@@ -1,20 +1,22 @@
 {
-  "name": "sdl-mcp-example-plugin",
+  "name": "sdl-mcp-mylang-plugin",
   "version": "1.0.0",
-  "description": "Example adapter plugin for SDL-MCP",
+  "description": "MyLang adapter plugin for SDL-MCP",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "watch": "tsc --watch"
+    "watch": "tsc --watch",
+    "test": "node --test",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "sdl-mcp",
     "plugin",
     "adapter",
-    "example"
+    "mylang"
   ],
-  "author": "SDL-MCP Team",
+  "author": "Your Name <your.email@example.com>",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.0.0",
@@ -23,8 +25,7 @@
   "peerDependencies": {
     "sdl-mcp": "*"
   },
-  "devDependencies": {
-    "typescript": "^5.9.3",
-    "@types/node": "^20.0.0"
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

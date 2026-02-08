@@ -1,35 +1,35 @@
+import { BaseAdapter } from "sdl-mcp/dist/indexer/adapter/BaseAdapter.js";
 import type {
   LanguageAdapter,
   ExtractedSymbol,
   ExtractedImport,
   ExtractedCall,
-} from "../../src/indexer/adapter/LanguageAdapter.js";
+} from "sdl-mcp/dist/indexer/adapter/LanguageAdapter.js";
 import type {
   AdapterPlugin,
   PluginAdapter,
-} from "../../src/indexer/adapter/plugin/types.js";
-import { BaseAdapter } from "../../src/indexer/adapter/BaseAdapter.js";
+} from "sdl-mcp/dist/indexer/adapter/plugin/types.js";
 
 const PLUGIN_API_VERSION = "1.0.0";
 
 export const manifest = {
-  name: "example-plugin",
+  name: "sdl-mcp-mylang-plugin",
   version: "1.0.0",
   apiVersion: PLUGIN_API_VERSION,
-  description: "Example adapter plugin demonstrating the plugin system",
-  author: "SDL-MCP Team",
+  description: "MyLang adapter plugin for SDL-MCP",
+  author: "Your Name",
   license: "MIT",
   adapters: [
     {
-      extension: ".ex",
-      languageId: "example-lang",
+      extension: ".mylang",
+      languageId: "mylang",
     },
   ],
 };
 
-class ExampleLangAdapter extends BaseAdapter {
-  languageId = "example-lang" as const;
-  fileExtensions = [".ex"] as const;
+class MyLangAdapter extends BaseAdapter {
+  languageId = "mylang" as const;
+  fileExtensions = [".mylang"] as const;
 
   extractSymbols(
     _tree: any,
@@ -37,10 +37,11 @@ class ExampleLangAdapter extends BaseAdapter {
     filePath: string,
   ): ExtractedSymbol[] {
     const symbols: ExtractedSymbol[] = [];
+
     const lines = content.split("\n");
 
     lines.forEach((line, index) => {
-      const funcMatch = line.match(/fn\s+(\w+)\s*\(/);
+      const funcMatch = line.match(/function\s+(\w+)\s*\(/);
       if (funcMatch) {
         symbols.push({
           id: `${filePath}:fn:${funcMatch[1]}`,
@@ -86,6 +87,7 @@ class ExampleLangAdapter extends BaseAdapter {
     filePath: string,
   ): ExtractedImport[] {
     const imports: ExtractedImport[] = [];
+
     const lines = content.split("\n");
 
     lines.forEach((line, index) => {
@@ -116,6 +118,7 @@ class ExampleLangAdapter extends BaseAdapter {
     extractedSymbols: ExtractedSymbol[],
   ): ExtractedCall[] {
     const calls: ExtractedCall[] = [];
+
     const lines = content.split("\n");
 
     lines.forEach((line, index) => {
@@ -147,9 +150,9 @@ class ExampleLangAdapter extends BaseAdapter {
 export async function createAdapters(): Promise<PluginAdapter[]> {
   return [
     {
-      extension: ".ex",
-      languageId: "example-lang",
-      factory: () => new ExampleLangAdapter(),
+      extension: ".mylang",
+      languageId: "mylang",
+      factory: () => new MyLangAdapter(),
     },
   ];
 }

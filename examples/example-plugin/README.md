@@ -83,8 +83,23 @@ Copy the structure from this example and modify:
 
 ### 4. Build your plugin
 
+**Note**: Building the example plugin requires SDL-MCP to be available. For local development, the example plugin uses relative imports to the SDL-MCP source code.
+
 ```bash
+# From SDL-MCP root directory
 npm install
+npm run build
+
+# Then build the example plugin
+cd examples/example-plugin
+npm install
+npm run build
+```
+
+If SDL-MCP is published to NPM, you can also install it as a dependency:
+
+```bash
+npm install sdl-mcp
 npm run build
 ```
 
