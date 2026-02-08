@@ -49,4 +49,7 @@ Thumbs.db
 # Local-only project artifacts
 data/
 devdocs/
+AGENTS.md
+CLAUDE.md
+TASKS.md
 nul
