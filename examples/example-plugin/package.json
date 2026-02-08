@@ -1,0 +1,26 @@
+{
+  "name": "sdl-mcp-example-plugin",
+  "version": "1.0.0",
+  "description": "Example adapter plugin for SDL-MCP",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch"
+  },
+  "keywords": [
+    "sdl-mcp",
+    "plugin",
+    "adapter",
+    "example"
+  ],
+  "author": "SDL-MCP Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "sdl-mcp": "*"
+  }
+}

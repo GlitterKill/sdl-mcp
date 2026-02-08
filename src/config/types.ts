@@ -160,6 +160,14 @@ export const CacheConfigSchema = z.object({
 
 export type CacheConfig = z.infer<typeof CacheConfigSchema>;
 
+export const PluginConfigSchema = z.object({
+  paths: z.array(z.string()).default([]),
+  enabled: z.boolean().default(true),
+  strictVersioning: z.boolean().default(true),
+});
+
+export type PluginConfig = z.infer<typeof PluginConfigSchema>;
+
 export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
   dbPath: z.string().min(1),
@@ -169,6 +177,7 @@ export const AppConfigSchema = z.object({
   slice: SliceConfigSchema.optional(),
   diagnostics: DiagnosticsConfigSchema.optional(),
   cache: CacheConfigSchema.optional(),
+  plugins: PluginConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
