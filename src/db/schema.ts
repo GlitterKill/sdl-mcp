@@ -149,3 +149,15 @@ export interface SymbolReferenceRow {
   line_number: number | null;
   created_at: string;
 }
+
+export interface SyncArtifactRow {
+  artifact_id: string;
+  repo_id: RepoId;
+  version_id: VersionId;
+  commit_sha: string | null;
+  branch: string | null;
+  artifact_hash: string;
+  compressed_data: string;
+  created_at: string;
+  size_bytes: number;
+}

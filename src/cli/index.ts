@@ -1,20 +1,22 @@
 #!/usr/bin/env node
 
 import { parseArgs } from "util";
-import type {
-  CLIOptions,
-  DoctorOptions,
-  VersionOptions,
-} from "./types.js";
+import type { CLIOptions, DoctorOptions, VersionOptions } from "./types.js";
 import { initCommand } from "./commands/init.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { versionCommand } from "./commands/version.js";
 import { indexCommand } from "./commands/index.js";
 import { serveCommand } from "./commands/serve.js";
+import { exportCommand } from "./commands/export.js";
+import { importCommand } from "./commands/import.js";
+import { pullCommand } from "./commands/pull.js";
 import {
   parseInitOptions,
   parseIndexOptions,
   parseServeOptions,
+  parseExportOptions,
+  parseImportOptions,
+  parsePullOptions,
 } from "./argParsing.js";
 
 async function main(): Promise<void> {
@@ -38,6 +40,15 @@ async function main(): Promise<void> {
       http: { type: "boolean" },
       port: { type: "string" },
       host: { type: "string" },
+      "version-id": { type: "string" },
+      "commit-sha": { type: "string" },
+      branch: { type: "string" },
+      output: { type: "string", short: "o" },
+      "artifact-path": { type: "string" },
+      verify: { type: "boolean" },
+      list: { type: "boolean" },
+      fallback: { type: "boolean" },
+      retries: { type: "string" },
     },
   });
 
@@ -112,6 +123,36 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "export": {
+      const options = parseExportOptions(
+        positionals.slice(1),
+        global,
+        values as Record<string, unknown>,
+      );
+      await exportCommand(options);
+      break;
+    }
+
+    case "import": {
+      const options = parseImportOptions(
+        positionals.slice(1),
+        global,
+        values as Record<string, unknown>,
+      );
+      await importCommand(options);
+      break;
+    }
+
+    case "pull": {
+      const options = parsePullOptions(
+        positionals.slice(1),
+        global,
+        values as Record<string, unknown>,
+      );
+      await pullCommand(options);
+      break;
+    }
+
     default:
       console.error(`Unknown command: ${command}`);
       console.error("");
@@ -133,6 +174,9 @@ Commands:
   version           Show version information
   index             Index repositories (optional: --watch, --repo-id)
   serve             Start MCP server (default: stdio, optional: --http, --port, --host)
+  export            Export indexed state as sync artifact
+  import            Import indexed state from sync artifact
+  pull              Pull latest state from artifact or fallback to full index
 
 Global Options:
   -c, --config PATH     Path to configuration file
@@ -157,12 +201,37 @@ Serve Options:
   --port NUMBER         HTTP port (default: 3000)
   --host HOST          HTTP host (default: localhost)
 
+Export Options:
+  --repo-id ID         Export specific repository by ID
+  --version-id ID      Export specific version
+  --commit-sha SHA     Link artifact to commit SHA
+  --branch NAME        Link artifact to branch name
+  -o, --output PATH    Output artifact path (default: .sdl-sync/)
+  --list               List available artifacts
+
+Import Options:
+  --artifact-path PATH  Path to artifact file (required)
+  --repo-id ID         Target repository ID
+  -f, --force          Force import even if repo_id mismatch
+  --verify             Verify artifact integrity (default: true)
+
+Pull Options:
+  --repo-id ID         Pull for specific repository by ID
+  --version-id ID      Pull specific version
+  --commit-sha SHA     Pull artifact matching commit SHA
+  --fallback            Fallback to full index if artifact not found (default: true)
+  --retries NUMBER     Max retry attempts (default: 3)
+
 Examples:
   sdl-mcp init
   sdl-mcp doctor
   sdl-mcp index --watch
   sdl-mcp serve --stdio
   sdl-mcp serve --http --port 3000
+  sdl-mcp export
+  sdl-mcp export --list
+  sdl-mcp import --artifact-path .sdl-sync/repo-xxx.sdl-artifact.json
+  sdl-mcp pull
 
 For more information, visit: https://github.com/your-org/sdl-mcp
 `);
