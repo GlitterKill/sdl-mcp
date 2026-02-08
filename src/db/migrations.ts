@@ -19,6 +19,20 @@ export interface MigrationResult {
   alreadyApplied: string[];
 }
 
+function registerMigrationFunctions(db: Database.Database): void {
+  // SQLite does not ship with reverse() by default, but migration 0011 uses it.
+  db.function(
+    "reverse",
+    { deterministic: true },
+    (value: string | null): string | null => {
+      if (value === null) {
+        return null;
+      }
+      return [...value].reverse().join("");
+    },
+  );
+}
+
 export function getAppliedMigrations(db: Database.Database): MigrationRow[] {
   db.exec(`
     CREATE TABLE IF NOT EXISTS _migrations (
@@ -45,6 +59,8 @@ export function getPendingMigrations(db: Database.Database): string[] {
 }
 
 export function runMigrations(db: Database.Database): MigrationResult {
+  registerMigrationFunctions(db);
+
   const appliedMigrations = getAppliedMigrations(db);
   const appliedNames = new Set(appliedMigrations.map((m) => m.name));
 

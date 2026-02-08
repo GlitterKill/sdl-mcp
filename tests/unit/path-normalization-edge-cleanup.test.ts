@@ -1,10 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { join, dirname, normalize, sep } from "path";
+import { join, dirname, normalize } from "path";
 
 describe("IE-K.2: Path normalization in edge cleanup", () => {
   const normalizePath = (p: string): string => {
-    return normalize(p).split(sep).join("/");
+    return normalize(p).replace(/\\/g, "/");
   };
 
   const generatePathVariants = (joinedPath: string): string[] => {

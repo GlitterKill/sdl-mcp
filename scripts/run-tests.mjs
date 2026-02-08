@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import fg from "fast-glob";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,9 +27,35 @@ const nodeArgs = [
   ...testFiles.map((file) => resolve(repoRoot, file)),
 ];
 
+const testTempDir = mkdtempSync(join(tmpdir(), "sdl-mcp-tests-"));
+const testDbPath = join(testTempDir, "sdl-ledger.db");
+const testEnv = {
+  ...process.env,
+  SDL_DB_PATH: testDbPath,
+};
+
+const migrationResult = spawnSync(
+  process.execPath,
+  [
+    "--input-type=module",
+    "-e",
+    "import { runDefaultMigrations } from './dist/db/migrations.js'; runDefaultMigrations();",
+  ],
+  {
+    cwd: repoRoot,
+    stdio: "inherit",
+    env: testEnv,
+  },
+);
+
+if ((migrationResult.status ?? 1) !== 0) {
+  process.exit(migrationResult.status ?? 1);
+}
+
 const result = spawnSync(process.execPath, nodeArgs, {
   cwd: repoRoot,
   stdio: "inherit",
+  env: testEnv,
 });
 
 process.exit(result.status ?? 1);
