@@ -1,3 +1,130 @@
+# CI Memory Sync Setup Guide
+
+## Quick Start
+
+This guide provides step-by-step instructions for setting up CI Memory Sync in your SDL-MCP project.
+
+### Prerequisites
+
+Before starting, ensure you have:
+
+- [ ] Node.js >= 18.0.0 installed
+- [ ] Git repository initialized
+- [ ] SDL-MCP installed locally
+- [ ] GitHub Actions enabled for your repository
+- [ ] Write permissions for repository settings
+
+### Step 1: Verify SDL-MCP Installation
+
+```bash
+# Check SDL-MCP version
+sdl-mcp version
+
+# Expected output:
+# SDL-MCP version: 0.5.1
+# Environment:
+#   Node.js: v20.11.0
+#   Platform: linux/win32
+```
+
+**Troubleshooting:**
+
+- If `sdl-mcp` command not found, install it:
+  ```bash
+  npm install -g .
+  ```
+
+### Step 2: Configure SDL-MCP
+
+```bash
+# Initialize SDL-MCP configuration
+sdl-mcp init --client opencode
+
+# This creates:
+# - config/sdlmcp.config.json
+# - opencode-mcp-config.json (if --client specified)
+```
+
+**Example Configuration:**
+
+```json
+{
+  "repos": [
+    {
+      "repoId": "my-repo",
+      "rootPath": "/path/to/your/repo",
+      "ignore": ["**/node_modules/**", "**/dist/**", "**/.git/**"],
+      "maxFileBytes": 2000000
+    }
+  ],
+  "dbPath": "./data/sdlmcp.sqlite",
+  "indexing": {
+    "concurrency": 4,
+    "enableFileWatching": false
+  }
+}
+```
+
+**Configuration Tips:**
+
+- Set `maxFileBytes` to skip large files (>2MB default)
+- Add ignore patterns for build artifacts
+- Use `repoId` that matches your repository name
+- Ensure `rootPath` is an absolute path
+
+### Step 3: Test Local Indexing
+
+```bash
+# Index your repository locally
+sdl-mcp index
+
+# Expected output:
+# Indexing 1 repo(s)...
+# Indexing my-repo (/path/to/repo)...
+#   Files: 245
+#   Symbols: 1842
+#   Edges: 3421
+#   Duration: 3421ms
+```
+
+**Troubleshooting:**
+
+- If indexing fails, run `sdl-mcp doctor` to validate environment
+- Check file permissions on repository path
+- Verify ignore patterns aren't excluding too many files
+
+### Step 4: Test Local Export
+
+```bash
+# Export indexed state
+sdl-mcp export --commit-sha $(git rev-parse HEAD)
+
+# Expected output:
+# ✓ Export successful
+#   Artifact ID: my-repo-abc123def456-a1b2c3d4e5f6
+#   Artifact path: ./.sdl-sync/my-repo-abc123def456-a1b2c3d4e5f6.sdl-artifact.json
+#   Files: 245
+#   Symbols: 1842
+#   Edges: 3421
+#   Size: 123.45 KB
+#   Duration: 1234ms
+```
+
+**Verification:**
+
+```bash
+# List exported artifacts
+sdl-mcp export --list
+
+# Test import integrity
+sdl-mcp import --artifact-path ./.sdl-sync/my-repo-*.sdl-artifact.json --verify true
+```
+
+### Step 5: Create GitHub Actions Workflow
+
+Create `.github/workflows/ci.yml` with the following content:
+
+```yaml
 name: CI
 
 on:
@@ -78,7 +205,7 @@ jobs:
       - name: Security audit
         run: npm audit --audit-level=moderate
 
-      - name: Run tests (including 6 new language adapters + cross-platform paths)
+      - name: Run tests
         run: npm test
 
       - name: Run test harness
@@ -96,13 +223,6 @@ jobs:
             node dist/main.js --help || echo "main.js runs"
             node dist/cli/index.js --help || echo "cli/index.js runs"
           fi
-
-      - name: Display test summary
-        if: always()
-        shell: bash
-        run: |
-          echo "CI completed on ${{ matrix.os }} with Node ${{ matrix.node-version }}"
-          echo "This validates cross-platform behavior for all language adapters:"
 
   sync-memory:
     name: Sync Indexed Memory (${{ matrix.os }}, Node ${{ matrix.node-version }})
@@ -315,8 +435,8 @@ jobs:
             console.log('Artifact comparison:');
             console.log('  Linux artifact_hash:', linux.artifact_hash);
             console.log('  Windows artifact_hash:', windows.artifact_hash);
-            console.log('  Linux files extracted:', linux.compressed_data.length);
-            console.log('  Windows files extracted:', windows.compressed_data.length);
+            console.log('  Linux size:', linux.size_bytes);
+            console.log('  Windows size:', windows.size_bytes);
             
             if (linux.artifact_hash === windows.artifact_hash) {
               console.log('✓ Artifacts match across platforms');
@@ -325,3 +445,202 @@ jobs:
               console.log('  Both artifacts are valid for their respective commits');
             }
           "
+```
+
+### Step 6: Commit and Push
+
+```bash
+# Add the workflow file
+git add .github/workflows/ci.yml
+
+# Commit your changes
+git commit -m "Add CI Memory Sync workflow"
+
+# Push to main branch
+git push origin main
+```
+
+### Step 7: Verify CI Execution
+
+1. Navigate to your repository on GitHub
+2. Click on **Actions** tab
+3. Select the latest workflow run
+4. Verify all jobs completed successfully:
+   - ✅ CI job
+   - ✅ sync-memory job (only on main pushes)
+   - ✅ sync-validation job (only on main pushes)
+
+**Expected Workflow Duration:**
+
+- CI job: ~2-5 minutes
+- sync-memory job: ~30-60 seconds
+- sync-validation job: ~10-30 seconds
+
+### Step 8: Validate Artifacts
+
+1. In the workflow run, scroll to the bottom
+2. Click on **Artifacts** section
+3. Verify these artifacts exist:
+   - `sync-artifact-ubuntu-latest`
+   - `sync-artifact-windows-latest`
+
+4. Download an artifact to verify locally:
+
+```bash
+# Download artifact from GitHub UI
+# Then validate locally
+sdl-mcp import --artifact-path ./sync-ubuntu-latest-*.sdl-artifact.json --verify true
+```
+
+## Configuration Options
+
+### Adjust Performance Budgets
+
+Edit the workflow file to modify performance budgets:
+
+```yaml
+MAX_INDEX_MS=45000    # Increase for large repos
+MAX_EXPORT_MS=8000    # Increase for complex repos
+MAX_TOTAL_MS=53000   # Adjust total budget
+```
+
+### Change Artifact Retention
+
+Modify artifact retention period:
+
+```yaml
+- name: Upload sync artifact
+  uses: actions/upload-artifact@v4
+  with:
+    name: sync-artifact-${{ runner.os }}
+    path: ./ci-artifacts/*.sdl-artifact.json
+    retention-days: 60 # Change from 30 to 60 days
+```
+
+### Disable Sync on PRs
+
+Currently, sync only runs on main pushes. To ensure this:
+
+```yaml
+sync-memory:
+  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+```
+
+### Customize Node.js Version
+
+Change the Node.js version matrix:
+
+```yaml
+matrix:
+  os: [ubuntu-latest, windows-latest]
+  node-version: [20.x] # Use only Node 20.x for consistency
+```
+
+## Testing
+
+### Test Workflow Locally
+
+Use `act` to test GitHub Actions locally:
+
+```bash
+# Install act
+brew install act  # macOS
+# or
+choco install act  # Windows
+
+# Run workflow locally
+act push -j sync-memory
+```
+
+### Test Manual Trigger
+
+Manually trigger the workflow:
+
+1. Navigate to **Actions** tab
+2. Select **CI** workflow
+3. Click **Run workflow** dropdown
+4. Select branch (usually `main`)
+5. Click **Run workflow**
+
+### Monitor Performance
+
+Add performance monitoring:
+
+```yaml
+- name: Monitor performance trends
+  if: always()
+  run: |
+    echo "Index: ${{ steps.index.outputs.duration_ms }}ms"
+    echo "Export: ${{ steps.export.outputs.duration_ms }}ms"
+```
+
+## Common Issues
+
+### Issue: "No repository specified or configured"
+
+**Fix:** Add initialization step:
+
+```yaml
+- name: Initialize SDL-MCP
+  run: |
+    npm run init || node dist/cli/index.js init --force
+```
+
+### Issue: "Artifact file not found"
+
+**Fix:** Ensure artifact upload step completes:
+
+```yaml
+- name: Upload sync artifact
+  if: success()
+  uses: actions/upload-artifact@v4
+  with:
+    name: sync-artifact-${{ runner.os }}
+    path: ./ci-artifacts/*.sdl-artifact.json
+```
+
+### Issue: "Performance budget exceeded"
+
+**Fix:** Adjust budgets or optimize repository:
+
+```yaml
+MAX_INDEX_MS=60000 # Increase budget
+```
+
+Or optimize ignore patterns:
+
+```json
+"ignore": [
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/coverage/**",
+  "**/*.min.js",
+  "**/*.min.css"
+]
+```
+
+## Next Steps
+
+After setup:
+
+1. ✅ Monitor first few workflow runs
+2. ✅ Review performance metrics
+3. ✅ Adjust budgets if needed
+4. ✅ Set up alerts for failures
+5. ✅ Document any customizations
+
+## Support
+
+For issues or questions:
+
+- Review [CI Memory Sync Operations Guide](CI_MEMORY_SYNC.md)
+- Check [Troubleshooting](CI_MEMORY_SYNC.md#troubleshooting)
+- Open an issue with workflow run URL
+
+## Related Documentation
+
+- [CI Memory Sync Operations Guide](CI_MEMORY_SYNC.md)
+- [Sync Artifact Documentation](sync-artifacts.md)
+- [User Guide](USER_GUIDE.md)
+- [Testing Guide](TESTING.md)

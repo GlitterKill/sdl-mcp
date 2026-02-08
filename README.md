@@ -511,6 +511,10 @@ Run `sdl-mcp doctor` to validate environment, then check logs with `--log-level 
 
 - **[User Guide](docs/USER_GUIDE.md)** - Comprehensive documentation with MCP tool reference
 - **[Testing Guide](docs/TESTING.md)** - Multi-language testing instructions
+- **[Sync Artifact Documentation](docs/sync-artifacts.md)** - Sync artifact system details
+- **[CI Memory Sync Operations Guide](docs/CI_MEMORY_SYNC.md)** - CI sync operations, troubleshooting, and recovery
+- **[CI Memory Sync Setup Guide](docs/CI_MEMORY_SYNC_SETUP.md)** - Step-by-step CI memory sync setup
+- **[Cross-Platform Validation](docs/CROSS_PLATFORM_VALIDATION.md)** - Linux/Windows CI validation
 - `Symbol_Data_Ledger_MCP.md` - Product Requirements Document
 - `SDL-MCP_v0.4.md` - v0.4 feature specifications
 - `SDL-MCP_v0.5.md` - v0.5 feature specifications
