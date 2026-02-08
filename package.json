@@ -24,7 +24,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
-    "test": "node --import tsx --test \"tests/**/*.test.ts\"",
+    "test": "node scripts/run-tests.mjs",
     "test:harness": "npm run test:adapters",
     "test:adapters": "npm run build && npx tsc --rootDir tests/harness --outDir dist/tests/harness --module nodenext tests/harness/adapter-runner.ts && node dist/tests/harness/adapter-runner.js",
     "test:golden": "npm run build && tsx scripts/golden/update-goldens.ts validate",

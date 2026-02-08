@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { writeFile, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { describe, it } from "node:test";
 import assert from "node:assert";
@@ -300,7 +300,7 @@ describe("Skeleton IR Determinism", () => {
     console.log(`✅ Different ops produce different hashes`);
   });
 
-  it("should save determinism results for debugging", async () => {
+  it("should save determinism results for debugging", () => {
     const resultsDir = join("tests", "results");
     const resultsPath = join(resultsDir, "skeleton-determinism.json");
 
@@ -314,18 +314,8 @@ describe("Skeleton IR Determinism", () => {
         results,
       };
 
-      writeFile(
-        resultsPath,
-        JSON.stringify(resultsData, null, 2),
-        "utf-8",
-        (err) => {
-          if (err) {
-            console.warn(`⚠️  Failed to save results: ${err}`);
-          } else {
-            console.log(`✅ Determinism results saved to ${resultsPath}`);
-          }
-        },
-      );
+      writeFileSync(resultsPath, JSON.stringify(resultsData, null, 2), "utf-8");
+      console.log(`✅ Determinism results saved to ${resultsPath}`);
     } catch (error) {
       console.warn(`⚠️  Failed to save results: ${error}`);
     }
