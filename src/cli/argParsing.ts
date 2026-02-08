@@ -335,3 +335,68 @@ export function parseServeOptions(
 
   return options;
 }
+
+export function parseBenchmarkOptions(
+  args: string[],
+  global: CLIOptions,
+  values: ParsedOptionValues,
+): import("./commands/benchmark.js").BenchmarkOptions {
+  const options: import("./commands/benchmark.js").BenchmarkOptions = {
+    ...global,
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--repo-id") {
+      if (i + 1 >= args.length) {
+        throw new Error("--repo-id requires a value");
+      }
+      options.repoId = args[++i];
+    } else if (arg === "--baseline-path") {
+      if (i + 1 >= args.length) {
+        throw new Error("--baseline-path requires a value");
+      }
+      options.baselinePath = args[++i];
+    } else if (arg === "--threshold-path") {
+      if (i + 1 >= args.length) {
+        throw new Error("--threshold-path requires a value");
+      }
+      options.thresholdPath = args[++i];
+    } else if (arg === "--out") {
+      if (i + 1 >= args.length) {
+        throw new Error("--out requires a value");
+      }
+      options.outputPath = args[++i];
+    } else if (arg === "--json") {
+      options.jsonOutput = true;
+    } else if (arg === "--update-baseline") {
+      options.updateBaseline = true;
+    } else if (arg === "--skip-indexing") {
+      options.skipIndexing = true;
+    }
+  }
+
+  if (typeof values["repo-id"] === "string") {
+    options.repoId = values["repo-id"];
+  }
+  if (typeof values["baseline-path"] === "string") {
+    options.baselinePath = values["baseline-path"];
+  }
+  if (typeof values["threshold-path"] === "string") {
+    options.thresholdPath = values["threshold-path"];
+  }
+  if (typeof values.out === "string") {
+    options.outputPath = values.out;
+  }
+  if (values.json === true) {
+    options.jsonOutput = true;
+  }
+  if (values["update-baseline"] === true) {
+    options.updateBaseline = true;
+  }
+  if (values["skip-indexing"] === true) {
+    options.skipIndexing = true;
+  }
+
+  return options;
+}

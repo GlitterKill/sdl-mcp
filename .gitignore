@@ -53,3 +53,7 @@ AGENTS.md
 CLAUDE.md
 TASKS.md
 nul
+
+# Benchmark outputs
+.benchmark/
+benchmark-*.json

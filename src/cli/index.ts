@@ -10,6 +10,7 @@ import { serveCommand } from "./commands/serve.js";
 import { exportCommand } from "./commands/export.js";
 import { importCommand } from "./commands/import.js";
 import { pullCommand } from "./commands/pull.js";
+import { benchmarkCICommand } from "./commands/benchmark.js";
 import {
   parseInitOptions,
   parseIndexOptions,
@@ -17,6 +18,7 @@ import {
   parseExportOptions,
   parseImportOptions,
   parsePullOptions,
+  parseBenchmarkOptions,
 } from "./argParsing.js";
 
 async function main(): Promise<void> {
@@ -49,6 +51,10 @@ async function main(): Promise<void> {
       list: { type: "boolean" },
       fallback: { type: "boolean" },
       retries: { type: "string" },
+      "baseline-path": { type: "string" },
+      "threshold-path": { type: "string" },
+      "update-baseline": { type: "boolean" },
+      "skip-indexing": { type: "boolean" },
     },
   });
 
@@ -153,6 +159,16 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "benchmark:ci": {
+      const options = parseBenchmarkOptions(
+        positionals.slice(1),
+        global,
+        values as Record<string, unknown>,
+      );
+      const exitCode = await benchmarkCICommand(options);
+      process.exit(exitCode);
+    }
+
     default:
       console.error(`Unknown command: ${command}`);
       console.error("");
@@ -177,6 +193,7 @@ Commands:
   export            Export indexed state as sync artifact
   import            Import indexed state from sync artifact
   pull              Pull latest state from artifact or fallback to full index
+  benchmark:ci      Run CI benchmark with threshold evaluation
 
 Global Options:
   -c, --config PATH     Path to configuration file
@@ -191,47 +208,59 @@ Global Options:
     --languages LIST      Comma-separated languages: ts, tsx, js, jsx, py, go, java, cs, c, cpp, php, rs, kt, sh (default: all)
     -f, --force           Force overwrite existing configuration
 
-Index Options:
-  -w, --watch          Watch for file changes
-  --repo-id ID         Index specific repository by ID
+ Index Options:
+   -w, --watch          Watch for file changes
+   --repo-id ID         Index specific repository by ID
 
-Serve Options:
-  --stdio               Use stdio transport (default)
-  --http               Use HTTP transport
-  --port NUMBER         HTTP port (default: 3000)
-  --host HOST          HTTP host (default: localhost)
+ Serve Options:
+   --stdio               Use stdio transport (default)
+   --http               Use HTTP transport
+   --port NUMBER         HTTP port (default: 3000)
+   --host HOST          HTTP host (default: localhost)
 
-Export Options:
-  --repo-id ID         Export specific repository by ID
-  --version-id ID      Export specific version
-  --commit-sha SHA     Link artifact to commit SHA
-  --branch NAME        Link artifact to branch name
-  -o, --output PATH    Output artifact path (default: .sdl-sync/)
-  --list               List available artifacts
+ Export Options:
+   --repo-id ID         Export specific repository by ID
+   --version-id ID      Export specific version
+   --commit-sha SHA     Link artifact to commit SHA
+   --branch NAME        Link artifact to branch name
+   -o, --output PATH    Output artifact path (default: .sdl-sync/)
+   --list               List available artifacts
 
-Import Options:
-  --artifact-path PATH  Path to artifact file (required)
-  --repo-id ID         Target repository ID
-  -f, --force          Force import even if repo_id mismatch
-  --verify             Verify artifact integrity (default: true)
+ Import Options:
+   --artifact-path PATH  Path to artifact file (required)
+   --repo-id ID         Target repository ID
+   -f, --force          Force import even if repo_id mismatch
+   --verify             Verify artifact integrity (default: true)
 
-Pull Options:
-  --repo-id ID         Pull for specific repository by ID
-  --version-id ID      Pull specific version
-  --commit-sha SHA     Pull artifact matching commit SHA
-  --fallback            Fallback to full index if artifact not found (default: true)
-  --retries NUMBER     Max retry attempts (default: 3)
+ Pull Options:
+   --repo-id ID         Pull for specific repository by ID
+   --version-id ID      Pull specific version
+   --commit-sha SHA     Pull artifact matching commit SHA
+   --fallback            Fallback to full index if artifact not found (default: true)
+   --retries NUMBER     Max retry attempts (default:3)
 
-Examples:
-  sdl-mcp init
-  sdl-mcp doctor
-  sdl-mcp index --watch
-  sdl-mcp serve --stdio
-  sdl-mcp serve --http --port 3000
-  sdl-mcp export
-  sdl-mcp export --list
-  sdl-mcp import --artifact-path .sdl-sync/repo-xxx.sdl-artifact.json
-  sdl-mcp pull
+ Benchmark:ci Options:
+   --repo-id ID         Benchmark specific repository by ID
+   --baseline-path PATH Path to baseline file (default: .benchmark/baseline.json)
+   --threshold-path PATH Path to threshold config (default: config/benchmark.config.json)
+   --out PATH           Output path for results (default: .benchmark/latest.json)
+   --json               Output JSON results
+   --update-baseline    Update baseline with current results
+   --skip-indexing      Skip re-indexing, use existing data
+
+ Examples:
+   sdl-mcp init
+   sdl-mcp doctor
+   sdl-mcp index --watch
+   sdl-mcp serve --stdio
+   sdl-mcp serve --http --port 3000
+   sdl-mcp export
+   sdl-mcp export --list
+   sdl-mcp import --artifact-path .sdl-sync/repo-xxx.sdl-artifact.json
+   sdl-mcp pull
+   sdl-mcp benchmark:ci
+   sdl-mcp benchmark:ci --repo-id my-repo --json
+   sdl-mcp benchmark:ci --update-baseline
 
 For more information, visit: https://github.com/your-org/sdl-mcp
 `);

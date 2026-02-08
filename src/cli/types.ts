@@ -34,3 +34,13 @@ export interface ServeOptions extends CLIOptions {
   port?: number;
   host?: string;
 }
+
+export interface BenchmarkOptions extends CLIOptions {
+  repoId?: string;
+  baselinePath?: string;
+  thresholdPath?: string;
+  outputPath?: string;
+  jsonOutput?: boolean;
+  updateBaseline?: boolean;
+  skipIndexing?: boolean;
+}
