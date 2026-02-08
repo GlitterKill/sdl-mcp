@@ -1,0 +1,28 @@
+{
+  "name": "PR Risk Analysis - Low Risk Changes",
+  "description": "Analyze PR risk with low-risk changes",
+  "tool": "sdl.pr.risk.analyze",
+  "request": {
+    "repoId": "test-repo-001",
+    "fromVersion": "version-001",
+    "toVersion": "version-002",
+    "riskThreshold": 70
+  },
+  "expectedResponse": {
+    "analysis": {
+      "repoId": "test-repo-001",
+      "fromVersion": "version-001",
+      "toVersion": "version-002",
+      "riskScore": "number",
+      "riskLevel": "string",
+      "findings": ["array"],
+      "impactedSymbols": ["array"],
+      "evidence": ["array"],
+      "recommendedTests": ["array"],
+      "changedSymbolsCount": "number",
+      "blastRadiusCount": "number"
+    },
+    "escalationRequired": "boolean",
+    "policyDecision": "object"
+  }
+}

@@ -40,6 +40,11 @@ import {
 } from "./code.js";
 import { PolicyGetRequestSchema, PolicySetRequestSchema } from "../tools.js";
 import { handlePolicyGet, handlePolicySet } from "./policy.js";
+import {
+  PRRiskAnalysisRequestSchema,
+  PRRiskAnalysisResponseSchema,
+} from "../tools.js";
+import { handlePRRiskAnalysis } from "./prRisk.js";
 
 export function registerTools(server: MCPServer): void {
   server.registerTool(
@@ -145,5 +150,12 @@ export function registerTools(server: MCPServer): void {
     "Get token-efficient codebase overview with directory summaries and hotspots",
     RepoOverviewRequestSchema,
     handleRepoOverview,
+  );
+
+  server.registerTool(
+    "sdl.pr.risk.analyze",
+    "Analyze PR risk by computing delta between versions, assessing blast radius, and recommending tests",
+    PRRiskAnalysisRequestSchema,
+    handlePRRiskAnalysis,
   );
 }

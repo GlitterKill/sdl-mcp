@@ -726,3 +726,68 @@ export type GetHotPathRequest = z.infer<typeof GetHotPathRequestSchema>;
 export type GetHotPathResponse = z.infer<typeof GetHotPathResponseSchema>;
 export type RepoOverviewRequest = z.infer<typeof RepoOverviewRequestSchema>;
 export type RepoOverviewResponse = z.infer<typeof RepoOverviewResponseSchema>;
+
+const FindingSchema = z.object({
+  type: z.string(),
+  severity: z.enum(["low", "medium", "high"]),
+  message: z.string(),
+  affectedSymbols: z.array(z.string()),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+const EvidenceSchema = z.object({
+  type: z.string(),
+  description: z.string(),
+  symbolId: z.string().optional(),
+  data: z.record(z.unknown()).optional(),
+});
+
+const RecommendedTestSchema = z.object({
+  type: z.string(),
+  description: z.string(),
+  targetSymbols: z.array(z.string()),
+  priority: z.enum(["high", "medium", "low"]),
+});
+
+const PRRiskAnalysisSchema = z.object({
+  repoId: z.string(),
+  fromVersion: z.string(),
+  toVersion: z.string(),
+  riskScore: z.number().int().min(0).max(100),
+  riskLevel: z.enum(["low", "medium", "high"]),
+  findings: z.array(FindingSchema),
+  impactedSymbols: z.array(z.string()),
+  evidence: z.array(EvidenceSchema),
+  recommendedTests: z.array(RecommendedTestSchema),
+  changedSymbolsCount: z.number().int().min(0),
+  blastRadiusCount: z.number().int().min(0),
+});
+
+const PolicyDecisionSummarySchema = z.object({
+  decision: z.enum([
+    "approve",
+    "deny",
+    "downgrade-to-skeleton",
+    "downgrade-to-hotpath",
+  ]),
+  deniedReasons: z.array(z.string()).optional(),
+  auditHash: z.string(),
+});
+
+export const PRRiskAnalysisRequestSchema = z.object({
+  repoId: z.string(),
+  fromVersion: z.string(),
+  toVersion: z.string(),
+  riskThreshold: z.number().int().min(0).max(100).optional(),
+});
+
+export const PRRiskAnalysisResponseSchema = z.object({
+  analysis: PRRiskAnalysisSchema,
+  escalationRequired: z.boolean(),
+  policyDecision: PolicyDecisionSummarySchema.optional(),
+});
+
+export type PRRiskAnalysisRequest = z.infer<typeof PRRiskAnalysisRequestSchema>;
+export type PRRiskAnalysisResponse = z.infer<
+  typeof PRRiskAnalysisResponseSchema
+>;

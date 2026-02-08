@@ -413,6 +413,7 @@ SDL-MCP exposes the following MCP tools:
 - `sdl.code.getSkeleton` - Get code skeleton
 - `sdl.policy.get` - Get current policy settings
 - `sdl.policy.set` - Update policy settings
+- `sdl.pr.risk.analyze` - Analyze PR risk with delta, blast radius, and test recommendations
 
 ## Client Integration
 

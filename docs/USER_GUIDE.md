@@ -473,82 +473,199 @@ A **Symbol Card** is a compact metadata record for a code symbol (function, clas
 }
 ```
 
-**Key Fields:**
+---
 
-- `symbolId`: Stable hash (survives whitespace changes)
-- `signature`: Function/method signature details
-- `summary`: 1-2 line description
-- `invariants`: Behavioral contracts
-- `sideEffects`: External interactions (network, fs, etc.)
-- `deps`: Import and call edges
-- `metrics`: Usage and change frequency
+### PR Risk Analysis
 
-### Graph Slices
+#### `sdl.pr.risk.analyze`
 
-A **Graph Slice** is a task-scoped subset of your codebase's dependency graph.
+Analyze Pull Request risk by computing delta between two versions, assessing blast radius impact, and recommending appropriate tests.
 
-**How it works:**
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `repoId` | string | Yes | Repository identifier |
+| `fromVersion` | string | Yes | Base version to compare from |
+| `toVersion` | string | Yes | Target version to compare to |
+| `riskThreshold` | number | No | Risk score threshold (0-100) that triggers escalation (default: 70) |
 
-1. You provide seed symbols (entry points)
-2. SDL-MCP traverses the dependency graph using weighted edges
-3. Returns cards up to your token budget
-4. Provides a handle for cache-coherent updates
-
-**Edge Weights:**
-| Edge Type | Default Weight | Description |
-|-----------|----------------|-------------|
-| `call` | 1.0 | Function calls another function |
-| `config` | 0.8 | Configuration relationship |
-| `import` | 0.6 | Module imports symbol |
-
-**Example Slice Response:**
+**Example Request:**
 
 ```json
 {
-  "sliceId": "slice_abc123",
-  "handle": "h_xyz789",
-  "leaseExpiresAt": "2024-01-15T12:30:00Z",
-  "cards": [...],
-  "totalCards": 42,
-  "truncated": false,
-  "tokenBudget": { "limit": 12000, "used": 8500 }
+  "repoId": "my-api",
+  "fromVersion": "v1.2.0",
+  "toVersion": "v1.3.0",
+  "riskThreshold": 70
 }
 ```
 
-### Context Ladder
-
-SDL-MCP implements a 4-rung **Context Ladder** that escalates from minimal to full context:
-
-| Rung        | Tool                   | Token Cost  | When to Use                            |
-| ----------- | ---------------------- | ----------- | -------------------------------------- |
-| 1. Card     | `sdl.symbol.getCard`   | ~135 tokens | Understanding signatures, dependencies |
-| 2. Skeleton | `sdl.code.getSkeleton` | ~113 tokens | Understanding control flow             |
-| 3. Hot-path | `sdl.code.getHotPath`  | ~200 tokens | Finding specific identifiers           |
-| 4. Raw      | `sdl.code.needWindow`  | Variable    | Full implementation details            |
-
-**Best Practice**: Start at Rung 1 and only escalate when needed.
-
-### Delta Packs
-
-A **Delta Pack** captures changes between two ledger versions:
+**Example Response:**
 
 ```json
 {
-  "fromVersion": "v1704067200000",
-  "toVersion": "v1704153600000",
-  "changedSymbols": [
-    {
-      "symbolId": "abc123",
-      "changeType": "modified",
-      "signatureChanged": true,
-      "summaryChanged": false
-    }
-  ],
-  "blastRadius": [{ "symbolId": "def456", "proximity": 1, "fanIn": 8 }]
+  "analysis": {
+    "repoId": "my-api",
+    "fromVersion": "v1.2.0",
+    "toVersion": "v1.3.0",
+    "riskScore": 45,
+    "riskLevel": "medium",
+    "findings": [
+      {
+        "type": "interface-breaking-changes",
+        "severity": "high",
+        "message": "2 symbol(s) with interface-breaking changes",
+        "affectedSymbols": [
+          "src/api/UserService.ts:getUser",
+          "src/api/UserService.ts:updateUser"
+        ],
+        "metadata": {
+          "breakingChangeCount": 2
+        }
+      },
+      {
+        "type": "side-effect-changes",
+        "severity": "medium",
+        "message": "3 symbol(s) with side effect changes",
+        "affectedSymbols": ["src/db/Database.ts:executeQuery"]
+      }
+    ],
+    "impactedSymbols": [
+      "src/controllers/UserController.ts:getUser",
+      "src/controllers/UserController.ts:login",
+      "src/services/AuthService.ts:validateToken"
+    ],
+    "evidence": [
+      {
+        "type": "summary",
+        "description": "Delta analysis summary",
+        "data": {
+          "totalChanges": 15,
+          "added": 3,
+          "removed": 1,
+          "modified": 11
+        }
+      },
+      {
+        "type": "blast-radius",
+        "description": "Impact radius analysis",
+        "data": {
+          "totalImpacted": 23,
+          "directDependents": 8,
+          "transitiveDependents": 15
+        }
+      }
+    ],
+    "recommendedTests": [
+      {
+        "type": "unit-tests",
+        "description": "Run unit tests for modified symbols",
+        "targetSymbols": [
+          "src/api/UserService.ts:getUser",
+          "src/api/UserService.ts:updateUser"
+        ],
+        "priority": "high"
+      },
+      {
+        "type": "integration-tests",
+        "description": "Run integration tests for symbols with interface changes",
+        "targetSymbols": ["src/api/UserService.ts:getUser"],
+        "priority": "high"
+      },
+      {
+        "type": "regression-tests",
+        "description": "Run regression tests on direct dependents",
+        "targetSymbols": ["src/controllers/UserController.ts:getUser"],
+        "priority": "medium"
+      }
+    ],
+    "changedSymbolsCount": 15,
+    "blastRadiusCount": 23
+  },
+  "escalationRequired": false,
+  "policyDecision": null
 }
 ```
 
-**Blast Radius**: Shows which symbols might be affected by changes (callers, importers).
+**Response Fields:**
+
+| Field                       | Type           | Description                                                           |
+| --------------------------- | -------------- | --------------------------------------------------------------------- |
+| `analysis.riskScore`        | number (0-100) | Overall risk score where 0 is minimal risk and 100 is maximum risk    |
+| `analysis.riskLevel`        | string         | One of: `low` (<40), `medium` (40-69), `high` (≥70)                   |
+| `analysis.findings`         | array          | Risk findings with severity levels and affected symbols               |
+| `analysis.impactedSymbols`  | array          | Symbol IDs within blast radius that may be affected by changes        |
+| `analysis.evidence`         | array          | Detailed evidence supporting the risk assessment                      |
+| `analysis.recommendedTests` | array          | Test recommendations with priorities (high/medium/low)                |
+| `escalationRequired`        | boolean        | True if risk score exceeds threshold and high-severity findings exist |
+| `policyDecision`            | object         | Policy engine decision when escalation is required                    |
+
+**Risk Scoring Factors:**
+
+1. **Changed Symbols (40% weight)**: Average risk score of all changed symbols based on:
+   - Interface stability (signature changes)
+   - Behavior stability (AST fingerprint changes)
+   - Side effect changes
+
+2. **Blast Radius (30% weight)**: Impact analysis considering:
+   - Number of direct dependents
+   - Distance to transitive dependents
+   - Dependency rank scores
+
+3. **Interface Stability (20% weight)**: Proportion of changes with breaking interface modifications
+
+4. **Side Effects (10% weight)**: Proportion of changes affecting side effects
+
+**Finding Types:**
+
+| Type                         | Severity | Description                                       |
+| ---------------------------- | -------- | ------------------------------------------------- |
+| `high-risk-changes`          | high     | Symbols with risk score ≥70                       |
+| `interface-breaking-changes` | high     | Modified symbols with signature changes           |
+| `side-effect-changes`        | medium   | Modified symbols with side effect changes         |
+| `removed-symbols`            | medium   | Deleted symbols that may break dependents         |
+| `large-impact-radius`        | medium   | Many direct dependents (>10) potentially affected |
+| `new-symbols`                | low      | Newly added symbols                               |
+
+**Recommended Test Types:**
+
+| Type                 | Priority | When Recommended                    |
+| -------------------- | -------- | ----------------------------------- |
+| `unit-tests`         | high     | Modified symbols present            |
+| `integration-tests`  | high     | Interface-breaking changes detected |
+| `regression-tests`   | medium   | Direct dependents in blast radius   |
+| `api-breakage-tests` | high     | Symbols were removed                |
+| `new-coverage-tests` | low      | New symbols added                   |
+
+**Usage Example - CI/CD Integration:**
+
+```bash
+# 1. Index the base branch
+sdl-mcp index --repo-id my-api
+
+# 2. Create PR and feature branch, run analysis
+sdl-mcp serve --stdio &
+echo '{
+  "tool": "sdl.pr.risk.analyze",
+  "arguments": {
+    "repoId": "my-api",
+    "fromVersion": "main",
+    "toVersion": "feature-branch",
+    "riskThreshold": 70
+  }
+}' | mcp-client
+
+# 3. Review findings and run recommended tests
+# If escalationRequired is true, require additional review before merge
+```
+
+**Best Practices:**
+
+- Set appropriate `riskThreshold` for your project's risk tolerance
+- Review `high` severity findings before merging
+- Run all `high` priority recommended tests before deployment
+- Use `impactedSymbols` to identify downstream systems needing testing
+- Integrate with CI/CD to block merges that exceed threshold
 
 ---
 
@@ -681,7 +798,7 @@ sdl-mcp version
 
 ## MCP Tools Reference
 
-SDL-MCP exposes 14 MCP tools organized into 6 categories.
+SDL-MCP exposes 15 MCP tools organized into 6 categories.
 
 ### Repository Management
 
