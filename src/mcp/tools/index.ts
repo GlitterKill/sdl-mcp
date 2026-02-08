@@ -43,8 +43,11 @@ import { handlePolicyGet, handlePolicySet } from "./policy.js";
 import {
   PRRiskAnalysisRequestSchema,
   PRRiskAnalysisResponseSchema,
+  AgentOrchestrateRequestSchema,
+  AgentOrchestrateResponseSchema,
 } from "../tools.js";
 import { handlePRRiskAnalysis } from "./prRisk.js";
+import { handleAgentOrchestrate } from "./agent.js";
 
 export function registerTools(server: MCPServer): void {
   server.registerTool(
@@ -157,5 +160,12 @@ export function registerTools(server: MCPServer): void {
     "Analyze PR risk by computing delta between versions, assessing blast radius, and recommending tests",
     PRRiskAnalysisRequestSchema,
     handlePRRiskAnalysis,
+  );
+
+  server.registerTool(
+    "sdl.agent.orchestrate",
+    "Orchestrate agent task execution with automated rung path selection and evidence capture",
+    AgentOrchestrateRequestSchema,
+    handleAgentOrchestrate,
   );
 }
