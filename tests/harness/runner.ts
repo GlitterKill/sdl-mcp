@@ -4,7 +4,13 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+  mkdirSync,
+} from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
@@ -12,6 +18,14 @@ import crypto from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+function resolveGoldenDir(): string {
+  const repoGoldenDir = join(process.cwd(), "tests", "golden");
+  if (existsSync(repoGoldenDir)) {
+    return repoGoldenDir;
+  }
+  return join(__dirname, "../golden");
+}
 
 interface GoldenTask {
   name: string;
@@ -182,7 +196,7 @@ class TestHarness {
   }
 
   async loadGoldenTasks(): Promise<void> {
-    const fixturesDir = join(__dirname, "../golden");
+    const fixturesDir = resolveGoldenDir();
     const files = readdirSync(fixturesDir).filter((f) => f.endsWith(".json"));
 
     for (const file of files) {
@@ -700,7 +714,7 @@ class TestHarness {
   }
 
   async saveGoldenFixture(fixtureName: string, data: unknown): Promise<void> {
-    const fixturesDir = join(__dirname, "../golden");
+    const fixturesDir = resolveGoldenDir();
     const fixturePath = join(fixturesDir, `${fixtureName}.json`);
 
     try {

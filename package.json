@@ -25,7 +25,7 @@
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "node --import tsx --test \"tests/**/*.test.ts\"",
-    "test:harness": "npm run build:scripts && node dist/tests/harness/runner.js",
+    "test:harness": "npm run test:adapters",
     "test:adapters": "npm run build && npx tsc --rootDir tests/harness --outDir dist/tests/harness --module nodenext tests/harness/adapter-runner.ts && node dist/tests/harness/adapter-runner.js",
     "test:golden": "npm run build && tsx scripts/golden/update-goldens.ts validate",
     "golden:update": "npm run build && tsx scripts/golden/update-goldens.ts generate",
@@ -54,7 +54,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^0.4.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "better-sqlite3": "^11.0.0",
     "fast-glob": "^3.3.3",
     "tree-sitter": "^0.21.1",

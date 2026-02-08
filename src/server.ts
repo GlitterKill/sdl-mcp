@@ -29,10 +29,17 @@ export class MCPServer {
   private tools: Map<string, ToolDefinition> = new Map();
 
   constructor() {
-    this.server = new Server({
-      name: "sdl-mcp",
-      version: packageJson.version,
-    });
+    this.server = new Server(
+      {
+        name: "sdl-mcp",
+        version: packageJson.version,
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      },
+    );
 
     this.setupHandlers();
   }
