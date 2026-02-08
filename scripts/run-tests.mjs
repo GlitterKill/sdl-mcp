@@ -20,6 +20,7 @@ if (testFiles.length === 0) {
 const nodeArgs = [
   "--import",
   "tsx",
+  "--test-concurrency=1",
   "--test",
   ...testFiles.map((file) => resolve(repoRoot, file)),
 ];
