@@ -1,0 +1,113 @@
+[
+  {
+    "callerNodeId": "tests/fixtures/csharp/calls.cs:User:2225503034928",
+    "calleeIdentifier": "_repository.FindById",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 18,
+      "startCol": 19,
+      "endLine": 18,
+      "endCol": 43
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/csharp/calls.cs:Log:2225503136288",
+    "calleeIdentifier": "Console.WriteLine",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 24,
+      "startCol": 12,
+      "endLine": 24,
+      "endCol": 38
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/csharp/calls.cs:User:2225503131488",
+    "calleeIdentifier": "new User",
+    "isResolved": true,
+    "callType": "constructor",
+    "calleeSymbolId": "tests/fixtures/csharp/calls.cs:User:2225504386976",
+    "range": {
+      "startLine": 30,
+      "startCol": 19,
+      "endLine": 30,
+      "endCol": 33
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/csharp/calls.cs:User:2225503137056",
+    "calleeIdentifier": "_repository.FindById(id).Validate().Save",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 36,
+      "startCol": 19,
+      "endLine": 36,
+      "endCol": 61
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/csharp/calls.cs:User:2225503137056",
+    "calleeIdentifier": "_repository.FindById(id).Validate",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 36,
+      "startCol": 19,
+      "endLine": 36,
+      "endCol": 54
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/csharp/calls.cs:User:2225503137056",
+    "calleeIdentifier": "_repository.FindById",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 36,
+      "startCol": 19,
+      "endLine": 36,
+      "endCol": 43
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/csharp/calls.cs:GetUserAsync:2225503125920",
+    "calleeIdentifier": "_repository.FindByIdAsync",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 42,
+      "startCol": 25,
+      "endLine": 42,
+      "endCol": 54
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/csharp/calls.cs:Process:2225503128608",
+    "calleeIdentifier": "this.LogInfo",
+    "isResolved": true,
+    "callType": "method",
+    "calleeSymbolId": "tests/fixtures/csharp/calls.cs:LogInfo:2225504396672",
+    "range": {
+      "startLine": 48,
+      "startCol": 12,
+      "endLine": 48,
+      "endCol": 38
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/csharp/calls.cs:Process:2225503128608",
+    "calleeIdentifier": "this.Validate",
+    "isResolved": true,
+    "callType": "method",
+    "calleeSymbolId": "tests/fixtures/csharp/calls.cs:Validate:2225504397248",
+    "range": {
+      "startLine": 49,
+      "startCol": 12,
+      "endLine": 49,
+      "endCol": 27
+    }
+  }
+]

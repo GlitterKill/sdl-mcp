@@ -1,0 +1,306 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SDL-MCP Configuration",
+  "description": "Configuration schema for SDL-MCP (Symbol Delta Ledger MCP Server)",
+  "type": "object",
+  "required": ["repos", "dbPath", "policy"],
+  "properties": {
+    "repos": {
+      "type": "array",
+      "description": "List of repositories to index",
+      "items": {
+        "type": "object",
+        "required": ["repoId", "rootPath"],
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Unique identifier for the repository",
+            "minLength": 1
+          },
+          "rootPath": {
+            "type": "string",
+            "description": "Absolute or relative path to the repository root",
+            "minLength": 1
+          },
+          "ignore": {
+            "type": "array",
+            "description": "Glob patterns to ignore during indexing",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/node_modules/**",
+              "**/dist/**",
+              "**/.next/**",
+              "**/build/**"
+            ]
+          },
+          "languages": {
+            "type": "array",
+            "description": "Programming languages to index",
+            "items": {
+              "type": "string",
+              "enum": [
+                "ts",
+                "tsx",
+                "js",
+                "jsx",
+                "py",
+                "go",
+                "java",
+                "cs",
+                "c",
+                "cpp",
+                "php",
+                "rs",
+                "kt",
+                "sh"
+              ]
+            },
+            "default": [
+              "ts",
+              "tsx",
+              "js",
+              "jsx",
+              "py",
+              "go",
+              "java",
+              "cs",
+              "c",
+              "cpp",
+              "php",
+              "rs",
+              "kt",
+              "sh"
+            ]
+          },
+          "maxFileBytes": {
+            "type": "integer",
+            "description": "Maximum file size in bytes to index",
+            "minimum": 1,
+            "default": 2000000
+          },
+          "packageJsonPath": {
+            "type": "string",
+            "description": "Optional path to package.json (auto-detected if not provided)"
+          },
+          "tsconfigPath": {
+            "type": "string",
+            "description": "Optional path to tsconfig.json (auto-detected if not provided)"
+          },
+          "workspaceGlobs": {
+            "type": "array",
+            "description": "Glob patterns to find workspace package.json files (monorepo support)",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "dbPath": {
+      "type": "string",
+      "description": "Path to SQLite database file",
+      "minLength": 1
+    },
+    "policy": {
+      "type": "object",
+      "description": "Code access policy settings",
+      "properties": {
+        "maxWindowLines": {
+          "type": "integer",
+          "description": "Maximum lines of code to return per window",
+          "minimum": 1,
+          "default": 180
+        },
+        "maxWindowTokens": {
+          "type": "integer",
+          "description": "Maximum tokens to return per window",
+          "minimum": 1,
+          "default": 1400
+        },
+        "requireIdentifiers": {
+          "type": "boolean",
+          "description": "Require user to specify identifiers before returning code",
+          "default": true
+        },
+        "allowBreakGlass": {
+          "type": "boolean",
+          "description": "Allow break-glass mode to override policy temporarily",
+          "default": true
+        }
+      },
+      "default": {
+        "maxWindowLines": 180,
+        "maxWindowTokens": 1400,
+        "requireIdentifiers": true,
+        "allowBreakGlass": true
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "description": "Secret redaction configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable secret redaction",
+          "default": true
+        },
+        "includeDefaults": {
+          "type": "boolean",
+          "description": "Include default redaction patterns",
+          "default": true
+        },
+        "patterns": {
+          "type": "array",
+          "description": "Custom redaction patterns",
+          "items": {
+            "type": "object",
+            "required": ["pattern"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Pattern name for documentation"
+              },
+              "pattern": {
+                "type": "string",
+                "description": "Regex pattern to match",
+                "minLength": 1
+              },
+              "flags": {
+                "type": "string",
+                "description": "Regex flags (e.g., 'i', 'g', 'm')"
+              }
+            }
+          },
+          "default": []
+        }
+      },
+      "default": {
+        "enabled": true,
+        "includeDefaults": true,
+        "patterns": []
+      }
+    },
+    "indexing": {
+      "type": "object",
+      "description": "Indexing behavior configuration",
+      "properties": {
+        "concurrency": {
+          "type": "integer",
+          "description": "Number of concurrent indexing workers",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 4
+        },
+        "enableFileWatching": {
+          "type": "boolean",
+          "description": "Enable automatic reindexing on file changes",
+          "default": false
+        }
+      },
+      "default": {
+        "concurrency": 4,
+        "enableFileWatching": false
+      }
+    },
+    "slice": {
+      "type": "object",
+      "description": "Graph slice configuration",
+      "properties": {
+        "defaultMaxCards": {
+          "type": "integer",
+          "description": "Default maximum cards in a slice",
+          "minimum": 1,
+          "default": 300
+        },
+        "defaultMaxTokens": {
+          "type": "integer",
+          "description": "Default maximum tokens in a slice",
+          "minimum": 1,
+          "default": 12000
+        },
+        "edgeWeights": {
+          "type": "object",
+          "description": "Weights for different edge types in slice traversal",
+          "properties": {
+            "call": {
+              "type": "number",
+              "description": "Weight for call edges",
+              "minimum": 0,
+              "default": 1.0
+            },
+            "import": {
+              "type": "number",
+              "description": "Weight for import edges",
+              "minimum": 0,
+              "default": 0.6
+            },
+            "config": {
+              "type": "number",
+              "description": "Weight for config edges",
+              "minimum": 0,
+              "default": 0.8
+            }
+          },
+          "default": {
+            "call": 1.0,
+            "import": 0.6,
+            "config": 0.8
+          }
+        }
+      },
+      "default": {
+        "defaultMaxCards": 300,
+        "defaultMaxTokens": 12000,
+        "edgeWeights": {
+          "call": 1.0,
+          "import": 0.6,
+          "config": 0.8
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "description": "TypeScript diagnostics configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable TypeScript diagnostics",
+          "default": true
+        },
+        "mode": {
+          "type": "string",
+          "description": "Diagnostics mode",
+          "enum": ["tsLS", "tsc"],
+          "default": "tsLS"
+        },
+        "maxErrors": {
+          "type": "integer",
+          "description": "Maximum errors to report per file",
+          "minimum": 1,
+          "default": 50
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "description": "Timeout for diagnostics in milliseconds",
+          "minimum": 100,
+          "default": 2000
+        },
+        "scope": {
+          "type": "string",
+          "description": "Diagnostics scope",
+          "enum": ["changedFiles", "workspace"],
+          "default": "changedFiles"
+        }
+      },
+      "default": {
+        "enabled": true,
+        "mode": "tsLS",
+        "maxErrors": 50,
+        "timeoutMs": 2000,
+        "scope": "changedFiles"
+      }
+    }
+  }
+}

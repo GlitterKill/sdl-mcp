@@ -1,0 +1,86 @@
+[
+  {
+    "specifier": "./utils.sh",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "/usr/local/lib/common.sh",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "./helpers.sh",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "/opt/scripts/functions.sh",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "../lib/config.sh",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "./lib/utils/logger.sh",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "../shared/constants.sh",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "./quoted-path.sh",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "./another-quoted.sh",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "./init.sh",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "./config.sh",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "./helpers.sh",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  }
+]

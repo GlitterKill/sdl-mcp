@@ -1,0 +1,134 @@
+[
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:validateUser:6",
+    "calleeIdentifier": "Validator::validate",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 25,
+      "startCol": 15,
+      "endLine": 25,
+      "endCol": 41
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:executeCallback:7",
+    "calleeIdentifier": "$callback",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 30,
+      "startCol": 8,
+      "endLine": 30,
+      "endCol": 24
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:getConfig:11",
+    "calleeIdentifier": "\\App\\Config::get",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 52,
+      "startCol": 15,
+      "endLine": 52,
+      "endCol": 43
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:App\\Services\\sendEmail:14",
+    "calleeIdentifier": "mail",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 71,
+      "startCol": 11,
+      "endLine": 71,
+      "endCol": 37
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:App\\Services\\logMessage:15",
+    "calleeIdentifier": "error_log",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 75,
+      "startCol": 4,
+      "endLine": 75,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:App\\Services\\executeCommand:16",
+    "calleeIdentifier": "$fn",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 81,
+      "startCol": 4,
+      "endLine": 81,
+      "endCol": 14
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:index:24",
+    "calleeIdentifier": "Cache::get",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 106,
+      "startCol": 16,
+      "endLine": 106,
+      "endCol": 35
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:index:24",
+    "calleeIdentifier": "Database::connect",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 108,
+      "startCol": 20,
+      "endLine": 108,
+      "endCol": 39
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:index:24",
+    "calleeIdentifier": "Cache::set",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 109,
+      "startCol": 12,
+      "endLine": 109,
+      "endCol": 38
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:dispatch:26",
+    "calleeIdentifier": "$handler",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 119,
+      "startCol": 8,
+      "endLine": 119,
+      "endCol": 18
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:getHandler:27",
+    "calleeIdentifier": "ucfirst",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 123,
+      "startCol": 34,
+      "endLine": 123,
+      "endCol": 50
+    }
+  }
+]

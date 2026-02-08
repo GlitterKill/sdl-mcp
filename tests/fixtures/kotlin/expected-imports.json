@@ -1,0 +1,101 @@
+[
+  {
+    "specifier": "java.util.List",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "List"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.util.Map",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "Map"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "kotlin.collections.ArrayList",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "ArrayList"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.util.HashMap",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "JavaHashMap"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.util.HashSet",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "MySet"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "kotlin.collections.LinkedHashMap",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "LinkedMap"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.util",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "*"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "kotlin.collections",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "*"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.io.File",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "File"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.io.FileInputStream",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "FIS"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.io",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "*"
+    ],
+    "isReExport": false
+  }
+]

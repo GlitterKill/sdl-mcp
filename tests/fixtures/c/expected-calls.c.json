@@ -1,0 +1,128 @@
+[
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:print_message:1",
+    "calleeIdentifier": "printf",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 9,
+      "startCol": 4,
+      "endLine": 9,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:allocate_memory:2",
+    "calleeIdentifier": "malloc",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 13,
+      "startCol": 11,
+      "endLine": 13,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:print_point:4",
+    "calleeIdentifier": "printf",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 22,
+      "startCol": 4,
+      "endLine": 22,
+      "endCol": 41
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "calleeIdentifier": "add_numbers",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:add_numbers:0",
+    "range": {
+      "startLine": 31,
+      "startCol": 14,
+      "endLine": 31,
+      "endCol": 33
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "calleeIdentifier": "print_message",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:print_message:1",
+    "range": {
+      "startLine": 32,
+      "startCol": 4,
+      "endLine": 32,
+      "endCol": 34
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "calleeIdentifier": "allocate_memory",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:allocate_memory:2",
+    "range": {
+      "startLine": 34,
+      "startCol": 16,
+      "endLine": 34,
+      "endCol": 36
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "calleeIdentifier": "create_point",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:create_point:5",
+    "range": {
+      "startLine": 36,
+      "startCol": 14,
+      "endLine": 36,
+      "endCol": 33
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "calleeIdentifier": "print_point",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:print_point:4",
+    "range": {
+      "startLine": 37,
+      "startCol": 4,
+      "endLine": 37,
+      "endCol": 19
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "calleeIdentifier": "print_point",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:print_point:4",
+    "range": {
+      "startLine": 40,
+      "startCol": 4,
+      "endLine": 40,
+      "endCol": 21
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "calleeIdentifier": "free",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 42,
+      "startCol": 4,
+      "endLine": 42,
+      "endCol": 13
+    }
+  }
+]

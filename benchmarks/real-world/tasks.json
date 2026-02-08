@@ -1,0 +1,262 @@
+{
+  "version": 2,
+  "defaults": {
+    "baseline": {
+      "maxFiles": 6
+    },
+    "sdl": {
+      "maxCards": 20,
+      "maxTokens": 4000,
+      "maxEntrySymbols": 2,
+      "maxSkeletons": 2,
+      "skeletonMaxLines": 120,
+      "skeletonMaxTokens": 1500
+    }
+  },
+  "tasks": [
+    {
+      "id": "policy-downgrade",
+      "title": "Enforce policy downgrade on code window requests",
+      "description": "Trace how code window requests are evaluated and downgraded to skeleton or hotpath when policy denies raw code.",
+      "queryTerms": [
+        "handleCodeNeedWindow",
+        "downgrade-to-skeleton",
+        "PolicyEngine",
+        "logPolicyDecision",
+        "GateContext"
+      ],
+      "entrySymbolNames": ["handleCodeNeedWindow", "PolicyEngine"],
+      "relevantFiles": [
+        "src/mcp/tools/code.ts",
+        "src/policy/engine.ts",
+        "src/code/gate.ts",
+        "src/code/skeleton.ts",
+        "src/code/hotpath.ts",
+        "src/mcp/telemetry.ts",
+        "src/config/types.ts"
+      ],
+      "relevantSymbols": [
+        "handleCodeNeedWindow",
+        "PolicyEngine",
+        "evaluateRequest",
+        "generateSymbolSkeleton",
+        "extractHotPath"
+      ]
+    },
+    {
+      "id": "slice-budget",
+      "title": "Tune slice expansion and budgets",
+      "description": "Locate where slice budgets, edge weights, and refresh responses are implemented.",
+      "queryTerms": [
+        "buildSlice",
+        "SliceBudget",
+        "edgeWeights",
+        "sliceHandle",
+        "SliceTruncation"
+      ],
+      "entrySymbolNames": ["buildSlice", "handleSliceBuild", "handleSliceRefresh"],
+      "relevantFiles": [
+        "src/graph/slice.ts",
+        "src/mcp/tools/slice.ts",
+        "src/config/loadConfig.ts",
+        "src/config/types.ts",
+        "src/db/queries.ts",
+        "src/mcp/types.ts"
+      ],
+      "relevantSymbols": [
+        "buildSlice",
+        "handleSliceBuild",
+        "handleSliceRefresh"
+      ]
+    },
+    {
+      "id": "call-graph",
+      "title": "Improve call graph extraction for chained calls",
+      "description": "Find how call edges are extracted from tree-sitter and resolved into graph edges.",
+      "queryTerms": [
+        "extractCalls",
+        "call_expression",
+        "resolveCallTarget",
+        "callType",
+        "member_expression"
+      ],
+      "entrySymbolNames": ["extractCalls", "resolveCallTarget"],
+      "relevantFiles": [
+        "src/indexer/treesitter/extractCalls.ts",
+        "src/indexer/indexer.ts",
+        "src/indexer/ts/tsParser.ts"
+      ],
+      "relevantSymbols": ["extractCalls", "resolveCallTarget"]
+    },
+    {
+      "id": "symbol-card-cache",
+      "title": "Debug symbol card caching behavior",
+      "description": "Understand how symbol cards are cached, invalidated, and retrieved for slice building.",
+      "queryTerms": [
+        "symbolCardCache",
+        "cacheGet",
+        "cacheSet",
+        "invalidate",
+        "maxEntries"
+      ],
+      "entrySymbolNames": ["symbolCardCache", "loadSymbolCards"],
+      "relevantFiles": [
+        "src/graph/cache.ts",
+        "src/graph/slice.ts",
+        "src/config/constants.ts",
+        "src/mcp/types.ts"
+      ],
+      "relevantSymbols": [
+        "symbolCardCache",
+        "loadSymbolCards",
+        "getFromCache"
+      ]
+    },
+    {
+      "id": "indexer-performance",
+      "title": "Profile and optimize indexing performance",
+      "description": "Find bottlenecks in the indexing pipeline from file scanning to database persistence.",
+      "queryTerms": [
+        "indexRepo",
+        "processFile",
+        "batchInsert",
+        "symbolsIndexed",
+        "durationMs"
+      ],
+      "entrySymbolNames": ["indexRepo", "processFile"],
+      "relevantFiles": [
+        "src/indexer/indexer.ts",
+        "src/indexer/file-scanner.ts",
+        "src/db/queries.ts",
+        "src/config/constants.ts"
+      ],
+      "relevantSymbols": [
+        "indexRepo",
+        "processFile",
+        "scanDirectory"
+      ],
+      "sdl": {
+        "maxCards": 25,
+        "maxTokens": 5000
+      }
+    },
+    {
+      "id": "delta-blast-radius",
+      "title": "Calculate blast radius for code changes",
+      "description": "Trace how delta packs compute affected symbols and rank them by impact.",
+      "queryTerms": [
+        "blastRadius",
+        "computeDelta",
+        "affectedSymbols",
+        "DeltaPack",
+        "proximity"
+      ],
+      "entrySymbolNames": ["computeDelta", "calculateBlastRadius"],
+      "relevantFiles": [
+        "src/delta/diff.ts",
+        "src/delta/blast-radius.ts",
+        "src/mcp/tools/delta.ts",
+        "src/mcp/types.ts"
+      ],
+      "relevantSymbols": [
+        "computeDelta",
+        "calculateBlastRadius",
+        "rankByImpact"
+      ]
+    },
+    {
+      "id": "mcp-tool-registration",
+      "title": "Add a new MCP tool to the server",
+      "description": "Understand the pattern for registering new MCP tools including schema, handler, and dispatch.",
+      "queryTerms": [
+        "registerTool",
+        "toolHandler",
+        "toolSchema",
+        "dispatch",
+        "McpServer"
+      ],
+      "entrySymbolNames": ["createServer", "registerTools"],
+      "relevantFiles": [
+        "src/server.ts",
+        "src/mcp/tools/index.ts",
+        "src/mcp/types.ts",
+        "src/mcp/errors.ts"
+      ],
+      "relevantSymbols": [
+        "createServer",
+        "registerTools",
+        "handleToolCall"
+      ]
+    },
+    {
+      "id": "skeleton-generation",
+      "title": "Fix skeleton generation for arrow functions",
+      "description": "Debug why arrow function skeletons may be missing or malformed.",
+      "queryTerms": [
+        "generateSymbolSkeleton",
+        "arrow_function",
+        "skeletonize",
+        "elideBody"
+      ],
+      "entrySymbolNames": ["generateSymbolSkeleton", "skeletonizeNode"],
+      "relevantFiles": [
+        "src/code/skeleton.ts",
+        "src/code/ast-utils.ts",
+        "src/indexer/treesitter/extractSymbols.ts"
+      ],
+      "relevantSymbols": [
+        "generateSymbolSkeleton",
+        "skeletonizeNode",
+        "extractSymbols"
+      ]
+    },
+    {
+      "id": "cli-transport",
+      "title": "Implement HTTP transport for CLI serve command",
+      "description": "Find how the CLI serve command handles different transport modes (stdio vs HTTP).",
+      "queryTerms": [
+        "serveCommand",
+        "transport",
+        "stdio",
+        "http",
+        "startServer"
+      ],
+      "entrySymbolNames": ["serveCommand", "startHttpServer"],
+      "relevantFiles": [
+        "src/cli/commands/serve.ts",
+        "src/cli/transports/stdio.ts",
+        "src/cli/transports/http.ts",
+        "src/server.ts"
+      ],
+      "relevantSymbols": [
+        "serveCommand",
+        "startHttpServer",
+        "createStdioTransport"
+      ]
+    },
+    {
+      "id": "config-validation",
+      "title": "Add validation for new config option",
+      "description": "Understand config schema validation and how to add new configuration options.",
+      "queryTerms": [
+        "loadConfig",
+        "configSchema",
+        "Zod",
+        "validate",
+        "defaults"
+      ],
+      "entrySymbolNames": ["loadConfig", "configSchema"],
+      "relevantFiles": [
+        "src/config/loadConfig.ts",
+        "src/config/types.ts",
+        "src/config/constants.ts",
+        "config/sdlmcp.config.schema.json"
+      ],
+      "relevantSymbols": [
+        "loadConfig",
+        "configSchema",
+        "validateConfig"
+      ]
+    }
+  ]
+}

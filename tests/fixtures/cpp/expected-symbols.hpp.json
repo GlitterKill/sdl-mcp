@@ -1,0 +1,391 @@
+[
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace:namespace",
+    "kind": "module",
+    "name": "MyNamespace",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 7,
+      "startCol": 0,
+      "endLine": 62,
+      "endCol": 1
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace:namespace",
+    "kind": "module",
+    "name": "MyNamespace::InnerNamespace",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 9,
+      "startCol": 4,
+      "endLine": 40,
+      "endCol": 5
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::BaseClass:class",
+    "kind": "class",
+    "name": "MyNamespace::InnerNamespace::BaseClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 11,
+      "startCol": 8,
+      "endLine": 23,
+      "endCol": 9
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::BaseClass:constructor",
+    "kind": "constructor",
+    "name": "MyNamespace::InnerNamespace::BaseClass",
+    "exported": false,
+    "visibility": "private",
+    "range": {
+      "startLine": 16,
+      "startCol": 12,
+      "endLine": 16,
+      "endCol": 24
+    },
+    "signature": {
+      "params": [],
+      "returns": "BaseClass()"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::BaseClass:constructor",
+    "kind": "constructor",
+    "name": "MyNamespace::InnerNamespace::BaseClass",
+    "exported": false,
+    "visibility": "private",
+    "range": {
+      "startLine": 17,
+      "startCol": 12,
+      "endLine": 17,
+      "endCol": 42
+    },
+    "signature": {
+      "params": [],
+      "returns": "explicit"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::~BaseClass:destructor",
+    "kind": "constructor",
+    "name": "MyNamespace::InnerNamespace::~BaseClass",
+    "exported": false,
+    "visibility": "private",
+    "range": {
+      "startLine": 18,
+      "startCol": 12,
+      "endLine": 18,
+      "endCol": 33
+    },
+    "signature": {
+      "params": [],
+      "returns": "~BaseClass()"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::DerivedClass:class",
+    "kind": "class",
+    "name": "MyNamespace::InnerNamespace::DerivedClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 25,
+      "startCol": 8,
+      "endLine": 38,
+      "endCol": 9
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::DerivedClass:constructor",
+    "kind": "constructor",
+    "name": "MyNamespace::InnerNamespace::DerivedClass",
+    "exported": false,
+    "visibility": "private",
+    "range": {
+      "startLine": 30,
+      "startCol": 12,
+      "endLine": 30,
+      "endCol": 27
+    },
+    "signature": {
+      "params": [],
+      "returns": "DerivedClass()"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::DerivedClass:constructor",
+    "kind": "constructor",
+    "name": "MyNamespace::InnerNamespace::DerivedClass",
+    "exported": false,
+    "visibility": "private",
+    "range": {
+      "startLine": 31,
+      "startCol": 12,
+      "endLine": 31,
+      "endCol": 48
+    },
+    "signature": {
+      "params": [],
+      "returns": "explicit"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::~DerivedClass:destructor",
+    "kind": "constructor",
+    "name": "MyNamespace::InnerNamespace::~DerivedClass",
+    "exported": false,
+    "visibility": "private",
+    "range": {
+      "startLine": 32,
+      "startCol": 12,
+      "endLine": 32,
+      "endCol": 28
+    },
+    "signature": {
+      "params": [],
+      "returns": "~DerivedClass()"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::TemplateClass:class",
+    "kind": "class",
+    "name": "MyNamespace::TemplateClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 43,
+      "startCol": 4,
+      "endLine": 53,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::TemplateClass:constructor",
+    "kind": "constructor",
+    "name": "MyNamespace::TemplateClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 45,
+      "startCol": 8,
+      "endLine": 45,
+      "endCol": 24
+    },
+    "signature": {
+      "params": [],
+      "returns": "TemplateClass()"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::~TemplateClass:destructor",
+    "kind": "constructor",
+    "name": "MyNamespace::~TemplateClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 46,
+      "startCol": 8,
+      "endLine": 46,
+      "endCol": 25
+    },
+    "signature": {
+      "params": [],
+      "returns": "~TemplateClass()"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::Map:class",
+    "kind": "class",
+    "name": "MyNamespace::Map",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 56,
+      "startCol": 4,
+      "endLine": 60,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:Color:enum",
+    "kind": "class",
+    "name": "Color",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 64,
+      "startCol": 0,
+      "endLine": 68,
+      "endCol": 1
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:StatusCode:enum",
+    "kind": "class",
+    "name": "StatusCode",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 70,
+      "startCol": 0,
+      "endLine": 74,
+      "endCol": 1
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:StringAlias:type",
+    "kind": "type",
+    "name": "StringAlias",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 76,
+      "startCol": 0,
+      "endLine": 76,
+      "endCol": 32
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:Vector:type",
+    "kind": "type",
+    "name": "Vector",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 79,
+      "startCol": 0,
+      "endLine": 79,
+      "endCol": 30
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:Point:class",
+    "kind": "class",
+    "name": "Point",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 81,
+      "startCol": 0,
+      "endLine": 88,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:Point:constructor",
+    "kind": "constructor",
+    "name": "Point",
+    "exported": false,
+    "visibility": "private",
+    "range": {
+      "startLine": 86,
+      "startCol": 4,
+      "endLine": 86,
+      "endCol": 12
+    },
+    "signature": {
+      "params": [],
+      "returns": "Point()"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:Point:constructor",
+    "kind": "constructor",
+    "name": "Point",
+    "exported": false,
+    "visibility": "private",
+    "range": {
+      "startLine": 87,
+      "startCol": 4,
+      "endLine": 87,
+      "endCol": 40
+    },
+    "signature": {
+      "params": [],
+      "returns": "Point(double x, double y, double z)"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:UtilityClass:class",
+    "kind": "class",
+    "name": "UtilityClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 90,
+      "startCol": 0,
+      "endLine": 94,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:AnonymousNamespaceClass:class",
+    "kind": "class",
+    "name": "AnonymousNamespaceClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 97,
+      "startCol": 4,
+      "endLine": 100,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:InlineNamespace:namespace",
+    "kind": "module",
+    "name": "InlineNamespace",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 103,
+      "startCol": 0,
+      "endLine": 108,
+      "endCol": 1
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:InlineNamespace::InlineClass:class",
+    "kind": "class",
+    "name": "InlineNamespace::InlineClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 104,
+      "startCol": 4,
+      "endLine": 107,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  }
+]

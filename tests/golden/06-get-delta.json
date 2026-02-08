@@ -1,0 +1,25 @@
+{
+  "name": "Get Delta Pack",
+  "description": "Get delta pack with blast radius and diagnostics between two versions",
+  "tool": "sdl.delta.get",
+  "request": {
+    "repoId": "test-repo-001",
+    "fromVersion": "version-001",
+    "toVersion": "version-002"
+  },
+  "expectedResponse": {
+    "delta": {
+      "repoId": "test-repo-001",
+      "fromVersion": "version-001",
+      "toVersion": "version-002",
+      "changedSymbols": ["array"],
+      "blastRadius": ["array"],
+      "diagnosticsSummary": {
+        "totalErrors": "number",
+        "totalWarnings": "number",
+        "totalInfo": "number",
+        "topFiles": ["array"]
+      }
+    }
+  }
+}

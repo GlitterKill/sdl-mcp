@@ -1,0 +1,83 @@
+[
+  {
+    "specifier": "local_header.hpp",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "local_header.hpp"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "iostream",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "iostream"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "vector",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "vector"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "string",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "string"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "../parent/relative.hpp",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "../parent/relative.hpp"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "utils/helper.hpp",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "utils/helper.hpp"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "map",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "map"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "algorithm",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "algorithm"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "memory",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "memory"
+    ],
+    "isReExport": false
+  }
+]

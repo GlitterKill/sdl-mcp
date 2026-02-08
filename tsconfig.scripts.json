@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": false,
+    "rootDir": "./",
+    "outDir": "./dist",
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true
+  },
+  "include": ["scripts/**/*.ts", "tests/harness/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

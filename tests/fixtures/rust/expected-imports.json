@@ -1,0 +1,149 @@
+[
+  {
+    "specifier": "my_module",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "my_module"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "internal",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "internal"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "utils",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "utils"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "std::collections::HashMap",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "HashMap"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "std::io",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "*"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "std::collections",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "HashMap",
+      "HashSet"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "std::io::Result",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "IoResult"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "std::sync::Arc",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "Arc"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "self::my_module::MyStruct",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "MyStruct"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "super::parent_module::ParentStruct",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "ParentStruct"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "crate::root_module::RootStruct",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "RootStruct"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "std::collections::HashMap",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "HashMap"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "std::io",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "Read",
+      "Write"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "serde",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "Serialize",
+      "Deserialize"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "tokio::runtime::Runtime",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "Runtime"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "crate::my_module::PublicStruct",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "PublicStruct"
+    ],
+    "isReExport": false
+  }
+]

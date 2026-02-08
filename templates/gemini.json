@@ -1,0 +1,66 @@
+{
+  "_comment": "Gemini CLI MCP Configuration Template for SDL-MCP",
+  "_documentation": {
+    "purpose": "Configure SDL-MCP as an MCP server for Gemini CLI",
+    "placement": "Add to Gemini MCP servers configuration file",
+    "windowsNotes": {
+      "paths": "Gemini CLI expects forward slashes (/) or escaped backslashes (\\\\)",
+      "npx": "npx is cross-platform. Use 'sdl-mcp' for global install",
+      "environment": "SDL_CONFIG or SDL_CONFIG_PATH required for configuration"
+    },
+    "quoting": {
+      "powershell": "Use single quotes for literal paths, double quotes with $ for variables",
+      "cmd": "Double quotes only; cmd does not support single quotes for strings"
+    },
+    "workspaceFolder": {
+      "description": "Gemini CLI replaces ${workspaceFolder} with workspace root",
+      "windows": "Always resolves to forward-slash normalized path"
+    }
+  },
+  "mcpServers": {
+    "sdl-mcp": {
+      "command": "npx",
+      "args": ["sdl-mcp"],
+      "env": {
+        "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
+      }
+    }
+  },
+  "_alternative_global_install": {
+    "description": "For global installation (npm install -g sdl-mcp):",
+    "mcpServers": {
+      "sdl-mcp": {
+        "command": "sdl-mcp",
+        "args": [],
+        "env": {
+          "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
+        }
+      }
+    }
+  },
+  "_windows_path_examples": {
+    "description": "Example paths for Windows environments",
+    "configPath": {
+      "forward_slash": "${workspaceFolder}/sdlmcp.config.json",
+      "escaped_backslash": "C:\\\\Users\\\\username\\\\project\\\\sdlmcp.config.json"
+    },
+    "nodePath": {
+      "if_needed": "C:\\\\Program Files\\\\nodejs\\\\node.exe"
+    }
+  },
+  "_shell_specific_quoting": {
+    "cmd": {
+      "rule": "Always use double quotes for paths",
+      "example": "\"C:\\Users\\name\\project\\sdlmcp.config.json\""
+    },
+    "powershell": {
+      "rule": "Single quotes for literals, double quotes with $var for expansion",
+      "example": "'C:/Users/name/project/sdlmcp.config.json'"
+    }
+  },
+  "_troubleshooting": {
+    "npx_hangs": "Try adding -y flag: npx -y sdl-mcp",
+    "permission_denied": "Check file permissions for config and database",
+    "path_resolution": "Verify workspaceFolder is set correctly in Gemini CLI"
+  }
+}

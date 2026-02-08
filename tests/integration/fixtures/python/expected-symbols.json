@@ -1,0 +1,383 @@
+[
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:calculate_sum:0",
+    "kind": "function",
+    "name": "calculate_sum",
+    "exported": true,
+    "range": {
+      "startLine": 5,
+      "startCol": 0,
+      "endLine": 7,
+      "endCol": 16
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "a",
+          "type": "int"
+        },
+        {
+          "name": "b",
+          "type": "int"
+        }
+      ],
+      "returns": "int"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:greet:1",
+    "kind": "function",
+    "name": "greet",
+    "exported": true,
+    "range": {
+      "startLine": 11,
+      "startCol": 0,
+      "endLine": 12,
+      "endCol": 28
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:process_data:2",
+    "kind": "function",
+    "name": "process_data",
+    "exported": true,
+    "range": {
+      "startLine": 16,
+      "startCol": 0,
+      "endLine": 17,
+      "endCol": 32
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "data",
+          "type": "str"
+        },
+        {
+          "name": "encoding",
+          "type": "str"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:flexible_function:3",
+    "kind": "function",
+    "name": "flexible_function",
+    "exported": true,
+    "range": {
+      "startLine": 21,
+      "startCol": 0,
+      "endLine": 22,
+      "endCol": 8
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "*args"
+        },
+        {
+          "name": "**kwargs"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:_internal_helper:4",
+    "kind": "function",
+    "name": "_internal_helper",
+    "exported": false,
+    "range": {
+      "startLine": 26,
+      "startCol": 0,
+      "endLine": 27,
+      "endCol": 21
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:__very_private:5",
+    "kind": "function",
+    "name": "__very_private",
+    "exported": false,
+    "range": {
+      "startLine": 31,
+      "startCol": 0,
+      "endLine": 32,
+      "endCol": 25
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:decorated_function:6",
+    "kind": "function",
+    "name": "decorated_function",
+    "exported": true,
+    "range": {
+      "startLine": 38,
+      "startCol": 0,
+      "endLine": 39,
+      "endCol": 8
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Animal:7",
+    "kind": "class",
+    "name": "Animal",
+    "exported": true,
+    "range": {
+      "startLine": 43,
+      "startCol": 0,
+      "endLine": 48,
+      "endCol": 12
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:__init__:8",
+    "kind": "function",
+    "name": "__init__",
+    "exported": false,
+    "range": {
+      "startLine": 44,
+      "startCol": 4,
+      "endLine": 45,
+      "endCol": 24
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "self"
+        },
+        {
+          "name": "name",
+          "type": "str"
+        }
+      ]
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:speak:9",
+    "kind": "function",
+    "name": "speak",
+    "exported": true,
+    "range": {
+      "startLine": 47,
+      "startCol": 4,
+      "endLine": 48,
+      "endCol": 12
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "self"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Dog:10",
+    "kind": "class",
+    "name": "Dog",
+    "exported": true,
+    "range": {
+      "startLine": 52,
+      "startCol": 0,
+      "endLine": 57,
+      "endCol": 19
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:speak:11",
+    "kind": "function",
+    "name": "speak",
+    "exported": true,
+    "range": {
+      "startLine": 53,
+      "startCol": 4,
+      "endLine": 54,
+      "endCol": 22
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "self"
+        }
+      ],
+      "returns": "str"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:fetch:12",
+    "kind": "function",
+    "name": "fetch",
+    "exported": true,
+    "range": {
+      "startLine": 56,
+      "startCol": 4,
+      "endLine": 57,
+      "endCol": 19
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "self"
+        },
+        {
+          "name": "item",
+          "type": "str"
+        }
+      ],
+      "returns": "bool"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:_InternalClass:13",
+    "kind": "class",
+    "name": "_InternalClass",
+    "exported": false,
+    "range": {
+      "startLine": 61,
+      "startCol": 0,
+      "endLine": 63,
+      "endCol": 12
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:method:14",
+    "kind": "function",
+    "name": "method",
+    "exported": true,
+    "range": {
+      "startLine": 62,
+      "startCol": 4,
+      "endLine": 63,
+      "endCol": 12
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "self"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Person:15",
+    "kind": "class",
+    "name": "Person",
+    "exported": true,
+    "range": {
+      "startLine": 68,
+      "startCol": 0,
+      "endLine": 70,
+      "endCol": 12
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:name:16",
+    "kind": "variable",
+    "name": "name",
+    "exported": true,
+    "range": {
+      "startLine": 69,
+      "startCol": 4,
+      "endLine": 69,
+      "endCol": 13
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:age:17",
+    "kind": "variable",
+    "name": "age",
+    "exported": true,
+    "range": {
+      "startLine": 70,
+      "startCol": 4,
+      "endLine": 70,
+      "endCol": 12
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:module_variable:18",
+    "kind": "variable",
+    "name": "module_variable",
+    "exported": true,
+    "range": {
+      "startLine": 74,
+      "startCol": 0,
+      "endLine": 74,
+      "endCol": 24
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:_private_var:19",
+    "kind": "variable",
+    "name": "_private_var",
+    "exported": false,
+    "range": {
+      "startLine": 77,
+      "startCol": 0,
+      "endLine": 77,
+      "endCol": 23
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:StringList:20",
+    "kind": "variable",
+    "name": "StringList",
+    "exported": true,
+    "range": {
+      "startLine": 80,
+      "startCol": 0,
+      "endLine": 80,
+      "endCol": 22
+    },
+    "visibility": "public"
+  }
+]

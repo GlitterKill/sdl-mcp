@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta content="text/html; charset=UTF-8" http-equiv="content-type">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SDL-MCP Server Documentation</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <header>
+      <div class="container"> <img title="SDL-MCP" alt="Symbol Delta Ledger MCP Server"
+          src="Symbol_Delta_Ledger_MCP.jpg">
+        <h1>The "Cards-First" Context Engine</h1>
+        <p class="tagline">Stop Drowning Your Agents in Raw Code.</p>
+      </div>
+    </header>
+    <main class="container">
+      <section class="hero">
+        <h2>Overview</h2>
+        <p><strong>SDL-MCP (Symbol Delta Ledger)</strong> is a high-performance
+          Model Context Protocol server designed to give coding agents a <strong>structured,
+            token-efficient view</strong> of your repository. Instead of dumping
+          thousands of lines of raw text, SDL-MCP creates a dependency-aware
+          Symbol Graph, delivering lightweight "Symbol Cards" first.</p>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <h3>78%</h3>
+            <p>Token Reduction</p>
+          </div>
+          <div class="stat-card">
+            <h3>4.7x</h3>
+            <p>Compression Ratio</p>
+          </div>
+          <div class="stat-card">
+            <h3>12+</h3>
+            <p>Languages Supported</p>
+          </div>
+        </div>
+      </section>
+      <section class="diagram-section">
+        <h2>High-Level Architecture</h2>
+        <p>Agents interact with the server to pull compact context
+          (Cards/Slices) before requesting raw code.</p>
+        <div class="image-container"> <img src="SDL-MCP_Architecture.jpg" alt="SDL-MCP Architecture Diagram">
+        </div>
+      </section>
+      <section class="features">
+        <h2>Features &amp; Benefits</h2>
+        <div class="feature-block">
+          <h3>1. The Context Ladder </h3>
+          <p>Agents climb this ladder to get only the data they need, preventing
+            context pollution.</p>
+          <ul>
+            <li><strong>Rung 1: Symbol Cards</strong> - Compact JSON metadata.</li>
+            <li><strong>Rung 2: Skeletons</strong>&nbsp; - Deterministic outline
+              of code structure.</li>
+            <li><strong>Rung 3: Hot-Path Excerpts</strong>&nbsp; - Specific
+              lines matching identifiers.</li>
+            <li><strong>Rung 4: Raw Code Window</strong> - Gated access via
+              Proof-of-Need.</li>
+          </ul>
+        </div>
+        <div class="feature-block">
+          <h3>2. Performance Comparison</h3>
+          <p>See how SDL-MCP compares to traditional full-file context
+            retrieval.</p>
+          <div class="image-container"> <img src="SDL-MCP_Comparison.jpg" alt="Token Usage Comparison Chart">
+          </div>
+        </div>
+        <div class="feature-block">
+          <h3>3. True Polyglot Support </h3>
+          <p>Seamlessly index mixed-language repositories.</p>
+          <div style="text-align: left;" class="image-container">
+            <table style="width: 100%;" border="0" cellpadding="0" cellspacing="0">
+              <tbody>
+                <tr>
+                  <td style="text-align: left; vertical-align: top; width: 50%;"><img
+                      style="width: 367px; height: 367px;" src="file:///F:/Claude/projects/sdl-mcp/Docs/SDL-MCP_Polyglot.jpg"
+                      alt="Polyglot Language Graph"></td>
+                  <td style="text-align: left; vertical-align: middle;"><b>Languages
+                      Supported</b><br>
+                    <ul>
+                      <li><b>TS/JS</b></li>
+                      <b> </b>
+                      <li><b>C#</b></li>
+                      <b> </b>
+                      <li><b>Python</b></li>
+                      <b> </b>
+                      <li><b>Rust</b></li>
+                      <b> </b>
+                      <li><b>Go</b></li>
+                      <b> </b>
+                      <li><b>Java</b></li>
+                      <b> </b>
+                      <li><b>PHP</b></li>
+                    </ul>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+      <section class="install">
+        <h2>Install &amp; Setup</h2>
+        <h3>Prerequisites</h3>
+        <p>Node.js ≥ 18.0.0</p>
+        <h3>Quick Start</h3>
+        <pre><code class="language-bash"># 1. Install Global Tool
+npm install -g sdl-mcp
+
+# 2. Initialize Config (in your repo root)
+sdl-mcp init --client claude-code
+
+# 3. Validate Environment
+sdl-mcp doctor
+
+# 4. Index Your Codebase
+sdl-mcp index
+
+# 5. Start the Server
+sdl-mcp serve --stdio</code></pre>
+      </section>
+      <section class="tools">
+        <h2>MCP Tools Overview</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Tool Name</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>sdl.repo.register</code></td>
+              <td>Registers a repository for indexing.</td>
+            </tr>
+            <tr>
+              <td><code>sdl.repo.status</code></td>
+              <td>Returns indexing status (file count, symbol count).</td>
+            </tr>
+            <tr>
+              <td><code>sdl.symbol.search</code></td>
+              <td>Finds symbols by name or fuzzy pattern. (Step 1)</td>
+            </tr>
+            <tr>
+              <td><code>sdl.symbol.getCard</code></td>
+              <td>Retrieves the compact Symbol Card (Step 2).</td>
+            </tr>
+            <tr>
+              <td><code>sdl.slice.build</code></td>
+              <td>Creates a "Graph Slice" of related symbols.</td>
+            </tr>
+            <tr>
+              <td><code>sdl.code.getSkeleton</code></td>
+              <td>Generates the structural skeleton (Step 3).</td>
+            </tr>
+            <tr>
+              <td><code>sdl.code.needWindow</code></td>
+              <td>Requests raw code. Requires justification (Step 4).</td>
+            </tr>
+            <tr>
+              <td><code>sdl.delta.get</code></td>
+              <td>Returns what changed between versions.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section class="cli">
+        <h2>CLI Commands</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Usage</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>init</code></td>
+              <td><code>sdl-mcp init</code></td>
+              <td>Scaffolds config and database.</td>
+            </tr>
+            <tr>
+              <td><code>doctor</code></td>
+              <td><code>sdl-mcp doctor</code></td>
+              <td>Checks Node version and dependencies.</td>
+            </tr>
+            <tr>
+              <td><code>index</code></td>
+              <td><code>sdl-mcp index</code></td>
+              <td>Scans repo and builds the graph.</td>
+            </tr>
+            <tr>
+              <td><code>serve</code></td>
+              <td><code>sdl-mcp serve</code></td>
+              <td>Starts the server.</td>
+            </tr>
+            <tr>
+              <td><code>version</code></td>
+              <td><code>sdl-mcp version</code></td>
+              <td>Displays current version.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section class="benchmark">
+        <h2>Benchmark &amp; Performance</h2>
+        <p>Run the built-in benchmark to measure efficiency:</p>
+        <pre><code class="language-bash">npm run benchmark:real</code></pre>
+        <p><strong>Example Output:</strong></p>
+        <blockquote> <strong>OVERALL WINNER: SDL-MCP</strong><br>
+          Token Reduction: 78.6%<br>
+          Compression Ratio: 4.7x </blockquote>
+      </section>
+      <section class="troubleshooting">
+        <h2>Troubleshooting</h2>
+        <ul>
+          <li><strong>"Config file not found"</strong>: Run <code>sdl-mcp init</code>.</li>
+          <li><strong>"SQLITE_BUSY"</strong>: Ensure no other process is holding
+            the DB file.</li>
+          <li><strong>Indexing is slow</strong>: Reduce <code>indexing.concurrency</code>
+            in config.</li>
+        </ul>
+        <p><br>
+        </p>
+        <div style="text-align: center;"><img alt="SDL-MCP" src="SDL-MCP_Server.jpg"></div>
+        <ul>
+        </ul>
+      </section>
+    </main>
+    <footer>
+      <p>Generated by SDL-MCP Documentation Generator</p>
+    </footer>
+  </body>
+</html>

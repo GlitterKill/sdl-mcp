@@ -1,0 +1,54 @@
+{
+  "_comment": "Claude Code MCP Configuration Template for SDL-MCP",
+  "_documentation": {
+    "purpose": "Configure SDL-MCP as an MCP server for Claude Code",
+    "placement": "Copy to ~/.claude/claude_desktop_config.json or add to existing mcpServers",
+    "windowsNotes": {
+      "paths": "Use forward slashes (/) or escaped backslashes (\\\\)",
+      "npx": "npx works cross-platform. For global install, use 'node' with full path",
+      "environment": "SDL_CONFIG_PATH or SDL_CONFIG must be set to point to your sdlmcp.config.json"
+    },
+    "quoting": {
+      "powerShell": "Single quotes work for paths, double quotes for variable expansion",
+      "cmd": "Use double quotes for all paths with spaces"
+    },
+    "workspaceFolder": {
+      "description": "Replaced by Claude Code with the current workspace root",
+      "windows": "Resolves to forward-slash path on all platforms"
+    }
+  },
+  "mcpServers": {
+    "sdl-mcp": {
+      "command": "npx",
+      "args": ["sdl-mcp"],
+      "env": {
+        "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json",
+        "_comment_env": "Alternative: Set SDL_CONFIG_PATH if you prefer environment variable name"
+      }
+    }
+  },
+  "_alternative_global_install": {
+    "description": "If you installed SDL-MCP globally with 'npm install -g sdl-mcp':",
+    "mcpServers": {
+      "sdl-mcp": {
+        "command": "sdl-mcp",
+        "args": [],
+        "env": {
+          "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
+        }
+      }
+    }
+  },
+  "_alternative_windows_direct_node": {
+    "description": "Windows alternative using direct Node invocation (if npx is unavailable):",
+    "mcpServers": {
+      "sdl-mcp": {
+        "command": "node",
+        "args": ["F:/path/to/sdl-mcp/dist/main.js"],
+        "env": {
+          "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
+        }
+      }
+    }
+  }
+}

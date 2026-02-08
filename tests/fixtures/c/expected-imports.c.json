@@ -1,0 +1,74 @@
+[
+  {
+    "specifier": "stdio.h",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "stdio.h"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "stdlib.h",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "stdlib.h"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "string.h",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "string.h"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "local_header.h",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "local_header.h"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "../parent/relative.h",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "../parent/relative.h"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "utils/helper.h",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "utils/helper.h"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "sys/types.h",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "sys/types.h"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "unistd.h",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "unistd.h"
+    ],
+    "isReExport": false
+  }
+]

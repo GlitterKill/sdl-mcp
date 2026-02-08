@@ -1,0 +1,206 @@
+[
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:simple_function:0",
+    "kind": "function",
+    "name": "simple_function",
+    "exported": true,
+    "range": {
+      "startLine": 7,
+      "startCol": 0,
+      "endLine": 9,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [],
+      "returns": "void"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:add_numbers:1",
+    "kind": "function",
+    "name": "add_numbers",
+    "exported": true,
+    "range": {
+      "startLine": 11,
+      "startCol": 0,
+      "endLine": 13,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "a",
+          "type": "int"
+        },
+        {
+          "name": "b",
+          "type": "int"
+        }
+      ],
+      "returns": "int"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:allocate_memory:2",
+    "kind": "function",
+    "name": "allocate_memory",
+    "exported": true,
+    "range": {
+      "startLine": 15,
+      "startCol": 0,
+      "endLine": 17,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [],
+      "returns": "void"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:process_data:3",
+    "kind": "function",
+    "name": "process_data",
+    "exported": true,
+    "range": {
+      "startLine": 19,
+      "startCol": 0,
+      "endLine": 24,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "data",
+          "type": "const"
+        },
+        {
+          "name": "length",
+          "type": "int"
+        }
+      ],
+      "returns": "void"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:compute_sum:4",
+    "kind": "function",
+    "name": "compute_sum",
+    "exported": true,
+    "range": {
+      "startLine": 26,
+      "startCol": 0,
+      "endLine": 32,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "array",
+          "type": "int"
+        },
+        {
+          "name": "count",
+          "type": "int"
+        }
+      ],
+      "returns": "int"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:print_point:5",
+    "kind": "function",
+    "name": "print_point",
+    "exported": true,
+    "range": {
+      "startLine": 34,
+      "startCol": 0,
+      "endLine": 36,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "p",
+          "type": "Point"
+        }
+      ],
+      "returns": "void"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:create_point:6",
+    "kind": "function",
+    "name": "create_point",
+    "exported": true,
+    "range": {
+      "startLine": 38,
+      "startCol": 0,
+      "endLine": 43,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "x",
+          "type": "int"
+        },
+        {
+          "name": "y",
+          "type": "int"
+        }
+      ],
+      "returns": "Point"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:get_color:7",
+    "kind": "function",
+    "name": "get_color",
+    "exported": true,
+    "range": {
+      "startLine": 45,
+      "startCol": 0,
+      "endLine": 53,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "status",
+          "type": "Status"
+        }
+      ],
+      "returns": "Color"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:print_status:8",
+    "kind": "function",
+    "name": "print_status",
+    "exported": true,
+    "range": {
+      "startLine": 55,
+      "startCol": 0,
+      "endLine": 67,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "status",
+          "type": "Status"
+        }
+      ],
+      "returns": "void"
+    },
+    "visibility": "public"
+  }
+]

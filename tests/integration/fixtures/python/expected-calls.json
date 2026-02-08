@@ -1,0 +1,530 @@
+[
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:0",
+    "calleeIdentifier": "calculate_sum",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 4,
+      "startCol": 9,
+      "endLine": 4,
+      "endCol": 28
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:message:1",
+    "calleeIdentifier": "greet",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 5,
+      "startCol": 10,
+      "endLine": 5,
+      "endCol": 24
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:obj:2",
+    "calleeIdentifier": "MyClass",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 8,
+      "startCol": 6,
+      "endLine": 8,
+      "endCol": 15
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "obj.method",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 9,
+      "startCol": 0,
+      "endLine": 9,
+      "endCol": 12
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "another_obj.process",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 10,
+      "startCol": 0,
+      "endLine": 10,
+      "endCol": 29
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:3",
+    "calleeIdentifier": "obj.method1",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 13,
+      "startCol": 9,
+      "endLine": 13,
+      "endCol": 22
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:3",
+    "calleeIdentifier": "obj.method1().method2",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 13,
+      "startCol": 9,
+      "endLine": 13,
+      "endCol": 32
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:3",
+    "calleeIdentifier": "obj.method1().method2().method3",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 13,
+      "startCol": 9,
+      "endLine": 13,
+      "endCol": 42
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:4",
+    "calleeIdentifier": "data.strip",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 14,
+      "startCol": 7,
+      "endLine": 14,
+      "endCol": 19
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:4",
+    "calleeIdentifier": "data.strip().lower",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 14,
+      "startCol": 7,
+      "endLine": 14,
+      "endCol": 27
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:4",
+    "calleeIdentifier": "data.strip().lower().replace",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 14,
+      "startCol": 7,
+      "endLine": 14,
+      "endCol": 45
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:instance:5",
+    "calleeIdentifier": "MyClass",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 17,
+      "startCol": 11,
+      "endLine": 17,
+      "endCol": 20
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:person:6",
+    "calleeIdentifier": "Person",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 18,
+      "startCol": 9,
+      "endLine": 18,
+      "endCol": 35
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "process_data",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 21,
+      "startCol": 0,
+      "endLine": 21,
+      "endCol": 39
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "calculate_sum",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 22,
+      "startCol": 0,
+      "endLine": 22,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:7",
+    "calleeIdentifier": "calculate_sum",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 25,
+      "startCol": 9,
+      "endLine": 25,
+      "endCol": 64
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:7",
+    "calleeIdentifier": "calculate_sum",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 25,
+      "startCol": 23,
+      "endLine": 25,
+      "endCol": 42
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:7",
+    "calleeIdentifier": "calculate_sum",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 25,
+      "startCol": 44,
+      "endLine": 25,
+      "endCol": 63
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:8",
+    "calleeIdentifier": "process",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 26,
+      "startCol": 7,
+      "endLine": 26,
+      "endCol": 42
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:8",
+    "calleeIdentifier": "calculate",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 26,
+      "startCol": 15,
+      "endLine": 26,
+      "endCol": 27
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:8",
+    "calleeIdentifier": "calculate",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 26,
+      "startCol": 29,
+      "endLine": 26,
+      "endCol": 41
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:data:9",
+    "calleeIdentifier": "fetch_data",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 29,
+      "startCol": 13,
+      "endLine": 29,
+      "endCol": 25
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:processed:10",
+    "calleeIdentifier": "process_data",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 30,
+      "startCol": 18,
+      "endLine": 30,
+      "endCol": 40
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "calculate_sum",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 34,
+      "startCol": 0,
+      "endLine": 34,
+      "endCol": 22
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "calculate_sum",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 36,
+      "startCol": 0,
+      "endLine": 36,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:results:13",
+    "calleeIdentifier": "calculate_sum",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 39,
+      "startCol": 11,
+      "endLine": 39,
+      "endCol": 30
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:processor:14",
+    "calleeIdentifier": "process",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 42,
+      "startCol": 22,
+      "endLine": 42,
+      "endCol": 32
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:adder:15",
+    "calleeIdentifier": "calculate_sum",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 43,
+      "startCol": 21,
+      "endLine": 43,
+      "endCol": 40
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "process",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 46,
+      "startCol": 0,
+      "endLine": 46,
+      "endCol": 30
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "processor",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 46,
+      "startCol": 8,
+      "endLine": 46,
+      "endCol": 29
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "calculate_sum",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 47,
+      "startCol": 0,
+      "endLine": 47,
+      "endCol": 37
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "process",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 47,
+      "startCol": 14,
+      "endLine": 47,
+      "endCol": 24
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "process",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 47,
+      "startCol": 26,
+      "endLine": 47,
+      "endCol": 36
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "len",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 50,
+      "startCol": 0,
+      "endLine": 50,
+      "endCol": 9
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "str",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 51,
+      "startCol": 0,
+      "endLine": 51,
+      "endCol": 8
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "list",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 52,
+      "startCol": 0,
+      "endLine": 52,
+      "endCol": 15
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "range",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 52,
+      "startCol": 5,
+      "endLine": 52,
+      "endCol": 14
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "MyClass.static_method",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 55,
+      "startCol": 0,
+      "endLine": 55,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "UtilityClass.helper_function",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 56,
+      "startCol": 0,
+      "endLine": 56,
+      "endCol": 30
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "\"hello\".upper",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 59,
+      "startCol": 0,
+      "endLine": 59,
+      "endCol": 15
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "\"test\".strip",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 60,
+      "startCol": 0,
+      "endLine": 60,
+      "endCol": 14
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "[1, 2, 3].append",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 63,
+      "startCol": 0,
+      "endLine": 63,
+      "endCol": 19
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "{\"a\": 1, \"b\": 2}.keys",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 64,
+      "startCol": 0,
+      "endLine": 64,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "decorator",
+    "calleeIdentifier": "decorator",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 73,
+      "startCol": 1,
+      "endLine": 73,
+      "endCol": 25
+    }
+  }
+]

@@ -1,0 +1,90 @@
+{
+  "_comment": "Opencode CLI MCP Configuration Template for SDL-MCP",
+  "_documentation": {
+    "purpose": "Configure SDL-MCP as an MCP server for Opencode CLI",
+    "placement": "Add to Opencode MCP servers configuration",
+    "windowsNotes": {
+      "paths": "Opencode normalizes to forward slashes automatically",
+      "npx": "npx works cross-platform. Use 'sdl-mcp' for global install",
+      "environment": "SDL_CONFIG_PATH or SDL_CONFIG must point to sdlmcp.config.json"
+    },
+    "quoting": {
+      "cmd": "Double quotes only for all paths",
+      "powershell": "Single or double quotes both work",
+      "opencode_handling": "Opencode CLI handles quoting automatically when using ${workspaceFolder}"
+    },
+    "workspaceFolder": {
+      "description": "Opencode replaces ${workspaceFolder} with detected workspace root",
+      "detection": "Auto-detects from .git directory, package.json, or current directory",
+      "windows": "Normalizes Windows paths to forward slashes"
+    }
+  },
+  "mcpServers": {
+    "sdl-mcp": {
+      "command": "npx",
+      "args": ["sdl-mcp"],
+      "env": {
+        "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
+      }
+    }
+  },
+  "_alternative_global_install": {
+    "description": "After global install (npm install -g sdl-mcp):",
+    "mcpServers": {
+      "sdl-mcp": {
+        "command": "sdl-mcp",
+        "args": [],
+        "env": {
+          "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
+        }
+      }
+    }
+  },
+  "_workspace_detection": {
+    "description": "How Opencode detects workspaceFolder",
+    "methods": [
+      "Git repository root (.git directory)",
+      "Node.js project root (package.json)",
+      "Current working directory",
+      "Manually specified via --workspace flag"
+    ]
+  },
+  "_windows_path_handling": {
+    "description": "Opencode CLI specific Windows path handling",
+    "normalization": "All paths normalized to forward slashes internally",
+    "examples": {
+      "input": "C:\\Users\\name\\project",
+      "normalized": "C:/Users/name/project",
+      "config_file": "${workspaceFolder}/sdlmcp.config.json resolves to C:/Users/name/project/sdlmcp.config.json"
+    }
+  },
+  "_slash_normalization": {
+    "description": "SDL-MCP path normalization (server-side)",
+    "behavior": "Server normalizes all paths using path utilities",
+    "storage": "Paths stored with forward slashes in database",
+    "resolution": "Resolved to OS-specific paths on read"
+  },
+  "_troubleshooting": {
+    "workspace_not_found": "Run from within a valid workspace or specify --workspace",
+    "config_missing": "Ensure sdlmcp.config.json exists at SDL_CONFIG path",
+    "path_case": "Windows paths are case-insensitive, but forward slashes required in env vars",
+    "npx_timeout": "If npx times out, try global install or use node with full path"
+  },
+  "_complete_windows_example": {
+    "description": "Full example for Windows with explicit paths",
+    "setup": {
+      "1": "npm install -g sdl-mcp",
+      "2": "Create sdlmcp.config.json in your project root",
+      "3": "Run opencode from project directory"
+    },
+    "mcpServers": {
+      "sdl-mcp": {
+        "command": "sdl-mcp",
+        "args": [],
+        "env": {
+          "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
+        }
+      }
+    }
+  }
+}

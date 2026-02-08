@@ -1,0 +1,27 @@
+{
+  "name": "Build Graph Slice",
+  "description": "Build a context slice for a task using symbols",
+  "tool": "sdl.slice.build",
+  "request": {
+    "repoId": "test-repo-001",
+    "taskText": "Fix the authentication bug in login function",
+    "budget": {
+      "maxCards": 10,
+      "maxEstimatedTokens": 2000
+    }
+  },
+  "expectedResponse": {
+    "slice": {
+      "repoId": "test-repo-001",
+      "versionId": "string",
+      "budget": {
+        "maxCards": 10,
+        "maxEstimatedTokens": 2000
+      },
+      "startSymbols": ["string"],
+      "cards": ["array"],
+      "edges": ["array"],
+      "frontier": ["array"]
+    }
+  }
+}

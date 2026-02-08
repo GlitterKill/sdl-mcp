@@ -1,0 +1,136 @@
+[
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:add:method",
+    "calleeIdentifier": "data_.push_back",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 27,
+      "startCol": 8,
+      "endLine": 27,
+      "endCol": 29
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:main:function",
+    "calleeIdentifier": "calc.add",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 49,
+      "startCol": 14,
+      "endLine": 49,
+      "endCol": 25
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:main:function",
+    "calleeIdentifier": "calc.multiply",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 50,
+      "startCol": 18,
+      "endLine": 50,
+      "endCol": 34
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:main:function",
+    "calleeIdentifier": "printMessage",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:printMessage:function",
+    "range": {
+      "startLine": 52,
+      "startCol": 4,
+      "endLine": 52,
+      "endCol": 51
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:main:function",
+    "calleeIdentifier": "createGreeting",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:createGreeting:function",
+    "range": {
+      "startLine": 54,
+      "startCol": 27,
+      "endLine": 54,
+      "endCol": 50
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:main:function",
+    "calleeIdentifier": "container.add",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 58,
+      "startCol": 4,
+      "endLine": 58,
+      "endCol": 21
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:main:function",
+    "calleeIdentifier": "container.add",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 59,
+      "startCol": 4,
+      "endLine": 59,
+      "endCol": 22
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:main:function",
+    "calleeIdentifier": "container.get",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 61,
+      "startCol": 15,
+      "endLine": 61,
+      "endCol": 31
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:main:function",
+    "calleeIdentifier": "stringContainer.add",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 64,
+      "startCol": 4,
+      "endLine": 64,
+      "endCol": 32
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:main:function",
+    "calleeIdentifier": "stringContainer.add",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 65,
+      "startCol": 4,
+      "endLine": 65,
+      "endCol": 33
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\calls.cpp:main:function",
+    "calleeIdentifier": "stringContainer.get",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 67,
+      "startCol": 26,
+      "endLine": 67,
+      "endCol": 48
+    }
+  }
+]

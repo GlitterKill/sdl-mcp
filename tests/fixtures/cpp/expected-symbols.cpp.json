@@ -1,0 +1,425 @@
+[
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace:namespace",
+    "kind": "module",
+    "name": "MyNamespace",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 5,
+      "startCol": 0,
+      "endLine": 70,
+      "endCol": 1
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace:namespace",
+    "kind": "module",
+    "name": "MyNamespace::InnerNamespace",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 7,
+      "startCol": 4,
+      "endLine": 41,
+      "endCol": 5
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::BaseClass::BaseClass:function",
+    "kind": "function",
+    "name": "MyNamespace::InnerNamespace::BaseClass::BaseClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 9,
+      "startCol": 8,
+      "endLine": 11,
+      "endCol": 9
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::BaseClass::BaseClass:function",
+    "kind": "function",
+    "name": "MyNamespace::InnerNamespace::BaseClass::BaseClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 13,
+      "startCol": 8,
+      "endLine": 14,
+      "endCol": 9
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::BaseClass::~BaseClass:function",
+    "kind": "function",
+    "name": "MyNamespace::InnerNamespace::BaseClass::~BaseClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 16,
+      "startCol": 8,
+      "endLine": 18,
+      "endCol": 9
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::BaseClass::publicMethod:function",
+    "kind": "function",
+    "name": "MyNamespace::InnerNamespace::BaseClass::publicMethod",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 20,
+      "startCol": 8,
+      "endLine": 21,
+      "endCol": 9
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::BaseClass::virtualMethod:function",
+    "kind": "function",
+    "name": "MyNamespace::InnerNamespace::BaseClass::virtualMethod",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 23,
+      "startCol": 8,
+      "endLine": 24,
+      "endCol": 9
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::DerivedClass:function",
+    "kind": "function",
+    "name": "MyNamespace::InnerNamespace::DerivedClass::DerivedClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 26,
+      "startCol": 8,
+      "endLine": 27,
+      "endCol": 9
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::DerivedClass:function",
+    "kind": "function",
+    "name": "MyNamespace::InnerNamespace::DerivedClass::DerivedClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 29,
+      "startCol": 8,
+      "endLine": 30,
+      "endCol": 9
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::~DerivedClass:function",
+    "kind": "function",
+    "name": "MyNamespace::InnerNamespace::DerivedClass::~DerivedClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 32,
+      "startCol": 8,
+      "endLine": 33,
+      "endCol": 9
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::overrideMethod:function",
+    "kind": "function",
+    "name": "MyNamespace::InnerNamespace::DerivedClass::overrideMethod",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 35,
+      "startCol": 8,
+      "endLine": 36,
+      "endCol": 9
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::protectedMethod:function",
+    "kind": "function",
+    "name": "MyNamespace::InnerNamespace::DerivedClass::protectedMethod",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 38,
+      "startCol": 8,
+      "endLine": 39,
+      "endCol": 9
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::TemplateClass<T>::TemplateClass:function",
+    "kind": "function",
+    "name": "MyNamespace::TemplateClass<T>::TemplateClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 44,
+      "startCol": 4,
+      "endLine": 45,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::TemplateClass<T>::~TemplateClass:function",
+    "kind": "function",
+    "name": "MyNamespace::TemplateClass<T>::~TemplateClass",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 48,
+      "startCol": 4,
+      "endLine": 49,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::TemplateClass<T>::setItem:function",
+    "kind": "function",
+    "name": "MyNamespace::TemplateClass<T>::setItem",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 52,
+      "startCol": 4,
+      "endLine": 54,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::TemplateClass<T>::getItem:function",
+    "kind": "function",
+    "name": "MyNamespace::TemplateClass<T>::getItem",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 57,
+      "startCol": 4,
+      "endLine": 59,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::Map<Key, Value>::insert:function",
+    "kind": "function",
+    "name": "MyNamespace::Map<Key, Value>::insert",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 62,
+      "startCol": 4,
+      "endLine": 63,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::Map<Key, Value>::get:function",
+    "kind": "function",
+    "name": "MyNamespace::Map<Key, Value>::get",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 66,
+      "startCol": 4,
+      "endLine": 68,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:Point::Point:function",
+    "kind": "function",
+    "name": "Point::Point",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 72,
+      "startCol": 0,
+      "endLine": 73,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:Point::Point:function",
+    "kind": "function",
+    "name": "Point::Point",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 75,
+      "startCol": 0,
+      "endLine": 76,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:UtilityClass::staticMethod:function",
+    "kind": "function",
+    "name": "UtilityClass::staticMethod",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 78,
+      "startCol": 0,
+      "endLine": 80,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:AnonymousNamespaceClass::method:function",
+    "kind": "function",
+    "name": "AnonymousNamespaceClass::method",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 84,
+      "startCol": 4,
+      "endLine": 85,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:InlineNamespace:namespace",
+    "kind": "module",
+    "name": "InlineNamespace",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 89,
+      "startCol": 0,
+      "endLine": 94,
+      "endCol": 1
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:InlineNamespace::InlineClass::inlineMethod:function",
+    "kind": "function",
+    "name": "InlineNamespace::InlineClass::inlineMethod",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 91,
+      "startCol": 4,
+      "endLine": 92,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:freeFunction:function",
+    "kind": "function",
+    "name": "freeFunction",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 96,
+      "startCol": 0,
+      "endLine": 97,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:templateFunction:function",
+    "kind": "function",
+    "name": "templateFunction",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 100,
+      "startCol": 0,
+      "endLine": 102,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:main:function",
+    "kind": "function",
+    "name": "main",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 104,
+      "startCol": 0,
+      "endLine": 119,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    }
+  }
+]

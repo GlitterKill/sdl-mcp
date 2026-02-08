@@ -1,0 +1,55 @@
+{
+  "_comment": "Codex CLI MCP Configuration Template for SDL-MCP",
+  "_documentation": {
+    "purpose": "Configure SDL-MCP as an MCP server for Codex CLI",
+    "placement": "Add to Codex MCP servers configuration",
+    "windowsNotes": {
+      "paths": "Use forward slashes (/) or escaped backslashes (\\\\)",
+      "npx": "npx works cross-platform. For global install, use 'sdl-mcp' directly",
+      "environment": "SDL_CONFIG_PATH or SDL_CONFIG must point to sdlmcp.config.json"
+    },
+    "quoting": {
+      "cmd": "Use double quotes for paths with spaces, no single quotes",
+      "powershell": "Single quotes work, but cmd is more portable for cross-platform configs"
+    },
+    "workspaceFolder": {
+      "description": "Codex expands ${workspaceFolder} to current directory",
+      "windows": "Resolves correctly on Windows with forward slashes"
+    }
+  },
+  "mcpServers": {
+    "sdl-mcp": {
+      "command": "npx",
+      "args": ["-y", "sdl-mcp"],
+      "env": {
+        "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
+      }
+    }
+  },
+  "_alternative_global_install": {
+    "description": "If globally installed with 'npm install -g sdl-mcp':",
+    "mcpServers": {
+      "sdl-mcp": {
+        "command": "sdl-mcp",
+        "args": [],
+        "env": {
+          "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
+        }
+      }
+    }
+  },
+  "_windows_specific": {
+    "description": "Windows-specific notes for cmd.exe",
+    "notes": [
+      "Ensure Node.js is in PATH",
+      "If using custom paths, use double backslashes: C:\\\\Users\\\\name\\\\.nvm\\\\versions\\\\node\\\\node.exe",
+      "SDL_CONFIG path uses forward slashes for cross-platform compatibility",
+      "If workspaceFolder has spaces, Codex CLI handles quoting automatically"
+    ]
+  },
+  "_troubleshooting": {
+    "npx_fails": "If npx fails, try 'npm config set script-shell pwsh' (PowerShell) or use global install",
+    "path_not_found": "Verify SDL_CONFIG path exists and is accessible",
+    "permissions": "Ensure Node.js has read access to config file and database path"
+  }
+}

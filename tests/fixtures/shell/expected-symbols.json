@@ -1,0 +1,354 @@
+[
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:GLOBAL_VAR",
+    "kind": "variable",
+    "name": "GLOBAL_VAR",
+    "exported": false,
+    "range": {
+      "startLine": 4,
+      "startCol": 0,
+      "endLine": 4,
+      "endCol": 18
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:EXPORTED_VAR",
+    "kind": "variable",
+    "name": "EXPORTED_VAR",
+    "exported": true,
+    "range": {
+      "startLine": 5,
+      "startCol": 7,
+      "endLine": 5,
+      "endCol": 30
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:READONLY_VAR",
+    "kind": "variable",
+    "name": "READONLY_VAR",
+    "exported": false,
+    "range": {
+      "startLine": 6,
+      "startCol": 9,
+      "endLine": 6,
+      "endCol": 32
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:ARRAY_VAR",
+    "kind": "variable",
+    "name": "ARRAY_VAR",
+    "exported": false,
+    "range": {
+      "startLine": 7,
+      "startCol": 0,
+      "endLine": 7,
+      "endCol": 25
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:ASSOC_VAR",
+    "kind": "variable",
+    "name": "ASSOC_VAR",
+    "exported": false,
+    "range": {
+      "startLine": 8,
+      "startCol": 0,
+      "endLine": 8,
+      "endCol": 39
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:ll:alias",
+    "kind": "variable",
+    "name": "ll",
+    "exported": true,
+    "range": {
+      "startLine": 11,
+      "startCol": 0,
+      "endLine": 11,
+      "endCol": 17
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:grep:alias",
+    "kind": "variable",
+    "name": "grep",
+    "exported": true,
+    "range": {
+      "startLine": 12,
+      "startCol": 0,
+      "endLine": 12,
+      "endCol": 30
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:gitlog:alias",
+    "kind": "variable",
+    "name": "gitlog",
+    "exported": true,
+    "range": {
+      "startLine": 13,
+      "startCol": 0,
+      "endLine": 13,
+      "endCol": 32
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:hello_world",
+    "kind": "function",
+    "name": "hello_world",
+    "exported": true,
+    "range": {
+      "startLine": 16,
+      "startCol": 0,
+      "endLine": 18,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:greet",
+    "kind": "function",
+    "name": "greet",
+    "exported": true,
+    "range": {
+      "startLine": 21,
+      "startCol": 0,
+      "endLine": 23,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:greet_user",
+    "kind": "function",
+    "name": "greet_user",
+    "exported": true,
+    "range": {
+      "startLine": 26,
+      "startCol": 0,
+      "endLine": 30,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:name",
+    "kind": "variable",
+    "name": "name",
+    "exported": false,
+    "range": {
+      "startLine": 27,
+      "startCol": 10,
+      "endLine": 27,
+      "endCol": 19
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:greeting",
+    "kind": "variable",
+    "name": "greeting",
+    "exported": false,
+    "range": {
+      "startLine": 28,
+      "startCol": 10,
+      "endLine": 28,
+      "endCol": 23
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:process_data",
+    "kind": "function",
+    "name": "process_data",
+    "exported": true,
+    "range": {
+      "startLine": 33,
+      "startCol": 0,
+      "endLine": 42,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:local_var",
+    "kind": "variable",
+    "name": "local_var",
+    "exported": false,
+    "range": {
+      "startLine": 34,
+      "startCol": 10,
+      "endLine": 34,
+      "endCol": 27
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:count",
+    "kind": "variable",
+    "name": "count",
+    "exported": false,
+    "range": {
+      "startLine": 35,
+      "startCol": 10,
+      "endLine": 35,
+      "endCol": 17
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:count",
+    "kind": "variable",
+    "name": "count",
+    "exported": false,
+    "range": {
+      "startLine": 38,
+      "startCol": 8,
+      "endLine": 38,
+      "endCol": 28
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:use_globals",
+    "kind": "function",
+    "name": "use_globals",
+    "exported": true,
+    "range": {
+      "startLine": 45,
+      "startCol": 0,
+      "endLine": 48,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:define_inner",
+    "kind": "function",
+    "name": "define_inner",
+    "exported": true,
+    "range": {
+      "startLine": 51,
+      "startCol": 0,
+      "endLine": 55,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:process_array",
+    "kind": "function",
+    "name": "process_array",
+    "exported": true,
+    "range": {
+      "startLine": 58,
+      "startCol": 0,
+      "endLine": 61,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:arr",
+    "kind": "variable",
+    "name": "arr",
+    "exported": false,
+    "range": {
+      "startLine": 59,
+      "startCol": 10,
+      "endLine": 59,
+      "endCol": 20
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:calculate",
+    "kind": "function",
+    "name": "calculate",
+    "exported": true,
+    "range": {
+      "startLine": 64,
+      "startCol": 0,
+      "endLine": 67,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:result",
+    "kind": "variable",
+    "name": "result",
+    "exported": false,
+    "range": {
+      "startLine": 65,
+      "startCol": 10,
+      "endLine": 65,
+      "endCol": 29
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:orchestrate",
+    "kind": "function",
+    "name": "orchestrate",
+    "exported": true,
+    "range": {
+      "startLine": 70,
+      "startCol": 0,
+      "endLine": 76,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:sum",
+    "kind": "variable",
+    "name": "sum",
+    "exported": false,
+    "range": {
+      "startLine": 74,
+      "startCol": 10,
+      "endLine": 74,
+      "endCol": 30
+    },
+    "visibility": "public"
+  }
+]

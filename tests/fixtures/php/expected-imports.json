@@ -1,0 +1,215 @@
+[
+  {
+    "specifier": "Illuminate\\Http\\Request",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "Request"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "Illuminate\\Support\\Facades\\Auth",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "Auth"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "App\\Models\\User",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "User"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "App\\Services\\EmailService",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "EmailService"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "App\\Repositories\\UserRepository",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "UserRepo"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "\\DateTime",
+    "isRelative": true,
+    "isExternal": true,
+    "imports": [
+      "DateTime"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "\\Exception",
+    "isRelative": true,
+    "isExternal": true,
+    "imports": [
+      "Exception"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "vendor/autoload.php",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "./config/app.php",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "../helpers/functions.php",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "/path/to/file.php",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "templates/header.php",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "./partials/nav.php",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "../config/database.php",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "/shared/constants.php",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "Monolog\\Logger",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "Logger"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "Monolog\\Handler\\StreamHandler",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "StreamHandler"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "config/services.php",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "App\\Traits\\Loggable",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "Loggable"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "App\\Utils\\StringHelper",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "Str"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "App\\Validators\\RequestValidator",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "Validator"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "C:/xampp/htdocs/vendor/autoload.php",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "D:/projects/shared/functions.php",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "./bootstrap/app.php",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "./routes/web.php",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "../config/database.php",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "../helpers/array.php",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  }
+]

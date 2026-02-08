@@ -1,0 +1,65 @@
+[
+  {
+    "specifier": "System",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "System.Collections.Generic",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "System.Linq",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "System.Console",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "Models",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "System.Text",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "System.IO.File",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "Math",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "Net.Http",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [],
+    "isReExport": false
+  }
+]

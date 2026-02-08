@@ -1,0 +1,16 @@
+{
+  "name": "Index Repository (Full)",
+  "description": "Trigger a full index refresh for the registered repository",
+  "tool": "sdl.index.refresh",
+  "request": {
+    "repoId": "test-repo-001",
+    "mode": "full",
+    "reason": "Initial indexing for test harness"
+  },
+  "expectedResponse": {
+    "ok": true,
+    "repoId": "test-repo-001",
+    "versionId": "string",
+    "changedFiles": "number"
+  }
+}

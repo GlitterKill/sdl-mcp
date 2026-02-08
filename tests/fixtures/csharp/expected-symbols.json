@@ -1,0 +1,328 @@
+[
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:MyApp.Controllers:0",
+    "kind": "module",
+    "name": "MyApp.Controllers",
+    "exported": true,
+    "range": {
+      "startLine": 5,
+      "startCol": 0,
+      "endLine": 38,
+      "endCol": 1
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:UsersController:2154539292208",
+    "kind": "class",
+    "name": "UsersController",
+    "exported": false,
+    "range": {
+      "startLine": 7,
+      "startCol": 4,
+      "endLine": 30,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:UsersController:2154541110928",
+    "kind": "constructor",
+    "name": "constructor",
+    "exported": false,
+    "range": {
+      "startLine": 11,
+      "startCol": 8,
+      "endLine": 14,
+      "endCol": 9
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "ILogger"
+        }
+      ]
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:GetUser:2154539289520",
+    "kind": "method",
+    "name": "GetUser",
+    "exported": false,
+    "range": {
+      "startLine": 16,
+      "startCol": 8,
+      "endLine": 20,
+      "endCol": 9
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "id"
+        }
+      ],
+      "returns": "void"
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:LogInfo:2154539288368",
+    "kind": "method",
+    "name": "LogInfo",
+    "exported": false,
+    "range": {
+      "startLine": 22,
+      "startCol": 8,
+      "endLine": 25,
+      "endCol": 9
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "message"
+        }
+      ],
+      "returns": "void"
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:Name:2154539292880",
+    "kind": "variable",
+    "name": "Name",
+    "exported": false,
+    "range": {
+      "startLine": 27,
+      "startCol": 8,
+      "endLine": 27,
+      "endCol": 40
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:InternalService:2154539294128",
+    "kind": "class",
+    "name": "InternalService",
+    "exported": false,
+    "range": {
+      "startLine": 32,
+      "startCol": 4,
+      "endLine": 37,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:Process:2154539292592",
+    "kind": "method",
+    "name": "Process",
+    "exported": false,
+    "range": {
+      "startLine": 34,
+      "startCol": 8,
+      "endLine": 36,
+      "endCol": 9
+    },
+    "signature": {
+      "params": [],
+      "returns": "void"
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:MyApp.Services:0",
+    "kind": "module",
+    "name": "MyApp.Services",
+    "exported": true,
+    "range": {
+      "startLine": 40,
+      "startCol": 0,
+      "endLine": 77,
+      "endCol": 1
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:IUserService:2154539281648",
+    "kind": "interface",
+    "name": "IUserService",
+    "exported": false,
+    "range": {
+      "startLine": 42,
+      "startCol": 4,
+      "endLine": 45,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:GetUserByIdAsync:2154539284720",
+    "kind": "method",
+    "name": "GetUserByIdAsync",
+    "exported": false,
+    "range": {
+      "startLine": 44,
+      "startCol": 8,
+      "endLine": 44,
+      "endCol": 44
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "id"
+        }
+      ],
+      "returns": "void"
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:Point:2154541116496",
+    "kind": "class",
+    "name": "Point",
+    "exported": false,
+    "range": {
+      "startLine": 47,
+      "startCol": 4,
+      "endLine": 57,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:X:2154539280976",
+    "kind": "variable",
+    "name": "X",
+    "exported": false,
+    "range": {
+      "startLine": 49,
+      "startCol": 8,
+      "endLine": 49,
+      "endCol": 29
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:Y:2154539279344",
+    "kind": "variable",
+    "name": "Y",
+    "exported": false,
+    "range": {
+      "startLine": 50,
+      "startCol": 8,
+      "endLine": 50,
+      "endCol": 29
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:Point:2154539285008",
+    "kind": "constructor",
+    "name": "constructor",
+    "exported": false,
+    "range": {
+      "startLine": 52,
+      "startCol": 8,
+      "endLine": 56,
+      "endCol": 9
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "x"
+        },
+        {
+          "name": "y"
+        }
+      ]
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:Status:2154538920496",
+    "kind": "type",
+    "name": "Status",
+    "exported": false,
+    "range": {
+      "startLine": 59,
+      "startCol": 4,
+      "endLine": 64,
+      "endCol": 5
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:User:2154538923280",
+    "kind": "class",
+    "name": "User",
+    "exported": false,
+    "range": {
+      "startLine": 66,
+      "startCol": 4,
+      "endLine": 66,
+      "endCol": 44
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:PartialClass:2154538920784",
+    "kind": "class",
+    "name": "PartialClass",
+    "exported": false,
+    "range": {
+      "startLine": 68,
+      "startCol": 4,
+      "endLine": 71,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:Method1:2154538922704",
+    "kind": "method",
+    "name": "Method1",
+    "exported": false,
+    "range": {
+      "startLine": 70,
+      "startCol": 8,
+      "endLine": 70,
+      "endCol": 33
+    },
+    "signature": {
+      "params": [],
+      "returns": "void"
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:PartialClass:2154538923856",
+    "kind": "class",
+    "name": "PartialClass",
+    "exported": false,
+    "range": {
+      "startLine": 73,
+      "startCol": 4,
+      "endLine": 76,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "tests/fixtures/csharp/symbols.cs:Method2:2154538921552",
+    "kind": "method",
+    "name": "Method2",
+    "exported": false,
+    "range": {
+      "startLine": 75,
+      "startCol": 8,
+      "endLine": 75,
+      "endCol": 33
+    },
+    "signature": {
+      "params": [],
+      "returns": "void"
+    }
+  }
+]

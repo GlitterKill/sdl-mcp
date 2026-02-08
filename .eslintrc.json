@@ -1,0 +1,37 @@
+{
+  "env": {
+    "es2022": true,
+    "node": true
+  },
+  "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "module",
+    "project": "./tsconfig.json"
+  },
+  "plugins": ["@typescript-eslint"],
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "off",
+    "@typescript-eslint/explicit-function-return-type": "off",
+    "@typescript-eslint/explicit-module-boundary-types": "off",
+    "@typescript-eslint/no-non-null-assertion": "off",
+    "@typescript-eslint/no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "@typescript-eslint/no-floating-promises": "warn",
+    "@typescript-eslint/no-misused-promises": "warn",
+    "@typescript-eslint/require-await": "warn",
+    "@typescript-eslint/no-unnecessary-type-assertion": "warn",
+    "no-console": "off",
+    "prefer-const": "warn",
+    "no-empty": "warn",
+    "no-case-declarations": "off",
+    "no-useless-escape": "off"
+  },
+  "ignorePatterns": ["dist/", "node_modules/", "scripts/*.js"]
+}

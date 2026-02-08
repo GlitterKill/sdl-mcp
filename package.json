@@ -1,0 +1,91 @@
+{
+  "name": "sdl-mcp",
+  "version": "0.5.1",
+  "description": "Symbol Delta Ledger MCP Server - Cards-first code context for TypeScript/JavaScript repositories",
+  "type": "module",
+  "main": "dist/main.js",
+  "bin": {
+    "sdl-mcp": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "config",
+    "migrations",
+    "templates",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:scripts": "tsc -p tsconfig.scripts.json && tsx scripts/fix-imports.ts",
+    "build:all": "npm run build && npm run build:scripts",
+    "watch": "tsc -p tsconfig.build.json --watch",
+    "dev": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "test": "node --import tsx --test \"tests/**/*.test.ts\"",
+    "test:harness": "npm run build:scripts && node dist/tests/harness/runner.js",
+    "test:adapters": "npm run build && npx tsc --rootDir tests/harness --outDir dist/tests/harness --module nodenext tests/harness/adapter-runner.ts && node dist/tests/harness/adapter-runner.js",
+    "test:golden": "npm run build && tsx scripts/golden/update-goldens.ts validate",
+    "golden:update": "npm run build && tsx scripts/golden/update-goldens.ts generate",
+    "migrate": "npm run build:scripts && node dist/scripts/migrate.js",
+    "index": "npm run build:scripts && node dist/scripts/index-repo.js",
+    "index-repo": "npm run build:scripts && node dist/scripts/index-repo.js",
+    "dump-symbol": "npm run build:scripts && node dist/scripts/dump-symbol.js",
+    "benchmark": "tsx scripts/benchmark.ts",
+    "benchmark:real": "tsx scripts/real-world-benchmark.ts",
+    "package:exe": "node scripts/build-exe.js",
+    "prepack": "npm run build:all",
+    "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "code-indexing",
+    "symbol-ledger",
+    "typescript",
+    "javascript",
+    "code-context",
+    "ast",
+    "code-analysis",
+    "developer-tools"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.4.0",
+    "better-sqlite3": "^11.0.0",
+    "fast-glob": "^3.3.3",
+    "tree-sitter": "^0.21.1",
+    "tree-sitter-bash": "^0.21.0",
+    "tree-sitter-c": "^0.21.0",
+    "tree-sitter-c-sharp": "0.23.1",
+    "tree-sitter-cpp": "^0.21.0",
+    "tree-sitter-go": "0.23.4",
+    "tree-sitter-java": "0.23.5",
+    "tree-sitter-kotlin": "0.3.8",
+    "tree-sitter-php": "0.22.8",
+    "tree-sitter-python": "0.23.3",
+    "tree-sitter-rust": "0.21.0",
+    "tree-sitter-typescript": "0.23.2",
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.25.1"
+  },
+  "optionalDependencies": {
+    "chokidar": "^3.5.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "name": "Get Symbol Card",
+  "description": "Retrieve a detailed symbol card by ID",
+  "tool": "sdl.symbol.getCard",
+  "request": {
+    "repoId": "test-repo-001",
+    "symbolId": "test-symbol-001"
+  },
+  "expectedResponse": {
+    "card": {
+      "symbolId": "test-symbol-001",
+      "repoId": "test-repo-001",
+      "file": "string",
+      "range": {
+        "startLine": "number",
+        "startCol": "number",
+        "endLine": "number",
+        "endCol": "number"
+      },
+      "kind": "function",
+      "name": "string",
+      "exported": true,
+      "signature": {
+        "name": "string",
+        "params": ["array"],
+        "returns": "string"
+      },
+      "summary": "string",
+      "deps": {
+        "imports": ["array"],
+        "calls": ["array"]
+      },
+      "version": {
+        "ledgerVersion": "string",
+        "astFingerprint": "string"
+      }
+    }
+  }
+}

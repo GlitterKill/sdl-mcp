@@ -1,0 +1,65 @@
+{
+  "repos": [
+    {
+      "repoId": "my-repo",
+      "rootPath": ".",
+      "ignore": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/.next/**",
+        "**/build/**",
+        "**/.git/**",
+        "**/coverage/**"
+      ],
+      "languages": [
+        "ts",
+        "tsx",
+        "js",
+        "jsx",
+        "py",
+        "go",
+        "java",
+        "cs",
+        "c",
+        "cpp",
+        "php",
+        "rs",
+        "kt",
+        "sh"
+      ],
+      "maxFileBytes": 2000000
+    }
+  ],
+  "dbPath": "./data/sdlmcp.sqlite",
+  "policy": {
+    "maxWindowLines": 180,
+    "maxWindowTokens": 1400,
+    "requireIdentifiers": true,
+    "allowBreakGlass": true
+  },
+  "redaction": {
+    "enabled": true,
+    "includeDefaults": true,
+    "patterns": []
+  },
+  "indexing": {
+    "concurrency": 4,
+    "enableFileWatching": false
+  },
+  "slice": {
+    "defaultMaxCards": 300,
+    "defaultMaxTokens": 12000,
+    "edgeWeights": {
+      "call": 1.0,
+      "import": 0.6,
+      "config": 0.8
+    }
+  },
+  "cache": {
+    "enabled": true,
+    "symbolCardMaxEntries": 2000,
+    "symbolCardMaxSizeBytes": 104857600,
+    "graphSliceMaxEntries": 1000,
+    "graphSliceMaxSizeBytes": 52428800
+  }
+}

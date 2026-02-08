@@ -1,0 +1,868 @@
+[
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:my_module:0",
+    "kind": "module",
+    "name": "my_module",
+    "exported": true,
+    "range": {
+      "startLine": 2,
+      "startCol": 0,
+      "endLine": 2,
+      "endCol": 18
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:internal:1",
+    "kind": "module",
+    "name": "internal",
+    "exported": false,
+    "range": {
+      "startLine": 5,
+      "startCol": 0,
+      "endLine": 5,
+      "endCol": 13
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:inline_mod:2",
+    "kind": "module",
+    "name": "inline_mod",
+    "exported": false,
+    "range": {
+      "startLine": 8,
+      "startCol": 0,
+      "endLine": 16,
+      "endCol": 1
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:inline_function:3",
+    "kind": "function",
+    "name": "inline_function",
+    "exported": true,
+    "range": {
+      "startLine": 9,
+      "startCol": 4,
+      "endLine": 11,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "i32"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:InlineStruct:4",
+    "kind": "class",
+    "name": "InlineStruct",
+    "exported": true,
+    "range": {
+      "startLine": 13,
+      "startCol": 4,
+      "endLine": 15,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "field",
+          "type": "i32"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:UserId:5",
+    "kind": "type",
+    "name": "UserId",
+    "exported": true,
+    "range": {
+      "startLine": 19,
+      "startCol": 0,
+      "endLine": 19,
+      "endCol": 22
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:InternalId:6",
+    "kind": "type",
+    "name": "InternalId",
+    "exported": false,
+    "range": {
+      "startLine": 22,
+      "startCol": 0,
+      "endLine": 22,
+      "endCol": 22
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Result:7",
+    "kind": "type",
+    "name": "Result",
+    "exported": true,
+    "range": {
+      "startLine": 25,
+      "startCol": 0,
+      "endLine": 25,
+      "endCol": 51
+    },
+    "signature": {
+      "params": [],
+      "generics": [
+        "T"
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Drawable:8",
+    "kind": "interface",
+    "name": "Drawable",
+    "exported": true,
+    "range": {
+      "startLine": 28,
+      "startCol": 0,
+      "endLine": 31,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:InternalTrait:9",
+    "kind": "interface",
+    "name": "InternalTrait",
+    "exported": false,
+    "range": {
+      "startLine": 34,
+      "startCol": 0,
+      "endLine": 36,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Container:10",
+    "kind": "interface",
+    "name": "Container",
+    "exported": true,
+    "range": {
+      "startLine": 39,
+      "startCol": 0,
+      "endLine": 42,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [],
+      "generics": [
+        "T"
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Point:11",
+    "kind": "class",
+    "name": "Point",
+    "exported": true,
+    "range": {
+      "startLine": 45,
+      "startCol": 0,
+      "endLine": 48,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "x",
+          "type": "f64"
+        },
+        {
+          "name": "y",
+          "type": "f64"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:InternalPoint:12",
+    "kind": "class",
+    "name": "InternalPoint",
+    "exported": false,
+    "range": {
+      "startLine": 51,
+      "startCol": 0,
+      "endLine": 54,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "x",
+          "type": "i32"
+        },
+        {
+          "name": "y",
+          "type": "i32"
+        }
+      ]
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Color:13",
+    "kind": "class",
+    "name": "Color",
+    "exported": true,
+    "range": {
+      "startLine": 57,
+      "startCol": 0,
+      "endLine": 57,
+      "endCol": 41
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Box:14",
+    "kind": "class",
+    "name": "Box",
+    "exported": true,
+    "range": {
+      "startLine": 60,
+      "startCol": 0,
+      "endLine": 62,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "contents",
+          "type": "T"
+        }
+      ],
+      "generics": [
+        "T"
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Ref:15",
+    "kind": "class",
+    "name": "Ref",
+    "exported": true,
+    "range": {
+      "startLine": 65,
+      "startCol": 0,
+      "endLine": 67,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "reference",
+          "type": "&'a T"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:VisibilityExample:16",
+    "kind": "class",
+    "name": "VisibilityExample",
+    "exported": true,
+    "range": {
+      "startLine": 70,
+      "startCol": 0,
+      "endLine": 74,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "public_field",
+          "type": "i32"
+        },
+        {
+          "name": "private_field",
+          "type": "i32"
+        },
+        {
+          "name": "crate_field",
+          "type": "i32"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Direction:17",
+    "kind": "type",
+    "name": "Direction",
+    "exported": true,
+    "range": {
+      "startLine": 77,
+      "startCol": 0,
+      "endLine": 82,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "North"
+        },
+        {
+          "name": "South"
+        },
+        {
+          "name": "East"
+        },
+        {
+          "name": "West"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Option:18",
+    "kind": "type",
+    "name": "Option",
+    "exported": true,
+    "range": {
+      "startLine": 85,
+      "startCol": 0,
+      "endLine": 88,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "Some"
+        },
+        {
+          "name": "None"
+        }
+      ],
+      "generics": [
+        "T"
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Message:19",
+    "kind": "type",
+    "name": "Message",
+    "exported": true,
+    "range": {
+      "startLine": 91,
+      "startCol": 0,
+      "endLine": 96,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "Quit"
+        },
+        {
+          "name": "Move"
+        },
+        {
+          "name": "Write"
+        },
+        {
+          "name": "ChangeColor"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:InternalEnum:20",
+    "kind": "type",
+    "name": "InternalEnum",
+    "exported": false,
+    "range": {
+      "startLine": 99,
+      "startCol": 0,
+      "endLine": 102,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "A"
+        },
+        {
+          "name": "B"
+        }
+      ]
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:ResultType:21",
+    "kind": "type",
+    "name": "ResultType",
+    "exported": true,
+    "range": {
+      "startLine": 105,
+      "startCol": 0,
+      "endLine": 108,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "Ok"
+        },
+        {
+          "name": "Err"
+        }
+      ],
+      "generics": [
+        "T",
+        "E"
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:add:22",
+    "kind": "function",
+    "name": "add",
+    "exported": true,
+    "range": {
+      "startLine": 111,
+      "startCol": 0,
+      "endLine": 113,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "a",
+          "type": "i32"
+        },
+        {
+          "name": "b",
+          "type": "i32"
+        }
+      ],
+      "returns": "i32"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:multiply:23",
+    "kind": "function",
+    "name": "multiply",
+    "exported": false,
+    "range": {
+      "startLine": 116,
+      "startCol": 0,
+      "endLine": 118,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "x",
+          "type": "i32"
+        },
+        {
+          "name": "y",
+          "type": "i32"
+        }
+      ],
+      "returns": "i32"
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:divide:24",
+    "kind": "function",
+    "name": "divide",
+    "exported": true,
+    "range": {
+      "startLine": 121,
+      "startCol": 0,
+      "endLine": 126,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "a",
+          "type": "f64"
+        },
+        {
+          "name": "b",
+          "type": "f64"
+        }
+      ],
+      "returns": "Result<f64>"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:identity:25",
+    "kind": "function",
+    "name": "identity",
+    "exported": true,
+    "range": {
+      "startLine": 129,
+      "startCol": 0,
+      "endLine": 131,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "value",
+          "type": "T"
+        }
+      ],
+      "returns": "T",
+      "generics": [
+        "T"
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:longest:26",
+    "kind": "function",
+    "name": "longest",
+    "exported": true,
+    "range": {
+      "startLine": 134,
+      "startCol": 0,
+      "endLine": 140,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "x",
+          "type": "&'a str"
+        },
+        {
+          "name": "y",
+          "type": "&'a str"
+        }
+      ],
+      "returns": "&'a str"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:process_data:27",
+    "kind": "function",
+    "name": "process_data",
+    "exported": true,
+    "range": {
+      "startLine": 143,
+      "startCol": 0,
+      "endLine": 148,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "items",
+          "type": "Vec<T>"
+        },
+        {
+          "name": "callback",
+          "type": "impl Fn(&T) -> bool"
+        }
+      ],
+      "returns": "Vec<T>"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:new:28",
+    "kind": "method",
+    "name": "new",
+    "exported": true,
+    "range": {
+      "startLine": 152,
+      "startCol": 4,
+      "endLine": 154,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "x",
+          "type": "f64"
+        },
+        {
+          "name": "y",
+          "type": "f64"
+        }
+      ],
+      "returns": "Self"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:distance_from_origin:29",
+    "kind": "method",
+    "name": "distance_from_origin",
+    "exported": true,
+    "range": {
+      "startLine": 156,
+      "startCol": 4,
+      "endLine": 158,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "f64"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:translate:30",
+    "kind": "method",
+    "name": "translate",
+    "exported": true,
+    "range": {
+      "startLine": 163,
+      "startCol": 4,
+      "endLine": 166,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "dx",
+          "type": "f64"
+        },
+        {
+          "name": "dy",
+          "type": "f64"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:draw:31",
+    "kind": "method",
+    "name": "draw",
+    "exported": false,
+    "range": {
+      "startLine": 171,
+      "startCol": 4,
+      "endLine": 173,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:area:32",
+    "kind": "method",
+    "name": "area",
+    "exported": false,
+    "range": {
+      "startLine": 175,
+      "startCol": 4,
+      "endLine": 177,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "f64"
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:get:33",
+    "kind": "method",
+    "name": "get",
+    "exported": false,
+    "range": {
+      "startLine": 182,
+      "startCol": 4,
+      "endLine": 184,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "index",
+          "type": "usize"
+        }
+      ],
+      "returns": "Option<&T>"
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:set:34",
+    "kind": "method",
+    "name": "set",
+    "exported": false,
+    "range": {
+      "startLine": 186,
+      "startCol": 4,
+      "endLine": 190,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "index",
+          "type": "usize"
+        },
+        {
+          "name": "value",
+          "type": "T"
+        }
+      ]
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:opposite:35",
+    "kind": "method",
+    "name": "opposite",
+    "exported": true,
+    "range": {
+      "startLine": 195,
+      "startCol": 4,
+      "endLine": 202,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "Direction"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:from_polar:36",
+    "kind": "method",
+    "name": "from_polar",
+    "exported": true,
+    "range": {
+      "startLine": 209,
+      "startCol": 4,
+      "endLine": 214,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "radius",
+          "type": "f64"
+        },
+        {
+          "name": "angle",
+          "type": "f64"
+        }
+      ],
+      "returns": "Self"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:DefaultStruct:37",
+    "kind": "class",
+    "name": "DefaultStruct",
+    "exported": false,
+    "range": {
+      "startLine": 218,
+      "startCol": 0,
+      "endLine": 220,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "field",
+          "type": "i32"
+        }
+      ]
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:crate_internal:38",
+    "kind": "function",
+    "name": "crate_internal",
+    "exported": false,
+    "range": {
+      "startLine": 223,
+      "startCol": 0,
+      "endLine": 225,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [],
+      "returns": "i32"
+    },
+    "visibility": "internal"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:CrateVisibility:39",
+    "kind": "class",
+    "name": "CrateVisibility",
+    "exported": true,
+    "range": {
+      "startLine": 228,
+      "startCol": 0,
+      "endLine": 232,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "public",
+          "type": "i32"
+        },
+        {
+          "name": "crate_visible",
+          "type": "i32"
+        },
+        {
+          "name": "private",
+          "type": "i32"
+        }
+      ]
+    },
+    "visibility": "public"
+  }
+]

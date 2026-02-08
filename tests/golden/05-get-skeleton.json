@@ -1,0 +1,24 @@
+{
+  "name": "Get Code Skeleton",
+  "description": "Get skeleton view of code with signatures and control flow",
+  "tool": "sdl.code.getSkeleton",
+  "request": {
+    "repoId": "test-repo-001",
+    "symbolId": "test-symbol-001",
+    "maxLines": 20,
+    "maxTokens": 500
+  },
+  "expectedResponse": {
+    "skeleton": "string",
+    "file": "string",
+    "range": {
+      "startLine": "number",
+      "startCol": "number",
+      "endLine": "number",
+      "endCol": "number"
+    },
+    "estimatedTokens": "number",
+    "originalLines": "number",
+    "truncated": "boolean"
+  }
+}

@@ -1,0 +1,51 @@
+[
+  {
+    "specifier": "java.util.List",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": ["List"],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.util.ArrayList",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": ["ArrayList"],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.util",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": ["util"],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.util.Collections.EMPTY_LIST",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": ["EMPTY_LIST"],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.util.Arrays",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": ["Arrays"],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.lang.Math.PI",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": ["PI"],
+    "isReExport": false
+  },
+  {
+    "specifier": "java.lang.System.out",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": ["out"],
+    "isReExport": false
+  }
+]

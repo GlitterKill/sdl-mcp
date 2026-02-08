@@ -1,0 +1,919 @@
+[
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_simple_calls:1",
+    "calleeIdentifier": "simple_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "range": {
+      "startLine": 8,
+      "startCol": 4,
+      "endLine": 8,
+      "endCol": 22
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_simple_calls:1",
+    "calleeIdentifier": "simple_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "range": {
+      "startLine": 9,
+      "startCol": 4,
+      "endLine": 9,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:distance:4",
+    "calleeIdentifier": "(self.x * self.x + self.y * self.y).abs",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 24,
+      "startCol": 8,
+      "endLine": 24,
+      "endCol": 49
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_method_calls:6",
+    "calleeIdentifier": "Point::new",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 34,
+      "startCol": 16,
+      "endLine": 34,
+      "endCol": 32
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_method_calls:6",
+    "calleeIdentifier": "p.distance",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 35,
+      "startCol": 4,
+      "endLine": 35,
+      "endCol": 16
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_method_calls:6",
+    "calleeIdentifier": "p.translate",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 36,
+      "startCol": 4,
+      "endLine": 36,
+      "endCol": 22
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:new:8",
+    "calleeIdentifier": "Vec::new",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 46,
+      "startCol": 27,
+      "endLine": 46,
+      "endCol": 37
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:push:9",
+    "calleeIdentifier": "self.data.push",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 50,
+      "startCol": 8,
+      "endLine": 50,
+      "endCol": 29
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:len:10",
+    "calleeIdentifier": "self.data.len",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 55,
+      "startCol": 8,
+      "endLine": 55,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_chained_calls:11",
+    "calleeIdentifier": "VecWrapper::new",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 60,
+      "startCol": 18,
+      "endLine": 60,
+      "endCol": 35
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_chained_calls:11",
+    "calleeIdentifier": "VecWrapper::new().push",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 60,
+      "startCol": 18,
+      "endLine": 60,
+      "endCol": 43
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_chained_calls:11",
+    "calleeIdentifier": "VecWrapper::new().push(1).push",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 60,
+      "startCol": 18,
+      "endLine": 60,
+      "endCol": 51
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_chained_calls:11",
+    "calleeIdentifier": "VecWrapper::new().push(1).push(2).push",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 60,
+      "startCol": 18,
+      "endLine": 60,
+      "endCol": 59
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_chained_calls:11",
+    "calleeIdentifier": "wrapper.len",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 61,
+      "startCol": 4,
+      "endLine": 61,
+      "endCol": 17
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "calleeIdentifier": "println!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 66,
+      "startCol": 4,
+      "endLine": 66,
+      "endCol": 29
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "calleeIdentifier": "println!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 67,
+      "startCol": 4,
+      "endLine": 67,
+      "endCol": 30
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "calleeIdentifier": "vec!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 68,
+      "startCol": 4,
+      "endLine": 68,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "calleeIdentifier": "vec!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 69,
+      "startCol": 4,
+      "endLine": 69,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "calleeIdentifier": "assert!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 70,
+      "startCol": 4,
+      "endLine": 70,
+      "endCol": 17
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "calleeIdentifier": "assert_eq!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 71,
+      "startCol": 4,
+      "endLine": 71,
+      "endCol": 20
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "calleeIdentifier": "format!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 72,
+      "startCol": 4,
+      "endLine": 72,
+      "endCol": 32
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "calleeIdentifier": "debug!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 73,
+      "startCol": 4,
+      "endLine": 73,
+      "endCol": 27
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_associated_functions:19",
+    "calleeIdentifier": "Circle::from_radius",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 107,
+      "startCol": 17,
+      "endLine": 107,
+      "endCol": 41
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_associated_functions:19",
+    "calleeIdentifier": "Rectangle::new",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 108,
+      "startCol": 15,
+      "endLine": 108,
+      "endCol": 41
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_associated_functions:19",
+    "calleeIdentifier": "circle.area",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 109,
+      "startCol": 4,
+      "endLine": 109,
+      "endCol": 17
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_associated_functions:19",
+    "calleeIdentifier": "rect.area",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 110,
+      "startCol": 4,
+      "endLine": 110,
+      "endCol": 15
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:outer_function:21",
+    "calleeIdentifier": "helper_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
+    "range": {
+      "startLine": 119,
+      "startCol": 20,
+      "endLine": 119,
+      "endCol": 38
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:outer_function:21",
+    "calleeIdentifier": "helper_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
+    "range": {
+      "startLine": 120,
+      "startCol": 20,
+      "endLine": 120,
+      "endCol": 38
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_nested_calls:22",
+    "calleeIdentifier": "simple_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "range": {
+      "startLine": 126,
+      "startCol": 4,
+      "endLine": 126,
+      "endCol": 39
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_nested_calls:22",
+    "calleeIdentifier": "helper_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
+    "range": {
+      "startLine": 126,
+      "startCol": 20,
+      "endLine": 126,
+      "endCol": 38
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_nested_calls:22",
+    "calleeIdentifier": "simple_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "range": {
+      "startLine": 127,
+      "startCol": 17,
+      "endLine": 127,
+      "endCol": 53
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_nested_calls:22",
+    "calleeIdentifier": "simple_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "range": {
+      "startLine": 127,
+      "startCol": 33,
+      "endLine": 127,
+      "endCol": 52
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:draw:25",
+    "calleeIdentifier": "println!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 142,
+      "startCol": 8,
+      "endLine": 142,
+      "endCol": 58
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_trait_methods:27",
+    "calleeIdentifier": "square.draw",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 152,
+      "startCol": 4,
+      "endLine": 152,
+      "endCol": 17
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_trait_methods:27",
+    "calleeIdentifier": "square.area",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 153,
+      "startCol": 4,
+      "endLine": 153,
+      "endCol": 17
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
+    "calleeIdentifier": "Box::new",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 172,
+      "startCol": 20,
+      "endLine": 172,
+      "endCol": 32
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
+    "calleeIdentifier": "Box::new",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 173,
+      "startCol": 20,
+      "endLine": 173,
+      "endCol": 37
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
+    "calleeIdentifier": "boxed_int.get",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 174,
+      "startCol": 4,
+      "endLine": 174,
+      "endCol": 19
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
+    "calleeIdentifier": "boxed_str.get",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 175,
+      "startCol": 4,
+      "endLine": 175,
+      "endCol": 19
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:calculate_distance:33",
+    "calleeIdentifier": "(x2 - x1).powi",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 181,
+      "startCol": 9,
+      "endLine": 181,
+      "endCol": 26
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:calculate_distance:33",
+    "calleeIdentifier": "(y2 - y1).powi",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 181,
+      "startCol": 29,
+      "endLine": 181,
+      "endCol": 46
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:calculate_distance:33",
+    "calleeIdentifier": "((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 181,
+      "startCol": 8,
+      "endLine": 181,
+      "endCol": 54
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_module_calls:34",
+    "calleeIdentifier": "geometry::calculate_distance",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 186,
+      "startCol": 4,
+      "endLine": 186,
+      "endCol": 52
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_closures:35",
+    "calleeIdentifier": "add",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:add:37",
+    "range": {
+      "startLine": 192,
+      "startCol": 4,
+      "endLine": 192,
+      "endCol": 13
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_closures:35",
+    "calleeIdentifier": "multiply",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 194,
+      "startCol": 4,
+      "endLine": 194,
+      "endCol": 18
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:apply_operation:39",
+    "calleeIdentifier": "op",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 209,
+      "startCol": 4,
+      "endLine": 209,
+      "endCol": 12
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_function_pointers:40",
+    "calleeIdentifier": "apply_operation",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:apply_operation:39",
+    "range": {
+      "startLine": 213,
+      "startCol": 4,
+      "endLine": 213,
+      "endCol": 30
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_function_pointers:40",
+    "calleeIdentifier": "apply_operation",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:apply_operation:39",
+    "range": {
+      "startLine": 214,
+      "startCol": 4,
+      "endLine": 214,
+      "endCol": 36
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_async_like_calls:42",
+    "calleeIdentifier": "async_helper",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:async_helper:41",
+    "range": {
+      "startLine": 223,
+      "startCol": 4,
+      "endLine": 223,
+      "endCol": 18
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_builder_pattern:47",
+    "calleeIdentifier": "Builder::new",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 247,
+      "startCol": 4,
+      "endLine": 247,
+      "endCol": 18
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_builder_pattern:47",
+    "calleeIdentifier": "Builder::new().with_value",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 247,
+      "startCol": 4,
+      "endLine": 247,
+      "endCol": 33
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_builder_pattern:47",
+    "calleeIdentifier": "Builder::new().with_value(10).build",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 247,
+      "startCol": 4,
+      "endLine": 247,
+      "endCol": 41
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:process:52",
+    "calleeIdentifier": "self.increment",
+    "isResolved": true,
+    "callType": "method",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:increment:50",
+    "range": {
+      "startLine": 269,
+      "startCol": 8,
+      "endLine": 269,
+      "endCol": 24
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:process:52",
+    "calleeIdentifier": "self.double",
+    "isResolved": true,
+    "callType": "method",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:double:51",
+    "range": {
+      "startLine": 270,
+      "startCol": 8,
+      "endLine": 270,
+      "endCol": 21
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_self_calls:53",
+    "calleeIdentifier": "Counter::new",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 275,
+      "startCol": 22,
+      "endLine": 275,
+      "endCol": 36
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_self_calls:53",
+    "calleeIdentifier": "counter.process",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 276,
+      "startCol": 4,
+      "endLine": 276,
+      "endCol": 21
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_complex_expressions:54",
+    "calleeIdentifier": "simple_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "range": {
+      "startLine": 281,
+      "startCol": 17,
+      "endLine": 281,
+      "endCol": 52
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_complex_expressions:54",
+    "calleeIdentifier": "helper_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
+    "range": {
+      "startLine": 281,
+      "startCol": 33,
+      "endLine": 281,
+      "endCol": 51
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_complex_expressions:54",
+    "calleeIdentifier": "helper_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
+    "range": {
+      "startLine": 281,
+      "startCol": 55,
+      "endLine": 281,
+      "endCol": 74
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_complex_expressions:54",
+    "calleeIdentifier": "println!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 282,
+      "startCol": 4,
+      "endLine": 282,
+      "endCol": 34
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_option_result:55",
+    "calleeIdentifier": "Some",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 287,
+      "startCol": 27,
+      "endLine": 287,
+      "endCol": 34
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_option_result:55",
+    "calleeIdentifier": "opt.unwrap",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 288,
+      "startCol": 4,
+      "endLine": 288,
+      "endCol": 16
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_option_result:55",
+    "calleeIdentifier": "opt.unwrap_or",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 289,
+      "startCol": 4,
+      "endLine": 289,
+      "endCol": 20
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_option_result:55",
+    "calleeIdentifier": "Ok",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 291,
+      "startCol": 33,
+      "endLine": 291,
+      "endCol": 39
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_option_result:55",
+    "calleeIdentifier": "res.unwrap",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 292,
+      "startCol": 4,
+      "endLine": 292,
+      "endCol": 16
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_option_result:55",
+    "calleeIdentifier": "res.unwrap_or",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 293,
+      "startCol": 4,
+      "endLine": 293,
+      "endCol": 20
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_iterators:56",
+    "calleeIdentifier": "vec!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 298,
+      "startCol": 18,
+      "endLine": 298,
+      "endCol": 37
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_iterators:56",
+    "calleeIdentifier": "numbers.iter",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 299,
+      "startCol": 19,
+      "endLine": 299,
+      "endCol": 33
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_iterators:56",
+    "calleeIdentifier": "numbers.iter().map",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 299,
+      "startCol": 19,
+      "endLine": 299,
+      "endCol": 48
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_iterators:56",
+    "calleeIdentifier": "numbers.iter().map(|x| x * 2).sum",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 299,
+      "startCol": 19,
+      "endLine": 299,
+      "endCol": 54
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_iterators:56",
+    "calleeIdentifier": "println!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 300,
+      "startCol": 4,
+      "endLine": 300,
+      "endCol": 28
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_string_methods:57",
+    "calleeIdentifier": "String::from",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 305,
+      "startCol": 12,
+      "endLine": 305,
+      "endCol": 33
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_string_methods:57",
+    "calleeIdentifier": "s.len",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 306,
+      "startCol": 4,
+      "endLine": 306,
+      "endCol": 11
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_string_methods:57",
+    "calleeIdentifier": "s.to_uppercase",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 307,
+      "startCol": 4,
+      "endLine": 307,
+      "endCol": 20
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_string_methods:57",
+    "calleeIdentifier": "s.contains",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 308,
+      "startCol": 4,
+      "endLine": 308,
+      "endCol": 21
+    }
+  }
+]

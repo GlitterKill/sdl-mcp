@@ -1,0 +1,673 @@
+[
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 5,
+      "startCol": 4,
+      "endLine": 5,
+      "endCol": 24
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 10,
+      "startCol": 4,
+      "endLine": 10,
+      "endCol": 28
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 14,
+      "startCol": 4,
+      "endLine": 14,
+      "endCol": 21
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:process_data",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 18,
+      "startCol": 4,
+      "endLine": 18,
+      "endCol": 26
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:orchestrate",
+    "calleeIdentifier": "hello_world",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "range": {
+      "startLine": 23,
+      "startCol": 4,
+      "endLine": 23,
+      "endCol": 15
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:orchestrate",
+    "calleeIdentifier": "greet_user",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
+    "range": {
+      "startLine": 24,
+      "startCol": 4,
+      "endLine": 24,
+      "endCol": 21
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:orchestrate",
+    "calleeIdentifier": "calculate",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "range": {
+      "startLine": 25,
+      "startCol": 4,
+      "endLine": 25,
+      "endCol": 17
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "hello_world",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "range": {
+      "startLine": 36,
+      "startCol": 0,
+      "endLine": 36,
+      "endCol": 11
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "greet_user",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
+    "range": {
+      "startLine": 39,
+      "startCol": 0,
+      "endLine": 39,
+      "endCol": 18
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "greet_user",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
+    "range": {
+      "startLine": 40,
+      "startCol": 0,
+      "endLine": 40,
+      "endCol": 26
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "calculate",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "range": {
+      "startLine": 43,
+      "startCol": 0,
+      "endLine": 43,
+      "endCol": 13
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:sum",
+    "calleeIdentifier": "calculate",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "range": {
+      "startLine": 46,
+      "startCol": 12,
+      "endLine": 46,
+      "endCol": 27
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "calculate",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "range": {
+      "startLine": 49,
+      "startCol": 0,
+      "endLine": 49,
+      "endCol": 13
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "cat",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 49,
+      "startCol": 16,
+      "endLine": 49,
+      "endCol": 19
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "calculate",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "range": {
+      "startLine": 52,
+      "startCol": 1,
+      "endLine": 52,
+      "endCol": 14
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "ls",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 57,
+      "startCol": 0,
+      "endLine": 57,
+      "endCol": 2
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "ls",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 60,
+      "startCol": 0,
+      "endLine": 60,
+      "endCol": 6
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "grep",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 63,
+      "startCol": 0,
+      "endLine": 63,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "cat",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 66,
+      "startCol": 0,
+      "endLine": 66,
+      "endCol": 12
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "grep",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 66,
+      "startCol": 15,
+      "endLine": 66,
+      "endCol": 29
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "wc",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 66,
+      "startCol": 32,
+      "endLine": 66,
+      "endCol": 37
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 69,
+      "startCol": 0,
+      "endLine": 69,
+      "endCol": 11
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 72,
+      "startCol": 0,
+      "endLine": 72,
+      "endCol": 20
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "git",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 75,
+      "startCol": 0,
+      "endLine": 75,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "ll",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 80,
+      "startCol": 0,
+      "endLine": 80,
+      "endCol": 2
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "ll",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 83,
+      "startCol": 0,
+      "endLine": 83,
+      "endCol": 7
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "ll",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 86,
+      "startCol": 0,
+      "endLine": 86,
+      "endCol": 2
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "grep",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 86,
+      "startCol": 5,
+      "endLine": 86,
+      "endCol": 19
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "hello_world",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "range": {
+      "startLine": 91,
+      "startCol": 0,
+      "endLine": 91,
+      "endCol": 11
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 92,
+      "startCol": 0,
+      "endLine": 92,
+      "endCol": 11
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 95,
+      "startCol": 0,
+      "endLine": 95,
+      "endCol": 18
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "process_data",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:process_data",
+    "range": {
+      "startLine": 96,
+      "startCol": 0,
+      "endLine": 96,
+      "endCol": 12
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "hello_world",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "range": {
+      "startLine": 99,
+      "startCol": 0,
+      "endLine": 99,
+      "endCol": 11
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "greet_user",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
+    "range": {
+      "startLine": 100,
+      "startCol": 0,
+      "endLine": 100,
+      "endCol": 17
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "calculate",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "range": {
+      "startLine": 101,
+      "startCol": 0,
+      "endLine": 101,
+      "endCol": 13
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "$(hello_world)",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 104,
+      "startCol": 0,
+      "endLine": 104,
+      "endCol": 14
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "hello_world",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "range": {
+      "startLine": 104,
+      "startCol": 2,
+      "endLine": 104,
+      "endCol": 13
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "$(echo \"Nested\" | grep \"Nested\")",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 105,
+      "startCol": 0,
+      "endLine": 105,
+      "endCol": 32
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 105,
+      "startCol": 2,
+      "endLine": 105,
+      "endCol": 15
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "grep",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 105,
+      "startCol": 18,
+      "endLine": 105,
+      "endCol": 31
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "calculate",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "range": {
+      "startLine": 110,
+      "startCol": 3,
+      "endLine": 110,
+      "endCol": 16
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 111,
+      "startCol": 4,
+      "endLine": 111,
+      "endCol": 18
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "calculate",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "range": {
+      "startLine": 115,
+      "startCol": 6,
+      "endLine": 115,
+      "endCol": 19
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "break",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 116,
+      "startCol": 4,
+      "endLine": 116,
+      "endCol": 9
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "ls",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 122,
+      "startCol": 14,
+      "endLine": 122,
+      "endCol": 16
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 123,
+      "startCol": 4,
+      "endLine": 123,
+      "endCol": 16
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:result",
+    "calleeIdentifier": "calculate",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "range": {
+      "startLine": 129,
+      "startCol": 9,
+      "endLine": 129,
+      "endCol": 22
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "process_data",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:process_data",
+    "range": {
+      "startLine": 132,
+      "startCol": 0,
+      "endLine": 132,
+      "endCol": 12
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 136,
+      "startCol": 0,
+      "endLine": 136,
+      "endCol": 26
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "hello_world",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "range": {
+      "startLine": 137,
+      "startCol": 0,
+      "endLine": 137,
+      "endCol": 11
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "ls",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 138,
+      "startCol": 0,
+      "endLine": 138,
+      "endCol": 6
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "greet_user",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
+    "range": {
+      "startLine": 139,
+      "startCol": 0,
+      "endLine": 139,
+      "endCol": 19
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "calculate",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "range": {
+      "startLine": 140,
+      "startCol": 0,
+      "endLine": 140,
+      "endCol": 17
+    }
+  },
+  {
+    "callerNodeId": "global",
+    "calleeIdentifier": "echo",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 141,
+      "startCol": 0,
+      "endLine": 141,
+      "endCol": 24
+    }
+  }
+]

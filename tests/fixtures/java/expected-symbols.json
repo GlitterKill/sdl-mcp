@@ -1,0 +1,229 @@
+[
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:com.example:package",
+    "kind": "module",
+    "name": "com.example",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 1,
+      "startCol": 0,
+      "endLine": 1,
+      "endCol": 20
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:Symbols:class",
+    "kind": "class",
+    "name": "Symbols",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 6,
+      "startCol": 0,
+      "endLine": 30,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:privateField:field",
+    "kind": "variable",
+    "name": "privateField",
+    "exported": false,
+    "visibility": "private",
+    "range": {
+      "startLine": 7,
+      "startCol": 19,
+      "endLine": 7,
+      "endCol": 31
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:protectedField:field",
+    "kind": "variable",
+    "name": "protectedField",
+    "exported": false,
+    "visibility": "protected",
+    "range": {
+      "startLine": 8,
+      "startCol": 18,
+      "endLine": 8,
+      "endCol": 32
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:publicField:field",
+    "kind": "variable",
+    "name": "publicField",
+    "exported": false,
+    "visibility": "public",
+    "range": {
+      "startLine": 9,
+      "startCol": 18,
+      "endLine": 9,
+      "endCol": 29
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:Symbols:constructor",
+    "kind": "constructor",
+    "name": "Symbols",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 11,
+      "startCol": 4,
+      "endLine": 13,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "Symbols"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:privateMethod:method",
+    "kind": "method",
+    "name": "privateMethod",
+    "exported": false,
+    "visibility": "private",
+    "range": {
+      "startLine": 15,
+      "startCol": 4,
+      "endLine": 17,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "void"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:protectedMethod:method",
+    "kind": "method",
+    "name": "protectedMethod",
+    "exported": false,
+    "visibility": "protected",
+    "range": {
+      "startLine": 19,
+      "startCol": 4,
+      "endLine": 21,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "param",
+          "type": "String"
+        }
+      ],
+      "returns": "void"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:publicMethod:method",
+    "kind": "method",
+    "name": "publicMethod",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 23,
+      "startCol": 4,
+      "endLine": 25,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "a"
+        },
+        {
+          "name": "b"
+        }
+      ],
+      "returns": "String"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:staticMethod:method",
+    "kind": "method",
+    "name": "staticMethod",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 27,
+      "startCol": 4,
+      "endLine": 29,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "void"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:ExampleInterface:interface",
+    "kind": "interface",
+    "name": "ExampleInterface",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 32,
+      "startCol": 0,
+      "endLine": 34,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:interfaceMethod:method",
+    "kind": "method",
+    "name": "interfaceMethod",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 33,
+      "startCol": 4,
+      "endLine": 33,
+      "endCol": 27
+    },
+    "signature": {
+      "params": [],
+      "returns": "void"
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:Status:enum",
+    "kind": "class",
+    "name": "Status",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 36,
+      "startCol": 0,
+      "endLine": 40,
+      "endCol": 1
+    }
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\java\\symbols.java:Point:record",
+    "kind": "class",
+    "name": "Point",
+    "exported": true,
+    "visibility": "public",
+    "range": {
+      "startLine": 42,
+      "startCol": 0,
+      "endLine": 48,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    }
+  }
+]

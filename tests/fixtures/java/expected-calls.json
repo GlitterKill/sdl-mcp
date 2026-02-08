@@ -1,0 +1,197 @@
+[
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:methodCalls:method",
+    "calleeIdentifier": "new ArrayList<>",
+    "isResolved": false,
+    "callType": "constructor",
+    "range": {
+      "startLine": 14,
+      "startCol": 28,
+      "endLine": 14,
+      "endCol": 45
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:methodCalls:method",
+    "calleeIdentifier": "list.add",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 15,
+      "startCol": 8,
+      "endLine": 15,
+      "endCol": 24
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:methodCalls:method",
+    "calleeIdentifier": "list.clear",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 17,
+      "startCol": 8,
+      "endLine": 17,
+      "endCol": 20
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:methodCalls:method",
+    "calleeIdentifier": "another.size",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 19,
+      "startCol": 8,
+      "endLine": 19,
+      "endCol": 22
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:methodCalls:method",
+    "calleeIdentifier": "list.toString().toUpperCase",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 21,
+      "startCol": 24,
+      "endLine": 21,
+      "endCol": 53
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:methodCalls:method",
+    "calleeIdentifier": "list.toString",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 21,
+      "startCol": 24,
+      "endLine": 21,
+      "endCol": 39
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:methodCalls:method",
+    "calleeIdentifier": "nestedMethod",
+    "isResolved": true,
+    "callType": "method",
+    "calleeSymbolId": "tests/fixtures/java/calls.java:nestedMethod:method",
+    "range": {
+      "startLine": 23,
+      "startCol": 8,
+      "endLine": 23,
+      "endCol": 22
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:nestedMethod:method",
+    "calleeIdentifier": "System.out.println",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 27,
+      "startCol": 8,
+      "endLine": 27,
+      "endCol": 36
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:staticCalls:method",
+    "calleeIdentifier": "Math.abs",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 31,
+      "startCol": 8,
+      "endLine": 31,
+      "endCol": 20
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:staticCalls:method",
+    "calleeIdentifier": "System.out.println",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 32,
+      "startCol": 8,
+      "endLine": 32,
+      "endCol": 36
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:chainedCalls:method",
+    "calleeIdentifier": "\"hello\".toUpperCase().trim().substring",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 36,
+      "startCol": 22,
+      "endLine": 36,
+      "endCol": 66
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:chainedCalls:method",
+    "calleeIdentifier": "\"hello\".toUpperCase().trim",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 36,
+      "startCol": 22,
+      "endLine": 36,
+      "endCol": 50
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:chainedCalls:method",
+    "calleeIdentifier": "\"hello\".toUpperCase",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 36,
+      "startCol": 22,
+      "endLine": 36,
+      "endCol": 43
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:parentMethod:method",
+    "calleeIdentifier": "System.out.println",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 50,
+      "startCol": 8,
+      "endLine": 50,
+      "endCol": 36
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:Child:constructor",
+    "calleeIdentifier": "super.parentMethod",
+    "isResolved": true,
+    "callType": "method",
+    "calleeSymbolId": "tests/fixtures/java/calls.java:parentMethod:method",
+    "range": {
+      "startLine": 61,
+      "startCol": 8,
+      "endLine": 61,
+      "endCol": 28
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/java/calls.java:parentMethod:method",
+    "calleeIdentifier": "super.parentMethod",
+    "isResolved": true,
+    "callType": "method",
+    "calleeSymbolId": "tests/fixtures/java/calls.java:parentMethod:method",
+    "range": {
+      "startLine": 66,
+      "startCol": 8,
+      "endLine": 66,
+      "endCol": 28
+    }
+  }
+]

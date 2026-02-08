@@ -1,0 +1,15 @@
+{
+  "name": "Register Repository",
+  "description": "Register a new TypeScript repository for indexing",
+  "tool": "sdl.repo.register",
+  "request": {
+    "repoId": "test-repo-001",
+    "rootPath": "./fixtures/test-repo",
+    "ignore": ["node_modules", "dist", ".git"],
+    "languages": ["typescript", "javascript"]
+  },
+  "expectedResponse": {
+    "ok": true,
+    "repoId": "test-repo-001"
+  }
+}

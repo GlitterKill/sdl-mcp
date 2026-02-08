@@ -1,0 +1,283 @@
+import { exec } from "child_process";
+import { promisify } from "util";
+import { readFileSync } from "fs";
+import { join } from "path";
+import fg from "fast-glob";
+import {
+  getEdgesByRepo,
+  getFilesByRepo,
+  getMetrics,
+  getRepo,
+  getSymbolsByRepo,
+  upsertMetrics,
+} from "../db/queries.js";
+import type { EdgeRow } from "../db/schema.js";
+import type { RepoConfig } from "../config/types.js";
+import type { StalenessTiers } from "../mcp/types.js";
+import { normalizePath } from "../util/paths.js";
+import { logger } from "../util/logger.js";
+
+const execAsync = promisify(exec);
+
+interface FanMetrics {
+  fanIn: number;
+  fanOut: number;
+}
+
+interface ChurnCache {
+  repoRoot: string;
+  lastCommitHash: string;
+  churnMap: Map<string, number>;
+  cachedAt: number;
+}
+
+const CHURN_CACHE_TTL_MS = 5 * 60 * 1000;
+const churnCacheByRepo = new Map<string, ChurnCache>();
+
+function calculateFanMetrics(
+  edges: EdgeRow[],
+  symbols: Set<string>,
+): Map<string, FanMetrics> {
+  const metrics = new Map<string, FanMetrics>();
+
+  for (const edge of edges) {
+    if (!symbols.has(edge.from_symbol_id) || !symbols.has(edge.to_symbol_id)) {
+      continue;
+    }
+    const from = metrics.get(edge.from_symbol_id) ?? { fanIn: 0, fanOut: 0 };
+    from.fanOut += 1;
+    metrics.set(edge.from_symbol_id, from);
+
+    const to = metrics.get(edge.to_symbol_id) ?? { fanIn: 0, fanOut: 0 };
+    to.fanIn += 1;
+    metrics.set(edge.to_symbol_id, to);
+  }
+
+  return metrics;
+}
+
+async function getCurrentCommitHash(repoRoot: string): Promise<string> {
+  try {
+    const { stdout } = await execAsync("git rev-parse HEAD", {
+      cwd: repoRoot,
+    });
+    return stdout.trim();
+  } catch {
+    return "";
+  }
+}
+
+async function getChurnByFile(repoRoot: string): Promise<Map<string, number>> {
+  try {
+    const { stdout } = await execAsync(
+      "git log --since=30.days --name-only --pretty=format:",
+      {
+        cwd: repoRoot,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
+    const churn = new Map<string, number>();
+    const lines = stdout.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const relPath = normalizePath(trimmed);
+      churn.set(relPath, (churn.get(relPath) ?? 0) + 1);
+    }
+    return churn;
+  } catch {
+    return new Map();
+  }
+}
+
+async function getChurnByFileCached(
+  repoRoot: string,
+): Promise<Map<string, number>> {
+  const cached = churnCacheByRepo.get(repoRoot);
+  const currentHead = await getCurrentCommitHash(repoRoot);
+
+  if (
+    cached &&
+    cached.lastCommitHash === currentHead &&
+    Date.now() - cached.cachedAt < CHURN_CACHE_TTL_MS
+  ) {
+    logger.debug(
+      `Churn cache HIT for repo ${repoRoot} (commit: ${currentHead})`,
+    );
+    return cached.churnMap;
+  }
+
+  logger.debug(
+    `Churn cache MISS for repo ${repoRoot} (commit: ${currentHead})`,
+  );
+  const churnMap = await getChurnByFile(repoRoot);
+  churnCacheByRepo.set(repoRoot, {
+    repoRoot,
+    lastCommitHash: currentHead,
+    churnMap,
+    cachedAt: Date.now(),
+  });
+  return churnMap;
+}
+
+function collectTestRefs(
+  repoRoot: string,
+  symbols: Array<{ symbol_id: string; name: string }>,
+  config: RepoConfig,
+): Map<string, Set<string>> {
+  const extGroup = config.languages.join(",");
+  const patterns = [
+    `**/*.test.{${extGroup}}`,
+    `**/*.spec.{${extGroup}}`,
+    `**/__tests__/**/*.${extGroup}`,
+    `**/tests/**/*.${extGroup}`,
+  ];
+
+  const testFiles = fg.sync(patterns, {
+    cwd: repoRoot,
+    ignore: config.ignore,
+    dot: false,
+  });
+
+  const nameToSymbolIds = new Map<string, string[]>();
+  for (const symbol of symbols) {
+    const existing = nameToSymbolIds.get(symbol.name) ?? [];
+    existing.push(symbol.symbol_id);
+    nameToSymbolIds.set(symbol.name, existing);
+  }
+
+  const testRefs = new Map<string, Set<string>>();
+  for (const file of testFiles) {
+    let content = "";
+    try {
+      content = readFileSync(join(repoRoot, file), "utf-8");
+    } catch {
+      continue;
+    }
+
+    const tokens = content.match(/[A-Za-z_][A-Za-z0-9_]*/g);
+    if (!tokens) continue;
+    const uniqueTokens = new Set(tokens);
+
+    for (const token of uniqueTokens) {
+      const symbolIds = nameToSymbolIds.get(token);
+      if (!symbolIds) continue;
+
+      for (const symbolId of symbolIds) {
+        const existing = testRefs.get(symbolId) ?? new Set<string>();
+        existing.add(normalizePath(file));
+        testRefs.set(symbolId, existing);
+      }
+    }
+  }
+
+  return testRefs;
+}
+
+export function calculateRiskScore(
+  tiers: StalenessTiers,
+  fanIn: number,
+  fanOut: number,
+  hasDiagnostics: boolean,
+): number {
+  let riskScore = tiers.riskScore;
+
+  const fanInPenalty = Math.min(fanIn * 2, 20);
+  const fanOutPenalty = Math.min(fanOut, 10);
+
+  riskScore += fanInPenalty;
+  riskScore += fanOutPenalty;
+
+  if (hasDiagnostics) {
+    riskScore += 15;
+  }
+
+  return Math.min(riskScore, 100);
+}
+
+export function calculateRiskScoresForSymbols(
+  symbolTiers: Map<string, StalenessTiers>,
+  diagnostics: Map<string, boolean>,
+): Map<string, number> {
+  const riskScores = new Map<string, number>();
+
+  for (const [symbolId, tiers] of symbolTiers) {
+    const metrics = getMetrics(symbolId);
+    if (!metrics) continue;
+
+    const hasDiagnostics = diagnostics.get(symbolId) ?? false;
+    const riskScore = calculateRiskScore(
+      tiers,
+      metrics.fan_in,
+      metrics.fan_out,
+      hasDiagnostics,
+    );
+
+    riskScores.set(symbolId, riskScore);
+  }
+
+  return riskScores;
+}
+
+export async function updateMetricsForRepo(
+  repoId: string,
+  changedFileIds?: Set<number>,
+): Promise<void> {
+  const edges = getEdgesByRepo(repoId);
+  const repo = getRepo(repoId);
+  if (!repo) {
+    return;
+  }
+  const config: RepoConfig = JSON.parse(repo.config_json);
+  const files = getFilesByRepo(repoId);
+  const fileById = new Map(files.map((file) => [file.file_id, file.rel_path]));
+  const allSymbols = getSymbolsByRepo(repoId);
+  const symbolIds = new Set(allSymbols.map((symbol) => symbol.symbol_id));
+
+  let symbols = allSymbols;
+
+  if (changedFileIds && changedFileIds.size > 0) {
+    const affectedSymbolIds = new Set<string>();
+
+    for (const symbol of allSymbols) {
+      if (changedFileIds.has(symbol.file_id)) {
+        affectedSymbolIds.add(symbol.symbol_id);
+      }
+    }
+
+    for (const edge of edges) {
+      if (affectedSymbolIds.has(edge.from_symbol_id)) {
+        affectedSymbolIds.add(edge.to_symbol_id);
+      }
+      if (affectedSymbolIds.has(edge.to_symbol_id)) {
+        affectedSymbolIds.add(edge.from_symbol_id);
+      }
+    }
+
+    symbols = allSymbols.filter((s) => affectedSymbolIds.has(s.symbol_id));
+    logger.debug(
+      `Incremental metrics: updating ${symbols.length} of ${allSymbols.length} symbols for ${changedFileIds.size} changed files`,
+    );
+  }
+
+  const fanMetrics = calculateFanMetrics(edges, symbolIds);
+  const churnByFile = await getChurnByFileCached(repo.root_path);
+  const testRefs = collectTestRefs(repo.root_path, allSymbols, config);
+
+  const now = new Date().toISOString();
+
+  for (const symbol of symbols) {
+    const metric = fanMetrics.get(symbol.symbol_id) ?? { fanIn: 0, fanOut: 0 };
+    const relPath = fileById.get(symbol.file_id);
+    const churn = relPath ? (churnByFile.get(relPath) ?? 0) : 0;
+    const refs = Array.from(testRefs.get(symbol.symbol_id) ?? []);
+    upsertMetrics({
+      symbolId: symbol.symbol_id,
+      fanIn: metric.fanIn,
+      fanOut: metric.fanOut,
+      churn30d: churn,
+      testRefsJson: JSON.stringify(refs),
+      updatedAt: now,
+    });
+  }
+}

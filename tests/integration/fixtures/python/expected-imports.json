@@ -1,0 +1,272 @@
+[
+  {
+    "specifier": "os",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "os"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "sys",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "sys"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "numpy",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "np"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "pandas",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "pd"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "typing",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "List"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "typing",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "Dict",
+      "Optional"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "typing",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "Union",
+      "Any",
+      "Callable"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "typing",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "TypingList"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "collections",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "dd"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "math",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "*"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "typing",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "*"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": ".",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "module"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "..",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "parent_module"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "...",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "grandparent_module"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": ".utils",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "helper_function"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "utils",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "helper_function"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "..config",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "Config",
+      "Settings"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "config",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "Config",
+      "Settings"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": ".types",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "MT"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "types",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "MT"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "my_package",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "ClassA"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "my_package.submodule",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "ClassB",
+      "function_b"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "json",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "json"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "re",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "re"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "datetime",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "datetime"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "typing",
+    "isRelative": false,
+    "isExternal": false,
+    "imports": [
+      "List",
+      "Dict",
+      "Optional",
+      "Union"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "package.submodule.subsub",
+    "isRelative": false,
+    "isExternal": true,
+    "imports": [
+      "thing"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": ".module",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "MC"
+    ],
+    "isReExport": false
+  },
+  {
+    "specifier": "module",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [
+      "MC"
+    ],
+    "isReExport": false
+  }
+]

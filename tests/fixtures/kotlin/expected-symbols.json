@@ -1,0 +1,926 @@
+[
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:com.example.kotlin:0",
+    "kind": "module",
+    "name": "com.example.kotlin",
+    "exported": true,
+    "range": {
+      "startLine": 1,
+      "startCol": 0,
+      "endLine": 1,
+      "endCol": 26
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:User:1",
+    "kind": "class",
+    "name": "User",
+    "exported": true,
+    "range": {
+      "startLine": 6,
+      "startCol": 0,
+      "endLine": 6,
+      "endCol": 66
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Animal:2",
+    "kind": "class",
+    "name": "Animal",
+    "exported": true,
+    "range": {
+      "startLine": 8,
+      "startCol": 0,
+      "endLine": 14,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:makeSound:3",
+    "kind": "function",
+    "name": "makeSound",
+    "exported": true,
+    "range": {
+      "startLine": 9,
+      "startCol": 4,
+      "endLine": 9,
+      "endCol": 50
+    },
+    "signature": {
+      "params": [],
+      "returns": "String"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:eat:4",
+    "kind": "function",
+    "name": "eat",
+    "exported": true,
+    "range": {
+      "startLine": 11,
+      "startCol": 4,
+      "endLine": 13,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "Unit"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Dog:5",
+    "kind": "class",
+    "name": "Dog",
+    "exported": true,
+    "range": {
+      "startLine": 16,
+      "startCol": 0,
+      "endLine": 18,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:makeSound:6",
+    "kind": "function",
+    "name": "makeSound",
+    "exported": true,
+    "range": {
+      "startLine": 17,
+      "startCol": 4,
+      "endLine": 17,
+      "endCol": 45
+    },
+    "signature": {
+      "params": [],
+      "returns": "String"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Repository:7",
+    "kind": "interface",
+    "name": "Repository",
+    "exported": true,
+    "range": {
+      "startLine": 20,
+      "startCol": 0,
+      "endLine": 24,
+      "endCol": 1
+    },
+    "signature": {
+      "params": [],
+      "generics": [
+        "T"
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:findById:8",
+    "kind": "function",
+    "name": "findById",
+    "exported": true,
+    "range": {
+      "startLine": 21,
+      "startCol": 4,
+      "endLine": 21,
+      "endCol": 32
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "id",
+          "type": "String"
+        }
+      ],
+      "returns": "T?"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:findAll:9",
+    "kind": "function",
+    "name": "findAll",
+    "exported": true,
+    "range": {
+      "startLine": 22,
+      "startCol": 4,
+      "endLine": 22,
+      "endCol": 26
+    },
+    "signature": {
+      "params": [],
+      "returns": "List<T>"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:save:10",
+    "kind": "function",
+    "name": "save",
+    "exported": true,
+    "range": {
+      "startLine": 23,
+      "startCol": 4,
+      "endLine": 23,
+      "endCol": 26
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "entity",
+          "type": "T"
+        }
+      ],
+      "returns": "T"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:UserRepository:11",
+    "kind": "class",
+    "name": "UserRepository",
+    "exported": true,
+    "range": {
+      "startLine": 26,
+      "startCol": 0,
+      "endLine": 41,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:users:12",
+    "kind": "variable",
+    "name": "users",
+    "exported": false,
+    "range": {
+      "startLine": 27,
+      "startCol": 4,
+      "endLine": 27,
+      "endCol": 45
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:findById:13",
+    "kind": "function",
+    "name": "findById",
+    "exported": true,
+    "range": {
+      "startLine": 29,
+      "startCol": 4,
+      "endLine": 31,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "id",
+          "type": "String"
+        }
+      ],
+      "returns": "User?"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:findAll:14",
+    "kind": "function",
+    "name": "findAll",
+    "exported": true,
+    "range": {
+      "startLine": 33,
+      "startCol": 4,
+      "endLine": 35,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "List<User>"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:save:15",
+    "kind": "function",
+    "name": "save",
+    "exported": true,
+    "range": {
+      "startLine": 37,
+      "startCol": 4,
+      "endLine": 40,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "entity",
+          "type": "User"
+        }
+      ],
+      "returns": "User"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:DatabaseConnection:16",
+    "kind": "class",
+    "name": "DatabaseConnection",
+    "exported": true,
+    "range": {
+      "startLine": 43,
+      "startCol": 0,
+      "endLine": 54,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:connectionCount:17",
+    "kind": "variable",
+    "name": "connectionCount",
+    "exported": false,
+    "range": {
+      "startLine": 44,
+      "startCol": 4,
+      "endLine": 44,
+      "endCol": 35
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:connect:18",
+    "kind": "function",
+    "name": "connect",
+    "exported": true,
+    "range": {
+      "startLine": 46,
+      "startCol": 4,
+      "endLine": 49,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "String"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:disconnect:19",
+    "kind": "function",
+    "name": "disconnect",
+    "exported": true,
+    "range": {
+      "startLine": 51,
+      "startCol": 4,
+      "endLine": 53,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "String"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:UserService:20",
+    "kind": "class",
+    "name": "UserService",
+    "exported": true,
+    "range": {
+      "startLine": 56,
+      "startCol": 0,
+      "endLine": 85,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:cache:21",
+    "kind": "variable",
+    "name": "cache",
+    "exported": false,
+    "range": {
+      "startLine": 57,
+      "startCol": 4,
+      "endLine": 57,
+      "endCol": 52
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:getUser:22",
+    "kind": "function",
+    "name": "getUser",
+    "exported": true,
+    "range": {
+      "startLine": 59,
+      "startCol": 4,
+      "endLine": 69,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "id",
+          "type": "String"
+        }
+      ],
+      "returns": "User?"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:cached:23",
+    "kind": "variable",
+    "name": "cached",
+    "exported": true,
+    "range": {
+      "startLine": 60,
+      "startCol": 8,
+      "endLine": 60,
+      "endCol": 30
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:user:24",
+    "kind": "variable",
+    "name": "user",
+    "exported": true,
+    "range": {
+      "startLine": 64,
+      "startCol": 8,
+      "endLine": 64,
+      "endCol": 42
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:getAllUsers:25",
+    "kind": "function",
+    "name": "getAllUsers",
+    "exported": true,
+    "range": {
+      "startLine": 71,
+      "startCol": 4,
+      "endLine": 73,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "List<User>"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:createUser:26",
+    "kind": "function",
+    "name": "createUser",
+    "exported": true,
+    "range": {
+      "startLine": 75,
+      "startCol": 4,
+      "endLine": 79,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "name",
+          "type": "String"
+        },
+        {
+          "name": "email",
+          "type": "String"
+        }
+      ],
+      "returns": "User"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:id:27",
+    "kind": "variable",
+    "name": "id",
+    "exported": true,
+    "range": {
+      "startLine": 76,
+      "startCol": 8,
+      "endLine": 76,
+      "endCol": 48
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:user:28",
+    "kind": "variable",
+    "name": "user",
+    "exported": true,
+    "range": {
+      "startLine": 77,
+      "startCol": 8,
+      "endLine": 77,
+      "endCol": 40
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:transformUser:29",
+    "kind": "function",
+    "name": "transformUser",
+    "exported": true,
+    "range": {
+      "startLine": 81,
+      "startCol": 4,
+      "endLine": 84,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "id",
+          "type": "String"
+        },
+        {
+          "name": "transformer",
+          "type": "(User) -> T"
+        }
+      ],
+      "returns": "T?",
+      "generics": [
+        "T"
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:user:30",
+    "kind": "variable",
+    "name": "user",
+    "exported": true,
+    "range": {
+      "startLine": 82,
+      "startCol": 8,
+      "endLine": 82,
+      "endCol": 42
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Status:31",
+    "kind": "class",
+    "name": "Status",
+    "exported": true,
+    "range": {
+      "startLine": 87,
+      "startCol": 0,
+      "endLine": 92,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Task:32",
+    "kind": "class",
+    "name": "Task",
+    "exported": true,
+    "range": {
+      "startLine": 94,
+      "startCol": 0,
+      "endLine": 118,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:MAX_TITLE_LENGTH:33",
+    "kind": "variable",
+    "name": "MAX_TITLE_LENGTH",
+    "exported": true,
+    "range": {
+      "startLine": 101,
+      "startCol": 8,
+      "endLine": 101,
+      "endCol": 40
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:create:34",
+    "kind": "function",
+    "name": "create",
+    "exported": true,
+    "range": {
+      "startLine": 103,
+      "startCol": 8,
+      "endLine": 108,
+      "endCol": 9
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "id",
+          "type": "Int"
+        },
+        {
+          "name": "title",
+          "type": "String"
+        }
+      ],
+      "returns": "Task"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:withStatus:35",
+    "kind": "function",
+    "name": "withStatus",
+    "exported": true,
+    "range": {
+      "startLine": 111,
+      "startCol": 4,
+      "endLine": 113,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "newStatus",
+          "type": "Status"
+        }
+      ],
+      "returns": "Task"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:isActive:36",
+    "kind": "function",
+    "name": "isActive",
+    "exported": true,
+    "range": {
+      "startLine": 115,
+      "startCol": 4,
+      "endLine": 117,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "Boolean"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:TaskManager:37",
+    "kind": "class",
+    "name": "TaskManager",
+    "exported": true,
+    "range": {
+      "startLine": 120,
+      "startCol": 0,
+      "endLine": 143,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:tasks:38",
+    "kind": "variable",
+    "name": "tasks",
+    "exported": false,
+    "range": {
+      "startLine": 121,
+      "startCol": 4,
+      "endLine": 121,
+      "endCol": 45
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "private"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:<init>:39",
+    "kind": "constructor",
+    "name": "<init>",
+    "exported": true,
+    "range": {
+      "startLine": 123,
+      "startCol": 4,
+      "endLine": 125,
+      "endCol": 5
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:<init>:40",
+    "kind": "constructor",
+    "name": "<init>",
+    "exported": true,
+    "range": {
+      "startLine": 127,
+      "startCol": 4,
+      "endLine": 129,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "initialTasks",
+          "type": "List<Task>"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:addTask:41",
+    "kind": "function",
+    "name": "addTask",
+    "exported": true,
+    "range": {
+      "startLine": 131,
+      "startCol": 4,
+      "endLine": 134,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "task",
+          "type": "Task"
+        }
+      ],
+      "returns": "Task"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:findTask:42",
+    "kind": "function",
+    "name": "findTask",
+    "exported": true,
+    "range": {
+      "startLine": 136,
+      "startCol": 4,
+      "endLine": 138,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "id",
+          "type": "Int"
+        }
+      ],
+      "returns": "Task?"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:listTasks:43",
+    "kind": "function",
+    "name": "listTasks",
+    "exported": true,
+    "range": {
+      "startLine": 140,
+      "startCol": 4,
+      "endLine": 142,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [],
+      "returns": "List<Task>"
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Logger:44",
+    "kind": "interface",
+    "name": "Logger",
+    "exported": true,
+    "range": {
+      "startLine": 145,
+      "startCol": 0,
+      "endLine": 148,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:log:45",
+    "kind": "function",
+    "name": "log",
+    "exported": true,
+    "range": {
+      "startLine": 146,
+      "startCol": 4,
+      "endLine": 146,
+      "endCol": 28
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:logError:46",
+    "kind": "function",
+    "name": "logError",
+    "exported": true,
+    "range": {
+      "startLine": 147,
+      "startCol": 4,
+      "endLine": 147,
+      "endCol": 59
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "message",
+          "type": "String"
+        },
+        {
+          "name": "error",
+          "type": "Throwable?"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:ConsoleLogger:47",
+    "kind": "class",
+    "name": "ConsoleLogger",
+    "exported": true,
+    "range": {
+      "startLine": 150,
+      "startCol": 0,
+      "endLine": 159,
+      "endCol": 1
+    },
+    "signature": {
+      "params": []
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:log:48",
+    "kind": "function",
+    "name": "log",
+    "exported": true,
+    "range": {
+      "startLine": 151,
+      "startCol": 4,
+      "endLine": 153,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    "visibility": "public"
+  },
+  {
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:logError:49",
+    "kind": "function",
+    "name": "logError",
+    "exported": true,
+    "range": {
+      "startLine": 155,
+      "startCol": 4,
+      "endLine": 158,
+      "endCol": 5
+    },
+    "signature": {
+      "params": [
+        {
+          "name": "message",
+          "type": "String"
+        },
+        {
+          "name": "error",
+          "type": "Throwable?"
+        }
+      ]
+    },
+    "visibility": "public"
+  }
+]

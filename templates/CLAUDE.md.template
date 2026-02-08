@@ -1,0 +1,179 @@
+# CLAUDE.md - SDL-MCP Integration
+
+This file instructs Claude Code (and other AI agents) to use SDL-MCP for efficient code context.
+
+## Code Context Protocol
+
+**IMPORTANT**: This project uses SDL-MCP for code understanding. Always prefer SDL-MCP tools over reading raw files directly.
+
+### Repository Configuration
+
+- **Repository ID**: `{{REPO_ID}}`
+- **MCP Server**: sdl-mcp
+
+### Context Ladder (Use in Order)
+
+When you need to understand code, follow this escalation path:
+
+| Step | Tool | Token Cost | When to Use |
+|------|------|------------|-------------|
+| 1 | `sdl.symbol.search` | ~50 | Find symbols by name |
+| 2 | `sdl.symbol.getCard` | ~135 | Understand signatures, deps, summary |
+| 3 | `sdl.slice.build` | ~800 | Get related symbols for a task |
+| 4 | `sdl.code.getSkeleton` | ~113 | See control flow structure |
+| 5 | `sdl.code.getHotPath` | ~200 | Find specific identifiers |
+| 6 | `sdl.code.needWindow` | Variable | Full code (last resort) |
+
+### Tool Usage Guidelines
+
+#### Finding Code
+
+```
+# Search for symbols by name
+sdl.symbol.search({ repoId: "{{REPO_ID}}", query: "functionName" })
+
+# Search with filters
+sdl.symbol.search({
+  repoId: "{{REPO_ID}}",
+  query: "parse",
+  kinds: ["function", "method"],
+  limit: 20
+})
+```
+
+#### Understanding Code
+
+```
+# Get symbol metadata (signature, summary, dependencies)
+sdl.symbol.getCard({ repoId: "{{REPO_ID}}", symbolId: "<id>" })
+
+# Get related symbols for context
+sdl.slice.build({
+  repoId: "{{REPO_ID}}",
+  entrySymbols: ["<symbolId>"],
+  maxCards: 30
+})
+```
+
+#### Reading Code (When Necessary)
+
+```
+# Get code skeleton (signatures + control flow, elided bodies)
+sdl.code.getSkeleton({ repoId: "{{REPO_ID}}", symbolId: "<id>" })
+
+# Find specific identifiers in code
+sdl.code.getHotPath({
+  repoId: "{{REPO_ID}}",
+  symbolId: "<id>",
+  identifiers: ["errorHandler", "validate"]
+})
+
+# Get raw code (requires justification)
+sdl.code.needWindow({
+  repoId: "{{REPO_ID}}",
+  symbolId: "<id>",
+  reason: "Need to understand validation implementation details",
+  expectedIdentifiers: ["validateInput"]
+})
+```
+
+### Required Practices
+
+1. **Always search first**: Use `sdl.symbol.search` before trying to read files
+2. **Get cards before code**: Use `sdl.symbol.getCard` to understand what a symbol does
+3. **Use slices for context**: Use `sdl.slice.build` to find related code
+4. **Justify raw code requests**: Always provide a `reason` for `sdl.code.needWindow`
+5. **Follow nextBestAction**: If a request is denied, use the suggested alternative
+
+### Do NOT
+
+- Read entire files with the `Read` tool when SDL-MCP can provide the context
+- Skip cards and go directly to raw code
+- Ignore policy denials - use the `nextBestAction` suggestion
+- Request raw code without trying cards/skeletons first
+
+### Workflow Examples
+
+#### Bug Investigation
+
+1. Search for the problematic function:
+   ```
+   sdl.symbol.search({ repoId: "{{REPO_ID}}", query: "handleError" })
+   ```
+
+2. Get the card to understand its purpose and dependencies:
+   ```
+   sdl.symbol.getCard({ repoId: "{{REPO_ID}}", symbolId: "<found-id>" })
+   ```
+
+3. Build a slice to see related error handling:
+   ```
+   sdl.slice.build({ repoId: "{{REPO_ID}}", entrySymbols: ["<id>"], maxCards: 20 })
+   ```
+
+4. If needed, get the skeleton to see control flow:
+   ```
+   sdl.code.getSkeleton({ repoId: "{{REPO_ID}}", symbolId: "<id>" })
+   ```
+
+5. Only if the bug requires seeing exact implementation:
+   ```
+   sdl.code.needWindow({
+     repoId: "{{REPO_ID}}",
+     symbolId: "<id>",
+     reason: "Need to see exact error condition logic",
+     expectedIdentifiers: ["errorCode", "throwError"]
+   })
+   ```
+
+#### Feature Implementation
+
+1. Search for similar existing features:
+   ```
+   sdl.symbol.search({ repoId: "{{REPO_ID}}", query: "create", kinds: ["function"] })
+   ```
+
+2. Get cards for relevant symbols to understand patterns:
+   ```
+   sdl.symbol.getCard({ repoId: "{{REPO_ID}}", symbolId: "<id>" })
+   ```
+
+3. Build a slice from the entry point:
+   ```
+   sdl.slice.build({ repoId: "{{REPO_ID}}", entrySymbols: ["<entry-id>"], maxCards: 50 })
+   ```
+
+4. Use skeletons to understand structure without full code:
+   ```
+   sdl.code.getSkeleton({ repoId: "{{REPO_ID}}", symbolId: "<id>" })
+   ```
+
+#### Code Review
+
+1. Get the delta pack to see what changed:
+   ```
+   sdl.delta.get({ repoId: "{{REPO_ID}}" })
+   ```
+
+2. For each changed symbol, get its card:
+   ```
+   sdl.symbol.getCard({ repoId: "{{REPO_ID}}", symbolId: "<changed-id>" })
+   ```
+
+3. Check blast radius for impact:
+   ```
+   sdl.delta.get({ repoId: "{{REPO_ID}}", includeBlastRadius: true })
+   ```
+
+### Refreshing the Index
+
+If you've made changes and need to update the symbol database:
+
+```
+sdl.index.refresh({ repoId: "{{REPO_ID}}", mode: "incremental" })
+```
+
+### Getting Help
+
+- Check repository status: `sdl.repo.status({ repoId: "{{REPO_ID}}" })`
+- View current policy: `sdl.policy.get({ repoId: "{{REPO_ID}}" })`
