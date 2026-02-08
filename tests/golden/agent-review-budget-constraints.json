@@ -1,0 +1,41 @@
+{
+  "name": "agent-review-budget-constraints",
+  "description": "Review task with strict budget constraints",
+  "tool": "sdl.agent.orchestrate",
+  "request": {
+    "repoId": "test-repo",
+    "taskType": "review",
+    "taskText": "Review the data access layer for security issues",
+    "budget": {
+      "maxTokens": 500,
+      "maxDurationMs": 1000
+    },
+    "options": {
+      "focusPaths": ["src/data"],
+      "includeTests": true
+    }
+  },
+  "expectedResponse": {
+    "taskId": "string",
+    "taskType": "review",
+    "actionsTaken": "array",
+    "path": {
+      "rungs": "array",
+      "estimatedTokens": "number",
+      "estimatedDurationMs": "number",
+      "reasoning": "string"
+    },
+    "finalEvidence": "array",
+    "summary": "string",
+    "success": "boolean",
+    "metrics": {
+      "totalDurationMs": "number",
+      "totalTokens": "number",
+      "totalActions": "number",
+      "successfulActions": "number",
+      "failedActions": "number",
+      "cacheHits": "number"
+    },
+    "answer": "string"
+  }
+}

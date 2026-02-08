@@ -1,0 +1,45 @@
+{
+  "name": "agent-implement-focus-symbols",
+  "description": "Implement task with focused symbol scope",
+  "tool": "sdl.agent.orchestrate",
+  "request": {
+    "repoId": "test-repo",
+    "taskType": "implement",
+    "taskText": "Add error handling to API endpoint handlers",
+    "budget": {
+      "maxTokens": 2000,
+      "maxActions": 5
+    },
+    "options": {
+      "focusSymbols": [
+        "api:handleRequest",
+        "api:validateInput",
+        "api:sendResponse"
+      ],
+      "focusPaths": ["src/api/handlers"]
+    }
+  },
+  "expectedResponse": {
+    "taskId": "string",
+    "taskType": "implement",
+    "actionsTaken": "array",
+    "path": {
+      "rungs": "array",
+      "estimatedTokens": "number",
+      "estimatedDurationMs": "number",
+      "reasoning": "string"
+    },
+    "finalEvidence": "array",
+    "summary": "string",
+    "success": "boolean",
+    "metrics": {
+      "totalDurationMs": "number",
+      "totalTokens": "number",
+      "totalActions": "number",
+      "successfulActions": "number",
+      "failedActions": "number",
+      "cacheHits": "number"
+    },
+    "answer": "string"
+  }
+}

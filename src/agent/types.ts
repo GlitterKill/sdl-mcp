@@ -80,6 +80,8 @@ export interface OrchestrationResult {
   success: boolean;
   error?: string;
   metrics: ExecutionMetrics;
+  answer?: string;
+  nextBestAction?: string;
 }
 
 export interface ExecutionMetrics {

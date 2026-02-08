@@ -96,6 +96,16 @@ export const AgentOrchestrateResponseSchema = z.object({
       cacheHits: z.number(),
     })
     .describe("Execution metrics"),
+  answer: z
+    .string()
+    .optional()
+    .describe("Answer to the task based on collected evidence"),
+  nextBestAction: z
+    .string()
+    .optional()
+    .describe(
+      "Suggested next action based on execution results and policy decisions",
+    ),
 });
 
 export type AgentOrchestrateRequest = z.infer<

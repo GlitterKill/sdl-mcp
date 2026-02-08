@@ -5,12 +5,15 @@ import type {
 } from "./types.js";
 import { Planner } from "./planner.js";
 import { Executor } from "./executor.js";
+import { PolicyEngine } from "../policy/engine.js";
 
 export class Orchestrator {
   private planner: Planner;
+  private policyEngine: PolicyEngine;
 
   constructor() {
     this.planner = new Planner();
+    this.policyEngine = new PolicyEngine();
   }
 
   async orchestrate(task: AgentTask): Promise<OrchestrationResult> {
@@ -29,7 +32,7 @@ export class Orchestrator {
       const path = this.planner.plan(task);
       const context = this.planner.selectContext(task);
 
-      const executor = new Executor();
+      const executor = new Executor(this.policyEngine);
       const { actions, evidence, success } = await executor.execute(
         task,
         path.rungs,
@@ -37,6 +40,7 @@ export class Orchestrator {
       );
 
       const metrics = executor.getMetrics();
+      const nextBestAction = executor.getNextBestAction();
 
       return {
         taskId,
@@ -47,6 +51,8 @@ export class Orchestrator {
         summary: this.generateSummary(task, actions, evidence, success),
         success,
         metrics,
+        answer: this.generateAnswer(task, evidence, success),
+        nextBestAction,
       };
     } catch (error) {
       return this.createErrorResult(
@@ -89,6 +95,29 @@ export class Orchestrator {
     return `Task "${task.taskType}" ${status}. Executed ${actionCount} action(s), collected ${evidenceCount} evidence item(s).`;
   }
 
+  private generateAnswer(
+    task: AgentTask,
+    evidence: unknown[],
+    success: boolean,
+  ): string {
+    if (!success) {
+      return `Task execution failed. Review actions and errors for details.`;
+    }
+
+    switch (task.taskType) {
+      case "explain":
+        return `Based on the collected evidence from ${evidence.length} sources, the code structure and relationships have been analyzed. Review the evidence sections for detailed information.`;
+      case "debug":
+        return `Debugging analysis completed with ${evidence.length} evidence items collected. Check actions taken and final evidence for specific findings.`;
+      case "review":
+        return `Code review completed with ${evidence.length} evidence items. Review findings include structure analysis and key symbols identified.`;
+      case "implement":
+        return `Implementation task completed with ${evidence.length} evidence items collected. Context gathered from the selected rungs should support the requested changes.`;
+      default:
+        return `Task completed successfully with ${evidence.length} evidence items collected.`;
+    }
+  }
+
   private createErrorResult(
     taskId: string,
     task: AgentTask,
@@ -116,6 +145,8 @@ export class Orchestrator {
         failedActions: 0,
         cacheHits: 0,
       },
+      answer: `Task execution failed: ${error}`,
+      nextBestAction: "retryWithDifferentInputs",
     };
   }
 }

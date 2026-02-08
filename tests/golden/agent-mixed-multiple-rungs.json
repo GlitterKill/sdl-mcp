@@ -1,0 +1,44 @@
+{
+  "name": "agent-mixed-multiple-rungs",
+  "description": "Mixed task that exercises all rungs in sequence",
+  "tool": "sdl.agent.orchestrate",
+  "request": {
+    "repoId": "test-repo",
+    "taskType": "debug",
+    "taskText": "Investigate performance issue in data processing pipeline",
+    "budget": {
+      "maxTokens": 5000,
+      "maxActions": 20,
+      "maxDurationMs": 5000
+    },
+    "options": {
+      "requireDiagnostics": true,
+      "focusSymbols": ["pipeline:processData"],
+      "includeTests": true
+    }
+  },
+  "expectedResponse": {
+    "taskId": "string",
+    "taskType": "debug",
+    "actionsTaken": "array",
+    "path": {
+      "rungs": "array",
+      "estimatedTokens": "number",
+      "estimatedDurationMs": "number",
+      "reasoning": "string"
+    },
+    "finalEvidence": "array",
+    "summary": "string",
+    "success": "boolean",
+    "metrics": {
+      "totalDurationMs": "number",
+      "totalTokens": "number",
+      "totalActions": "number",
+      "successfulActions": "number",
+      "failedActions": "number",
+      "cacheHits": "number"
+    },
+    "answer": "string",
+    "nextBestAction": "string"
+  }
+}

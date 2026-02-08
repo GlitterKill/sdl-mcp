@@ -6,15 +6,23 @@ import type {
   RungType,
 } from "./types.js";
 import { EvidenceCapture } from "./evidence.js";
+import type {
+  PolicyEngine,
+  PolicyRequestContext,
+  PolicyDecision,
+} from "../policy/engine.js";
 
 export class Executor {
   private evidenceCapture: EvidenceCapture;
   private actions: Action[] = [];
   private metrics: ExecutionMetrics;
   private startTime: number;
+  private policyEngine: PolicyEngine | undefined;
+  private policyDecisions: Map<string, PolicyDecision> = new Map();
 
-  constructor() {
+  constructor(policyEngine?: PolicyEngine) {
     this.evidenceCapture = new EvidenceCapture();
+    this.policyEngine = policyEngine;
     this.metrics = {
       totalDurationMs: 0,
       totalTokens: 0,
@@ -200,25 +208,83 @@ export class Executor {
   }
 
   private async executeRawRung(
-    _task: AgentTask,
+    task: AgentTask,
     context: string[],
   ): Promise<void> {
     const actionId = this.generateActionId();
     const startTime = Date.now();
 
     try {
+      const symbols = context
+        .filter((c) => c.startsWith("symbol:"))
+        .map((s) => s.replace("symbol:", ""));
+
+      let rawAccessAllowed = true;
+      let policyDecision: PolicyDecision | undefined;
+
+      if (this.policyEngine && symbols.length > 0) {
+        const symbolId = symbols[0];
+        const policyContext: PolicyRequestContext = {
+          requestType: "codeWindow",
+          repoId: task.repoId,
+          symbolId,
+          identifiersToFind: [],
+          reason: `Raw code access for ${task.taskType} task`,
+        };
+
+        policyDecision = this.policyEngine.evaluate(policyContext);
+        this.policyDecisions.set(actionId, policyDecision);
+
+        if (policyDecision.decision === "deny") {
+          rawAccessAllowed = false;
+          this.metrics.cacheHits++;
+          this.evidenceCapture.captureDiagnostic(
+            symbolId,
+            0,
+            "Raw code access denied by policy",
+          );
+        } else if (
+          policyDecision.decision === "downgrade-to-skeleton" ||
+          policyDecision.decision === "downgrade-to-hotpath"
+        ) {
+          rawAccessAllowed = false;
+          this.metrics.cacheHits++;
+          this.evidenceCapture.captureDiagnostic(
+            symbolId,
+            0,
+            `Raw code access downgraded to ${policyDecision.decision}`,
+          );
+        }
+      }
+
       const action: Action = {
         id: actionId,
         type: "needWindow",
-        status: "completed",
+        status: rawAccessAllowed ? "completed" : "failed",
         input: { context },
-        output: { message: "Raw rung would need code window access" },
+        output: rawAccessAllowed
+          ? { message: "Raw code window accessed successfully" }
+          : {
+              message: "Raw code access denied or downgraded by policy",
+              policyDecision: policyDecision?.decision,
+            },
+        error: rawAccessAllowed
+          ? undefined
+          : `Raw code access denied by policy: ${policyDecision?.decision}`,
         timestamp: startTime,
         durationMs: Date.now() - startTime,
-        evidence: [],
+        evidence: rawAccessAllowed
+          ? []
+          : this.evidenceCapture.getEvidenceByType("diagnostic"),
       };
+
+      if (!rawAccessAllowed) {
+        this.metrics.failedActions++;
+      } else {
+        this.metrics.successfulActions++;
+      }
+
       this.actions.push(action);
-      this.metrics.successfulActions++;
     } catch (error) {
       throw new Error(
         `Raw rung execution failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -244,6 +310,24 @@ export class Executor {
     return this.evidenceCapture.getAllEvidence();
   }
 
+  getNextBestAction(): string | undefined {
+    if (this.policyDecisions.size === 0) {
+      return undefined;
+    }
+
+    for (const decision of this.policyDecisions.values()) {
+      if (decision.decision === "downgrade-to-skeleton") {
+        return "requestSkeleton";
+      } else if (decision.decision === "downgrade-to-hotpath") {
+        return "requestHotPath";
+      } else if (decision.decision === "deny") {
+        return "refineRequest";
+      }
+    }
+
+    return undefined;
+  }
+
   reset(): void {
     this.evidenceCapture.reset();
     this.actions = [];
@@ -256,5 +340,6 @@ export class Executor {
       cacheHits: 0,
     };
     this.startTime = Date.now();
+    this.policyDecisions.clear();
   }
 }

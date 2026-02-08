@@ -1,0 +1,40 @@
+{
+  "name": "agent-explain-simple",
+  "description": "Simple explain task that only uses card rung",
+  "tool": "sdl.agent.orchestrate",
+  "request": {
+    "repoId": "test-repo",
+    "taskType": "explain",
+    "taskText": "Explain how the authentication system works",
+    "budget": {
+      "maxTokens": 1000
+    },
+    "options": {
+      "focusSymbols": ["auth:authenticateUser"],
+      "includeTests": false
+    }
+  },
+  "expectedResponse": {
+    "taskId": "string",
+    "taskType": "explain",
+    "actionsTaken": "array",
+    "path": {
+      "rungs": "array",
+      "estimatedTokens": "number",
+      "estimatedDurationMs": "number",
+      "reasoning": "string"
+    },
+    "finalEvidence": "array",
+    "summary": "string",
+    "success": "boolean",
+    "metrics": {
+      "totalDurationMs": "number",
+      "totalTokens": "number",
+      "totalActions": "number",
+      "successfulActions": "number",
+      "failedActions": "number",
+      "cacheHits": "number"
+    },
+    "answer": "string"
+  }
+}
