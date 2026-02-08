@@ -84,6 +84,24 @@ jobs:
       - name: Run test harness
         run: npm run test:harness
 
+      - name: Run Benchmark CI Guardrails
+        shell: bash
+        run: |
+          echo "Running benchmark CI with guardrails..."
+          npm run build
+          node dist/cli/index.js benchmark:ci --json --out .benchmark/latest-result.json
+          BENCHMARK_EXIT_CODE=$?
+
+          echo "Benchmark exit code: ${BENCHMARK_EXIT_CODE}"
+
+          if [ $BENCHMARK_EXIT_CODE -ne 0 ]; then
+            echo "❌ Benchmark guardrails failed"
+            echo "Review the results in .benchmark/latest-result.json"
+            exit 1
+          fi
+
+          echo "✅ Benchmark guardrails passed"
+
       - name: Verify runtime entrypoints
         shell: bash
         run: |

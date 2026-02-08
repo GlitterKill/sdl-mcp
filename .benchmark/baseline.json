@@ -1,0 +1,43 @@
+{
+  "benchmarkVersion": "2.0",
+  "generatedAt": "2026-02-08T00:00:00.000Z",
+  "results": [
+    {
+      "timestamp": "2026-02-08T00:00:00.000Z",
+      "repoId": "my-repo",
+      "repoPath": ".",
+      "performance": {
+        "indexTimeMs": 32700.85,
+        "indexTimePerFile": 222.45,
+        "indexTimePerSymbol": 5.77,
+        "sliceBuildTimeMs": 430.89,
+        "skeletonGenerationTimeMs": 9.33,
+        "avgSkeletonTimeMs": 1.56,
+        "dbQueryTimeMs": 0
+      },
+      "sdlMcp": {
+        "symbolsIndexed": 5670,
+        "avgCardTokens": 198,
+        "avgSkeletonTokens": 146,
+        "sampleSlice": {
+          "seedSymbol": "doctorCommand",
+          "cards": 5,
+          "tokens": 2753,
+          "frontierSize": 0
+        }
+      },
+      "quality": {
+        "symbolsPerFile": 38.57,
+        "edgesPerSymbol": 33.82,
+        "edgeTypeDistribution": {
+          "import": 185379,
+          "call": 6386
+        },
+        "exportedSymbolRatio": 0.30,
+        "functionMethodRatio": 0.18,
+        "avgDepsPerSymbol": 33.82,
+        "graphConnectivity": 0.93
+      }
+    }
+  ]
+}
