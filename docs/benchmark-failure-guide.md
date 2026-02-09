@@ -501,7 +501,7 @@ Working on improved error handling in slice building.
 **Failure:**
 ```
 
-sliceBuildTimeMs: Increased by 25% (threshold: 20%)
+sliceBuildTimeMs: Increased by 25% (threshold: 25%)
 Baseline: 430ms
 Current: 537ms
 

@@ -317,6 +317,52 @@ export async function benchmarkCICommand(
   }
 
   const repoId = repoConfig.repoId;
+  const configuredRepoPath = resolve(repoConfig.rootPath);
+  const repoPath = existsSync(configuredRepoPath)
+    ? configuredRepoPath
+    : process.cwd();
+
+  if (!existsSync(configuredRepoPath)) {
+    console.warn(
+      `[WARN] Configured repository path does not exist: ${configuredRepoPath}`,
+    );
+    console.warn(`[WARN] Falling back to current working directory: ${repoPath}`);
+  }
+
+  const database = getDb(config.dbPath);
+  runMigrations(database);
+
+  const repoRuntimeConfigJson = JSON.stringify({
+    ignore: repoConfig.ignore,
+    languages: repoConfig.languages,
+    maxFileBytes: repoConfig.maxFileBytes,
+    packageJsonPath: repoConfig.packageJsonPath,
+    tsconfigPath: repoConfig.tsconfigPath,
+    workspaceGlobs: repoConfig.workspaceGlobs,
+  });
+
+  const persistedRepo = db.getRepo(repoId);
+  if (!persistedRepo) {
+    db.createRepo({
+      repo_id: repoId,
+      root_path: repoPath,
+      config_json: repoRuntimeConfigJson,
+      created_at: new Date().toISOString(),
+    });
+  } else {
+    const repoUpdates: { root_path?: string; config_json?: string } = {};
+
+    if (persistedRepo.root_path !== repoPath) {
+      repoUpdates.root_path = repoPath;
+    }
+    if (persistedRepo.config_json !== repoRuntimeConfigJson) {
+      repoUpdates.config_json = repoRuntimeConfigJson;
+    }
+
+    if (Object.keys(repoUpdates).length > 0) {
+      db.updateRepo(repoId, repoUpdates);
+    }
+  }
 
   const thresholdPath =
     options.thresholdPath ??
@@ -336,7 +382,7 @@ export async function benchmarkCICommand(
   }
 
   console.log(`\nBenchmarking repository: ${repoId}`);
-  console.log(`Repository path: ${repoConfig.rootPath}`);
+  console.log(`Repository path: ${repoPath}`);
 
   if (thresholds) {
     console.log(
@@ -353,7 +399,7 @@ export async function benchmarkCICommand(
       () =>
         collectBenchmarkMetrics(
           repoId,
-          repoConfig.rootPath,
+          repoPath,
           options.skipIndexing ?? false,
         ).then((m) => m as unknown as Record<string, number>),
     );
@@ -363,7 +409,7 @@ export async function benchmarkCICommand(
     console.log(`\nRunning benchmark (single run)...`);
     benchmarkMetrics = await collectBenchmarkMetrics(
       repoId,
-      repoConfig.rootPath,
+      repoPath,
       options.skipIndexing ?? false,
     );
     console.log(`✓ Benchmark complete`);
@@ -496,7 +542,7 @@ export async function benchmarkCICommand(
   const result: BenchmarkCIResult = {
     timestamp: new Date().toISOString(),
     repoId,
-    repoPath: repoConfig.rootPath,
+    repoPath,
     metrics: benchmarkMetrics,
     thresholdResult,
     regressionReport,

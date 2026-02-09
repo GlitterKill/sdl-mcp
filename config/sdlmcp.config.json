@@ -2,7 +2,7 @@
   "repos": [
     {
       "repoId": "my-repo",
-      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp",
+      "rootPath": ".",
       "ignore": [
         "**/node_modules/**",
         "**/dist/**",
@@ -20,7 +20,7 @@
       "maxFileBytes": 2000000
     }
   ],
-  "dbPath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\data\\sdlmcp.sqlite",
+  "dbPath": "./data/sdlmcp.sqlite",
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,

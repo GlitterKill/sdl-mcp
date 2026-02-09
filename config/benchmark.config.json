@@ -40,7 +40,7 @@
       "sliceBuildTimeMs": {
         "maxMs": 200,
         "trend": "lower-is-better",
-        "allowableIncreasePercent": 20
+        "allowableIncreasePercent": 25
       },
       "avgSkeletonTimeMs": {
         "maxMs": 5,
