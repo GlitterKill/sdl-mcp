@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
-import { join } from "path";
+import { mkdirSync } from "fs";
+import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { DB_BUSY_TIMEOUT_MS } from "../config/constants.js";
 
@@ -15,6 +16,15 @@ export function getDb(dbPath?: string): Database.Database {
   const envPath = process.env.SDL_DB_PATH;
   const path =
     dbPath || envPath || join(__dirname, "..", "..", "sdl-ledger.db");
+
+  // Ensure parent directory exists for file-backed databases (CI runners may start clean).
+  if (path !== ":memory:") {
+    const parentDir = dirname(path);
+    if (parentDir && parentDir !== ".") {
+      mkdirSync(parentDir, { recursive: true });
+    }
+  }
+
   const db = new Database(path);
 
   db.pragma("journal_mode = WAL");
