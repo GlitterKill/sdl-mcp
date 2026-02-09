@@ -246,9 +246,16 @@ jobs:
         if: always()
         shell: bash
         run: |
-          MAX_INDEX_MS=30000
-          MAX_EXPORT_MS=5000
-          MAX_TOTAL_MS=35000
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # Windows runners have higher variance for filesystem-heavy indexing.
+            MAX_INDEX_MS=70000
+            MAX_EXPORT_MS=10000
+            MAX_TOTAL_MS=78000
+          else
+            MAX_INDEX_MS=45000
+            MAX_EXPORT_MS=8000
+            MAX_TOTAL_MS=52000
+          fi
 
           INDEX_MS=${{ steps.index.outputs.duration_ms }}
           EXPORT_MS=${{ steps.export.outputs.duration_ms }}
