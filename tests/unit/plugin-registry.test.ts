@@ -11,13 +11,16 @@ import {
   getLanguageIdForExtension,
   loadPlugins,
   getAdapterInfo,
+  resetRegistry,
 } from "../../dist/indexer/adapter/registry.js";
-import { getHostApiVersion } from "../../dist/indexer/adapter/plugin/loader.js";
+import { getHostApiVersion, clearLoadedPlugins } from "../../dist/indexer/adapter/plugin/loader.js";
 
 const TEST_PLUGINS_DIR = path.join(process.cwd(), "test-registry-plugins");
 
 describe("Registry with Plugin Integration", () => {
   beforeEach(() => {
+    resetRegistry();
+    clearLoadedPlugins();
     if (existsSync(TEST_PLUGINS_DIR)) {
       rmSync(TEST_PLUGINS_DIR, { recursive: true, force: true });
     }
@@ -25,6 +28,8 @@ describe("Registry with Plugin Integration", () => {
   });
 
   afterEach(() => {
+    resetRegistry();
+    clearLoadedPlugins();
     if (existsSync(TEST_PLUGINS_DIR)) {
       rmSync(TEST_PLUGINS_DIR, { recursive: true, force: true });
     }

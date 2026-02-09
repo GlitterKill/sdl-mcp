@@ -1,0 +1,38 @@
+[
+  {
+    "id": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex:import:0",
+    "filePath": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex",
+    "range": {
+      "startLine": 1,
+      "startCol": 0,
+      "endLine": 1,
+      "endCol": 16
+    },
+    "moduleName": "stdlib",
+    "symbols": []
+  },
+  {
+    "id": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex:import:1",
+    "filePath": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex",
+    "range": {
+      "startLine": 2,
+      "startCol": 0,
+      "endLine": 2,
+      "endCol": 21
+    },
+    "moduleName": "mylib/utils",
+    "symbols": []
+  },
+  {
+    "id": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex:import:2",
+    "filePath": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex",
+    "range": {
+      "startLine": 3,
+      "startCol": 0,
+      "endLine": 3,
+      "endCol": 24
+    },
+    "moduleName": "./local_module",
+    "symbols": []
+  }
+]

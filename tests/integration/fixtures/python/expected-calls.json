@@ -1,6 +1,6 @@
 [
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:0",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:0",
     "calleeIdentifier": "calculate_sum",
     "isResolved": false,
     "callType": "function",
@@ -12,7 +12,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:message:1",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:message:1",
     "calleeIdentifier": "greet",
     "isResolved": false,
     "callType": "function",
@@ -24,7 +24,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:obj:2",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:obj:2",
     "calleeIdentifier": "MyClass",
     "isResolved": false,
     "callType": "function",
@@ -60,7 +60,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:3",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:3",
     "calleeIdentifier": "obj.method1",
     "isResolved": false,
     "callType": "method",
@@ -72,7 +72,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:3",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:3",
     "calleeIdentifier": "obj.method1().method2",
     "isResolved": false,
     "callType": "method",
@@ -84,7 +84,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:3",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:3",
     "calleeIdentifier": "obj.method1().method2().method3",
     "isResolved": false,
     "callType": "method",
@@ -96,7 +96,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:4",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:4",
     "calleeIdentifier": "data.strip",
     "isResolved": false,
     "callType": "method",
@@ -108,7 +108,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:4",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:4",
     "calleeIdentifier": "data.strip().lower",
     "isResolved": false,
     "callType": "method",
@@ -120,7 +120,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:4",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:4",
     "calleeIdentifier": "data.strip().lower().replace",
     "isResolved": false,
     "callType": "method",
@@ -132,7 +132,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:instance:5",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:instance:5",
     "calleeIdentifier": "MyClass",
     "isResolved": false,
     "callType": "function",
@@ -144,7 +144,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:person:6",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:person:6",
     "calleeIdentifier": "Person",
     "isResolved": false,
     "callType": "function",
@@ -180,7 +180,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:7",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:7",
     "calleeIdentifier": "calculate_sum",
     "isResolved": false,
     "callType": "function",
@@ -192,7 +192,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:7",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:7",
     "calleeIdentifier": "calculate_sum",
     "isResolved": false,
     "callType": "function",
@@ -204,7 +204,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:7",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:result:7",
     "calleeIdentifier": "calculate_sum",
     "isResolved": false,
     "callType": "function",
@@ -216,7 +216,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:8",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:8",
     "calleeIdentifier": "process",
     "isResolved": false,
     "callType": "function",
@@ -228,7 +228,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:8",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:8",
     "calleeIdentifier": "calculate",
     "isResolved": false,
     "callType": "function",
@@ -240,7 +240,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:8",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:text:8",
     "calleeIdentifier": "calculate",
     "isResolved": false,
     "callType": "function",
@@ -252,7 +252,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:data:9",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:data:9",
     "calleeIdentifier": "fetch_data",
     "isResolved": false,
     "callType": "function",
@@ -264,7 +264,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:processed:10",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:processed:10",
     "calleeIdentifier": "process_data",
     "isResolved": false,
     "callType": "function",
@@ -300,7 +300,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:results:13",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:results:13",
     "calleeIdentifier": "calculate_sum",
     "isResolved": false,
     "callType": "function",
@@ -312,7 +312,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:processor:14",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:processor:14",
     "calleeIdentifier": "process",
     "isResolved": false,
     "callType": "function",
@@ -324,7 +324,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:adder:15",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\calls.py:adder:15",
     "calleeIdentifier": "calculate_sum",
     "isResolved": false,
     "callType": "function",

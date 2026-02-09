@@ -1,6 +1,6 @@
 [
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
     "calleeIdentifier": "echo",
     "isResolved": false,
     "callType": "dynamic",
@@ -12,7 +12,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
     "calleeIdentifier": "echo",
     "isResolved": false,
     "callType": "dynamic",
@@ -24,7 +24,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
     "calleeIdentifier": "echo",
     "isResolved": false,
     "callType": "dynamic",
@@ -36,7 +36,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:process_data",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:process_data",
     "calleeIdentifier": "echo",
     "isResolved": false,
     "callType": "dynamic",
@@ -48,11 +48,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:orchestrate",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:orchestrate",
     "calleeIdentifier": "hello_world",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
     "range": {
       "startLine": 23,
       "startCol": 4,
@@ -61,11 +61,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:orchestrate",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:orchestrate",
     "calleeIdentifier": "greet_user",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
     "range": {
       "startLine": 24,
       "startCol": 4,
@@ -74,11 +74,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:orchestrate",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:orchestrate",
     "calleeIdentifier": "calculate",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
     "range": {
       "startLine": 25,
       "startCol": 4,
@@ -91,7 +91,7 @@
     "calleeIdentifier": "hello_world",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
     "range": {
       "startLine": 36,
       "startCol": 0,
@@ -104,7 +104,7 @@
     "calleeIdentifier": "greet_user",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
     "range": {
       "startLine": 39,
       "startCol": 0,
@@ -117,7 +117,7 @@
     "calleeIdentifier": "greet_user",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
     "range": {
       "startLine": 40,
       "startCol": 0,
@@ -130,7 +130,7 @@
     "calleeIdentifier": "calculate",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
     "range": {
       "startLine": 43,
       "startCol": 0,
@@ -139,11 +139,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:sum",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:sum",
     "calleeIdentifier": "calculate",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
     "range": {
       "startLine": 46,
       "startCol": 12,
@@ -156,7 +156,7 @@
     "calleeIdentifier": "calculate",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
     "range": {
       "startLine": 49,
       "startCol": 0,
@@ -181,7 +181,7 @@
     "calleeIdentifier": "calculate",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
     "range": {
       "startLine": 52,
       "startCol": 1,
@@ -350,7 +350,7 @@
     "calleeIdentifier": "hello_world",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
     "range": {
       "startLine": 91,
       "startCol": 0,
@@ -387,7 +387,7 @@
     "calleeIdentifier": "process_data",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:process_data",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:process_data",
     "range": {
       "startLine": 96,
       "startCol": 0,
@@ -400,7 +400,7 @@
     "calleeIdentifier": "hello_world",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
     "range": {
       "startLine": 99,
       "startCol": 0,
@@ -413,7 +413,7 @@
     "calleeIdentifier": "greet_user",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
     "range": {
       "startLine": 100,
       "startCol": 0,
@@ -426,7 +426,7 @@
     "calleeIdentifier": "calculate",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
     "range": {
       "startLine": 101,
       "startCol": 0,
@@ -451,7 +451,7 @@
     "calleeIdentifier": "hello_world",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
     "range": {
       "startLine": 104,
       "startCol": 2,
@@ -500,7 +500,7 @@
     "calleeIdentifier": "calculate",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
     "range": {
       "startLine": 110,
       "startCol": 3,
@@ -525,7 +525,7 @@
     "calleeIdentifier": "calculate",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
     "range": {
       "startLine": 115,
       "startCol": 6,
@@ -570,11 +570,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:result",
+    "callerNodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:result",
     "calleeIdentifier": "calculate",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
     "range": {
       "startLine": 129,
       "startCol": 9,
@@ -587,7 +587,7 @@
     "calleeIdentifier": "process_data",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:process_data",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:process_data",
     "range": {
       "startLine": 132,
       "startCol": 0,
@@ -612,7 +612,7 @@
     "calleeIdentifier": "hello_world",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:hello_world",
     "range": {
       "startLine": 137,
       "startCol": 0,
@@ -637,7 +637,7 @@
     "calleeIdentifier": "greet_user",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:greet_user",
     "range": {
       "startLine": 139,
       "startCol": 0,
@@ -650,7 +650,7 @@
     "calleeIdentifier": "calculate",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
+    "calleeSymbolId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\calls.sh:calculate",
     "range": {
       "startLine": 140,
       "startCol": 0,

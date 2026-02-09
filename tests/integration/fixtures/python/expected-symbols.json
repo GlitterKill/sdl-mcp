@@ -1,6 +1,6 @@
 [
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:calculate_sum:0",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:calculate_sum:0",
     "kind": "function",
     "name": "calculate_sum",
     "exported": true,
@@ -26,7 +26,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:greet:1",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:greet:1",
     "kind": "function",
     "name": "greet",
     "exported": true,
@@ -46,7 +46,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:process_data:2",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:process_data:2",
     "kind": "function",
     "name": "process_data",
     "exported": true,
@@ -71,7 +71,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:flexible_function:3",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:flexible_function:3",
     "kind": "function",
     "name": "flexible_function",
     "exported": true,
@@ -94,7 +94,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:_internal_helper:4",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:_internal_helper:4",
     "kind": "function",
     "name": "_internal_helper",
     "exported": false,
@@ -110,7 +110,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:__very_private:5",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:__very_private:5",
     "kind": "function",
     "name": "__very_private",
     "exported": false,
@@ -126,7 +126,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:decorated_function:6",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:decorated_function:6",
     "kind": "function",
     "name": "decorated_function",
     "exported": true,
@@ -142,7 +142,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Animal:7",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Animal:7",
     "kind": "class",
     "name": "Animal",
     "exported": true,
@@ -158,7 +158,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:__init__:8",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:__init__:8",
     "kind": "function",
     "name": "__init__",
     "exported": false,
@@ -182,7 +182,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:speak:9",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:speak:9",
     "kind": "function",
     "name": "speak",
     "exported": true,
@@ -202,7 +202,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Dog:10",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Dog:10",
     "kind": "class",
     "name": "Dog",
     "exported": true,
@@ -218,7 +218,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:speak:11",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:speak:11",
     "kind": "function",
     "name": "speak",
     "exported": true,
@@ -239,7 +239,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:fetch:12",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:fetch:12",
     "kind": "function",
     "name": "fetch",
     "exported": true,
@@ -264,7 +264,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:_InternalClass:13",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:_InternalClass:13",
     "kind": "class",
     "name": "_InternalClass",
     "exported": false,
@@ -280,7 +280,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:method:14",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:method:14",
     "kind": "function",
     "name": "method",
     "exported": true,
@@ -300,7 +300,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Person:15",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Person:15",
     "kind": "class",
     "name": "Person",
     "exported": true,
@@ -316,7 +316,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:name:16",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:name:16",
     "kind": "variable",
     "name": "name",
     "exported": true,
@@ -329,7 +329,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:age:17",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:age:17",
     "kind": "variable",
     "name": "age",
     "exported": true,
@@ -342,7 +342,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:module_variable:18",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:module_variable:18",
     "kind": "variable",
     "name": "module_variable",
     "exported": true,
@@ -355,7 +355,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:_private_var:19",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:_private_var:19",
     "kind": "variable",
     "name": "_private_var",
     "exported": false,
@@ -368,7 +368,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:StringList:20",
+    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:StringList:20",
     "kind": "variable",
     "name": "StringList",
     "exported": true,

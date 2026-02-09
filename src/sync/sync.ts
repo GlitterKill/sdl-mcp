@@ -13,15 +13,15 @@ import { getCurrentTimestamp } from "../util/time.js";
 import {
   getRepo,
   getFilesByRepo,
-  getSymbolsByRepoForSnapshot,
+  getSymbolsByRepo,
   getEdgesByRepo,
   getVersion,
   getLatestVersion,
-  listVersions,
 } from "../db/queries.js";
 import { readdir, readFile, writeFile, mkdir } from "fs/promises";
+import { readFileSync } from "fs";
 import { join, dirname } from "path";
-import { gzip, gunzip } from "zlib";
+import { gzip, gunzip, gunzipSync } from "zlib";
 import { promisify } from "util";
 
 const gzipAsync = promisify(gzip);
@@ -51,13 +51,43 @@ export async function exportArtifact(
     throw new Error(`Version not found: ${versionId}`);
   }
 
+  const commitSha =
+    options.commitSha ?? (await getGitCommitSha(repo.root_path));
+
+  const files = getFilesByRepo(options.repoId);
+  const symbols = getSymbolsByRepo(options.repoId);
+
   const state: SyncIndexState = {
     repo_id: options.repoId,
     version_id: versionId,
     version_hash: version.version_hash,
     prev_version_hash: version.prev_version_hash,
-    files: getFilesByRepo(options.repoId),
-    symbols: getSymbolsByRepoForSnapshot(options.repoId),
+    files: files.map((f) => ({
+      file_id: f.file_id,
+      rel_path: f.rel_path,
+      content_hash: f.content_hash,
+      language: f.language,
+      byte_size: f.byte_size,
+    })),
+    symbols: symbols.map((s) => ({
+      symbol_id: s.symbol_id,
+      file_id: s.file_id,
+      kind: s.kind,
+      name: s.name,
+      exported: s.exported,
+      visibility: s.visibility,
+      language: s.language,
+      range_start_line: s.range_start_line,
+      range_start_col: s.range_start_col,
+      range_end_line: s.range_end_line,
+      range_end_col: s.range_end_col,
+      ast_fingerprint: s.ast_fingerprint,
+      signature_json: s.signature_json,
+      summary: s.summary,
+      invariants_json: s.invariants_json,
+      side_effects_json: s.side_effects_json,
+      updated_at: s.updated_at,
+    })),
     symbol_versions: db
       .prepare("SELECT * FROM symbol_versions WHERE version_id = ?")
       .all(versionId) as any[],
@@ -74,8 +104,6 @@ export async function exportArtifact(
   const artifactHash = hashContent(stateJson);
 
   const artifactId = `${options.repoId}-${commitSha ?? "manual"}-${artifactHash.slice(0, 12)}`;
-  const commitSha =
-    options.commitSha ?? (await getGitCommitSha(repo.root_path));
 
   const artifact: SyncArtifact = {
     artifact_id: artifactId,
@@ -156,12 +184,12 @@ export async function importArtifact(
 
     for (const file of state.files) {
       db.prepare(
-        `INSERT OR REPLACE INTO files 
+        `INSERT OR REPLACE INTO files
            (file_id, repo_id, rel_path, content_hash, language, byte_size, last_indexed_at, directory)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         file.file_id,
-        file.repo_id,
+        artifact.repo_id,
         file.rel_path,
         file.content_hash,
         file.language,
@@ -173,14 +201,14 @@ export async function importArtifact(
 
     for (const symbol of state.symbols) {
       db.prepare(
-        `INSERT OR REPLACE INTO symbols 
+        `INSERT OR REPLACE INTO symbols
            (symbol_id, repo_id, file_id, kind, name, exported, visibility, language,
             range_start_line, range_start_col, range_end_line, range_end_col,
             ast_fingerprint, signature_json, summary, invariants_json, side_effects_json, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         symbol.symbol_id,
-        symbol.repo_id,
+        artifact.repo_id,
         symbol.file_id,
         symbol.kind,
         symbol.name,
@@ -280,11 +308,11 @@ export function getArtifactMetadata(
   artifactPath: string,
 ): SyncArtifactMetadata | null {
   try {
-    const artifactContent = require("fs").readFileSync(artifactPath, "utf-8");
+    const artifactContent = readFileSync(artifactPath, "utf-8");
     const artifact: SyncArtifact = JSON.parse(artifactContent);
 
     const compressed = Buffer.from(artifact.compressed_data, "base64");
-    const decompressed = require("zlib").gunzipSync(compressed);
+    const decompressed = gunzipSync(compressed);
     const state: SyncIndexState = JSON.parse(decompressed.toString("utf-8"));
 
     return {

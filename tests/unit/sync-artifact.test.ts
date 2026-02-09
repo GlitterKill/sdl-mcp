@@ -1,19 +1,26 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { join } from "path";
+import { describe, it, beforeEach, afterEach } from "node:test";
+import assert from "node:assert";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { unlinkSync, rmdirSync, existsSync } from "fs";
 import {
   exportArtifact,
   importArtifact,
   getArtifactMetadata,
-} from "../../src/sync/sync.js";
-import { getDb, closeDb } from "../../src/db/db.js";
-import { runMigrations } from "../../src/db/migrations.js";
+} from "../../dist/sync/sync.js";
+import { getDb, closeDb } from "../../dist/db/db.js";
+import { runMigrations } from "../../dist/db/migrations.js";
 import {
   createRepo,
+  createVersion,
   upsertFile,
   upsertSymbolTransaction,
-} from "../../src/db/queries.js";
-import { getCurrentTimestamp } from "../../src/util/time.js";
+  resetQueryCache,
+} from "../../dist/db/queries.js";
+import { getCurrentTimestamp } from "../../dist/util/time.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 describe("Sync Artifact Model", () => {
   const testDbPath = join(__dirname, "test-sync.db");
@@ -31,6 +38,8 @@ describe("Sync Artifact Model", () => {
   });
 
   afterEach(() => {
+    resetQueryCache();
+    closeDb();
     if (existsSync(testDbPath)) {
       unlinkSync(testDbPath);
     }
@@ -38,7 +47,6 @@ describe("Sync Artifact Model", () => {
       rmdirSync(syncDir, { recursive: true });
     }
     delete process.env.SDL_DB_PATH;
-    closeDb();
   });
 
   it("should create sync artifact with commit SHA linking", async () => {
@@ -52,6 +60,13 @@ describe("Sync Artifact Model", () => {
       created_at: getCurrentTimestamp(),
     });
 
+    createVersion({
+      version_id: "v-test",
+      repo_id: repoId,
+      created_at: getCurrentTimestamp(),
+      reason: "test-version",
+    });
+
     upsertFile({
       repo_id: repoId,
       rel_path: "test.ts",
@@ -59,7 +74,6 @@ describe("Sync Artifact Model", () => {
       language: "ts",
       byte_size: 100,
       last_indexed_at: getCurrentTimestamp(),
-      directory: ".",
     });
 
     const result = await exportArtifact({
@@ -69,10 +83,10 @@ describe("Sync Artifact Model", () => {
       outputPath: join(syncDir, "test.sdl-artifact.json"),
     });
 
-    expect(result.artifactId).toContain(repoId);
-    expect(result.commitSha).toBe("abc123def456");
-    expect(result.fileCount).toBe(1);
-    expect(result.sizeBytes).toBeGreaterThan(0);
+    assert.ok(result.artifactId.includes(repoId));
+    assert.strictEqual(result.commitSha, "abc123def456");
+    assert.strictEqual(result.fileCount, 1);
+    assert.ok(result.sizeBytes > 0);
   });
 
   it("should export and import sync artifact with integrity verification", async () => {
@@ -86,6 +100,13 @@ describe("Sync Artifact Model", () => {
       created_at: getCurrentTimestamp(),
     });
 
+    createVersion({
+      version_id: "v-test",
+      repo_id: repoId,
+      created_at: getCurrentTimestamp(),
+      reason: "test-version",
+    });
+
     upsertFile({
       repo_id: repoId,
       rel_path: "test.ts",
@@ -93,7 +114,6 @@ describe("Sync Artifact Model", () => {
       language: "ts",
       byte_size: 100,
       last_indexed_at: getCurrentTimestamp(),
-      directory: ".",
     });
 
     const exportResult = await exportArtifact({
@@ -108,9 +128,9 @@ describe("Sync Artifact Model", () => {
       verifyIntegrity: true,
     });
 
-    expect(importResult.verified).toBe(true);
-    expect(importResult.filesRestored).toBe(1);
-    expect(importResult.repoId).toBe(repoId);
+    assert.strictEqual(importResult.verified, true);
+    assert.strictEqual(importResult.filesRestored, 1);
+    assert.strictEqual(importResult.repoId, repoId);
   });
 
   it("should reject import with hash mismatch on tampered artifact", async () => {
@@ -124,6 +144,13 @@ describe("Sync Artifact Model", () => {
       created_at: getCurrentTimestamp(),
     });
 
+    createVersion({
+      version_id: "v-test",
+      repo_id: repoId,
+      created_at: getCurrentTimestamp(),
+      reason: "test-version",
+    });
+
     upsertFile({
       repo_id: repoId,
       rel_path: "test.ts",
@@ -131,7 +158,6 @@ describe("Sync Artifact Model", () => {
       language: "ts",
       byte_size: 100,
       last_indexed_at: getCurrentTimestamp(),
-      directory: ".",
     });
 
     const exportResult = await exportArtifact({
@@ -149,13 +175,14 @@ describe("Sync Artifact Model", () => {
       "utf-8",
     );
 
-    await expect(
+    await assert.rejects(
       importArtifact({
         artifactPath: exportResult.artifactPath,
         repoId,
         verifyIntegrity: true,
       }),
-    ).rejects.toThrow("Artifact integrity check failed");
+      { message: /Artifact integrity check failed/ },
+    );
   });
 
   it("should retrieve artifact metadata without full import", async () => {
@@ -169,6 +196,13 @@ describe("Sync Artifact Model", () => {
       created_at: getCurrentTimestamp(),
     });
 
+    createVersion({
+      version_id: "v-test",
+      repo_id: repoId,
+      created_at: getCurrentTimestamp(),
+      reason: "test-version",
+    });
+
     upsertFile({
       repo_id: repoId,
       rel_path: "test.ts",
@@ -176,7 +210,6 @@ describe("Sync Artifact Model", () => {
       language: "ts",
       byte_size: 100,
       last_indexed_at: getCurrentTimestamp(),
-      directory: ".",
     });
 
     const exportResult = await exportArtifact({
@@ -186,15 +219,15 @@ describe("Sync Artifact Model", () => {
 
     const metadata = getArtifactMetadata(exportResult.artifactPath);
 
-    expect(metadata).not.toBeNull();
-    expect(metadata?.artifact_id).toBe(exportResult.artifactId);
-    expect(metadata?.repo_id).toBe(repoId);
-    expect(metadata?.file_count).toBe(1);
+    assert.ok(metadata !== null);
+    assert.strictEqual(metadata?.artifact_id, exportResult.artifactId);
+    assert.strictEqual(metadata?.repo_id, repoId);
+    assert.strictEqual(metadata?.file_count, 1);
   });
 
   it("should handle missing artifact metadata gracefully", () => {
     const metadata = getArtifactMetadata(join(syncDir, "nonexistent.json"));
-    expect(metadata).toBeNull();
+    assert.strictEqual(metadata, null);
   });
 
   it("should handle repo_id mismatch with force flag", async () => {
@@ -208,6 +241,13 @@ describe("Sync Artifact Model", () => {
       created_at: getCurrentTimestamp(),
     });
 
+    createVersion({
+      version_id: "v-test",
+      repo_id: repoId,
+      created_at: getCurrentTimestamp(),
+      reason: "test-version",
+    });
+
     upsertFile({
       repo_id: repoId,
       rel_path: "test.ts",
@@ -215,7 +255,6 @@ describe("Sync Artifact Model", () => {
       language: "ts",
       byte_size: 100,
       last_indexed_at: getCurrentTimestamp(),
-      directory: ".",
     });
 
     const exportResult = await exportArtifact({
@@ -223,13 +262,14 @@ describe("Sync Artifact Model", () => {
       outputPath: join(syncDir, "test.sdl-artifact.json"),
     });
 
-    await expect(
+    await assert.rejects(
       importArtifact({
         artifactPath: exportResult.artifactPath,
         repoId: "different-repo",
         verifyIntegrity: false,
       }),
-    ).rejects.toThrow("does not match expected repo_id");
+      { message: /does not match expected repo_id/ },
+    );
 
     const importResult = await importArtifact({
       artifactPath: exportResult.artifactPath,
@@ -238,6 +278,6 @@ describe("Sync Artifact Model", () => {
       verifyIntegrity: false,
     });
 
-    expect(importResult.repoId).toBe(repoId);
+    assert.strictEqual(importResult.repoId, repoId);
   });
 });

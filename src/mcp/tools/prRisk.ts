@@ -1,17 +1,12 @@
 import {
   computeDeltaWithTiers,
-  computeStalenessTiers,
 } from "../../delta/diff.js";
 import { computeBlastRadius } from "../../delta/blastRadius.js";
 import { loadGraphForRepo } from "../../graph/buildGraph.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyEngine } from "../../policy/engine.js";
 import { logger } from "../../util/logger.js";
-import type {
-  PRRiskAnalysisRequestSchema,
-  PRRiskAnalysisResponseSchema,
-} from "../tools.js";
-import * as db from "../../db/queries.js";
+import { PRRiskAnalysisRequestSchema } from "../tools.js";
 
 export async function handlePRRiskAnalysis(args: unknown) {
   const validated = PRRiskAnalysisRequestSchema.parse(args);
@@ -67,14 +62,8 @@ export async function handlePRRiskAnalysis(args: unknown) {
     policyDecision = policyEngine.evaluate({
       requestType: "codeWindow",
       repoId: validated.repoId,
-      maxWindowLines: null,
-      maxWindowTokens: null,
       identifiersToFind: [],
       reason: `PR risk score ${riskScore} exceeds threshold`,
-      symbolId: null,
-      budget: null,
-      symbolData: null,
-      sliceContext: null,
     });
   }
 

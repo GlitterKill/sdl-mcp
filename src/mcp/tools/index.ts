@@ -42,9 +42,7 @@ import { PolicyGetRequestSchema, PolicySetRequestSchema } from "../tools.js";
 import { handlePolicyGet, handlePolicySet } from "./policy.js";
 import {
   PRRiskAnalysisRequestSchema,
-  PRRiskAnalysisResponseSchema,
   AgentOrchestrateRequestSchema,
-  AgentOrchestrateResponseSchema,
 } from "../tools.js";
 import { handlePRRiskAnalysis } from "./prRisk.js";
 import { handleAgentOrchestrate } from "./agent.js";

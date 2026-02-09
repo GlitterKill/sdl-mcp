@@ -1,22 +1,30 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { join } from "path";
+import { describe, it, beforeEach, afterEach } from "node:test";
+import assert from "node:assert";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { unlinkSync, rmdirSync, existsSync, mkdirSync } from "fs";
-import { exportArtifact, importArtifact } from "../../src/sync/sync.js";
-import { pullWithFallback } from "../../src/sync/pull.js";
-import { getDb, closeDb } from "../../src/db/db.js";
-import { runMigrations } from "../../src/db/migrations.js";
+import { exportArtifact, importArtifact } from "../../dist/sync/sync.js";
+import { pullWithFallback } from "../../dist/sync/pull.js";
+import { getDb, closeDb } from "../../dist/db/db.js";
+import { runMigrations } from "../../dist/db/migrations.js";
 import {
   createRepo,
+  createVersion,
   upsertFile,
   upsertSymbolTransaction,
   createEdgeTransaction,
-} from "../../src/db/queries.js";
-import { getCurrentTimestamp } from "../../src/util/time.js";
-import { indexRepo } from "../../src/indexer/indexer.js";
+  resetQueryCache,
+} from "../../dist/db/queries.js";
+import { getCurrentTimestamp } from "../../dist/util/time.js";
+import { indexRepo } from "../../dist/indexer/indexer.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 describe("Round-Trip Sync Integration", () => {
   const testDbPath = join(__dirname, "test-roundtrip.db");
   const syncDir = join(__dirname, "test-roundtrip-artifacts");
+  const pullSyncDir = join(process.cwd(), ".sdl-sync");
   const repoId = "test-repo-roundtrip";
 
   beforeEach(() => {
@@ -28,17 +36,25 @@ describe("Round-Trip Sync Integration", () => {
       rmdirSync(syncDir, { recursive: true });
     }
     mkdirSync(syncDir, { recursive: true });
+    if (existsSync(pullSyncDir)) {
+      rmdirSync(pullSyncDir, { recursive: true });
+    }
+    mkdirSync(pullSyncDir, { recursive: true });
   });
 
   afterEach(() => {
+    resetQueryCache();
+    closeDb();
     if (existsSync(testDbPath)) {
       unlinkSync(testDbPath);
     }
     if (existsSync(syncDir)) {
       rmdirSync(syncDir, { recursive: true });
     }
+    if (existsSync(pullSyncDir)) {
+      rmdirSync(pullSyncDir, { recursive: true });
+    }
     delete process.env.SDL_DB_PATH;
-    closeDb();
   });
 
   it("should perform complete round-trip sync: export -> import -> verify", async () => {
@@ -52,6 +68,13 @@ describe("Round-Trip Sync Integration", () => {
       created_at: getCurrentTimestamp(),
     });
 
+    createVersion({
+      version_id: "v-test",
+      repo_id: repoId,
+      created_at: getCurrentTimestamp(),
+      reason: "test-version",
+    });
+
     upsertFile({
       repo_id: repoId,
       rel_path: "src/index.ts",
@@ -59,7 +82,6 @@ describe("Round-Trip Sync Integration", () => {
       language: "ts",
       byte_size: 500,
       last_indexed_at: getCurrentTimestamp(),
-      directory: "src",
     });
 
     upsertFile({
@@ -69,7 +91,6 @@ describe("Round-Trip Sync Integration", () => {
       language: "ts",
       byte_size: 300,
       last_indexed_at: getCurrentTimestamp(),
-      directory: "src",
     });
 
     const exportResult = await exportArtifact({
@@ -79,8 +100,9 @@ describe("Round-Trip Sync Integration", () => {
       outputPath: join(syncDir, "roundtrip-test.sdl-artifact.json"),
     });
 
-    expect(exportResult.fileCount).toBe(2);
+    assert.strictEqual(exportResult.fileCount, 2);
 
+    resetQueryCache();
     closeDb();
     unlinkSync(testDbPath);
 
@@ -93,17 +115,19 @@ describe("Round-Trip Sync Integration", () => {
       verifyIntegrity: true,
     });
 
-    expect(importResult.verified).toBe(true);
-    expect(importResult.filesRestored).toBe(2);
-    expect(importResult.repoId).toBe(repoId);
+    assert.strictEqual(importResult.verified, true);
+    assert.strictEqual(importResult.filesRestored, 2);
+    assert.strictEqual(importResult.repoId, repoId);
 
-    const { getFilesByRepo } = await import("../../src/db/queries.js");
+    const { getFilesByRepo } = await import("../../dist/db/queries.js");
     const restoredFiles = getFilesByRepo(repoId);
-    expect(restoredFiles.length).toBe(2);
-    expect(restoredFiles.some((f: any) => f.rel_path === "src/index.ts")).toBe(
+    assert.strictEqual(restoredFiles.length, 2);
+    assert.strictEqual(
+      restoredFiles.some((f: any) => f.rel_path === "src/index.ts"),
       true,
     );
-    expect(restoredFiles.some((f: any) => f.rel_path === "src/utils.ts")).toBe(
+    assert.strictEqual(
+      restoredFiles.some((f: any) => f.rel_path === "src/utils.ts"),
       true,
     );
   });
@@ -119,6 +143,13 @@ describe("Round-Trip Sync Integration", () => {
       created_at: getCurrentTimestamp(),
     });
 
+    createVersion({
+      version_id: "v-test",
+      repo_id: repoId,
+      created_at: getCurrentTimestamp(),
+      reason: "test-version",
+    });
+
     upsertFile({
       repo_id: repoId,
       rel_path: "src/test.ts",
@@ -126,20 +157,26 @@ describe("Round-Trip Sync Integration", () => {
       language: "ts",
       byte_size: 200,
       last_indexed_at: getCurrentTimestamp(),
-      directory: "src",
     });
 
-    const exportResult = await exportArtifact({
+    await exportArtifact({
       repoId,
       commitSha: "abc123",
-      outputPath: join(syncDir, "pull-test.sdl-artifact.json"),
     });
 
+    resetQueryCache();
     closeDb();
     unlinkSync(testDbPath);
 
     const newDb = getDb();
     runMigrations(newDb);
+
+    createRepo({
+      repo_id: repoId,
+      root_path: "/fake/repo",
+      config_json: "{}",
+      created_at: getCurrentTimestamp(),
+    });
 
     const pullResult = await pullWithFallback({
       repoId,
@@ -148,9 +185,9 @@ describe("Round-Trip Sync Integration", () => {
       maxRetries: 1,
     });
 
-    expect(pullResult.success).toBe(true);
-    expect(pullResult.method).toBe("artifact");
-    expect(pullResult.versionId).not.toBeNull();
+    assert.strictEqual(pullResult.success, true);
+    assert.strictEqual(pullResult.method, "artifact");
+    assert.ok(pullResult.versionId !== null);
   });
 
   it("should handle pull with no artifact and fallback disabled", async () => {
@@ -170,9 +207,9 @@ describe("Round-Trip Sync Integration", () => {
       maxRetries: 1,
     });
 
-    expect(pullResult.success).toBe(false);
-    expect(pullResult.method).toBe("fallback");
-    expect(pullResult.error).toContain("No sync artifact found");
+    assert.strictEqual(pullResult.success, false);
+    assert.strictEqual(pullResult.method, "fallback");
+    assert.ok(pullResult.error.includes("No sync artifact found"));
   });
 
   it("should verify deterministic restore across multiple exports/imports", async () => {
@@ -186,6 +223,13 @@ describe("Round-Trip Sync Integration", () => {
       created_at: getCurrentTimestamp(),
     });
 
+    createVersion({
+      version_id: "v-test",
+      repo_id: repoId,
+      created_at: getCurrentTimestamp(),
+      reason: "test-version",
+    });
+
     upsertFile({
       repo_id: repoId,
       rel_path: "deterministic.ts",
@@ -193,7 +237,6 @@ describe("Round-Trip Sync Integration", () => {
       language: "ts",
       byte_size: 150,
       last_indexed_at: getCurrentTimestamp(),
-      directory: ".",
     });
 
     const exportResult1 = await exportArtifact({
@@ -208,8 +251,8 @@ describe("Round-Trip Sync Integration", () => {
       outputPath: join(syncDir, "det2.sdl-artifact.json"),
     });
 
-    expect(exportResult1.artifactId).toBe(exportResult2.artifactId);
-    expect(exportResult1.artifactHash).toBe(exportResult2.artifactHash);
+    assert.strictEqual(exportResult1.artifactId, exportResult2.artifactId);
+    assert.strictEqual(exportResult1.artifactHash, exportResult2.artifactHash);
 
     const { readFile } = await import("fs/promises");
     const content1 = await readFile(exportResult1.artifactPath, "utf-8");
@@ -217,7 +260,7 @@ describe("Round-Trip Sync Integration", () => {
     const artifact1 = JSON.parse(content1);
     const artifact2 = JSON.parse(content2);
 
-    expect(artifact1.compressed_data).toBe(artifact2.compressed_data);
+    assert.strictEqual(artifact1.compressed_data, artifact2.compressed_data);
   });
 
   it("should handle pull with retry on transient failures", async () => {
@@ -231,8 +274,15 @@ describe("Round-Trip Sync Integration", () => {
       created_at: getCurrentTimestamp(),
     });
 
+    createVersion({
+      version_id: "v-test",
+      repo_id: repoId,
+      created_at: getCurrentTimestamp(),
+      reason: "test-version",
+    });
+
     let attemptCount = 0;
-    const originalGetArtifactMetadata = (await import("../../src/sync/sync.js"))
+    const originalGetArtifactMetadata = (await import("../../dist/sync/sync.js"))
       .getArtifactMetadata;
 
     const mockGetArtifactMetadata = (path: string) => {
@@ -243,9 +293,8 @@ describe("Round-Trip Sync Integration", () => {
       return originalGetArtifactMetadata(path);
     };
 
-    const exportResult = await exportArtifact({
+    await exportArtifact({
       repoId,
-      outputPath: join(syncDir, "retry-test.sdl-artifact.json"),
     });
 
     const pullResult = await pullWithFallback({
@@ -253,6 +302,6 @@ describe("Round-Trip Sync Integration", () => {
       maxRetries: 3,
     });
 
-    expect(pullResult.success).toBe(true);
+    assert.strictEqual(pullResult.success, true);
   });
 });

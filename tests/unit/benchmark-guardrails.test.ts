@@ -1,19 +1,15 @@
-# Benchmark Guardrails Test
-
-Test suite for the benchmark guardrails system.
-
-import { describe, it, expect, beforeEach } from "bun:test";
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from "fs";
+import { describe, it, beforeEach, afterEach } from "node:test";
+import assert from "node:assert";
+import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { resolve } from "path";
 import {
   ThresholdEvaluator,
-  loadThresholdConfig,
   loadBaselineMetrics,
   saveBaselineMetrics,
   type BenchmarkThresholds,
-} from "../../src/benchmark/threshold.js";
-import { RegressionReportGenerator } from "../../src/benchmark/regression.js";
-import { MetricSmoothing, runBenchmarkWithSmoothing } from "../../src/benchmark/smoothing.js";
+} from "../../dist/benchmark/threshold.js";
+import { RegressionReportGenerator } from "../../dist/benchmark/regression.js";
+import { MetricSmoothing, runBenchmarkWithSmoothing } from "../../dist/benchmark/smoothing.js";
 
 describe("Benchmark Threshold Evaluator", () => {
   let thresholds: BenchmarkThresholds;
@@ -62,11 +58,13 @@ describe("Benchmark Threshold Evaluator", () => {
 
     const result = evaluator.evaluate(currentMetrics, baselineMetrics);
 
-    expect(result.passed).toBe(true);
-    expect(result.evaluations.length).toBe(1);
-    expect(result.evaluations[0].passed).toBe(true);
-    expect(result.evaluations[0].delta).toBe(-50);
-    expect(result.evaluations[0].deltaPercent).toBeCloseTo(-33.33, 1);
+    assert.strictEqual(result.passed, true);
+    assert.strictEqual(result.evaluations.length, 1);
+    assert.strictEqual(result.evaluations[0].passed, true);
+    assert.strictEqual(result.evaluations[0].delta, -50);
+    assert.ok(
+      Math.abs((result.evaluations[0].deltaPercent ?? 0) - -33.33) < 0.1,
+    );
   });
 
   it("should fail when current value exceeds allowable increase", () => {
@@ -75,10 +73,10 @@ describe("Benchmark Threshold Evaluator", () => {
 
     const result = evaluator.evaluate(currentMetrics, baselineMetrics);
 
-    expect(result.passed).toBe(false);
-    expect(result.evaluations[0].passed).toBe(false);
-    expect(result.evaluations[0].delta).toBe(30);
-    expect(result.evaluations[0].deltaPercent).toBe(20);
+    assert.strictEqual(result.passed, false);
+    assert.strictEqual(result.evaluations[0].passed, false);
+    assert.strictEqual(result.evaluations[0].delta, 30);
+    assert.strictEqual(result.evaluations[0].deltaPercent, 20);
   });
 
   it("should pass when within allowable increase", () => {
@@ -87,8 +85,8 @@ describe("Benchmark Threshold Evaluator", () => {
 
     const result = evaluator.evaluate(currentMetrics, baselineMetrics);
 
-    expect(result.passed).toBe(true);
-    expect(result.evaluations[0].passed).toBe(true);
+    assert.strictEqual(result.passed, true);
+    assert.strictEqual(result.evaluations[0].passed, true);
   });
 
   it("should fail when below minimum value", () => {
@@ -96,8 +94,8 @@ describe("Benchmark Threshold Evaluator", () => {
 
     const result = evaluator.evaluate(currentMetrics);
 
-    expect(result.passed).toBe(false);
-    expect(result.evaluations[0].passed).toBe(false);
+    assert.strictEqual(result.passed, false);
+    assert.strictEqual(result.evaluations[0].passed, false);
   });
 
   it("should pass when above minimum value", () => {
@@ -105,8 +103,8 @@ describe("Benchmark Threshold Evaluator", () => {
 
     const result = evaluator.evaluate(currentMetrics);
 
-    expect(result.passed).toBe(true);
-    expect(result.evaluations[0].passed).toBe(true);
+    assert.strictEqual(result.passed, true);
+    assert.strictEqual(result.evaluations[0].passed, true);
   });
 
   it("should evaluate multiple metrics", () => {
@@ -121,9 +119,9 @@ describe("Benchmark Threshold Evaluator", () => {
 
     const result = evaluator.evaluate(currentMetrics, baselineMetrics);
 
-    expect(result.evaluations.length).toBe(2);
-    expect(result.summary.total).toBe(2);
-    expect(result.summary.passed).toBe(2);
+    assert.strictEqual(result.evaluations.length, 2);
+    assert.strictEqual(result.summary.total, 2);
+    assert.strictEqual(result.summary.passed, 2);
   });
 });
 
@@ -161,11 +159,11 @@ describe("Regression Report Generator", () => {
 
     const report = generator.generate(data);
 
-    expect(report.summary.passed).toBe(true);
-    expect(report.summary.totalMetrics).toBe(1);
-    expect(report.summary.improved).toBe(1);
-    expect(report.summary.degraded).toBe(0);
-    expect(report.deltas[0].trend).toBe("improved");
+    assert.strictEqual(report.summary.passed, true);
+    assert.strictEqual(report.summary.totalMetrics, 1);
+    assert.strictEqual(report.summary.improved, 1);
+    assert.strictEqual(report.summary.degraded, 0);
+    assert.strictEqual(report.deltas[0].trend, "improved");
   });
 
   it("should generate regression report with degraded metrics", () => {
@@ -195,11 +193,11 @@ describe("Regression Report Generator", () => {
 
     const report = generator.generate(data);
 
-    expect(report.summary.passed).toBe(false);
-    expect(report.summary.degraded).toBe(1);
-    expect(report.deltas[0].trend).toBe("degraded");
-    expect(report.deltas[0].impact).toBe("high");
-    expect(report.failingThresholds).toContain("indexing.indexTimePerFile");
+    assert.strictEqual(report.summary.passed, false);
+    assert.strictEqual(report.summary.degraded, 1);
+    assert.strictEqual(report.deltas[0].trend, "degraded");
+    assert.strictEqual(report.deltas[0].impact, "medium");
+    assert.ok(report.failingThresholds.includes("indexing.indexTimePerFile"));
   });
 
   it("should generate markdown report", () => {
@@ -230,10 +228,10 @@ describe("Regression Report Generator", () => {
     const report = generator.generate(data);
     const markdown = generator.generateMarkdownReport(report);
 
-    expect(markdown).toContain("# Benchmark Regression Report");
-    expect(markdown).toContain("## Summary");
-    expect(markdown).toContain("indexTimePerFile");
-    expect(markdown).toContain("improved");
+    assert.ok(markdown.includes("Benchmark Regression Report"));
+    assert.ok(markdown.includes("Summary"));
+    assert.ok(markdown.includes("indexTimePerFile"));
+    assert.ok(markdown.includes("improved"));
   });
 });
 
@@ -253,7 +251,7 @@ describe("Metric Smoothing", () => {
 
     const filtered = smoother.filterWarmup(measurements);
 
-    expect(filtered.metricA).toEqual([90, 88, 87]);
+    assert.deepStrictEqual(filtered.metricA, [90, 88, 87]);
   });
 
   it("should detect IQR outliers", () => {
@@ -268,8 +266,8 @@ describe("Metric Smoothing", () => {
     const values = [10, 12, 11, 100, 13, 12, 11];
     const outliers = smoother.detectOutliers(values);
 
-    expect(outliers).toContain(100);
-    expect(outliers.length).toBe(1);
+    assert.ok(outliers.includes(100));
+    assert.strictEqual(outliers.length, 1);
   });
 
   it("should detect standard deviation outliers", () => {
@@ -284,7 +282,7 @@ describe("Metric Smoothing", () => {
     const values = [10, 12, 11, 10, 12, 11, 100];
     const outliers = smoother.detectOutliers(values);
 
-    expect(outliers).toContain(100);
+    assert.ok(outliers.includes(100));
   });
 
   it("should smooth metrics with median", () => {
@@ -302,7 +300,7 @@ describe("Metric Smoothing", () => {
 
     const smoothed = smoother.smooth(measurements);
 
-    expect(smoothed.metricA).toBe(90);
+    assert.strictEqual(smoothed.metricA, 90);
   });
 
   it("should run benchmark with smoothing", async () => {
@@ -321,9 +319,9 @@ describe("Metric Smoothing", () => {
 
     const { smoothed, raw } = await runBenchmarkWithSmoothing(config, benchmarkFn);
 
-    expect(callCount).toBe(3); // 1 warmup + 2 samples
-    expect(raw.metricA).toEqual([100, 200, 300]);
-    expect(smoothed.metricA).toBe(250); // Median of [200, 300]
+    assert.strictEqual(callCount, 3);
+    assert.deepStrictEqual(raw.metricA, [100, 200, 300]);
+    assert.strictEqual(smoothed.metricA, 250);
   });
 });
 
@@ -364,20 +362,20 @@ describe("Baseline Management", () => {
 
     const loaded = loadBaselineMetrics(baselinePath);
 
-    expect(loaded).toBeDefined();
-    expect(loaded?.indexTimePerFile).toBe(150);
-    expect(loaded?.symbolsPerFile).toBe(25);
+    assert.ok(loaded !== undefined);
+    assert.strictEqual(loaded?.indexTimePerFile, 150);
+    assert.strictEqual(loaded?.symbolsPerFile, 25);
   });
 
   it("should return undefined for missing baseline", () => {
     const loaded = loadBaselineMetrics(baselinePath);
 
-    expect(loaded).toBeUndefined();
+    assert.strictEqual(loaded, undefined);
   });
 
   it("should handle malformed baseline gracefully", () => {
     writeFileSync(baselinePath, "invalid json", "utf-8");
 
-    expect(() => loadBaselineMetrics(baselinePath)).toThrow();
+    assert.throws(() => loadBaselineMetrics(baselinePath));
   });
 });

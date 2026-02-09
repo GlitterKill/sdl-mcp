@@ -1,4 +1,3 @@
-import type { Statement } from "better-sqlite3";
 import type { VersionId, SymbolVersionRow } from "../db/schema.js";
 import type {
   DeltaPack,
@@ -14,16 +13,10 @@ import {
   STABILITY_SCORE_SIDE_EFFECTS,
 } from "../config/constants.js";
 
-// Lazy statement preparation - only prepared on first use
-let getSymbolVersionsStmt: Statement | null = null;
-
 function getSymbolVersions(versionId: string): SymbolVersionRow[] {
-  if (!getSymbolVersionsStmt) {
-    getSymbolVersionsStmt = getDb().prepare(
-      "SELECT * FROM symbol_versions WHERE version_id = ?",
-    );
-  }
-  return getSymbolVersionsStmt.all(versionId) as SymbolVersionRow[];
+  return getDb()
+    .prepare("SELECT * FROM symbol_versions WHERE version_id = ?")
+    .all(versionId) as SymbolVersionRow[];
 }
 
 export function computeDelta(

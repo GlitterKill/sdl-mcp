@@ -5,7 +5,6 @@ import type {
 } from "./types.js";
 import { listArtifacts, getArtifactMetadata, importArtifact } from "./sync.js";
 import { indexRepo, type IndexResult } from "../indexer/indexer.js";
-import { getLatestVersion } from "../delta/versioning.js";
 import { getRepo } from "../db/queries.js";
 import { join } from "path";
 import { sleep } from "../util/time.js";
@@ -80,7 +79,6 @@ export async function pullLatestState(
           "full",
         );
 
-        const latestVersion = getLatestVersion(options.repoId);
         const durationMs = Date.now() - startTime;
 
         return {
@@ -126,8 +124,6 @@ export async function pullWithFallback(
     try {
       const startTime = Date.now();
       const indexResult: IndexResult = await indexRepo(options.repoId, "full");
-
-      const latestVersion = getLatestVersion(options.repoId);
 
       return {
         success: true,

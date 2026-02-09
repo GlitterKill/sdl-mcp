@@ -1,19 +1,15 @@
 import path from "node:path";
-import { readFileSync, existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 import type {
   AdapterPlugin,
   PluginAdapter,
   PluginLoadError,
   PluginLoadResult,
-  PluginValidationResult,
 } from "./types.js";
 import { validateManifest, PLUGIN_API_VERSION } from "./types.js";
 import { logger } from "../../../util/logger.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const loadedPlugins = new Map<string, AdapterPlugin>();
 
@@ -34,7 +30,8 @@ export async function loadPlugin(
       };
     }
 
-    const module = await import(absolutePath);
+    const importUrl = pathToFileURL(absolutePath).href;
+    const module = await import(importUrl);
     const pluginModule: AdapterPlugin = module.default ?? module;
 
     if (!pluginModule) {

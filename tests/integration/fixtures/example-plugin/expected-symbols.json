@@ -1,0 +1,44 @@
+[
+  {
+    "id": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex:class:MyClass",
+    "name": "MyClass",
+    "kind": "class",
+    "filePath": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex",
+    "range": {
+      "startLine": 3,
+      "startCol": 6,
+      "endLine": 3,
+      "endCol": 13
+    },
+    "parentId": null,
+    "metadata": {}
+  },
+  {
+    "id": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex:fn:myMethod",
+    "name": "myMethod",
+    "kind": "function",
+    "filePath": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex",
+    "range": {
+      "startLine": 4,
+      "startCol": 5,
+      "endLine": 4,
+      "endCol": 13
+    },
+    "parentId": null,
+    "metadata": {}
+  },
+  {
+    "id": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex:fn:calculateSum",
+    "name": "calculateSum",
+    "kind": "function",
+    "filePath": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex",
+    "range": {
+      "startLine": 7,
+      "startCol": 5,
+      "endLine": 7,
+      "endCol": 17
+    },
+    "parentId": null,
+    "metadata": {}
+  }
+]

@@ -18,7 +18,7 @@ import {
 } from "../../dist/indexer/adapter/plugin/loader.js";
 import {
   registerAdapter,
-  getAdapter,
+  getAdapterInfo,
 } from "../../dist/indexer/adapter/registry.js";
 import { getPluginAdapters } from "../../dist/indexer/adapter/plugin/loader.js";
 
@@ -221,11 +221,10 @@ describe("External Plugin Loading Integration Tests (V06-10)", () => {
       const adapters = await getPluginAdapters(loadResult.plugin);
       assert.strictEqual(adapters.length, 1);
 
-      const adapter = adapters[0].factory();
-      registerAdapter(".regtest", adapter, "plugin", "registry-plugin");
+      registerAdapter(".regtest", adapters[0].languageId, adapters[0].factory, "plugin", "registry-plugin");
 
-      const registered = getAdapter(".regtest");
-      assert.ok(registered, "Adapter should be registered in registry");
+      const registered = getAdapterInfo(".regtest");
+      assert.ok(registered.source, "Adapter should be registered in registry");
       assert.strictEqual(registered.source, "plugin");
       assert.strictEqual(registered.pluginName, "registry-plugin");
     });
@@ -285,17 +284,17 @@ describe("External Plugin Loading Integration Tests (V06-10)", () => {
       assert.strictEqual(adapters.length, 2);
 
       for (const adapterDesc of adapters) {
-        const adapter = adapterDesc.factory();
         registerAdapter(
           adapterDesc.extension,
-          adapter,
+          adapterDesc.languageId,
+          adapterDesc.factory,
           "plugin",
           "multi-adapter-plugin",
         );
 
-        const registered = getAdapter(adapterDesc.extension);
+        const registered = getAdapterInfo(adapterDesc.extension);
         assert.ok(
-          registered,
+          registered.source,
           `Adapter for ${adapterDesc.extension} should be registered`,
         );
         assert.strictEqual(registered.source, "plugin");

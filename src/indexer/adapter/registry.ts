@@ -175,6 +175,12 @@ function getAdapterInfo(ext: string): {
       };
 }
 
+function resetRegistry(): void {
+  ADAPTER_REGISTRY.clear();
+  builtInAdaptersLoaded = false;
+  pluginsLoaded = false;
+}
+
 export {
   registerAdapter,
   getAdapterForExtension,
@@ -184,4 +190,5 @@ export {
   loadPlugins,
   loadPluginsSync,
   getAdapterInfo,
+  resetRegistry,
 };

@@ -5,6 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-02-08
+
+### Added
+
+#### PR Risk Copilot (V06-1, V06-2)
+
+- `sdl.pr.riskAnalysis` MCP tool for pull request risk assessment
+- Risk model computing composite scores from churn, fan-in/out, diagnostic density, and blast radius
+- File-level and symbol-level risk classification (critical, high, moderate, low)
+- Configurable risk thresholds and weighting via policy engine
+- Suggested reviewers based on ownership and expertise signals
+- Harness test coverage for risk analysis end-to-end flow
+
+#### Agent Autopilot (V06-3, V06-4)
+
+- `sdl.agent.autopilot` MCP tool for AI-assisted workflow orchestration
+- Orchestration planner generating multi-step execution plans from natural language goals
+- Policy-integrated execution flow with approval gates and rollback support
+- Step-level status tracking (pending, running, completed, failed, skipped)
+- Workflow test coverage for plan generation, execution, and error recovery
+
+#### Continuous Team Memory (V06-5, V06-6)
+
+- Sync artifact export/import protocol for portable repository state
+- `exportArtifact()` producing compressed, content-addressed `.sdl-artifact.json` bundles
+- `importArtifact()` restoring full repository state (files, symbols, edges, metrics, versions)
+- `pullWithFallback()` for artifact-first sync with configurable retry and fallback
+- Deterministic artifact hashing ensuring reproducible exports
+- CI workflow integration for automated sync artifact generation
+
+#### Benchmark Guardrails (V06-7, V06-8)
+
+- `benchmark:ci` CLI command for automated performance regression detection
+- Threshold evaluator comparing current metrics against configurable baselines
+- Statistical smoothing with configurable sample runs and warmup iterations
+- Baseline management with `benchmark:baseline:save` and `benchmark:baseline:load`
+- Fail policy (warn, fail, block) controlling CI gate behavior
+- Threshold configuration via `config/benchmark.config.json`
+
+#### Adapter Plugin SDK (V06-9, V06-10)
+
+- Public plugin contract (`PluginManifest`, `AdapterPlugin`, `AdapterRegistration`)
+- Runtime plugin loader with validation, error reporting, and lifecycle management
+- `loadPlugin()`, `loadPluginsFromConfig()`, `getPluginAdapters()` API
+- Plugin registry with one-shot initialization guards and `resetRegistry()` for test isolation
+- Sample `.vlang` plugin demonstrating extractSymbols, extractCalls, and generateSkeleton
+- Plugin development templates and integration test patterns
+- API version compatibility checking (`PLUGIN_API_VERSION`)
+
+### Changed
+
+- Prepared statement caching in `queries.ts` now supports `resetQueryCache()` for safe DB lifecycle management across test boundaries
+- `diff.ts` symbol version lookup uses inline `getDb().prepare()` instead of module-level cached statements to avoid stale references
+- `sync.ts` uses ESM-compatible imports (`readFileSync`, `gunzipSync`) instead of CJS `require()` calls
+
+### Fixed
+
+- Statement cache invalidation across `closeDb()`/`getDb()` cycles causing "database connection is not open" errors
+- EBUSY errors on Windows when test cleanup attempted file deletion before closing SQLite connections
+- ESM module resolution failures in test files importing from `src/` instead of `dist/`
+- `getArtifactMetadata()` returning null due to CJS `require()` in ESM context
+- `pullWithFallback()` artifact path mismatch between export naming and lookup directory
+- Example plugin `extractCalls` not handling unresolved external function references
+- 20 integration test failures resolved, achieving 676/676 tests passing (0 failures)
+
+### Known Limitations
+
+- `benchmark:ci` requires a real repository path for live benchmarking; CI environments need the repo checked out at the configured path
+- Plugin SDK currently supports synchronous adapters only; async adapter support is planned for v0.7
+- Sync artifacts do not include raw file content, only metadata and symbol graph state
+- Agent Autopilot execution plans are generated but external tool invocation requires host integration
+
+### Follow-up Items
+
+- Async adapter plugin support (v0.7 candidate)
+- Sync artifact delta compression for incremental updates
+- Agent Autopilot tool integration with external CI/CD systems
+- PR Risk Copilot integration with GitHub/GitLab webhook events
+- Benchmark baseline auto-update on main branch merges
+
 ## [0.5.1] - 2026-01-29
 
 ### Added
@@ -163,5 +243,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.6.0]: https://github.com/your-org/sdl-mcp/releases/tag/v0.6.0
 [0.5.1]: https://github.com/your-org/sdl-mcp/releases/tag/v0.5.1
 [0.5.0]: https://github.com/your-org/sdl-mcp/releases/tag/v0.5.0

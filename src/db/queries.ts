@@ -58,6 +58,11 @@ function stmt(sql: string): Statement {
   return s;
 }
 
+export function resetQueryCache(): void {
+  stmtCache.clear();
+  stmtCacheOrder.length = 0;
+}
+
 // Repo operations
 /**
  * Creates a new repository record in the database.

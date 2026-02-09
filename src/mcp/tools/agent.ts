@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { orchestrator } from "../agent/orchestrator.js";
-import type { AgentTask } from "../agent/types.js";
+import { orchestrator } from "../../agent/orchestrator.js";
+import type { AgentTask } from "../../agent/types.js";
 
 export const AgentOrchestrateRequestSchema = z.object({
   repoId: z.string().describe("Repository ID to work with"),
@@ -116,8 +116,9 @@ export type AgentOrchestrateResponse = z.infer<
 >;
 
 export async function handleAgentOrchestrate(
-  request: AgentOrchestrateRequest,
+  args: unknown,
 ): Promise<AgentOrchestrateResponse> {
+  const request = AgentOrchestrateRequestSchema.parse(args);
   const task: AgentTask = {
     repoId: request.repoId,
     taskType: request.taskType,
