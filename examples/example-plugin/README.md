@@ -1,5 +1,19 @@
 # Example Adapter Plugin
 
+<div align="right">
+<details>
+<summary><strong>Docs Navigation</strong></summary>
+
+- [SDL-MCP Overview](../../README.md)
+- [Documentation Hub](../../docs/README.md)
+  - [Plugin SDK Author Guide](../../docs/PLUGIN_SDK_AUTHOR_GUIDE.md)
+  - [Plugin SDK Security](../../docs/PLUGIN_SDK_SECURITY.md)
+- [Plugin Templates](../../templates/README.md)
+- [Example Plugin (this page)](./README.md)
+
+</details>
+</div>
+
 This is a demonstration plugin for SDL-MCP's adapter plugin system. It shows how to create a custom language adapter that can be loaded at runtime without modifying the core SDL-MCP codebase.
 
 ## What This Plugin Does
@@ -282,7 +296,7 @@ Check SDL-MCP logs for error messages:
 
 ## Further Reading
 
-- [SDL-MCP README](../../../README.md)
-- [LanguageAdapter Interface](../../../src/indexer/adapter/LanguageAdapter.ts)
-- [BaseAdapter Implementation](../../../src/indexer/adapter/BaseAdapter.ts)
-- [Plugin Types](../../../src/indexer/adapter/plugin/types.ts)
+- [SDL-MCP README](../../README.md)
+- [LanguageAdapter Interface](../../src/indexer/adapter/LanguageAdapter.ts)
+- [BaseAdapter Implementation](../../src/indexer/adapter/BaseAdapter.ts)
+- [Plugin Types](../../src/indexer/adapter/plugin/types.ts)

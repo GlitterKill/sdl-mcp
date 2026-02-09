@@ -1,5 +1,19 @@
 # Real-World Use Case Benchmark
 
+<div align="right">
+<details>
+<summary><strong>Docs Navigation</strong></summary>
+
+- [SDL-MCP Overview](../../README.md)
+- [Documentation Hub](../../docs/README.md)
+  - [Benchmark Guardrails](../../docs/benchmark-guardrails.md)
+  - [Benchmark Failure Guide](../../docs/benchmark-failure-guide.md)
+  - [Benchmark Baseline Management](../../docs/benchmark-baseline-management.md)
+- [Real-World Benchmark (this page)](./README.md)
+
+</details>
+</div>
+
 This benchmark compares SDL-MCP against traditional "grep + open files" workflows
 on realistic software maintenance tasks. It measures both efficiency (token usage)
 and effectiveness (precision/recall) to demonstrate the benefits of semantic code
@@ -20,6 +34,9 @@ context.
 ```bash
 # Run with defaults (uses first configured repo)
 npm run benchmark:real
+
+# Run CI guardrails benchmark
+npm run benchmark:ci
 
 # Run with specific options
 npm run benchmark:real -- --repo-id my-repo --skip-index

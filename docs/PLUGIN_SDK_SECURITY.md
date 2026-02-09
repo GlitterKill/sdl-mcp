@@ -785,7 +785,7 @@ strace -f -e trace=clone,fork,vfork,execve sdl-mcp index 2>&1
 
 ## Additional Resources
 
-- [SDL-MCP README](../../README.md)
+- [SDL-MCP README](../README.md)
 - [Plugin Author Guide](PLUGIN_SDK_AUTHOR_GUIDE.md)
 - [Node.js Security Best Practices](https://nodejs.org/en/docs/guides/security/)
 - [OWASP Top 10](https://owasp.org/www-project-top-ten/)

@@ -1,5 +1,18 @@
 # Golden File Infrastructure
 
+<div align="right">
+<details>
+<summary><strong>Docs Navigation</strong></summary>
+
+- [SDL-MCP Overview](../../README.md)
+- [Documentation Hub](../../docs/README.md)
+  - [Testing Guide](../../docs/TESTING.md)
+  - [Troubleshooting](../../docs/troubleshooting.md)
+- [Golden Scripts (this page)](./README.md)
+
+</details>
+</div>
+
 This directory contains tools for managing golden files (expected output files) used in regression testing.
 
 ## Overview
@@ -98,25 +111,25 @@ assert.deepStrictEqual(
 
 ## Directory Structure
 
-```
+```text
 scripts/golden/
-├── e2e.ts              # E2E golden file manager
-├── update-goldens.ts   # Adapter golden file manager
-└── README.md           # This file
+|-- e2e.ts              # E2E golden file manager
+|-- update-goldens.ts   # Adapter golden file manager
+`-- README.md           # This file
 
 tests/
-├── golden/             # E2E golden files
-│   ├── 01-register-repo.json
-│   ├── 02-index-repo.json
-│   └── ...
-└── fixtures/          # Adapter golden files
-    ├── rust/
-    │   ├── expected-symbols.json
-    │   ├── expected-imports.json
-    │   └── expected-calls.json
-    ├── c/
-    ├── cpp/
-    └── ...
+|-- golden/             # E2E golden files
+|   |-- 01-register-repo.json
+|   |-- 02-index-repo.json
+|   `-- ...
+`-- fixtures/           # Adapter golden files
+    |-- rust/
+    |   |-- expected-symbols.json
+    |   |-- expected-imports.json
+    |   `-- expected-calls.json
+    |-- c/
+    |-- cpp/
+    `-- ...
 ```
 
 ## Troubleshooting
@@ -158,3 +171,4 @@ If you see "Adapter not available" message:
 
 - [TESTING.md](../../TESTING.md) - Testing guide
 - [AGENTS.md](../../AGENTS.md) - Development coordination
+

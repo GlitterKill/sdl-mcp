@@ -167,7 +167,7 @@ Detailed troubleshooting guide with:
 
 ### Performance Metrics
 
-- `sliceBuildTimeMs`: max 200ms, +15% tolerance
+- `sliceBuildTimeMs`: max 200ms, +20% tolerance
 - `avgSkeletonTimeMs`: max 5ms, +15% tolerance
 
 ### Token Efficiency Metrics

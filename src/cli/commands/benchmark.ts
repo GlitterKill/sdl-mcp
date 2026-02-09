@@ -167,14 +167,9 @@ async function collectBenchmarkMetrics(
 
   if (!skipIndexing) {
     const indexStart = performance.now();
-    await indexRepo(repoId, "full");
+    const indexResult = await indexRepo(repoId, "full");
     indexTimeMs = performance.now() - indexStart;
-
-    const repo = db.getRepo(repoId);
-    if (repo) {
-      const repoConfig = JSON.parse(repo.config_json);
-      filesIndexed = repoConfig.languages.length;
-    }
+    filesIndexed = indexResult.filesProcessed;
   }
 
   const allSymbols = db.getSymbolsByRepo(repoId);
@@ -278,8 +273,12 @@ async function collectBenchmarkMetrics(
     {} as Record<string, number>,
   );
 
+  if (filesIndexed === 0) {
+    filesIndexed = db.getFilesByRepo(repoId).length;
+  }
+
   const totalSymbols = allSymbols.length;
-  const totalFiles = filesIndexed > 0 ? filesIndexed : allSymbols.length / 10;
+  const totalFiles = filesIndexed > 0 ? filesIndexed : 1;
 
   return {
     indexTimePerFile: totalFiles > 0 ? indexTimeMs / totalFiles : 0,

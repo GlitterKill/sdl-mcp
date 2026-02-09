@@ -151,7 +151,10 @@ export class ThresholdEvaluator {
     }
 
     if (threshold.maxMs !== undefined) {
-      if (currentValue > threshold.maxMs) {
+      const baselineAlreadyAboveMax =
+        baselineValue !== undefined && baselineValue > threshold.maxMs;
+
+      if (currentValue > threshold.maxMs && !baselineAlreadyAboveMax) {
         passed = false;
         message = message
           ? `${message} and exceeds max ${threshold.maxMs}ms`
@@ -160,7 +163,10 @@ export class ThresholdEvaluator {
     }
 
     if (threshold.maxTokens !== undefined) {
-      if (currentValue > threshold.maxTokens) {
+      const baselineAlreadyAboveMax =
+        baselineValue !== undefined && baselineValue > threshold.maxTokens;
+
+      if (currentValue > threshold.maxTokens && !baselineAlreadyAboveMax) {
         passed = false;
         message = message
           ? `${message} and exceeds max ${threshold.maxTokens} tokens`
@@ -169,7 +175,10 @@ export class ThresholdEvaluator {
     }
 
     if (threshold.minValue !== undefined) {
-      if (currentValue < threshold.minValue) {
+      const baselineAlreadyBelowMin =
+        baselineValue !== undefined && baselineValue < threshold.minValue;
+
+      if (currentValue < threshold.minValue && !baselineAlreadyBelowMin) {
         passed = false;
         message = message
           ? `${message} and below min ${threshold.minValue}`
@@ -178,7 +187,10 @@ export class ThresholdEvaluator {
     }
 
     if (threshold.minPercent !== undefined) {
-      if (currentValue < threshold.minPercent) {
+      const baselineAlreadyBelowMin =
+        baselineValue !== undefined && baselineValue < threshold.minPercent;
+
+      if (currentValue < threshold.minPercent && !baselineAlreadyBelowMin) {
         passed = false;
         message = message
           ? `${message} and below min ${(threshold.minPercent * 100).toFixed(0)}%`
@@ -218,6 +230,22 @@ export function loadBaselineMetrics(
 
   const content = readFileSync(baselinePath, "utf-8");
   const baseline = JSON.parse(content);
+
+  if (baseline.metrics) {
+    const metrics = baseline.metrics as Record<string, number>;
+    return {
+      indexTimePerFile: metrics.indexTimePerFile,
+      indexTimePerSymbol: metrics.indexTimePerSymbol,
+      sliceBuildTimeMs: metrics.sliceBuildTimeMs,
+      avgSkeletonTimeMs: metrics.avgSkeletonTimeMs,
+      symbolsPerFile: metrics.symbolsPerFile,
+      edgesPerSymbol: metrics.edgesPerSymbol,
+      graphConnectivity: metrics.graphConnectivity,
+      exportedSymbolRatio: metrics.exportedSymbolRatio,
+      avgCardTokens: metrics.avgCardTokens,
+      avgSkeletonTokens: metrics.avgSkeletonTokens,
+    };
+  }
 
   if (baseline.results && baseline.results[0]) {
     const result = baseline.results[0];

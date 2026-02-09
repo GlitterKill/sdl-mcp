@@ -639,7 +639,7 @@ Configure policy behavior via `sdl.policy.set`:
 
 ## Related Documentation
 
-- [MCP Tools Documentation](./MCP_TOOLS.md)
-- [Policy Engine](./POLICY_ENGINE.md)
-- [Code Access Rungs](./CODE_RUNGS.md)
+- [MCP Tools Documentation](./mcp-tools-reference.md)
+- [Configuration Reference](./configuration-reference.md)
+- [Agent Workflows](./agent-workflows.md)
 - [Testing Guide](./TESTING.md)

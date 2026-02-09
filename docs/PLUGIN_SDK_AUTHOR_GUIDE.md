@@ -1032,8 +1032,8 @@ const symbolMap = new Map(symbols.map((s) => [s.name, s]));
 
 ## Additional Resources
 
-- [SDL-MCP README](../../README.md)
-- [Plugin Types](../../src/indexer/adapter/plugin/types.ts)
-- [BaseAdapter](../../src/indexer/adapter/BaseAdapter.ts)
-- [LanguageAdapter Interface](../../src/indexer/adapter/LanguageAdapter.ts)
-- [Example Plugin](../example-plugin/)
+- [SDL-MCP README](../README.md)
+- [Plugin Types](../src/indexer/adapter/plugin/types.ts)
+- [BaseAdapter](../src/indexer/adapter/BaseAdapter.ts)
+- [LanguageAdapter Interface](../src/indexer/adapter/LanguageAdapter.ts)
+- [Example Plugin](../examples/example-plugin/README.md)

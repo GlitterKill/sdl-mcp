@@ -17,7 +17,7 @@
       },
       "sdlMcp": {
         "symbolsIndexed": 5670,
-        "avgCardTokens": 198,
+        "avgCardTokens": 218.25,
         "avgSkeletonTokens": 146,
         "sampleSlice": {
           "seedSymbol": "doctorCommand",
@@ -27,7 +27,7 @@
         }
       },
       "quality": {
-        "symbolsPerFile": 38.57,
+        "symbolsPerFile": 28.07,
         "edgesPerSymbol": 33.82,
         "edgeTypeDistribution": {
           "import": 185379,

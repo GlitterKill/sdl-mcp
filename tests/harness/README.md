@@ -1,59 +1,47 @@
 # SDL-MCP Test Harness
 
-This directory contains the test harness for SDL-MCP, which verifies compatibility with various MCP clients.
+<div align="right">
+<details>
+<summary><strong>Docs Navigation</strong></summary>
 
-## Usage
+- [SDL-MCP Overview](../../README.md)
+- [Documentation Hub](../../docs/README.md)
+  - [Testing Guide](../../docs/TESTING.md)
+  - [Troubleshooting](../../docs/troubleshooting.md)
+- [Harness README (this page)](./README.md)
 
-Run the full test harness suite:
+</details>
+</div>
+
+This directory contains compatibility harnesses that validate SDL-MCP behavior for supported client profiles and language adapters.
+
+## Quick Start
 
 ```bash
+# Runs adapter harness via package.json
 npm run test:harness
 ```
 
-Run with a custom configuration:
-
 ```bash
-npm run test:harness -- --config=path/to/sdlmcp.config.json
+# Run dist-first adapter harness directly
+npm run build
+node dist/tests/harness/adapter-runner.js
 ```
 
-## Structure
+## What Gets Validated
 
-- `runner.ts` - Main test runner that starts the server and executes golden tasks
-- `client-assertions.ts` - Client profile validation logic
-- `../golden/*.json` - Golden task fixtures for each MCP tool
+- Tool discovery and registration shape
+- Core MCP workflows (register, index, slice, code, delta)
+- Profile compatibility assumptions for agent clients
+- Adapter integration expectations
 
-## What It Tests
+## Key Files
 
-1. **Tool Discovery** - Verifies all expected tools are available
-2. **Schema Compatibility** - Validates input/output schemas match expectations
-3. **Golden Tasks** - Executes a sequence of representative tasks:
-   - Register repository
-   - Index repository
-   - Build graph slice
-   - Get symbol card
-   - Get code skeleton
-   - Get delta pack
-   - Request code window
-
-## Client Profiles
-
-The harness tests compatibility with:
-
-- Claude Code
-- Codex CLI
-- Gemini CLI
-- Opencode CLI
-
-## Output
-
-The harness produces a pass/fail report per client profile with:
-
-- Tool discovery results
-- Golden task execution results
-- Duration metrics
-- Detailed error messages
+- `tests/harness/adapter-runner.ts`: dist-first adapter harness entrypoint
+- `tests/harness/runner.ts`: golden task runner
+- `tests/harness/client-assertions.ts`: client profile assertions
 
 ## Exit Codes
 
-- `0` - All client profiles passed
-- `1` - One or more client profiles failed
+- `0`: all checks passed
+- `1`: one or more checks failed

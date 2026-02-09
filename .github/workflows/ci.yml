@@ -95,12 +95,12 @@ jobs:
           echo "Benchmark exit code: ${BENCHMARK_EXIT_CODE}"
 
           if [ $BENCHMARK_EXIT_CODE -ne 0 ]; then
-            echo "❌ Benchmark guardrails failed"
+            echo "[FAIL] Benchmark guardrails failed"
             echo "Review the results in .benchmark/latest-result.json"
             exit 1
           fi
 
-          echo "✅ Benchmark guardrails passed"
+          echo "[PASS] Benchmark guardrails passed"
 
       - name: Verify runtime entrypoints
         shell: bash
@@ -189,7 +189,7 @@ jobs:
           END_TIME=$(date +%s%3N)
           DURATION=$((END_TIME - START_TIME))
           echo "duration_ms=${DURATION}" >> $GITHUB_OUTPUT
-          echo "✓ Index completed in ${DURATION}ms"
+          echo "[OK] Index completed in ${DURATION}ms"
 
       - name: Export sync artifact
         id: export
@@ -204,7 +204,7 @@ jobs:
           END_TIME=$(date +%s%3N)
           DURATION=$((END_TIME - START_TIME))
           echo "duration_ms=${DURATION}" >> $GITHUB_OUTPUT
-          echo "✓ Export completed in ${DURATION}ms"
+          echo "[OK] Export completed in ${DURATION}ms"
 
       - name: Validate artifact integrity
         shell: bash
@@ -216,9 +216,9 @@ jobs:
               --artifact-path "$ARTIFACT_FILE" \
               --verify true \
               --force
-            echo "✓ Artifact validation successful"
+            echo "[OK] Artifact validation successful"
           else
-            echo "✗ Artifact file not found: $ARTIFACT_FILE"
+            echo "[ERROR] Artifact file not found: $ARTIFACT_FILE"
             exit 1
           fi
 
@@ -256,21 +256,21 @@ jobs:
           echo "Validating performance budget..."
 
           if [ $INDEX_MS -gt $MAX_INDEX_MS ]; then
-            echo "✗ Index duration exceeded budget: ${INDEX_MS}ms > ${MAX_INDEX_MS}ms"
+            echo "[ERROR] Index duration exceeded budget: ${INDEX_MS}ms > ${MAX_INDEX_MS}ms"
             exit 1
           fi
 
           if [ $EXPORT_MS -gt $MAX_EXPORT_MS ]; then
-            echo "✗ Export duration exceeded budget: ${EXPORT_MS}ms > ${MAX_EXPORT_MS}ms"
+            echo "[ERROR] Export duration exceeded budget: ${EXPORT_MS}ms > ${MAX_EXPORT_MS}ms"
             exit 1
           fi
 
           if [ $TOTAL_MS -gt $MAX_TOTAL_MS ]; then
-            echo "✗ Total sync duration exceeded budget: ${TOTAL_MS}ms > ${MAX_TOTAL_MS}ms"
+            echo "[ERROR] Total sync duration exceeded budget: ${TOTAL_MS}ms > ${MAX_TOTAL_MS}ms"
             exit 1
           fi
 
-          echo "✓ Performance budget validated"
+          echo "[OK] Performance budget validated"
           echo "  - Index: ${INDEX_MS}ms / ${MAX_INDEX_MS}ms"
           echo "  - Export: ${EXPORT_MS}ms / ${MAX_EXPORT_MS}ms"
           echo "  - Total: ${TOTAL_MS}ms / ${MAX_TOTAL_MS}ms"
@@ -318,7 +318,7 @@ jobs:
           WINDOWS_ARTIFACT=$(find ./artifacts/windows -name "*.sdl-artifact.json" | head -n 1)
 
           if [ -z "$LINUX_ARTIFACT" ] || [ -z "$WINDOWS_ARTIFACT" ]; then
-            echo "✗ Missing artifacts for comparison"
+            echo "[ERROR] Missing artifacts for comparison"
             exit 1
           fi
 
@@ -337,9 +337,9 @@ jobs:
             console.log('  Windows files extracted:', windows.compressed_data.length);
             
             if (linux.artifact_hash === windows.artifact_hash) {
-              console.log('✓ Artifacts match across platforms');
+              console.log('[OK] Artifacts match across platforms');
             } else {
-              console.log('⚠ Artifacts differ (expected for different commit SHAs)');
+              console.log('[WARN] Artifacts differ (expected for different commit SHAs)');
               console.log('  Both artifacts are valid for their respective commits');
             }
           "

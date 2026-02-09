@@ -1,5 +1,20 @@
 # MyLang Plugin for SDL-MCP
 
+<div align="right">
+<details>
+<summary><strong>Docs Navigation</strong></summary>
+
+- [SDL-MCP Overview](../../README.md)
+- [Documentation Hub](../../docs/README.md)
+  - [Plugin SDK Author Guide](../../docs/PLUGIN_SDK_AUTHOR_GUIDE.md)
+  - [Plugin SDK Security](../../docs/PLUGIN_SDK_SECURITY.md)
+- [Templates Index](../README.md)
+- [Plugin Template (this page)](./README.md)
+- [Example Plugin](../../examples/example-plugin/README.md)
+
+</details>
+</div>
+
 A template adapter plugin for SDL-MCP. Customize this to add support for your language.
 
 ## Quick Start
@@ -180,17 +195,17 @@ class YourLangAdapter extends BaseAdapter {
 
 ## File Structure
 
-```
+```text
 my-lang-plugin/
-├── package.json          # NPM package metadata
-├── tsconfig.json         # TypeScript configuration
-├── index.ts             # Plugin implementation
-├── README.md            # Plugin documentation (this file)
-├── LICENSE              # License file
-└── dist/                # Compiled output (generated)
-    ├── index.js
-    ├── index.d.ts
-    └── index.js.map
+|-- package.json          # NPM package metadata
+|-- tsconfig.json         # TypeScript configuration
+|-- index.ts              # Plugin implementation
+|-- README.md             # Plugin documentation (this file)
+|-- LICENSE               # License file
+`-- dist/                 # Compiled output (generated)
+    |-- index.js
+    |-- index.d.ts
+    `-- index.js.map
 ```
 
 ## Testing
@@ -268,7 +283,7 @@ For more detailed information:
 
 - [Plugin SDK Author Guide](../../docs/PLUGIN_SDK_AUTHOR_GUIDE.md)
 - [Plugin SDK Security](../../docs/PLUGIN_SDK_SECURITY.md)
-- [Example Plugin](../example-plugin/)
+- [Example Plugin](../../examples/example-plugin/README.md)
 - [SDL-MCP README](../../README.md)
 
 ## Support
@@ -276,7 +291,7 @@ For more detailed information:
 For issues or questions:
 
 - Check the [troubleshooting guide](../../docs/PLUGIN_SDK_AUTHOR_GUIDE.md#troubleshooting)
-- Review the [example plugin](../example-plugin/)
+- Review the [Example Plugin](../../examples/example-plugin/README.md)
 - Open an issue on the SDL-MCP repository
 
 ## License
@@ -291,3 +306,4 @@ Contributions are welcome! Please:
 2. Customize for your language
 3. Add tests
 4. Submit a pull request
+

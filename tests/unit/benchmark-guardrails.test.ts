@@ -89,6 +89,16 @@ describe("Benchmark Threshold Evaluator", () => {
     assert.strictEqual(result.evaluations[0].passed, true);
   });
 
+  it("should not hard-fail on absolute max when baseline already exceeds max and current is within tolerance", () => {
+    const currentMetrics = { indexTimePerFile: 260 };
+    const baselineMetrics = { indexTimePerFile: 250 };
+
+    const result = evaluator.evaluate(currentMetrics, baselineMetrics);
+
+    assert.strictEqual(result.passed, true);
+    assert.strictEqual(result.evaluations[0].passed, true);
+  });
+
   it("should fail when below minimum value", () => {
     const currentMetrics = { symbolsPerFile: 3 };
 
@@ -365,6 +375,35 @@ describe("Baseline Management", () => {
     assert.ok(loaded !== undefined);
     assert.strictEqual(loaded?.indexTimePerFile, 150);
     assert.strictEqual(loaded?.symbolsPerFile, 25);
+  });
+
+  it("should load baseline metrics from benchmark-ci result format", () => {
+    const results = {
+      timestamp: "2026-02-09T00:00:00.000Z",
+      repoId: "test-repo",
+      repoPath: "/tmp/test-repo",
+      metrics: {
+        indexTimePerFile: 150,
+        indexTimePerSymbol: 5,
+        symbolsPerFile: 25,
+        edgesPerSymbol: 12,
+        graphConnectivity: 0.8,
+        exportedSymbolRatio: 0.3,
+        sliceBuildTimeMs: 100,
+        avgSkeletonTimeMs: 2,
+        avgCardTokens: 180,
+        avgSkeletonTokens: 150,
+      },
+    };
+
+    saveBaselineMetrics(baselinePath, results);
+
+    const loaded = loadBaselineMetrics(baselinePath);
+
+    assert.ok(loaded !== undefined);
+    assert.strictEqual(loaded?.indexTimePerFile, 150);
+    assert.strictEqual(loaded?.symbolsPerFile, 25);
+    assert.strictEqual(loaded?.avgCardTokens, 180);
   });
 
   it("should return undefined for missing baseline", () => {

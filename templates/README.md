@@ -1,5 +1,20 @@
 # SDL-MCP Plugin Templates
 
+<div align="right">
+<details>
+<summary><strong>Docs Navigation</strong></summary>
+
+- [SDL-MCP Overview](../README.md)
+- [Documentation Hub](../docs/README.md)
+  - [Getting Started](../docs/getting-started.md)
+  - [Plugin SDK Author Guide](../docs/PLUGIN_SDK_AUTHOR_GUIDE.md)
+  - [Plugin SDK Security](../docs/PLUGIN_SDK_SECURITY.md)
+- [Templates (this page)](./README.md)
+- [Plugin Template README](./plugin-template/README.md)
+
+</details>
+</div>
+
 Templates and scaffolding for creating SDL-MCP adapter plugins.
 
 ## Available Templates
@@ -47,17 +62,17 @@ See [plugin-template/README.md](./plugin-template/README.md) for detailed instru
 
 ## Template Structure
 
-```
+```text
 templates/
-├── plugin-template/        # Full plugin template
-│   ├── package.json       # NPM configuration
-│   ├── tsconfig.json      # TypeScript configuration
-│   ├── index.ts          # Plugin implementation
-│   ├── README.md         # Plugin documentation
-│   ├── LICENSE           # MIT license
-│   └── test/             # Test suite
-│       └── plugin.test.ts
-└── README.md            # This file
+|-- plugin-template/        # Full plugin template
+|   |-- package.json        # NPM configuration
+|   |-- tsconfig.json       # TypeScript configuration
+|   |-- index.ts            # Plugin implementation
+|   |-- README.md           # Plugin documentation
+|   |-- LICENSE             # MIT license
+|   `-- test/               # Test suite
+|       `-- plugin.test.ts
+`-- README.md               # This file
 ```
 
 ## Using Templates
@@ -210,3 +225,4 @@ All templates are licensed under MIT.
 - [SDL-MCP README](../README.md)
 - [Plugin SDK Implementation Summary](../PLUGIN_SDK_IMPLEMENTATION.md)
 - [Example Plugin](../examples/example-plugin/)
+
