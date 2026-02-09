@@ -54,7 +54,6 @@ export function generateAuditHash(
     requestType: context.requestType,
     repoId: context.repoId,
     symbolId: context.symbolId,
-    timestamp: Date.now(),
   };
   const hashString = JSON.stringify(hashInput);
   return crypto.createHash("sha256").update(hashString).digest("hex");
