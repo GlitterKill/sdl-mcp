@@ -96,8 +96,19 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       process.exit(0);
     };
 
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
+    const handleShutdown = (signal: "SIGINT" | "SIGTERM"): void => {
+      void shutdown().catch((error) => {
+        console.error(
+          `Failed to handle ${signal}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        process.exit(1);
+      });
+    };
+
+    process.once("SIGINT", () => handleShutdown("SIGINT"));
+    process.once("SIGTERM", () => handleShutdown("SIGTERM"));
 
     await new Promise(() => {});
   }

@@ -555,7 +555,7 @@ class CppAdapter implements LanguageAdapter {
         seenCallNodes.add(nodeId);
 
         let calleeIdentifier = "";
-        let callType: ExtractedCall["callType"] = "constructor";
+        const callType: ExtractedCall["callType"] = "constructor";
         let isResolved = false;
         let calleeSymbolId: string | undefined;
 

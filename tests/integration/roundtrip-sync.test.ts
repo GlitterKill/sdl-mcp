@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { unlinkSync, rmdirSync, existsSync, mkdirSync } from "fs";
+import { unlinkSync, rmSync, existsSync, mkdirSync } from "fs";
 import { exportArtifact, importArtifact } from "../../dist/sync/sync.js";
 import { pullWithFallback } from "../../dist/sync/pull.js";
 import { getDb, closeDb } from "../../dist/db/db.js";
@@ -33,11 +33,11 @@ describe("Round-Trip Sync Integration", () => {
       unlinkSync(testDbPath);
     }
     if (existsSync(syncDir)) {
-      rmdirSync(syncDir, { recursive: true });
+      rmSync(syncDir, { recursive: true, force: true });
     }
     mkdirSync(syncDir, { recursive: true });
     if (existsSync(pullSyncDir)) {
-      rmdirSync(pullSyncDir, { recursive: true });
+      rmSync(pullSyncDir, { recursive: true, force: true });
     }
     mkdirSync(pullSyncDir, { recursive: true });
   });
@@ -49,10 +49,10 @@ describe("Round-Trip Sync Integration", () => {
       unlinkSync(testDbPath);
     }
     if (existsSync(syncDir)) {
-      rmdirSync(syncDir, { recursive: true });
+      rmSync(syncDir, { recursive: true, force: true });
     }
     if (existsSync(pullSyncDir)) {
-      rmdirSync(pullSyncDir, { recursive: true });
+      rmSync(pullSyncDir, { recursive: true, force: true });
     }
     delete process.env.SDL_DB_PATH;
   });

@@ -177,5 +177,14 @@ describe("Global cache functions", () => {
       });
       assert.strictEqual(key, "repo1:v1:sym1,sym2:100:5000");
     });
+
+    it("should not mutate input symbol order when generating graph slice cache keys", () => {
+      const entrySymbols = ["sym-b", "sym-a"];
+      makeGraphSliceCacheKey("repo1", "v1", entrySymbols, {
+        maxCards: 100,
+        maxEstimatedTokens: 5000,
+      });
+      assert.deepStrictEqual(entrySymbols, ["sym-b", "sym-a"]);
+    });
   });
 });

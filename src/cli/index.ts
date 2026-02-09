@@ -167,6 +167,7 @@ async function main(): Promise<void> {
       );
       const exitCode = await benchmarkCICommand(options);
       process.exit(exitCode);
+      return;
     }
 
     default:

@@ -177,8 +177,14 @@ class LRUCache<T> {
     versionId: VersionId,
     value: T,
   ): Promise<void> {
-    await this.lock;
-    const release = this.acquireLock();
+    let releaseLock: (() => void) | undefined;
+    const nextLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    const previousLock = this.lock;
+    this.lock = previousLock.then(() => nextLock);
+
+    await previousLock;
 
     try {
       const key = this.makeKey(repoId, id, versionId);
@@ -219,28 +225,8 @@ class LRUCache<T> {
 
       this.evictIfNeeded();
     } finally {
-      release();
+      releaseLock?.();
     }
-  }
-
-  /**
-   * Acquires a simple mutex lock for atomic operations
-   */
-  private acquireLock(): () => void {
-    let released = false;
-    const previousLock = this.lock;
-    this.lock = new Promise<void>((resolve) => {
-      previousLock.then(() => {
-        if (released) {
-          resolve();
-        } else {
-          this.lock = new Promise<void>((r) => r()).then(() => resolve());
-        }
-      });
-    });
-    return () => {
-      released = true;
-    };
   }
 
   /**
@@ -294,7 +280,7 @@ export function makeGraphSliceCacheKey(
   budget: { maxCards?: number; maxEstimatedTokens?: number },
 ): string {
   const budgetStr = `${budget.maxCards || 0}:${budget.maxEstimatedTokens || 0}`;
-  const symbolsStr = entrySymbols.sort().join(",");
+  const symbolsStr = [...entrySymbols].sort().join(",");
   return `${repoId}:${versionId}:${symbolsStr}:${budgetStr}`;
 }
 

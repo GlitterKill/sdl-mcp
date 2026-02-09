@@ -63,9 +63,7 @@ class AsyncFsOperations {
     filePath: string,
     encoding: BufferEncoding = "utf-8",
   ): Promise<string> {
-    return this.readLimiter.run(() =>
-      readFile(filePath, encoding),
-    ) as Promise<string>;
+    return this.readLimiter.run(() => readFile(filePath, encoding));
   }
 
   /**
@@ -75,9 +73,7 @@ class AsyncFsOperations {
    * @returns Promise that resolves with file stats
    */
   async stat(filePath: string): Promise<import("fs").Stats> {
-    return this.statLimiter.run(() => stat(filePath)) as Promise<
-      import("fs").Stats
-    >;
+    return this.statLimiter.run(() => stat(filePath));
   }
 
   /**

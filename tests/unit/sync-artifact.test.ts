@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { unlinkSync, rmdirSync, existsSync } from "fs";
+import { unlinkSync, rmSync, existsSync } from "fs";
 import {
   exportArtifact,
   importArtifact,
@@ -33,7 +33,7 @@ describe("Sync Artifact Model", () => {
       unlinkSync(testDbPath);
     }
     if (existsSync(syncDir)) {
-      rmdirSync(syncDir, { recursive: true });
+      rmSync(syncDir, { recursive: true, force: true });
     }
   });
 
@@ -44,7 +44,7 @@ describe("Sync Artifact Model", () => {
       unlinkSync(testDbPath);
     }
     if (existsSync(syncDir)) {
-      rmdirSync(syncDir, { recursive: true });
+      rmSync(syncDir, { recursive: true, force: true });
     }
     delete process.env.SDL_DB_PATH;
   });

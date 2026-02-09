@@ -20,7 +20,7 @@ process.on("unhandledRejection", (reason) => {
 
 async function main(): Promise<void> {
   const server = new MCPServer();
-  let watchers: Array<{ close: () => Promise<void> }> = [];
+  const watchers: Array<{ close: () => Promise<void> }> = [];
   let shutdownCalled = false;
 
   try {

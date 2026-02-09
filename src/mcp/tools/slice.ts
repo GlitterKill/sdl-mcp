@@ -311,7 +311,12 @@ export async function handleSliceBuild(
       entrySymbols,
       effectiveBudget,
     );
-    graphSliceCache.set(repoId, cacheKey, latestVersion.version_id, slice);
+    await graphSliceCache.set(
+      repoId,
+      cacheKey,
+      latestVersion.version_id,
+      slice,
+    );
   }
 
   return {
