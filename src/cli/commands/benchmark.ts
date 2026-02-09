@@ -392,8 +392,6 @@ export async function benchmarkCICommand(
   const thresholdPath =
     options.thresholdPath ??
     resolve(process.cwd(), "config/benchmark.config.json");
-  const baselinePath =
-    options.baselinePath ?? resolve(process.cwd(), ".benchmark/baseline.json");
   const outputPath =
     options.outputPath ?? resolve(process.cwd(), ".benchmark/latest.json");
 
@@ -405,6 +403,13 @@ export async function benchmarkCICommand(
     console.warn(`⚠ Could not load threshold config: ${error}`);
     console.warn("  Continuing without threshold evaluation...");
   }
+
+  const baselinePath =
+    options.baselinePath ??
+    resolve(
+      process.cwd(),
+      thresholds?.baseline.filePath ?? ".benchmark/baseline.json",
+    );
 
   console.log(`\nBenchmarking repository: ${repoId}`);
   console.log(`Repository path: ${repoPath}`);

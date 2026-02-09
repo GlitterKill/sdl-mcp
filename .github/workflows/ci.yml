@@ -88,8 +88,14 @@ jobs:
         shell: bash
         run: |
           echo "Running benchmark CI with guardrails..."
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            THRESHOLD_PATH="config/benchmark.ci.windows.config.json"
+          else
+            THRESHOLD_PATH="config/benchmark.ci.config.json"
+          fi
+          echo "Using threshold config: ${THRESHOLD_PATH}"
           npm run build
-          node dist/cli/index.js benchmark:ci --threshold-path config/benchmark.ci.config.json --json --out .benchmark/latest-result.json
+          node dist/cli/index.js benchmark:ci --threshold-path "${THRESHOLD_PATH}" --json --out .benchmark/latest-result.json
           BENCHMARK_EXIT_CODE=$?
 
           echo "Benchmark exit code: ${BENCHMARK_EXIT_CODE}"
