@@ -174,16 +174,30 @@ async function collectBenchmarkMetrics(
 
   const allSymbols = db.getSymbolsByRepo(repoId);
   const edges = db.getEdgesByRepo(repoId);
-
-  const srcSymbols = allSymbols.filter((s) => {
-    const file = db.getFile(s.file_id);
-    return file?.rel_path.startsWith("src/");
-  });
-  const sampleSize = Math.min(20, srcSymbols.length || allSymbols.length);
-  const sampleSymbols = (srcSymbols.length > 0 ? srcSymbols : allSymbols).slice(
-    0,
-    sampleSize,
+  const filesById = new Map(
+    db.getFilesByRepo(repoId).map((file) => [file.file_id, file.rel_path]),
   );
+
+  // Ensure benchmark symbol sampling is deterministic across platforms/runs.
+  const sortedSymbols = [...allSymbols].sort((a, b) => {
+    const pathA = filesById.get(a.file_id) ?? "";
+    const pathB = filesById.get(b.file_id) ?? "";
+    return (
+      pathA.localeCompare(pathB) ||
+      a.range_start_line - b.range_start_line ||
+      a.range_start_col - b.range_start_col ||
+      a.kind.localeCompare(b.kind) ||
+      a.name.localeCompare(b.name) ||
+      a.symbol_id.localeCompare(b.symbol_id)
+    );
+  });
+
+  const srcSymbols = sortedSymbols.filter(
+    (symbol) => (filesById.get(symbol.file_id) ?? "").startsWith("src/"),
+  );
+  const samplingPool = srcSymbols.length > 0 ? srcSymbols : sortedSymbols;
+  const sampleSize = Math.min(20, samplingPool.length);
+  const sampleSymbols = samplingPool.slice(0, sampleSize);
 
   let totalCardTokens = 0;
   let totalSkeletonTokens = 0;
@@ -221,17 +235,28 @@ async function collectBenchmarkMetrics(
 
   let sliceBuildTimeMs = 0;
 
-  if (allSymbols.length > 0) {
-    const functionSymbols = allSymbols.filter((s) => s.kind === "function");
-    let seedSymbol = functionSymbols[0] || allSymbols[0];
+  if (sortedSymbols.length > 0) {
+    const outDegreeBySymbol = edges.reduce((counts, edge) => {
+      counts.set(edge.from_symbol_id, (counts.get(edge.from_symbol_id) ?? 0) + 1);
+      return counts;
+    }, new Map<string, number>());
 
-    for (const sym of functionSymbols) {
-      const outEdges = db.getEdgesFrom(sym.symbol_id);
-      if (outEdges.length > 3) {
-        seedSymbol = sym;
-        break;
-      }
-    }
+    const srcFunctionSymbols = srcSymbols.filter(
+      (s) => s.kind === "function" || s.kind === "method",
+    );
+    const allFunctionSymbols = sortedSymbols.filter(
+      (s) => s.kind === "function" || s.kind === "method",
+    );
+    const seedCandidates =
+      srcFunctionSymbols.length > 0 ? srcFunctionSymbols : allFunctionSymbols;
+
+    const seedSymbol =
+      seedCandidates.find((sym) => {
+        const outDegree = outDegreeBySymbol.get(sym.symbol_id) ?? 0;
+        return outDegree >= 3 && outDegree <= 40;
+      }) ??
+      seedCandidates[0] ??
+      sortedSymbols[0];
 
     const latestVersion = db.getLatestVersion(repoId);
     const versionId = latestVersion?.version_id ?? "current";
@@ -274,7 +299,7 @@ async function collectBenchmarkMetrics(
   );
 
   if (filesIndexed === 0) {
-    filesIndexed = db.getFilesByRepo(repoId).length;
+    filesIndexed = filesById.size;
   }
 
   const totalSymbols = allSymbols.length;

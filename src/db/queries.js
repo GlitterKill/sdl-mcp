@@ -469,14 +469,8 @@ export function deleteSymbolsByFile(fileId) {
  * @param fileId - File identifier
  */
 export function deleteSymbolsByFileWithEdges(fileId) {
-    const db = getDb();
-    const deleteTx = db.transaction(() => {
-        const symbols = getSymbolsByFile(fileId);
-        for (const symbol of symbols) {
-            stmt("DELETE FROM symbols WHERE symbol_id = ?").run(symbol.symbol_id);
-        }
-    });
-    deleteTx();
+    // Cascading foreign keys on symbols remove dependent edges/metrics/versions.
+    deleteSymbolsByFile(fileId);
 }
 // Edge operations
 /**

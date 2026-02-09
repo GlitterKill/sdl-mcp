@@ -1,0 +1,86 @@
+{
+  "version": "1.0",
+  "description": "Benchmark threshold configuration for CI regression detection (hosted-runner profile)",
+  "thresholds": {
+    "indexing": {
+      "indexTimePerFile": {
+        "maxMs": 200,
+        "trend": "lower-is-better",
+        "allowableIncreasePercent": 10
+      },
+      "indexTimePerSymbol": {
+        "maxMs": 15,
+        "trend": "lower-is-better",
+        "allowableIncreasePercent": 60
+      }
+    },
+    "quality": {
+      "symbolsPerFile": {
+        "minValue": 5,
+        "trend": "higher-is-better",
+        "allowableDecreasePercent": 5
+      },
+      "edgesPerSymbol": {
+        "minValue": 1,
+        "trend": "higher-is-better",
+        "allowableDecreasePercent": 5
+      },
+      "graphConnectivity": {
+        "minValue": 0.3,
+        "trend": "higher-is-better",
+        "allowableDecreasePercent": 5
+      },
+      "exportedSymbolRatio": {
+        "minValue": 0.2,
+        "trend": "higher-is-better",
+        "allowableDecreasePercent": 10
+      }
+    },
+    "performance": {
+      "sliceBuildTimeMs": {
+        "maxMs": 200,
+        "trend": "lower-is-better",
+        "allowableIncreasePercent": 125
+      },
+      "avgSkeletonTimeMs": {
+        "maxMs": 5,
+        "trend": "lower-is-better",
+        "allowableIncreasePercent": 30
+      }
+    },
+    "tokenEfficiency": {
+      "avgCardTokens": {
+        "maxTokens": 350,
+        "trend": "lower-is-better",
+        "allowableIncreasePercent": 30
+      },
+      "avgSkeletonTokens": {
+        "maxTokens": 200,
+        "trend": "lower-is-better",
+        "allowableIncreasePercent": 10
+      }
+    },
+    "coverage": {
+      "callEdgeCoverage": {
+        "minPercent": 0.1,
+        "trend": "higher-is-better",
+        "allowableDecreasePercent": 10
+      },
+      "importEdgeCoverage": {
+        "minPercent": 0.5,
+        "trend": "higher-is-better",
+        "allowableDecreasePercent": 10
+      }
+    }
+  },
+  "smoothing": {
+    "warmupRuns": 2,
+    "sampleRuns": 3,
+    "outlierMethod": "iqr",
+    "iqrMultiplier": 1.5
+  },
+  "baseline": {
+    "filePath": ".benchmark/baseline.json",
+    "autoUpdateOnPass": false
+  }
+}
