@@ -1,5 +1,22 @@
 # Benchmark CI Failures: Interpretation and Remediation
 
+<div align="right">
+<details>
+<summary><strong>Docs Navigation</strong></summary>
+
+- [Overview](../README.md)
+- [Documentation Hub](./README.md)
+  - [Getting Started](./getting-started.md)
+  - [CLI Reference](./cli-reference.md)
+  - [MCP Tools Reference](./mcp-tools-reference.md)
+  - [Configuration Reference](./configuration-reference.md)
+  - [Agent Workflows](./agent-workflows.md)
+  - [Troubleshooting](./troubleshooting.md)
+- [Legacy User Guide](./USER_GUIDE.md)
+
+</details>
+</div>
+
 This guide helps developers understand benchmark CI failures and take appropriate action.
 
 ## Quick Reference: What to Do When CI Fails

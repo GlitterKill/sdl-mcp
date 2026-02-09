@@ -1,5 +1,22 @@
 # CI Memory Sync Setup Guide
 
+<div align="right">
+<details>
+<summary><strong>Docs Navigation</strong></summary>
+
+- [Overview](../README.md)
+- [Documentation Hub](./README.md)
+  - [Getting Started](./getting-started.md)
+  - [CLI Reference](./cli-reference.md)
+  - [MCP Tools Reference](./mcp-tools-reference.md)
+  - [Configuration Reference](./configuration-reference.md)
+  - [Agent Workflows](./agent-workflows.md)
+  - [Troubleshooting](./troubleshooting.md)
+- [Legacy User Guide](./USER_GUIDE.md)
+
+</details>
+</div>
+
 ## Quick Start
 
 This guide provides step-by-step instructions for setting up CI Memory Sync in your SDL-MCP project.
@@ -21,7 +38,7 @@ Before starting, ensure you have:
 sdl-mcp version
 
 # Expected output:
-# SDL-MCP version: 0.5.1
+# SDL-MCP version: 0.6.0
 # Environment:
 #   Node.js: v20.11.0
 #   Platform: linux/win32

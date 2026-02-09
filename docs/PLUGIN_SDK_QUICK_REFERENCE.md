@@ -1,5 +1,22 @@
 # Adapter Plugin SDK - Quick Reference
 
+<div align="right">
+<details>
+<summary><strong>Docs Navigation</strong></summary>
+
+- [Overview](../README.md)
+- [Documentation Hub](./README.md)
+  - [Getting Started](./getting-started.md)
+  - [CLI Reference](./cli-reference.md)
+  - [MCP Tools Reference](./mcp-tools-reference.md)
+  - [Configuration Reference](./configuration-reference.md)
+  - [Agent Workflows](./agent-workflows.md)
+  - [Troubleshooting](./troubleshooting.md)
+- [Legacy User Guide](./USER_GUIDE.md)
+
+</details>
+</div>
+
 Quick reference guide for SDL-MCP adapter plugin system.
 
 ## Getting Started

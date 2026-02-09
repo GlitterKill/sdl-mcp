@@ -1,5 +1,22 @@
 # PR Risk Copilot Tool - Implementation Summary
 
+<div align="right">
+<details>
+<summary><strong>Docs Navigation</strong></summary>
+
+- [Overview](../README.md)
+- [Documentation Hub](./README.md)
+  - [Getting Started](./getting-started.md)
+  - [CLI Reference](./cli-reference.md)
+  - [MCP Tools Reference](./mcp-tools-reference.md)
+  - [Configuration Reference](./configuration-reference.md)
+  - [Agent Workflows](./agent-workflows.md)
+  - [Troubleshooting](./troubleshooting.md)
+- [Legacy User Guide](./USER_GUIDE.md)
+
+</details>
+</div>
+
 ## Overview
 
 The PR Risk Copilot Tool (`sdl.pr.risk.analyze`) has been successfully implemented as an MCP tool that analyzes Pull Request risk by computing deltas between versions, assessing blast radius impact, and recommending appropriate tests.
@@ -49,7 +66,8 @@ Unit tests created covering:
 
 Comprehensive documentation added to:
 
-- `docs/USER_GUIDE.md`: Full tool reference with parameters, response schema, risk scoring factors, usage examples
+- `docs/mcp-tools-reference.md`: Full tool reference with parameters and examples
+- `docs/agent-workflows.md`: Agent-centric usage patterns and risk-review workflow
 - `README.md`: Tool added to MCP tools list
 
 **Documentation sections**:
@@ -76,7 +94,7 @@ Comprehensive documentation added to:
 
 1. `src/mcp/tools.ts` - Added PR Risk request/response schemas
 2. `src/mcp/tools/index.ts` - Registered `sdl.pr.risk.analyze` tool
-3. `docs/USER_GUIDE.md` - Added comprehensive tool documentation
+3. `docs/mcp-tools-reference.md` - Added and maintained tool documentation reference
 4. `README.md` - Added tool to MCP tools list
 
 ### Risk Scoring Algorithm

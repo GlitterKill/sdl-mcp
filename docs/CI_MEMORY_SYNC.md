@@ -1,5 +1,22 @@
 # CI Memory Sync Operations Guide
 
+<div align="right">
+<details>
+<summary><strong>Docs Navigation</strong></summary>
+
+- [Overview](../README.md)
+- [Documentation Hub](./README.md)
+  - [Getting Started](./getting-started.md)
+  - [CLI Reference](./cli-reference.md)
+  - [MCP Tools Reference](./mcp-tools-reference.md)
+  - [Configuration Reference](./configuration-reference.md)
+  - [Agent Workflows](./agent-workflows.md)
+  - [Troubleshooting](./troubleshooting.md)
+- [Legacy User Guide](./USER_GUIDE.md)
+
+</details>
+</div>
+
 ## Overview
 
 CI Memory Sync automates the synchronization of indexed code memory across continuous integration workflows. This ensures that indexed state is consistently maintained, exported, and validated on every successful main branch merge.
