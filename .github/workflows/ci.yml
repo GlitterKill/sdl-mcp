@@ -226,7 +226,7 @@ jobs:
       - name: Upload sync artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sync-artifact-${{ runner.os }}
+          name: sync-artifact-${{ matrix.os }}
           path: ./ci-artifacts/*.sdl-artifact.json
           retention-days: 30
 
