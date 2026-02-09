@@ -85,7 +85,6 @@ jobs:
         run: npm run test:harness
 
       - name: Run Benchmark CI Guardrails
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
         shell: bash
         run: |
           echo "Running benchmark CI with guardrails..."
