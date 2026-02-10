@@ -4,7 +4,9 @@
  *
  * @template T - Type of items in the heap (must have a numeric score property)
  */
-export class MinHeap<T extends { score: number }> {
+export class MinHeap<
+  T extends { score: number; priority?: number; sequence?: number },
+> {
   private heap: T[] = [];
 
   /**
@@ -109,7 +111,7 @@ export class MinHeap<T extends { score: number }> {
   private bubbleUp(index: number): void {
     while (index > 0) {
       const parentIndex = Math.floor((index - 1) / 2);
-      if (this.heap[parentIndex].score <= this.heap[index].score) {
+      if (this.compare(this.heap[parentIndex], this.heap[index]) <= 0) {
         break;
       }
       this.swap(parentIndex, index);
@@ -129,13 +131,16 @@ export class MinHeap<T extends { score: number }> {
       const left = 2 * index + 1;
       const right = 2 * index + 2;
 
-      if (left < length && this.heap[left].score < this.heap[smallest].score) {
+      if (
+        left < length &&
+        this.compare(this.heap[left], this.heap[smallest]) < 0
+      ) {
         smallest = left;
       }
 
       if (
         right < length &&
-        this.heap[right].score < this.heap[smallest].score
+        this.compare(this.heap[right], this.heap[smallest]) < 0
       ) {
         smallest = right;
       }
@@ -157,5 +162,19 @@ export class MinHeap<T extends { score: number }> {
    */
   private swap(i: number, j: number): void {
     [this.heap[i], this.heap[j]] = [this.heap[j], this.heap[i]];
+  }
+
+  /**
+   * Compare two heap items with deterministic tie-breakers.
+   * Lower score is better; ties are broken by priority and then insertion sequence.
+   */
+  private compare(a: T, b: T): number {
+    if (a.score !== b.score) return a.score - b.score;
+    const aPriority = a.priority ?? 0;
+    const bPriority = b.priority ?? 0;
+    if (aPriority !== bPriority) return aPriority - bPriority;
+    const aSequence = a.sequence ?? 0;
+    const bSequence = b.sequence ?? 0;
+    return aSequence - bSequence;
   }
 }

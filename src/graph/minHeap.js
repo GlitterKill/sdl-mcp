@@ -98,7 +98,7 @@ export class MinHeap {
     bubbleUp(index) {
         while (index > 0) {
             const parentIndex = Math.floor((index - 1) / 2);
-            if (this.heap[parentIndex].score <= this.heap[index].score) {
+            if (this.compare(this.heap[parentIndex], this.heap[index]) <= 0) {
                 break;
             }
             this.swap(parentIndex, index);
@@ -112,15 +112,16 @@ export class MinHeap {
      */
     bubbleDown(index) {
         const length = this.heap.length;
-        while (true) {
+        for (;;) {
             let smallest = index;
             const left = 2 * index + 1;
             const right = 2 * index + 2;
-            if (left < length && this.heap[left].score < this.heap[smallest].score) {
+            if (left < length &&
+                this.compare(this.heap[left], this.heap[smallest]) < 0) {
                 smallest = left;
             }
             if (right < length &&
-                this.heap[right].score < this.heap[smallest].score) {
+                this.compare(this.heap[right], this.heap[smallest]) < 0) {
                 smallest = right;
             }
             if (smallest === index) {
@@ -138,6 +139,21 @@ export class MinHeap {
      */
     swap(i, j) {
         [this.heap[i], this.heap[j]] = [this.heap[j], this.heap[i]];
+    }
+    /**
+     * Compare two heap items with deterministic tie-breakers.
+     * Lower score is better; ties are broken by priority and then insertion sequence.
+     */
+    compare(a, b) {
+        if (a.score !== b.score)
+            return a.score - b.score;
+        const aPriority = a.priority ?? 0;
+        const bPriority = b.priority ?? 0;
+        if (aPriority !== bPriority)
+            return aPriority - bPriority;
+        const aSequence = a.sequence ?? 0;
+        const bSequence = b.sequence ?? 0;
+        return aSequence - bSequence;
     }
 }
 //# sourceMappingURL=minHeap.js.map

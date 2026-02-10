@@ -94,6 +94,7 @@ interface TokenAnalysis {
   reduction: number;
   compressionRatio: number;
   winner: "SDL-MCP" | "Traditional" | "Tie";
+  qualifier?: string;
 }
 
 interface BenchmarkResult {
@@ -405,9 +406,10 @@ function printComparisonTable(analyses: TokenAnalysis[]): void {
     const sdl = formatNumber(analysis.sdlMcp.tokens).padStart(10);
     const savings = formatPercent(analysis.reduction).padStart(6);
     const indicator = analysis.winner === "SDL-MCP" ? " *" : "  ";
+    const qualifier = analysis.qualifier ? ` ${analysis.qualifier}` : "";
 
     console.log(
-      `  | ${scenario} | ${trad} tk | ${sdl} tk | ${savings}${indicator}|`,
+      `  | ${scenario} | ${trad} tk | ${sdl} tk | ${savings}${indicator}${qualifier}|`,
     );
   }
 
@@ -421,17 +423,14 @@ function printBenefitsSummary(result: BenchmarkResult): void {
   const avgReductionAll =
     result.tokenAnalysis.reduce((sum, a) => sum + a.reduction, 0) /
     result.tokenAnalysis.length;
-  const winningAnalyses = result.tokenAnalysis.filter(
-    (a) => a.winner === "SDL-MCP",
+  const compressionAnalyses = result.tokenAnalysis.filter(
+    (a) => a.qualifier !== "(Functional Overview)",
   );
-  const avgReductionWhenWinning =
-    winningAnalyses.length > 0
-      ? winningAnalyses.reduce((sum, a) => sum + a.reduction, 0) /
-        winningAnalyses.length
-      : avgReductionAll;
+  const compressionSource =
+    compressionAnalyses.length > 0 ? compressionAnalyses : result.tokenAnalysis;
   const avgCompression =
-    result.tokenAnalysis.reduce((sum, a) => sum + a.compressionRatio, 0) /
-    result.tokenAnalysis.length;
+    compressionSource.reduce((sum, a) => sum + a.compressionRatio, 0) /
+    compressionSource.length;
   const wins = result.tokenAnalysis.filter((a) => a.winner === "SDL-MCP").length;
   const total = result.tokenAnalysis.length;
 
@@ -453,9 +452,8 @@ function printBenefitsSummary(result: BenchmarkResult): void {
     - Intelligent caching reduces repeated context loading
 
   MEASURED BENEFITS FOR THIS CODEBASE:
-    ${progressBar(avgReductionWhenWinning)} ${formatPercent(avgReductionWhenWinning)} avg token reduction (when SDL-MCP wins)
     ${progressBar(avgReductionAll)} ${formatPercent(avgReductionAll)} avg token reduction (all scenarios)
-    ${avgCompression.toFixed(1)}x average compression ratio
+    ${avgCompression.toFixed(1)}x average compression ratio (excluding Functional Overview)
     ${wins}/${total} scenarios where SDL-MCP uses fewer tokens
     ${formatNumber(result.sdlMcp.symbolsIndexed)} symbols indexed across ${formatNumber(result.traditional.totalFiles)} files
     ${formatNumber(result.quality.edgeTypeDistribution.call ?? 0)} call edges + ${formatNumber(result.quality.edgeTypeDistribution.import ?? 0)} import edges tracked
@@ -837,64 +835,111 @@ async function runBenchmark(repoId?: string): Promise<BenchmarkResult[]> {
       winner: sdlMcpBug < traditionalBug ? "SDL-MCP" : "Traditional",
     });
 
-    // Scenario 4: Full codebase overview (all symbol cards)
+    // Scenario 4: Full codebase context (compressed semantic overview)
     const traditionalOverview = totalTokens;
-    const sdlMcpCardsOverview = allSymbols.length * avgCardTokens;
-    const cardsOverviewReduction =
-      traditionalOverview > 0 && sdlMcpCardsOverview > 0
-        ? (1 - sdlMcpCardsOverview / traditionalOverview) * 100
-        : 0;
-
-    tokenAnalysis.push({
-      scenario: "Full Codebase (Cards)",
-      traditional: {
-        description: "all files",
-        tokens: traditionalOverview,
-      },
-      sdlMcp: {
-        description: "all symbol cards",
-        tokens: sdlMcpCardsOverview,
-      },
-      reduction: cardsOverviewReduction,
-      compressionRatio:
-        sdlMcpCardsOverview > 0 ? traditionalOverview / sdlMcpCardsOverview : 0,
-      winner: sdlMcpCardsOverview < traditionalOverview ? "SDL-MCP" : "Traditional",
-    });
-
-    // Scenario 5: Directory overview (new compressed format)
-    let directoryOverviewTokens = 0;
-    let compressionRatio = 1;
+    let fullContextTokens = 0;
+    let highFidelityContextTokens = 0;
     try {
       const overview = buildRepoOverview({
         repoId: repoConfig.repoId,
         level: "full",
         includeHotspots: true,
       });
-      directoryOverviewTokens = overview.tokenMetrics.overviewTokens;
-      compressionRatio = overview.tokenMetrics.compressionRatio;
-    } catch {
-      // If overview fails, estimate based on directory count
-      directoryOverviewTokens = Math.round(allSymbols.length * avgCardTokens * 0.1);
-    }
+      fullContextTokens = overview.tokenMetrics.overviewTokens;
 
-    const directoryOverviewReduction =
-      traditionalOverview > 0 && directoryOverviewTokens > 0
-        ? (1 - directoryOverviewTokens / traditionalOverview) * 100
+      // Policy-guided high-fidelity workflow:
+      // 1) full overview for global map
+      // 2) focused symbol cards for hotspot-heavy and directory coverage
+      // 3) focused skeletons for structural fidelity
+      // 4) bounded code windows under policy limits for exact implementation detail
+      const maxCards = tuningParameters.slice.maxCards;
+      const maxWindowTokens = config.policy.maxWindowTokens;
+      const directoryCount = overview.directories.length;
+      const hotspotIds = new Set<string>();
+      for (const ref of overview.hotspots?.mostDepended ?? []) {
+        hotspotIds.add(ref.symbolId);
+      }
+      for (const ref of overview.hotspots?.mostChanged ?? []) {
+        hotspotIds.add(ref.symbolId);
+      }
+      const hotspotCount = hotspotIds.size;
+      const focusedCardCount = Math.min(
+        maxCards,
+        Math.max(20, hotspotCount + directoryCount * 2),
+      );
+      const focusedSkeletonCount = Math.min(
+        focusedCardCount,
+        Math.max(10, hotspotCount + Math.ceil(directoryCount / 2)),
+      );
+      const codeWindowCount = Math.min(
+        6,
+        Math.max(2, Math.ceil(focusedSkeletonCount / 20)),
+      );
+      const focusedCardTokens = focusedCardCount * avgCardTokens;
+      const focusedSkeletonTokens =
+        focusedSkeletonCount * estimatedSkeletonTokens;
+      const windowTokens = codeWindowCount * maxWindowTokens;
+
+      highFidelityContextTokens = Math.round(
+        fullContextTokens +
+          focusedCardTokens +
+          focusedSkeletonTokens +
+          windowTokens,
+      );
+    } catch {
+      // If overview fails, estimate based on directory-level compression
+      fullContextTokens = Math.round(allSymbols.length * avgCardTokens * 0.1);
+      highFidelityContextTokens = Math.round(
+        fullContextTokens + avgCardTokens * 60 + estimatedSkeletonTokens * 30,
+      );
+    }
+    const fullContextReduction =
+      traditionalOverview > 0 && fullContextTokens > 0
+        ? (1 - fullContextTokens / traditionalOverview) * 100
         : 0;
 
     tokenAnalysis.push({
-      scenario: "Directory Overview",
+      scenario: "Full Codebase Context",
       traditional: {
         description: "all files",
         tokens: traditionalOverview,
       },
       sdlMcp: {
-        description: "directory summaries + hotspots",
-        tokens: directoryOverviewTokens,
+        description: "overview (stats + dirs + hotspots)",
+        tokens: fullContextTokens,
       },
-      reduction: directoryOverviewReduction,
-      compressionRatio,
-      winner: directoryOverviewTokens < traditionalOverview ? "SDL-MCP" : "Traditional",
+      reduction: fullContextReduction,
+      compressionRatio:
+        fullContextTokens > 0 ? traditionalOverview / fullContextTokens : 0,
+      winner: fullContextTokens < traditionalOverview ? "SDL-MCP" : "Traditional",
+      qualifier: "(Functional Overview)",
+    });
+
+    const highFidelityContextReduction =
+      traditionalOverview > 0 && highFidelityContextTokens > 0
+        ? (1 - highFidelityContextTokens / traditionalOverview) * 100
+        : 0;
+
+    tokenAnalysis.push({
+      scenario: "Full Codebase Context",
+      traditional: {
+        description: "all files",
+        tokens: traditionalOverview,
+      },
+      sdlMcp: {
+        description: "overview + focused cards/skeletons/windows",
+        tokens: highFidelityContextTokens,
+      },
+      reduction: highFidelityContextReduction,
+      compressionRatio:
+        highFidelityContextTokens > 0
+          ? traditionalOverview / highFidelityContextTokens
+          : 0,
+      winner:
+        highFidelityContextTokens < traditionalOverview
+          ? "SDL-MCP"
+          : "Traditional",
+      qualifier: "(High Fidelity)",
     });
 
     const performance_metrics: PerformanceMetrics = {
@@ -987,10 +1032,20 @@ function printFinalSummary(results: BenchmarkResult[]): void {
 
   const avgCompression =
     results.reduce(
-      (sum, r) =>
-        sum +
-        r.tokenAnalysis.reduce((s, a) => s + a.compressionRatio, 0) /
-          r.tokenAnalysis.length,
+      (sum, r) => {
+        const compressionAnalyses = r.tokenAnalysis.filter(
+          (a) => a.qualifier !== "(Functional Overview)",
+        );
+        const compressionSource =
+          compressionAnalyses.length > 0
+            ? compressionAnalyses
+            : r.tokenAnalysis;
+        return (
+          sum +
+          compressionSource.reduce((s, a) => s + a.compressionRatio, 0) /
+            compressionSource.length
+        );
+      },
       0,
     ) / results.length;
 

@@ -1,6 +1,8 @@
 import {
   SliceBuildRequestSchema,
   SliceBuildResponse,
+  SliceBuildWireFormat,
+  CompactGraphSlice,
   SliceRefreshRequestSchema,
   SliceRefreshResponse,
   SliceSpilloverGetRequestSchema,
@@ -33,6 +35,7 @@ import { graphSliceCache, makeGraphSliceCacheKey } from "../../graph/cache.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { createPolicyDenial } from "../errors.js";
+import { pickDepLabel } from "../../util/depLabels.js";
 
 const policyEngine = new PolicyEngine();
 
@@ -108,6 +111,118 @@ function createSliceEtag(
   };
 }
 
+function serializeSliceForWireFormat(
+  slice: GraphSlice,
+  wireFormat: SliceBuildWireFormat,
+): GraphSlice | CompactGraphSlice {
+  if (wireFormat === "compact") {
+    return toCompactGraphSlice(slice);
+  }
+  return slice;
+}
+
+export function toCompactGraphSlice(slice: GraphSlice): CompactGraphSlice {
+  const compact: CompactGraphSlice = {
+    wf: "compact",
+    wv: 1,
+    rid: slice.repoId,
+    vid: slice.versionId,
+    b: {
+      mc: slice.budget.maxCards,
+      mt: slice.budget.maxEstimatedTokens,
+    },
+    ss: slice.startSymbols,
+    si: slice.symbolIndex,
+    c: slice.cards.map((card) => {
+      const compactCard: CompactGraphSlice["c"][number] = {
+        sid: card.symbolId,
+        f: card.file,
+        r: [
+          card.range.startLine,
+          card.range.startCol,
+          card.range.endLine,
+          card.range.endCol,
+        ],
+        k: card.kind,
+        n: card.name,
+        x: card.exported,
+        d: {
+          i: card.deps.imports,
+          c: card.deps.calls,
+        },
+        af: card.version.astFingerprint,
+      };
+
+      if (card.visibility) compactCard.v = card.visibility;
+      if (card.signature) compactCard.sig = card.signature;
+      if (card.summary) compactCard.sum = card.summary;
+      if (card.invariants && card.invariants.length > 0) {
+        compactCard.inv = card.invariants;
+      }
+      if (card.sideEffects && card.sideEffects.length > 0) {
+        compactCard.se = card.sideEffects;
+      }
+      if (card.metrics) {
+        const metrics: CompactGraphSlice["c"][number]["m"] = {};
+        if (card.metrics.fanIn !== undefined) metrics.fi = card.metrics.fanIn;
+        if (card.metrics.fanOut !== undefined) metrics.fo = card.metrics.fanOut;
+        if (card.metrics.churn30d !== undefined) metrics.ch = card.metrics.churn30d;
+        if (card.metrics.testRefs && card.metrics.testRefs.length > 0) {
+          metrics.t = card.metrics.testRefs;
+        }
+        if (Object.keys(metrics).length > 0) {
+          compactCard.m = metrics;
+        }
+      }
+      if (card.detailLevel && card.detailLevel !== "compact") {
+        compactCard.dl = card.detailLevel;
+      }
+
+      return compactCard;
+    }),
+    e: slice.edges,
+  };
+
+  if (slice.cardRefs && slice.cardRefs.length > 0) {
+    type CompactCardRef = NonNullable<CompactGraphSlice["cr"]>[number];
+    compact.cr = slice.cardRefs.map((ref) => {
+      const compactRef: CompactCardRef = {
+        sid: ref.symbolId,
+        e: ref.etag,
+      };
+      if (ref.detailLevel !== "compact") {
+        compactRef.dl = ref.detailLevel;
+      }
+      return compactRef;
+    });
+  }
+
+  if (slice.frontier && slice.frontier.length > 0) {
+    compact.f = slice.frontier.map((item) => ({
+      sid: item.symbolId,
+      s: item.score,
+      w: item.why,
+    }));
+  }
+
+  if (slice.truncation) {
+    const truncation: CompactGraphSlice["t"] = {
+      tr: slice.truncation.truncated,
+      dc: slice.truncation.droppedCards,
+      de: slice.truncation.droppedEdges,
+    };
+    if (slice.truncation.howToResume) {
+      truncation.res = {
+        t: slice.truncation.howToResume.type,
+        v: slice.truncation.howToResume.value,
+      };
+    }
+    compact.t = truncation;
+  }
+
+  return compact;
+}
+
 /**
  * Handles graph slice build requests.
  * Creates a new slice handle with configurable entry points and budget.
@@ -128,8 +243,12 @@ export async function handleSliceBuild(
     failingTestPath,
     editedFiles,
     entrySymbols,
+    knownCardEtags,
+    cardDetail,
+    wireFormat,
     budget,
   } = request;
+  const requestedWireFormat: SliceBuildWireFormat = wireFormat ?? "standard";
 
   const config = loadConfig();
   const repo = db.getRepo(repoId);
@@ -200,14 +319,28 @@ export async function handleSliceBuild(
     failingTestPath,
     editedFiles,
     entrySymbols,
+    knownCardEtags,
+    cardDetail,
     budget: effectiveBudget,
   };
 
-  if (cacheEnabled && entrySymbols) {
+  const hasKnownCardEtags = Boolean(
+    knownCardEtags && Object.keys(knownCardEtags).length > 0,
+  );
+  const cacheableEntrySymbols =
+    entrySymbols && entrySymbols.length > 0 ? entrySymbols : null;
+  const canUseGraphSliceCache = Boolean(
+    cacheEnabled &&
+      cacheableEntrySymbols &&
+      !hasKnownCardEtags &&
+      cardDetail !== "full",
+  );
+
+  if (canUseGraphSliceCache && cacheableEntrySymbols) {
     const cacheKey = makeGraphSliceCacheKey(
       repoId,
       latestVersion.version_id,
-      entrySymbols,
+      cacheableEntrySymbols,
       effectiveBudget,
     );
     const cachedSlice = graphSliceCache.get(
@@ -243,7 +376,7 @@ export async function handleSliceBuild(
         ledgerVersion: latestVersion.version_id,
         lease,
         sliceEtag,
-        slice: cachedSlice,
+        slice: serializeSliceForWireFormat(cachedSlice, requestedWireFormat),
       };
     }
   }
@@ -304,11 +437,11 @@ export async function handleSliceBuild(
 
   db.createSliceHandle(handleRow);
 
-  if (cacheEnabled && entrySymbols) {
+  if (canUseGraphSliceCache && cacheableEntrySymbols) {
     const cacheKey = makeGraphSliceCacheKey(
       repoId,
       latestVersion.version_id,
-      entrySymbols,
+      cacheableEntrySymbols,
       effectiveBudget,
     );
     await graphSliceCache.set(
@@ -324,7 +457,7 @@ export async function handleSliceBuild(
     ledgerVersion: latestVersion.version_id,
     lease,
     sliceEtag,
-    slice,
+    slice: serializeSliceForWireFormat(slice, requestedWireFormat),
   };
 }
 
@@ -496,14 +629,31 @@ export async function handleSliceSpilloverGet(
       };
 
       const outgoingEdges = db.getEdgesFrom(item.symbolId);
+      const targetSymbolIds = Array.from(
+        new Set(outgoingEdges.map((edge) => edge.to_symbol_id)),
+      );
+      const targetSymbolsById =
+        targetSymbolIds.length > 0
+          ? db.getSymbolsByIdsLite(targetSymbolIds)
+          : new Map<string, { symbol_id: string; name: string }>();
+
       for (const edge of outgoingEdges) {
         if (edge.type === "import") {
-          const importedSymbol = db.getSymbol(edge.to_symbol_id);
-          if (importedSymbol) {
-            deps.imports.push(importedSymbol.name);
+          const depLabel = pickDepLabel(
+            edge.to_symbol_id,
+            targetSymbolsById.get(edge.to_symbol_id)?.name,
+          );
+          if (depLabel) {
+            deps.imports.push(depLabel);
           }
         } else if (edge.type === "call") {
-          deps.calls.push(edge.to_symbol_id);
+          const depLabel = pickDepLabel(
+            edge.to_symbol_id,
+            targetSymbolsById.get(edge.to_symbol_id)?.name,
+          );
+          if (depLabel) {
+            deps.calls.push(depLabel);
+          }
         }
       }
 

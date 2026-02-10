@@ -1,9 +1,9 @@
 [
   {
-    "id": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex:class:MyClass",
+    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex:class:MyClass",
     "name": "MyClass",
     "kind": "class",
-    "filePath": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex",
+    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex",
     "range": {
       "startLine": 3,
       "startCol": 6,
@@ -14,10 +14,10 @@
     "metadata": {}
   },
   {
-    "id": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex:fn:myMethod",
+    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex:fn:myMethod",
     "name": "myMethod",
     "kind": "function",
-    "filePath": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex",
+    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex",
     "range": {
       "startLine": 4,
       "startCol": 5,
@@ -28,10 +28,10 @@
     "metadata": {}
   },
   {
-    "id": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex:fn:calculateSum",
+    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex:fn:calculateSum",
     "name": "calculateSum",
     "kind": "function",
-    "filePath": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex",
+    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\symbols.ex",
     "range": {
       "startLine": 7,
       "startCol": 5,

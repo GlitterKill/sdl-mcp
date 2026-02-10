@@ -1,6 +1,6 @@
 [
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:GLOBAL_VAR",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:GLOBAL_VAR",
     "kind": "variable",
     "name": "GLOBAL_VAR",
     "exported": false,
@@ -13,7 +13,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:EXPORTED_VAR",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:EXPORTED_VAR",
     "kind": "variable",
     "name": "EXPORTED_VAR",
     "exported": true,
@@ -26,7 +26,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:READONLY_VAR",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:READONLY_VAR",
     "kind": "variable",
     "name": "READONLY_VAR",
     "exported": false,
@@ -39,7 +39,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:ARRAY_VAR",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:ARRAY_VAR",
     "kind": "variable",
     "name": "ARRAY_VAR",
     "exported": false,
@@ -52,7 +52,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:ASSOC_VAR",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:ASSOC_VAR",
     "kind": "variable",
     "name": "ASSOC_VAR",
     "exported": false,
@@ -65,7 +65,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:ll:alias",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:ll:alias",
     "kind": "variable",
     "name": "ll",
     "exported": true,
@@ -78,7 +78,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:grep:alias",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:grep:alias",
     "kind": "variable",
     "name": "grep",
     "exported": true,
@@ -91,7 +91,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:gitlog:alias",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:gitlog:alias",
     "kind": "variable",
     "name": "gitlog",
     "exported": true,
@@ -104,7 +104,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:hello_world",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:hello_world",
     "kind": "function",
     "name": "hello_world",
     "exported": true,
@@ -120,7 +120,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:greet",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:greet",
     "kind": "function",
     "name": "greet",
     "exported": true,
@@ -136,7 +136,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:greet_user",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:greet_user",
     "kind": "function",
     "name": "greet_user",
     "exported": true,
@@ -152,7 +152,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:name",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:name",
     "kind": "variable",
     "name": "name",
     "exported": false,
@@ -165,7 +165,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:greeting",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:greeting",
     "kind": "variable",
     "name": "greeting",
     "exported": false,
@@ -178,7 +178,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:process_data",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:process_data",
     "kind": "function",
     "name": "process_data",
     "exported": true,
@@ -194,7 +194,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:local_var",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:local_var",
     "kind": "variable",
     "name": "local_var",
     "exported": false,
@@ -207,7 +207,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:count",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:count",
     "kind": "variable",
     "name": "count",
     "exported": false,
@@ -220,7 +220,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:count",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:count",
     "kind": "variable",
     "name": "count",
     "exported": false,
@@ -233,7 +233,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:use_globals",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:use_globals",
     "kind": "function",
     "name": "use_globals",
     "exported": true,
@@ -249,7 +249,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:define_inner",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:define_inner",
     "kind": "function",
     "name": "define_inner",
     "exported": true,
@@ -265,7 +265,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:process_array",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:process_array",
     "kind": "function",
     "name": "process_array",
     "exported": true,
@@ -281,7 +281,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:arr",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:arr",
     "kind": "variable",
     "name": "arr",
     "exported": false,
@@ -294,7 +294,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:calculate",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:calculate",
     "kind": "function",
     "name": "calculate",
     "exported": true,
@@ -310,7 +310,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:result",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:result",
     "kind": "variable",
     "name": "result",
     "exported": false,
@@ -323,7 +323,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:orchestrate",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:orchestrate",
     "kind": "function",
     "name": "orchestrate",
     "exported": true,
@@ -339,7 +339,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:sum",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\shell\\symbols.sh:sum",
     "kind": "variable",
     "name": "sum",
     "exported": false,

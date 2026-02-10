@@ -43,6 +43,12 @@ const SymbolCardVersionSchema = z.object({
   astFingerprint: z.string(),
 });
 
+const SliceSymbolCardVersionSchema = z.object({
+  astFingerprint: z.string(),
+});
+
+const CardDetailLevelSchema = z.enum(["compact", "full"]);
+
 const SymbolCardSchema = z.object({
   symbolId: z.string(),
   repoId: z.string(),
@@ -69,15 +75,25 @@ const SymbolCardSchema = z.object({
   sideEffects: z.array(z.string()).optional(),
   deps: SymbolDepsSchema,
   metrics: SymbolMetricsSchema.optional(),
+  detailLevel: CardDetailLevelSchema.optional(),
+  etag: z.string().optional(),
   version: SymbolCardVersionSchema,
 });
 
-const CompressedEdgeSchema = z.object({
-  from: z.string(),
-  to: z.string(),
-  type: z.enum(["import", "call", "config"]),
-  weight: z.number(),
+const SliceSymbolCardSchema = SymbolCardSchema.omit({
+  repoId: true,
+  etag: true,
+  version: true,
+}).extend({
+  version: SliceSymbolCardVersionSchema,
 });
+
+const CompressedEdgeSchema = z.tuple([
+  z.number().int().min(0),
+  z.number().int().min(0),
+  z.enum(["import", "call", "config"]),
+  z.number(),
+]);
 
 const SliceBudgetSchema = z.object({
   maxCards: z.number().int().min(1).optional(),
@@ -95,6 +111,12 @@ const FrontierItemSchema = z.object({
   why: z.string(),
 });
 
+const SliceCardRefSchema = z.object({
+  symbolId: z.string(),
+  etag: z.string(),
+  detailLevel: CardDetailLevelSchema,
+});
+
 const SliceTruncationSchema = z.object({
   truncated: z.boolean(),
   droppedCards: z.number().int().min(0),
@@ -107,15 +129,112 @@ const SliceTruncationSchema = z.object({
     .nullable(),
 });
 
+const SliceBuildWireFormatSchema = z.enum(["standard", "compact"]);
+const SliceBuildWireFormatVersionSchema = z.literal(1);
+
 const GraphSliceSchema = z.object({
   repoId: z.string(),
   versionId: z.string(),
   budget: RequiredSliceBudgetSchema,
   startSymbols: z.array(z.string()),
-  cards: z.array(SymbolCardSchema),
+  symbolIndex: z.array(z.string()),
+  cards: z.array(SliceSymbolCardSchema),
+  cardRefs: z.array(SliceCardRefSchema).optional(),
   edges: z.array(CompressedEdgeSchema),
   frontier: z.array(FrontierItemSchema).optional(),
   truncation: SliceTruncationSchema.optional(),
+});
+
+const CompactRangeSchema = z.tuple([
+  z.number().int().min(0),
+  z.number().int().min(0),
+  z.number().int().min(0),
+  z.number().int().min(0),
+]);
+
+const CompactSymbolDepsSchema = z.object({
+  i: z.array(z.string()),
+  c: z.array(z.string()),
+});
+
+const CompactSymbolMetricsSchema = z.object({
+  fi: z.number().optional(),
+  fo: z.number().optional(),
+  ch: z.number().optional(),
+  t: z.array(z.string()).optional(),
+});
+
+const CompactSliceSymbolCardSchema = z.object({
+  sid: z.string(),
+  f: z.string(),
+  r: CompactRangeSchema,
+  k: z.enum([
+    "function",
+    "class",
+    "interface",
+    "type",
+    "module",
+    "method",
+    "constructor",
+    "variable",
+  ]),
+  n: z.string(),
+  x: z.boolean(),
+  v: z
+    .enum(["public", "protected", "private", "exported", "internal"])
+    .optional(),
+  sig: SymbolSignatureSchema.optional(),
+  sum: z.string().optional(),
+  inv: z.array(z.string()).optional(),
+  se: z.array(z.string()).optional(),
+  d: CompactSymbolDepsSchema,
+  m: CompactSymbolMetricsSchema.optional(),
+  dl: CardDetailLevelSchema.optional(),
+  af: z.string(),
+});
+
+const CompactSliceCardRefSchema = z.object({
+  sid: z.string(),
+  e: z.string(),
+  dl: CardDetailLevelSchema.optional(),
+});
+
+const CompactFrontierItemSchema = z.object({
+  sid: z.string(),
+  s: z.number(),
+  w: z.string(),
+});
+
+const CompactSliceResumeSchema = z.object({
+  t: z.enum(["cursor", "token"]),
+  v: z.union([z.string(), z.number()]),
+});
+
+const CompactSliceTruncationSchema = z.object({
+  tr: z.boolean(),
+  dc: z.number().int().min(0),
+  de: z.number().int().min(0),
+  res: CompactSliceResumeSchema.optional(),
+});
+
+const CompactSliceBudgetSchema = z.object({
+  mc: z.number().int().min(1),
+  mt: z.number().int().min(1),
+});
+
+const CompactGraphSliceSchema = z.object({
+  wf: z.literal("compact"),
+  wv: z.literal(1),
+  rid: z.string(),
+  vid: z.string(),
+  b: CompactSliceBudgetSchema,
+  ss: z.array(z.string()),
+  si: z.array(z.string()),
+  c: z.array(CompactSliceSymbolCardSchema),
+  cr: z.array(CompactSliceCardRefSchema).optional(),
+  e: z.array(CompressedEdgeSchema),
+  f: z.array(CompactFrontierItemSchema).optional(),
+  t: CompactSliceTruncationSchema.optional(),
 });
 
 const DeltaSymbolChangeSchema = z.object({
@@ -345,15 +464,30 @@ export const SymbolGetCardResponseSchema = z.union([
   NotModifiedResponseSchema,
 ]);
 
-export const SliceBuildRequestSchema = z.object({
-  repoId: z.string(),
-  taskText: z.string().min(1),
-  stackTrace: z.string().optional(),
-  failingTestPath: z.string().optional(),
-  editedFiles: z.array(z.string()).optional(),
-  entrySymbols: z.array(z.string()).optional(),
-  budget: SliceBudgetSchema.optional(),
-});
+export const SliceBuildRequestSchema = z
+  .object({
+    repoId: z.string(),
+    taskText: z.string().min(1),
+    stackTrace: z.string().optional(),
+    failingTestPath: z.string().optional(),
+    editedFiles: z.array(z.string()).optional(),
+    entrySymbols: z.array(z.string()).optional(),
+    knownCardEtags: z.record(z.string()).optional(),
+    cardDetail: CardDetailLevelSchema.optional(),
+    wireFormat: SliceBuildWireFormatSchema.optional(),
+    wireFormatVersion: SliceBuildWireFormatVersionSchema.optional(),
+    budget: SliceBudgetSchema.optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.wireFormat === "compact" && data.wireFormatVersion !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "wireFormatVersion: 1 is required when wireFormat is compact",
+        path: ["wireFormatVersion"],
+      });
+    }
+  });
 
 const SliceLeaseSchema = z.object({
   expiresAt: z.string(),
@@ -417,7 +551,7 @@ export const SliceBuildResponseSchema = z.union([
     ledgerVersion: z.string(),
     lease: SliceLeaseSchema,
     sliceEtag: SliceEtagSchema.optional(),
-    slice: GraphSliceSchema,
+    slice: z.union([GraphSliceSchema, CompactGraphSliceSchema]),
   }),
   NotModifiedResponseSchema,
 ]);
@@ -699,6 +833,8 @@ export type SymbolGetCardRequest = z.infer<typeof SymbolGetCardRequestSchema>;
 export type SymbolGetCardResponse = z.infer<typeof SymbolGetCardResponseSchema>;
 export type SliceBuildRequest = z.infer<typeof SliceBuildRequestSchema>;
 export type SliceBuildResponse = z.infer<typeof SliceBuildResponseSchema>;
+export type SliceBuildWireFormat = z.infer<typeof SliceBuildWireFormatSchema>;
+export type CompactGraphSlice = z.infer<typeof CompactGraphSliceSchema>;
 export type SliceLease = z.infer<typeof SliceLeaseSchema>;
 export type SliceEtag = z.infer<typeof SliceEtagSchema>;
 export type NotModifiedResponse = z.infer<typeof NotModifiedResponseSchema>;

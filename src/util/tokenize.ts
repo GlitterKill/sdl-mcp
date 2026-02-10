@@ -1,8 +1,17 @@
-const CHARS_PER_TOKEN = 4;
+const PROSE_CHARS_PER_TOKEN = 3.5;
+const STRUCTURAL_TOKEN_CHARS = new Set(["{", "}", "[", "]", ":", ",", "\""]);
 
 export function estimateTokens(text: string): number {
   if (!text) return 0;
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
+  let structuralChars = 0;
+  for (const char of text) {
+    if (STRUCTURAL_TOKEN_CHARS.has(char)) {
+      structuralChars++;
+    }
+  }
+
+  const proseChars = Math.max(0, text.length - structuralChars);
+  return Math.ceil(structuralChars + proseChars / PROSE_CHARS_PER_TOKEN);
 }
 
 export function calculateRemainingBudget(used: number, total: number): number {

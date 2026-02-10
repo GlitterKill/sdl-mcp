@@ -1,7 +1,7 @@
 [
   {
-    "id": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex:import:0",
-    "filePath": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex",
+    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex:import:0",
+    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex",
     "range": {
       "startLine": 1,
       "startCol": 0,
@@ -12,8 +12,8 @@
     "symbols": []
   },
   {
-    "id": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex:import:1",
-    "filePath": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex",
+    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex:import:1",
+    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex",
     "range": {
       "startLine": 2,
       "startCol": 0,
@@ -24,8 +24,8 @@
     "symbols": []
   },
   {
-    "id": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex:import:2",
-    "filePath": "C:\\Users\\glitt\\AppData\\Local\\Temp\\vibe-kanban\\worktrees\\ff1e-v06-11-v0-6-inte\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex",
+    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex:import:2",
+    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\imports.ex",
     "range": {
       "startLine": 3,
       "startCol": 0,

@@ -88,6 +88,34 @@ export const DEFAULT_MAX_TOKENS_SLICE = 12000;
  */
 export const MAX_FRONTIER = 1000;
 /**
+ * Maximum number of start nodes sourced from free-form task text.
+ */
+export const TASK_TEXT_START_NODE_MAX = 40;
+/**
+ * Maximum number of distinct task-text tokens considered for start-node seeding.
+ */
+export const TASK_TEXT_TOKEN_MAX = 24;
+/**
+ * Maximum number of symbol matches to pull per task-text token.
+ */
+export const TASK_TEXT_TOKEN_QUERY_LIMIT = 6;
+/**
+ * Minimum token length required for task-text seeding.
+ */
+export const TASK_TEXT_MIN_TOKEN_LENGTH = 3;
+/**
+ * Max promoted first-hop dependencies (call/import) per explicit entry symbol.
+ */
+export const ENTRY_FIRST_HOP_MAX_PER_SYMBOL = 4;
+/**
+ * Max same-file sibling symbols to promote per explicit entry symbol.
+ */
+export const ENTRY_SIBLING_MAX_PER_SYMBOL = 3;
+/**
+ * Minimum shared prefix length for sibling promotion based on name similarity.
+ */
+export const ENTRY_SIBLING_MIN_SHARED_PREFIX = 6;
+/**
  * Minimum score threshold for including nodes in slice results.
  */
 export const SLICE_SCORE_THRESHOLD = 0.2;

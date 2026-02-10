@@ -24,7 +24,7 @@ export interface SymbolSignature {
 
 export interface SymbolDeps {
   imports: string[];
-  calls: SymbolId[];
+  calls: string[];
 }
 
 export interface SymbolMetrics {
@@ -33,6 +33,8 @@ export interface SymbolMetrics {
   churn30d?: number;
   testRefs?: string[];
 }
+
+export type CardDetailLevel = "compact" | "full";
 
 export interface SymbolCard {
   symbolId: SymbolId;
@@ -53,6 +55,8 @@ export interface SymbolCard {
 
   deps: SymbolDeps;
   metrics?: SymbolMetrics;
+  detailLevel?: CardDetailLevel;
+  etag?: string;
 
   version: {
     ledgerVersion: VersionId;
@@ -60,12 +64,25 @@ export interface SymbolCard {
   };
 }
 
-export interface CompressedEdge {
-  from: SymbolId;
-  to: SymbolId;
-  type: EdgeType;
-  weight: number;
+export interface SliceSymbolCard
+  extends Omit<SymbolCard, "repoId" | "etag" | "version"> {
+  version: {
+    astFingerprint: string;
+  };
 }
+
+export interface SliceCardRef {
+  symbolId: SymbolId;
+  etag: string;
+  detailLevel: CardDetailLevel;
+}
+
+export type CompressedEdge = [
+  fromIndex: number,
+  toIndex: number,
+  type: EdgeType,
+  weight: number,
+];
 
 export interface SliceBudget {
   maxCards?: number;
@@ -87,8 +104,10 @@ export interface GraphSlice {
   versionId: VersionId;
   budget: Required<SliceBudget>;
   startSymbols: SymbolId[];
+  symbolIndex: SymbolId[];
 
-  cards: SymbolCard[];
+  cards: SliceSymbolCard[];
+  cardRefs?: SliceCardRef[];
   edges: CompressedEdge[];
 
   frontier?: Array<{ symbolId: SymbolId; score: number; why: string }>;
@@ -150,14 +169,6 @@ export interface DeltaPack {
   };
   trimmedSet?: TrimmedSet;
   spilloverHandle?: SpilloverHandle;
-}
-
-export interface DeltaPack {
-  repoId: RepoId;
-  fromVersion: VersionId;
-  toVersion: VersionId;
-  changedSymbols: DeltaSymbolChange[];
-  blastRadius: BlastRadiusItem[];
 }
 
 export interface CodeWindowRequest {

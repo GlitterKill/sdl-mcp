@@ -9,6 +9,8 @@ interface SliceBuildRequest {
   failingTestPath?: string;
   editedFiles?: string[];
   entrySymbols?: SymbolId[];
+  knownCardEtags?: Record<SymbolId, string>;
+  cardDetail?: "compact" | "full";
   budget?: {
     maxCards?: number;
     maxEstimatedTokens?: number;
@@ -74,6 +76,8 @@ export function getSliceCacheKey(request: SliceBuildRequest): string {
     entrySymbols: request.entrySymbols
       ? [...request.entrySymbols].sort()
       : null,
+    knownCardEtags: request.knownCardEtags ?? null,
+    cardDetail: request.cardDetail ?? "compact",
     budget: request.budget ?? null,
   };
   return `${request.repoId}:${request.versionId}:${stableStringify(context)}`;

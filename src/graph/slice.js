@@ -3,10 +3,56 @@ import { scoreSymbolWithMetrics } from "./score.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { tokenize, estimateTokens as estimateTextTokens, } from "../util/tokenize.js";
 import * as db from "../db/queries.js";
-import { DEFAULT_MAX_CARDS, DEFAULT_MAX_TOKENS_SLICE, SLICE_SCORE_THRESHOLD, MAX_FRONTIER, SYMBOL_TOKEN_BASE, SYMBOL_TOKEN_ADDITIONAL_MAX, SYMBOL_TOKEN_MAX, TOKENS_PER_CHAR_ESTIMATE, DB_QUERY_LIMIT_DEFAULT, } from "../config/constants.js";
+import { DEFAULT_MAX_CARDS, DEFAULT_MAX_TOKENS_SLICE, SLICE_SCORE_THRESHOLD, MAX_FRONTIER, TASK_TEXT_START_NODE_MAX, TASK_TEXT_TOKEN_MAX, TASK_TEXT_TOKEN_QUERY_LIMIT, TASK_TEXT_MIN_TOKEN_LENGTH, ENTRY_FIRST_HOP_MAX_PER_SYMBOL, ENTRY_SIBLING_MAX_PER_SYMBOL, ENTRY_SIBLING_MIN_SHARED_PREFIX, SYMBOL_TOKEN_BASE, SYMBOL_TOKEN_ADDITIONAL_MAX, SYMBOL_TOKEN_MAX, TOKENS_PER_CHAR_ESTIMATE, DB_QUERY_LIMIT_DEFAULT, } from "../config/constants.js";
 import { MinHeap } from "./minHeap.js";
 import { symbolCardCache } from "./cache.js";
 import { getSliceCacheKey, getCachedSlice, setCachedSlice, } from "./sliceCache.js";
+const START_NODE_SOURCE_PRIORITY = {
+    entrySymbol: 0,
+    entrySibling: 1,
+    entryFirstHop: 2,
+    stackTrace: 3,
+    failingTestPath: 4,
+    editedFile: 5,
+    taskText: 6,
+};
+const START_NODE_SOURCE_SCORE = {
+    entrySymbol: -1.4,
+    entrySibling: -1.22,
+    entryFirstHop: -1.18,
+    stackTrace: -1.2,
+    failingTestPath: -1.1,
+    editedFile: -1.0,
+    taskText: -0.6,
+};
+const TASK_TEXT_STOP_WORDS = new Set([
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "do",
+    "does",
+    "for",
+    "from",
+    "id",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "please",
+    "task",
+    "that",
+    "the",
+    "this",
+    "to",
+    "with",
+]);
 /**
  * Builds a graph slice for code context delivery.
  * Uses beam search to select relevant symbols based on entry points and scoring.
@@ -39,8 +85,9 @@ export async function buildSlice(request) {
             sliceConfig?.defaultMaxTokens ??
             DEFAULT_MAX_TOKENS_SLICE,
     };
-    const startSymbols = resolveStartNodes(graph, request);
-    const { sliceCards, frontier, wasTruncated, droppedCandidates } = beamSearch(graph, startSymbols, budget, request, edgeWeights);
+    const startNodes = resolveStartNodes(graph, request);
+    const startSymbols = startNodes.map((node) => node.symbolId);
+    const { sliceCards, frontier, wasTruncated, droppedCandidates } = beamSearch(graph, startNodes, budget, request, edgeWeights);
     const cards = await loadSymbolCards(Array.from(sliceCards), request.versionId, request.repoId);
     const edges = loadEdgesBetweenSymbols(Array.from(sliceCards), request.repoId);
     const frontierSuggestions = frontier.slice(0, 10).map((item) => ({
@@ -77,50 +124,211 @@ export async function buildSlice(request) {
     return slice;
 }
 function resolveStartNodes(graph, request) {
-    const startNodes = new Set();
+    const startNodes = new Map();
+    const explicitEntrySymbols = [];
+    const addStartNode = (symbolId, source) => {
+        if (!graph.symbols.has(symbolId))
+            return;
+        const existingSource = startNodes.get(symbolId);
+        if (existingSource &&
+            START_NODE_SOURCE_PRIORITY[existingSource] <=
+                START_NODE_SOURCE_PRIORITY[source]) {
+            return;
+        }
+        startNodes.set(symbolId, source);
+    };
     if (request.entrySymbols) {
         for (const symbolId of request.entrySymbols) {
-            if (graph.symbols.has(symbolId)) {
-                startNodes.add(symbolId);
-            }
+            if (!graph.symbols.has(symbolId))
+                continue;
+            explicitEntrySymbols.push(symbolId);
+            addStartNode(symbolId, "entrySymbol");
         }
     }
-    if (request.taskText) {
-        const tokens = tokenize(request.taskText);
-        for (const token of tokens) {
-            const results = db.searchSymbolsLite(request.repoId, token, DB_QUERY_LIMIT_DEFAULT);
-            for (const result of results) {
-                startNodes.add(result.symbol_id);
+    for (const symbolId of explicitEntrySymbols) {
+        const firstHopSymbols = collectEntryFirstHopSymbols(graph, symbolId);
+        for (const firstHopSymbolId of firstHopSymbols) {
+            addStartNode(firstHopSymbolId, "entryFirstHop");
+        }
+    }
+    if (explicitEntrySymbols.length > 0) {
+        const symbolsByFile = buildSymbolsByFile(graph);
+        for (const symbolId of explicitEntrySymbols) {
+            const siblingSymbols = collectEntrySiblingSymbols(graph, symbolId, symbolsByFile);
+            for (const siblingSymbolId of siblingSymbols) {
+                addStartNode(siblingSymbolId, "entrySibling");
             }
         }
     }
     if (request.stackTrace) {
         const stackSymbols = extractSymbolsFromStackTrace(request.stackTrace, request.repoId);
         for (const symbolId of stackSymbols) {
-            if (graph.symbols.has(symbolId)) {
-                startNodes.add(symbolId);
-            }
+            addStartNode(symbolId, "stackTrace");
         }
     }
     if (request.failingTestPath) {
         const fileSymbols = getSymbolsByPath(request.repoId, request.failingTestPath);
         for (const symbolId of fileSymbols) {
-            if (graph.symbols.has(symbolId)) {
-                startNodes.add(symbolId);
-            }
+            addStartNode(symbolId, "failingTestPath");
         }
     }
     if (request.editedFiles) {
         for (const filePath of request.editedFiles) {
             const fileSymbols = getSymbolsByPath(request.repoId, filePath);
             for (const symbolId of fileSymbols) {
-                if (graph.symbols.has(symbolId)) {
-                    startNodes.add(symbolId);
-                }
+                addStartNode(symbolId, "editedFile");
             }
         }
     }
-    return Array.from(startNodes);
+    if (request.taskText) {
+        const taskTokens = collectTaskTextSeedTokens(request.taskText);
+        let taskTextSeedCount = 0;
+        for (const token of taskTokens) {
+            if (taskTextSeedCount >= TASK_TEXT_START_NODE_MAX)
+                break;
+            const remaining = TASK_TEXT_START_NODE_MAX - taskTextSeedCount;
+            const perTokenLimit = Math.max(1, Math.min(DB_QUERY_LIMIT_DEFAULT, TASK_TEXT_TOKEN_QUERY_LIMIT, remaining));
+            const results = db.searchSymbolsLite(request.repoId, token, perTokenLimit);
+            for (const result of results) {
+                const symbolId = result.symbol_id;
+                if (startNodes.has(symbolId))
+                    continue;
+                addStartNode(symbolId, "taskText");
+                if (startNodes.has(symbolId)) {
+                    taskTextSeedCount++;
+                }
+                if (taskTextSeedCount >= TASK_TEXT_START_NODE_MAX)
+                    break;
+            }
+        }
+    }
+    return Array.from(startNodes.entries())
+        .sort(([, sourceA], [, sourceB]) => START_NODE_SOURCE_PRIORITY[sourceA] -
+        START_NODE_SOURCE_PRIORITY[sourceB])
+        .map(([symbolId, source]) => ({ symbolId, source }));
+}
+function collectTaskTextSeedTokens(taskText) {
+    const seen = new Set();
+    const filtered = [];
+    for (const token of tokenize(taskText)) {
+        if (token.length < TASK_TEXT_MIN_TOKEN_LENGTH)
+            continue;
+        if (TASK_TEXT_STOP_WORDS.has(token))
+            continue;
+        if (/^\d+$/.test(token))
+            continue;
+        if (!/[a-z]/.test(token))
+            continue;
+        if (seen.has(token))
+            continue;
+        seen.add(token);
+        filtered.push(token);
+    }
+    filtered.sort((a, b) => {
+        const rankDiff = getTaskTextTokenRank(b) - getTaskTextTokenRank(a);
+        if (rankDiff !== 0)
+            return rankDiff;
+        return b.length - a.length;
+    });
+    return filtered.slice(0, TASK_TEXT_TOKEN_MAX);
+}
+function getTaskTextTokenRank(token) {
+    let rank = 0;
+    if (token.includes("/") || token.includes("\\"))
+        rank += 4;
+    if (token.includes(".") || token.includes("_") || token.includes("-"))
+        rank += 3;
+    if (/[0-9]/.test(token))
+        rank += 2;
+    if (token.length >= 8)
+        rank += 1;
+    return rank;
+}
+function buildSymbolsByFile(graph) {
+    const symbolsByFile = new Map();
+    for (const [symbolId, symbol] of graph.symbols) {
+        const current = symbolsByFile.get(symbol.file_id);
+        if (current) {
+            current.push(symbolId);
+            continue;
+        }
+        symbolsByFile.set(symbol.file_id, [symbolId]);
+    }
+    return symbolsByFile;
+}
+function collectEntryFirstHopSymbols(graph, entrySymbolId) {
+    const outgoing = graph.adjacencyOut.get(entrySymbolId) ?? [];
+    if (outgoing.length === 0)
+        return [];
+    const ranked = new Map();
+    for (const edge of outgoing) {
+        if (edge.type !== "call" && edge.type !== "import")
+            continue;
+        const target = graph.symbols.get(edge.to_symbol_id);
+        if (!target)
+            continue;
+        let rank = edge.type === "call" ? 4 : 2;
+        if (target.exported === 1)
+            rank += 1;
+        if (target.kind === "function" || target.kind === "method")
+            rank += 1;
+        const previous = ranked.get(edge.to_symbol_id);
+        if (previous === undefined || rank > previous) {
+            ranked.set(edge.to_symbol_id, rank);
+        }
+    }
+    return Array.from(ranked.entries())
+        .sort((a, b) => {
+        if (b[1] !== a[1])
+            return b[1] - a[1];
+        const nameA = graph.symbols.get(a[0])?.name ?? "";
+        const nameB = graph.symbols.get(b[0])?.name ?? "";
+        return nameA.localeCompare(nameB);
+    })
+        .slice(0, ENTRY_FIRST_HOP_MAX_PER_SYMBOL)
+        .map(([symbolId]) => symbolId);
+}
+function collectEntrySiblingSymbols(graph, entrySymbolId, symbolsByFile) {
+    const entrySymbol = graph.symbols.get(entrySymbolId);
+    if (!entrySymbol)
+        return [];
+    const symbolIdsInFile = symbolsByFile.get(entrySymbol.file_id) ?? [];
+    if (symbolIdsInFile.length <= 1)
+        return [];
+    const entryName = entrySymbol.name.toLowerCase();
+    const ranked = [];
+    for (const candidateId of symbolIdsInFile) {
+        if (candidateId === entrySymbolId)
+            continue;
+        const candidate = graph.symbols.get(candidateId);
+        if (!candidate)
+            continue;
+        if (candidate.kind !== entrySymbol.kind)
+            continue;
+        const sharedPrefix = commonPrefixLength(entryName, candidate.name.toLowerCase());
+        if (sharedPrefix < ENTRY_SIBLING_MIN_SHARED_PREFIX)
+            continue;
+        let rank = sharedPrefix;
+        if (candidate.exported === 1)
+            rank += 2;
+        ranked.push({ symbolId: candidateId, rank, name: candidate.name });
+    }
+    return ranked
+        .sort((a, b) => {
+        if (b.rank !== a.rank)
+            return b.rank - a.rank;
+        return a.name.localeCompare(b.name);
+    })
+        .slice(0, ENTRY_SIBLING_MAX_PER_SYMBOL)
+        .map((item) => item.symbolId);
+}
+function commonPrefixLength(a, b) {
+    const max = Math.min(a.length, b.length);
+    let i = 0;
+    while (i < max && a[i] === b[i]) {
+        i++;
+    }
+    return i;
 }
 function extractSymbolsFromStackTrace(stackTrace, repoId) {
     const symbols = new Set();
@@ -151,17 +359,20 @@ function getSymbolsByPath(repoId, filePath) {
     const symbolIds = db.getSymbolIdsByFile(file.file_id);
     return symbolIds;
 }
-function beamSearch(graph, startSymbols, budget, request, edgeWeights) {
+function beamSearch(graph, startNodes, budget, request, edgeWeights) {
     const sliceCards = new Set();
     const visited = new Set();
     const frontier = new MinHeap();
     let droppedCandidates = 0;
-    for (const symbolId of startSymbols) {
+    let sequence = 0;
+    for (const { symbolId, source } of startNodes) {
         if (!visited.has(symbolId) && graph.symbols.has(symbolId)) {
             frontier.insert({
                 symbolId,
-                score: -1.0,
-                why: "start node",
+                score: START_NODE_SOURCE_SCORE[source],
+                why: getStartNodeWhy(source),
+                priority: START_NODE_SOURCE_PRIORITY[source],
+                sequence: sequence++,
             });
             visited.add(symbolId);
         }
@@ -237,17 +448,22 @@ function beamSearch(graph, startSymbols, budget, request, edgeWeights) {
                     symbolId: neighborId,
                     score: neighborScore,
                     why: getEdgeWhy(edge.type, neighborSymbol.name),
+                    priority: 10,
+                    sequence: sequence++,
                 });
             }
             else {
                 const min = frontier.peek();
-                if (min && min.score > neighborScore) {
+                const candidate = {
+                    symbolId: neighborId,
+                    score: neighborScore,
+                    why: getEdgeWhy(edge.type, neighborSymbol.name),
+                    priority: 10,
+                    sequence: sequence++,
+                };
+                if (min && compareFrontierItems(min, candidate) > 0) {
                     frontier.extractMin();
-                    frontier.insert({
-                        symbolId: neighborId,
-                        score: neighborScore,
-                        why: getEdgeWhy(edge.type, neighborSymbol.name),
-                    });
+                    frontier.insert(candidate);
                 }
                 else {
                     droppedCandidates++;
@@ -259,6 +475,8 @@ function beamSearch(graph, startSymbols, budget, request, edgeWeights) {
         symbolId: item.symbolId,
         score: -item.score,
         why: item.why,
+        priority: item.priority,
+        sequence: item.sequence,
     }));
     if (sliceCards.size >= budget.maxCards || frontierArray.length > 0) {
         wasTruncated = true;
@@ -270,6 +488,31 @@ function beamSearch(graph, startSymbols, budget, request, edgeWeights) {
         wasTruncated,
         droppedCandidates,
     };
+}
+function compareFrontierItems(a, b) {
+    if (a.score !== b.score)
+        return a.score - b.score;
+    if (a.priority !== b.priority)
+        return a.priority - b.priority;
+    return a.sequence - b.sequence;
+}
+function getStartNodeWhy(source) {
+    switch (source) {
+        case "entrySymbol":
+            return "entry symbol";
+        case "entrySibling":
+            return "entry sibling";
+        case "entryFirstHop":
+            return "entry dependency";
+        case "stackTrace":
+            return "stack trace";
+        case "failingTestPath":
+            return "failing test";
+        case "editedFile":
+            return "edited file";
+        case "taskText":
+            return "task text";
+    }
 }
 function getEdgeWhy(edgeType, symbolName) {
     switch (edgeType) {

@@ -58,12 +58,15 @@ export function calculateHotness(metrics) {
 }
 export function scoreSymbol(symbol, context) {
     const factors = new Map();
-    factors.set("query", calculateQueryOverlap(symbol, context.query, context.queryTokens));
-    factors.set("stacktrace", calculateStacktraceLocality(symbol, context.stackTrace || ""));
+    const file = db.getFile(symbol.file_id);
+    factors.set("query", calculateQueryOverlapWithFile(symbol, context.query, context.queryTokens, file ?? undefined));
+    factors.set("stacktrace", calculateStacktraceLocalityWithFile(symbol, context.stackTrace || "", file ?? undefined));
+    factors.set("structure", calculateStructuralSpecificity(file ?? undefined));
     const weights = new Map([
-        ["query", 0.4],
-        ["stacktrace", 0.3],
-        ["hotness", 0.3],
+        ["query", 0.35],
+        ["stacktrace", 0.25],
+        ["hotness", 0.2],
+        ["structure", 0.2],
     ]);
     const metrics = db.getMetrics(symbol.symbol_id);
     factors.set("hotness", calculateHotness(metrics));
@@ -73,10 +76,12 @@ export function scoreSymbolWithMetrics(symbol, context, metrics, file) {
     const factors = new Map();
     factors.set("query", calculateQueryOverlapWithFile(symbol, context.query, context.queryTokens, file));
     factors.set("stacktrace", calculateStacktraceLocalityWithFile(symbol, context.stackTrace || "", file));
+    factors.set("structure", calculateStructuralSpecificity(file));
     const weights = new Map([
-        ["query", 0.4],
-        ["stacktrace", 0.3],
-        ["hotness", 0.3],
+        ["query", 0.35],
+        ["stacktrace", 0.25],
+        ["hotness", 0.2],
+        ["structure", 0.2],
     ]);
     factors.set("hotness", calculateHotness(metrics));
     return combineScores(factors, weights);
@@ -118,6 +123,34 @@ function calculateStacktraceLocalityWithFile(symbol, stackTrace, file) {
         }
     }
     return 0;
+}
+function calculateStructuralSpecificity(file) {
+    if (!file?.rel_path)
+        return 0.8;
+    const relPath = file.rel_path.toLowerCase();
+    let specificity = 1;
+    if (relPath.includes("/tests/") ||
+        relPath.startsWith("tests/") ||
+        relPath.includes("dist-tests/") ||
+        relPath.includes(".test.") ||
+        relPath.includes(".spec.")) {
+        specificity *= 0.55;
+    }
+    if (relPath.startsWith("dist/") ||
+        relPath.includes("/dist/") ||
+        relPath.startsWith("dist-tests/")) {
+        specificity *= 0.6;
+    }
+    if (relPath.startsWith("scripts/")) {
+        specificity *= 0.75;
+    }
+    if (/(^|\/)(index|tools|types|main|mod|util|utils)\.[^.]+$/.test(relPath)) {
+        specificity *= 0.72;
+    }
+    if (/(^|\/)mcp\/tools\.[^.]+$/.test(relPath)) {
+        specificity *= 0.65;
+    }
+    return Math.max(0.15, Math.min(1, specificity));
 }
 export function normalizeScores(scores) {
     if (scores.length === 0)

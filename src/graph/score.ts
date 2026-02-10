@@ -98,20 +98,34 @@ export function calculateHotness(metrics: MetricsRow | null): number {
 
 export function scoreSymbol(symbol: SymbolRow, context: SliceContext): number {
   const factors = new Map<string, number>();
+  const file = db.getFile(symbol.file_id);
 
   factors.set(
     "query",
-    calculateQueryOverlap(symbol, context.query, context.queryTokens),
+    calculateQueryOverlapWithFile(
+      symbol,
+      context.query,
+      context.queryTokens,
+      file ?? undefined,
+    ),
   );
   factors.set(
     "stacktrace",
-    calculateStacktraceLocality(symbol, context.stackTrace || ""),
+    calculateStacktraceLocalityWithFile(
+      symbol,
+      context.stackTrace || "",
+      file ?? undefined,
+    ),
   );
+  factors.set("structure", calculateStructuralSpecificity(file ?? undefined));
+  factors.set("kind", calculateSymbolKindSpecificity(symbol));
 
   const weights = new Map<string, number>([
     ["query", 0.4],
-    ["stacktrace", 0.3],
-    ["hotness", 0.3],
+    ["stacktrace", 0.2],
+    ["hotness", 0.15],
+    ["structure", 0.15],
+    ["kind", 0.1],
   ]);
 
   const metrics = db.getMetrics(symbol.symbol_id);
@@ -141,11 +155,15 @@ export function scoreSymbolWithMetrics(
     "stacktrace",
     calculateStacktraceLocalityWithFile(symbol, context.stackTrace || "", file),
   );
+  factors.set("structure", calculateStructuralSpecificity(file));
+  factors.set("kind", calculateSymbolKindSpecificity(symbol));
 
   const weights = new Map<string, number>([
     ["query", 0.4],
-    ["stacktrace", 0.3],
-    ["hotness", 0.3],
+    ["stacktrace", 0.2],
+    ["hotness", 0.15],
+    ["structure", 0.15],
+    ["kind", 0.1],
   ]);
 
   factors.set("hotness", calculateHotness(metrics));
@@ -165,14 +183,26 @@ function calculateQueryOverlapWithFile(
   const symbolName = symbol.name.toLowerCase();
   const filePath = file?.rel_path.toLowerCase() || "";
 
-  let matches = 0;
+  let weightedMatches = 0;
   for (const token of tokens) {
-    if (symbolName.includes(token) || filePath.includes(token)) {
-      matches++;
+    if (symbolName === token) {
+      weightedMatches += 1.25;
+      continue;
+    }
+    if (symbolName.startsWith(token)) {
+      weightedMatches += 1.0;
+      continue;
+    }
+    if (symbolName.includes(token)) {
+      weightedMatches += 0.75;
+      continue;
+    }
+    if (filePath.includes(token)) {
+      weightedMatches += 0.4;
     }
   }
 
-  return matches / tokens.length;
+  return Math.min(weightedMatches / tokens.length, 1);
 }
 
 function calculateStacktraceLocalityWithFile(
@@ -206,6 +236,67 @@ function calculateStacktraceLocalityWithFile(
   }
 
   return 0;
+}
+
+function calculateStructuralSpecificity(file?: FileRow): number {
+  if (!file?.rel_path) return 0.8;
+
+  const relPath = file.rel_path.toLowerCase();
+  let specificity = 1;
+
+  if (
+    relPath.includes("/tests/") ||
+    relPath.startsWith("tests/") ||
+    relPath.includes("dist-tests/") ||
+    relPath.includes(".test.") ||
+    relPath.includes(".spec.")
+  ) {
+    specificity *= 0.55;
+  }
+
+  if (
+    relPath.startsWith("dist/") ||
+    relPath.includes("/dist/") ||
+    relPath.startsWith("dist-tests/")
+  ) {
+    specificity *= 0.6;
+  }
+
+  if (relPath.startsWith("scripts/")) {
+    specificity *= 0.75;
+  }
+
+  if (/(^|\/)(index|tools|types|main|mod|util|utils)\.[^.]+$/.test(relPath)) {
+    specificity *= 0.72;
+  }
+
+  if (/(^|\/)mcp\/tools\.[^.]+$/.test(relPath)) {
+    specificity *= 0.65;
+  }
+
+  return Math.max(0.15, Math.min(1, specificity));
+}
+
+function calculateSymbolKindSpecificity(symbol: SymbolRow): number {
+  switch (symbol.kind) {
+    case "class":
+      return 1;
+    case "function":
+      return 0.98;
+    case "method":
+      return 0.95;
+    case "interface":
+      return 0.9;
+    case "type":
+      return 0.88;
+    case "constructor":
+      return 0.8;
+    case "module":
+      return 0.7;
+    case "variable":
+    default:
+      return 0.55;
+  }
 }
 
 export function normalizeScores(scores: number[]): number[] {

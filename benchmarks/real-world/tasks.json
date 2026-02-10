@@ -1,261 +1,413 @@
 {
-  "version": 2,
+  "version": 3,
   "defaults": {
     "baseline": {
-      "maxFiles": 6
+      "maxFilesPerStep": 4,
+      "maxTokensPerFile": 2200
     },
     "sdl": {
-      "maxCards": 20,
-      "maxTokens": 4000,
-      "maxEntrySymbols": 2,
-      "maxSkeletons": 2,
+      "maxSearchTerms": 12,
+      "maxSearchResultsPerTerm": 6,
+      "maxEntrySymbols": 4,
+      "maxCardsPerStep": 5,
+      "maxCards": 14,
+      "maxTokens": 3200,
+      "maxSkeletonsPerStep": 1,
       "skeletonMaxLines": 120,
       "skeletonMaxTokens": 1500
     }
   },
   "tasks": [
     {
-      "id": "policy-downgrade",
-      "title": "Enforce policy downgrade on code window requests",
-      "description": "Trace how code window requests are evaluated and downgraded to skeleton or hotpath when policy denies raw code.",
-      "queryTerms": [
-        "handleCodeNeedWindow",
-        "downgrade-to-skeleton",
-        "PolicyEngine",
-        "logPolicyDecision",
-        "GateContext"
-      ],
-      "entrySymbolNames": ["handleCodeNeedWindow", "PolicyEngine"],
-      "relevantFiles": [
-        "src/mcp/tools/code.ts",
-        "src/policy/engine.ts",
-        "src/code/gate.ts",
-        "src/code/skeleton.ts",
-        "src/code/hotpath.ts",
-        "src/mcp/telemetry.ts",
-        "src/config/types.ts"
-      ],
-      "relevantSymbols": [
-        "handleCodeNeedWindow",
-        "PolicyEngine",
-        "evaluateRequest",
-        "generateSymbolSkeleton",
-        "extractHotPath"
+      "id": "code-review-slice-pr",
+      "category": "code-review",
+      "title": "Review slice-expansion pull request for correctness and regressions",
+      "description": "Simulates reviewing a PR that changes slice expansion and scoring behavior.",
+      "contextTargets": {
+        "files": [
+          "src/graph/slice.ts",
+          "src/graph/score.ts",
+          "src/graph/minHeap.ts",
+          "src/mcp/tools/slice.ts",
+          "src/config/loadConfig.ts",
+          "src/config/types.ts"
+        ],
+        "symbols": [
+          "buildSlice",
+          "scoreSymbol",
+          "scoreSymbolWithMetrics",
+          "handleSliceBuild",
+          "handleSliceRefresh",
+          "loadConfig",
+          "SliceConfigSchema"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "triage-pr",
+          "phase": "triage",
+          "goal": "Understand what changed and what user-visible behavior could regress.",
+          "prompt": "Review this PR: it adjusts slice expansion, symbol scoring, and frontier logic. Identify risky behavior changes.",
+          "entrySymbolHints": ["buildSlice", "scoreSymbol", "handleSliceBuild"],
+          "artifacts": {
+            "changedFiles": ["src/graph/slice.ts", "src/graph/score.ts", "src/graph/minHeap.ts"]
+          }
+        },
+        {
+          "id": "investigate-behavior",
+          "phase": "investigate",
+          "goal": "Trace MCP handler flow and config impact.",
+          "prompt": "Follow request flow from MCP slice handlers into graph scoring and config defaults.",
+          "entrySymbolHints": ["handleSliceBuild", "handleSliceRefresh", "loadConfig"]
+        },
+        {
+          "id": "validate-review",
+          "phase": "validate",
+          "goal": "Confirm likely regressions and required tests.",
+          "prompt": "Validate whether expansion/scoring changes could miss relevant symbols or inflate token usage."
+        }
       ]
     },
     {
-      "id": "slice-budget",
-      "title": "Tune slice expansion and budgets",
-      "description": "Locate where slice budgets, edge weights, and refresh responses are implemented.",
-      "queryTerms": [
-        "buildSlice",
-        "SliceBudget",
-        "edgeWeights",
-        "sliceHandle",
-        "SliceTruncation"
-      ],
-      "entrySymbolNames": ["buildSlice", "handleSliceBuild", "handleSliceRefresh"],
-      "relevantFiles": [
-        "src/graph/slice.ts",
-        "src/mcp/tools/slice.ts",
-        "src/config/loadConfig.ts",
-        "src/config/types.ts",
-        "src/db/queries.ts",
-        "src/mcp/types.ts"
-      ],
-      "relevantSymbols": [
-        "buildSlice",
-        "handleSliceBuild",
-        "handleSliceRefresh"
+      "id": "bug-fix-policy-window-downgrade",
+      "category": "bug-fix",
+      "title": "Fix policy downgrade behavior for code window requests",
+      "description": "Simulates debugging code window requests that should downgrade to skeleton/hotpath under policy restrictions.",
+      "contextTargets": {
+        "files": [
+          "src/mcp/tools/code.ts",
+          "src/policy/engine.ts",
+          "src/code/skeleton.ts",
+          "src/code/hotpath.ts",
+          "src/mcp/telemetry.ts",
+          "src/config/types.ts"
+        ],
+        "symbols": [
+          "handleCodeNeedWindow",
+          "PolicyEngine",
+          "generateSymbolSkeleton",
+          "extractHotPath"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "triage-error",
+          "phase": "triage",
+          "goal": "Reproduce and localize where downgrade fails.",
+          "prompt": "Requests that should be downgraded to skeleton/hotpath are returning unexpected behavior. Find why.",
+          "entrySymbolHints": ["handleCodeNeedWindow", "PolicyEngine"],
+          "artifacts": {
+            "stackTrace": "Error: policy downgrade path not applied at handleCodeNeedWindow"
+          }
+        },
+        {
+          "id": "investigate-policy",
+          "phase": "investigate",
+          "goal": "Trace policy decision and fallback branches.",
+          "prompt": "Track policy evaluation and fallback generation paths for skeleton and hotpath."
+        },
+        {
+          "id": "validate-fix",
+          "phase": "validate",
+          "goal": "Confirm downgrade behavior across deny/allow scenarios.",
+          "prompt": "Verify expected behavior for policy deny vs allow and ensure telemetry reflects decisions."
+        }
       ]
     },
     {
-      "id": "call-graph",
-      "title": "Improve call graph extraction for chained calls",
-      "description": "Find how call edges are extracted from tree-sitter and resolved into graph edges.",
-      "queryTerms": [
-        "extractCalls",
-        "call_expression",
-        "resolveCallTarget",
-        "callType",
-        "member_expression"
-      ],
-      "entrySymbolNames": ["extractCalls", "resolveCallTarget"],
-      "relevantFiles": [
-        "src/indexer/treesitter/extractCalls.ts",
-        "src/indexer/indexer.ts",
-        "src/indexer/ts/tsParser.ts"
-      ],
-      "relevantSymbols": ["extractCalls", "resolveCallTarget"]
-    },
-    {
-      "id": "symbol-card-cache",
-      "title": "Debug symbol card caching behavior",
-      "description": "Understand how symbol cards are cached, invalidated, and retrieved for slice building.",
-      "queryTerms": [
-        "symbolCardCache",
-        "cacheGet",
-        "cacheSet",
-        "invalidate",
-        "maxEntries"
-      ],
-      "entrySymbolNames": ["symbolCardCache", "loadSymbolCards"],
-      "relevantFiles": [
-        "src/graph/cache.ts",
-        "src/graph/slice.ts",
-        "src/config/constants.ts",
-        "src/mcp/types.ts"
-      ],
-      "relevantSymbols": [
-        "symbolCardCache",
-        "loadSymbolCards",
-        "getFromCache"
+      "id": "feature-review-mcp-tool-pattern",
+      "category": "feature-review",
+      "title": "Review adding a new MCP tool end-to-end",
+      "description": "Simulates feature review for adding a new MCP tool handler, schema, and server registration.",
+      "contextTargets": {
+        "files": [
+          "src/mcp/tools/index.ts",
+          "src/mcp/tools/symbol.ts",
+          "src/mcp/tools/repo.ts",
+          "src/server.ts",
+          "src/mcp/types.ts",
+          "src/mcp/errors.ts"
+        ],
+        "symbols": [
+          "registerTools",
+          "handleSymbolSearch",
+          "handleSymbolGetCard",
+          "handleRepoStatus",
+          "MCPServer"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "understand-pattern",
+          "phase": "triage",
+          "goal": "Understand current tool registration and request handling conventions.",
+          "prompt": "Map the current pattern for adding a new tool, including schema, handler, and registration.",
+          "entrySymbolHints": ["registerTools", "MCPServer"]
+        },
+        {
+          "id": "investigate-integration",
+          "phase": "investigate",
+          "goal": "Trace representative tool handlers for validation, error, and response shape.",
+          "prompt": "Inspect existing handlers and identify guardrails for request parsing and typed errors.",
+          "entrySymbolHints": ["handleSymbolSearch", "handleRepoStatus"]
+        },
+        {
+          "id": "validate-feature-review",
+          "phase": "validate",
+          "goal": "List required integration points and review risks.",
+          "prompt": "Confirm what must be touched for a new tool and what can break if wiring is incomplete."
+        }
       ]
     },
     {
-      "id": "indexer-performance",
-      "title": "Profile and optimize indexing performance",
-      "description": "Find bottlenecks in the indexing pipeline from file scanning to database persistence.",
-      "queryTerms": [
-        "indexRepo",
-        "processFile",
-        "batchInsert",
-        "symbolsIndexed",
-        "durationMs"
-      ],
-      "entrySymbolNames": ["indexRepo", "processFile"],
-      "relevantFiles": [
-        "src/indexer/indexer.ts",
-        "src/indexer/file-scanner.ts",
-        "src/db/queries.ts",
-        "src/config/constants.ts"
-      ],
-      "relevantSymbols": [
-        "indexRepo",
-        "processFile",
-        "scanDirectory"
-      ],
-      "sdl": {
-        "maxCards": 25,
-        "maxTokens": 5000
-      }
-    },
-    {
-      "id": "delta-blast-radius",
-      "title": "Calculate blast radius for code changes",
-      "description": "Trace how delta packs compute affected symbols and rank them by impact.",
-      "queryTerms": [
-        "blastRadius",
-        "computeDelta",
-        "affectedSymbols",
-        "DeltaPack",
-        "proximity"
-      ],
-      "entrySymbolNames": ["computeDelta", "calculateBlastRadius"],
-      "relevantFiles": [
-        "src/delta/diff.ts",
-        "src/delta/blast-radius.ts",
-        "src/mcp/tools/delta.ts",
-        "src/mcp/types.ts"
-      ],
-      "relevantSymbols": [
-        "computeDelta",
-        "calculateBlastRadius",
-        "rankByImpact"
+      "id": "understanding-slice-lifecycle",
+      "category": "understanding",
+      "title": "Understand slice lifecycle from request to refresh",
+      "description": "Simulates onboarding and understanding how slice state is built, cached, and refreshed.",
+      "contextTargets": {
+        "files": [
+          "src/mcp/tools/slice.ts",
+          "src/graph/slice.ts",
+          "src/graph/cache.ts",
+          "src/db/queries.ts",
+          "src/mcp/types.ts"
+        ],
+        "symbols": [
+          "handleSliceBuild",
+          "handleSliceRefresh",
+          "buildSlice",
+          "loadSymbolCards"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "triage-flow",
+          "phase": "triage",
+          "goal": "Map top-level request flow for initial slice build.",
+          "prompt": "Explain the flow from MCP slice build request into graph construction and response objects.",
+          "entrySymbolHints": ["handleSliceBuild", "buildSlice"]
+        },
+        {
+          "id": "investigate-refresh",
+          "phase": "investigate",
+          "goal": "Understand refresh semantics and handle lifecycles.",
+          "prompt": "Trace how slice refresh uses prior handles, cache, and changed symbols."
+        },
+        {
+          "id": "validate-understanding",
+          "phase": "validate",
+          "goal": "Summarize critical invariants and data dependencies.",
+          "prompt": "Identify invariants required to keep slice handles and card sets consistent."
+        }
       ]
     },
     {
-      "id": "mcp-tool-registration",
-      "title": "Add a new MCP tool to the server",
-      "description": "Understand the pattern for registering new MCP tools including schema, handler, and dispatch.",
-      "queryTerms": [
-        "registerTool",
-        "toolHandler",
-        "toolSchema",
-        "dispatch",
-        "McpServer"
-      ],
-      "entrySymbolNames": ["createServer", "registerTools"],
-      "relevantFiles": [
-        "src/server.ts",
-        "src/mcp/tools/index.ts",
-        "src/mcp/types.ts",
-        "src/mcp/errors.ts"
-      ],
-      "relevantSymbols": [
-        "createServer",
-        "registerTools",
-        "handleToolCall"
+      "id": "code-change-new-slice-config",
+      "category": "code-change",
+      "title": "Implement a new slice configuration option safely",
+      "description": "Simulates adding a new slice config option and wiring it through load, schema, and behavior layers.",
+      "contextTargets": {
+        "files": [
+          "src/config/types.ts",
+          "src/config/loadConfig.ts",
+          "src/config/constants.ts",
+          "src/graph/slice.ts",
+          "config/sdlmcp.config.schema.json"
+        ],
+        "symbols": [
+          "SliceConfigSchema",
+          "loadConfig",
+          "buildSlice"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "triage-config-points",
+          "phase": "triage",
+          "goal": "Find all source-of-truth points for config shape and defaults.",
+          "prompt": "Add a new slice option and ensure schema/default/loading behavior remains aligned.",
+          "entrySymbolHints": ["SliceConfigSchema", "loadConfig"]
+        },
+        {
+          "id": "investigate-runtime-use",
+          "phase": "investigate",
+          "goal": "Find where config is consumed in slice construction.",
+          "prompt": "Trace how loaded config values influence slice build and budget behavior.",
+          "entrySymbolHints": ["buildSlice"]
+        },
+        {
+          "id": "validate-change",
+          "phase": "validate",
+          "goal": "Confirm no drift between docs/schema/runtime.",
+          "prompt": "Validate that config schema, parsing, and runtime defaults remain consistent."
+        }
       ]
     },
     {
-      "id": "skeleton-generation",
-      "title": "Fix skeleton generation for arrow functions",
-      "description": "Debug why arrow function skeletons may be missing or malformed.",
-      "queryTerms": [
-        "generateSymbolSkeleton",
-        "arrow_function",
-        "skeletonize",
-        "elideBody"
-      ],
-      "entrySymbolNames": ["generateSymbolSkeleton", "skeletonizeNode"],
-      "relevantFiles": [
-        "src/code/skeleton.ts",
-        "src/code/ast-utils.ts",
-        "src/indexer/treesitter/extractSymbols.ts"
-      ],
-      "relevantSymbols": [
-        "generateSymbolSkeleton",
-        "skeletonizeNode",
-        "extractSymbols"
+      "id": "performance-indexing-regression",
+      "category": "performance",
+      "title": "Investigate indexing performance regression",
+      "description": "Simulates diagnosing a slowdown in indexing throughput across scanning, parsing, and persistence.",
+      "contextTargets": {
+        "files": [
+          "src/indexer/indexer.ts",
+          "src/indexer/fileScanner.ts",
+          "src/db/queries.ts",
+          "src/config/constants.ts",
+          "src/cli/commands/index.ts"
+        ],
+        "symbols": [
+          "indexRepo",
+          "processFile",
+          "scanRepository",
+          "indexCommand"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "triage-regression",
+          "phase": "triage",
+          "goal": "Locate likely bottleneck areas quickly.",
+          "prompt": "Indexing got slower. Identify likely bottlenecks from file scanning through DB writes.",
+          "entrySymbolHints": ["indexRepo", "processFile"]
+        },
+        {
+          "id": "investigate-pipeline",
+          "phase": "investigate",
+          "goal": "Trace scanner and persistence interactions.",
+          "prompt": "Follow scanner output into indexing batches and persistence operations.",
+          "entrySymbolHints": ["scanRepository"]
+        },
+        {
+          "id": "validate-diagnosis",
+          "phase": "validate",
+          "goal": "Propose focused instrumentation/tests to confirm root cause.",
+          "prompt": "Determine where additional timing or counters should be added to validate root cause."
+        }
       ]
     },
     {
-      "id": "cli-transport",
-      "title": "Implement HTTP transport for CLI serve command",
-      "description": "Find how the CLI serve command handles different transport modes (stdio vs HTTP).",
-      "queryTerms": [
-        "serveCommand",
-        "transport",
-        "stdio",
-        "http",
-        "startServer"
-      ],
-      "entrySymbolNames": ["serveCommand", "startHttpServer"],
-      "relevantFiles": [
-        "src/cli/commands/serve.ts",
-        "src/cli/transports/stdio.ts",
-        "src/cli/transports/http.ts",
-        "src/server.ts"
-      ],
-      "relevantSymbols": [
-        "serveCommand",
-        "startHttpServer",
-        "createStdioTransport"
+      "id": "bug-fix-call-graph-regression",
+      "category": "bug-fix",
+      "title": "Fix missed call edges in call graph extraction",
+      "description": "Simulates debugging call-edge extraction regressions affecting downstream graph quality.",
+      "contextTargets": {
+        "files": [
+          "src/indexer/treesitter/extractCalls.ts",
+          "src/indexer/indexer.ts",
+          "src/indexer/ts/tsParser.ts",
+          "src/graph/slice.ts"
+        ],
+        "symbols": [
+          "extractCalls",
+          "resolveCallTarget",
+          "buildSlice"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "triage-call-loss",
+          "phase": "triage",
+          "goal": "Find where call edges are dropped.",
+          "prompt": "Call edge counts dropped unexpectedly. Locate likely extraction/resolution failure points.",
+          "entrySymbolHints": ["extractCalls", "resolveCallTarget"]
+        },
+        {
+          "id": "investigate-resolution",
+          "phase": "investigate",
+          "goal": "Trace AST extraction to graph edge insertion.",
+          "prompt": "Trace call expressions through extraction and resolution into the graph."
+        },
+        {
+          "id": "validate-impact",
+          "phase": "validate",
+          "goal": "Check downstream impact on slice relevance.",
+          "prompt": "Verify how missing call edges alter slice expansion behavior and context quality."
+        }
       ]
     },
     {
-      "id": "config-validation",
-      "title": "Add validation for new config option",
-      "description": "Understand config schema validation and how to add new configuration options.",
-      "queryTerms": [
-        "loadConfig",
-        "configSchema",
-        "Zod",
-        "validate",
-        "defaults"
-      ],
-      "entrySymbolNames": ["loadConfig", "configSchema"],
-      "relevantFiles": [
-        "src/config/loadConfig.ts",
-        "src/config/types.ts",
-        "src/config/constants.ts",
-        "config/sdlmcp.config.schema.json"
-      ],
-      "relevantSymbols": [
-        "loadConfig",
-        "configSchema",
-        "validateConfig"
+      "id": "impact-analysis-delta-refactor",
+      "category": "impact-analysis",
+      "title": "Assess blast radius for a delta/impact refactor",
+      "description": "Simulates impact analysis before and after refactoring delta-pack and blast-radius logic.",
+      "contextTargets": {
+        "files": [
+          "src/delta/diff.ts",
+          "src/delta/blastRadius.ts",
+          "src/mcp/tools/delta.ts",
+          "src/mcp/types.ts",
+          "src/graph/slice.ts"
+        ],
+        "symbols": [
+          "computeDelta",
+          "computeBlastRadius",
+          "handleDeltaGet",
+          "buildSlice"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "triage-impact-task",
+          "phase": "triage",
+          "goal": "Locate primary delta and blast-radius computations.",
+          "prompt": "Plan impact analysis for refactoring delta and blast-radius logic.",
+          "entrySymbolHints": ["computeDelta", "computeBlastRadius", "handleDeltaGet"]
+        },
+        {
+          "id": "investigate-coupling",
+          "phase": "investigate",
+          "goal": "Trace data shape coupling with MCP response types.",
+          "prompt": "Trace dependencies between delta computation, blast-radius ranking, and MCP types."
+        },
+        {
+          "id": "validate-analysis",
+          "phase": "validate",
+          "goal": "Identify high-risk interfaces and regression checks.",
+          "prompt": "List highest-risk interfaces and what should be covered by tests before merge."
+        }
+      ]
+    },
+    {
+      "id": "test-triage-config-loading",
+      "category": "test-triage",
+      "title": "Triage failing config loading checks",
+      "description": "Simulates handling failing tests around config loading and environment validation.",
+      "contextTargets": {
+        "files": [
+          "src/config/loadConfig.ts",
+          "src/config/types.ts",
+          "src/cli/commands/doctor.ts",
+          "src/cli/commands/index.ts",
+          "src/config/constants.ts"
+        ],
+        "symbols": [
+          "loadConfig",
+          "SliceConfigSchema",
+          "doctorCommand",
+          "indexCommand"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "triage-test-failure",
+          "phase": "triage",
+          "goal": "Localize failure to config parsing or command usage.",
+          "prompt": "Tests around config loading are failing. Identify whether schema, defaults, or command paths are at fault.",
+          "entrySymbolHints": ["loadConfig", "doctorCommand"]
+        },
+        {
+          "id": "investigate-validation",
+          "phase": "investigate",
+          "goal": "Trace validation and defaulting behavior.",
+          "prompt": "Follow config parsing and validation through CLI command usage paths."
+        },
+        {
+          "id": "validate-triage",
+          "phase": "validate",
+          "goal": "Propose a targeted fix and verification scope.",
+          "prompt": "Define a minimal fix and tests to prevent recurrence."
+        }
       ]
     }
   ]

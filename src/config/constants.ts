@@ -109,6 +109,41 @@ export const DEFAULT_MAX_TOKENS_SLICE = 12000;
 export const MAX_FRONTIER = 1000;
 
 /**
+ * Maximum number of start nodes sourced from free-form task text.
+ */
+export const TASK_TEXT_START_NODE_MAX = 40;
+
+/**
+ * Maximum number of distinct task-text tokens considered for start-node seeding.
+ */
+export const TASK_TEXT_TOKEN_MAX = 24;
+
+/**
+ * Maximum number of symbol matches to pull per task-text token.
+ */
+export const TASK_TEXT_TOKEN_QUERY_LIMIT = 6;
+
+/**
+ * Minimum token length required for task-text seeding.
+ */
+export const TASK_TEXT_MIN_TOKEN_LENGTH = 3;
+
+/**
+ * Max promoted first-hop dependencies (call/import) per explicit entry symbol.
+ */
+export const ENTRY_FIRST_HOP_MAX_PER_SYMBOL = 4;
+
+/**
+ * Max same-file sibling symbols to promote per explicit entry symbol.
+ */
+export const ENTRY_SIBLING_MAX_PER_SYMBOL = 3;
+
+/**
+ * Minimum shared prefix length for sibling promotion based on name similarity.
+ */
+export const ENTRY_SIBLING_MIN_SHARED_PREFIX = 6;
+
+/**
  * Minimum score threshold for including nodes in slice results.
  */
 export const SLICE_SCORE_THRESHOLD = 0.2;
@@ -219,6 +254,52 @@ export const PAGE_SIZE_MAX = 100;
  * Default number of symbols to return from search operations.
  */
 export const SYMBOL_SEARCH_DEFAULT_LIMIT = 50;
+
+/**
+ * Maximum number of query tokens to fan out when symbol search receives natural-language text.
+ */
+export const SYMBOL_SEARCH_MAX_QUERY_TOKENS = 8;
+
+/**
+ * Minimum token length used for natural-language symbol search tokenization.
+ */
+export const SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH = 3;
+
+/**
+ * Maximum dependency names to include per dependency kind in symbol cards.
+ * Trims high-degree symbols so card payloads remain practical.
+ */
+export const SYMBOL_CARD_MAX_DEPS_PER_KIND = 24;
+
+/**
+ * Max deps per kind for lightweight slice cards (non-entry symbols).
+ */
+export const SYMBOL_CARD_MAX_DEPS_PER_KIND_LIGHT = 6;
+
+/**
+ * Maximum number of test references stored in card metrics payload.
+ */
+export const SYMBOL_CARD_MAX_TEST_REFS = 8;
+
+/**
+ * Maximum number of invariants kept in card payload.
+ */
+export const SYMBOL_CARD_MAX_INVARIANTS = 8;
+
+/**
+ * Maximum number of side effects kept in card payload.
+ */
+export const SYMBOL_CARD_MAX_SIDE_EFFECTS = 8;
+
+/**
+ * Maximum summary length stored in symbol card payload.
+ */
+export const SYMBOL_CARD_SUMMARY_MAX_CHARS = 240;
+
+/**
+ * Max summary length for lightweight slice cards.
+ */
+export const SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT = 90;
 
 // ============================================================================
 // Policy & Weights Constants
