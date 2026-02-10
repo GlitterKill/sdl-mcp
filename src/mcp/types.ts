@@ -124,7 +124,7 @@ export interface DeltaSymbolChange {
 
 export interface BlastRadiusItem {
   symbolId: SymbolId;
-  reason: string;
+  reason?: string;
   distance: number;
   rank: number;
   signal: "diagnostic" | "directDependent" | "graph";
@@ -191,7 +191,7 @@ export interface CodeWindowRequest {
 
 export interface CodeWindowResponseApproved {
   approved: true;
-  repoId: RepoId;
+  repoId?: RepoId;
   symbolId: SymbolId;
   file: string;
   range: Range;

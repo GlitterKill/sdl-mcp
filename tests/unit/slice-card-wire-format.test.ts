@@ -5,6 +5,7 @@ import {
   buildPayloadCardsAndRefs,
   toSliceSymbolCard,
 } from "../../src/graph/slice.js";
+import { toCompactGraphSliceV2 } from "../../src/mcp/tools/slice.js";
 
 describe("slice card wire format", () => {
   const fullCard = {
@@ -86,5 +87,35 @@ describe("slice card wire format", () => {
       sliceCard.version.astFingerprint,
       longFingerprint.slice(0, 16),
     );
+  });
+
+  it("truncates astFingerprint to 8 chars in compact v2 wire format", () => {
+    const longFingerprint =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const slice = {
+      repoId: "repo-1",
+      versionId: "v1",
+      budget: { maxCards: 10, maxEstimatedTokens: 5000 },
+      startSymbols: ["sym-1"],
+      symbolIndex: ["sym-1"],
+      cards: [
+        {
+          symbolId: "sym-1",
+          file: "src/example.ts",
+          range: { startLine: 1, startCol: 0, endLine: 10, endCol: 1 },
+          kind: "function",
+          name: "example",
+          exported: true,
+          deps: { imports: ["depA"], calls: ["depB"] },
+          detailLevel: "compact",
+          version: { astFingerprint: longFingerprint },
+        },
+      ],
+      edges: [] as Array<[number, number, "import" | "call" | "config", number]>,
+    } as const;
+
+    const compact = toCompactGraphSliceV2(slice as any);
+    assert.strictEqual(compact.c[0].af.length, 8);
+    assert.strictEqual(compact.c[0].af, longFingerprint.slice(0, 8));
   });
 });

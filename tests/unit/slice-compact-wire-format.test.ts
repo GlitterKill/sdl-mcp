@@ -1,9 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { toCompactGraphSlice } from "../../src/mcp/tools/slice.js";
+import {
+  toCompactGraphSlice,
+  toCompactGraphSliceV2,
+} from "../../src/mcp/tools/slice.js";
 import { SliceBuildRequestSchema } from "../../src/mcp/tools.js";
 
-describe("slice compact wire format", () => {
+describe("slice compact wire format v1", () => {
   it("serializes a standard slice to abbreviated compact keys", () => {
     const slice = {
       repoId: "repo-1",
@@ -112,15 +115,258 @@ describe("slice compact wire format", () => {
   });
 });
 
+describe("slice compact wire format v2", () => {
+  it("serializes with file path lookup, integer edge types, and no sid/rid", () => {
+    const slice = {
+      repoId: "repo-1",
+      versionId: "v1",
+      budget: { maxCards: 20, maxEstimatedTokens: 12000 },
+      startSymbols: ["sym-1"],
+      symbolIndex: ["sym-1", "sym-2"],
+      cards: [
+        {
+          symbolId: "sym-1",
+          file: "src/a.ts",
+          range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
+          kind: "function",
+          name: "alpha",
+          exported: true,
+          deps: { imports: ["x"], calls: ["sym-2"] },
+          detailLevel: "compact",
+          version: { astFingerprint: "abcdef0123456789abcdef0123456789" },
+        },
+        {
+          symbolId: "sym-2",
+          file: "src/a.ts",
+          range: { startLine: 10, startCol: 0, endLine: 15, endCol: 1 },
+          kind: "function",
+          name: "beta",
+          exported: false,
+          deps: { imports: [], calls: [] },
+          detailLevel: "compact",
+          version: { astFingerprint: "fedcba9876543210fedcba9876543210" },
+        },
+      ],
+      edges: [[0, 1, "call", 1]],
+    } as const;
+
+    const compact = toCompactGraphSliceV2(slice as any);
+
+    assert.strictEqual(compact.wf, "compact");
+    assert.strictEqual(compact.wv, 2);
+    assert.ok(!("rid" in compact), "v2 should omit rid");
+    assert.strictEqual(compact.vid, "v1");
+    assert.deepStrictEqual(compact.b, { mc: 20, mt: 12000 });
+    assert.deepStrictEqual(compact.ss, ["sym-1"]);
+    assert.deepStrictEqual(compact.si, ["sym-1", "sym-2"]);
+
+    // File path lookup table - deduplicated
+    assert.deepStrictEqual(compact.fp, ["src/a.ts"]);
+
+    // Edge type lookup table
+    assert.deepStrictEqual(compact.et, ["import", "call", "config"]);
+
+    // Edges use integer edge type index (call = 1)
+    assert.deepStrictEqual(compact.e, [[0, 1, 1, 1]]);
+
+    // Cards use fi (file index) instead of f (file path), no sid
+    const card0 = compact.c[0];
+    assert.ok(!("sid" in card0), "v2 card should not have sid");
+    assert.ok(!("f" in card0), "v2 card should not have f (file path)");
+    assert.strictEqual(card0.fi, 0);
+    assert.strictEqual(card0.n, "alpha");
+    assert.strictEqual(card0.x, true);
+
+    // astFingerprint truncated to 8 chars in v2
+    assert.strictEqual(card0.af.length, 8);
+    assert.strictEqual(card0.af, "abcdef01");
+
+    const card1 = compact.c[1];
+    assert.strictEqual(card1.fi, 0); // Same file
+    assert.strictEqual(card1.n, "beta");
+    assert.strictEqual(card1.af, "fedcba98");
+  });
+
+  it("uses card index for frontier and abbreviates why codes", () => {
+    const slice = {
+      repoId: "repo-1",
+      versionId: "v1",
+      budget: { maxCards: 10, maxEstimatedTokens: 5000 },
+      startSymbols: ["sym-1"],
+      symbolIndex: ["sym-1", "sym-2"],
+      cards: [
+        {
+          symbolId: "sym-1",
+          file: "src/a.ts",
+          range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
+          kind: "function",
+          name: "alpha",
+          exported: true,
+          deps: { imports: [], calls: [] },
+          detailLevel: "compact",
+          version: { astFingerprint: "abcdef0123456789" },
+        },
+      ],
+      edges: [] as Array<[number, number, "import" | "call" | "config", number]>,
+      frontier: [
+        { symbolId: "sym-1", score: 0.9, why: "calls" },
+        { symbolId: "sym-2", score: 0.5, why: "entry symbol" },
+      ],
+      cardRefs: [{ symbolId: "sym-1", etag: "etag-1", detailLevel: "full" }],
+    } as const;
+
+    const compact = toCompactGraphSliceV2(slice as any);
+
+    // Frontier uses ci (card index) and abbreviated why codes
+    assert.ok(compact.f, "frontier should be present");
+    assert.strictEqual(compact.f![0].ci, 0); // sym-1 is at index 0 in symbolIndex
+    assert.strictEqual(compact.f![0].w, "c"); // "calls" -> "c"
+    assert.strictEqual(compact.f![1].ci, 1); // sym-2 is at index 1
+    assert.strictEqual(compact.f![1].w, "e"); // "entry symbol" -> "e"
+
+    // Card refs use ci (card index)
+    assert.ok(compact.cr, "card refs should be present");
+    assert.strictEqual(compact.cr![0].ci, 0);
+    assert.strictEqual(compact.cr![0].e, "etag-1");
+    assert.strictEqual(compact.cr![0].dl, "full");
+  });
+
+  it("omits truncation when not truncated", () => {
+    const slice = {
+      repoId: "repo-1",
+      versionId: "v1",
+      budget: { maxCards: 10, maxEstimatedTokens: 5000 },
+      startSymbols: ["sym-1"],
+      symbolIndex: ["sym-1"],
+      cards: [
+        {
+          symbolId: "sym-1",
+          file: "src/a.ts",
+          range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
+          kind: "function",
+          name: "alpha",
+          exported: true,
+          deps: { imports: [], calls: [] },
+          detailLevel: "compact",
+          version: { astFingerprint: "abcdef01" },
+        },
+      ],
+      edges: [] as Array<[number, number, "import" | "call" | "config", number]>,
+      truncation: {
+        truncated: false,
+        droppedCards: 0,
+        droppedEdges: 0,
+        howToResume: null,
+      },
+    } as const;
+
+    const compact = toCompactGraphSliceV2(slice as any);
+    assert.ok(!("t" in compact), "v2 should omit truncation when not truncated");
+  });
+
+  it("includes truncation when actually truncated", () => {
+    const slice = {
+      repoId: "repo-1",
+      versionId: "v1",
+      budget: { maxCards: 10, maxEstimatedTokens: 5000 },
+      startSymbols: ["sym-1"],
+      symbolIndex: ["sym-1"],
+      cards: [
+        {
+          symbolId: "sym-1",
+          file: "src/a.ts",
+          range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
+          kind: "function",
+          name: "alpha",
+          exported: true,
+          deps: { imports: [], calls: [] },
+          detailLevel: "compact",
+          version: { astFingerprint: "abcdef01" },
+        },
+      ],
+      edges: [] as Array<[number, number, "import" | "call" | "config", number]>,
+      truncation: {
+        truncated: true,
+        droppedCards: 5,
+        droppedEdges: 3,
+        howToResume: { type: "token", value: 2000 },
+      },
+    } as const;
+
+    const compact = toCompactGraphSliceV2(slice as any);
+    assert.ok(compact.t, "v2 should include truncation when truncated");
+    assert.deepStrictEqual(compact.t, {
+      tr: true,
+      dc: 5,
+      de: 3,
+      res: { t: "token", v: 2000 },
+    });
+  });
+
+  it("deduplicates file paths across cards from different files", () => {
+    const slice = {
+      repoId: "repo-1",
+      versionId: "v1",
+      budget: { maxCards: 10, maxEstimatedTokens: 5000 },
+      startSymbols: ["sym-1"],
+      symbolIndex: ["sym-1", "sym-2", "sym-3"],
+      cards: [
+        {
+          symbolId: "sym-1",
+          file: "src/a.ts",
+          range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
+          kind: "function",
+          name: "alpha",
+          exported: true,
+          deps: { imports: [], calls: [] },
+          detailLevel: "compact",
+          version: { astFingerprint: "aaaa0000" },
+        },
+        {
+          symbolId: "sym-2",
+          file: "src/b.ts",
+          range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
+          kind: "function",
+          name: "beta",
+          exported: true,
+          deps: { imports: [], calls: [] },
+          detailLevel: "compact",
+          version: { astFingerprint: "bbbb0000" },
+        },
+        {
+          symbolId: "sym-3",
+          file: "src/a.ts",
+          range: { startLine: 10, startCol: 0, endLine: 15, endCol: 1 },
+          kind: "function",
+          name: "gamma",
+          exported: true,
+          deps: { imports: [], calls: [] },
+          detailLevel: "compact",
+          version: { astFingerprint: "cccc0000" },
+        },
+      ],
+      edges: [] as Array<[number, number, "import" | "call" | "config", number]>,
+    } as const;
+
+    const compact = toCompactGraphSliceV2(slice as any);
+    assert.deepStrictEqual(compact.fp, ["src/a.ts", "src/b.ts"]);
+    assert.strictEqual(compact.c[0].fi, 0); // src/a.ts
+    assert.strictEqual(compact.c[1].fi, 1); // src/b.ts
+    assert.strictEqual(compact.c[2].fi, 0); // src/a.ts (deduplicated)
+  });
+});
+
 describe("slice build request wire-format negotiation", () => {
-  it("requires version=1 for compact wire format", () => {
+  it("accepts compact wire format without version (defaults to v2)", () => {
     const withoutVersion = SliceBuildRequestSchema.safeParse({
       repoId: "repo-1",
       taskText: "review slice behavior",
       wireFormat: "compact",
     });
-    assert.strictEqual(withoutVersion.success, false);
+    assert.strictEqual(withoutVersion.success, true);
+  });
 
+  it("accepts compact wire format with version 1", () => {
     const withVersion = SliceBuildRequestSchema.safeParse({
       repoId: "repo-1",
       taskText: "review slice behavior",
@@ -128,6 +374,16 @@ describe("slice build request wire-format negotiation", () => {
       wireFormatVersion: 1,
     });
     assert.strictEqual(withVersion.success, true);
+  });
+
+  it("accepts compact wire format with version 2", () => {
+    const withVersion2 = SliceBuildRequestSchema.safeParse({
+      repoId: "repo-1",
+      taskText: "review slice behavior",
+      wireFormat: "compact",
+      wireFormatVersion: 2,
+    });
+    assert.strictEqual(withVersion2.success, true);
   });
 
   it("keeps standard wire format backward compatible", () => {

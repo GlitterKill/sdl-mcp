@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "generatedAt": "2026-02-10T16:07:46.121Z",
+  "source": {
+    "inputFile": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\benchmarks\\real-world\\results-current.json",
+    "benchmarkGeneratedAt": "2026-02-10T03:34:29.906Z"
+  },
+  "traces": [
+    {
+      "id": "trace-code-review-slice-pr",
+      "scenario": "Review slice-expansion pull request for correctness and regressions",
+      "traditional": {
+        "description": "code-review workflow replay (traditional)",
+        "tokens": 13618
+      },
+      "sdlMcp": {
+        "description": "code-review workflow replay (SDL tool-ladder)",
+        "tokens": 6032
+      },
+      "qualifier": "(hard)",
+      "sourceTaskId": "code-review-slice-pr",
+      "sourceRepoId": "my-repo"
+    },
+    {
+      "id": "trace-bug-fix-policy-window-downgrade",
+      "scenario": "Fix policy downgrade behavior for code window requests",
+      "traditional": {
+        "description": "bug-fix workflow replay (traditional)",
+        "tokens": 17666
+      },
+      "sdlMcp": {
+        "description": "bug-fix workflow replay (SDL tool-ladder)",
+        "tokens": 8052
+      },
+      "qualifier": "(medium)",
+      "sourceTaskId": "bug-fix-policy-window-downgrade",
+      "sourceRepoId": "my-repo"
+    },
+    {
+      "id": "trace-feature-review-mcp-tool-pattern",
+      "scenario": "Review adding a new MCP tool end-to-end",
+      "traditional": {
+        "description": "feature-review workflow replay (traditional)",
+        "tokens": 18055
+      },
+      "sdlMcp": {
+        "description": "feature-review workflow replay (SDL tool-ladder)",
+        "tokens": 7113
+      },
+      "qualifier": "(medium)",
+      "sourceTaskId": "feature-review-mcp-tool-pattern",
+      "sourceRepoId": "my-repo"
+    },
+    {
+      "id": "trace-understanding-slice-lifecycle",
+      "scenario": "Understand slice lifecycle from request to refresh",
+      "traditional": {
+        "description": "understanding workflow replay (traditional)",
+        "tokens": 15144
+      },
+      "sdlMcp": {
+        "description": "understanding workflow replay (SDL tool-ladder)",
+        "tokens": 7312
+      },
+      "qualifier": "(easy)",
+      "sourceTaskId": "understanding-slice-lifecycle",
+      "sourceRepoId": "my-repo"
+    },
+    {
+      "id": "trace-code-change-new-slice-config",
+      "scenario": "Implement a new slice configuration option safely",
+      "traditional": {
+        "description": "code-change workflow replay (traditional)",
+        "tokens": 17170
+      },
+      "sdlMcp": {
+        "description": "code-change workflow replay (SDL tool-ladder)",
+        "tokens": 9880
+      },
+      "qualifier": "(hard)",
+      "sourceTaskId": "code-change-new-slice-config",
+      "sourceRepoId": "my-repo"
+    },
+    {
+      "id": "trace-performance-indexing-regression",
+      "scenario": "Investigate indexing performance regression",
+      "traditional": {
+        "description": "performance workflow replay (traditional)",
+        "tokens": 17161
+      },
+      "sdlMcp": {
+        "description": "performance workflow replay (SDL tool-ladder)",
+        "tokens": 9247
+      },
+      "qualifier": "(hard)",
+      "sourceTaskId": "performance-indexing-regression",
+      "sourceRepoId": "my-repo"
+    },
+    {
+      "id": "trace-bug-fix-call-graph-regression",
+      "scenario": "Fix missed call edges in call graph extraction",
+      "traditional": {
+        "description": "bug-fix workflow replay (traditional)",
+        "tokens": 14260
+      },
+      "sdlMcp": {
+        "description": "bug-fix workflow replay (SDL tool-ladder)",
+        "tokens": 6865
+      },
+      "qualifier": "(medium)",
+      "sourceTaskId": "bug-fix-call-graph-regression",
+      "sourceRepoId": "my-repo"
+    },
+    {
+      "id": "trace-impact-analysis-delta-refactor",
+      "scenario": "Assess blast radius for a delta/impact refactor",
+      "traditional": {
+        "description": "impact-analysis workflow replay (traditional)",
+        "tokens": 14016
+      },
+      "sdlMcp": {
+        "description": "impact-analysis workflow replay (SDL tool-ladder)",
+        "tokens": 7223
+      },
+      "qualifier": "(medium)",
+      "sourceTaskId": "impact-analysis-delta-refactor",
+      "sourceRepoId": "my-repo"
+    },
+    {
+      "id": "trace-test-triage-config-loading",
+      "scenario": "Triage failing config loading checks",
+      "traditional": {
+        "description": "test-triage workflow replay (traditional)",
+        "tokens": 15613
+      },
+      "sdlMcp": {
+        "description": "test-triage workflow replay (SDL tool-ladder)",
+        "tokens": 8348
+      },
+      "qualifier": "(easy)",
+      "sourceTaskId": "test-triage-config-loading",
+      "sourceRepoId": "my-repo"
+    }
+  ]
+}

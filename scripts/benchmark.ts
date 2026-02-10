@@ -21,7 +21,6 @@ import * as db from "../src/db/queries.js";
 import type { SymbolRow } from "../src/db/schema.js";
 import { indexRepo } from "../src/indexer/indexer.js";
 import { buildSlice } from "../src/graph/slice.js";
-import { buildRepoOverview } from "../src/graph/overview.js";
 import { generateSymbolSkeleton } from "../src/code/skeleton.js";
 import type {
   SymbolCard,
@@ -37,6 +36,7 @@ import {
   SYMBOL_TOKEN_BASE,
   SYMBOL_TOKEN_MAX,
 } from "../src/config/constants.js";
+import { estimateTokens } from "../src/util/tokenize.js";
 
 // ============================================================================
 // Types
@@ -57,7 +57,7 @@ interface TuningParameters {
   tokenEstimation: {
     baseTokensPerSymbol: number;
     maxTokensPerSymbol: number;
-    charsPerToken: number;
+    algorithm: string;
   };
 }
 
@@ -97,6 +97,28 @@ interface TokenAnalysis {
   qualifier?: string;
 }
 
+interface ReplayTrace {
+  id: string;
+  scenario: string;
+  traditional: {
+    description: string;
+    tokens: number;
+  };
+  sdlMcp: {
+    description: string;
+    tokens: number;
+  };
+  qualifier?: string;
+  sourceTaskId?: string;
+  sourceRepoId?: string;
+}
+
+interface ReplayTraceFile {
+  version: number;
+  generatedAt: string;
+  traces: ReplayTrace[];
+}
+
 interface BenchmarkResult {
   timestamp: string;
   repoId: string;
@@ -123,6 +145,10 @@ interface BenchmarkResult {
   };
   quality: QualityMetrics;
   tokenAnalysis: TokenAnalysis[];
+  traceSource?: {
+    traceFile: string;
+    traceCount: number;
+  };
   recommendations: string[];
 }
 
@@ -130,11 +156,7 @@ interface BenchmarkResult {
 // Utilities
 // ============================================================================
 
-const CHARS_PER_TOKEN = 4;
-
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
-}
+const DEFAULT_REPLAY_TRACE_PATH = "benchmarks/synthetic/replay-traces.json";
 
 function formatNumber(n: number): string {
   return n.toLocaleString();
@@ -161,6 +183,63 @@ function progressBar(percent: number, width: number = 20): string {
   const filled = Math.round((clamped / 100) * width);
   const empty = width - filled;
   return `[${"#".repeat(filled)}${"-".repeat(empty)}]`;
+}
+
+function loadReplayTraces(
+  traceFilePath: string,
+  repoId: string,
+): ReplayTrace[] {
+  const resolved = resolve(traceFilePath);
+  const raw = readFileSync(resolved, "utf-8");
+  const payload = JSON.parse(raw) as ReplayTraceFile;
+  const repoScoped = payload.traces.filter(
+    (trace) => !trace.sourceRepoId || trace.sourceRepoId === repoId,
+  );
+  if (repoScoped.length > 0) {
+    return repoScoped;
+  }
+  const traceRepoIds = [
+    ...new Set(payload.traces.map((t) => t.sourceRepoId).filter(Boolean)),
+  ];
+  console.warn(
+    `  Warning: No replay traces found for repo "${repoId}". ` +
+      `Falling back to all ${payload.traces.length} traces ` +
+      `(from repo(s): ${traceRepoIds.join(", ") || "unknown"}). ` +
+      `Token comparisons may not reflect this repository.`,
+  );
+  return payload.traces;
+}
+
+function buildTokenAnalysisFromTrace(trace: ReplayTrace): TokenAnalysis {
+  const traditionalTokens = Math.max(0, trace.traditional.tokens);
+  const sdlTokens = Math.max(0, trace.sdlMcp.tokens);
+  const reduction =
+    traditionalTokens > 0 && sdlTokens > 0
+      ? (1 - sdlTokens / traditionalTokens) * 100
+      : 0;
+  const winner: TokenAnalysis["winner"] =
+    sdlTokens < traditionalTokens
+      ? "SDL-MCP"
+      : traditionalTokens < sdlTokens
+        ? "Traditional"
+        : "Tie";
+
+  return {
+    scenario: trace.scenario,
+    traditional: {
+      description: trace.traditional.description,
+      tokens: traditionalTokens,
+    },
+    sdlMcp: {
+      description: trace.sdlMcp.description,
+      tokens: sdlTokens,
+    },
+    reduction,
+    compressionRatio:
+      sdlTokens > 0 ? traditionalTokens / sdlTokens : 0,
+    winner,
+    qualifier: trace.qualifier,
+  };
 }
 
 function buildCardFromSymbol(
@@ -310,13 +389,15 @@ function generateRecommendations(result: BenchmarkResult): string[] {
     );
   }
 
-  // Check slice effectiveness
-  const sliceReduction =
-    result.tokenAnalysis.find((t) => t.scenario === "Feature Understanding")
-      ?.reduction ?? 0;
-  if (sliceReduction < 30) {
+  // Check slice effectiveness using average reduction across all replay traces
+  const avgReduction =
+    result.tokenAnalysis.length > 0
+      ? result.tokenAnalysis.reduce((sum, t) => sum + t.reduction, 0) /
+        result.tokenAnalysis.length
+      : 0;
+  if (avgReduction < 30) {
     recommendations.push(
-      `Slice token reduction is low (${formatPercent(sliceReduction)}). Consider:
+      `Average token reduction is low (${formatPercent(avgReduction)}). Consider:
    - Increasing maxCards for broader coverage
    - Adjusting edge weights to prioritize call edges
    - Lowering SLICE_SCORE_THRESHOLD for more inclusive slices`,
@@ -423,14 +504,9 @@ function printBenefitsSummary(result: BenchmarkResult): void {
   const avgReductionAll =
     result.tokenAnalysis.reduce((sum, a) => sum + a.reduction, 0) /
     result.tokenAnalysis.length;
-  const compressionAnalyses = result.tokenAnalysis.filter(
-    (a) => a.qualifier !== "(Functional Overview)",
-  );
-  const compressionSource =
-    compressionAnalyses.length > 0 ? compressionAnalyses : result.tokenAnalysis;
   const avgCompression =
-    compressionSource.reduce((sum, a) => sum + a.compressionRatio, 0) /
-    compressionSource.length;
+    result.tokenAnalysis.reduce((sum, a) => sum + a.compressionRatio, 0) /
+    result.tokenAnalysis.length;
   const wins = result.tokenAnalysis.filter((a) => a.winner === "SDL-MCP").length;
   const total = result.tokenAnalysis.length;
 
@@ -453,7 +529,7 @@ function printBenefitsSummary(result: BenchmarkResult): void {
 
   MEASURED BENEFITS FOR THIS CODEBASE:
     ${progressBar(avgReductionAll)} ${formatPercent(avgReductionAll)} avg token reduction (all scenarios)
-    ${avgCompression.toFixed(1)}x average compression ratio (excluding Functional Overview)
+    ${avgCompression.toFixed(1)}x average compression ratio
     ${wins}/${total} scenarios where SDL-MCP uses fewer tokens
     ${formatNumber(result.sdlMcp.symbolsIndexed)} symbols indexed across ${formatNumber(result.traditional.totalFiles)} files
     ${formatNumber(result.quality.edgeTypeDistribution.call ?? 0)} call edges + ${formatNumber(result.quality.edgeTypeDistribution.import ?? 0)} import edges tracked
@@ -478,7 +554,7 @@ function printTuningParameters(params: TuningParameters): void {
   Token Estimation:
     baseTokensPerSymbol:  ${params.tokenEstimation.baseTokensPerSymbol}
     maxTokensPerSymbol:   ${params.tokenEstimation.maxTokensPerSymbol}
-    charsPerToken:        ${params.tokenEstimation.charsPerToken}
+    algorithm:            ${params.tokenEstimation.algorithm}
   `);
 }
 
@@ -511,7 +587,10 @@ function printRecommendations(recommendations: string[]): void {
 // Main Benchmark
 // ============================================================================
 
-async function runBenchmark(repoId?: string): Promise<BenchmarkResult[]> {
+async function runBenchmark(
+  repoId?: string,
+  traceFilePath: string = DEFAULT_REPLAY_TRACE_PATH,
+): Promise<BenchmarkResult[]> {
   const config = loadConfig();
   const database = getDb(config.dbPath);
   runMigrations(database);
@@ -536,7 +615,7 @@ async function runBenchmark(repoId?: string): Promise<BenchmarkResult[]> {
     tokenEstimation: {
       baseTokensPerSymbol: SYMBOL_TOKEN_BASE,
       maxTokensPerSymbol: SYMBOL_TOKEN_MAX,
-      charsPerToken: CHARS_PER_TOKEN,
+      algorithm: "structural-aware (tokenize.ts)",
     },
   };
 
@@ -685,7 +764,9 @@ async function runBenchmark(repoId?: string): Promise<BenchmarkResult[]> {
         sliceBuildTimeMs = performance.now() - sliceStart;
 
         sliceCards = slice.cards.length;
-        sliceTokens = estimateTokens(JSON.stringify(slice.cards));
+        sliceTokens = estimateTokens(
+          JSON.stringify({ cards: slice.cards, cardRefs: slice.cardRefs ?? [] }),
+        );
         sliceFrontierSize = slice.frontier?.length ?? 0;
       } catch (e) {
         console.log(`  Slice build error: ${e}`);
@@ -745,202 +826,13 @@ async function runBenchmark(repoId?: string): Promise<BenchmarkResult[]> {
       graphConnectivity,
     };
 
-    // Token analysis scenarios
-    const tokenAnalysis: TokenAnalysis[] = [];
-
-    // Scenario 1: Understanding a feature
-    const filesForUnderstanding = 4;
-    const traditionalUnderstanding = Math.round(
-      avgTokensPerFile * filesForUnderstanding,
+    const traces = loadReplayTraces(traceFilePath, repoConfig.repoId);
+    const tokenAnalysis = traces.map((trace) =>
+      buildTokenAnalysisFromTrace(trace),
     );
-    const cardsForUnderstanding = 10;
-    const sdlMcpUnderstanding = cardsForUnderstanding * avgCardTokens;
-    const understandingReduction =
-      traditionalUnderstanding > 0 && sdlMcpUnderstanding > 0
-        ? (1 - sdlMcpUnderstanding / traditionalUnderstanding) * 100
-        : 0;
-
-    tokenAnalysis.push({
-      scenario: "Feature Understanding",
-      traditional: {
-        description: `${filesForUnderstanding} full files`,
-        tokens: traditionalUnderstanding,
-      },
-      sdlMcp: {
-        description: `${cardsForUnderstanding} symbol cards`,
-        tokens: sdlMcpUnderstanding,
-      },
-      reduction: understandingReduction,
-      compressionRatio:
-        sdlMcpUnderstanding > 0
-          ? traditionalUnderstanding / sdlMcpUnderstanding
-          : 0,
-      winner:
-        sdlMcpUnderstanding < traditionalUnderstanding ? "SDL-MCP" : "Traditional",
-    });
-
-    // Scenario 2: Making a code change
-    const filesForChange = 3;
-    const traditionalChange = Math.round(avgTokensPerFile * filesForChange);
-    const estimatedSkeletonTokens = avgSkeletonTokens > 0 ? avgSkeletonTokens : avgCardTokens * 2;
-    const sdlMcpChange =
-      sliceTokens > 1
-        ? sliceTokens + estimatedSkeletonTokens * 2
-        : cardsForUnderstanding * avgCardTokens + estimatedSkeletonTokens * 2;
-    const changeReduction =
-      traditionalChange > 0 && sdlMcpChange > 0
-        ? (1 - sdlMcpChange / traditionalChange) * 100
-        : 0;
-
-    tokenAnalysis.push({
-      scenario: "Code Change",
-      traditional: {
-        description: `${filesForChange} full files`,
-        tokens: traditionalChange,
-      },
-      sdlMcp: {
-        description: "slice + 2 skeletons",
-        tokens: sdlMcpChange,
-      },
-      reduction: changeReduction,
-      compressionRatio:
-        sdlMcpChange > 0 ? traditionalChange / sdlMcpChange : 0,
-      winner: sdlMcpChange < traditionalChange ? "SDL-MCP" : "Traditional",
-    });
-
-    // Scenario 3: Bug investigation (deeper dive)
-    const filesForBug = 6;
-    const traditionalBug = Math.round(avgTokensPerFile * filesForBug);
-    const sdlMcpBug =
-      sliceTokens > 1
-        ? sliceTokens * 1.5 + estimatedSkeletonTokens * 3
-        : cardsForUnderstanding * avgCardTokens * 1.5 + estimatedSkeletonTokens * 3;
-    const bugReduction =
-      traditionalBug > 0 && sdlMcpBug > 0
-        ? (1 - sdlMcpBug / traditionalBug) * 100
-        : 0;
-
-    tokenAnalysis.push({
-      scenario: "Bug Investigation",
-      traditional: {
-        description: `${filesForBug} full files`,
-        tokens: traditionalBug,
-      },
-      sdlMcp: {
-        description: "expanded slice + skeletons",
-        tokens: Math.round(sdlMcpBug),
-      },
-      reduction: bugReduction,
-      compressionRatio: sdlMcpBug > 0 ? traditionalBug / sdlMcpBug : 0,
-      winner: sdlMcpBug < traditionalBug ? "SDL-MCP" : "Traditional",
-    });
-
-    // Scenario 4: Full codebase context (compressed semantic overview)
-    const traditionalOverview = totalTokens;
-    let fullContextTokens = 0;
-    let highFidelityContextTokens = 0;
-    try {
-      const overview = buildRepoOverview({
-        repoId: repoConfig.repoId,
-        level: "full",
-        includeHotspots: true,
-      });
-      fullContextTokens = overview.tokenMetrics.overviewTokens;
-
-      // Policy-guided high-fidelity workflow:
-      // 1) full overview for global map
-      // 2) focused symbol cards for hotspot-heavy and directory coverage
-      // 3) focused skeletons for structural fidelity
-      // 4) bounded code windows under policy limits for exact implementation detail
-      const maxCards = tuningParameters.slice.maxCards;
-      const maxWindowTokens = config.policy.maxWindowTokens;
-      const directoryCount = overview.directories.length;
-      const hotspotIds = new Set<string>();
-      for (const ref of overview.hotspots?.mostDepended ?? []) {
-        hotspotIds.add(ref.symbolId);
-      }
-      for (const ref of overview.hotspots?.mostChanged ?? []) {
-        hotspotIds.add(ref.symbolId);
-      }
-      const hotspotCount = hotspotIds.size;
-      const focusedCardCount = Math.min(
-        maxCards,
-        Math.max(20, hotspotCount + directoryCount * 2),
-      );
-      const focusedSkeletonCount = Math.min(
-        focusedCardCount,
-        Math.max(10, hotspotCount + Math.ceil(directoryCount / 2)),
-      );
-      const codeWindowCount = Math.min(
-        6,
-        Math.max(2, Math.ceil(focusedSkeletonCount / 20)),
-      );
-      const focusedCardTokens = focusedCardCount * avgCardTokens;
-      const focusedSkeletonTokens =
-        focusedSkeletonCount * estimatedSkeletonTokens;
-      const windowTokens = codeWindowCount * maxWindowTokens;
-
-      highFidelityContextTokens = Math.round(
-        fullContextTokens +
-          focusedCardTokens +
-          focusedSkeletonTokens +
-          windowTokens,
-      );
-    } catch {
-      // If overview fails, estimate based on directory-level compression
-      fullContextTokens = Math.round(allSymbols.length * avgCardTokens * 0.1);
-      highFidelityContextTokens = Math.round(
-        fullContextTokens + avgCardTokens * 60 + estimatedSkeletonTokens * 30,
-      );
-    }
-    const fullContextReduction =
-      traditionalOverview > 0 && fullContextTokens > 0
-        ? (1 - fullContextTokens / traditionalOverview) * 100
-        : 0;
-
-    tokenAnalysis.push({
-      scenario: "Full Codebase Context",
-      traditional: {
-        description: "all files",
-        tokens: traditionalOverview,
-      },
-      sdlMcp: {
-        description: "overview (stats + dirs + hotspots)",
-        tokens: fullContextTokens,
-      },
-      reduction: fullContextReduction,
-      compressionRatio:
-        fullContextTokens > 0 ? traditionalOverview / fullContextTokens : 0,
-      winner: fullContextTokens < traditionalOverview ? "SDL-MCP" : "Traditional",
-      qualifier: "(Functional Overview)",
-    });
-
-    const highFidelityContextReduction =
-      traditionalOverview > 0 && highFidelityContextTokens > 0
-        ? (1 - highFidelityContextTokens / traditionalOverview) * 100
-        : 0;
-
-    tokenAnalysis.push({
-      scenario: "Full Codebase Context",
-      traditional: {
-        description: "all files",
-        tokens: traditionalOverview,
-      },
-      sdlMcp: {
-        description: "overview + focused cards/skeletons/windows",
-        tokens: highFidelityContextTokens,
-      },
-      reduction: highFidelityContextReduction,
-      compressionRatio:
-        highFidelityContextTokens > 0
-          ? traditionalOverview / highFidelityContextTokens
-          : 0,
-      winner:
-        highFidelityContextTokens < traditionalOverview
-          ? "SDL-MCP"
-          : "Traditional",
-      qualifier: "(High Fidelity)",
-    });
+    console.log(
+      `\n  Replay traces loaded: ${traces.length} from ${resolve(traceFilePath)}`,
+    );
 
     const performance_metrics: PerformanceMetrics = {
       indexTimeMs,
@@ -979,6 +871,10 @@ async function runBenchmark(repoId?: string): Promise<BenchmarkResult[]> {
       },
       quality,
       tokenAnalysis,
+      traceSource: {
+        traceFile: resolve(traceFilePath),
+        traceCount: tokenAnalysis.length,
+      },
       recommendations: [],
     };
 
@@ -1032,20 +928,10 @@ function printFinalSummary(results: BenchmarkResult[]): void {
 
   const avgCompression =
     results.reduce(
-      (sum, r) => {
-        const compressionAnalyses = r.tokenAnalysis.filter(
-          (a) => a.qualifier !== "(Functional Overview)",
-        );
-        const compressionSource =
-          compressionAnalyses.length > 0
-            ? compressionAnalyses
-            : r.tokenAnalysis;
-        return (
-          sum +
-          compressionSource.reduce((s, a) => s + a.compressionRatio, 0) /
-            compressionSource.length
-        );
-      },
+      (sum, r) =>
+        sum +
+        r.tokenAnalysis.reduce((s, a) => s + a.compressionRatio, 0) /
+          r.tokenAnalysis.length,
       0,
     ) / results.length;
 
@@ -1076,6 +962,7 @@ const args = process.argv.slice(2);
 let targetRepoId: string | undefined;
 let outputPath: string | undefined;
 let jsonOutput = false;
+let traceFilePath = DEFAULT_REPLAY_TRACE_PATH;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--repo-id" && args[i + 1]) {
@@ -1086,6 +973,9 @@ for (let i = 0; i < args.length; i++) {
   }
   if (args[i] === "--json") {
     jsonOutput = true;
+  }
+  if (args[i] === "--trace-file" && args[i + 1]) {
+    traceFilePath = args[i + 1];
   }
 }
 
@@ -1098,10 +988,11 @@ console.log(`
   - Token savings across different scenarios
   - Quality metrics for symbol extraction and graph building
   - Performance measurements for indexing and runtime operations
+  - Replay trace based scenario analysis (no hypothetical scenario assumptions)
   - Tuning recommendations based on your codebase characteristics
 `);
 
-runBenchmark(targetRepoId)
+runBenchmark(targetRepoId, traceFilePath)
   .then((results) => {
     printFinalSummary(results);
 

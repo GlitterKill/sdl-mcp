@@ -50,6 +50,18 @@ interface BenchmarkDefaults {
     skeletonMaxLines: number;
     skeletonMaxTokens: number;
   };
+  scoring: {
+    weights: {
+      tokenEfficiency: number;
+      coverageQuality: number;
+      efficiencyScore: number;
+      precisionQuality: number;
+    };
+    thresholds: {
+      sdlWin: number;
+      traditionalWin: number;
+    };
+  };
 }
 
 interface WorkflowArtifacts {
@@ -81,6 +93,7 @@ interface WorkflowTask {
     | "test-triage";
   title: string;
   description: string;
+  difficulty?: "easy" | "medium" | "hard";
   contextTargets: {
     files?: string[];
     symbols?: string[];
@@ -124,6 +137,14 @@ interface StepResult {
   sdlSkeletons: number;
   sdlTokensAdded: number;
   sliceBuildTimeMs: number;
+  baselineCoveragePctAfter: number;
+  sdlCoveragePctAfter: number;
+  baselineMarginalCoveragePct: number;
+  sdlMarginalCoveragePct: number;
+  baselineTokensPerCoveragePoint: number | null;
+  sdlTokensPerCoveragePoint: number | null;
+  baselineDeadWeight: boolean;
+  sdlDeadWeight: boolean;
 }
 
 interface CompletionResult {
@@ -139,9 +160,11 @@ interface CompletionResult {
 
 interface ApproachMetrics {
   tokens: number;
+  tokensUncapped?: number;
   fileCoveragePct: number;
   symbolCoveragePct: number;
   contextCoveragePct: number;
+  tokensPerCoveragePoint: number | null;
   precision: number;
   recall: number;
   contextUnitsFound: number;
@@ -179,19 +202,36 @@ interface LossAnalysis {
 interface TaskResult {
   id: string;
   category: WorkflowTask["category"];
+  difficulty: "easy" | "medium" | "hard";
   title: string;
   description: string;
+  naturalCoverage: {
+    baseline: ApproachMetrics;
+    sdl: ApproachMetrics;
+  };
+  postCompletionCoverage: {
+    baseline: ApproachMetrics;
+    sdl: ApproachMetrics;
+  };
   baseline: BaselineSelection;
   sdl: SdlSelection;
   steps: StepResult[];
   completion: CompletionResult;
   comparison: {
     tokenReductionPct: number;
+    tokenReductionPctUncapped: number;
     fileCoverageGainPct: number;
     symbolCoverageGainPct: number;
     contextCoverageGainPct: number;
     precisionGainPct: number;
     recallGainPct: number;
+    compositeScore: number;
+    scoreBreakdown: {
+      tokenEfficiency: number;
+      coverageQuality: number;
+      efficiencyScore: number;
+      precisionQuality: number;
+    };
     extraContextPctWhenCheaper: number | null;
     winner: "SDL-MCP" | "Traditional" | "Tie";
   };
@@ -212,13 +252,20 @@ interface BenchmarkSummary {
   avgSymbolCoverageGainPct: number;
   avgPrecisionGainPct: number;
   avgRecallGainPct: number;
+  avgCompositeScore: number;
   tasksWithExtraContextWhenCheaper: number;
   avgExtraContextWhenCheaperPct: number;
+  difficultyBreakdown: {
+    easy: number;
+    medium: number;
+    hard: number;
+  };
 }
 
 interface BaselineState {
   openedFiles: Set<string>;
   tokens: number;
+  uncappedTokens: number;
   matchedFiles: number;
   matchedTerms: number;
 }
@@ -290,7 +337,22 @@ const FALLBACK_DEFAULTS: BenchmarkDefaults = {
     skeletonMaxLines: 120,
     skeletonMaxTokens: 1500,
   },
+  scoring: {
+    weights: {
+      tokenEfficiency: 0.45,
+      coverageQuality: 0.25,
+      efficiencyScore: 0.2,
+      precisionQuality: 0.1,
+    },
+    thresholds: {
+      sdlWin: 5,
+      traditionalWin: -5,
+    },
+  },
 };
+
+const PRECISION_EXCLUDED_PREFIXES = ["dist/", "node_modules/"];
+const PRECISION_EXCLUDED_PATTERNS = [/\.d\.ts$/i, /\.map$/i];
 
 // ============================================================================
 // Formatting Helpers
@@ -308,6 +370,11 @@ function formatMs(n: number): string {
   if (n < 1) return "<1ms";
   if (n < 1000) return `${Math.round(n)}ms`;
   return `${(n / 1000).toFixed(2)}s`;
+}
+
+function formatTokensPerCoveragePoint(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "n/a";
+  return `${formatNumber(Math.round(value))} tk/pt`;
 }
 
 function progressBar(percent: number, width: number = 20): string {
@@ -386,6 +453,7 @@ function printTaskHeader(task: WorkflowTask): void {
   console.log(`  TASK: ${task.title}`);
   console.log(`  ID: ${task.id}`);
   console.log(`  CATEGORY: ${task.category}`);
+  console.log(`  DIFFICULTY: ${task.difficulty ?? "medium"}`);
   console.log("-".repeat(74));
   console.log(`  ${task.description}`);
 }
@@ -539,6 +607,59 @@ function computePrecision(found: number, total: number): number {
 function computeRecall(found: number, relevant: number): number {
   if (relevant <= 0) return 0;
   return found / relevant;
+}
+
+function computeTokensPerCoveragePoint(
+  tokens: number,
+  contextCoveragePct: number,
+): number | null {
+  if (contextCoveragePct <= 0) return null;
+  return tokens / contextCoveragePct;
+}
+
+function hasSourceVariant(relPath: string, corpusPaths: Set<string>): boolean {
+  if (!/\.js$/i.test(relPath)) return false;
+  const base = relPath.slice(0, -3);
+  return corpusPaths.has(`${base}.ts`) || corpusPaths.has(`${base}.tsx`);
+}
+
+function isPrecisionExcludedPath(
+  relPath: string,
+  corpusPaths: Set<string>,
+): boolean {
+  const normalized = normalizePath(relPath);
+  if (
+    PRECISION_EXCLUDED_PREFIXES.some((prefix) =>
+      normalized.startsWith(prefix),
+    )
+  ) {
+    return true;
+  }
+  if (PRECISION_EXCLUDED_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return true;
+  }
+  if (hasSourceVariant(normalized, corpusPaths)) {
+    return true;
+  }
+  return false;
+}
+
+function countPrecisionEligibleFiles(
+  files: Iterable<string>,
+  corpusPaths: Set<string>,
+): number {
+  let count = 0;
+  for (const relPath of files) {
+    if (isPrecisionExcludedPath(relPath, corpusPaths)) continue;
+    count++;
+  }
+  return count;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
 }
 
 // ============================================================================
@@ -770,11 +891,39 @@ function normalizeTaskFile(taskFile: TaskFile): { defaults: BenchmarkDefaults; t
       skeletonMaxTokens:
         taskFile.defaults?.sdl?.skeletonMaxTokens ?? FALLBACK_DEFAULTS.sdl.skeletonMaxTokens,
     },
+    scoring: {
+      weights: {
+        tokenEfficiency:
+          taskFile.defaults?.scoring?.weights?.tokenEfficiency ??
+          FALLBACK_DEFAULTS.scoring.weights.tokenEfficiency,
+        coverageQuality:
+          taskFile.defaults?.scoring?.weights?.coverageQuality ??
+          FALLBACK_DEFAULTS.scoring.weights.coverageQuality,
+        efficiencyScore:
+          taskFile.defaults?.scoring?.weights?.efficiencyScore ??
+          FALLBACK_DEFAULTS.scoring.weights.efficiencyScore,
+        precisionQuality:
+          taskFile.defaults?.scoring?.weights?.precisionQuality ??
+          FALLBACK_DEFAULTS.scoring.weights.precisionQuality,
+      },
+      thresholds: {
+        sdlWin:
+          taskFile.defaults?.scoring?.thresholds?.sdlWin ??
+          FALLBACK_DEFAULTS.scoring.thresholds.sdlWin,
+        traditionalWin:
+          taskFile.defaults?.scoring?.thresholds?.traditionalWin ??
+          FALLBACK_DEFAULTS.scoring.thresholds.traditionalWin,
+      },
+    },
   };
 
   const normalizedTasks: WorkflowTask[] = taskFile.tasks.map((task): WorkflowTask => {
     if ("workflow" in task && Array.isArray(task.workflow)) {
-      return task as WorkflowTask;
+      const workflowTask = task as WorkflowTask;
+      return {
+        ...workflowTask,
+        difficulty: workflowTask.difficulty ?? "medium",
+      };
     }
 
     const legacy = task as LegacyTask;
@@ -783,6 +932,7 @@ function normalizeTaskFile(taskFile: TaskFile): { defaults: BenchmarkDefaults; t
       category: "understanding",
       title: legacy.title,
       description: legacy.description,
+      difficulty: "medium",
       repoId: legacy.repoId,
       contextTargets: {
         files: legacy.relevantFiles,
@@ -846,6 +996,160 @@ function collectSdlSymbolHits(
   return hits;
 }
 
+function buildApproachMetrics(params: {
+  tokens: number;
+  tokensUncapped?: number;
+  filesFound: number;
+  filesTotal: number;
+  symbolsFound: number;
+  symbolsTotal: number;
+  precisionDenominator: number;
+}): ApproachMetrics {
+  const contextUnitsTotal = params.filesTotal + params.symbolsTotal;
+  const contextUnitsFound = params.filesFound + params.symbolsFound;
+  const fileCoveragePct = computePercent(params.filesFound, params.filesTotal);
+  const symbolCoveragePct = computePercent(params.symbolsFound, params.symbolsTotal);
+  const contextCoveragePct = computePercent(contextUnitsFound, contextUnitsTotal);
+  return {
+    tokens: params.tokens,
+    tokensUncapped: params.tokensUncapped,
+    filesFound: params.filesFound,
+    filesTotal: params.filesTotal,
+    symbolsFound: params.symbolsFound,
+    symbolsTotal: params.symbolsTotal,
+    fileCoveragePct,
+    symbolCoveragePct,
+    contextCoveragePct,
+    contextUnitsFound,
+    contextUnitsTotal,
+    precision: computePrecision(params.filesFound, params.precisionDenominator),
+    recall: computeRecall(params.filesFound, params.filesTotal),
+    tokensPerCoveragePoint: computeTokensPerCoveragePoint(
+      params.tokens,
+      contextCoveragePct,
+    ),
+  };
+}
+
+function computeCompositeScore(
+  baselineMetrics: ApproachMetrics,
+  sdlMetrics: ApproachMetrics,
+  scoring: BenchmarkDefaults["scoring"],
+): {
+  compositeScore: number;
+  scoreBreakdown: {
+    tokenEfficiency: number;
+    coverageQuality: number;
+    efficiencyScore: number;
+    precisionQuality: number;
+  };
+} {
+  const tokenEfficiency = clamp(
+    computeTokenReduction(baselineMetrics.tokens, sdlMetrics.tokens),
+    -100,
+    100,
+  );
+  const coverageQuality = clamp(
+    sdlMetrics.contextCoveragePct - baselineMetrics.contextCoveragePct,
+    -100,
+    100,
+  );
+  const precisionQuality = clamp(
+    (sdlMetrics.precision - baselineMetrics.precision) * 100,
+    -100,
+    100,
+  );
+
+  let efficiencyScore = 0;
+  if (
+    baselineMetrics.tokensPerCoveragePoint !== null &&
+    sdlMetrics.tokensPerCoveragePoint !== null &&
+    baselineMetrics.tokensPerCoveragePoint > 0
+  ) {
+    efficiencyScore = clamp(
+      ((baselineMetrics.tokensPerCoveragePoint -
+        sdlMetrics.tokensPerCoveragePoint) /
+        baselineMetrics.tokensPerCoveragePoint) *
+        100,
+      -100,
+      100,
+    );
+  }
+
+  const compositeScore =
+    tokenEfficiency * scoring.weights.tokenEfficiency +
+    coverageQuality * scoring.weights.coverageQuality +
+    efficiencyScore * scoring.weights.efficiencyScore +
+    precisionQuality * scoring.weights.precisionQuality;
+
+  return {
+    compositeScore,
+    scoreBreakdown: {
+      tokenEfficiency,
+      coverageQuality,
+      efficiencyScore,
+      precisionQuality,
+    },
+  };
+}
+
+function captureCoverageFromStates(params: {
+  relevantFiles: Set<string>;
+  relevantSymbols: Set<string>;
+  fileSymbolMap: Map<string, Set<string>>;
+  baselineState: BaselineState;
+  sdlState: SdlState;
+  corpusPaths: Set<string>;
+}): { baseline: ApproachMetrics; sdl: ApproachMetrics } {
+  const baselineFilesFound = Array.from(params.relevantFiles).filter((file) =>
+    params.baselineState.openedFiles.has(file),
+  ).length;
+  const baselineSymbolNames = collectBaselineSymbolNames(
+    params.baselineState.openedFiles,
+    params.fileSymbolMap,
+  );
+  const baselineSymbolsFound = Array.from(params.relevantSymbols).filter((symbol) =>
+    baselineSymbolNames.has(symbol),
+  ).length;
+
+  const sdlFilesFound = Array.from(params.relevantFiles).filter((file) =>
+    params.sdlState.files.has(file),
+  ).length;
+  const sdlSymbolsFound = collectSdlSymbolHits(
+    params.relevantSymbols,
+    params.sdlState,
+  ).size;
+
+  const baselinePrecisionDenominator = countPrecisionEligibleFiles(
+    params.baselineState.openedFiles,
+    params.corpusPaths,
+  );
+  const sdlPrecisionDenominator = countPrecisionEligibleFiles(
+    params.sdlState.files,
+    params.corpusPaths,
+  );
+
+  return {
+    baseline: buildApproachMetrics({
+      tokens: params.baselineState.tokens,
+      tokensUncapped: params.baselineState.uncappedTokens,
+      filesFound: baselineFilesFound,
+      filesTotal: params.relevantFiles.size,
+      symbolsFound: baselineSymbolsFound,
+      symbolsTotal: params.relevantSymbols.size,
+      precisionDenominator: baselinePrecisionDenominator,
+    }),
+    sdl: buildApproachMetrics({
+      tokens: params.sdlState.tokens,
+      filesFound: sdlFilesFound,
+      filesTotal: params.relevantFiles.size,
+      symbolsFound: sdlSymbolsFound,
+      symbolsTotal: params.relevantSymbols.size,
+      precisionDenominator: sdlPrecisionDenominator,
+    }),
+  };
+}
+
 function addBaselineFileContext(
   relPath: string,
   corpusByRelPath: Map<string, CorpusFile>,
@@ -858,6 +1162,7 @@ function addBaselineFileContext(
 
   baselineState.openedFiles.add(relPath);
   baselineState.tokens += Math.min(file.tokens, maxTokensPerFile);
+  baselineState.uncappedTokens += file.tokens;
   return true;
 }
 
@@ -966,6 +1271,9 @@ async function runCompletionPass(
 
     if ("notModified" in response && response.notModified) {
       sdlState.cardEtags.set(chosen.symbol_id, response.etag);
+      continue;
+    }
+    if (!("card" in response) || !response.card) {
       continue;
     }
 
@@ -1187,6 +1495,9 @@ async function runSdlStep(
       state.cardEtags.set(symbol.symbol_id, response.etag);
       continue;
     }
+    if (!("card" in response) || !response.card) {
+      continue;
+    }
 
     const card = response.card as CardWithETag;
     state.fetchedCardSymbols.add(symbol.symbol_id);
@@ -1391,10 +1702,12 @@ function runBaselineStep(
     if (state.openedFiles.has(relPath)) continue;
     state.openedFiles.add(relPath);
     filesOpened++;
-    tokensAdded += Math.min(entry.file.tokens, defaults.baseline.maxTokensPerFile);
+    const cappedTokens = Math.min(entry.file.tokens, defaults.baseline.maxTokensPerFile);
+    tokensAdded += cappedTokens;
+    state.tokens += cappedTokens;
+    state.uncappedTokens += entry.file.tokens;
   }
 
-  state.tokens += tokensAdded;
   return { filesOpened, tokensAdded };
 }
 
@@ -1461,6 +1774,8 @@ function analyzeLoss(taskResult: TaskResult): LossAnalysis {
 function printComparisonTable(result: TaskResult): void {
   const b = result.baseline;
   const s = result.sdl;
+  const nB = result.naturalCoverage.baseline;
+  const nS = result.naturalCoverage.sdl;
 
   console.log("\n  COMPARISON TABLE");
   console.log("  " + "-".repeat(68));
@@ -1472,8 +1787,25 @@ function printComparisonTable(result: TaskResult): void {
   );
 
   const tokenWinner = s.tokens < b.tokens ? "SDL" : b.tokens < s.tokens ? "Trad" : "Tie";
+  const baselineTokensPerCoverage = b.tokensPerCoveragePoint ?? Number.POSITIVE_INFINITY;
+  const sdlTokensPerCoverage = s.tokensPerCoveragePoint ?? Number.POSITIVE_INFINITY;
+  const tokenEfficiencyWinner =
+    sdlTokensPerCoverage < baselineTokensPerCoverage
+      ? "SDL"
+      : baselineTokensPerCoverage < sdlTokensPerCoverage
+        ? "Trad"
+        : "Tie";
+  const naturalContextWinner =
+    nS.contextCoveragePct > nB.contextCoveragePct
+      ? "SDL"
+      : nB.contextCoveragePct > nS.contextCoveragePct
+        ? "Trad"
+        : "Tie";
   console.log(
     `  | Tokens                    | ${formatNumber(b.tokens).padStart(12)} | ${formatNumber(s.tokens).padStart(12)} | ${tokenWinner.padStart(6)} |`,
+  );
+  console.log(
+    `  | Tokens/Coverage Point     | ${formatTokensPerCoveragePoint(b.tokensPerCoveragePoint).padStart(12)} | ${formatTokensPerCoveragePoint(s.tokensPerCoveragePoint).padStart(12)} | ${tokenEfficiencyWinner.padStart(6)} |`,
   );
 
   const fileWinner = s.fileCoveragePct > b.fileCoveragePct ? "SDL" : b.fileCoveragePct > s.fileCoveragePct ? "Trad" : "Tie";
@@ -1489,6 +1821,9 @@ function printComparisonTable(result: TaskResult): void {
   const contextWinner = s.contextCoveragePct > b.contextCoveragePct ? "SDL" : b.contextCoveragePct > s.contextCoveragePct ? "Trad" : "Tie";
   console.log(
     `  | Context Coverage          | ${formatPercent(b.contextCoveragePct).padStart(12)} | ${formatPercent(s.contextCoveragePct).padStart(12)} | ${contextWinner.padStart(6)} |`,
+  );
+  console.log(
+    `  | Natural Context Coverage  | ${formatPercent(nB.contextCoveragePct).padStart(12)} | ${formatPercent(nS.contextCoveragePct).padStart(12)} | ${naturalContextWinner.padStart(6)} |`,
   );
 
   const precisionWinner = s.precision > b.precision ? "SDL" : b.precision > s.precision ? "Trad" : "Tie";
@@ -1506,7 +1841,13 @@ function printComparisonTable(result: TaskResult): void {
   );
   console.log(`  | OVERALL WINNER: ${result.comparison.winner.padEnd(49)}|`);
   console.log(
+    `  | Composite Score: ${result.comparison.compositeScore.toFixed(2).padEnd(48)}|`,
+  );
+  console.log(
     `  | Token Reduction: ${formatPercent(result.comparison.tokenReductionPct).padEnd(48)}|`,
+  );
+  console.log(
+    `  | Token Reduction (uncap): ${formatPercent(result.comparison.tokenReductionPctUncapped).padEnd(39)}|`,
   );
   if (result.comparison.extraContextPctWhenCheaper !== null) {
     console.log(
@@ -1518,6 +1859,7 @@ function printComparisonTable(result: TaskResult): void {
   console.log("  Coverage score definitions:");
   console.log("    File Coverage   = relevant files found / total relevant files for the task.");
   console.log("    Symbol Coverage = relevant symbols found / total relevant symbols for the task.");
+  console.log("    Natural Coverage = coverage before completion pass retrieval.");
 }
 
 function printSummary(summary: BenchmarkSummary): void {
@@ -1535,9 +1877,11 @@ function printSummary(summary: BenchmarkSummary): void {
   ${progressBar(summary.avgSymbolCoverageGainPct + 50)} ${formatPercent(summary.avgSymbolCoverageGainPct)} average symbol coverage gain
   ${progressBar(summary.avgPrecisionGainPct + 50)} ${formatPercent(summary.avgPrecisionGainPct)} average precision gain
   ${progressBar(summary.avgRecallGainPct + 50)} ${formatPercent(summary.avgRecallGainPct)} average recall gain
+  Composite score (avg):      ${summary.avgCompositeScore.toFixed(2)}
 
   SDL cheaper + richer context tasks: ${summary.tasksWithExtraContextWhenCheaper}
   Avg extra context when cheaper:      ${formatPercent(summary.avgExtraContextWhenCheaperPct)}
+  Difficulty mix (E/M/H):              ${summary.difficultyBreakdown.easy}/${summary.difficultyBreakdown.medium}/${summary.difficultyBreakdown.hard}
   `);
 }
 
@@ -1609,6 +1953,7 @@ async function runBenchmark(): Promise<void> {
   );
   const corpus = buildCorpus(repoConfig.rootPath, candidateFiles);
   const corpusByRelPath = new Map(corpus.map((file) => [file.relPath, file]));
+  const corpusPaths = new Set(corpus.map((file) => file.relPath));
   const fileSymbolMap = buildFileSymbolNameMap(repoConfig.repoId);
 
   const results: TaskResult[] = [];
@@ -1618,6 +1963,8 @@ async function runBenchmark(): Promise<void> {
   Benchmark Mode: realism-first (no per-task budget/query tuning)
   SDL ladder:     symbol search -> cards -> slice -> skeletons
   Completion:     continue retrieval until task target context is reached
+  Scoring:        weighted composite (token, coverage, efficiency, precision)
+  Baseline mode:  capped + uncapped token baselines reported
   Repository:     ${repoConfig.repoId}
   Root Path:      ${repoConfig.rootPath}
   Tasks:          ${normalized.tasks.length}
@@ -1642,6 +1989,7 @@ async function runBenchmark(): Promise<void> {
     const baselineState: BaselineState = {
       openedFiles: new Set<string>(),
       tokens: 0,
+      uncappedTokens: 0,
       matchedFiles: 0,
       matchedTerms: 0,
     };
@@ -1667,6 +2015,14 @@ async function runBenchmark(): Promise<void> {
     };
 
     const stepResults: StepResult[] = [];
+    let previousCoverage = captureCoverageFromStates({
+      relevantFiles,
+      relevantSymbols,
+      fileSymbolMap,
+      baselineState,
+      sdlState,
+      corpusPaths,
+    });
 
     for (const step of task.workflow) {
       console.log(`\n  [Step: ${step.phase}] ${step.goal}`);
@@ -1687,6 +2043,32 @@ async function runBenchmark(): Promise<void> {
         sdlState,
       );
 
+      const currentCoverage = captureCoverageFromStates({
+        relevantFiles,
+        relevantSymbols,
+        fileSymbolMap,
+        baselineState,
+        sdlState,
+        corpusPaths,
+      });
+      const baselineMarginalCoveragePct =
+        currentCoverage.baseline.contextCoveragePct -
+        previousCoverage.baseline.contextCoveragePct;
+      const sdlMarginalCoveragePct =
+        currentCoverage.sdl.contextCoveragePct -
+        previousCoverage.sdl.contextCoveragePct;
+      const baselineTokensPerCoveragePoint =
+        baselineMarginalCoveragePct > 0
+          ? baselineStep.tokensAdded / baselineMarginalCoveragePct
+          : null;
+      const sdlTokensPerCoveragePoint =
+        sdlMarginalCoveragePct > 0
+          ? sdlStep.tokensAdded / sdlMarginalCoveragePct
+          : null;
+      const baselineDeadWeight =
+        baselineStep.tokensAdded > 0 && baselineMarginalCoveragePct <= 0;
+      const sdlDeadWeight = sdlStep.tokensAdded > 0 && sdlMarginalCoveragePct <= 0;
+
       stepResults.push({
         id: step.id,
         phase: step.phase,
@@ -1699,6 +2081,14 @@ async function runBenchmark(): Promise<void> {
         sdlSkeletons: sdlStep.skeletons,
         sdlTokensAdded: sdlStep.tokensAdded,
         sliceBuildTimeMs: sdlStep.sliceBuildTimeMs,
+        baselineCoveragePctAfter: currentCoverage.baseline.contextCoveragePct,
+        sdlCoveragePctAfter: currentCoverage.sdl.contextCoveragePct,
+        baselineMarginalCoveragePct,
+        sdlMarginalCoveragePct,
+        baselineTokensPerCoveragePoint,
+        sdlTokensPerCoveragePoint,
+        baselineDeadWeight,
+        sdlDeadWeight,
       });
 
       console.log(
@@ -1707,7 +2097,20 @@ async function runBenchmark(): Promise<void> {
       console.log(
         `    SDL hits:${sdlStep.searchHits} entry:${sdlStep.entrySymbols} cards:${sdlStep.cardsFetched} sliceCards:${sdlStep.sliceCards} skeletons:${sdlStep.skeletons} +${formatNumber(sdlStep.tokensAdded)} tokens (${formatMs(sdlStep.sliceBuildTimeMs)} slice)`,
       );
+      console.log(
+        `    Marginal coverage gain -> baseline +${formatPercent(baselineMarginalCoveragePct)} (${formatTokensPerCoveragePoint(baselineTokensPerCoveragePoint)})${baselineDeadWeight ? " [dead-weight]" : ""}, SDL +${formatPercent(sdlMarginalCoveragePct)} (${formatTokensPerCoveragePoint(sdlTokensPerCoveragePoint)})${sdlDeadWeight ? " [dead-weight]" : ""}`,
+      );
+      previousCoverage = currentCoverage;
     }
+
+    const naturalCoverage = captureCoverageFromStates({
+      relevantFiles,
+      relevantSymbols,
+      fileSymbolMap,
+      baselineState,
+      sdlState,
+      corpusPaths,
+    });
 
     const completion = await runCompletionPass(
       repoConfig.repoId,
@@ -1724,48 +2127,24 @@ async function runBenchmark(): Promise<void> {
       `\n  [Completion pass] baseline +${formatNumber(completion.baselineAddedTokens)} tokens (${completion.baselineAddedFiles} target files + ${completion.baselineAddedSymbolFiles} symbol-driven files), SDL +${formatNumber(completion.sdlAddedTokens)} tokens (${completion.sdlAddedCards} cards, ${completion.sdlAddedSlices} slices, ${completion.sdlAddedRawFiles} raw files)`,
     );
 
-    const baselineFilesFound = Array.from(relevantFiles).filter((file) =>
-      baselineState.openedFiles.has(file),
-    ).length;
-
-    const baselineSymbolNames = collectBaselineSymbolNames(
-      baselineState.openedFiles,
+    const postCompletionCoverage = captureCoverageFromStates({
+      relevantFiles,
+      relevantSymbols,
       fileSymbolMap,
-    );
-    const baselineSymbolsFound = Array.from(relevantSymbols).filter((symbol) =>
-      baselineSymbolNames.has(symbol),
-    ).length;
-
-    const sdlFilesFound = Array.from(relevantFiles).filter((file) =>
-      sdlState.files.has(file),
-    ).length;
-
-    const sdlSymbolsFound = collectSdlSymbolHits(relevantSymbols, sdlState).size;
-
-    const contextUnitsTotal = relevantFiles.size + relevantSymbols.size;
-    const baselineUnitsFound = baselineFilesFound + baselineSymbolsFound;
-    const sdlUnitsFound = sdlFilesFound + sdlSymbolsFound;
+      baselineState,
+      sdlState,
+      corpusPaths,
+    });
 
     const baselineMetrics: BaselineSelection = {
-      tokens: baselineState.tokens,
+      ...postCompletionCoverage.baseline,
       filesViewed: Array.from(baselineState.openedFiles).sort(),
       matchedFiles: baselineState.matchedFiles,
       matchedTerms: baselineState.matchedTerms,
-      filesFound: baselineFilesFound,
-      filesTotal: relevantFiles.size,
-      symbolsFound: baselineSymbolsFound,
-      symbolsTotal: relevantSymbols.size,
-      fileCoveragePct: computePercent(baselineFilesFound, relevantFiles.size),
-      symbolCoveragePct: computePercent(baselineSymbolsFound, relevantSymbols.size),
-      contextCoveragePct: computePercent(baselineUnitsFound, contextUnitsTotal),
-      contextUnitsFound: baselineUnitsFound,
-      contextUnitsTotal,
-      precision: computePrecision(baselineFilesFound, baselineState.openedFiles.size),
-      recall: computeRecall(baselineFilesFound, relevantFiles.size),
     };
 
     const sdlMetrics: SdlSelection = {
-      tokens: sdlState.tokens,
+      ...postCompletionCoverage.sdl,
       contextFiles: Array.from(sdlState.files).sort(),
       entrySymbols: Array.from(sdlState.entrySymbols).sort(),
       cardsFetched: sdlState.cardsFetched,
@@ -1776,46 +2155,14 @@ async function runBenchmark(): Promise<void> {
       sliceTokens: sdlState.sliceTokens,
       skeletonTokens: sdlState.skeletonTokens,
       sliceBuildTimeMs: sdlState.sliceBuildTimeMs,
-      filesFound: sdlFilesFound,
-      filesTotal: relevantFiles.size,
-      symbolsFound: sdlSymbolsFound,
-      symbolsTotal: relevantSymbols.size,
-      fileCoveragePct: computePercent(sdlFilesFound, relevantFiles.size),
-      symbolCoveragePct: computePercent(sdlSymbolsFound, relevantSymbols.size),
-      contextCoveragePct: computePercent(sdlUnitsFound, contextUnitsTotal),
-      contextUnitsFound: sdlUnitsFound,
-      contextUnitsTotal,
-      precision: computePrecision(sdlFilesFound, sdlState.files.size),
-      recall: computeRecall(sdlFilesFound, relevantFiles.size),
     };
-
-    let sdlScore = 0;
-    let traditionalScore = 0;
-
-    if (sdlMetrics.tokens < baselineMetrics.tokens) sdlScore++;
-    else if (baselineMetrics.tokens < sdlMetrics.tokens) traditionalScore++;
-
-    if (sdlMetrics.contextCoveragePct > baselineMetrics.contextCoveragePct) sdlScore++;
-    else if (baselineMetrics.contextCoveragePct > sdlMetrics.contextCoveragePct) traditionalScore++;
-
-    if (sdlMetrics.fileCoveragePct > baselineMetrics.fileCoveragePct) sdlScore++;
-    else if (baselineMetrics.fileCoveragePct > sdlMetrics.fileCoveragePct) traditionalScore++;
-
-    if (sdlMetrics.symbolCoveragePct > baselineMetrics.symbolCoveragePct) sdlScore++;
-    else if (baselineMetrics.symbolCoveragePct > sdlMetrics.symbolCoveragePct) traditionalScore++;
-
-    if (sdlMetrics.precision > baselineMetrics.precision) sdlScore++;
-    else if (baselineMetrics.precision > sdlMetrics.precision) traditionalScore++;
-
-    const winner: "SDL-MCP" | "Traditional" | "Tie" =
-      sdlScore > traditionalScore
-        ? "SDL-MCP"
-        : traditionalScore > sdlScore
-          ? "Traditional"
-          : "Tie";
 
     const tokenReductionPct = computeTokenReduction(
       baselineMetrics.tokens,
+      sdlMetrics.tokens,
+    );
+    const tokenReductionPctUncapped = computeTokenReduction(
+      baselineMetrics.tokensUncapped ?? baselineMetrics.tokens,
       sdlMetrics.tokens,
     );
 
@@ -1824,6 +2171,17 @@ async function runBenchmark(): Promise<void> {
     const contextCoverageGainPct = sdlMetrics.contextCoveragePct - baselineMetrics.contextCoveragePct;
     const precisionGainPct = (sdlMetrics.precision - baselineMetrics.precision) * 100;
     const recallGainPct = (sdlMetrics.recall - baselineMetrics.recall) * 100;
+    const { compositeScore, scoreBreakdown } = computeCompositeScore(
+      baselineMetrics,
+      sdlMetrics,
+      normalized.defaults.scoring,
+    );
+    const winner: "SDL-MCP" | "Traditional" | "Tie" =
+      compositeScore > normalized.defaults.scoring.thresholds.sdlWin
+        ? "SDL-MCP"
+        : compositeScore < normalized.defaults.scoring.thresholds.traditionalWin
+          ? "Traditional"
+          : "Tie";
 
     const extraContextPctWhenCheaper =
       sdlMetrics.tokens < baselineMetrics.tokens &&
@@ -1836,19 +2194,25 @@ async function runBenchmark(): Promise<void> {
     const taskResult: TaskResult = {
       id: task.id,
       category: task.category,
+      difficulty: task.difficulty ?? "medium",
       title: task.title,
       description: task.description,
+      naturalCoverage,
+      postCompletionCoverage,
       baseline: baselineMetrics,
       sdl: sdlMetrics,
       steps: stepResults,
       completion,
       comparison: {
         tokenReductionPct,
+        tokenReductionPctUncapped,
         fileCoverageGainPct,
         symbolCoverageGainPct,
         contextCoverageGainPct,
         precisionGainPct,
         recallGainPct,
+        compositeScore,
+        scoreBreakdown,
         extraContextPctWhenCheaper,
         winner,
       },
@@ -1883,6 +2247,9 @@ async function runBenchmark(): Promise<void> {
   const avgRecallGainPct =
     results.reduce((sum, result) => sum + result.comparison.recallGainPct, 0) /
     Math.max(1, taskCount);
+  const avgCompositeScore =
+    results.reduce((sum, result) => sum + result.comparison.compositeScore, 0) /
+    Math.max(1, taskCount);
 
   const sdlWins = results.filter((result) => result.comparison.winner === "SDL-MCP").length;
   const traditionalWins = results.filter((result) => result.comparison.winner === "Traditional").length;
@@ -1891,6 +2258,12 @@ async function runBenchmark(): Promise<void> {
   const extraContextValues = results
     .map((result) => result.comparison.extraContextPctWhenCheaper)
     .filter((value): value is number => value !== null);
+
+  const difficultyBreakdown = {
+    easy: results.filter((result) => result.difficulty === "easy").length,
+    medium: results.filter((result) => result.difficulty === "medium").length,
+    hard: results.filter((result) => result.difficulty === "hard").length,
+  };
 
   const summary: BenchmarkSummary = {
     repoId: repoConfig.repoId,
@@ -1906,10 +2279,12 @@ async function runBenchmark(): Promise<void> {
     avgSymbolCoverageGainPct,
     avgPrecisionGainPct,
     avgRecallGainPct,
+    avgCompositeScore,
     tasksWithExtraContextWhenCheaper: extraContextValues.length,
     avgExtraContextWhenCheaperPct:
       extraContextValues.reduce((sum, value) => sum + value, 0) /
       Math.max(1, extraContextValues.length),
+    difficultyBreakdown,
   };
 
   printSummary(summary);

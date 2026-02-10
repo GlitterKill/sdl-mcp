@@ -95,8 +95,9 @@ export const DEFAULT_MAX_WINDOW_TOKENS = 1400;
 
 /**
  * Default maximum number of symbol cards to include in a graph slice.
+ * Tightened from 300 to 60 to reduce token cost per slice response.
  */
-export const DEFAULT_MAX_CARDS = 300;
+export const DEFAULT_MAX_CARDS = 60;
 
 /**
  * Default maximum estimated token budget for graph slices.
@@ -287,9 +288,19 @@ export const SYMBOL_CARD_MAX_TEST_REFS = 8;
 export const SYMBOL_CARD_MAX_INVARIANTS = 8;
 
 /**
+ * Maximum invariants for lightweight (non-entry) slice cards.
+ */
+export const SYMBOL_CARD_MAX_INVARIANTS_LIGHT = 2;
+
+/**
  * Maximum number of side effects kept in card payload.
  */
 export const SYMBOL_CARD_MAX_SIDE_EFFECTS = 8;
+
+/**
+ * Maximum side effects for lightweight (non-entry) slice cards.
+ */
+export const SYMBOL_CARD_MAX_SIDE_EFFECTS_LIGHT = 2;
 
 /**
  * Maximum summary length stored in symbol card payload.
@@ -300,6 +311,28 @@ export const SYMBOL_CARD_SUMMARY_MAX_CHARS = 240;
  * Max summary length for lightweight slice cards.
  */
 export const SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT = 90;
+
+/**
+ * Maximum length for dependency labels in slice cards.
+ * Truncates long names to save tokens in wire format.
+ */
+export const DEP_LABEL_MAX_LENGTH = 40;
+
+/**
+ * Default page size for spillover symbol retrieval.
+ * Reduced from 50 to 20 to limit per-page token cost.
+ */
+export const SPILLOVER_DEFAULT_PAGE_SIZE = 20;
+
+/**
+ * Length to truncate astFingerprint in standard wire format.
+ */
+export const AST_FINGERPRINT_WIRE_LENGTH = 16;
+
+/**
+ * Length to truncate astFingerprint in compact v2 wire format.
+ */
+export const AST_FINGERPRINT_COMPACT_WIRE_LENGTH = 8;
 
 // ============================================================================
 // Policy & Weights Constants

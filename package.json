@@ -36,6 +36,9 @@
     "dump-symbol": "npm run build:scripts && node dist/scripts/dump-symbol.js",
     "benchmark": "tsx scripts/benchmark.ts",
     "benchmark:real": "tsx scripts/real-world-benchmark.ts",
+    "benchmark:sweep": "tsx scripts/budget-sensitivity-sweep.ts",
+    "benchmark:record-trace": "tsx scripts/record-trace.ts",
+    "benchmark:setup-external": "tsx scripts/setup-external-benchmark-repos.ts",
     "package:exe": "node scripts/build-exe.js",
     "prepack": "npm run build:all",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck"

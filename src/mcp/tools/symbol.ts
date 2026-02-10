@@ -320,7 +320,6 @@ export async function handleSymbolSearch(
   );
 
   return {
-    repoId: request.repoId,
     results: results.map((row) => ({
       symbolId: row.symbol_id,
       name: row.name,

@@ -5,6 +5,10 @@ import { loadGraphForRepo } from "../../graph/buildGraph.js";
 import { truncateArray } from "../../util/truncation.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import * as db from "../../db/queries.js";
+import {
+  DEFAULT_MAX_CARDS,
+  DEFAULT_MAX_TOKENS_SLICE,
+} from "../../config/constants.js";
 
 /**
  * Handles delta pack requests.
@@ -39,8 +43,8 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
 
   const config = loadConfig();
   const budget = validated.budget ?? {
-    maxCards: config.slice?.defaultMaxCards ?? 300,
-    maxEstimatedTokens: config.slice?.defaultMaxTokens ?? 12000,
+    maxCards: config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS,
+    maxEstimatedTokens: config.slice?.defaultMaxTokens ?? DEFAULT_MAX_TOKENS_SLICE,
   };
   const governorOptions = {
     repoId: validated.repoId,
@@ -70,8 +74,8 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     }
   }
 
-  const maxChanges = config.slice?.defaultMaxCards ?? 300;
-  const maxBlastRadius = config.slice?.defaultMaxCards ?? 300;
+  const maxChanges = config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS;
+  const maxBlastRadius = config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS;
 
   const changedSymbolsTruncation = truncateArray(delta.changedSymbols, {
     maxItems: maxChanges,
@@ -88,6 +92,13 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
   if (blastRadiusTruncation.truncated) {
     delta.blastRadius = blastRadiusTruncation.items;
   }
+
+  // Strip verbose reason strings from blast radius items to save tokens.
+  // The signal + distance fields convey the same information more compactly.
+  delta.blastRadius = delta.blastRadius.map(
+    ({ reason: _reason, ...rest }) => rest as typeof delta.blastRadius[number],
+  );
+
 
   if (changedSymbolsTruncation.truncated || blastRadiusTruncation.truncated) {
     delta.truncation = {

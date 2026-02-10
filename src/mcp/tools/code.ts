@@ -207,7 +207,6 @@ export async function handleCodeNeedWindow(
 
     const response: CodeNeedWindowResponse = {
       approved: true,
-      repoId: request.repoId,
       symbolId: request.symbolId,
       file: file.rel_path,
       range: skeletonResult.actualRange,
@@ -260,7 +259,6 @@ export async function handleCodeNeedWindow(
 
     const response: CodeNeedWindowResponse = {
       approved: true,
-      repoId: request.repoId,
       symbolId: request.symbolId,
       file: file.rel_path,
       range: hotpathResult.actualRange,
@@ -349,7 +347,6 @@ export async function handleCodeNeedWindow(
 
     const response: CodeNeedWindowResponse = {
       approved: true,
-      repoId: request.repoId,
       symbolId: request.symbolId,
       file: file.rel_path,
       range: windowResult.actualRange,

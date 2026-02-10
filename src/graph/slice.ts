@@ -41,7 +41,10 @@ import {
   SYMBOL_CARD_MAX_DEPS_PER_KIND,
   SYMBOL_CARD_MAX_DEPS_PER_KIND_LIGHT,
   SYMBOL_CARD_MAX_INVARIANTS,
+  SYMBOL_CARD_MAX_INVARIANTS_LIGHT,
   SYMBOL_CARD_MAX_SIDE_EFFECTS,
+  SYMBOL_CARD_MAX_SIDE_EFFECTS_LIGHT,
+  AST_FINGERPRINT_WIRE_LENGTH,
   SYMBOL_CARD_MAX_TEST_REFS,
   SYMBOL_CARD_SUMMARY_MAX_CHARS,
   SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT,
@@ -140,8 +143,6 @@ const DYNAMIC_CAP_RECENT_SCORE_WINDOW = 6;
 const DYNAMIC_CAP_MIN_ENTRY_COVERAGE = 0.9;
 const DYNAMIC_CAP_FRONTIER_SCORE_MARGIN = 0.08;
 const DYNAMIC_CAP_FRONTIER_DROP_FACTOR = 0.67;
-const AST_FINGERPRINT_WIRE_LENGTH = 16;
-
 interface SliceBuildRequest {
   repoId: RepoId;
   versionId: VersionId;
@@ -1227,9 +1228,15 @@ async function loadSymbolCards(
     }
 
     let invariants: string[] | undefined;
-    if (isDetailed && symbolRow.invariants_json) {
+    if (symbolRow.invariants_json) {
       try {
-        invariants = JSON.parse(symbolRow.invariants_json);
+        const parsed = JSON.parse(symbolRow.invariants_json);
+        invariants = parsed.slice(
+          0,
+          isDetailed
+            ? SYMBOL_CARD_MAX_INVARIANTS
+            : SYMBOL_CARD_MAX_INVARIANTS_LIGHT,
+        );
       } catch (error) {
         process.stderr.write(
           `[sdl-mcp] Failed to parse invariants_json for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
@@ -1238,9 +1245,15 @@ async function loadSymbolCards(
     }
 
     let sideEffects: string[] | undefined;
-    if (isDetailed && symbolRow.side_effects_json) {
+    if (symbolRow.side_effects_json) {
       try {
-        sideEffects = JSON.parse(symbolRow.side_effects_json);
+        const parsed = JSON.parse(symbolRow.side_effects_json);
+        sideEffects = parsed.slice(
+          0,
+          isDetailed
+            ? SYMBOL_CARD_MAX_SIDE_EFFECTS
+            : SYMBOL_CARD_MAX_SIDE_EFFECTS_LIGHT,
+        );
       } catch (error) {
         process.stderr.write(
           `[sdl-mcp] Failed to parse side_effects_json for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
@@ -1296,12 +1309,8 @@ async function loadSymbolCards(
               : SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT,
           )
         : undefined,
-      invariants: isDetailed && invariants
-        ? invariants.slice(0, SYMBOL_CARD_MAX_INVARIANTS)
-        : undefined,
-      sideEffects: isDetailed && sideEffects
-        ? sideEffects.slice(0, SYMBOL_CARD_MAX_SIDE_EFFECTS)
-        : undefined,
+      invariants: invariants && invariants.length > 0 ? invariants : undefined,
+      sideEffects: sideEffects && sideEffects.length > 0 ? sideEffects : undefined,
       deps,
       metrics: isDetailed ? metricsData : undefined,
       detailLevel: isDetailed ? "full" : "compact",

@@ -34,8 +34,10 @@ ground-truth context targets (`files`, `symbols`) used only for scoring.
 | File Coverage | `relevantFilesFound / relevantFilesTotal` | Higher |
 | Symbol Coverage | `relevantSymbolsFound / relevantSymbolsTotal` | Higher |
 | Context Coverage | `(relevant files + symbols found) / total context units` | Higher |
+| Natural Context Coverage | Same coverage metric measured before completion pass | Higher |
 | Precision | Relevant files found / files returned | Higher |
 | Recall | Relevant files found / relevant files total | Higher |
+| Composite Score | Weighted score from token efficiency, coverage quality, efficiency, precision | Higher |
 | Extra Context (when cheaper) | Additional context found by SDL when SDL also used fewer tokens | Higher |
 
 Coverage definitions are shown in the benchmark output for each task:
@@ -71,6 +73,7 @@ The benchmark runner enforces realism-first behavior:
 - terms are derived from workflow prompts/artifacts
 - fixed SDL ladder policy across tasks
 - baseline file-open token cost is capped per file to model partial human/agent reads
+- report token reduction against both capped and uncapped baseline token totals
 - completion pass is applied to both approaches so benchmarks compare fully-completed tasks (not early stopping states)
 
 If SDL loses a task, the report includes per-task loss reasons and server-focused
@@ -93,12 +96,25 @@ improvement suggestions.
       "maxSkeletonsPerStep": 1,
       "skeletonMaxLines": 120,
       "skeletonMaxTokens": 1500
+    },
+    "scoring": {
+      "weights": {
+        "tokenEfficiency": 0.45,
+        "coverageQuality": 0.25,
+        "efficiencyScore": 0.2,
+        "precisionQuality": 0.1
+      },
+      "thresholds": {
+        "sdlWin": 5,
+        "traditionalWin": -5
+      }
     }
   },
   "tasks": [
     {
       "id": "task-id",
       "category": "code-review",
+      "difficulty": "easy|medium|hard",
       "title": "Task title",
       "description": "Task description",
       "contextTargets": {
@@ -130,7 +146,7 @@ Console output includes:
 
 - per-step token/context activity for baseline and SDL
 - per-task comparison table
-- file/symbol coverage definitions
+- file/symbol/natural coverage definitions
 - summary across all tasks
 - loss analysis for tasks where traditional wins
 
@@ -139,5 +155,6 @@ JSON output (`--out`) includes:
 - benchmark metadata
 - defaults used
 - per-task step telemetry
-- token and coverage metrics
+- token and coverage metrics (natural and post-completion)
+- weighted composite score and dual-baseline reductions
 - per-loss analysis and suggestions

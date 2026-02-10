@@ -11,6 +11,10 @@ import type {
 import { getNeighbors } from "../graph/buildGraph.js";
 import * as db from "../db/queries.js";
 import * as crypto from "crypto";
+import {
+  DEFAULT_MAX_CARDS,
+  DEFAULT_MAX_TOKENS_SLICE,
+} from "../config/constants.js";
 
 export interface BlastRadiusOptions {
   maxHops?: number;
@@ -178,11 +182,11 @@ export async function runGovernorLoop(
   options: GovernorLoopOptions,
 ): Promise<GovernorLoopResult> {
   const budget = options.budget ?? {
-    maxCards: 300,
-    maxEstimatedTokens: 12000,
+    maxCards: DEFAULT_MAX_CARDS,
+    maxEstimatedTokens: DEFAULT_MAX_TOKENS_SLICE,
   };
   const maxHops = options.maxHops ?? 3;
-  const maxBlastRadius = budget.maxCards ?? 300;
+  const maxBlastRadius = budget.maxCards ?? DEFAULT_MAX_CARDS;
 
   const candidateBlastRadius = computeBlastRadius(changedSymbols, graph, {
     maxHops,
@@ -248,8 +252,8 @@ function applyBudgetedSelection(
   blastRadius: BlastRadiusItem[],
   budget: SliceBudget,
 ): { trimmedSet: TrimmedSet; spilloverHandle: SpilloverHandle | null } {
-  const maxCards = budget.maxCards ?? 300;
-  const maxTokens = budget.maxEstimatedTokens ?? 12000;
+  const maxCards = budget.maxCards ?? DEFAULT_MAX_CARDS;
+  const maxTokens = budget.maxEstimatedTokens ?? DEFAULT_MAX_TOKENS_SLICE;
 
   if (maxCards <= 0 || maxTokens <= 0) {
     logger.warn("Invalid budget values detected, using defaults", {
@@ -279,7 +283,7 @@ function applyBudgetedSelection(
     ) {
       droppedSymbols.push({
         symbolId: item.symbolId,
-        reason: item.reason,
+        reason: item.reason ?? "",
         priority: item.priority,
       });
     } else {

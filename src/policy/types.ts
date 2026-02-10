@@ -101,7 +101,7 @@ export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   allowBreakGlass: true,
   defaultDenyRaw: true,
   budgetCaps: {
-    maxCards: 300,
+    maxCards: 60,
     maxEstimatedTokens: 12000,
   },
 };

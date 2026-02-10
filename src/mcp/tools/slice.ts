@@ -3,6 +3,7 @@ import {
   SliceBuildResponse,
   SliceBuildWireFormat,
   CompactGraphSlice,
+  CompactGraphSliceV2,
   SliceRefreshRequestSchema,
   SliceRefreshResponse,
   SliceSpilloverGetRequestSchema,
@@ -30,6 +31,8 @@ import {
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
   SLICE_LEASE_TTL_MS,
+  SPILLOVER_DEFAULT_PAGE_SIZE,
+  AST_FINGERPRINT_COMPACT_WIRE_LENGTH,
 } from "../../config/constants.js";
 import { graphSliceCache, makeGraphSliceCacheKey } from "../../graph/cache.js";
 import { loadConfig } from "../../config/loadConfig.js";
@@ -114,14 +117,17 @@ function createSliceEtag(
 function serializeSliceForWireFormat(
   slice: GraphSlice,
   wireFormat: SliceBuildWireFormat,
-): GraphSlice | CompactGraphSlice {
+  wireFormatVersion?: number,
+): GraphSlice | CompactGraphSlice | CompactGraphSliceV2 {
   if (wireFormat === "compact") {
-    return toCompactGraphSlice(slice);
+    return wireFormatVersion === 1
+      ? toCompactGraphSliceV1(slice)
+      : toCompactGraphSliceV2(slice);
   }
   return slice;
 }
 
-export function toCompactGraphSlice(slice: GraphSlice): CompactGraphSlice {
+export function toCompactGraphSliceV1(slice: GraphSlice): CompactGraphSlice {
   const compact: CompactGraphSlice = {
     wf: "compact",
     wv: 1,
@@ -223,6 +229,156 @@ export function toCompactGraphSlice(slice: GraphSlice): CompactGraphSlice {
   return compact;
 }
 
+/** Backward-compatible alias for v1 compact serializer. */
+export const toCompactGraphSlice = toCompactGraphSliceV1;
+
+const FRONTIER_WHY_CODES: Record<string, string> = {
+  "calls": "c",
+  "imports": "i",
+  "configures": "cf",
+  "entry symbol": "e",
+  "entry sibling": "es",
+  "entry dependency": "ed",
+  "stack trace": "st",
+  "failing test": "ft",
+  "edited file": "ef",
+  "task text": "tt",
+};
+
+export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
+  // Build file path lookup table (#2: deduplicate file paths)
+  const filePaths: string[] = [];
+  const filePathIndex = new Map<string, number>();
+  for (const card of slice.cards) {
+    if (!filePathIndex.has(card.file)) {
+      filePathIndex.set(card.file, filePaths.length);
+      filePaths.push(card.file);
+    }
+  }
+
+  // Edge type lookup table (#5: integer edge types)
+  const edgeTypes = ["import", "call", "config"];
+  const edgeTypeIndex = new Map(edgeTypes.map((t, i) => [t, i]));
+
+  // SymbolId to index mapping (#6: cards are positional)
+  const symbolIdToIndex = new Map(
+    slice.symbolIndex.map((id, i) => [id, i]),
+  );
+
+  const compact: CompactGraphSliceV2 = {
+    wf: "compact",
+    wv: 2,
+    // #13: omit rid (caller already knows it)
+    vid: slice.versionId,
+    b: {
+      mc: slice.budget.maxCards,
+      mt: slice.budget.maxEstimatedTokens,
+    },
+    ss: slice.startSymbols,
+    si: slice.symbolIndex,
+    fp: filePaths,
+    et: edgeTypes,
+    c: slice.cards.map((card) => {
+      const compactCard: CompactGraphSliceV2["c"][number] = {
+        fi: filePathIndex.get(card.file) ?? 0,
+        r: [
+          card.range.startLine,
+          card.range.startCol,
+          card.range.endLine,
+          card.range.endCol,
+        ],
+        k: card.kind,
+        n: card.name,
+        x: card.exported,
+        d: {
+          i: card.deps.imports,
+          c: card.deps.calls,
+        },
+        af: card.version.astFingerprint.slice(
+          0,
+          AST_FINGERPRINT_COMPACT_WIRE_LENGTH,
+        ),
+      };
+
+      if (card.visibility) compactCard.v = card.visibility;
+      if (card.signature) compactCard.sig = card.signature;
+      if (card.summary) compactCard.sum = card.summary;
+      if (card.invariants && card.invariants.length > 0) {
+        compactCard.inv = card.invariants;
+      }
+      if (card.sideEffects && card.sideEffects.length > 0) {
+        compactCard.se = card.sideEffects;
+      }
+      if (card.metrics) {
+        const metrics: CompactGraphSliceV2["c"][number]["m"] = {};
+        if (card.metrics.fanIn !== undefined) metrics.fi = card.metrics.fanIn;
+        if (card.metrics.fanOut !== undefined) metrics.fo = card.metrics.fanOut;
+        if (card.metrics.churn30d !== undefined)
+          metrics.ch = card.metrics.churn30d;
+        if (card.metrics.testRefs && card.metrics.testRefs.length > 0) {
+          metrics.t = card.metrics.testRefs;
+        }
+        if (Object.keys(metrics).length > 0) {
+          compactCard.m = metrics;
+        }
+      }
+      if (card.detailLevel && card.detailLevel !== "compact") {
+        compactCard.dl = card.detailLevel;
+      }
+
+      return compactCard;
+    }),
+    e: slice.edges.map(([from, to, type, weight]) => [
+      from,
+      to,
+      edgeTypeIndex.get(type) ?? 0,
+      weight,
+    ]),
+  };
+
+  // Card refs with index refs (#6)
+  if (slice.cardRefs && slice.cardRefs.length > 0) {
+    type CompactCardRefV2 = NonNullable<CompactGraphSliceV2["cr"]>[number];
+    compact.cr = slice.cardRefs.map((ref) => {
+      const compactRef: CompactCardRefV2 = {
+        ci: symbolIdToIndex.get(ref.symbolId) ?? -1,
+        e: ref.etag,
+      };
+      if (ref.detailLevel !== "compact") {
+        compactRef.dl = ref.detailLevel;
+      }
+      return compactRef;
+    });
+  }
+
+  // Frontier with index refs and why codes (#6, #7)
+  if (slice.frontier && slice.frontier.length > 0) {
+    compact.f = slice.frontier.map((item) => ({
+      ci: symbolIdToIndex.get(item.symbolId) ?? -1,
+      s: item.score,
+      w: FRONTIER_WHY_CODES[item.why] ?? item.why,
+    }));
+  }
+
+  // Only attach truncation when actually truncated (#12)
+  if (slice.truncation?.truncated) {
+    const truncation: NonNullable<CompactGraphSliceV2["t"]> = {
+      tr: true,
+      dc: slice.truncation.droppedCards,
+      de: slice.truncation.droppedEdges,
+    };
+    if (slice.truncation.howToResume) {
+      truncation.res = {
+        t: slice.truncation.howToResume.type,
+        v: slice.truncation.howToResume.value,
+      };
+    }
+    compact.t = truncation;
+  }
+
+  return compact;
+}
+
 /**
  * Handles graph slice build requests.
  * Creates a new slice handle with configurable entry points and budget.
@@ -246,9 +402,14 @@ export async function handleSliceBuild(
     knownCardEtags,
     cardDetail,
     wireFormat,
+    wireFormatVersion,
     budget,
   } = request;
-  const requestedWireFormat: SliceBuildWireFormat = wireFormat ?? "standard";
+  const requestedWireFormat: SliceBuildWireFormat = wireFormat ?? "compact";
+  const effectiveWireFormatVersion =
+    requestedWireFormat === "compact"
+      ? (wireFormatVersion ?? 2)
+      : undefined;
 
   const config = loadConfig();
   const repo = db.getRepo(repoId);
@@ -376,7 +537,7 @@ export async function handleSliceBuild(
         ledgerVersion: latestVersion.version_id,
         lease,
         sliceEtag,
-        slice: serializeSliceForWireFormat(cachedSlice, requestedWireFormat),
+        slice: serializeSliceForWireFormat(cachedSlice, requestedWireFormat, effectiveWireFormatVersion),
       };
     }
   }
@@ -457,7 +618,7 @@ export async function handleSliceBuild(
     ledgerVersion: latestVersion.version_id,
     lease,
     sliceEtag,
-    slice: serializeSliceForWireFormat(slice, requestedWireFormat),
+    slice: serializeSliceForWireFormat(slice, requestedWireFormat, effectiveWireFormatVersion),
   };
 }
 
@@ -610,7 +771,7 @@ export async function handleSliceSpilloverGet(
   if (Number.isNaN(startIndex)) {
     throw new Error(`Invalid cursor value: ${cursor} is not a valid number`);
   }
-  const size = pageSize ?? 50;
+  const size = pageSize ?? SPILLOVER_DEFAULT_PAGE_SIZE;
   const endIndex = startIndex + size;
 
   const pageSymbols = droppedSymbols.slice(startIndex, endIndex);

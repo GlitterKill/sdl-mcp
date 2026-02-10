@@ -233,7 +233,7 @@ describe("Policy Engine - Budget Caps Rule", () => {
       requestType: "graphSlice",
       repoId: "test-repo",
       budget: {
-        maxCards: 100,
+        maxCards: 30,
         maxEstimatedTokens: 5000,
       },
     };
@@ -251,7 +251,7 @@ describe("Policy Engine - Budget Caps Rule", () => {
       requestType: "graphSlice",
       repoId: "test-repo",
       budget: {
-        maxCards: 400,
+        maxCards: 100,
         maxEstimatedTokens: 5000,
       },
     };
@@ -270,7 +270,7 @@ describe("Policy Engine - Budget Caps Rule", () => {
       requestType: "graphSlice",
       repoId: "test-repo",
       budget: {
-        maxCards: 100,
+        maxCards: 30,
         maxEstimatedTokens: 15000,
       },
     };
@@ -317,7 +317,7 @@ describe("Policy Engine - Budget Caps Rule", () => {
       requestType: "graphSlice",
       repoId: "test-repo",
       budget: {
-        maxCards: 300,
+        maxCards: 60,
         maxEstimatedTokens: 12000,
       },
     };
