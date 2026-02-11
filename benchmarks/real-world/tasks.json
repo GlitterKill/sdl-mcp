@@ -91,7 +91,10 @@
           "prompt": "Validate whether expansion/scoring changes could miss relevant symbols or inflate token usage."
         }
       ],
-      "difficulty": "hard"
+      "difficulty": "hard",
+      "tags": [
+        "code-review"
+      ]
     },
     {
       "id": "bug-fix-policy-window-downgrade",
@@ -141,7 +144,10 @@
           "prompt": "Verify expected behavior for policy deny vs allow and ensure telemetry reflects decisions."
         }
       ],
-      "difficulty": "medium"
+      "difficulty": "medium",
+      "tags": [
+        "bug-fix"
+      ]
     },
     {
       "id": "feature-review-mcp-tool-pattern",
@@ -193,7 +199,10 @@
           "prompt": "Confirm what must be touched for a new tool and what can break if wiring is incomplete."
         }
       ],
-      "difficulty": "medium"
+      "difficulty": "medium",
+      "tags": [
+        "feature-review"
+      ]
     },
     {
       "id": "understanding-slice-lifecycle",
@@ -239,7 +248,10 @@
           "prompt": "Identify invariants required to keep slice handles and card sets consistent."
         }
       ],
-      "difficulty": "easy"
+      "difficulty": "easy",
+      "tags": [
+        "understanding"
+      ]
     },
     {
       "id": "code-change-new-slice-config",
@@ -287,7 +299,10 @@
           "prompt": "Validate that config schema, parsing, and runtime defaults remain consistent."
         }
       ],
-      "difficulty": "hard"
+      "difficulty": "hard",
+      "tags": [
+        "code-change"
+      ]
     },
     {
       "id": "performance-indexing-regression",
@@ -336,7 +351,10 @@
           "prompt": "Determine where additional timing or counters should be added to validate root cause."
         }
       ],
-      "difficulty": "hard"
+      "difficulty": "hard",
+      "tags": [
+        "performance"
+      ]
     },
     {
       "id": "bug-fix-call-graph-regression",
@@ -380,7 +398,10 @@
           "prompt": "Verify how missing call edges alter slice expansion behavior and context quality."
         }
       ],
-      "difficulty": "medium"
+      "difficulty": "medium",
+      "tags": [
+        "bug-fix"
+      ]
     },
     {
       "id": "impact-analysis-delta-refactor",
@@ -427,7 +448,10 @@
           "prompt": "List highest-risk interfaces and what should be covered by tests before merge."
         }
       ],
-      "difficulty": "medium"
+      "difficulty": "medium",
+      "tags": [
+        "impact-analysis"
+      ]
     },
     {
       "id": "test-triage-config-loading",
@@ -473,7 +497,10 @@
           "prompt": "Define a minimal fix and tests to prevent recurrence."
         }
       ],
-      "difficulty": "easy"
+      "difficulty": "easy",
+      "tags": [
+        "test-triage"
+      ]
     },
     {
       "id": "zod-schema-validation-flow",
@@ -519,6 +546,10 @@
           "goal": "Confirm how user-facing errors are materialized.",
           "prompt": "Validate how accumulated issues become ZodError instances and what information is preserved."
         }
+      ],
+      "tags": [
+        "understanding",
+        "repo:zod-oss"
       ]
     },
     {
@@ -568,6 +599,10 @@
           "goal": "Validate expected path output for nested array/object schemas.",
           "prompt": "Confirm the fix preserves correct path shape and does not break flat-schema error reporting."
         }
+      ],
+      "tags": [
+        "bug-fix",
+        "repo:zod-oss"
       ]
     },
     {
@@ -612,6 +647,10 @@
           "goal": "Produce risk checklist for refactor validation.",
           "prompt": "List affected interfaces and tests needed to validate the refactor safely."
         }
+      ],
+      "tags": [
+        "impact-analysis",
+        "repo:zod-oss"
       ]
     }
   ]

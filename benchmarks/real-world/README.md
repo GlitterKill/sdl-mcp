@@ -62,6 +62,12 @@ npm run benchmark:real -- --skip-index
 
 # Write JSON report
 npm run benchmark:real -- --out benchmarks/real-world/results.json
+
+# Run matrix benchmark across task packs/repo targets
+npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir benchmarks/real-world/runs/coverage-matrix
+
+# Validate claim thresholds from matrix aggregate
+npx tsx scripts/check-benchmark-claims.ts --in benchmarks/real-world/runs/coverage-matrix/aggregate.json
 ```
 
 ## Benchmark Policy
@@ -78,6 +84,17 @@ The benchmark runner enforces realism-first behavior:
 
 If SDL loses a task, the report includes per-task loss reasons and server-focused
 improvement suggestions.
+
+## Claim Thresholds
+
+For broad token-efficiency claims, use these gates on aggregated benchmark output:
+
+- Per family: `p50(capped token reduction) >= 50%`
+- Per family: `p25(capped token reduction) >= 40%`
+- Per task floor: `capped token reduction >= 20%`
+
+These thresholds should be checked across task families and repos, not only a single
+summary average.
 
 ## Tasks File Schema
 

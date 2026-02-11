@@ -36,6 +36,8 @@
     "dump-symbol": "npm run build:scripts && node dist/scripts/dump-symbol.js",
     "benchmark": "tsx scripts/benchmark.ts",
     "benchmark:real": "tsx scripts/real-world-benchmark.ts",
+    "benchmark:matrix": "tsx scripts/real-world-benchmark-matrix.ts",
+    "benchmark:claims": "tsx scripts/check-benchmark-claims.ts",
     "benchmark:sweep": "tsx scripts/budget-sensitivity-sweep.ts",
     "benchmark:record-trace": "tsx scripts/record-trace.ts",
     "benchmark:setup-external": "tsx scripts/setup-external-benchmark-repos.ts",

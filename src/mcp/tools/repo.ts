@@ -18,6 +18,8 @@ import { normalizePath } from "../../util/paths.js";
 import { DatabaseError, ConfigError } from "../errors.js";
 import { MAX_FILE_BYTES } from "../../config/constants.js";
 import { buildRepoOverview } from "../../graph/overview.js";
+import { clearSliceCache } from "../../graph/sliceCache.js";
+import { symbolCardCache } from "../../graph/cache.js";
 
 const SUPPORTED_LANGUAGES = [...LanguageSchema.options];
 
@@ -237,6 +239,9 @@ export async function handleIndexRefresh(
   }
 
   const result = await indexRepo(repoId, mode);
+
+  clearSliceCache();
+  symbolCardCache.clear();
 
   return {
     ok: true,

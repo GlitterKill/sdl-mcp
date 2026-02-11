@@ -1,0 +1,259 @@
+{
+  "version": 3,
+  "defaults": {
+    "baseline": {
+      "maxFilesPerStep": 4,
+      "maxTokensPerFile": 2200
+    },
+    "sdl": {
+      "maxSearchTerms": 12,
+      "maxSearchResultsPerTerm": 6,
+      "maxEntrySymbols": 4,
+      "maxCardsPerStep": 5,
+      "maxCards": 14,
+      "maxTokens": 3200,
+      "maxSkeletonsPerStep": 1,
+      "skeletonMaxLines": 120,
+      "skeletonMaxTokens": 1500
+    },
+    "scoring": {
+      "weights": {
+        "tokenEfficiency": 0.45,
+        "coverageQuality": 0.25,
+        "efficiencyScore": 0.2,
+        "precisionQuality": 0.1
+      },
+      "thresholds": {
+        "sdlWin": 5,
+        "traditionalWin": -5
+      }
+    }
+  },
+  "tasks": [
+    {
+      "id": "infra-devops-1-triage-ci-benchmark-gate-instability",
+      "repoId": "my-repo",
+      "category": "test-triage",
+      "difficulty": "hard",
+      "title": "Triage CI benchmark gate instability",
+      "description": "infra-devops benchmark scenario: Triage CI benchmark gate instability.",
+      "tags": [
+        "infra-devops",
+        "test-triage",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          ".github/workflows/ci.yml",
+          "src/cli/commands/benchmark.ts",
+          "src/db/migrations.ts"
+        ],
+        "symbols": [
+          "benchmarkCICommand",
+          "runMigrations",
+          "ThresholdEvaluator"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "infra-devops-1-triage-ci-benchmark-gate-instability-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Triage CI benchmark gate instability. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "infra-devops-1-triage-ci-benchmark-gate-instability-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Triage CI benchmark gate instability. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "infra-devops-1-triage-ci-benchmark-gate-instability-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Triage CI benchmark gate instability. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "infra-devops-2-review-release-artifact-build-flow",
+      "repoId": "my-repo",
+      "category": "code-review",
+      "difficulty": "medium",
+      "title": "Review release artifact build flow",
+      "description": "infra-devops benchmark scenario: Review release artifact build flow.",
+      "tags": [
+        "infra-devops",
+        "code-review",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          ".github/workflows/ci.yml",
+          "src/cli/commands/benchmark.ts",
+          "src/db/migrations.ts"
+        ],
+        "symbols": [
+          "benchmarkCICommand",
+          "runMigrations",
+          "ThresholdEvaluator"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "infra-devops-2-review-release-artifact-build-flow-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Review release artifact build flow. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "infra-devops-2-review-release-artifact-build-flow-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Review release artifact build flow. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "infra-devops-2-review-release-artifact-build-flow-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Review release artifact build flow. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "infra-devops-3-investigate-operational-telemetry-bl",
+      "repoId": "my-repo",
+      "category": "performance",
+      "difficulty": "easy",
+      "title": "Investigate operational telemetry blind spots",
+      "description": "infra-devops benchmark scenario: Investigate operational telemetry blind spots.",
+      "tags": [
+        "infra-devops",
+        "performance",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          ".github/workflows/ci.yml",
+          "src/cli/commands/benchmark.ts",
+          "src/db/migrations.ts"
+        ],
+        "symbols": [
+          "benchmarkCICommand",
+          "runMigrations",
+          "ThresholdEvaluator"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "infra-devops-3-investigate-operational-telemetry-bl-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Investigate operational telemetry blind spots. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "infra-devops-3-investigate-operational-telemetry-bl-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Investigate operational telemetry blind spots. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "infra-devops-3-investigate-operational-telemetry-bl-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Investigate operational telemetry blind spots. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "infra-devops-4-fix-env-config-loading-drift-in-auto",
+      "repoId": "my-repo",
+      "category": "bug-fix",
+      "difficulty": "hard",
+      "title": "Fix env-config loading drift in automation",
+      "description": "infra-devops benchmark scenario: Fix env-config loading drift in automation.",
+      "tags": [
+        "infra-devops",
+        "bug-fix",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          ".github/workflows/ci.yml",
+          "src/cli/commands/benchmark.ts",
+          "src/db/migrations.ts"
+        ],
+        "symbols": [
+          "benchmarkCICommand",
+          "runMigrations",
+          "ThresholdEvaluator"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "infra-devops-4-fix-env-config-loading-drift-in-auto-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Fix env-config loading drift in automation. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "infra-devops-4-fix-env-config-loading-drift-in-auto-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Fix env-config loading drift in automation. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "infra-devops-4-fix-env-config-loading-drift-in-auto-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Fix env-config loading drift in automation. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "infra-devops-5-assess-deploy-migration-sequencing-r",
+      "repoId": "my-repo",
+      "category": "impact-analysis",
+      "difficulty": "medium",
+      "title": "Assess deploy migration sequencing risk",
+      "description": "infra-devops benchmark scenario: Assess deploy migration sequencing risk.",
+      "tags": [
+        "infra-devops",
+        "impact-analysis",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          ".github/workflows/ci.yml",
+          "src/cli/commands/benchmark.ts",
+          "src/db/migrations.ts"
+        ],
+        "symbols": [
+          "benchmarkCICommand",
+          "runMigrations",
+          "ThresholdEvaluator"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "infra-devops-5-assess-deploy-migration-sequencing-r-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Assess deploy migration sequencing risk. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "infra-devops-5-assess-deploy-migration-sequencing-r-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Assess deploy migration sequencing risk. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "infra-devops-5-assess-deploy-migration-sequencing-r-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Assess deploy migration sequencing risk. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,259 @@
+{
+  "version": 3,
+  "defaults": {
+    "baseline": {
+      "maxFilesPerStep": 4,
+      "maxTokensPerFile": 2200
+    },
+    "sdl": {
+      "maxSearchTerms": 12,
+      "maxSearchResultsPerTerm": 6,
+      "maxEntrySymbols": 4,
+      "maxCardsPerStep": 5,
+      "maxCards": 14,
+      "maxTokens": 3200,
+      "maxSkeletonsPerStep": 1,
+      "skeletonMaxLines": 120,
+      "skeletonMaxTokens": 1500
+    },
+    "scoring": {
+      "weights": {
+        "tokenEfficiency": 0.45,
+        "coverageQuality": 0.25,
+        "efficiencyScore": 0.2,
+        "precisionQuality": 0.1
+      },
+      "thresholds": {
+        "sdlWin": 5,
+        "traditionalWin": -5
+      }
+    }
+  },
+  "tasks": [
+    {
+      "id": "multirepo-1-assess-repo-config-contract-alignmen",
+      "repoId": "my-repo",
+      "category": "impact-analysis",
+      "difficulty": "hard",
+      "title": "Assess repo-config contract alignment",
+      "description": "multirepo benchmark scenario: Assess repo-config contract alignment.",
+      "tags": [
+        "multirepo",
+        "impact-analysis",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "scripts/real-world-benchmark.ts",
+          "benchmarks/real-world/external-repos.config.json",
+          "config/sdlmcp.config.schema.json"
+        ],
+        "symbols": [
+          "runBenchmark",
+          "normalizeTaskFile",
+          "loadConfig"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "multirepo-1-assess-repo-config-contract-alignmen-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Assess repo-config contract alignment. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "multirepo-1-assess-repo-config-contract-alignmen-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Assess repo-config contract alignment. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "multirepo-1-assess-repo-config-contract-alignmen-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Assess repo-config contract alignment. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "multirepo-2-investigate-multi-repo-indexing-coor",
+      "repoId": "my-repo",
+      "category": "performance",
+      "difficulty": "medium",
+      "title": "Investigate multi-repo indexing coordination",
+      "description": "multirepo benchmark scenario: Investigate multi-repo indexing coordination.",
+      "tags": [
+        "multirepo",
+        "performance",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "scripts/real-world-benchmark.ts",
+          "benchmarks/real-world/external-repos.config.json",
+          "config/sdlmcp.config.schema.json"
+        ],
+        "symbols": [
+          "runBenchmark",
+          "normalizeTaskFile",
+          "loadConfig"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "multirepo-2-investigate-multi-repo-indexing-coor-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Investigate multi-repo indexing coordination. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "multirepo-2-investigate-multi-repo-indexing-coor-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Investigate multi-repo indexing coordination. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "multirepo-2-investigate-multi-repo-indexing-coor-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Investigate multi-repo indexing coordination. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "multirepo-3-fix-repo-scoped-task-routing-mismatc",
+      "repoId": "my-repo",
+      "category": "bug-fix",
+      "difficulty": "easy",
+      "title": "Fix repo-scoped task routing mismatch",
+      "description": "multirepo benchmark scenario: Fix repo-scoped task routing mismatch.",
+      "tags": [
+        "multirepo",
+        "bug-fix",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "scripts/real-world-benchmark.ts",
+          "benchmarks/real-world/external-repos.config.json",
+          "config/sdlmcp.config.schema.json"
+        ],
+        "symbols": [
+          "runBenchmark",
+          "normalizeTaskFile",
+          "loadConfig"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "multirepo-3-fix-repo-scoped-task-routing-mismatc-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Fix repo-scoped task routing mismatch. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "multirepo-3-fix-repo-scoped-task-routing-mismatc-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Fix repo-scoped task routing mismatch. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "multirepo-3-fix-repo-scoped-task-routing-mismatc-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Fix repo-scoped task routing mismatch. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "multirepo-4-review-external-setup-determinism-an",
+      "repoId": "my-repo",
+      "category": "code-review",
+      "difficulty": "hard",
+      "title": "Review external setup determinism and safety",
+      "description": "multirepo benchmark scenario: Review external setup determinism and safety.",
+      "tags": [
+        "multirepo",
+        "code-review",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "scripts/real-world-benchmark.ts",
+          "benchmarks/real-world/external-repos.config.json",
+          "config/sdlmcp.config.schema.json"
+        ],
+        "symbols": [
+          "runBenchmark",
+          "normalizeTaskFile",
+          "loadConfig"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "multirepo-4-review-external-setup-determinism-an-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Review external setup determinism and safety. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "multirepo-4-review-external-setup-determinism-an-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Review external setup determinism and safety. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "multirepo-4-review-external-setup-determinism-an-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Review external setup determinism and safety. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "multirepo-5-analyze-cross-repo-benchmark-framewo",
+      "repoId": "my-repo",
+      "category": "feature-review",
+      "difficulty": "medium",
+      "title": "Analyze cross-repo benchmark framework impact",
+      "description": "multirepo benchmark scenario: Analyze cross-repo benchmark framework impact.",
+      "tags": [
+        "multirepo",
+        "feature-review",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "scripts/real-world-benchmark.ts",
+          "benchmarks/real-world/external-repos.config.json",
+          "config/sdlmcp.config.schema.json"
+        ],
+        "symbols": [
+          "runBenchmark",
+          "normalizeTaskFile",
+          "loadConfig"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "multirepo-5-analyze-cross-repo-benchmark-framewo-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Analyze cross-repo benchmark framework impact. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "multirepo-5-analyze-cross-repo-benchmark-framewo-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Analyze cross-repo benchmark framework impact. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "multirepo-5-analyze-cross-repo-benchmark-framewo-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Analyze cross-repo benchmark framework impact. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    }
+  ]
+}

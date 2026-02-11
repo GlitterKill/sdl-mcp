@@ -1,0 +1,265 @@
+{
+  "version": 3,
+  "defaults": {
+    "baseline": {
+      "maxFilesPerStep": 4,
+      "maxTokensPerFile": 2200
+    },
+    "sdl": {
+      "maxSearchTerms": 12,
+      "maxSearchResultsPerTerm": 6,
+      "maxEntrySymbols": 4,
+      "maxCardsPerStep": 5,
+      "maxCards": 14,
+      "maxTokens": 3200,
+      "maxSkeletonsPerStep": 1,
+      "skeletonMaxLines": 120,
+      "skeletonMaxTokens": 1500
+    },
+    "scoring": {
+      "weights": {
+        "tokenEfficiency": 0.45,
+        "coverageQuality": 0.25,
+        "efficiencyScore": 0.2,
+        "precisionQuality": 0.1
+      },
+      "thresholds": {
+        "sdlWin": 5,
+        "traditionalWin": -5
+      }
+    }
+  },
+  "tasks": [
+    {
+      "id": "db-migration-1-assess-schema-evolution-compatibilit",
+      "repoId": "my-repo",
+      "category": "impact-analysis",
+      "difficulty": "hard",
+      "title": "Assess schema evolution compatibility risk",
+      "description": "db-migration benchmark scenario: Assess schema evolution compatibility risk.",
+      "tags": [
+        "db-migration",
+        "impact-analysis",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/db/migrations.ts",
+          "src/db/queries.ts",
+          "migrations/0010_standardize_fks.sql"
+        ],
+        "symbols": [
+          "runMigrations",
+          "createRepo",
+          "getRepo"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "db-migration-1-assess-schema-evolution-compatibilit-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Assess schema evolution compatibility risk. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "db-migration-1-assess-schema-evolution-compatibilit-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Assess schema evolution compatibility risk. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "db-migration-1-assess-schema-evolution-compatibilit-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Assess schema evolution compatibility risk. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "db-migration-2-plan-safe-metadata-backfill-rollout",
+      "repoId": "my-repo",
+      "category": "code-change",
+      "difficulty": "medium",
+      "title": "Plan safe metadata backfill rollout",
+      "description": "db-migration benchmark scenario: Plan safe metadata backfill rollout.",
+      "tags": [
+        "db-migration",
+        "code-change",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/db/migrations.ts",
+          "src/db/queries.ts",
+          "migrations/0010_standardize_fks.sql"
+        ],
+        "symbols": [
+          "runMigrations",
+          "createRepo",
+          "getRepo"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "db-migration-2-plan-safe-metadata-backfill-rollout-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Plan safe metadata backfill rollout. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "db-migration-2-plan-safe-metadata-backfill-rollout-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Plan safe metadata backfill rollout. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "db-migration-2-plan-safe-metadata-backfill-rollout-change",
+          "phase": "change",
+          "goal": "Define the minimal safe change plan.",
+          "prompt": "Change task: Plan safe metadata backfill rollout. Specify minimal edits and dependency impacts for a safe implementation."
+        },
+        {
+          "id": "db-migration-2-plan-safe-metadata-backfill-rollout-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Plan safe metadata backfill rollout. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "db-migration-3-investigate-index-migration-performa",
+      "repoId": "my-repo",
+      "category": "performance",
+      "difficulty": "easy",
+      "title": "Investigate index migration performance regression",
+      "description": "db-migration benchmark scenario: Investigate index migration performance regression.",
+      "tags": [
+        "db-migration",
+        "performance",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/db/migrations.ts",
+          "src/db/queries.ts",
+          "migrations/0010_standardize_fks.sql"
+        ],
+        "symbols": [
+          "runMigrations",
+          "createRepo",
+          "getRepo"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "db-migration-3-investigate-index-migration-performa-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Investigate index migration performance regression. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "db-migration-3-investigate-index-migration-performa-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Investigate index migration performance regression. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "db-migration-3-investigate-index-migration-performa-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Investigate index migration performance regression. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "db-migration-4-audit-foreign-key-cleanup-integrity",
+      "repoId": "my-repo",
+      "category": "code-review",
+      "difficulty": "hard",
+      "title": "Audit foreign-key cleanup integrity",
+      "description": "db-migration benchmark scenario: Audit foreign-key cleanup integrity.",
+      "tags": [
+        "db-migration",
+        "code-review",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/db/migrations.ts",
+          "src/db/queries.ts",
+          "migrations/0010_standardize_fks.sql"
+        ],
+        "symbols": [
+          "runMigrations",
+          "createRepo",
+          "getRepo"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "db-migration-4-audit-foreign-key-cleanup-integrity-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Audit foreign-key cleanup integrity. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "db-migration-4-audit-foreign-key-cleanup-integrity-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Audit foreign-key cleanup integrity. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "db-migration-4-audit-foreign-key-cleanup-integrity-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Audit foreign-key cleanup integrity. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "db-migration-5-triage-migration-ordering-determinis",
+      "repoId": "my-repo",
+      "category": "test-triage",
+      "difficulty": "medium",
+      "title": "Triage migration ordering determinism",
+      "description": "db-migration benchmark scenario: Triage migration ordering determinism.",
+      "tags": [
+        "db-migration",
+        "test-triage",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/db/migrations.ts",
+          "src/db/queries.ts",
+          "migrations/0010_standardize_fks.sql"
+        ],
+        "symbols": [
+          "runMigrations",
+          "createRepo",
+          "getRepo"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "db-migration-5-triage-migration-ordering-determinis-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Triage migration ordering determinism. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "db-migration-5-triage-migration-ordering-determinis-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Triage migration ordering determinism. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "db-migration-5-triage-migration-ordering-determinis-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Triage migration ordering determinism. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 
 interface RealWorldTaskResult {
@@ -57,6 +57,10 @@ interface ReplayTraceFile {
   traces: ReplayTrace[];
 }
 
+const DEFAULT_REAL_WORLD_RESULTS_CURRENT =
+  "benchmarks/real-world/results-current.json";
+const DEFAULT_REAL_WORLD_RESULTS_LEGACY = "benchmarks/real-world/results.json";
+
 function getArgValue(args: string[], name: string): string | undefined {
   const direct = args.find((arg) => arg.startsWith(`--${name}=`));
   if (direct) return direct.slice(name.length + 3);
@@ -65,11 +69,28 @@ function getArgValue(args: string[], name: string): string | undefined {
   return undefined;
 }
 
+function resolveDefaultInputPath(): string {
+  const current = resolve(DEFAULT_REAL_WORLD_RESULTS_CURRENT);
+  if (existsSync(current)) {
+    return current;
+  }
+
+  const legacy = resolve(DEFAULT_REAL_WORLD_RESULTS_LEGACY);
+  if (existsSync(legacy)) {
+    console.warn(
+      `Warning: ${DEFAULT_REAL_WORLD_RESULTS_CURRENT} not found; ` +
+        `falling back to ${DEFAULT_REAL_WORLD_RESULTS_LEGACY}.`,
+    );
+    return legacy;
+  }
+
+  return current;
+}
+
 function main(): void {
   const args = process.argv.slice(2);
-  const inputPath = resolve(
-    getArgValue(args, "input") ?? "benchmarks/real-world/results.json",
-  );
+  const inputArg = getArgValue(args, "input");
+  const inputPath = inputArg ? resolve(inputArg) : resolveDefaultInputPath();
   const outPath = resolve(
     getArgValue(args, "out") ?? "benchmarks/synthetic/replay-traces.json",
   );

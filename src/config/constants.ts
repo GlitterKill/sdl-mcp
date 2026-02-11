@@ -334,6 +334,12 @@ export const AST_FINGERPRINT_WIRE_LENGTH = 16;
  */
 export const AST_FINGERPRINT_COMPACT_WIRE_LENGTH = 8;
 
+/**
+ * Length to truncate symbol IDs in compact v2 wire format.
+ * 16 hex chars = 64 bits. Collision probability among 1000 symbols is ~10^-14.
+ */
+export const SYMBOL_ID_COMPACT_WIRE_LENGTH = 16;
+
 // ============================================================================
 // Policy & Weights Constants
 // ============================================================================

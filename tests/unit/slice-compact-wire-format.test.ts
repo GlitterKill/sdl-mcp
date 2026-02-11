@@ -116,27 +116,33 @@ describe("slice compact wire format v1", () => {
 });
 
 describe("slice compact wire format v2", () => {
+  // Full 64-char SHA-256 hex IDs used in v2 tests
+  const SYM1_FULL = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2";
+  const SYM2_FULL = "f1e2d3c4b5a6f7e8d9c0b1a2f3e4d5c6b7a8f9e0d1c2b3a4f5e6d7c8b9a0f1e2";
+  const SYM1_SHORT = SYM1_FULL.slice(0, 16);
+  const SYM2_SHORT = SYM2_FULL.slice(0, 16);
+
   it("serializes with file path lookup, integer edge types, and no sid/rid", () => {
     const slice = {
       repoId: "repo-1",
       versionId: "v1",
       budget: { maxCards: 20, maxEstimatedTokens: 12000 },
-      startSymbols: ["sym-1"],
-      symbolIndex: ["sym-1", "sym-2"],
+      startSymbols: [SYM1_FULL],
+      symbolIndex: [SYM1_FULL, SYM2_FULL],
       cards: [
         {
-          symbolId: "sym-1",
+          symbolId: SYM1_FULL,
           file: "src/a.ts",
           range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
           kind: "function",
           name: "alpha",
           exported: true,
-          deps: { imports: ["x"], calls: ["sym-2"] },
+          deps: { imports: ["x"], calls: [SYM2_FULL] },
           detailLevel: "compact",
           version: { astFingerprint: "abcdef0123456789abcdef0123456789" },
         },
         {
-          symbolId: "sym-2",
+          symbolId: SYM2_FULL,
           file: "src/a.ts",
           range: { startLine: 10, startCol: 0, endLine: 15, endCol: 1 },
           kind: "function",
@@ -157,8 +163,15 @@ describe("slice compact wire format v2", () => {
     assert.ok(!("rid" in compact), "v2 should omit rid");
     assert.strictEqual(compact.vid, "v1");
     assert.deepStrictEqual(compact.b, { mc: 20, mt: 12000 });
-    assert.deepStrictEqual(compact.ss, ["sym-1"]);
-    assert.deepStrictEqual(compact.si, ["sym-1", "sym-2"]);
+    assert.deepStrictEqual(compact.ss, [SYM1_SHORT]);
+    assert.deepStrictEqual(compact.si, [SYM1_SHORT, SYM2_SHORT]);
+    // Verify truncated length
+    for (const id of compact.si) {
+      assert.strictEqual(id.length, 16, `si entry should be 16 chars, got ${id.length}`);
+    }
+    for (const id of compact.ss) {
+      assert.strictEqual(id.length, 16, `ss entry should be 16 chars, got ${id.length}`);
+    }
 
     // File path lookup table - deduplicated
     assert.deepStrictEqual(compact.fp, ["src/a.ts"]);
@@ -191,11 +204,11 @@ describe("slice compact wire format v2", () => {
       repoId: "repo-1",
       versionId: "v1",
       budget: { maxCards: 10, maxEstimatedTokens: 5000 },
-      startSymbols: ["sym-1"],
-      symbolIndex: ["sym-1", "sym-2"],
+      startSymbols: [SYM1_FULL],
+      symbolIndex: [SYM1_FULL, SYM2_FULL],
       cards: [
         {
-          symbolId: "sym-1",
+          symbolId: SYM1_FULL,
           file: "src/a.ts",
           range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
           kind: "function",
@@ -208,10 +221,10 @@ describe("slice compact wire format v2", () => {
       ],
       edges: [] as Array<[number, number, "import" | "call" | "config", number]>,
       frontier: [
-        { symbolId: "sym-1", score: 0.9, why: "calls" },
-        { symbolId: "sym-2", score: 0.5, why: "entry symbol" },
+        { symbolId: SYM1_FULL, score: 0.9, why: "calls" },
+        { symbolId: SYM2_FULL, score: 0.5, why: "entry symbol" },
       ],
-      cardRefs: [{ symbolId: "sym-1", etag: "etag-1", detailLevel: "full" }],
+      cardRefs: [{ symbolId: SYM1_FULL, etag: "etag-1", detailLevel: "full" }],
     } as const;
 
     const compact = toCompactGraphSliceV2(slice as any);
@@ -235,11 +248,11 @@ describe("slice compact wire format v2", () => {
       repoId: "repo-1",
       versionId: "v1",
       budget: { maxCards: 10, maxEstimatedTokens: 5000 },
-      startSymbols: ["sym-1"],
-      symbolIndex: ["sym-1"],
+      startSymbols: [SYM1_FULL],
+      symbolIndex: [SYM1_FULL],
       cards: [
         {
-          symbolId: "sym-1",
+          symbolId: SYM1_FULL,
           file: "src/a.ts",
           range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
           kind: "function",
@@ -268,11 +281,11 @@ describe("slice compact wire format v2", () => {
       repoId: "repo-1",
       versionId: "v1",
       budget: { maxCards: 10, maxEstimatedTokens: 5000 },
-      startSymbols: ["sym-1"],
-      symbolIndex: ["sym-1"],
+      startSymbols: [SYM1_FULL],
+      symbolIndex: [SYM1_FULL],
       cards: [
         {
-          symbolId: "sym-1",
+          symbolId: SYM1_FULL,
           file: "src/a.ts",
           range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
           kind: "function",
@@ -302,16 +315,48 @@ describe("slice compact wire format v2", () => {
     });
   });
 
-  it("deduplicates file paths across cards from different files", () => {
+  it("truncates 64-char symbol IDs to 16 chars in ss and si", () => {
+    const longId = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
     const slice = {
       repoId: "repo-1",
       versionId: "v1",
       budget: { maxCards: 10, maxEstimatedTokens: 5000 },
-      startSymbols: ["sym-1"],
-      symbolIndex: ["sym-1", "sym-2", "sym-3"],
+      startSymbols: [longId],
+      symbolIndex: [longId],
       cards: [
         {
-          symbolId: "sym-1",
+          symbolId: longId,
+          file: "src/a.ts",
+          range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
+          kind: "function",
+          name: "alpha",
+          exported: true,
+          deps: { imports: [], calls: [] },
+          detailLevel: "compact",
+          version: { astFingerprint: "abcdef01" },
+        },
+      ],
+      edges: [] as Array<[number, number, "import" | "call" | "config", number]>,
+    } as const;
+
+    const compact = toCompactGraphSliceV2(slice as any);
+    assert.strictEqual(compact.ss[0], "abcdef0123456789");
+    assert.strictEqual(compact.ss[0].length, 16);
+    assert.strictEqual(compact.si[0], "abcdef0123456789");
+    assert.strictEqual(compact.si[0].length, 16);
+  });
+
+  it("deduplicates file paths across cards from different files", () => {
+    const SYM3_FULL = "0102030405060708091011121314151617181920212223242526272829303132";
+    const slice = {
+      repoId: "repo-1",
+      versionId: "v1",
+      budget: { maxCards: 10, maxEstimatedTokens: 5000 },
+      startSymbols: [SYM1_FULL],
+      symbolIndex: [SYM1_FULL, SYM2_FULL, SYM3_FULL],
+      cards: [
+        {
+          symbolId: SYM1_FULL,
           file: "src/a.ts",
           range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
           kind: "function",
@@ -322,7 +367,7 @@ describe("slice compact wire format v2", () => {
           version: { astFingerprint: "aaaa0000" },
         },
         {
-          symbolId: "sym-2",
+          symbolId: SYM2_FULL,
           file: "src/b.ts",
           range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
           kind: "function",
@@ -333,7 +378,7 @@ describe("slice compact wire format v2", () => {
           version: { astFingerprint: "bbbb0000" },
         },
         {
-          symbolId: "sym-3",
+          symbolId: SYM3_FULL,
           file: "src/a.ts",
           range: { startLine: 10, startCol: 0, endLine: 15, endCol: 1 },
           kind: "function",

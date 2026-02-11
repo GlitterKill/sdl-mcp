@@ -1,0 +1,78 @@
+{
+  "repos": [
+    {
+      "repoId": "zod-oss",
+      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp/.tmp/external-benchmarks/zod-oss",
+      "languages": [
+        "ts",
+        "tsx",
+        "js"
+      ],
+      "ignore": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/lib/**",
+        "**/coverage/**",
+        "**/*.test.ts",
+        "**/*.spec.ts"
+      ]
+    },
+    {
+      "repoId": "preact-oss",
+      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp/.tmp/external-benchmarks/preact-oss",
+      "languages": [
+        "ts",
+        "tsx",
+        "js",
+        "jsx"
+      ],
+      "ignore": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/coverage/**",
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "**/*.test.tsx",
+        "**/*.spec.tsx"
+      ]
+    },
+    {
+      "repoId": "flask-oss",
+      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp/.tmp/external-benchmarks/flask-oss",
+      "languages": [
+        "py"
+      ],
+      "ignore": [
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/.pytest_cache/**",
+        "**/build/**",
+        "**/dist/**",
+        "**/*.pyc",
+        "**/tests/**"
+      ]
+    },
+    {
+      "repoId": "ansible-lint-oss",
+      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp/.tmp/external-benchmarks/ansible-lint-oss",
+      "languages": [
+        "py",
+        "sh"
+      ],
+      "ignore": [
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/.pytest_cache/**",
+        "**/build/**",
+        "**/dist/**",
+        "**/*.pyc",
+        "**/test/**",
+        "**/tests/**",
+        "**/.tox/**"
+      ]
+    }
+  ]
+}

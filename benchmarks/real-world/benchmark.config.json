@@ -15,23 +15,18 @@
         "ts",
         "tsx",
         "js",
-        "jsx",
-        "py",
-        "go",
-        "java",
-        "cs",
-        "c",
-        "cpp",
-        "php",
-        "rs",
-        "kt",
-        "sh"
+        "jsx"
       ],
       "maxFileBytes": 2000000
     },
     {
       "repoId": "zod-oss",
-      "rootPath": ".tmp/external-benchmarks/zod-oss",
+      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp/.tmp/external-benchmarks/zod-oss",
+      "languages": [
+        "ts",
+        "tsx",
+        "js"
+      ],
       "ignore": [
         "**/node_modules/**",
         "**/dist/**",
@@ -39,16 +34,17 @@
         "**/coverage/**",
         "**/*.test.ts",
         "**/*.spec.ts"
-      ],
-      "languages": [
-        "ts",
-        "tsx",
-        "js"
       ]
     },
     {
       "repoId": "preact-oss",
-      "rootPath": ".tmp/external-benchmarks/preact-oss",
+      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp/.tmp/external-benchmarks/preact-oss",
+      "languages": [
+        "ts",
+        "tsx",
+        "js",
+        "jsx"
+      ],
       "ignore": [
         "**/node_modules/**",
         "**/dist/**",
@@ -58,17 +54,14 @@
         "**/*.spec.ts",
         "**/*.test.tsx",
         "**/*.spec.tsx"
-      ],
-      "languages": [
-        "ts",
-        "tsx",
-        "js",
-        "jsx"
       ]
     },
     {
       "repoId": "flask-oss",
-      "rootPath": ".tmp/external-benchmarks/flask-oss",
+      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp/.tmp/external-benchmarks/flask-oss",
+      "languages": [
+        "py"
+      ],
       "ignore": [
         "**/.venv/**",
         "**/venv/**",
@@ -78,14 +71,15 @@
         "**/dist/**",
         "**/*.pyc",
         "**/tests/**"
-      ],
-      "languages": [
-        "py"
       ]
     },
     {
       "repoId": "ansible-lint-oss",
-      "rootPath": ".tmp/external-benchmarks/ansible-lint-oss",
+      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp/.tmp/external-benchmarks/ansible-lint-oss",
+      "languages": [
+        "py",
+        "sh"
+      ],
       "ignore": [
         "**/.venv/**",
         "**/venv/**",
@@ -97,10 +91,6 @@
         "**/test/**",
         "**/tests/**",
         "**/.tox/**"
-      ],
-      "languages": [
-        "py",
-        "sh"
       ]
     }
   ],
@@ -124,16 +114,9 @@
     "defaultMaxCards": 60,
     "defaultMaxTokens": 12000,
     "edgeWeights": {
-      "call": 1.0,
+      "call": 1,
       "import": 0.6,
       "config": 0.8
     }
-  },
-  "cache": {
-    "enabled": true,
-    "symbolCardMaxEntries": 2000,
-    "symbolCardMaxSizeBytes": 104857600,
-    "graphSliceMaxEntries": 1000,
-    "graphSliceMaxSizeBytes": 52428800
   }
 }

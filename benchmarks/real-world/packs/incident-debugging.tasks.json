@@ -1,0 +1,259 @@
+{
+  "version": 3,
+  "defaults": {
+    "baseline": {
+      "maxFilesPerStep": 4,
+      "maxTokensPerFile": 2200
+    },
+    "sdl": {
+      "maxSearchTerms": 12,
+      "maxSearchResultsPerTerm": 6,
+      "maxEntrySymbols": 4,
+      "maxCardsPerStep": 5,
+      "maxCards": 14,
+      "maxTokens": 3200,
+      "maxSkeletonsPerStep": 1,
+      "skeletonMaxLines": 120,
+      "skeletonMaxTokens": 1500
+    },
+    "scoring": {
+      "weights": {
+        "tokenEfficiency": 0.45,
+        "coverageQuality": 0.25,
+        "efficiencyScore": 0.2,
+        "precisionQuality": 0.1
+      },
+      "thresholds": {
+        "sdlWin": 5,
+        "traditionalWin": -5
+      }
+    }
+  },
+  "tasks": [
+    {
+      "id": "incident-debugging-1-debug-intermittent-slice-timeout-inc",
+      "repoId": "my-repo",
+      "category": "bug-fix",
+      "difficulty": "hard",
+      "title": "Debug intermittent slice timeout incident",
+      "description": "incident-debugging benchmark scenario: Debug intermittent slice timeout incident.",
+      "tags": [
+        "incident-debugging",
+        "bug-fix",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/graph/slice.ts",
+          "src/indexer/indexer.ts",
+          "src/graph/cache.ts"
+        ],
+        "symbols": [
+          "buildSlice",
+          "indexRepo",
+          "GraphCache"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "incident-debugging-1-debug-intermittent-slice-timeout-inc-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Debug intermittent slice timeout incident. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "incident-debugging-1-debug-intermittent-slice-timeout-inc-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Debug intermittent slice timeout incident. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "incident-debugging-1-debug-intermittent-slice-timeout-inc-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Debug intermittent slice timeout incident. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "incident-debugging-2-triage-indexer-worker-crash-path",
+      "repoId": "my-repo",
+      "category": "test-triage",
+      "difficulty": "medium",
+      "title": "Triage indexer worker crash path",
+      "description": "incident-debugging benchmark scenario: Triage indexer worker crash path.",
+      "tags": [
+        "incident-debugging",
+        "test-triage",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/graph/slice.ts",
+          "src/indexer/indexer.ts",
+          "src/graph/cache.ts"
+        ],
+        "symbols": [
+          "buildSlice",
+          "indexRepo",
+          "GraphCache"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "incident-debugging-2-triage-indexer-worker-crash-path-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Triage indexer worker crash path. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "incident-debugging-2-triage-indexer-worker-crash-path-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Triage indexer worker crash path. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "incident-debugging-2-triage-indexer-worker-crash-path-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Triage indexer worker crash path. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "incident-debugging-3-investigate-db-lock-contention-under",
+      "repoId": "my-repo",
+      "category": "performance",
+      "difficulty": "easy",
+      "title": "Investigate DB lock contention under load",
+      "description": "incident-debugging benchmark scenario: Investigate DB lock contention under load.",
+      "tags": [
+        "incident-debugging",
+        "performance",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/graph/slice.ts",
+          "src/indexer/indexer.ts",
+          "src/graph/cache.ts"
+        ],
+        "symbols": [
+          "buildSlice",
+          "indexRepo",
+          "GraphCache"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "incident-debugging-3-investigate-db-lock-contention-under-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Investigate DB lock contention under load. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "incident-debugging-3-investigate-db-lock-contention-under-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Investigate DB lock contention under load. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "incident-debugging-3-investigate-db-lock-contention-under-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Investigate DB lock contention under load. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "incident-debugging-4-fix-stale-cache-serving-outdated-sli",
+      "repoId": "my-repo",
+      "category": "bug-fix",
+      "difficulty": "hard",
+      "title": "Fix stale-cache serving outdated slice results",
+      "description": "incident-debugging benchmark scenario: Fix stale-cache serving outdated slice results.",
+      "tags": [
+        "incident-debugging",
+        "bug-fix",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/graph/slice.ts",
+          "src/indexer/indexer.ts",
+          "src/graph/cache.ts"
+        ],
+        "symbols": [
+          "buildSlice",
+          "indexRepo",
+          "GraphCache"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "incident-debugging-4-fix-stale-cache-serving-outdated-sli-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Fix stale-cache serving outdated slice results. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "incident-debugging-4-fix-stale-cache-serving-outdated-sli-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Fix stale-cache serving outdated slice results. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "incident-debugging-4-fix-stale-cache-serving-outdated-sli-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Fix stale-cache serving outdated slice results. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "incident-debugging-5-trace-orchestration-failure-propagat",
+      "repoId": "my-repo",
+      "category": "understanding",
+      "difficulty": "medium",
+      "title": "Trace orchestration failure propagation",
+      "description": "incident-debugging benchmark scenario: Trace orchestration failure propagation.",
+      "tags": [
+        "incident-debugging",
+        "understanding",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/graph/slice.ts",
+          "src/indexer/indexer.ts",
+          "src/graph/cache.ts"
+        ],
+        "symbols": [
+          "buildSlice",
+          "indexRepo",
+          "GraphCache"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "incident-debugging-5-trace-orchestration-failure-propagat-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Trace orchestration failure propagation. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "incident-debugging-5-trace-orchestration-failure-propagat-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Trace orchestration failure propagation. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "incident-debugging-5-trace-orchestration-failure-propagat-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Trace orchestration failure propagation. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,265 @@
+{
+  "version": 3,
+  "defaults": {
+    "baseline": {
+      "maxFilesPerStep": 4,
+      "maxTokensPerFile": 2200
+    },
+    "sdl": {
+      "maxSearchTerms": 12,
+      "maxSearchResultsPerTerm": 6,
+      "maxEntrySymbols": 4,
+      "maxCardsPerStep": 5,
+      "maxCards": 14,
+      "maxTokens": 3200,
+      "maxSkeletonsPerStep": 1,
+      "skeletonMaxLines": 120,
+      "skeletonMaxTokens": 1500
+    },
+    "scoring": {
+      "weights": {
+        "tokenEfficiency": 0.45,
+        "coverageQuality": 0.25,
+        "efficiencyScore": 0.2,
+        "precisionQuality": 0.1
+      },
+      "thresholds": {
+        "sdlWin": 5,
+        "traditionalWin": -5
+      }
+    }
+  },
+  "tasks": [
+    {
+      "id": "tiny-tasks-1-fix-tiny-cli-text-mismatch",
+      "repoId": "my-repo",
+      "category": "test-triage",
+      "difficulty": "hard",
+      "title": "Fix tiny CLI text mismatch",
+      "description": "tiny-tasks benchmark scenario: Fix tiny CLI text mismatch.",
+      "tags": [
+        "tiny-tasks",
+        "test-triage",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/util/paths.ts",
+          "src/cli/commands/version.ts",
+          "tests/cache.test.ts"
+        ],
+        "symbols": [
+          "normalizePath",
+          "versionCommand",
+          "GraphCache"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "tiny-tasks-1-fix-tiny-cli-text-mismatch-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Fix tiny CLI text mismatch. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "tiny-tasks-1-fix-tiny-cli-text-mismatch-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Fix tiny CLI text mismatch. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "tiny-tasks-1-fix-tiny-cli-text-mismatch-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Fix tiny CLI text mismatch. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "tiny-tasks-2-patch-single-path-normalization-edge",
+      "repoId": "my-repo",
+      "category": "bug-fix",
+      "difficulty": "medium",
+      "title": "Patch single path-normalization edge case",
+      "description": "tiny-tasks benchmark scenario: Patch single path-normalization edge case.",
+      "tags": [
+        "tiny-tasks",
+        "bug-fix",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/util/paths.ts",
+          "src/cli/commands/version.ts",
+          "tests/cache.test.ts"
+        ],
+        "symbols": [
+          "normalizePath",
+          "versionCommand",
+          "GraphCache"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "tiny-tasks-2-patch-single-path-normalization-edge-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Patch single path-normalization edge case. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "tiny-tasks-2-patch-single-path-normalization-edge-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Patch single path-normalization edge case. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "tiny-tasks-2-patch-single-path-normalization-edge-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Patch single path-normalization edge case. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "tiny-tasks-3-add-missing-context-to-one-error-log",
+      "repoId": "my-repo",
+      "category": "code-change",
+      "difficulty": "easy",
+      "title": "Add missing context to one error log",
+      "description": "tiny-tasks benchmark scenario: Add missing context to one error log.",
+      "tags": [
+        "tiny-tasks",
+        "code-change",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/util/paths.ts",
+          "src/cli/commands/version.ts",
+          "tests/cache.test.ts"
+        ],
+        "symbols": [
+          "normalizePath",
+          "versionCommand",
+          "GraphCache"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "tiny-tasks-3-add-missing-context-to-one-error-log-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Add missing context to one error log. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "tiny-tasks-3-add-missing-context-to-one-error-log-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Add missing context to one error log. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "tiny-tasks-3-add-missing-context-to-one-error-log-change",
+          "phase": "change",
+          "goal": "Define the minimal safe change plan.",
+          "prompt": "Change task: Add missing context to one error log. Specify minimal edits and dependency impacts for a safe implementation."
+        },
+        {
+          "id": "tiny-tasks-3-add-missing-context-to-one-error-log-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Add missing context to one error log. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "tiny-tasks-4-triage-one-small-unit-test-failure",
+      "repoId": "my-repo",
+      "category": "test-triage",
+      "difficulty": "hard",
+      "title": "Triage one small unit test failure",
+      "description": "tiny-tasks benchmark scenario: Triage one small unit test failure.",
+      "tags": [
+        "tiny-tasks",
+        "test-triage",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/util/paths.ts",
+          "src/cli/commands/version.ts",
+          "tests/cache.test.ts"
+        ],
+        "symbols": [
+          "normalizePath",
+          "versionCommand",
+          "GraphCache"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "tiny-tasks-4-triage-one-small-unit-test-failure-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Triage one small unit test failure. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "tiny-tasks-4-triage-one-small-unit-test-failure-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Triage one small unit test failure. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "tiny-tasks-4-triage-one-small-unit-test-failure-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Triage one small unit test failure. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "tiny-tasks-5-assess-impact-of-one-line-docs-fix",
+      "repoId": "my-repo",
+      "category": "impact-analysis",
+      "difficulty": "medium",
+      "title": "Assess impact of one-line docs fix",
+      "description": "tiny-tasks benchmark scenario: Assess impact of one-line docs fix.",
+      "tags": [
+        "tiny-tasks",
+        "impact-analysis",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/util/paths.ts",
+          "src/cli/commands/version.ts",
+          "tests/cache.test.ts"
+        ],
+        "symbols": [
+          "normalizePath",
+          "versionCommand",
+          "GraphCache"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "tiny-tasks-5-assess-impact-of-one-line-docs-fix-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Assess impact of one-line docs fix. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "tiny-tasks-5-assess-impact-of-one-line-docs-fix-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Assess impact of one-line docs fix. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "tiny-tasks-5-assess-impact-of-one-line-docs-fix-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Assess impact of one-line docs fix. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    }
+  ]
+}

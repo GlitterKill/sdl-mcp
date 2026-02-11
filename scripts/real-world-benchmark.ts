@@ -93,6 +93,7 @@ interface WorkflowTask {
     | "test-triage";
   title: string;
   description: string;
+  tags?: string[];
   difficulty?: "easy" | "medium" | "hard";
   contextTargets: {
     files?: string[];
@@ -112,6 +113,7 @@ interface LegacyTask {
   id: string;
   title: string;
   description: string;
+  tags?: string[];
   repoId?: string;
   entrySymbolNames?: string[];
   relevantFiles?: string[];
@@ -202,6 +204,7 @@ interface LossAnalysis {
 interface TaskResult {
   id: string;
   category: WorkflowTask["category"];
+  tags: string[];
   difficulty: "easy" | "medium" | "hard";
   title: string;
   description: string;
@@ -353,6 +356,14 @@ const FALLBACK_DEFAULTS: BenchmarkDefaults = {
 
 const PRECISION_EXCLUDED_PREFIXES = ["dist/", "node_modules/"];
 const PRECISION_EXCLUDED_PATTERNS = [/\.d\.ts$/i, /\.map$/i];
+const COMPLETION_SLICE_MIN_CARDS = 6;
+const COMPLETION_SLICE_MIN_TOKENS = 1200;
+const COMPLETION_SLICE_TOKENS_PER_GAP = 350;
+const INITIAL_STEP_CARD_FRACTION = 0.6;
+const INITIAL_STEP_MIN_CARDS = 3;
+const SEARCH_PAYLOAD_PREVIEW_LIMIT = 8;
+const INITIAL_STEP_SEARCH_PREVIEW_LIMIT = 6;
+const SDL_RAW_FILE_MAX_TOKENS = 1200;
 
 // ============================================================================
 // Formatting Helpers
@@ -729,6 +740,23 @@ function buildFileSymbolNameMap(repoId: string): Map<string, Set<string>> {
   return map;
 }
 
+function buildFileRepresentativeSymbolMap(repoId: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const files = db.getFilesByRepoLite(repoId);
+
+  for (const file of files) {
+    const relPath = normalizePath(file.rel_path);
+    const symbols = db.getSymbolsByFileLite(file.file_id);
+    if (symbols.length === 0) continue;
+    const representative =
+      symbols.find((symbol) => symbol.exported === 1) ?? symbols[0];
+    if (!representative?.symbol_id) continue;
+    map.set(relPath, representative.symbol_id);
+  }
+
+  return map;
+}
+
 function findSymbolsByName(
   repoId: string,
   names: string[],
@@ -865,6 +893,20 @@ function inflateSliceCard(
   };
 }
 
+function normalizeTags(tags?: string[]): string[] {
+  if (!Array.isArray(tags)) return [];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const rawTag of tags) {
+    if (typeof rawTag !== "string") continue;
+    const tag = rawTag.trim();
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    normalized.push(tag);
+  }
+  return normalized;
+}
+
 function normalizeTaskFile(taskFile: TaskFile): { defaults: BenchmarkDefaults; tasks: WorkflowTask[] } {
   const mergedDefaults: BenchmarkDefaults = {
     baseline: {
@@ -922,6 +964,7 @@ function normalizeTaskFile(taskFile: TaskFile): { defaults: BenchmarkDefaults; t
       const workflowTask = task as WorkflowTask;
       return {
         ...workflowTask,
+        tags: normalizeTags(workflowTask.tags),
         difficulty: workflowTask.difficulty ?? "medium",
       };
     }
@@ -932,6 +975,7 @@ function normalizeTaskFile(taskFile: TaskFile): { defaults: BenchmarkDefaults; t
       category: "understanding",
       title: legacy.title,
       description: legacy.description,
+      tags: normalizeTags(legacy.tags),
       difficulty: "medium",
       repoId: legacy.repoId,
       contextTargets: {
@@ -1166,6 +1210,10 @@ function addBaselineFileContext(
   return true;
 }
 
+function getSdlRawFileTokenCap(maxTokensPerFile: number): number {
+  return Math.min(maxTokensPerFile, SDL_RAW_FILE_MAX_TOKENS);
+}
+
 function addSdlRawFileContext(
   relPath: string,
   corpusByRelPath: Map<string, CorpusFile>,
@@ -1177,7 +1225,7 @@ function addSdlRawFileContext(
   const file = corpusByRelPath.get(relPath);
   if (!file) return false;
 
-  const tokens = Math.min(file.tokens, maxTokensPerFile);
+  const tokens = Math.min(file.tokens, getSdlRawFileTokenCap(maxTokensPerFile));
   sdlState.files.add(relPath);
   sdlState.tokens += tokens;
   sdlState.textFragments.push(file.content);
@@ -1200,6 +1248,7 @@ async function runCompletionPass(
   relevantSymbols: Set<string>,
   corpusByRelPath: Map<string, CorpusFile>,
   fileSymbolMap: Map<string, Set<string>>,
+  fileRepresentativeSymbolMap: Map<string, string>,
   baselineState: BaselineState,
   sdlState: SdlState,
 ): Promise<CompletionResult> {
@@ -1287,10 +1336,41 @@ async function runCompletionPass(
     applyCardContext(sdlState, card);
   }
 
-  if (completionEntries.length > 0) {
+  const sdlSymbolHitsAfterCards = collectSdlSymbolHits(relevantSymbols, sdlState);
+  const remainingSdlSymbolsAfterCards = Array.from(relevantSymbols).filter(
+    (symbolName) => !sdlSymbolHitsAfterCards.has(symbolName),
+  );
+  const missingSdlFilesAfterCards = Array.from(relevantFiles).filter(
+    (relPath) => !sdlState.files.has(relPath),
+  );
+
+  if (
+    completionEntries.length > 0 &&
+    (remainingSdlSymbolsAfterCards.length > 0 ||
+      missingSdlFilesAfterCards.length > 0)
+  ) {
     const latestVersion = db.getLatestVersion(repoId);
     const versionId = latestVersion?.version_id ?? "current";
     const knownCardEtags = Object.fromEntries(sdlState.cardEtags.entries());
+    const completionGapSize =
+      remainingSdlSymbolsAfterCards.length + missingSdlFilesAfterCards.length;
+    const completionSliceBudget = {
+      maxCards: Math.min(
+        defaults.sdl.maxCards,
+        Math.max(
+          COMPLETION_SLICE_MIN_CARDS,
+          remainingSdlSymbolsAfterCards.length * 2 +
+            missingSdlFilesAfterCards.length,
+        ),
+      ),
+      maxEstimatedTokens: Math.min(
+        defaults.sdl.maxTokens,
+        Math.max(
+          COMPLETION_SLICE_MIN_TOKENS,
+          completionGapSize * COMPLETION_SLICE_TOKENS_PER_GAP,
+        ),
+      ),
+    };
 
     const sliceStart = performance.now();
     const slice = await buildSlice({
@@ -1300,10 +1380,7 @@ async function runCompletionPass(
       taskText: `${task.title}\n${task.description}\nCompletion pass: continue until required context is reached.`,
       knownCardEtags,
       cardDetail: "compact",
-      budget: {
-        maxCards: defaults.sdl.maxCards,
-        maxEstimatedTokens: defaults.sdl.maxTokens,
-      },
+      budget: completionSliceBudget,
     });
     const sliceBuildTimeMs = performance.now() - sliceStart;
     sdlState.slicesBuilt += 1;
@@ -1339,6 +1416,50 @@ async function runCompletionPass(
     }
   }
 
+  // Try file-specific cards before raw file fallback to reduce capped token cost.
+  const missingSdlFilesBeforeRaw = Array.from(relevantFiles).filter(
+    (relPath) => !sdlState.files.has(relPath),
+  );
+  for (const relPath of missingSdlFilesBeforeRaw) {
+    const representativeSymbolId = fileRepresentativeSymbolMap.get(relPath);
+    if (!representativeSymbolId) continue;
+
+    if (sdlState.fetchedCardSymbols.has(representativeSymbolId)) {
+      const cachedCard = sdlState.cardsBySymbolId.get(representativeSymbolId);
+      if (cachedCard) applyCardContext(sdlState, cachedCard);
+      continue;
+    }
+
+    const response = await handleSymbolGetCard({
+      repoId,
+      symbolId: representativeSymbolId,
+      ifNoneMatch: sdlState.cardEtags.get(representativeSymbolId),
+    });
+    const responseTokens = estimateTokens(JSON.stringify(response));
+    sdlAddedTokens += responseTokens;
+    sdlState.tokens += responseTokens;
+    sdlState.cardTokens += responseTokens;
+
+    if ("notModified" in response && response.notModified) {
+      sdlState.cardEtags.set(representativeSymbolId, response.etag);
+      const cachedCard = sdlState.cardsBySymbolId.get(representativeSymbolId);
+      if (cachedCard) applyCardContext(sdlState, cachedCard);
+      continue;
+    }
+    if (!("card" in response) || !response.card) {
+      continue;
+    }
+
+    const card = response.card as CardWithETag;
+    if (!sdlState.fetchedCardSymbols.has(representativeSymbolId)) {
+      sdlState.fetchedCardSymbols.add(representativeSymbolId);
+      sdlState.cardsFetched += 1;
+      sdlAddedCards += 1;
+    }
+    sdlState.cardEtags.set(representativeSymbolId, card.etag);
+    applyCardContext(sdlState, card);
+  }
+
   // Final safety net: in real workflows agents may open raw files when needed.
   for (const relPath of relevantFiles) {
     if (!addSdlRawFileContext(relPath, corpusByRelPath, fileSymbolMap, defaults.baseline.maxTokensPerFile, sdlState)) {
@@ -1346,7 +1467,12 @@ async function runCompletionPass(
     }
     sdlAddedRawFiles++;
     const file = corpusByRelPath.get(relPath);
-    if (file) sdlAddedTokens += Math.min(file.tokens, defaults.baseline.maxTokensPerFile);
+    if (file) {
+      sdlAddedTokens += Math.min(
+        file.tokens,
+        getSdlRawFileTokenCap(defaults.baseline.maxTokensPerFile),
+      );
+    }
   }
 
   const baselineFilesFound = Array.from(relevantFiles).filter((file) =>
@@ -1432,7 +1558,11 @@ async function runSdlStep(
     return a.name.localeCompare(b.name);
   });
 
-  const searchPayload = ranked.slice(0, 8).map((symbol) => {
+  const searchPayloadLimit =
+    state.slicesBuilt === 0
+      ? INITIAL_STEP_SEARCH_PREVIEW_LIMIT
+      : SEARCH_PAYLOAD_PREVIEW_LIMIT;
+  const searchPayload = ranked.slice(0, searchPayloadLimit).map((symbol) => {
     const file = db.getFile(symbol.file_id);
     return {
       symbolId: symbol.symbol_id,
@@ -1461,22 +1591,29 @@ async function runSdlStep(
 
   let cardsFetched = 0;
   let cardTokens = 0;
+  const maxCardsForStep =
+    state.slicesBuilt === 0
+      ? Math.max(
+          INITIAL_STEP_MIN_CARDS,
+          Math.floor(defaults.sdl.maxCardsPerStep * INITIAL_STEP_CARD_FRACTION),
+        )
+      : defaults.sdl.maxCardsPerStep;
   const cardCandidateMap = new Map<string, SymbolRow>();
   for (const symbol of hintMatches) {
     cardCandidateMap.set(symbol.symbol_id, symbol);
-    if (cardCandidateMap.size >= defaults.sdl.maxCardsPerStep) break;
+    if (cardCandidateMap.size >= maxCardsForStep) break;
   }
   for (const symbol of entrySymbols) {
     if (!cardCandidateMap.has(symbol.symbol_id)) {
       cardCandidateMap.set(symbol.symbol_id, symbol);
-      if (cardCandidateMap.size >= defaults.sdl.maxCardsPerStep) break;
+      if (cardCandidateMap.size >= maxCardsForStep) break;
     }
   }
-  if (cardCandidateMap.size < defaults.sdl.maxCardsPerStep && state.fetchedCardSymbols.size === 0) {
+  if (cardCandidateMap.size < maxCardsForStep && state.fetchedCardSymbols.size === 0) {
     for (const symbol of ranked) {
       if (!cardCandidateMap.has(symbol.symbol_id)) {
         cardCandidateMap.set(symbol.symbol_id, symbol);
-        if (cardCandidateMap.size >= defaults.sdl.maxCardsPerStep) break;
+        if (cardCandidateMap.size >= maxCardsForStep) break;
       }
     }
   }
@@ -1941,6 +2078,16 @@ async function runBenchmark(): Promise<void> {
     throw new Error("No repository configured for benchmark.");
   }
 
+  const persistedRepo = db.getRepo(repoConfig.repoId);
+  if (!persistedRepo) {
+    db.createRepo({
+      repo_id: repoConfig.repoId,
+      root_path: repoConfig.rootPath,
+      config_json: JSON.stringify(repoConfig),
+      created_at: new Date().toISOString(),
+    });
+  }
+
   if (!skipIndex) {
     console.log(`Indexing repo ${repoConfig.repoId}...`);
     await indexRepo(repoConfig.repoId, "full");
@@ -1955,6 +2102,9 @@ async function runBenchmark(): Promise<void> {
   const corpusByRelPath = new Map(corpus.map((file) => [file.relPath, file]));
   const corpusPaths = new Set(corpus.map((file) => file.relPath));
   const fileSymbolMap = buildFileSymbolNameMap(repoConfig.repoId);
+  const fileRepresentativeSymbolMap = buildFileRepresentativeSymbolMap(
+    repoConfig.repoId,
+  );
 
   const results: TaskResult[] = [];
 
@@ -2120,6 +2270,7 @@ async function runBenchmark(): Promise<void> {
       relevantSymbols,
       corpusByRelPath,
       fileSymbolMap,
+      fileRepresentativeSymbolMap,
       baselineState,
       sdlState,
     );
@@ -2194,6 +2345,7 @@ async function runBenchmark(): Promise<void> {
     const taskResult: TaskResult = {
       id: task.id,
       category: task.category,
+      tags: task.tags ?? [],
       difficulty: task.difficulty ?? "medium",
       title: task.title,
       description: task.description,

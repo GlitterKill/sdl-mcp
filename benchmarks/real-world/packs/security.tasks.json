@@ -1,0 +1,265 @@
+{
+  "version": 3,
+  "defaults": {
+    "baseline": {
+      "maxFilesPerStep": 4,
+      "maxTokensPerFile": 2200
+    },
+    "sdl": {
+      "maxSearchTerms": 12,
+      "maxSearchResultsPerTerm": 6,
+      "maxEntrySymbols": 4,
+      "maxCardsPerStep": 5,
+      "maxCards": 14,
+      "maxTokens": 3200,
+      "maxSkeletonsPerStep": 1,
+      "skeletonMaxLines": 120,
+      "skeletonMaxTokens": 1500
+    },
+    "scoring": {
+      "weights": {
+        "tokenEfficiency": 0.45,
+        "coverageQuality": 0.25,
+        "efficiencyScore": 0.2,
+        "precisionQuality": 0.1
+      },
+      "thresholds": {
+        "sdlWin": 5,
+        "traditionalWin": -5
+      }
+    }
+  },
+  "tasks": [
+    {
+      "id": "security-1-prevent-policy-downgrade-bypass-path",
+      "repoId": "my-repo",
+      "category": "bug-fix",
+      "difficulty": "hard",
+      "title": "Prevent policy downgrade bypass paths",
+      "description": "security benchmark scenario: Prevent policy downgrade bypass paths.",
+      "tags": [
+        "security",
+        "bug-fix",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/mcp/tools/code.ts",
+          "src/policy/engine.ts",
+          "src/code/redact.ts"
+        ],
+        "symbols": [
+          "handleCodeNeedWindow",
+          "PolicyEngine",
+          "redactContent"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "security-1-prevent-policy-downgrade-bypass-path-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Prevent policy downgrade bypass paths. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "security-1-prevent-policy-downgrade-bypass-path-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Prevent policy downgrade bypass paths. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "security-1-prevent-policy-downgrade-bypass-path-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Prevent policy downgrade bypass paths. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "security-2-review-secret-redaction-coverage",
+      "repoId": "my-repo",
+      "category": "code-review",
+      "difficulty": "medium",
+      "title": "Review secret redaction coverage",
+      "description": "security benchmark scenario: Review secret redaction coverage.",
+      "tags": [
+        "security",
+        "code-review",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/mcp/tools/code.ts",
+          "src/policy/engine.ts",
+          "src/code/redact.ts"
+        ],
+        "symbols": [
+          "handleCodeNeedWindow",
+          "PolicyEngine",
+          "redactContent"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "security-2-review-secret-redaction-coverage-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Review secret redaction coverage. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "security-2-review-secret-redaction-coverage-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Review secret redaction coverage. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "security-2-review-secret-redaction-coverage-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Review secret redaction coverage. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "security-3-assess-audit-trail-completeness-for-",
+      "repoId": "my-repo",
+      "category": "impact-analysis",
+      "difficulty": "easy",
+      "title": "Assess audit trail completeness for policy actions",
+      "description": "security benchmark scenario: Assess audit trail completeness for policy actions.",
+      "tags": [
+        "security",
+        "impact-analysis",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/mcp/tools/code.ts",
+          "src/policy/engine.ts",
+          "src/code/redact.ts"
+        ],
+        "symbols": [
+          "handleCodeNeedWindow",
+          "PolicyEngine",
+          "redactContent"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "security-3-assess-audit-trail-completeness-for--triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Assess audit trail completeness for policy actions. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "security-3-assess-audit-trail-completeness-for--investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Assess audit trail completeness for policy actions. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "security-3-assess-audit-trail-completeness-for--validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Assess audit trail completeness for policy actions. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "security-4-align-policy-config-schema-and-runti",
+      "repoId": "my-repo",
+      "category": "code-change",
+      "difficulty": "hard",
+      "title": "Align policy config schema and runtime defaults",
+      "description": "security benchmark scenario: Align policy config schema and runtime defaults.",
+      "tags": [
+        "security",
+        "code-change",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/mcp/tools/code.ts",
+          "src/policy/engine.ts",
+          "src/code/redact.ts"
+        ],
+        "symbols": [
+          "handleCodeNeedWindow",
+          "PolicyEngine",
+          "redactContent"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "security-4-align-policy-config-schema-and-runti-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Align policy config schema and runtime defaults. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "security-4-align-policy-config-schema-and-runti-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Align policy config schema and runtime defaults. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "security-4-align-policy-config-schema-and-runti-change",
+          "phase": "change",
+          "goal": "Define the minimal safe change plan.",
+          "prompt": "Change task: Align policy config schema and runtime defaults. Specify minimal edits and dependency impacts for a safe implementation."
+        },
+        {
+          "id": "security-4-align-policy-config-schema-and-runti-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Align policy config schema and runtime defaults. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "security-5-triage-security-regression-in-code-w",
+      "repoId": "my-repo",
+      "category": "test-triage",
+      "difficulty": "medium",
+      "title": "Triage security regression in code window access",
+      "description": "security benchmark scenario: Triage security regression in code window access.",
+      "tags": [
+        "security",
+        "test-triage",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/mcp/tools/code.ts",
+          "src/policy/engine.ts",
+          "src/code/redact.ts"
+        ],
+        "symbols": [
+          "handleCodeNeedWindow",
+          "PolicyEngine",
+          "redactContent"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "security-5-triage-security-regression-in-code-w-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Triage security regression in code window access. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "security-5-triage-security-regression-in-code-w-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Triage security regression in code window access. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "security-5-triage-security-regression-in-code-w-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Triage security regression in code window access. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    }
+  ]
+}

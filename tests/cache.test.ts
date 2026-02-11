@@ -7,11 +7,9 @@ import assert from "node:assert";
 import {
   LRUCache,
   invalidateSymbolCardVersion,
-  invalidateGraphSliceVersion,
   clearAllCaches,
   resetAllCacheStats,
   makeSymbolCardCacheKey,
-  makeGraphSliceCacheKey,
 } from "../src/graph/cache.js";
 
 describe("LRU Cache", () => {
@@ -168,23 +166,6 @@ describe("Global cache functions", () => {
     it("should generate symbol card cache keys", () => {
       const key = makeSymbolCardCacheKey("repo1", "symbol1", "v1");
       assert.strictEqual(key, "repo1:symbol1:v1");
-    });
-
-    it("should generate graph slice cache keys", () => {
-      const key = makeGraphSliceCacheKey("repo1", "v1", ["sym1", "sym2"], {
-        maxCards: 100,
-        maxEstimatedTokens: 5000,
-      });
-      assert.strictEqual(key, "repo1:v1:sym1,sym2:100:5000");
-    });
-
-    it("should not mutate input symbol order when generating graph slice cache keys", () => {
-      const entrySymbols = ["sym-b", "sym-a"];
-      makeGraphSliceCacheKey("repo1", "v1", entrySymbols, {
-        maxCards: 100,
-        maxEstimatedTokens: 5000,
-      });
-      assert.deepStrictEqual(entrySymbols, ["sym-b", "sym-a"]);
     });
   });
 });

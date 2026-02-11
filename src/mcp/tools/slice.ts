@@ -33,8 +33,8 @@ import {
   SLICE_LEASE_TTL_MS,
   SPILLOVER_DEFAULT_PAGE_SIZE,
   AST_FINGERPRINT_COMPACT_WIRE_LENGTH,
+  SYMBOL_ID_COMPACT_WIRE_LENGTH,
 } from "../../config/constants.js";
-import { graphSliceCache, makeGraphSliceCacheKey } from "../../graph/cache.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { createPolicyDenial } from "../errors.js";
@@ -272,8 +272,8 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
       mc: slice.budget.maxCards,
       mt: slice.budget.maxEstimatedTokens,
     },
-    ss: slice.startSymbols,
-    si: slice.symbolIndex,
+    ss: slice.startSymbols.map(id => id.slice(0, SYMBOL_ID_COMPACT_WIRE_LENGTH)),
+    si: slice.symbolIndex.map(id => id.slice(0, SYMBOL_ID_COMPACT_WIRE_LENGTH)),
     fp: filePaths,
     et: slice.edges.length > 0 ? edgeTypes : undefined,
     c: slice.cards.map((card) => {
@@ -463,9 +463,6 @@ export async function handleSliceBuild(
     });
   }
 
-  const cacheConfig = config.cache;
-  const cacheEnabled = cacheConfig?.enabled ?? true;
-
   const latestVersion = db.getLatestVersion(repoId);
   if (!latestVersion) {
     throw new Error(
@@ -485,63 +482,6 @@ export async function handleSliceBuild(
     cardDetail,
     budget: effectiveBudget,
   };
-
-  const hasKnownCardEtags = Boolean(
-    knownCardEtags && Object.keys(knownCardEtags).length > 0,
-  );
-  const cacheableEntrySymbols =
-    entrySymbols && entrySymbols.length > 0 ? entrySymbols : null;
-  const canUseGraphSliceCache = Boolean(
-    cacheEnabled &&
-      cacheableEntrySymbols &&
-      !hasKnownCardEtags &&
-      cardDetail !== "full",
-  );
-
-  if (canUseGraphSliceCache && cacheableEntrySymbols) {
-    const cacheKey = makeGraphSliceCacheKey(
-      repoId,
-      latestVersion.version_id,
-      cacheableEntrySymbols,
-      effectiveBudget,
-    );
-    const cachedSlice = graphSliceCache.get(
-      repoId,
-      cacheKey,
-      latestVersion.version_id,
-    );
-    if (cachedSlice) {
-      const handle = generateSliceHandle();
-      const sliceHash = generateSliceHash(cachedSlice);
-      const lease = createLease(latestVersion.version_id);
-      const sliceEtag = createSliceEtag(
-        handle,
-        latestVersion.version_id,
-        sliceHash,
-      );
-
-      const handleRow: SliceHandleRow = {
-        handle,
-        repo_id: repoId,
-        created_at: new Date().toISOString(),
-        expires_at: lease.expiresAt,
-        min_version: lease.minVersion,
-        max_version: lease.maxVersion,
-        slice_hash: sliceHash,
-        spillover_ref: null,
-      };
-
-      db.createSliceHandle(handleRow);
-
-      return {
-        sliceHandle: handle,
-        ledgerVersion: latestVersion.version_id,
-        lease,
-        sliceEtag,
-        slice: serializeSliceForWireFormat(cachedSlice, requestedWireFormat, effectiveWireFormatVersion),
-      };
-    }
-  }
 
   const policyContext: PolicyRequestContext = {
     requestType: "graphSlice",
@@ -598,21 +538,6 @@ export async function handleSliceBuild(
   };
 
   db.createSliceHandle(handleRow);
-
-  if (canUseGraphSliceCache && cacheableEntrySymbols) {
-    const cacheKey = makeGraphSliceCacheKey(
-      repoId,
-      latestVersion.version_id,
-      cacheableEntrySymbols,
-      effectiveBudget,
-    );
-    await graphSliceCache.set(
-      repoId,
-      cacheKey,
-      latestVersion.version_id,
-      slice,
-    );
-  }
 
   return {
     sliceHandle: handle,

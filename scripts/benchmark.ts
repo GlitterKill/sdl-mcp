@@ -12,7 +12,7 @@
  *   npm run benchmark -- --out results.json        # Save to file
  */
 
-import { readFileSync, readdirSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { join, relative, resolve } from "path";
 import { getDb } from "../src/db/db.js";
 import { runMigrations } from "../src/db/migrations.js";
@@ -116,6 +116,10 @@ interface ReplayTrace {
 interface ReplayTraceFile {
   version: number;
   generatedAt: string;
+  source?: {
+    inputFile?: string;
+    benchmarkGeneratedAt?: string;
+  };
   traces: ReplayTrace[];
 }
 
@@ -157,6 +161,70 @@ interface BenchmarkResult {
 // ============================================================================
 
 const DEFAULT_REPLAY_TRACE_PATH = "benchmarks/synthetic/replay-traces.json";
+const DEFAULT_REAL_WORLD_RESULTS_CURRENT =
+  "benchmarks/real-world/results-current.json";
+const REPLAY_TRACE_STALE_DAYS = 7;
+const REPLAY_TRACE_REFRESH_COMMAND =
+  "npm run benchmark:record-trace -- --input benchmarks/real-world/results-current.json --tasks benchmarks/real-world/tasks.json --out benchmarks/synthetic/replay-traces.json";
+
+function normalizePathForCompare(filePath: string): string {
+  return resolve(filePath).replace(/\\/g, "/").toLowerCase();
+}
+
+function warnReplayTraceStaleness(
+  traceFilePath: string,
+  payload: ReplayTraceFile,
+): void {
+  const expectedSourcePath = resolve(DEFAULT_REAL_WORLD_RESULTS_CURRENT);
+  const sourceInputPath = payload.source?.inputFile
+    ? resolve(payload.source.inputFile)
+    : undefined;
+
+  if (
+    sourceInputPath &&
+    normalizePathForCompare(sourceInputPath) !==
+      normalizePathForCompare(expectedSourcePath)
+  ) {
+    console.warn(
+      `  Warning: Replay traces were generated from "${sourceInputPath}" instead of ` +
+        `"${expectedSourcePath}". Rebuild with: ${REPLAY_TRACE_REFRESH_COMMAND}`,
+    );
+  }
+
+  const generatedAtMs = Date.parse(payload.generatedAt);
+  if (!Number.isFinite(generatedAtMs)) {
+    console.warn(
+      `  Warning: Replay trace file "${traceFilePath}" has an invalid ` +
+        `"generatedAt" timestamp. Rebuild with: ${REPLAY_TRACE_REFRESH_COMMAND}`,
+    );
+    return;
+  }
+
+  const staleThresholdMs = REPLAY_TRACE_STALE_DAYS * 24 * 60 * 60 * 1000;
+  const ageMs = Date.now() - generatedAtMs;
+  if (ageMs > staleThresholdMs) {
+    const ageDays = Math.floor(ageMs / (24 * 60 * 60 * 1000));
+    console.warn(
+      `  Warning: Replay traces are ${ageDays} day(s) old ` +
+        `(generated ${new Date(generatedAtMs).toISOString()}). ` +
+        `Rebuild with: ${REPLAY_TRACE_REFRESH_COMMAND}`,
+    );
+  }
+
+  if (!existsSync(expectedSourcePath)) {
+    return;
+  }
+
+  const sourceStats = statSync(expectedSourcePath);
+  if (sourceStats.mtimeMs > generatedAtMs + 1000) {
+    console.warn(
+      `  Warning: "${traceFilePath}" was generated before ` +
+        `"${expectedSourcePath}" was last updated ` +
+        `(${new Date(sourceStats.mtimeMs).toISOString()}). ` +
+        `Rebuild with: ${REPLAY_TRACE_REFRESH_COMMAND}`,
+    );
+  }
+}
 
 function formatNumber(n: number): string {
   return n.toLocaleString();
@@ -192,6 +260,7 @@ function loadReplayTraces(
   const resolved = resolve(traceFilePath);
   const raw = readFileSync(resolved, "utf-8");
   const payload = JSON.parse(raw) as ReplayTraceFile;
+  warnReplayTraceStaleness(resolved, payload);
   const repoScoped = payload.traces.filter(
     (trace) => !trace.sourceRepoId || trace.sourceRepoId === repoId,
   );

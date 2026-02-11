@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "runs": [
+    {
+      "id": "security-my-repo",
+      "family": "security",
+      "repoId": "my-repo",
+      "tasks": "packs/security.tasks.json"
+    },
+    {
+      "id": "infra-devops-my-repo",
+      "family": "infra-devops",
+      "repoId": "my-repo",
+      "tasks": "packs/infra-devops.tasks.json"
+    },
+    {
+      "id": "db-migration-my-repo",
+      "family": "db-migration",
+      "repoId": "my-repo",
+      "tasks": "packs/db-migration.tasks.json"
+    },
+    {
+      "id": "dependency-migration-my-repo",
+      "family": "dependency-migration",
+      "repoId": "my-repo",
+      "tasks": "packs/dependency-migration.tasks.json"
+    },
+    {
+      "id": "incident-debugging-my-repo",
+      "family": "incident-debugging",
+      "repoId": "my-repo",
+      "tasks": "packs/incident-debugging.tasks.json"
+    },
+    {
+      "id": "frontend-ui-zod-oss",
+      "family": "frontend-ui",
+      "repoId": "zod-oss",
+      "tasks": "packs/frontend-ui.tasks.json"
+    },
+    {
+      "id": "multirepo-my-repo",
+      "family": "multirepo",
+      "repoId": "my-repo",
+      "tasks": "packs/multirepo.tasks.json"
+    },
+    {
+      "id": "greenfield-my-repo",
+      "family": "greenfield",
+      "repoId": "my-repo",
+      "tasks": "packs/greenfield.tasks.json"
+    },
+    {
+      "id": "tiny-tasks-my-repo",
+      "family": "tiny-tasks",
+      "repoId": "my-repo",
+      "tasks": "packs/tiny-tasks.tasks.json"
+    },
+    {
+      "id": "cross-language-my-repo",
+      "family": "cross-language",
+      "repoId": "my-repo",
+      "tasks": "packs/cross-language.tasks.json"
+    }
+  ]
+}

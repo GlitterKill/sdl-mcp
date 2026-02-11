@@ -1,0 +1,265 @@
+{
+  "version": 3,
+  "defaults": {
+    "baseline": {
+      "maxFilesPerStep": 4,
+      "maxTokensPerFile": 2200
+    },
+    "sdl": {
+      "maxSearchTerms": 12,
+      "maxSearchResultsPerTerm": 6,
+      "maxEntrySymbols": 4,
+      "maxCardsPerStep": 5,
+      "maxCards": 14,
+      "maxTokens": 3200,
+      "maxSkeletonsPerStep": 1,
+      "skeletonMaxLines": 120,
+      "skeletonMaxTokens": 1500
+    },
+    "scoring": {
+      "weights": {
+        "tokenEfficiency": 0.45,
+        "coverageQuality": 0.25,
+        "efficiencyScore": 0.2,
+        "precisionQuality": 0.1
+      },
+      "thresholds": {
+        "sdlWin": 5,
+        "traditionalWin": -5
+      }
+    }
+  },
+  "tasks": [
+    {
+      "id": "frontend-ui-1-debug-docs-navigation-state-regressi",
+      "repoId": "zod-oss",
+      "category": "bug-fix",
+      "difficulty": "hard",
+      "title": "Debug docs navigation state regression",
+      "description": "frontend-ui benchmark scenario: Debug docs navigation state regression.",
+      "tags": [
+        "frontend-ui",
+        "bug-fix",
+        "repo:zod-oss"
+      ],
+      "contextTargets": {
+        "files": [
+          "packages/docs/app/layout.tsx",
+          "packages/docs/components/sidebar-item.tsx",
+          "packages/docs/app/api/search/route.ts"
+        ],
+        "symbols": [
+          "Layout",
+          "SidebarItem",
+          "GET"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "frontend-ui-1-debug-docs-navigation-state-regressi-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Debug docs navigation state regression. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "frontend-ui-1-debug-docs-navigation-state-regressi-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Debug docs navigation state regression. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "frontend-ui-1-debug-docs-navigation-state-regressi-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Debug docs navigation state regression. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "frontend-ui-2-investigate-docs-search-latency-path",
+      "repoId": "zod-oss",
+      "category": "performance",
+      "difficulty": "medium",
+      "title": "Investigate docs search latency path",
+      "description": "frontend-ui benchmark scenario: Investigate docs search latency path.",
+      "tags": [
+        "frontend-ui",
+        "performance",
+        "repo:zod-oss"
+      ],
+      "contextTargets": {
+        "files": [
+          "packages/docs/app/layout.tsx",
+          "packages/docs/components/sidebar-item.tsx",
+          "packages/docs/app/api/search/route.ts"
+        ],
+        "symbols": [
+          "Layout",
+          "SidebarItem",
+          "GET"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "frontend-ui-2-investigate-docs-search-latency-path-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Investigate docs search latency path. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "frontend-ui-2-investigate-docs-search-latency-path-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Investigate docs search latency path. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "frontend-ui-2-investigate-docs-search-latency-path-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Investigate docs search latency path. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "frontend-ui-3-review-accessibility-risk-in-docs-co",
+      "repoId": "zod-oss",
+      "category": "code-review",
+      "difficulty": "easy",
+      "title": "Review accessibility risk in docs components",
+      "description": "frontend-ui benchmark scenario: Review accessibility risk in docs components.",
+      "tags": [
+        "frontend-ui",
+        "code-review",
+        "repo:zod-oss"
+      ],
+      "contextTargets": {
+        "files": [
+          "packages/docs/app/layout.tsx",
+          "packages/docs/components/sidebar-item.tsx",
+          "packages/docs/app/api/search/route.ts"
+        ],
+        "symbols": [
+          "Layout",
+          "SidebarItem",
+          "GET"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "frontend-ui-3-review-accessibility-risk-in-docs-co-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Review accessibility risk in docs components. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "frontend-ui-3-review-accessibility-risk-in-docs-co-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Review accessibility risk in docs components. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "frontend-ui-3-review-accessibility-risk-in-docs-co-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Review accessibility risk in docs components. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "frontend-ui-4-understand-theme-render-pipeline-beh",
+      "repoId": "zod-oss",
+      "category": "understanding",
+      "difficulty": "hard",
+      "title": "Understand theme/render pipeline behavior",
+      "description": "frontend-ui benchmark scenario: Understand theme/render pipeline behavior.",
+      "tags": [
+        "frontend-ui",
+        "understanding",
+        "repo:zod-oss"
+      ],
+      "contextTargets": {
+        "files": [
+          "packages/docs/app/layout.tsx",
+          "packages/docs/components/sidebar-item.tsx",
+          "packages/docs/app/api/search/route.ts"
+        ],
+        "symbols": [
+          "Layout",
+          "SidebarItem",
+          "GET"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "frontend-ui-4-understand-theme-render-pipeline-beh-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Understand theme/render pipeline behavior. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "frontend-ui-4-understand-theme-render-pipeline-beh-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Understand theme/render pipeline behavior. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "frontend-ui-4-understand-theme-render-pipeline-beh-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Understand theme/render pipeline behavior. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "frontend-ui-5-plan-safe-docs-landing-ui-update",
+      "repoId": "zod-oss",
+      "category": "code-change",
+      "difficulty": "medium",
+      "title": "Plan safe docs landing UI update",
+      "description": "frontend-ui benchmark scenario: Plan safe docs landing UI update.",
+      "tags": [
+        "frontend-ui",
+        "code-change",
+        "repo:zod-oss"
+      ],
+      "contextTargets": {
+        "files": [
+          "packages/docs/app/layout.tsx",
+          "packages/docs/components/sidebar-item.tsx",
+          "packages/docs/app/api/search/route.ts"
+        ],
+        "symbols": [
+          "Layout",
+          "SidebarItem",
+          "GET"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "frontend-ui-5-plan-safe-docs-landing-ui-update-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Plan safe docs landing UI update. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "frontend-ui-5-plan-safe-docs-landing-ui-update-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Plan safe docs landing UI update. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "frontend-ui-5-plan-safe-docs-landing-ui-update-change",
+          "phase": "change",
+          "goal": "Define the minimal safe change plan.",
+          "prompt": "Change task: Plan safe docs landing UI update. Specify minimal edits and dependency impacts for a safe implementation."
+        },
+        {
+          "id": "frontend-ui-5-plan-safe-docs-landing-ui-update-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Plan safe docs landing UI update. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    }
+  ]
+}

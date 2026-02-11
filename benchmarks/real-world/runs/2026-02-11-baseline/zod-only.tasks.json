@@ -1,0 +1,173 @@
+{
+    "version":  3,
+    "defaults":  {
+                     "baseline":  {
+                                      "maxFilesPerStep":  4,
+                                      "maxTokensPerFile":  2200
+                                  },
+                     "sdl":  {
+                                 "maxSearchTerms":  12,
+                                 "maxSearchResultsPerTerm":  6,
+                                 "maxEntrySymbols":  4,
+                                 "maxCardsPerStep":  5,
+                                 "maxCards":  14,
+                                 "maxTokens":  3200,
+                                 "maxSkeletonsPerStep":  1,
+                                 "skeletonMaxLines":  120,
+                                 "skeletonMaxTokens":  1500
+                             },
+                     "scoring":  {
+                                     "weights":  {
+                                                     "tokenEfficiency":  0.45,
+                                                     "coverageQuality":  0.25,
+                                                     "efficiencyScore":  0.2,
+                                                     "precisionQuality":  0.1
+                                                 },
+                                     "thresholds":  {
+                                                        "sdlWin":  5,
+                                                        "traditionalWin":  -5
+                                                    }
+                                 }
+                 },
+    "tasks":  [
+                  {
+                      "id":  "zod-schema-validation-flow",
+                      "repoId":  "zod-oss",
+                      "category":  "understanding",
+                      "difficulty":  "medium",
+                      "title":  "Understand Zod schema parse and refinement flow",
+                      "description":  "Trace how Zod composes schema parsing, checks refinements, and surfaces typed errors.",
+                      "contextTargets":  {
+                                             "files":  [
+                                                           "src/types.ts",
+                                                           "src/ZodError.ts",
+                                                           "src/helpers/parseUtil.ts",
+                                                           "src/helpers/errorUtil.ts"
+                                                       ],
+                                             "symbols":  [
+                                                             "ZodType",
+                                                             "ParseStatus",
+                                                             "addIssueToContext",
+                                                             "ZodError"
+                                                         ]
+                                         },
+                      "workflow":  [
+                                       {
+                                           "id":  "zod-triage-parse-entry",
+                                           "phase":  "triage",
+                                           "goal":  "Locate schema parse entry points and shared parse context.",
+                                           "prompt":  "Find where parse and safeParse begin and how parse context is initialized.",
+                                           "entrySymbolHints":  [
+                                                                    "ZodType",
+                                                                    "ParseStatus"
+                                                                ]
+                                       },
+                                       {
+                                           "id":  "zod-investigate-refinements",
+                                           "phase":  "investigate",
+                                           "goal":  "Trace refinement checks and issue accumulation.",
+                                           "prompt":  "Follow refinement/check handling and determine where validation issues are appended to context."
+                                       },
+                                       {
+                                           "id":  "zod-validate-understanding",
+                                           "phase":  "validate",
+                                           "goal":  "Confirm how user-facing errors are materialized.",
+                                           "prompt":  "Validate how accumulated issues become ZodError instances and what information is preserved."
+                                       }
+                                   ]
+                  },
+                  {
+                      "id":  "zod-bug-fix-error-path-shape",
+                      "repoId":  "zod-oss",
+                      "category":  "bug-fix",
+                      "difficulty":  "hard",
+                      "title":  "Debug incorrect nested error path formatting",
+                      "description":  "Investigate a regression where nested object/array paths are reported incorrectly in errors.",
+                      "contextTargets":  {
+                                             "files":  [
+                                                           "src/ZodError.ts",
+                                                           "src/helpers/errorUtil.ts",
+                                                           "src/helpers/parseUtil.ts",
+                                                           "src/types.ts"
+                                                       ],
+                                             "symbols":  [
+                                                             "ZodIssue",
+                                                             "makeIssue",
+                                                             "addIssueToContext",
+                                                             "ZodError"
+                                                         ]
+                                         },
+                      "workflow":  [
+                                       {
+                                           "id":  "zod-triage-error-path",
+                                           "phase":  "triage",
+                                           "goal":  "Localize where path segments are assembled.",
+                                           "prompt":  "Nested validation errors show incorrect paths. Locate issue creation and path-merging logic.",
+                                           "artifacts":  {
+                                                             "stackTrace":  "Error: expected nested path user.addresses[0].street but got user.street"
+                                                         },
+                                           "entrySymbolHints":  [
+                                                                    "makeIssue",
+                                                                    "addIssueToContext"
+                                                                ]
+                                       },
+                                       {
+                                           "id":  "zod-investigate-aggregation",
+                                           "phase":  "investigate",
+                                           "goal":  "Trace issue propagation across parse frames.",
+                                           "prompt":  "Trace how issue objects propagate through parse context for nested schemas."
+                                       },
+                                       {
+                                           "id":  "zod-validate-fix",
+                                           "phase":  "validate",
+                                           "goal":  "Validate expected path output for nested array/object schemas.",
+                                           "prompt":  "Confirm the fix preserves correct path shape and does not break flat-schema error reporting."
+                                       }
+                                   ]
+                  },
+                  {
+                      "id":  "zod-impact-analysis-mini-refactor",
+                      "repoId":  "zod-oss",
+                      "category":  "impact-analysis",
+                      "difficulty":  "medium",
+                      "title":  "Assess blast radius of parse-context refactor",
+                      "description":  "Estimate impact of changing shared parse context helpers used across schema types.",
+                      "contextTargets":  {
+                                             "files":  [
+                                                           "src/helpers/parseUtil.ts",
+                                                           "src/helpers/errorUtil.ts",
+                                                           "src/types.ts"
+                                                       ],
+                                             "symbols":  [
+                                                             "ParseContext",
+                                                             "ParseStatus",
+                                                             "addIssueToContext"
+                                                         ]
+                                         },
+                      "workflow":  [
+                                       {
+                                           "id":  "zod-impact-triage",
+                                           "phase":  "triage",
+                                           "goal":  "Locate central parse context helpers and call sites.",
+                                           "prompt":  "Identify shared parse context helpers and high-fanout consumers before refactor.",
+                                           "entrySymbolHints":  [
+                                                                    "ParseContext",
+                                                                    "ParseStatus"
+                                                                ]
+                                       },
+                                       {
+                                           "id":  "zod-impact-investigate",
+                                           "phase":  "investigate",
+                                           "goal":  "Trace type/shape coupling in parse and error utilities.",
+                                           "prompt":  "Trace dependencies between parse context shape and issue/error construction."
+                                       },
+                                       {
+                                           "id":  "zod-impact-validate",
+                                           "phase":  "validate",
+                                           "goal":  "Produce risk checklist for refactor validation.",
+                                           "prompt":  "List affected interfaces and tests needed to validate the refactor safely."
+                                       }
+                                   ]
+                  }
+              ]
+}

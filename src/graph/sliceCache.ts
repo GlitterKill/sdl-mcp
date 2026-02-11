@@ -26,6 +26,7 @@ interface SliceCacheEntry {
 const SLICE_CACHE_TTL_MS = 60_000;
 const SLICE_CACHE_MAX = 100;
 const sliceCache = new Map<string, SliceCacheEntry>();
+const accessOrder: string[] = [];
 
 interface SliceCacheStats {
   hits: number;
@@ -82,6 +83,14 @@ export function getSliceCacheKey(request: SliceBuildRequest): string {
   return `${request.repoId}:${request.versionId}:${stableStringify(context)}`;
 }
 
+function promoteAccessOrder(key: string): void {
+  const index = accessOrder.indexOf(key);
+  if (index !== -1) {
+    accessOrder.splice(index, 1);
+  }
+  accessOrder.push(key);
+}
+
 export function getCachedSlice(key: string): GraphSlice | null {
   const entry = sliceCache.get(key);
   if (!entry) {
@@ -91,30 +100,46 @@ export function getCachedSlice(key: string): GraphSlice | null {
   }
   if (entry.expiresAt <= Date.now()) {
     sliceCache.delete(key);
+    removeFromAccessOrder(key);
     cacheStats.currentSize--;
     cacheStats.misses++;
     updateHitRate();
     return null;
   }
+  promoteAccessOrder(key);
   cacheStats.hits++;
   updateHitRate();
   return entry.slice;
 }
 
+function removeFromAccessOrder(key: string): void {
+  const index = accessOrder.indexOf(key);
+  if (index !== -1) {
+    accessOrder.splice(index, 1);
+  }
+}
+
 export function setCachedSlice(key: string, slice: GraphSlice): void {
+  if (sliceCache.has(key)) {
+    sliceCache.delete(key);
+    removeFromAccessOrder(key);
+    cacheStats.currentSize--;
+  }
   if (sliceCache.size >= SLICE_CACHE_MAX) {
-    const oldestKey = sliceCache.keys().next().value;
-    if (oldestKey) {
-      sliceCache.delete(oldestKey);
+    const lruKey = accessOrder.shift();
+    if (lruKey) {
+      sliceCache.delete(lruKey);
       cacheStats.evictions++;
       cacheStats.currentSize--;
     }
   }
+  const now = Date.now();
   sliceCache.set(key, {
     slice,
-    expiresAt: Date.now() + SLICE_CACHE_TTL_MS,
-    createdAt: Date.now(),
+    expiresAt: now + SLICE_CACHE_TTL_MS,
+    createdAt: now,
   });
+  accessOrder.push(key);
   cacheStats.currentSize++;
 }
 
@@ -127,12 +152,14 @@ export function invalidateVersion(versionId: VersionId): void {
   }
   for (const key of keysToDelete) {
     sliceCache.delete(key);
+    removeFromAccessOrder(key);
     cacheStats.currentSize--;
   }
 }
 
 export function clearSliceCache(): void {
   sliceCache.clear();
+  accessOrder.length = 0;
   cacheStats = {
     hits: 0,
     misses: 0,

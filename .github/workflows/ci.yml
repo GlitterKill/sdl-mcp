@@ -7,12 +7,15 @@ on:
   pull_request:
     branches:
       - main
+  schedule:
+    - cron: "23 7 * * *"
   workflow_dispatch:
 
 jobs:
   ci:
     name: CI (${{ matrix.os }}, Node ${{ matrix.node-version }})
     runs-on: ${{ matrix.os }}
+    if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
@@ -108,6 +111,30 @@ jobs:
 
           echo "[PASS] Benchmark guardrails passed"
 
+      - name: Setup external benchmark repos (matrix smoke)
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
+        run: npm run benchmark:setup-external
+
+      - name: Build benchmark matrix config (matrix smoke)
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const base = JSON.parse(fs.readFileSync('config/sdlmcp.config.json', 'utf8'));
+            const ext = JSON.parse(fs.readFileSync('benchmarks/real-world/external-repos.config.json', 'utf8'));
+            const merged = { ...base, repos: [...(base.repos || []), ...(ext.repos || [])] };
+            fs.writeFileSync('benchmarks/real-world/benchmark.config.json', JSON.stringify(merged, null, 2) + '\\n');
+          "
+
+      - name: Run benchmark matrix smoke
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
+        run: npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-smoke --limit-runs 2 --skip-index
+
+      - name: Validate benchmark matrix smoke claims
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
+        run: npx tsx scripts/check-benchmark-claims.ts --in .benchmark/matrix-smoke/aggregate.json --min-family-p50 30 --min-family-p25 20 --min-task-floor 5
+
       - name: Verify runtime entrypoints
         shell: bash
         run: |
@@ -127,6 +154,56 @@ jobs:
         run: |
           echo "CI completed on ${{ matrix.os }} with Node ${{ matrix.node-version }}"
           echo "This validates cross-platform behavior for all language adapters:"
+
+  benchmark-matrix-nightly:
+    name: Benchmark Matrix Nightly
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all
+        run: npm run build:all
+
+      - name: Setup external benchmark repos
+        run: npm run benchmark:setup-external
+
+      - name: Build benchmark matrix config
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const base = JSON.parse(fs.readFileSync('config/sdlmcp.config.json', 'utf8'));
+            const ext = JSON.parse(fs.readFileSync('benchmarks/real-world/external-repos.config.json', 'utf8'));
+            const merged = { ...base, repos: [...(base.repos || []), ...(ext.repos || [])] };
+            fs.writeFileSync('benchmarks/real-world/benchmark.config.json', JSON.stringify(merged, null, 2) + '\\n');
+          "
+
+      - name: Run full benchmark matrix
+        run: npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-nightly
+
+      - name: Validate matrix benchmark claims
+        run: npx tsx scripts/check-benchmark-claims.ts --in .benchmark/matrix-nightly/aggregate.json --min-family-p50 50 --min-family-p25 40 --min-task-floor 20
+
+      - name: Upload matrix artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-matrix-nightly
+          path: .benchmark/matrix-nightly/**
+          retention-days: 14
 
   sync-memory:
     name: Sync Indexed Memory (${{ matrix.os }}, Node ${{ matrix.node-version }})

@@ -8,7 +8,7 @@
  * - Configurable size limits per cache type
  */
 
-import type { SymbolCard, GraphSlice } from "../mcp/types.js";
+import type { SymbolCard } from "../mcp/types.js";
 import type { VersionId, SymbolId, RepoId } from "../db/schema.js";
 
 interface CacheEntry<T> {
@@ -260,7 +260,6 @@ class LRUCache<T> {
 export const symbolCardCache = new LRUCache<SymbolCard>(
   DEFAULT_SYMBOL_CACHE_CONFIG,
 );
-export const graphSliceCache = new LRUCache<GraphSlice>(DEFAULT_CACHE_CONFIG);
 
 /**
  * Cache key generators
@@ -273,26 +272,12 @@ export function makeSymbolCardCacheKey(
   return `${repoId}:${symbolId}:${versionId}`;
 }
 
-export function makeGraphSliceCacheKey(
-  repoId: RepoId,
-  versionId: VersionId,
-  entrySymbols: SymbolId[],
-  budget: { maxCards?: number; maxEstimatedTokens?: number },
-): string {
-  const budgetStr = `${budget.maxCards || 0}:${budget.maxEstimatedTokens || 0}`;
-  const symbolsStr = [...entrySymbols].sort().join(",");
-  return `${repoId}:${versionId}:${symbolsStr}:${budgetStr}`;
-}
 
 /**
  * Cache statistics retrieval
  */
 export function getSymbolCardCacheStats(): CacheStats {
   return symbolCardCache.getStats();
-}
-
-export function getGraphSliceCacheStats(): CacheStats {
-  return graphSliceCache.getStats();
 }
 
 /**
@@ -302,16 +287,11 @@ export function invalidateSymbolCardVersion(versionId: VersionId): void {
   symbolCardCache.invalidateVersion(versionId);
 }
 
-export function invalidateGraphSliceVersion(versionId: VersionId): void {
-  graphSliceCache.invalidateVersion(versionId);
-}
-
 /**
  * Clears all caches
  */
 export function clearAllCaches(): void {
   symbolCardCache.clear();
-  graphSliceCache.clear();
 }
 
 /**
@@ -319,7 +299,6 @@ export function clearAllCaches(): void {
  */
 export function resetAllCacheStats(): void {
   symbolCardCache.resetStats();
-  graphSliceCache.resetStats();
 }
 
 export { LRUCache };

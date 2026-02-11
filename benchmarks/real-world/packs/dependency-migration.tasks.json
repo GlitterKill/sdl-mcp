@@ -1,0 +1,265 @@
+{
+  "version": 3,
+  "defaults": {
+    "baseline": {
+      "maxFilesPerStep": 4,
+      "maxTokensPerFile": 2200
+    },
+    "sdl": {
+      "maxSearchTerms": 12,
+      "maxSearchResultsPerTerm": 6,
+      "maxEntrySymbols": 4,
+      "maxCardsPerStep": 5,
+      "maxCards": 14,
+      "maxTokens": 3200,
+      "maxSkeletonsPerStep": 1,
+      "skeletonMaxLines": 120,
+      "skeletonMaxTokens": 1500
+    },
+    "scoring": {
+      "weights": {
+        "tokenEfficiency": 0.45,
+        "coverageQuality": 0.25,
+        "efficiencyScore": 0.2,
+        "precisionQuality": 0.1
+      },
+      "thresholds": {
+        "sdlWin": 5,
+        "traditionalWin": -5
+      }
+    }
+  },
+  "tasks": [
+    {
+      "id": "dependency-migration-1-assess-tree-sitter-upgrade-blast-rad",
+      "repoId": "my-repo",
+      "category": "impact-analysis",
+      "difficulty": "hard",
+      "title": "Assess tree-sitter upgrade blast radius",
+      "description": "dependency-migration benchmark scenario: Assess tree-sitter upgrade blast radius.",
+      "tags": [
+        "dependency-migration",
+        "impact-analysis",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "package.json",
+          "src/indexer/treesitter/grammarLoader.ts",
+          "src/config/types.ts"
+        ],
+        "symbols": [
+          "loadGrammar",
+          "AppConfigSchema",
+          "indexRepo"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "dependency-migration-1-assess-tree-sitter-upgrade-blast-rad-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Assess tree-sitter upgrade blast radius. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "dependency-migration-1-assess-tree-sitter-upgrade-blast-rad-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Assess tree-sitter upgrade blast radius. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "dependency-migration-1-assess-tree-sitter-upgrade-blast-rad-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Assess tree-sitter upgrade blast radius. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "dependency-migration-2-plan-major-schema-validation-library",
+      "repoId": "my-repo",
+      "category": "code-change",
+      "difficulty": "medium",
+      "title": "Plan major schema-validation library upgrade",
+      "description": "dependency-migration benchmark scenario: Plan major schema-validation library upgrade.",
+      "tags": [
+        "dependency-migration",
+        "code-change",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "package.json",
+          "src/indexer/treesitter/grammarLoader.ts",
+          "src/config/types.ts"
+        ],
+        "symbols": [
+          "loadGrammar",
+          "AppConfigSchema",
+          "indexRepo"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "dependency-migration-2-plan-major-schema-validation-library-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Plan major schema-validation library upgrade. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "dependency-migration-2-plan-major-schema-validation-library-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Plan major schema-validation library upgrade. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "dependency-migration-2-plan-major-schema-validation-library-change",
+          "phase": "change",
+          "goal": "Define the minimal safe change plan.",
+          "prompt": "Change task: Plan major schema-validation library upgrade. Specify minimal edits and dependency impacts for a safe implementation."
+        },
+        {
+          "id": "dependency-migration-2-plan-major-schema-validation-library-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Plan major schema-validation library upgrade. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "dependency-migration-3-review-runtime-toolchain-upgrade-imp",
+      "repoId": "my-repo",
+      "category": "feature-review",
+      "difficulty": "easy",
+      "title": "Review runtime/toolchain upgrade implications",
+      "description": "dependency-migration benchmark scenario: Review runtime/toolchain upgrade implications.",
+      "tags": [
+        "dependency-migration",
+        "feature-review",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "package.json",
+          "src/indexer/treesitter/grammarLoader.ts",
+          "src/config/types.ts"
+        ],
+        "symbols": [
+          "loadGrammar",
+          "AppConfigSchema",
+          "indexRepo"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "dependency-migration-3-review-runtime-toolchain-upgrade-imp-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Review runtime/toolchain upgrade implications. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "dependency-migration-3-review-runtime-toolchain-upgrade-imp-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Review runtime/toolchain upgrade implications. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "dependency-migration-3-review-runtime-toolchain-upgrade-imp-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Review runtime/toolchain upgrade implications. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "dependency-migration-4-debug-db-driver-compatibility-regres",
+      "repoId": "my-repo",
+      "category": "bug-fix",
+      "difficulty": "hard",
+      "title": "Debug DB-driver compatibility regression",
+      "description": "dependency-migration benchmark scenario: Debug DB-driver compatibility regression.",
+      "tags": [
+        "dependency-migration",
+        "bug-fix",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "package.json",
+          "src/indexer/treesitter/grammarLoader.ts",
+          "src/config/types.ts"
+        ],
+        "symbols": [
+          "loadGrammar",
+          "AppConfigSchema",
+          "indexRepo"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "dependency-migration-4-debug-db-driver-compatibility-regres-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Debug DB-driver compatibility regression. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "dependency-migration-4-debug-db-driver-compatibility-regres-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Debug DB-driver compatibility regression. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "dependency-migration-4-debug-db-driver-compatibility-regres-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Debug DB-driver compatibility regression. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "dependency-migration-5-triage-compile-test-drift-after-depe",
+      "repoId": "my-repo",
+      "category": "test-triage",
+      "difficulty": "medium",
+      "title": "Triage compile/test drift after dependency bump",
+      "description": "dependency-migration benchmark scenario: Triage compile/test drift after dependency bump.",
+      "tags": [
+        "dependency-migration",
+        "test-triage",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "package.json",
+          "src/indexer/treesitter/grammarLoader.ts",
+          "src/config/types.ts"
+        ],
+        "symbols": [
+          "loadGrammar",
+          "AppConfigSchema",
+          "indexRepo"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "dependency-migration-5-triage-compile-test-drift-after-depe-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Triage compile/test drift after dependency bump. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "dependency-migration-5-triage-compile-test-drift-after-depe-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Triage compile/test drift after dependency bump. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "dependency-migration-5-triage-compile-test-drift-after-depe-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Triage compile/test drift after dependency bump. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    }
+  ]
+}

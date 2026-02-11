@@ -87,6 +87,8 @@ sdl-mcp serve --stdio
 - `import` - import sync artifact
 - `pull` - pull by version/commit with fallback behavior
 - `benchmark:ci` - run CI benchmark and threshold checks
+- `benchmark:real` - run realism-first workflow benchmark
+- `benchmark:matrix` - run pack/repo matrix benchmark and aggregate family stats
 - `version` - show version and environment info
 
 ## MCP Tools

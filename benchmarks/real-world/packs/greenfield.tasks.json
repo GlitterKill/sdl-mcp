@@ -1,0 +1,271 @@
+{
+  "version": 3,
+  "defaults": {
+    "baseline": {
+      "maxFilesPerStep": 4,
+      "maxTokensPerFile": 2200
+    },
+    "sdl": {
+      "maxSearchTerms": 12,
+      "maxSearchResultsPerTerm": 6,
+      "maxEntrySymbols": 4,
+      "maxCardsPerStep": 5,
+      "maxCards": 14,
+      "maxTokens": 3200,
+      "maxSkeletonsPerStep": 1,
+      "skeletonMaxLines": 120,
+      "skeletonMaxTokens": 1500
+    },
+    "scoring": {
+      "weights": {
+        "tokenEfficiency": 0.45,
+        "coverageQuality": 0.25,
+        "efficiencyScore": 0.2,
+        "precisionQuality": 0.1
+      },
+      "thresholds": {
+        "sdlWin": 5,
+        "traditionalWin": -5
+      }
+    }
+  },
+  "tasks": [
+    {
+      "id": "greenfield-1-scope-new-cli-command-integration",
+      "repoId": "my-repo",
+      "category": "code-change",
+      "difficulty": "hard",
+      "title": "Scope new CLI command integration",
+      "description": "greenfield benchmark scenario: Scope new CLI command integration.",
+      "tags": [
+        "greenfield",
+        "code-change",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/cli/index.ts",
+          "src/mcp/tools.ts",
+          "src/agent/orchestrator.ts"
+        ],
+        "symbols": [
+          "main",
+          "setupHandlers",
+          "orchestrateTask"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "greenfield-1-scope-new-cli-command-integration-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Scope new CLI command integration. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "greenfield-1-scope-new-cli-command-integration-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Scope new CLI command integration. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "greenfield-1-scope-new-cli-command-integration-change",
+          "phase": "change",
+          "goal": "Define the minimal safe change plan.",
+          "prompt": "Change task: Scope new CLI command integration. Specify minimal edits and dependency impacts for a safe implementation."
+        },
+        {
+          "id": "greenfield-1-scope-new-cli-command-integration-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Scope new CLI command integration. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "greenfield-2-design-new-mcp-tool-workflow",
+      "repoId": "my-repo",
+      "category": "feature-review",
+      "difficulty": "medium",
+      "title": "Design new MCP tool workflow",
+      "description": "greenfield benchmark scenario: Design new MCP tool workflow.",
+      "tags": [
+        "greenfield",
+        "feature-review",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/cli/index.ts",
+          "src/mcp/tools.ts",
+          "src/agent/orchestrator.ts"
+        ],
+        "symbols": [
+          "main",
+          "setupHandlers",
+          "orchestrateTask"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "greenfield-2-design-new-mcp-tool-workflow-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Design new MCP tool workflow. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "greenfield-2-design-new-mcp-tool-workflow-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Design new MCP tool workflow. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "greenfield-2-design-new-mcp-tool-workflow-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Design new MCP tool workflow. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "greenfield-3-plan-new-slice-ranking-signal-featur",
+      "repoId": "my-repo",
+      "category": "code-change",
+      "difficulty": "easy",
+      "title": "Plan new slice-ranking signal feature",
+      "description": "greenfield benchmark scenario: Plan new slice-ranking signal feature.",
+      "tags": [
+        "greenfield",
+        "code-change",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/cli/index.ts",
+          "src/mcp/tools.ts",
+          "src/agent/orchestrator.ts"
+        ],
+        "symbols": [
+          "main",
+          "setupHandlers",
+          "orchestrateTask"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "greenfield-3-plan-new-slice-ranking-signal-featur-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Plan new slice-ranking signal feature. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "greenfield-3-plan-new-slice-ranking-signal-featur-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Plan new slice-ranking signal feature. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "greenfield-3-plan-new-slice-ranking-signal-featur-change",
+          "phase": "change",
+          "goal": "Define the minimal safe change plan.",
+          "prompt": "Change task: Plan new slice-ranking signal feature. Specify minimal edits and dependency impacts for a safe implementation."
+        },
+        {
+          "id": "greenfield-3-plan-new-slice-ranking-signal-featur-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Plan new slice-ranking signal feature. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "greenfield-4-map-sync-pipeline-for-new-capability",
+      "repoId": "my-repo",
+      "category": "understanding",
+      "difficulty": "hard",
+      "title": "Map sync pipeline for new capability",
+      "description": "greenfield benchmark scenario: Map sync pipeline for new capability.",
+      "tags": [
+        "greenfield",
+        "understanding",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/cli/index.ts",
+          "src/mcp/tools.ts",
+          "src/agent/orchestrator.ts"
+        ],
+        "symbols": [
+          "main",
+          "setupHandlers",
+          "orchestrateTask"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "greenfield-4-map-sync-pipeline-for-new-capability-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Map sync pipeline for new capability. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "greenfield-4-map-sync-pipeline-for-new-capability-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Map sync pipeline for new capability. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "greenfield-4-map-sync-pipeline-for-new-capability-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Map sync pipeline for new capability. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "greenfield-5-understand-adapter-plugin-extension-",
+      "repoId": "my-repo",
+      "category": "understanding",
+      "difficulty": "medium",
+      "title": "Understand adapter plugin extension points",
+      "description": "greenfield benchmark scenario: Understand adapter plugin extension points.",
+      "tags": [
+        "greenfield",
+        "understanding",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/cli/index.ts",
+          "src/mcp/tools.ts",
+          "src/agent/orchestrator.ts"
+        ],
+        "symbols": [
+          "main",
+          "setupHandlers",
+          "orchestrateTask"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "greenfield-5-understand-adapter-plugin-extension--triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Understand adapter plugin extension points. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "greenfield-5-understand-adapter-plugin-extension--investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Understand adapter plugin extension points. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "greenfield-5-understand-adapter-plugin-extension--validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Understand adapter plugin extension points. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    }
+  ]
+}

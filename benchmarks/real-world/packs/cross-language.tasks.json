@@ -1,0 +1,259 @@
+{
+  "version": 3,
+  "defaults": {
+    "baseline": {
+      "maxFilesPerStep": 4,
+      "maxTokensPerFile": 2200
+    },
+    "sdl": {
+      "maxSearchTerms": 12,
+      "maxSearchResultsPerTerm": 6,
+      "maxEntrySymbols": 4,
+      "maxCardsPerStep": 5,
+      "maxCards": 14,
+      "maxTokens": 3200,
+      "maxSkeletonsPerStep": 1,
+      "skeletonMaxLines": 120,
+      "skeletonMaxTokens": 1500
+    },
+    "scoring": {
+      "weights": {
+        "tokenEfficiency": 0.45,
+        "coverageQuality": 0.25,
+        "efficiencyScore": 0.2,
+        "precisionQuality": 0.1
+      },
+      "thresholds": {
+        "sdlWin": 5,
+        "traditionalWin": -5
+      }
+    }
+  },
+  "tasks": [
+    {
+      "id": "cross-language-1-fix-missed-java-call-edge-extraction",
+      "repoId": "my-repo",
+      "category": "bug-fix",
+      "difficulty": "hard",
+      "title": "Fix missed Java call-edge extraction pattern",
+      "description": "cross-language benchmark scenario: Fix missed Java call-edge extraction pattern.",
+      "tags": [
+        "cross-language",
+        "bug-fix",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/indexer/adapter/java.ts",
+          "src/indexer/adapter/python.ts",
+          "src/indexer/adapter/rust.ts"
+        ],
+        "symbols": [
+          "JavaAdapter",
+          "PythonAdapter",
+          "RustAdapter"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "cross-language-1-fix-missed-java-call-edge-extraction-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Fix missed Java call-edge extraction pattern. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "cross-language-1-fix-missed-java-call-edge-extraction-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Fix missed Java call-edge extraction pattern. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "cross-language-1-fix-missed-java-call-edge-extraction-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Fix missed Java call-edge extraction pattern. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "cross-language-2-trace-python-symbol-summary-behavior",
+      "repoId": "my-repo",
+      "category": "understanding",
+      "difficulty": "medium",
+      "title": "Trace Python symbol-summary behavior",
+      "description": "cross-language benchmark scenario: Trace Python symbol-summary behavior.",
+      "tags": [
+        "cross-language",
+        "understanding",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/indexer/adapter/java.ts",
+          "src/indexer/adapter/python.ts",
+          "src/indexer/adapter/rust.ts"
+        ],
+        "symbols": [
+          "JavaAdapter",
+          "PythonAdapter",
+          "RustAdapter"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "cross-language-2-trace-python-symbol-summary-behavior-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Trace Python symbol-summary behavior. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "cross-language-2-trace-python-symbol-summary-behavior-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Trace Python symbol-summary behavior. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "cross-language-2-trace-python-symbol-summary-behavior-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Trace Python symbol-summary behavior. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "cross-language-3-review-go-c-family-import-resolution",
+      "repoId": "my-repo",
+      "category": "code-review",
+      "difficulty": "easy",
+      "title": "Review Go/C-family import-resolution parity",
+      "description": "cross-language benchmark scenario: Review Go/C-family import-resolution parity.",
+      "tags": [
+        "cross-language",
+        "code-review",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/indexer/adapter/java.ts",
+          "src/indexer/adapter/python.ts",
+          "src/indexer/adapter/rust.ts"
+        ],
+        "symbols": [
+          "JavaAdapter",
+          "PythonAdapter",
+          "RustAdapter"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "cross-language-3-review-go-c-family-import-resolution-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Review Go/C-family import-resolution parity. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "cross-language-3-review-go-c-family-import-resolution-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Review Go/C-family import-resolution parity. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "cross-language-3-review-go-c-family-import-resolution-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Review Go/C-family import-resolution parity. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "cross-language-4-investigate-rust-adapter-hotspot-beh",
+      "repoId": "my-repo",
+      "category": "performance",
+      "difficulty": "hard",
+      "title": "Investigate Rust adapter hotspot behavior",
+      "description": "cross-language benchmark scenario: Investigate Rust adapter hotspot behavior.",
+      "tags": [
+        "cross-language",
+        "performance",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/indexer/adapter/java.ts",
+          "src/indexer/adapter/python.ts",
+          "src/indexer/adapter/rust.ts"
+        ],
+        "symbols": [
+          "JavaAdapter",
+          "PythonAdapter",
+          "RustAdapter"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "cross-language-4-investigate-rust-adapter-hotspot-beh-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Investigate Rust adapter hotspot behavior. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "cross-language-4-investigate-rust-adapter-hotspot-beh-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Investigate Rust adapter hotspot behavior. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "cross-language-4-investigate-rust-adapter-hotspot-beh-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Investigate Rust adapter hotspot behavior. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    },
+    {
+      "id": "cross-language-5-assess-c-and-kotlin-parity-risks",
+      "repoId": "my-repo",
+      "category": "impact-analysis",
+      "difficulty": "medium",
+      "title": "Assess C# and Kotlin parity risks",
+      "description": "cross-language benchmark scenario: Assess C# and Kotlin parity risks.",
+      "tags": [
+        "cross-language",
+        "impact-analysis",
+        "repo:my-repo"
+      ],
+      "contextTargets": {
+        "files": [
+          "src/indexer/adapter/java.ts",
+          "src/indexer/adapter/python.ts",
+          "src/indexer/adapter/rust.ts"
+        ],
+        "symbols": [
+          "JavaAdapter",
+          "PythonAdapter",
+          "RustAdapter"
+        ]
+      },
+      "workflow": [
+        {
+          "id": "cross-language-5-assess-c-and-kotlin-parity-risks-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage task: Assess C# and Kotlin parity risks. Identify the primary modules and likely risk hotspots."
+        },
+        {
+          "id": "cross-language-5-assess-c-and-kotlin-parity-risks-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate task: Assess C# and Kotlin parity risks. Follow request-to-effect flow and find likely failure/regression points."
+        },
+        {
+          "id": "cross-language-5-assess-c-and-kotlin-parity-risks-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate task: Assess C# and Kotlin parity risks. List tests and checks that prove the issue is solved without regressions."
+        }
+      ]
+    }
+  ]
+}
