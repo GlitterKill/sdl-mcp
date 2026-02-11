@@ -1,0 +1,6045 @@
+
+> sdl-mcp@0.6.0 test
+> node scripts/run-tests.mjs
+
+TAP version 13
+# [WARN] Invalid maxHops value, using default of 3 {"maxHops":0}
+# [WARN] Invalid maxHops value, using default of 3 {"maxHops":-1}
+# Subtest: BlastRadius Edge Cases
+    # Subtest: maxHops validation
+        # Subtest: should handle maxHops=0 gracefully (AC1)
+        ok 1 - should handle maxHops=0 gracefully (AC1)
+          ---
+          duration_ms: 1.1766
+          type: 'test'
+          ...
+        # Subtest: should handle negative maxHops gracefully
+        ok 2 - should handle negative maxHops gracefully
+          ---
+          duration_ms: 0.1036
+          type: 'test'
+          ...
+        1..2
+    ok 1 - maxHops validation
+      ---
+      duration_ms: 1.5771
+      type: 'suite'
+      ...
+    # Subtest: edge case combinations
+        # Subtest: should handle empty changed symbols list
+        ok 1 - should handle empty changed symbols list
+          ---
+          duration_ms: 0.1178
+          type: 'test'
+          ...
+        # Subtest: should handle graph with no edges
+        ok 2 - should handle graph with no edges
+          ---
+          duration_ms: 0.0664
+          type: 'test'
+          ...
+        1..2
+    ok 2 - edge case combinations
+      ---
+      duration_ms: 0.2488
+      type: 'suite'
+      ...
+    # Subtest: missing symbol handling
+        # Subtest: should handle missing symbol in graph gracefully (AC2)
+        ok 1 - should handle missing symbol in graph gracefully (AC2)
+          ---
+          duration_ms: 0.1238
+          type: 'test'
+          ...
+        # Subtest: should handle mix of present and missing symbols
+        ok 2 - should handle mix of present and missing symbols
+          ---
+          duration_ms: 0.1101
+          type: 'test'
+          ...
+        1..2
+    ok 3 - missing symbol handling
+      ---
+      duration_ms: 0.3772
+      type: 'suite'
+      ...
+    1..3
+ok 1 - BlastRadius Edge Cases
+  ---
+  duration_ms: 2.4518
+  type: 'suite'
+  ...
+# Subtest: LRU Cache
+    # Subtest: Basic cache operations
+        # Subtest: should store and retrieve values
+        ok 1 - should store and retrieve values
+          ---
+          duration_ms: 0.4337
+          type: 'test'
+          ...
+        # Subtest: should return undefined for non-existent keys
+        ok 2 - should return undefined for non-existent keys
+          ---
+          duration_ms: 0.0627
+          type: 'test'
+          ...
+        # Subtest: should update existing values
+        ok 3 - should update existing values
+          ---
+          duration_ms: 0.0673
+          type: 'test'
+          ...
+        # Subtest: should check key existence
+        ok 4 - should check key existence
+          ---
+          duration_ms: 0.0677
+          type: 'test'
+          ...
+        1..4
+    ok 1 - Basic cache operations
+      ---
+      duration_ms: 1.0352
+      type: 'suite'
+      ...
+    # Subtest: Version-based invalidation
+        # Subtest: should not return values from different versions
+        ok 1 - should not return values from different versions
+          ---
+          duration_ms: 0.0655
+          type: 'test'
+          ...
+        # Subtest: should invalidate all entries for a specific version
+        ok 2 - should invalidate all entries for a specific version
+          ---
+          duration_ms: 0.1612
+          type: 'test'
+          ...
+        1..2
+    ok 2 - Version-based invalidation
+      ---
+      duration_ms: 0.2903
+      type: 'suite'
+      ...
+    # Subtest: LRU eviction
+        # Subtest: should evict least recently used entry when max entries reached
+        ok 1 - should evict least recently used entry when max entries reached
+          ---
+          duration_ms: 0.1874
+          type: 'test'
+          ...
+        # Subtest: should update access order on get
+        ok 2 - should update access order on get
+          ---
+          duration_ms: 0.1256
+          type: 'test'
+          ...
+        1..2
+    ok 3 - LRU eviction
+      ---
+      duration_ms: 0.4112
+      type: 'suite'
+      ...
+    # Subtest: Cache statistics
+        # Subtest: should track hits and misses
+        ok 1 - should track hits and misses
+          ---
+          duration_ms: 0.1538
+          type: 'test'
+          ...
+        # Subtest: should track evictions
+        ok 2 - should track evictions
+          ---
+          duration_ms: 0.1781
+          type: 'test'
+          ...
+        # Subtest: should reset statistics
+        ok 3 - should reset statistics
+          ---
+          duration_ms: 0.0705
+          type: 'test'
+          ...
+        1..3
+    ok 4 - Cache statistics
+      ---
+      duration_ms: 0.46
+      type: 'suite'
+      ...
+    # Subtest: Size-based eviction
+        # Subtest: should evict when size limit reached
+        ok 1 - should evict when size limit reached
+          ---
+          duration_ms: 0.0841
+          type: 'test'
+          ...
+        1..1
+    ok 5 - Size-based eviction
+      ---
+      duration_ms: 0.1162
+      type: 'suite'
+      ...
+    # Subtest: Cache clearing
+        # Subtest: should clear all entries
+        ok 1 - should clear all entries
+          ---
+          duration_ms: 0.0601
+          type: 'test'
+          ...
+        1..1
+    ok 6 - Cache clearing
+      ---
+      duration_ms: 0.081
+      type: 'suite'
+      ...
+    1..6
+ok 2 - LRU Cache
+  ---
+  duration_ms: 2.7421
+  type: 'suite'
+  ...
+# Subtest: Global cache functions
+    # Subtest: Cache key generation
+        # Subtest: should generate symbol card cache keys
+        ok 1 - should generate symbol card cache keys
+          ---
+          duration_ms: 0.0792
+          type: 'test'
+          ...
+        # Subtest: should generate graph slice cache keys
+        ok 2 - should generate graph slice cache keys
+          ---
+          duration_ms: 0.0553
+          type: 'test'
+          ...
+        # Subtest: should not mutate input symbol order when generating graph slice cache keys
+        ok 3 - should not mutate input symbol order when generating graph slice cache keys
+          ---
+          duration_ms: 0.3534
+          type: 'test'
+          ...
+        1..3
+    ok 1 - Cache key generation
+      ---
+      duration_ms: 0.5324
+      type: 'suite'
+      ...
+    1..1
+ok 3 - Global cache functions
+  ---
+  duration_ms: 0.5668
+  type: 'suite'
+  ...
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+# Subtest: Example Plugin Integration Tests (V06-10)
+    # Subtest: AC1: Sample Plugin Indexing Tests
+        # Subtest: Symbol Extraction
+            # Subtest: should extract functions from .ex files
+            ok 1 - should extract functions from .ex files
+              ---
+              duration_ms: 4.7735
+              type: 'test'
+              ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+            # Subtest: should extract classes from .ex files
+            ok 2 - should extract classes from .ex files
+              ---
+              duration_ms: 1.5859
+              type: 'test'
+              ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+            # Subtest: should generate golden file for symbols
+            ok 3 - should generate golden file for symbols
+              ---
+              duration_ms: 1.7268
+              type: 'test'
+              ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+            # Subtest: should validate against golden file
+            ok 4 - should validate against golden file
+              ---
+              duration_ms: 1.8075
+              type: 'test'
+              ...
+            1..4
+        ok 1 - Symbol Extraction
+          ---
+          duration_ms: 10.3926
+          type: 'suite'
+          ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: Import Extraction
+            # Subtest: should extract imports from .ex files
+            ok 1 - should extract imports from .ex files
+              ---
+              duration_ms: 1.991
+              type: 'test'
+              ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+            # Subtest: should generate golden file for imports
+            ok 2 - should generate golden file for imports
+              ---
+              duration_ms: 1.5694
+              type: 'test'
+              ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+            # Subtest: should validate against golden file
+            ok 3 - should validate against golden file
+              ---
+              duration_ms: 1.4617
+              type: 'test'
+              ...
+            1..3
+        ok 2 - Import Extraction
+          ---
+          duration_ms: 5.2876
+          type: 'suite'
+          ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: Call Extraction
+            # Subtest: should extract function calls from .ex files
+            ok 1 - should extract function calls from .ex files
+              ---
+              duration_ms: 1.6392
+              type: 'test'
+              ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+            # Subtest: should extract method calls
+            ok 2 - should extract method calls
+              ---
+              duration_ms: 1.461
+              type: 'test'
+              ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+            # Subtest: should generate golden file for calls
+            ok 3 - should generate golden file for calls
+              ---
+              duration_ms: 1.4352
+              type: 'test'
+              ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+            # Subtest: should validate against golden file
+            ok 4 - should validate against golden file
+              ---
+              duration_ms: 1.3009
+              type: 'test'
+              ...
+            1..4
+        ok 3 - Call Extraction
+          ---
+          duration_ms: 6.0197
+          type: 'suite'
+          ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: AC1: Graph Extraction Tests
+            # Subtest: should extract complete graph data structure
+            ok 1 - should extract complete graph data structure
+              ---
+              duration_ms: 1.5678
+              type: 'test'
+              ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+            # Subtest: should maintain symbol ID references in calls
+            ok 2 - should maintain symbol ID references in calls
+              ---
+              duration_ms: 1.3336
+              type: 'test'
+              ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+            # Subtest: should validate graph structure integrity
+            ok 3 - should validate graph structure integrity
+              ---
+              duration_ms: 1.3407
+              type: 'test'
+              ...
+            1..3
+        ok 4 - AC1: Graph Extraction Tests
+          ---
+          duration_ms: 4.3645
+          type: 'suite'
+          ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: Adapter Metadata
+            # Subtest: should expose correct language ID
+            ok 1 - should expose correct language ID
+              ---
+              duration_ms: 1.2742
+              type: 'test'
+              ...
+# [INFO] Plugin loaded successfully {"name":"example-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-example-plugin\\\\example-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+            # Subtest: should expose correct file extensions
+            ok 2 - should expose correct file extensions
+              ---
+              duration_ms: 1.1393
+              type: 'test'
+              ...
+            1..2
+        ok 5 - Adapter Metadata
+          ---
+          duration_ms: 2.5088
+          type: 'suite'
+          ...
+        1..5
+    ok 1 - AC1: Sample Plugin Indexing Tests
+      ---
+      duration_ms: 29.2165
+      type: 'suite'
+      ...
+    1..1
+ok 4 - Example Plugin Integration Tests (V06-10)
+  ---
+  duration_ms: 29.3633
+  type: 'suite'
+  ...
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] Plugin loaded successfully {"name":"absolute-path-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-external-plugins\\\\absolute-path-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+# Subtest: External Plugin Loading Integration Tests (V06-10)
+    # Subtest: AC3: External Plugin Load Path Tests
+        # Subtest: should load plugin from absolute path
+        ok 1 - should load plugin from absolute path
+          ---
+          duration_ms: 4.389
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"relative-path-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-external-plugins\\\\relative-path-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should load plugin from relative path
+        ok 2 - should load plugin from relative path
+          ---
+          duration_ms: 1.9501
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"multi-plugin-1","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-external-plugins\\\\multi-plugin-1.mjs"}
+# [INFO] Plugin loaded successfully {"name":"multi-plugin-2","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-external-plugins\\\\multi-plugin-2.mjs"}
+# [INFO] All plugins unloaded {"count":2}
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should load multiple plugins from config paths
+        ok 3 - should load multiple plugins from config paths
+          ---
+          duration_ms: 3.6421
+          type: 'test'
+          ...
+        # Subtest: should handle non-existent plugin paths gracefully
+        ok 4 - should handle non-existent plugin paths gracefully
+          ---
+          duration_ms: 0.8553
+          type: 'test'
+          ...
+        1..4
+    ok 1 - AC3: External Plugin Load Path Tests
+      ---
+      duration_ms: 11.3487
+      type: 'suite'
+      ...
+# [INFO] Plugin loaded successfully {"name":"registry-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-external-plugins\\\\registry-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+    # Subtest: Plugin Registration in Adapter Registry
+        # Subtest: should register plugin adapters in registry
+        ok 1 - should register plugin adapters in registry
+          ---
+          duration_ms: 3.4332
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"multi-adapter-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-external-plugins\\\\multi-adapter-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should handle multiple adapters from single plugin
+        ok 2 - should handle multiple adapters from single plugin
+          ---
+          duration_ms: 1.6966
+          type: 'test'
+          ...
+        1..2
+    ok 2 - Plugin Registration in Adapter Registry
+      ---
+      duration_ms: 5.3331
+      type: 'suite'
+      ...
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] All plugins unloaded {"count":0}
+    # Subtest: Plugin Lifecycle and Error Handling
+        # Subtest: should fail gracefully on invalid plugin
+        ok 1 - should fail gracefully on invalid plugin
+          ---
+          duration_ms: 1.5908
+          type: 'test'
+          ...
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should handle incompatible API versions
+        ok 2 - should handle incompatible API versions
+          ---
+          duration_ms: 1.4988
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"bad-adapter-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-external-plugins\\\\bad-adapter-plugin.mjs"}
+# [ERROR] Failed to create adapters from plugin {"plugin":"bad-adapter-plugin","error":"Invalid adapter: must have extension, languageId, and factory function"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should handle plugin with invalid adapter structure
+        ok 3 - should handle plugin with invalid adapter structure
+          ---
+          duration_ms: 1.8783
+          type: 'test'
+          ...
+        1..3
+    ok 3 - Plugin Lifecycle and Error Handling
+      ---
+      duration_ms: 5.1986
+      type: 'suite'
+      ...
+# [INFO] Plugin loaded successfully {"name":"config-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-external-plugins\\\\config-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] All plugins unloaded {"count":0}
+    # Subtest: Config File Integration
+        # Subtest: should load plugins from config file
+        ok 1 - should load plugins from config file
+          ---
+          duration_ms: 2.1768
+          type: 'test'
+          ...
+        # Subtest: should handle disabled plugin configuration
+        ok 2 - should handle disabled plugin configuration
+          ---
+          duration_ms: 0.9616
+          type: 'test'
+          ...
+        1..2
+    ok 4 - Config File Integration
+      ---
+      duration_ms: 3.2074
+      type: 'suite'
+      ...
+    1..4
+ok 5 - External Plugin Loading Integration Tests (V06-10)
+  ---
+  duration_ms: 25.4707
+  type: 'suite'
+  ...
+# Subtest: Grammar Loading Integration Tests (ML-B.1, ML-B.3)
+    # Subtest: Python Grammar
+        # Subtest: should load tree-sitter-python grammar
+        ok 1 - should load tree-sitter-python grammar
+          ---
+          duration_ms: 9.8417
+          type: 'test'
+          ...
+        # Subtest: should parse basic Python constructs
+        ok 2 - should parse basic Python constructs
+          ---
+          duration_ms: 0.2102
+          type: 'test'
+          ...
+        1..2
+    ok 1 - Python Grammar
+      ---
+      duration_ms: 10.3646
+      type: 'suite'
+      ...
+    # Subtest: Go Grammar
+        # Subtest: should load tree-sitter-go grammar
+        ok 1 - should load tree-sitter-go grammar
+          ---
+          duration_ms: 3.3841
+          type: 'test'
+          ...
+        # Subtest: should parse basic Go constructs
+        ok 2 - should parse basic Go constructs
+          ---
+          duration_ms: 0.1607
+          type: 'test'
+          ...
+        1..2
+    ok 2 - Go Grammar
+      ---
+      duration_ms: 3.6647
+      type: 'suite'
+      ...
+    # Subtest: Java Grammar
+        # Subtest: should load tree-sitter-java grammar
+        ok 1 - should load tree-sitter-java grammar
+          ---
+          duration_ms: 4.3784
+          type: 'test'
+          ...
+        # Subtest: should parse basic Java constructs
+        ok 2 - should parse basic Java constructs
+          ---
+          duration_ms: 0.17
+          type: 'test'
+          ...
+        1..2
+    ok 3 - Java Grammar
+      ---
+      duration_ms: 4.7195
+      type: 'suite'
+      ...
+    # Subtest: C\# Grammar
+        # Subtest: should load tree-sitter-c-sharp grammar
+        ok 1 - should load tree-sitter-c-sharp grammar
+          ---
+          duration_ms: 4.6885
+          type: 'test'
+          ...
+        # Subtest: should parse basic C\# constructs
+        ok 2 - should parse basic C\# constructs
+          ---
+          duration_ms: 0.2881
+          type: 'test'
+          ...
+        1..2
+    ok 4 - C\# Grammar
+      ---
+      duration_ms: 5.1037
+      type: 'suite'
+      ...
+    # Subtest: C Grammar
+        # Subtest: should load tree-sitter-c grammar
+        ok 1 - should load tree-sitter-c grammar
+          ---
+          duration_ms: 4.2343
+          type: 'test'
+          ...
+        # Subtest: should parse basic C constructs
+        ok 2 - should parse basic C constructs
+          ---
+          duration_ms: 0.3329
+          type: 'test'
+          ...
+        1..2
+    ok 5 - C Grammar
+      ---
+      duration_ms: 4.6381
+      type: 'suite'
+      ...
+    # Subtest: C++ Grammar
+        # Subtest: should load tree-sitter-cpp grammar
+        ok 1 - should load tree-sitter-cpp grammar
+          ---
+          duration_ms: 5.9672
+          type: 'test'
+          ...
+        # Subtest: should parse basic C++ constructs
+        ok 2 - should parse basic C++ constructs
+          ---
+          duration_ms: 0.2874
+          type: 'test'
+          ...
+        1..2
+    ok 6 - C++ Grammar
+      ---
+      duration_ms: 6.3145
+      type: 'suite'
+      ...
+    # Subtest: PHP Grammar
+        # Subtest: should load tree-sitter-php grammar
+        ok 1 - should load tree-sitter-php grammar
+          ---
+          duration_ms: 5.9329
+          type: 'test'
+          ...
+        # Subtest: should parse basic PHP constructs
+        ok 2 - should parse basic PHP constructs
+          ---
+          duration_ms: 0.3214
+          type: 'test'
+          ...
+        1..2
+    ok 7 - PHP Grammar
+      ---
+      duration_ms: 6.3062
+      type: 'suite'
+      ...
+    # Subtest: Rust Grammar
+        # Subtest: should load tree-sitter-rust grammar
+        ok 1 - should load tree-sitter-rust grammar
+          ---
+          duration_ms: 4.393
+          type: 'test'
+          ...
+        # Subtest: should parse basic Rust constructs
+        ok 2 - should parse basic Rust constructs
+          ---
+          duration_ms: 0.2341
+          type: 'test'
+          ...
+        1..2
+    ok 8 - Rust Grammar
+      ---
+      duration_ms: 4.6764
+      type: 'suite'
+      ...
+    # Subtest: Kotlin Grammar
+        # Subtest: should load tree-sitter-kotlin grammar
+        ok 1 - should load tree-sitter-kotlin grammar
+          ---
+          duration_ms: 4.0101
+          type: 'test'
+          ...
+        # Subtest: should parse basic Kotlin constructs
+        ok 2 - should parse basic Kotlin constructs
+          ---
+          duration_ms: 0.2387
+          type: 'test'
+          ...
+        1..2
+    ok 9 - Kotlin Grammar
+      ---
+      duration_ms: 4.2975
+      type: 'suite'
+      ...
+    # Subtest: Bash Grammar
+        # Subtest: should load tree-sitter-bash grammar
+        ok 1 - should load tree-sitter-bash grammar
+          ---
+          duration_ms: 2.9777
+          type: 'test'
+          ...
+        # Subtest: should parse basic Bash constructs
+        ok 2 - should parse basic Bash constructs
+          ---
+          duration_ms: 0.1942
+          type: 'test'
+          ...
+        1..2
+    ok 10 - Bash Grammar
+      ---
+      duration_ms: 3.2247
+      type: 'suite'
+      ...
+    # Subtest: Cross-Language Parser Reuse
+        # Subtest: should allow multiple parsers with different languages
+        ok 1 - should allow multiple parsers with different languages
+          ---
+          duration_ms: 0.135
+          type: 'test'
+          ...
+        # Subtest: should allow single parser to switch languages
+        ok 2 - should allow single parser to switch languages
+          ---
+          duration_ms: 0.0835
+          type: 'test'
+          ...
+        1..2
+    ok 11 - Cross-Language Parser Reuse
+      ---
+      duration_ms: 0.2539
+      type: 'suite'
+      ...
+    1..11
+ok 6 - Grammar Loading Integration Tests (ML-B.1, ML-B.3)
+  ---
+  duration_ms: 54.7563
+  type: 'suite'
+  ...
+# ✓ Extracted 14 symbols for symbols.java
+# ✓ Extracted 7 imports for imports.java
+# ✓ Extracted 16 calls for calls.java
+# Subtest: Java Adapter Tests (ML-C3.x)
+    # Subtest: ML-C3.1: Symbol Extraction
+        # Subtest: should extract all symbols correctly
+        ok 1 - should extract all symbols correctly
+          ---
+          duration_ms: 5.4796
+          type: 'test'
+          ...
+        # Subtest: should extract classes with modifiers
+        ok 2 - should extract classes with modifiers
+          ---
+          duration_ms: 1.4104
+          type: 'test'
+          ...
+        # Subtest: should extract methods with visibility and signature
+        ok 3 - should extract methods with visibility and signature
+          ---
+          duration_ms: 1.3221
+          type: 'test'
+          ...
+        # Subtest: should identify constructors
+        ok 4 - should identify constructors
+          ---
+          duration_ms: 1.7831
+          type: 'test'
+          ...
+        # Subtest: should extract interfaces
+        ok 5 - should extract interfaces
+          ---
+          duration_ms: 1.2178
+          type: 'test'
+          ...
+        # Subtest: should extract enums
+        ok 6 - should extract enums
+          ---
+          duration_ms: 1.21
+          type: 'test'
+          ...
+        # Subtest: should extract records
+        ok 7 - should extract records
+          ---
+          duration_ms: 1.3139
+          type: 'test'
+          ...
+        # Subtest: should extract fields with visibility
+        ok 8 - should extract fields with visibility
+          ---
+          duration_ms: 1.1888
+          type: 'test'
+          ...
+        # Subtest: should extract package as module
+        ok 9 - should extract package as module
+          ---
+          duration_ms: 1.2956
+          type: 'test'
+          ...
+        1..9
+    ok 1 - ML-C3.1: Symbol Extraction
+      ---
+      duration_ms: 16.9022
+      type: 'suite'
+      ...
+    # Subtest: ML-C3.2: Import Extraction
+        # Subtest: should extract all imports correctly
+        ok 1 - should extract all imports correctly
+          ---
+          duration_ms: 1.1945
+          type: 'test'
+          ...
+        # Subtest: should parse single imports
+        ok 2 - should parse single imports
+          ---
+          duration_ms: 0.8002
+          type: 'test'
+          ...
+        # Subtest: should parse wildcard imports
+        ok 3 - should parse wildcard imports
+          ---
+          duration_ms: 0.814
+          type: 'test'
+          ...
+        # Subtest: should identify static imports
+        ok 4 - should identify static imports
+          ---
+          duration_ms: 0.7269
+          type: 'test'
+          ...
+        1..4
+    ok 2 - ML-C3.2: Import Extraction
+      ---
+      duration_ms: 3.6565
+      type: 'suite'
+      ...
+    # Subtest: ML-C3.3: Call Extraction
+        # Subtest: should extract all calls correctly
+        ok 1 - should extract all calls correctly
+          ---
+          duration_ms: 2.6873
+          type: 'test'
+          ...
+        # Subtest: should extract method calls with context
+        ok 2 - should extract method calls with context
+          ---
+          duration_ms: 2.868
+          type: 'test'
+          ...
+        # Subtest: should create constructor edges for new expressions
+        ok 3 - should create constructor edges for new expressions
+          ---
+          duration_ms: 1.9929
+          type: 'test'
+          ...
+        # Subtest: should capture chained calls
+        ok 4 - should capture chained calls
+          ---
+          duration_ms: 1.9351
+          type: 'test'
+          ...
+        # Subtest: should identify this calls
+        ok 5 - should identify this calls
+          ---
+          duration_ms: 1.8533
+          type: 'test'
+          ...
+        # Subtest: should identify super calls
+        ok 6 - should identify super calls
+          ---
+          duration_ms: 2.0301
+          type: 'test'
+          ...
+        # Subtest: should resolve calls to symbols in same file
+        ok 7 - should resolve calls to symbols in same file
+          ---
+          duration_ms: 1.8421
+          type: 'test'
+          ...
+        1..7
+    ok 3 - ML-C3.3: Call Extraction
+      ---
+      duration_ms: 15.3427
+      type: 'suite'
+      ...
+    1..3
+ok 7 - Java Adapter Tests (ML-C3.x)
+  ---
+  duration_ms: 36.1425
+  type: 'suite'
+  ...
+# ✓ Generated 21 symbols for symbols.py
+# calculateSum.signature: {
+#   "params": [
+#     {
+#       "name": "a",
+#       "type": "int"
+#     },
+#     {
+#       "name": "b",
+#       "type": "int"
+#     }
+#   ],
+#   "returns": "int"
+# }
+# ✓ Generated 29 imports for imports.py
+# ✓ Generated 44 calls for calls.py
+# Subtest: Python Adapter Tests (ML-C1.x)
+    # Subtest: ML-C1.1: Symbol Extraction
+        # Subtest: should extract all symbols correctly
+        ok 1 - should extract all symbols correctly
+          ---
+          duration_ms: 5.0194
+          type: 'test'
+          ...
+        # Subtest: should extract functions with params and return hints
+        ok 2 - should extract functions with params and return hints
+          ---
+          duration_ms: 1.6389
+          type: 'test'
+          ...
+        # Subtest: should extract classes with inheritance
+        ok 3 - should extract classes with inheritance
+          ---
+          duration_ms: 1.347
+          type: 'test'
+          ...
+        # Subtest: should detect visibility from naming conventions
+        ok 4 - should detect visibility from naming conventions
+          ---
+          duration_ms: 2.0129
+          type: 'test'
+          ...
+        # Subtest: should capture decorators
+        ok 5 - should capture decorators
+          ---
+          duration_ms: 1.3365
+          type: 'test'
+          ...
+        1..5
+    ok 1 - ML-C1.1: Symbol Extraction
+      ---
+      duration_ms: 11.8197
+      type: 'suite'
+      ...
+    # Subtest: ML-C1.2: Import Extraction
+        # Subtest: should extract all imports correctly
+        ok 1 - should extract all imports correctly
+          ---
+          duration_ms: 3.4802
+          type: 'test'
+          ...
+        # Subtest: should parse simple imports
+        ok 2 - should parse simple imports
+          ---
+          duration_ms: 2.451
+          type: 'test'
+          ...
+        # Subtest: should parse import with alias
+        ok 3 - should parse import with alias
+          ---
+          duration_ms: 2.4231
+          type: 'test'
+          ...
+        # Subtest: should parse from imports
+        ok 4 - should parse from imports
+          ---
+          duration_ms: 2.3679
+          type: 'test'
+          ...
+        # Subtest: should parse wildcard imports
+        ok 5 - should parse wildcard imports
+          ---
+          duration_ms: 2.4597
+          type: 'test'
+          ...
+        # Subtest: should identify relative imports
+        ok 6 - should identify relative imports
+          ---
+          duration_ms: 2.3035
+          type: 'test'
+          ...
+        1..6
+    ok 2 - ML-C1.2: Import Extraction
+      ---
+      duration_ms: 15.7264
+      type: 'suite'
+      ...
+    # Subtest: ML-C1.3: Call Extraction
+        # Subtest: should extract all calls correctly
+        ok 1 - should extract all calls correctly
+          ---
+          duration_ms: 7.5243
+          type: 'test'
+          ...
+        # Subtest: should extract basic function calls
+        ok 2 - should extract basic function calls
+          ---
+          duration_ms: 7.8531
+          type: 'test'
+          ...
+        # Subtest: should extract method calls with receiver context
+        ok 3 - should extract method calls with receiver context
+          ---
+          duration_ms: 6.5743
+          type: 'test'
+          ...
+        # Subtest: should extract constructor calls
+        ok 4 - should extract constructor calls
+          ---
+          duration_ms: 6.4928
+          type: 'test'
+          ...
+        # Subtest: should capture decorator calls
+        ok 5 - should capture decorator calls
+          ---
+          duration_ms: 6.5042
+          type: 'test'
+          ...
+        # Subtest: should extract chained method calls
+        ok 6 - should extract chained method calls
+          ---
+          duration_ms: 6.4745
+          type: 'test'
+          ...
+        1..6
+    ok 3 - ML-C1.3: Call Extraction
+      ---
+      duration_ms: 41.5592
+      type: 'suite'
+      ...
+    # Subtest: ML-C1.4: Golden File Validation
+        # Subtest: should match expected symbols
+        ok 1 - should match expected symbols
+          ---
+          duration_ms: 1.8844
+          type: 'test'
+          ...
+        # Subtest: should match expected imports
+        ok 2 - should match expected imports
+          ---
+          duration_ms: 2.3718
+          type: 'test'
+          ...
+        # Subtest: should match expected calls
+        ok 3 - should match expected calls
+          ---
+          duration_ms: 6.5353
+          type: 'test'
+          ...
+        1..3
+    ok 4 - ML-C1.4: Golden File Validation
+      ---
+      duration_ms: 10.8699
+      type: 'suite'
+      ...
+    1..4
+ok 8 - Python Adapter Tests (ML-C1.x)
+  ---
+  duration_ms: 80.2527
+  type: 'suite'
+  ...
+# Subtest: Round-Trip Sync Integration
+    # Subtest: should perform complete round-trip sync: export -> import -> verify
+    ok 1 - should perform complete round-trip sync: export -> import -> verify
+      ---
+      duration_ms: 60.8296
+      type: 'test'
+      ...
+    # Subtest: should pull from artifact when available, fallback to index when not
+    ok 2 - should pull from artifact when available, fallback to index when not
+      ---
+      duration_ms: 42.7264
+      type: 'test'
+      ...
+    # Subtest: should handle pull with no artifact and fallback disabled
+    ok 3 - should handle pull with no artifact and fallback disabled
+      ---
+      duration_ms: 1033.1946
+      type: 'test'
+      ...
+    # Subtest: should verify deterministic restore across multiple exports/imports
+    ok 4 - should verify deterministic restore across multiple exports/imports
+      ---
+      duration_ms: 19.6515
+      type: 'test'
+      ...
+    # Subtest: should handle pull with retry on transient failures
+    ok 5 - should handle pull with retry on transient failures
+      ---
+      duration_ms: 19.219
+      type: 'test'
+      ...
+    1..5
+ok 9 - Round-Trip Sync Integration
+  ---
+  duration_ms: 1176.3612
+  type: 'suite'
+  ...
+# ✓ Extracted 58 symbols and 75 calls
+#   - Function calls: 30
+#   - Method calls: 33
+#   - Macro calls: 12
+# Subtest: Rust Adapter Tests - Call Extraction (ML2-C3.3)
+    # Subtest: ML2-C3.3: Call Extraction
+        # Subtest: should extract function calls with caller context
+        ok 1 - should extract function calls with caller context
+          ---
+          duration_ms: 8.436
+          type: 'test'
+          ...
+        # Subtest: should extract method calls with receiver
+        ok 2 - should extract method calls with receiver
+          ---
+          duration_ms: 4.84
+          type: 'test'
+          ...
+        # Subtest: should extract associated function calls (Type::func())
+        ok 3 - should extract associated function calls (Type::func())
+          ---
+          duration_ms: 4.6242
+          type: 'test'
+          ...
+        # Subtest: should extract macro invocations as unresolved edges
+        ok 4 - should extract macro invocations as unresolved edges
+          ---
+          duration_ms: 4.5211
+          type: 'test'
+          ...
+        # Subtest: should extract calls from comprehensive fixture
+        ok 5 - should extract calls from comprehensive fixture
+          ---
+          duration_ms: 10.4031
+          type: 'test'
+          ...
+        # Subtest: should handle chained method calls
+        ok 6 - should handle chained method calls
+          ---
+          duration_ms: 4.6622
+          type: 'test'
+          ...
+        # Subtest: should track caller context correctly
+        ok 7 - should track caller context correctly
+          ---
+          duration_ms: 4.4865
+          type: 'test'
+          ...
+        1..7
+    ok 1 - ML2-C3.3: Call Extraction
+      ---
+      duration_ms: 42.465
+      type: 'suite'
+      ...
+    1..1
+ok 10 - Rust Adapter Tests - Call Extraction (ML2-C3.3)
+  ---
+  duration_ms: 42.7685
+  type: 'suite'
+  ...
+# ✓ Generated 25 symbols for symbols.sh
+# ✓ Generated 12 imports for imports.sh
+# ✓ Generated 54 calls for calls.sh
+# Subtest: Shell Adapter Tests (ML2-C5.x)
+    # Subtest: ML2-C5.1: Symbol Extraction
+        # Subtest: should extract all symbols correctly
+        ok 1 - should extract all symbols correctly
+          ---
+          duration_ms: 4.523
+          type: 'test'
+          ...
+        # Subtest: should extract functions
+        ok 2 - should extract functions
+          ---
+          duration_ms: 1.4043
+          type: 'test'
+          ...
+        # Subtest: should extract variables with export status
+        ok 3 - should extract variables with export status
+          ---
+          duration_ms: 1.3484
+          type: 'test'
+          ...
+        # Subtest: should extract aliases
+        ok 4 - should extract aliases
+          ---
+          duration_ms: 1.2632
+          type: 'test'
+          ...
+        1..4
+    ok 1 - ML2-C5.1: Symbol Extraction
+      ---
+      duration_ms: 8.9785
+      type: 'suite'
+      ...
+    # Subtest: ML2-C5.2: Import Extraction
+        # Subtest: should extract all imports correctly
+        ok 1 - should extract all imports correctly
+          ---
+          duration_ms: 5.5392
+          type: 'test'
+          ...
+        # Subtest: should parse source commands
+        ok 2 - should parse source commands
+          ---
+          duration_ms: 4.0425
+          type: 'test'
+          ...
+        # Subtest: should parse dot notation for sourcing
+        ok 3 - should parse dot notation for sourcing
+          ---
+          duration_ms: 3.9728
+          type: 'test'
+          ...
+        1..3
+    ok 2 - ML2-C5.2: Import Extraction
+      ---
+      duration_ms: 13.7577
+      type: 'suite'
+      ...
+    # Subtest: ML2-C5.3: Call Extraction
+        # Subtest: should extract all calls correctly
+        ok 1 - should extract all calls correctly
+          ---
+          duration_ms: 5.3806
+          type: 'test'
+          ...
+        # Subtest: should extract basic function calls
+        ok 2 - should extract basic function calls
+          ---
+          duration_ms: 4.7239
+          type: 'test'
+          ...
+        # Subtest: should extract function calls with arguments
+        ok 3 - should extract function calls with arguments
+          ---
+          duration_ms: 4.9782
+          type: 'test'
+          ...
+        # Subtest: should detect external command calls
+        ok 4 - should detect external command calls
+          ---
+          duration_ms: 4.6797
+          type: 'test'
+          ...
+        # Subtest: should detect alias invocations
+        ok 5 - should detect alias invocations
+          ---
+          duration_ms: 4.6268
+          type: 'test'
+          ...
+        # Subtest: should capture caller context for calls inside functions
+        ok 6 - should capture caller context for calls inside functions
+          ---
+          duration_ms: 5.3323
+          type: 'test'
+          ...
+        # Subtest: should identify calls in global scope
+        ok 7 - should identify calls in global scope
+          ---
+          duration_ms: 4.5567
+          type: 'test'
+          ...
+        # Subtest: should skip source and alias definitions
+        ok 8 - should skip source and alias definitions
+          ---
+          duration_ms: 4.5661
+          type: 'test'
+          ...
+        1..8
+    ok 3 - ML2-C5.3: Call Extraction
+      ---
+      duration_ms: 39.0458
+      type: 'suite'
+      ...
+    # Subtest: ML2-C5.4: Golden File Validation
+        # Subtest: should match expected symbols
+        ok 1 - should match expected symbols
+          ---
+          duration_ms: 1.7552
+          type: 'test'
+          ...
+        # Subtest: should match expected imports
+        ok 2 - should match expected imports
+          ---
+          duration_ms: 4.0536
+          type: 'test'
+          ...
+        # Subtest: should match expected calls
+        ok 3 - should match expected calls
+          ---
+          duration_ms: 4.7923
+          type: 'test'
+          ...
+        1..3
+    ok 4 - ML2-C5.4: Golden File Validation
+      ---
+      duration_ms: 10.6763
+      type: 'suite'
+      ...
+    1..4
+ok 11 - Shell Adapter Tests (ML2-C5.x)
+  ---
+  duration_ms: 72.7607
+  type: 'suite'
+  ...
+# Subtest: collectTestRefs Caching
+    # Subtest: Basic functionality
+        # Subtest: should collect test references on first run
+        ok 1 - should collect test references on first run
+          ---
+          duration_ms: 5.1932
+          type: 'test'
+          ...
+        # Subtest: should return empty map when no test files exist
+        ok 2 - should return empty map when no test files exist
+          ---
+          duration_ms: 1.0313
+          type: 'test'
+          ...
+        1..2
+    ok 1 - Basic functionality
+      ---
+      duration_ms: 6.4626
+      type: 'suite'
+      ...
+    # Subtest: Cache invalidation
+        # Subtest: should use cached results for unchanged files
+        ok 1 - should use cached results for unchanged files
+          ---
+          duration_ms: 5.7362
+          type: 'test'
+          ...
+        # Subtest: should re-scan modified files
+        ok 2 - should re-scan modified files
+          ---
+          duration_ms: 1.8247
+          type: 'test'
+          ...
+        # Subtest: should handle new files added between runs
+        ok 3 - should handle new files added between runs
+          ---
+          duration_ms: 1.899
+          type: 'test'
+          ...
+        1..3
+    ok 2 - Cache invalidation
+      ---
+      duration_ms: 9.6521
+      type: 'suite'
+      ...
+    # Subtest: Cache clearing
+        # Subtest: should clear cache for specific repo
+        ok 1 - should clear cache for specific repo
+          ---
+          duration_ms: 1.77
+          type: 'test'
+          ...
+        1..1
+    ok 3 - Cache clearing
+      ---
+      duration_ms: 1.933
+      type: 'suite'
+      ...
+    # Subtest: Multiple symbols per file
+        # Subtest: should track all symbols referenced in a file
+        ok 1 - should track all symbols referenced in a file
+          ---
+          duration_ms: 0.9603
+          type: 'test'
+          ...
+        1..1
+    ok 4 - Multiple symbols per file
+      ---
+      duration_ms: 1.0618
+      type: 'suite'
+      ...
+    # Subtest: File pattern matching
+        # Subtest: should match *.test.ts files
+        ok 1 - should match *.test.ts files
+          ---
+          duration_ms: 1.1745
+          type: 'test'
+          ...
+        # Subtest: should match *.spec.ts files
+        ok 2 - should match *.spec.ts files
+          ---
+          duration_ms: 1.2317
+          type: 'test'
+          ...
+        1..2
+    ok 5 - File pattern matching
+      ---
+      duration_ms: 2.4801
+      type: 'suite'
+      ...
+    # Subtest: Error handling
+        # Subtest: should handle file read errors gracefully
+        ok 1 - should handle file read errors gracefully
+          ---
+          duration_ms: 1.1257
+          type: 'test'
+          ...
+        1..1
+    ok 6 - Error handling
+      ---
+      duration_ms: 1.1786
+      type: 'suite'
+      ...
+    1..6
+ok 12 - collectTestRefs Caching
+  ---
+  duration_ms: 25.7358
+  type: 'suite'
+  ...
+# ✅ Skeleton text is byte-stable across 10 runs
+# ✅ Skeleton IR is byte-stable across 10 runs
+# ✅ IR hashes are stable: 9e06b0bde006fd637a05e2ca04b572edd88e359100d5215f94ff7c97b1316f57
+# ✅ Elided IR is deterministic: 34c7aa5c018075bc2c69a3be4109c8f3f5537fb48d9e9f3316e28ee3f82de97b
+# ✅ Side-effect IR is deterministic: 8c222f5b535afe82d9780b153fc4e0286c9062f6a2c219e6bf79e31c94e9cdbb
+# ✅ Complex nested IR is deterministic: ec3693d95ac5f919dc430c5e740bab82879bb275bb5f8f0a17d97c738dc14c23
+# ✅ Semantically equivalent ops produce same hash: 2970634c42e03761057edc0617c9c5a713199f973d5fbeb74268276f214733ab
+# ✅ Different ops produce different hashes
+# ✅ Determinism results saved to tests\\results\\skeleton-determinism.json
+# Subtest: Skeleton IR Determinism
+    # Subtest: should produce byte-stable skeleton text across multiple runs
+    ok 1 - should produce byte-stable skeleton text across multiple runs
+      ---
+      duration_ms: 0.9421
+      type: 'test'
+      ...
+    # Subtest: should produce byte-stable Skeleton IR across multiple runs
+    ok 2 - should produce byte-stable Skeleton IR across multiple runs
+      ---
+      duration_ms: 0.1397
+      type: 'test'
+      ...
+    # Subtest: should generate stable IR hashes for identical inputs
+    ok 3 - should generate stable IR hashes for identical inputs
+      ---
+      duration_ms: 0.1179
+      type: 'test'
+      ...
+    # Subtest: should produce deterministic results with elided blocks
+    ok 4 - should produce deterministic results with elided blocks
+      ---
+      duration_ms: 0.0991
+      type: 'test'
+      ...
+    # Subtest: should produce deterministic results with side-effect markers
+    ok 5 - should produce deterministic results with side-effect markers
+      ---
+      duration_ms: 0.1016
+      type: 'test'
+      ...
+    # Subtest: should maintain hash stability across complex nested structures
+    ok 6 - should maintain hash stability across complex nested structures
+      ---
+      duration_ms: 0.1616
+      type: 'test'
+      ...
+    # Subtest: should produce same hash for semantically equivalent operations
+    ok 7 - should produce same hash for semantically equivalent operations
+      ---
+      duration_ms: 0.0909
+      type: 'test'
+      ...
+    # Subtest: should produce different hashes for different operations
+    ok 8 - should produce different hashes for different operations
+      ---
+      duration_ms: 0.1138
+      type: 'test'
+      ...
+    # Subtest: should save determinism results for debugging
+    ok 9 - should save determinism results for debugging
+      ---
+      duration_ms: 1.0037
+      type: 'test'
+      ...
+    1..9
+ok 13 - Skeleton IR Determinism
+  ---
+  duration_ms: 3.5103
+  type: 'suite'
+  ...
+# Subtest: Skeleton Generator Unit Tests
+    # Subtest: skeleton file parsing
+        # Subtest: should be able to parse TypeScript files
+        ok 1 - should be able to parse TypeScript files
+          ---
+          duration_ms: 2.4549
+          type: 'test'
+          ...
+        # Subtest: should handle parse errors gracefully
+        ok 2 - should handle parse errors gracefully
+          ---
+          duration_ms: 1.4698
+          type: 'test'
+          ...
+        # Subtest: should support multiple file extensions
+        ok 3 - should support multiple file extensions
+          ---
+          duration_ms: 2.445
+          type: 'test'
+          ...
+        1..3
+    ok 1 - skeleton file parsing
+      ---
+      duration_ms: 6.861
+      type: 'suite'
+      ...
+    # Subtest: skeleton extraction logic
+        # Subtest: should preserve export statements
+        ok 1 - should preserve export statements
+          ---
+          duration_ms: 1.7489
+          type: 'test'
+          ...
+        # Subtest: should preserve function signatures
+        ok 2 - should preserve function signatures
+          ---
+          duration_ms: 1.5942
+          type: 'test'
+          ...
+        # Subtest: should preserve control flow statements
+        ok 3 - should preserve control flow statements
+          ---
+          duration_ms: 1.5245
+          type: 'test'
+          ...
+        # Subtest: should elide dense function bodies with // …
+        ok 4 - should elide dense function bodies with // …
+          ---
+          duration_ms: 1.6304
+          type: 'test'
+          ...
+        # Subtest: should preserve try-catch-finally blocks
+        ok 5 - should preserve try-catch-finally blocks
+          ---
+          duration_ms: 1.6697
+          type: 'test'
+          ...
+        # Subtest: should preserve for and while loops
+        ok 6 - should preserve for and while loops
+          ---
+          duration_ms: 1.6032
+          type: 'test'
+          ...
+        # Subtest: should handle class declarations
+        ok 7 - should handle class declarations
+          ---
+          duration_ms: 1.4382
+          type: 'test'
+          ...
+        # Subtest: should be deterministic for same input
+        ok 8 - should be deterministic for same input
+          ---
+          duration_ms: 1.6436
+          type: 'test'
+          ...
+        # Subtest: should include return and throw statements
+        ok 9 - should include return and throw statements
+          ---
+          duration_ms: 1.452
+          type: 'test'
+          ...
+        1..9
+    ok 2 - skeleton extraction logic
+      ---
+      duration_ms: 14.6985
+      type: 'suite'
+      ...
+    # Subtest: skeleton truncation
+        # Subtest: should respect maxLines limit
+        ok 1 - should respect maxLines limit
+          ---
+          duration_ms: 1.1999
+          type: 'test'
+          ...
+        # Subtest: should respect maxTokens limit
+        ok 2 - should respect maxTokens limit
+          ---
+          duration_ms: 1.251
+          type: 'test'
+          ...
+        # Subtest: should not truncate when within limits
+        ok 3 - should not truncate when within limits
+          ---
+          duration_ms: 1.0788
+          type: 'test'
+          ...
+        1..3
+    ok 3 - skeleton truncation
+      ---
+      duration_ms: 3.6164
+      type: 'suite'
+      ...
+    # Subtest: acceptance criteria
+        # Subtest: should be deterministic for same input (AC1)
+        ok 1 - should be deterministic for same input (AC1)
+          ---
+          duration_ms: 1.5953
+          type: 'test'
+          ...
+        # Subtest: should be cheaper than raw code (AC2)
+        ok 2 - should be cheaper than raw code (AC2)
+          ---
+          duration_ms: 1.3806
+          type: 'test'
+          ...
+        # Subtest: should preserve important identifiers when requested (AC3)
+        ok 3 - should preserve important identifiers when requested (AC3)
+          ---
+          duration_ms: 1.371
+          type: 'test'
+          ...
+        1..3
+    ok 4 - acceptance criteria
+      ---
+      duration_ms: 4.4313
+      type: 'suite'
+      ...
+    1..4
+ok 14 - Skeleton Generator Unit Tests
+  ---
+  duration_ms: 29.8978
+  type: 'suite'
+  ...
+# Subtest: Slice Cache - Cache key generation
+    # Subtest: should generate consistent cache keys for identical requests
+    ok 1 - should generate consistent cache keys for identical requests
+      ---
+      duration_ms: 5.4215
+      type: 'test'
+      ...
+    # Subtest: should generate different cache keys for different requests
+    ok 2 - should generate different cache keys for different requests
+      ---
+      duration_ms: 0.0982
+      type: 'test'
+      ...
+    1..2
+ok 15 - Slice Cache - Cache key generation
+  ---
+  duration_ms: 5.9453
+  type: 'test'
+  ...
+# Subtest: Slice Cache - Cache operations
+    # Subtest: should store and retrieve slices
+    ok 1 - should store and retrieve slices
+      ---
+      duration_ms: 0.2315
+      type: 'test'
+      ...
+    # Subtest: should store and retrieve slices
+    ok 2 - should store and retrieve slices
+      ---
+      duration_ms: 0.0576
+      type: 'test'
+      ...
+    # Subtest: should return null for non-existent keys
+    ok 3 - should return null for non-existent keys
+      ---
+      duration_ms: 0.0767
+      type: 'test'
+      ...
+    # Subtest: should return null for expired entries
+    ok 4 - should return null for expired entries
+      ---
+      duration_ms: 0.077
+      type: 'test'
+      ...
+    # Subtest: should track cache statistics
+    ok 5 - should track cache statistics
+      ---
+      duration_ms: 0.1437
+      type: 'test'
+      ...
+    # Subtest: should respect cache size limit
+    ok 6 - should respect cache size limit
+      ---
+      duration_ms: 0.2223
+      type: 'test'
+      ...
+    # Subtest: should clear all cache entries
+    ok 7 - should clear all cache entries
+      ---
+      duration_ms: 0.0938
+      type: 'test'
+      ...
+    1..7
+ok 16 - Slice Cache - Cache operations
+  ---
+  duration_ms: 1.4995
+  type: 'test'
+  ...
+# Subtest: Adapter Registry
+    # Subtest: should return null for unregistered extensions
+    ok 1 - should return null for unregistered extensions
+      ---
+      duration_ms: 0.4959
+      type: 'test'
+      ...
+    # Subtest: should return null for unregistered language IDs
+    ok 2 - should return null for unregistered language IDs
+      ---
+      duration_ms: 0.1191
+      type: 'test'
+      ...
+    # Subtest: should register adapters with factory functions
+    ok 3 - should register adapters with factory functions
+      ---
+      duration_ms: 0.1042
+      type: 'test'
+      ...
+    # Subtest: should lazy load adapters
+    ok 4 - should lazy load adapters
+      ---
+      duration_ms: 0.1243
+      type: 'test'
+      ...
+    # Subtest: should return supported extensions
+    ok 5 - should return supported extensions
+      ---
+      duration_ms: 0.2704
+      type: 'test'
+      ...
+    # Subtest: should be case-insensitive for extensions
+    ok 6 - should be case-insensitive for extensions
+      ---
+      duration_ms: 0.1372
+      type: 'test'
+      ...
+    # Subtest: should return language ID for registered extensions
+    ok 7 - should return language ID for registered extensions
+      ---
+      duration_ms: 0.0548
+      type: 'test'
+      ...
+    1..7
+ok 17 - Adapter Registry
+  ---
+  duration_ms: 1.7886
+  type: 'suite'
+  ...
+# Subtest: Evidence Capture
+    # Subtest: Symbol Card Evidence
+        # Subtest: captures symbol card evidence
+        ok 1 - captures symbol card evidence
+          ---
+          duration_ms: 0.3558
+          type: 'test'
+          ...
+        # Subtest: adds to evidence collection
+        ok 2 - adds to evidence collection
+          ---
+          duration_ms: 0.0657
+          type: 'test'
+          ...
+        1..2
+    ok 1 - Symbol Card Evidence
+      ---
+      duration_ms: 0.7171
+      type: 'suite'
+      ...
+    # Subtest: Skeleton Evidence
+        # Subtest: captures skeleton evidence
+        ok 1 - captures skeleton evidence
+          ---
+          duration_ms: 0.0591
+          type: 'test'
+          ...
+        1..1
+    ok 2 - Skeleton Evidence
+      ---
+      duration_ms: 0.097
+      type: 'suite'
+      ...
+    # Subtest: Hot Path Evidence
+        # Subtest: captures hot path evidence
+        ok 1 - captures hot path evidence
+          ---
+          duration_ms: 0.0652
+          type: 'test'
+          ...
+        1..1
+    ok 3 - Hot Path Evidence
+      ---
+      duration_ms: 0.1077
+      type: 'suite'
+      ...
+    # Subtest: Code Window Evidence
+        # Subtest: captures code window evidence
+        ok 1 - captures code window evidence
+          ---
+          duration_ms: 0.0609
+          type: 'test'
+          ...
+        1..1
+    ok 4 - Code Window Evidence
+      ---
+      duration_ms: 0.2133
+      type: 'suite'
+      ...
+    # Subtest: Delta Evidence
+        # Subtest: captures delta evidence
+        ok 1 - captures delta evidence
+          ---
+          duration_ms: 0.0714
+          type: 'test'
+          ...
+        1..1
+    ok 5 - Delta Evidence
+      ---
+      duration_ms: 0.1188
+      type: 'suite'
+      ...
+    # Subtest: Diagnostic Evidence
+        # Subtest: captures diagnostic evidence
+        ok 1 - captures diagnostic evidence
+          ---
+          duration_ms: 0.0502
+          type: 'test'
+          ...
+        1..1
+    ok 6 - Diagnostic Evidence
+      ---
+      duration_ms: 0.0739
+      type: 'suite'
+      ...
+    # Subtest: Search Result Evidence
+        # Subtest: captures search result evidence
+        ok 1 - captures search result evidence
+          ---
+          duration_ms: 0.0832
+          type: 'test'
+          ...
+        1..1
+    ok 7 - Search Result Evidence
+      ---
+      duration_ms: 0.1112
+      type: 'suite'
+      ...
+    # Subtest: Evidence Retrieval
+        # Subtest: returns all evidence in chronological order
+        ok 1 - returns all evidence in chronological order
+          ---
+          duration_ms: 0.1402
+          type: 'test'
+          ...
+        # Subtest: returns evidence by type
+        ok 2 - returns evidence by type
+          ---
+          duration_ms: 0.1324
+          type: 'test'
+          ...
+        # Subtest: returns empty array for unknown type
+        ok 3 - returns empty array for unknown type
+          ---
+          duration_ms: 0.3449
+          type: 'test'
+          ...
+        # Subtest: counts total evidence
+        ok 4 - counts total evidence
+          ---
+          duration_ms: 0.0589
+          type: 'test'
+          ...
+        # Subtest: counts evidence by type
+        ok 5 - counts evidence by type
+          ---
+          duration_ms: 0.0353
+          type: 'test'
+          ...
+        1..5
+    ok 8 - Evidence Retrieval
+      ---
+      duration_ms: 0.7813
+      type: 'suite'
+      ...
+    # Subtest: Evidence Summary
+        # Subtest: generates evidence summary
+        ok 1 - generates evidence summary
+          ---
+          duration_ms: 0.064
+          type: 'test'
+          ...
+        1..1
+    ok 9 - Evidence Summary
+      ---
+      duration_ms: 0.0871
+      type: 'suite'
+      ...
+    # Subtest: Evidence Reset
+        # Subtest: resets evidence collection
+        ok 1 - resets evidence collection
+          ---
+          duration_ms: 0.0576
+          type: 'test'
+          ...
+        1..1
+    ok 10 - Evidence Reset
+      ---
+      duration_ms: 0.0896
+      type: 'suite'
+      ...
+    # Subtest: Evidence Timestamps
+        # Subtest: assigns unique timestamps
+        ok 1 - assigns unique timestamps
+          ---
+          duration_ms: 0.0402
+          type: 'test'
+          ...
+        1..1
+    ok 11 - Evidence Timestamps
+      ---
+      duration_ms: 0.06
+      type: 'suite'
+      ...
+    1..11
+ok 18 - Evidence Capture
+  ---
+  duration_ms: 2.9948
+  type: 'suite'
+  ...
+# Subtest: Orchestrator
+    # Subtest: Task Orchestration
+        # Subtest: orchestrates debug task successfully
+        ok 1 - orchestrates debug task successfully
+          ---
+          duration_ms: 0.7017
+          type: 'test'
+          ...
+        # Subtest: orchestrates review task successfully
+        ok 2 - orchestrates review task successfully
+          ---
+          duration_ms: 0.1115
+          type: 'test'
+          ...
+        # Subtest: orchestrates implement task successfully
+        ok 3 - orchestrates implement task successfully
+          ---
+          duration_ms: 0.0869
+          type: 'test'
+          ...
+        # Subtest: orchestrates explain task successfully
+        ok 4 - orchestrates explain task successfully
+          ---
+          duration_ms: 0.0706
+          type: 'test'
+          ...
+        # Subtest: returns error for invalid task
+        ok 5 - returns error for invalid task
+          ---
+          duration_ms: 0.1153
+          type: 'test'
+          ...
+        1..5
+    ok 1 - Task Orchestration
+      ---
+      duration_ms: 1.4481
+      type: 'suite'
+      ...
+    # Subtest: Result Structure
+        # Subtest: includes taskId in result
+        ok 1 - includes taskId in result
+          ---
+          duration_ms: 0.1671
+          type: 'test'
+          ...
+        # Subtest: includes actionsTaken array
+        ok 2 - includes actionsTaken array
+          ---
+          duration_ms: 0.0821
+          type: 'test'
+          ...
+        # Subtest: includes path with rungs
+        ok 3 - includes path with rungs
+          ---
+          duration_ms: 0.4995
+          type: 'test'
+          ...
+        # Subtest: includes finalEvidence array
+        ok 4 - includes finalEvidence array
+          ---
+          duration_ms: 0.1336
+          type: 'test'
+          ...
+        # Subtest: includes summary
+        ok 5 - includes summary
+          ---
+          duration_ms: 0.1959
+          type: 'test'
+          ...
+        # Subtest: includes metrics
+        ok 6 - includes metrics
+          ---
+          duration_ms: 0.1303
+          type: 'test'
+          ...
+        1..6
+    ok 2 - Result Structure
+      ---
+      duration_ms: 1.3793
+      type: 'suite'
+      ...
+    # Subtest: Task Planning
+        # Subtest: plans task with valid path
+        ok 1 - plans task with valid path
+          ---
+          duration_ms: 0.0847
+          type: 'test'
+          ...
+        # Subtest: throws error for invalid task
+        ok 2 - throws error for invalid task
+          ---
+          duration_ms: 0.2366
+          type: 'test'
+          ...
+        1..2
+    ok 3 - Task Planning
+      ---
+      duration_ms: 0.362
+      type: 'suite'
+      ...
+    # Subtest: Path Selection
+        # Subtest: selects minimal rungs for explain task
+        ok 1 - selects minimal rungs for explain task
+          ---
+          duration_ms: 0.0826
+          type: 'test'
+          ...
+        # Subtest: selects more rungs for debug task with diagnostics
+        ok 2 - selects more rungs for debug task with diagnostics
+          ---
+          duration_ms: 0.226
+          type: 'test'
+          ...
+        1..2
+    ok 4 - Path Selection
+      ---
+      duration_ms: 0.3502
+      type: 'suite'
+      ...
+    # Subtest: Budget Respect
+        # Subtest: respects token budget
+        ok 1 - respects token budget
+          ---
+          duration_ms: 0.105
+          type: 'test'
+          ...
+        # Subtest: respects duration budget
+        ok 2 - respects duration budget
+          ---
+          duration_ms: 0.0648
+          type: 'test'
+          ...
+        1..2
+    ok 5 - Budget Respect
+      ---
+      duration_ms: 0.2082
+      type: 'suite'
+      ...
+    # Subtest: Evidence Collection
+        # Subtest: collects evidence during orchestration
+        ok 1 - collects evidence during orchestration
+          ---
+          duration_ms: 0.0602
+          type: 'test'
+          ...
+        # Subtest: evidence is empty on error
+        ok 2 - evidence is empty on error
+          ---
+          duration_ms: 0.0378
+          type: 'test'
+          ...
+        1..2
+    ok 6 - Evidence Collection
+      ---
+      duration_ms: 0.1267
+      type: 'suite'
+      ...
+    # Subtest: Error Handling
+        # Subtest: handles missing repoId
+        ok 1 - handles missing repoId
+          ---
+          duration_ms: 0.0475
+          type: 'test'
+          ...
+        # Subtest: handles missing taskText
+        ok 2 - handles missing taskText
+          ---
+          duration_ms: 0.0325
+          type: 'test'
+          ...
+        1..2
+    ok 7 - Error Handling
+      ---
+      duration_ms: 0.1067
+      type: 'suite'
+      ...
+    # Subtest: Summary Generation
+        # Subtest: includes task type in summary
+        ok 1 - includes task type in summary
+          ---
+          duration_ms: 0.0554
+          type: 'test'
+          ...
+        # Subtest: includes success status in summary
+        ok 2 - includes success status in summary
+          ---
+          duration_ms: 0.0385
+          type: 'test'
+          ...
+        # Subtest: includes action count in summary
+        ok 3 - includes action count in summary
+          ---
+          duration_ms: 0.0767
+          type: 'test'
+          ...
+        1..3
+    ok 8 - Summary Generation
+      ---
+      duration_ms: 0.2057
+      type: 'suite'
+      ...
+    # Subtest: Determinism
+        # Subtest: produces consistent results for same task
+        ok 1 - produces consistent results for same task
+          ---
+          duration_ms: 0.0634
+          type: 'test'
+          ...
+        1..1
+    ok 9 - Determinism
+      ---
+      duration_ms: 0.1191
+      type: 'suite'
+      ...
+    1..9
+ok 19 - Orchestrator
+  ---
+  duration_ms: 4.7304
+  type: 'suite'
+  ...
+# Subtest: Agent Planner
+    # Subtest: Debug Task Planning
+        # Subtest: plans debug task with diagnostics to include all rungs
+        ok 1 - plans debug task with diagnostics to include all rungs
+          ---
+          duration_ms: 0.6806
+          type: 'test'
+          ...
+        # Subtest: plans debug task with focus symbols to include three rungs
+        ok 2 - plans debug task with focus symbols to include three rungs
+          ---
+          duration_ms: 0.0699
+          type: 'test'
+          ...
+        # Subtest: plans debug task without focus to include two rungs
+        ok 3 - plans debug task without focus to include two rungs
+          ---
+          duration_ms: 0.0524
+          type: 'test'
+          ...
+        1..3
+    ok 1 - Debug Task Planning
+      ---
+      duration_ms: 1.1519
+      type: 'suite'
+      ...
+    # Subtest: Review Task Planning
+        # Subtest: plans review task with focus symbols to include three rungs
+        ok 1 - plans review task with focus symbols to include three rungs
+          ---
+          duration_ms: 0.0829
+          type: 'test'
+          ...
+        # Subtest: plans review task with tests to include hot path
+        ok 2 - plans review task with tests to include hot path
+          ---
+          duration_ms: 0.0734
+          type: 'test'
+          ...
+        # Subtest: plans review task without options to include two rungs
+        ok 3 - plans review task without options to include two rungs
+          ---
+          duration_ms: 0.0719
+          type: 'test'
+          ...
+        1..3
+    ok 2 - Review Task Planning
+      ---
+      duration_ms: 0.3004
+      type: 'suite'
+      ...
+    # Subtest: Implement Task Planning
+        # Subtest: plans implement task with focus paths to include hot path
+        ok 1 - plans implement task with focus paths to include hot path
+          ---
+          duration_ms: 0.1122
+          type: 'test'
+          ...
+        # Subtest: plans implement task without options to include two rungs
+        ok 2 - plans implement task without options to include two rungs
+          ---
+          duration_ms: 0.0924
+          type: 'test'
+          ...
+        1..2
+    ok 3 - Implement Task Planning
+      ---
+      duration_ms: 0.2767
+      type: 'suite'
+      ...
+    # Subtest: Explain Task Planning
+        # Subtest: plans explain task with focus symbols to include skeleton
+        ok 1 - plans explain task with focus symbols to include skeleton
+          ---
+          duration_ms: 0.124
+          type: 'test'
+          ...
+        # Subtest: plans explain task without options to include only card
+        ok 2 - plans explain task without options to include only card
+          ---
+          duration_ms: 0.1375
+          type: 'test'
+          ...
+        1..2
+    ok 4 - Explain Task Planning
+      ---
+      duration_ms: 0.3059
+      type: 'suite'
+      ...
+    # Subtest: Budget Constraints
+        # Subtest: reduces rungs when token budget is exceeded
+        ok 1 - reduces rungs when token budget is exceeded
+          ---
+          duration_ms: 0.1214
+          type: 'test'
+          ...
+        # Subtest: reduces rungs when duration budget is exceeded
+        ok 2 - reduces rungs when duration budget is exceeded
+          ---
+          duration_ms: 0.0811
+          type: 'test'
+          ...
+        # Subtest: keeps minimum one rung when budget is very low
+        ok 3 - keeps minimum one rung when budget is very low
+          ---
+          duration_ms: 0.0387
+          type: 'test'
+          ...
+        1..3
+    ok 5 - Budget Constraints
+      ---
+      duration_ms: 0.289
+      type: 'suite'
+      ...
+    # Subtest: Context Selection
+        # Subtest: selects focus symbols from options
+        ok 1 - selects focus symbols from options
+          ---
+          duration_ms: 0.0748
+          type: 'test'
+          ...
+        # Subtest: selects focus paths from options
+        ok 2 - selects focus paths from options
+          ---
+          duration_ms: 0.0285
+          type: 'test'
+          ...
+        # Subtest: selects both symbols and paths when provided
+        ok 3 - selects both symbols and paths when provided
+          ---
+          duration_ms: 0.0333
+          type: 'test'
+          ...
+        # Subtest: returns empty context when no options provided
+        ok 4 - returns empty context when no options provided
+          ---
+          duration_ms: 0.0222
+          type: 'test'
+          ...
+        1..4
+    ok 6 - Context Selection
+      ---
+      duration_ms: 0.2029
+      type: 'suite'
+      ...
+    # Subtest: Task Validation
+        # Subtest: validates task with all required fields
+        ok 1 - validates task with all required fields
+          ---
+          duration_ms: 0.0795
+          type: 'test'
+          ...
+        # Subtest: rejects task with empty task text
+        ok 2 - rejects task with empty task text
+          ---
+          duration_ms: 0.0324
+          type: 'test'
+          ...
+        # Subtest: rejects task with empty repo id
+        ok 3 - rejects task with empty repo id
+          ---
+          duration_ms: 0.409
+          type: 'test'
+          ...
+        # Subtest: rejects task with negative max tokens
+        ok 4 - rejects task with negative max tokens
+          ---
+          duration_ms: 0.0498
+          type: 'test'
+          ...
+        # Subtest: rejects task with negative max duration
+        ok 5 - rejects task with negative max duration
+          ---
+          duration_ms: 0.0308
+          type: 'test'
+          ...
+        # Subtest: rejects task with negative max actions
+        ok 6 - rejects task with negative max actions
+          ---
+          duration_ms: 0.0249
+          type: 'test'
+          ...
+        # Subtest: validates task with valid budget constraints
+        ok 7 - validates task with valid budget constraints
+          ---
+          duration_ms: 0.0251
+          type: 'test'
+          ...
+        1..7
+    ok 7 - Task Validation
+      ---
+      duration_ms: 0.7204
+      type: 'suite'
+      ...
+    # Subtest: Path Estimation
+        # Subtest: estimates tokens correctly for different rungs
+        ok 1 - estimates tokens correctly for different rungs
+          ---
+          duration_ms: 0.0594
+          type: 'test'
+          ...
+        # Subtest: estimates duration correctly for different rungs
+        ok 2 - estimates duration correctly for different rungs
+          ---
+          duration_ms: 0.0331
+          type: 'test'
+          ...
+        # Subtest: includes reasoning in path
+        ok 3 - includes reasoning in path
+          ---
+          duration_ms: 0.026
+          type: 'test'
+          ...
+        1..3
+    ok 8 - Path Estimation
+      ---
+      duration_ms: 0.1524
+      type: 'suite'
+      ...
+    1..8
+ok 20 - Agent Planner
+  ---
+  duration_ms: 3.8478
+  type: 'suite'
+  ...
+# Subtest: Benchmark Threshold Evaluator
+    # Subtest: should pass when current value is better than baseline
+    ok 1 - should pass when current value is better than baseline
+      ---
+      duration_ms: 0.6572
+      type: 'test'
+      ...
+    # Subtest: should fail when current value exceeds allowable increase
+    ok 2 - should fail when current value exceeds allowable increase
+      ---
+      duration_ms: 0.1802
+      type: 'test'
+      ...
+    # Subtest: should pass when within allowable increase
+    ok 3 - should pass when within allowable increase
+      ---
+      duration_ms: 0.0952
+      type: 'test'
+      ...
+    # Subtest: should not hard-fail on absolute max when baseline already exceeds max and current is within tolerance
+    ok 4 - should not hard-fail on absolute max when baseline already exceeds max and current is within tolerance
+      ---
+      duration_ms: 0.1115
+      type: 'test'
+      ...
+    # Subtest: should fail when below minimum value
+    ok 5 - should fail when below minimum value
+      ---
+      duration_ms: 0.1829
+      type: 'test'
+      ...
+    # Subtest: should pass when above minimum value
+    ok 6 - should pass when above minimum value
+      ---
+      duration_ms: 0.1193
+      type: 'test'
+      ...
+    # Subtest: should evaluate multiple metrics
+    ok 7 - should evaluate multiple metrics
+      ---
+      duration_ms: 0.0778
+      type: 'test'
+      ...
+    1..7
+ok 21 - Benchmark Threshold Evaluator
+  ---
+  duration_ms: 1.9046
+  type: 'suite'
+  ...
+# Subtest: Regression Report Generator
+    # Subtest: should generate regression report with improved metrics
+    ok 1 - should generate regression report with improved metrics
+      ---
+      duration_ms: 0.7712
+      type: 'test'
+      ...
+    # Subtest: should generate regression report with degraded metrics
+    ok 2 - should generate regression report with degraded metrics
+      ---
+      duration_ms: 0.1642
+      type: 'test'
+      ...
+    # Subtest: should generate markdown report
+    ok 3 - should generate markdown report
+      ---
+      duration_ms: 0.2279
+      type: 'test'
+      ...
+    1..3
+ok 22 - Regression Report Generator
+  ---
+  duration_ms: 1.3078
+  type: 'suite'
+  ...
+# Subtest: Metric Smoothing
+    # Subtest: should filter warmup runs
+    ok 1 - should filter warmup runs
+      ---
+      duration_ms: 0.4098
+      type: 'test'
+      ...
+    # Subtest: should detect IQR outliers
+    ok 2 - should detect IQR outliers
+      ---
+      duration_ms: 0.1047
+      type: 'test'
+      ...
+    # Subtest: should detect standard deviation outliers
+    ok 3 - should detect standard deviation outliers
+      ---
+      duration_ms: 0.0631
+      type: 'test'
+      ...
+    # Subtest: should smooth metrics with median
+    ok 4 - should smooth metrics with median
+      ---
+      duration_ms: 0.1118
+      type: 'test'
+      ...
+    # Subtest: should run benchmark with smoothing
+    ok 5 - should run benchmark with smoothing
+      ---
+      duration_ms: 0.6686
+      type: 'test'
+      ...
+    1..5
+ok 23 - Metric Smoothing
+  ---
+  duration_ms: 1.4405
+  type: 'suite'
+  ...
+# Subtest: Baseline Management
+    # Subtest: should save and load baseline metrics
+    ok 1 - should save and load baseline metrics
+      ---
+      duration_ms: 0.7559
+      type: 'test'
+      ...
+    # Subtest: should load baseline metrics from benchmark-ci result format
+    ok 2 - should load baseline metrics from benchmark-ci result format
+      ---
+      duration_ms: 0.6157
+      type: 'test'
+      ...
+    # Subtest: should return undefined for missing baseline
+    ok 3 - should return undefined for missing baseline
+      ---
+      duration_ms: 0.092
+      type: 'test'
+      ...
+    # Subtest: should handle malformed baseline gracefully
+    ok 4 - should handle malformed baseline gracefully
+      ---
+      duration_ms: 0.557
+      type: 'test'
+      ...
+    1..4
+ok 24 - Baseline Management
+  ---
+  duration_ms: 2.1029
+  type: 'suite'
+  ...
+# Subtest: C Adapter
+    # Subtest: ML2-C1.1: Symbol Extraction
+        # Subtest: should extract function definitions with parameters
+        ok 1 - should extract function definitions with parameters
+          ---
+          duration_ms: 5.0767
+          type: 'test'
+          ...
+        # Subtest: should extract functions with void parameters
+        ok 2 - should extract functions with void parameters
+          ---
+          duration_ms: 1.9272
+          type: 'test'
+          ...
+        # Subtest: should extract functions with pointer parameters
+        ok 3 - should extract functions with pointer parameters
+          ---
+          duration_ms: 2.1486
+          type: 'test'
+          ...
+        # Subtest: should extract struct specifiers
+        ok 4 - should extract struct specifiers
+          ---
+          duration_ms: 1.5258
+          type: 'test'
+          ...
+        # Subtest: should extract enum specifiers with values
+        ok 5 - should extract enum specifiers with values
+          ---
+          duration_ms: 1.2452
+          type: 'test'
+          ...
+        # Subtest: should extract typedef declarations
+        ok 6 - should extract typedef declarations
+          ---
+          duration_ms: 1.1984
+          type: 'test'
+          ...
+        # Subtest: should extract anonymous typedefs
+        ok 7 - should extract anonymous typedefs
+          ---
+          duration_ms: 1.2717
+          type: 'test'
+          ...
+        1..7
+    ok 1 - ML2-C1.1: Symbol Extraction
+      ---
+      duration_ms: 14.9583
+      type: 'suite'
+      ...
+    # Subtest: ML2-C1.2: Import Extraction
+        # Subtest: should extract system includes
+        ok 1 - should extract system includes
+          ---
+          duration_ms: 0.8102
+          type: 'test'
+          ...
+        # Subtest: should extract local includes
+        ok 2 - should extract local includes
+          ---
+          duration_ms: 0.6825
+          type: 'test'
+          ...
+        # Subtest: should extract relative includes
+        ok 3 - should extract relative includes
+          ---
+          duration_ms: 0.686
+          type: 'test'
+          ...
+        1..3
+    ok 2 - ML2-C1.2: Import Extraction
+      ---
+      duration_ms: 2.3206
+      type: 'suite'
+      ...
+    # Subtest: ML2-C1.3: Call Extraction
+        # Subtest: should extract function calls
+        ok 1 - should extract function calls
+          ---
+          duration_ms: 4.4129
+          type: 'test'
+          ...
+        # Subtest: should extract pointer field access calls
+        ok 2 - should extract pointer field access calls
+          ---
+          duration_ms: 3.8839
+          type: 'test'
+          ...
+        # Subtest: should extract malloc call
+        ok 3 - should extract malloc call
+          ---
+          duration_ms: 3.6796
+          type: 'test'
+          ...
+        # Subtest: should extract free call
+        ok 4 - should extract free call
+          ---
+          duration_ms: 3.6532
+          type: 'test'
+          ...
+        1..4
+    ok 3 - ML2-C1.3: Call Extraction
+      ---
+      duration_ms: 15.7252
+      type: 'suite'
+      ...
+    # Subtest: ML2-C1.4: Golden Files
+        # Subtest: should match expected symbols.h output
+        ok 1 - should match expected symbols.h output
+          ---
+          duration_ms: 2.2642
+          type: 'test'
+          ...
+        # Subtest: should match expected symbols.c output
+        ok 2 - should match expected symbols.c output
+          ---
+          duration_ms: 1.3837
+          type: 'test'
+          ...
+        # Subtest: should match expected imports output
+        ok 3 - should match expected imports output
+          ---
+          duration_ms: 0.636
+          type: 'test'
+          ...
+        # Subtest: should match expected calls output
+        ok 4 - should match expected calls output
+          ---
+          duration_ms: 3.5295
+          type: 'test'
+          ...
+        1..4
+    ok 4 - ML2-C1.4: Golden Files
+      ---
+      duration_ms: 7.9
+      type: 'suite'
+      ...
+    # Subtest: Edge Cases
+        # Subtest: should handle macros as unresolved calls
+        ok 1 - should handle macros as unresolved calls
+          ---
+          duration_ms: 3.0304
+          type: 'test'
+          ...
+        # Subtest: should handle function pointers
+        ok 2 - should handle function pointers
+          ---
+          duration_ms: 3.0267
+          type: 'test'
+          ...
+        1..2
+    ok 5 - Edge Cases
+      ---
+      duration_ms: 6.1131
+      type: 'suite'
+      ...
+    1..5
+ok 25 - C Adapter
+  ---
+  duration_ms: 47.4242
+  type: 'suite'
+  ...
+# Subtest: CLI arg parsing
+    # Subtest: prefers parsed --repo-id and --watch values for index command
+    ok 1 - prefers parsed --repo-id and --watch values for index command
+      ---
+      duration_ms: 0.3393
+      type: 'test'
+      ...
+    # Subtest: prefers parsed transport values for serve command
+    ok 2 - prefers parsed transport values for serve command
+      ---
+      duration_ms: 0.1078
+      type: 'test'
+      ...
+    1..2
+ok 26 - CLI arg parsing
+  ---
+  duration_ms: 0.8834
+  type: 'suite'
+  ...
+# Subtest: Config Loading (RR-H.8)
+    # Subtest: should resolve default path relative to module (RR-H.8.1)
+    ok 1 - should resolve default path relative to module (RR-H.8.1)
+      ---
+      duration_ms: 0.3348
+      type: 'test'
+      ...
+    # Subtest: should load example config successfully
+    ok 2 - should load example config successfully
+      ---
+      duration_ms: 1.5167
+      type: 'test'
+      ...
+    # Subtest: should throw error for non-existent config
+    ok 3 - should throw error for non-existent config
+      ---
+      duration_ms: 0.3537
+      type: 'test'
+      ...
+    1..3
+ok 27 - Config Loading (RR-H.8)
+  ---
+  duration_ms: 2.6631
+  type: 'suite'
+  ...
+# Subtest: AsyncFs Factory Pattern (RR-H.8.2)
+    # Subtest: should create new instances with factory (RR-H.8.2.1)
+    ok 1 - should create new instances with factory (RR-H.8.2.1)
+      ---
+      duration_ms: 0.0819
+      type: 'test'
+      ...
+    # Subtest: should apply config to each new instance (RR-H.8.2.2)
+    ok 2 - should apply config to each new instance (RR-H.8.2.2)
+      ---
+      duration_ms: 0.0513
+      type: 'test'
+      ...
+    # Subtest: should use default config when none provided
+    ok 3 - should use default config when none provided
+      ---
+      duration_ms: 0.0361
+      type: 'test'
+      ...
+    1..3
+ok 28 - AsyncFs Factory Pattern (RR-H.8.2)
+  ---
+  duration_ms: 0.3128
+  type: 'suite'
+  ...
+# Subtest: C++ Adapter
+    # Subtest: ML2-C1.5: Symbol Extraction
+        # Subtest: should extract namespace definitions
+        ok 1 - should extract namespace definitions
+          ---
+          duration_ms: 7.6959
+          type: 'test'
+          ...
+        # Subtest: should extract class specifiers
+        ok 2 - should extract class specifiers
+          ---
+          duration_ms: 2.1957
+          type: 'test'
+          ...
+        # Subtest: should extract constructors from headers
+        ok 3 - should extract constructors from headers
+          ---
+          duration_ms: 2.1272
+          type: 'test'
+          ...
+        # Subtest: should extract destructors
+        ok 4 - should extract destructors
+          ---
+          duration_ms: 2.1258
+          type: 'test'
+          ...
+        # Subtest: should extract methods
+        ok 5 - should extract methods
+          ---
+          duration_ms: 3.3434
+          type: 'test'
+          ...
+        # Subtest: should extract template classes
+        ok 6 - should extract template classes
+          ---
+          duration_ms: 2.7293
+          type: 'test'
+          ...
+        # Subtest: should extract enum specifiers
+        ok 7 - should extract enum specifiers
+          ---
+          duration_ms: 2.1034
+          type: 'test'
+          ...
+        # Subtest: should extract alias declarations (using)
+        ok 8 - should extract alias declarations (using)
+          ---
+          duration_ms: 1.977
+          type: 'test'
+          ...
+        # Subtest: should extract free functions
+        ok 9 - should extract free functions
+          ---
+          duration_ms: 2.9204
+          type: 'test'
+          ...
+        # Subtest: should extract symbols in anonymous namespace
+        ok 10 - should extract symbols in anonymous namespace
+          ---
+          duration_ms: 3.2118
+          type: 'test'
+          ...
+        # Subtest: should extract symbols in inline namespace
+        ok 11 - should extract symbols in inline namespace
+          ---
+          duration_ms: 3.5305
+          type: 'test'
+          ...
+        1..11
+    ok 1 - ML2-C1.5: Symbol Extraction
+      ---
+      duration_ms: 34.6351
+      type: 'suite'
+      ...
+    # Subtest: ML2-C1.6: Import Extraction
+        # Subtest: should extract system includes
+        ok 1 - should extract system includes
+          ---
+          duration_ms: 1.7777
+          type: 'test'
+          ...
+        # Subtest: should extract local includes
+        ok 2 - should extract local includes
+          ---
+          duration_ms: 0.6308
+          type: 'test'
+          ...
+        # Subtest: should extract relative includes
+        ok 3 - should extract relative includes
+          ---
+          duration_ms: 0.6076
+          type: 'test'
+          ...
+        1..3
+    ok 2 - ML2-C1.6: Import Extraction
+      ---
+      duration_ms: 3.0947
+      type: 'suite'
+      ...
+    # Subtest: ML2-C1.7: Call Extraction
+        # Subtest: should extract method calls
+        ok 1 - should extract method calls
+          ---
+          duration_ms: 2.6382
+          type: 'test'
+          ...
+        # Subtest: should extract free function calls
+        ok 2 - should extract free function calls
+          ---
+          duration_ms: 2.3887
+          type: 'test'
+          ...
+        # Subtest: should extract constructor calls (new)
+        ok 3 - should extract constructor calls (new)
+          ---
+          duration_ms: 2.2855
+          type: 'test'
+          ...
+        # Subtest: should extract template function calls
+        ok 4 - should extract template function calls
+          ---
+          duration_ms: 3.7544
+          type: 'test'
+          ...
+        # Subtest: should extract method calls on objects
+        ok 5 - should extract method calls on objects
+          ---
+          duration_ms: 2.5004
+          type: 'test'
+          ...
+        # Subtest: should extract std library method calls
+        ok 6 - should extract std library method calls
+          ---
+          duration_ms: 2.4591
+          type: 'test'
+          ...
+        1..6
+    ok 3 - ML2-C1.7: Call Extraction
+      ---
+      duration_ms: 16.1624
+      type: 'suite'
+      ...
+    # Subtest: Golden Files
+        # Subtest: should match expected symbols.hpp output
+        ok 1 - should match expected symbols.hpp output
+          ---
+          duration_ms: 2.2081
+          type: 'test'
+          ...
+        # Subtest: should match expected symbols.cpp output
+        ok 2 - should match expected symbols.cpp output
+          ---
+          duration_ms: 3.3221
+          type: 'test'
+          ...
+        # Subtest: should match expected imports.cpp output
+        ok 3 - should match expected imports.cpp output
+          ---
+          duration_ms: 0.9138
+          type: 'test'
+          ...
+        # Subtest: should match expected calls.cpp output
+        ok 4 - should match expected calls.cpp output
+          ---
+          duration_ms: 2.5714
+          type: 'test'
+          ...
+        1..4
+    ok 4 - Golden Files
+      ---
+      duration_ms: 9.1683
+      type: 'suite'
+      ...
+    # Subtest: Integration
+        # Subtest: should handle complete C++ file with all constructs
+        ok 1 - should handle complete C++ file with all constructs
+          ---
+          duration_ms: 1.3631
+          type: 'test'
+          ...
+        # Subtest: should handle templates with multiple type parameters
+        ok 2 - should handle templates with multiple type parameters
+          ---
+          duration_ms: 1.0953
+          type: 'test'
+          ...
+        1..2
+    ok 5 - Integration
+      ---
+      duration_ms: 2.5288
+      type: 'suite'
+      ...
+    # Subtest: Edge Cases
+        # Subtest: should handle macros as unresolved calls
+        ok 1 - should handle macros as unresolved calls
+          ---
+          duration_ms: 0.7054
+          type: 'test'
+          ...
+        # Subtest: should handle lambda expressions
+        ok 2 - should handle lambda expressions
+          ---
+          duration_ms: 0.8219
+          type: 'test'
+          ...
+        # Subtest: should handle operator overloading
+        ok 3 - should handle operator overloading
+          ---
+          duration_ms: 2.2085
+          type: 'test'
+          ...
+        1..3
+    ok 6 - Edge Cases
+      ---
+      duration_ms: 3.801
+      type: 'suite'
+      ...
+    1..6
+ok 29 - C++ Adapter
+  ---
+  duration_ms: 69.7416
+  type: 'suite'
+  ...
+# Subtest: Cross-Platform Path Utilities
+    # Subtest: normalizePath
+        # Subtest: should convert Windows backslashes to forward slashes
+        ok 1 - should convert Windows backslashes to forward slashes
+          ---
+          duration_ms: 0.447
+          type: 'test'
+          ...
+        # Subtest: should keep forward slashes unchanged
+        ok 2 - should keep forward slashes unchanged
+          ---
+          duration_ms: 0.0899
+          type: 'test'
+          ...
+        # Subtest: should handle mixed path separators
+        ok 3 - should handle mixed path separators
+          ---
+          duration_ms: 0.0448
+          type: 'test'
+          ...
+        # Subtest: should handle empty string
+        ok 4 - should handle empty string
+          ---
+          duration_ms: 0.0364
+          type: 'test'
+          ...
+        # Subtest: should handle single-component paths
+        ok 5 - should handle single-component paths
+          ---
+          duration_ms: 0.0402
+          type: 'test'
+          ...
+        1..5
+    ok 1 - normalizePath
+      ---
+      duration_ms: 1.0494
+      type: 'suite'
+      ...
+    # Subtest: getRelativePath
+        # Subtest: should calculate relative path on Unix-style paths
+        ok 1 - should calculate relative path on Unix-style paths
+          ---
+          duration_ms: 0.1637
+          type: 'test'
+          ...
+        # Subtest: should normalize result to use forward slashes
+        ok 2 - should normalize result to use forward slashes
+          ---
+          duration_ms: 0.124
+          type: 'test'
+          ...
+        # Subtest: should handle same directory
+        ok 3 - should handle same directory
+          ---
+          duration_ms: 0.1365
+          type: 'test'
+          ...
+        # Subtest: should handle parent directory
+        ok 4 - should handle parent directory
+          ---
+          duration_ms: 0.0867
+          type: 'test'
+          ...
+        1..4
+    ok 2 - getRelativePath
+      ---
+      duration_ms: 0.7088
+      type: 'suite'
+      ...
+    # Subtest: safeJoin
+        # Subtest: should join path components and normalize separators
+        ok 1 - should join path components and normalize separators
+          ---
+          duration_ms: 0.1388
+          type: 'test'
+          ...
+        # Subtest: should handle mixed separators in components
+        ok 2 - should handle mixed separators in components
+          ---
+          duration_ms: 0.0499
+          type: 'test'
+          ...
+        # Subtest: should handle absolute paths (keep them absolute)
+        ok 3 - should handle absolute paths (keep them absolute)
+          ---
+          duration_ms: 0.0368
+          type: 'test'
+          ...
+        # Subtest: should handle Windows absolute paths
+        ok 4 - should handle Windows absolute paths
+          ---
+          duration_ms: 0.0706
+          type: 'test'
+          ...
+        # Subtest: should normalize dot segments
+        ok 5 - should normalize dot segments
+          ---
+          duration_ms: 0.0361
+          type: 'test'
+          ...
+        1..5
+    ok 3 - safeJoin
+      ---
+      duration_ms: 0.4077
+      type: 'suite'
+      ...
+    # Subtest: getAbsolutePathFromRepoRoot
+        # Subtest: should join repo root with relative path
+        ok 1 - should join repo root with relative path
+          ---
+          duration_ms: 0.1768
+          type: 'test'
+          ...
+        # Subtest: should normalize Windows paths
+        ok 2 - should normalize Windows paths
+          ---
+          duration_ms: 0.0907
+          type: 'test'
+          ...
+        # Subtest: should handle mixed separators
+        ok 3 - should handle mixed separators
+          ---
+          duration_ms: 0.0515
+          type: 'test'
+          ...
+        1..3
+    ok 4 - getAbsolutePathFromRepoRoot
+      ---
+      duration_ms: 0.3647
+      type: 'suite'
+      ...
+    # Subtest: Real-world Path Scenarios
+        # Subtest: should handle file paths with Windows backslashes
+        ok 1 - should handle file paths with Windows backslashes
+          ---
+          duration_ms: 0.0628
+          type: 'test'
+          ...
+        # Subtest: should handle relative import paths with backslashes
+        ok 2 - should handle relative import paths with backslashes
+          ---
+          duration_ms: 0.0286
+          type: 'test'
+          ...
+        # Subtest: should handle Windows network paths
+        ok 3 - should handle Windows network paths
+          ---
+          duration_ms: 0.4465
+          type: 'test'
+          ...
+        # Subtest: should calculate path between two files on Windows
+        ok 4 - should calculate path between two files on Windows
+          ---
+          duration_ms: 0.1459
+          type: 'test'
+          ...
+        # Subtest: should handle deeply nested paths
+        ok 5 - should handle deeply nested paths
+          ---
+          duration_ms: 0.0361
+          type: 'test'
+          ...
+        # Subtest: should handle paths with spaces
+        ok 6 - should handle paths with spaces
+          ---
+          duration_ms: 0.0238
+          type: 'test'
+          ...
+        1..6
+    ok 5 - Real-world Path Scenarios
+      ---
+      duration_ms: 0.8137
+      type: 'suite'
+      ...
+    # Subtest: Cross-Platform Consistency
+        # Subtest: should produce same normalized path from different OS inputs
+        ok 1 - should produce same normalized path from different OS inputs
+          ---
+          duration_ms: 0.0433
+          type: 'test'
+          ...
+        # Subtest: should produce same relative path regardless of input format
+        ok 2 - should produce same relative path regardless of input format
+          ---
+          duration_ms: 0.0574
+          type: 'test'
+          ...
+        # Subtest: should handle empty relative path correctly
+        ok 3 - should handle empty relative path correctly
+          ---
+          duration_ms: 0.0221
+          type: 'test'
+          ...
+        1..3
+    ok 6 - Cross-Platform Consistency
+      ---
+      duration_ms: 0.1578
+      type: 'suite'
+      ...
+    # Subtest: Edge Cases
+        # Subtest: should handle trailing slashes
+        ok 1 - should handle trailing slashes
+          ---
+          duration_ms: 0.0718
+          type: 'test'
+          ...
+        # Subtest: should handle leading slashes in relative paths
+        ok 2 - should handle leading slashes in relative paths
+          ---
+          duration_ms: 0.0257
+          type: 'test'
+          ...
+        # Subtest: should handle multiple consecutive slashes
+        ok 3 - should handle multiple consecutive slashes
+          ---
+          duration_ms: 0.0219
+          type: 'test'
+          ...
+        # Subtest: should handle current directory references
+        ok 4 - should handle current directory references
+          ---
+          duration_ms: 0.0209
+          type: 'test'
+          ...
+        # Subtest: should handle parent directory references in middle of path
+        ok 5 - should handle parent directory references in middle of path
+          ---
+          duration_ms: 0.021
+          type: 'test'
+          ...
+        1..5
+    ok 7 - Edge Cases
+      ---
+      duration_ms: 0.2053
+      type: 'suite'
+      ...
+    1..7
+ok 30 - Cross-Platform Path Utilities
+  ---
+  duration_ms: 4.0492
+  type: 'suite'
+  ...
+# Subtest: dep label helpers
+    # Subtest: detects opaque 64-char hash symbol references
+    ok 1 - detects opaque 64-char hash symbol references
+      ---
+      duration_ms: 0.4397
+      type: 'test'
+      ...
+    # Subtest: prefers readable names and drops opaque hash fallbacks
+    ok 2 - prefers readable names and drops opaque hash fallbacks
+      ---
+      duration_ms: 0.08
+      type: 'test'
+      ...
+    # Subtest: truncates long target names to DEP_LABEL_MAX_LENGTH (40)
+    ok 3 - truncates long target names to DEP_LABEL_MAX_LENGTH (40)
+      ---
+      duration_ms: 0.0456
+      type: 'test'
+      ...
+    # Subtest: truncates long targetId fallbacks to DEP_LABEL_MAX_LENGTH (40)
+    ok 4 - truncates long targetId fallbacks to DEP_LABEL_MAX_LENGTH (40)
+      ---
+      duration_ms: 0.1063
+      type: 'test'
+      ...
+    # Subtest: does not truncate names within limit
+    ok 5 - does not truncate names within limit
+      ---
+      duration_ms: 0.0473
+      type: 'test'
+      ...
+    # Subtest: does not truncate targetId fallbacks within limit
+    ok 6 - does not truncate targetId fallbacks within limit
+      ---
+      duration_ms: 0.0359
+      type: 'test'
+      ...
+    1..6
+ok 31 - dep label helpers
+  ---
+  duration_ms: 1.254
+  type: 'suite'
+  ...
+# Subtest: Go Adapter
+    # Subtest: ML-C2.1: Symbol Extraction
+        # Subtest: should extract package declarations
+        ok 1 - should extract package declarations
+          ---
+          duration_ms: 5.5279
+          type: 'test'
+          ...
+        # Subtest: should extract functions with parameters and return types
+        ok 2 - should extract functions with parameters and return types
+          ---
+          duration_ms: 2.2558
+          type: 'test'
+          ...
+        # Subtest: should extract methods with receiver type
+        ok 3 - should extract methods with receiver type
+          ---
+          duration_ms: 3.3674
+          type: 'test'
+          ...
+        # Subtest: should extract type declarations
+        ok 4 - should extract type declarations
+          ---
+          duration_ms: 1.9552
+          type: 'test'
+          ...
+        # Subtest: should extract const declarations
+        ok 5 - should extract const declarations
+          ---
+          duration_ms: 1.9287
+          type: 'test'
+          ...
+        # Subtest: should extract var declarations
+        ok 6 - should extract var declarations
+          ---
+          duration_ms: 2.1078
+          type: 'test'
+          ...
+        # Subtest: should export only capitalized symbols
+        ok 7 - should export only capitalized symbols
+          ---
+          duration_ms: 2.0325
+          type: 'test'
+          ...
+        1..7
+    ok 1 - ML-C2.1: Symbol Extraction
+      ---
+      duration_ms: 19.701
+      type: 'suite'
+      ...
+    # Subtest: ML-C2.2: Import Extraction
+        # Subtest: should extract single-line imports
+        ok 1 - should extract single-line imports
+          ---
+          duration_ms: 1.8982
+          type: 'test'
+          ...
+        # Subtest: should extract aliased imports
+        ok 2 - should extract aliased imports
+          ---
+          duration_ms: 1.3248
+          type: 'test'
+          ...
+        # Subtest: should identify external vs relative imports
+        ok 3 - should identify external vs relative imports
+          ---
+          duration_ms: 1.3156
+          type: 'test'
+          ...
+        # Subtest: should identify dot imports
+        ok 4 - should identify dot imports
+          ---
+          duration_ms: 1.2396
+          type: 'test'
+          ...
+        # Subtest: should identify blank imports
+        ok 5 - should identify blank imports
+          ---
+          duration_ms: 1.2086
+          type: 'test'
+          ...
+        1..5
+    ok 2 - ML-C2.2: Import Extraction
+      ---
+      duration_ms: 7.1719
+      type: 'suite'
+      ...
+    # Subtest: ML-C2.3: Call Extraction
+        # Subtest: should extract function calls
+        ok 1 - should extract function calls
+          ---
+          duration_ms: 6.8441
+          type: 'test'
+          ...
+        # Subtest: should extract method calls
+        ok 2 - should extract method calls
+          ---
+          duration_ms: 5.6598
+          type: 'test'
+          ...
+        # Subtest: should extract package-qualified calls
+        ok 3 - should extract package-qualified calls
+          ---
+          duration_ms: 5.0534
+          type: 'test'
+          ...
+        # Subtest: should extract go statement calls
+        ok 4 - should extract go statement calls
+          ---
+          duration_ms: 5.0638
+          type: 'test'
+          ...
+        # Subtest: should extract defer statement calls
+        ok 5 - should extract defer statement calls
+          ---
+          duration_ms: 5.0093
+          type: 'test'
+          ...
+        1..5
+    ok 3 - ML-C2.3: Call Extraction
+      ---
+      duration_ms: 27.7395
+      type: 'suite'
+      ...
+    # Subtest: ML-C2.4: Golden Files
+        # Subtest: should match expected symbols output
+        ok 1 - should match expected symbols output
+          ---
+          duration_ms: 1.7397
+          type: 'test'
+          ...
+        # Subtest: should match expected imports output
+        ok 2 - should match expected imports output
+          ---
+          duration_ms: 0.9791
+          type: 'test'
+          ...
+        # Subtest: should match expected calls output
+        ok 3 - should match expected calls output
+          ---
+          duration_ms: 5
+          type: 'test'
+          ...
+        1..3
+    ok 4 - ML-C2.4: Golden Files
+      ---
+      duration_ms: 7.7928
+      type: 'suite'
+      ...
+    # Subtest: Integration
+        # Subtest: should handle complete Go file with all constructs
+        ok 1 - should handle complete Go file with all constructs
+          ---
+          duration_ms: 4.662
+          type: 'test'
+          ...
+        1..1
+    ok 5 - Integration
+      ---
+      duration_ms: 4.7122
+      type: 'suite'
+      ...
+    1..5
+ok 32 - Go Adapter
+  ---
+  duration_ms: 67.5288
+  type: 'suite'
+  ...
+# Subtest: harness runner teardown
+    # Subtest: stops harness before exiting success path
+    ok 1 - stops harness before exiting success path
+      ---
+      duration_ms: 0.5343
+      type: 'test'
+      ...
+    1..1
+ok 33 - harness runner teardown
+  ---
+  duration_ms: 0.9132
+  type: 'suite'
+  ...
+# Subtest: hotpath token cap in no-match branch
+    # Subtest: estimateTokens returns positive values for non-empty strings
+    ok 1 - estimateTokens returns positive values for non-empty strings
+      ---
+      duration_ms: 0.3743
+      type: 'test'
+      ...
+    # Subtest: longer lines produce higher token estimates
+    ok 2 - longer lines produce higher token estimates
+      ---
+      duration_ms: 0.0712
+      type: 'test'
+      ...
+    # Subtest: token bounding loop stops when budget exhausted
+    ok 3 - token bounding loop stops when budget exhausted
+      ---
+      duration_ms: 0.1622
+      type: 'test'
+      ...
+    # Subtest: maxLines limit is respected even when token budget allows more
+    ok 4 - maxLines limit is respected even when token budget allows more
+      ---
+      duration_ms: 0.0929
+      type: 'test'
+      ...
+    1..4
+ok 34 - hotpath token cap in no-match branch
+  ---
+  duration_ms: 1.1835
+  type: 'suite'
+  ...
+# Subtest: Incremental Metrics Calculation (PERF-L2.2)
+    # Subtest: Full metrics update
+        # Subtest: should update all symbols without changedFileIds
+        ok 1 - should update all symbols without changedFileIds
+          ---
+          duration_ms: 8.1639
+          type: 'test'
+          ...
+        1..1
+    ok 1 - Full metrics update
+      ---
+      duration_ms: 8.3752
+      type: 'suite'
+      ...
+    # Subtest: Incremental metrics update
+        # Subtest: should only update affected symbols for changed files
+        ok 1 - should only update affected symbols for changed files
+          ---
+          duration_ms: 1.5766
+          type: 'test'
+          ...
+        # Subtest: should track edge neighbors correctly
+        ok 2 - should track edge neighbors correctly
+          ---
+          duration_ms: 1.3263
+          type: 'test'
+          ...
+        # Subtest: should handle multiple changed files
+        ok 3 - should handle multiple changed files
+          ---
+          duration_ms: 1.4837
+          type: 'test'
+          ...
+        1..3
+    ok 2 - Incremental metrics update
+      ---
+      duration_ms: 4.5175
+      type: 'suite'
+      ...
+    # Subtest: Changed files parameter
+        # Subtest: should update all symbols when changedFileIds is undefined
+        ok 1 - should update all symbols when changedFileIds is undefined
+          ---
+          duration_ms: 1.4417
+          type: 'test'
+          ...
+        # Subtest: should not update anything with empty changedFileIds
+        ok 2 - should not update anything with empty changedFileIds
+          ---
+          duration_ms: 0.1913
+          type: 'test'
+          ...
+        1..2
+    ok 3 - Changed files parameter
+      ---
+      duration_ms: 1.8759
+      type: 'suite'
+      ...
+    1..3
+ok 35 - Incremental Metrics Calculation (PERF-L2.2)
+  ---
+  duration_ms: 26.9535
+  type: 'suite'
+  ...
+# Subtest: Kotlin Adapter
+    # Subtest: ML-C2.1: Symbol Extraction
+        # Subtest: should extract package declarations
+        ok 1 - should extract package declarations
+          ---
+          duration_ms: 8.8779
+          type: 'test'
+          ...
+        # Subtest: should extract class declarations
+        ok 2 - should extract class declarations
+          ---
+          duration_ms: 4.2612
+          type: 'test'
+          ...
+        # Subtest: should extract data class declarations
+        ok 3 - should extract data class declarations
+          ---
+          duration_ms: 4.2423
+          type: 'test'
+          ...
+        # Subtest: should extract open class declarations
+        ok 4 - should extract open class declarations
+          ---
+          duration_ms: 4.8811
+          type: 'test'
+          ...
+        # Subtest: should extract interface declarations
+        ok 5 - should extract interface declarations
+          ---
+          duration_ms: 4.0224
+          type: 'test'
+          ...
+        # Subtest: should extract object declarations
+        ok 6 - should extract object declarations
+          ---
+          duration_ms: 3.8993
+          type: 'test'
+          ...
+        # Subtest: should extract function declarations
+        ok 7 - should extract function declarations
+          ---
+          duration_ms: 4.6074
+          type: 'test'
+          ...
+        # Subtest: should extract method declarations
+        ok 8 - should extract method declarations
+          ---
+          duration_ms: 3.8362
+          type: 'test'
+          ...
+        # Subtest: should extract property declarations
+        ok 9 - should extract property declarations
+          ---
+          duration_ms: 4.0128
+          type: 'test'
+          ...
+        # Subtest: should extract secondary constructors
+        ok 10 - should extract secondary constructors
+          ---
+          duration_ms: 3.6759
+          type: 'test'
+          ...
+        # Subtest: should extract companion object constants
+        ok 11 - should extract companion object constants
+          ---
+          duration_ms: 3.6972
+          type: 'test'
+          ...
+        # Subtest: should extract generic type parameters
+        ok 12 - should extract generic type parameters
+          ---
+          duration_ms: 3.8215
+          type: 'test'
+          ...
+        # Subtest: should extract visibility modifiers
+        ok 13 - should extract visibility modifiers
+          ---
+          duration_ms: 4.4555
+          type: 'test'
+          ...
+        # Subtest: should extract extension functions
+        ok 14 - should extract extension functions
+          ---
+          duration_ms: 2.531
+          type: 'test'
+          ...
+        1..14
+    ok 1 - ML-C2.1: Symbol Extraction
+      ---
+      duration_ms: 61.5405
+      type: 'suite'
+      ...
+    # Subtest: ML-C2.2: Import Extraction
+        # Subtest: should extract simple imports
+        ok 1 - should extract simple imports
+          ---
+          duration_ms: 0.9836
+          type: 'test'
+          ...
+        # Subtest: should extract aliased imports
+        ok 2 - should extract aliased imports
+          ---
+          duration_ms: 0.754
+          type: 'test'
+          ...
+        # Subtest: should extract wildcard imports
+        ok 3 - should extract wildcard imports
+          ---
+          duration_ms: 0.7089
+          type: 'test'
+          ...
+        # Subtest: should identify external vs relative imports
+        ok 4 - should identify external vs relative imports
+          ---
+          duration_ms: 0.6931
+          type: 'test'
+          ...
+        1..4
+    ok 2 - ML-C2.2: Import Extraction
+      ---
+      duration_ms: 3.242
+      type: 'suite'
+      ...
+    # Subtest: ML-C2.3: Call Extraction
+        # Subtest: should extract simple function calls
+        ok 1 - should extract simple function calls
+          ---
+          duration_ms: 17.0551
+          type: 'test'
+          ...
+        # Subtest: should extract method calls on objects
+        ok 2 - should extract method calls on objects
+          ---
+          duration_ms: 15.2935
+          type: 'test'
+          ...
+        # Subtest: should extract chained method calls
+        ok 3 - should extract chained method calls
+          ---
+          duration_ms: 16.3731
+          type: 'test'
+          ...
+        # Subtest: should extract companion object calls
+        ok 4 - should extract companion object calls
+          ---
+          duration_ms: 15.0522
+          type: 'test'
+          ...
+        # Subtest: should extract constructor calls
+        ok 5 - should extract constructor calls
+          ---
+          duration_ms: 15.1783
+          type: 'test'
+          ...
+        # Subtest: should extract extension function calls
+        ok 6 - should extract extension function calls
+          ---
+          duration_ms: 15.122
+          type: 'test'
+          ...
+        # Subtest: should extract this.method calls
+        ok 7 - should extract this.method calls
+          ---
+          duration_ms: 15.9146
+          type: 'test'
+          ...
+        # Subtest: should extract nested function calls
+        ok 8 - should extract nested function calls
+          ---
+          duration_ms: 15.221
+          type: 'test'
+          ...
+        # Subtest: should extract lambda calls
+        ok 9 - should extract lambda calls
+          ---
+          duration_ms: 15.179
+          type: 'test'
+          ...
+        1..9
+    ok 3 - ML-C2.3: Call Extraction
+      ---
+      duration_ms: 140.61
+      type: 'suite'
+      ...
+    # Subtest: ML-C2.4: Golden Files
+        # Subtest: should match expected symbols output
+        ok 1 - should match expected symbols output
+          ---
+          duration_ms: 4.7879
+          type: 'test'
+          ...
+        # Subtest: should match expected imports output
+        ok 2 - should match expected imports output
+          ---
+          duration_ms: 0.8651
+          type: 'test'
+          ...
+        # Subtest: should match expected calls output
+        ok 3 - should match expected calls output
+          ---
+          duration_ms: 15.0986
+          type: 'test'
+          ...
+        1..3
+    ok 4 - ML-C2.4: Golden Files
+      ---
+      duration_ms: 20.905
+      type: 'suite'
+      ...
+    # Subtest: Integration
+        # Subtest: should handle complete Kotlin file with all constructs
+        ok 1 - should handle complete Kotlin file with all constructs
+          ---
+          duration_ms: 13.1281
+          type: 'test'
+          ...
+        1..1
+    ok 5 - Integration
+      ---
+      duration_ms: 13.1833
+      type: 'suite'
+      ...
+    # Subtest: Edge Cases
+        # Subtest: should handle extension function call edge cases
+        ok 1 - should handle extension function call edge cases
+          ---
+          duration_ms: 15.3929
+          type: 'test'
+          ...
+        # Subtest: should handle constructor calls correctly
+        ok 2 - should handle constructor calls correctly
+          ---
+          duration_ms: 15.1731
+          type: 'test'
+          ...
+        # Subtest: should handle chained call edge cases
+        ok 3 - should handle chained call edge cases
+          ---
+          duration_ms: 16.1029
+          type: 'test'
+          ...
+        1..3
+    ok 6 - Edge Cases
+      ---
+      duration_ms: 46.7651
+      type: 'suite'
+      ...
+    1..6
+ok 36 - Kotlin Adapter
+  ---
+  duration_ms: 286.6015
+  type: 'suite'
+  ...
+# Subtest: loadConfig environment path resolution
+    # Subtest: uses SDL_CONFIG when no explicit configPath is provided
+    ok 1 - uses SDL_CONFIG when no explicit configPath is provided
+      ---
+      duration_ms: 8.4866
+      type: 'test'
+      ...
+    1..1
+ok 37 - loadConfig environment path resolution
+  ---
+  duration_ms: 8.8543
+  type: 'suite'
+  ...
+# Subtest: main stdio shutdown wiring
+    # Subtest: unrefs cleanup interval so it cannot keep process alive
+    ok 1 - unrefs cleanup interval so it cannot keep process alive
+      ---
+      duration_ms: 0.4683
+      type: 'test'
+      ...
+    # Subtest: handles stdin end/close to trigger graceful shutdown
+    ok 2 - handles stdin end/close to trigger graceful shutdown
+      ---
+      duration_ms: 0.2017
+      type: 'test'
+      ...
+    1..2
+ok 38 - main stdio shutdown wiring
+  ---
+  duration_ms: 1.1212
+  type: 'suite'
+  ...
+# Subtest: MinHeap
+    # Subtest: orders by score ascending
+    ok 1 - orders by score ascending
+      ---
+      duration_ms: 0.3819
+      type: 'test'
+      ...
+    # Subtest: breaks score ties by priority
+    ok 2 - breaks score ties by priority
+      ---
+      duration_ms: 0.0681
+      type: 'test'
+      ...
+    # Subtest: breaks full ties by insertion sequence
+    ok 3 - breaks full ties by insertion sequence
+      ---
+      duration_ms: 0.0572
+      type: 'test'
+      ...
+    1..3
+ok 39 - MinHeap
+  ---
+  duration_ms: 0.9391
+  type: 'suite'
+  ...
+# Subtest: IE-K.2: Path normalization in edge cleanup
+    # Subtest: should handle relative paths with .. segments
+    ok 1 - should handle relative paths with .. segments
+      ---
+      duration_ms: 0.582
+      type: 'test'
+      ...
+    # Subtest: should handle relative paths with multiple .. segments
+    ok 2 - should handle relative paths with multiple .. segments
+      ---
+      duration_ms: 0.1181
+      type: 'test'
+      ...
+    # Subtest: should try .tsx and .jsx extensions
+    ok 3 - should try .tsx and .jsx extensions
+      ---
+      duration_ms: 0.0588
+      type: 'test'
+      ...
+    # Subtest: should handle paths without extensions
+    ok 4 - should handle paths without extensions
+      ---
+      duration_ms: 0.0604
+      type: 'test'
+      ...
+    # Subtest: should handle index file resolution
+    ok 5 - should handle index file resolution
+      ---
+      duration_ms: 0.0483
+      type: 'test'
+      ...
+    # Subtest: should handle complex paths with .. and . segments
+    ok 6 - should handle complex paths with .. and . segments
+      ---
+      duration_ms: 0.0579
+      type: 'test'
+      ...
+    # Subtest: should remove duplicates from variants
+    ok 7 - should remove duplicates from variants
+      ---
+      duration_ms: 0.0678
+      type: 'test'
+      ...
+    # Subtest: should handle Windows path separators
+    ok 8 - should handle Windows path separators
+      ---
+      duration_ms: 0.0705
+      type: 'test'
+      ...
+    # Subtest: should preserve path normalization with .. that escape and re-enter
+    ok 9 - should preserve path normalization with .. that escape and re-enter
+      ---
+      duration_ms: 0.1327
+      type: 'test'
+      ...
+    1..9
+ok 40 - IE-K.2: Path normalization in edge cleanup
+  ---
+  duration_ms: 1.8665
+  type: 'suite'
+  ...
+# Subtest: PHP Adapter
+    # Subtest: ML-C2.1: Symbol Extraction
+        # Subtest: should extract class declarations
+        ok 1 - should extract class declarations
+          ---
+          duration_ms: 6.4402
+          type: 'test'
+          ...
+        # Subtest: should extract interface declarations
+        ok 2 - should extract interface declarations
+          ---
+          duration_ms: 3.0811
+          type: 'test'
+          ...
+        # Subtest: should extract trait declarations as class
+        ok 3 - should extract trait declarations as class
+          ---
+          duration_ms: 2.6933
+          type: 'test'
+          ...
+        # Subtest: should extract method declarations with visibility
+        ok 4 - should extract method declarations with visibility
+          ---
+          duration_ms: 2.5615
+          type: 'test'
+          ...
+        # Subtest: should extract method return types
+        ok 5 - should extract method return types
+          ---
+          duration_ms: 2.4144
+          type: 'test'
+          ...
+        # Subtest: should extract function declarations with namespace
+        ok 6 - should extract function declarations with namespace
+          ---
+          duration_ms: 3.2809
+          type: 'test'
+          ...
+        # Subtest: should mark private functions starting with underscore
+        ok 7 - should mark private functions starting with underscore
+          ---
+          duration_ms: 2.4012
+          type: 'test'
+          ...
+        # Subtest: should extract property declarations with visibility
+        ok 8 - should extract property declarations with visibility
+          ---
+          duration_ms: 2.3579
+          type: 'test'
+          ...
+        # Subtest: should extract const declarations
+        ok 9 - should extract const declarations
+          ---
+          duration_ms: 2.2707
+          type: 'test'
+          ...
+        # Subtest: should extract abstract and final class declarations
+        ok 10 - should extract abstract and final class declarations
+          ---
+          duration_ms: 2.1896
+          type: 'test'
+          ...
+        1..10
+    ok 1 - ML-C2.1: Symbol Extraction
+      ---
+      duration_ms: 30.4301
+      type: 'suite'
+      ...
+    # Subtest: ML-C2.2: Import Extraction
+        # Subtest: should extract namespace use declarations
+        ok 1 - should extract namespace use declarations
+          ---
+          duration_ms: 3.9146
+          type: 'test'
+          ...
+        # Subtest: should extract use statements with aliases
+        ok 2 - should extract use statements with aliases
+          ---
+          duration_ms: 3.1158
+          type: 'test'
+          ...
+        # Subtest: should extract require statements
+        ok 3 - should extract require statements
+          ---
+          duration_ms: 3.2293
+          type: 'test'
+          ...
+        # Subtest: should identify relative paths in require/include
+        ok 4 - should identify relative paths in require/include
+          ---
+          duration_ms: 3.3421
+          type: 'test'
+          ...
+        # Subtest: should extract include statements
+        ok 5 - should extract include statements
+          ---
+          duration_ms: 3.0412
+          type: 'test'
+          ...
+        # Subtest: should handle absolute paths on Windows
+        ok 6 - should handle absolute paths on Windows
+          ---
+          duration_ms: 3.0321
+          type: 'test'
+          ...
+        # Subtest: should identify leading backslash as relative
+        ok 7 - should identify leading backslash as relative
+          ---
+          duration_ms: 3.0649
+          type: 'test'
+          ...
+        1..7
+    ok 2 - ML-C2.2: Import Extraction
+      ---
+      duration_ms: 22.8886
+      type: 'suite'
+      ...
+    # Subtest: ML-C2.3: Call Extraction
+        # Subtest: should extract static method calls
+        ok 1 - should extract static method calls
+          ---
+          duration_ms: 9.5638
+          type: 'test'
+          ...
+        # Subtest: should extract function calls
+        ok 2 - should extract function calls
+          ---
+          duration_ms: 8.0424
+          type: 'test'
+          ...
+        # Subtest: should mark dynamic calls as unresolved
+        ok 3 - should mark dynamic calls as unresolved
+          ---
+          duration_ms: 8.2038
+          type: 'test'
+          ...
+        # Subtest: should extract qualified namespace static calls
+        ok 4 - should extract qualified namespace static calls
+          ---
+          duration_ms: 8.178
+          type: 'test'
+          ...
+        # Subtest: should extract multiple static calls in same function
+        ok 5 - should extract multiple static calls in same function
+          ---
+          duration_ms: 8.1403
+          type: 'test'
+          ...
+        # Subtest: should handle variable function name patterns
+        ok 6 - should handle variable function name patterns
+          ---
+          duration_ms: 8.3926
+          type: 'test'
+          ...
+        1..6
+    ok 3 - ML-C2.3: Call Extraction
+      ---
+      duration_ms: 50.6652
+      type: 'suite'
+      ...
+    # Subtest: ML-C2.4: Golden Files
+        # Subtest: should match expected symbols output
+        ok 1 - should match expected symbols output
+          ---
+          duration_ms: 2.0739
+          type: 'test'
+          ...
+        # Subtest: should match expected imports output
+        ok 2 - should match expected imports output
+          ---
+          duration_ms: 3.0452
+          type: 'test'
+          ...
+        # Subtest: should match expected calls output
+        ok 3 - should match expected calls output
+          ---
+          duration_ms: 8.4417
+          type: 'test'
+          ...
+        1..3
+    ok 4 - ML-C2.4: Golden Files
+      ---
+      duration_ms: 13.6401
+      type: 'suite'
+      ...
+    # Subtest: Integration
+        # Subtest: should handle complete PHP file with all constructs
+        ok 1 - should handle complete PHP file with all constructs
+          ---
+          duration_ms: 9.0853
+          type: 'test'
+          ...
+        1..1
+    ok 5 - Integration
+      ---
+      duration_ms: 9.1373
+      type: 'suite'
+      ...
+    1..5
+ok 41 - PHP Adapter
+  ---
+  duration_ms: 127.0828
+  type: 'suite'
+  ...
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] Plugin loaded successfully {"name":"valid-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-plugins\\\\valid-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+# Subtest: Plugin Loader
+    # Subtest: loadPlugin
+        # Subtest: should load a valid plugin
+        ok 1 - should load a valid plugin
+          ---
+          duration_ms: 4.3169
+          type: 'test'
+          ...
+        # Subtest: should fail to load non-existent plugin
+        ok 2 - should fail to load non-existent plugin
+          ---
+          duration_ms: 0.7121
+          type: 'test'
+          ...
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should fail to load plugin with invalid manifest
+        ok 3 - should fail to load plugin with invalid manifest
+          ---
+          duration_ms: 1.5776
+          type: 'test'
+          ...
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should fail to load plugin with incompatible API version
+        ok 4 - should fail to load plugin with incompatible API version
+          ---
+          duration_ms: 1.4856
+          type: 'test'
+          ...
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should fail to load plugin with invalid module structure
+        ok 5 - should fail to load plugin with invalid module structure
+          ---
+          duration_ms: 1.5108
+          type: 'test'
+          ...
+        1..5
+    ok 1 - loadPlugin
+      ---
+      duration_ms: 10.1405
+      type: 'suite'
+      ...
+# [INFO] Plugin loaded successfully {"name":"plugin1","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-plugins\\\\plugin1.mjs"}
+# [INFO] Plugin loaded successfully {"name":"plugin2","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-plugins\\\\plugin2.mjs"}
+# [INFO] All plugins unloaded {"count":2}
+    # Subtest: loadPluginsFromConfig
+        # Subtest: should load multiple plugins successfully
+        ok 1 - should load multiple plugins successfully
+          ---
+          duration_ms: 3.0443
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"valid-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-plugins\\\\valid.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should handle mixed success and failure
+        ok 2 - should handle mixed success and failure
+          ---
+          duration_ms: 1.4477
+          type: 'test'
+          ...
+        # Subtest: should return empty result when no plugin paths provided
+        ok 3 - should return empty result when no plugin paths provided
+          ---
+          duration_ms: 0.5964
+          type: 'test'
+          ...
+        # Subtest: should return empty result when empty array provided
+        ok 4 - should return empty result when empty array provided
+          ---
+          duration_ms: 0.4257
+          type: 'test'
+          ...
+        1..4
+    ok 2 - loadPluginsFromConfig
+      ---
+      duration_ms: 5.732
+      type: 'suite'
+      ...
+# [INFO] Plugin loaded successfully {"name":"adapters-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-plugins\\\\adapters-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+    # Subtest: getPluginAdapters
+        # Subtest: should return valid adapters from plugin
+        ok 1 - should return valid adapters from plugin
+          ---
+          duration_ms: 1.5309
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"invalid-adapter-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-plugins\\\\invalid-adapter.mjs"}
+# [ERROR] Failed to create adapters from plugin {"plugin":"invalid-adapter-plugin","error":"Invalid adapter: must have extension, languageId, and factory function"}
+# [INFO] All plugins unloaded {"count":1}
+        # Subtest: should throw error for invalid adapter structure
+        ok 2 - should throw error for invalid adapter structure
+          ---
+          duration_ms: 1.6356
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"non-array-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-plugins\\\\non-array-adapter.mjs"}
+# [ERROR] Failed to create adapters from plugin {"plugin":"non-array-plugin","error":"createAdapters must return an array of adapters"}
+# [INFO] All plugins unloaded {"count":1}
+        # Subtest: should throw error if createAdapters returns non-array
+        ok 3 - should throw error if createAdapters returns non-array
+          ---
+          duration_ms: 1.3472
+          type: 'test'
+          ...
+        1..3
+    ok 3 - getPluginAdapters
+      ---
+      duration_ms: 4.6276
+      type: 'suite'
+      ...
+# [INFO] Plugin loaded successfully {"name":"track-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-plugins\\\\track-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":1}
+    # Subtest: plugin lifecycle management
+        # Subtest: should track loaded plugins
+        ok 1 - should track loaded plugins
+          ---
+          duration_ms: 1.5116
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"unload-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-plugins\\\\unload-plugin.mjs"}
+# [INFO] Plugin unloaded {"path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-plugins\\\\unload-plugin.mjs"}
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should unload plugin
+        ok 2 - should unload plugin
+          ---
+          duration_ms: 1.2965
+          type: 'test'
+          ...
+        # Subtest: should return false when unloading non-existent plugin
+        ok 3 - should return false when unloading non-existent plugin
+          ---
+          duration_ms: 0.5242
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"clear1","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-plugins\\\\clear1.mjs"}
+# [INFO] Plugin loaded successfully {"name":"clear2","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-plugins\\\\clear2.mjs"}
+# [INFO] All plugins unloaded {"count":2}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should clear all loaded plugins
+        ok 4 - should clear all loaded plugins
+          ---
+          duration_ms: 1.7825
+          type: 'test'
+          ...
+        1..4
+    ok 4 - plugin lifecycle management
+      ---
+      duration_ms: 5.2453
+      type: 'suite'
+      ...
+    # Subtest: getHostApiVersion
+        # Subtest: should return a valid version string
+        ok 1 - should return a valid version string
+          ---
+          duration_ms: 0.646
+          type: 'test'
+          ...
+        1..1
+    ok 5 - getHostApiVersion
+      ---
+      duration_ms: 0.684
+      type: 'suite'
+      ...
+    1..5
+ok 42 - Plugin Loader
+  ---
+  duration_ms: 26.7293
+  type: 'suite'
+  ...
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] Plugin loaded successfully {"name":"registry-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-registry-plugins\\\\registry-plugin.mjs"}
+# [INFO] Registered plugin registry-plugin {"adapters":1,"extensions":[".custom"]}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+# Subtest: Registry with Plugin Integration
+    # Subtest: plugin registration
+        # Subtest: should register plugin adapters
+        ok 1 - should register plugin adapters
+          ---
+          duration_ms: 4.5071
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"multi-adapter-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-registry-plugins\\\\multi-adapter-plugin.mjs"}
+# [INFO] Registered plugin multi-adapter-plugin {"adapters":3,"extensions":[".ext1",".ext2",".ext3"]}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should register multiple adapters from single plugin
+        ok 2 - should register multiple adapters from single plugin
+          ---
+          duration_ms: 1.9242
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"override-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-registry-plugins\\\\override-plugin.mjs"}
+# [WARN] Plugin overriding built-in adapter for extension .ts {"pluginName":"override-plugin","extension":".ts"}
+# [INFO] Registered plugin override-plugin {"adapters":1,"extensions":[".ts"]}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should allow plugin to override built-in adapter
+        ok 3 - should allow plugin to override built-in adapter
+          ---
+          duration_ms: 2.5611
+          type: 'test'
+          ...
+        1..3
+    ok 1 - plugin registration
+      ---
+      duration_ms: 9.5635
+      type: 'suite'
+      ...
+    # Subtest: getAdapterInfo
+        # Subtest: should return info for built-in adapter
+        ok 1 - should return info for built-in adapter
+          ---
+          duration_ms: 0.5688
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"info-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-registry-plugins\\\\info-plugin.mjs"}
+# [INFO] Registered plugin info-plugin {"adapters":1,"extensions":[".info"]}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should return info for plugin adapter
+        ok 2 - should return info for plugin adapter
+          ---
+          duration_ms: 3.0402
+          type: 'test'
+          ...
+        # Subtest: should return null info for unknown extension
+        ok 3 - should return null info for unknown extension
+          ---
+          duration_ms: 0.4538
+          type: 'test'
+          ...
+        1..3
+    ok 2 - getAdapterInfo
+      ---
+      duration_ms: 4.2178
+      type: 'suite'
+      ...
+# [INFO] Plugin loaded successfully {"name":"langid-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-registry-plugins\\\\langid-plugin.mjs"}
+# [INFO] Registered plugin langid-plugin {"adapters":1,"extensions":[".langtest"]}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+    # Subtest: getLanguageIdForExtension with plugins
+        # Subtest: should return language ID for plugin adapter
+        ok 1 - should return language ID for plugin adapter
+          ---
+          duration_ms: 1.8086
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"override-langid-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-registry-plugins\\\\override-langid-plugin.mjs"}
+# [WARN] Plugin overriding built-in adapter for extension .ts {"pluginName":"override-langid-plugin","extension":".ts"}
+# [INFO] Registered plugin override-langid-plugin {"adapters":1,"extensions":[".ts"]}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should return overridden language ID from plugin
+        ok 2 - should return overridden language ID from plugin
+          ---
+          duration_ms: 1.4855
+          type: 'test'
+          ...
+        1..2
+    ok 3 - getLanguageIdForExtension with plugins
+      ---
+      duration_ms: 3.5325
+      type: 'suite'
+      ...
+# [INFO] Plugin loaded successfully {"name":"supported-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-registry-plugins\\\\supported-plugin.mjs"}
+# [INFO] Registered plugin supported-plugin {"adapters":2,"extensions":[".supp1",".supp2"]}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+    # Subtest: getSupportedExtensions with plugins
+        # Subtest: should include plugin extensions
+        ok 1 - should include plugin extensions
+          ---
+          duration_ms: 1.6459
+          type: 'test'
+          ...
+# [INFO] Plugin loaded successfully {"name":"mixed-plugin","version":"1.0.0","path":"F:\\\\Claude\\\\projects\\\\sdl-mcp\\\\sdl-mcp\\\\test-registry-plugins\\\\mixed-plugin.mjs"}
+# [INFO] Registered plugin mixed-plugin {"adapters":1,"extensions":[".pluginext"]}
+# [INFO] All plugins unloaded {"count":1}
+# [INFO] All plugins unloaded {"count":0}
+# [INFO] All plugins unloaded {"count":0}
+        # Subtest: should include both built-in and plugin extensions
+        ok 2 - should include both built-in and plugin extensions
+          ---
+          duration_ms: 1.6053
+          type: 'test'
+          ...
+        1..2
+    ok 4 - getSupportedExtensions with plugins
+      ---
+      duration_ms: 3.3489
+      type: 'suite'
+      ...
+    # Subtest: registerAdapter with source tracking
+        # Subtest: should allow manual registration with source specified
+        ok 1 - should allow manual registration with source specified
+          ---
+          duration_ms: 0.4568
+          type: 'test'
+          ...
+        1..1
+    ok 5 - registerAdapter with source tracking
+      ---
+      duration_ms: 0.4963
+      type: 'suite'
+      ...
+    1..5
+ok 43 - Registry with Plugin Integration
+  ---
+  duration_ms: 21.528
+  type: 'suite'
+  ...
+# Subtest: Plugin Types
+    # Subtest: validateApiVersion
+        # Subtest: should accept matching major versions
+        ok 1 - should accept matching major versions
+          ---
+          duration_ms: 0.4106
+          type: 'test'
+          ...
+        # Subtest: should reject mismatched major versions
+        ok 2 - should reject mismatched major versions
+          ---
+          duration_ms: 0.0887
+          type: 'test'
+          ...
+        # Subtest: should use host API version by default
+        ok 3 - should use host API version by default
+          ---
+          duration_ms: 0.0404
+          type: 'test'
+          ...
+        # Subtest: should reject zero major version
+        ok 4 - should reject zero major version
+          ---
+          duration_ms: 0.0865
+          type: 'test'
+          ...
+        1..4
+    ok 1 - validateApiVersion
+      ---
+      duration_ms: 0.9548
+      type: 'suite'
+      ...
+    # Subtest: validateManifest
+        # Subtest: should validate a correct manifest
+        ok 1 - should validate a correct manifest
+          ---
+          duration_ms: 0.8126
+          type: 'test'
+          ...
+        # Subtest: should reject manifest with missing required fields
+        ok 2 - should reject manifest with missing required fields
+          ---
+          duration_ms: 0.3706
+          type: 'test'
+          ...
+        # Subtest: should reject manifest with invalid API version
+        ok 3 - should reject manifest with invalid API version
+          ---
+          duration_ms: 0.1004
+          type: 'test'
+          ...
+        # Subtest: should accept manifest with optional fields
+        ok 4 - should accept manifest with optional fields
+          ---
+          duration_ms: 0.2202
+          type: 'test'
+          ...
+        # Subtest: should reject manifest with invalid adapter structure
+        ok 5 - should reject manifest with invalid adapter structure
+          ---
+          duration_ms: 0.1509
+          type: 'test'
+          ...
+        # Subtest: should reject manifest with empty adapter array
+        ok 6 - should reject manifest with empty adapter array
+          ---
+          duration_ms: 0.5648
+          type: 'test'
+          ...
+        1..6
+    ok 2 - validateManifest
+      ---
+      duration_ms: 2.4109
+      type: 'suite'
+      ...
+    1..2
+ok 44 - Plugin Types
+  ---
+  duration_ms: 3.5747
+  type: 'suite'
+  ...
+# [ERROR] Policy rule "error-rule" evaluation failed {"error":{},"context":{"requestType":"symbolCard","repoId":"test-repo","symbolId":"test-symbol"}}
+# [ERROR] Policy rule "error-rule" evaluation failed {"error":{},"context":{"requestType":"symbolCard","repoId":"test-repo","symbolId":"test-symbol"}}
+# Subtest: Policy Engine - Window Size Limit Rule
+    # Subtest: should approve request within default window limits when symbol in slice
+    ok 1 - should approve request within default window limits when symbol in slice
+      ---
+      duration_ms: 0.883
+      type: 'test'
+      ...
+    # Subtest: should deny when maxWindowLines exceeds limit
+    ok 2 - should deny when maxWindowLines exceeds limit
+      ---
+      duration_ms: 0.1504
+      type: 'test'
+      ...
+    # Subtest: should deny when maxWindowTokens exceeds limit
+    ok 3 - should deny when maxWindowTokens exceeds limit
+      ---
+      duration_ms: 0.1973
+      type: 'test'
+      ...
+    # Subtest: should skip rule for non-codeWindow requests
+    ok 4 - should skip rule for non-codeWindow requests
+      ---
+      duration_ms: 0.1336
+      type: 'test'
+      ...
+    # Subtest: should allow when maxWindowLines equals limit
+    ok 5 - should allow when maxWindowLines equals limit
+      ---
+      duration_ms: 0.2049
+      type: 'test'
+      ...
+    # Subtest: should allow when maxWindowTokens equals limit
+    ok 6 - should allow when maxWindowTokens equals limit
+      ---
+      duration_ms: 0.1372
+      type: 'test'
+      ...
+    1..6
+ok 45 - Policy Engine - Window Size Limit Rule
+  ---
+  duration_ms: 2.5606
+  type: 'suite'
+  ...
+# Subtest: Policy Engine - Identifiers Required Rule
+    # Subtest: should downgrade when identifiers are provided but not in slice
+    ok 1 - should downgrade when identifiers are provided but not in slice
+      ---
+      duration_ms: 0.1479
+      type: 'test'
+      ...
+    # Subtest: should deny when identifiers missing but required
+    ok 2 - should deny when identifiers missing but required
+      ---
+      duration_ms: 0.1225
+      type: 'test'
+      ...
+    # Subtest: should deny when identifiersToFind is undefined
+    ok 3 - should deny when identifiersToFind is undefined
+      ---
+      duration_ms: 0.1612
+      type: 'test'
+      ...
+    # Subtest: should approve when identifiers not required by policy
+    ok 4 - should approve when identifiers not required by policy
+      ---
+      duration_ms: 0.1562
+      type: 'test'
+      ...
+    # Subtest: should skip rule for non-codeWindow requests
+    ok 5 - should skip rule for non-codeWindow requests
+      ---
+      duration_ms: 0.0698
+      type: 'test'
+      ...
+    # Subtest: should capture limited identifiers in evidence
+    ok 6 - should capture limited identifiers in evidence
+      ---
+      duration_ms: 0.0886
+      type: 'test'
+      ...
+    1..6
+ok 46 - Policy Engine - Identifiers Required Rule
+  ---
+  duration_ms: 0.892
+  type: 'suite'
+  ...
+# Subtest: Policy Engine - Budget Caps Rule
+    # Subtest: should approve when budget within limits
+    ok 1 - should approve when budget within limits
+      ---
+      duration_ms: 0.097
+      type: 'test'
+      ...
+    # Subtest: should deny when maxCards exceeds limit
+    ok 2 - should deny when maxCards exceeds limit
+      ---
+      duration_ms: 0.0583
+      type: 'test'
+      ...
+    # Subtest: should deny when maxEstimatedTokens exceeds limit
+    ok 3 - should deny when maxEstimatedTokens exceeds limit
+      ---
+      duration_ms: 0.0514
+      type: 'test'
+      ...
+    # Subtest: should skip rule for non-graphSlice requests
+    ok 4 - should skip rule for non-graphSlice requests
+      ---
+      duration_ms: 0.0558
+      type: 'test'
+      ...
+    # Subtest: should skip rule when budget not provided
+    ok 5 - should skip rule when budget not provided
+      ---
+      duration_ms: 0.0465
+      type: 'test'
+      ...
+    # Subtest: should approve when budget at limits
+    ok 6 - should approve when budget at limits
+      ---
+      duration_ms: 0.0447
+      type: 'test'
+      ...
+    1..6
+ok 47 - Policy Engine - Budget Caps Rule
+  ---
+  duration_ms: 0.4154
+  type: 'suite'
+  ...
+# Subtest: Policy Engine - Break Glass Rule
+    # Subtest: should trigger break glass with AUDIT keyword
+    ok 1 - should trigger break glass with AUDIT keyword
+      ---
+      duration_ms: 0.0941
+      type: 'test'
+      ...
+    # Subtest: should trigger break glass with BREAK-GLASS keyword
+    ok 2 - should trigger break glass with BREAK-GLASS keyword
+      ---
+      duration_ms: 0.0835
+      type: 'test'
+      ...
+    # Subtest: should be case-insensitive for break glass keywords
+    ok 3 - should be case-insensitive for break glass keywords
+      ---
+      duration_ms: 0.0731
+      type: 'test'
+      ...
+    # Subtest: should not trigger break glass without keyword
+    ok 4 - should not trigger break glass without keyword
+      ---
+      duration_ms: 0.049
+      type: 'test'
+      ...
+    # Subtest: should approve when break glass disabled in config
+    ok 5 - should approve when break glass disabled in config
+      ---
+      duration_ms: 0.0642
+      type: 'test'
+      ...
+    1..5
+ok 48 - Policy Engine - Break Glass Rule
+  ---
+  duration_ms: 0.4176
+  type: 'suite'
+  ...
+# Subtest: Policy Engine - Default Deny Raw Rule
+    # Subtest: should deny raw code access by default
+    ok 1 - should deny raw code access by default
+      ---
+      duration_ms: 0.1016
+      type: 'test'
+      ...
+    # Subtest: should approve when symbol in slice context
+    ok 2 - should approve when symbol in slice context
+      ---
+      duration_ms: 0.066
+      type: 'test'
+      ...
+    # Subtest: should approve when symbol in frontier
+    ok 3 - should approve when symbol in frontier
+      ---
+      duration_ms: 0.0559
+      type: 'test'
+      ...
+    # Subtest: should downgrade to skeleton when no identifiers
+    ok 4 - should downgrade to skeleton when no identifiers
+      ---
+      duration_ms: 0.0481
+      type: 'test'
+      ...
+    # Subtest: should downgrade to hotpath when identifiers provided
+    ok 5 - should downgrade to hotpath when identifiers provided
+      ---
+      duration_ms: 0.0445
+      type: 'test'
+      ...
+    # Subtest: should allow raw when defaultDenyRaw is false
+    ok 6 - should allow raw when defaultDenyRaw is false
+      ---
+      duration_ms: 0.0498
+      type: 'test'
+      ...
+    # Subtest: should skip rule for non-codeWindow requests
+    ok 7 - should skip rule for non-codeWindow requests
+      ---
+      duration_ms: 0.0381
+      type: 'test'
+      ...
+    1..7
+ok 49 - Policy Engine - Default Deny Raw Rule
+  ---
+  duration_ms: 0.469
+  type: 'suite'
+  ...
+# Subtest: Policy Engine - Priority Evaluation
+    # Subtest: should evaluate rules in priority order
+    ok 1 - should evaluate rules in priority order
+      ---
+      duration_ms: 0.5894
+      type: 'test'
+      ...
+    # Subtest: should stop evaluation at first deny if no downgrade
+    ok 2 - should stop evaluation at first deny if no downgrade
+      ---
+      duration_ms: 0.0596
+      type: 'test'
+      ...
+    # Subtest: should continue evaluating after downgrade suggestion
+    ok 3 - should continue evaluating after downgrade suggestion
+      ---
+      duration_ms: 0.0557
+      type: 'test'
+      ...
+    1..3
+ok 50 - Policy Engine - Priority Evaluation
+  ---
+  duration_ms: 0.7465
+  type: 'suite'
+  ...
+# Subtest: Policy Engine - Next Best Action
+    # Subtest: should suggest skeleton for downgrade-to-skeleton
+    ok 1 - should suggest skeleton for downgrade-to-skeleton
+      ---
+      duration_ms: 0.1903
+      type: 'test'
+      ...
+    # Subtest: should suggest hotpath for downgrade-to-hotpath
+    ok 2 - should suggest hotpath for downgrade-to-hotpath
+      ---
+      duration_ms: 0.0723
+      type: 'test'
+      ...
+    # Subtest: should suggest increaseBudget for max-lines-exceeded
+    ok 3 - should suggest increaseBudget for max-lines-exceeded
+      ---
+      duration_ms: 0.0563
+      type: 'test'
+      ...
+    # Subtest: should suggest provideIdentifiersToFind for missing identifiers
+    ok 4 - should suggest provideIdentifiersToFind for missing identifiers
+      ---
+      duration_ms: 0.0461
+      type: 'test'
+      ...
+    # Subtest: should suggest narrowScope for max-cards-exceeded
+    ok 5 - should suggest narrowScope for max-cards-exceeded
+      ---
+      duration_ms: 0.0712
+      type: 'test'
+      ...
+    # Subtest: should suggest narrowScope for max-tokens-budget-exceeded
+    ok 6 - should suggest narrowScope for max-tokens-budget-exceeded
+      ---
+      duration_ms: 0.0524
+      type: 'test'
+      ...
+    # Subtest: should return no action for approved requests
+    ok 7 - should return no action for approved requests
+      ---
+      duration_ms: 0.0416
+      type: 'test'
+      ...
+    1..7
+ok 51 - Policy Engine - Next Best Action
+  ---
+  duration_ms: 0.5992
+  type: 'suite'
+  ...
+# Subtest: Policy Engine - Audit Trail
+    # Subtest: should generate consistent hash for same inputs
+    ok 1 - should generate consistent hash for same inputs
+      ---
+      duration_ms: 0.0511
+      type: 'test'
+      ...
+    # Subtest: should generate different hashes for different decisions
+    ok 2 - should generate different hashes for different decisions
+      ---
+      duration_ms: 0.046
+      type: 'test'
+      ...
+    # Subtest: should include audit hash in decision
+    ok 3 - should include audit hash in decision
+      ---
+      duration_ms: 0.033
+      type: 'test'
+      ...
+    # Subtest: should capture all evidence in audit trail
+    ok 4 - should capture all evidence in audit trail
+      ---
+      duration_ms: 0.0862
+      type: 'test'
+      ...
+    # Subtest: should capture denied reasons when applicable
+    ok 5 - should capture denied reasons when applicable
+      ---
+      duration_ms: 0.037
+      type: 'test'
+      ...
+    1..5
+ok 52 - Policy Engine - Audit Trail
+  ---
+  duration_ms: 0.3028
+  type: 'suite'
+  ...
+# Subtest: Policy Engine - Rule Management
+    # Subtest: should add custom rule
+    ok 1 - should add custom rule
+      ---
+      duration_ms: 0.1186
+      type: 'test'
+      ...
+    # Subtest: should remove existing rule
+    ok 2 - should remove existing rule
+      ---
+      duration_ms: 0.0431
+      type: 'test'
+      ...
+    # Subtest: should get rule by name
+    ok 3 - should get rule by name
+      ---
+      duration_ms: 0.0348
+      type: 'test'
+      ...
+    # Subtest: should return undefined for non-existent rule
+    ok 4 - should return undefined for non-existent rule
+      ---
+      duration_ms: 0.0315
+      type: 'test'
+      ...
+    # Subtest: should respect disabled rule during evaluation
+    ok 5 - should respect disabled rule during evaluation
+      ---
+      duration_ms: 0.0552
+      type: 'test'
+      ...
+    1..5
+ok 53 - Policy Engine - Rule Management
+  ---
+  duration_ms: 0.3321
+  type: 'suite'
+  ...
+# Subtest: Policy Engine - Configuration Management
+    # Subtest: should update configuration
+    ok 1 - should update configuration
+      ---
+      duration_ms: 0.0823
+      type: 'test'
+      ...
+    # Subtest: should merge configuration updates
+    ok 2 - should merge configuration updates
+      ---
+      duration_ms: 0.0394
+      type: 'test'
+      ...
+    # Subtest: should return copy of configuration
+    ok 3 - should return copy of configuration
+      ---
+      duration_ms: 0.0363
+      type: 'test'
+      ...
+    # Subtest: should use updated configuration in evaluation
+    ok 4 - should use updated configuration in evaluation
+      ---
+      duration_ms: 0.0514
+      type: 'test'
+      ...
+    1..4
+ok 54 - Policy Engine - Configuration Management
+  ---
+  duration_ms: 0.2594
+  type: 'suite'
+  ...
+# Subtest: Policy Engine - Error Handling
+    # Subtest: should handle rule evaluation errors gracefully
+    ok 1 - should handle rule evaluation errors gracefully
+      ---
+      duration_ms: 0.4538
+      type: 'test'
+      ...
+    # Subtest: should continue evaluation after error
+    ok 2 - should continue evaluation after error
+      ---
+      duration_ms: 0.0986
+      type: 'test'
+      ...
+    1..2
+ok 55 - Policy Engine - Error Handling
+  ---
+  duration_ms: 0.5862
+  type: 'suite'
+  ...
+# Subtest: Policy Engine - Edge Cases
+    # Subtest: should handle empty context
+    ok 1 - should handle empty context
+      ---
+      duration_ms: 0.1673
+      type: 'test'
+      ...
+    # Subtest: should handle maximum budget values
+    ok 2 - should handle maximum budget values
+      ---
+      duration_ms: 0.0712
+      type: 'test'
+      ...
+    # Subtest: should handle zero values
+    ok 3 - should handle zero values
+      ---
+      duration_ms: 0.0368
+      type: 'test'
+      ...
+    # Subtest: should handle negative values
+    ok 4 - should handle negative values
+      ---
+      duration_ms: 0.0299
+      type: 'test'
+      ...
+    # Subtest: should handle very long reason strings
+    ok 5 - should handle very long reason strings
+      ---
+      duration_ms: 0.0511
+      type: 'test'
+      ...
+    # Subtest: should handle very large identifier arrays
+    ok 6 - should handle very large identifier arrays
+      ---
+      duration_ms: 0.0924
+      type: 'test'
+      ...
+    1..6
+ok 56 - Policy Engine - Edge Cases
+  ---
+  duration_ms: 0.5048
+  type: 'suite'
+  ...
+# Subtest: Policy Engine - Integration Tests
+    # Subtest: should handle complex multi-rule scenarios
+    ok 1 - should handle complex multi-rule scenarios
+      ---
+      duration_ms: 0.0606
+      type: 'test'
+      ...
+    # Subtest: should work with symbol in slice context
+    ok 2 - should work with symbol in slice context
+      ---
+      duration_ms: 0.0467
+      type: 'test'
+      ...
+    # Subtest: should generate downgrade target with symbol info
+    ok 3 - should generate downgrade target with symbol info
+      ---
+      duration_ms: 0.058
+      type: 'test'
+      ...
+    1..3
+ok 57 - Policy Engine - Integration Tests
+  ---
+  duration_ms: 0.2101
+  type: 'suite'
+  ...
+# [INFO] PR Risk Analysis requested {"repoId":"test-repo","fromVersion":"v1","toVersion":"v2"}
+# [INFO] PR Risk Analysis completed {"repoId":"test-repo","riskScore":100,"riskLevel":"high","findingsCount":3}
+# [INFO] PR Risk Analysis requested {"repoId":"test-repo","fromVersion":"v1","toVersion":"v2"}
+# [INFO] PR Risk Analysis completed {"repoId":"test-repo","riskScore":100,"riskLevel":"high","findingsCount":3}
+# [INFO] PR Risk Analysis requested {"repoId":"test-repo","fromVersion":"v1","toVersion":"v2"}
+# [INFO] PR Risk Analysis completed {"repoId":"test-repo","riskScore":100,"riskLevel":"high","findingsCount":3}
+# [INFO] PR Risk Analysis requested {"repoId":"test-repo","fromVersion":"v1","toVersion":"v2"}
+# [INFO] PR Risk Analysis completed {"repoId":"test-repo","riskScore":100,"riskLevel":"high","findingsCount":3}
+# [INFO] PR Risk Analysis requested {"repoId":"test-repo","fromVersion":"v1","toVersion":"v2"}
+# [INFO] PR Risk Analysis completed {"repoId":"test-repo","riskScore":100,"riskLevel":"high","findingsCount":3}
+# [INFO] PR Risk Analysis requested {"repoId":"test-repo","fromVersion":"v1","toVersion":"v2"}
+# [INFO] PR Risk Analysis completed {"repoId":"test-repo","riskScore":100,"riskLevel":"high","findingsCount":3}
+# [INFO] PR Risk Analysis requested {"repoId":"test-repo","fromVersion":"v1","toVersion":"v2"}
+# [INFO] PR Risk Analysis completed {"repoId":"test-repo","riskScore":100,"riskLevel":"high","findingsCount":3}
+# [INFO] PR Risk Analysis requested {"repoId":"test-repo","fromVersion":"nonexistent-v1","toVersion":"nonexistent-v2"}
+# Subtest: PR Risk Analysis Tool
+    # Subtest: should compute risk score for delta changes
+    ok 1 - should compute risk score for delta changes
+      ---
+      duration_ms: 22.8456
+      type: 'test'
+      ...
+    # Subtest: should return findings array with severity levels
+    ok 2 - should return findings array with severity levels
+      ---
+      duration_ms: 16.0924
+      type: 'test'
+      ...
+    # Subtest: should return impactedSymbols from blast radius
+    ok 3 - should return impactedSymbols from blast radius
+      ---
+      duration_ms: 15.5243
+      type: 'test'
+      ...
+    # Subtest: should return evidence array
+    ok 4 - should return evidence array
+      ---
+      duration_ms: 16.2389
+      type: 'test'
+      ...
+    # Subtest: should return recommendedTests with priorities
+    ok 5 - should return recommendedTests with priorities
+      ---
+      duration_ms: 16.4553
+      type: 'test'
+      ...
+    # Subtest: should set escalationRequired based on risk threshold
+    ok 6 - should set escalationRequired based on risk threshold
+      ---
+      duration_ms: 15.44
+      type: 'test'
+      ...
+    # Subtest: should include policyDecision when escalation required
+    ok 7 - should include policyDecision when escalation required
+      ---
+      duration_ms: 15.2326
+      type: 'test'
+      ...
+    # Subtest: should handle missing versions gracefully
+    ok 8 - should handle missing versions gracefully
+      ---
+      duration_ms: 15.0767
+      type: 'test'
+      ...
+    1..8
+ok 58 - PR Risk Analysis Tool
+  ---
+  duration_ms: 133.594
+  type: 'suite'
+  ...
+# Subtest: release regression guards
+    # Subtest: parses card URI symbol segment correctly
+    ok 1 - parses card URI symbol segment correctly
+      ---
+      duration_ms: 0.5712
+      type: 'test'
+      ...
+    # Subtest: updates code policy engine from merged repo+app policy before evaluation
+    ok 2 - updates code policy engine from merged repo+app policy before evaluation
+      ---
+      duration_ms: 0.2537
+      type: 'test'
+      ...
+    # Subtest: uses absolute end line for code window truncation resume cursor
+    ok 3 - uses absolute end line for code window truncation resume cursor
+      ---
+      duration_ms: 0.1724
+      type: 'test'
+      ...
+    # Subtest: merges repo policy overrides in slice policy evaluation
+    ok 4 - merges repo policy overrides in slice policy evaluation
+      ---
+      duration_ms: 0.2205
+      type: 'test'
+      ...
+    # Subtest: policy get/set merges with app policy without clobbering overrides
+    ok 5 - policy get/set merges with app policy without clobbering overrides
+      ---
+      duration_ms: 0.2226
+      type: 'test'
+      ...
+    1..5
+ok 59 - release regression guards
+  ---
+  duration_ms: 1.9564
+  type: 'suite'
+  ...
+# Subtest: repo.register language defaults
+    # Subtest: defaults to all supported languages when languages are omitted
+    ok 1 - defaults to all supported languages when languages are omitted
+      ---
+      duration_ms: 0.3317
+      type: 'test'
+      ...
+    1..1
+ok 60 - repo.register language defaults
+  ---
+  duration_ms: 0.6993
+  type: 'suite'
+  ...
+# Subtest: Rust Adapter
+    # Subtest: ML2-C3.2: Import Extraction
+        # Subtest: should extract use statements with simple path
+        ok 1 - should extract use statements with simple path
+          ---
+          duration_ms: 4.6926
+          type: 'test'
+          ...
+        # Subtest: should extract wildcard imports
+        ok 2 - should extract wildcard imports
+          ---
+          duration_ms: 1.1421
+          type: 'test'
+          ...
+        # Subtest: should extract use statements with scoped list
+        ok 3 - should extract use statements with scoped list
+          ---
+          duration_ms: 1.1675
+          type: 'test'
+          ...
+        # Subtest: should extract use statements with aliases
+        ok 4 - should extract use statements with aliases
+          ---
+          duration_ms: 1.0805
+          type: 'test'
+          ...
+        # Subtest: should identify relative imports (self, super, crate)
+        ok 5 - should identify relative imports (self, super, crate)
+          ---
+          duration_ms: 1.1807
+          type: 'test'
+          ...
+        # Subtest: should extract module declarations (mod foo;)
+        ok 6 - should extract module declarations (mod foo;)
+          ---
+          duration_ms: 1.1122
+          type: 'test'
+          ...
+        # Subtest: should identify external crate uses
+        ok 7 - should identify external crate uses
+          ---
+          duration_ms: 1.0934
+          type: 'test'
+          ...
+        # Subtest: should extract re-exports
+        ok 8 - should extract re-exports
+          ---
+          duration_ms: 1.052
+          type: 'test'
+          ...
+        # Subtest: should handle mixed use statements
+        ok 9 - should handle mixed use statements
+          ---
+          duration_ms: 1.079
+          type: 'test'
+          ...
+        # Subtest: should match expected imports output
+        ok 10 - should match expected imports output
+          ---
+          duration_ms: 1.1539
+          type: 'test'
+          ...
+        1..10
+    ok 1 - ML2-C3.2: Import Extraction
+      ---
+      duration_ms: 15.4115
+      type: 'suite'
+      ...
+    # Subtest: ML2-C3.1: Symbol Extraction
+        # Subtest: should extract module declarations
+        ok 1 - should extract module declarations
+          ---
+          duration_ms: 4.991
+          type: 'test'
+          ...
+        # Subtest: should extract functions with parameters and return types
+        ok 2 - should extract functions with parameters and return types
+          ---
+          duration_ms: 3.2744
+          type: 'test'
+          ...
+        # Subtest: should extract generic functions
+        ok 3 - should extract generic functions
+          ---
+          duration_ms: 3.0628
+          type: 'test'
+          ...
+        # Subtest: should extract structs with fields
+        ok 4 - should extract structs with fields
+          ---
+          duration_ms: 3.9758
+          type: 'test'
+          ...
+        # Subtest: should extract generic structs
+        ok 5 - should extract generic structs
+          ---
+          duration_ms: 2.7182
+          type: 'test'
+          ...
+        # Subtest: should extract enums with variants
+        ok 6 - should extract enums with variants
+          ---
+          duration_ms: 2.8113
+          type: 'test'
+          ...
+        # Subtest: should extract traits
+        ok 7 - should extract traits
+          ---
+          duration_ms: 2.7513
+          type: 'test'
+          ...
+        # Subtest: should extract impl block methods
+        ok 8 - should extract impl block methods
+          ---
+          duration_ms: 2.6552
+          type: 'test'
+          ...
+        # Subtest: should extract type aliases
+        ok 9 - should extract type aliases
+          ---
+          duration_ms: 3.8648
+          type: 'test'
+          ...
+        # Subtest: should extract visibility modifiers correctly
+        ok 10 - should extract visibility modifiers correctly
+          ---
+          duration_ms: 2.7364
+          type: 'test'
+          ...
+        1..10
+    ok 2 - ML2-C3.1: Symbol Extraction
+      ---
+      duration_ms: 33.0652
+      type: 'suite'
+      ...
+    # Subtest: ML2-C3.3: Call Extraction
+        # Subtest: should extract simple function calls
+        ok 1 - should extract simple function calls
+          ---
+          duration_ms: 10.2496
+          type: 'test'
+          ...
+        # Subtest: should extract method calls with receiver
+        ok 2 - should extract method calls with receiver
+          ---
+          duration_ms: 8.8314
+          type: 'test'
+          ...
+        # Subtest: should extract associated function calls (Type::func)
+        ok 3 - should extract associated function calls (Type::func)
+          ---
+          duration_ms: 8.901
+          type: 'test'
+          ...
+        # Subtest: should extract chained method calls
+        ok 4 - should extract chained method calls
+          ---
+          duration_ms: 10.7387
+          type: 'test'
+          ...
+        # Subtest: should extract macro invocations as unresolved
+        ok 5 - should extract macro invocations as unresolved
+          ---
+          duration_ms: 8.266
+          type: 'test'
+          ...
+        # Subtest: should extract module-qualified calls
+        ok 6 - should extract module-qualified calls
+          ---
+          duration_ms: 8.2335
+          type: 'test'
+          ...
+        # Subtest: should track caller context for calls
+        ok 7 - should track caller context for calls
+          ---
+          duration_ms: 8.4002
+          type: 'test'
+          ...
+        1..7
+    ok 3 - ML2-C3.3: Call Extraction
+      ---
+      duration_ms: 63.8022
+      type: 'suite'
+      ...
+    # Subtest: ML2-C3.4: Golden Files
+        # Subtest: should match expected symbols output
+        ok 1 - should match expected symbols output
+          ---
+          duration_ms: 2.7329
+          type: 'test'
+          ...
+        # Subtest: should match expected imports output
+        ok 2 - should match expected imports output
+          ---
+          duration_ms: 0.8195
+          type: 'test'
+          ...
+        # Subtest: should match expected calls output
+        ok 3 - should match expected calls output
+          ---
+          duration_ms: 8.8325
+          type: 'test'
+          ...
+        1..3
+    ok 4 - ML2-C3.4: Golden Files
+      ---
+      duration_ms: 12.4849
+      type: 'suite'
+      ...
+    # Subtest: Integration
+        # Subtest: should handle complete Rust file with all constructs
+        ok 1 - should handle complete Rust file with all constructs
+          ---
+          duration_ms: 5.2109
+          type: 'test'
+          ...
+        1..1
+    ok 5 - Integration
+      ---
+      duration_ms: 5.262
+      type: 'suite'
+      ...
+    1..5
+ok 61 - Rust Adapter
+  ---
+  duration_ms: 130.3645
+  type: 'suite'
+  ...
+# Subtest: scoreSymbolWithMetrics structural specificity
+    # Subtest: de-prioritizes broad aggregator files versus domain files
+    ok 1 - de-prioritizes broad aggregator files versus domain files
+      ---
+      duration_ms: 0.6927
+      type: 'test'
+      ...
+    # Subtest: penalizes generated and test paths compared to source paths
+    ok 2 - penalizes generated and test paths compared to source paths
+      ---
+      duration_ms: 0.0983
+      type: 'test'
+      ...
+    1..2
+ok 62 - scoreSymbolWithMetrics structural specificity
+  ---
+  duration_ms: 1.209
+  type: 'suite'
+  ...
+# Subtest: Shell Adapter
+    # Subtest: ML2-C5.1: Symbol Extraction
+        # Subtest: should extract function definitions with name() style
+        ok 1 - should extract function definitions with name() style
+          ---
+          duration_ms: 4.2324
+          type: 'test'
+          ...
+        # Subtest: should extract function definitions with function keyword style
+        ok 2 - should extract function definitions with function keyword style
+          ---
+          duration_ms: 1.534
+          type: 'test'
+          ...
+        # Subtest: should extract function definitions with parameters in body
+        ok 3 - should extract function definitions with parameters in body
+          ---
+          duration_ms: 1.4533
+          type: 'test'
+          ...
+        # Subtest: should extract global variables
+        ok 4 - should extract global variables
+          ---
+          duration_ms: 2.1199
+          type: 'test'
+          ...
+        # Subtest: should extract exported variables
+        ok 5 - should extract exported variables
+          ---
+          duration_ms: 1.5121
+          type: 'test'
+          ...
+        # Subtest: should extract readonly variables
+        ok 6 - should extract readonly variables
+          ---
+          duration_ms: 1.4404
+          type: 'test'
+          ...
+        # Subtest: should extract array variables
+        ok 7 - should extract array variables
+          ---
+          duration_ms: 1.4099
+          type: 'test'
+          ...
+        # Subtest: should extract associative array variables
+        ok 8 - should extract associative array variables
+          ---
+          duration_ms: 1.4083
+          type: 'test'
+          ...
+        # Subtest: should extract local variables inside functions
+        ok 9 - should extract local variables inside functions
+          ---
+          duration_ms: 1.5263
+          type: 'test'
+          ...
+        # Subtest: should extract aliases as variables
+        ok 10 - should extract aliases as variables
+          ---
+          duration_ms: 1.77
+          type: 'test'
+          ...
+        # Subtest: should extract functions with multiple variable reassignments
+        ok 11 - should extract functions with multiple variable reassignments
+          ---
+          duration_ms: 1.4369
+          type: 'test'
+          ...
+        1..11
+    ok 1 - ML2-C5.1: Symbol Extraction
+      ---
+      duration_ms: 20.5249
+      type: 'suite'
+      ...
+    # Subtest: ML2-C5.2: Import Extraction
+        # Subtest: should extract source commands with relative paths
+        ok 1 - should extract source commands with relative paths
+          ---
+          duration_ms: 4.8762
+          type: 'test'
+          ...
+        # Subtest: should extract source commands with absolute paths
+        ok 2 - should extract source commands with absolute paths
+          ---
+          duration_ms: 4.2179
+          type: 'test'
+          ...
+        # Subtest: should extract dot notation source commands
+        ok 3 - should extract dot notation source commands
+          ---
+          duration_ms: 4.0906
+          type: 'test'
+          ...
+        # Subtest: should extract source with parent directory relative paths
+        ok 4 - should extract source with parent directory relative paths
+          ---
+          duration_ms: 4.1026
+          type: 'test'
+          ...
+        # Subtest: should extract source with nested relative paths
+        ok 5 - should extract source with nested relative paths
+          ---
+          duration_ms: 4.1564
+          type: 'test'
+          ...
+        # Subtest: should strip quotes from file paths
+        ok 6 - should strip quotes from file paths
+          ---
+          duration_ms: 4.1341
+          type: 'test'
+          ...
+        # Subtest: should handle multiple source commands
+        ok 7 - should handle multiple source commands
+          ---
+          duration_ms: 4.1275
+          type: 'test'
+          ...
+        1..7
+    ok 2 - ML2-C5.2: Import Extraction
+      ---
+      duration_ms: 29.8733
+      type: 'suite'
+      ...
+    # Subtest: ML2-C5.3: Call Extraction
+        # Subtest: should extract function calls inside function bodies
+        ok 1 - should extract function calls inside function bodies
+          ---
+          duration_ms: 6.1748
+          type: 'test'
+          ...
+        # Subtest: should extract function calls with correct resolution
+        ok 2 - should extract function calls with correct resolution
+          ---
+          duration_ms: 4.8362
+          type: 'test'
+          ...
+        # Subtest: should identify external commands as dynamic calls
+        ok 3 - should identify external commands as dynamic calls
+          ---
+          duration_ms: 4.9423
+          type: 'test'
+          ...
+        # Subtest: should identify alias invocations as dynamic calls
+        ok 4 - should identify alias invocations as dynamic calls
+          ---
+          duration_ms: 5.0712
+          type: 'test'
+          ...
+        # Subtest: should extract calls with arguments
+        ok 5 - should extract calls with arguments
+          ---
+          duration_ms: 5.4362
+          type: 'test'
+          ...
+        # Subtest: should extract function calls in command substitution
+        ok 6 - should extract function calls in command substitution
+          ---
+          duration_ms: 4.9932
+          type: 'test'
+          ...
+        # Subtest: should extract calls in pipelines
+        ok 7 - should extract calls in pipelines
+          ---
+          duration_ms: 4.7753
+          type: 'test'
+          ...
+        # Subtest: should extract calls in subshells
+        ok 8 - should extract calls in subshells
+          ---
+          duration_ms: 5.8268
+          type: 'test'
+          ...
+        # Subtest: should extract calls in conditional statements
+        ok 9 - should extract calls in conditional statements
+          ---
+          duration_ms: 5.0001
+          type: 'test'
+          ...
+        # Subtest: should skip source commands (not function calls)
+        ok 10 - should skip source commands (not function calls)
+          ---
+          duration_ms: 4.8863
+          type: 'test'
+          ...
+        # Subtest: should skip alias definitions (not function calls)
+        ok 11 - should skip alias definitions (not function calls)
+          ---
+          duration_ms: 4.7645
+          type: 'test'
+          ...
+        # Subtest: should correctly identify caller for calls in global scope
+        ok 12 - should correctly identify caller for calls in global scope
+          ---
+          duration_ms: 4.742
+          type: 'test'
+          ...
+        1..12
+    ok 3 - ML2-C5.3: Call Extraction
+      ---
+      duration_ms: 61.6948
+      type: 'suite'
+      ...
+    # Subtest: ML2-C5.4: Golden Files
+        # Subtest: should match expected symbols output
+        ok 1 - should match expected symbols output
+          ---
+          duration_ms: 1.2129
+          type: 'test'
+          ...
+        # Subtest: should match expected imports output
+        ok 2 - should match expected imports output
+          ---
+          duration_ms: 4.1662
+          type: 'test'
+          ...
+        # Subtest: should match expected calls output
+        ok 3 - should match expected calls output
+          ---
+          duration_ms: 4.7796
+          type: 'test'
+          ...
+        1..3
+    ok 4 - ML2-C5.4: Golden Files
+      ---
+      duration_ms: 10.234
+      type: 'suite'
+      ...
+    # Subtest: Integration
+        # Subtest: should handle complete Shell file with all constructs
+        ok 1 - should handle complete Shell file with all constructs
+          ---
+          duration_ms: 7.4847
+          type: 'test'
+          ...
+        1..1
+    ok 5 - Integration
+      ---
+      duration_ms: 7.5313
+      type: 'suite'
+      ...
+    # Subtest: Command Substitution Edge Cases
+        # Subtest: should handle nested command substitution
+        ok 1 - should handle nested command substitution
+          ---
+          duration_ms: 3.6161
+          type: 'test'
+          ...
+        # Subtest: should handle command substitution with pipelines
+        ok 2 - should handle command substitution with pipelines
+          ---
+          duration_ms: 3.6267
+          type: 'test'
+          ...
+        # Subtest: should handle backtick command substitution
+        ok 3 - should handle backtick command substitution
+          ---
+          duration_ms: 3.5126
+          type: 'test'
+          ...
+        1..3
+    ok 6 - Command Substitution Edge Cases
+      ---
+      duration_ms: 10.8201
+      type: 'suite'
+      ...
+    1..6
+ok 63 - Shell Adapter
+  ---
+  duration_ms: 141.0265
+  type: 'suite'
+  ...
+# Subtest: skeleton exportedOnly filtering
+    # Subtest: exportedOnly=false includes non-exported declarations
+    ok 1 - exportedOnly=false includes non-exported declarations
+      ---
+      duration_ms: 1.6612
+      type: 'test'
+      ...
+    # Subtest: exportedOnly=true excludes non-exported declarations
+    ok 2 - exportedOnly=true excludes non-exported declarations
+      ---
+      duration_ms: 0.6838
+      type: 'test'
+      ...
+    # Subtest: exportedOnly=true produces fewer lines than exportedOnly=false
+    ok 3 - exportedOnly=true produces fewer lines than exportedOnly=false
+      ---
+      duration_ms: 0.6668
+      type: 'test'
+      ...
+    # Subtest: importStatements are always included regardless of exportedOnly
+    ok 4 - importStatements are always included regardless of exportedOnly
+      ---
+      duration_ms: 0.5696
+      type: 'test'
+      ...
+    1..4
+ok 64 - skeleton exportedOnly filtering
+  ---
+  duration_ms: 4.122
+  type: 'suite'
+  ...
+# Subtest: slice card wire format
+    # Subtest: omits repoId and version.ledgerVersion in slice cards
+    ok 1 - omits repoId and version.ledgerVersion in slice cards
+      ---
+      duration_ms: 0.4642
+      type: 'test'
+      ...
+    # Subtest: skips both payload and cardRefs for unchanged cards (delta-only refs)
+    ok 2 - skips both payload and cardRefs for unchanged cards (delta-only refs)
+      ---
+      duration_ms: 0.3205
+      type: 'test'
+      ...
+    # Subtest: includes changed cards in both payload and cardRefs
+    ok 3 - includes changed cards in both payload and cardRefs
+      ---
+      duration_ms: 0.1281
+      type: 'test'
+      ...
+    # Subtest: truncates astFingerprint to 16 chars in slice wire format
+    ok 4 - truncates astFingerprint to 16 chars in slice wire format
+      ---
+      duration_ms: 0.0533
+      type: 'test'
+      ...
+    # Subtest: truncates astFingerprint to 8 chars in compact v2 wire format for full detail cards
+    ok 5 - truncates astFingerprint to 8 chars in compact v2 wire format for full detail cards
+      ---
+      duration_ms: 0.2049
+      type: 'test'
+      ...
+    # Subtest: omits astFingerprint in compact v2 wire format for compact detail cards
+    ok 6 - omits astFingerprint in compact v2 wire format for compact detail cards
+      ---
+      duration_ms: 0.0741
+      type: 'test'
+      ...
+    1..6
+ok 65 - slice card wire format
+  ---
+  duration_ms: 1.7467
+  type: 'suite'
+  ...
+# Subtest: slice compact wire format v1
+    # Subtest: serializes a standard slice to abbreviated compact keys
+    ok 1 - serializes a standard slice to abbreviated compact keys
+      ---
+      duration_ms: 0.8455
+      type: 'test'
+      ...
+    # Subtest: includes optional compact fields only when present
+    ok 2 - includes optional compact fields only when present
+      ---
+      duration_ms: 0.1529
+      type: 'test'
+      ...
+    1..2
+ok 66 - slice compact wire format v1
+  ---
+  duration_ms: 1.4181
+  type: 'suite'
+  ...
+# Subtest: slice compact wire format v2
+    # Subtest: serializes with file path lookup, integer edge types, and no sid/rid
+    ok 1 - serializes with file path lookup, integer edge types, and no sid/rid
+      ---
+      duration_ms: 0.3035
+      type: 'test'
+      ...
+    # Subtest: uses card index for frontier and abbreviates why codes
+    ok 2 - uses card index for frontier and abbreviates why codes
+      ---
+      duration_ms: 0.142
+      type: 'test'
+      ...
+    # Subtest: omits truncation when not truncated
+    ok 3 - omits truncation when not truncated
+      ---
+      duration_ms: 0.0653
+      type: 'test'
+      ...
+    # Subtest: includes truncation when actually truncated
+    ok 4 - includes truncation when actually truncated
+      ---
+      duration_ms: 0.0692
+      type: 'test'
+      ...
+    # Subtest: deduplicates file paths across cards from different files
+    ok 5 - deduplicates file paths across cards from different files
+      ---
+      duration_ms: 0.0896
+      type: 'test'
+      ...
+    1..5
+ok 67 - slice compact wire format v2
+  ---
+  duration_ms: 0.8822
+  type: 'suite'
+  ...
+# Subtest: slice build request wire-format negotiation
+    # Subtest: accepts compact wire format without version (defaults to v2)
+    ok 1 - accepts compact wire format without version (defaults to v2)
+      ---
+      duration_ms: 0.5866
+      type: 'test'
+      ...
+    # Subtest: accepts compact wire format with version 1
+    ok 2 - accepts compact wire format with version 1
+      ---
+      duration_ms: 0.2641
+      type: 'test'
+      ...
+    # Subtest: accepts compact wire format with version 2
+    ok 3 - accepts compact wire format with version 2
+      ---
+      duration_ms: 0.4525
+      type: 'test'
+      ...
+    # Subtest: keeps standard wire format backward compatible
+    ok 4 - keeps standard wire format backward compatible
+      ---
+      duration_ms: 0.1442
+      type: 'test'
+      ...
+    1..4
+ok 68 - slice build request wire-format negotiation
+  ---
+  duration_ms: 1.5658
+  type: 'suite'
+  ...
+# Subtest: slice edge wire format
+    # Subtest: encodes edges as index tuples with a deduplicated symbol index
+    ok 1 - encodes edges as index tuples with a deduplicated symbol index
+      ---
+      duration_ms: 0.6342
+      type: 'test'
+      ...
+    # Subtest: uses integer edge type indices in compact v2 format
+    ok 2 - uses integer edge type indices in compact v2 format
+      ---
+      duration_ms: 0.3012
+      type: 'test'
+      ...
+    1..2
+ok 69 - slice edge wire format
+  ---
+  duration_ms: 1.3737
+  type: 'suite'
+  ...
+# Subtest: Symbol References (Inverted Index)
+    # Subtest: should insert and retrieve symbol references
+    ok 1 - should insert and retrieve symbol references
+      ---
+      duration_ms: 1.0312
+      type: 'test'
+      ...
+    # Subtest: should return empty array for non-existent symbol
+    ok 2 - should return empty array for non-existent symbol
+      ---
+      duration_ms: 0.3618
+      type: 'test'
+      ...
+    # Subtest: should delete references by file ID
+    ok 3 - should delete references by file ID
+      ---
+      duration_ms: 0.1905
+      type: 'test'
+      ...
+    # Subtest: should handle duplicate symbol names correctly
+    ok 4 - should handle duplicate symbol names correctly
+      ---
+      duration_ms: 0.225
+      type: 'test'
+      ...
+    1..4
+ok 70 - Symbol References (Inverted Index)
+  ---
+  duration_ms: 12.4982
+  type: 'suite'
+  ...
+# Subtest: Sync Artifact Model
+    # Subtest: should create sync artifact with commit SHA linking
+    ok 1 - should create sync artifact with commit SHA linking
+      ---
+      duration_ms: 22.9995
+      type: 'test'
+      ...
+    # Subtest: should export and import sync artifact with integrity verification
+    ok 2 - should export and import sync artifact with integrity verification
+      ---
+      duration_ms: 19.3779
+      type: 'test'
+      ...
+    # Subtest: should reject import with hash mismatch on tampered artifact
+    ok 3 - should reject import with hash mismatch on tampered artifact
+      ---
+      duration_ms: 19.2897
+      type: 'test'
+      ...
+    # Subtest: should retrieve artifact metadata without full import
+    ok 4 - should retrieve artifact metadata without full import
+      ---
+      duration_ms: 17.503
+      type: 'test'
+      ...
+    # Subtest: should handle missing artifact metadata gracefully
+    ok 5 - should handle missing artifact metadata gracefully
+      ---
+      duration_ms: 0.2393
+      type: 'test'
+      ...
+    # Subtest: should handle repo_id mismatch with force flag
+    ok 6 - should handle repo_id mismatch with force flag
+      ---
+      duration_ms: 20.3386
+      type: 'test'
+      ...
+    1..6
+ok 71 - Sync Artifact Model
+  ---
+  duration_ms: 100.5181
+  type: 'suite'
+  ...
+# Subtest: token estimate model
+    # Subtest: returns 0 for empty input
+    ok 1 - returns 0 for empty input
+      ---
+      duration_ms: 0.3276
+      type: 'test'
+      ...
+    # Subtest: uses ~3.5 chars/token for prose-like text
+    ok 2 - uses ~3.5 chars/token for prose-like text
+      ---
+      duration_ms: 0.0811
+      type: 'test'
+      ...
+    # Subtest: counts JSON structural characters as 1:1 overhead
+    ok 3 - counts JSON structural characters as 1:1 overhead
+      ---
+      duration_ms: 0.0411
+      type: 'test'
+      ...
+    # Subtest: estimates JSON payloads higher than legacy chars/4 heuristic
+    ok 4 - estimates JSON payloads higher than legacy chars/4 heuristic
+      ---
+      duration_ms: 0.0745
+      type: 'test'
+      ...
+    1..4
+ok 72 - token estimate model
+  ---
+  duration_ms: 1.013
+  type: 'suite'
+  ...
+# Subtest: MCP tool registration
+    # Subtest: registers sdl.slice.refresh
+    ok 1 - registers sdl.slice.refresh
+      ---
+      duration_ms: 0.3633
+      type: 'test'
+      ...
+    1..1
+ok 73 - MCP tool registration
+  ---
+  duration_ms: 0.7313
+  type: 'suite'
+  ...
+# Subtest: TypeScriptAdapter async methods
+    # Subtest: parseAsync should return the same result as parse
+    ok 1 - parseAsync should return the same result as parse
+      ---
+      duration_ms: 4.25
+      type: 'test'
+      ...
+    # Subtest: extractAll should return tree, symbols, imports, and calls
+    ok 2 - extractAll should return tree, symbols, imports, and calls
+      ---
+      duration_ms: 49.9769
+      type: 'test'
+      ...
+    # Subtest: extractAll should extract symbols correctly
+    ok 3 - extractAll should extract symbols correctly
+      ---
+      duration_ms: 47.8692
+      type: 'test'
+      ...
+    # Subtest: extractAll should handle parse errors gracefully
+    ok 4 - extractAll should handle parse errors gracefully
+      ---
+      duration_ms: 47.2756
+      type: 'test'
+      ...
+    # Subtest: extractAll should bundle all extraction steps
+    ok 5 - extractAll should bundle all extraction steps
+      ---
+      duration_ms: 49.0221
+      type: 'test'
+      ...
+    1..5
+ok 74 - TypeScriptAdapter async methods
+  ---
+  duration_ms: 198.9799
+  type: 'suite'
+  ...
+# Subtest: TypeScript Symbol Extraction (IE-K.1)
+    # Subtest: should extract exported type aliases
+    ok 1 - should extract exported type aliases
+      ---
+      duration_ms: 13.4436
+      type: 'test'
+      ...
+    # Subtest: should extract exported interfaces
+    ok 2 - should extract exported interfaces
+      ---
+      duration_ms: 0.4397
+      type: 'test'
+      ...
+    # Subtest: should mark non-exported types with exported: false
+    ok 3 - should mark non-exported types with exported: false
+      ---
+      duration_ms: 0.3024
+      type: 'test'
+      ...
+    # Subtest: should extract type aliases with generics
+    ok 4 - should extract type aliases with generics
+      ---
+      duration_ms: 0.7143
+      type: 'test'
+      ...
+    # Subtest: should extract interfaces with generics and inheritance
+    ok 5 - should extract interfaces with generics and inheritance
+      ---
+      duration_ms: 0.8283
+      type: 'test'
+      ...
+    # Subtest: should extract mixed exports (functions, classes, types, interfaces)
+    ok 6 - should extract mixed exports (functions, classes, types, interfaces)
+      ---
+      duration_ms: 0.8782
+      type: 'test'
+      ...
+    1..6
+ok 75 - TypeScript Symbol Extraction (IE-K.1)
+  ---
+  duration_ms: 17.1061
+  type: 'suite'
+  ...
+1..75
+# tests 721
+# suites 214
+# pass 721
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12432.4741

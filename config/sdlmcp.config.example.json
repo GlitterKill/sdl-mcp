@@ -47,7 +47,7 @@
     "enableFileWatching": false
   },
   "slice": {
-    "defaultMaxCards": 300,
+    "defaultMaxCards": 60,
     "defaultMaxTokens": 12000,
     "edgeWeights": {
       "call": 1.0,

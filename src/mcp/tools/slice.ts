@@ -267,8 +267,6 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
 
   const compact: CompactGraphSliceV2 = {
     wf: "compact",
-    wv: 2,
-    // #13: omit rid (caller already knows it)
     vid: slice.versionId,
     b: {
       mc: slice.budget.maxCards,
@@ -277,7 +275,7 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
     ss: slice.startSymbols,
     si: slice.symbolIndex,
     fp: filePaths,
-    et: edgeTypes,
+    et: slice.edges.length > 0 ? edgeTypes : undefined,
     c: slice.cards.map((card) => {
       const compactCard: CompactGraphSliceV2["c"][number] = {
         fi: filePathIndex.get(card.file) ?? 0,
@@ -294,11 +292,14 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
           i: card.deps.imports,
           c: card.deps.calls,
         },
-        af: card.version.astFingerprint.slice(
+      };
+
+      if (card.detailLevel === "full") {
+        compactCard.af = card.version.astFingerprint.slice(
           0,
           AST_FINGERPRINT_COMPACT_WIRE_LENGTH,
-        ),
-      };
+        );
+      }
 
       if (card.visibility) compactCard.v = card.visibility;
       if (card.signature) compactCard.sig = card.signature;

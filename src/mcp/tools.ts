@@ -268,7 +268,7 @@ const CompactSliceSymbolCardV2Schema = z.object({
   d: CompactSymbolDepsSchema,
   m: CompactSymbolMetricsSchema.optional(),
   dl: CardDetailLevelSchema.optional(),
-  af: z.string(),
+  af: z.string().optional(),
 });
 
 const CompactFrontierItemV2Schema = z.object({
@@ -292,14 +292,14 @@ const CompactEdgeV2Schema = z.tuple([
 
 const CompactGraphSliceV2Schema = z.object({
   wf: z.literal("compact"),
-  wv: z.literal(2),
+  wv: z.literal(2).optional(),
   rid: z.string().optional(),
   vid: z.string(),
   b: CompactSliceBudgetSchema,
   ss: z.array(z.string()),
   si: z.array(z.string()),
   fp: z.array(z.string()),
-  et: z.array(z.string()),
+  et: z.array(z.string()).optional(),
   c: z.array(CompactSliceSymbolCardV2Schema),
   cr: z.array(CompactSliceCardRefV2Schema).optional(),
   e: z.array(CompactEdgeV2Schema),

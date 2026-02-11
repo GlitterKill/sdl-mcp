@@ -212,7 +212,7 @@
           "type": "integer",
           "description": "Default maximum cards in a slice",
           "minimum": 1,
-          "default": 300
+          "default": 60
         },
         "defaultMaxTokens": {
           "type": "integer",
@@ -251,7 +251,7 @@
         }
       },
       "default": {
-        "defaultMaxCards": 300,
+        "defaultMaxCards": 60,
         "defaultMaxTokens": 12000,
         "edgeWeights": {
           "call": 1.0,

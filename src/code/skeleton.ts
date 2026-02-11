@@ -55,6 +55,7 @@ export function extractSkeletonFromNode(
   content: string,
   includeIdentifiers: string[],
   depth: number = 0,
+  exportedOnly: boolean = false,
 ): string {
   const nodeType = node.type;
 
@@ -70,20 +71,24 @@ export function extractSkeletonFromNode(
           content,
           includeIdentifiers,
           depth,
+          exportedOnly,
         );
       }
     }
-    for (const child of node.children) {
-      if (
-        child.type !== "import_statement" &&
-        child.type !== "export_statement"
-      ) {
-        result += extractSkeletonFromNode(
-          child,
-          content,
-          includeIdentifiers,
-          depth,
-        );
+    if (!exportedOnly) {
+      for (const child of node.children) {
+        if (
+          child.type !== "import_statement" &&
+          child.type !== "export_statement"
+        ) {
+          result += extractSkeletonFromNode(
+            child,
+            content,
+            includeIdentifiers,
+            depth,
+            exportedOnly,
+          );
+        }
       }
     }
     return result;
@@ -517,21 +522,13 @@ export function generateFileSkeleton(
     return null;
   }
 
-  let skeletonText = "";
-
-  if (exportedOnly) {
-    skeletonText = extractSkeletonFromNode(
-      tree.rootNode,
-      content,
-      options.includeIdentifiers ?? [],
-    );
-  } else {
-    skeletonText = extractSkeletonFromNode(
-      tree.rootNode,
-      content,
-      options.includeIdentifiers ?? [],
-    );
-  }
+  const skeletonText = extractSkeletonFromNode(
+    tree.rootNode,
+    content,
+    options.includeIdentifiers ?? [],
+    0,
+    exportedOnly,
+  );
 
   const maxLines = options.maxLines ?? DEFAULT_MAX_LINES_SKELETON_DETAILED;
   const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS_SKELETON_DETAILED;

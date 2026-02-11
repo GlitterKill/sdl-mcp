@@ -150,18 +150,26 @@ function buildHotPathExcerpt(
   actualRange: Range;
 } {
   if (matchedLines.size === 0) {
-    const excerptLines = lines.slice(0, Math.min(maxLines, lines.length));
-    const excerpt = excerptLines.join("\n");
+    const allExcerpt = lines.slice(0, Math.min(maxLines, lines.length));
+    const resultLines: string[] = [];
+    let remainingTokens = maxTokens;
+    for (const line of allExcerpt) {
+      const lineTokens = estimateTokenCount(line);
+      if (lineTokens > remainingTokens) break;
+      resultLines.push(line);
+      remainingTokens -= lineTokens;
+    }
+    const excerpt = resultLines.join("\n");
     return {
       excerpt,
       matchedIdentifiers: [],
       matchedLineNumbers: [],
-      truncated: excerptLines.length < lines.length,
+      truncated: resultLines.length < lines.length,
       actualRange: {
         startLine: 1,
         startCol: 0,
-        endLine: excerptLines.length,
-        endCol: excerptLines[excerptLines.length - 1]?.length ?? 0,
+        endLine: resultLines.length,
+        endCol: resultLines[resultLines.length - 1]?.length ?? 0,
       },
     };
   }

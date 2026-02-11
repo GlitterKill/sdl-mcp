@@ -153,7 +153,7 @@ describe("slice compact wire format v2", () => {
     const compact = toCompactGraphSliceV2(slice as any);
 
     assert.strictEqual(compact.wf, "compact");
-    assert.strictEqual(compact.wv, 2);
+    assert.ok(!("wv" in compact), "v2 should omit wv (inferred from wf:compact)");
     assert.ok(!("rid" in compact), "v2 should omit rid");
     assert.strictEqual(compact.vid, "v1");
     assert.deepStrictEqual(compact.b, { mc: 20, mt: 12000 });
@@ -163,7 +163,7 @@ describe("slice compact wire format v2", () => {
     // File path lookup table - deduplicated
     assert.deepStrictEqual(compact.fp, ["src/a.ts"]);
 
-    // Edge type lookup table
+    // Edge type lookup table - present when edges exist
     assert.deepStrictEqual(compact.et, ["import", "call", "config"]);
 
     // Edges use integer edge type index (call = 1)
@@ -177,14 +177,13 @@ describe("slice compact wire format v2", () => {
     assert.strictEqual(card0.n, "alpha");
     assert.strictEqual(card0.x, true);
 
-    // astFingerprint truncated to 8 chars in v2
-    assert.strictEqual(card0.af.length, 8);
-    assert.strictEqual(card0.af, "abcdef01");
+    // astFingerprint omitted for compact cards (only included for full detail)
+    assert.ok(!("af" in card0), "v2 compact card should omit af");
 
     const card1 = compact.c[1];
     assert.strictEqual(card1.fi, 0); // Same file
     assert.strictEqual(card1.n, "beta");
-    assert.strictEqual(card1.af, "fedcba98");
+    assert.ok(!("af" in card1), "v2 compact card should omit af");
   });
 
   it("uses card index for frontier and abbreviates why codes", () => {

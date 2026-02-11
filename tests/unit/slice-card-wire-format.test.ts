@@ -57,17 +57,26 @@ describe("slice card wire format", () => {
     );
   });
 
-  it("preserves full-card etag semantics for cardRefs", () => {
+  it("skips both payload and cardRefs for unchanged cards (delta-only refs)", () => {
     const knownEtag = hashCard(fullCard);
     const { cardsForPayload, cardRefs } = buildPayloadCardsAndRefs([fullCard], {
       [fullCard.symbolId]: knownEtag,
     });
 
-    assert.strictEqual(cardsForPayload.length, 0);
+    assert.strictEqual(cardsForPayload.length, 0, "unchanged card should not appear in payload");
     assert.ok(cardRefs, "expected cardRefs to be present");
-    assert.strictEqual(cardRefs?.length, 1);
+    assert.strictEqual(cardRefs?.length, 0, "unchanged card should not appear in cardRefs");
+  });
+
+  it("includes changed cards in both payload and cardRefs", () => {
+    const { cardsForPayload, cardRefs } = buildPayloadCardsAndRefs([fullCard], {
+      [fullCard.symbolId]: "stale-etag",
+    });
+
+    assert.strictEqual(cardsForPayload.length, 1, "changed card should appear in payload");
+    assert.ok(cardRefs, "expected cardRefs to be present");
+    assert.strictEqual(cardRefs?.length, 1, "changed card should appear in cardRefs");
     assert.strictEqual(cardRefs?.[0].symbolId, fullCard.symbolId);
-    assert.strictEqual(cardRefs?.[0].etag, knownEtag);
   });
 
   it("truncates astFingerprint to 16 chars in slice wire format", () => {
@@ -89,7 +98,7 @@ describe("slice card wire format", () => {
     );
   });
 
-  it("truncates astFingerprint to 8 chars in compact v2 wire format", () => {
+  it("truncates astFingerprint to 8 chars in compact v2 wire format for full detail cards", () => {
     const longFingerprint =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     const slice = {
@@ -107,7 +116,7 @@ describe("slice card wire format", () => {
           name: "example",
           exported: true,
           deps: { imports: ["depA"], calls: ["depB"] },
-          detailLevel: "compact",
+          detailLevel: "full",
           version: { astFingerprint: longFingerprint },
         },
       ],
@@ -115,7 +124,35 @@ describe("slice card wire format", () => {
     } as const;
 
     const compact = toCompactGraphSliceV2(slice as any);
-    assert.strictEqual(compact.c[0].af.length, 8);
+    assert.ok(compact.c[0].af, "af should be present for full detail cards");
+    assert.strictEqual(compact.c[0].af!.length, 8);
     assert.strictEqual(compact.c[0].af, longFingerprint.slice(0, 8));
+  });
+
+  it("omits astFingerprint in compact v2 wire format for compact detail cards", () => {
+    const slice = {
+      repoId: "repo-1",
+      versionId: "v1",
+      budget: { maxCards: 10, maxEstimatedTokens: 5000 },
+      startSymbols: ["sym-1"],
+      symbolIndex: ["sym-1"],
+      cards: [
+        {
+          symbolId: "sym-1",
+          file: "src/example.ts",
+          range: { startLine: 1, startCol: 0, endLine: 10, endCol: 1 },
+          kind: "function",
+          name: "example",
+          exported: true,
+          deps: { imports: ["depA"], calls: ["depB"] },
+          detailLevel: "compact",
+          version: { astFingerprint: "0123456789abcdef" },
+        },
+      ],
+      edges: [] as Array<[number, number, "import" | "call" | "config", number]>,
+    } as const;
+
+    const compact = toCompactGraphSliceV2(slice as any);
+    assert.ok(!("af" in compact.c[0]), "af should be omitted for compact detail cards");
   });
 });

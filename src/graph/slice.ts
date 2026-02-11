@@ -224,12 +224,6 @@ export async function buildSlice(
     Array.from(sliceCards),
     request.repoId,
   );
-  const frontierSuggestions = frontier.slice(0, 10).map((item) => ({
-    symbolId: item.symbolId,
-    score: item.score,
-    why: item.why,
-  }));
-
   const estimatedTokens = estimateTokens(cardsForPayload);
   const slice: GraphSlice = {
     repoId: request.repoId,
@@ -240,10 +234,14 @@ export async function buildSlice(
     cards: cardsForPayload,
     cardRefs,
     edges,
-    frontier: frontierSuggestions,
   };
 
   if (wasTruncated || cards.length >= budget.maxCards) {
+    slice.frontier = frontier.slice(0, 10).map((item) => ({
+      symbolId: item.symbolId,
+      score: item.score,
+      why: item.why,
+    }));
     const totalEdges = edges.length;
     const maxEdges = Math.max(0, totalEdges);
     slice.truncation = {
@@ -478,16 +476,15 @@ export function buildPayloadCardsAndRefs(
     delete cardWithoutEtag.etag;
     const etag = hashCard(cardWithoutEtag);
 
+    if (knownEtags[card.symbolId] === etag) {
+      continue;
+    }
+
     cardRefs.push({
       symbolId: card.symbolId,
       etag,
       detailLevel,
     });
-
-    if (knownEtags[card.symbolId] === etag) {
-      continue;
-    }
-
     cardsForPayload.push(toSliceSymbolCard(cardWithoutEtag));
   }
 
