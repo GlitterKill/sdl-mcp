@@ -12,6 +12,8 @@ build/
 # Database
 *.sqlite
 *.sqlite3
+*.sqlite-shm
+*.sqlite-wal
 *.db
 
 # Environment
@@ -19,22 +21,26 @@ build/
 .env.local
 .env.*.local
 
-# IDE
+# IDE / Editor
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-.DS_Store
 
-# Logs
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs (all formats)
 logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
-# Testing
+# Test output
+test-output*.txt
+test-run*.txt
+test-red-output*.txt
+tests/results/
 coverage/
 .nyc_output/
 
@@ -42,9 +48,18 @@ coverage/
 tmp/
 temp/
 *.tmp
+.tmp/
+.tmp_*
 
-# OS
-Thumbs.db
+# Benchmark results (keep configs and task packs)
+.benchmark/
+benchmark-*.json
+benchmarks/**/results*.json
+benchmarks/**/runs/
+benchmarks/**/budget-sensitivity/
+
+# Package archives
+*.tgz
 
 # Local-only project artifacts
 data/
@@ -52,49 +67,12 @@ devdocs/
 AGENTS.md
 CLAUDE.md
 TASKS.md
+V06-*.md
 nul
 
-# Benchmark outputs
-.benchmark/
-benchmark-*.json
-benchmarks/real-world/budget-sensitivity/points/result-c8-t2000.json
-benchmarks/real-world/budget-sensitivity/points/result-c8-t3000.json
-benchmarks/real-world/budget-sensitivity/points/result-c8-t4000.json
-benchmarks/real-world/budget-sensitivity/points/result-c8-t5000.json
-benchmarks/real-world/budget-sensitivity/points/result-c8-t6500.json
-benchmarks/real-world/budget-sensitivity/points/result-c8-t8000.json
-benchmarks/real-world/budget-sensitivity/points/result-c12-t2000.json
-benchmarks/real-world/budget-sensitivity/points/result-c12-t3000.json
-benchmarks/real-world/budget-sensitivity/points/result-c12-t4000.json
-benchmarks/real-world/budget-sensitivity/points/result-c12-t5000.json
-benchmarks/real-world/budget-sensitivity/points/result-c12-t6500.json
-benchmarks/real-world/budget-sensitivity/points/result-c12-t8000.json
-benchmarks/real-world/budget-sensitivity/points/result-c16-t2000.json
-benchmarks/real-world/budget-sensitivity/points/result-c16-t3000.json
-benchmarks/real-world/budget-sensitivity/points/result-c16-t4000.json
-benchmarks/real-world/budget-sensitivity/points/result-c16-t5000.json
-benchmarks/real-world/budget-sensitivity/points/result-c16-t6500.json
-benchmarks/real-world/budget-sensitivity/points/result-c16-t8000.json
-benchmarks/real-world/budget-sensitivity/points/result-c20-t2000.json
-benchmarks/real-world/budget-sensitivity/points/result-c20-t3000.json
-benchmarks/real-world/budget-sensitivity/points/result-c20-t4000.json
-benchmarks/real-world/budget-sensitivity/points/result-c20-t5000.json
-benchmarks/real-world/budget-sensitivity/points/result-c20-t6500.json
-benchmarks/real-world/budget-sensitivity/points/result-c20-t8000.json
-benchmarks/real-world/budget-sensitivity/points/result-c24-t2000.json
-benchmarks/real-world/budget-sensitivity/points/result-c24-t3000.json
-benchmarks/real-world/budget-sensitivity/points/result-c24-t4000.json
-benchmarks/real-world/budget-sensitivity/points/result-c24-t5000.json
-benchmarks/real-world/budget-sensitivity/points/result-c24-t6500.json
-benchmarks/real-world/budget-sensitivity/points/result-c24-t8000.json
-benchmarks/real-world/budget-sensitivity/points/result-c30-t2000.json
-benchmarks/real-world/budget-sensitivity/points/result-c30-t3000.json
-benchmarks/real-world/budget-sensitivity/points/result-c30-t4000.json
-benchmarks/real-world/budget-sensitivity/points/result-c30-t5000.json
-benchmarks/real-world/budget-sensitivity/points/result-c30-t6500.json
-benchmarks/real-world/budget-sensitivity/points/result-c30-t8000.json
-benchmarks/real-world/budget-sensitivity/budget-sensitivity-heatmap.csv
-benchmarks/real-world/budget-sensitivity/budget-sensitivity-results.csv
-benchmarks/real-world/budget-sensitivity/budget-sensitivity-surface.json
-tests/results/skeleton-determinism.json
-tests/results/skeleton-determinism.json
+# Tool caches
+.ruff_cache/
+.codex/
+
+# Nested temp scripts
+sdl-mcp/.tmp-scripts/
