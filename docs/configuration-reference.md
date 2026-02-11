@@ -45,11 +45,11 @@ Main config file: `config/sdlmcp.config.json`
     "patterns": []
   },
   "indexing": {
-    "concurrency": 4,
+    "concurrency": 8,
     "enableFileWatching": false
   },
   "slice": {
-    "defaultMaxCards": 300,
+    "defaultMaxCards": 60,
     "defaultMaxTokens": 12000,
     "edgeWeights": {
       "call": 1.0,
@@ -63,6 +63,18 @@ Main config file: `config/sdlmcp.config.json`
     "maxErrors": 50,
     "timeoutMs": 2000,
     "scope": "changedFiles"
+  },
+  "cache": {
+    "enabled": true,
+    "symbolCardMaxEntries": 2000,
+    "symbolCardMaxSizeBytes": 104857600,
+    "graphSliceMaxEntries": 1000,
+    "graphSliceMaxSizeBytes": 52428800
+  },
+  "plugins": {
+    "paths": [],
+    "enabled": true,
+    "strictVersioning": true
   }
 }
 ```
@@ -76,6 +88,9 @@ Main config file: `config/sdlmcp.config.json`
 - `ignore`: glob patterns to exclude heavy or generated content
 - `languages`: include only needed languages for faster indexing
 - `maxFileBytes`: per-file hard cap
+- `packageJsonPath`: optional path to `package.json` (auto-detected if not set)
+- `tsconfigPath`: optional path to `tsconfig.json` (auto-detected if not set)
+- `workspaceGlobs`: optional globs to find workspace `package.json` files (monorepo support)
 
 ### `dbPath`
 
@@ -96,8 +111,9 @@ Controls sensitive-data masking in returned content.
 
 ### `indexing`
 
-- `concurrency`: increase on strong local machines, lower in constrained CI
+- `concurrency`: increase on strong local machines, lower in constrained CI (max: 10)
 - `enableFileWatching`: keeps index fresh during active development
+- `workerPoolSize`: optional worker pool size cap (defaults to CPU-count based heuristic)
 
 ### `slice`
 
@@ -106,6 +122,14 @@ Defaults for graph slice budget and edge weighting.
 ### `diagnostics`
 
 TypeScript/JavaScript diagnostics integration controls.
+
+### `cache`
+
+Controls in-memory caching for symbol cards and graph slices.
+
+### `plugins`
+
+Controls adapter plugin loading. See the Plugin SDK docs for authoring and packaging.
 
 ## Common Profiles
 
@@ -129,7 +153,7 @@ TypeScript/JavaScript diagnostics integration controls.
 
 ## Environment Overrides
 
-- `SDL_CONFIG`
-- `SDL_LOG_LEVEL`
-- `SDL_LOG_FORMAT`
-- `SDL_DB_PATH` (runtime override used by server/tests)
+- `SDL_CONFIG` (or `SDL_CONFIG_PATH`) to set the config file path
+- `SDL_DB_PATH` to override the SQLite database path
+
+SDL-MCP also expands environment variables inside JSON config values using `${VAR_NAME}` syntax.

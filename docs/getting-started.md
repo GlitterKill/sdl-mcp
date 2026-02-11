@@ -35,7 +35,7 @@ sdl-mcp version
 ### Run Without Installing
 
 ```bash
-npx sdl-mcp@latest version
+npx --yes sdl-mcp@latest version
 ```
 
 ### Install From Source
@@ -52,6 +52,7 @@ npm link
 
 ```bash
 # from your target project directory
+# If you are using npx, replace `sdl-mcp` with `npx --yes sdl-mcp@latest`.
 sdl-mcp init --client codex
 sdl-mcp doctor
 sdl-mcp index
@@ -78,7 +79,13 @@ What this does:
       "maxFileBytes": 2000000
     }
   ],
-  "dbPath": "./data/sdlmcp.sqlite"
+  "dbPath": "./data/sdlmcp.sqlite",
+  "policy": {
+    "maxWindowLines": 180,
+    "maxWindowTokens": 1400,
+    "requireIdentifiers": true,
+    "allowBreakGlass": true
+  }
 }
 ```
 

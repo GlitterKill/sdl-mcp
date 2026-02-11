@@ -169,6 +169,6 @@ If you see "Adapter not available" message:
 
 ## See Also
 
-- [TESTING.md](../../TESTING.md) - Testing guide
+- [docs/TESTING.md](../../docs/TESTING.md) - Testing guide
 - [AGENTS.md](../../AGENTS.md) - Development coordination
 

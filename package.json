@@ -5,8 +5,16 @@
   "type": "module",
   "main": "dist/main.js",
   "bin": {
-    "sdl-mcp": "./dist/cli/index.js"
+    "sdl-mcp": "dist/cli/index.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GlitterKill/sdl-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/GlitterKill/sdl-mcp/issues"
+  },
+  "homepage": "https://github.com/GlitterKill/sdl-mcp#readme",
   "files": [
     "dist",
     "config",
@@ -16,9 +24,11 @@
     "LICENSE"
   ],
   "scripts": {
+    "clean:dist": "node scripts/clean-dist.mjs",
     "build": "tsc -p tsconfig.build.json",
     "build:scripts": "tsc -p tsconfig.scripts.json && tsx scripts/fix-imports.ts",
-    "build:all": "npm run build && npm run build:scripts",
+    "build:runtime": "npm run clean:dist && npm run build",
+    "build:all": "npm run clean:dist && npm run build && npm run build:scripts",
     "watch": "tsc -p tsconfig.build.json --watch",
     "dev": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
@@ -42,7 +52,7 @@
     "benchmark:record-trace": "tsx scripts/record-trace.ts",
     "benchmark:setup-external": "tsx scripts/setup-external-benchmark-repos.ts",
     "package:exe": "node scripts/build-exe.js",
-    "prepack": "npm run build:all",
+    "prepack": "npm run build:runtime",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck"
   },
   "keywords": [
@@ -75,6 +85,7 @@
     "tree-sitter-python": "0.23.3",
     "tree-sitter-rust": "0.21.0",
     "tree-sitter-typescript": "0.23.2",
+    "typescript": "^5.9.3",
     "zod": "^3.23.0",
     "zod-to-json-schema": "^3.25.1"
   },
@@ -88,8 +99,7 @@
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^8.0.0",
     "prettier": "^3.0.0",
-    "tsx": "^4.0.0",
-    "typescript": "^5.9.3"
+    "tsx": "^4.0.0"
   },
   "engines": {
     "node": ">=18.0.0"

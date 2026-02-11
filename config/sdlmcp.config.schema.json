@@ -191,16 +191,22 @@
           "description": "Number of concurrent indexing workers",
           "minimum": 1,
           "maximum": 10,
-          "default": 4
+          "default": 8
         },
         "enableFileWatching": {
           "type": "boolean",
           "description": "Enable automatic reindexing on file changes",
           "default": false
+        },
+        "workerPoolSize": {
+          "type": "integer",
+          "description": "Optional cap for the indexing worker pool size",
+          "minimum": 1,
+          "maximum": 16
         }
       },
       "default": {
-        "concurrency": 4,
+        "concurrency": 8,
         "enableFileWatching": false
       }
     },
@@ -300,6 +306,75 @@
         "maxErrors": 50,
         "timeoutMs": 2000,
         "scope": "changedFiles"
+      }
+    },
+    "cache": {
+      "type": "object",
+      "description": "In-memory caching configuration for symbol cards and slices",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable caching",
+          "default": true
+        },
+        "symbolCardMaxEntries": {
+          "type": "integer",
+          "description": "Maximum number of symbol cards to keep in cache",
+          "minimum": 1,
+          "default": 2000
+        },
+        "symbolCardMaxSizeBytes": {
+          "type": "integer",
+          "description": "Maximum total size in bytes for cached symbol cards",
+          "minimum": 1024,
+          "default": 104857600
+        },
+        "graphSliceMaxEntries": {
+          "type": "integer",
+          "description": "Maximum number of graph slices to keep in cache",
+          "minimum": 1,
+          "default": 1000
+        },
+        "graphSliceMaxSizeBytes": {
+          "type": "integer",
+          "description": "Maximum total size in bytes for cached graph slices",
+          "minimum": 1024,
+          "default": 52428800
+        }
+      },
+      "default": {
+        "enabled": true,
+        "symbolCardMaxEntries": 2000,
+        "symbolCardMaxSizeBytes": 104857600,
+        "graphSliceMaxEntries": 1000,
+        "graphSliceMaxSizeBytes": 52428800
+      }
+    },
+    "plugins": {
+      "type": "object",
+      "description": "Adapter plugin configuration",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "description": "Paths to plugin entrypoints (files or directories)",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable plugin loading",
+          "default": true
+        },
+        "strictVersioning": {
+          "type": "boolean",
+          "description": "Require plugin API version compatibility",
+          "default": true
+        }
+      },
+      "default": {
+        "paths": [],
+        "enabled": true,
+        "strictVersioning": true
       }
     }
   }

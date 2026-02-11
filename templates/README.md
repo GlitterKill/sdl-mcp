@@ -223,6 +223,6 @@ All templates are licensed under MIT.
 ## See Also
 
 - [SDL-MCP README](../README.md)
-- [Plugin SDK Implementation Summary](../PLUGIN_SDK_IMPLEMENTATION.md)
+- [Plugin SDK Implementation Summary](../docs/PLUGIN_SDK_IMPLEMENTATION.md)
 - [Example Plugin](../examples/example-plugin/)
 

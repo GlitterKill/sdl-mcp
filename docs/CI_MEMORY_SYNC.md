@@ -72,8 +72,8 @@ The CI workflow uses these environment variables:
 | Variable         | Description         | Default                       |
 | ---------------- | ------------------- | ----------------------------- |
 | `SDL_CONFIG`     | Path to config file | `./config/sdlmcp.config.json` |
-| `SDL_LOG_LEVEL`  | Log level           | `info`                        |
-| `SDL_LOG_FORMAT` | Log format          | `pretty`                      |
+| `SDL_CONFIG_PATH` | Alternate config path env var | (none)               |
+| `SDL_DB_PATH`    | Override SQLite DB path | (none)                      |
 
 ### Workflow Configuration
 
@@ -108,13 +108,13 @@ Sync artifacts are stored in CI artifact storage with:
 
 ## Performance Budgets
 
-CI Memory Sync enforces strict performance budgets to ensure fast feedback loops:
+CI Memory Sync validates performance budgets to keep CI feedback loops fast.
 
-| Operation | Budget | Rationale                         |
-| --------- | ------ | --------------------------------- |
-| Index     | 30s    | Full repository indexing          |
-| Export    | 5s     | Artifact creation and compression |
-| Total     | 35s    | Complete sync operation           |
+| Operation | Linux Budget | Windows Budget | Rationale |
+| --------- | ------------ | -------------- | --------- |
+| Index     | 45s          | 70s            | Filesystem-heavy indexing varies by OS |
+| Export    | 8s           | 10s            | Artifact serialization and compression |
+| Total     | 52s          | 78s            | End-to-end sync job budget |
 
 ### Performance Validation
 
@@ -124,9 +124,16 @@ The workflow automatically validates against budgets:
 - name: Validate sync performance budget
   shell: bash
   run: |
-    MAX_INDEX_MS=30000
-    MAX_EXPORT_MS=5000
-    MAX_TOTAL_MS=35000
+    if [ "${{ runner.os }}" = "Windows" ]; then
+      # Windows runners have higher variance for filesystem-heavy indexing.
+      MAX_INDEX_MS=70000
+      MAX_EXPORT_MS=10000
+      MAX_TOTAL_MS=78000
+    else
+      MAX_INDEX_MS=45000
+      MAX_EXPORT_MS=8000
+      MAX_TOTAL_MS=52000
+    fi
 
     # Validation logic...
 ```
@@ -144,7 +151,7 @@ The workflow automatically validates against budgets:
 **Symptoms:**
 
 ```
-✗ Index duration exceeded budget: 45000ms > 30000ms
+[ERROR] Index duration exceeded budget: 48000ms > 45000ms
 ```
 
 **Causes:**
@@ -172,7 +179,7 @@ MAX_INDEX_MS=60000 # Increase for large repos
 **Symptoms:**
 
 ```
-✗ Export failed: Artifact integrity check failed: hash mismatch
+[ERROR] Export failed: Artifact integrity check failed: hash mismatch
 ```
 
 **Causes:**
@@ -201,7 +208,7 @@ git push origin main --force-with-lease
 **Symptoms:**
 
 ```
-✗ Artifact file not found: ./ci-artifacts/sync-ubuntu-latest-abc123.sdl-artifact.json
+[ERROR] Artifact file not found: ./ci-artifacts/sync-ubuntu-latest-abc123.sdl-artifact.json
 ```
 
 **Causes:**
@@ -338,11 +345,11 @@ The workflow outputs these metrics:
 
 ```
 Starting CI memory index on ubuntu-latest...
-✓ Index completed in 24532ms
+[OK] Index completed in 24532ms
 Exporting sync artifact for CI...
-✓ Export completed in 3241ms
+[OK] Export completed in 3241ms
 Validating performance budget...
-✓ Performance budget validated
+[OK] Performance budget validated
 ```
 
 ### Alerting
@@ -366,7 +373,7 @@ Consider setting up alerts for:
 # Add to CI workflow after checkout
 - name: Initialize SDL-MCP
   run: |
-    npm run init || node dist/cli/index.js init --force
+    node dist/cli/index.js init --force
 ```
 
 ### "Artifact integrity check failed"
@@ -382,7 +389,7 @@ Consider setting up alerts for:
 
 ```bash
 # Local validation
-sdl-mcp import --artifact-path artifact.json --verify true
+sdl-mcp import --artifact-path artifact.json
 ```
 
 ### "Sync duration exceeded budget"
@@ -430,7 +437,15 @@ time sdl-mcp index --repo-id my-repo
       ],
       "maxFileBytes": 2000000
     }
-  ]
+  ],
+  "dbPath": "./data/sdlmcp.sqlite",
+  "policy": {
+    "maxWindowLines": 180,
+    "maxWindowTokens": 1400,
+    "requireIdentifiers": true,
+    "allowBreakGlass": true
+  },
+  "indexing": { "concurrency": 8, "enableFileWatching": false }
 }
 ```
 

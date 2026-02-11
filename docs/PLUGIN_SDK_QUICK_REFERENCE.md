@@ -56,7 +56,7 @@ sdl-mcp index
 | ---------------------------------------------------------------------- | ---------------------------------------- |
 | [PLUGIN_SDK_AUTHOR_GUIDE.md](./PLUGIN_SDK_AUTHOR_GUIDE.md)             | Complete guide for creating plugins      |
 | [PLUGIN_SDK_SECURITY.md](./PLUGIN_SDK_SECURITY.md)                     | Security best practices and threat model |
-| [PLUGIN_SDK_IMPLEMENTATION.md](../PLUGIN_SDK_IMPLEMENTATION.md)        | Plugin SDK implementation details        |
+| [PLUGIN_SDK_IMPLEMENTATION.md](./PLUGIN_SDK_IMPLEMENTATION.md)         | Plugin SDK implementation details        |
 | [templates/README.md](../templates/README.md)                          | Template usage guide                     |
 | [examples/example-plugin/README.md](../examples/example-plugin/README.md) | Example plugin documentation          |
 
@@ -137,8 +137,8 @@ npm publish
 npm test
 
 # Integration tests (requires built SDL-MCP)
-node --test tests/integration/example-plugin.test.ts
-node --test tests/integration/external-plugin-loading.test.ts
+node --import tsx --test tests/integration/example-plugin.test.ts
+node --import tsx --test tests/integration/external-plugin-loading.test.ts
 ```
 
 ### Troubleshooting

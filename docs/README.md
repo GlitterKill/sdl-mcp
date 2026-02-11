@@ -42,8 +42,11 @@ Use this page as the entry point for SDL-MCP documentation.
 - [Benchmark Failure Guide](./benchmark-failure-guide.md)
 - [CI Memory Sync Setup](./CI_MEMORY_SYNC_SETUP.md)
 - [CI Memory Sync Operations](./CI_MEMORY_SYNC.md)
+- [Testing Guide](./TESTING.md)
+- [Release Test Checklist](./RELEASETEST.md)
 - [Plugin SDK Author Guide](./PLUGIN_SDK_AUTHOR_GUIDE.md)
 - [Plugin SDK Quick Reference](./PLUGIN_SDK_QUICK_REFERENCE.md)
+- [Plugin SDK Implementation](./PLUGIN_SDK_IMPLEMENTATION.md)
 - [Plugin SDK Security](./PLUGIN_SDK_SECURITY.md)
 
 ## Current Scope Snapshot

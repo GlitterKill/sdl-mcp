@@ -263,7 +263,7 @@ npm run build:all && node dist/tests/harness/runner.js
 - Test files: `tests/unit/mcp-*-tools.test.ts`
 - Tool handlers: `src/mcp/tools/*.ts`
 - Test framework: Node.js built-in `node:test`
-- Test documentation: `TESTING.md`
+- Test documentation: `docs/TESTING.md`
 
 ## Conclusion
 

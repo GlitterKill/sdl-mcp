@@ -395,10 +395,17 @@ Add plugin to `config/sdlmcp.config.json`:
 {
   "repos": [
     {
-      "id": "my-repo",
-      "path": "/path/to/repo"
+      "repoId": "my-repo",
+      "rootPath": "/path/to/repo"
     }
   ],
+  "dbPath": "./data/sdlmcp.sqlite",
+  "policy": {
+    "maxWindowLines": 180,
+    "maxWindowTokens": 1400,
+    "requireIdentifiers": true,
+    "allowBreakGlass": true
+  },
   "plugins": {
     "paths": ["./my-lang-plugin/dist/index.js"],
     "enabled": true,
@@ -618,9 +625,11 @@ git push
 # 2. Users can install via Git
 npm install https://github.com/user/my-lang-plugin.git
 
-# 3. Or use npx
-npx sdl-mcp --plugin https://github.com/user/my-lang-plugin.git
+# 3. Or run SDL-MCP without installing (npx)
+npx --yes sdl-mcp@latest serve --stdio -c ./config/sdlmcp.config.json
 ```
+
+To load the plugin, add its entrypoint to `plugins.paths` in your SDL-MCP config.
 
 ### Private Distribution
 

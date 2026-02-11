@@ -263,7 +263,7 @@ Global Options:
    sdl-mcp benchmark:ci --repo-id my-repo --json
    sdl-mcp benchmark:ci --update-baseline
 
-For more information, visit: https://github.com/your-org/sdl-mcp
+For more information, visit: https://github.com/GlitterKill/sdl-mcp
 `);
 }
 

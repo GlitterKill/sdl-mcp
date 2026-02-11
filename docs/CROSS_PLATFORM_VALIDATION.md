@@ -459,10 +459,17 @@ src/utils/helper.ts  # Same file, different case
   "repos": [
     {
       "repoId": "my-repo",
-      "rootPath": "/absolute/path/to/repo", // Use absolute paths
+      "rootPath": "/absolute/path/to/repo",
       "ignore": ["**/node_modules/**", "**/dist/**"]
     }
-  ]
+  ],
+  "dbPath": "./data/sdlmcp.sqlite",
+  "policy": {
+    "maxWindowLines": 180,
+    "maxWindowTokens": 1400,
+    "requireIdentifiers": true,
+    "allowBreakGlass": true
+  }
 }
 ```
 

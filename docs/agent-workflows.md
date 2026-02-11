@@ -66,8 +66,10 @@ Example:
 ```json
 {
   "repoId": "my-repo",
+  "taskType": "debug",
   "taskText": "identify and fix flaky test root cause",
-  "maxIterations": 4
+  "budget": { "maxTokens": 6000, "maxActions": 20 },
+  "options": { "includeTests": true, "requireDiagnostics": true }
 }
 ```
 

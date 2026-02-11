@@ -186,8 +186,10 @@ Run automated rung selection with evidence capture for agent tasks.
 ```json
 {
   "repoId": "my-repo",
+  "taskType": "debug",
   "taskText": "find root cause of auth timeout",
-  "maxIterations": 3
+  "budget": { "maxTokens": 4000, "maxActions": 12 },
+  "options": { "includeTests": true, "requireDiagnostics": true }
 }
 ```
 

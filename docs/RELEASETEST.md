@@ -1,5 +1,22 @@
 # SDL-MCP Release Testing Checklist
 
+<div align="right">
+<details>
+<summary><strong>Docs Navigation</strong></summary>
+
+- [Overview](../README.md)
+- [Documentation Hub](./README.md)
+  - [Getting Started](./getting-started.md)
+  - [CLI Reference](./cli-reference.md)
+  - [MCP Tools Reference](./mcp-tools-reference.md)
+  - [Configuration Reference](./configuration-reference.md)
+  - [Agent Workflows](./agent-workflows.md)
+  - [Troubleshooting](./troubleshooting.md)
+- [Legacy User Guide](./USER_GUIDE.md)
+
+</details>
+</div>
+
 This document provides step-by-step testing for all SDL-MCP features before release.
 
 ## Prerequisites
@@ -11,7 +28,8 @@ cd F:\Claude\projects\sdl-mcp\sdl-mcp
 npm run build:all
 
 # Clean database (fresh start)
-Remove-Item sdl-ledger.db* -ErrorAction SilentlyContinue
+Remove-Item .\\data\\sdlmcp.sqlite* -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force .\\.sdl-sync -ErrorAction SilentlyContinue
 ```
 
 ---
@@ -72,7 +90,7 @@ node dist/cli/index.js index
 ### 1.5 Serve Command (Manual Test)
 
 ```powershell
-node dist/main.js
+node dist/cli/index.js serve --stdio
 ```
 
 **Expected:** Server starts and shows startup logs on stderr.
@@ -99,10 +117,8 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 {
   "repoId": "test-repo",
   "rootPath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp",
-  "config": {
-    "languages": ["ts", "js"],
-    "ignorePatterns": ["node_modules", "dist"]
-  }
+  "languages": ["ts", "js"],
+  "ignore": ["**/node_modules/**", "**/dist/**"]
 }
 ```
 
@@ -224,10 +240,9 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 ```json
 {
   "repoId": "test-repo",
-  "seedSymbols": ["<symbolId>"],
   "taskText": "understand the MCP server implementation",
-  "maxCards": 20,
-  "maxTokens": 4000
+  "entrySymbols": ["<symbolId>"],
+  "budget": { "maxCards": 20, "maxEstimatedTokens": 4000 }
 }
 ```
 
@@ -259,17 +274,15 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 **Input:**
 ```json
 {
-  "sliceHandle": "<handle>",
-  "offset": 0,
-  "limit": 10
+  "spilloverHandle": "<spilloverHandle-from-build>",
+  "pageSize": 20
 }
 ```
 
 **Expected:** Returns additional cards beyond initial slice.
 
 - [ ] Returns cards array
-- [ ] Returns hasMore boolean
-- [ ] Returns nextOffset
+- [ ] Returns a cursor or pagination token when more results exist
 
 ### 2.5 Delta Packs
 
@@ -298,7 +311,9 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 ```json
 {
   "repoId": "test-repo",
-  "symbolId": "<symbolId>"
+  "symbolId": "<symbolId>",
+  "identifiersToFind": ["registerTool", "PolicyEngine"],
+  "contextLines": 3
 }
 ```
 
@@ -360,7 +375,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 **Expected:** Returns current policy settings.
 
 - [ ] Returns policy object
-- [ ] Shows maxWindowLines, maxTokens
+- [ ] Shows maxWindowLines, maxWindowTokens
 - [ ] Shows requireIdentifiers, allowBreakGlass
 
 #### sdl.policy.set
@@ -536,5 +551,5 @@ Test with each supported client:
 
 **Tested By:** _______________
 **Date:** _______________
-**Version:** 0.5.1
+**Version:** 0.6.0
 **Result:** PASS / FAIL

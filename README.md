@@ -34,6 +34,21 @@ Instead of opening large files first, SDL-MCP indexes repositories into symbol c
 - Faster iteration through incremental indexing and refresh workflows
 - Works across TypeScript, JavaScript, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, and Shell
 
+## ChatGPT-5.3-Codex XHigh Overview
+
+Question: "Review code and explain what this MCP server does and the benefits of using it."
+
+Response: "SDL‑MCP is a Model Context Protocol (MCP) server that turns your codebase into a queryable, versioned knowledge system for AI agents. Instead of “reading files,” agents interact with a set of structured tools that can register repositories, index them, and retrieve precise, high-signal context about what matters for a task.
+
+At its core, SDL‑MCP builds and maintains a SQLite-backed symbol ledger: it indexes files, extracts symbols (names, kinds, locations, signatures, summaries), and records dependency relationships like imports and call edges. That foundation enables fast, repeatable navigation from a question (“where is this used?”) to the exact set of relevant code elements, without the noise and cost of full-file context.
+
+On top of the ledger, SDL‑MCP provides practical developer workflows as tools: search for symbols, fetch a detailed “symbol card,” and automatically build focused graph slices that capture the most relevant surrounding code for a given task. It also supports deltas and blast-radius analysis between versions, plus PR risk analysis to help
+prioritize what to review and what to test.
+
+SDL‑MCP is built for responsible code access. When raw code is necessary, it offers graduated options—skeleton views (structure without full bodies), hot-path excerpts (only matching identifiers with context), and a policy-gated “need window” request for full code. Policies enforce limits and require intent signals (like identifiers), reducing overexposure while still enabling effective debugging when it’s justified.
+
+The result is faster, cheaper, and safer agent assistance: less token burn, more relevant context, clearer change impact, and better governance through auditing of tool calls and policy decisions. It’s a code-intelligence layer that makes AI collaboration feel less like “chatting with a repo” and more like using a purpose-built engineering assistant."
+
 ## Quick Start
 
 ### Install
@@ -45,12 +60,13 @@ npm install -g sdl-mcp
 Or run without global install:
 
 ```bash
-npx sdl-mcp@latest version
+npx --yes sdl-mcp@latest version
 ```
 
 ### Initialize and Run
 
 ```bash
+# Tip: If you are using npx, replace `sdl-mcp` with `npx --yes sdl-mcp@latest`.
 # 1) Create config in the current project
 sdl-mcp init --client codex
 
@@ -87,8 +103,6 @@ sdl-mcp serve --stdio
 - `import` - import sync artifact
 - `pull` - pull by version/commit with fallback behavior
 - `benchmark:ci` - run CI benchmark and threshold checks
-- `benchmark:real` - run realism-first workflow benchmark
-- `benchmark:matrix` - run pack/repo matrix benchmark and aggregate family stats
 - `version` - show version and environment info
 
 ## MCP Tools
@@ -122,6 +136,12 @@ npm run typecheck
 npm run lint
 npm test
 ```
+
+Benchmark tooling (npm scripts):
+
+- `npm run benchmark:real`
+- `npm run benchmark:matrix`
+- `npm run benchmark:sweep`
 
 ## License
 

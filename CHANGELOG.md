@@ -11,20 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### PR Risk Copilot (V06-1, V06-2)
 
-- `sdl.pr.riskAnalysis` MCP tool for pull request risk assessment
+- `sdl.pr.risk.analyze` MCP tool for pull request risk assessment
 - Risk model computing composite scores from churn, fan-in/out, diagnostic density, and blast radius
 - File-level and symbol-level risk classification (critical, high, moderate, low)
-- Configurable risk thresholds and weighting via policy engine
-- Suggested reviewers based on ownership and expertise signals
-- Harness test coverage for risk analysis end-to-end flow
+- Configurable risk threshold via `riskThreshold`
+- Unit test coverage for PR risk analysis flow
 
 #### Agent Autopilot (V06-3, V06-4)
 
-- `sdl.agent.autopilot` MCP tool for AI-assisted workflow orchestration
-- Orchestration planner generating multi-step execution plans from natural language goals
-- Policy-integrated execution flow with approval gates and rollback support
-- Step-level status tracking (pending, running, completed, failed, skipped)
-- Workflow test coverage for plan generation, execution, and error recovery
+- `sdl.agent.orchestrate` MCP tool for policy-aware rung selection with evidence capture
+- Budget and focus controls (`budget`, `options.focusPaths`, `options.focusSymbols`)
+- Action tracing with per-step status and collected evidence
 
 #### Continuous Team Memory (V06-5, V06-6)
 
@@ -40,8 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `benchmark:ci` CLI command for automated performance regression detection
 - Threshold evaluator comparing current metrics against configurable baselines
 - Statistical smoothing with configurable sample runs and warmup iterations
-- Baseline management with `benchmark:baseline:save` and `benchmark:baseline:load`
-- Fail policy (warn, fail, block) controlling CI gate behavior
+- Baseline management via baseline files and `benchmark:ci --update-baseline`
+- CI gate behavior driven by exit code and configured thresholds
 - Threshold configuration via `config/benchmark.config.json`
 
 #### Adapter Plugin SDK (V06-9, V06-10)
@@ -90,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - LICENSE file (MIT license)
-- TEST documentation (TESTING.md) documenting dist-first testing strategy
+- Testing documentation (`docs/TESTING.md`) documenting dist-first testing strategy
 - `npm run test:harness` execution step in CI workflow
 
 ### Fixed
@@ -243,6 +240,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
-[0.6.0]: https://github.com/your-org/sdl-mcp/releases/tag/v0.6.0
-[0.5.1]: https://github.com/your-org/sdl-mcp/releases/tag/v0.5.1
-[0.5.0]: https://github.com/your-org/sdl-mcp/releases/tag/v0.5.0
+[0.6.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.0
+[0.5.1]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.5.1
+[0.5.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.5.0

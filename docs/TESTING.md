@@ -46,20 +46,11 @@ SDL-MCP uses a **dist-first** testing strategy to ensure tests validate the ship
 ### Test Layers
 
 ```
-┌─────────────────────────────────────┐
-│  Integration Tests                  │
-│  (Multi-language end-to-end)        │
-└─────────────┬───────────────────────┘
-              │
-┌─────────────▼───────────────────────┐
-│  Unit Tests                         │
-│  (Individual adapters/extractors)  │
-└─────────────┬───────────────────────┘
-              │
-┌─────────────▼───────────────────────┐
-│  Golden File Tests                  │
-│  (Extraction output validation)      │
-└─────────────────────────────────────┘
+Integration Tests (multi-language end-to-end)
+  |
+Unit Tests (individual adapters and extractors)
+  |
+Golden File Tests (fixture output validation)
 ```
 
 ---
@@ -68,7 +59,10 @@ SDL-MCP uses a **dist-first** testing strategy to ensure tests validate the ship
 
 ### All Tests
 
+SDL-MCP tests rely on `dist/` for some runtime entrypoints (for example, DB migrations). Build first, then run tests.
+
 ```bash
+npm run build
 npm test
 ```
 
@@ -82,61 +76,27 @@ npm run test:harness
 
 ### Specific Test Files
 
+Run any `tests/**/*.test.ts` file with Node's test runner and the `tsx` loader:
+
 ```bash
-# TypeScript/JavaScript tests
-node --test tests/unit/ts-parser.test.ts
-
-# Python adapter tests
-node --test tests/unit/python-adapter.test.ts
-
-# Go adapter tests
-node --test tests/unit/go-adapter.test.ts
-
-# Java adapter tests
-node --test tests/unit/java-adapter.test.ts
-
-# C# adapter tests
-node --test tests/unit/csharp-adapter.test.ts
-
-# C adapter tests
-node --test tests/unit/c-adapter.test.ts
-
-# C++ adapter tests
-node --test tests/unit/cpp-adapter.test.ts
-
-# PHP adapter tests
-node --test tests/unit/php-adapter.test.ts
-
-# Rust adapter tests
-node --test tests/unit/rust-adapter.test.ts
-
-# Kotlin adapter tests
-node --test tests/unit/kotlin-adapter.test.ts
-
-# Shell adapter tests
-node --test tests/unit/shell-adapter.test.ts
-
-# Adapter registry tests
-node --test tests/unit/adapter-registry.test.ts
-
-# Grammar loading tests
-node --test tests/integration/grammar-loading.test.ts
+node --import tsx --test tests/unit/pr-risk-analysis.test.ts
+node --import tsx --test tests/integration/java-adapter.test.ts
 ```
 
 ### Watch Mode
 
 ```bash
 # Watch all tests
-node --test --watch
+node --import tsx --test --watch
 
 # Watch specific test
-node --test --watch tests/unit/python-adapter.test.ts
+node --import tsx --test --watch tests/unit/pr-risk-analysis.test.ts
 ```
 
 ### With Coverage
 
 ```bash
-node --test --experimental-test-coverage
+node --import tsx --test --experimental-test-coverage
 ```
 
 ---
@@ -216,7 +176,13 @@ EOF
       "languages": ["ts", "py", "go", "java"]
     }
   ],
-  "dbPath": "/tmp/test-polyglot/sdlmcp.sqlite"
+  "dbPath": "/tmp/test-polyglot/sdlmcp.sqlite",
+  "policy": {
+    "maxWindowLines": 180,
+    "maxWindowTokens": 1400,
+    "requireIdentifiers": true,
+    "allowBreakGlass": true
+  }
 }
 ```
 
@@ -248,51 +214,35 @@ Golden files are expected JSON outputs for extraction tests. They ensure that:
 
 ```
 tests/fixtures/
-├── typescript/
-│   ├── symbols.ts
-│   ├── imports.ts
-│   ├── calls.ts
-│   ├── expected-symbols.json
-│   ├── expected-imports.json
-│   └── expected-calls.json
-├── python/
-│   ├── symbols.py
-│   ├── imports.py
-│   ├── calls.py
-│   ├── expected-symbols.json
-│   ├── expected-imports.json
-│   └── expected-calls.json
-├── go/
-│   ├── symbols.go
-│   ├── imports.go
-│   ├── calls.go
-│   ├── expected-symbols.json
-│   ├── expected-imports.json
-│   └── expected-calls.json
-├── java/
-│   ├── symbols.java
-│   ├── imports.java
-│   ├── calls.java
-│   ├── expected-symbols.json
-│   ├── expected-imports.json
-│   └── expected-calls.json
-└── csharp/
-    ├── symbols.cs
-    ├── imports.cs
-    ├── calls.cs
-    ├── expected-symbols.json
-    ├── expected-imports.json
-    └── expected-calls.json
+  c/
+  cpp/
+  csharp/
+  go/
+  java/
+  kotlin/
+  php/
+  rust/
+  shell/
 ```
+
+Most fixture folders include `expected-*.json` files. The Go fixtures currently do not include golden JSON outputs.
 
 ### Updating Golden Files
 
 After modifying an adapter, update golden files:
 
 ```bash
-# Run tests with --update flag (custom script)
-node tests/update-golden-files.ts
+# Validate current golden files
+npm run test:golden
+
+# Regenerate golden files (when an intentional change occurred)
+npm run golden:update
+
+# Optional: limit to a specific language supported by the golden manager script
+npx tsx scripts/golden/update-goldens.ts generate rust
 ```
+
+The golden manager script currently supports: `c`, `cpp`, `kotlin`, `php`, `rust`, and `shell`.
 
 ### Golden File Structure
 
@@ -301,20 +251,18 @@ node tests/update-golden-files.ts
 ```json
 [
   {
-    "id": "string",
-    "name": "string",
+    "nodeId": "string",
     "kind": "function|class|method|variable|interface|type|module",
+    "name": "string",
     "exported": true,
-    "file": "string",
-    "startLine": 1,
-    "endLine": 10,
-    "signature": {
-      "params": [],
-      "returnType": "string",
-      "async": false
+    "range": {
+      "startLine": 1,
+      "startCol": 0,
+      "endLine": 10,
+      "endCol": 1
     },
-    "visibility": "public|private|protected|internal",
-    "decorators": []
+    "signature": {},
+    "visibility": "public|private|protected|internal"
   }
 ]
 ```
@@ -324,11 +272,11 @@ node tests/update-golden-files.ts
 ```json
 [
   {
-    "path": "string",
-    "name": "string",
-    "alias": "string|null",
-    "isDefault": false,
-    "isWildcard": false
+    "specifier": "string",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": ["string"],
+    "isReExport": false
   }
 ]
 ```
@@ -338,11 +286,17 @@ node tests/update-golden-files.ts
 ```json
 [
   {
-    "callee": "string",
-    "caller": "string",
-    "file": "string",
-    "line": 1,
-    "receiver": "string|null"
+    "callerNodeId": "string",
+    "calleeIdentifier": "string",
+    "isResolved": false,
+    "callType": "function|method",
+    "calleeSymbolId": "string",
+    "range": {
+      "startLine": 1,
+      "startCol": 0,
+      "endLine": 1,
+      "endCol": 10
+    }
   }
 ]
 ```
@@ -829,7 +783,10 @@ When adding a new language:
 3. **Generate golden files**:
 
    ```bash
-   node tests/update-golden-files.ts --language newlang
+   # 1) Add the adapter to scripts/golden/update-goldens.ts (ADAPTERS map)
+   # 2) Add fixtures under tests/fixtures/newlang/
+   # 3) Regenerate goldens
+   npm run golden:update
    ```
 
 4. **Update CI configuration**:
@@ -849,7 +806,7 @@ When adding a new language:
 Run with coverage:
 
 ```bash
-node --test --experimental-test-coverage
+node --import tsx --test --experimental-test-coverage
 ```
 
 ### Coverage Goals

@@ -17,11 +17,22 @@
 </details>
 </div>
 
+## Run Without Installing (npx)
+
+If you do not want a global install, run commands through `npx`:
+
+```bash
+npx --yes sdl-mcp@latest version
+npx --yes sdl-mcp@latest doctor
+```
+
+In this document, replace `sdl-mcp` with `npx --yes sdl-mcp@latest` if you use `npx`.
+
 ## Global Options
 
-- `-c, --config <PATH>`
-- `--log-level <debug|info|warn|error>`
-- `--log-format <json|pretty>`
+- `-c, --config <PATH>` (default: `./config/sdlmcp.config.json`)
+- `--log-level <debug|info|warn|error>` (default: `info`)
+- `--log-format <json|pretty>` (default: `pretty`)
 - `-h, --help`
 - `-v, --version`
 
@@ -38,8 +49,8 @@ sdl-mcp init --client codex --repo-path . --languages ts,py,go
 Key options:
 
 - `--client <claude-code|codex|gemini|opencode>`
-- `--repo-path <PATH>`
-- `--languages <comma-separated>`
+- `--repo-path <PATH>` (default: current directory)
+- `--languages <comma-separated>` (default: all supported languages)
 - `-f, --force`
 
 ### `sdl-mcp doctor`
@@ -79,8 +90,8 @@ Key options:
 
 - `--stdio`
 - `--http`
-- `--host <HOST>`
-- `--port <NUMBER>`
+- `--host <HOST>` (default: `localhost`)
+- `--port <NUMBER>` (default: `3000`)
 
 ### `sdl-mcp export`
 
@@ -97,7 +108,7 @@ Key options:
 - `--version-id <ID>`
 - `--commit-sha <SHA>`
 - `--branch <NAME>`
-- `-o, --output <PATH>`
+- `-o, --output <PATH>` (default: `.sdl-sync/`)
 - `--list`
 
 ### `sdl-mcp import`
@@ -113,7 +124,7 @@ Key options:
 - `--artifact-path <PATH>`
 - `--repo-id <ID>`
 - `-f, --force`
-- `--verify`
+- `--verify` (default: `true`)
 
 ### `sdl-mcp pull`
 
@@ -128,8 +139,8 @@ Key options:
 - `--repo-id <ID>`
 - `--version-id <ID>`
 - `--commit-sha <SHA>`
-- `--fallback`
-- `--retries <NUMBER>`
+- `--fallback` (default: `true`)
+- `--retries <NUMBER>` (default: `3`)
 
 ### `sdl-mcp benchmark:ci`
 
@@ -142,9 +153,9 @@ sdl-mcp benchmark:ci --repo-id my-repo --update-baseline
 Key options:
 
 - `--repo-id <ID>`
-- `--baseline-path <PATH>`
-- `--threshold-path <PATH>`
-- `--out <PATH>`
+- `--baseline-path <PATH>` (default: `.benchmark/baseline.json`)
+- `--threshold-path <PATH>` (default: `config/benchmark.config.json`)
+- `--out <PATH>` (default: `.benchmark/latest.json`)
 - `--json`
 - `--update-baseline`
 - `--skip-indexing`

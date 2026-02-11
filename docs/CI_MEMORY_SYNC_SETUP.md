@@ -34,8 +34,11 @@ Before starting, ensure you have:
 ### Step 1: Verify SDL-MCP Installation
 
 ```bash
-# Check SDL-MCP version
+# Check SDL-MCP version (global install)
 sdl-mcp version
+
+# Or run without installing (npx)
+npx --yes sdl-mcp@latest version
 
 # Expected output:
 # SDL-MCP version: 0.6.0
@@ -46,9 +49,10 @@ sdl-mcp version
 
 **Troubleshooting:**
 
-- If `sdl-mcp` command not found, install it:
+- If `sdl-mcp` command not found, install it or run via `npx`:
   ```bash
-  npm install -g .
+  npm install -g sdl-mcp
+  npx --yes sdl-mcp@latest version
   ```
 
 ### Step 2: Configure SDL-MCP
@@ -75,8 +79,14 @@ sdl-mcp init --client opencode
     }
   ],
   "dbPath": "./data/sdlmcp.sqlite",
+  "policy": {
+    "maxWindowLines": 180,
+    "maxWindowTokens": 1400,
+    "requireIdentifiers": true,
+    "allowBreakGlass": true
+  },
   "indexing": {
-    "concurrency": 4,
+    "concurrency": 8,
     "enableFileWatching": false
   }
 }
