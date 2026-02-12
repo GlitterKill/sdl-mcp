@@ -110,16 +110,31 @@ SDL_CONFIG = "[path-to-repo]/config/sdlmcp.config.json"
 Claude Code CLI .json with NVM4Windows
 ```json
 "sdl-mcp": {
-"type": "stdio",
-"command": "C:\\nvm4w\\nodejs\\sdl-mcp.cmd",
-"args": [
-  "serve",
-  "--stdio"
-],
-"env": {
-  "SDL_CONFIG": "[path-to-repo]/config/sdlmcp.config.json"
-    }
+  "type": "stdio",
+  "command": "C:\\nvm4w\\nodejs\\sdl-mcp.cmd",
+  "args": [
+    "serve",
+    "--stdio"
+  ],
+  "env": {
+    "SDL_CONFIG": "[path-to-repo]/config/sdlmcp.config.json"
   }
+ }
+```
+
+Gemini CLI .json with NVM4Windows
+```json
+"sdl-mcp": {
+  "type": "stdio",
+  "command": "C:\\nvm4w\\nodejs\\sdl-mcp.cmd",
+  "args": [
+    "serve",
+    "--stdio"
+  ],
+  "env": {
+    "SDL_CONFIG": "[path-to-repo]/config/sdlmcp.config.json"
+  }
+}
 ```
 
 ## Basic Agent Verification
