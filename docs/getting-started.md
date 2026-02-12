@@ -61,16 +61,80 @@ sdl-mcp serve --stdio
 
 What this does:
 
-1. `init` creates a user-global `sdlmcp.config.json` by default (and optional client config template)
-2. `doctor` validates Node, config, DB path, grammar availability, and repo paths
+1. `init` creates `sdlmcp.config.json` at the active global config location by default (and optional client config template).
+2. `doctor` validates Node, config, DB path, grammar availability, and repo paths.
+   To make `doctor` and all other commands use one persistent global config file, run:
+   `setx SDL_CONFIG "C:\sdl\global\sdlmcp.config.json"` and open a new terminal.
 3. `index` builds symbol/version/edge data into SQLite
 4. `serve --stdio` exposes MCP tools for coding agents
 
 ## Config Location Control
 
-- Force a specific config file path per command: `sdl-mcp ... --config /path/to/sdlmcp.config.json`
-- Set a persistent config file path for all commands: `SDL_CONFIG=/path/to/sdlmcp.config.json`
-- Set only the default global config directory: `SDL_CONFIG_HOME=/path/to/config-dir`
+You do not edit an SDL-MCP config setting to choose the config location. You set the location from the command line or environment variables.
+
+### Option 1: Per-command override (`--config`)
+
+Use `--config` when you want one command (or one script step) to use an explicit file path.
+
+```powershell
+sdl-mcp doctor --config "C:\sdl\global\sdlmcp.config.json"
+sdl-mcp index --config "C:\sdl\global\sdlmcp.config.json"
+sdl-mcp serve --stdio --config "C:\sdl\global\sdlmcp.config.json"
+```
+
+### Option 2: Persistent exact file path (`SDL_CONFIG`)
+
+Use `SDL_CONFIG` when you always want SDL-MCP commands to use one specific global config file.
+
+Current PowerShell session only:
+
+```powershell
+$env:SDL_CONFIG = "C:\sdl\global\sdlmcp.config.json"
+```
+
+Persist for future terminals:
+
+```powershell
+setx SDL_CONFIG "C:\sdl\global\sdlmcp.config.json"
+```
+
+After `setx`, open a new terminal, then run:
+
+```powershell
+sdl-mcp doctor
+```
+
+### Option 3: Persistent directory default (`SDL_CONFIG_HOME`)
+
+Use `SDL_CONFIG_HOME` when you want SDL-MCP to build the file path automatically as:
+`<SDL_CONFIG_HOME>\sdlmcp.config.json`.
+
+Current PowerShell session only:
+
+```powershell
+$env:SDL_CONFIG_HOME = "C:\sdl\global"
+```
+
+Persist for future terminals:
+
+```powershell
+setx SDL_CONFIG_HOME "C:\sdl\global"
+```
+
+After `setx`, open a new terminal, then run:
+
+```powershell
+sdl-mcp doctor
+```
+
+### Config Path Precedence
+
+SDL-MCP resolves config path in this order:
+
+1. `--config`
+2. `SDL_CONFIG` (or `SDL_CONFIG_PATH`)
+3. default global config path (including `SDL_CONFIG_HOME` if set)
+4. legacy local fallback (`./config/sdlmcp.config.json`)
 
 ## First Config Example
 
