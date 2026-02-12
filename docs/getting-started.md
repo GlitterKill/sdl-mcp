@@ -137,6 +137,21 @@ Gemini CLI .json with NVM4Windows
 }
 ```
 
+OpenCode CLI .json with NVM4Windows
+```json
+"sdl-mcp": {
+		"type": "local",
+		"command": [
+			"C:\\nvm4w\\nodejs\\sdl-mcp.cmd",
+			"-c",
+			"[path-to-repo]\\config\\sdlmcp.config.json",
+			"serve",
+			"--stdio"
+		],
+		"enabled": true
+	}
+```
+
 ## Basic Agent Verification
 
 After server startup, verify your agent/tooling can call:
