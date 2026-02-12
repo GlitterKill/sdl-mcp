@@ -71,7 +71,7 @@ Or run without global install:
 npx --yes sdl-mcp@latest version
 ```
 
-### Initialize and Run
+### Configure and Initialize
 
 ```bash
 # Tip: If you are using npx, replace `sdl-mcp` with `npx --yes sdl-mcp@latest`.
