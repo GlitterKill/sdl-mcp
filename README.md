@@ -145,4 +145,9 @@ Benchmark tooling (npm scripts):
 
 ## License
 
-MIT
+This project is **source-available**.
+
+- **Free Use (Community License):** You may use, run, and modify this software for any purpose, including **internal business use**, under the terms in [`LICENSE`](./LICENSE).
+- **Commercial Distribution / Embedding:** You must obtain a **commercial license** *before* you **sell, license, sublicense, bundle, embed, or distribute** this software (or a modified version) **as part of a for-sale or monetized product or offering**. See [`COMMERCIAL_LICENSE.md`](./COMMERCIAL_LICENSE.md).
+
+If you're unsure whether your use is "Commercial Distribution / Embedding", contact **gmullins.gkc@gmail.com**.
