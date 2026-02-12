@@ -89,6 +89,39 @@ What this does:
 }
 ```
 
+## Sample Agent CLI Configs 
+Codex CLI .toml
+```toml
+[mcp_servers.sdl-mcp]
+command = "npx"
+args = [
+  "--yes",
+  "sdl-mcp@latest",
+  "serve",
+  "--stdio",
+  "--config",
+  "[path-to-repo]/config/sdlmcp.config.json",
+]
+
+[mcp_servers.sdl-mcp.env]
+SDL_CONFIG = "[path-to-repo]/config/sdlmcp.config.json"
+```
+
+Claude Code CLI .json with NVM4Windows
+```json
+"sdl-mcp": {
+"type": "stdio",
+"command": "C:\\nvm4w\\nodejs\\sdl-mcp.cmd",
+"args": [
+  "serve",
+  "--stdio"
+],
+"env": {
+  "SDL_CONFIG": "[path-to-repo]/config/sdlmcp.config.json"
+    }
+  }
+```
+
 ## Basic Agent Verification
 
 After server startup, verify your agent/tooling can call:
