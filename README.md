@@ -1,8 +1,13 @@
 <div align="center">
 <img src="https://github.com/GlitterKill/sdl-mcp/blob/main/docs/Symbol_Delta_Ledger_MCP.jpg" alt="Symbol Delta Ledger MCP">
 </div>
+<div align="center">
+[![npm version](https://img.shields.io/npm/v/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) [![npm downloads](https://img.shields.io/npm/dm/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) [![CI](https://github.com/GlitterKill/sdl-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/GlitterKill/sdl-mcp/actions/workflows/ci.yml)
+</div>
 
 # SDL-MCP
+
+[![npm version](https://img.shields.io/npm/v/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) [![npm downloads](https://img.shields.io/npm/dm/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) [![CI](https://github.com/GlitterKill/sdl-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/GlitterKill/sdl-mcp/actions/workflows/ci.yml)
 
 <div align="right">
 <details>
