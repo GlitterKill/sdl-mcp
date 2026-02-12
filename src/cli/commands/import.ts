@@ -1,9 +1,9 @@
 import { importArtifact } from "../../sync/sync.js";
 import type { SyncImportOptions } from "../../sync/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { resolve } from "path";
 import { getDb } from "../../db/db.js";
 import { runMigrations } from "../../db/migrations.js";
+import { activateCliConfigPath } from "../../config/configPath.js";
 
 interface ImportCommandOptions {
   config?: string;
@@ -16,8 +16,7 @@ interface ImportCommandOptions {
 export async function importCommand(
   options: ImportCommandOptions,
 ): Promise<void> {
-  const configPath = options.config ?? resolve("./config/sdlmcp.config.json");
-  process.env.SDL_CONFIG = configPath;
+  const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
 
   const db = getDb(config.dbPath);

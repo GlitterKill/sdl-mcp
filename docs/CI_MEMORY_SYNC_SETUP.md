@@ -62,7 +62,7 @@ npx --yes sdl-mcp@latest version
 sdl-mcp init --client opencode
 
 # This creates:
-# - config/sdlmcp.config.json
+# - user-global sdlmcp.config.json (unless overridden with --config)
 # - opencode-mcp-config.json (if --client specified)
 ```
 

@@ -17,7 +17,11 @@
 </details>
 </div>
 
-Main config file: `config/sdlmcp.config.json`
+Main config file:
+
+- Default: user-global `sdlmcp.config.json`
+- Override per command: `--config <PATH>`
+- Override via env: `SDL_CONFIG` (or `SDL_CONFIG_PATH`)
 
 ## Full Example
 
@@ -154,6 +158,7 @@ Controls adapter plugin loading. See the Plugin SDK docs for authoring and packa
 ## Environment Overrides
 
 - `SDL_CONFIG` (or `SDL_CONFIG_PATH`) to set the config file path
+- `SDL_CONFIG_HOME` to set the directory used for default global config path resolution
 - `SDL_DB_PATH` to override the SQLite database path
 
 SDL-MCP also expands environment variables inside JSON config values using `${VAR_NAME}` syntax.

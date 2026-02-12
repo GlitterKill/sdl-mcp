@@ -1,4 +1,13 @@
+<div align="center">
+<img src="https://github.com/GlitterKill/sdl-mcp/blob/main/docs/Symbol_Delta_Ledger_MCP.jpg" alt="Symbol Delta Ledger MCP">
+</div>
+<div align="center">
+<a href="https://www.npmjs.com/package/sdl-mcp"><img src="https://img.shields.io/npm/v/sdl-mcp.svg" alt="Version"></a> <a href="https://www.npmjs.com/package/sdl-mcp"><img src="https://img.shields.io/npm/dm/sdl-mcp.svgg"></a> 
+</div>
+
 # SDL-MCP
+
+[![npm version](https://img.shields.io/npm/v/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) [![npm downloads](https://img.shields.io/npm/dm/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) [![CI](https://github.com/GlitterKill/sdl-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/GlitterKill/sdl-mcp/actions/workflows/ci.yml)
 
 <div align="right">
 <details>
@@ -67,7 +76,7 @@ npx --yes sdl-mcp@latest version
 
 ```bash
 # Tip: If you are using npx, replace `sdl-mcp` with `npx --yes sdl-mcp@latest`.
-# 1) Create config in the current project
+# 1) Create config (defaults to user-global path)
 sdl-mcp init --client codex
 
 # 2) Validate environment
@@ -145,4 +154,9 @@ Benchmark tooling (npm scripts):
 
 ## License
 
-MIT
+This project is **source-available**.
+
+- **Free Use (Community License):** You may use, run, and modify this software for any purpose, including **internal business use**, under the terms in [`LICENSE`](./LICENSE).
+- **Commercial Distribution / Embedding:** You must obtain a **commercial license** *before* you **sell, license, sublicense, bundle, embed, or distribute** this software (or a modified version) **as part of a for-sale or monetized product or offering**. See [`COMMERCIAL_LICENSE.md`](./COMMERCIAL_LICENSE.md).
+
+If you're unsure whether your use is "Commercial Distribution / Embedding", contact **gmullins.gkc@gmail.com**.

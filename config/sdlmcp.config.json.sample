@@ -1,8 +1,8 @@
 {
   "repos": [
     {
-      "repoId": "my-repo",
-      "rootPath": ".",
+      "repoId": "sdl-mcp",
+      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp",
       "ignore": [
         "**/node_modules/**",
         "**/dist/**",
@@ -15,12 +15,22 @@
         "ts",
         "tsx",
         "js",
-        "jsx"
+        "jsx",
+        "py",
+        "go",
+        "java",
+        "cs",
+        "c",
+        "cpp",
+        "php",
+        "rs",
+        "kt",
+        "sh"
       ],
       "maxFileBytes": 2000000
     }
   ],
-  "dbPath": "./data/sdlmcp.sqlite",
+  "dbPath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\data\\sdlmcp.sqlite",
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,
@@ -33,7 +43,7 @@
     "patterns": []
   },
   "indexing": {
-    "concurrency": 4,
+    "concurrency": 8,
     "enableFileWatching": false
   },
   "slice": {

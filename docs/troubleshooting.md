@@ -33,7 +33,8 @@ This catches most setup issues quickly.
 
 - Run `sdl-mcp init`
 - Or pass explicit config path with `-c`
-- Or set `SDL_CONFIG`
+- Or set `SDL_CONFIG` (or `SDL_CONFIG_PATH`)
+- Or set `SDL_CONFIG_HOME` to control the default global config directory
 
 ### Grammar Load Errors
 

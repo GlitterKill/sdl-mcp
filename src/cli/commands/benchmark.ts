@@ -6,6 +6,7 @@ import type { CLIOptions } from "../types.js";
 import { getDb } from "../../db/db.js";
 import { runMigrations } from "../../db/migrations.js";
 import { loadConfig } from "../../config/loadConfig.js";
+import { activateCliConfigPath } from "../../config/configPath.js";
 import * as db from "../../db/queries.js";
 import { indexRepo } from "../../indexer/indexer.js";
 import { buildSlice } from "../../graph/slice.js";
@@ -331,7 +332,8 @@ export async function benchmarkCICommand(
 ): Promise<number> {
   console.log("Benchmark CI: Running benchmark guardrails...\n");
 
-  const config = loadConfig();
+  const configPath = activateCliConfigPath(options.config);
+  const config = loadConfig(configPath);
   const repoConfig = options.repoId
     ? config.repos.find((r) => r.repoId === options.repoId)
     : config.repos[0];

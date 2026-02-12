@@ -10,11 +10,10 @@ import {
 } from "../../indexer/indexer.js";
 import { getRepo, createRepo } from "../../db/queries.js";
 import { getCurrentTimestamp } from "../../util/time.js";
-import { resolve } from "path";
+import { activateCliConfigPath } from "../../config/configPath.js";
 
 export async function indexCommand(options: IndexOptions): Promise<void> {
-  const configPath = options.config ?? resolve("./config/sdlmcp.config.json");
-  process.env.SDL_CONFIG = configPath;
+  const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
 
   const db = getDb(config.dbPath);

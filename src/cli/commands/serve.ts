@@ -8,11 +8,10 @@ import { watchRepository, IndexWatchHandle } from "../../indexer/indexer.js";
 import { setupStdioTransport } from "../transport/stdio.js";
 import { setupHttpTransport } from "../transport/http.js";
 import { configureLogger } from "../logging.js";
-import { resolve } from "path";
+import { activateCliConfigPath } from "../../config/configPath.js";
 
 export async function serveCommand(options: ServeOptions): Promise<void> {
-  const configPath = options.config ?? resolve("./config/sdlmcp.config.json");
-  process.env.SDL_CONFIG = configPath;
+  const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
 
   configureLogger(options.logLevel ?? "info", options.logFormat ?? "pretty");

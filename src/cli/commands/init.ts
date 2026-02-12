@@ -11,6 +11,7 @@ import { fileURLToPath } from "url";
 import { createInterface } from "readline";
 import { InitOptions } from "../types.js";
 import { normalizePath } from "../../util/paths.js";
+import { resolveCliConfigPath } from "../../config/configPath.js";
 import {
   MAX_FILE_BYTES,
   DEFAULT_MAX_WINDOW_LINES,
@@ -112,7 +113,7 @@ async function loadClientTemplate(client: ClientType): Promise<any> {
   return JSON.parse(content);
 }
 
-function generateClientConfig(template: any, workspaceRoot: string): string {
+function generateClientConfig(template: any, configPath: string): string {
   const mcpServers = template.mcpServers;
   const config = {
     mcpServers: {
@@ -120,7 +121,7 @@ function generateClientConfig(template: any, workspaceRoot: string): string {
         ...mcpServers["sdl-mcp"],
         env: {
           ...mcpServers["sdl-mcp"].env,
-          SDL_CONFIG: `${workspaceRoot}/sdlmcp.config.json`,
+          SDL_CONFIG: normalizePath(configPath),
         },
       },
     },
@@ -129,7 +130,7 @@ function generateClientConfig(template: any, workspaceRoot: string): string {
 }
 
 export async function initCommand(options: InitOptions): Promise<void> {
-  const configPath = options.config ?? resolve("./config/sdlmcp.config.json");
+  const configPath = resolveCliConfigPath(options.config, "write");
   const repoPath = options.repoPath ?? process.cwd();
 
   if (existsSync(configPath) && !options.force) {
@@ -140,7 +141,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
     process.exit(1);
   }
 
-  const dbPath = resolve("./data/sdlmcp.sqlite");
+  const dbPath = resolve(dirname(configPath), "sdlmcp.sqlite");
   const configDir = dirname(configPath);
   const dbDir = dirname(dbPath);
 
@@ -248,7 +249,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
       }
 
       const template = await loadClientTemplate(options.client as ClientType);
-      const clientConfig = generateClientConfig(template, normalizedRepoPath);
+      const clientConfig = generateClientConfig(template, configPath);
 
       const clientConfigPath = resolve(`${options.client}-mcp-config.json`);
       writeFileSync(clientConfigPath, clientConfig);

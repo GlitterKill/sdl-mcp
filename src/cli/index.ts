@@ -197,11 +197,14 @@ Commands:
   benchmark:ci      Run CI benchmark with threshold evaluation
 
 Global Options:
-  -c, --config PATH     Path to configuration file
+  -c, --config PATH     Path to configuration file (overrides env/default lookup)
   --log-level LEVEL      Log level: debug, info, warn, error (default: info)
   --log-format FORMAT    Log format: json, pretty (default: pretty)
   -h, --help           Show this help message
   -v, --version        Show version
+
+ Config lookup order:
+   --config > SDL_CONFIG/SDL_CONFIG_PATH > user-global config > legacy local config
 
  Init Options:
     --client NAME         Client template: claude-code, codex, gemini, opencode

@@ -1,8 +1,8 @@
 import { access, constants, existsSync } from "fs";
-import { resolve } from "path";
 import { DoctorOptions } from "../types.js";
 import { getDb } from "../../db/db.js";
 import { NODE_MIN_MAJOR_VERSION } from "../../config/constants.js";
+import { activateCliConfigPath } from "../../config/configPath.js";
 import Parser from "tree-sitter";
 import TypeScript from "tree-sitter-typescript";
 import C from "tree-sitter-c";
@@ -30,11 +30,16 @@ interface DoctorResult {
 export async function doctorCommand(options: DoctorOptions): Promise<void> {
   console.log("Running SDL-MCP environment checks...\n");
 
+  const resolvedOptions: DoctorOptions = {
+    ...options,
+    config: activateCliConfigPath(options.config),
+  };
+
   const results: DoctorResult[] = [];
 
   for (const { name, check } of DOCTOR_CHECKS) {
     try {
-      const result = await check(options);
+      const result = await check(resolvedOptions);
       results.push({ name, ...result });
     } catch (error) {
       results.push({
@@ -85,8 +90,7 @@ async function checkNodeVersion(
 async function checkConfigExists(
   options: DoctorOptions,
 ): Promise<Omit<DoctorResult, "name">> {
-  const configPath = options.config ?? resolve("./config/sdlmcp.config.json");
-  process.env.SDL_CONFIG = configPath;
+  const configPath = options.config ?? activateCliConfigPath();
 
   if (existsSync(configPath)) {
     return { status: "pass", message: configPath };
@@ -101,7 +105,7 @@ async function checkConfigExists(
 async function checkConfigReadable(
   options: DoctorOptions,
 ): Promise<Omit<DoctorResult, "name">> {
-  const configPath = options.config ?? resolve("./config/sdlmcp.config.json");
+  const configPath = options.config ?? activateCliConfigPath();
 
   if (!existsSync(configPath)) {
     return { status: "warn", message: "Config file not found (skip)" };
@@ -217,7 +221,7 @@ async function checkTreeSitterGrammar(
 async function checkRepoPaths(
   options: DoctorOptions,
 ): Promise<Omit<DoctorResult, "name">> {
-  const configPath = options.config ?? resolve("./config/sdlmcp.config.json");
+  const configPath = options.config ?? activateCliConfigPath();
 
   if (!existsSync(configPath)) {
     return { status: "warn", message: "Config not found (skip repo checks)" };

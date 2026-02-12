@@ -30,11 +30,17 @@ In this document, replace `sdl-mcp` with `npx --yes sdl-mcp@latest` if you use `
 
 ## Global Options
 
-- `-c, --config <PATH>` (default: `./config/sdlmcp.config.json`)
+- `-c, --config <PATH>` (explicit config file path)
 - `--log-level <debug|info|warn|error>` (default: `info`)
 - `--log-format <json|pretty>` (default: `pretty`)
 - `-h, --help`
 - `-v, --version`
+
+Config lookup order when `--config` is omitted:
+
+1. `SDL_CONFIG` (or `SDL_CONFIG_PATH`)
+2. Global config path (default user-level location; overridable via `SDL_CONFIG_HOME`)
+3. Legacy local config fallback (`./config/sdlmcp.config.json`)
 
 ## Commands
 

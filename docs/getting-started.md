@@ -61,10 +61,16 @@ sdl-mcp serve --stdio
 
 What this does:
 
-1. `init` creates `config/sdlmcp.config.json` (and optional client config template)
+1. `init` creates a user-global `sdlmcp.config.json` by default (and optional client config template)
 2. `doctor` validates Node, config, DB path, grammar availability, and repo paths
 3. `index` builds symbol/version/edge data into SQLite
 4. `serve --stdio` exposes MCP tools for coding agents
+
+## Config Location Control
+
+- Force a specific config file path per command: `sdl-mcp ... --config /path/to/sdlmcp.config.json`
+- Set a persistent config file path for all commands: `SDL_CONFIG=/path/to/sdlmcp.config.json`
+- Set only the default global config directory: `SDL_CONFIG_HOME=/path/to/config-dir`
 
 ## First Config Example
 
@@ -87,6 +93,69 @@ What this does:
     "allowBreakGlass": true
   }
 }
+```
+
+## Sample Agent CLI Configs 
+Codex CLI .toml
+```toml
+[mcp_servers.sdl-mcp]
+command = "npx"
+args = [
+  "--yes",
+  "sdl-mcp@latest",
+  "serve",
+  "--stdio",
+  "--config",
+  "[path-to-global]/sdlmcp.config.json",
+]
+
+[mcp_servers.sdl-mcp.env]
+SDL_CONFIG = "[path-to-global]/sdlmcp.config.json"
+```
+
+Claude Code CLI .json with NVM4Windows
+```json
+"sdl-mcp": {
+  "type": "stdio",
+  "command": "C:\\nvm4w\\nodejs\\sdl-mcp.cmd",
+  "args": [
+    "serve",
+    "--stdio"
+  ],
+  "env": {
+    "SDL_CONFIG": "[path-to-global]/sdlmcp.config.json"
+  }
+ }
+```
+
+Gemini CLI .json with NVM4Windows
+```json
+"sdl-mcp": {
+  "type": "stdio",
+  "command": "C:\\nvm4w\\nodejs\\sdl-mcp.cmd",
+  "args": [
+    "serve",
+    "--stdio"
+  ],
+  "env": {
+    "SDL_CONFIG": "[path-to-global]/sdlmcp.config.json"
+  }
+}
+```
+
+OpenCode CLI .json with NVM4Windows
+```json
+"sdl-mcp": {
+		"type": "local",
+		"command": [
+			"C:\\nvm4w\\nodejs\\sdl-mcp.cmd",
+			"-c",
+			"[path-to-global]\\sdlmcp.config.json",
+			"serve",
+			"--stdio"
+		],
+		"enabled": true
+	}
 ```
 
 ## Basic Agent Verification

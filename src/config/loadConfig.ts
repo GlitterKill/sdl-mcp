@@ -1,11 +1,6 @@
 import { readFileSync } from "fs";
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
 import { AppConfig, AppConfigSchema } from "./types.js";
-import { findPackageRoot } from "../util/findPackageRoot.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { resolveCliConfigPath } from "./configPath.js";
 
 function expandEnvVars(obj: unknown): unknown {
   if (typeof obj === "string") {
@@ -34,14 +29,7 @@ function expandEnvVars(obj: unknown): unknown {
 }
 
 export function loadConfig(configPath?: string): AppConfig {
-  const packageRoot = findPackageRoot(__dirname);
-  const defaultConfigPath = resolve(packageRoot, "config", "sdlmcp.config.json");
-  const envConfigPath = process.env.SDL_CONFIG ?? process.env.SDL_CONFIG_PATH;
-  const filePath = configPath
-    ? resolve(configPath)
-    : envConfigPath
-      ? resolve(envConfigPath)
-      : defaultConfigPath;
+  const filePath = resolveCliConfigPath(configPath, "read");
 
   try {
     const rawContent = readFileSync(filePath, "utf-8");

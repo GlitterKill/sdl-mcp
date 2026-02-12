@@ -71,8 +71,9 @@ The CI workflow uses these environment variables:
 
 | Variable         | Description         | Default                       |
 | ---------------- | ------------------- | ----------------------------- |
-| `SDL_CONFIG`     | Path to config file | `./config/sdlmcp.config.json` |
+| `SDL_CONFIG`     | Path to config file | auto-discovered if unset |
 | `SDL_CONFIG_PATH` | Alternate config path env var | (none)               |
+| `SDL_CONFIG_HOME` | Default global config directory override | platform default |
 | `SDL_DB_PATH`    | Override SQLite DB path | (none)                      |
 
 ### Workflow Configuration

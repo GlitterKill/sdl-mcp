@@ -1,9 +1,9 @@
 import { exportArtifact, listArtifacts } from "../../sync/sync.js";
 import type { SyncExportOptions } from "../../sync/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { resolve } from "path";
 import { getDb } from "../../db/db.js";
 import { runMigrations } from "../../db/migrations.js";
+import { activateCliConfigPath } from "../../config/configPath.js";
 
 interface ExportCommandOptions {
   config?: string;
@@ -18,8 +18,7 @@ interface ExportCommandOptions {
 export async function exportCommand(
   options: ExportCommandOptions,
 ): Promise<void> {
-  const configPath = options.config ?? resolve("./config/sdlmcp.config.json");
-  process.env.SDL_CONFIG = configPath;
+  const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
 
   const db = getDb(config.dbPath);
