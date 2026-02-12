@@ -89,6 +89,8 @@ sdl-mcp index
 
 # 5) Start MCP server (stdio for coding agents)
 sdl-mcp serve --stdio
+
+# 6) Add the contents of agent-workflows.md to your AGENTS.md file
 ```
 
 ## Core Feature Set
