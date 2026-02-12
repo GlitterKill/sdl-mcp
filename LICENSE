@@ -1,21 +1,90 @@
-MIT License
+FREE PERSONAL USE LICENSE
 
-Copyright (c) 2026 SDL-MCP Contributors
+SDL-MCP COMMUNITY LICENSE
+Version 1.0 (2026-02-11)
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Copyright (c) 2026 Gary Mullins
+All rights reserved.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+This Community License allows free use (including internal business use), but requires a paid commercial license to
+distribute, embed, or provide the Software as part of a for-sale or monetized offering.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. DEFINITIONS
+1.1 "Software" means the SDL-MCP software, including source code, binaries, build artifacts, and any materials
+    distributed with it, plus any modifications you make.
+1.2 "Licensor" means Gary Mullins.
+1.3 "You" means the individual or legal entity exercising permissions under this license.
+1.4 "Internal Use" means use of the Software solely within Your organization (including use by Your employees and
+    contractors acting on Your behalf), where the Software is not provided to third parties as a product or service.
+1.5 "Commercial Distribution" means any of the following, whether for a fee or as part of a paid offering:
+    (a) selling, licensing, sublicensing, renting, leasing, or otherwise distributing the Software;
+    (b) bundling or embedding the Software in a product, appliance, container image, installer, SDK, library, or service
+        that is sold, licensed, or monetized;
+    (c) making the Software available for use by third parties (including customers) as part of a monetized offering
+        (e.g., paid tiers, subscriptions, usage-based pricing, paid access), whether or not You distribute a copy.
+1.6 "Non-Commercial Distribution" means distributing the Software (or Your modifications) to third parties strictly
+    free of charge, with no monetization and no paid access, and not as part of any commercial product or service.
+
+2. LICENSE GRANT (FREE USE)
+Subject to the restrictions in Section 3, Licensor grants You a non-exclusive, worldwide, royalty-free license to:
+(a) use, run, and display the Software;
+(b) copy the Software for development, testing, backup, and Internal Use;
+(c) modify the Software for Internal Use or Non-Commercial Distribution.
+
+3. RESTRICTIONS
+3.1 No Commercial Distribution.
+    You may NOT engage in Commercial Distribution of the Software without a separate written commercial license from
+    Licensor (see Section 8).
+3.2 No circumvention.
+    You may not remove or alter licensing notices intended to communicate the licensing model in the Software, README,
+    or accompanying materials.
+3.3 Compliance.
+    You are responsible for ensuring Your use complies with applicable laws and regulations.
+
+4. NON-COMMERCIAL DISTRIBUTION PERMITTED
+4.1 You may engage in Non-Commercial Distribution provided that:
+(a) You include a copy of this license with any distribution; and
+(b) You retain all copyright, attribution, and license notices in the Software; and
+(c) You do not misrepresent the origin of the Software.
+4.2 You may charge cost-recovery fees only (e.g., media/shipping) provided there is no profit and no monetization.
+    If in doubt, treat it as Commercial Distribution and obtain a commercial license.
+
+5. CONTRIBUTIONS (OPTIONAL)
+If You submit changes to Licensor (e.g., via pull request), You grant Licensor a perpetual, worldwide, irrevocable,
+royalty-free right to use, modify, relicense, and distribute those contributions in any form, including under
+commercial terms. (If You do not want this, do not submit contributions.)
+
+6. INTELLECTUAL PROPERTY; TRADEMARKS
+6.1 The Software is licensed, not sold.
+6.2 No trademark rights are granted. " SDL-MCP " and related marks are Licensor’s trademarks (if any).
+
+7. PATENT LICENSE
+Licensor grants You a royalty-free patent license under Licensor’s patent claims, if any, that are necessarily
+infringed by the Software, solely to make, use, and modify the Software as permitted by this license.
+This patent license does not extend to any Commercial Distribution.
+
+8. COMMERCIAL LICENSING
+If You want to engage in Commercial Distribution, You must obtain a commercial license from Licensor before doing so.
+Contact: gmullins.gkc@gmail.com
+
+9. TERMINATION
+9.1 This license is effective until terminated.
+9.2 If You breach this license, Your rights terminate automatically.
+9.3 Upon termination, You must stop all use and distribution that is not otherwise permitted by law. Sections that by
+    their nature should survive (e.g., disclaimers, limitations, definitions) survive termination.
+
+10. DISCLAIMER OF WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+
+11. LIMITATION OF LIABILITY
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT WILL LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL,
+CONSEQUENTIAL, OR EXEMPLARY DAMAGES, OR FOR ANY LOSS OF PROFITS, REVENUE, DATA, OR BUSINESS INTERRUPTION, ARISING OUT
+OF OR RELATED TO THE SOFTWARE OR THIS LICENSE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. LICENSOR’S TOTAL
+LIABILITY FOR ANY CLAIM WILL NOT EXCEED USD $100.
+
+12. GOVERNING LAW
+This license is governed by the laws of the State of Tennessee, excluding conflict-of-law principles.
+
+13. QUESTIONS
+For licensing questions, email gmullins.gkc@gmail.com.
