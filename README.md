@@ -75,16 +75,19 @@ npx --yes sdl-mcp@latest version
 
 ```bash
 # Tip: If you are using npx, replace `sdl-mcp` with `npx --yes sdl-mcp@latest`.
-# 1) Create config (defaults to user-global path)
-sdl-mcp init --client codex
+# 1) Set config location variable then open a new terminal
+setx SDL_CONFIG_HOME "C:\[your path]"
 
-# 2) Validate environment
+# 2) Initialize repo (run from repo root folder)
+sdl-mcp init --config "C:\[same path as SDL_CONFIG_HOME]"
+
+# 3) Validate environment
 sdl-mcp doctor
 
-# 3) Build the symbol ledger
+# 4) Build the symbol ledger (run from repo folder)
 sdl-mcp index
 
-# 4) Start MCP server (stdio for coding agents)
+# 5) Start MCP server (stdio for coding agents)
 sdl-mcp serve --stdio
 ```
 
