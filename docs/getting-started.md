@@ -61,10 +61,8 @@ sdl-mcp serve --stdio
 
 What this does:
 
-1. `init` creates `sdlmcp.config.json` at the active global config location by default (and optional client config template).
+1. `init` creates `sdlmcp.config.json` at the active global config location by default (and optional client config template). You can set the target path explicitly during setup with `sdl-mcp init --config "C:\sdl\global\sdlmcp.config.json"`.
 2. `doctor` validates Node, config, DB path, grammar availability, and repo paths.
-   To make `doctor` and all other commands use one persistent global config file, run:
-   `setx SDL_CONFIG "C:\sdl\global\sdlmcp.config.json"` and open a new terminal.
 3. `index` builds symbol/version/edge data into SQLite
 4. `serve --stdio` exposes MCP tools for coding agents
 
@@ -96,6 +94,8 @@ Persist for future terminals:
 
 ```powershell
 setx SDL_CONFIG "C:\sdl\global\sdlmcp.config.json"
+# Option: initialize the global config file directly at this path
+sdl-mcp init --config "C:\sdl\global\sdlmcp.config.json"
 ```
 
 After `setx`, open a new terminal, then run:
