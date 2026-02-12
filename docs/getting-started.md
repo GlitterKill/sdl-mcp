@@ -51,12 +51,23 @@ npm link
 ## 5-Minute Setup
 
 ```bash
-# from your target project directory
-# If you are using npx, replace `sdl-mcp` with `npx --yes sdl-mcp@latest`.
-sdl-mcp init --client codex
+# Tip: If you are using npx, replace `sdl-mcp` with `npx --yes sdl-mcp@latest`.
+# 1) Set config location variable then open a new terminal
+setx SDL_CONFIG_HOME "C:\[your path]"
+
+# 2) Initialize repo (run from repo root folder)
+sdl-mcp init --config "C:\[same path as SDL_CONFIG_HOME]"
+
+# 3) Validate environment
 sdl-mcp doctor
+
+# 4) Build the symbol ledger (run from repo folder)
 sdl-mcp index
+
+# 5) Start MCP server (stdio for coding agents)
 sdl-mcp serve --stdio
+
+# 6) Copy the agent instructions from agent-workflows.md and paste them in the AGENTS.md file for your project.
 ```
 
 What this does:
