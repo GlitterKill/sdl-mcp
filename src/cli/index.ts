@@ -204,7 +204,7 @@ Global Options:
   -v, --version        Show version
 
  Config lookup order:
-   --config > SDL_CONFIG/SDL_CONFIG_PATH > user-global config > legacy local config
+   --config > SDL_CONFIG/SDL_CONFIG_PATH > cwd local config > user-global config > package fallback
 
  Init Options:
     --client NAME         Client template: claude-code, codex, gemini, opencode

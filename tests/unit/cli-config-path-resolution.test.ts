@@ -93,6 +93,56 @@ describe("CLI config path resolution", () => {
     }
   });
 
+  it("prefers cwd config path over global config path in read mode", () => {
+    const oldCwd = process.cwd();
+    const oldConfig = process.env.SDL_CONFIG;
+    const oldConfigPath = process.env.SDL_CONFIG_PATH;
+    const oldConfigHome = process.env.SDL_CONFIG_HOME;
+
+    const workspace = mkdtempSync(join(tmpdir(), "sdl-config-cwd-priority-"));
+    const configDir = join(workspace, "config");
+    const cwdConfigPath = join(configDir, "sdlmcp.config.json");
+    const configHome = mkdtempSync(join(tmpdir(), "sdl-config-home-with-global-"));
+    const globalConfigPath = join(configHome, "sdlmcp.config.json");
+
+    try {
+      mkdirSync(configDir, { recursive: true });
+      writeFileSync(cwdConfigPath, "{}");
+      writeFileSync(globalConfigPath, "{}");
+      process.chdir(workspace);
+
+      delete process.env.SDL_CONFIG;
+      delete process.env.SDL_CONFIG_PATH;
+      process.env.SDL_CONFIG_HOME = configHome;
+
+      const resolved = resolveCliConfigPath(undefined, "read");
+      assert.strictEqual(resolved, resolve(cwdConfigPath));
+    } finally {
+      process.chdir(oldCwd);
+
+      if (oldConfig === undefined) {
+        delete process.env.SDL_CONFIG;
+      } else {
+        process.env.SDL_CONFIG = oldConfig;
+      }
+
+      if (oldConfigPath === undefined) {
+        delete process.env.SDL_CONFIG_PATH;
+      } else {
+        process.env.SDL_CONFIG_PATH = oldConfigPath;
+      }
+
+      if (oldConfigHome === undefined) {
+        delete process.env.SDL_CONFIG_HOME;
+      } else {
+        process.env.SDL_CONFIG_HOME = oldConfigHome;
+      }
+
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(configHome, { recursive: true, force: true });
+    }
+  });
+
   it("falls back to cwd config path in read mode when global config is absent", () => {
     const oldCwd = process.cwd();
     const oldConfig = process.env.SDL_CONFIG;

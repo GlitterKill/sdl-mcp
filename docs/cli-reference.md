@@ -39,8 +39,9 @@ In this document, replace `sdl-mcp` with `npx --yes sdl-mcp@latest` if you use `
 Config lookup order when `--config` is omitted:
 
 1. `SDL_CONFIG` (or `SDL_CONFIG_PATH`)
-2. Global config path (default user-level location; overridable via `SDL_CONFIG_HOME`)
-3. Legacy local config fallback (`./config/sdlmcp.config.json`)
+2. Local config in current working directory (`./config/sdlmcp.config.json`)
+3. Global config path (default user-level location; overridable via `SDL_CONFIG_HOME`)
+4. Package-local fallback (`<sdl-mcp package root>/config/sdlmcp.config.json`)
 
 ## Commands
 

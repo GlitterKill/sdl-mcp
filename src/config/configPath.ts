@@ -47,10 +47,11 @@ function resolveGlobalConfigPath(): string {
   return resolve(homePath, ".config", "sdl-mcp", CONFIG_FILE_NAME);
 }
 
-function resolveLegacyConfigCandidates(): string[] {
+function resolveReadConfigCandidates(globalConfigPath: string): string[] {
   const packageRoot = findPackageRoot(__dirname);
   return [
     resolve(process.cwd(), "config", CONFIG_FILE_NAME),
+    globalConfigPath,
     resolve(packageRoot, "config", CONFIG_FILE_NAME),
   ];
 }
@@ -76,11 +77,7 @@ export function resolveCliConfigPath(
     return globalConfigPath;
   }
 
-  if (existsSync(globalConfigPath)) {
-    return globalConfigPath;
-  }
-
-  for (const candidatePath of resolveLegacyConfigCandidates()) {
+  for (const candidatePath of resolveReadConfigCandidates(globalConfigPath)) {
     if (existsSync(candidatePath)) {
       return candidatePath;
     }
