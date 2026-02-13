@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.4] - 2026-02-13
+
+### Added
+
+- Edge confidence support across indexing and slicing:
+  - `edges.confidence` is now persisted by `createEdge()`/`createEdgeTransaction()`
+  - slice cards now include dependency confidence metadata (`{ symbolId, confidence }`)
+  - `sdl.slice.build` accepts `minConfidence` (default `0.5`)
+- TypeScript resolver option `includeNodeModulesTypes` (default `true`) with `@types/node` exclusion
+- New tests for edge confidence, dep-list filtering, two-pass indexing progress, and index CLI `--force`
+
+### Changed
+
+- TypeScript indexing now reports explicit `pass1`/`pass2` progress stages
+- TS/JS call resolution runs with a two-pass flow (symbols/imports first, then call-edge reconciliation)
+- Beam search now applies `edgeWeight * confidence` scoring and adaptive confidence tightening at high budget utilization
+- Slice payloads now filter dependency lists to only symbols included in the slice
+- `sdl-mcp index` now supports `--force` for explicit full re-indexing (default path uses incremental mode when possible)
+
+### Fixed
+
+- Missing `config/sdlmcp.config.json` baseline in benchmark tests
+- Call-edge confidence defaults and unresolved-edge confidence handling in TS/heuristic resolution paths
+
 ## [0.6.0] - 2026-02-08
 
 ### Added
@@ -240,6 +264,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.6.4]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.4
 [0.6.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.0
 [0.5.1]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.5.1
 [0.5.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.5.0

@@ -48,6 +48,7 @@ Use this order unless task constraints force escalation:
 4. `sdl.slice.build` with explicit budget and compact output:
    - Keep `wireFormat: "compact"` (default) and `wireFormatVersion: 2` (default).
    - Set budget early, for example: `{ "maxCards": 30, "maxEstimatedTokens": 4000 }`.
+   - Use `minConfidence` to drop low-trust edges (default `0.5`; adaptive thresholds can tighten to `0.8` and `0.95` as token usage approaches budget).
    - Always provide `entrySymbols` when available.
    - Provide `knownCardEtags` to avoid resending unchanged cards (`cardRefs` are returned instead).
    - Leave `cardDetail` unset for mixed compact/full behavior. Use `"full"` only when you truly need full cards for all slice symbols.
@@ -72,6 +73,9 @@ Use this order unless task constraints force escalation:
   - `level: "stats"` is cheapest.
   - `level: "full"` auto-enables hotspots unless overridden.
   - Use `directories`, `maxDirectories`, and `maxExportsPerDirectory` to bound payload.
+- `sdl.slice.build`:
+  - Keep `minConfidence` near `0.5` for recall-oriented work and raise it for precision-focused runs.
+  - Slice cards now filter `deps.calls`/`deps.imports` to only in-slice symbols and include per-dependency confidence scores.
 - `sdl.delta.get`:
   - Pass `budget` for large version diffs to constrain blast-radius work.
 - `sdl.pr.risk.analyze`:
