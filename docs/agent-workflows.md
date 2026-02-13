@@ -97,8 +97,3 @@ Use this order unless task constraints force escalation:
 - Do not rebuild slices repeatedly when `sdl.slice.refresh` can provide incremental deltas.
 ```
 
-## Why This Replaces `agentIntegration.txt`
-
-- It includes newer tools (`sdl.repo.overview`, `sdl.pr.risk.analyze`, `sdl.agent.orchestrate`).
-- It reflects current defaults and caps (compact slice wire format, policy window/token limits, spillover paging).
-- It adds concrete cache-aware guidance (`ifNoneMatch`, `knownCardEtags`, `slice.refresh`) for repeat-turn token savings.
