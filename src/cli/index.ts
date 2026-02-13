@@ -189,7 +189,7 @@ Commands:
   init              Initialize SDL-MCP configuration
   doctor            Validate SDL-MCP environment
   version           Show version information
-  index             Index repositories (optional: --watch, --repo-id)
+  index             Index repositories (optional: --watch, --repo-id, --force)
   serve             Start MCP server (default: stdio, optional: --http, --port, --host)
   export            Export indexed state as sync artifact
   import            Import indexed state from sync artifact
@@ -215,6 +215,7 @@ Global Options:
  Index Options:
    -w, --watch          Watch for file changes
    --repo-id ID         Index specific repository by ID
+   -f, --force          Force full re-index (default mode is incremental)
 
  Serve Options:
    --stdio               Use stdio transport (default)

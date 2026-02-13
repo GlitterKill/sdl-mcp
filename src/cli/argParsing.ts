@@ -120,6 +120,8 @@ export function parseIndexOptions(
     const arg = args[i];
     if (arg === "--watch" || arg === "-w") {
       options.watch = true;
+    } else if (arg === "--force" || arg === "-f") {
+      options.force = true;
     } else if (arg === "--repo-id") {
       if (i + 1 >= args.length) {
         throw new Error("--repo-id requires a value");
@@ -130,6 +132,9 @@ export function parseIndexOptions(
 
   if (values.watch === true) {
     options.watch = true;
+  }
+  if (values.force === true) {
+    options.force = true;
   }
   if (typeof values["repo-id"] === "string") {
     options.repoId = values["repo-id"];

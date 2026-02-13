@@ -25,6 +25,7 @@ export interface DoctorOptions extends CLIOptions {}
 export interface IndexOptions extends CLIOptions {
   watch?: boolean;
   repoId?: string;
+  force?: boolean;
 }
 
 export interface VersionOptions extends CLIOptions {}

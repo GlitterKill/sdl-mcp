@@ -3,8 +3,8 @@ import assert from "node:assert";
 import {
   parseIndexOptions,
   parseServeOptions,
-} from "../../dist/cli/argParsing.js";
-import type { CLIOptions } from "../../dist/cli/types.js";
+} from "../../src/cli/argParsing.js";
+import type { CLIOptions } from "../../src/cli/types.js";
 
 describe("CLI arg parsing", () => {
   const global: CLIOptions = {};
@@ -17,6 +17,14 @@ describe("CLI arg parsing", () => {
 
     assert.strictEqual(options.watch, true);
     assert.strictEqual(options.repoId, "repo-from-values");
+  });
+
+  it("parses --force for index command", () => {
+    const options = parseIndexOptions([], global, {
+      force: true,
+    });
+
+    assert.strictEqual(options.force, true);
   });
 
   it("prefers parsed transport values for serve command", () => {

@@ -47,10 +47,21 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       });
     }
 
-    console.log(`\nIndexing ${repo.repoId} (${repo.rootPath})...`);
+    const mode = options.force || !existingRepo ? "full" : "incremental";
+    console.log(`\nIndexing ${repo.repoId} (${repo.rootPath}) [mode=${mode}]...`);
 
     try {
-      const stats: IndexResult = await indexRepo(repo.repoId, "full");
+      let lastProgressLine = "";
+      const stats: IndexResult = await indexRepo(repo.repoId, mode, (progress) => {
+        if (progress.stage !== "pass1" && progress.stage !== "pass2") {
+          return;
+        }
+        const line = `  ${progress.stage}: ${progress.current}/${progress.total}${progress.currentFile ? ` ${progress.currentFile}` : ""}`;
+        if (line !== lastProgressLine) {
+          console.log(line);
+          lastProgressLine = line;
+        }
+      });
       console.log(`  Files: ${stats.filesProcessed}`);
       console.log(`  Symbols: ${stats.symbolsIndexed}`);
       console.log(`  Edges: ${stats.edgesCreated}`);
