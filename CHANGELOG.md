@@ -23,11 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Beam search now applies `edgeWeight * confidence` scoring and adaptive confidence tightening at high budget utilization
 - Slice payloads now filter dependency lists to only symbols included in the slice
 - `sdl-mcp index` now supports `--force` for explicit full re-indexing (default path uses incremental mode when possible)
+- Agent workflow/setup docs were refreshed for current SDL-MCP initialization and context ladder usage
 
 ### Fixed
 
 - Missing `config/sdlmcp.config.json` baseline in benchmark tests
 - Call-edge confidence defaults and unresolved-edge confidence handling in TS/heuristic resolution paths
+- Benchmark drift corrections for confidence dependency-reference handling in benchmark scoring flows
 
 ## [0.6.0] - 2026-02-08
 
