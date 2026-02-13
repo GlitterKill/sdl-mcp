@@ -21,12 +21,12 @@ This page defines practical workflows for coding agents using SDL-MCP.
 
 ## Paste-Ready AGENTS.md Block
 
-Copy this block into `AGENTS.md` for token-efficient SDL-MCP usage on the current codebase/tooling.
+Copy this block into `AGENTS.md` for token-efficient SDL-MCP usage on the current codebase/tooling.  Replace [repoid] with your repo's ID.
 
 ```md
 ## SDL-MCP Token-Efficient Protocol (v0.6)
 
-- Repository ID: `sdl-mcp`
+- Repository ID: `[repoid]`
 - MCP Server: `sdl-mcp`
 
 ### 0) Establish state before deep context
