@@ -72,6 +72,16 @@ export interface EdgeRow {
   weight: number;
   provenance: string | null;
   created_at: string;
+  /**
+   * Confidence score for edge resolution (0.0-1.0).
+   * - 1.0: TS Compiler API resolved
+   * - 0.9: Import-trace resolved
+   * - 0.8: Same-file symbol match
+   * - 0.6: Class method heuristic
+   * - 0.3: Unresolved
+   * @default 1.0
+   */
+  confidence?: number;
 }
 
 export interface VersionRow {
