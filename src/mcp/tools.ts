@@ -31,6 +31,16 @@ const SymbolDepsSchema = z.object({
   calls: z.array(z.string()),
 });
 
+const SliceDepRefSchema = z.object({
+  symbolId: z.string(),
+  confidence: z.number().min(0).max(1),
+});
+
+const SliceSymbolDepsSchema = z.object({
+  imports: z.array(SliceDepRefSchema),
+  calls: z.array(SliceDepRefSchema),
+});
+
 const SymbolMetricsSchema = z.object({
   fanIn: z.number().int().min(0).optional(),
   fanOut: z.number().int().min(0).optional(),
@@ -84,7 +94,9 @@ const SliceSymbolCardSchema = SymbolCardSchema.omit({
   repoId: true,
   etag: true,
   version: true,
+  deps: true,
 }).extend({
+  deps: SliceSymbolDepsSchema,
   version: SliceSymbolCardVersionSchema,
 });
 
@@ -143,6 +155,14 @@ const GraphSliceSchema = z.object({
   edges: z.array(CompressedEdgeSchema),
   frontier: z.array(FrontierItemSchema).optional(),
   truncation: SliceTruncationSchema.optional(),
+  confidenceDistribution: z
+    .object({
+      high: z.number().int().min(0),
+      medium: z.number().int().min(0),
+      low: z.number().int().min(0),
+      unknown: z.number().int().min(0),
+    })
+    .optional(),
 });
 
 const CompactRangeSchema = z.tuple([
@@ -153,8 +173,8 @@ const CompactRangeSchema = z.tuple([
 ]);
 
 const CompactSymbolDepsSchema = z.object({
-  i: z.array(z.string()),
-  c: z.array(z.string()),
+  i: z.array(SliceDepRefSchema),
+  c: z.array(SliceDepRefSchema),
 });
 
 const CompactSymbolMetricsSchema = z.object({
@@ -546,6 +566,7 @@ export const SliceBuildRequestSchema = z.object({
   wireFormat: SliceBuildWireFormatSchema.optional(),
   wireFormatVersion: SliceBuildWireFormatVersionSchema.optional(),
   budget: SliceBudgetSchema.optional(),
+  minConfidence: z.number().min(0).max(1).default(0.5),
 });
 
 const SliceLeaseSchema = z.object({

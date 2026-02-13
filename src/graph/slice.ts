@@ -11,6 +11,9 @@ import type {
   SymbolCard,
   SliceSymbolCard,
   CompressedEdge,
+  SliceDepRef,
+  SliceSymbolDeps,
+  ConfidenceDistribution,
 } from "../mcp/types.js";
 import type { Graph } from "./buildGraph.js";
 import { loadGraphForRepo } from "./buildGraph.js";
@@ -154,6 +157,7 @@ interface SliceBuildRequest {
   knownCardEtags?: Record<SymbolId, string>;
   cardDetail?: "compact" | "full";
   budget?: SliceBudget;
+  minConfidence?: number;
 }
 
 /**
@@ -195,6 +199,7 @@ export async function buildSlice(
       sliceConfig?.defaultMaxTokens ??
       DEFAULT_MAX_TOKENS_SLICE,
   };
+  const minConfidence = request.minConfidence ?? 0.5;
 
   const startNodes = resolveStartNodes(graph, request);
   const startSymbols = startNodes.map((node) => node.symbolId);
@@ -204,13 +209,14 @@ export async function buildSlice(
     budget,
     request,
     edgeWeights,
+    minConfidence,
   );
 
   const detailedSymbolIds = resolveDetailedSymbolIds(
     Array.from(sliceCards),
     request,
   );
-  const cards = await loadSymbolCards(
+  const { cards, sliceDepsBySymbol } = await loadSymbolCards(
     Array.from(sliceCards),
     request.versionId,
     request.repoId,
@@ -219,10 +225,16 @@ export async function buildSlice(
   const {
     cardsForPayload,
     cardRefs,
-  } = buildPayloadCardsAndRefs(cards, request.knownCardEtags);
-  const { symbolIndex, edges } = loadEdgesBetweenSymbols(
+  } = buildPayloadCardsAndRefs(
+    cards,
+    request.knownCardEtags,
+    sliceDepsBySymbol,
+    sliceCards,
+  );
+  const { symbolIndex, edges, confidenceDistribution } = loadEdgesBetweenSymbols(
     Array.from(sliceCards),
     request.repoId,
+    minConfidence,
   );
   const estimatedTokens = estimateTokens(cardsForPayload);
   const slice: GraphSlice = {
@@ -234,6 +246,7 @@ export async function buildSlice(
     cards: cardsForPayload,
     cardRefs,
     edges,
+    confidenceDistribution,
   };
 
   if (wasTruncated || cards.length >= budget.maxCards) {
@@ -438,6 +451,8 @@ function resolveDetailedSymbolIds(
 export function buildPayloadCardsAndRefs(
   cards: SymbolCard[],
   knownCardEtags?: Record<SymbolId, string>,
+  sliceDepsBySymbol?: Map<SymbolId, SliceSymbolDeps>,
+  sliceSymbolSet?: Set<SymbolId>,
 ): {
   cardsForPayload: SliceSymbolCard[];
   cardRefs?: Array<{ symbolId: SymbolId; etag: string; detailLevel: "compact" | "full" }>;
@@ -455,7 +470,12 @@ export function buildPayloadCardsAndRefs(
           detailLevel,
         };
         delete normalized.etag;
-        return toSliceSymbolCard(normalized);
+        const deps = resolveSliceDeps(
+          normalized,
+          sliceDepsBySymbol,
+          sliceSymbolSet,
+        );
+        return toSliceSymbolCard(normalized, deps);
       }),
     };
   }
@@ -485,7 +505,12 @@ export function buildPayloadCardsAndRefs(
       etag,
       detailLevel,
     });
-    cardsForPayload.push(toSliceSymbolCard(cardWithoutEtag));
+    const deps = resolveSliceDeps(
+      cardWithoutEtag,
+      sliceDepsBySymbol,
+      sliceSymbolSet,
+    );
+    cardsForPayload.push(toSliceSymbolCard(cardWithoutEtag, deps));
   }
 
   return {
@@ -681,12 +706,46 @@ function getSymbolsByPath(repoId: RepoId, filePath: string): SymbolId[] {
   return symbolIds;
 }
 
+function normalizeEdgeConfidence(confidence: number | undefined): number {
+  if (typeof confidence !== "number" || Number.isNaN(confidence)) {
+    return 1;
+  }
+  return Math.max(0, Math.min(1, confidence));
+}
+
+export function applyEdgeConfidenceWeight(
+  baseWeight: number,
+  confidence: number | undefined,
+): number {
+  return baseWeight * normalizeEdgeConfidence(confidence);
+}
+
+export function getAdaptiveMinConfidence(
+  minConfidence: number,
+  usedTokens: number,
+  maxEstimatedTokens: number,
+): number {
+  if (maxEstimatedTokens <= 0) {
+    return Math.max(0, Math.min(1, minConfidence));
+  }
+
+  const ratio = usedTokens / maxEstimatedTokens;
+  if (ratio > 0.9) {
+    return Math.max(minConfidence, 0.95);
+  }
+  if (ratio > 0.7) {
+    return Math.max(minConfidence, 0.8);
+  }
+  return Math.max(0, Math.min(1, minConfidence));
+}
+
 function beamSearch(
   graph: Graph,
   startNodes: ResolvedStartNode[],
   budget: Required<SliceBudget>,
   request: SliceBuildRequest,
   edgeWeights: Record<EdgeType, number>,
+  minConfidence: number,
 ): {
   sliceCards: Set<SymbolId>;
   frontier: FrontierItem[];
@@ -734,8 +793,14 @@ function beamSearch(
   let belowThresholdCount = 0;
   let wasTruncated = false;
   let totalTokens = 0;
+  let effectiveMinConfidence = minConfidence;
 
   while (!frontier.isEmpty() && sliceCards.size < effectiveCardCap) {
+    effectiveMinConfidence = getAdaptiveMinConfidence(
+      minConfidence,
+      totalTokens,
+      budget.maxEstimatedTokens,
+    );
     const current = frontier.extractMin()!;
     const actualScore = -current.score;
 
@@ -803,7 +868,16 @@ function beamSearch(
       const edge = outgoing.find((e) => e.to_symbol_id === neighborId);
       if (!edge) continue;
 
-      const edgeWeight = edgeWeights[edge.type] ?? 0.5;
+      const edgeConfidence = normalizeEdgeConfidence(edge.confidence);
+      if (edgeConfidence < effectiveMinConfidence) {
+        droppedCandidates++;
+        continue;
+      }
+
+      const edgeWeight = applyEdgeConfidenceWeight(
+        edgeWeights[edge.type] ?? 0.5,
+        edgeConfidence,
+      );
       const neighborScore = -(
         scoreSymbolWithMetrics(
           neighborSymbol,
@@ -998,6 +1072,60 @@ function uniqueLimit(values: string[], max: number): string[] {
   return result;
 }
 
+function uniqueDepRefs(values: SliceDepRef[], max: number): SliceDepRef[] {
+  const bySymbolId = new Map<string, number>();
+  for (const value of values) {
+    if (!value?.symbolId) continue;
+    const confidence = normalizeEdgeConfidence(value.confidence);
+    const existing = bySymbolId.get(value.symbolId);
+    if (existing === undefined || confidence > existing) {
+      bySymbolId.set(value.symbolId, confidence);
+    }
+  }
+
+  return Array.from(bySymbolId.entries())
+    .slice(0, max)
+    .map(([symbolId, confidence]) => ({ symbolId, confidence }));
+}
+
+function toDefaultSliceDeps(card: SymbolCard): SliceSymbolDeps {
+  return {
+    imports: card.deps.imports.map((symbolId) => ({
+      symbolId,
+      confidence: 1,
+    })),
+    calls: card.deps.calls.map((symbolId) => ({
+      symbolId,
+      confidence: 1,
+    })),
+  };
+}
+
+function resolveSliceDeps(
+  card: SymbolCard,
+  sliceDepsBySymbol?: Map<SymbolId, SliceSymbolDeps>,
+  sliceSymbolSet?: Set<SymbolId>,
+): SliceSymbolDeps {
+  const deps = sliceDepsBySymbol?.get(card.symbolId) ?? toDefaultSliceDeps(card);
+  if (!sliceSymbolSet) {
+    return deps;
+  }
+  return filterDepsBySliceSymbolSet(deps, sliceSymbolSet);
+}
+
+export function filterDepsBySliceSymbolSet(
+  deps: SliceSymbolDeps,
+  sliceSymbolSet: Set<SymbolId>,
+): SliceSymbolDeps {
+  const filter = (values: SliceDepRef[]): SliceDepRef[] =>
+    values.filter((dep) => sliceSymbolSet.has(dep.symbolId));
+
+  return {
+    imports: filter(deps.imports),
+    calls: filter(deps.calls),
+  };
+}
+
 function toFullCard(card: SymbolCard): SymbolCard {
   const normalized: SymbolCard = {
     ...card,
@@ -1041,7 +1169,10 @@ function toCompactCard(card: SymbolCard): SymbolCard {
   return compact;
 }
 
-export function toSliceSymbolCard(card: SymbolCard): SliceSymbolCard {
+export function toSliceSymbolCard(
+  card: SymbolCard,
+  deps?: SliceSymbolDeps,
+): SliceSymbolCard {
   const detailLevel = card.detailLevel ?? "compact";
   const astFingerprint = card.version.astFingerprint.slice(
     0,
@@ -1054,7 +1185,7 @@ export function toSliceSymbolCard(card: SymbolCard): SliceSymbolCard {
     kind: card.kind,
     name: card.name,
     exported: card.exported,
-    deps: card.deps,
+    deps: deps ?? toDefaultSliceDeps(card),
     detailLevel,
     version: {
       astFingerprint,
@@ -1093,8 +1224,16 @@ async function loadSymbolCards(
   versionId: VersionId,
   repoId: RepoId,
   detailedSymbolIds?: Set<SymbolId>,
-): Promise<SymbolCard[]> {
-  if (symbolIds.length === 0) return [];
+): Promise<{
+  cards: SymbolCard[];
+  sliceDepsBySymbol: Map<SymbolId, SliceSymbolDeps>;
+}> {
+  if (symbolIds.length === 0) {
+    return {
+      cards: [],
+      sliceDepsBySymbol: new Map<SymbolId, SliceSymbolDeps>(),
+    };
+  }
 
   const config = loadConfig();
   const cacheConfig = config.cache;
@@ -1135,7 +1274,10 @@ async function loadSymbolCards(
   }
 
   if (uncachedSymbolIds.length === 0) {
-    return cards;
+    return {
+      cards,
+      sliceDepsBySymbol: buildSliceDepsBySymbol(symbolIds),
+    };
   }
 
   uncachedSymbolIds.sort();
@@ -1332,17 +1474,66 @@ async function loadSymbolCards(
     }
   }
 
-  return cards;
+  return {
+    cards,
+    sliceDepsBySymbol: buildSliceDepsBySymbol(symbolIds),
+  };
+}
+
+function buildSliceDepsBySymbol(
+  symbolIds: SymbolId[],
+): Map<SymbolId, SliceSymbolDeps> {
+  const depMap = new Map<SymbolId, SliceSymbolDeps>();
+  if (symbolIds.length === 0) {
+    return depMap;
+  }
+
+  const edgesMap = db.getEdgesFromSymbols(symbolIds);
+  for (const symbolId of symbolIds) {
+    const outgoing = edgesMap.get(symbolId) ?? [];
+    const imports: SliceDepRef[] = [];
+    const calls: SliceDepRef[] = [];
+
+    for (const edge of outgoing) {
+      const depRef = {
+        symbolId: edge.to_symbol_id,
+        confidence: normalizeEdgeConfidence(edge.confidence),
+      };
+      if (edge.type === "import") {
+        imports.push(depRef);
+      } else if (edge.type === "call") {
+        calls.push(depRef);
+      }
+    }
+
+    depMap.set(symbolId, {
+      imports: uniqueDepRefs(imports, SYMBOL_CARD_MAX_DEPS_PER_KIND),
+      calls: uniqueDepRefs(calls, SYMBOL_CARD_MAX_DEPS_PER_KIND),
+    });
+  }
+
+  return depMap;
 }
 
 function loadEdgesBetweenSymbols(
   symbolIds: SymbolId[],
   _repoId: RepoId,
-): { symbolIndex: SymbolId[]; edges: CompressedEdge[] } {
+  minConfidence: number,
+): {
+  symbolIndex: SymbolId[];
+  edges: CompressedEdge[];
+  confidenceDistribution: ConfidenceDistribution;
+} {
   if (symbolIds.length === 0) {
     return {
       symbolIndex: [],
       edges: [],
+      confidenceDistribution: {
+        high: 0,
+        medium: 0,
+        low: 0,
+        unknown: 0,
+      },
     };
   }
 
@@ -1352,6 +1543,7 @@ function loadEdgesBetweenSymbols(
     to_symbol_id: SymbolId;
     type: EdgeType;
     weight: number;
+    confidence?: number;
   }> = [];
 
   // Batch fetch all outgoing edges (1 query instead of N)
@@ -1359,13 +1551,50 @@ function loadEdgesBetweenSymbols(
 
   for (const [_fromId, outgoing] of edgesMap) {
     for (const edge of outgoing) {
-      if (symbolSet.has(edge.to_symbol_id)) {
+      const edgeConfidence = normalizeEdgeConfidence(edge.confidence);
+      if (
+        symbolSet.has(edge.to_symbol_id) &&
+        edgeConfidence >= minConfidence
+      ) {
         dbEdges.push(edge);
       }
     }
   }
+  const encoded = encodeEdgesWithSymbolIndex(symbolIds, dbEdges);
+  return {
+    ...encoded,
+    confidenceDistribution: buildConfidenceDistribution(dbEdges),
+  };
+}
 
-  return encodeEdgesWithSymbolIndex(symbolIds, dbEdges);
+function buildConfidenceDistribution(
+  edges: Array<{
+    confidence?: number;
+  }>,
+): ConfidenceDistribution {
+  const distribution: ConfidenceDistribution = {
+    high: 0,
+    medium: 0,
+    low: 0,
+    unknown: 0,
+  };
+
+  for (const edge of edges) {
+    const confidence = edge.confidence;
+    if (typeof confidence !== "number" || Number.isNaN(confidence)) {
+      distribution.unknown++;
+      continue;
+    }
+    if (confidence >= 0.9) {
+      distribution.high++;
+    } else if (confidence >= 0.6) {
+      distribution.medium++;
+    } else {
+      distribution.low++;
+    }
+  }
+
+  return distribution;
 }
 
 export function encodeEdgesWithSymbolIndex(

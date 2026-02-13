@@ -715,7 +715,7 @@ export function deleteSymbolsByFileWithEdges(fileId: number): void {
  */
 export function createEdge(edge: EdgeRow): void {
   stmt(
-    "INSERT INTO edges (repo_id, from_symbol_id, to_symbol_id, type, weight, provenance, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO edges (repo_id, from_symbol_id, to_symbol_id, type, weight, provenance, created_at, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     edge.repo_id,
     edge.from_symbol_id,
@@ -724,6 +724,7 @@ export function createEdge(edge: EdgeRow): void {
     edge.weight,
     edge.provenance,
     edge.created_at,
+    edge.confidence ?? 1.0,
   );
 }
 
@@ -851,6 +852,17 @@ export function getEdgesFromSymbolsLite(
 export function deleteEdgesBySymbol(symbolId: string): void {
   stmt("DELETE FROM edges WHERE from_symbol_id = ? OR to_symbol_id = ?").run(
     symbolId,
+    symbolId,
+  );
+}
+
+/**
+ * Deletes outgoing call edges for a symbol.
+ *
+ * @param symbolId - Symbol identifier
+ */
+export function deleteOutgoingCallEdgesBySymbol(symbolId: string): void {
+  stmt("DELETE FROM edges WHERE type = 'call' AND from_symbol_id = ?").run(
     symbolId,
   );
 }

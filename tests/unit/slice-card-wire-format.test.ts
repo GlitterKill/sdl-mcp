@@ -155,4 +155,35 @@ describe("slice card wire format", () => {
     const compact = toCompactGraphSliceV2(slice as any);
     assert.ok(!("af" in compact.c[0]), "af should be omitted for compact detail cards");
   });
+
+  it("serializes slice deps with confidence metadata", () => {
+    const slice = {
+      repoId: "repo-1",
+      versionId: "v1",
+      budget: { maxCards: 10, maxEstimatedTokens: 5000 },
+      startSymbols: ["sym-1"],
+      symbolIndex: ["sym-1"],
+      cards: [
+        {
+          symbolId: "sym-1",
+          file: "src/example.ts",
+          range: { startLine: 1, startCol: 0, endLine: 10, endCol: 1 },
+          kind: "function",
+          name: "example",
+          exported: true,
+          deps: {
+            imports: [{ symbolId: "sym-2", confidence: 0.9 }],
+            calls: [{ symbolId: "sym-3", confidence: 0.6 }],
+          },
+          detailLevel: "compact",
+          version: { astFingerprint: "0123456789abcdef" },
+        },
+      ],
+      edges: [] as Array<[number, number, "import" | "call" | "config", number]>,
+    } as const;
+
+    const compact = toCompactGraphSliceV2(slice as any);
+    assert.deepStrictEqual(compact.c[0].d.i, [{ symbolId: "sym-2", confidence: 0.9 }]);
+    assert.deepStrictEqual(compact.c[0].d.c, [{ symbolId: "sym-3", confidence: 0.6 }]);
+  });
 });

@@ -27,6 +27,16 @@ export interface SymbolDeps {
   calls: string[];
 }
 
+export interface SliceDepRef {
+  symbolId: string;
+  confidence: number;
+}
+
+export interface SliceSymbolDeps {
+  imports: SliceDepRef[];
+  calls: SliceDepRef[];
+}
+
 export interface SymbolMetrics {
   fanIn?: number;
   fanOut?: number;
@@ -65,7 +75,8 @@ export interface SymbolCard {
 }
 
 export interface SliceSymbolCard
-  extends Omit<SymbolCard, "repoId" | "etag" | "version"> {
+  extends Omit<SymbolCard, "repoId" | "etag" | "version" | "deps"> {
+  deps: SliceSymbolDeps;
   version: {
     astFingerprint: string;
   };
@@ -87,6 +98,26 @@ export type CompressedEdge = [
 export interface SliceBudget {
   maxCards?: number;
   maxEstimatedTokens?: number;
+}
+
+export interface SliceBuildInput {
+  repoId: RepoId;
+  taskText: string;
+  stackTrace?: string;
+  failingTestPath?: string;
+  editedFiles?: string[];
+  entrySymbols?: SymbolId[];
+  knownCardEtags?: Record<SymbolId, string>;
+  cardDetail?: CardDetailLevel;
+  budget?: SliceBudget;
+  minConfidence?: number;
+}
+
+export interface ConfidenceDistribution {
+  high: number;
+  medium: number;
+  low: number;
+  unknown: number;
 }
 
 export interface SliceTruncation {
@@ -112,6 +143,7 @@ export interface GraphSlice {
 
   frontier?: Array<{ symbolId: SymbolId; score: number; why: string }>;
   truncation?: SliceTruncation;
+  confidenceDistribution?: ConfidenceDistribution;
 }
 
 export interface DeltaSymbolChange {

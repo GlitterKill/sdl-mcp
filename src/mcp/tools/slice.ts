@@ -405,6 +405,7 @@ export async function handleSliceBuild(
     wireFormat,
     wireFormatVersion,
     budget,
+    minConfidence,
   } = request;
   const requestedWireFormat: SliceBuildWireFormat = wireFormat ?? "compact";
   const effectiveWireFormatVersion =
@@ -481,6 +482,7 @@ export async function handleSliceBuild(
     knownCardEtags,
     cardDetail,
     budget: effectiveBudget,
+    minConfidence,
   };
 
   const policyContext: PolicyRequestContext = {
