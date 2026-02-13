@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Missing `config/sdlmcp.config.json` baseline in benchmark tests
 - Call-edge confidence defaults and unresolved-edge confidence handling in TS/heuristic resolution paths
 - Benchmark drift corrections for confidence dependency-reference handling in benchmark scoring flows
+- Real-world benchmark slice-card inflation now normalizes dependency refs to symbol-id lists for strict script type-checking/publish builds
 
 ## [0.6.0] - 2026-02-08
 
