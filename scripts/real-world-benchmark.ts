@@ -887,6 +887,10 @@ function inflateSliceCard(
 ): SymbolCard {
   return {
     ...card,
+    deps: {
+      imports: card.deps.imports.map((dep) => dep.symbolId),
+      calls: card.deps.calls.map((dep) => dep.symbolId),
+    },
     repoId: slice.repoId,
     version: {
       ledgerVersion: slice.versionId,
