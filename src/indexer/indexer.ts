@@ -1703,6 +1703,34 @@ function findEnclosingSymbolByRange(
   return bestMatch?.nodeId ?? null;
 }
 
+export interface ResolveParserWorkerPoolSizeParams {
+  configuredWorkerPoolSize?: number;
+  concurrency: number;
+  fileCount: number;
+  cpuCount?: number;
+}
+
+export function resolveParserWorkerPoolSize(
+  params: ResolveParserWorkerPoolSizeParams,
+): number {
+  const {
+    configuredWorkerPoolSize,
+    concurrency,
+    fileCount,
+    cpuCount = os.cpus().length,
+  } = params;
+
+  const boundedConcurrency = Math.max(1, concurrency);
+  const boundedFileCount = Math.max(1, fileCount);
+  const defaultPoolSize = Math.max(1, cpuCount - 1);
+  const requestedPoolSize = configuredWorkerPoolSize ?? defaultPoolSize;
+
+  return Math.max(
+    1,
+    Math.min(requestedPoolSize, boundedConcurrency, boundedFileCount),
+  );
+}
+
 export async function indexRepo(
   repoId: string,
   mode: "full" | "incremental",
@@ -1727,9 +1755,14 @@ export async function indexRepo(
     Math.min(appConfig.indexing?.concurrency ?? 4, files.length || 1),
   );
 
-  const workerPool = new ParserWorkerPool(
-    appConfig.indexing?.workerPoolSize ?? os.cpus().length - 1,
-  );
+  const workerPoolSize = resolveParserWorkerPoolSize({
+    configuredWorkerPoolSize: appConfig.indexing?.workerPoolSize,
+    concurrency,
+    fileCount: files.length,
+  });
+  const workerPool = new ParserWorkerPool(workerPoolSize);
+
+  const runIndex = async (): Promise<IndexResult> => {
 
   const existingFiles = getFilesByRepo(repoId);
   const existingByPath = new Map(
@@ -1959,9 +1992,6 @@ export async function indexRepo(
       : undefined;
   await updateMetricsForRepo(repoId, changedFileIdsParam);
 
-  // Shutdown worker pool to release resources
-  await workerPool.shutdown();
-
   return {
     versionId,
     filesProcessed,
@@ -1971,6 +2001,13 @@ export async function indexRepo(
     edgesCreated: totalEdgesCreated + configEdgesCreated,
     durationMs,
   };
+  };
+
+  try {
+    return await runIndex();
+  } finally {
+    await workerPool.shutdown();
+  }
 }
 
 type SymbolIndex = Map<string, Map<string, Map<SymbolKind, string[]>>>;

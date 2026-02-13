@@ -406,6 +406,42 @@ describe("Baseline Management", () => {
     assert.strictEqual(loaded?.avgCardTokens, 180);
   });
 
+  it("should normalize inconsistent indexTimePerSymbol from baseline ratios", () => {
+    const results = {
+      results: [
+        {
+          performance: {
+            indexTimePerFile: 200,
+            indexTimePerSymbol: 5,
+            sliceBuildTimeMs: 120,
+            avgSkeletonTimeMs: 3,
+          },
+          quality: {
+            symbolsPerFile: 20,
+            edgesPerSymbol: 10,
+            graphConnectivity: 0.8,
+            exportedSymbolRatio: 0.3,
+          },
+          sdlMcp: {
+            avgCardTokens: 190,
+            avgSkeletonTokens: 140,
+          },
+        },
+      ],
+    };
+
+    saveBaselineMetrics(baselinePath, results);
+
+    const loaded = loadBaselineMetrics(baselinePath);
+
+    assert.ok(loaded !== undefined);
+    assert.ok(loaded?.indexTimePerSymbol !== undefined);
+    assert.ok(
+      Math.abs((loaded?.indexTimePerSymbol ?? 0) - 10) < 0.0001,
+      "indexTimePerSymbol should be normalized from indexTimePerFile/symbolsPerFile",
+    );
+  });
+
   it("should return undefined for missing baseline", () => {
     const loaded = loadBaselineMetrics(baselinePath);
 

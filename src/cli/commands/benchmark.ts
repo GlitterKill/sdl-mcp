@@ -7,6 +7,7 @@ import { getDb } from "../../db/db.js";
 import { runMigrations } from "../../db/migrations.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
+import type { RepoConfig } from "../../config/types.js";
 import * as db from "../../db/queries.js";
 import { indexRepo } from "../../indexer/indexer.js";
 import { buildSlice } from "../../graph/slice.js";
@@ -68,6 +69,46 @@ interface BenchmarkCIResult {
     thresholdPath: string;
     baselinePath: string;
     smoothing: SmoothingConfig;
+  };
+}
+
+export const BENCHMARK_SCOPE_IGNORE_PATTERNS = [
+  "**/tests/**",
+  "**/dist-tests/**",
+  "**/*.test.ts",
+  "**/*.spec.ts",
+];
+
+export function mergeBenchmarkIgnorePatterns(
+  baseIgnorePatterns: ReadonlyArray<string> = [],
+): string[] {
+  const merged = [...baseIgnorePatterns];
+  for (const pattern of BENCHMARK_SCOPE_IGNORE_PATTERNS) {
+    if (!merged.includes(pattern)) {
+      merged.push(pattern);
+    }
+  }
+  return merged;
+}
+
+function buildBenchmarkRuntimeRepoConfig(repoConfig: RepoConfig): {
+  runtimeConfigJson: string;
+  addedScopePatterns: string[];
+} {
+  const mergedIgnore = mergeBenchmarkIgnorePatterns(repoConfig.ignore ?? []);
+  const addedScopePatterns = mergedIgnore.filter(
+    (pattern) => !(repoConfig.ignore ?? []).includes(pattern),
+  );
+  return {
+    runtimeConfigJson: JSON.stringify({
+      ignore: mergedIgnore,
+      languages: repoConfig.languages,
+      maxFileBytes: repoConfig.maxFileBytes,
+      packageJsonPath: repoConfig.packageJsonPath,
+      tsconfigPath: repoConfig.tsconfigPath,
+      workspaceGlobs: repoConfig.workspaceGlobs,
+    }),
+    addedScopePatterns,
   };
 }
 
@@ -359,14 +400,13 @@ export async function benchmarkCICommand(
   const database = getDb(config.dbPath);
   runMigrations(database);
 
-  const repoRuntimeConfigJson = JSON.stringify({
-    ignore: repoConfig.ignore,
-    languages: repoConfig.languages,
-    maxFileBytes: repoConfig.maxFileBytes,
-    packageJsonPath: repoConfig.packageJsonPath,
-    tsconfigPath: repoConfig.tsconfigPath,
-    workspaceGlobs: repoConfig.workspaceGlobs,
-  });
+  const { runtimeConfigJson: repoRuntimeConfigJson, addedScopePatterns } =
+    buildBenchmarkRuntimeRepoConfig(repoConfig);
+  if (addedScopePatterns.length > 0) {
+    console.log(
+      `[benchmark:ci] Locked benchmark scope by adding ignore patterns: ${addedScopePatterns.join(", ")}`,
+    );
+  }
 
   const persistedRepo = db.getRepo(repoId);
   if (!persistedRepo) {

@@ -221,6 +221,24 @@ export function loadThresholdConfig(configPath: string): BenchmarkThresholds {
   return JSON.parse(content) as BenchmarkThresholds;
 }
 
+function normalizeBaselineDerivedMetrics(
+  metrics: Record<string, number>,
+): Record<string, number> {
+  const normalized = { ...metrics };
+  const indexTimePerFile = normalized.indexTimePerFile;
+  const symbolsPerFile = normalized.symbolsPerFile;
+
+  if (
+    typeof indexTimePerFile === "number" &&
+    typeof symbolsPerFile === "number" &&
+    symbolsPerFile > 0
+  ) {
+    normalized.indexTimePerSymbol = indexTimePerFile / symbolsPerFile;
+  }
+
+  return normalized;
+}
+
 export function loadBaselineMetrics(
   baselinePath: string,
 ): Record<string, number> | undefined {
@@ -233,7 +251,7 @@ export function loadBaselineMetrics(
 
   if (baseline.metrics) {
     const metrics = baseline.metrics as Record<string, number>;
-    return {
+    return normalizeBaselineDerivedMetrics({
       indexTimePerFile: metrics.indexTimePerFile,
       indexTimePerSymbol: metrics.indexTimePerSymbol,
       sliceBuildTimeMs: metrics.sliceBuildTimeMs,
@@ -244,7 +262,7 @@ export function loadBaselineMetrics(
       exportedSymbolRatio: metrics.exportedSymbolRatio,
       avgCardTokens: metrics.avgCardTokens,
       avgSkeletonTokens: metrics.avgSkeletonTokens,
-    };
+    });
   }
 
   if (baseline.results && baseline.results[0]) {
@@ -270,7 +288,7 @@ export function loadBaselineMetrics(
       metrics.avgSkeletonTokens = result.sdlMcp.avgSkeletonTokens;
     }
 
-    return metrics;
+    return normalizeBaselineDerivedMetrics(metrics);
   }
 
   return undefined;

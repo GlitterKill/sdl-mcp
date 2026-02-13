@@ -1296,7 +1296,7 @@ async function loadSymbolCards(
   const metricsMap = db.getMetricsBySymbolIds(uncachedSymbolIds);
 
   // Batch fetch all outgoing edges (1 query instead of N)
-  const edgesMap = db.getEdgesFromSymbols(uncachedSymbolIds);
+  const edgesMap = db.getEdgesFromSymbolsForSlice(uncachedSymbolIds);
 
   // Collect all imported symbol IDs to batch fetch their names
   const importedSymbolIds = new Set<string>();
@@ -1476,19 +1476,42 @@ async function loadSymbolCards(
 
   return {
     cards,
-    sliceDepsBySymbol: buildSliceDepsBySymbol(symbolIds),
+    sliceDepsBySymbol: buildSliceDepsBySymbol(symbolIds, edgesMap),
   };
 }
 
+type SliceEdgeProjection = {
+  from_symbol_id: SymbolId;
+  to_symbol_id: SymbolId;
+  type: EdgeType;
+  weight: number;
+  confidence?: number;
+};
+
 function buildSliceDepsBySymbol(
   symbolIds: SymbolId[],
+  prefetchedEdgesMap?: Map<SymbolId, SliceEdgeProjection[]>,
 ): Map<SymbolId, SliceSymbolDeps> {
   const depMap = new Map<SymbolId, SliceSymbolDeps>();
   if (symbolIds.length === 0) {
     return depMap;
   }
 
-  const edgesMap = db.getEdgesFromSymbols(symbolIds);
+  const edgesMap = new Map<SymbolId, SliceEdgeProjection[]>();
+  if (prefetchedEdgesMap) {
+    for (const [symbolId, edges] of prefetchedEdgesMap) {
+      edgesMap.set(symbolId, edges);
+    }
+  }
+
+  const missingSymbolIds = symbolIds.filter((symbolId) => !edgesMap.has(symbolId));
+  if (missingSymbolIds.length > 0) {
+    const missingEdgesMap = db.getEdgesFromSymbolsForSlice(missingSymbolIds);
+    for (const [symbolId, edges] of missingEdgesMap) {
+      edgesMap.set(symbolId, edges);
+    }
+  }
+
   for (const symbolId of symbolIds) {
     const outgoing = edgesMap.get(symbolId) ?? [];
     const imports: SliceDepRef[] = [];
@@ -1538,20 +1561,29 @@ function loadEdgesBetweenSymbols(
   }
 
   const symbolSet = new Set(symbolIds);
-  const dbEdges: Array<{
-    from_symbol_id: SymbolId;
-    to_symbol_id: SymbolId;
-    type: EdgeType;
-    weight: number;
-    confidence?: number;
-  }> = [];
+  const dbEdges: SliceEdgeProjection[] = [];
+  const confidenceDistribution: ConfidenceDistribution = {
+    high: 0,
+    medium: 0,
+    low: 0,
+    unknown: 0,
+  };
 
   // Batch fetch all outgoing edges (1 query instead of N)
-  const edgesMap = db.getEdgesFromSymbols(symbolIds);
+  const edgesMap = db.getEdgesFromSymbolsForSlice(symbolIds);
 
   for (const [_fromId, outgoing] of edgesMap) {
     for (const edge of outgoing) {
       const edgeConfidence = normalizeEdgeConfidence(edge.confidence);
+      if (typeof edge.confidence !== "number" || Number.isNaN(edge.confidence)) {
+        confidenceDistribution.unknown++;
+      } else if (edgeConfidence >= 0.9) {
+        confidenceDistribution.high++;
+      } else if (edgeConfidence >= 0.6) {
+        confidenceDistribution.medium++;
+      } else {
+        confidenceDistribution.low++;
+      }
       if (
         symbolSet.has(edge.to_symbol_id) &&
         edgeConfidence >= minConfidence
@@ -1563,38 +1595,8 @@ function loadEdgesBetweenSymbols(
   const encoded = encodeEdgesWithSymbolIndex(symbolIds, dbEdges);
   return {
     ...encoded,
-    confidenceDistribution: buildConfidenceDistribution(dbEdges),
+    confidenceDistribution,
   };
-}
-
-function buildConfidenceDistribution(
-  edges: Array<{
-    confidence?: number;
-  }>,
-): ConfidenceDistribution {
-  const distribution: ConfidenceDistribution = {
-    high: 0,
-    medium: 0,
-    low: 0,
-    unknown: 0,
-  };
-
-  for (const edge of edges) {
-    const confidence = edge.confidence;
-    if (typeof confidence !== "number" || Number.isNaN(confidence)) {
-      distribution.unknown++;
-      continue;
-    }
-    if (confidence >= 0.9) {
-      distribution.high++;
-    } else if (confidence >= 0.6) {
-      distribution.medium++;
-    } else {
-      distribution.low++;
-    }
-  }
-
-  return distribution;
 }
 
 export function encodeEdgesWithSymbolIndex(

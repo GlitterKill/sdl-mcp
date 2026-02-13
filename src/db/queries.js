@@ -540,6 +540,35 @@ export function getEdgesFromSymbols(symbolIds) {
     return result;
 }
 /**
+ * Batch fetch outgoing edges for multiple symbols with projection tailored for slice/deps paths.
+ * Returns only from_symbol_id, to_symbol_id, type, weight, confidence.
+ *
+ * @param symbolIds - Array of symbol identifiers
+ * @returns Map of symbol_id to projected outgoing edges
+ */
+export function getEdgesFromSymbolsForSlice(symbolIds) {
+    if (symbolIds.length === 0)
+        return new Map();
+    const result = new Map();
+    for (const id of symbolIds) {
+        result.set(id, []);
+    }
+    for (let i = 0; i < symbolIds.length; i += DB_CHUNK_SIZE) {
+        const chunk = symbolIds.slice(i, i + DB_CHUNK_SIZE);
+        const placeholders = chunk.map(() => "?").join(",");
+        const rows = getDb()
+            .prepare(`SELECT from_symbol_id, to_symbol_id, type, weight, confidence FROM edges WHERE from_symbol_id IN (${placeholders})`)
+            .all(...chunk);
+        for (const row of rows) {
+            const edges = result.get(row.from_symbol_id);
+            if (edges) {
+                edges.push(row);
+            }
+        }
+    }
+    return result;
+}
+/**
  * Batch fetch outgoing edges for multiple symbols with minimal projection.
  * Returns only from_symbol_id, to_symbol_id, type for dependency tracking.
  * Uses chunked queries to avoid SQLite parameter limits.

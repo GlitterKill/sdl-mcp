@@ -5,6 +5,7 @@ import {
   createEdgeTransaction,
   createRepo,
   getEdgesFrom,
+  getEdgesFromSymbolsForSlice,
   getFileByRepoPath,
   upsertFile,
   upsertSymbolTransaction,
@@ -121,6 +122,31 @@ describe("edge confidence", () => {
   it("multiplies edge type weight by confidence", () => {
     assert.strictEqual(applyEdgeConfidenceWeight(1, 0.25), 0.25);
     assert.strictEqual(applyEdgeConfidenceWeight(0.6, undefined), 0.6);
+  });
+
+  it("loads projected edge columns for slice paths", () => {
+    createEdgeTransaction({
+      repo_id: repoId,
+      from_symbol_id: fromSymbol,
+      to_symbol_id: toSymbol,
+      type: "import",
+      weight: 0.6,
+      confidence: 0.9,
+      provenance: "test",
+      created_at: new Date().toISOString(),
+    });
+
+    const edgesMap = getEdgesFromSymbolsForSlice([fromSymbol]);
+    const edges = edgesMap.get(fromSymbol) ?? [];
+    const projected = edges.find(
+      (edge) =>
+        edge.to_symbol_id === toSymbol &&
+        edge.type === "import" &&
+        edge.confidence === 0.9,
+    );
+
+    assert.ok(projected, "expected projected edge row");
+    assert.ok(!("repo_id" in (projected as Record<string, unknown>)));
   });
 
   it("raises effective min confidence at 70% and 90% token usage", () => {

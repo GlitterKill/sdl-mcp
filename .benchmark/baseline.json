@@ -1,43 +1,23 @@
 {
-  "benchmarkVersion": "2.0",
-  "generatedAt": "2026-02-08T00:00:00.000Z",
-  "results": [
-    {
-      "timestamp": "2026-02-08T00:00:00.000Z",
-      "repoId": "my-repo",
-      "repoPath": ".",
-      "performance": {
-        "indexTimeMs": 32700.85,
-        "indexTimePerFile": 222.45,
-        "indexTimePerSymbol": 5.77,
-        "sliceBuildTimeMs": 430.89,
-        "skeletonGenerationTimeMs": 9.33,
-        "avgSkeletonTimeMs": 1.56,
-        "dbQueryTimeMs": 0
-      },
-      "sdlMcp": {
-        "symbolsIndexed": 5670,
-        "avgCardTokens": 218.25,
-        "avgSkeletonTokens": 146,
-        "sampleSlice": {
-          "seedSymbol": "doctorCommand",
-          "cards": 5,
-          "tokens": 2753,
-          "frontierSize": 0
-        }
-      },
-      "quality": {
-        "symbolsPerFile": 28.07,
-        "edgesPerSymbol": 33.82,
-        "edgeTypeDistribution": {
-          "import": 185379,
-          "call": 6386
-        },
-        "exportedSymbolRatio": 0.30,
-        "functionMethodRatio": 0.18,
-        "avgDepsPerSymbol": 33.82,
-        "graphConnectivity": 0.93
-      }
-    }
-  ]
+  "timestamp": "2026-02-13T21:39:42.792Z",
+  "repoId": "my-repo",
+  "repoPath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp",
+  "metrics": {
+    "indexTimePerFile": 292.02046625,
+    "indexTimePerSymbol": 8.502870718835306,
+    "symbolsPerFile": 34.34375,
+    "edgesPerSymbol": 40.64112829845314,
+    "graphConnectivity": 0.8926296633303002,
+    "exportedSymbolRatio": 0.4227479526842584,
+    "sliceBuildTimeMs": 587.7168999999994,
+    "avgSkeletonTimeMs": 0.7885000000018269,
+    "avgCardTokens": 180.5,
+    "avgSkeletonTokens": 9.153846153846153,
+    "functionMethodRatio": 0.2251137397634213,
+    "avgDepsPerSymbol": 40.64112829845314,
+    "callEdgeCount": 6479,
+    "importEdgeCount": 216844,
+    "totalSymbols": 5495,
+    "totalFiles": 160
+  }
 }
