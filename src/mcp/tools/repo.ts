@@ -76,6 +76,7 @@ export async function handleRepoRegister(
     ],
     languages: resolveRepoLanguages(languages),
     maxFileBytes: maxFileBytes ?? MAX_FILE_BYTES,
+    includeNodeModulesTypes: true,
     packageJsonPath: packageJson?.relPath,
     tsconfigPath,
     workspaceGlobs,

@@ -27,7 +27,8 @@
         "kt",
         "sh"
       ],
-      "maxFileBytes": 2000000
+      "maxFileBytes": 2000000,
+      "includeNodeModulesTypes": true
     },
     {
       "repoId": "zod-oss",

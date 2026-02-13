@@ -63,6 +63,7 @@ export const RepoConfigSchema = z.object({
       "sh",
     ]),
   maxFileBytes: z.number().int().min(1).default(MAX_FILE_BYTES),
+  includeNodeModulesTypes: z.boolean().default(true),
   packageJsonPath: z.string().optional(),
   tsconfigPath: z.string().optional(),
   workspaceGlobs: z.array(z.string()).optional(),

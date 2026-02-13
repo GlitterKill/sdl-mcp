@@ -1,4 +1,5 @@
 import path from "path";
+import fg from "fast-glob";
 import ts from "typescript";
 import type { SymbolKind } from "../../db/schema.js";
 import { normalizePath } from "../../util/paths.js";
@@ -16,6 +17,7 @@ export interface ResolvedCall {
     name: string;
     kind: SymbolKind;
   };
+  confidence?: number;
 }
 
 export interface TsCallResolver {
@@ -25,8 +27,11 @@ export interface TsCallResolver {
 export function createTsCallResolver(
   repoRoot: string,
   files: FileMetadata[],
+  options?: {
+    includeNodeModulesTypes?: boolean;
+  },
 ): TsCallResolver | null {
-  const fileNames = files
+  const sourceFileNames = files
     .map((file) => path.resolve(repoRoot, file.path))
     .filter(
       (file) =>
@@ -35,6 +40,29 @@ export function createTsCallResolver(
         file.endsWith(".js") ||
         file.endsWith(".jsx"),
     );
+
+  const includeNodeModulesTypes =
+    options?.includeNodeModulesTypes !== undefined
+      ? options.includeNodeModulesTypes
+      : true;
+  const typeDefinitionFiles = includeNodeModulesTypes
+    ? fg.sync(
+        [
+          "node_modules/@types/**/*.d.ts",
+          "!node_modules/@types/node/**",
+          "!node_modules/@types/node.d.ts",
+        ],
+        {
+          cwd: repoRoot,
+          absolute: true,
+          onlyFiles: true,
+          unique: true,
+          suppressErrors: true,
+        },
+      )
+    : [];
+
+  const fileNames = Array.from(new Set([...sourceFileNames, ...typeDefinitionFiles]));
 
   if (fileNames.length === 0) {
     return null;
@@ -65,9 +93,21 @@ export function createTsCallResolver(
 
       const visit = (node: ts.Node): void => {
         if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+          let confidence = 1.0;
           const symbol = checker.getSymbolAtLocation(node.expression);
-          const declaration =
-            symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+          let declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+
+          if (!declaration && ts.isPropertyAccessExpression(node.expression)) {
+            const memberName = node.expression.name.text;
+            const receiverType = checker.getTypeAtLocation(
+              node.expression.expression,
+            );
+            const member = receiverType.getProperty(memberName);
+            declaration = member?.valueDeclaration ?? member?.declarations?.[0];
+            if (declaration) {
+              confidence = 0.6;
+            }
+          }
 
           if (declaration) {
             const mapped = mapDeclaration(declaration, repoRoot);
@@ -87,6 +127,7 @@ export function createTsCallResolver(
                   endCol: end.character,
                 },
                 callee: mapped,
+                confidence,
               });
             }
           }

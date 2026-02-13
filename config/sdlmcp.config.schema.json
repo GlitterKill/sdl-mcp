@@ -80,6 +80,11 @@
             "minimum": 1,
             "default": 2000000
           },
+          "includeNodeModulesTypes": {
+            "type": "boolean",
+            "description": "Include node_modules/@types declarations in TypeScript call resolution (excluding @types/node)",
+            "default": true
+          },
           "packageJsonPath": {
             "type": "string",
             "description": "Optional path to package.json (auto-detected if not provided)"

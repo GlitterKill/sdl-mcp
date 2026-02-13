@@ -20,6 +20,7 @@ import {
   getSymbolsByRepo,
   getSymbol,
   getFile,
+  deleteOutgoingCallEdgesBySymbol,
   deleteSymbolReferencesByFileId,
   insertSymbolReference,
 } from "../db/queries.js";
@@ -53,9 +54,15 @@ import type { ExtractedCall } from "./treesitter/extractCalls.js";
 import type { ExtractedImport } from "./treesitter/extractImports.js";
 
 const require = createRequire(import.meta.url);
+const TS_CALL_RESOLUTION_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx"]);
+
+function isTsCallResolutionFile(relPath: string): boolean {
+  const ext = relPath.split(".").pop()?.toLowerCase() ?? "";
+  return TS_CALL_RESOLUTION_EXTENSIONS.has(ext);
+}
 
 export interface IndexProgress {
-  stage: "scanning" | "parsing" | "indexing" | "finalizing";
+  stage: "scanning" | "parsing" | "pass1" | "pass2" | "finalizing";
   current: number;
   total: number;
   currentFile?: string;
@@ -90,6 +97,7 @@ export interface ProcessFileParams {
   allSymbolsByName?: Map<string, SymbolRow[]>;
   onProgress?: (progress: IndexProgress) => void;
   workerPool?: ParserWorkerPool | null;
+  skipCallResolution?: boolean;
 }
 
 async function processFile(params: ProcessFileParams): Promise<{
@@ -113,6 +121,7 @@ async function processFile(params: ProcessFileParams): Promise<{
     allSymbolsByName,
     onProgress: _onProgress,
     workerPool,
+    skipCallResolution,
   } = params;
   try {
     const filePath = join(repoRoot, fileMeta.path);
@@ -328,6 +337,7 @@ async function processFile(params: ProcessFileParams): Promise<{
       imports,
       extensions,
       adapter.languageId,
+      content,
     );
     const importTargets = importResolution.targets;
 
@@ -461,69 +471,79 @@ async function processFile(params: ProcessFileParams): Promise<{
         }
       }
 
-      for (const call of calls) {
-        if (call.callerNodeId !== extractedSymbol.nodeId) {
-          continue;
-        }
-
-        const resolved = resolveCallTarget(
-          call,
-          nodeIdToSymbolId,
-          nameToSymbolIds,
-          importResolution.importedNameToSymbolIds,
-          importResolution.namespaceImports,
-        );
-
-        if (!resolved) {
-          continue;
-        }
-
-        // 36-1.3: Handle both resolved and unresolved edges
-        if (resolved.isResolved && resolved.symbolId) {
-          // Fully resolved edge
-          const edgeKey = `${symbolId}->${resolved.symbolId}`;
-          if (createdCallEdges && createdCallEdges.has(edgeKey)) {
+      if (!skipCallResolution) {
+        for (const call of calls) {
+          if (call.callerNodeId !== extractedSymbol.nodeId) {
             continue;
           }
 
-          const edge: EdgeRow = {
-            repo_id: repoId,
-            from_symbol_id: symbolId,
-            to_symbol_id: resolved.symbolId,
-            type: "call",
-            weight: 1.0,
-            provenance: `call:${call.calleeIdentifier}`,
-            created_at: new Date().toISOString(),
-          };
-          createEdgeTransaction(edge);
-          createdCallEdges?.add(edgeKey);
-          edgesCreated++;
-        } else if (resolved.targetName) {
-          // 36-1.3: Unresolved edge - still useful for graph traversal
-          // Use a placeholder symbol ID that encodes the unresolved target
-          const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
-          const edgeKey = `${symbolId}->${unresolvedTargetId}`;
-          if (createdCallEdges && createdCallEdges.has(edgeKey)) {
+          const resolved = resolveCallTarget(
+            call,
+            nodeIdToSymbolId,
+            nameToSymbolIds,
+            importResolution.importedNameToSymbolIds,
+            importResolution.namespaceImports,
+          );
+
+          if (!resolved) {
             continue;
           }
 
-          const edge: EdgeRow = {
-            repo_id: repoId,
-            from_symbol_id: symbolId,
-            to_symbol_id: unresolvedTargetId,
-            type: "call",
-            weight: 0.5, // Lower weight for unresolved edges
-            provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
-            created_at: new Date().toISOString(),
-          };
-          createEdgeTransaction(edge);
-          createdCallEdges?.add(edgeKey);
-          edgesCreated++;
+          // 36-1.3: Handle both resolved and unresolved edges
+          if (resolved.isResolved && resolved.symbolId) {
+            // Fully resolved edge
+            const edgeKey = `${symbolId}->${resolved.symbolId}`;
+            if (createdCallEdges && createdCallEdges.has(edgeKey)) {
+              continue;
+            }
+
+            const edge: EdgeRow = {
+              repo_id: repoId,
+              from_symbol_id: symbolId,
+              to_symbol_id: resolved.symbolId,
+              type: "call",
+              weight: 1.0,
+              confidence: resolved.confidence,
+              provenance: `call:${call.calleeIdentifier}`,
+              created_at: new Date().toISOString(),
+            };
+            createEdgeTransaction(edge);
+            createdCallEdges?.add(edgeKey);
+            edgesCreated++;
+          } else if (resolved.targetName) {
+            // 36-1.3: Unresolved edge - still useful for graph traversal
+            // Use a placeholder symbol ID that encodes the unresolved target
+            const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
+            const edgeKey = `${symbolId}->${unresolvedTargetId}`;
+            if (createdCallEdges && createdCallEdges.has(edgeKey)) {
+              continue;
+            }
+
+            const edge: EdgeRow = {
+              repo_id: repoId,
+              from_symbol_id: symbolId,
+              to_symbol_id: unresolvedTargetId,
+              type: "call",
+              weight: 0.5, // Lower weight for unresolved edges
+              confidence: resolved.confidence,
+              provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
+              created_at: new Date().toISOString(),
+            };
+            createEdgeTransaction(edge);
+            createdCallEdges?.add(edgeKey);
+            edgesCreated++;
+          }
         }
       }
     }
 
-    if (tsResolver && symbolIndex && pendingCallEdges && createdCallEdges) {
+    if (
+      !skipCallResolution &&
+      tsResolver &&
+      symbolIndex &&
+      pendingCallEdges &&
+      createdCallEdges
+    ) {
       const tsCalls = tsResolver.getResolvedCalls(fileMeta.path);
       for (const tsCall of tsCalls) {
         const callerNodeId = findEnclosingSymbolByRange(
@@ -554,6 +574,7 @@ async function processFile(params: ProcessFileParams): Promise<{
             to_symbol_id: toSymbolId,
             type: "call",
             weight: 1.0,
+            confidence: tsCall.confidence ?? 1.0,
             provenance: `ts-call:${tsCall.callee.name}`,
             created_at: new Date().toISOString(),
           });
@@ -565,6 +586,7 @@ async function processFile(params: ProcessFileParams): Promise<{
             toFile: tsCall.callee.filePath,
             toName: tsCall.callee.name,
             toKind: tsCall.callee.kind,
+            confidence: tsCall.confidence ?? 1.0,
             provenance: `ts-call:${tsCall.callee.name}`,
             callerLanguage: adapter.languageId,
           });
@@ -643,6 +665,7 @@ async function resolveImportTargets(
   imports: ExtractedImport[],
   extensions: string[],
   importerLanguage: string,
+  sourceContent?: string,
 ): Promise<{
   targets: Array<{ symbolId: string; provenance: string }>;
   importedNameToSymbolIds: Map<string, string[]>;
@@ -651,8 +674,11 @@ async function resolveImportTargets(
   const targets: Array<{ symbolId: string; provenance: string }> = [];
   const importedNameToSymbolIds = new Map<string, string[]>();
   const namespaceImports = new Map<string, Map<string, string>>();
+  const allImports = sourceContent
+    ? [...imports, ...extractCommonJsRequireImports(sourceContent)]
+    : imports;
 
-  for (const imp of imports) {
+  for (const imp of allImports) {
     const resolvedPath = await resolveImportToPath(
       repoRoot,
       importerRelPath,
@@ -775,6 +801,63 @@ async function resolveImportTargets(
   return { targets, importedNameToSymbolIds, namespaceImports };
 }
 
+function extractCommonJsRequireImports(content: string): ExtractedImport[] {
+  const imports: ExtractedImport[] = [];
+  const seen = new Set<string>();
+
+  const requireNamespaceRe =
+    /\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*require\(\s*["']([^"']+)["']\s*\)/g;
+  const requireDestructureRe =
+    /\b(?:const|let|var)\s*\{\s*([^}]+)\s*\}\s*=\s*require\(\s*["']([^"']+)["']\s*\)/g;
+
+  for (const match of content.matchAll(requireNamespaceRe)) {
+    const alias = match[1];
+    const specifier = match[2];
+    if (!alias || !specifier) continue;
+    const key = `ns:${alias}:${specifier}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const isRelative = specifier.startsWith("./") || specifier.startsWith("../");
+    imports.push({
+      specifier,
+      isRelative,
+      isExternal: !isRelative,
+      imports: [],
+      namespaceImport: alias,
+      isReExport: false,
+    });
+  }
+
+  for (const match of content.matchAll(requireDestructureRe)) {
+    const namesRaw = match[1];
+    const specifier = match[2];
+    if (!namesRaw || !specifier) continue;
+    const names = namesRaw
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const colonIdx = part.indexOf(":");
+        if (colonIdx === -1) return part;
+        return part.slice(colonIdx + 1).trim();
+      });
+    if (names.length === 0) continue;
+    const key = `destruct:${names.join(",")}:${specifier}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const isRelative = specifier.startsWith("./") || specifier.startsWith("../");
+    imports.push({
+      specifier,
+      isRelative,
+      isExternal: !isRelative,
+      imports: names,
+      isReExport: false,
+    });
+  }
+
+  return imports;
+}
+
 async function resolveImportToPath(
   repoRoot: string,
   importerRelPath: string,
@@ -824,6 +907,7 @@ async function resolveImportToPath(
 interface ResolvedCallTarget {
   symbolId: string | null;
   isResolved: boolean;
+  confidence: number;
   candidateCount?: number;
   targetName?: string;
 }
@@ -840,6 +924,7 @@ function resolveCallTarget(
     return {
       symbolId: nodeIdToSymbolId.get(call.calleeSymbolId) ?? null,
       isResolved: true,
+      confidence: 0.8,
     };
   }
 
@@ -858,6 +943,7 @@ function resolveCallTarget(
       return {
         symbolId: namespace.get(member) ?? null,
         isResolved: true,
+        confidence: 0.9,
       };
     }
   }
@@ -873,6 +959,7 @@ function resolveCallTarget(
     return {
       symbolId: importedCandidates[0],
       isResolved: true,
+      confidence: 0.9,
     };
   }
 
@@ -881,6 +968,7 @@ function resolveCallTarget(
     return {
       symbolId: null,
       isResolved: false,
+      confidence: 0.3,
       candidateCount: importedCandidates.length,
       targetName: identifier,
     };
@@ -889,9 +977,11 @@ function resolveCallTarget(
   // Check local symbols
   const candidates = nameToSymbolIds.get(identifier);
   if (candidates && candidates.length === 1) {
+    const heuristicConfidence = cleaned.includes(".") ? 0.6 : 0.8;
     return {
       symbolId: candidates[0],
       isResolved: true,
+      confidence: heuristicConfidence,
     };
   }
 
@@ -900,6 +990,7 @@ function resolveCallTarget(
     return {
       symbolId: null,
       isResolved: false,
+      confidence: 0.3,
       candidateCount: candidates.length,
       targetName: identifier,
     };
@@ -911,6 +1002,7 @@ function resolveCallTarget(
     return {
       symbolId: null,
       isResolved: false,
+      confidence: 0.3,
       candidateCount: 0,
       targetName: identifier,
     };
@@ -1009,10 +1101,298 @@ function resolvePendingCallEdges(
       to_symbol_id: toSymbolId,
       type: "call",
       weight: 1.0,
+      confidence: edge.confidence ?? 1.0,
       provenance: edge.provenance,
       created_at: new Date().toISOString(),
     });
     created.add(edgeKey);
+  }
+}
+
+function resolvePass2Targets(params: {
+  repoId: string;
+  mode: "full" | "incremental";
+  tsFiles: FileMetadata[];
+  changedTsFilePaths: Set<string>;
+}): FileMetadata[] {
+  const { repoId, mode, tsFiles, changedTsFilePaths } = params;
+  if (mode === "full") {
+    return tsFiles;
+  }
+  if (changedTsFilePaths.size === 0) {
+    return [];
+  }
+
+  const tsFilesByPath = new Map(tsFiles.map((file) => [file.path, file]));
+  const targetPaths = new Set<string>(changedTsFilePaths);
+  const changedSymbolIds = new Set<string>();
+
+  for (const changedPath of changedTsFilePaths) {
+    const file = getFileByRepoPath(repoId, changedPath);
+    if (!file) continue;
+    const symbols = getSymbolsByFile(file.file_id);
+    for (const symbol of symbols) {
+      changedSymbolIds.add(symbol.symbol_id);
+    }
+  }
+
+  if (changedSymbolIds.size === 0) {
+    return Array.from(targetPaths)
+      .map((path) => tsFilesByPath.get(path))
+      .filter((file): file is FileMetadata => Boolean(file));
+  }
+
+  const importEdges = getEdgesByRepo(repoId).filter((edge) => edge.type === "import");
+  for (const edge of importEdges) {
+    if (!changedSymbolIds.has(edge.to_symbol_id)) continue;
+    const fromSymbol = getSymbol(edge.from_symbol_id);
+    if (!fromSymbol) continue;
+    const fromFile = getFile(fromSymbol.file_id);
+    if (!fromFile) continue;
+    if (!isTsCallResolutionFile(fromFile.rel_path)) continue;
+    targetPaths.add(fromFile.rel_path);
+  }
+
+  return Array.from(targetPaths)
+    .map((path) => tsFilesByPath.get(path))
+    .filter((file): file is FileMetadata => Boolean(file));
+}
+
+async function resolveTsCallEdgesPass2(params: {
+  repoId: string;
+  repoRoot: string;
+  fileMeta: FileMetadata;
+  symbolIndex: SymbolIndex;
+  tsResolver: TsCallResolver | null;
+  languages: string[];
+  createdCallEdges: Set<string>;
+}): Promise<number> {
+  const {
+    repoId,
+    repoRoot,
+    fileMeta,
+    symbolIndex,
+    tsResolver,
+    languages,
+    createdCallEdges,
+  } = params;
+  if (!isTsCallResolutionFile(fileMeta.path)) {
+    return 0;
+  }
+
+  try {
+    const filePath = join(repoRoot, fileMeta.path);
+    const content = await readFileAsync(filePath, "utf-8");
+    const ext = fileMeta.path.split(".").pop() || "";
+    const extWithDot = `.${ext}`;
+    const adapter = getAdapterForExtension(extWithDot);
+    if (!adapter) {
+      return 0;
+    }
+
+    const tree = adapter.parse(content, filePath);
+    if (!tree) {
+      return 0;
+    }
+
+    const extractedSymbols = adapter.extractSymbols(tree, content, filePath);
+    const symbolsWithNodeIds = extractedSymbols.map((symbol) => ({
+      nodeId: symbol.nodeId,
+      kind: symbol.kind,
+      name: symbol.name,
+      exported: symbol.exported,
+      range: symbol.range,
+      signature: symbol.signature,
+      visibility: symbol.visibility,
+    }));
+    const imports = adapter.extractImports(tree, content, filePath);
+    const calls = adapter.extractCalls(
+      tree,
+      content,
+      filePath,
+      symbolsWithNodeIds as any,
+    );
+
+    const fileRecord = getFileByRepoPath(repoId, fileMeta.path);
+    if (!fileRecord) {
+      return 0;
+    }
+    const existingSymbols = getSymbolsByFile(fileRecord.file_id);
+    const toSymbolKey = (
+      kind: SymbolKind,
+      name: string,
+      range: {
+        startLine: number;
+        startCol: number;
+        endLine: number;
+        endCol: number;
+      },
+    ): string =>
+      `${kind}:${name}:${range.startLine}:${range.startCol}:${range.endLine}:${range.endCol}`;
+    const symbolIdByKey = new Map<string, string>();
+    for (const symbol of existingSymbols) {
+      symbolIdByKey.set(
+        toSymbolKey(symbol.kind, symbol.name, {
+          startLine: symbol.range_start_line,
+          startCol: symbol.range_start_col,
+          endLine: symbol.range_end_line,
+          endCol: symbol.range_end_col,
+        }),
+        symbol.symbol_id,
+      );
+    }
+
+    const symbolDetails = symbolsWithNodeIds.map((extractedSymbol) => {
+      const symbolId =
+        symbolIdByKey.get(
+          toSymbolKey(
+            extractedSymbol.kind,
+            extractedSymbol.name,
+            extractedSymbol.range,
+          ),
+        ) ??
+        generateSymbolId(
+          repoId,
+          fileMeta.path,
+          extractedSymbol.kind,
+          extractedSymbol.name,
+          "",
+        );
+      return {
+        extractedSymbol,
+        symbolId,
+      };
+    });
+
+    const existingSymbolIds = new Set(existingSymbols.map((symbol) => symbol.symbol_id));
+    const filteredSymbolDetails = symbolDetails.filter((detail) =>
+      existingSymbolIds.has(detail.symbolId),
+    );
+
+    if (filteredSymbolDetails.length === 0) {
+      return 0;
+    }
+
+    for (const detail of filteredSymbolDetails) {
+      deleteOutgoingCallEdgesBySymbol(detail.symbolId);
+      for (const edgeKey of Array.from(createdCallEdges)) {
+        if (edgeKey.startsWith(`${detail.symbolId}->`)) {
+          createdCallEdges.delete(edgeKey);
+        }
+      }
+    }
+
+    const nodeIdToSymbolId = new Map<string, string>();
+    const nameToSymbolIds = new Map<string, string[]>();
+    for (const detail of filteredSymbolDetails) {
+      nodeIdToSymbolId.set(detail.extractedSymbol.nodeId, detail.symbolId);
+      const existing = nameToSymbolIds.get(detail.extractedSymbol.name) ?? [];
+      existing.push(detail.symbolId);
+      nameToSymbolIds.set(detail.extractedSymbol.name, existing);
+    }
+
+    const extensions = languages.map((lang) => `.${lang}`);
+    const importResolution = await resolveImportTargets(
+      repoId,
+      repoRoot,
+      fileMeta.path,
+      imports,
+      extensions,
+      adapter.languageId,
+      content,
+    );
+
+    let createdEdges = 0;
+    for (const detail of filteredSymbolDetails) {
+      for (const call of calls) {
+        if (call.callerNodeId !== detail.extractedSymbol.nodeId) {
+          continue;
+        }
+        const resolved = resolveCallTarget(
+          call,
+          nodeIdToSymbolId,
+          nameToSymbolIds,
+          importResolution.importedNameToSymbolIds,
+          importResolution.namespaceImports,
+        );
+        if (!resolved) continue;
+
+        if (resolved.isResolved && resolved.symbolId) {
+          const edgeKey = `${detail.symbolId}->${resolved.symbolId}`;
+          if (createdCallEdges.has(edgeKey)) continue;
+          createEdgeTransaction({
+            repo_id: repoId,
+            from_symbol_id: detail.symbolId,
+            to_symbol_id: resolved.symbolId,
+            type: "call",
+            weight: 1.0,
+            confidence: resolved.confidence,
+            provenance: `call:${call.calleeIdentifier}`,
+            created_at: new Date().toISOString(),
+          });
+          createdCallEdges.add(edgeKey);
+          createdEdges++;
+        } else if (resolved.targetName) {
+          const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
+          const edgeKey = `${detail.symbolId}->${unresolvedTargetId}`;
+          if (createdCallEdges.has(edgeKey)) continue;
+          createEdgeTransaction({
+            repo_id: repoId,
+            from_symbol_id: detail.symbolId,
+            to_symbol_id: unresolvedTargetId,
+            type: "call",
+            weight: 0.5,
+            confidence: resolved.confidence,
+            provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
+            created_at: new Date().toISOString(),
+          });
+          createdCallEdges.add(edgeKey);
+          createdEdges++;
+        }
+      }
+    }
+
+    if (tsResolver) {
+      const tsCalls = tsResolver.getResolvedCalls(fileMeta.path);
+      for (const tsCall of tsCalls) {
+        const callerNodeId = findEnclosingSymbolByRange(tsCall.caller, filteredSymbolDetails);
+        if (!callerNodeId) continue;
+        const fromSymbolId = nodeIdToSymbolId.get(callerNodeId);
+        if (!fromSymbolId) continue;
+        const toSymbolId = resolveSymbolIdFromIndex(
+          symbolIndex,
+          repoId,
+          tsCall.callee.filePath,
+          tsCall.callee.name,
+          tsCall.callee.kind,
+          adapter.languageId,
+        );
+        if (!toSymbolId) continue;
+        const edgeKey = `${fromSymbolId}->${toSymbolId}`;
+        if (createdCallEdges.has(edgeKey)) continue;
+        createEdgeTransaction({
+          repo_id: repoId,
+          from_symbol_id: fromSymbolId,
+          to_symbol_id: toSymbolId,
+          type: "call",
+          weight: 1.0,
+          confidence: tsCall.confidence ?? 1.0,
+          provenance: `ts-call:${tsCall.callee.name}`,
+          created_at: new Date().toISOString(),
+        });
+        createdCallEdges.add(edgeKey);
+        createdEdges++;
+      }
+    }
+
+    return createdEdges;
+  } catch (error) {
+    logger.warn(
+      `Pass 2 call resolution failed for ${fileMeta.path}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return 0;
   }
 }
 
@@ -1369,7 +1749,9 @@ export async function indexRepo(
   const symbolIndex: SymbolIndex = new Map();
   const pendingCallEdges: PendingCallEdge[] = [];
   const createdCallEdges = new Set<string>();
-  const tsResolver = createTsCallResolver(repoRow.root_path, files);
+  const tsResolver = createTsCallResolver(repoRow.root_path, files, {
+    includeNodeModulesTypes: config.includeNodeModulesTypes,
+  });
 
   const allSymbolsByName = new Map<string, SymbolRow[]>();
   const repoSymbols = getSymbolsByRepo(repoId);
@@ -1386,11 +1768,13 @@ export async function indexRepo(
   let configEdgesCreated = 0;
   const allConfigEdges: ConfigEdge[] = [];
   const changedFileIds = new Set<number>();
+  const changedTsFilePaths = new Set<string>();
+  const tsFiles = files.filter((file) => isTsCallResolutionFile(file.path));
 
   let nextIndex = 0;
-  const updateProgress = (currentFile?: string): void => {
+  const updatePass1Progress = (currentFile?: string): void => {
     onProgress?.({
-      stage: "indexing",
+      stage: "pass1",
       current: Math.min(filesProcessed, files.length),
       total: files.length,
       currentFile,
@@ -1406,7 +1790,8 @@ export async function indexRepo(
       }
 
       const file = files[index];
-      updateProgress(file.path);
+      updatePass1Progress(file.path);
+      const skipCallResolution = isTsCallResolutionFile(file.path);
 
       try {
         const result = await processFile({
@@ -1424,10 +1809,14 @@ export async function indexRepo(
           allSymbolsByName,
           onProgress,
           workerPool,
+          skipCallResolution,
         });
         filesProcessed++;
         if (result.changed) {
           changedFiles++;
+          if (skipCallResolution) {
+            changedTsFilePaths.add(file.path);
+          }
           const fileRecord = getFileByRepoPath(repoId, file.path);
           if (fileRecord) {
             changedFileIds.add(fileRecord.file_id);
@@ -1448,6 +1837,61 @@ export async function indexRepo(
     () => runWorker(),
   );
   await Promise.all(workers);
+
+  const refreshedSymbolIndex: SymbolIndex = new Map();
+  const allFilesAfterPass1 = getFilesByRepo(repoId);
+  const filePathById = new Map(allFilesAfterPass1.map((file) => [file.file_id, file.rel_path]));
+  const symbolsAfterPass1 = getSymbolsByRepo(repoId);
+  for (const symbol of symbolsAfterPass1) {
+    const filePath = filePathById.get(symbol.file_id);
+    if (!filePath) continue;
+    addToSymbolIndex(
+      refreshedSymbolIndex,
+      filePath,
+      symbol.symbol_id,
+      symbol.name,
+      symbol.kind,
+    );
+  }
+
+  symbolIndex.clear();
+  for (const [filePath, names] of refreshedSymbolIndex) {
+    symbolIndex.set(filePath, names);
+  }
+
+  const pass2Targets = resolvePass2Targets({
+    repoId,
+    mode,
+    tsFiles,
+    changedTsFilePaths,
+  });
+  let pass2Processed = 0;
+  for (const fileMeta of pass2Targets) {
+    onProgress?.({
+      stage: "pass2",
+      current: pass2Processed,
+      total: pass2Targets.length,
+      currentFile: fileMeta.path,
+    });
+    const pass2Edges = await resolveTsCallEdgesPass2({
+      repoId,
+      repoRoot: repoRow.root_path,
+      fileMeta,
+      symbolIndex,
+      tsResolver,
+      languages: config.languages,
+      createdCallEdges,
+    });
+    totalEdgesCreated += pass2Edges;
+    pass2Processed++;
+  }
+  if (pass2Targets.length > 0) {
+    onProgress?.({
+      stage: "pass2",
+      current: pass2Targets.length,
+      total: pass2Targets.length,
+    });
+  }
 
   onProgress?.({
     stage: "finalizing",
@@ -1536,6 +1980,7 @@ interface PendingCallEdge {
   toFile: string;
   toName: string;
   toKind: SymbolKind;
+  confidence?: number;
   provenance: string;
   callerLanguage: string; // ML-D.1: Track caller's language for cross-language detection
 }
