@@ -1,0 +1,140 @@
+{
+  "repos": [
+    {
+      "repoId": "my-repo",
+      "rootPath": ".",
+      "ignore": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/.next/**",
+        "**/build/**",
+        "**/.git/**",
+        "**/coverage/**"
+      ],
+      "languages": [
+        "ts",
+        "tsx",
+        "js",
+        "jsx",
+        "py",
+        "go",
+        "java",
+        "cs",
+        "c",
+        "cpp",
+        "php",
+        "rs",
+        "kt",
+        "sh"
+      ],
+      "maxFileBytes": 2000000,
+      "includeNodeModulesTypes": true
+    },
+    {
+      "repoId": "zod-oss",
+      "rootPath": ".tmp/external-benchmarks/zod-oss",
+      "ignore": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/lib/**",
+        "**/coverage/**",
+        "**/*.test.ts",
+        "**/*.spec.ts"
+      ],
+      "languages": [
+        "ts",
+        "tsx",
+        "js"
+      ]
+    },
+    {
+      "repoId": "preact-oss",
+      "rootPath": ".tmp/external-benchmarks/preact-oss",
+      "ignore": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/coverage/**",
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "**/*.test.tsx",
+        "**/*.spec.tsx"
+      ],
+      "languages": [
+        "ts",
+        "tsx",
+        "js",
+        "jsx"
+      ]
+    },
+    {
+      "repoId": "flask-oss",
+      "rootPath": ".tmp/external-benchmarks/flask-oss",
+      "ignore": [
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/.pytest_cache/**",
+        "**/build/**",
+        "**/dist/**",
+        "**/*.pyc",
+        "**/tests/**"
+      ],
+      "languages": [
+        "py"
+      ]
+    },
+    {
+      "repoId": "ansible-lint-oss",
+      "rootPath": ".tmp/external-benchmarks/ansible-lint-oss",
+      "ignore": [
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/.pytest_cache/**",
+        "**/build/**",
+        "**/dist/**",
+        "**/*.pyc",
+        "**/test/**",
+        "**/tests/**",
+        "**/.tox/**"
+      ],
+      "languages": [
+        "py",
+        "sh"
+      ]
+    }
+  ],
+  "dbPath": "./data/sdlmcp.sqlite",
+  "policy": {
+    "maxWindowLines": 180,
+    "maxWindowTokens": 1400,
+    "requireIdentifiers": true,
+    "allowBreakGlass": true
+  },
+  "redaction": {
+    "enabled": true,
+    "includeDefaults": true,
+    "patterns": []
+  },
+  "indexing": {
+    "concurrency": 4,
+    "enableFileWatching": false
+  },
+  "slice": {
+    "defaultMaxCards": 60,
+    "defaultMaxTokens": 12000,
+    "edgeWeights": {
+      "call": 1.0,
+      "import": 0.6,
+      "config": 0.8
+    }
+  },
+  "cache": {
+    "enabled": true,
+    "symbolCardMaxEntries": 2000,
+    "symbolCardMaxSizeBytes": 104857600,
+    "graphSliceMaxEntries": 1000,
+    "graphSliceMaxSizeBytes": 52428800
+  }
+}

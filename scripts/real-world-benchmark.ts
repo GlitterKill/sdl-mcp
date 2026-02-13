@@ -843,10 +843,13 @@ function searchSymbolsByTerms(
     .map((entry) => entry.symbol);
 }
 
-function collectDependencyNames(symbolIds: string[]): Set<string> {
+function collectDependencyNames(
+  deps: Array<string | { symbolId: string; confidence?: number }>,
+): Set<string> {
   const names = new Set<string>();
 
-  for (const symbolId of symbolIds) {
+  for (const dep of deps) {
+    const symbolId = typeof dep === "string" ? dep : dep?.symbolId;
     if (!symbolId) continue;
 
     const unresolvedPrefix = "unresolved:call:";
