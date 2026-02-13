@@ -71,7 +71,7 @@ Or run without global install:
 npx --yes sdl-mcp@latest version
 ```
 
-### Initialize and Run
+### Configure and Initialize
 
 ```bash
 # Tip: If you are using npx, replace `sdl-mcp` with `npx --yes sdl-mcp@latest`.
@@ -90,7 +90,7 @@ sdl-mcp index
 # 5) Start MCP server (stdio for coding agents)
 sdl-mcp serve --stdio
 
-# 6) Add the contents of agent-workflows.md to your AGENTS.md file
+# 6) Copy the agent instructions from agent-workflows.md and paste them in the AGENTS.md file for your project.
 ```
 
 ## Core Feature Set
