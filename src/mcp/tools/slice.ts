@@ -28,6 +28,10 @@ import {
 import { logPolicyDecision } from "../telemetry.js";
 import { logger } from "../../util/logger.js";
 import {
+  consumePrefetchedKey,
+  prefetchSliceFrontier,
+} from "../../graph/prefetch.js";
+import {
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
   SLICE_LEASE_TTL_MS,
@@ -414,6 +418,12 @@ export async function handleSliceBuild(
       : undefined;
 
   const config = loadConfig();
+
+  if (entrySymbols && entrySymbols.length > 0) {
+    for (const symbolId of entrySymbols) {
+      consumePrefetchedKey(repoId, `slice:${symbolId}`);
+    }
+  }
   const repo = db.getRepo(repoId);
   if (!repo) {
     throw new Error(`Repository not found: ${repoId}`);
@@ -518,6 +528,11 @@ export async function handleSliceBuild(
   }
 
   const slice: GraphSlice = await buildSlice(sliceRequest);
+  const frontierSeeds =
+    entrySymbols && entrySymbols.length > 0
+      ? entrySymbols
+      : slice.cards.slice(0, 12).map((card) => card.symbolId);
+  prefetchSliceFrontier(repoId, frontierSeeds);
 
   const handle = generateSliceHandle();
   const sliceHash = generateSliceHash(slice);

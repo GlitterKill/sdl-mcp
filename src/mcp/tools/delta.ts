@@ -9,6 +9,7 @@ import {
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
 } from "../../config/constants.js";
+import { prefetchDeltaBlastRadius } from "../../graph/prefetch.js";
 
 /**
  * Handles delta pack requests.
@@ -40,6 +41,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
   const changedSymbolIds = delta.changedSymbols.map(
     (change) => change.symbolId,
   );
+  prefetchDeltaBlastRadius(validated.repoId, changedSymbolIds);
 
   const config = loadConfig();
   const budget = validated.budget ?? {

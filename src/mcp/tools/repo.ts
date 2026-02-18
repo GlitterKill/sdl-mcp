@@ -11,7 +11,7 @@ import {
   RepoOverviewResponse,
 } from "../tools.js";
 import * as db from "../../db/queries.js";
-import { indexRepo } from "../../indexer/indexer.js";
+import { getWatcherHealth, indexRepo } from "../../indexer/indexer.js";
 import { RepoConfig } from "../../config/types.js";
 import { LanguageSchema } from "../../config/types.js";
 import { normalizePath } from "../../util/paths.js";
@@ -20,6 +20,9 @@ import { MAX_FILE_BYTES } from "../../config/constants.js";
 import { buildRepoOverview } from "../../graph/overview.js";
 import { clearSliceCache } from "../../graph/sliceCache.js";
 import { symbolCardCache } from "../../graph/cache.js";
+import { getRepoHealthSnapshot } from "../health.js";
+import { logPrefetchTelemetry, logWatcherHealthTelemetry } from "../telemetry.js";
+import { getPrefetchStats } from "../../graph/prefetch.js";
 
 const SUPPORTED_LANGUAGES = [...LanguageSchema.options];
 
@@ -201,6 +204,28 @@ export async function handleRepoStatus(
   const latestVersion = db.getLatestVersion(repoId);
   const files = db.getFilesByRepo(repoId);
   const symbolsIndexed = db.countSymbolsByRepo(repoId);
+  const health = await getRepoHealthSnapshot(repoId);
+  const watcherHealth = getWatcherHealth(repoId);
+  const prefetchStats = getPrefetchStats(repoId);
+  if (watcherHealth) {
+    logWatcherHealthTelemetry({
+      repoId,
+      enabled: watcherHealth.enabled,
+      running: watcherHealth.running,
+      stale: watcherHealth.stale,
+      errors: watcherHealth.errors,
+      queueDepth: watcherHealth.queueDepth,
+      eventsReceived: watcherHealth.eventsReceived,
+      eventsProcessed: watcherHealth.eventsProcessed,
+    });
+  }
+  logPrefetchTelemetry({
+    repoId,
+    hitRate: prefetchStats.hitRate,
+    wasteRate: prefetchStats.wasteRate,
+    avgLatencyReductionMs: prefetchStats.avgLatencyReductionMs,
+    queueDepth: prefetchStats.queueDepth,
+  });
 
   const lastIndexedFile = files
     .filter((f) => f.last_indexed_at !== null)
@@ -217,6 +242,11 @@ export async function handleRepoStatus(
     filesIndexed: files.length,
     symbolsIndexed,
     lastIndexedAt: lastIndexedFile?.last_indexed_at ?? null,
+    healthScore: health.score,
+    healthComponents: health.components,
+    healthAvailable: health.available,
+    watcherHealth,
+    prefetchStats,
   };
 }
 

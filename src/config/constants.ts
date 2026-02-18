@@ -237,6 +237,31 @@ export const TS_DIAGNOSTICS_MAX_ERRORS = 50;
  */
 export const WATCHER_ERROR_MAX_COUNT = 100;
 
+/**
+ * Threshold for detecting stale watcher state when pending changes exist.
+ */
+export const WATCHER_STALE_THRESHOLD_MS = 60_000;
+
+/**
+ * Base retry delay for failed incremental watcher re-index operations.
+ */
+export const WATCHER_REINDEX_RETRY_BASE_MS = 250;
+
+/**
+ * Maximum retry delay for watcher re-index backoff.
+ */
+export const WATCHER_REINDEX_RETRY_MAX_MS = 4000;
+
+/**
+ * Maximum attempts for watcher-triggered re-index retries.
+ */
+export const WATCHER_REINDEX_MAX_ATTEMPTS = 4;
+
+/**
+ * Default upper bound on candidate source files in watcher mode.
+ */
+export const WATCHER_DEFAULT_MAX_WATCHED_FILES = 25_000;
+
 // ============================================================================
 // API & Tool Constants
 // ============================================================================

@@ -9,6 +9,10 @@ import { setupStdioTransport } from "../transport/stdio.js";
 import { setupHttpTransport } from "../transport/http.js";
 import { configureLogger } from "../logging.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
+import {
+  configurePrefetch,
+  warmPrefetchOnServeStart,
+} from "../../graph/prefetch.js";
 
 export async function serveCommand(options: ServeOptions): Promise<void> {
   const configPath = activateCliConfigPath(options.config);
@@ -19,9 +23,19 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   const db = getDb(config.dbPath);
   runMigrations(db);
 
+  configurePrefetch({
+    enabled: config.prefetch?.enabled ?? false,
+    maxBudgetPercent: config.prefetch?.maxBudgetPercent ?? 20,
+  });
+  if (config.prefetch?.enabled) {
+    for (const repo of config.repos) {
+      warmPrefetchOnServeStart(repo.repoId, config.prefetch.warmTopN ?? 50);
+    }
+  }
+
   const watchers: IndexWatchHandle[] = [];
 
-  if (config.indexing?.enableFileWatching) {
+  if (config.indexing?.enableFileWatching && !options.noWatch) {
     console.error(
       `Starting file watchers for ${config.repos.length} repo(s)...`,
     );
@@ -33,6 +47,8 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       }
     }
     console.error(`Watching ${watchers.length} repo(s)`);
+  } else if (config.indexing?.enableFileWatching && options.noWatch) {
+    console.error("File watching disabled by --no-watch");
   }
 
   const server = new MCPServer();
