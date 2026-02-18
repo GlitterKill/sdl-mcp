@@ -66,7 +66,7 @@ function buildCodeLensProvider() {
         return [];
       }
       const text = document.getText();
-      const regex = /\\b(function|class)\\s+([A-Za-z_][A-Za-z0-9_]*)/g;
+      const regex = /\b(function|class)\s+([A-Za-z_][A-Za-z0-9_]*)/g;
       const lenses = [];
       let match;
 

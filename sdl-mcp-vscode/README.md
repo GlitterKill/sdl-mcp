@@ -12,7 +12,7 @@ Provides inline SDL-MCP insights in VSCode/Cursor:
 
 ## Requirements
 
-- SDL MCP server running in HTTP mode (`sdl-mcp serve --transport http`)
+- SDL MCP server running in HTTP mode (`sdl-mcp serve --http`)
 - REST endpoints available at `http://localhost:3000`
 
 ## Settings
