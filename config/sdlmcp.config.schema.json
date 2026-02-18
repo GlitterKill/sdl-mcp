@@ -201,7 +201,13 @@
         "enableFileWatching": {
           "type": "boolean",
           "description": "Enable automatic reindexing on file changes",
-          "default": false
+          "default": true
+        },
+        "maxWatchedFiles": {
+          "type": "integer",
+          "description": "Maximum candidate source files allowed for watcher startup",
+          "minimum": 1,
+          "default": 25000
         },
         "workerPoolSize": {
           "type": "integer",
@@ -212,7 +218,8 @@
       },
       "default": {
         "concurrency": 8,
-        "enableFileWatching": false
+        "enableFileWatching": true,
+        "maxWatchedFiles": 25000
       }
     },
     "slice": {
@@ -380,6 +387,68 @@
         "paths": [],
         "enabled": true,
         "strictVersioning": true
+      }
+    },
+    "semantic": {
+      "type": "object",
+      "description": "Semantic retrieval and generated summary configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "alpha": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.6
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["api", "local", "mock"],
+          "default": "mock"
+        },
+        "model": {
+          "type": "string",
+          "default": "all-MiniLM-L6-v2"
+        },
+        "generateSummaries": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "default": {
+        "enabled": false,
+        "alpha": 0.6,
+        "provider": "mock",
+        "model": "all-MiniLM-L6-v2",
+        "generateSummaries": false
+      }
+    },
+    "prefetch": {
+      "type": "object",
+      "description": "Predictive prefetch configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "maxBudgetPercent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        },
+        "warmTopN": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 50
+        }
+      },
+      "default": {
+        "enabled": false,
+        "maxBudgetPercent": 20,
+        "warmTopN": 50
       }
     }
   }

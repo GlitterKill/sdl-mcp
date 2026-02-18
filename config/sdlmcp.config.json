@@ -119,7 +119,8 @@
   },
   "indexing": {
     "concurrency": 4,
-    "enableFileWatching": false
+    "enableFileWatching": true,
+    "maxWatchedFiles": 25000
   },
   "slice": {
     "defaultMaxCards": 60,
@@ -136,5 +137,17 @@
     "symbolCardMaxSizeBytes": 104857600,
     "graphSliceMaxEntries": 1000,
     "graphSliceMaxSizeBytes": 52428800
+  },
+  "semantic": {
+    "enabled": false,
+    "alpha": 0.6,
+    "provider": "mock",
+    "model": "all-MiniLM-L6-v2",
+    "generateSummaries": false
+  },
+  "prefetch": {
+    "enabled": false,
+    "maxBudgetPercent": 20,
+    "warmTopN": 50
   }
 }

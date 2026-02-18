@@ -32,10 +32,17 @@ import {
   PolicyEngine,
   type PolicyRequestContext,
 } from "../../policy/engine.js";
-import { logPolicyDecision } from "../telemetry.js";
+import {
+  logPolicyDecision,
+  logSemanticSearchTelemetry,
+  logSummaryQualityTelemetry,
+} from "../telemetry.js";
 import { DatabaseError, createPolicyDenial } from "../errors.js";
 import { symbolCardCache } from "../../graph/cache.js";
 import { loadConfig } from "../../config/loadConfig.js";
+import { rerankByEmbeddings } from "../../indexer/embeddings.js";
+import { generateSummaryWithGuardrails } from "../../indexer/summary-generator.js";
+import { consumePrefetchedKey } from "../../graph/prefetch.js";
 
 const policyEngine = new PolicyEngine();
 type SearchRow = {
@@ -45,6 +52,7 @@ type SearchRow = {
   file_path: string;
   kind: SymbolRow["kind"];
 };
+type ScoredSearchRow = { row: SearchRow; score: number };
 const SYMBOL_SEARCH_STOP_WORDS = new Set([
   "a",
   "an",
@@ -229,7 +237,7 @@ function searchSymbolsNaturalLanguage(
   repoId: string,
   rawQuery: string,
   limit: number,
-): SearchRow[] {
+): ScoredSearchRow[] {
   const query = rawQuery.trim().toLowerCase();
   if (!query) return [];
 
@@ -297,8 +305,7 @@ function searchSymbolsNaturalLanguage(
       if (a.row.kind !== b.row.kind) return a.row.kind.localeCompare(b.row.kind);
       return a.row.name.localeCompare(b.row.name);
     })
-    .slice(0, limit)
-    .map((entry) => entry.row);
+    .slice(0, limit);
 }
 
 /**
@@ -311,16 +318,70 @@ function searchSymbolsNaturalLanguage(
 export async function handleSymbolSearch(
   args: unknown,
 ): Promise<SymbolSearchResponse> {
+  const startedAt = Date.now();
   const request = SymbolSearchRequestSchema.parse(args);
   const limit = request.limit ?? SYMBOL_SEARCH_DEFAULT_LIMIT;
-  const results = searchSymbolsNaturalLanguage(
+  const lexicalScored = searchSymbolsNaturalLanguage(
     request.repoId,
     request.query,
-    limit,
+    Math.max(limit, 100),
   );
 
+  const config = loadConfig();
+  const semanticEnabled = request.semantic ?? config.semantic?.enabled ?? false;
+  let rankedRows = lexicalScored.slice(0, limit).map((item) => item.row);
+
+  if (semanticEnabled && lexicalScored.length > 0) {
+    try {
+      const maxLexical = Math.max(
+        1,
+        ...lexicalScored.map((item) => item.score),
+      );
+      const symbolCandidates = lexicalScored
+        .map((item) => ({
+          row: item.row,
+          symbol: db.getSymbol(item.row.symbol_id),
+          lexicalScore: item.score / maxLexical,
+        }))
+        .filter(
+          (item): item is { row: SearchRow; symbol: SymbolRow; lexicalScore: number } =>
+            item.symbol !== null,
+        );
+
+      const reranked = await rerankByEmbeddings({
+        query: request.query,
+        symbols: symbolCandidates.map((item) => ({
+          symbol: item.symbol,
+          lexicalScore: item.lexicalScore,
+        })),
+        provider: config.semantic?.provider ?? "mock",
+        alpha: config.semantic?.alpha ?? 0.6,
+        model: config.semantic?.model ?? "all-MiniLM-L6-v2",
+      });
+
+      const rowBySymbol = new Map(
+        symbolCandidates.map((item) => [item.symbol.symbol_id, item.row]),
+      );
+      rankedRows = reranked
+        .slice(0, limit)
+        .map((item) => rowBySymbol.get(item.symbol.symbol_id))
+        .filter((row): row is SearchRow => Boolean(row));
+    } catch {
+      // Embedding provider unavailable: fall back to lexical results.
+      rankedRows = lexicalScored.slice(0, limit).map((item) => item.row);
+    }
+  }
+
+  logSemanticSearchTelemetry({
+    repoId: request.repoId,
+    semanticEnabled,
+    latencyMs: Date.now() - startedAt,
+    candidateCount: lexicalScored.length,
+    alpha: config.semantic?.alpha ?? 0.6,
+  });
+
   return {
-    results: results.map((row) => ({
+    results: rankedRows.map((row) => ({
       symbolId: row.symbol_id,
       name: row.name,
       file: row.file_path,
@@ -344,6 +405,7 @@ export async function handleSymbolGetCard(
 ): Promise<SymbolGetCardResponse> {
   const request = SymbolGetCardRequestSchema.parse(args);
   const { repoId, symbolId, ifNoneMatch } = request;
+  consumePrefetchedKey(repoId, `card:${symbolId}`);
 
   const config = loadConfig();
   const cacheConfig = config.cache;
@@ -438,6 +500,30 @@ export async function handleSymbolGetCard(
     ? JSON.parse(symbol.side_effects_json)
     : undefined;
 
+  let cardSummary = symbol.summary
+    ? symbol.summary.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS)
+    : undefined;
+  if (config.semantic?.generateSummaries) {
+    try {
+      const generated = await generateSummaryWithGuardrails({
+        symbolName: symbol.name,
+        heuristicSummary: cardSummary,
+        provider: config.semantic.provider ?? "mock",
+      });
+      logSummaryQualityTelemetry({
+        repoId,
+        provider: generated.provider,
+        divergenceScore: generated.divergenceScore,
+        costUsd: generated.costUsd,
+      });
+      if (generated.divergenceScore <= 0.85) {
+        cardSummary = generated.summary.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS);
+      }
+    } catch {
+      // Keep heuristic summary if generation fails.
+    }
+  }
+
   const importTargetIds = edgesFrom
     .filter((edge) => edge.type === "import")
     .map((edge) => edge.to_symbol_id);
@@ -496,9 +582,7 @@ export async function handleSymbolGetCard(
     exported: symbol.exported === 1,
     visibility: symbol.visibility ?? undefined,
     signature,
-    summary: symbol.summary
-      ? symbol.summary.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS)
-      : undefined,
+    summary: cardSummary,
     invariants: invariants
       ? invariants.slice(0, SYMBOL_CARD_MAX_INVARIANTS)
       : undefined,

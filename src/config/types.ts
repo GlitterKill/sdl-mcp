@@ -14,6 +14,7 @@ import {
   DEFAULT_SYMBOL_CARD_CACHE_MAX_SIZE_BYTES,
   DEFAULT_GRAPH_SLICE_CACHE_MAX_ENTRIES,
   DEFAULT_GRAPH_SLICE_CACHE_MAX_SIZE_BYTES,
+  WATCHER_DEFAULT_MAX_WATCHED_FILES,
 } from "./constants.js";
 
 export const LanguageSchema = z.enum([
@@ -101,7 +102,12 @@ export const IndexingConfigSchema = z.object({
     .min(1)
     .max(MAX_INDEXING_CONCURRENCY)
     .default(DEFAULT_INDEXING_CONCURRENCY),
-  enableFileWatching: z.boolean().default(false),
+  enableFileWatching: z.boolean().default(true),
+  maxWatchedFiles: z
+    .number()
+    .int()
+    .min(1)
+    .default(WATCHER_DEFAULT_MAX_WATCHED_FILES),
   workerPoolSize: z.number().int().min(1).max(16).optional(),
 });
 
@@ -169,6 +175,24 @@ export const PluginConfigSchema = z.object({
 
 export type PluginConfig = z.infer<typeof PluginConfigSchema>;
 
+export const SemanticConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  alpha: z.number().min(0).max(1).default(0.6),
+  provider: z.enum(["api", "local", "mock"]).default("mock"),
+  model: z.string().default("all-MiniLM-L6-v2"),
+  generateSummaries: z.boolean().default(false),
+});
+
+export type SemanticConfig = z.infer<typeof SemanticConfigSchema>;
+
+export const PrefetchConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  maxBudgetPercent: z.number().int().min(1).max(100).default(20),
+  warmTopN: z.number().int().min(1).default(50),
+});
+
+export type PrefetchConfig = z.infer<typeof PrefetchConfigSchema>;
+
 export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
   dbPath: z.string().min(1),
@@ -179,6 +203,8 @@ export const AppConfigSchema = z.object({
   diagnostics: DiagnosticsConfigSchema.optional(),
   cache: CacheConfigSchema.optional(),
   plugins: PluginConfigSchema.optional(),
+  semantic: SemanticConfigSchema.optional(),
+  prefetch: PrefetchConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

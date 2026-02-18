@@ -44,7 +44,8 @@
   },
   "indexing": {
     "concurrency": 8,
-    "enableFileWatching": false
+    "enableFileWatching": true,
+    "maxWatchedFiles": 25000
   },
   "slice": {
     "defaultMaxCards": 60,
@@ -54,5 +55,17 @@
       "import": 0.6,
       "config": 0.8
     }
+  },
+  "semantic": {
+    "enabled": false,
+    "alpha": 0.6,
+    "provider": "mock",
+    "model": "all-MiniLM-L6-v2",
+    "generateSummaries": false
+  },
+  "prefetch": {
+    "enabled": false,
+    "maxBudgetPercent": 20,
+    "warmTopN": 50
   }
 }
