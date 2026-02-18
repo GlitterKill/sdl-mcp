@@ -78,19 +78,16 @@ npx --yes sdl-mcp@latest version
 # 1) Set config location variable then open a new terminal
 setx SDL_CONFIG_HOME "C:\[your path]"
 
-# 2) Initialize repo (run from repo root folder)
-sdl-mcp init --config "C:\[same path as SDL_CONFIG_HOME]"
+# 2) One-line non-interactive setup (includes inline index + doctor)
+sdl-mcp init -y --auto-index --config "C:\[same path as SDL_CONFIG_HOME]"
 
-# 3) Validate environment
-sdl-mcp doctor
-
-# 4) Build the symbol ledger (run from repo folder)
-sdl-mcp index
-
-# 5) Start MCP server (stdio for coding agents)
+# 3) Start MCP server (stdio for coding agents)
 sdl-mcp serve --stdio
 
-# 6) Copy the agent instructions from agent-workflows.md and paste them in the AGENTS.md file for your project.
+# Optional: disable watch mode if your environment has watcher instability
+sdl-mcp serve --stdio --no-watch
+
+# 4) Copy the agent instructions from agent-workflows.md and paste them in the AGENTS.md file for your project.
 ```
 
 ## Core Feature Set
@@ -116,12 +113,15 @@ sdl-mcp serve --stdio
 - `import` - import sync artifact
 - `pull` - pull by version/commit with fallback behavior
 - `benchmark:ci` - run CI benchmark and threshold checks
+- `summary` - generate token-bounded copy/paste context summaries
+- `health` - compute composite index health score and badge/json output
 - `version` - show version and environment info
 
 ## MCP Tools
 
 - Repository: `sdl.repo.register`, `sdl.repo.status`, `sdl.repo.overview`, `sdl.index.refresh`
 - Symbols: `sdl.symbol.search`, `sdl.symbol.getCard`
+- Context: `sdl.context.summary`
 - Slice: `sdl.slice.build`, `sdl.slice.refresh`, `sdl.slice.spillover.get`
 - Delta: `sdl.delta.get`
 - Code: `sdl.code.needWindow`, `sdl.code.getSkeleton`, `sdl.code.getHotPath`
@@ -155,6 +155,10 @@ Benchmark tooling (npm scripts):
 - `npm run benchmark:real`
 - `npm run benchmark:matrix`
 - `npm run benchmark:sweep`
+
+Phase A benchmark lockfile:
+
+- `scripts/benchmark/phase-a-benchmark-lock.json` pins TS/Python/Tier-3 repos for reproducible baseline runs.
 
 ## License
 

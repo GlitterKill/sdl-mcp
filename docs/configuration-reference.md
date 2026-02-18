@@ -50,7 +50,8 @@ Main config file:
   },
   "indexing": {
     "concurrency": 8,
-    "enableFileWatching": false
+    "enableFileWatching": true,
+    "maxWatchedFiles": 25000
   },
   "slice": {
     "defaultMaxCards": 60,
@@ -117,6 +118,7 @@ Controls sensitive-data masking in returned content.
 
 - `concurrency`: increase on strong local machines, lower in constrained CI (max: 10)
 - `enableFileWatching`: keeps index fresh during active development
+- `maxWatchedFiles`: hard cap to prevent watcher overload on very large repos
 - `workerPoolSize`: optional worker pool size cap (defaults to CPU-count based heuristic)
 
 ### `slice`

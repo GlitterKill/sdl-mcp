@@ -31,13 +31,18 @@ Example:
 ```
 
 ### `sdl.repo.status`
-Get status for one repository (latest version, indexed files/symbols, timestamps).
+Get status for one repository (latest version, indexed files/symbols, timestamps, health, and watcher telemetry).
 
 Example:
 
 ```json
 { "repoId": "my-repo" }
 ```
+
+Response includes:
+
+- `healthScore`, `healthComponents`, `healthAvailable`
+- `watcherHealth` (nullable runtime telemetry snapshot)
 
 ### `sdl.index.refresh`
 Refresh index in `incremental` or `full` mode.
@@ -71,6 +76,19 @@ Fetch one symbol card.
 
 ```json
 { "repoId": "my-repo", "symbolId": "<symbol-id>" }
+```
+
+### `sdl.context.summary`
+Generate a token-bounded context summary for symbol/file/task queries.
+
+```json
+{
+  "repoId": "my-repo",
+  "query": "auth middleware",
+  "budget": 2000,
+  "format": "markdown",
+  "scope": "task"
+}
 ```
 
 ## Graph Slice Workflows

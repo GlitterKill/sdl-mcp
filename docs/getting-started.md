@@ -55,27 +55,23 @@ npm link
 # 1) Set config location variable then open a new terminal
 setx SDL_CONFIG_HOME "C:\[your path]"
 
-# 2) Initialize repo (run from repo root folder)
-sdl-mcp init --config "C:\[same path as SDL_CONFIG_HOME]"
+# 2) One-line non-interactive setup (init + index + doctor)
+sdl-mcp init -y --auto-index --config "C:\[same path as SDL_CONFIG_HOME]"
 
-# 3) Validate environment
-sdl-mcp doctor
-
-# 4) Build the symbol ledger (run from repo folder)
-sdl-mcp index
-
-# 5) Start MCP server (stdio for coding agents)
+# 3) Start MCP server (stdio for coding agents)
 sdl-mcp serve --stdio
 
-# 6) Copy the agent instructions from agent-workflows.md and paste them in the AGENTS.md file for your project.
+# Optional: disable watcher mode if your environment is unstable
+sdl-mcp serve --stdio --no-watch
+
+# 4) Copy the agent instructions from agent-workflows.md and paste them in the AGENTS.md file for your project.
 ```
 
 What this does:
 
-1. `init` creates `sdlmcp.config.json` at the active global config location by default (and optional client config template). You can set the target path explicitly during setup with `sdl-mcp init --config "C:\sdl\global\sdlmcp.config.json"`.
-2. `doctor` validates Node, config, DB path, grammar availability, and repo paths.
-3. `index` builds symbol/version/edge data into SQLite
-4. `serve --stdio` exposes MCP tools for coding agents
+1. `init -y --auto-index` creates config, detects repo/languages, runs index, and runs doctor checks inline.
+2. `serve --stdio` exposes MCP tools for coding agents.
+3. `serve --no-watch` is the fallback mode when file watching is unreliable in your environment.
 
 ## Config Location Control
 

@@ -60,6 +60,41 @@ This catches most setup issues quickly.
 - Or call `sdl.index.refresh` with `incremental`
 - Enable watcher mode if desired (`index --watch`)
 
+### Watcher Failure Modes
+
+If file watching is enabled by default and becomes unstable, use:
+
+```bash
+sdl-mcp serve --no-watch
+```
+
+Then run manual refreshes with `sdl-mcp index` until the underlying issue is fixed.
+
+#### Windows: antivirus/endpoint locks
+
+- Symptom: frequent watcher errors, delayed or missing re-index events
+- Cause: file handles held by antivirus/endpoint scanning tools
+- Resolution:
+  - exclude your repo path and SDL-MCP DB path from scanning
+  - retry with `sdl-mcp serve --no-watch` as a safe fallback
+
+#### Linux: inotify limits
+
+- Symptom: watcher fails to start on large repos
+- Cause: low `fs.inotify.max_user_watches` / `max_user_instances`
+- Resolution:
+  - increase inotify limits via `sysctl`
+  - reduce scope with stronger `ignore` patterns
+  - cap file-watching load with `indexing.maxWatchedFiles`
+
+#### Network drives / remote filesystems
+
+- Symptom: inconsistent or missing watch events
+- Cause: non-local filesystems may not emit reliable file notifications
+- Resolution:
+  - run SDL-MCP on a local clone/worktree
+  - disable watch mode (`--no-watch`) and use periodic incremental indexing
+
 ### Server Starts But Agent Cannot Use Tools
 
 - Ensure agent points to `sdl-mcp serve --stdio`

@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "Symbol Delta Ledger MCP Server - Cards-first code context for TypeScript/JavaScript repositories",
   "type": "module",
   "main": "dist/main.js",
@@ -90,7 +90,8 @@
     "zod-to-json-schema": "^3.25.1"
   },
   "optionalDependencies": {
-    "chokidar": "^3.5.3"
+    "chokidar": "^3.5.3",
+    "onnxruntime-node": "^1.22.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",

@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- None yet.
+
+## [0.6.5] - 2026-02-18
+
+### Added
+
+- Phase A delivery: one-line setup flags (`-y/--yes`, `--auto-index`, `--dry-run`), context summary CLI/MCP tooling, watcher health/stale recovery, and health score surfaces.
+- Phase B delivery: edge-accuracy benchmark suite + CI baseline gate, `resolution_strategy` edge metadata, plugin resolver hook (`resolveCall`), Python/Go/Java resolver upgrades, and confidence calibration support.
+- Phase C delivery: symbol embedding storage + migration, hybrid lexical+semantic reranking (`semantic: true`), optional local ONNX runtime path, generated summaries (feature-flagged), and incremental embedding refresh by `cardHash`.
+- Phase D delivery: graph REST endpoints, browser graph explorer UI with progressive loading and SVG/PNG export, and VSCode extension MVP (status bar, CodeLens, hover, on-save reindex, diagnostics).
+- Phase E delivery: deterministic prefetch queue/rules, prefetch safeguards and config, startup warm prefetch, prefetch effectiveness metrics in `sdl.repo.status`, and learned-model scaffold.
+- Added unit/benchmark coverage for edge accuracy, edge calibration, semantic reranking, summary generation, embedding migration, prefetch behavior, and repo-status schema changes.
+
+### Changed
+
+- Config schema now includes semantic and prefetch settings used by indexing, search, serve, and status flows.
+- `sdl.repo.status` response expanded with health and prefetch observability fields consumed by CLI/HTTP/extension surfaces.
+- Benchmark CI flow now evaluates edge-quality regression thresholds and emits edge-resolution telemetry.
+
+### Fixed
+
+- Optional local embedding runtime loading no longer fails TypeScript typecheck when `onnxruntime-node` is not installed.
+- Semantic search test setup now bootstraps embedding table state for isolated SQLite runs.
+- Repo status schema tests now include required prefetch metrics fields.
+- Slice prefetch frontier seeding now derives correctly from `slice.cards`.
+
 ## [0.6.4] - 2026-02-13
 
 ### Added
@@ -267,6 +297,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.6.5]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.5
 [0.6.4]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.4
 [0.6.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.0
 [0.5.1]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.5.1

@@ -51,6 +51,8 @@ Initialize configuration and optional client template.
 
 ```bash
 sdl-mcp init --client codex --repo-path . --languages ts,py,go
+sdl-mcp init -y --auto-index
+sdl-mcp init -y --dry-run
 ```
 
 Key options:
@@ -59,6 +61,9 @@ Key options:
 - `--repo-path <PATH>` (default: current directory)
 - `--languages <comma-separated>` (default: all supported languages)
 - `-f, --force`
+- `-y, --yes` (non-interactive mode with repo/language auto-detection)
+- `--auto-index` (run inline incremental index and doctor checks)
+- `--dry-run` (print generated config without writing files)
 
 ### `sdl-mcp doctor`
 
@@ -99,6 +104,7 @@ Key options:
 - `--http`
 - `--host <HOST>` (default: `localhost`)
 - `--port <NUMBER>` (default: `3000`)
+- `--no-watch` (disable file watchers even when enabled in config)
 
 ### `sdl-mcp export`
 
@@ -166,6 +172,37 @@ Key options:
 - `--json`
 - `--update-baseline`
 - `--skip-indexing`
+
+### `sdl-mcp summary`
+
+Generate copy-paste context summaries from indexed data.
+
+```bash
+sdl-mcp summary "auth flow" --short
+```
+
+Key options:
+
+- `--budget <NUMBER>`
+- `--short|--medium|--long`
+- `--format <markdown|json|clipboard>`
+- `--scope <symbol|file|task>`
+- `--repo <ID>`
+
+### `sdl-mcp health`
+
+Show composite repository health and machine-readable badge/json output.
+
+```bash
+sdl-mcp health --json
+sdl-mcp health --badge
+```
+
+Key options:
+
+- `--repo-id <ID>`
+- `--json`
+- `--badge`
 
 ### `sdl-mcp version`
 
