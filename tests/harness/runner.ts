@@ -92,6 +92,7 @@ const CLIENT_PROFILES: ClientProfile[] = [
       "sdl.code.getSkeleton",
       "sdl.policy.get",
       "sdl.policy.set",
+      "sdl.context.summary",
     ],
   },
   {
@@ -110,6 +111,7 @@ const CLIENT_PROFILES: ClientProfile[] = [
       "sdl.code.getSkeleton",
       "sdl.policy.get",
       "sdl.policy.set",
+      "sdl.context.summary",
     ],
   },
   {
@@ -128,6 +130,7 @@ const CLIENT_PROFILES: ClientProfile[] = [
       "sdl.code.getSkeleton",
       "sdl.policy.get",
       "sdl.policy.set",
+      "sdl.context.summary",
     ],
   },
   {
@@ -146,6 +149,7 @@ const CLIENT_PROFILES: ClientProfile[] = [
       "sdl.code.getSkeleton",
       "sdl.policy.get",
       "sdl.policy.set",
+      "sdl.context.summary",
     ],
   },
 ];

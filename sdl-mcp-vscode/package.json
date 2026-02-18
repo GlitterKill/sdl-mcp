@@ -1,0 +1,68 @@
+{
+  "name": "sdl-mcp-vscode",
+  "displayName": "SDL MCP",
+  "description": "Inline SDL-MCP insights for VSCode/Cursor.",
+  "version": "0.10.0",
+  "publisher": "sdl-mcp",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguage:typescript",
+    "onLanguage:javascript",
+    "onLanguage:python",
+    "onCommand:sdl.showBlastRadius",
+    "onCommand:sdl.refreshIndex",
+    "onCommand:sdl.showDiagnostics"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sdl.showBlastRadius",
+        "title": "SDL: Show Blast Radius"
+      },
+      {
+        "command": "sdl.refreshIndex",
+        "title": "SDL: Refresh Index"
+      },
+      {
+        "command": "sdl.showDiagnostics",
+        "title": "SDL: Show Diagnostics"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "SDL MCP",
+      "properties": {
+        "sdl.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "SDL MCP HTTP server URL."
+        },
+        "sdl.repoId": {
+          "type": "string",
+          "default": "sdl-mcp",
+          "description": "Repository ID to query."
+        },
+        "sdl.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-connect to running SDL server."
+        },
+        "sdl.enableCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable fan-in/fan-out CodeLens."
+        },
+        "sdl.enableOnSaveReindex": {
+          "type": "boolean",
+          "default": false,
+          "description": "Trigger incremental re-index after save."
+        }
+      }
+    }
+  }
+}

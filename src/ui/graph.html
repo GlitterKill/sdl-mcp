@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SDL Graph Explorer</title>
+    <link rel="stylesheet" href="/ui/graph.css" />
+  </head>
+  <body>
+    <header>
+      <h1>SDL Graph Explorer</h1>
+      <div class="controls">
+        <label>
+          Repo
+          <input id="repoId" value="sdl-mcp" />
+        </label>
+        <label>
+          Symbol
+          <input id="symbolId" placeholder="optional symbol id" />
+        </label>
+        <label>
+          Max Nodes
+          <input id="maxNodes" type="number" min="20" max="500" value="200" />
+        </label>
+        <button id="loadBtn">Load</button>
+        <button id="exportSvgBtn">Export SVG</button>
+        <button id="exportPngBtn">Export PNG</button>
+      </div>
+      <div class="controls">
+        <label>
+          From Version
+          <input id="fromVersion" placeholder="v123" />
+        </label>
+        <label>
+          To Version
+          <input id="toVersion" placeholder="v124" />
+        </label>
+        <button id="blastBtn">Blast Radius</button>
+        <input id="filter" placeholder="Filter nodes" />
+      </div>
+    </header>
+    <main>
+      <svg id="graph" width="1200" height="760" aria-label="Graph visualization"></svg>
+      <aside id="details">
+        <h2>Node</h2>
+        <pre id="nodeDetails">Select a node</pre>
+      </aside>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+    <script type="module" src="/ui/graph.js"></script>
+  </body>
+</html>

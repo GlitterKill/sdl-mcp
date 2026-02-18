@@ -167,6 +167,18 @@ export class ClientProfileAssertions {
           .optional(),
       }),
     },
+    {
+      name: "sdl.context.summary",
+      description:
+        "Generate token-bounded context summary for a symbol, file, or task query",
+      inputSchema: z.object({
+        repoId: z.string(),
+        query: z.string(),
+        budget: z.number().min(1).optional(),
+        format: z.enum(["markdown", "json", "clipboard"]).optional(),
+        scope: z.enum(["symbol", "file", "task"]).optional(),
+      }),
+    },
   ];
 
   assertToolDiscovery(actualTools: unknown): ClientAssertionResult {
