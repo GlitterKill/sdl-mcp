@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - None yet.
 
+## [0.6.6] - 2026-02-18
+
+### Added
+
+- Documentation coverage for `v0.6.5` feature surfaces:
+  - HTTP graph UI and REST endpoints (`/ui/graph`, `/api/graph/*`)
+  - semantic search usage and configuration (`semantic`, `semantic: true`)
+  - prefetch configuration and `sdl.repo.status.prefetchStats` observability
+  - benchmark edge-accuracy lock/baseline references
+  - VSCode extension documentation links from top-level docs
+
+### Changed
+
+- Updated core docs pages (`README`, docs hub, getting started, CLI reference, MCP tools reference, configuration reference) to reflect current shipped behavior.
+
 ## [0.6.5] - 2026-02-18
 
 ### Added
@@ -297,6 +312,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.6.6]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.6
 [0.6.5]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.5
 [0.6.4]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.4
 [0.6.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.0
