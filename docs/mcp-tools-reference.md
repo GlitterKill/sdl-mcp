@@ -43,6 +43,7 @@ Response includes:
 
 - `healthScore`, `healthComponents`, `healthAvailable`
 - `watcherHealth` (nullable runtime telemetry snapshot)
+- `prefetchStats` (queue depth, hit/waste rates, latency reduction, last run)
 
 ### `sdl.index.refresh`
 Refresh index in `incremental` or `full` mode.
@@ -70,6 +71,14 @@ Search symbols by name/summary.
 ```json
 { "repoId": "my-repo", "query": "parseConfig", "limit": 20 }
 ```
+
+Optional semantic reranking:
+
+```json
+{ "repoId": "my-repo", "query": "auth token refresh", "limit": 20, "semantic": true }
+```
+
+When semantic mode is enabled, lexical candidates are reranked by embeddings. If the embedding provider is unavailable, the tool falls back to lexical-only results.
 
 ### `sdl.symbol.getCard`
 Fetch one symbol card.
@@ -221,3 +230,16 @@ Use in this order for most tasks:
 4. `sdl.code.getSkeleton`
 5. `sdl.code.getHotPath`
 6. `sdl.code.needWindow` only when necessary
+
+## HTTP Surface (Non-MCP)
+
+When serving with `sdl-mcp serve --http`, these non-MCP endpoints are available for graph/IDE integrations:
+
+- `/ui/graph`
+- `/api/graph/:repoId/slice/:handle`
+- `/api/graph/:repoId/symbol/:symbolId/neighborhood`
+- `/api/graph/:repoId/blast-radius/:fromVersion/:toVersion`
+- `/api/symbol/:repoId/search`
+- `/api/symbol/:repoId/card/:symbolId`
+- `/api/repo/:repoId/status`
+- `/api/repo/:repoId/reindex`

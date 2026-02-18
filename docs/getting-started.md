@@ -73,6 +73,47 @@ What this does:
 2. `serve --stdio` exposes MCP tools for coding agents.
 3. `serve --no-watch` is the fallback mode when file watching is unreliable in your environment.
 
+## Optional: Graph Explorer Over HTTP
+
+Use HTTP transport if you want the built-in graph UI and REST endpoints.
+
+```bash
+sdl-mcp serve --http --host localhost --port 3000
+```
+
+Then open:
+
+- `http://localhost:3000/ui/graph`
+- `http://localhost:3000/api/graph/<repoId>/symbol/<symbolId>/neighborhood`
+- `http://localhost:3000/api/repo/<repoId>/status`
+
+## Optional: Enable Semantic Search and Prefetch
+
+Add these sections to your config (or update existing values):
+
+```json
+{
+  "semantic": {
+    "enabled": true,
+    "alpha": 0.6,
+    "provider": "mock",
+    "model": "all-MiniLM-L6-v2",
+    "generateSummaries": false
+  },
+  "prefetch": {
+    "enabled": true,
+    "maxBudgetPercent": 20,
+    "warmTopN": 50
+  }
+}
+```
+
+Notes:
+
+- Set `semantic.provider` to `local` to use optional ONNX runtime (`onnxruntime-node`) for offline reranking.
+- Keep `generateSummaries` disabled until you validate summary quality for your repository.
+- Prefetch stats are visible in `sdl.repo.status` under `prefetchStats`.
+
 ## Config Location Control
 
 You do not edit an SDL-MCP config setting to choose the config location. You set the location from the command line or environment variables.
@@ -245,3 +286,4 @@ If those work, you are ready for slice and code-window workflows.
 - Command details: [CLI Reference](./cli-reference.md)
 - Tool payloads: [MCP Tools Reference](./mcp-tools-reference.md)
 - Config tuning: [Configuration Reference](./configuration-reference.md)
+- VSCode extension setup: [../sdl-mcp-vscode/README.md](../sdl-mcp-vscode/README.md)

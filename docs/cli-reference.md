@@ -106,6 +106,12 @@ Key options:
 - `--port <NUMBER>` (default: `3000`)
 - `--no-watch` (disable file watchers even when enabled in config)
 
+When running with `--http`, additional surfaces are available:
+
+- Graph UI: `http://<host>:<port>/ui/graph`
+- Graph REST: `/api/graph/:repoId/symbol/:symbolId/neighborhood`, `/api/graph/:repoId/blast-radius/:fromVersion/:toVersion`, `/api/graph/:repoId/slice/:handle`
+- Symbol and repo helpers: `/api/symbol/:repoId/search`, `/api/symbol/:repoId/card/:symbolId`, `/api/repo/:repoId/status`, `/api/repo/:repoId/reindex`
+
 ### `sdl-mcp export`
 
 Export a sync artifact.
@@ -172,6 +178,11 @@ Key options:
 - `--json`
 - `--update-baseline`
 - `--skip-indexing`
+
+Notes:
+
+- Edge-accuracy regression checks run as part of `benchmark:ci` and compare against `scripts/benchmark/edge-accuracy-baseline.json`.
+- Benchmark repo scope can be pinned via `scripts/benchmark/phase-a-benchmark-lock.json`.
 
 ### `sdl-mcp summary`
 

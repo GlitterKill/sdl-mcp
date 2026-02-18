@@ -84,6 +84,9 @@ sdl-mcp init -y --auto-index --config "C:\[same path as SDL_CONFIG_HOME]"
 # 3) Start MCP server (stdio for coding agents)
 sdl-mcp serve --stdio
 
+# Optional: start HTTP transport for graph explorer + REST endpoints
+sdl-mcp serve --http --host localhost --port 3000
+
 # Optional: disable watch mode if your environment has watcher instability
 sdl-mcp serve --stdio --no-watch
 
@@ -96,11 +99,16 @@ sdl-mcp serve --stdio --no-watch
 - Symbol cards with signatures, deps, metrics, and versioning
 - Graph slices with handles, leases, refresh, and spillover
 - Delta analysis and blast radius support
+- Semantic symbol search reranking (`sdl.symbol.search` with `semantic: true`)
+- Optional generated symbol summaries (`semantic.generateSummaries`)
 - Code access ladder: `getSkeleton` -> `getHotPath` -> `needWindow`
 - Policy management (`sdl.policy.get` / `sdl.policy.set`)
 - Repository overview and hotspot inspection (`sdl.repo.overview`)
 - PR risk analysis (`sdl.pr.risk.analyze`)
 - Agent orchestration tool (`sdl.agent.orchestrate`)
+- Predictive prefetch heuristics with status metrics (`prefetchStats`)
+- Graph HTTP surface and browser explorer (`/api/graph/*`, `/ui/graph`)
+- VSCode extension MVP in `sdl-mcp-vscode/`
 - Sync artifact export/import/pull workflows
 
 ## CLI Commands
@@ -112,7 +120,7 @@ sdl-mcp serve --stdio --no-watch
 - `export` - export sync artifact
 - `import` - import sync artifact
 - `pull` - pull by version/commit with fallback behavior
-- `benchmark:ci` - run CI benchmark and threshold checks
+- `benchmark:ci` - run CI benchmark checks, including edge-accuracy regression gating
 - `summary` - generate token-bounded copy/paste context summaries
 - `health` - compute composite index health score and badge/json output
 - `version` - show version and environment info
@@ -139,6 +147,7 @@ See: [MCP Tools Reference](./docs/mcp-tools-reference.md)
 - [Configuration Reference](./docs/configuration-reference.md)
 - [Agent Workflows](./docs/agent-workflows.md)
 - [Troubleshooting](./docs/troubleshooting.md)
+- [VSCode Extension README](./sdl-mcp-vscode/README.md)
 - [Legacy User Guide](./docs/USER_GUIDE.md)
 
 ## Development

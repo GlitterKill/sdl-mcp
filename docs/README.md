@@ -48,9 +48,13 @@ Use this page as the entry point for SDL-MCP documentation.
 - [Plugin SDK Quick Reference](./PLUGIN_SDK_QUICK_REFERENCE.md)
 - [Plugin SDK Implementation](./PLUGIN_SDK_IMPLEMENTATION.md)
 - [Plugin SDK Security](./PLUGIN_SDK_SECURITY.md)
+- [VSCode Extension README](../sdl-mcp-vscode/README.md)
 
 ## Current Scope Snapshot
 
 - Supported languages: TS, JS, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, Shell
-- CLI: init, doctor, index, serve, export, import, pull, benchmark:ci, version
-- MCP tools include repository overview, PR risk analysis, and agent orchestration
+- CLI: init, doctor, index, serve, export, import, pull, benchmark:ci, summary, health, version
+- MCP tools include repository overview, context summary, PR risk analysis, and agent orchestration
+- Semantic and summary features: optional semantic reranking and generated symbol summaries (feature-flagged)
+- HTTP graph surface: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
+- VSCode extension MVP: see `../sdl-mcp-vscode/README.md`

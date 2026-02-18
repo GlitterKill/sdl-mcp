@@ -80,6 +80,18 @@ Main config file:
     "paths": [],
     "enabled": true,
     "strictVersioning": true
+  },
+  "semantic": {
+    "enabled": false,
+    "alpha": 0.6,
+    "provider": "mock",
+    "model": "all-MiniLM-L6-v2",
+    "generateSummaries": false
+  },
+  "prefetch": {
+    "enabled": false,
+    "maxBudgetPercent": 20,
+    "warmTopN": 50
   }
 }
 ```
@@ -136,6 +148,28 @@ Controls in-memory caching for symbol cards and graph slices.
 ### `plugins`
 
 Controls adapter plugin loading. See the Plugin SDK docs for authoring and packaging.
+
+### `semantic`
+
+Controls optional semantic search and summary generation behavior.
+
+- `enabled`: enables semantic reranking in symbol search
+- `alpha`: lexical/semantic blend (0..1, default `0.6`)
+- `provider`: `api`, `local`, or `mock`
+- `model`: embedding model identifier
+- `generateSummaries`: enables generated symbol summaries (disabled by default)
+
+Use `provider: "local"` for offline environments with `onnxruntime-node` installed.
+
+### `prefetch`
+
+Controls predictive prefetch behavior.
+
+- `enabled`: toggles background prefetch queue
+- `maxBudgetPercent`: cap for prefetch resource usage relative to configured budget
+- `warmTopN`: number of symbols warmed on `serve` startup when prefetch is enabled
+
+Prefetch effectiveness and queue metrics are exposed in `sdl.repo.status.prefetchStats`.
 
 ## Common Profiles
 
