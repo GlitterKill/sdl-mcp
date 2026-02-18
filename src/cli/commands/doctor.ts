@@ -3,6 +3,7 @@ import { DoctorOptions } from "../types.js";
 import { getDb } from "../../db/db.js";
 import { NODE_MIN_MAJOR_VERSION } from "../../config/constants.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
+import { getAllWatcherHealth } from "../../indexer/indexer.js";
 import Parser from "tree-sitter";
 import TypeScript from "tree-sitter-typescript";
 import C from "tree-sitter-c";
@@ -19,6 +20,7 @@ const DOCTOR_CHECKS = [
   { name: "Database path writable", check: checkDatabaseWritable },
   { name: "Tree-sitter grammars available", check: checkTreeSitterGrammar },
   { name: "Repo paths accessible", check: checkRepoPaths },
+  { name: "Watcher health telemetry", check: checkWatcherHealth },
 ];
 
 interface DoctorResult {
@@ -253,6 +255,63 @@ async function checkRepoPaths(
     return {
       status: "warn",
       message: `Cannot verify repo paths: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+async function checkWatcherHealth(
+  options: DoctorOptions,
+): Promise<Omit<DoctorResult, "name">> {
+  const configPath = options.config ?? activateCliConfigPath();
+  if (!existsSync(configPath)) {
+    return { status: "warn", message: "Config not found (skip watcher health)" };
+  }
+
+  try {
+    const { loadConfig } = await import("../../config/loadConfig.js");
+    const config = loadConfig(configPath);
+    const watchEnabled = config.indexing?.enableFileWatching ?? true;
+    if (!watchEnabled) {
+      return { status: "warn", message: "File watching disabled in config" };
+    }
+
+    const healthByRepo = getAllWatcherHealth();
+    const repoStates = config.repos.map((repo) => ({
+      repoId: repo.repoId,
+      health: healthByRepo[repo.repoId],
+    }));
+
+    const active = repoStates.filter((item) => Boolean(item.health));
+    if (active.length === 0) {
+      return {
+        status: "warn",
+        message: "No active watcher telemetry in this process (start `sdl-mcp serve` to observe runtime watcher health)",
+      };
+    }
+
+    const stale = active.filter((item) => item.health?.stale);
+    const errored = active.filter((item) => (item.health?.errors ?? 0) > 0);
+    if (stale.length > 0) {
+      return {
+        status: "fail",
+        message: `Stale watchers detected: ${stale.map((item) => item.repoId).join(", ")}`,
+      };
+    }
+    if (errored.length > 0) {
+      return {
+        status: "warn",
+        message: `Watcher errors observed: ${errored.map((item) => item.repoId).join(", ")}`,
+      };
+    }
+
+    return {
+      status: "pass",
+      message: `Active watcher telemetry for ${active.length} repo(s)`,
+    };
+  } catch (error) {
+    return {
+      status: "warn",
+      message: `Cannot evaluate watcher health: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }

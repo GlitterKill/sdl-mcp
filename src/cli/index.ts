@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 
 import { parseArgs } from "util";
-import type { CLIOptions, DoctorOptions, VersionOptions } from "./types.js";
+import type {
+  CLIOptions,
+  DoctorOptions,
+  SummaryOptions,
+  VersionOptions,
+  HealthOptions,
+} from "./types.js";
 import { initCommand } from "./commands/init.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { versionCommand } from "./commands/version.js";
@@ -11,6 +17,8 @@ import { exportCommand } from "./commands/export.js";
 import { importCommand } from "./commands/import.js";
 import { pullCommand } from "./commands/pull.js";
 import { benchmarkCICommand } from "./commands/benchmark.js";
+import { summaryCommand } from "./commands/summary.js";
+import { healthCommand } from "./commands/health.js";
 import {
   parseInitOptions,
   parseIndexOptions,
@@ -19,6 +27,8 @@ import {
   parseImportOptions,
   parsePullOptions,
   parseBenchmarkOptions,
+  parseSummaryOptions,
+  parseHealthOptions,
 } from "./argParsing.js";
 
 async function main(): Promise<void> {
@@ -36,6 +46,9 @@ async function main(): Promise<void> {
       client: { type: "string" },
       "repo-path": { type: "string" },
       force: { type: "boolean", short: "f" },
+      yes: { type: "boolean", short: "y" },
+      "auto-index": { type: "boolean" },
+      "dry-run": { type: "boolean" },
       watch: { type: "boolean", short: "w" },
       "repo-id": { type: "string" },
       stdio: { type: "boolean" },
@@ -55,6 +68,16 @@ async function main(): Promise<void> {
       "threshold-path": { type: "string" },
       "update-baseline": { type: "boolean" },
       "skip-indexing": { type: "boolean" },
+      budget: { type: "string" },
+      format: { type: "string" },
+      scope: { type: "string" },
+      short: { type: "boolean" },
+      medium: { type: "boolean" },
+      long: { type: "boolean" },
+      repo: { type: "string" },
+      json: { type: "boolean" },
+      badge: { type: "boolean" },
+      "no-watch": { type: "boolean" },
     },
   });
 
@@ -170,6 +193,26 @@ async function main(): Promise<void> {
       return;
     }
 
+    case "summary": {
+      const options = parseSummaryOptions(
+        positionals.slice(1),
+        global,
+        values as Record<string, unknown>,
+      );
+      await summaryCommand(options as SummaryOptions);
+      break;
+    }
+
+    case "health": {
+      const options = parseHealthOptions(
+        positionals.slice(1),
+        global,
+        values as Record<string, unknown>,
+      );
+      await healthCommand(options as HealthOptions);
+      break;
+    }
+
     default:
       console.error(`Unknown command: ${command}`);
       console.error("");
@@ -195,6 +238,8 @@ Commands:
   import            Import indexed state from sync artifact
   pull              Pull latest state from artifact or fallback to full index
   benchmark:ci      Run CI benchmark with threshold evaluation
+  summary           Generate a token-bounded context summary for a query
+  health            Show composite index health score and components
 
 Global Options:
   -c, --config PATH     Path to configuration file (overrides env/default lookup)
@@ -211,6 +256,9 @@ Global Options:
     --repo-path PATH      Repository root path (default: current directory)
     --languages LIST      Comma-separated languages: ts, tsx, js, jsx, py, go, java, cs, c, cpp, php, rs, kt, sh (default: all)
     -f, --force           Force overwrite existing configuration
+    -y, --yes             Non-interactive mode (auto-detect repo/languages)
+    --auto-index          Run index + doctor automatically after init
+    --dry-run             Print generated config and exit without writing files
 
  Index Options:
    -w, --watch          Watch for file changes
@@ -222,6 +270,7 @@ Global Options:
    --http               Use HTTP transport
    --port NUMBER         HTTP port (default: 3000)
    --host HOST          HTTP host (default: localhost)
+   --no-watch           Disable file watchers even if enabled in config
 
  Export Options:
    --repo-id ID         Export specific repository by ID
@@ -253,8 +302,24 @@ Global Options:
    --update-baseline    Update baseline with current results
    --skip-indexing      Skip re-indexing, use existing data
 
+ Summary Options:
+   --budget NUMBER      Token budget (default: 2000)
+   --short              Budget preset: 500 tokens
+   --medium             Budget preset: 2000 tokens
+   --long               Budget preset: 5000 tokens
+   --format FORMAT      markdown | json | clipboard (default: markdown)
+   --scope SCOPE        symbol | file | task (default: auto)
+   --repo ID            Repository ID (default: auto from cwd)
+   -o, --output PATH    Write output to file instead of stdout
+
+ Health Options:
+   --repo-id ID         Repository ID (default: first configured repo)
+   --json               Output full JSON payload
+   --badge              Output shields.io-compatible JSON
+
  Examples:
    sdl-mcp init
+   sdl-mcp init -y --auto-index
    sdl-mcp doctor
    sdl-mcp index --watch
    sdl-mcp serve --stdio
@@ -266,6 +331,8 @@ Global Options:
    sdl-mcp benchmark:ci
    sdl-mcp benchmark:ci --repo-id my-repo --json
    sdl-mcp benchmark:ci --update-baseline
+   sdl-mcp summary "repo status" --short
+   sdl-mcp health --json
 
 For more information, visit: https://github.com/GlitterKill/sdl-mcp
 `);

@@ -2,6 +2,8 @@ import type {
   CLIOptions,
   IndexOptions,
   InitOptions,
+  SummaryOptions,
+  HealthOptions,
   ServeOptions,
 } from "./types.js";
 
@@ -77,6 +79,12 @@ export function parseInitOptions(
       options.languages = args[++i].split(",").map((lang) => lang.trim());
     } else if (arg === "--force" || arg === "-f") {
       options.force = true;
+    } else if (arg === "--yes" || arg === "-y") {
+      options.yes = true;
+    } else if (arg === "--auto-index") {
+      options.autoIndex = true;
+    } else if (arg === "--dry-run") {
+      options.dryRun = true;
     }
   }
 
@@ -104,6 +112,15 @@ export function parseInitOptions(
   }
   if (values.force === true) {
     options.force = true;
+  }
+  if (values.yes === true) {
+    options.yes = true;
+  }
+  if (values["auto-index"] === true) {
+    options.autoIndex = true;
+  }
+  if (values["dry-run"] === true) {
+    options.dryRun = true;
   }
 
   return options;
@@ -322,6 +339,8 @@ export function parseServeOptions(
         throw new Error("--host requires a value");
       }
       options.host = args[++i];
+    } else if (arg === "--no-watch") {
+      options.noWatch = true;
     }
   }
 
@@ -336,6 +355,162 @@ export function parseServeOptions(
   }
   if (typeof values.host === "string" && values.host.length > 0) {
     options.host = values.host;
+  }
+  if (values["no-watch"] === true) {
+    options.noWatch = true;
+  }
+
+  return options;
+}
+
+export function parseSummaryOptions(
+  args: string[],
+  global: CLIOptions,
+  values: ParsedOptionValues,
+): SummaryOptions {
+  let query = "";
+  const options: SummaryOptions = {
+    ...global,
+    query,
+    budget: 2000,
+    format: "markdown",
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg.startsWith("-") && !query) {
+      query = arg;
+      continue;
+    }
+    if (arg === "--budget") {
+      if (i + 1 >= args.length) {
+        throw new Error("--budget requires a value");
+      }
+      const budget = parseInt(args[++i], 10);
+      if (!Number.isFinite(budget) || budget < 1) {
+        throw new Error("--budget must be a positive integer");
+      }
+      options.budget = budget;
+    } else if (arg === "--short") {
+      options.budget = 500;
+    } else if (arg === "--medium") {
+      options.budget = 2000;
+    } else if (arg === "--long") {
+      options.budget = 5000;
+    } else if (arg === "--format") {
+      if (i + 1 >= args.length) {
+        throw new Error("--format requires a value");
+      }
+      const format = args[++i];
+      if (format !== "markdown" && format !== "json" && format !== "clipboard") {
+        throw new Error("--format must be one of: markdown, json, clipboard");
+      }
+      options.format = format;
+    } else if (arg === "--scope") {
+      if (i + 1 >= args.length) {
+        throw new Error("--scope requires a value");
+      }
+      const scope = args[++i];
+      if (scope !== "symbol" && scope !== "file" && scope !== "task") {
+        throw new Error("--scope must be one of: symbol, file, task");
+      }
+      options.scope = scope;
+    } else if (arg === "--output" || arg === "-o") {
+      if (i + 1 >= args.length) {
+        throw new Error("--output requires a value");
+      }
+      options.output = args[++i];
+    } else if (arg === "--repo" || arg === "--repo-id") {
+      if (i + 1 >= args.length) {
+        throw new Error(`${arg} requires a value`);
+      }
+      options.repoId = args[++i];
+    }
+  }
+
+  if (typeof values.query === "string" && values.query.trim().length > 0) {
+    query = values.query.trim();
+  }
+  if (!query && args.length > 0) {
+    query = args.filter((arg) => !arg.startsWith("-")).join(" ").trim();
+  }
+  if (typeof values.budget === "string") {
+    const budget = parseInt(values.budget, 10);
+    if (!Number.isFinite(budget) || budget < 1) {
+      throw new Error("--budget must be a positive integer");
+    }
+    options.budget = budget;
+  }
+  if (values.short === true) {
+    options.budget = 500;
+  }
+  if (values.medium === true) {
+    options.budget = 2000;
+  }
+  if (values.long === true) {
+    options.budget = 5000;
+  }
+  if (typeof values.format === "string") {
+    const format = values.format;
+    if (format !== "markdown" && format !== "json" && format !== "clipboard") {
+      throw new Error("--format must be one of: markdown, json, clipboard");
+    }
+    options.format = format;
+  }
+  if (typeof values.scope === "string") {
+    const scope = values.scope;
+    if (scope !== "symbol" && scope !== "file" && scope !== "task") {
+      throw new Error("--scope must be one of: symbol, file, task");
+    }
+    options.scope = scope;
+  }
+  if (typeof values.output === "string") {
+    options.output = values.output;
+  }
+  if (typeof values.repo === "string") {
+    options.repoId = values.repo;
+  }
+  if (typeof values["repo-id"] === "string") {
+    options.repoId = values["repo-id"];
+  }
+
+  options.query = query.trim();
+  if (!options.query) {
+    throw new Error("summary command requires a query");
+  }
+
+  return options;
+}
+
+export function parseHealthOptions(
+  args: string[],
+  global: CLIOptions,
+  values: ParsedOptionValues,
+): HealthOptions {
+  const options: HealthOptions = { ...global };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--repo-id") {
+      if (i + 1 >= args.length) {
+        throw new Error("--repo-id requires a value");
+      }
+      options.repoId = args[++i];
+    } else if (arg === "--json") {
+      options.jsonOutput = true;
+    } else if (arg === "--badge") {
+      options.badge = true;
+    }
+  }
+
+  if (typeof values["repo-id"] === "string") {
+    options.repoId = values["repo-id"];
+  }
+  if (values.json === true) {
+    options.jsonOutput = true;
+  }
+  if (values.badge === true) {
+    options.badge = true;
   }
 
   return options;

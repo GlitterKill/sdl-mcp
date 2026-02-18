@@ -607,3 +607,70 @@ export interface RepoOverviewRequest {
   /** Maximum exports to list per directory */
   maxExportsPerDirectory?: number;
 }
+
+export type ContextSummaryScope = "symbol" | "file" | "task";
+export type ContextSummaryFormat = "markdown" | "json" | "clipboard";
+
+export interface ContextSummarySymbol {
+  symbolId: SymbolId;
+  name: string;
+  kind: SymbolKind;
+  signature?: string;
+  summary: string;
+}
+
+export interface ContextSummaryDependency {
+  fromSymbolId: SymbolId;
+  toSymbolIds: SymbolId[];
+}
+
+export interface ContextSummaryRiskArea {
+  symbolId: SymbolId;
+  name: string;
+  reasons: string[];
+}
+
+export interface ContextSummaryFileTouch {
+  file: string;
+  symbolCount: number;
+}
+
+export interface ContextSummaryMetadata {
+  query: string;
+  summaryTokens: number;
+  budget: number;
+  truncated: boolean;
+  indexVersion: VersionId | string;
+}
+
+export interface ContextSummary {
+  repoId: RepoId;
+  query: string;
+  scope: ContextSummaryScope;
+  keySymbols: ContextSummarySymbol[];
+  dependencyGraph: ContextSummaryDependency[];
+  riskAreas: ContextSummaryRiskArea[];
+  filesTouched: ContextSummaryFileTouch[];
+  metadata: ContextSummaryMetadata;
+}
+
+export interface HealthComponents {
+  freshness: number;
+  coverage: number;
+  errorRate: number;
+  edgeQuality: number;
+}
+
+export interface WatcherHealth {
+  enabled: boolean;
+  running: boolean;
+  filesWatched: number;
+  eventsReceived: number;
+  eventsProcessed: number;
+  errors: number;
+  queueDepth: number;
+  restartCount: number;
+  stale: boolean;
+  lastEventAt: string | null;
+  lastSuccessfulReindexAt: string | null;
+}

@@ -465,6 +465,43 @@ export const RepoStatusResponseSchema = z.object({
   filesIndexed: z.number().int(),
   symbolsIndexed: z.number().int(),
   lastIndexedAt: z.string().nullable(),
+  healthScore: z.number().int().min(0).max(100),
+  healthComponents: z.object({
+    freshness: z.number().min(0).max(1),
+    coverage: z.number().min(0).max(1),
+    errorRate: z.number().min(0).max(1),
+    edgeQuality: z.number().min(0).max(1),
+  }),
+  healthAvailable: z.boolean(),
+  watcherHealth: z
+    .object({
+      enabled: z.boolean(),
+      running: z.boolean(),
+      filesWatched: z.number().int().min(0),
+      eventsReceived: z.number().int().min(0),
+      eventsProcessed: z.number().int().min(0),
+      errors: z.number().int().min(0),
+      queueDepth: z.number().int().min(0),
+      restartCount: z.number().int().min(0),
+      stale: z.boolean(),
+      lastEventAt: z.string().nullable(),
+      lastSuccessfulReindexAt: z.string().nullable(),
+    })
+    .nullable(),
+  prefetchStats: z.object({
+    enabled: z.boolean(),
+    queueDepth: z.number().int().min(0),
+    running: z.boolean(),
+    completed: z.number().int().min(0),
+    cancelled: z.number().int().min(0),
+    cacheHits: z.number().int().min(0),
+    cacheMisses: z.number().int().min(0),
+    wastedPrefetch: z.number().int().min(0),
+    hitRate: z.number().min(0).max(1),
+    wasteRate: z.number().min(0).max(1),
+    avgLatencyReductionMs: z.number().min(0),
+    lastRunAt: z.string().nullable(),
+  }),
 });
 
 export const IndexRefreshRequestSchema = z.object({
@@ -500,6 +537,7 @@ export const SymbolSearchRequestSchema = z.object({
   repoId: z.string(),
   query: z.string().min(1),
   limit: z.number().int().min(1).max(SYMBOL_SEARCH_MAX_RESULTS).optional(),
+  semantic: z.boolean().optional(),
 });
 
 export const SymbolSearchResponseSchema = z.object({
@@ -905,6 +943,80 @@ export const RepoOverviewResponseSchema = z.object({
   tokenMetrics: TokenMetricsSchema,
 });
 
+// ============================================================================
+// Context Summary Schemas
+// ============================================================================
+
+const ContextSummaryScopeSchema = z.enum(["symbol", "file", "task"]);
+const ContextSummaryFormatSchema = z.enum(["markdown", "json", "clipboard"]);
+
+const ContextSummarySymbolSchema = z.object({
+  symbolId: z.string(),
+  name: z.string(),
+  kind: z.enum([
+    "function",
+    "class",
+    "interface",
+    "type",
+    "module",
+    "method",
+    "constructor",
+    "variable",
+  ]),
+  signature: z.string().optional(),
+  summary: z.string(),
+});
+
+const ContextSummaryDependencySchema = z.object({
+  fromSymbolId: z.string(),
+  toSymbolIds: z.array(z.string()),
+});
+
+const ContextSummaryRiskAreaSchema = z.object({
+  symbolId: z.string(),
+  name: z.string(),
+  reasons: z.array(z.string()),
+});
+
+const ContextSummaryFileTouchSchema = z.object({
+  file: z.string(),
+  symbolCount: z.number().int().min(0),
+});
+
+const ContextSummaryMetadataSchema = z.object({
+  query: z.string(),
+  summaryTokens: z.number().int().min(0),
+  budget: z.number().int().min(1),
+  truncated: z.boolean(),
+  indexVersion: z.string(),
+});
+
+const ContextSummarySchema = z.object({
+  repoId: z.string(),
+  query: z.string(),
+  scope: ContextSummaryScopeSchema,
+  keySymbols: z.array(ContextSummarySymbolSchema),
+  dependencyGraph: z.array(ContextSummaryDependencySchema),
+  riskAreas: z.array(ContextSummaryRiskAreaSchema),
+  filesTouched: z.array(ContextSummaryFileTouchSchema),
+  metadata: ContextSummaryMetadataSchema,
+});
+
+export const ContextSummaryRequestSchema = z.object({
+  repoId: z.string(),
+  query: z.string().min(1),
+  budget: z.number().int().min(1).optional(),
+  format: ContextSummaryFormatSchema.optional(),
+  scope: ContextSummaryScopeSchema.optional(),
+});
+
+export const ContextSummaryResponseSchema = z.object({
+  repoId: z.string(),
+  format: ContextSummaryFormatSchema,
+  summary: ContextSummarySchema,
+  content: z.string(),
+});
+
 export type RepoRegisterRequest = z.infer<typeof RepoRegisterRequestSchema>;
 export type RepoRegisterResponse = z.infer<typeof RepoRegisterResponseSchema>;
 export type RepoStatusRequest = z.infer<typeof RepoStatusRequestSchema>;
@@ -947,6 +1059,10 @@ export type GetHotPathRequest = z.infer<typeof GetHotPathRequestSchema>;
 export type GetHotPathResponse = z.infer<typeof GetHotPathResponseSchema>;
 export type RepoOverviewRequest = z.infer<typeof RepoOverviewRequestSchema>;
 export type RepoOverviewResponse = z.infer<typeof RepoOverviewResponseSchema>;
+export type ContextSummaryRequest = z.infer<typeof ContextSummaryRequestSchema>;
+export type ContextSummaryResponse = z.infer<
+  typeof ContextSummaryResponseSchema
+>;
 
 const FindingSchema = z.object({
   type: z.string(),

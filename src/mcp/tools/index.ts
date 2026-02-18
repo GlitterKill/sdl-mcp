@@ -46,6 +46,8 @@ import {
 } from "../tools.js";
 import { handlePRRiskAnalysis } from "./prRisk.js";
 import { handleAgentOrchestrate } from "./agent.js";
+import { ContextSummaryRequestSchema } from "../tools.js";
+import { handleContextSummary } from "./summary.js";
 
 export function registerTools(server: MCPServer): void {
   server.registerTool(
@@ -165,5 +167,12 @@ export function registerTools(server: MCPServer): void {
     "Orchestrate agent task execution with automated rung path selection and evidence capture",
     AgentOrchestrateRequestSchema,
     handleAgentOrchestrate,
+  );
+
+  server.registerTool(
+    "sdl.context.summary",
+    "Generate token-bounded context summary for a symbol, file, or task query",
+    ContextSummaryRequestSchema,
+    handleContextSummary,
   );
 }

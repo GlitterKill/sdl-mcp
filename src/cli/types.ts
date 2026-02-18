@@ -18,6 +18,9 @@ export interface InitOptions extends CLIOptions {
   repoPath?: string;
   languages?: string[];
   force?: boolean;
+  yes?: boolean;
+  autoIndex?: boolean;
+  dryRun?: boolean;
 }
 
 export interface DoctorOptions extends CLIOptions {}
@@ -34,6 +37,22 @@ export interface ServeOptions extends CLIOptions {
   transport: "stdio" | "http";
   port?: number;
   host?: string;
+  noWatch?: boolean;
+}
+
+export interface SummaryOptions extends CLIOptions {
+  query: string;
+  budget?: number;
+  format?: "markdown" | "json" | "clipboard";
+  scope?: "symbol" | "file" | "task";
+  output?: string;
+  repoId?: string;
+}
+
+export interface HealthOptions extends CLIOptions {
+  repoId?: string;
+  jsonOutput?: boolean;
+  badge?: boolean;
 }
 
 export interface BenchmarkOptions extends CLIOptions {

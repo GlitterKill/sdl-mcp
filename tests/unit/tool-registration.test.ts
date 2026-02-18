@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { registerTools } from "../../dist/mcp/tools/index.js";
+import { registerTools } from "../../src/mcp/tools/index.js";
 
 describe("MCP tool registration", () => {
   it("registers sdl.slice.refresh", () => {
@@ -16,6 +16,10 @@ describe("MCP tool registration", () => {
     assert.ok(
       names.includes("sdl.slice.refresh"),
       "expected sdl.slice.refresh to be registered",
+    );
+    assert.ok(
+      names.includes("sdl.context.summary"),
+      "expected sdl.context.summary to be registered",
     );
   });
 });
