@@ -1,6 +1,10 @@
 import type { Tree, SyntaxNode } from "tree-sitter";
 import { BaseAdapter } from "./BaseAdapter.js";
 import type {
+  AdapterResolvedCall,
+  CallResolutionContext,
+} from "./LanguageAdapter.js";
+import type {
   ExtractedSymbol,
   ExtractedCall,
 } from "../treesitter/extractCalls.js";
@@ -347,11 +351,16 @@ class JavaAdapter extends BaseAdapter {
             !specifier.startsWith("javax.") &&
             !specifier.startsWith("com."),
           imports: isWildcard ? ["*"] : [specifier.split(".").pop() || ""],
+          namespaceImport: isWildcard ? undefined : (specifier.split(".").pop() || undefined),
           isReExport: false,
         };
 
         if (isStatic) {
-          result.imports = [`static ${specifier}`];
+          const parts = specifier.split(".");
+          const member = parts[parts.length - 1];
+          const className = parts.length > 1 ? parts[parts.length - 2] : undefined;
+          result.namespaceImport = className;
+          result.imports = member === "*" ? ["*"] : [member];
         }
 
         imports.push(result);
@@ -505,6 +514,53 @@ class JavaAdapter extends BaseAdapter {
     traverseAST(tree.rootNode);
 
     return calls;
+  }
+
+  resolveCall(context: CallResolutionContext): AdapterResolvedCall | null {
+    const identifier = context.call.calleeIdentifier.replace(/^new\s+/, "").trim();
+    if (!identifier) {
+      return null;
+    }
+
+    if (identifier.includes(".")) {
+      const parts = identifier.split(".");
+      const prefix = parts[0];
+      const member = parts[parts.length - 1];
+
+      const namespace = context.namespaceImports.get(prefix);
+      if (namespace && namespace.has(member)) {
+        return {
+          symbolId: namespace.get(member) ?? null,
+          isResolved: true,
+          strategy: "exact",
+          confidence: 0.9,
+        };
+      }
+
+      if (prefix === "this" || prefix === "super") {
+        const local = context.nameToSymbolIds.get(member);
+        if (local && local.length === 1) {
+          return {
+            symbolId: local[0],
+            isResolved: true,
+            strategy: "heuristic",
+            confidence: 0.78,
+          };
+        }
+      }
+    }
+
+    const imported = context.importedNameToSymbolIds.get(identifier);
+    if (imported && imported.length === 1) {
+      return {
+        symbolId: imported[0],
+        isResolved: true,
+        strategy: "exact",
+        confidence: 0.88,
+      };
+    }
+
+    return null;
   }
 }
 

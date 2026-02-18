@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { dirname, resolve } from "path";
 import type { CLIOptions } from "../types.js";
 import { getDb } from "../../db/db.js";
@@ -13,6 +13,8 @@ import { indexRepo } from "../../indexer/indexer.js";
 import { buildSlice } from "../../graph/slice.js";
 import { generateSymbolSkeleton } from "../../code/skeleton.js";
 import type { SymbolRow } from "../../db/schema.js";
+import { generateContextSummary } from "../../mcp/summary.js";
+import { getRepoHealthSnapshot } from "../../mcp/health.js";
 import {
   ThresholdEvaluator,
   loadThresholdConfig,
@@ -26,6 +28,12 @@ import {
   runBenchmarkWithSmoothing,
   type SmoothingConfig,
 } from "../../benchmark/smoothing.js";
+import { getWatcherHealth } from "../../indexer/indexer.js";
+import {
+  evaluateEdgeAccuracySuite,
+  type EdgeAccuracyScore,
+} from "../../benchmark/edgeAccuracy.js";
+import { logEdgeResolutionTelemetry } from "../../mcp/telemetry.js";
 
 export interface BenchmarkOptions extends CLIOptions {
   repoId?: string;
@@ -56,6 +64,19 @@ interface BenchmarkMetrics {
   importEdgeCount: number;
   totalSymbols: number;
   totalFiles: number;
+  summaryGenerationMs: number;
+  summaryTokens: number;
+  healthScore: number;
+  watcherEventsProcessed: number;
+  watcherErrors: number;
+}
+
+interface LockedBenchmarkRepo {
+  repoId: string;
+  cloneUrl: string;
+  ref: string;
+  languageTier: "tier1" | "tier2" | "tier3";
+  languageFamily: string;
 }
 
 interface BenchmarkCIResult {
@@ -68,7 +89,19 @@ interface BenchmarkCIResult {
   config: {
     thresholdPath: string;
     baselinePath: string;
+    lockPath: string;
+    lockedRepos: LockedBenchmarkRepo[];
     smoothing: SmoothingConfig;
+  };
+  edgeAccuracy?: {
+    baselinePath: string;
+    passed: boolean;
+    scores: EdgeAccuracyScore[];
+    failures: Array<{
+      language: string;
+      f1: number;
+      minF1: number;
+    }>;
   };
 }
 
@@ -110,6 +143,20 @@ function buildBenchmarkRuntimeRepoConfig(repoConfig: RepoConfig): {
     }),
     addedScopePatterns,
   };
+}
+
+function loadLockedBenchmarkRepos(lockPath: string): LockedBenchmarkRepo[] {
+  if (!existsSync(lockPath)) {
+    return [];
+  }
+
+  try {
+    const raw = readFileSync(lockPath, "utf-8");
+    const parsed = JSON.parse(raw) as { repos?: LockedBenchmarkRepo[] };
+    return Array.isArray(parsed.repos) ? parsed.repos : [];
+  } catch {
+    return [];
+  }
 }
 
 function formatNumber(n: number): string {
@@ -318,6 +365,24 @@ async function collectBenchmarkMetrics(
     }
   }
 
+  let summaryGenerationMs = 0;
+  let summaryTokens = 0;
+  try {
+    const summaryStart = performance.now();
+    const summary = generateContextSummary({
+      repoId,
+      query: "repo status",
+      budget: 500,
+    });
+    summaryGenerationMs = performance.now() - summaryStart;
+    summaryTokens = summary.metadata.summaryTokens;
+  } catch {
+    // Summary generation is sampled but not required for benchmark completion.
+  }
+
+  const health = await getRepoHealthSnapshot(repoId);
+  const watcher = getWatcherHealth(repoId);
+
   const exportedCount = allSymbols.filter((s) => s.exported === 1).length;
   const functionMethodCount = allSymbols.filter(
     (s) => s.kind === "function" || s.kind === "method",
@@ -365,6 +430,11 @@ async function collectBenchmarkMetrics(
     importEdgeCount: edgeTypes.import ?? 0,
     totalSymbols,
     totalFiles,
+    summaryGenerationMs,
+    summaryTokens,
+    healthScore: health.score,
+    watcherEventsProcessed: watcher?.eventsProcessed ?? 0,
+    watcherErrors: watcher?.errors ?? 0,
   };
 }
 
@@ -436,6 +506,22 @@ export async function benchmarkCICommand(
     resolve(process.cwd(), "config/benchmark.config.json");
   const outputPath =
     options.outputPath ?? resolve(process.cwd(), ".benchmark/latest.json");
+  const lockPath = resolve(
+    process.cwd(),
+    "scripts/benchmark/phase-a-benchmark-lock.json",
+  );
+  const edgeAccuracyBaselinePath = resolve(
+    process.cwd(),
+    "scripts/benchmark/edge-accuracy-baseline.json",
+  );
+  const lockedRepos = loadLockedBenchmarkRepos(lockPath);
+  if (lockedRepos.length > 0) {
+    console.log(
+      `Loaded benchmark lockfile (${lockedRepos.length} repo specs): ${lockPath}`,
+    );
+  } else {
+    console.warn(`No benchmark lockfile entries found at: ${lockPath}`);
+  }
 
   let thresholds: BenchmarkThresholds | undefined;
   try {
@@ -529,6 +615,77 @@ export async function benchmarkCICommand(
   console.log(
     `  Import edges:       ${formatNumber(benchmarkMetrics.importEdgeCount)}`,
   );
+  console.log(`Phase A:`);
+  console.log(
+    `  Summary gen:        ${formatNumber(benchmarkMetrics.summaryGenerationMs)}ms`,
+  );
+  console.log(
+    `  Summary tokens:     ${formatNumber(benchmarkMetrics.summaryTokens)}`,
+  );
+  console.log(
+    `  Health score:       ${formatNumber(benchmarkMetrics.healthScore)}`,
+  );
+  console.log(
+    `  Watcher events:     ${formatNumber(benchmarkMetrics.watcherEventsProcessed)}`,
+  );
+  console.log(
+    `  Watcher errors:     ${formatNumber(benchmarkMetrics.watcherErrors)}`,
+  );
+
+  const edgeAccuracyScores = evaluateEdgeAccuracySuite();
+  let edgeAccuracyThresholds: Record<string, number> = {};
+  if (existsSync(edgeAccuracyBaselinePath)) {
+    try {
+      const parsed = JSON.parse(
+        readFileSync(edgeAccuracyBaselinePath, "utf-8"),
+      ) as { minimumF1?: Record<string, number> };
+      edgeAccuracyThresholds = parsed.minimumF1 ?? {};
+    } catch (error) {
+      console.warn(
+        `\n⚠ Could not parse edge-accuracy baseline file: ${error}`,
+      );
+    }
+  } else {
+    console.warn(
+      `\n⚠ Edge-accuracy baseline file missing: ${edgeAccuracyBaselinePath}`,
+    );
+  }
+
+  console.log(`Phase B (Edge Accuracy):`);
+  for (const score of edgeAccuracyScores) {
+    logEdgeResolutionTelemetry({
+      repoId,
+      language: score.language,
+      precision: score.precision,
+      recall: score.recall,
+      f1: score.f1,
+      strategyAccuracy: score.strategyAccuracy,
+    });
+    console.log(
+      `  ${score.language}: precision=${formatPercent(score.precision * 100)} recall=${formatPercent(score.recall * 100)} f1=${formatPercent(score.f1 * 100)} strategy=${formatPercent(score.strategyAccuracy * 100)}`,
+    );
+  }
+
+  const edgeAccuracyFailures = edgeAccuracyScores
+    .filter((score) => {
+      const minF1 = edgeAccuracyThresholds[score.language];
+      return typeof minF1 === "number" && score.f1 < minF1;
+    })
+    .map((score) => ({
+      language: score.language,
+      f1: score.f1,
+      minF1: edgeAccuracyThresholds[score.language],
+    }));
+
+  const edgeAccuracyPassed = edgeAccuracyFailures.length === 0;
+  if (!edgeAccuracyPassed) {
+    console.log("\nEdge-accuracy gate failures:");
+    for (const failure of edgeAccuracyFailures) {
+      console.log(
+        `  - ${failure.language}: f1=${formatPercent(failure.f1 * 100)} < baseline ${formatPercent(failure.minF1 * 100)}`,
+      );
+    }
+  }
 
   let baselineMetrics: Record<string, number> | undefined;
   try {
@@ -561,6 +718,11 @@ export async function benchmarkCICommand(
       avgSkeletonTimeMs: benchmarkMetrics.avgSkeletonTimeMs,
       avgCardTokens: benchmarkMetrics.avgCardTokens,
       avgSkeletonTokens: benchmarkMetrics.avgSkeletonTokens,
+      summaryGenerationMs: benchmarkMetrics.summaryGenerationMs,
+      summaryTokens: benchmarkMetrics.summaryTokens,
+      healthScore: benchmarkMetrics.healthScore,
+      watcherEventsProcessed: benchmarkMetrics.watcherEventsProcessed,
+      watcherErrors: benchmarkMetrics.watcherErrors,
     };
 
     thresholdResult = evaluator.evaluate(currentMetrics, baselineMetrics);
@@ -621,12 +783,20 @@ export async function benchmarkCICommand(
     config: {
       thresholdPath,
       baselinePath,
+      lockPath,
+      lockedRepos,
       smoothing: thresholds?.smoothing ?? {
         warmupRuns: 0,
         sampleRuns: 1,
         outlierMethod: "none",
         iqrMultiplier: 1.5,
       },
+    },
+    edgeAccuracy: {
+      baselinePath: edgeAccuracyBaselinePath,
+      passed: edgeAccuracyPassed,
+      scores: edgeAccuracyScores,
+      failures: edgeAccuracyFailures,
     },
   };
 
@@ -647,6 +817,7 @@ export async function benchmarkCICommand(
     console.log(`\n✓ Baseline updated: ${baselinePath}`);
   }
 
-  const exitCode = thresholdResult?.passed !== false ? 0 : 1;
+  const exitCode =
+    thresholdResult?.passed !== false && edgeAccuracyPassed ? 0 : 1;
   return exitCode;
 }

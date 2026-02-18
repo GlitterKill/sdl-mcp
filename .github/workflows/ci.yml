@@ -111,6 +111,18 @@ jobs:
 
           echo "[PASS] Benchmark guardrails passed"
 
+      - name: Auto-update benchmark baseline on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          echo "Auto-updating benchmark baseline on main..."
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            THRESHOLD_PATH="config/benchmark.ci.windows.config.json"
+          else
+            THRESHOLD_PATH="config/benchmark.ci.config.json"
+          fi
+          node dist/cli/index.js benchmark:ci --threshold-path "${THRESHOLD_PATH}" --update-baseline --out .benchmark/latest-result.json
+
       - name: Setup external benchmark repos (matrix smoke)
         if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
         run: npm run benchmark:setup-external

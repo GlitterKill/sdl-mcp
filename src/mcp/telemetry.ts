@@ -58,6 +58,70 @@ export interface PolicyDecisionEvent {
   context?: PolicyRequestContext;
 }
 
+export interface SetupPipelineEvent {
+  repoId: RepoId;
+  nonInteractive: boolean;
+  autoIndex: boolean;
+  dryRun: boolean;
+  durationMs: number;
+  languages: string[];
+  configPath: string;
+}
+
+export interface SummaryGenerationEvent {
+  repoId: RepoId;
+  query: string;
+  scope: string;
+  format: string;
+  budget: number;
+  summaryTokens: number;
+  truncated: boolean;
+  durationMs: number;
+}
+
+export interface WatcherHealthTelemetryEvent {
+  repoId: RepoId;
+  enabled: boolean;
+  running: boolean;
+  stale: boolean;
+  errors: number;
+  queueDepth: number;
+  eventsReceived: number;
+  eventsProcessed: number;
+}
+
+export interface EdgeResolutionTelemetryEvent {
+  repoId: RepoId;
+  language: string;
+  precision: number;
+  recall: number;
+  f1: number;
+  strategyAccuracy: number;
+}
+
+export interface SemanticSearchTelemetryEvent {
+  repoId: RepoId;
+  semanticEnabled: boolean;
+  latencyMs: number;
+  candidateCount: number;
+  alpha: number;
+}
+
+export interface SummaryQualityTelemetryEvent {
+  repoId: RepoId;
+  provider: string;
+  divergenceScore: number;
+  costUsd: number;
+}
+
+export interface PrefetchTelemetryEvent {
+  repoId: RepoId;
+  hitRate: number;
+  wasteRate: number;
+  avgLatencyReductionMs: number;
+  queueDepth: number;
+}
+
 export interface AuditEvent {
   eventId: number;
   timestamp: string;
@@ -215,5 +279,109 @@ export function logPolicyDecision(event: PolicyDecisionEvent): void {
     symbolId: event.symbolId,
     auditHash,
     nextBestAction,
+  });
+}
+
+export function logSetupPipelineEvent(event: SetupPipelineEvent): void {
+  getQueries()
+    .then((queries) => {
+      queries.logAuditEvent({
+        timestamp: getCurrentTimestamp(),
+        tool: "phaseA.setup",
+        decision: "success",
+        repoId: event.repoId,
+        detailsJson: JSON.stringify(event),
+      });
+    })
+    .catch((err) => {
+      logger.error(`Failed to log setup pipeline event: ${err}`);
+    });
+}
+
+export function logSummaryGenerationEvent(event: SummaryGenerationEvent): void {
+  getQueries()
+    .then((queries) => {
+      queries.logAuditEvent({
+        timestamp: getCurrentTimestamp(),
+        tool: "phaseA.summary",
+        decision: "success",
+        repoId: event.repoId,
+        detailsJson: JSON.stringify(event),
+      });
+    })
+    .catch((err) => {
+      logger.error(`Failed to log summary generation event: ${err}`);
+    });
+}
+
+export function logWatcherHealthTelemetry(
+  event: WatcherHealthTelemetryEvent,
+): void {
+  getQueries()
+    .then((queries) => {
+      queries.logAuditEvent({
+        timestamp: getCurrentTimestamp(),
+        tool: "phaseA.watcher",
+        decision: event.stale || event.errors > 0 ? "warn" : "success",
+        repoId: event.repoId,
+        detailsJson: JSON.stringify(event),
+      });
+    })
+    .catch((err) => {
+      logger.error(`Failed to log watcher telemetry event: ${err}`);
+  });
+}
+
+export function logEdgeResolutionTelemetry(
+  event: EdgeResolutionTelemetryEvent,
+): void {
+  logger.info("Edge resolution benchmark", {
+    eventType: "edge_resolution",
+    timestamp: getCurrentTimestamp(),
+    repoId: event.repoId,
+    language: event.language,
+    precision: event.precision,
+    recall: event.recall,
+    f1: event.f1,
+    strategyAccuracy: event.strategyAccuracy,
+  });
+}
+
+export function logSemanticSearchTelemetry(
+  event: SemanticSearchTelemetryEvent,
+): void {
+  logger.info("Semantic search", {
+    eventType: "semantic_search",
+    timestamp: getCurrentTimestamp(),
+    repoId: event.repoId,
+    semanticEnabled: event.semanticEnabled,
+    latencyMs: event.latencyMs,
+    candidateCount: event.candidateCount,
+    alpha: event.alpha,
+  });
+}
+
+export function logSummaryQualityTelemetry(
+  event: SummaryQualityTelemetryEvent,
+): void {
+  logger.info("Generated summary quality", {
+    eventType: "summary_quality",
+    timestamp: getCurrentTimestamp(),
+    repoId: event.repoId,
+    provider: event.provider,
+    divergenceScore: event.divergenceScore,
+    costUsd: event.costUsd,
+  });
+}
+
+export function logPrefetchTelemetry(event: PrefetchTelemetryEvent): void {
+  logger.info("Prefetch metrics", {
+    eventType: "prefetch_metrics",
+    timestamp: getCurrentTimestamp(),
+    repoId: event.repoId,
+    hitRate: event.hitRate,
+    wasteRate: event.wasteRate,
+    avgLatencyReductionMs: event.avgLatencyReductionMs,
+    queueDepth: event.queueDepth,
   });
 }

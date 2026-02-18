@@ -34,6 +34,11 @@ import {
   WATCH_STABILITY_THRESHOLD_MS,
   WATCH_POLL_INTERVAL_MS,
   WATCHER_ERROR_MAX_COUNT,
+  WATCHER_STALE_THRESHOLD_MS,
+  WATCHER_REINDEX_RETRY_BASE_MS,
+  WATCHER_REINDEX_RETRY_MAX_MS,
+  WATCHER_REINDEX_MAX_ATTEMPTS,
+  WATCHER_DEFAULT_MAX_WATCHED_FILES,
 } from "../config/constants.js";
 import { hashContent } from "../util/hashing.js";
 import { normalizePath } from "../util/paths.js";
@@ -47,11 +52,18 @@ import { extractConfigEdgesFromTree, type ConfigEdge } from "./configEdges.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { createTsCallResolver, ResolvedCall } from "./ts/tsParser.js";
 import { getAdapterForExtension } from "./adapter/registry.js";
+import type {
+  AdapterResolvedCall,
+  LanguageAdapter,
+} from "./adapter/LanguageAdapter.js";
 import { ParserWorkerPool } from "./workerPool.js";
 import { logger } from "../util/logger.js";
 import { readFileAsync, existsAsync } from "../util/asyncFs.js";
 import type { ExtractedCall } from "./treesitter/extractCalls.js";
 import type { ExtractedImport } from "./treesitter/extractImports.js";
+import { calibrateResolutionConfidence } from "./edge-confidence.js";
+import { refreshSymbolEmbeddings } from "./embeddings.js";
+import { prefetchFileExports } from "../graph/prefetch.js";
 
 const require = createRequire(import.meta.url);
 const TS_CALL_RESOLUTION_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx"]);
@@ -80,6 +92,20 @@ export interface IndexResult {
 
 export interface IndexWatchHandle {
   close: () => Promise<void>;
+}
+
+export interface WatcherHealth {
+  enabled: boolean;
+  running: boolean;
+  filesWatched: number;
+  eventsReceived: number;
+  eventsProcessed: number;
+  errors: number;
+  queueDepth: number;
+  restartCount: number;
+  stale: boolean;
+  lastEventAt: string | null;
+  lastSuccessfulReindexAt: string | null;
 }
 
 export interface ProcessFileParams {
@@ -483,6 +509,7 @@ async function processFile(params: ProcessFileParams): Promise<{
             nameToSymbolIds,
             importResolution.importedNameToSymbolIds,
             importResolution.namespaceImports,
+            adapter,
           );
 
           if (!resolved) {
@@ -504,6 +531,7 @@ async function processFile(params: ProcessFileParams): Promise<{
               type: "call",
               weight: 1.0,
               confidence: resolved.confidence,
+              resolution_strategy: resolved.strategy,
               provenance: `call:${call.calleeIdentifier}`,
               created_at: new Date().toISOString(),
             };
@@ -526,6 +554,7 @@ async function processFile(params: ProcessFileParams): Promise<{
               type: "call",
               weight: 0.5, // Lower weight for unresolved edges
               confidence: resolved.confidence,
+              resolution_strategy: "unresolved",
               provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
               created_at: new Date().toISOString(),
             };
@@ -575,6 +604,7 @@ async function processFile(params: ProcessFileParams): Promise<{
             type: "call",
             weight: 1.0,
             confidence: tsCall.confidence ?? 1.0,
+            resolution_strategy: "exact",
             provenance: `ts-call:${tsCall.callee.name}`,
             created_at: new Date().toISOString(),
           });
@@ -587,6 +617,7 @@ async function processFile(params: ProcessFileParams): Promise<{
             toName: tsCall.callee.name,
             toKind: tsCall.callee.kind,
             confidence: tsCall.confidence ?? 1.0,
+            strategy: "exact",
             provenance: `ts-call:${tsCall.callee.name}`,
             callerLanguage: adapter.languageId,
           });
@@ -607,6 +638,8 @@ async function processFile(params: ProcessFileParams): Promise<{
         allSymbolsByName,
       });
     }
+
+    prefetchFileExports(repoId, fileMeta.path);
 
     return { symbolsIndexed, edgesCreated, changed: true, configEdges };
   } catch (error) {
@@ -908,8 +941,46 @@ interface ResolvedCallTarget {
   symbolId: string | null;
   isResolved: boolean;
   confidence: number;
+  strategy: "exact" | "heuristic" | "unresolved";
   candidateCount?: number;
   targetName?: string;
+}
+
+function finalizeCallResolution(input: {
+  symbolId: string | null;
+  isResolved: boolean;
+  strategy?: "exact" | "heuristic" | "unresolved";
+  confidence?: number;
+  candidateCount?: number;
+  targetName?: string;
+}): ResolvedCallTarget {
+  const calibrated = calibrateResolutionConfidence({
+    isResolved: input.isResolved,
+    strategy: input.strategy,
+    candidateCount: input.candidateCount,
+    baseConfidence: input.confidence,
+  });
+  return {
+    symbolId: input.symbolId,
+    isResolved: input.isResolved,
+    confidence: calibrated.confidence,
+    strategy: calibrated.strategy,
+    candidateCount: input.candidateCount,
+    targetName: input.targetName,
+  };
+}
+
+function normalizeAdapterResolution(
+  adapterResolved: AdapterResolvedCall,
+): ResolvedCallTarget {
+  return finalizeCallResolution({
+    symbolId: adapterResolved.symbolId,
+    isResolved: adapterResolved.isResolved,
+    confidence: adapterResolved.confidence,
+    strategy: adapterResolved.strategy,
+    candidateCount: adapterResolved.candidateCount,
+    targetName: adapterResolved.targetName,
+  });
 }
 
 function resolveCallTarget(
@@ -918,14 +989,28 @@ function resolveCallTarget(
   nameToSymbolIds: Map<string, string[]>,
   importedNameToSymbolIds: Map<string, string[]>,
   namespaceImports: Map<string, Map<string, string>>,
+  adapter?: LanguageAdapter | null,
 ): ResolvedCallTarget | null {
+  if (adapter?.resolveCall) {
+    const adapterResolved = adapter.resolveCall({
+      call,
+      importedNameToSymbolIds,
+      namespaceImports,
+      nameToSymbolIds,
+    });
+    if (adapterResolved) {
+      return normalizeAdapterResolution(adapterResolved);
+    }
+  }
+
   // Already resolved to a specific symbol
   if (call.calleeSymbolId && nodeIdToSymbolId.has(call.calleeSymbolId)) {
-    return {
+    return finalizeCallResolution({
       symbolId: nodeIdToSymbolId.get(call.calleeSymbolId) ?? null,
       isResolved: true,
-      confidence: 0.8,
-    };
+      strategy: "exact",
+      confidence: 0.85,
+    });
   }
 
   const candidateId = call.calleeSymbolId ?? call.calleeIdentifier;
@@ -940,11 +1025,12 @@ function resolveCallTarget(
     const member = parts[parts.length - 1];
     const namespace = namespaceImports.get(prefix);
     if (namespace && namespace.has(member)) {
-      return {
+      return finalizeCallResolution({
         symbolId: namespace.get(member) ?? null,
         isResolved: true,
-        confidence: 0.9,
-      };
+        strategy: "exact",
+        confidence: 0.92,
+      });
     }
   }
 
@@ -956,56 +1042,57 @@ function resolveCallTarget(
   // Check imported names first
   const importedCandidates = importedNameToSymbolIds.get(identifier);
   if (importedCandidates && importedCandidates.length === 1) {
-    return {
+    return finalizeCallResolution({
       symbolId: importedCandidates[0],
       isResolved: true,
+      strategy: "exact",
       confidence: 0.9,
-    };
+    });
   }
 
   // 36-1.3: Handle ambiguous imported names - create unresolved edge
   if (importedCandidates && importedCandidates.length > 1) {
-    return {
+    return finalizeCallResolution({
       symbolId: null,
       isResolved: false,
-      confidence: 0.3,
+      strategy: "unresolved",
       candidateCount: importedCandidates.length,
       targetName: identifier,
-    };
+    });
   }
 
   // Check local symbols
   const candidates = nameToSymbolIds.get(identifier);
   if (candidates && candidates.length === 1) {
-    const heuristicConfidence = cleaned.includes(".") ? 0.6 : 0.8;
-    return {
+    return finalizeCallResolution({
       symbolId: candidates[0],
       isResolved: true,
-      confidence: heuristicConfidence,
-    };
+      strategy: "heuristic",
+      confidence: cleaned.includes(".") ? 0.68 : 0.8,
+    });
   }
 
   // 36-1.3: Handle ambiguous local names - create unresolved edge
   if (candidates && candidates.length > 1) {
-    return {
+    return finalizeCallResolution({
       symbolId: null,
       isResolved: false,
-      confidence: 0.3,
+      strategy: "unresolved",
       candidateCount: candidates.length,
       targetName: identifier,
-    };
+    });
   }
 
   // No candidates at all - still create an unresolved edge if we have a name
   // This helps with external calls that might be resolved later
   if (identifier && call.callType !== "dynamic") {
-    return {
+    return finalizeCallResolution({
       symbolId: null,
       isResolved: false,
-      confidence: 0.3,
+      strategy: "unresolved",
       candidateCount: 0,
       targetName: identifier,
-    };
+    });
   }
 
   return null;
@@ -1102,6 +1189,7 @@ function resolvePendingCallEdges(
       type: "call",
       weight: 1.0,
       confidence: edge.confidence ?? 1.0,
+      resolution_strategy: edge.strategy ?? "heuristic",
       provenance: edge.provenance,
       created_at: new Date().toISOString(),
     });
@@ -1314,6 +1402,7 @@ async function resolveTsCallEdgesPass2(params: {
           nameToSymbolIds,
           importResolution.importedNameToSymbolIds,
           importResolution.namespaceImports,
+          adapter,
         );
         if (!resolved) continue;
 
@@ -1327,6 +1416,7 @@ async function resolveTsCallEdgesPass2(params: {
             type: "call",
             weight: 1.0,
             confidence: resolved.confidence,
+            resolution_strategy: resolved.strategy,
             provenance: `call:${call.calleeIdentifier}`,
             created_at: new Date().toISOString(),
           });
@@ -1343,6 +1433,7 @@ async function resolveTsCallEdgesPass2(params: {
             type: "call",
             weight: 0.5,
             confidence: resolved.confidence,
+            resolution_strategy: "unresolved",
             provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
             created_at: new Date().toISOString(),
           });
@@ -1377,6 +1468,7 @@ async function resolveTsCallEdgesPass2(params: {
           type: "call",
           weight: 1.0,
           confidence: tsCall.confidence ?? 1.0,
+          resolution_strategy: "exact",
           provenance: `ts-call:${tsCall.callee.name}`,
           created_at: new Date().toISOString(),
         });
@@ -1648,6 +1740,8 @@ function cleanupUnresolvedEdges(repoId: string): void {
         to_symbol_id: matchingSymbolId,
         type: edge.type,
         weight: edge.type === "import" ? 0.6 : 1.0,
+        confidence: edge.confidence,
+        resolution_strategy: edge.resolution_strategy,
         provenance: edge.provenance,
         created_at: new Date().toISOString(),
       });
@@ -1992,6 +2086,18 @@ export async function indexRepo(
       : undefined;
   await updateMetricsForRepo(repoId, changedFileIdsParam);
 
+  if (appConfig.semantic?.enabled) {
+    try {
+      await refreshSymbolEmbeddings({
+        repoId,
+        provider: appConfig.semantic.provider ?? "mock",
+        model: appConfig.semantic.model ?? "all-MiniLM-L6-v2",
+      });
+    } catch (error) {
+      logger.warn(`Semantic embedding refresh skipped: ${String(error)}`);
+    }
+  }
+
   return {
     versionId,
     filesProcessed,
@@ -2018,6 +2124,7 @@ interface PendingCallEdge {
   toName: string;
   toKind: SymbolKind;
   confidence?: number;
+  strategy?: "exact" | "heuristic" | "unresolved";
   provenance: string;
   callerLanguage: string; // ML-D.1: Track caller's language for cross-language detection
 }
@@ -2037,105 +2144,287 @@ function loadChokidar(): ChokidarModule | null {
 }
 
 const watcherErrors: string[] = [];
+type MutableWatcherHealth = WatcherHealth & { pendingChanges: number };
+type RuntimeWatcher = { close: () => Promise<void> };
+
+const watcherHealthByRepo = new Map<string, MutableWatcherHealth>();
+
+function cloneWatcherHealth(state: MutableWatcherHealth): WatcherHealth {
+  return {
+    enabled: state.enabled,
+    running: state.running,
+    filesWatched: state.filesWatched,
+    eventsReceived: state.eventsReceived,
+    eventsProcessed: state.eventsProcessed,
+    errors: state.errors,
+    queueDepth: state.queueDepth,
+    restartCount: state.restartCount,
+    stale: state.stale,
+    lastEventAt: state.lastEventAt,
+    lastSuccessfulReindexAt: state.lastSuccessfulReindexAt,
+  };
+}
+
+export function getWatcherHealth(repoId: string): WatcherHealth | null {
+  const state = watcherHealthByRepo.get(repoId);
+  return state ? cloneWatcherHealth(state) : null;
+}
+
+export function getAllWatcherHealth(): Record<string, WatcherHealth> {
+  const out: Record<string, WatcherHealth> = {};
+  for (const [repoId, state] of watcherHealthByRepo.entries()) {
+    out[repoId] = cloneWatcherHealth(state);
+  }
+  return out;
+}
+
 export function watchRepository(repoId: string): IndexWatchHandle {
   const repoRow = getRepo(repoId);
   if (!repoRow) {
     throw new Error(`Repository ${repoId} not found`);
   }
 
-  const config: RepoConfig = JSON.parse(repoRow.config_json);
-  const extensions = config.languages.map((lang) => `.${lang}`);
+  const repoConfig: RepoConfig = JSON.parse(repoRow.config_json);
+  const ignorePatterns = repoConfig.ignore ?? [];
+  const extensions = repoConfig.languages.map((lang) => `.${lang}`);
 
-  const reindex = async (filePath: string): Promise<void> => {
-    try {
-      process.stderr.write(`[sdl-mcp] File change detected: ${filePath}\n`);
-      await indexRepo(repoId, "incremental");
-    } catch (error) {
-      process.stderr.write(
-        `[sdl-mcp] Failed incremental index for ${filePath}: ${error}\n`,
-      );
+  const appConfig = loadConfig();
+  const maxWatchedFiles =
+    appConfig.indexing?.maxWatchedFiles ?? WATCHER_DEFAULT_MAX_WATCHED_FILES;
+  const estimatedFileCount = getFilesByRepo(repoId).length;
+  if (estimatedFileCount > maxWatchedFiles) {
+    throw new Error(
+      `Watcher cap exceeded for ${repoId}: ${estimatedFileCount} files > maxWatchedFiles ${maxWatchedFiles}`,
+    );
+  }
+
+  const health: MutableWatcherHealth = {
+    enabled: true,
+    running: true,
+    filesWatched: estimatedFileCount,
+    eventsReceived: 0,
+    eventsProcessed: 0,
+    errors: 0,
+    queueDepth: 0,
+    restartCount: 0,
+    stale: false,
+    lastEventAt: null,
+    lastSuccessfulReindexAt: null,
+    pendingChanges: 0,
+  };
+  watcherHealthByRepo.set(repoId, health);
+
+  const pending = new Map<string, NodeJS.Timeout>();
+  let activeWatcher: RuntimeWatcher | null = null;
+  let closed = false;
+  let restarting = false;
+  let lastRestartMs = 0;
+  const staleCheckIntervalMs = Math.max(
+    5_000,
+    Math.floor(WATCHER_STALE_THRESHOLD_MS / 4),
+  );
+
+  const updateQueueDepth = (): void => {
+    health.queueDepth = pending.size;
+  };
+
+  const recordWatcherError = (message: string): void => {
+    health.errors += 1;
+    process.stderr.write(`${message}\n`);
+    watcherErrors.push(`${new Date().toISOString()} - ${message}`);
+    if (watcherErrors.length > WATCHER_ERROR_MAX_COUNT) {
+      watcherErrors.shift();
     }
   };
 
-  const pending = new Map<string, NodeJS.Timeout>();
+  const markEventReceived = (): void => {
+    health.eventsReceived += 1;
+    health.lastEventAt = new Date().toISOString();
+  };
+
+  const reindexWithRetry = async (
+    filePath: string,
+    attempt = 0,
+  ): Promise<void> => {
+    try {
+      process.stderr.write(`[sdl-mcp] File change detected: ${filePath}\n`);
+      await indexRepo(repoId, "incremental");
+      health.eventsProcessed += 1;
+      health.pendingChanges = Math.max(0, health.pendingChanges - 1);
+      health.lastSuccessfulReindexAt = new Date().toISOString();
+      health.stale = false;
+    } catch (error) {
+      const msg =
+        error instanceof Error ? error.message : String(error);
+      recordWatcherError(
+        `[sdl-mcp] Failed incremental index for ${filePath}: ${msg}`,
+      );
+      if (attempt + 1 < WATCHER_REINDEX_MAX_ATTEMPTS && !closed) {
+        const delay = Math.min(
+          WATCHER_REINDEX_RETRY_MAX_MS,
+          WATCHER_REINDEX_RETRY_BASE_MS * 2 ** attempt,
+        );
+        setTimeout(() => {
+          void reindexWithRetry(filePath, attempt + 1);
+        }, delay);
+      }
+    }
+  };
+
   const schedule = (filePath: string): void => {
     const existing = pending.get(filePath);
     if (existing) {
       clearTimeout(existing);
+    } else {
+      health.pendingChanges += 1;
     }
     pending.set(
       filePath,
       setTimeout(() => {
         pending.delete(filePath);
-        void reindex(filePath);
+        updateQueueDepth();
+        void reindexWithRetry(filePath);
       }, WATCH_DEBOUNCE_MS),
     );
+    updateQueueDepth();
   };
 
-  const chokidar = loadChokidar();
-  if (chokidar) {
-    const watcher = chokidar.watch(repoRow.root_path, {
-      ignored: config.ignore,
-      ignoreInitial: true,
-      awaitWriteFinish: {
-        stabilityThreshold: WATCH_STABILITY_THRESHOLD_MS,
-        pollInterval: WATCH_POLL_INTERVAL_MS,
+  const handler = (relativeFilePath: string): void => {
+    if (shouldIgnorePath(relativeFilePath, ignorePatterns)) {
+      return;
+    }
+    if (!matchesExtensions(relativeFilePath, extensions)) {
+      return;
+    }
+    markEventReceived();
+    schedule(relativeFilePath);
+  };
+
+  const startWatcher = (): RuntimeWatcher => {
+    const chokidar = loadChokidar();
+    if (chokidar) {
+      const watcher = chokidar.watch(repoRow.root_path, {
+        ignored: ignorePatterns,
+        ignoreInitial: true,
+        awaitWriteFinish: {
+          stabilityThreshold: WATCH_STABILITY_THRESHOLD_MS,
+          pollInterval: WATCH_POLL_INTERVAL_MS,
+        },
+      });
+
+      (watcher as any).on("error", (error: Error) => {
+        recordWatcherError(`[sdl-mcp] File watcher error: ${error}`);
+      });
+
+      (watcher as any).on("ready", () => {
+        const watched = (watcher as any).getWatched?.();
+        if (!watched || typeof watched !== "object") {
+          return;
+        }
+        const count = Object.values(watched as Record<string, string[]>).reduce(
+          (total, entries) => total + entries.length,
+          0,
+        );
+        health.filesWatched = count;
+      });
+
+      const chokidarHandler = (filePath: string): void => {
+        const relPath = normalizePath(relative(repoRow.root_path, filePath));
+        handler(relPath);
+      };
+
+      (watcher as any).on("add", chokidarHandler);
+      (watcher as any).on("change", chokidarHandler);
+      (watcher as any).on("unlink", chokidarHandler);
+
+      return {
+        close: async () => {
+          await (watcher as any).close();
+        },
+      };
+    }
+
+    const fsWatcher = watch(
+      repoRow.root_path,
+      { recursive: true },
+      (_eventType, filename) => {
+        if (!filename) return;
+        handler(normalizePath(filename.toString()));
       },
-    });
-
-    (watcher as any).on("error", (error: Error) => {
-      const errorMsg = `[sdl-mcp] File watcher error: ${error}`;
-      process.stderr.write(`${errorMsg}
-`);
-      watcherErrors.push(`${new Date().toISOString()} - ${errorMsg}`);
-      if (watcherErrors.length > WATCHER_ERROR_MAX_COUNT) {
-        watcherErrors.shift();
-      }
-    });
-
-    const handler = (filePath: string): void => {
-      const relPath = normalizePath(relative(repoRow.root_path, filePath));
-      if (shouldIgnorePath(relPath, config.ignore)) {
-        return;
-      }
-      if (!matchesExtensions(relPath, extensions)) {
-        return;
-      }
-      schedule(relPath);
-    };
-
-    (watcher as any).on("add", handler);
-    (watcher as any).on("change", handler);
-    (watcher as any).on("unlink", handler);
+    );
 
     return {
       close: async () => {
-        await (watcher as any).close();
+        fsWatcher.close();
       },
     };
-  }
+  };
 
-  const watcher = watch(
-    repoRow.root_path,
-    { recursive: true },
-    (_eventType, filename) => {
-      if (!filename) return;
-      const relPath = normalizePath(filename.toString());
-      if (shouldIgnorePath(relPath, config.ignore)) {
-        return;
+  const restartWatcher = async (reason: string): Promise<void> => {
+    if (closed || restarting) {
+      return;
+    }
+    const now = Date.now();
+    if (now - lastRestartMs < WATCHER_STALE_THRESHOLD_MS / 2) {
+      return;
+    }
+    restarting = true;
+    lastRestartMs = now;
+    health.restartCount += 1;
+    process.stderr.write(`[sdl-mcp] Restarting watcher for ${repoId}: ${reason}\n`);
+    try {
+      if (activeWatcher) {
+        await activeWatcher.close();
       }
+      activeWatcher = startWatcher();
+      health.running = true;
+      health.stale = false;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      recordWatcherError(`[sdl-mcp] Failed to restart watcher for ${repoId}: ${msg}`);
+    } finally {
+      restarting = false;
+    }
+  };
 
-      if (!matchesExtensions(relPath, extensions)) {
-        return;
-      }
+  const staleTimer = setInterval(() => {
+    if (closed) {
+      return;
+    }
+    if (health.pendingChanges <= 0) {
+      health.stale = false;
+      return;
+    }
+    const lastSuccessMs = health.lastSuccessfulReindexAt
+      ? Date.parse(health.lastSuccessfulReindexAt)
+      : 0;
+    const stale =
+      lastSuccessMs === 0 || Date.now() - lastSuccessMs > WATCHER_STALE_THRESHOLD_MS;
+    health.stale = stale;
+    if (stale) {
+      const staleMsg = `[sdl-mcp] Watcher stale detected for ${repoId}: pending=${health.pendingChanges}, queueDepth=${health.queueDepth}`;
+      recordWatcherError(staleMsg);
+      void restartWatcher("stale-index-detected");
+    }
+  }, staleCheckIntervalMs);
 
-      schedule(relPath);
-    },
-  );
+  activeWatcher = startWatcher();
 
   return {
     close: async () => {
-      watcher.close();
+      closed = true;
+      clearInterval(staleTimer);
+      for (const timer of pending.values()) {
+        clearTimeout(timer);
+      }
+      pending.clear();
+      updateQueueDepth();
+      health.running = false;
+      health.pendingChanges = 0;
+      health.stale = false;
+      if (activeWatcher) {
+        await activeWatcher.close();
+      }
     },
   };
 }

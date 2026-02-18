@@ -4,6 +4,23 @@ import type {
   ExtractedCall,
 } from "../treesitter/extractCalls.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
+import type { EdgeResolutionStrategy } from "../../db/schema.js";
+
+export interface CallResolutionContext {
+  call: ExtractedCall;
+  importedNameToSymbolIds: Map<string, string[]>;
+  namespaceImports: Map<string, Map<string, string>>;
+  nameToSymbolIds: Map<string, string[]>;
+}
+
+export interface AdapterResolvedCall {
+  symbolId: string | null;
+  isResolved: boolean;
+  confidence?: number;
+  strategy?: EdgeResolutionStrategy;
+  candidateCount?: number;
+  targetName?: string;
+}
 
 export interface LanguageAdapter {
   languageId: string;
@@ -44,4 +61,10 @@ export interface LanguageAdapter {
     filePath: string,
     extractedSymbols: ExtractedSymbol[],
   ): ExtractedCall[];
+
+  /**
+   * Optional language-specific call target resolver.
+   * Can improve precision beyond generic fallback heuristics.
+   */
+  resolveCall?(context: CallResolutionContext): AdapterResolvedCall | null;
 }

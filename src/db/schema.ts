@@ -3,6 +3,7 @@ export type SymbolId = string;
 export type VersionId = string;
 
 export type EdgeType = "import" | "call" | "config";
+export type EdgeResolutionStrategy = "exact" | "heuristic" | "unresolved";
 export type SymbolKind =
   | "function"
   | "class"
@@ -82,6 +83,23 @@ export interface EdgeRow {
    * @default 1.0
    */
   confidence?: number;
+  /**
+   * Resolution strategy used for call-edge target inference.
+   * - exact: direct/static target resolution
+   * - heuristic: inferred target using heuristics
+   * - unresolved: unresolved placeholder target
+   */
+  resolution_strategy?: EdgeResolutionStrategy;
+}
+
+export interface SymbolEmbeddingRow {
+  symbol_id: SymbolId;
+  model: string;
+  embedding_vector: Buffer;
+  version: string;
+  card_hash: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface VersionRow {

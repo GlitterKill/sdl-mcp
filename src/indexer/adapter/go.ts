@@ -1,6 +1,10 @@
 import type { Tree, SyntaxNode, QueryCapture } from "tree-sitter";
 import { BaseAdapter } from "./BaseAdapter.js";
 import type {
+  AdapterResolvedCall,
+  CallResolutionContext,
+} from "./LanguageAdapter.js";
+import type {
   ExtractedSymbol,
   ExtractedCall,
 } from "../treesitter/extractCalls.js";
@@ -60,13 +64,25 @@ class GoAdapter extends BaseAdapter {
 
             const nameNode = parent.childForFieldName("name");
             const alias = nameNode ? nameNode.text : undefined;
+            const packageName = path.split("/").pop() || path;
+            const namedImports: string[] = [];
+            let namespaceImport: string | undefined;
+
+            if (alias) {
+              namedImports.push(alias);
+              if (alias !== "_") {
+                namespaceImport = alias;
+              }
+            } else {
+              namespaceImport = packageName;
+            }
 
             imports.push({
               specifier: path,
               isRelative: path.startsWith("./") || path.startsWith("../"),
               isExternal: !path.startsWith(".") && !path.startsWith("./"),
-              imports: alias ? [alias] : [],
-              namespaceImport: undefined,
+              imports: namedImports,
+              namespaceImport,
               isReExport: false,
             });
           }
@@ -217,6 +233,51 @@ class GoAdapter extends BaseAdapter {
     }
 
     return calls;
+  }
+
+  resolveCall(context: CallResolutionContext): AdapterResolvedCall | null {
+    const identifier = context.call.calleeIdentifier.replace(/^new\s+/, "").trim();
+    if (!identifier) {
+      return null;
+    }
+
+    if (identifier.includes(".")) {
+      const parts = identifier.split(".");
+      const prefix = parts[0];
+      const member = parts[parts.length - 1];
+      const namespace = context.namespaceImports.get(prefix);
+      if (namespace && namespace.has(member)) {
+        return {
+          symbolId: namespace.get(member) ?? null,
+          isResolved: true,
+          strategy: "exact",
+          confidence: 0.9,
+        };
+      }
+      return null;
+    }
+
+    const imported = context.importedNameToSymbolIds.get(identifier);
+    if (imported && imported.length === 1) {
+      return {
+        symbolId: imported[0],
+        isResolved: true,
+        strategy: "exact",
+        confidence: 0.88,
+      };
+    }
+
+    const dotNamespace = context.namespaceImports.get(".");
+    if (dotNamespace && dotNamespace.has(identifier)) {
+      return {
+        symbolId: dotNamespace.get(identifier) ?? null,
+        isResolved: true,
+        strategy: "heuristic",
+        confidence: 0.76,
+      };
+    }
+
+    return null;
   }
 }
 

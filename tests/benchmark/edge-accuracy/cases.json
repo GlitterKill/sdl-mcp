@@ -1,0 +1,127 @@
+{
+  "version": "2026-02-17",
+  "cases": [
+    {
+      "language": "python",
+      "name": "from-import exact",
+      "call": "bar",
+      "expectedResolved": true,
+      "expectedStrategy": "exact",
+      "importedNameToSymbolIds": { "bar": ["py:foo.py:bar:function"] },
+      "namespaceImports": {},
+      "nameToSymbolIds": {}
+    },
+    {
+      "language": "python",
+      "name": "namespace import exact",
+      "call": "mod.bar",
+      "expectedResolved": true,
+      "expectedStrategy": "exact",
+      "importedNameToSymbolIds": {},
+      "namespaceImports": { "mod": { "bar": "py:foo.py:bar:function" } },
+      "nameToSymbolIds": {}
+    },
+    {
+      "language": "python",
+      "name": "self method heuristic",
+      "call": "self.run",
+      "expectedResolved": true,
+      "expectedStrategy": "heuristic",
+      "importedNameToSymbolIds": {},
+      "namespaceImports": {},
+      "nameToSymbolIds": { "run": ["py:main.py:run:method"] }
+    },
+    {
+      "language": "python",
+      "name": "unknown unresolved",
+      "call": "unknown_call",
+      "expectedResolved": false,
+      "expectedStrategy": "unresolved",
+      "importedNameToSymbolIds": {},
+      "namespaceImports": {},
+      "nameToSymbolIds": {}
+    },
+
+    {
+      "language": "go",
+      "name": "package qualified exact",
+      "call": "pkg.Do",
+      "expectedResolved": true,
+      "expectedStrategy": "exact",
+      "importedNameToSymbolIds": {},
+      "namespaceImports": { "pkg": { "Do": "go:pkg.go:Do:function" } },
+      "nameToSymbolIds": {}
+    },
+    {
+      "language": "go",
+      "name": "dot import heuristic",
+      "call": "Do",
+      "expectedResolved": true,
+      "expectedStrategy": "heuristic",
+      "importedNameToSymbolIds": {},
+      "namespaceImports": { ".": { "Do": "go:pkg.go:Do:function" } },
+      "nameToSymbolIds": {}
+    },
+    {
+      "language": "go",
+      "name": "imported identifier exact",
+      "call": "Do",
+      "expectedResolved": true,
+      "expectedStrategy": "exact",
+      "importedNameToSymbolIds": { "Do": ["go:pkg.go:Do:function"] },
+      "namespaceImports": {},
+      "nameToSymbolIds": {}
+    },
+    {
+      "language": "go",
+      "name": "unknown unresolved",
+      "call": "missing",
+      "expectedResolved": false,
+      "expectedStrategy": "unresolved",
+      "importedNameToSymbolIds": {},
+      "namespaceImports": {},
+      "nameToSymbolIds": {}
+    },
+
+    {
+      "language": "java",
+      "name": "class qualified exact",
+      "call": "Util.parse",
+      "expectedResolved": true,
+      "expectedStrategy": "exact",
+      "importedNameToSymbolIds": {},
+      "namespaceImports": { "Util": { "parse": "java:Util.java:parse:method" } },
+      "nameToSymbolIds": {}
+    },
+    {
+      "language": "java",
+      "name": "this method heuristic",
+      "call": "this.compute",
+      "expectedResolved": true,
+      "expectedStrategy": "heuristic",
+      "importedNameToSymbolIds": {},
+      "namespaceImports": {},
+      "nameToSymbolIds": { "compute": ["java:Service.java:compute:method"] }
+    },
+    {
+      "language": "java",
+      "name": "static imported member exact",
+      "call": "max",
+      "expectedResolved": true,
+      "expectedStrategy": "exact",
+      "importedNameToSymbolIds": { "max": ["java:Math.java:max:method"] },
+      "namespaceImports": {},
+      "nameToSymbolIds": {}
+    },
+    {
+      "language": "java",
+      "name": "unknown unresolved",
+      "call": "missing",
+      "expectedResolved": false,
+      "expectedStrategy": "unresolved",
+      "importedNameToSymbolIds": {},
+      "namespaceImports": {},
+      "nameToSymbolIds": {}
+    }
+  ]
+}

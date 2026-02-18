@@ -1,6 +1,10 @@
 import type { Tree, SyntaxNode, QueryCapture } from "tree-sitter";
 import { BaseAdapter } from "./BaseAdapter.js";
 import type {
+  AdapterResolvedCall,
+  CallResolutionContext,
+} from "./LanguageAdapter.js";
+import type {
   ExtractedSymbol,
   ExtractedCall,
 } from "../treesitter/extractCalls.js";
@@ -79,6 +83,56 @@ class PythonAdapter extends BaseAdapter {
     extractedSymbols: ExtractedSymbol[],
   ): ExtractedCall[] {
     return extractCalls(tree, extractedSymbols);
+  }
+
+  resolveCall(context: CallResolutionContext): AdapterResolvedCall | null {
+    const identifier = context.call.calleeIdentifier.replace(/^new\s+/, "").trim();
+    if (!identifier) {
+      return null;
+    }
+
+    const lastPart = identifier.includes(".")
+      ? identifier.split(".").pop() ?? identifier
+      : identifier;
+
+    const imported = context.importedNameToSymbolIds.get(lastPart);
+    if (imported && imported.length === 1) {
+      return {
+        symbolId: imported[0],
+        isResolved: true,
+        strategy: "exact",
+        confidence: 0.9,
+      };
+    }
+
+    if (identifier.includes(".")) {
+      const parts = identifier.split(".");
+      const prefix = parts[0];
+      const member = parts[parts.length - 1];
+      const namespace = context.namespaceImports.get(prefix);
+      if (namespace && namespace.has(member)) {
+        return {
+          symbolId: namespace.get(member) ?? null,
+          isResolved: true,
+          strategy: "exact",
+          confidence: 0.92,
+        };
+      }
+
+      if (prefix === "self" || prefix === "cls") {
+        const localCandidates = context.nameToSymbolIds.get(member);
+        if (localCandidates && localCandidates.length === 1) {
+          return {
+            symbolId: localCandidates[0],
+            isResolved: true,
+            strategy: "heuristic",
+            confidence: 0.78,
+          };
+        }
+      }
+    }
+
+    return null;
   }
 }
 

@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2026-02-17T00:00:00.000Z",
+  "description": "Phase A benchmark repo lock (TS + Python + Tier 3).",
+  "repos": [
+    {
+      "repoId": "zod-oss",
+      "cloneUrl": "https://github.com/colinhacks/zod.git",
+      "ref": "c7805073fef5b6b8857307c3d4b3597a70613bc2",
+      "languageTier": "tier1",
+      "languageFamily": "typescript"
+    },
+    {
+      "repoId": "flask-oss",
+      "cloneUrl": "https://github.com/pallets/flask.git",
+      "ref": "d98eb69a354158252854ed4a5c9778e03d089191",
+      "languageTier": "tier2",
+      "languageFamily": "python"
+    },
+    {
+      "repoId": "ripgrep-oss",
+      "cloneUrl": "https://github.com/BurntSushi/ripgrep.git",
+      "ref": "9b84e154c8e404f4c40f6f4e4c674ea02e77324a",
+      "languageTier": "tier3",
+      "languageFamily": "rust"
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import type {
   FileRow,
   SymbolRow,
   EdgeRow,
+  SymbolEmbeddingRow,
   VersionRow,
   SymbolVersionRow,
   MetricsRow,
@@ -715,7 +716,7 @@ export function deleteSymbolsByFileWithEdges(fileId: number): void {
  */
 export function createEdge(edge: EdgeRow): void {
   stmt(
-    "INSERT INTO edges (repo_id, from_symbol_id, to_symbol_id, type, weight, provenance, created_at, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO edges (repo_id, from_symbol_id, to_symbol_id, type, weight, provenance, created_at, confidence, resolution_strategy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     edge.repo_id,
     edge.from_symbol_id,
@@ -725,6 +726,7 @@ export function createEdge(edge: EdgeRow): void {
     edge.provenance,
     edge.created_at,
     edge.confidence ?? 1.0,
+    edge.resolution_strategy ?? "exact",
   );
 }
 
@@ -1686,4 +1688,84 @@ export function getRepoTotals(repoId: string): {
     edgeCount: row.edge_count,
     exportedCount: row.exported_count,
   };
+}
+
+/**
+ * Upserts an embedding vector for a symbol.
+ */
+export function upsertSymbolEmbedding(row: SymbolEmbeddingRow): void {
+  stmt(
+    `INSERT INTO symbol_embeddings (
+       symbol_id, model, embedding_vector, version, card_hash, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(symbol_id) DO UPDATE SET
+       model = excluded.model,
+       embedding_vector = excluded.embedding_vector,
+       version = excluded.version,
+       card_hash = excluded.card_hash,
+       updated_at = excluded.updated_at`,
+  ).run(
+    row.symbol_id,
+    row.model,
+    row.embedding_vector,
+    row.version,
+    row.card_hash,
+    row.created_at,
+    row.updated_at,
+  );
+}
+
+/**
+ * Reads a single symbol embedding.
+ */
+export function getSymbolEmbedding(
+  symbolId: string,
+): SymbolEmbeddingRow | null {
+  return stmt("SELECT * FROM symbol_embeddings WHERE symbol_id = ?").get(
+    symbolId,
+  ) as SymbolEmbeddingRow | null;
+}
+
+/**
+ * Batch read embeddings for symbol IDs.
+ */
+export function getSymbolEmbeddings(
+  symbolIds: string[],
+): Map<string, SymbolEmbeddingRow> {
+  const result = new Map<string, SymbolEmbeddingRow>();
+  if (symbolIds.length === 0) {
+    return result;
+  }
+
+  for (let i = 0; i < symbolIds.length; i += DB_CHUNK_SIZE) {
+    const chunk = symbolIds.slice(i, i + DB_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = getDb()
+      .prepare(
+        `SELECT * FROM symbol_embeddings WHERE symbol_id IN (${placeholders})`,
+      )
+      .all(...chunk) as SymbolEmbeddingRow[];
+    for (const row of rows) {
+      result.set(row.symbol_id, row);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Removes stale embeddings by symbol ID.
+ */
+export function deleteSymbolEmbeddings(symbolIds: string[]): void {
+  if (symbolIds.length === 0) {
+    return;
+  }
+
+  for (let i = 0; i < symbolIds.length; i += DB_CHUNK_SIZE) {
+    const chunk = symbolIds.slice(i, i + DB_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(",");
+    getDb()
+      .prepare(`DELETE FROM symbol_embeddings WHERE symbol_id IN (${placeholders})`)
+      .run(...chunk);
+  }
 }
