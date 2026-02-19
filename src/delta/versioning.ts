@@ -5,6 +5,7 @@ import type { VersionRow } from "../db/schema.js";
 import type { SymbolVersionRow } from "../db/schema.js";
 import { getDb } from "../db/db.js";
 import { hashContent } from "../util/hashing.js";
+import { logger } from "../util/logger.js";
 
 export function createVersion(repoId: string, reason?: string): VersionId {
   const timestamp = Date.now();
@@ -78,7 +79,13 @@ export function snapshotSymbols(
 
     for (const symbolId of symbolIds) {
       const symbol = db.getSymbol(symbolId);
-      if (!symbol) continue;
+      if (!symbol) {
+        logger.warn("Symbol not found during version snapshot, skipping", {
+          versionId,
+          symbolId,
+        });
+        continue;
+      }
 
       const snapshot: SymbolVersionRow = {
         version_id: versionId,
@@ -97,5 +104,15 @@ export function snapshotSymbols(
     finalizeVersionHash(versionId, snapshots);
   });
 
-  snapshotTx();
+  try {
+    snapshotTx();
+  } catch (error) {
+    logger.error("Snapshot transaction failed; version may be inconsistent", {
+      versionId,
+      symbolCount: symbolIds.length,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    throw error;
+  }
 }

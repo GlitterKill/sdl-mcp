@@ -243,7 +243,7 @@ async function runDiagnosticsWithTimeout(
   repoId: RepoId,
   _timeoutMs: number,
 ): Promise<{ suspects: DiagnosticSuspect[] }> {
-  const { getDiagnosticsWithSuspects } = await import("../ts/mapping");
+  const { getDiagnosticsWithSuspects } = await import("../ts/mapping.js");
   const { suspects } = await getDiagnosticsWithSuspects(repoId);
   return { suspects };
 }

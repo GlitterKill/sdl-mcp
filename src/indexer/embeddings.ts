@@ -3,7 +3,7 @@ import * as db from "../db/queries.js";
 import { hashContent } from "../util/hashing.js";
 import { ensureLocalEmbeddingRuntime } from "./embeddings-local.js";
 
-const EMBEDDING_DIMENSION = 64;
+export const EMBEDDING_DIMENSION = 64;
 
 export interface EmbeddingScoredSymbol {
   symbol: SymbolRow;
@@ -102,7 +102,11 @@ function fromFloat16Blob(blob: Buffer): number[] {
   if (blob.byteLength === 0) {
     return [];
   }
-  const view = new Int16Array(blob.buffer, blob.byteOffset, blob.byteLength / 2);
+  const view = new Int16Array(
+    blob.buffer,
+    blob.byteOffset,
+    blob.byteLength / 2,
+  );
   const vector = new Array<number>(view.length);
   for (let i = 0; i < view.length; i++) {
     vector[i] = view[i] / 10000;
@@ -207,7 +211,9 @@ export async function rerankByEmbeddings(params: {
       model: params.model,
       symbols: missing,
     });
-    const refreshed = db.getSymbolEmbeddings(missing.map((symbol) => symbol.symbol_id));
+    const refreshed = db.getSymbolEmbeddings(
+      missing.map((symbol) => symbol.symbol_id),
+    );
     for (const [key, value] of refreshed) {
       embeddingMap.set(key, value);
     }
@@ -217,9 +223,13 @@ export async function rerankByEmbeddings(params: {
     .map((item) => {
       const embeddingRow = embeddingMap.get(item.symbol.symbol_id);
       const semanticScore = embeddingRow
-        ? cosineSimilarity(queryEmbedding, fromFloat16Blob(embeddingRow.embedding_vector))
+        ? cosineSimilarity(
+            queryEmbedding,
+            fromFloat16Blob(embeddingRow.embedding_vector),
+          )
         : 0;
-      const finalScore = alpha * item.lexicalScore + (1 - alpha) * semanticScore;
+      const finalScore =
+        alpha * item.lexicalScore + (1 - alpha) * semanticScore;
       return {
         symbol: item.symbol,
         lexicalScore: item.lexicalScore,

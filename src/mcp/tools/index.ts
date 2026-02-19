@@ -48,6 +48,14 @@ import { handlePRRiskAnalysis } from "./prRisk.js";
 import { handleAgentOrchestrate } from "./agent.js";
 import { ContextSummaryRequestSchema } from "../tools.js";
 import { handleContextSummary } from "./summary.js";
+import {
+  AgentFeedbackRequestSchema,
+  AgentFeedbackQueryRequestSchema,
+} from "../tools.js";
+import {
+  handleAgentFeedback,
+  handleAgentFeedbackQuery,
+} from "./agent-feedback.js";
 
 export function registerTools(server: MCPServer): void {
   server.registerTool(
@@ -174,5 +182,19 @@ export function registerTools(server: MCPServer): void {
     "Generate token-bounded context summary for a symbol, file, or task query",
     ContextSummaryRequestSchema,
     handleContextSummary,
+  );
+
+  server.registerTool(
+    "sdl.agent.feedback",
+    "Record feedback about useful and missing symbols for offline tuning",
+    AgentFeedbackRequestSchema,
+    handleAgentFeedback,
+  );
+
+  server.registerTool(
+    "sdl.agent.feedback.query",
+    "Query feedback records and aggregated statistics for offline tuning pipelines",
+    AgentFeedbackQueryRequestSchema,
+    handleAgentFeedbackQuery,
   );
 }

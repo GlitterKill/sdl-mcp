@@ -18,8 +18,10 @@ const DOCTOR_CHECKS = [
   { name: "Config file exists", check: checkConfigExists },
   { name: "Config file readable", check: checkConfigReadable },
   { name: "Database path writable", check: checkDatabaseWritable },
+  { name: "Database integrity", check: checkDatabaseIntegrity },
   { name: "Tree-sitter grammars available", check: checkTreeSitterGrammar },
   { name: "Repo paths accessible", check: checkRepoPaths },
+  { name: "Stale index detection", check: checkStaleIndex },
   { name: "Watcher health telemetry", check: checkWatcherHealth },
 ];
 
@@ -216,6 +218,83 @@ async function checkTreeSitterGrammar(
     return {
       status: "fail",
       message: `Cannot load tree-sitter: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+async function checkDatabaseIntegrity(
+  _options: DoctorOptions,
+): Promise<Omit<DoctorResult, "name">> {
+  try {
+    const db = getDb();
+    const result = db.pragma("integrity_check") as Array<{ integrity_check: string }>;
+    const status = result[0]?.integrity_check;
+    if (status === "ok") {
+      return { status: "pass", message: "PRAGMA integrity_check passed" };
+    }
+    return {
+      status: "fail",
+      message: `Database integrity check failed: ${status}`,
+    };
+  } catch (error) {
+    return {
+      status: "warn",
+      message: `Cannot check database integrity: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+async function checkStaleIndex(
+  options: DoctorOptions,
+): Promise<Omit<DoctorResult, "name">> {
+  const configPath = options.config ?? activateCliConfigPath();
+  if (!existsSync(configPath)) {
+    return { status: "warn", message: "Config not found (skip stale index check)" };
+  }
+
+  try {
+    const { loadConfig } = await import("../../config/loadConfig.js");
+    const config = loadConfig(configPath);
+    const db = getDb();
+
+    const staleRepos: string[] = [];
+    const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+    for (const repo of config.repos) {
+      const row = db
+        .prepare(
+          `SELECT MAX(last_indexed_at) as last_indexed FROM files WHERE repo_id = (SELECT repo_id FROM repos WHERE repo_id = ?)`,
+        )
+        .get(repo.repoId) as { last_indexed: string | null } | undefined;
+
+      if (!row?.last_indexed) {
+        staleRepos.push(`${repo.repoId} (never indexed)`);
+        continue;
+      }
+
+      const lastIndexed = new Date(row.last_indexed).getTime();
+      const age = Date.now() - lastIndexed;
+      if (age > STALE_THRESHOLD_MS) {
+        const hoursAgo = Math.round(age / (60 * 60 * 1000));
+        staleRepos.push(`${repo.repoId} (${hoursAgo}h ago)`);
+      }
+    }
+
+    if (staleRepos.length === 0) {
+      return {
+        status: "pass",
+        message: `All ${config.repos.length} repo(s) indexed within 24h`,
+      };
+    }
+
+    return {
+      status: "warn",
+      message: `Stale indexes:\n${staleRepos.map((r) => `  - ${r}`).join("\n")}\n  Run: sdl-mcp index --mode full`,
+    };
+  } catch (error) {
+    return {
+      status: "warn",
+      message: `Cannot check index staleness: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }

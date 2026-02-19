@@ -1,7 +1,14 @@
 import { DeltaGetRequestSchema, type DeltaGetResponse } from "../tools.js";
 import { computeDelta } from "../../delta/diff.js";
 import { runGovernorLoop } from "../../delta/blastRadius.js";
-import { loadGraphForRepo } from "../../graph/buildGraph.js";
+import {
+  loadGraphForRepo,
+  loadNeighborhood,
+  logGraphTelemetry,
+  getLastLoadStats,
+  LAZY_GRAPH_LOADING_DEFAULT_HOPS,
+  LAZY_GRAPH_LOADING_MAX_SYMBOLS,
+} from "../../graph/buildGraph.js";
 import { truncateArray } from "../../util/truncation.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import * as db from "../../db/queries.js";
@@ -10,6 +17,12 @@ import {
   DEFAULT_MAX_TOKENS_SLICE,
 } from "../../config/constants.js";
 import { prefetchDeltaBlastRadius } from "../../graph/prefetch.js";
+import {
+  withSpan,
+  SPAN_NAMES,
+  isTracingEnabled,
+  type SpanAttributes,
+} from "../../util/tracing.js";
 
 /**
  * Handles delta pack requests.
@@ -23,98 +36,139 @@ import { prefetchDeltaBlastRadius } from "../../graph/prefetch.js";
 export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
   const validated = DeltaGetRequestSchema.parse(args);
 
-  let delta;
-  try {
-    delta = computeDelta(
-      validated.repoId,
-      validated.fromVersion,
-      validated.toVersion,
-    );
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to compute delta pack.";
-    throw new Error(`Delta pack error: ${message}`);
-  }
-
-  const graph = loadGraphForRepo(validated.repoId);
-
-  const changedSymbolIds = delta.changedSymbols.map(
-    (change) => change.symbolId,
-  );
-  prefetchDeltaBlastRadius(validated.repoId, changedSymbolIds);
-
-  const config = loadConfig();
-  const budget = validated.budget ?? {
-    maxCards: config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS,
-    maxEstimatedTokens: config.slice?.defaultMaxTokens ?? DEFAULT_MAX_TOKENS_SLICE,
-  };
-  const governorOptions = {
-    repoId: validated.repoId,
-    budget,
-    runDiagnostics: true,
-    diagnosticsTimeoutMs: 5000,
-  };
-
-  const governorResult = await runGovernorLoop(
-    changedSymbolIds,
-    graph,
-    governorOptions,
-  );
-
-  delta.blastRadius = governorResult.blastRadius;
-  delta.trimmedSet = governorResult.trimmedSet;
-
-  if (governorResult.spilloverHandle) {
-    delta.spilloverHandle = governorResult.spilloverHandle;
-
-    const handleRow = db.getSliceHandle(governorResult.spilloverHandle);
-    if (handleRow) {
-      db.updateSliceHandleSpillover(
-        governorResult.spilloverHandle,
-        JSON.stringify(governorResult.trimmedSet.droppedSymbols),
+  const executeDelta = async () => {
+    let delta;
+    try {
+      delta = computeDelta(
+        validated.repoId,
+        validated.fromVersion,
+        validated.toVersion,
       );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to compute delta pack.";
+      throw new Error(`Delta pack error: ${message}`);
     }
-  }
 
-  const maxChanges = config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS;
-  const maxBlastRadius = config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS;
+    const changedSymbolIds = delta.changedSymbols.map(
+      (change) => change.symbolId,
+    );
 
-  const changedSymbolsTruncation = truncateArray(delta.changedSymbols, {
-    maxItems: maxChanges,
-  });
+    let graph;
+    if (changedSymbolIds.length > 0 && changedSymbolIds.length < 500) {
+      graph = loadNeighborhood(validated.repoId, changedSymbolIds, {
+        maxHops: LAZY_GRAPH_LOADING_DEFAULT_HOPS,
+        direction: "both",
+        maxSymbols: LAZY_GRAPH_LOADING_MAX_SYMBOLS,
+      });
+    } else {
+      graph = loadGraphForRepo(validated.repoId);
+    }
 
-  const blastRadiusTruncation = truncateArray(delta.blastRadius, {
-    maxItems: maxBlastRadius,
-  });
+    const loadStats = getLastLoadStats();
+    if (loadStats) {
+      logGraphTelemetry({
+        repoId: validated.repoId,
+        ...loadStats,
+      });
+    }
 
-  if (changedSymbolsTruncation.truncated) {
-    delta.changedSymbols = changedSymbolsTruncation.items;
-  }
+    prefetchDeltaBlastRadius(validated.repoId, changedSymbolIds);
 
-  if (blastRadiusTruncation.truncated) {
-    delta.blastRadius = blastRadiusTruncation.items;
-  }
-
-  // Strip verbose reason strings from blast radius items to save tokens.
-  // The signal + distance fields convey the same information more compactly.
-  delta.blastRadius = delta.blastRadius.map(
-    ({ reason: _reason, ...rest }) => rest as typeof delta.blastRadius[number],
-  );
-
-
-  if (changedSymbolsTruncation.truncated || blastRadiusTruncation.truncated) {
-    delta.truncation = {
-      truncated: true,
-      droppedChanges: changedSymbolsTruncation.droppedCount,
-      droppedBlastRadius: blastRadiusTruncation.droppedCount,
-      howToResume:
-        changedSymbolsTruncation.howToResume ??
-        blastRadiusTruncation.howToResume ??
-        null,
+    const config = loadConfig();
+    const budget = validated.budget ?? {
+      maxCards: config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS,
+      maxEstimatedTokens:
+        config.slice?.defaultMaxTokens ?? DEFAULT_MAX_TOKENS_SLICE,
     };
+    const governorOptions = {
+      repoId: validated.repoId,
+      budget,
+      runDiagnostics: true,
+      diagnosticsTimeoutMs: 5000,
+    };
+
+    const governorResult = await runGovernorLoop(
+      changedSymbolIds,
+      graph,
+      governorOptions,
+    );
+
+    delta.blastRadius = governorResult.blastRadius;
+    delta.trimmedSet = governorResult.trimmedSet;
+
+    if (governorResult.spilloverHandle) {
+      delta.spilloverHandle = governorResult.spilloverHandle;
+
+      const handleRow = db.getSliceHandle(governorResult.spilloverHandle);
+      if (handleRow) {
+        db.updateSliceHandleSpillover(
+          governorResult.spilloverHandle,
+          JSON.stringify(governorResult.trimmedSet.droppedSymbols),
+        );
+      }
+    }
+
+    const maxChanges = config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS;
+    const maxBlastRadius = config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS;
+
+    const changedSymbolsTruncation = truncateArray(delta.changedSymbols, {
+      maxItems: maxChanges,
+    });
+
+    const blastRadiusTruncation = truncateArray(delta.blastRadius, {
+      maxItems: maxBlastRadius,
+    });
+
+    if (changedSymbolsTruncation.truncated) {
+      delta.changedSymbols = changedSymbolsTruncation.items;
+    }
+
+    if (blastRadiusTruncation.truncated) {
+      delta.blastRadius = blastRadiusTruncation.items;
+    }
+
+    delta.blastRadius = delta.blastRadius.map(
+      ({ reason: _reason, ...rest }) =>
+        rest as (typeof delta.blastRadius)[number],
+    );
+
+    if (changedSymbolsTruncation.truncated || blastRadiusTruncation.truncated) {
+      delta.truncation = {
+        truncated: true,
+        droppedChanges: changedSymbolsTruncation.droppedCount,
+        droppedBlastRadius: blastRadiusTruncation.droppedCount,
+        howToResume:
+          changedSymbolsTruncation.howToResume ??
+          blastRadiusTruncation.howToResume ??
+          null,
+      };
+    }
+
+    return { delta };
+  };
+
+  if (isTracingEnabled()) {
+    const attrs: SpanAttributes = {
+      repoId: validated.repoId,
+      versionId: `${validated.fromVersion}..${validated.toVersion}`,
+      budget: validated.budget ?? {},
+    };
+    return withSpan(
+      SPAN_NAMES.DELTA_GET,
+      async (span) => {
+        const result = await executeDelta();
+        span.setAttributes({
+          "counts.changedSymbols": result.delta.changedSymbols.length,
+          "counts.blastRadius": result.delta.blastRadius.length,
+        });
+        return result;
+      },
+      attrs,
+    );
   }
 
-  return {
-    delta,
-  };
+  return executeDelta();
 }

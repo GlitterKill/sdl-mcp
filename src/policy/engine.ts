@@ -275,11 +275,14 @@ export class PolicyEngine {
         }
 
         if (ctx.reason) {
-          const reasonUpper = ctx.reason.toUpperCase();
-          if (
-            reasonUpper.includes("AUDIT") ||
-            reasonUpper.includes("BREAK-GLASS")
-          ) {
+          const reasonTrimmed = ctx.reason.trim();
+          if (reasonTrimmed.startsWith("BREAK-GLASS:")) {
+            logger.warn("Break-glass override triggered", {
+              repoId: ctx.repoId,
+              symbolId: ctx.symbolId,
+              reason: ctx.reason,
+              requestType: ctx.requestType,
+            });
             return {
               passed: true,
               evidence: {

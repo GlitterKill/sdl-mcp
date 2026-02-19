@@ -270,36 +270,6 @@ function extractSkeletonFromBody(
       processedStatements++;
     } else if (
       childType === "for_statement" ||
-      childType === "while_statement"
-    ) {
-      const condition = child.children.find(
-        (c) => c.type === "parenthesized_expression",
-      );
-      const conditionText = condition ? condition.text : "";
-      const body = child.children.find((c) => c.type === "statement_block");
-
-      const loopKeyword = childType.replace("_statement", "");
-      let loopLine = loopKeyword + " " + conditionText;
-      if (body) {
-        const bodySkeleton = extractSkeletonFromBody(
-          body,
-          content,
-          includeIdentifiers,
-        );
-        loopLine += " {\n" + bodySkeleton + "}";
-      }
-
-      result += loopLine + "\n";
-      processedStatements++;
-    } else if (
-      childType === "try_statement" ||
-      childType === "catch_clause" ||
-      childType === "finally_clause"
-    ) {
-      result += child.text.trim() + "\n";
-      processedStatements++;
-    } else if (
-      childType === "for_statement" ||
       childType === "for_in_statement" ||
       childType === "while_statement"
     ) {
@@ -323,6 +293,13 @@ function extractSkeletonFromBody(
       }
 
       result += loopLine + "\n";
+      processedStatements++;
+    } else if (
+      childType === "try_statement" ||
+      childType === "catch_clause" ||
+      childType === "finally_clause"
+    ) {
+      result += child.text.trim() + "\n";
       processedStatements++;
     }
   }
@@ -490,7 +467,7 @@ export function generateSymbolSkeleton(
   const actualRange: Range = {
     startLine: symbol.range_start_line,
     startCol: symbol.range_start_col,
-    endLine: symbol.range_start_line + skeletonLines.length - 1,
+    endLine: Math.max(symbol.range_start_line, symbol.range_start_line + skeletonLines.length - 1),
     endCol: truncated ? 0 : symbol.range_end_col,
   };
 

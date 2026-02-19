@@ -42,11 +42,14 @@ const DEFAULT_SYMBOL_CACHE_CONFIG: CacheConfig = {
 };
 
 /**
- * LRU Cache implementation with version-based invalidation
+ * LRU Cache implementation with version-based invalidation.
+ *
+ * Uses Map insertion-order semantics for O(1) LRU promotion:
+ * delete + re-insert moves a key to the end (most-recently-used).
+ * Iteration order is insertion order, so the first key is the LRU candidate.
  */
 class LRUCache<T> {
   private cache: Map<string, CacheEntry<T>> = new Map();
-  private accessOrder: string[] = [];
   private stats: CacheStats = {
     hits: 0,
     misses: 0,
@@ -61,17 +64,10 @@ class LRUCache<T> {
     this.config = { ...DEFAULT_CACHE_CONFIG, ...config };
   }
 
-  /**
-   * Generates a cache key including version for invalidation
-   */
   private makeKey(repoId: RepoId, id: string, versionId: VersionId): string {
     return `${repoId}:${id}:${versionId}`;
   }
 
-  /**
-   * Estimates size of a cache entry in bytes
-   * Accounts for object overhead and string encoding
-   */
   private estimateSize(value: unknown): number {
     try {
       const jsonString = JSON.stringify(value);
@@ -84,45 +80,48 @@ class LRUCache<T> {
   }
 
   /**
-   * Updates access order for LRU tracking
+   * O(1) LRU promotion: delete and re-insert to move key to end of Map.
    */
-  private updateAccessOrder(key: string): void {
-    const index = this.accessOrder.indexOf(key);
-    if (index !== -1) {
-      this.accessOrder.splice(index, 1);
+  private promoteKey(key: string): void {
+    const entry = this.cache.get(key);
+    if (entry) {
+      this.cache.delete(key);
+      this.cache.set(key, entry);
     }
-    this.accessOrder.push(key);
   }
 
   /**
-   * Evicts entries to fit within cache limits
+   * Evicts the least-recently-used entry (first key in Map iteration order).
    */
+  private evictLRU(): void {
+    const firstKey = this.cache.keys().next().value;
+    if (firstKey === undefined) return;
+
+    const entry = this.cache.get(firstKey);
+    if (entry) {
+      this.stats.currentSize -= entry.size;
+      this.stats.entryCount--;
+      this.stats.evictions++;
+    }
+    this.cache.delete(firstKey);
+  }
+
   private evictIfNeeded(): void {
     while (
-      this.accessOrder.length > this.config.maxEntries ||
+      this.cache.size > this.config.maxEntries ||
       (this.stats.currentSize > this.config.maxSizeBytes &&
-        this.accessOrder.length > 1)
+        this.cache.size > 1)
     ) {
-      if (this.accessOrder.length === 0) break;
-
-      const oldestKey = this.accessOrder.shift()!;
-      const entry = this.cache.get(oldestKey);
-      if (entry) {
-        this.stats.currentSize -= entry.size;
-        this.stats.entryCount--;
-        this.stats.evictions++;
-        this.cache.delete(oldestKey);
-      }
+      if (this.cache.size === 0) break;
+      this.evictLRU();
     }
   }
 
-  /**
-   * Invalidates all cache entries for a specific version
-   */
   invalidateVersion(versionId: VersionId): void {
+    const suffix = `:${versionId}`;
     const keysToDelete: string[] = [];
     for (const key of this.cache.keys()) {
-      if (key.endsWith(`:${versionId}`)) {
+      if (key.endsWith(suffix)) {
         keysToDelete.push(key);
       }
     }
@@ -133,32 +132,21 @@ class LRUCache<T> {
         this.stats.entryCount--;
       }
       this.cache.delete(key);
-      const index = this.accessOrder.indexOf(key);
-      if (index !== -1) {
-        this.accessOrder.splice(index, 1);
-      }
     }
   }
 
-  /**
-   * Clears all cache entries
-   */
   clear(): void {
     this.cache.clear();
-    this.accessOrder = [];
     this.stats.currentSize = 0;
     this.stats.entryCount = 0;
   }
 
-  /**
-   * Gets a cached value
-   */
   get(repoId: RepoId, id: string, versionId: VersionId): T | undefined {
     const key = this.makeKey(repoId, id, versionId);
     const entry = this.cache.get(key);
 
     if (entry) {
-      this.updateAccessOrder(key);
+      this.promoteKey(key);
       entry.lastAccessed = Date.now();
       this.stats.hits++;
       return entry.value;
@@ -168,9 +156,6 @@ class LRUCache<T> {
     return undefined;
   }
 
-  /**
-   * Sets a cached value
-   */
   async set(
     repoId: RepoId,
     id: string,
@@ -195,22 +180,13 @@ class LRUCache<T> {
       if (existingEntry) {
         this.stats.currentSize -= existingEntry.size;
         this.stats.entryCount--;
+        this.cache.delete(key);
       }
 
       const newTotalSize = this.stats.currentSize + size;
 
-      if (
-        newTotalSize > this.config.maxSizeBytes &&
-        this.accessOrder.length > 0
-      ) {
-        const oldestKey = this.accessOrder.shift()!;
-        const entry = this.cache.get(oldestKey);
-        if (entry) {
-          this.stats.currentSize -= entry.size;
-          this.stats.entryCount--;
-          this.stats.evictions++;
-          this.cache.delete(oldestKey);
-        }
+      if (newTotalSize > this.config.maxSizeBytes && this.cache.size > 0) {
+        this.evictLRU();
       }
 
       this.cache.set(key, {
@@ -221,7 +197,6 @@ class LRUCache<T> {
       });
       this.stats.currentSize += size;
       this.stats.entryCount++;
-      this.updateAccessOrder(key);
 
       this.evictIfNeeded();
     } finally {
@@ -229,24 +204,15 @@ class LRUCache<T> {
     }
   }
 
-  /**
-   * Checks if a key exists in the cache
-   */
   has(repoId: RepoId, id: string, versionId: VersionId): boolean {
     const key = this.makeKey(repoId, id, versionId);
     return this.cache.has(key);
   }
 
-  /**
-   * Gets cache statistics
-   */
   getStats(): CacheStats {
     return { ...this.stats };
   }
 
-  /**
-   * Resets cache statistics
-   */
   resetStats(): void {
     this.stats.hits = 0;
     this.stats.misses = 0;

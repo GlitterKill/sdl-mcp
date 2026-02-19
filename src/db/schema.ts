@@ -2,25 +2,6 @@ export type RepoId = string;
 export type SymbolId = string;
 export type VersionId = string;
 
-export type EdgeType = "import" | "call" | "config";
-export type EdgeResolutionStrategy = "exact" | "heuristic" | "unresolved";
-export type SymbolKind =
-  | "function"
-  | "class"
-  | "interface"
-  | "type"
-  | "module"
-  | "method"
-  | "constructor"
-  | "variable";
-
-export type Visibility =
-  | "public"
-  | "protected"
-  | "private"
-  | "exported"
-  | "internal";
-
 export interface RepoRow {
   repo_id: RepoId;
   root_path: string;
@@ -188,4 +169,45 @@ export interface SyncArtifactRow {
   compressed_data: string;
   created_at: string;
   size_bytes: number;
+}
+
+export type EdgeType = "import" | "call" | "config";
+export type EdgeResolutionStrategy = "exact" | "heuristic" | "unresolved";
+export type SymbolKind =
+  | "function"
+  | "class"
+  | "interface"
+  | "type"
+  | "module"
+  | "method"
+  | "constructor"
+  | "variable";
+
+export type Visibility =
+  | "public"
+  | "protected"
+  | "private"
+  | "exported"
+  | "internal";
+
+export interface AgentFeedbackRow {
+  feedback_id: number;
+  repo_id: RepoId;
+  version_id: VersionId;
+  slice_handle: string;
+  useful_symbols_json: string;
+  missing_symbols_json: string;
+  task_tags_json: string | null;
+  task_type: string | null;
+  task_text: string | null;
+  created_at: string;
+}
+
+export interface SymbolFeedbackWeightRow {
+  symbol_id: SymbolId;
+  repo_id: RepoId;
+  positive_count: number;
+  negative_count: number;
+  weight_adjustment: number;
+  updated_at: string;
 }

@@ -43,6 +43,7 @@ import { loadConfig } from "../../config/loadConfig.js";
 import { rerankByEmbeddings } from "../../indexer/embeddings.js";
 import { generateSummaryWithGuardrails } from "../../indexer/summary-generator.js";
 import { consumePrefetchedKey } from "../../graph/prefetch.js";
+import { recordToolTrace } from "../../graph/prefetch-model.js";
 
 const policyEngine = new PolicyEngine();
 type SearchRow = {
@@ -101,7 +102,8 @@ const UNDERSTANDING_SYMBOL_TOKENS = new Set([
   "slice",
   "state",
 ]);
-const AGGREGATOR_PATH_RE = /(^|\/)(index|tools|types|main|mod|util|utils)\.[^.]+$/;
+const AGGREGATOR_PATH_RE =
+  /(^|\/)(index|tools|types|main|mod|util|utils)\.[^.]+$/;
 
 function uniqueLimit(values: string[], max: number): string[] {
   const seen = new Set<string>();
@@ -169,7 +171,9 @@ function expandSemanticQueryTokens(tokens: string[]): string[] {
   return uniqueLimit(Array.from(expanded), SYMBOL_SEARCH_MAX_QUERY_TOKENS);
 }
 
-function enrichSearchRowsWithFilePath(rows: Array<Omit<SearchRow, "file_path">>): SearchRow[] {
+function enrichSearchRowsWithFilePath(
+  rows: Array<Omit<SearchRow, "file_path">>,
+): SearchRow[] {
   const filePathCache = new Map<number, string>();
   return rows.map((row) => {
     let filePath = filePathCache.get(row.file_id);
@@ -241,10 +245,7 @@ function searchSymbolsNaturalLanguage(
   const query = rawQuery.trim().toLowerCase();
   if (!query) return [];
 
-  const scored = new Map<
-    string,
-    { row: SearchRow; score: number }
-  >();
+  const scored = new Map<string, { row: SearchRow; score: number }>();
 
   const queryTokens = expandSemanticQueryTokens(
     uniqueLimit(
@@ -289,7 +290,11 @@ function searchSymbolsNaturalLanguage(
   );
 
   for (const token of queryTokens) {
-    const tokenResults = db.searchSymbolsLite(repoId, token, Math.max(limit, 12));
+    const tokenResults = db.searchSymbolsLite(
+      repoId,
+      token,
+      Math.max(limit, 12),
+    );
     addResults(tokenResults, (row, idx) => {
       const rankBonus = Math.max(0, 20 - idx);
       return (
@@ -302,7 +307,8 @@ function searchSymbolsNaturalLanguage(
   return Array.from(scored.values())
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
-      if (a.row.kind !== b.row.kind) return a.row.kind.localeCompare(b.row.kind);
+      if (a.row.kind !== b.row.kind)
+        return a.row.kind.localeCompare(b.row.kind);
       return a.row.name.localeCompare(b.row.name);
     })
     .slice(0, limit);
@@ -321,6 +327,13 @@ export async function handleSymbolSearch(
   const startedAt = Date.now();
   const request = SymbolSearchRequestSchema.parse(args);
   const limit = request.limit ?? SYMBOL_SEARCH_DEFAULT_LIMIT;
+
+  recordToolTrace({
+    repoId: request.repoId,
+    taskType: "search",
+    tool: "symbol.search",
+  });
+
   const lexicalScored = searchSymbolsNaturalLanguage(
     request.repoId,
     request.query,
@@ -344,8 +357,13 @@ export async function handleSymbolSearch(
           lexicalScore: item.score / maxLexical,
         }))
         .filter(
-          (item): item is { row: SearchRow; symbol: SymbolRow; lexicalScore: number } =>
-            item.symbol !== null,
+          (
+            item,
+          ): item is {
+            row: SearchRow;
+            symbol: SymbolRow;
+            lexicalScore: number;
+          } => item.symbol !== null,
         );
 
       const reranked = await rerankByEmbeddings({
@@ -402,9 +420,17 @@ export async function handleSymbolSearch(
  */
 export async function handleSymbolGetCard(
   args: unknown,
-): Promise<SymbolGetCardResponse> {
+): Promise<SymbolGetCardResponse | NotModifiedResponse> {
   const request = SymbolGetCardRequestSchema.parse(args);
   const { repoId, symbolId, ifNoneMatch } = request;
+
+  recordToolTrace({
+    repoId,
+    taskType: "card",
+    tool: "symbol.getCard",
+    symbolId,
+  });
+
   consumePrefetchedKey(repoId, `card:${symbolId}`);
 
   const config = loadConfig();
@@ -432,7 +458,7 @@ export async function handleSymbolGetCard(
           etag: cachedETag,
           ledgerVersion: latestVersion.version_id,
         };
-        return notModified as any;
+        return notModified;
       }
       const cardWithETag: CardWithETag = {
         ...normalizedCachedCard,
@@ -606,7 +632,7 @@ export async function handleSymbolGetCard(
       etag,
       ledgerVersion: latestVersion?.version_id ?? "current",
     };
-    return notModified as any;
+    return notModified;
   }
 
   const cardWithETag: CardWithETag = {
@@ -620,7 +646,12 @@ export async function handleSymbolGetCard(
       detailLevel: "full",
     };
     delete cacheCard.etag;
-    await symbolCardCache.set(repoId, symbolId, latestVersion.version_id, cacheCard);
+    await symbolCardCache.set(
+      repoId,
+      symbolId,
+      latestVersion.version_id,
+      cacheCard,
+    );
   }
 
   return { card: cardWithETag };

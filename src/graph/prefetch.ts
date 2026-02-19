@@ -1,7 +1,21 @@
 import { cpus, loadavg, platform } from "os";
 import * as db from "../db/queries.js";
+import {
+  predictNextToolFromRecent,
+  computePriorityBoost,
+  recordStrategyMetrics,
+  recordWastedPrefetch,
+  getAllStrategyMetrics,
+  getCurrentModel,
+  getGatingConfig,
+  type StrategyMetrics,
+} from "./prefetch-model.js";
 
-type PrefetchTaskType = "slice-frontier" | "file-open" | "delta-blast" | "startup-warm";
+type PrefetchTaskType =
+  | "slice-frontier"
+  | "file-open"
+  | "delta-blast"
+  | "startup-warm";
 
 interface PrefetchTask {
   repoId: string;
@@ -9,6 +23,7 @@ interface PrefetchTask {
   priority: number;
   type: PrefetchTaskType;
   run: () => Promise<void>;
+  modelBoosted?: boolean;
 }
 
 export interface PrefetchStats {
@@ -24,6 +39,9 @@ export interface PrefetchStats {
   wasteRate: number;
   avgLatencyReductionMs: number;
   lastRunAt: string | null;
+  modelEnabled: boolean;
+  strategyMetrics: StrategyMetrics[];
+  deterministicFallback: boolean;
 }
 
 const queue: PrefetchTask[] = [];
@@ -38,6 +56,7 @@ function getOrCreateStats(repoId: string): PrefetchStats {
   if (existing) {
     return existing;
   }
+  const gating = getGatingConfig();
   const initial: PrefetchStats = {
     enabled,
     queueDepth: 0,
@@ -51,6 +70,9 @@ function getOrCreateStats(repoId: string): PrefetchStats {
     wasteRate: 0,
     avgLatencyReductionMs: 0,
     lastRunAt: null,
+    modelEnabled: gating.enabled,
+    strategyMetrics: [],
+    deterministicFallback: !gating.enabled || getCurrentModel() === null,
   };
   statsByRepo.set(repoId, initial);
   return initial;
@@ -60,7 +82,9 @@ function updateRates(stats: PrefetchStats): void {
   const total = stats.cacheHits + stats.cacheMisses;
   stats.hitRate = total > 0 ? stats.cacheHits / total : 0;
   stats.wasteRate =
-    stats.completed > 0 ? stats.wastedPrefetch / Math.max(1, stats.completed) : 0;
+    stats.completed > 0
+      ? stats.wastedPrefetch / Math.max(1, stats.completed)
+      : 0;
 }
 
 function currentCpuLoadRatio(): number {
@@ -82,7 +106,15 @@ async function runQueue(): Promise<void> {
   }
   running = true;
   try {
+    const predictedTool = predictNextToolFromRecent();
     while (queue.length > 0) {
+      for (const task of queue) {
+        const boost = computePriorityBoost(task.type, predictedTool);
+        if (boost > 0 && !task.modelBoosted) {
+          task.priority += boost;
+          task.modelBoosted = true;
+        }
+      }
       queue.sort((a, b) => b.priority - a.priority);
       const task = queue.shift();
       if (!task) break;
@@ -93,6 +125,7 @@ async function runQueue(): Promise<void> {
 
       if (shouldYieldForLoad()) {
         stats.cancelled += 1;
+        recordWastedPrefetch(task.type);
         stats.running = false;
         continue;
       }
@@ -103,6 +136,7 @@ async function runQueue(): Promise<void> {
         stats.lastRunAt = new Date().toISOString();
       } catch {
         stats.cancelled += 1;
+        recordWastedPrefetch(task.type);
       } finally {
         stats.running = false;
       }
@@ -113,6 +147,11 @@ async function runQueue(): Promise<void> {
       stats.queueDepth = queue.length;
       stats.running = false;
       updateRates(stats);
+      stats.strategyMetrics = getAllStrategyMetrics();
+      const gating = getGatingConfig();
+      stats.modelEnabled = gating.enabled;
+      stats.deterministicFallback =
+        !gating.enabled || getCurrentModel() === null;
     }
   }
 }
@@ -144,8 +183,14 @@ export function enqueuePrefetchTask(task: PrefetchTask): void {
   void runQueue();
 }
 
-export function prefetchSliceFrontier(repoId: string, seedSymbolIds: string[]): void {
-  const budgetCap = Math.max(1, Math.floor(seedSymbolIds.length * (maxBudgetPercent / 100)));
+export function prefetchSliceFrontier(
+  repoId: string,
+  seedSymbolIds: string[],
+): void {
+  const budgetCap = Math.max(
+    1,
+    Math.floor(seedSymbolIds.length * (maxBudgetPercent / 100)),
+  );
   const seeds = seedSymbolIds.slice(0, budgetCap);
   enqueuePrefetchTask({
     repoId,
@@ -182,8 +227,14 @@ export function prefetchFileExports(repoId: string, filePath: string): void {
   });
 }
 
-export function prefetchDeltaBlastRadius(repoId: string, symbolIds: string[]): void {
-  const seeds = symbolIds.slice(0, Math.max(1, Math.floor(symbolIds.length * (maxBudgetPercent / 100))));
+export function prefetchDeltaBlastRadius(
+  repoId: string,
+  symbolIds: string[],
+): void {
+  const seeds = symbolIds.slice(
+    0,
+    Math.max(1, Math.floor(symbolIds.length * (maxBudgetPercent / 100))),
+  );
   enqueuePrefetchTask({
     repoId,
     key: `delta-blast:${seeds.join(",")}`,
@@ -212,21 +263,32 @@ export function warmPrefetchOnServeStart(repoId: string, topN = 50): void {
   });
 }
 
-export function consumePrefetchedKey(repoId: string, key: string): boolean {
+export function consumePrefetchedKey(
+  repoId: string,
+  key: string,
+  strategy?: string,
+): boolean {
   const stats = getOrCreateStats(repoId);
   const map = prefetchedKeysByRepo.get(repoId);
   const ts = map?.get(key);
+  const latencyReductionMs = 35;
   if (typeof ts === "number") {
     map?.delete(key);
     stats.cacheHits += 1;
     const prev = stats.avgLatencyReductionMs;
     stats.avgLatencyReductionMs =
-      prev === 0 ? 35 : (prev * 0.8 + 35 * 0.2);
+      prev === 0 ? latencyReductionMs : prev * 0.8 + latencyReductionMs * 0.2;
     updateRates(stats);
+    if (strategy) {
+      recordStrategyMetrics(strategy, true, latencyReductionMs);
+    }
     return true;
   }
   stats.cacheMisses += 1;
   updateRates(stats);
+  if (strategy) {
+    recordStrategyMetrics(strategy, false, 0);
+  }
   return false;
 }
 
@@ -244,5 +306,9 @@ export function getPrefetchStats(repoId: string): PrefetchStats {
     stats.wastedPrefetch = stale;
     updateRates(stats);
   }
+  stats.strategyMetrics = getAllStrategyMetrics();
+  const gating = getGatingConfig();
+  stats.modelEnabled = gating.enabled;
+  stats.deterministicFallback = !gating.enabled || getCurrentModel() === null;
   return { ...stats };
 }

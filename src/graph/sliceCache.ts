@@ -1,4 +1,4 @@
-import type { GraphSlice } from "../mcp/types.js";
+import type { GraphSlice, CardDetailLevel } from "../mcp/types.js";
 import type { RepoId, VersionId, SymbolId } from "../db/schema.js";
 
 interface SliceBuildRequest {
@@ -10,7 +10,7 @@ interface SliceBuildRequest {
   editedFiles?: string[];
   entrySymbols?: SymbolId[];
   knownCardEtags?: Record<SymbolId, string>;
-  cardDetail?: "compact" | "full";
+  cardDetail?: CardDetailLevel;
   budget?: {
     maxCards?: number;
     maxEstimatedTokens?: number;
@@ -77,7 +77,7 @@ export function getSliceCacheKey(request: SliceBuildRequest): string {
     entrySymbols: request.entrySymbols
       ? [...request.entrySymbols].sort()
       : null,
-    cardDetail: request.cardDetail ?? "compact",
+    cardDetail: request.cardDetail ?? "deps",
     budget: request.budget ?? null,
   };
   return `${request.repoId}:${request.versionId}:${stableStringify(context)}`;

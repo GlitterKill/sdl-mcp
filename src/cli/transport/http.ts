@@ -494,6 +494,13 @@ export async function setupHttpTransport(
     console.error(`  - SSE endpoint: http://${host}:${port}/sse`);
     console.error(`  - Health check: http://${host}:${port}/health`);
     console.error(`  - Graph UI: http://${host}:${port}/ui/graph`);
+    if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") {
+      console.error(
+        `\n  WARNING: Server is listening on ${host} over plaintext HTTP.` +
+        `\n  Traffic (including code content) is NOT encrypted.` +
+        `\n  Use localhost or add a TLS reverse proxy for production use.\n`,
+      );
+    }
   });
 
   return new Promise((resolve_) => {

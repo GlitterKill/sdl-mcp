@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, statSync } from "fs";
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { Range } from "../mcp/types.js";
 import { getSymbol, getFile, getRepo } from "../db/queries.js";
@@ -10,7 +10,9 @@ import {
   DEFAULT_CONTEXT_LINES,
   DEFAULT_MAX_LINES_HOTPATH,
   DEFAULT_MAX_TOKENS_HOTPATH,
+  MAX_FILE_BYTES,
 } from "../config/constants.js";
+import { logger } from "../util/logger.js";
 
 const tsParser = new Parser();
 const tsxParser = new Parser();
@@ -56,9 +58,10 @@ function parseFile(content: string, extension: string): Parser.Tree | null {
 
     return tree;
   } catch (error) {
-    process.stderr.write(
-      `[sdl-mcp] Failed to parse file for hot path (extension: ${extension}): ${error instanceof Error ? error.message : String(error)}\n`,
-    );
+    logger.warn("Failed to parse file for hot path", {
+      extension,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 }
@@ -76,14 +79,11 @@ function findLinesMatchingIdentifiers(
   const identifierSet = new Set<string>(identifiersToFind);
 
   function matchesExactIdentifier(text: string): boolean {
-    if (identifierSet.has(text)) {
-      return true;
-    }
-    return false;
+    return identifierSet.has(text);
   }
 
   function matchesAsMemberExpression(text: string): boolean {
-    const parts = text.split(".");
+    const parts = text.split(/[.?\[\]]+/).filter(Boolean);
     return parts.some((part) => identifierSet.has(part));
   }
 
@@ -207,9 +207,10 @@ function buildHotPathExcerpt(
   const truncated = resultLines.length < excerptLines.length;
 
   const startLine = resultLines.length > 0 ? excerptLineNumbers[0] + 1 : 1;
+  const lastIndex = Math.min(resultLines.length - 1, excerptLineNumbers.length - 1);
   const endLine =
     resultLines.length > 0
-      ? excerptLineNumbers[resultLines.length - 1] + 1
+      ? excerptLineNumbers[lastIndex] + 1
       : startLine;
 
   const actualRange: Range = {
@@ -246,7 +247,26 @@ export function extractHotPath(
   const filePath = getAbsolutePathFromRepoRoot(repo.root_path, file.rel_path);
   const extension = file.rel_path.split(".").pop() || "";
 
-  const content = readFileSync(filePath, "utf-8");
+  let content: string;
+  try {
+    const fileStat = statSync(filePath);
+    if (fileStat.size > MAX_FILE_BYTES) {
+      logger.warn("File exceeds size limit for hot path extraction", {
+        filePath: file.rel_path,
+        fileSize: fileStat.size,
+        maxFileBytes: MAX_FILE_BYTES,
+      });
+      return null;
+    }
+    content = readFileSync(filePath, "utf-8");
+  } catch (error) {
+    logger.warn("Failed to read file for hot path extraction", {
+      filePath: file.rel_path,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+
   const tree = parseFile(content, `.${extension}`);
 
   if (!tree) {

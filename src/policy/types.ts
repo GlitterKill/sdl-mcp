@@ -3,6 +3,7 @@ import type {
   GraphSlice,
   DeltaPack,
   SliceBudget,
+  EvidenceValue,
 } from "../mcp/types.js";
 import type { SymbolRow } from "../db/schema.js";
 
@@ -36,7 +37,7 @@ export interface PolicyRequestContext {
 
 export interface PolicyEvidence {
   type: string;
-  value: any;
+  value: EvidenceValue;
   reason: string;
 }
 

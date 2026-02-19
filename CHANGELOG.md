@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - None yet.
 
+## [0.6.7] - 2026-02-19
+
+### Added
+
+- New MCP feedback tools: `sdl.agent.feedback` and `sdl.agent.feedback.query` for capturing and querying symbol-level usefulness signals from agent runs.
+- Agent feedback persistence with migration `0017_agent_feedback.sql`, schema/query support, and symbol feedback weight updates for offline tuning inputs.
+- v0.6.7 benchmark and validation coverage, including new benchmark scripts and tests for ANN retrieval, lazy graph loading, beam-parallel behavior, and slice regressions.
+
+### Changed
+
+- Refactored slice construction into focused `src/graph/slice/*` modules (start-node resolution, beam search, serialization, and truncation) to improve maintainability and execution behavior.
+- Expanded MCP tooling and response typing around slice/delta/repo flows, including richer error handling and stronger boundary validation for code-window and wire-format paths.
+- Updated benchmark/config surfaces (`.benchmark/baseline.json`, `config/benchmark.config.json`, `config/sdlmcp.config.schema.json`) for the v0.6.7 baseline and new runtime options.
+
 ## [0.6.6] - 2026-02-18
 
 ### Added
@@ -312,6 +326,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.6.7]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.7
 [0.6.6]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.6
 [0.6.5]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.5
 [0.6.4]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.4

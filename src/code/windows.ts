@@ -1,10 +1,12 @@
-import { readFileSync } from "fs";
+import { readFileSync, statSync } from "fs";
 import { join } from "path";
 import * as db from "../db/queries.js";
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { CodeWindowResponse, Range } from "../mcp/types.js";
 import { normalizePath } from "../util/paths.js";
 import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
+import { MAX_FILE_BYTES } from "../config/constants.js";
+import { logger } from "../util/logger.js";
 
 export function extractCodeWindow(
   repoId: RepoId,
@@ -20,7 +22,27 @@ export function extractCodeWindow(
   if (!repo) return null;
 
   const filePath = join(repo.root_path, file.rel_path);
-  const fileContent = readFileSync(filePath, "utf-8");
+
+  let fileContent: string;
+  try {
+    const fileStat = statSync(filePath);
+    if (fileStat.size > MAX_FILE_BYTES) {
+      logger.warn("File exceeds size limit for code window", {
+        filePath: file.rel_path,
+        fileSize: fileStat.size,
+        maxFileBytes: MAX_FILE_BYTES,
+      });
+      return null;
+    }
+    fileContent = readFileSync(filePath, "utf-8");
+  } catch (error) {
+    logger.warn("Failed to read file for code window", {
+      filePath: file.rel_path,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+
   const lines = fileContent.split("\n");
 
   const startLine = symbol.range_start_line;
@@ -54,19 +76,35 @@ export function extractCodeWindow(
   };
 }
 
+const identifierRegexCache = new Map<string, RegExp>();
+
 export function identifiersExistInWindow(
   code: string,
   identifiers: string[],
 ): boolean {
   if (identifiers.length === 0) return false;
 
-  const escapedIdentifiers = identifiers.map((id) =>
-    id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-  );
-  const regex = new RegExp(
-    `(?<![_\\w$])(${escapedIdentifiers.join("|")})(?![_\\w$])`,
-    "g",
-  );
+  const cacheKey = identifiers.slice().sort().join("|");
+  let regex = identifierRegexCache.get(cacheKey);
+  if (!regex) {
+    const escapedIdentifiers = identifiers.map((id) =>
+      id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    );
+    regex = new RegExp(
+      `(?<![_\\w$])(${escapedIdentifiers.join("|")})(?![_\\w$])`,
+      "g",
+    );
+    identifierRegexCache.set(cacheKey, regex);
+    if (identifierRegexCache.size > 500) {
+      const keysToDelete = Array.from(identifierRegexCache.keys()).slice(0, 100);
+      for (const key of keysToDelete) {
+        identifierRegexCache.delete(key);
+      }
+    }
+  }
+
+  // Reset lastIndex for global regex reuse
+  regex.lastIndex = 0;
   const matches = code.match(regex);
 
   if (!matches) return false;
@@ -92,7 +130,36 @@ export function extractWindow(
   maxTokens: number,
 ): ExtractWindowResult {
   const resolvedPath = normalizePath(filePath);
-  const content = readFileSync(resolvedPath, "utf-8");
+
+  let content: string;
+  try {
+    const fileStat = statSync(resolvedPath);
+    if (fileStat.size > MAX_FILE_BYTES) {
+      return {
+        code: "",
+        actualRange: { startLine: range.startLine, startCol: 0, endLine: range.startLine, endCol: 0 },
+        estimatedTokens: 0,
+        originalLines: 0,
+        originalTokens: 0,
+        truncated: true,
+      };
+    }
+    content = readFileSync(resolvedPath, "utf-8");
+  } catch (error) {
+    logger.warn("Failed to read file for extract window", {
+      filePath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      code: "",
+      actualRange: { startLine: range.startLine, startCol: 0, endLine: range.startLine, endCol: 0 },
+      estimatedTokens: 0,
+      originalLines: 0,
+      originalTokens: 0,
+      truncated: true,
+    };
+  }
+
   const normalizedContent = normalizeLineEndings(content);
   const lines = splitLines(normalizedContent);
 
@@ -223,7 +290,7 @@ export function centerOnSymbol(
     actualRange: {
       startLine: startLine + 1,
       startCol: 0,
-      endLine: endLine,
+      endLine: startLine + selectedLines.length,
       endCol: selectedLines[selectedLines.length - 1]?.length ?? 0,
     },
     estimatedTokens,

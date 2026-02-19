@@ -1,23 +1,391 @@
 {
-  "timestamp": "2026-02-13T21:39:42.792Z",
+  "timestamp": "2026-02-18T22:34:05.599Z",
   "repoId": "my-repo",
   "repoPath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp",
   "metrics": {
-    "indexTimePerFile": 292.02046625,
-    "indexTimePerSymbol": 8.502870718835306,
-    "symbolsPerFile": 34.34375,
-    "edgesPerSymbol": 40.64112829845314,
-    "graphConnectivity": 0.8926296633303002,
-    "exportedSymbolRatio": 0.4227479526842584,
-    "sliceBuildTimeMs": 587.7168999999994,
-    "avgSkeletonTimeMs": 0.7885000000018269,
+    "indexTimePerFile": 364.75053736842113,
+    "indexTimePerSymbol": 9.948693956359463,
+    "symbolsPerFile": 36.66315789473684,
+    "edgesPerSymbol": 46.29859316681022,
+    "graphConnectivity": 0.8937697387309791,
+    "exportedSymbolRatio": 0.4596612115991961,
+    "sliceBuildTimeMs": 867.5422999999719,
+    "avgSkeletonTimeMs": 0.8581384615345786,
     "avgCardTokens": 180.5,
     "avgSkeletonTokens": 9.153846153846153,
-    "functionMethodRatio": 0.2251137397634213,
-    "avgDepsPerSymbol": 40.64112829845314,
-    "callEdgeCount": 6479,
-    "importEdgeCount": 216844,
-    "totalSymbols": 5495,
-    "totalFiles": 160
+    "functionMethodRatio": 0.2233706574791846,
+    "avgDepsPerSymbol": 46.29859316681022,
+    "callEdgeCount": 8223,
+    "importEdgeCount": 314293,
+    "totalSymbols": 6966,
+    "totalFiles": 190,
+    "summaryGenerationMs": 2.1979999999748543,
+    "summaryTokens": 522,
+    "healthScore": 91,
+    "watcherEventsProcessed": 0,
+    "watcherErrors": 0
+  },
+  "thresholdResult": {
+    "passed": false,
+    "evaluations": [
+      {
+        "metricName": "indexTimePerFile",
+        "category": "indexing",
+        "currentValue": 364.75053736842113,
+        "baselineValue": 292.02046625,
+        "threshold": {
+          "maxMs": 200,
+          "trend": "lower-is-better",
+          "allowableIncreasePercent": 10
+        },
+        "passed": false,
+        "delta": 72.73007111842111,
+        "deltaPercent": 24.905812956327715,
+        "message": "Increased by 24.9% (threshold: 10%)"
+      },
+      {
+        "metricName": "indexTimePerSymbol",
+        "category": "indexing",
+        "currentValue": 9.948693956359463,
+        "baselineValue": 8.502870718835306,
+        "threshold": {
+          "maxMs": 15,
+          "trend": "lower-is-better",
+          "allowableIncreasePercent": 60
+        },
+        "passed": true,
+        "delta": 1.4458232375241575,
+        "deltaPercent": 17.00394237820661,
+        "message": "Within tolerance (17.0% increase)"
+      },
+      {
+        "metricName": "symbolsPerFile",
+        "category": "quality",
+        "currentValue": 36.66315789473684,
+        "baselineValue": 34.34375,
+        "threshold": {
+          "minValue": 5,
+          "trend": "higher-is-better",
+          "allowableDecreasePercent": 5
+        },
+        "passed": true,
+        "delta": 2.319407894736841,
+        "deltaPercent": 6.753507973756043,
+        "message": "Within tolerance (6.8% change)"
+      },
+      {
+        "metricName": "edgesPerSymbol",
+        "category": "quality",
+        "currentValue": 46.29859316681022,
+        "baselineValue": 40.64112829845314,
+        "threshold": {
+          "minValue": 1,
+          "trend": "higher-is-better",
+          "allowableDecreasePercent": 5
+        },
+        "passed": true,
+        "delta": 5.657464868357081,
+        "deltaPercent": 13.920540854109142,
+        "message": "Within tolerance (13.9% change)"
+      },
+      {
+        "metricName": "graphConnectivity",
+        "category": "quality",
+        "currentValue": 0.8937697387309791,
+        "baselineValue": 0.8926296633303002,
+        "threshold": {
+          "minValue": 0.3,
+          "trend": "higher-is-better",
+          "allowableDecreasePercent": 5
+        },
+        "passed": true,
+        "delta": 0.0011400754006788416,
+        "deltaPercent": 0.12772098525443903,
+        "message": "Within tolerance (0.1% change)"
+      },
+      {
+        "metricName": "exportedSymbolRatio",
+        "category": "quality",
+        "currentValue": 0.4596612115991961,
+        "baselineValue": 0.4227479526842584,
+        "threshold": {
+          "minValue": 0.2,
+          "trend": "higher-is-better",
+          "allowableDecreasePercent": 10
+        },
+        "passed": true,
+        "delta": 0.036913258914937686,
+        "deltaPercent": 8.73174161590971,
+        "message": "Within tolerance (8.7% change)"
+      },
+      {
+        "metricName": "sliceBuildTimeMs",
+        "category": "performance",
+        "currentValue": 867.5422999999719,
+        "baselineValue": 587.7168999999994,
+        "threshold": {
+          "maxMs": 200,
+          "trend": "lower-is-better",
+          "allowableIncreasePercent": 125
+        },
+        "passed": true,
+        "delta": 279.82539999997243,
+        "deltaPercent": 47.61227727158649,
+        "message": "Within tolerance (47.6% increase)"
+      },
+      {
+        "metricName": "avgSkeletonTimeMs",
+        "category": "performance",
+        "currentValue": 0.8581384615345786,
+        "baselineValue": 0.7885000000018269,
+        "threshold": {
+          "maxMs": 5,
+          "trend": "lower-is-better",
+          "allowableIncreasePercent": 30
+        },
+        "passed": true,
+        "delta": 0.06963846153275177,
+        "deltaPercent": 8.831764303435692,
+        "message": "Within tolerance (8.8% increase)"
+      },
+      {
+        "metricName": "avgCardTokens",
+        "category": "tokenEfficiency",
+        "currentValue": 180.5,
+        "baselineValue": 180.5,
+        "threshold": {
+          "maxTokens": 250,
+          "trend": "lower-is-better",
+          "allowableIncreasePercent": 10
+        },
+        "passed": true,
+        "delta": 0,
+        "deltaPercent": 0,
+        "message": "Within tolerance (0.0% increase)"
+      },
+      {
+        "metricName": "avgSkeletonTokens",
+        "category": "tokenEfficiency",
+        "currentValue": 9.153846153846153,
+        "baselineValue": 9.153846153846153,
+        "threshold": {
+          "maxTokens": 200,
+          "trend": "lower-is-better",
+          "allowableIncreasePercent": 10
+        },
+        "passed": true,
+        "delta": 0,
+        "deltaPercent": 0,
+        "message": "Within tolerance (0.0% increase)"
+      }
+    ],
+    "summary": {
+      "total": 10,
+      "passed": 9,
+      "failed": 1,
+      "warnings": 0
+    }
+  },
+  "regressionReport": {
+    "summary": {
+      "passed": false,
+      "totalMetrics": 10,
+      "improved": 4,
+      "degraded": 4,
+      "neutral": 2,
+      "unknown": 0
+    },
+    "deltas": [
+      {
+        "metricName": "indexTimePerFile",
+        "category": "indexing",
+        "currentValue": 364.75053736842113,
+        "baselineValue": 292.02046625,
+        "delta": 72.73007111842111,
+        "deltaPercent": 24.905812956327715,
+        "trend": "degraded",
+        "impact": "high",
+        "description": "Increased by 24.9% (threshold: 10%)"
+      },
+      {
+        "metricName": "indexTimePerSymbol",
+        "category": "indexing",
+        "currentValue": 9.948693956359463,
+        "baselineValue": 8.502870718835306,
+        "delta": 1.4458232375241575,
+        "deltaPercent": 17.00394237820661,
+        "trend": "degraded",
+        "impact": "medium",
+        "description": "degraded by 17.0% ↑"
+      },
+      {
+        "metricName": "symbolsPerFile",
+        "category": "quality",
+        "currentValue": 36.66315789473684,
+        "baselineValue": 34.34375,
+        "delta": 2.319407894736841,
+        "deltaPercent": 6.753507973756043,
+        "trend": "improved",
+        "impact": "low",
+        "description": "improved by 6.8% ↓"
+      },
+      {
+        "metricName": "edgesPerSymbol",
+        "category": "quality",
+        "currentValue": 46.29859316681022,
+        "baselineValue": 40.64112829845314,
+        "delta": 5.657464868357081,
+        "deltaPercent": 13.920540854109142,
+        "trend": "improved",
+        "impact": "medium",
+        "description": "improved by 13.9% ↓"
+      },
+      {
+        "metricName": "graphConnectivity",
+        "category": "quality",
+        "currentValue": 0.8937697387309791,
+        "baselineValue": 0.8926296633303002,
+        "delta": 0.0011400754006788416,
+        "deltaPercent": 0.12772098525443903,
+        "trend": "improved",
+        "impact": "none",
+        "description": "0.89 (baseline: 0.89)"
+      },
+      {
+        "metricName": "exportedSymbolRatio",
+        "category": "quality",
+        "currentValue": 0.4596612115991961,
+        "baselineValue": 0.4227479526842584,
+        "delta": 0.036913258914937686,
+        "deltaPercent": 8.73174161590971,
+        "trend": "improved",
+        "impact": "low",
+        "description": "improved by 8.7% ↓"
+      },
+      {
+        "metricName": "sliceBuildTimeMs",
+        "category": "performance",
+        "currentValue": 867.5422999999719,
+        "baselineValue": 587.7168999999994,
+        "delta": 279.82539999997243,
+        "deltaPercent": 47.61227727158649,
+        "trend": "degraded",
+        "impact": "high",
+        "description": "degraded by 47.6% ↑"
+      },
+      {
+        "metricName": "avgSkeletonTimeMs",
+        "category": "performance",
+        "currentValue": 0.8581384615345786,
+        "baselineValue": 0.7885000000018269,
+        "delta": 0.06963846153275177,
+        "deltaPercent": 8.831764303435692,
+        "trend": "degraded",
+        "impact": "low",
+        "description": "degraded by 8.8% ↑"
+      },
+      {
+        "metricName": "avgCardTokens",
+        "category": "tokenEfficiency",
+        "currentValue": 180.5,
+        "baselineValue": 180.5,
+        "delta": 0,
+        "deltaPercent": 0,
+        "trend": "neutral",
+        "impact": "none",
+        "description": "180.50 (baseline: 180.50)"
+      },
+      {
+        "metricName": "avgSkeletonTokens",
+        "category": "tokenEfficiency",
+        "currentValue": 9.153846153846153,
+        "baselineValue": 9.153846153846153,
+        "delta": 0,
+        "deltaPercent": 0,
+        "trend": "neutral",
+        "impact": "none",
+        "description": "9.15 (baseline: 9.15)"
+      }
+    ],
+    "failingThresholds": [
+      "indexing.indexTimePerFile"
+    ],
+    "recommendations": [
+      "CRITICAL: 2 metrics have high-impact degradation:",
+      "  - indexTimePerFile: Increased by 24.9% (threshold: 10%)",
+      "  - sliceBuildTimeMs: degraded by 47.6% ↑",
+      "WARNING: 1 metrics have medium-impact degradation:",
+      "  - indexTimePerSymbol: degraded by 17.0% ↑",
+      "Indexing performance issues detected. Consider:",
+      "  - Increasing indexing concurrency",
+      "  - Adding large generated files to ignore list",
+      "  - Reducing maxFileBytes threshold",
+      "  - Checking for tree-sitter query performance issues"
+    ]
+  },
+  "config": {
+    "thresholdPath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\config\\benchmark.config.json",
+    "baselinePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\.benchmark\\baseline.json",
+    "lockPath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\scripts\\benchmark\\phase-a-benchmark-lock.json",
+    "lockedRepos": [
+      {
+        "repoId": "zod-oss",
+        "cloneUrl": "https://github.com/colinhacks/zod.git",
+        "ref": "c7805073fef5b6b8857307c3d4b3597a70613bc2",
+        "languageTier": "tier1",
+        "languageFamily": "typescript"
+      },
+      {
+        "repoId": "flask-oss",
+        "cloneUrl": "https://github.com/pallets/flask.git",
+        "ref": "d98eb69a354158252854ed4a5c9778e03d089191",
+        "languageTier": "tier2",
+        "languageFamily": "python"
+      },
+      {
+        "repoId": "ripgrep-oss",
+        "cloneUrl": "https://github.com/BurntSushi/ripgrep.git",
+        "ref": "9b84e154c8e404f4c40f6f4e4c674ea02e77324a",
+        "languageTier": "tier3",
+        "languageFamily": "rust"
+      }
+    ],
+    "smoothing": {
+      "warmupRuns": 2,
+      "sampleRuns": 3,
+      "outlierMethod": "iqr",
+      "iqrMultiplier": 1.5
+    }
+  },
+  "edgeAccuracy": {
+    "baselinePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\scripts\\benchmark\\edge-accuracy-baseline.json",
+    "passed": true,
+    "scores": [
+      {
+        "language": "go",
+        "cases": 4,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1,
+        "strategyAccuracy": 1
+      },
+      {
+        "language": "java",
+        "cases": 4,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1,
+        "strategyAccuracy": 1
+      },
+      {
+        "language": "python",
+        "cases": 4,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1,
+        "strategyAccuracy": 1
+      }
+    ],
+    "failures": []
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "Symbol Delta Ledger MCP Server - Cards-first code context for TypeScript/JavaScript repositories",
   "type": "module",
   "main": "dist/main.js",
@@ -51,6 +51,9 @@
     "benchmark:sweep": "tsx scripts/budget-sensitivity-sweep.ts",
     "benchmark:record-trace": "tsx scripts/record-trace.ts",
     "benchmark:setup-external": "tsx scripts/setup-external-benchmark-repos.ts",
+    "benchmark:v067": "tsx scripts/benchmark/v067-baseline.ts",
+    "benchmark:v067:check": "tsx scripts/benchmark/v067-baseline.ts --check devdocs/benchmarks/v067-baseline.json",
+    "benchmark:v067:save": "tsx scripts/benchmark/v067-baseline.ts --out devdocs/benchmarks/v067-baseline.json",
     "package:exe": "node scripts/build-exe.js",
     "prepack": "npm run build:runtime",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck"
@@ -71,6 +74,9 @@
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-trace-base": "^1.30.0",
+    "@opentelemetry/sdk-trace-node": "^1.30.0",
     "better-sqlite3": "^11.0.0",
     "fast-glob": "^3.3.3",
     "tree-sitter": "^0.21.1",
@@ -94,11 +100,14 @@
     "onnxruntime-node": "^1.22.0"
   },
   "devDependencies": {
+    "@opentelemetry/sdk-trace-web": "^1.30.0",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^8.0.0",
+    "eslint-plugin-import": "^2.32.0",
+    "fast-check": "^3.23.2",
     "prettier": "^3.0.0",
     "tsx": "^4.0.0"
   },

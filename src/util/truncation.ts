@@ -114,8 +114,8 @@ export function applyTokenTruncation(
 
   const truncateAt = options.truncateAt ?? "end";
   const lines = text.split("\n");
-  const avgTokensPerLine = estimatedTokens / lines.length;
-  const maxLines = Math.floor(maxTokens / avgTokensPerLine);
+  const avgTokensPerLine = lines.length > 0 ? estimatedTokens / lines.length : 1;
+  const maxLines = avgTokensPerLine > 0 ? Math.floor(maxTokens / avgTokensPerLine) : lines.length;
 
   let truncatedLines: string[];
   let droppedCount: number;
@@ -311,10 +311,11 @@ export function truncateRange(
     const middleEnd = range.endLine - lastCount;
     const middleCount = maxLines - firstCount - lastCount;
 
+    const computedEnd = Math.min(middleStart + middleCount - 1, middleEnd);
     truncatedRange = {
       startLine: middleStart,
       startCol: 0,
-      endLine: Math.min(middleStart + middleCount - 1, middleEnd),
+      endLine: Math.max(middleStart, computedEnd),
       endCol: 0,
     };
     droppedCount = lines - maxLines;

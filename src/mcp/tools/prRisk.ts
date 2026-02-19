@@ -1,8 +1,13 @@
-import {
-  computeDeltaWithTiers,
-} from "../../delta/diff.js";
+import { computeDeltaWithTiers } from "../../delta/diff.js";
 import { computeBlastRadius } from "../../delta/blastRadius.js";
-import { loadGraphForRepo } from "../../graph/buildGraph.js";
+import {
+  loadGraphForRepo,
+  loadNeighborhood,
+  logGraphTelemetry,
+  getLastLoadStats,
+  LAZY_GRAPH_LOADING_DEFAULT_HOPS,
+  LAZY_GRAPH_LOADING_MAX_SYMBOLS,
+} from "../../graph/buildGraph.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyEngine } from "../../policy/engine.js";
 import { logger } from "../../util/logger.js";
@@ -32,9 +37,26 @@ export async function handlePRRiskAnalysis(args: unknown) {
     throw new Error(`Delta pack error: ${message}`);
   }
 
-  const graph = loadGraphForRepo(validated.repoId);
-
   const changedSymbolIds = delta.changedSymbols.map((c) => c.symbolId);
+
+  let graph;
+  if (changedSymbolIds.length > 0 && changedSymbolIds.length < 500) {
+    graph = loadNeighborhood(validated.repoId, changedSymbolIds, {
+      maxHops: LAZY_GRAPH_LOADING_DEFAULT_HOPS,
+      direction: "both",
+      maxSymbols: LAZY_GRAPH_LOADING_MAX_SYMBOLS,
+    });
+  } else {
+    graph = loadGraphForRepo(validated.repoId);
+  }
+
+  const loadStats = getLastLoadStats();
+  if (loadStats) {
+    logGraphTelemetry({
+      repoId: validated.repoId,
+      ...loadStats,
+    });
+  }
 
   const blastRadiusItems = computeBlastRadius(changedSymbolIds, graph, {
     maxHops: 3,

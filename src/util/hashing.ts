@@ -34,6 +34,19 @@ function normalizeObject(obj: unknown): NormalizedValue {
   }
 
   if (typeof obj === "object" && obj !== null) {
+    if (obj instanceof Date) {
+      return obj.toISOString();
+    }
+    if (obj instanceof Set) {
+      return Array.from(obj).map(normalizeObject);
+    }
+    if (obj instanceof Map) {
+      const entries: Record<string, NormalizedValue> = {};
+      for (const [key, value] of obj) {
+        entries[String(key)] = normalizeObject(value);
+      }
+      return entries;
+    }
     const normalized: Record<string, NormalizedValue> = {};
     const sortedKeys = Object.keys(obj as Record<string, unknown>).sort();
 

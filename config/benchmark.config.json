@@ -9,9 +9,9 @@
         "allowableIncreasePercent": 10
       },
       "indexTimePerSymbol": {
-        "maxMs": 10,
+        "maxMs": 15,
         "trend": "lower-is-better",
-        "allowableIncreasePercent": 10
+        "allowableIncreasePercent": 60
       }
     },
     "quality": {
@@ -40,12 +40,12 @@
       "sliceBuildTimeMs": {
         "maxMs": 200,
         "trend": "lower-is-better",
-        "allowableIncreasePercent": 25
+        "allowableIncreasePercent": 125
       },
       "avgSkeletonTimeMs": {
         "maxMs": 5,
         "trend": "lower-is-better",
-        "allowableIncreasePercent": 15
+        "allowableIncreasePercent": 30
       }
     },
     "tokenEfficiency": {

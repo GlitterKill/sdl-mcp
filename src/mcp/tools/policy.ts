@@ -7,6 +7,7 @@ import {
 import * as db from "../../db/queries.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
+import { DatabaseError } from "../errors.js";
 
 /**
  * Handles policy retrieval requests.
@@ -24,7 +25,7 @@ export async function handlePolicyGet(
 
   const repo = db.getRepo(repoId);
   if (!repo) {
-    throw new Error(`Repository ${repoId} not found`);
+    throw new DatabaseError(`Repository ${repoId} not found`);
   }
 
   const appConfig = loadConfig();
@@ -59,7 +60,7 @@ export async function handlePolicySet(
 
   const repo = db.getRepo(repoId);
   if (!repo) {
-    throw new Error(`Repository ${repoId} not found`);
+    throw new DatabaseError(`Repository ${repoId} not found`);
   }
 
   const appConfig = loadConfig();

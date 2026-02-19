@@ -25,12 +25,30 @@ export function getDb(dbPath?: string): Database.Database {
     }
   }
 
-  const db = new Database(path);
+  let db: Database.Database;
+  try {
+    db = new Database(path);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Failed to open database at ${path}: ${msg}. ` +
+      `Check file permissions, disk space, and that the file is not corrupted.`
+    );
+  }
 
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
-  db.pragma(`busy_timeout = ${DB_BUSY_TIMEOUT_MS}`);
-  db.pragma("foreign_keys = ON");
+  try {
+    db.pragma("journal_mode = WAL");
+    db.pragma("synchronous = NORMAL");
+    db.pragma(`busy_timeout = ${DB_BUSY_TIMEOUT_MS}`);
+    db.pragma("foreign_keys = ON");
+  } catch (error) {
+    db.close();
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Failed to configure database at ${path}: ${msg}. ` +
+      `The database file may be corrupted or locked by another process.`
+    );
+  }
 
   dbInstance = db;
 

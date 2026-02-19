@@ -175,12 +175,23 @@ export const PluginConfigSchema = z.object({
 
 export type PluginConfig = z.infer<typeof PluginConfigSchema>;
 
+export const AnnConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  m: z.number().int().min(4).max(64).default(16),
+  efConstruction: z.number().int().min(16).max(500).default(200),
+  efSearch: z.number().int().min(8).max(256).default(50),
+  maxElements: z.number().int().min(1000).max(1000000).default(200000),
+});
+
+export type AnnConfig = z.infer<typeof AnnConfigSchema>;
+
 export const SemanticConfigSchema = z.object({
   enabled: z.boolean().default(false),
   alpha: z.number().min(0).max(1).default(0.6),
   provider: z.enum(["api", "local", "mock"]).default("mock"),
   model: z.string().default("all-MiniLM-L6-v2"),
   generateSummaries: z.boolean().default(false),
+  ann: AnnConfigSchema.optional(),
 });
 
 export type SemanticConfig = z.infer<typeof SemanticConfigSchema>;
@@ -192,6 +203,24 @@ export const PrefetchConfigSchema = z.object({
 });
 
 export type PrefetchConfig = z.infer<typeof PrefetchConfigSchema>;
+
+export const TracingConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  serviceName: z.string().default("sdl-mcp"),
+  exporterType: z.enum(["console", "otlp", "memory"]).default("console"),
+  otlpEndpoint: z.string().optional(),
+  sampleRate: z.number().min(0).max(1).default(1.0),
+});
+
+export type TracingConfig = z.infer<typeof TracingConfigSchema>;
+
+export const ParallelScorerConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  poolSize: z.number().int().min(1).max(8).optional(),
+  minBatchSize: z.number().int().min(1).max(100).optional(),
+});
+
+export type ParallelScorerConfig = z.infer<typeof ParallelScorerConfigSchema>;
 
 export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
@@ -205,6 +234,8 @@ export const AppConfigSchema = z.object({
   plugins: PluginConfigSchema.optional(),
   semantic: SemanticConfigSchema.optional(),
   prefetch: PrefetchConfigSchema.optional(),
+  tracing: TracingConfigSchema.optional(),
+  parallelScorer: ParallelScorerConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

@@ -57,7 +57,15 @@ const SliceSymbolCardVersionSchema = z.object({
   astFingerprint: z.string(),
 });
 
-const CardDetailLevelSchema = z.enum(["compact", "full"]);
+const CardDetailLevelSchema = z.enum([
+  "minimal",
+  "signature",
+  "deps",
+  "compact",
+  "full",
+]);
+
+const LegacyCardDetailLevelSchema = z.enum(["compact", "full"]);
 
 const SymbolCardSchema = z.object({
   symbolId: z.string(),
@@ -142,7 +150,11 @@ const SliceTruncationSchema = z.object({
 });
 
 const SliceBuildWireFormatSchema = z.enum(["standard", "compact"]);
-const SliceBuildWireFormatVersionSchema = z.union([z.literal(1), z.literal(2)]);
+const SliceBuildWireFormatVersionSchema = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+]);
 
 const GraphSliceSchema = z.object({
   repoId: z.string(),
@@ -326,6 +338,39 @@ const CompactGraphSliceV2Schema = z.object({
   f: z.array(CompactFrontierItemV2Schema).optional(),
   t: CompactSliceTruncationSchema.optional(),
 });
+
+// ============================================================================
+// Compact Wire Format V3 Schemas (Grouped Edge Encoding)
+// ============================================================================
+
+const CompactGroupedEdgeV3Schema = z.object({
+  from: z.number().int().min(0),
+  c: z.array(z.number().int().min(0)).optional(),
+  i: z.array(z.number().int().min(0)).optional(),
+  cf: z.array(z.number().int().min(0)).optional(),
+});
+
+const CompactGraphSliceV3Schema = z.object({
+  wf: z.literal("compact"),
+  wv: z.literal(3),
+  vid: z.string(),
+  b: CompactSliceBudgetSchema,
+  ss: z.array(z.string()),
+  si: z.array(z.string()),
+  fp: z.array(z.string()),
+  et: z.array(z.string()).optional(),
+  c: z.array(CompactSliceSymbolCardV2Schema),
+  cr: z.array(CompactSliceCardRefV2Schema).optional(),
+  e: z.array(CompactGroupedEdgeV3Schema),
+  f: z.array(CompactFrontierItemV2Schema).optional(),
+  t: CompactSliceTruncationSchema.optional(),
+});
+
+export {
+  CompactGroupedEdgeV3Schema,
+  CompactGraphSliceV3Schema,
+  CompactGraphSliceV2Schema,
+};
 
 const DeltaSymbolChangeSchema = z.object({
   symbolId: z.string(),
@@ -601,6 +646,7 @@ export const SliceBuildRequestSchema = z.object({
   entrySymbols: z.array(z.string()).optional(),
   knownCardEtags: z.record(z.string()).optional(),
   cardDetail: CardDetailLevelSchema.optional(),
+  adaptiveDetail: z.boolean().optional(),
   wireFormat: SliceBuildWireFormatSchema.optional(),
   wireFormatVersion: SliceBuildWireFormatVersionSchema.optional(),
   budget: SliceBudgetSchema.optional(),
@@ -673,6 +719,7 @@ export const SliceBuildResponseSchema = z.union([
       GraphSliceSchema,
       CompactGraphSliceSchema,
       CompactGraphSliceV2Schema,
+      CompactGraphSliceV3Schema,
     ]),
   }),
   NotModifiedResponseSchema,
@@ -1030,8 +1077,14 @@ export type SymbolGetCardResponse = z.infer<typeof SymbolGetCardResponseSchema>;
 export type SliceBuildRequest = z.infer<typeof SliceBuildRequestSchema>;
 export type SliceBuildResponse = z.infer<typeof SliceBuildResponseSchema>;
 export type SliceBuildWireFormat = z.infer<typeof SliceBuildWireFormatSchema>;
+export type CardDetailLevelSchemaType = z.infer<typeof CardDetailLevelSchema>;
+export type LegacyCardDetailLevelSchemaType = z.infer<
+  typeof LegacyCardDetailLevelSchema
+>;
 export type CompactGraphSlice = z.infer<typeof CompactGraphSliceSchema>;
 export type CompactGraphSliceV2 = z.infer<typeof CompactGraphSliceV2Schema>;
+export type CompactGroupedEdgeV3 = z.infer<typeof CompactGroupedEdgeV3Schema>;
+export type CompactGraphSliceV3 = z.infer<typeof CompactGraphSliceV3Schema>;
 export type SliceLease = z.infer<typeof SliceLeaseSchema>;
 export type SliceEtag = z.infer<typeof SliceEtagSchema>;
 export type NotModifiedResponse = z.infer<typeof NotModifiedResponseSchema>;
@@ -1240,4 +1293,120 @@ export type AgentOrchestrateRequest = z.infer<
 >;
 export type AgentOrchestrateResponse = z.infer<
   typeof AgentOrchestrateResponseSchema
+>;
+
+// ============================================================================
+// Agent Feedback Schemas
+// ============================================================================
+
+export const AgentFeedbackRequestSchema = z.object({
+  repoId: z.string().min(1).describe("Repository identifier"),
+  versionId: z
+    .string()
+    .min(1)
+    .describe("Version identifier for the feedback context"),
+  sliceHandle: z
+    .string()
+    .min(1)
+    .describe("Slice handle that was used for the task"),
+  usefulSymbols: z
+    .array(z.string())
+    .min(1)
+    .describe("Symbol IDs that were useful for the task"),
+  missingSymbols: z
+    .array(z.string())
+    .optional()
+    .describe("Symbol IDs that were expected but missing"),
+  taskTags: z
+    .array(z.string())
+    .optional()
+    .describe("Optional tags describing the task type"),
+  taskType: z
+    .enum(["debug", "review", "implement", "explain"])
+    .optional()
+    .describe("Type of task performed"),
+  taskText: z
+    .string()
+    .optional()
+    .describe("Optional task description for context"),
+});
+
+export const AgentFeedbackResponseSchema = z.object({
+  ok: z.boolean().describe("Whether the feedback was recorded successfully"),
+  feedbackId: z
+    .number()
+    .int()
+    .describe("The ID of the created feedback record"),
+  repoId: z.string().describe("Repository identifier"),
+  versionId: z.string().describe("Version identifier"),
+  symbolsRecorded: z
+    .number()
+    .int()
+    .describe("Total number of symbols recorded"),
+});
+
+export const AgentFeedbackQueryRequestSchema = z.object({
+  repoId: z.string().min(1).describe("Repository identifier"),
+  versionId: z
+    .string()
+    .optional()
+    .describe("Optional version identifier to filter by"),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .optional()
+    .describe("Maximum number of records to return"),
+  since: z
+    .string()
+    .optional()
+    .describe("Optional ISO timestamp to filter feedback from"),
+});
+
+export const AgentFeedbackQueryResponseSchema = z.object({
+  repoId: z.string().describe("Repository identifier"),
+  feedback: z
+    .array(
+      z.object({
+        feedbackId: z.number().int(),
+        versionId: z.string(),
+        sliceHandle: z.string(),
+        usefulSymbols: z.array(z.string()),
+        missingSymbols: z.array(z.string()),
+        taskTags: z.array(z.string()).nullable(),
+        taskType: z.string().nullable(),
+        taskText: z.string().nullable(),
+        createdAt: z.string(),
+      }),
+    )
+    .describe("Array of feedback records"),
+  aggregatedStats: z
+    .object({
+      totalFeedback: z.number().int(),
+      topUsefulSymbols: z.array(
+        z.object({
+          symbolId: z.string(),
+          count: z.number().int(),
+        }),
+      ),
+      topMissingSymbols: z.array(
+        z.object({
+          symbolId: z.string(),
+          count: z.number().int(),
+        }),
+      ),
+    })
+    .optional()
+    .describe("Aggregated statistics if requested"),
+  hasMore: z.boolean().describe("Whether more records are available"),
+});
+
+export type AgentFeedbackRequest = z.infer<typeof AgentFeedbackRequestSchema>;
+export type AgentFeedbackResponse = z.infer<typeof AgentFeedbackResponseSchema>;
+export type AgentFeedbackQueryRequest = z.infer<
+  typeof AgentFeedbackQueryRequestSchema
+>;
+export type AgentFeedbackQueryResponse = z.infer<
+  typeof AgentFeedbackQueryResponseSchema
 >;

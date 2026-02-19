@@ -8,6 +8,7 @@ import type {
   SyncIndexState,
 } from "./types.js";
 import { getDb } from "../db/db.js";
+import type { SymbolVersionRow, MetricsRow } from "../db/schema.js";
 import { hashContent } from "../util/hashing.js";
 import { getCurrentTimestamp } from "../util/time.js";
 import {
@@ -90,13 +91,13 @@ export async function exportArtifact(
     })),
     symbol_versions: db
       .prepare("SELECT * FROM symbol_versions WHERE version_id = ?")
-      .all(versionId) as any[],
+      .all(versionId) as SymbolVersionRow[],
     edges: getEdgesByRepo(options.repoId),
     metrics: db
       .prepare(
         "SELECT * FROM metrics WHERE symbol_id IN (SELECT symbol_id FROM symbols WHERE repo_id = ?)",
       )
-      .all(options.repoId) as any[],
+      .all(options.repoId) as MetricsRow[],
   };
 
   const stateJson = JSON.stringify(state, null, 0);

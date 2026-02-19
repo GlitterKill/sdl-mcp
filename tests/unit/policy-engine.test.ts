@@ -335,7 +335,7 @@ describe("Policy Engine - Break Glass Rule", () => {
     engine = new PolicyEngine();
   });
 
-  it("should trigger break glass with AUDIT keyword", () => {
+  it("should not trigger break glass with AUDIT keyword alone", () => {
     const context: PolicyRequestContext = {
       requestType: "codeWindow",
       repoId: "test-repo",
@@ -348,7 +348,9 @@ describe("Policy Engine - Break Glass Rule", () => {
 
     assert.strictEqual(decision.decision, "downgrade-to-hotpath");
     assert.ok(
-      decision.evidenceUsed.some((e) => e.type === "break-glass-triggered"),
+      decision.evidenceUsed.some(
+        (e) => e.type === "break-glass-not-triggered",
+      ),
     );
   });
 
@@ -369,7 +371,7 @@ describe("Policy Engine - Break Glass Rule", () => {
     );
   });
 
-  it("should be case-insensitive for break glass keywords", () => {
+  it("should require exact BREAK-GLASS: prefix", () => {
     const context: PolicyRequestContext = {
       requestType: "codeWindow",
       repoId: "test-repo",
@@ -382,7 +384,9 @@ describe("Policy Engine - Break Glass Rule", () => {
 
     assert.strictEqual(decision.decision, "downgrade-to-hotpath");
     assert.ok(
-      decision.evidenceUsed.some((e) => e.type === "break-glass-triggered"),
+      decision.evidenceUsed.some(
+        (e) => e.type === "break-glass-not-triggered",
+      ),
     );
   });
 

@@ -34,6 +34,7 @@ export class ConcurrencyLimiter {
     reject: (reason?: unknown) => void;
     task: () => Promise<unknown>;
   }>;
+  private drainResolvers: Array<() => void> = [];
 
   constructor(options: ConcurrencyLimiterOptions) {
     if (options.maxConcurrency < 1) {
@@ -111,6 +112,7 @@ export class ConcurrencyLimiter {
     } finally {
       this.activeCount--;
       this.processQueue();
+      this.notifyDrainIfIdle();
     }
   }
 
@@ -152,15 +154,28 @@ export class ConcurrencyLimiter {
     this.queue.length = 0;
   }
 
+  private notifyDrainIfIdle(): void {
+    if (this.activeCount === 0 && this.queue.length === 0) {
+      const resolvers = this.drainResolvers;
+      this.drainResolvers = [];
+      for (const resolve of resolvers) {
+        resolve();
+      }
+    }
+  }
+
   /**
    * Waits for all active tasks to complete.
    *
    * @returns Promise that resolves when no tasks are active
    */
   async drain(): Promise<void> {
-    while (this.activeCount > 0 || this.queue.length > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    if (this.activeCount === 0 && this.queue.length === 0) {
+      return;
     }
+    return new Promise<void>((resolve) => {
+      this.drainResolvers.push(resolve);
+    });
   }
 }
 

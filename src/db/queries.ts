@@ -22,6 +22,7 @@ import type {
   ToolPolicyHashRow,
   TsconfigHashRow,
   SymbolReferenceRow,
+  AgentFeedbackRow,
 } from "./schema.js";
 import { z } from "zod";
 
@@ -33,6 +34,7 @@ const stmtCacheOrder: string[] = [];
  * Prevents unintended pattern matching when user input contains these chars.
  */
 function escapeSearchPattern(query: string): string {
+  if (!query) return "";
   return query.replace(/[%_\\]/g, "\\$&");
 }
 
@@ -496,6 +498,7 @@ export function searchSymbols(
   query: string,
   limit: number,
 ): SymbolRow[] {
+  const effectiveLimit = Math.max(1, Math.min(limit, DB_QUERY_LIMIT_MAX));
   const searchPattern = `%${escapeSearchPattern(query)}%`;
   // Order results by relevance:
   // 1. Exact name match (case-sensitive) first
@@ -536,7 +539,7 @@ export function searchSymbols(
     query,
     query,
     searchPattern,
-    limit,
+    effectiveLimit,
   ) as SymbolRow[];
 }
 
@@ -555,6 +558,7 @@ export function searchSymbolsLite(
   query: string,
   limit: number,
 ): Pick<SymbolRow, "symbol_id" | "name" | "file_id" | "kind">[] {
+  const effectiveLimit = Math.max(1, Math.min(limit, DB_QUERY_LIMIT_MAX));
   const searchPattern = `%${escapeSearchPattern(query)}%`;
   // Order results by relevance (same logic as searchSymbols)
   return stmt(
@@ -590,7 +594,7 @@ export function searchSymbolsLite(
     query,
     query,
     searchPattern,
-    limit,
+    effectiveLimit,
   ) as Pick<SymbolRow, "symbol_id" | "name" | "file_id" | "kind">[];
 }
 
@@ -889,6 +893,39 @@ export function getEdgesFromSymbolsLite(
 
     for (const row of rows) {
       const edges = result.get(row.from_symbol_id);
+      if (edges) {
+        edges.push(row);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Batch fetch incoming edges for multiple symbols. Uses chunked queries.
+ * Returns a Map where key is to_symbol_id and value is array of edges.
+ *
+ * @param symbolIds - Array of symbol identifiers
+ * @returns Map of symbol_id to array of incoming edges
+ */
+export function getEdgesToSymbols(symbolIds: string[]): Map<string, EdgeRow[]> {
+  if (symbolIds.length === 0) return new Map();
+
+  const result = new Map<string, EdgeRow[]>();
+  for (const id of symbolIds) {
+    result.set(id, []);
+  }
+
+  for (let i = 0; i < symbolIds.length; i += DB_CHUNK_SIZE) {
+    const chunk = symbolIds.slice(i, i + DB_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = getDb()
+      .prepare(`SELECT * FROM edges WHERE to_symbol_id IN (${placeholders})`)
+      .all(...chunk) as EdgeRow[];
+
+    for (const row of rows) {
+      const edges = result.get(row.to_symbol_id);
       if (edges) {
         edges.push(row);
       }
@@ -1765,7 +1802,263 @@ export function deleteSymbolEmbeddings(symbolIds: string[]): void {
     const chunk = symbolIds.slice(i, i + DB_CHUNK_SIZE);
     const placeholders = chunk.map(() => "?").join(",");
     getDb()
-      .prepare(`DELETE FROM symbol_embeddings WHERE symbol_id IN (${placeholders})`)
+      .prepare(
+        `DELETE FROM symbol_embeddings WHERE symbol_id IN (${placeholders})`,
+      )
       .run(...chunk);
   }
+}
+
+// ============================================================================
+// Agent Feedback Operations
+// ============================================================================
+
+/**
+ * Creates a new agent feedback record.
+ *
+ * @param feedback - Feedback record with all required fields
+ * @returns The generated feedback_id
+ */
+export function createAgentFeedback(
+  feedback: Omit<AgentFeedbackRow, "feedback_id">,
+): number {
+  const result = stmt(
+    `INSERT INTO agent_feedback (
+      repo_id, version_id, slice_handle, useful_symbols_json, missing_symbols_json,
+      task_tags_json, task_type, task_text, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    feedback.repo_id,
+    feedback.version_id,
+    feedback.slice_handle,
+    feedback.useful_symbols_json,
+    feedback.missing_symbols_json,
+    feedback.task_tags_json ?? null,
+    feedback.task_type ?? null,
+    feedback.task_text ?? null,
+    feedback.created_at,
+  );
+  return result.lastInsertRowid as number;
+}
+
+/**
+ * Retrieves agent feedback by ID.
+ *
+ * @param feedbackId - Feedback identifier
+ * @returns Feedback record or null if not found
+ */
+export function getAgentFeedback(feedbackId: number): AgentFeedbackRow | null {
+  return stmt("SELECT * FROM agent_feedback WHERE feedback_id = ?").get(
+    feedbackId,
+  ) as AgentFeedbackRow | null;
+}
+
+/**
+ * Lists agent feedback for a repository.
+ *
+ * @param repoId - Repository identifier
+ * @param limit - Maximum number of records to return
+ * @returns Array of feedback records
+ */
+export function getAgentFeedbackByRepo(
+  repoId: string,
+  limit: number = DB_QUERY_LIMIT_DEFAULT,
+): AgentFeedbackRow[] {
+  return stmt(
+    "SELECT * FROM agent_feedback WHERE repo_id = ? ORDER BY created_at DESC LIMIT ?",
+  ).all(repoId, limit) as AgentFeedbackRow[];
+}
+
+/**
+ * Lists agent feedback for a specific version.
+ *
+ * @param repoId - Repository identifier
+ * @param versionId - Version identifier
+ * @param limit - Maximum number of records to return
+ * @returns Array of feedback records
+ */
+export function getAgentFeedbackByVersion(
+  repoId: string,
+  versionId: string,
+  limit: number = DB_QUERY_LIMIT_DEFAULT,
+): AgentFeedbackRow[] {
+  return stmt(
+    "SELECT * FROM agent_feedback WHERE repo_id = ? AND version_id = ? ORDER BY created_at DESC LIMIT ?",
+  ).all(repoId, versionId, limit) as AgentFeedbackRow[];
+}
+
+/**
+ * Gets aggregated feedback for offline tuning pipelines.
+ * Returns useful and missing symbol counts across all feedback for a repo.
+ *
+ * @param repoId - Repository identifier
+ * @param since - Optional ISO timestamp to filter feedback from
+ * @returns Aggregated feedback statistics
+ */
+export function getAggregatedFeedback(
+  repoId: string,
+  since?: string,
+): {
+  totalFeedback: number;
+  symbolPositiveCounts: Map<string, number>;
+  symbolNegativeCounts: Map<string, number>;
+  taskTypeCounts: Map<string, number>;
+} {
+  const whereClause = since
+    ? "WHERE repo_id = ? AND created_at >= ?"
+    : "WHERE repo_id = ?";
+  const params = since ? [repoId, since] : [repoId];
+
+  const rows = stmt(
+    `SELECT * FROM agent_feedback ${whereClause} ORDER BY created_at DESC`,
+  ).all(...params) as AgentFeedbackRow[];
+
+  const symbolPositiveCounts = new Map<string, number>();
+  const symbolNegativeCounts = new Map<string, number>();
+  const taskTypeCounts = new Map<string, number>();
+
+  for (const row of rows) {
+    let usefulSymbols: string[];
+    let missingSymbols: string[];
+    let taskTags: string[];
+    try {
+      usefulSymbols = JSON.parse(row.useful_symbols_json) as string[];
+      missingSymbols = JSON.parse(row.missing_symbols_json) as string[];
+      taskTags = row.task_tags_json
+        ? (JSON.parse(row.task_tags_json) as string[])
+        : [];
+    } catch {
+      continue;
+    }
+
+    for (const symbolId of usefulSymbols) {
+      symbolPositiveCounts.set(
+        symbolId,
+        (symbolPositiveCounts.get(symbolId) ?? 0) + 1,
+      );
+    }
+
+    for (const symbolId of missingSymbols) {
+      symbolNegativeCounts.set(
+        symbolId,
+        (symbolNegativeCounts.get(symbolId) ?? 0) + 1,
+      );
+    }
+
+    if (row.task_type) {
+      taskTypeCounts.set(
+        row.task_type,
+        (taskTypeCounts.get(row.task_type) ?? 0) + 1,
+      );
+    }
+
+    for (const tag of taskTags) {
+      taskTypeCounts.set(tag, (taskTypeCounts.get(tag) ?? 0) + 1);
+    }
+  }
+
+  return {
+    totalFeedback: rows.length,
+    symbolPositiveCounts,
+    symbolNegativeCounts,
+    taskTypeCounts,
+  };
+}
+
+// ============================================================================
+// Symbol Feedback Weight Operations
+// ============================================================================
+
+/**
+ * Updates symbol feedback weights based on positive/negative counts.
+ * Uses exponential decay to ensure recent feedback has more impact.
+ *
+ * @param symbolId - Symbol identifier
+ * @param repoId - Repository identifier
+ * @param isPositive - Whether this is positive or negative feedback
+ */
+export function updateSymbolFeedbackWeight(
+  symbolId: string,
+  repoId: string,
+  isPositive: boolean,
+): void {
+  const now = new Date().toISOString();
+
+  stmt(
+    `INSERT INTO symbol_feedback_weights (symbol_id, repo_id, positive_count, negative_count, weight_adjustment, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(symbol_id, repo_id) DO UPDATE SET
+       positive_count = positive_count + ?,
+       negative_count = negative_count + ?,
+       weight_adjustment = (positive_count - negative_count) * 0.1,
+       updated_at = excluded.updated_at`,
+  ).run(
+    symbolId,
+    repoId,
+    isPositive ? 1 : 0,
+    isPositive ? 0 : 1,
+    isPositive ? 0.1 : -0.1,
+    now,
+    isPositive ? 1 : 0,
+    isPositive ? 0 : 1,
+  );
+}
+
+/**
+ * Gets symbol feedback weights for ranking adjustments.
+ *
+ * @param symbolIds - Array of symbol identifiers
+ * @param repoId - Repository identifier
+ * @returns Map of symbol_id to weight adjustment
+ */
+export function getSymbolFeedbackWeights(
+  symbolIds: string[],
+  repoId: string,
+): Map<string, number> {
+  const result = new Map<string, number>();
+  if (symbolIds.length === 0) return result;
+
+  for (let i = 0; i < symbolIds.length; i += DB_CHUNK_SIZE) {
+    const chunk = symbolIds.slice(i, i + DB_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = getDb()
+      .prepare(
+        `SELECT symbol_id, weight_adjustment FROM symbol_feedback_weights
+         WHERE repo_id = ? AND symbol_id IN (${placeholders})`,
+      )
+      .all(repoId, ...chunk) as Array<{
+      symbol_id: string;
+      weight_adjustment: number;
+    }>;
+
+    for (const row of rows) {
+      result.set(row.symbol_id, row.weight_adjustment);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Batch updates symbol feedback weights from a feedback record.
+ *
+ * @param repoId - Repository identifier
+ * @param usefulSymbols - Symbols marked as useful
+ * @param missingSymbols - Symbols marked as missing
+ */
+export function batchUpdateSymbolFeedbackWeights(
+  repoId: string,
+  usefulSymbols: string[],
+  missingSymbols: string[],
+): void {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    for (const symbolId of usefulSymbols) {
+      updateSymbolFeedbackWeight(symbolId, repoId, true);
+    }
+    for (const symbolId of missingSymbols) {
+      updateSymbolFeedbackWeight(symbolId, repoId, false);
+    }
+  });
+  tx();
 }

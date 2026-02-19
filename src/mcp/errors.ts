@@ -67,15 +67,33 @@ export function createPolicyDenial(
   return error;
 }
 
-export function errorToMcpResponse(error: unknown): {
-  error?: { message: string };
-} {
+export interface McpErrorDetail {
+  message: string;
+  code?: string;
+  nextBestAction?: NextBestAction;
+  requiredFieldsForNext?: RequiredFieldsForNext;
+}
+
+export function errorToMcpResponse(error: unknown): Record<string, unknown> {
   if (error instanceof Error) {
-    return {
-      error: {
-        message: error.message,
-      },
+    const detail: McpErrorDetail = {
+      message: error.message,
     };
+
+    const codeError = error as { code?: string };
+    if (codeError.code) {
+      detail.code = codeError.code;
+    }
+
+    const policyError = error as Partial<PolicyDenialError>;
+    if (policyError.nextBestAction) {
+      detail.nextBestAction = policyError.nextBestAction;
+    }
+    if (policyError.requiredFieldsForNext) {
+      detail.requiredFieldsForNext = policyError.requiredFieldsForNext;
+    }
+
+    return { error: detail };
   }
   return {
     error: {

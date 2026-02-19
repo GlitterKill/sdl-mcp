@@ -316,33 +316,37 @@ function processTypeAliasDeclaration(
 
 function processVariableDeclaration(
   node: Parser.SyntaxNode,
-): ExtractedSymbol | null {
-  const name = extractIdentifier(node);
-  if (!name) {
-    const left = node.childForFieldName("name");
-    if (
-      left &&
-      (left.type === "object_pattern" || left.type === "array_pattern")
-    ) {
-      const patterns: ExtractedSymbol[] = [];
-      for (const child of left.children) {
-        if (
-          child.type === "object_pattern" ||
-          child.type === "array_pattern" ||
-          child.type === "pair" ||
-          child.type === "identifier"
-        ) {
-          const patternName = extractIdentifier(child);
-          if (patternName) {
-            patterns.push({
-              name: patternName,
-              kind: "variable",
-              exported: isExported(node),
-              visibility: undefined,
-              range: extractRange(child),
-            });
-          }
+): ExtractedSymbol[] {
+  // Check the "name" field first to detect destructuring patterns.
+  // extractIdentifier() can incorrectly match the RHS identifier
+  // (e.g. "config" in `const { host, port } = config`).
+  const left = node.childForFieldName("name");
+  if (
+    left &&
+    (left.type === "object_pattern" || left.type === "array_pattern")
+  ) {
+    const patterns: ExtractedSymbol[] = [];
+    for (const child of left.children) {
+      if (
+        child.type === "object_pattern" ||
+        child.type === "array_pattern" ||
+        child.type === "pair" ||
+        child.type === "identifier" ||
+        child.type === "shorthand_property_identifier_pattern"
+      ) {
+        const patternName = child.type === "shorthand_property_identifier_pattern"
+          ? child.text
+          : extractIdentifier(child);
+        if (patternName) {
+          patterns.push({
+            name: patternName,
+            kind: "variable",
+            exported: isExported(node),
+            visibility: undefined,
+            range: extractRange(child),
+          });
         }
+      } else {
         const identifier = child.childForFieldName("name");
         if (identifier) {
           const patternName = extractIdentifier(identifier);
@@ -357,18 +361,22 @@ function processVariableDeclaration(
           }
         }
       }
-      return patterns.length > 0 ? patterns[0] : null;
     }
-    return null;
+    return patterns;
   }
 
-  return {
+  const name = extractIdentifier(node);
+  if (!name) {
+    return [];
+  }
+
+  return [{
     name,
     kind: "variable",
     exported: isExported(node),
     visibility: undefined,
     range: extractRange(node),
-  };
+  }];
 }
 
 function processModule(node: Parser.SyntaxNode): ExtractedSymbol | null {
@@ -439,8 +447,8 @@ function traverseAST(
     case "variable_declaration":
       for (const child of node.children) {
         if (child.type === "variable_declarator") {
-          const varSymbol = processVariableDeclaration(child);
-          if (varSymbol) symbols.push(varSymbol);
+          const varSymbols = processVariableDeclaration(child);
+          symbols.push(...varSymbols);
         }
       }
       break;

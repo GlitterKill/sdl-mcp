@@ -15,24 +15,40 @@ import { getWatcherHealth, indexRepo } from "../../indexer/indexer.js";
 import { RepoConfig } from "../../config/types.js";
 import { LanguageSchema } from "../../config/types.js";
 import { normalizePath } from "../../util/paths.js";
-import { DatabaseError, ConfigError } from "../errors.js";
+import { DatabaseError, ConfigError, ValidationError } from "../errors.js";
+import { logger } from "../../util/logger.js";
 import { MAX_FILE_BYTES } from "../../config/constants.js";
 import { buildRepoOverview } from "../../graph/overview.js";
 import { clearSliceCache } from "../../graph/sliceCache.js";
 import { symbolCardCache } from "../../graph/cache.js";
 import { getRepoHealthSnapshot } from "../health.js";
-import { logPrefetchTelemetry, logWatcherHealthTelemetry } from "../telemetry.js";
+import {
+  logPrefetchTelemetry,
+  logWatcherHealthTelemetry,
+} from "../telemetry.js";
 import { getPrefetchStats } from "../../graph/prefetch.js";
+import { recordToolTrace } from "../../graph/prefetch-model.js";
+import {
+  withSpan,
+  SPAN_NAMES,
+  isTracingEnabled,
+  type SpanAttributes,
+} from "../../util/tracing.js";
 
 const SUPPORTED_LANGUAGES = [...LanguageSchema.options];
 
-export function resolveRepoLanguages(languages?: string[]): RepoConfig["languages"] {
+export function resolveRepoLanguages(
+  languages?: string[],
+): RepoConfig["languages"] {
   if (!languages || languages.length === 0) {
     return [...SUPPORTED_LANGUAGES] as RepoConfig["languages"];
   }
 
   const invalid = languages.filter(
-    (lang) => !SUPPORTED_LANGUAGES.includes(lang as (typeof SUPPORTED_LANGUAGES)[number]),
+    (lang) =>
+      !SUPPORTED_LANGUAGES.includes(
+        lang as (typeof SUPPORTED_LANGUAGES)[number],
+      ),
   );
   if (invalid.length > 0) {
     throw new ConfigError(
@@ -57,6 +73,17 @@ export async function handleRepoRegister(
 ): Promise<RepoRegisterResponse> {
   const request = RepoRegisterRequestSchema.parse(args);
   const { repoId, rootPath, ignore, languages, maxFileBytes } = request;
+
+  const normalizedRoot = normalizePath(rootPath);
+  if (
+    normalizedRoot.includes("/../") ||
+    normalizedRoot.endsWith("/..") ||
+    normalizedRoot.startsWith("..") ||
+    normalizedRoot.includes("\\..\\") ||
+    normalizedRoot.endsWith("\\..")
+  ) {
+    throw new ValidationError(`Root path contains path traversal: ${rootPath}`);
+  }
 
   if (!existsSync(rootPath)) {
     throw new ConfigError(`Path does not exist: ${rootPath}`);
@@ -175,7 +202,11 @@ function detectWorkspaces(packageJsonPath: string): string[] | undefined {
     ) {
       return workspacesField.packages;
     }
-  } catch {
+  } catch (error) {
+    logger.warn("Failed to parse package.json for workspace detection", {
+      packageJsonPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return undefined;
   }
 
@@ -196,58 +227,85 @@ export async function handleRepoStatus(
   const request = RepoStatusRequestSchema.parse(args);
   const { repoId } = request;
 
-  const repo = db.getRepo(repoId);
-  if (!repo) {
-    throw new DatabaseError(`Repository ${repoId} not found`);
-  }
-
-  const latestVersion = db.getLatestVersion(repoId);
-  const files = db.getFilesByRepo(repoId);
-  const symbolsIndexed = db.countSymbolsByRepo(repoId);
-  const health = await getRepoHealthSnapshot(repoId);
-  const watcherHealth = getWatcherHealth(repoId);
-  const prefetchStats = getPrefetchStats(repoId);
-  if (watcherHealth) {
-    logWatcherHealthTelemetry({
+  const executeStatus = async () => {
+    recordToolTrace({
       repoId,
-      enabled: watcherHealth.enabled,
-      running: watcherHealth.running,
-      stale: watcherHealth.stale,
-      errors: watcherHealth.errors,
-      queueDepth: watcherHealth.queueDepth,
-      eventsReceived: watcherHealth.eventsReceived,
-      eventsProcessed: watcherHealth.eventsProcessed,
+      taskType: "status",
+      tool: "repo.status",
     });
-  }
-  logPrefetchTelemetry({
-    repoId,
-    hitRate: prefetchStats.hitRate,
-    wasteRate: prefetchStats.wasteRate,
-    avgLatencyReductionMs: prefetchStats.avgLatencyReductionMs,
-    queueDepth: prefetchStats.queueDepth,
-  });
 
-  const lastIndexedFile = files
-    .filter((f) => f.last_indexed_at !== null)
-    .sort(
-      (a, b) =>
-        new Date(b.last_indexed_at!).getTime() -
-        new Date(a.last_indexed_at!).getTime(),
-    )[0];
+    const repo = db.getRepo(repoId);
+    if (!repo) {
+      throw new DatabaseError(`Repository ${repoId} not found`);
+    }
 
-  return {
-    repoId,
-    rootPath: repo.root_path,
-    latestVersionId: latestVersion?.version_id ?? null,
-    filesIndexed: files.length,
-    symbolsIndexed,
-    lastIndexedAt: lastIndexedFile?.last_indexed_at ?? null,
-    healthScore: health.score,
-    healthComponents: health.components,
-    healthAvailable: health.available,
-    watcherHealth,
-    prefetchStats,
+    const latestVersion = db.getLatestVersion(repoId);
+    const files = db.getFilesByRepo(repoId);
+    const symbolsIndexed = db.countSymbolsByRepo(repoId);
+    const health = await getRepoHealthSnapshot(repoId);
+    const watcherHealth = getWatcherHealth(repoId);
+    const prefetchStats = getPrefetchStats(repoId);
+    if (watcherHealth) {
+      logWatcherHealthTelemetry({
+        repoId,
+        enabled: watcherHealth.enabled,
+        running: watcherHealth.running,
+        stale: watcherHealth.stale,
+        errors: watcherHealth.errors,
+        queueDepth: watcherHealth.queueDepth,
+        eventsReceived: watcherHealth.eventsReceived,
+        eventsProcessed: watcherHealth.eventsProcessed,
+      });
+    }
+    logPrefetchTelemetry({
+      repoId,
+      hitRate: prefetchStats.hitRate,
+      wasteRate: prefetchStats.wasteRate,
+      avgLatencyReductionMs: prefetchStats.avgLatencyReductionMs,
+      queueDepth: prefetchStats.queueDepth,
+    });
+
+    const lastIndexedFile = files
+      .filter((f) => f.last_indexed_at !== null)
+      .sort(
+        (a, b) =>
+          new Date(b.last_indexed_at!).getTime() -
+          new Date(a.last_indexed_at!).getTime(),
+      )[0];
+
+    return {
+      repoId,
+      rootPath: repo.root_path,
+      latestVersionId: latestVersion?.version_id ?? null,
+      filesIndexed: files.length,
+      symbolsIndexed,
+      lastIndexedAt: lastIndexedFile?.last_indexed_at ?? null,
+      healthScore: health.score,
+      healthComponents: health.components,
+      healthAvailable: health.available,
+      watcherHealth,
+      prefetchStats,
+    };
   };
+
+  if (isTracingEnabled()) {
+    const attrs: SpanAttributes = { repoId };
+    return withSpan(
+      SPAN_NAMES.REPO_STATUS,
+      async (span) => {
+        const result = await executeStatus();
+        span.setAttributes({
+          "counts.files": result.filesIndexed,
+          "counts.symbols": result.symbolsIndexed,
+          versionId: result.latestVersionId ?? undefined,
+        });
+        return result;
+      },
+      attrs,
+    );
+  }
+
+  return executeStatus();
 }
 
 /**
@@ -264,22 +322,42 @@ export async function handleIndexRefresh(
   const request = IndexRefreshRequestSchema.parse(args);
   const { repoId, mode } = request;
 
-  const repo = db.getRepo(repoId);
-  if (!repo) {
-    throw new DatabaseError(`Repository ${repoId} not found`);
+  const executeRefresh = async () => {
+    const repo = db.getRepo(repoId);
+    if (!repo) {
+      throw new DatabaseError(`Repository ${repoId} not found`);
+    }
+
+    const result = await indexRepo(repoId, mode);
+
+    clearSliceCache();
+    symbolCardCache.clear();
+
+    return {
+      ok: true,
+      repoId,
+      versionId: result.versionId,
+      changedFiles: result.changedFiles,
+    };
+  };
+
+  if (isTracingEnabled()) {
+    const attrs: SpanAttributes = { repoId, mode };
+    return withSpan(
+      SPAN_NAMES.INDEX_REFRESH,
+      async (span) => {
+        const result = await executeRefresh();
+        span.setAttributes({
+          "counts.changedFiles": result.changedFiles,
+          versionId: result.versionId,
+        });
+        return result;
+      },
+      attrs,
+    );
   }
 
-  const result = await indexRepo(repoId, mode);
-
-  clearSliceCache();
-  symbolCardCache.clear();
-
-  return {
-    ok: true,
-    repoId,
-    versionId: result.versionId,
-    changedFiles: result.changedFiles,
-  };
+  return executeRefresh();
 }
 
 /**

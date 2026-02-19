@@ -408,6 +408,11 @@ export const NODE_MIN_MAJOR_VERSION = 18;
  */
 export const DEFAULT_HTTP_PORT = 3000;
 
+/**
+ * SDL-MCP package version. Keep in sync with package.json.
+ */
+export const SDL_MCP_VERSION = "0.6.7";
+
 // ============================================================================
 // Configuration Defaults
 // ============================================================================

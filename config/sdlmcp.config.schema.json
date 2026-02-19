@@ -415,6 +415,52 @@
         "generateSummaries": {
           "type": "boolean",
           "default": false
+        },
+        "ann": {
+          "type": "object",
+          "description": "HNSW approximate nearest neighbor index configuration for semantic retrieval",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable HNSW ANN index for faster semantic retrieval",
+              "default": false
+            },
+            "m": {
+              "type": "integer",
+              "description": "Number of bi-directional links per node in HNSW graph",
+              "minimum": 4,
+              "maximum": 64,
+              "default": 16
+            },
+            "efConstruction": {
+              "type": "integer",
+              "description": "Size of dynamic candidate list during index construction",
+              "minimum": 16,
+              "maximum": 500,
+              "default": 200
+            },
+            "efSearch": {
+              "type": "integer",
+              "description": "Size of dynamic candidate list during search",
+              "minimum": 8,
+              "maximum": 256,
+              "default": 50
+            },
+            "maxElements": {
+              "type": "integer",
+              "description": "Maximum number of elements in the ANN index",
+              "minimum": 1000,
+              "maximum": 1000000,
+              "default": 200000
+            }
+          },
+          "default": {
+            "enabled": false,
+            "m": 16,
+            "efConstruction": 200,
+            "efSearch": 50,
+            "maxElements": 200000
+          }
         }
       },
       "default": {
@@ -422,7 +468,14 @@
         "alpha": 0.6,
         "provider": "mock",
         "model": "all-MiniLM-L6-v2",
-        "generateSummaries": false
+        "generateSummaries": false,
+        "ann": {
+          "enabled": false,
+          "m": 16,
+          "efConstruction": 200,
+          "efSearch": 50,
+          "maxElements": 200000
+        }
       }
     },
     "prefetch": {
@@ -449,6 +502,71 @@
         "enabled": false,
         "maxBudgetPercent": 20,
         "warmTopN": 50
+      }
+    },
+    "tracing": {
+      "type": "object",
+      "description": "OpenTelemetry tracing configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable OpenTelemetry tracing",
+          "default": false
+        },
+        "serviceName": {
+          "type": "string",
+          "description": "Service name for tracing",
+          "default": "sdl-mcp"
+        },
+        "exporterType": {
+          "type": "string",
+          "description": "Exporter type for traces",
+          "enum": ["console", "otlp", "memory"],
+          "default": "console"
+        },
+        "otlpEndpoint": {
+          "type": "string",
+          "description": "OTLP collector endpoint URL (required when exporterType is otlp)"
+        },
+        "sampleRate": {
+          "type": "number",
+          "description": "Sampling rate for traces (0.0 to 1.0)",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        }
+      },
+      "default": {
+        "enabled": false,
+        "serviceName": "sdl-mcp",
+        "exporterType": "console",
+        "sampleRate": 1
+      }
+    },
+    "parallelScorer": {
+      "type": "object",
+      "description": "Parallel beam search scorer configuration for improved slice performance",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable parallel scoring using worker threads",
+          "default": false
+        },
+        "poolSize": {
+          "type": "integer",
+          "description": "Number of worker threads in the scorer pool",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "minBatchSize": {
+          "type": "integer",
+          "description": "Minimum candidates to trigger parallel scoring",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "default": {
+        "enabled": false
       }
     }
   }

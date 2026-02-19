@@ -1,11 +1,8 @@
-import type {
-  RepoId,
-  SymbolId,
-  VersionId,
-  EdgeType,
-  SymbolKind,
-  Visibility,
-} from "../db/schema.js";
+import type { EdgeType, SymbolKind, Visibility } from "../db/schema.js";
+
+export type RepoId = string;
+export type SymbolId = string;
+export type VersionId = string;
 
 export interface Range {
   startLine: number;
@@ -44,7 +41,55 @@ export interface SymbolMetrics {
   testRefs?: string[];
 }
 
-export type CardDetailLevel = "compact" | "full";
+export type CardDetailLevel =
+  | "minimal"
+  | "signature"
+  | "deps"
+  | "compact"
+  | "full";
+
+export type LegacyCardDetailLevel = "compact" | "full";
+
+export const CARD_DETAIL_LEVELS: CardDetailLevel[] = [
+  "minimal",
+  "signature",
+  "deps",
+  "compact",
+  "full",
+];
+
+export const CARD_DETAIL_LEVEL_RANK: Record<CardDetailLevel, number> = {
+  minimal: 0,
+  signature: 1,
+  deps: 2,
+  compact: 3,
+  full: 4,
+};
+
+export function normalizeCardDetailLevel(
+  level: CardDetailLevel | LegacyCardDetailLevel | undefined,
+): CardDetailLevel {
+  if (!level) return "deps";
+  if (level === "compact") return "deps";
+  return level as CardDetailLevel;
+}
+
+export function legacyDetailLevelToWire(
+  level: CardDetailLevel | LegacyCardDetailLevel | undefined,
+): CardDetailLevel {
+  if (!level) return "compact";
+  return level as CardDetailLevel;
+}
+
+export function isLegacyDetailLevel(
+  level: string,
+): level is LegacyCardDetailLevel {
+  return level === "compact" || level === "full";
+}
+
+export function cardDetailLevelOrder(level: CardDetailLevel): number {
+  return CARD_DETAIL_LEVEL_RANK[level];
+}
 
 export interface SymbolCard {
   symbolId: SymbolId;
@@ -74,8 +119,10 @@ export interface SymbolCard {
   };
 }
 
-export interface SliceSymbolCard
-  extends Omit<SymbolCard, "repoId" | "etag" | "version" | "deps"> {
+export interface SliceSymbolCard extends Omit<
+  SymbolCard,
+  "repoId" | "etag" | "version" | "deps"
+> {
   deps: SliceSymbolDeps;
   version: {
     astFingerprint: string;
@@ -86,6 +133,13 @@ export interface SliceCardRef {
   symbolId: SymbolId;
   etag: string;
   detailLevel: CardDetailLevel;
+}
+
+export interface DetailLevelMetadata {
+  requested: CardDetailLevel;
+  effective: CardDetailLevel;
+  budgetAdaptive: boolean;
+  cardsByLevel: Record<CardDetailLevel, number>;
 }
 
 export type CompressedEdge = [
@@ -109,6 +163,7 @@ export interface SliceBuildInput {
   entrySymbols?: SymbolId[];
   knownCardEtags?: Record<SymbolId, string>;
   cardDetail?: CardDetailLevel;
+  adaptiveDetail?: boolean;
   budget?: SliceBudget;
   minConfidence?: number;
 }
@@ -144,6 +199,7 @@ export interface GraphSlice {
   frontier?: Array<{ symbolId: SymbolId; score: number; why: string }>;
   truncation?: SliceTruncation;
   confidenceDistribution?: ConfidenceDistribution;
+  detailLevelMetadata?: DetailLevelMetadata;
 }
 
 export interface DeltaSymbolChange {
@@ -280,7 +336,7 @@ export type EvidenceValue =
   | string
   | number
   | boolean
-  | { [key: string]: EvidenceValue }
+  | { [key: string]: EvidenceValue | undefined }
   | EvidenceValue[]
   | null;
 

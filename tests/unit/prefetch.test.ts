@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import {
   configurePrefetch,
@@ -6,9 +6,29 @@ import {
   getPrefetchStats,
   prefetchSliceFrontier,
 } from "../../src/graph/prefetch.js";
-import { trainPrefetchModel, predictNextTool } from "../../src/graph/prefetch-model.js";
+import {
+  trainPrefetchModel,
+  predictNextTool,
+  configureGating,
+  resetModel,
+} from "../../src/graph/prefetch-model.js";
 
 describe("prefetch pipeline", () => {
+  beforeEach(() => {
+    resetModel();
+    configureGating({
+      enabled: true,
+      minSamplesForPrediction: 2,
+      confidenceThreshold: 0.3,
+      fallbackToDeterministic: true,
+      retrainIntervalMs: 60000,
+    });
+  });
+
+  afterEach(() => {
+    resetModel();
+  });
+
   it("records cache misses/hits and exposes rates", () => {
     const repoId = "prefetch-test";
     configurePrefetch({ enabled: true, maxBudgetPercent: 20 });

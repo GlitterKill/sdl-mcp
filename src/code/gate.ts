@@ -49,6 +49,39 @@ export function evaluateRequest(
     };
   }
 
+  // Check policy limits first, before any approval logic
+  const policyViolations: string[] = [];
+
+  if (request.expectedLines > policy.maxWindowLines) {
+    policyViolations.push(
+      `Request exceeds maximum window lines (${request.expectedLines} > ${policy.maxWindowLines})`,
+    );
+  }
+
+  if (request.maxTokens && request.maxTokens > policy.maxWindowTokens) {
+    policyViolations.push(
+      `Request exceeds maximum window tokens (${request.maxTokens} > ${policy.maxWindowTokens})`,
+    );
+  }
+
+  if (request.identifiersToFind.length === 0 && policy.requireIdentifiers) {
+    policyViolations.push("No identifiers to find provided");
+  }
+
+  if (policyViolations.length > 0) {
+    const suggestedNextRequest = generateDenialGuidance(
+      request,
+      "general",
+      policy,
+    );
+    return {
+      approved: false,
+      whyDenied: policyViolations,
+      suggestedNextRequest,
+    };
+  }
+
+  // Policy limits pass - now check approval criteria
   const whyApproved: string[] = [];
 
   if (request.identifiersToFind.length > 0) {
@@ -103,21 +136,7 @@ export function evaluateRequest(
     policy,
   );
 
-  if (request.expectedLines > policy.maxWindowLines) {
-    whyDenied.push(
-      `Request exceeds maximum window lines (${request.expectedLines} > ${policy.maxWindowLines})`,
-    );
-  }
-
-  if (request.maxTokens && request.maxTokens > policy.maxWindowTokens) {
-    whyDenied.push(
-      `Request exceeds maximum window tokens (${request.maxTokens} > ${policy.maxWindowTokens})`,
-    );
-  }
-
-  if (request.identifiersToFind.length === 0 && policy.requireIdentifiers) {
-    whyDenied.push("No identifiers to find provided");
-  } else if (
+  if (
     request.identifiersToFind.length > 0 &&
     window.approved &&
     !identifiersExistInWindow(window.code, request.identifiersToFind)
@@ -158,10 +177,13 @@ export function generateDenialGuidance(
     const symbol = db.getSymbol(request.symbolId);
     if (symbol && symbol.signature_json) {
       try {
-        const signature = JSON.parse(symbol.signature_json);
+        const signature = JSON.parse(symbol.signature_json) as {
+          params?: Array<{ name: string; type?: string }>;
+          returns?: string;
+        };
         if (signature.params && Array.isArray(signature.params)) {
           suggestions.identifiersToFind = signature.params
-            .map((p: any) => p.name)
+            .map((p) => p.name)
             .slice(0, 3);
         }
       } catch (error) {
