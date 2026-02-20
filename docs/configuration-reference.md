@@ -133,7 +133,7 @@ Controls sensitive-data masking in returned content.
 - `enableFileWatching`: keeps index fresh during active development
 - `maxWatchedFiles`: hard cap to prevent watcher overload on very large repos
 - `workerPoolSize`: optional worker pool size cap (defaults to CPU-count based heuristic)
-- `engine`: pass-1 indexer implementation, either `typescript` (default) or `rust`
+- `engine`: pass-1 indexer implementation, either `typescript` (default) or `rust`. The Rust engine uses a native addon built with napi-rs and tree-sitter for faster symbol extraction. See [Native Rust Engine](#native-rust-engine) below for setup.
 
 ### `slice`
 
@@ -146,6 +146,12 @@ TypeScript/JavaScript diagnostics integration controls.
 ### `cache`
 
 Controls in-memory caching for symbol cards and graph slices.
+
+- `enabled`: toggles caching globally
+- `symbolCardMaxEntries`: maximum number of symbol cards held in memory
+- `graphSliceMaxEntries`: maximum number of graph slices in the LRU cache (applied at runtime via `configureSliceCache`)
+- `symbolCardMaxSizeBytes`: total byte cap for symbol card cache
+- `graphSliceMaxSizeBytes`: total byte cap for graph slice cache
 
 ### `plugins`
 
@@ -172,6 +178,47 @@ Controls predictive prefetch behavior.
 - `warmTopN`: number of symbols warmed on `serve` startup when prefetch is enabled
 
 Prefetch effectiveness and queue metrics are exposed in `sdl.repo.status.prefetchStats`.
+
+## Native Rust Engine
+
+The optional Rust indexer replaces the TypeScript tree-sitter pass with a native addon for faster symbol extraction. It supports the same 12 languages as the TypeScript engine.
+
+### Prerequisites
+
+- Rust toolchain (rustc 1.70+, cargo)
+- `@napi-rs/cli` (installed as a dev dependency)
+
+### Build
+
+```bash
+npm run build:native
+```
+
+This compiles the native addon in `native/` and produces a platform-specific `.node` file.
+
+### Enable
+
+Set `indexing.engine` to `"rust"` in your config:
+
+```json
+{
+  "indexing": {
+    "engine": "rust"
+  }
+}
+```
+
+Add `**/native/target/**` to your repo `ignore` patterns to exclude the Rust build directory from indexing.
+
+### Verify
+
+```bash
+npm run test:native-parity
+```
+
+This runs parity checks comparing Rust and TypeScript extraction output.
+
+If the native addon fails to load at runtime, the indexer falls back to the TypeScript engine with a warning.
 
 ## Common Profiles
 

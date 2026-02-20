@@ -54,6 +54,10 @@ Example:
 { "repoId": "my-repo", "mode": "incremental" }
 ```
 
+When called with a progress token, the server emits `notifications/progress` messages with the current stage, file path, and completion percentage. MCP clients that support progress tokens can display real-time indexing status.
+
+In incremental mode, files whose modification time predates their last indexed timestamp are skipped. If no files changed, the existing version is reused instead of creating an empty snapshot.
+
 ### `sdl.repo.overview`
 Return token-efficient repository overview with directory summaries and hotspots.
 
@@ -152,14 +156,14 @@ Assess PR-level risk from delta + blast radius and produce test recommendations.
 ## Code Access Ladder
 
 ### `sdl.code.getSkeleton`
-Get structure-first symbol code view.
+Get structure-first symbol code view. Returns `null` for files exceeding the configured `maxFileBytes` limit.
 
 ```json
 { "repoId": "my-repo", "symbolId": "<symbol-id>" }
 ```
 
 ### `sdl.code.getHotPath`
-Get identifier-focused excerpt with context.
+Get identifier-focused excerpt with context. The `matchedIdentifiers` field in the response contains only identifiers that were actually found in the AST, not the full request list.
 
 ```json
 {
@@ -171,7 +175,7 @@ Get identifier-focused excerpt with context.
 ```
 
 ### `sdl.code.needWindow`
-Request raw code window (policy-gated).
+Request raw code window (policy-gated). The `expectedLines` and `maxTokens` values are clamped to the effective policy limits (`maxWindowLines`, `maxWindowTokens`), so requests exceeding policy caps are silently reduced rather than rejected.
 
 ```json
 {

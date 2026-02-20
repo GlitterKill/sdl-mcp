@@ -53,6 +53,7 @@ This catches most setup issues quickly.
 - Add more `ignore` patterns
 - Lower `maxFileBytes`
 - Tune `indexing.concurrency`
+- Try the native Rust engine (`indexing.engine: "rust"`) for faster pass-1 extraction
 
 ### Stale Results
 
@@ -94,6 +95,23 @@ Then run manual refreshes with `sdl-mcp index` until the underlying issue is fix
 - Resolution:
   - run SDL-MCP on a local clone/worktree
   - disable watch mode (`--no-watch`) and use periodic incremental indexing
+
+### Rust Native Engine Not Loading
+
+- Symptom: log warning "Rust engine returned null, falling back to TypeScript engine"
+- Cause: the native `.node` addon was not built or is incompatible with the current Node.js version
+- Resolution:
+  - run `npm run build:native` from the sdl-mcp directory
+  - verify the Rust toolchain is installed: `rustc --version`
+  - ensure Node.js major version matches the one used during build
+  - check that `native/*.node` exists after build
+  - if you do not need the Rust engine, set `indexing.engine: "typescript"` (the default)
+
+### Missing Symbols for JS Files With TS Counterparts
+
+- Symptom: `.js` files are not indexed even though they are listed in `languages`
+- Cause: when both `foo.ts` and `foo.js` exist at the same path, the scanner excludes the JS file to avoid indexing compiled output alongside source
+- Resolution: this is expected behavior. If the JS file is hand-written source (not compiled), remove or rename the corresponding `.ts` file
 
 ### Server Starts But Agent Cannot Use Tools
 

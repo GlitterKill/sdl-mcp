@@ -87,6 +87,26 @@ Then open:
 - `http://localhost:3000/api/graph/<repoId>/symbol/<symbolId>/neighborhood`
 - `http://localhost:3000/api/repo/<repoId>/status`
 
+## Optional: Native Rust Indexer
+
+If you have a Rust toolchain installed, you can use the native Rust engine for faster pass-1 symbol extraction:
+
+```bash
+npm run build:native
+```
+
+Then set `indexing.engine` to `"rust"` in your config:
+
+```json
+{
+  "indexing": {
+    "engine": "rust"
+  }
+}
+```
+
+The Rust engine falls back to TypeScript automatically if the native addon is not available. See [Configuration Reference](./configuration-reference.md#native-rust-engine) for details.
+
 ## Optional: Enable Semantic Search and Prefetch
 
 Add these sections to your config (or update existing values):

@@ -9,7 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- None yet.
+- Native Rust pass-1 indexing engine via napi-rs, with tree-sitter support for 12 languages (TS, JS, Python, Go, Rust, Java, C#, C/C++, Ruby, PHP, Scala, Swift). Enable with `indexing.engine: "rust"` in config.
+- `ToolContext` interface passing MCP progress tokens, abort signals, and `sendNotification` through to tool handlers.
+- `sdl.index.refresh` now emits MCP `notifications/progress` so clients can display real-time indexing status (stage, current file, progress percentage).
+- Configurable slice cache: `cache.graphSliceMaxEntries` now controls the in-memory graph slice LRU cache size at runtime.
+- Native build CI job for cross-platform Rust addon compilation and parity testing on Ubuntu, Windows, and macOS.
+- `build:native`, `build:native:debug`, and `test:native-parity` npm scripts.
+- Integration test for index-refresh timeout edge cases.
+
+### Changed
+
+- File scanner now excludes compiled JS files when a corresponding TS source exists at the same path, preventing duplicate symbol indexing.
+- `sdl.code.getHotPath` `matchedIdentifiers` field now returns only identifiers confirmed present in the AST, rather than echoing the full request list.
+- `sdl.code.needWindow` clamps `expectedLines` and `maxTokens` to configured policy limits instead of using policy maximums directly.
+- `sdl.code.getSkeleton` returns `null` for files exceeding `maxFileBytes`, preventing out-of-memory reads on very large files.
+- `PolicyEngine` is now constructed per-request instead of shared as a module-level singleton, eliminating stale policy state between concurrent requests.
+- Benchmark scope ignores native/, dist/, build/, target/, and non-source directories for accurate source-only metrics.
+- CI benchmarks run against a locked external OSS repository (zod-oss) for stable cross-run comparisons.
+- Claude Code template updated: `serve --stdio` args, `--yes` and `@latest` flags for npx, placement docs reference `~/.claude.json`.
+- `init` command detects `~/.claude.json` as a Claude Code client config candidate.
+
+### Fixed
+
+- Java adapter no longer sets `namespaceImport` on wildcard imports, which caused false import edges during resolution.
+- All code and symbol tools now validate that the requested symbol belongs to the specified `repoId`, preventing cross-repo data leakage.
+- Incremental indexing skips files whose `mtime` predates `last_indexed_at`, avoiding redundant re-processing of unchanged files.
+- Incremental indexing reuses the existing version ID when no files changed, instead of creating an empty snapshot.
 
 ## [0.6.7] - 2026-02-19
 
