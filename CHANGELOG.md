@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.8] - 2026-02-20
 
 ### Added
 
@@ -351,6 +351,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.6.8]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.8
 [0.6.7]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.7
 [0.6.6]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.6
 [0.6.5]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.5
