@@ -51,7 +51,8 @@ Main config file:
   "indexing": {
     "concurrency": 8,
     "enableFileWatching": true,
-    "maxWatchedFiles": 25000
+    "maxWatchedFiles": 25000,
+    "engine": "typescript"
   },
   "slice": {
     "defaultMaxCards": 60,
@@ -102,7 +103,7 @@ Main config file:
 
 - `repoId`: unique identifier used in tool calls
 - `rootPath`: absolute path recommended
-- `ignore`: glob patterns to exclude heavy or generated content
+- `ignore`: glob patterns to exclude heavy or generated content. If you use the native Rust engine, include `**/native/target/**`.
 - `languages`: include only needed languages for faster indexing
 - `maxFileBytes`: per-file hard cap
 - `packageJsonPath`: optional path to `package.json` (auto-detected if not set)
@@ -132,6 +133,7 @@ Controls sensitive-data masking in returned content.
 - `enableFileWatching`: keeps index fresh during active development
 - `maxWatchedFiles`: hard cap to prevent watcher overload on very large repos
 - `workerPoolSize`: optional worker pool size cap (defaults to CPU-count based heuristic)
+- `engine`: pass-1 indexer implementation, either `typescript` (default) or `rust`
 
 ### `slice`
 

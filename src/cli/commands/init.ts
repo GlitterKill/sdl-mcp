@@ -341,6 +341,7 @@ function detectInstalledClients(): ClientDetection[] {
       name: "claude-code",
       templateClient: "claude-code",
       candidates: [
+        join(userProfile, ".claude.json"),
         join(userProfile, ".claude", "settings.json"),
         join(appData, "Claude", "claude_desktop_config.json"),
       ],

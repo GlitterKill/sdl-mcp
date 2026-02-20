@@ -2,7 +2,7 @@
   "_comment": "Claude Code MCP Configuration Template for SDL-MCP",
   "_documentation": {
     "purpose": "Configure SDL-MCP as an MCP server for Claude Code",
-    "placement": "Copy to ~/.claude/claude_desktop_config.json or add to existing mcpServers",
+    "placement": "Use `claude mcp add-json` or merge into ~/.claude.json under `mcpServers`",
     "windowsNotes": {
       "paths": "Use forward slashes (/) or escaped backslashes (\\\\)",
       "npx": "npx works cross-platform. For global install, use 'node' with full path",
@@ -20,7 +20,7 @@
   "mcpServers": {
     "sdl-mcp": {
       "command": "npx",
-      "args": ["sdl-mcp"],
+      "args": ["--yes", "sdl-mcp@latest", "serve", "--stdio"],
       "env": {
         "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json",
         "_comment_env": "Alternative: Set SDL_CONFIG_PATH if you prefer environment variable name"
@@ -32,7 +32,7 @@
     "mcpServers": {
       "sdl-mcp": {
         "command": "sdl-mcp",
-        "args": [],
+        "args": ["serve", "--stdio"],
         "env": {
           "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
         }
@@ -44,7 +44,7 @@
     "mcpServers": {
       "sdl-mcp": {
         "command": "node",
-        "args": ["F:/path/to/sdl-mcp/dist/main.js"],
+        "args": ["F:/path/to/sdl-mcp/dist/main.js", "serve", "--stdio"],
         "env": {
           "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
         }

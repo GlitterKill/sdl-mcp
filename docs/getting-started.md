@@ -226,6 +226,7 @@ SDL_CONFIG = "[path-to-global]/sdlmcp.config.json"
 ```
 
 Claude Code CLI .json with NVM4Windows
+Use `serve --stdio`; running only `npx sdl-mcp` does not start the MCP server.
 ```json
 "sdl-mcp": {
   "type": "stdio",

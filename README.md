@@ -96,6 +96,7 @@ sdl-mcp serve --stdio --no-watch
 ## Core Feature Set
 
 - Multi-language repository indexing with tree-sitter adapters
+- Optional native Rust pass-1 indexing engine (`indexing.engine: "rust"`)
 - Symbol cards with signatures, deps, metrics, and versioning
 - Graph slices with handles, leases, refresh, and spillover
 - Delta analysis and blast radius support
@@ -157,6 +158,9 @@ npm run build
 npm run typecheck
 npm run lint
 npm test
+# Optional native addon + parity checks
+npm run build:native
+npm run test:native-parity
 ```
 
 Benchmark tooling (npm scripts):
