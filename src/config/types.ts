@@ -109,6 +109,7 @@ export const IndexingConfigSchema = z.object({
     .min(1)
     .default(WATCHER_DEFAULT_MAX_WATCHED_FILES),
   workerPoolSize: z.number().int().min(1).max(16).optional(),
+  engine: z.enum(["typescript", "rust"]).default("typescript"),
 });
 
 export type IndexingConfig = z.infer<typeof IndexingConfigSchema>;

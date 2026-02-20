@@ -214,12 +214,19 @@
           "description": "Optional cap for the indexing worker pool size",
           "minimum": 1,
           "maximum": 16
+        },
+        "engine": {
+          "type": "string",
+          "description": "Pass-1 indexing engine implementation",
+          "enum": ["typescript", "rust"],
+          "default": "typescript"
         }
       },
       "default": {
         "concurrency": 8,
         "enableFileWatching": true,
-        "maxWatchedFiles": 25000
+        "maxWatchedFiles": 25000,
+        "engine": "typescript"
       }
     },
     "slice": {

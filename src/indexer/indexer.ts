@@ -18,6 +18,7 @@ import {
   getSymbolsByRepoForSnapshot,
   getEdgesByRepo,
   getSymbolsByRepo,
+  getLatestVersion,
   getSymbol,
   getFile,
   deleteOutgoingCallEdgesBySymbol,
@@ -64,6 +65,11 @@ import type { ExtractedImport } from "./treesitter/extractImports.js";
 import { calibrateResolutionConfidence } from "./edge-confidence.js";
 import { refreshSymbolEmbeddings } from "./embeddings.js";
 import { prefetchFileExports } from "../graph/prefetch.js";
+import {
+  parseFilesRust,
+  isRustEngineAvailable,
+  type RustParseResult,
+} from "./rustIndexer.js";
 
 const require = createRequire(import.meta.url);
 const TS_CALL_RESOLUTION_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx"]);
@@ -114,7 +120,11 @@ export interface ProcessFileParams {
   fileMeta: FileMetadata;
   languages: string[];
   mode: "full" | "incremental";
-  existingFile?: { file_id: number; content_hash: string };
+  existingFile?: {
+    file_id: number;
+    content_hash: string;
+    last_indexed_at: string | null;
+  };
   symbolIndex?: SymbolIndex;
   pendingCallEdges?: PendingCallEdge[];
   createdCallEdges?: Set<string>;
@@ -150,6 +160,18 @@ async function processFile(params: ProcessFileParams): Promise<{
     skipCallResolution,
   } = params;
   try {
+    if (mode === "incremental" && existingFile?.last_indexed_at) {
+      const lastIndexedMs = new Date(existingFile.last_indexed_at).getTime();
+      if (fileMeta.mtime <= lastIndexedMs) {
+        return {
+          symbolsIndexed: 0,
+          edgesCreated: 0,
+          changed: false,
+          configEdges: [],
+        };
+      }
+    }
+
     const filePath = join(repoRoot, fileMeta.path);
     const content = await readFileAsync(filePath, "utf-8");
     const contentHash = hashContent(content);
@@ -644,6 +666,379 @@ async function processFile(params: ProcessFileParams): Promise<{
     return { symbolsIndexed, edgesCreated, changed: true, configEdges };
   } catch (error) {
     console.error(`Error processing file ${fileMeta.path}:`, error);
+    return {
+      symbolsIndexed: 0,
+      edgesCreated: 0,
+      changed: false,
+      configEdges: [],
+    };
+  }
+}
+
+/**
+ * Process a file using pre-parsed results from the Rust native engine.
+ *
+ * Handles DB writes, import edge resolution, and call edge resolution
+ * using extraction data already computed by the Rust engine (symbols,
+ * imports, calls, fingerprints, summaries, invariants, side effects).
+ */
+async function processFileFromRustResult(params: {
+  repoId: string;
+  repoRoot: string;
+  fileMeta: FileMetadata;
+  rustResult: RustParseResult;
+  languages: string[];
+  mode: "full" | "incremental";
+  existingFile?: {
+    file_id: number;
+    content_hash: string;
+    last_indexed_at: string | null;
+  };
+  symbolIndex: SymbolIndex;
+  pendingCallEdges: PendingCallEdge[];
+  createdCallEdges: Set<string>;
+  tsResolver: TsCallResolver | null;
+  config: RepoConfig;
+  allSymbolsByName: Map<string, SymbolRow[]>;
+  skipCallResolution: boolean;
+}): Promise<{
+  symbolsIndexed: number;
+  edgesCreated: number;
+  changed: boolean;
+  configEdges: ConfigEdge[];
+}> {
+  const {
+    repoId,
+    repoRoot,
+    fileMeta,
+    rustResult,
+    languages,
+    mode,
+    existingFile,
+    symbolIndex,
+    pendingCallEdges: _pendingCallEdges,
+    createdCallEdges,
+    tsResolver: _tsResolver,
+    config: _config,
+    allSymbolsByName: _allSymbolsByName,
+    skipCallResolution,
+  } = params;
+
+  try {
+    if (mode === "incremental" && existingFile?.last_indexed_at) {
+      const lastIndexedMs = new Date(existingFile.last_indexed_at).getTime();
+      if (fileMeta.mtime <= lastIndexedMs) {
+        return {
+          symbolsIndexed: 0,
+          edgesCreated: 0,
+          changed: false,
+          configEdges: [],
+        };
+      }
+    }
+
+    const ext = fileMeta.path.split(".").pop() || "";
+    const contentHash = rustResult.contentHash;
+
+    if (rustResult.parseError) {
+      logger.warn(
+        `Rust parse error for ${fileMeta.path}: ${rustResult.parseError}`,
+      );
+    }
+
+    if (
+      mode === "incremental" &&
+      existingFile &&
+      existingFile.content_hash === contentHash
+    ) {
+      return {
+        symbolsIndexed: 0,
+        edgesCreated: 0,
+        changed: false,
+        configEdges: [],
+      };
+    }
+
+    if (!languages.includes(ext)) {
+      if (existingFile) {
+        deleteSymbolsByFileWithEdges(existingFile.file_id);
+      }
+      upsertFile({
+        repo_id: repoId,
+        rel_path: fileMeta.path,
+        content_hash: contentHash,
+        language: ext,
+        byte_size: fileMeta.size,
+        last_indexed_at: new Date().toISOString(),
+      });
+      return {
+        symbolsIndexed: 0,
+        edgesCreated: 0,
+        changed: true,
+        configEdges: [],
+      };
+    }
+
+    const extWithDot = `.${ext}`;
+    const adapter = getAdapterForExtension(extWithDot);
+    const filePath = join(repoRoot, fileMeta.path);
+    const content = await readFileAsync(filePath, "utf-8");
+
+    // Preserve previous symbol metadata before deleting rows for this file.
+    const existingSymbolsById = new Map<string, SymbolRow>();
+    if (existingFile) {
+      const existingSymbols = getSymbolsByFile(existingFile.file_id);
+      for (const symbol of existingSymbols) {
+        existingSymbolsById.set(symbol.symbol_id, symbol);
+      }
+    }
+
+    const fileRecord = {
+      repo_id: repoId,
+      rel_path: fileMeta.path,
+      content_hash: contentHash,
+      language: ext,
+      byte_size: fileMeta.size,
+      last_indexed_at: new Date().toISOString(),
+    };
+    upsertFile(fileRecord);
+
+    const file = getFileByRepoPath(repoId, fileMeta.path);
+    if (!file) {
+      return {
+        symbolsIndexed: rustResult.symbols.length,
+        edgesCreated: 0,
+        changed: true,
+        configEdges: [],
+      };
+    }
+
+    if (existingFile) {
+      deleteSymbolsByFileWithEdges(existingFile.file_id);
+      deleteSymbolReferencesByFileId(existingFile.file_id);
+    }
+
+    // Rebuild test symbol reference index from the current file content.
+    if (isTestFile(fileMeta.path, languages)) {
+      try {
+        extractSymbolReferences(content, repoId, file.file_id);
+      } catch {
+        // Non-critical: skip reference extraction on read failure
+      }
+    }
+
+    const symbolsWithIds = rustResult.symbols;
+    const imports = rustResult.imports;
+    const calls = rustResult.calls;
+    const symbolsIndexed = symbolsWithIds.length;
+    let edgesCreated = 0;
+
+    // Build symbol details directly from native Rust identity/metadata fields.
+    const symbolDetails = symbolsWithIds.map((extracted) => {
+      const symbolId = extracted.symbolId;
+      const astFingerprint = extracted.astFingerprint;
+
+      return {
+        extractedSymbol: {
+          nodeId: extracted.nodeId,
+          kind: extracted.kind as SymbolKind,
+          name: extracted.name,
+          exported: extracted.exported,
+          range: extracted.range,
+          signature: extracted.signature,
+          visibility: extracted.visibility,
+        },
+        astFingerprint,
+        symbolId,
+        nativeSummary: extracted.summary,
+        nativeInvariantsJson: extracted.invariantsJson,
+        nativeSideEffectsJson: extracted.sideEffectsJson,
+      };
+    });
+
+    const nodeIdToSymbolId = new Map<string, string>();
+    const nameToSymbolIds = new Map<string, string[]>();
+
+    for (const detail of symbolDetails) {
+      nodeIdToSymbolId.set(detail.extractedSymbol.nodeId, detail.symbolId);
+      const existing = nameToSymbolIds.get(detail.extractedSymbol.name) ?? [];
+      existing.push(detail.symbolId);
+      nameToSymbolIds.set(detail.extractedSymbol.name, existing);
+    }
+
+    // Resolve imports
+    const extensions = languages.map((lang) => `.${lang}`);
+    const importResolution = await resolveImportTargets(
+      repoId,
+      repoRoot,
+      fileMeta.path,
+      imports,
+      extensions,
+      adapter?.languageId ?? ext,
+      content,
+    );
+    const importTargets = importResolution.targets;
+
+    const exportSymbols = symbolDetails.filter(
+      (d) => d.extractedSymbol.exported,
+    );
+    const edgeSourceDetails =
+      exportSymbols.length > 0 ? exportSymbols : symbolDetails;
+
+    for (const detail of symbolDetails) {
+      const extracted = detail.extractedSymbol;
+      const symbolId = detail.symbolId;
+
+      const existingSymbol = existingSymbolsById.get(symbolId);
+      const nativeSummary = detail.nativeSummary.trim();
+      const nativeInvariantsJson = detail.nativeInvariantsJson.trim();
+      const nativeSideEffectsJson = detail.nativeSideEffectsJson.trim();
+
+      // Prefer existing values for stable IDs, then Rust-native metadata, then TS fallback.
+      let summary =
+        existingSymbol?.summary ?? (nativeSummary.length > 0 ? nativeSummary : null);
+      if (summary === null) {
+        summary = generateSummary(extracted as any, content);
+      }
+
+      let invariantsJson =
+        existingSymbol?.invariants_json ??
+        (nativeInvariantsJson.length > 0 && nativeInvariantsJson !== "[]"
+          ? nativeInvariantsJson
+          : null);
+      if (invariantsJson === null) {
+        const invariants = extractInvariants(extracted as any, content);
+        invariantsJson =
+          invariants.length > 0 ? JSON.stringify(invariants) : null;
+      }
+
+      let sideEffectsJson =
+        existingSymbol?.side_effects_json ??
+        (nativeSideEffectsJson.length > 0 && nativeSideEffectsJson !== "[]"
+          ? nativeSideEffectsJson
+          : null);
+      if (sideEffectsJson === null) {
+        const sideEffects = extractSideEffects(extracted as any, content);
+        sideEffectsJson =
+          sideEffects.length > 0 ? JSON.stringify(sideEffects) : null;
+      }
+
+      const symbol: SymbolRow = {
+        symbol_id: symbolId,
+        repo_id: repoId,
+        file_id: file.file_id,
+        kind: extracted.kind,
+        name: extracted.name,
+        exported: extracted.exported ? 1 : 0,
+        visibility: extracted.visibility || null,
+        language: adapter?.languageId ?? ext,
+        range_start_line: extracted.range.startLine,
+        range_start_col: extracted.range.startCol,
+        range_end_line: extracted.range.endLine,
+        range_end_col: extracted.range.endCol,
+        ast_fingerprint: detail.astFingerprint,
+        signature_json: extracted.signature
+          ? JSON.stringify(extracted.signature)
+          : null,
+        summary,
+        invariants_json: invariantsJson,
+        side_effects_json: sideEffectsJson,
+        updated_at: new Date().toISOString(),
+      };
+
+      upsertSymbolTransaction(symbol);
+      addToSymbolIndex(
+        symbolIndex,
+        fileMeta.path,
+        symbol.symbol_id,
+        symbol.name,
+        symbol.kind,
+      );
+
+      if (
+        edgeSourceDetails.some(
+          (s) => s.extractedSymbol.nodeId === extracted.nodeId,
+        )
+      ) {
+        for (const target of importTargets) {
+          const edge: EdgeRow = {
+            repo_id: repoId,
+            from_symbol_id: symbolId,
+            to_symbol_id: target.symbolId,
+            type: "import",
+            weight: 0.6,
+            provenance: `import:${target.provenance}`,
+            created_at: new Date().toISOString(),
+          };
+          createEdgeTransaction(edge);
+          edgesCreated++;
+        }
+      }
+
+      if (!skipCallResolution) {
+        for (const call of calls) {
+          if (call.callerNodeId !== extracted.nodeId) {
+            continue;
+          }
+
+          const resolved = resolveCallTarget(
+            call,
+            nodeIdToSymbolId,
+            nameToSymbolIds,
+            importResolution.importedNameToSymbolIds,
+            importResolution.namespaceImports,
+            adapter,
+          );
+
+          if (!resolved) continue;
+
+          if (resolved.isResolved && resolved.symbolId) {
+            const edgeKey = `${symbolId}->${resolved.symbolId}`;
+            if (createdCallEdges.has(edgeKey)) continue;
+
+            const edge: EdgeRow = {
+              repo_id: repoId,
+              from_symbol_id: symbolId,
+              to_symbol_id: resolved.symbolId,
+              type: "call",
+              weight: 1.0,
+              confidence: resolved.confidence,
+              resolution_strategy: resolved.strategy,
+              provenance: `call:${call.calleeIdentifier}`,
+              created_at: new Date().toISOString(),
+            };
+            createEdgeTransaction(edge);
+            createdCallEdges.add(edgeKey);
+            edgesCreated++;
+          } else if (resolved.targetName) {
+            const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
+            const edgeKey = `${symbolId}->${unresolvedTargetId}`;
+            if (createdCallEdges.has(edgeKey)) continue;
+
+            const edge: EdgeRow = {
+              repo_id: repoId,
+              from_symbol_id: symbolId,
+              to_symbol_id: unresolvedTargetId,
+              type: "call",
+              weight: 0.5,
+              confidence: resolved.confidence,
+              resolution_strategy: "unresolved",
+              provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
+              created_at: new Date().toISOString(),
+            };
+            createEdgeTransaction(edge);
+            createdCallEdges.add(edgeKey);
+            edgesCreated++;
+          }
+        }
+      }
+    }
+
+    prefetchFileExports(repoId, fileMeta.path);
+
+    return { symbolsIndexed, edgesCreated, changed: true, configEdges: [] };
+  } catch (error) {
+    logger.error(`Error processing Rust result for ${fileMeta.path}: ${error}`);
     return {
       symbolsIndexed: 0,
       edgesCreated: 0,
@@ -1849,12 +2244,23 @@ export async function indexRepo(
     Math.min(appConfig.indexing?.concurrency ?? 4, files.length || 1),
   );
 
-  const workerPoolSize = resolveParserWorkerPoolSize({
-    configuredWorkerPoolSize: appConfig.indexing?.workerPoolSize,
-    concurrency,
-    fileCount: files.length,
-  });
-  const workerPool = new ParserWorkerPool(workerPoolSize);
+  const useRustEngine =
+    appConfig.indexing?.engine === "rust" && isRustEngineAvailable();
+
+  // Only create worker pool for TypeScript engine
+  let workerPool: ParserWorkerPool | null = null;
+  if (!useRustEngine) {
+    const workerPoolSize = resolveParserWorkerPoolSize({
+      configuredWorkerPoolSize: appConfig.indexing?.workerPoolSize,
+      concurrency,
+      fileCount: files.length,
+    });
+    workerPool = new ParserWorkerPool(workerPoolSize);
+  }
+
+  if (useRustEngine) {
+    logger.info("Using native Rust indexer engine for Pass 1");
+  }
 
   const runIndex = async (): Promise<IndexResult> => {
 
@@ -1908,62 +2314,147 @@ export async function indexRepo(
     });
   };
 
-  const runWorker = async (): Promise<void> => {
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const index = nextIndex++;
-      if (index >= files.length) {
-        return;
-      }
-
-      const file = files[index];
-      updatePass1Progress(file.path);
-      const skipCallResolution = isTsCallResolutionFile(file.path);
-
-      try {
-        const result = await processFile({
-          repoId,
-          repoRoot: repoRow.root_path,
-          fileMeta: file,
-          languages: config.languages,
-          mode,
-          existingFile: existingByPath.get(file.path),
-          symbolIndex,
-          pendingCallEdges,
-          createdCallEdges,
-          tsResolver,
-          config,
-          allSymbolsByName,
-          onProgress,
-          workerPool,
-          skipCallResolution,
-        });
-        filesProcessed++;
-        if (result.changed) {
-          changedFiles++;
-          if (skipCallResolution) {
-            changedTsFilePaths.add(file.path);
-          }
-          const fileRecord = getFileByRepoPath(repoId, file.path);
-          if (fileRecord) {
-            changedFileIds.add(fileRecord.file_id);
-          }
+  if (useRustEngine) {
+    let rustFiles = files;
+    let skippedRustFiles = 0;
+    if (mode === "incremental") {
+      rustFiles = files.filter((file) => {
+        const existing = existingByPath.get(file.path);
+        if (!existing?.last_indexed_at) {
+          return true;
         }
-        totalSymbolsIndexed += result.symbolsIndexed;
-        totalEdgesCreated += result.edgesCreated;
-        allConfigEdges.push(...result.configEdges);
-      } catch (error) {
-        filesProcessed++;
-        console.error(`Error processing file ${file.path}:`, error);
-      }
+        return file.mtime > new Date(existing.last_indexed_at).getTime();
+      });
+      skippedRustFiles = files.length - rustFiles.length;
     }
-  };
 
-  const workers = Array.from(
-    { length: Math.min(concurrency, files.length || 1) },
-    () => runWorker(),
-  );
-  await Promise.all(workers);
+    // --- Rust engine: batch parse all files, then process results ---
+    const rustResults = parseFilesRust(
+      repoId,
+      repoRow.root_path,
+      rustFiles,
+      concurrency,
+    );
+
+    if (rustResults) {
+      filesProcessed += skippedRustFiles;
+
+      const resultByPath = new Map<string, RustParseResult>();
+      for (const result of rustResults) {
+        resultByPath.set(result.relPath, result);
+      }
+
+      for (const file of rustFiles) {
+        updatePass1Progress(file.path);
+        const rustResult = resultByPath.get(file.path);
+        if (!rustResult) {
+          filesProcessed++;
+          continue;
+        }
+
+        const skipCallResolution = isTsCallResolutionFile(file.path);
+
+        try {
+          const result = await processFileFromRustResult({
+            repoId,
+            repoRoot: repoRow.root_path,
+            fileMeta: file,
+            rustResult,
+            languages: config.languages,
+            mode,
+            existingFile: existingByPath.get(file.path),
+            symbolIndex,
+            pendingCallEdges,
+            createdCallEdges,
+            tsResolver,
+            config,
+            allSymbolsByName,
+            skipCallResolution,
+          });
+          filesProcessed++;
+          if (result.changed) {
+            changedFiles++;
+            if (skipCallResolution) {
+              changedTsFilePaths.add(file.path);
+            }
+            const fileRecord = getFileByRepoPath(repoId, file.path);
+            if (fileRecord) {
+              changedFileIds.add(fileRecord.file_id);
+            }
+          }
+          totalSymbolsIndexed += result.symbolsIndexed;
+          totalEdgesCreated += result.edgesCreated;
+          allConfigEdges.push(...result.configEdges);
+        } catch (error) {
+          filesProcessed++;
+          logger.error(`Error processing Rust result for ${file.path}: ${error}`);
+        }
+      }
+    } else {
+      // Rust engine returned null (addon not loadable) - fall through to TS
+      logger.warn("Rust engine returned null, falling back to TypeScript engine");
+    }
+  }
+
+  if (!useRustEngine || filesProcessed === 0) {
+    // --- TypeScript engine: worker pool with concurrent processing ---
+    const runWorker = async (): Promise<void> => {
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const index = nextIndex++;
+        if (index >= files.length) {
+          return;
+        }
+
+        const file = files[index];
+        updatePass1Progress(file.path);
+        const skipCallResolution = isTsCallResolutionFile(file.path);
+
+        try {
+          const result = await processFile({
+            repoId,
+            repoRoot: repoRow.root_path,
+            fileMeta: file,
+            languages: config.languages,
+            mode,
+            existingFile: existingByPath.get(file.path),
+            symbolIndex,
+            pendingCallEdges,
+            createdCallEdges,
+            tsResolver,
+            config,
+            allSymbolsByName,
+            onProgress,
+            workerPool,
+            skipCallResolution,
+          });
+          filesProcessed++;
+          if (result.changed) {
+            changedFiles++;
+            if (skipCallResolution) {
+              changedTsFilePaths.add(file.path);
+            }
+            const fileRecord = getFileByRepoPath(repoId, file.path);
+            if (fileRecord) {
+              changedFileIds.add(fileRecord.file_id);
+            }
+          }
+          totalSymbolsIndexed += result.symbolsIndexed;
+          totalEdgesCreated += result.edgesCreated;
+          allConfigEdges.push(...result.configEdges);
+        } catch (error) {
+          filesProcessed++;
+          console.error(`Error processing file ${file.path}:`, error);
+        }
+      }
+    };
+
+    const workers = Array.from(
+      { length: Math.min(concurrency, files.length || 1) },
+      () => runWorker(),
+    );
+    await Promise.all(workers);
+  }
 
   const refreshedSymbolIndex: SymbolIndex = new Map();
   const allFilesAfterPass1 = getFilesByRepo(repoId);
@@ -2055,35 +2546,64 @@ export async function indexRepo(
     configEdgesCreated++;
   }
 
-  const versionId = `v${Date.now()}`;
-  const version = {
-    version_id: versionId,
-    repo_id: repoId,
-    created_at: new Date().toISOString(),
-    reason: mode === "full" ? "Full index" : "Incremental index",
-    prev_version_hash: null,
-    version_hash: null,
-  };
+  const versionReason = mode === "full" ? "Full index" : "Incremental index";
 
-  const symbols = getSymbolsByRepoForSnapshot(repoId);
-  const snapshots = symbols.map((symbol) => ({
-    version_id: versionId,
-    symbol_id: symbol.symbol_id,
-    ast_fingerprint: symbol.ast_fingerprint,
-    signature_json: symbol.signature_json,
-    summary: symbol.summary,
-    invariants_json: symbol.invariants_json,
-    side_effects_json: symbol.side_effects_json,
-  }));
+  let versionId: string;
+  if (changedFiles === 0 && mode === "incremental") {
+    const latestVersion = getLatestVersion(repoId);
+    versionId = latestVersion ? latestVersion.version_id : `v${Date.now()}`;
 
-  createSnapshotTransaction(version, snapshots);
+    if (!latestVersion) {
+      const version = {
+        version_id: versionId,
+        repo_id: repoId,
+        created_at: new Date().toISOString(),
+        reason: versionReason,
+        prev_version_hash: null,
+        version_hash: null,
+      };
+
+      const symbols = getSymbolsByRepoForSnapshot(repoId);
+      const snapshots = symbols.map((symbol) => ({
+        version_id: versionId,
+        symbol_id: symbol.symbol_id,
+        ast_fingerprint: symbol.ast_fingerprint,
+        signature_json: symbol.signature_json,
+        summary: symbol.summary,
+        invariants_json: symbol.invariants_json,
+        side_effects_json: symbol.side_effects_json,
+      }));
+
+      createSnapshotTransaction(version, snapshots);
+    }
+  } else {
+    versionId = `v${Date.now()}`;
+    const version = {
+      version_id: versionId,
+      repo_id: repoId,
+      created_at: new Date().toISOString(),
+      reason: versionReason,
+      prev_version_hash: null,
+      version_hash: null,
+    };
+
+    const symbols = getSymbolsByRepoForSnapshot(repoId);
+    const snapshots = symbols.map((symbol) => ({
+      version_id: versionId,
+      symbol_id: symbol.symbol_id,
+      ast_fingerprint: symbol.ast_fingerprint,
+      signature_json: symbol.signature_json,
+      summary: symbol.summary,
+      invariants_json: symbol.invariants_json,
+      side_effects_json: symbol.side_effects_json,
+    }));
+
+    createSnapshotTransaction(version, snapshots);
+  }
 
   const durationMs = Date.now() - startTime;
 
-  const changedFileIdsParam =
-    mode === "incremental" && changedFileIds.size > 0
-      ? changedFileIds
-      : undefined;
+  const changedFileIdsParam = mode === "incremental" ? changedFileIds : undefined;
   await updateMetricsForRepo(repoId, changedFileIdsParam);
 
   if (appConfig.semantic?.enabled) {
@@ -2112,7 +2632,9 @@ export async function indexRepo(
   try {
     return await runIndex();
   } finally {
-    await workerPool.shutdown();
+    if (workerPool) {
+      await workerPool.shutdown();
+    }
   }
 }
 

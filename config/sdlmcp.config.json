@@ -9,7 +9,8 @@
         "**/.next/**",
         "**/build/**",
         "**/.git/**",
-        "**/coverage/**"
+        "**/coverage/**",
+        "**/native/target/**"
       ],
       "languages": [
         "ts",

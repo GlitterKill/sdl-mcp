@@ -9,6 +9,11 @@ dist/
 build/
 *.tsbuildinfo
 
+# Rust / napi-rs native build
+native/target/
+native/*.node
+*.node
+
 # Database
 *.sqlite
 *.sqlite3

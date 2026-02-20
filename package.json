@@ -56,6 +56,9 @@
     "benchmark:v067:save": "tsx scripts/benchmark/v067-baseline.ts --out devdocs/benchmarks/v067-baseline.json",
     "package:exe": "node scripts/build-exe.js",
     "prepack": "npm run build:runtime",
+    "build:native": "cd native && npx @napi-rs/cli build --release",
+    "build:native:debug": "cd native && npx @napi-rs/cli build",
+    "test:native-parity": "node --import tsx tests/native/parity-test.ts",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck"
   },
   "keywords": [
@@ -100,6 +103,7 @@
     "onnxruntime-node": "^1.22.0"
   },
   "devDependencies": {
+    "@napi-rs/cli": "^2.18.0",
     "@opentelemetry/sdk-trace-web": "^1.30.0",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0",

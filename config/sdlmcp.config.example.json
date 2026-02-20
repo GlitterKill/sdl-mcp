@@ -120,7 +120,8 @@
   "indexing": {
     "concurrency": 4,
     "enableFileWatching": true,
-    "maxWatchedFiles": 25000
+    "maxWatchedFiles": 25000,
+    "engine": "typescript"
   },
   "slice": {
     "defaultMaxCards": 60,
