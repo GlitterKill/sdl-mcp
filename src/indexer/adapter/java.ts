@@ -351,7 +351,6 @@ class JavaAdapter extends BaseAdapter {
             !specifier.startsWith("javax.") &&
             !specifier.startsWith("com."),
           imports: isWildcard ? ["*"] : [specifier.split(".").pop() || ""],
-          namespaceImport: isWildcard ? undefined : (specifier.split(".").pop() || undefined),
           isReExport: false,
         };
 
