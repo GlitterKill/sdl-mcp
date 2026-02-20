@@ -51,6 +51,7 @@ import {
   getSliceCacheKey,
   getCachedSlice,
   setCachedSlice,
+  configureSliceCache,
 } from "./sliceCache.js";
 
 import {
@@ -133,6 +134,12 @@ export async function buildSlice(
   const config = loadConfig();
   const cacheConfig = config.cache;
   const cacheEnabled = cacheConfig?.enabled ?? true;
+
+  if (cacheConfig) {
+    configureSliceCache({
+      maxEntries: cacheConfig.graphSliceMaxEntries,
+    });
+  }
 
   const cacheKey = getSliceCacheKey(request);
   const cached = cacheEnabled ? getCachedSlice(cacheKey) : null;

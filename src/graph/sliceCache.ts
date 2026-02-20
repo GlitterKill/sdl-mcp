@@ -23,10 +23,24 @@ interface SliceCacheEntry {
   createdAt: number;
 }
 
-const SLICE_CACHE_TTL_MS = 60_000;
-const SLICE_CACHE_MAX = 100;
+const DEFAULT_SLICE_CACHE_TTL_MS = 60_000;
+const DEFAULT_SLICE_CACHE_MAX = 100;
+let sliceCacheTtlMs = DEFAULT_SLICE_CACHE_TTL_MS;
+let sliceCacheMax = DEFAULT_SLICE_CACHE_MAX;
 const sliceCache = new Map<string, SliceCacheEntry>();
 const accessOrder: string[] = [];
+
+export function configureSliceCache(options: {
+  maxEntries?: number;
+  ttlMs?: number;
+}): void {
+  if (options.maxEntries !== undefined && options.maxEntries >= 1) {
+    sliceCacheMax = options.maxEntries;
+  }
+  if (options.ttlMs !== undefined && options.ttlMs >= 1000) {
+    sliceCacheTtlMs = options.ttlMs;
+  }
+}
 
 interface SliceCacheStats {
   hits: number;
@@ -98,7 +112,7 @@ export function getCachedSlice(key: string): GraphSlice | null {
     updateHitRate();
     return null;
   }
-  if (entry.expiresAt <= Date.now()) {
+  if (Date.now() >= entry.expiresAt) {
     sliceCache.delete(key);
     removeFromAccessOrder(key);
     cacheStats.currentSize--;
@@ -125,7 +139,7 @@ export function setCachedSlice(key: string, slice: GraphSlice): void {
     removeFromAccessOrder(key);
     cacheStats.currentSize--;
   }
-  if (sliceCache.size >= SLICE_CACHE_MAX) {
+  if (sliceCache.size >= sliceCacheMax) {
     const lruKey = accessOrder.shift();
     if (lruKey) {
       sliceCache.delete(lruKey);
@@ -136,7 +150,7 @@ export function setCachedSlice(key: string, slice: GraphSlice): void {
   const now = Date.now();
   sliceCache.set(key, {
     slice,
-    expiresAt: now + SLICE_CACHE_TTL_MS,
+    expiresAt: now + sliceCacheTtlMs,
     createdAt: now,
   });
   accessOrder.push(key);
