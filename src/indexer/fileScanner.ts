@@ -113,9 +113,27 @@ async function filterFilesBySize(
   return metadata;
 }
 
+const TS_SUPERSEDES_JS: Record<string, string> = {
+  ".js": ".ts",
+  ".jsx": ".tsx",
+};
+
+function deduplicateCompiledJs(files: FileMetadata[]): FileMetadata[] {
+  const pathSet = new Set(files.map((f) => f.path));
+  return files.filter((f) => {
+    const ext = f.path.slice(f.path.lastIndexOf("."));
+    const tsExt = TS_SUPERSEDES_JS[ext];
+    if (!tsExt) return true;
+    const tsCounterpart = f.path.slice(0, f.path.length - ext.length) + tsExt;
+    return !pathSet.has(tsCounterpart);
+  });
+}
+
 /**
  * Scans a repository for source files matching configured languages.
  * Filters by file extensions and size limits, resolves workspaces automatically.
+ * When both a TS and JS file exist at the same path, the JS file is excluded
+ * to avoid indexing compiled output alongside source.
  *
  * @param repoPath - Absolute path to repository root
  * @param config - Repository configuration with languages, ignore patterns, and limits
@@ -132,5 +150,7 @@ export async function scanRepository(
     config.maxFileBytes,
   );
 
-  return metadata.sort((a, b) => a.path.localeCompare(b.path));
+  const deduplicated = deduplicateCompiledJs(metadata);
+
+  return deduplicated.sort((a, b) => a.path.localeCompare(b.path));
 }
