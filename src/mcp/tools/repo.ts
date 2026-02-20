@@ -11,7 +11,11 @@ import {
   RepoOverviewResponse,
 } from "../tools.js";
 import * as db from "../../db/queries.js";
-import { getWatcherHealth, indexRepo } from "../../indexer/indexer.js";
+import {
+  getWatcherHealth,
+  indexRepo,
+  type IndexProgress,
+} from "../../indexer/indexer.js";
 import { RepoConfig } from "../../config/types.js";
 import { LanguageSchema } from "../../config/types.js";
 import { normalizePath } from "../../util/paths.js";
@@ -34,6 +38,7 @@ import {
   isTracingEnabled,
   type SpanAttributes,
 } from "../../util/tracing.js";
+import type { ToolContext } from "../../server.js";
 
 const SUPPORTED_LANGUAGES = [...LanguageSchema.options];
 
@@ -318,6 +323,7 @@ export async function handleRepoStatus(
  */
 export async function handleIndexRefresh(
   args: unknown,
+  context?: ToolContext,
 ): Promise<IndexRefreshResponse> {
   const request = IndexRefreshRequestSchema.parse(args);
   const { repoId, mode } = request;
@@ -328,7 +334,25 @@ export async function handleIndexRefresh(
       throw new DatabaseError(`Repository ${repoId} not found`);
     }
 
-    const result = await indexRepo(repoId, mode);
+    const progressToken = context?.progressToken;
+    const sendNotification = context?.sendNotification;
+    const onProgress =
+      progressToken !== undefined && sendNotification
+        ? (progress: IndexProgress) => {
+            const message = `[${progress.stage}] ${progress.currentFile ?? ""}`.trim();
+            sendNotification({
+              method: "notifications/progress",
+              params: {
+                progressToken,
+                progress: progress.current,
+                total: progress.total,
+                message,
+              },
+            }).catch(() => undefined);
+          }
+        : undefined;
+
+    const result = await indexRepo(repoId, mode, onProgress);
 
     clearSliceCache();
     symbolCardCache.clear();

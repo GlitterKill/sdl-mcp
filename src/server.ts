@@ -1,20 +1,27 @@
+import { createRequire } from "module";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
+  type ServerNotification,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { errorToMcpResponse } from "./mcp/errors.js";
 import { logToolCall } from "./mcp/telemetry.js";
-import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../package.json");
 
+export interface ToolContext {
+  progressToken?: string | number;
+  sendNotification: (notification: ServerNotification) => Promise<void>;
+  signal: AbortSignal;
+}
+
 interface ToolHandler {
-  (args: unknown): Promise<unknown>;
+  (args: unknown, context?: ToolContext): Promise<unknown>;
 }
 
 interface ToolDefinition {
@@ -60,75 +67,86 @@ export class MCPServer {
       }
     });
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      try {
-        const tool = this.tools.get(request.params.name);
-        if (!tool) {
-          return {
-            content: [
-              { type: "text", text: `Tool '${request.params.name}' not found` },
-            ],
-            isError: true,
-          };
-        }
-
-        const start = Date.now();
-        const repoId = extractStringField(request.params.arguments, "repoId");
-        const symbolId = extractStringField(
-          request.params.arguments,
-          "symbolId",
-        );
+    this.server.setRequestHandler(
+      CallToolRequestSchema,
+      async (request, extra) => {
+        const toolContext: ToolContext = {
+          progressToken: extra._meta?.progressToken,
+          sendNotification: extra.sendNotification,
+          signal: extra.signal,
+        };
 
         try {
-          const result = await tool.handler(request.params.arguments);
-          logToolCall({
-            tool: request.params.name,
-            request: request.params.arguments as Record<string, unknown>,
-            response: result as Record<string, unknown>,
-            durationMs: Date.now() - start,
-            repoId,
-            symbolId,
-          });
-          // Wrap result in MCP content format
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(result, null, 2),
-              },
-            ],
-          };
-        } catch (error) {
-          process.stderr.write(
-            `[sdl-mcp] Tool ${request.params.name} error: ${error}\n`,
+          const tool = this.tools.get(request.params.name);
+          if (!tool) {
+            return {
+              content: [
+                { type: "text", text: `Tool '${request.params.name}' not found` },
+              ],
+              isError: true,
+            };
+          }
+
+          const start = Date.now();
+          const repoId = extractStringField(request.params.arguments, "repoId");
+          const symbolId = extractStringField(
+            request.params.arguments,
+            "symbolId",
           );
-          logToolCall({
-            tool: request.params.name,
-            request: request.params.arguments as Record<string, unknown>,
-            response: errorToMcpResponse(error),
-            durationMs: Date.now() - start,
-            repoId,
-            symbolId,
-          });
-          // Return error in MCP content format instead of throwing
+
+          try {
+            const result = await tool.handler(request.params.arguments, toolContext);
+            logToolCall({
+              tool: request.params.name,
+              request: request.params.arguments as Record<string, unknown>,
+              response: result as Record<string, unknown>,
+              durationMs: Date.now() - start,
+              repoId,
+              symbolId,
+            });
+            // Wrap result in MCP content format
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(result, null, 2),
+                },
+              ],
+            };
+          } catch (error) {
+            process.stderr.write(
+              `[sdl-mcp] Tool ${request.params.name} error: ${error}\n`,
+            );
+            logToolCall({
+              tool: request.params.name,
+              request: request.params.arguments as Record<string, unknown>,
+              response: errorToMcpResponse(error),
+              durationMs: Date.now() - start,
+              repoId,
+              symbolId,
+            });
+            // Return error in MCP content format instead of throwing
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(errorToMcpResponse(error), null, 2),
+                },
+              ],
+              isError: true,
+            };
+          }
+        } catch (outerError) {
+          process.stderr.write(
+            `[sdl-mcp] CallTool outer error: ${outerError}\n`,
+          );
           return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(errorToMcpResponse(error), null, 2),
-              },
-            ],
+            content: [{ type: "text", text: `Internal error: ${outerError}` }],
             isError: true,
           };
         }
-      } catch (outerError) {
-        process.stderr.write(`[sdl-mcp] CallTool outer error: ${outerError}\n`);
-        return {
-          content: [{ type: "text", text: `Internal error: ${outerError}` }],
-          isError: true,
-        };
-      }
-    });
+      },
+    );
   }
 
   registerTool(
