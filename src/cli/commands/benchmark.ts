@@ -106,10 +106,27 @@ interface BenchmarkCIResult {
 }
 
 export const BENCHMARK_SCOPE_IGNORE_PATTERNS = [
+  // Test files
   "**/tests/**",
   "**/dist-tests/**",
   "**/*.test.ts",
   "**/*.spec.ts",
+  // Build output and native addons
+  "**/native/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/target/**",
+  // Root-level non-source directories (scopes self-repo to src/)
+  "scripts/**",
+  "migrations/**",
+  "templates/**",
+  "benchmarks/**",
+  "docs/**",
+  "devdocs/**",
+  "config/**",
+  "data/**",
+  ".benchmark/**",
+  ".tmp/**",
 ];
 
 export function mergeBenchmarkIgnorePatterns(

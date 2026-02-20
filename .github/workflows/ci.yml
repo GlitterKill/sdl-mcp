@@ -87,10 +87,21 @@ jobs:
       - name: Run test harness
         run: npm run test:harness
 
-      - name: Run Benchmark CI Guardrails
+      - name: Cache locked benchmark repos
+        id: cache-benchmark-repos
+        uses: actions/cache@v4
+        with:
+          path: .tmp/external-benchmarks
+          key: benchmark-repos-${{ hashFiles('scripts/benchmark/phase-a-benchmark-lock.json') }}
+
+      - name: Setup locked benchmark repos
+        if: steps.cache-benchmark-repos.outputs.cache-hit != 'true'
+        run: npm run benchmark:setup-external
+
+      - name: Run Benchmark CI Guardrails (locked OSS repo)
         shell: bash
         run: |
-          echo "Running benchmark CI with guardrails..."
+          echo "Running benchmark CI against locked OSS repo (zod-oss)..."
           if [ "${{ runner.os }}" = "Windows" ]; then
             THRESHOLD_PATH="config/benchmark.ci.windows.config.json"
           else
@@ -98,7 +109,7 @@ jobs:
           fi
           echo "Using threshold config: ${THRESHOLD_PATH}"
           npm run build
-          node dist/cli/index.js benchmark:ci --threshold-path "${THRESHOLD_PATH}" --json --out .benchmark/latest-result.json
+          node dist/cli/index.js benchmark:ci --repo-id zod-oss --threshold-path "${THRESHOLD_PATH}" --json --out .benchmark/latest-result.json
           BENCHMARK_EXIT_CODE=$?
 
           echo "Benchmark exit code: ${BENCHMARK_EXIT_CODE}"
@@ -121,7 +132,7 @@ jobs:
           else
             THRESHOLD_PATH="config/benchmark.ci.config.json"
           fi
-          node dist/cli/index.js benchmark:ci --threshold-path "${THRESHOLD_PATH}" --update-baseline --out .benchmark/latest-result.json
+          node dist/cli/index.js benchmark:ci --repo-id zod-oss --threshold-path "${THRESHOLD_PATH}" --update-baseline --out .benchmark/latest-result.json
 
       - name: Setup external benchmark repos (matrix smoke)
         if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
@@ -166,6 +177,58 @@ jobs:
         run: |
           echo "CI completed on ${{ matrix.os }} with Node ${{ matrix.node-version }}"
           echo "This validates cross-platform behavior for all language adapters:"
+
+  native-build:
+    name: Native Rust Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: "npm"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('native/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build native addon
+        run: npm run build:native
+
+      - name: Build TypeScript
+        run: npm run build:all
+
+      - name: Run native parity tests
+        run: npm run test:native-parity
+
+      - name: Upload native addon
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-addon-${{ matrix.os }}
+          path: native/*.node
+          retention-days: 7
 
   benchmark-matrix-nightly:
     name: Benchmark Matrix Nightly

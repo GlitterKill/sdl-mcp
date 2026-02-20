@@ -1,25 +1,25 @@
 {
-  "timestamp": "2026-02-18T22:34:05.599Z",
+  "timestamp": "2026-02-19T19:15:34.636Z",
   "repoId": "my-repo",
   "repoPath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp",
   "metrics": {
-    "indexTimePerFile": 364.75053736842113,
-    "indexTimePerSymbol": 9.948693956359463,
-    "symbolsPerFile": 36.66315789473684,
-    "edgesPerSymbol": 46.29859316681022,
-    "graphConnectivity": 0.8937697387309791,
-    "exportedSymbolRatio": 0.4596612115991961,
-    "sliceBuildTimeMs": 867.5422999999719,
-    "avgSkeletonTimeMs": 0.8581384615345786,
+    "indexTimePerFile": 203.40951712328766,
+    "indexTimePerSymbol": 5.582291259398496,
+    "symbolsPerFile": 36.43835616438356,
+    "edgesPerSymbol": 13.292105263157895,
+    "graphConnectivity": 0.8751879699248121,
+    "exportedSymbolRatio": 0.5291353383458647,
+    "sliceBuildTimeMs": 220.5907999999763,
+    "avgSkeletonTimeMs": 0.8690846153879718,
     "avgCardTokens": 180.5,
     "avgSkeletonTokens": 9.153846153846153,
-    "functionMethodRatio": 0.2233706574791846,
-    "avgDepsPerSymbol": 46.29859316681022,
-    "callEdgeCount": 8223,
-    "importEdgeCount": 314293,
-    "totalSymbols": 6966,
-    "totalFiles": 190,
-    "summaryGenerationMs": 2.1979999999748543,
+    "functionMethodRatio": 0.22105263157894736,
+    "avgDepsPerSymbol": 13.292105263157895,
+    "callEdgeCount": 6214,
+    "importEdgeCount": 64500,
+    "totalSymbols": 5320,
+    "totalFiles": 146,
+    "summaryGenerationMs": 1.6276999999972759,
     "summaryTokens": 522,
     "healthScore": 91,
     "watcherEventsProcessed": 0,
@@ -31,122 +31,122 @@
       {
         "metricName": "indexTimePerFile",
         "category": "indexing",
-        "currentValue": 364.75053736842113,
-        "baselineValue": 292.02046625,
+        "currentValue": 203.40951712328766,
+        "baselineValue": 364.75053736842113,
         "threshold": {
           "maxMs": 200,
           "trend": "lower-is-better",
           "allowableIncreasePercent": 10
         },
-        "passed": false,
-        "delta": 72.73007111842111,
-        "deltaPercent": 24.905812956327715,
-        "message": "Increased by 24.9% (threshold: 10%)"
+        "passed": true,
+        "delta": -161.34102024513348,
+        "deltaPercent": -44.233250870352755,
+        "message": "Within tolerance (-44.2% increase)"
       },
       {
         "metricName": "indexTimePerSymbol",
         "category": "indexing",
-        "currentValue": 9.948693956359463,
-        "baselineValue": 8.502870718835306,
+        "currentValue": 5.582291259398496,
+        "baselineValue": 9.948693956359463,
         "threshold": {
           "maxMs": 15,
           "trend": "lower-is-better",
           "allowableIncreasePercent": 60
         },
         "passed": true,
-        "delta": 1.4458232375241575,
-        "deltaPercent": 17.00394237820661,
-        "message": "Within tolerance (17.0% increase)"
+        "delta": -4.366402696960967,
+        "deltaPercent": -43.889205116917374,
+        "message": "Within tolerance (-43.9% increase)"
       },
       {
         "metricName": "symbolsPerFile",
         "category": "quality",
-        "currentValue": 36.66315789473684,
-        "baselineValue": 34.34375,
+        "currentValue": 36.43835616438356,
+        "baselineValue": 36.66315789473684,
         "threshold": {
           "minValue": 5,
           "trend": "higher-is-better",
           "allowableDecreasePercent": 5
         },
         "passed": true,
-        "delta": 2.319407894736841,
-        "deltaPercent": 6.753507973756043,
-        "message": "Within tolerance (6.8% change)"
+        "delta": -0.22480173035327766,
+        "deltaPercent": -0.6131543032891582,
+        "message": "Within tolerance (-0.6% change)"
       },
       {
         "metricName": "edgesPerSymbol",
         "category": "quality",
-        "currentValue": 46.29859316681022,
-        "baselineValue": 40.64112829845314,
+        "currentValue": 13.292105263157895,
+        "baselineValue": 46.29859316681022,
         "threshold": {
           "minValue": 1,
           "trend": "higher-is-better",
           "allowableDecreasePercent": 5
         },
-        "passed": true,
-        "delta": 5.657464868357081,
-        "deltaPercent": 13.920540854109142,
-        "message": "Within tolerance (13.9% change)"
+        "passed": false,
+        "delta": -33.00648790365233,
+        "deltaPercent": -71.29047698000785,
+        "message": "Decreased by 71.3% (threshold: 5%)"
       },
       {
         "metricName": "graphConnectivity",
         "category": "quality",
-        "currentValue": 0.8937697387309791,
-        "baselineValue": 0.8926296633303002,
+        "currentValue": 0.8751879699248121,
+        "baselineValue": 0.8937697387309791,
         "threshold": {
           "minValue": 0.3,
           "trend": "higher-is-better",
           "allowableDecreasePercent": 5
         },
         "passed": true,
-        "delta": 0.0011400754006788416,
-        "deltaPercent": 0.12772098525443903,
-        "message": "Within tolerance (0.1% change)"
+        "delta": -0.01858176880616702,
+        "deltaPercent": -2.079033111207187,
+        "message": "Within tolerance (-2.1% change)"
       },
       {
         "metricName": "exportedSymbolRatio",
         "category": "quality",
-        "currentValue": 0.4596612115991961,
-        "baselineValue": 0.4227479526842584,
+        "currentValue": 0.5291353383458647,
+        "baselineValue": 0.4596612115991961,
         "threshold": {
           "minValue": 0.2,
           "trend": "higher-is-better",
           "allowableDecreasePercent": 10
         },
         "passed": true,
-        "delta": 0.036913258914937686,
-        "deltaPercent": 8.73174161590971,
-        "message": "Within tolerance (8.7% change)"
+        "delta": 0.06947412674666859,
+        "deltaPercent": 15.114202589546952,
+        "message": "Within tolerance (15.1% change)"
       },
       {
         "metricName": "sliceBuildTimeMs",
         "category": "performance",
-        "currentValue": 867.5422999999719,
-        "baselineValue": 587.7168999999994,
+        "currentValue": 220.5907999999763,
+        "baselineValue": 867.5422999999719,
         "threshold": {
           "maxMs": 200,
           "trend": "lower-is-better",
           "allowableIncreasePercent": 125
         },
         "passed": true,
-        "delta": 279.82539999997243,
-        "deltaPercent": 47.61227727158649,
-        "message": "Within tolerance (47.6% increase)"
+        "delta": -646.9514999999956,
+        "deltaPercent": -74.57290555169662,
+        "message": "Within tolerance (-74.6% increase)"
       },
       {
         "metricName": "avgSkeletonTimeMs",
         "category": "performance",
-        "currentValue": 0.8581384615345786,
-        "baselineValue": 0.7885000000018269,
+        "currentValue": 0.8690846153879718,
+        "baselineValue": 0.8581384615345786,
         "threshold": {
           "maxMs": 5,
           "trend": "lower-is-better",
           "allowableIncreasePercent": 30
         },
         "passed": true,
-        "delta": 0.06963846153275177,
-        "deltaPercent": 8.831764303435692,
-        "message": "Within tolerance (8.8% increase)"
+        "delta": 0.010946153853393148,
+        "deltaPercent": 1.275569659681554,
+        "message": "Within tolerance (1.3% increase)"
       },
       {
         "metricName": "avgCardTokens",
@@ -199,90 +199,90 @@
       {
         "metricName": "indexTimePerFile",
         "category": "indexing",
-        "currentValue": 364.75053736842113,
-        "baselineValue": 292.02046625,
-        "delta": 72.73007111842111,
-        "deltaPercent": 24.905812956327715,
-        "trend": "degraded",
+        "currentValue": 203.40951712328766,
+        "baselineValue": 364.75053736842113,
+        "delta": -161.34102024513348,
+        "deltaPercent": -44.233250870352755,
+        "trend": "improved",
         "impact": "high",
-        "description": "Increased by 24.9% (threshold: 10%)"
+        "description": "improved by 44.2% ↓"
       },
       {
         "metricName": "indexTimePerSymbol",
         "category": "indexing",
-        "currentValue": 9.948693956359463,
-        "baselineValue": 8.502870718835306,
-        "delta": 1.4458232375241575,
-        "deltaPercent": 17.00394237820661,
-        "trend": "degraded",
-        "impact": "medium",
-        "description": "degraded by 17.0% ↑"
+        "currentValue": 5.582291259398496,
+        "baselineValue": 9.948693956359463,
+        "delta": -4.366402696960967,
+        "deltaPercent": -43.889205116917374,
+        "trend": "improved",
+        "impact": "high",
+        "description": "improved by 43.9% ↓"
       },
       {
         "metricName": "symbolsPerFile",
         "category": "quality",
-        "currentValue": 36.66315789473684,
-        "baselineValue": 34.34375,
-        "delta": 2.319407894736841,
-        "deltaPercent": 6.753507973756043,
-        "trend": "improved",
-        "impact": "low",
-        "description": "improved by 6.8% ↓"
+        "currentValue": 36.43835616438356,
+        "baselineValue": 36.66315789473684,
+        "delta": -0.22480173035327766,
+        "deltaPercent": -0.6131543032891582,
+        "trend": "degraded",
+        "impact": "none",
+        "description": "36.44 (baseline: 36.66)"
       },
       {
         "metricName": "edgesPerSymbol",
         "category": "quality",
-        "currentValue": 46.29859316681022,
-        "baselineValue": 40.64112829845314,
-        "delta": 5.657464868357081,
-        "deltaPercent": 13.920540854109142,
-        "trend": "improved",
-        "impact": "medium",
-        "description": "improved by 13.9% ↓"
+        "currentValue": 13.292105263157895,
+        "baselineValue": 46.29859316681022,
+        "delta": -33.00648790365233,
+        "deltaPercent": -71.29047698000785,
+        "trend": "degraded",
+        "impact": "high",
+        "description": "Decreased by 71.3% (threshold: 5%)"
       },
       {
         "metricName": "graphConnectivity",
         "category": "quality",
-        "currentValue": 0.8937697387309791,
-        "baselineValue": 0.8926296633303002,
-        "delta": 0.0011400754006788416,
-        "deltaPercent": 0.12772098525443903,
-        "trend": "improved",
+        "currentValue": 0.8751879699248121,
+        "baselineValue": 0.8937697387309791,
+        "delta": -0.01858176880616702,
+        "deltaPercent": -2.079033111207187,
+        "trend": "degraded",
         "impact": "none",
-        "description": "0.89 (baseline: 0.89)"
+        "description": "0.88 (baseline: 0.89)"
       },
       {
         "metricName": "exportedSymbolRatio",
         "category": "quality",
-        "currentValue": 0.4596612115991961,
-        "baselineValue": 0.4227479526842584,
-        "delta": 0.036913258914937686,
-        "deltaPercent": 8.73174161590971,
+        "currentValue": 0.5291353383458647,
+        "baselineValue": 0.4596612115991961,
+        "delta": 0.06947412674666859,
+        "deltaPercent": 15.114202589546952,
         "trend": "improved",
-        "impact": "low",
-        "description": "improved by 8.7% ↓"
+        "impact": "medium",
+        "description": "improved by 15.1% ↓"
       },
       {
         "metricName": "sliceBuildTimeMs",
         "category": "performance",
-        "currentValue": 867.5422999999719,
-        "baselineValue": 587.7168999999994,
-        "delta": 279.82539999997243,
-        "deltaPercent": 47.61227727158649,
-        "trend": "degraded",
+        "currentValue": 220.5907999999763,
+        "baselineValue": 867.5422999999719,
+        "delta": -646.9514999999956,
+        "deltaPercent": -74.57290555169662,
+        "trend": "improved",
         "impact": "high",
-        "description": "degraded by 47.6% ↑"
+        "description": "improved by 74.6% ↓"
       },
       {
         "metricName": "avgSkeletonTimeMs",
         "category": "performance",
-        "currentValue": 0.8581384615345786,
-        "baselineValue": 0.7885000000018269,
-        "delta": 0.06963846153275177,
-        "deltaPercent": 8.831764303435692,
+        "currentValue": 0.8690846153879718,
+        "baselineValue": 0.8581384615345786,
+        "delta": 0.010946153853393148,
+        "deltaPercent": 1.275569659681554,
         "trend": "degraded",
-        "impact": "low",
-        "description": "degraded by 8.8% ↑"
+        "impact": "none",
+        "description": "0.87 (baseline: 0.86)"
       },
       {
         "metricName": "avgCardTokens",
@@ -308,19 +308,15 @@
       }
     ],
     "failingThresholds": [
-      "indexing.indexTimePerFile"
+      "quality.edgesPerSymbol"
     ],
     "recommendations": [
-      "CRITICAL: 2 metrics have high-impact degradation:",
-      "  - indexTimePerFile: Increased by 24.9% (threshold: 10%)",
-      "  - sliceBuildTimeMs: degraded by 47.6% ↑",
-      "WARNING: 1 metrics have medium-impact degradation:",
-      "  - indexTimePerSymbol: degraded by 17.0% ↑",
-      "Indexing performance issues detected. Consider:",
-      "  - Increasing indexing concurrency",
-      "  - Adding large generated files to ignore list",
-      "  - Reducing maxFileBytes threshold",
-      "  - Checking for tree-sitter query performance issues"
+      "CRITICAL: 1 metrics have high-impact degradation:",
+      "  - edgesPerSymbol: Decreased by 71.3% (threshold: 5%)",
+      "Quality metrics degraded. This may indicate:",
+      "  - Changes in symbol extraction logic",
+      "  - Modifications to tree-sitter queries",
+      "  - Regression in edge detection algorithms"
     ]
   },
   "config": {
