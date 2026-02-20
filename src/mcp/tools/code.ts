@@ -42,8 +42,6 @@ import {
   type PolicyRequestContext,
 } from "../../policy/engine.js";
 
-const policyEngine = new PolicyEngine();
-
 /**
  * Handles code window requests with policy evaluation.
  * Returns full code, skeleton, or hot-path based on policy decisions.
@@ -61,6 +59,12 @@ export async function handleCodeNeedWindow(
   const symbol = getSymbol(request.symbolId);
   if (!symbol) {
     throw new Error(`Symbol not found: ${request.symbolId}`);
+  }
+
+  if (symbol.repo_id !== request.repoId) {
+    throw new Error(
+      `Symbol ${request.symbolId} belongs to repo "${symbol.repo_id}", not "${request.repoId}"`,
+    );
   }
 
   const file = getFile(symbol.file_id);
@@ -90,13 +94,11 @@ export async function handleCodeNeedWindow(
     maxCards: appConfig.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS,
     maxEstimatedTokens: appConfig.slice?.defaultMaxTokens ?? DEFAULT_MAX_TOKENS_SLICE,
   };
-  const existingPolicyConfig = policyEngine.getConfig();
-  policyEngine.updateConfig({
+  const policyEngine = new PolicyEngine({
     maxWindowLines: validatedPolicy.maxWindowLines,
     maxWindowTokens: validatedPolicy.maxWindowTokens,
     requireIdentifiers: validatedPolicy.requireIdentifiers,
     allowBreakGlass: validatedPolicy.allowBreakGlass,
-    defaultDenyRaw: existingPolicyConfig.defaultDenyRaw,
     budgetCaps: sliceBudgetDefaults,
   });
 
@@ -280,8 +282,10 @@ export async function handleCodeNeedWindow(
     const filePath = getAbsolutePathFromRepoRoot(repo.root_path, file.rel_path);
     const isSensitive = shouldRedactFile(filePath);
 
-    const maxLines = validatedPolicy.maxWindowLines;
-    const maxTokens = request.maxTokens ?? validatedPolicy.maxWindowTokens;
+    const maxLines = Math.min(request.expectedLines, validatedPolicy.maxWindowLines);
+    const maxTokens = request.maxTokens
+      ? Math.min(request.maxTokens, validatedPolicy.maxWindowTokens)
+      : validatedPolicy.maxWindowTokens;
 
     const windowResult = extractWindow(
       filePath,

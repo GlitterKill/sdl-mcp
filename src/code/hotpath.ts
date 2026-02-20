@@ -66,31 +66,49 @@ function parseFile(content: string, extension: string): Parser.Tree | null {
   }
 }
 
+interface IdentifierMatchResult {
+  matchedLines: Set<number>;
+  confirmedIdentifiers: Set<string>;
+}
+
 function findLinesMatchingIdentifiers(
   tree: Parser.Tree,
   identifiersToFind: string[],
-): Set<number> {
+): IdentifierMatchResult {
   const matchedLines = new Set<number>();
+  const confirmedIdentifiers = new Set<string>();
 
   if (identifiersToFind.length === 0) {
-    return matchedLines;
+    return { matchedLines, confirmedIdentifiers };
   }
 
   const identifierSet = new Set<string>(identifiersToFind);
 
-  function matchesExactIdentifier(text: string): boolean {
-    return identifierSet.has(text);
+  function recordMatch(text: string, line: number): void {
+    matchedLines.add(line);
+    if (identifierSet.has(text)) {
+      confirmedIdentifiers.add(text);
+    }
   }
 
-  function matchesAsMemberExpression(text: string): boolean {
+  function matchesAsMemberExpression(
+    text: string,
+    line: number,
+  ): boolean {
     const parts = text.split(/[.?\[\]]+/).filter(Boolean);
-    return parts.some((part) => identifierSet.has(part));
+    for (const part of parts) {
+      if (identifierSet.has(part)) {
+        recordMatch(part, line);
+        return true;
+      }
+    }
+    return false;
   }
 
   function walk(node: Parser.SyntaxNode) {
     if (node.type === "identifier") {
-      if (matchesExactIdentifier(node.text)) {
-        matchedLines.add(node.startPosition.row + 1);
+      if (identifierSet.has(node.text)) {
+        recordMatch(node.text, node.startPosition.row + 1);
       }
     }
 
@@ -98,13 +116,14 @@ function findLinesMatchingIdentifiers(
       const funcNode = node.childForFieldName("function");
       if (funcNode) {
         if (funcNode.type === "identifier") {
-          if (matchesExactIdentifier(funcNode.text)) {
-            matchedLines.add(node.startPosition.row + 1);
+          if (identifierSet.has(funcNode.text)) {
+            recordMatch(funcNode.text, node.startPosition.row + 1);
           }
         } else if (funcNode.type === "member_expression") {
-          if (matchesAsMemberExpression(funcNode.text)) {
-            matchedLines.add(node.startPosition.row + 1);
-          }
+          matchesAsMemberExpression(
+            funcNode.text,
+            node.startPosition.row + 1,
+          );
         }
       }
     }
@@ -115,13 +134,16 @@ function findLinesMatchingIdentifiers(
         if (thrown.type === "new_expression") {
           const constructorNode = thrown.childForFieldName("constructor");
           if (constructorNode && constructorNode.type === "identifier") {
-            if (matchesExactIdentifier(constructorNode.text)) {
-              matchedLines.add(node.startPosition.row + 1);
+            if (identifierSet.has(constructorNode.text)) {
+              recordMatch(
+                constructorNode.text,
+                node.startPosition.row + 1,
+              );
             }
           }
         } else if (thrown.type === "identifier") {
-          if (matchesExactIdentifier(thrown.text)) {
-            matchedLines.add(node.startPosition.row + 1);
+          if (identifierSet.has(thrown.text)) {
+            recordMatch(thrown.text, node.startPosition.row + 1);
           }
         }
       }
@@ -133,7 +155,7 @@ function findLinesMatchingIdentifiers(
   }
 
   walk(tree.rootNode);
-  return matchedLines;
+  return { matchedLines, confirmedIdentifiers };
 }
 
 function buildHotPathExcerpt(
@@ -238,6 +260,8 @@ export function extractHotPath(
   const symbol = getSymbol(symbolId);
   if (!symbol) return null;
 
+  if (symbol.repo_id !== repoId) return null;
+
   const file = getFile(symbol.file_id);
   if (!file) return null;
 
@@ -279,7 +303,8 @@ export function extractHotPath(
   const maxLines = options.maxLines ?? DEFAULT_MAX_LINES_HOTPATH;
   const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS_HOTPATH;
 
-  const matchedLines = findLinesMatchingIdentifiers(tree, identifiersToFind);
+  const { matchedLines, confirmedIdentifiers } =
+    findLinesMatchingIdentifiers(tree, identifiersToFind);
 
   const { excerpt, matchedLineNumbers, truncated, actualRange } =
     buildHotPathExcerpt(lines, matchedLines, contextLines, maxLines, maxTokens);
@@ -288,7 +313,7 @@ export function extractHotPath(
     excerpt,
     actualRange,
     estimatedTokens: estimateTokenCount(excerpt),
-    matchedIdentifiers: identifiersToFind,
+    matchedIdentifiers: Array.from(confirmedIdentifiers),
     matchedLineNumbers,
     truncated,
   };

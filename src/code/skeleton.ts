@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, statSync } from "fs";
 import { createHash } from "crypto";
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { Range, SkeletonOp, SkeletonIR } from "../mcp/types.js";
@@ -12,6 +12,7 @@ import {
   DEFAULT_MAX_TOKENS_SKELETON,
   DEFAULT_MAX_LINES_SKELETON_DETAILED,
   DEFAULT_MAX_TOKENS_SKELETON_DETAILED,
+  MAX_FILE_BYTES,
 } from "../config/constants.js";
 
 const tsParser = new Parser();
@@ -420,6 +421,8 @@ export function generateSymbolSkeleton(
   const symbol = getSymbol(symbolId);
   if (!symbol) return null;
 
+  if (symbol.repo_id !== repoId) return null;
+
   const file = getFile(symbol.file_id);
   if (!file) return null;
 
@@ -428,6 +431,15 @@ export function generateSymbolSkeleton(
 
   const filePath = getAbsolutePathFromRepoRoot(repo.root_path, file.rel_path);
   const extension = file.rel_path.split(".").pop() || "";
+
+  try {
+    const fileStat = statSync(filePath);
+    if (fileStat.size > MAX_FILE_BYTES) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
 
   const content = readFileSync(filePath, "utf-8");
   const tree = parseFile(content, `.${extension}`);
@@ -491,6 +503,15 @@ export function generateFileSkeleton(
 
   const absPath = getAbsolutePathFromRepoRoot(repo.root_path, filePath);
   const extension = filePath.split(".").pop() || "";
+
+  try {
+    const fileStat = statSync(absPath);
+    if (fileStat.size > MAX_FILE_BYTES) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
 
   const content = readFileSync(absPath, "utf-8");
   const tree = parseFile(content, `.${extension}`);
@@ -791,6 +812,8 @@ export function generateSkeletonIR(
   const symbol = getSymbol(symbolId);
   if (!symbol) return null;
 
+  if (symbol.repo_id !== repoId) return null;
+
   const file = getFile(symbol.file_id);
   if (!file) return null;
 
@@ -799,6 +822,15 @@ export function generateSkeletonIR(
 
   const filePath = getAbsolutePathFromRepoRoot(repo.root_path, file.rel_path);
   const extension = file.rel_path.split(".").pop() || "";
+
+  try {
+    const fileStat = statSync(filePath);
+    if (fileStat.size > MAX_FILE_BYTES) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
 
   const content = readFileSync(filePath, "utf-8");
   const tree = parseFile(content, `.${extension}`);

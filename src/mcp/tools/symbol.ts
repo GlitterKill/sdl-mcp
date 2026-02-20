@@ -44,8 +44,6 @@ import { rerankByEmbeddings } from "../../indexer/embeddings.js";
 import { generateSummaryWithGuardrails } from "../../indexer/summary-generator.js";
 import { consumePrefetchedKey } from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
-
-const policyEngine = new PolicyEngine();
 type SearchRow = {
   symbol_id: string;
   name: string;
@@ -472,6 +470,14 @@ export async function handleSymbolGetCard(
   if (!symbol) {
     throw new DatabaseError(`Symbol not found: ${symbolId}`);
   }
+
+  if (symbol.repo_id !== repoId) {
+    throw new DatabaseError(
+      `Symbol ${symbolId} belongs to repo "${symbol.repo_id}", not "${repoId}"`,
+    );
+  }
+
+  const policyEngine = new PolicyEngine();
 
   const policyContext: PolicyRequestContext = {
     requestType: "symbolCard",
