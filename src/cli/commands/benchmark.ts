@@ -706,9 +706,14 @@ export async function benchmarkCICommand(
 
   let baselineMetrics: Record<string, number> | undefined;
   try {
-    baselineMetrics = loadBaselineMetrics(baselinePath);
+    baselineMetrics = loadBaselineMetrics(baselinePath, repoId);
     if (baselineMetrics) {
       console.log(`\n✓ Loaded baseline from: ${baselinePath}`);
+    } else if (existsSync(baselinePath)) {
+      console.log(
+        `\n⚠ Baseline at ${baselinePath} does not match repo ${repoId} or has an unsupported format`,
+      );
+      console.log(`  Use --update-baseline to refresh it for this repo`);
     } else {
       console.log(`\n⚠ No baseline found at: ${baselinePath}`);
       console.log(`  Use --update-baseline to create one`);

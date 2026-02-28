@@ -241,6 +241,7 @@ function normalizeBaselineDerivedMetrics(
 
 export function loadBaselineMetrics(
   baselinePath: string,
+  expectedRepoId?: string,
 ): Record<string, number> | undefined {
   if (!existsSync(baselinePath)) {
     return undefined;
@@ -248,6 +249,14 @@ export function loadBaselineMetrics(
 
   const content = readFileSync(baselinePath, "utf-8");
   const baseline = JSON.parse(content);
+
+  if (
+    expectedRepoId &&
+    typeof baseline.repoId === "string" &&
+    baseline.repoId !== expectedRepoId
+  ) {
+    return undefined;
+  }
 
   if (baseline.metrics) {
     const metrics = baseline.metrics as Record<string, number>;
