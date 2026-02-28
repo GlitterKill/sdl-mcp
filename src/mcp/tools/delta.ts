@@ -88,6 +88,8 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       budget,
       runDiagnostics: true,
       diagnosticsTimeoutMs: 5000,
+      fromVersionId: validated.fromVersion,
+      toVersionId: validated.toVersion,
     };
 
     const governorResult = await runGovernorLoop(
@@ -147,7 +149,16 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       };
     }
 
-    return { delta };
+    const amplifiers = delta.blastRadius
+      .filter((item) => item.fanInTrend?.isAmplifier)
+      .map((item) => ({
+        symbolId: item.symbolId,
+        growthRate: item.fanInTrend!.growthRate,
+        previous: item.fanInTrend!.previous,
+        current: item.fanInTrend!.current,
+      }));
+
+    return { delta, amplifiers };
   };
 
   if (isTracingEnabled()) {

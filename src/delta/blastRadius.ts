@@ -14,11 +14,15 @@ import * as crypto from "crypto";
 import {
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
+  FAN_IN_AMPLIFIER_THRESHOLD,
 } from "../config/constants.js";
 
 export interface BlastRadiusOptions {
   maxHops?: number;
   maxResults?: number;
+  repoId?: RepoId;
+  fromVersionId?: string;
+  toVersionId?: string;
 }
 
 export interface GovernorLoopOptions {
@@ -27,6 +31,8 @@ export interface GovernorLoopOptions {
   maxHops?: number;
   runDiagnostics?: boolean;
   diagnosticsTimeoutMs?: number;
+  fromVersionId?: string;
+  toVersionId?: string;
 }
 
 export interface GovernorLoopResult {
@@ -127,7 +133,41 @@ export function computeBlastRadius(
     });
   });
 
-  return rankDependents(dependents).slice(0, maxResults);
+  const ranked = rankDependents(dependents).slice(0, maxResults);
+
+  // Attach fan-in trend data when version IDs are provided
+  const { fromVersionId, toVersionId, repoId } = options ?? {};
+  if (fromVersionId && toVersionId && repoId) {
+    for (const item of ranked) {
+      const previous = db.getFanInAtVersion(repoId, item.symbolId, fromVersionId);
+      const current = db.getFanInAtVersion(repoId, item.symbolId, toVersionId);
+      const growthRate = (current - previous) / Math.max(previous, 1);
+
+      if (growthRate !== 0) {
+        item.fanInTrend = {
+          previous,
+          current,
+          growthRate,
+          isAmplifier: growthRate > FAN_IN_AMPLIFIER_THRESHOLD,
+        };
+      }
+    }
+
+    // Re-sort: amplifiers first within same distance tier, then existing order
+    ranked.sort((a, b) => {
+      if (a.distance !== b.distance) {
+        return a.distance - b.distance;
+      }
+      const aAmplifier = a.fanInTrend?.isAmplifier ? 1 : 0;
+      const bAmplifier = b.fanInTrend?.isAmplifier ? 1 : 0;
+      if (aAmplifier !== bAmplifier) {
+        return bAmplifier - aAmplifier; // amplifiers first
+      }
+      return b.rank - a.rank;
+    });
+  }
+
+  return ranked;
 }
 
 export function rankDependents(
@@ -191,6 +231,9 @@ export async function runGovernorLoop(
   const candidateBlastRadius = computeBlastRadius(changedSymbols, graph, {
     maxHops,
     maxResults: maxBlastRadius * 2,
+    repoId: options.repoId,
+    fromVersionId: options.fromVersionId,
+    toVersionId: options.toVersionId,
   });
 
   let diagnosticSuspects: DiagnosticSuspect[] = [];

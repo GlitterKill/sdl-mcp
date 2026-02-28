@@ -34,11 +34,19 @@ export interface SliceSymbolDeps {
   calls: SliceDepRef[];
 }
 
+export interface CanonicalTest {
+  file: string;        // relative path to the test file
+  symbolId?: SymbolId; // specific test function symbolId, if resolvable
+  distance: number;    // BFS hops from source symbol to this test node
+  proximity: number;   // 0–1 score: 1.0 = direct test, lower = indirect
+}
+
 export interface SymbolMetrics {
   fanIn?: number;
   fanOut?: number;
   churn30d?: number;
   testRefs?: string[];
+  canonicalTest?: CanonicalTest;
 }
 
 export type CardDetailLevel =
@@ -200,6 +208,7 @@ export interface GraphSlice {
   truncation?: SliceTruncation;
   confidenceDistribution?: ConfidenceDistribution;
   detailLevelMetadata?: DetailLevelMetadata;
+  staleSymbols?: SymbolId[];  // symbolIds that changed since this slice was issued
 }
 
 export interface DeltaSymbolChange {
@@ -216,6 +225,12 @@ export interface BlastRadiusItem {
   distance: number;
   rank: number;
   signal: "diagnostic" | "directDependent" | "graph";
+  fanInTrend?: {
+    previous: number;
+    current: number;
+    growthRate: number;      // (current - previous) / max(previous, 1)
+    isAmplifier: boolean;    // growthRate > FAN_IN_AMPLIFIER_THRESHOLD
+  };
 }
 
 export interface DiagnosticsSummary {
@@ -292,6 +307,7 @@ export interface CodeWindowResponseDenied {
   approved: false;
   whyDenied: string[];
   suggestedNextRequest?: Partial<CodeWindowRequest>;
+  nextBestAction?: NextBestActionCallable;
 }
 
 export type CodeWindowResponse =
@@ -364,6 +380,17 @@ export type NextBestAction =
   | "increaseBudget"
   | "narrowScope"
   | "retryWithSameInputs";
+
+/**
+ * A directly executable tool suggestion returned on policy denials.
+ * Provides the exact tool name, arguments, and rationale so the agent
+ * can immediately retry with a less expensive context-ladder rung.
+ */
+export interface NextBestActionCallable {
+  tool: string;
+  args: Record<string, unknown>;
+  rationale: string;
+}
 
 export interface RequiredFieldsForNext {
   requestSkeleton?: {
@@ -715,6 +742,7 @@ export interface HealthComponents {
   coverage: number;
   errorRate: number;
   edgeQuality: number;
+  callResolution?: number;
 }
 
 export interface WatcherHealth {
