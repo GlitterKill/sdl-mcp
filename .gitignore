@@ -45,6 +45,7 @@ logs/
 test-output*.txt
 test-run*.txt
 test-red-output*.txt
+test_results.txt
 tests/results/
 coverage/
 .nyc_output/
@@ -58,6 +59,10 @@ temp/
 
 # Benchmark results (keep configs and task packs)
 .benchmark/
+!.benchmark/
+!.benchmark/baseline.json
+!.benchmark/baseline.zod-oss.json
+!.benchmark/baseline.windows.json
 benchmark-*.json
 benchmarks/**/results*.json
 benchmarks/**/runs/
@@ -78,6 +83,7 @@ nul
 # Tool caches
 .ruff_cache/
 .codex/
+.claude/
 
 # Nested temp scripts
 sdl-mcp/.tmp-scripts/

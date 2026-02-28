@@ -52,7 +52,8 @@ Main config file:
     "concurrency": 8,
     "enableFileWatching": true,
     "maxWatchedFiles": 25000,
-    "engine": "typescript"
+    "engine": "typescript",
+    "watchDebounceMs": 300
   },
   "slice": {
     "defaultMaxCards": 60,
@@ -87,7 +88,12 @@ Main config file:
     "alpha": 0.6,
     "provider": "mock",
     "model": "all-MiniLM-L6-v2",
-    "generateSummaries": false
+    "generateSummaries": false,
+    "summaryModel": "claude-haiku-4-5-20251001",
+    "summaryApiKey": null,
+    "summaryApiBaseUrl": null,
+    "summaryMaxConcurrency": 5,
+    "summaryBatchSize": 20
   },
   "prefetch": {
     "enabled": false,
@@ -134,6 +140,7 @@ Controls sensitive-data masking in returned content.
 - `maxWatchedFiles`: hard cap to prevent watcher overload on very large repos
 - `workerPoolSize`: optional worker pool size cap (defaults to CPU-count based heuristic)
 - `engine`: pass-1 indexer implementation, either `typescript` (default) or `rust`. The Rust engine uses a native addon built with napi-rs and tree-sitter for faster symbol extraction. See [Native Rust Engine](#native-rust-engine) below for setup.
+- `watchDebounceMs`: debounce delay in milliseconds (50-5000, default 300) before processing file change events during file watching. Lower values = faster incremental indexing but more reindex calls; higher values = fewer redundant reindex calls during rapid edits but slower responsiveness.
 
 ### `slice`
 
@@ -166,6 +173,11 @@ Controls optional semantic search and summary generation behavior.
 - `provider`: `api`, `local`, or `mock`
 - `model`: embedding model identifier
 - `generateSummaries`: enables generated symbol summaries (disabled by default)
+- `summaryModel`: LLM model name for summary generation (default: `"claude-haiku-4-5-20251001"`). Supports Anthropic Claude models or OpenAI-compatible API endpoints.
+- `summaryApiKey`: optional API key override for the summary LLM provider. Falls back to `ANTHROPIC_API_KEY` environment variable if not provided.
+- `summaryApiBaseUrl`: optional base URL for OpenAI-compatible local providers (e.g., `http://localhost:11434/v1` for Ollama). If not set, uses Anthropic API by default.
+- `summaryMaxConcurrency`: maximum concurrent LLM requests during batch summary generation (1-20, default 5). Higher values speed up generation but consume more memory and API quota.
+- `summaryBatchSize`: number of symbols to batch per LLM request during index-time summary generation (1-50, default 20). Larger batches may reduce API calls but require larger context windows.
 
 Use `provider: "local"` for offline environments with `onnxruntime-node` installed.
 

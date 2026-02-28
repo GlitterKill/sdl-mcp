@@ -91,6 +91,8 @@ Fetch one symbol card.
 { "repoId": "my-repo", "symbolId": "<symbol-id>" }
 ```
 
+The returned card includes `metrics.canonicalTest` (if available), which contains the file path, distance, and proximity information for the nearest test associated with this symbol.
+
 ### `sdl.context.summary`
 Generate a token-bounded context summary for symbol/file/task queries.
 
@@ -140,6 +142,8 @@ Compute delta between two versions with blast-radius support.
 ```json
 { "repoId": "my-repo", "fromVersion": "v1", "toVersion": "v2" }
 ```
+
+The response includes an `amplifiers` field containing multipliers for dependent symbols that increase blast-radius scoring based on test proximity, fan-in, and change severity. Amplifiers help prioritize high-impact symbols for testing and review.
 
 ### `sdl.pr.risk.analyze`
 Assess PR-level risk from delta + blast radius and produce test recommendations.

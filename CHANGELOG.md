@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.9] - 2026-02-28
+
+### Added
+
+#### Feature 1: LLM-Generated Symbol Summaries
+- Added `symbol_summary_cache` DB table (migration `0018`) to persist LLM-generated summaries independently of heuristic summaries
+- Added `AnthropicSummaryProvider` and `OpenAICompatibleSummaryProvider` to `summary-generator.ts`
+- Cache integration: `generateSummaryWithGuardrails` checks cache by `cardHash` before calling provider
+- Batch generation at index time via `generateSummariesForRepo` (concurrent batches via `Promise.allSettled`)
+- New config fields in `semantic`: `summaryModel`, `summaryApiKey`, `summaryApiBaseUrl`, `summaryMaxConcurrency`, `summaryBatchSize`
+- `IndexResult` now includes `summaryStats?: SummaryBatchResult`; CLI prints summary counts after indexing
+
+#### Feature 2: Real-Time File Watching Fixes
+- **Bug fix**: Compiled `src/config/types.js` had `enableFileWatching: false` while source had `true`; now synced
+- Fixed 6+ additional missing schemas/fields in `types.js` (SemanticConfigSchema, PluginConfigSchema, etc.)
+- Added `scripts/check-config-sync.ts` + `npm run check:config-sync` CI step to detect future drift
+- Added `watchDebounceMs` config field (default 300ms, range 50–5000ms)
+- Windows path normalization in watcher event handler (backslash/forward-slash)
+- `sdl.repo.status` now includes `watcherNote` when watcher is inactive
+- Error budget exceeded sets `health.stale = true` and logs to stderr
+
+#### Feature 3: TypeScript Type-Aware Call Resolution
+- Import alias following via `checker.getAliasedSymbol()` (fixes destructured imports)
+- Barrel re-export chain resolution up to depth 5
+- Tagged template literal support (`ts.isTaggedTemplateExpression`)
+- Arrow function variable edge emission with repo-root guard
+- Cross-module type inference confidence tier `0.4`
+- Incremental `ts.Program` reuse via `programCache` + `invalidateFiles()` method on `TsCallResolver`
+- `callResolution` metric added to `sdl.repo.status` health components
+
+#### Feature 4: Canonical Test Mapping
+- Added `CanonicalTest` interface to `src/mcp/types.ts`
+- `computeCanonicalTest` in `src/graph/metrics.ts`: BFS forward+backward, depth ≤ 6, ≤ 500 visited nodes
+- `canonical_test_json` column added to `metrics` table (migration `0019`)
+- `getCanonicalTest` query function; exposed in `sdl.symbol.getCard` response as `metrics.canonicalTest`
+
+#### Feature 5: Fan-in Trend Alerts in Delta Packs
+- Extended `BlastRadiusItem` with `fanInTrend?: { previous, current, growthRate, isAmplifier }`
+- `FAN_IN_AMPLIFIER_THRESHOLD = 0.20` in constants
+- `getFanInAtVersion` uses version-scoped subquery for accurate per-version fan-in approximation
+- `sdl.delta.get` response always includes `amplifiers: []` summary array
+- Amplifiers sorted before non-amplifiers within same BFS distance tier
+
 ## [0.6.8] - 2026-02-20
 
 ### Added
@@ -351,6 +394,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.6.9]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.9
 [0.6.8]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.8
 [0.6.7]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.7
 [0.6.6]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.6

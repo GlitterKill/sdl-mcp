@@ -99,15 +99,17 @@ sdl-mcp serve --stdio --no-watch
 - Optional native Rust pass-1 indexing engine (`indexing.engine: "rust"`)
 - Symbol cards with signatures, deps, metrics, and versioning
 - Graph slices with handles, leases, refresh, and spillover
-- Delta analysis and blast radius support
+- Delta analysis and blast radius support with amplifier scoring
 - Semantic symbol search reranking (`sdl.symbol.search` with `semantic: true`)
-- Optional generated symbol summaries (`semantic.generateSummaries`)
+- LLM-generated symbol summaries with configurable concurrency and batching (`semantic.summaryModel`, `summaryMaxConcurrency`, `summaryBatchSize`)
 - Code access ladder: `getSkeleton` -> `getHotPath` -> `needWindow`
 - Policy management (`sdl.policy.get` / `sdl.policy.set`)
 - Repository overview and hotspot inspection (`sdl.repo.overview`)
 - PR risk analysis (`sdl.pr.risk.analyze`)
 - Agent orchestration tool (`sdl.agent.orchestrate`)
 - Predictive prefetch heuristics with status metrics (`prefetchStats`)
+- File watch debouncing for efficient incremental indexing (`indexing.watchDebounceMs`)
+- Canonical test mapping in symbol cards (`metrics.canonicalTest`)
 - Graph HTTP surface and browser explorer (`/api/graph/*`, `/ui/graph`)
 - VSCode extension MVP in `sdl-mcp-vscode/`
 - Sync artifact export/import/pull workflows

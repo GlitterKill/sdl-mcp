@@ -78,6 +78,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Check config sync (types.ts vs types.js defaults)
+        run: npm run check:config-sync
+
       - name: Security audit
         run: npm audit --audit-level=moderate
 

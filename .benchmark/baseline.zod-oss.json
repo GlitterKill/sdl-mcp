@@ -1,0 +1,224 @@
+{
+  "timestamp": "2026-02-28T04:37:33.825Z",
+  "repoId": "zod-oss",
+  "repoPath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\.tmp\\external-benchmarks\\zod-oss",
+  "metrics": {
+    "indexTimePerFile": 198.05603243243246,
+    "indexTimePerSymbol": 11.047346532663319,
+    "symbolsPerFile": 17.92792792792793,
+    "edgesPerSymbol": 14.453015075376884,
+    "graphConnectivity": 0.9278894472361809,
+    "exportedSymbolRatio": 0.671105527638191,
+    "sliceBuildTimeMs": 146.30449999999837,
+    "avgSkeletonTimeMs": 0.6840666666588125,
+    "avgCardTokens": 180.8,
+    "avgSkeletonTokens": 26.333333333333332,
+    "functionMethodRatio": 0.20477386934673367,
+    "avgDepsPerSymbol": 14.453015075376884,
+    "callEdgeCount": 3777,
+    "importEdgeCount": 53746,
+    "totalSymbols": 3980,
+    "totalFiles": 222,
+    "summaryGenerationMs": 2.3588999999919906,
+    "summaryTokens": 414,
+    "healthScore": 95,
+    "watcherEventsProcessed": 0,
+    "watcherErrors": 0
+  },
+  "thresholdResult": {
+    "passed": true,
+    "evaluations": [
+      {
+        "metricName": "indexTimePerFile",
+        "category": "indexing",
+        "currentValue": 198.05603243243246,
+        "threshold": {
+          "maxMs": 200,
+          "trend": "lower-is-better",
+          "allowableIncreasePercent": 10
+        },
+        "passed": true,
+        "message": "No baseline or absolute threshold defined"
+      },
+      {
+        "metricName": "indexTimePerSymbol",
+        "category": "indexing",
+        "currentValue": 11.047346532663319,
+        "threshold": {
+          "maxMs": 15,
+          "trend": "lower-is-better",
+          "allowableIncreasePercent": 60
+        },
+        "passed": true,
+        "message": "No baseline or absolute threshold defined"
+      },
+      {
+        "metricName": "symbolsPerFile",
+        "category": "quality",
+        "currentValue": 17.92792792792793,
+        "threshold": {
+          "minValue": 5,
+          "trend": "higher-is-better",
+          "allowableDecreasePercent": 5
+        },
+        "passed": true,
+        "message": "No baseline or absolute threshold defined"
+      },
+      {
+        "metricName": "edgesPerSymbol",
+        "category": "quality",
+        "currentValue": 14.453015075376884,
+        "threshold": {
+          "minValue": 1,
+          "trend": "higher-is-better",
+          "allowableDecreasePercent": 5
+        },
+        "passed": true,
+        "message": "No baseline or absolute threshold defined"
+      },
+      {
+        "metricName": "graphConnectivity",
+        "category": "quality",
+        "currentValue": 0.9278894472361809,
+        "threshold": {
+          "minValue": 0.3,
+          "trend": "higher-is-better",
+          "allowableDecreasePercent": 5
+        },
+        "passed": true,
+        "message": "No baseline or absolute threshold defined"
+      },
+      {
+        "metricName": "exportedSymbolRatio",
+        "category": "quality",
+        "currentValue": 0.671105527638191,
+        "threshold": {
+          "minValue": 0.2,
+          "trend": "higher-is-better",
+          "allowableDecreasePercent": 10
+        },
+        "passed": true,
+        "message": "No baseline or absolute threshold defined"
+      },
+      {
+        "metricName": "sliceBuildTimeMs",
+        "category": "performance",
+        "currentValue": 146.30449999999837,
+        "threshold": {
+          "maxMs": 200,
+          "trend": "lower-is-better",
+          "allowableIncreasePercent": 125
+        },
+        "passed": true,
+        "message": "No baseline or absolute threshold defined"
+      },
+      {
+        "metricName": "avgSkeletonTimeMs",
+        "category": "performance",
+        "currentValue": 0.6840666666588125,
+        "threshold": {
+          "maxMs": 5,
+          "trend": "lower-is-better",
+          "allowableIncreasePercent": 30
+        },
+        "passed": true,
+        "message": "No baseline or absolute threshold defined"
+      },
+      {
+        "metricName": "avgCardTokens",
+        "category": "tokenEfficiency",
+        "currentValue": 180.8,
+        "threshold": {
+          "maxTokens": 350,
+          "trend": "lower-is-better",
+          "allowableIncreasePercent": 30
+        },
+        "passed": true,
+        "message": "No baseline or absolute threshold defined"
+      },
+      {
+        "metricName": "avgSkeletonTokens",
+        "category": "tokenEfficiency",
+        "currentValue": 26.333333333333332,
+        "threshold": {
+          "maxTokens": 200,
+          "trend": "lower-is-better",
+          "allowableIncreasePercent": 10
+        },
+        "passed": true,
+        "message": "No baseline or absolute threshold defined"
+      }
+    ],
+    "summary": {
+      "total": 10,
+      "passed": 10,
+      "failed": 0,
+      "warnings": 0
+    }
+  },
+  "config": {
+    "thresholdPath": "config/benchmark.ci.config.json",
+    "baselinePath": ".tmp/zod-baseline.json",
+    "lockPath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\scripts\\benchmark\\phase-a-benchmark-lock.json",
+    "lockedRepos": [
+      {
+        "repoId": "zod-oss",
+        "cloneUrl": "https://github.com/colinhacks/zod.git",
+        "ref": "c7805073fef5b6b8857307c3d4b3597a70613bc2",
+        "languageTier": "tier1",
+        "languageFamily": "typescript"
+      },
+      {
+        "repoId": "flask-oss",
+        "cloneUrl": "https://github.com/pallets/flask.git",
+        "ref": "d98eb69a354158252854ed4a5c9778e03d089191",
+        "languageTier": "tier2",
+        "languageFamily": "python"
+      },
+      {
+        "repoId": "ripgrep-oss",
+        "cloneUrl": "https://github.com/BurntSushi/ripgrep.git",
+        "ref": "9b84e154c8e404f4c40f6f4e4c674ea02e77324a",
+        "languageTier": "tier3",
+        "languageFamily": "rust"
+      }
+    ],
+    "smoothing": {
+      "warmupRuns": 2,
+      "sampleRuns": 3,
+      "outlierMethod": "iqr",
+      "iqrMultiplier": 1.5
+    }
+  },
+  "edgeAccuracy": {
+    "baselinePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\scripts\\benchmark\\edge-accuracy-baseline.json",
+    "passed": true,
+    "scores": [
+      {
+        "language": "go",
+        "cases": 4,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1,
+        "strategyAccuracy": 1
+      },
+      {
+        "language": "java",
+        "cases": 4,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1,
+        "strategyAccuracy": 1
+      },
+      {
+        "language": "python",
+        "cases": 4,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1,
+        "strategyAccuracy": 1
+      }
+    ],
+    "failures": []
+  }
+}

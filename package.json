@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp",
-  "version": "0.6.8",
+  "version": "0.6.9",
   "description": "Symbol Delta Ledger MCP Server - Cards-first code context for TypeScript/JavaScript repositories",
   "type": "module",
   "main": "dist/main.js",
@@ -59,6 +59,7 @@
     "build:native": "cd native && npx @napi-rs/cli build --release",
     "build:native:debug": "cd native && npx @napi-rs/cli build",
     "test:native-parity": "node --import tsx tests/native/parity-test.ts",
+    "check:config-sync": "tsx scripts/check-config-sync.ts",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck"
   },
   "keywords": [
