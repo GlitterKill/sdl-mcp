@@ -1,4 +1,6 @@
 {
+  "$schema": "./sdlmcp.config.schema.json",
+
   "repos": [
     {
       "repoId": "my-repo",
@@ -12,118 +14,43 @@
         "**/coverage/**"
       ],
       "languages": [
-        "ts",
-        "tsx",
-        "js",
-        "jsx",
-        "py",
-        "go",
-        "java",
-        "cs",
-        "c",
-        "cpp",
-        "php",
-        "rs",
-        "kt",
-        "sh"
+        "ts", "tsx", "js", "jsx",
+        "py", "go", "java", "cs",
+        "c", "cpp", "php", "rs",
+        "kt", "sh"
       ],
       "maxFileBytes": 2000000,
-      "includeNodeModulesTypes": true
-    },
-    {
-      "repoId": "zod-oss",
-      "rootPath": ".tmp/external-benchmarks/zod-oss",
-      "ignore": [
-        "**/node_modules/**",
-        "**/dist/**",
-        "**/lib/**",
-        "**/coverage/**",
-        "**/*.test.ts",
-        "**/*.spec.ts"
-      ],
-      "languages": [
-        "ts",
-        "tsx",
-        "js"
-      ]
-    },
-    {
-      "repoId": "preact-oss",
-      "rootPath": ".tmp/external-benchmarks/preact-oss",
-      "ignore": [
-        "**/node_modules/**",
-        "**/dist/**",
-        "**/build/**",
-        "**/coverage/**",
-        "**/*.test.ts",
-        "**/*.spec.ts",
-        "**/*.test.tsx",
-        "**/*.spec.tsx"
-      ],
-      "languages": [
-        "ts",
-        "tsx",
-        "js",
-        "jsx"
-      ]
-    },
-    {
-      "repoId": "flask-oss",
-      "rootPath": ".tmp/external-benchmarks/flask-oss",
-      "ignore": [
-        "**/.venv/**",
-        "**/venv/**",
-        "**/__pycache__/**",
-        "**/.pytest_cache/**",
-        "**/build/**",
-        "**/dist/**",
-        "**/*.pyc",
-        "**/tests/**"
-      ],
-      "languages": [
-        "py"
-      ]
-    },
-    {
-      "repoId": "ansible-lint-oss",
-      "rootPath": ".tmp/external-benchmarks/ansible-lint-oss",
-      "ignore": [
-        "**/.venv/**",
-        "**/venv/**",
-        "**/__pycache__/**",
-        "**/.pytest_cache/**",
-        "**/build/**",
-        "**/dist/**",
-        "**/*.pyc",
-        "**/test/**",
-        "**/tests/**",
-        "**/.tox/**"
-      ],
-      "languages": [
-        "py",
-        "sh"
-      ]
+      "includeNodeModulesTypes": true,
+      "packageJsonPath": null,
+      "tsconfigPath": null,
+      "workspaceGlobs": null
     }
   ],
+
   "dbPath": "./data/sdlmcp.sqlite",
+
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,
     "requireIdentifiers": true,
     "allowBreakGlass": true
   },
+
   "redaction": {
     "enabled": true,
     "includeDefaults": true,
     "patterns": []
   },
+
   "indexing": {
-    "concurrency": 4,
+    "concurrency": 8,
     "enableFileWatching": true,
     "maxWatchedFiles": 25000,
+    "workerPoolSize": null,
     "engine": "typescript",
     "watchDebounceMs": 300
   },
+
   "slice": {
     "defaultMaxCards": 60,
     "defaultMaxTokens": 12000,
@@ -133,6 +60,15 @@
       "config": 0.8
     }
   },
+
+  "diagnostics": {
+    "enabled": true,
+    "mode": "tsLS",
+    "maxErrors": 50,
+    "timeoutMs": 2000,
+    "scope": "changedFiles"
+  },
+
   "cache": {
     "enabled": true,
     "symbolCardMaxEntries": 2000,
@@ -140,8 +76,15 @@
     "graphSliceMaxEntries": 1000,
     "graphSliceMaxSizeBytes": 52428800
   },
+
+  "plugins": {
+    "paths": [],
+    "enabled": true,
+    "strictVersioning": true
+  },
+
   "semantic": {
-    "enabled": false,
+    "enabled": true,
     "alpha": 0.6,
     "provider": "mock",
     "model": "all-MiniLM-L6-v2",
@@ -150,11 +93,33 @@
     "summaryApiKey": null,
     "summaryApiBaseUrl": null,
     "summaryMaxConcurrency": 5,
-    "summaryBatchSize": 20
+    "summaryBatchSize": 20,
+    "ann": {
+      "enabled": false,
+      "m": 16,
+      "efConstruction": 200,
+      "efSearch": 50,
+      "maxElements": 200000
+    }
   },
+
   "prefetch": {
     "enabled": true,
     "maxBudgetPercent": 20,
     "warmTopN": 50
+  },
+
+  "tracing": {
+    "enabled": false,
+    "serviceName": "sdl-mcp",
+    "exporterType": "console",
+    "otlpEndpoint": null,
+    "sampleRate": 1.0
+  },
+
+  "parallelScorer": {
+    "enabled": false,
+    "poolSize": null,
+    "minBatchSize": null
   }
 }

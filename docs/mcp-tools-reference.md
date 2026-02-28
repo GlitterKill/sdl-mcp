@@ -17,57 +17,121 @@
 </details>
 </div>
 
-Use this page for the current tool surface exposed by `registerTools`.
+Complete reference for all 21 MCP tools exposed by `registerTools`. Tools are organized by category and listed in the recommended usage order within each category.
 
-## Repository and Indexing
+---
+
+## Repository and Indexing (4 tools)
 
 ### `sdl.repo.register`
-Register repository metadata for indexing.
 
-Example:
+Register a new repository for indexing.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Unique identifier for the repository |
+| `rootPath` | `string` | Yes | Absolute path to repository root |
+| `ignore` | `string[]` | No | Glob patterns for files/dirs to ignore |
+| `languages` | `string[]` | No | Language filter (e.g., `["typescript", "javascript"]`) |
+| `maxFileBytes` | `integer` | No | Max file size to index (min: 1) |
+
+**Response:** `{ ok: boolean, repoId: string }`
+
+**Example:**
 
 ```json
-{ "repoId": "my-repo", "rootPath": "/workspace/my-repo" }
+{
+  "repoId": "my-repo",
+  "rootPath": "/workspace/my-repo",
+  "ignore": ["node_modules", "dist"],
+  "languages": ["typescript", "javascript"]
+}
 ```
 
-### `sdl.repo.status`
-Get status for one repository (latest version, indexed files/symbols, timestamps, health, and watcher telemetry).
+---
 
-Example:
+### `sdl.repo.status`
+
+Get status for one repository including latest version, indexed files/symbols, timestamps, health, watcher telemetry, and prefetch statistics.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+
+**Response includes:**
+
+- `repoId`, `rootPath`, `latestVersionId`, `filesIndexed`, `symbolsIndexed`, `lastIndexedAt`
+- `healthScore` (0-100), `healthComponents` (freshness, coverage, errorRate, edgeQuality, callResolution), `healthAvailable`
+- `watcherHealth` (nullable) — runtime telemetry: enabled, running, filesWatched, eventsReceived/Processed, errors, queueDepth, restartCount, stale, lastEventAt, lastSuccessfulReindexAt
+- `prefetchStats` — queue depth, hit/waste rates, latency reduction, last run
+
+**Example:**
 
 ```json
 { "repoId": "my-repo" }
 ```
 
-Response includes:
-
-- `healthScore`, `healthComponents`, `healthAvailable`
-- `watcherHealth` (nullable runtime telemetry snapshot)
-- `prefetchStats` (queue depth, hit/waste rates, latency reduction, last run)
+---
 
 ### `sdl.index.refresh`
-Refresh index in `incremental` or `full` mode.
 
-Example:
+Refresh the symbol index in `incremental` or `full` mode.
 
-```json
-{ "repoId": "my-repo", "mode": "incremental" }
-```
+**Parameters:**
 
-When called with a progress token, the server emits `notifications/progress` messages with the current stage, file path, and completion percentage. MCP clients that support progress tokens can display real-time indexing status.
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `mode` | `"full" \| "incremental"` | Yes | Refresh mode |
+| `reason` | `string` | No | Human-readable reason for the refresh |
+
+**Response:** `{ ok: boolean, repoId: string, versionId: string, changedFiles: integer }`
 
 In incremental mode, files whose modification time predates their last indexed timestamp are skipped. If no files changed, the existing version is reused instead of creating an empty snapshot.
 
-### `sdl.repo.overview`
-Return token-efficient repository overview with directory summaries and hotspots.
+When called with a progress token, the server emits `notifications/progress` messages with the current stage, file path, and completion percentage.
 
-Start with `level: "stats"` (cheapest), escalate to `"directories"` or `"full"` only when you need per-directory breakdowns.
+**Example:**
+
+```json
+{ "repoId": "my-repo", "mode": "incremental", "reason": "post-edit refresh" }
+```
+
+---
+
+### `sdl.repo.overview`
+
+Return a token-efficient repository overview with directory summaries and hotspots.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `level` | `"stats" \| "directories" \| "full"` | Yes | Detail level |
+| `includeHotspots` | `boolean` | No | Include codebase hotspots (auto-enabled at `"full"` level) |
+| `directories` | `string[]` | No | Filter to specific directories |
+| `maxDirectories` | `integer` | No | Max directories to return (1-200) |
+| `maxExportsPerDirectory` | `integer` | No | Max exports per directory (1-50) |
+
+Start with `level: "stats"` (cheapest). Escalate to `"directories"` or `"full"` only when needed. `level: "full"` auto-enables hotspots unless `includeHotspots: false` is set.
+
+**Response includes:**
+
+- `stats` — fileCount, symbolCount, edgeCount, exportedSymbolCount, byKind, byEdgeType, avgSymbolsPerFile, avgEdgesPerSymbol
+- `directories` — array of summaries with path, fileCount, symbolCount, exports, topByFanIn, topByChurn
+- `hotspots` (optional) — mostDepended, mostChanged, largestFiles, mostConnected
+- `tokenMetrics` — fullCardsEstimate, overviewTokens, compressionRatio
+
+**Examples:**
 
 ```json
 { "repoId": "my-repo", "level": "stats" }
 ```
-
-Filter output to specific directories and bound payload size:
 
 ```json
 {
@@ -80,64 +144,113 @@ Filter output to specific directories and bound payload size:
 }
 ```
 
-`level: "full"` auto-enables hotspots unless `includeHotspots: false` is set explicitly.
+---
 
-## Symbol Discovery
+## Symbol Discovery (4 tools)
 
 ### `sdl.symbol.search`
-Search symbols by name/summary.
+
+Search symbols by name or summary text.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `query` | `string` | Yes | Search query (min length: 1) |
+| `limit` | `integer` | No | Max results (1-1000, default: 50) |
+| `semantic` | `boolean` | No | Enable semantic reranking via embeddings |
+
+When semantic mode is enabled, lexical candidates are reranked by embeddings. If the embedding provider is unavailable, the tool falls back to lexical-only results.
+
+**Response:** `{ results: [{ symbolId, name, file, kind }], truncation? }`
+
+**Examples:**
 
 ```json
 { "repoId": "my-repo", "query": "parseConfig", "limit": 20 }
 ```
 
-Optional semantic reranking:
-
 ```json
 { "repoId": "my-repo", "query": "auth token refresh", "limit": 20, "semantic": true }
 ```
 
-When semantic mode is enabled, lexical candidates are reranked by embeddings. If the embedding provider is unavailable, the tool falls back to lexical-only results.
+---
 
 ### `sdl.symbol.getCard`
-Fetch one symbol card.
+
+Fetch a single symbol card by ID with ETag support.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `symbolId` | `string` | Yes | Symbol identifier |
+| `ifNoneMatch` | `string` | No | ETag for conditional fetch (returns `notModified` if unchanged) |
+
+The returned card includes identity, signature, summary, invariants, side effects, dependency edges (imports/calls), and metrics. `metrics.canonicalTest` (if available) contains the file path, distance, and proximity of the nearest associated test.
+
+**Response:** Either `{ card: SymbolCard }` or `{ notModified: true, etag, ledgerVersion }`.
+
+**Examples:**
 
 ```json
 { "repoId": "my-repo", "symbolId": "<symbol-id>" }
 ```
 
-The returned card includes `metrics.canonicalTest` (if available), which contains the file path, distance, and proximity information for the nearest test associated with this symbol.
-
-Pass `ifNoneMatch` with the card's ETag to get a lightweight `notModified` response when the symbol has not changed:
-
 ```json
 { "repoId": "my-repo", "symbolId": "<symbol-id>", "ifNoneMatch": "<etag>" }
 ```
 
+---
+
 ### `sdl.symbol.getCards`
+
 Batch fetch up to 100 symbol cards in a single round trip. Prefer this over multiple sequential `sdl.symbol.getCard` calls when you already have a list of symbol IDs.
 
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `symbolIds` | `string[]` | Yes | Array of symbol IDs (1-100) |
+| `knownEtags` | `Record<string, string>` | No | Map of symbolId to known ETag; matching symbols return `notModified` |
+
+**Response:** `{ cards: Array<SymbolCard | NotModifiedResponse> }`
+
+**Example:**
+
 ```json
 {
   "repoId": "my-repo",
-  "symbolIds": ["<symbol-id-1>", "<symbol-id-2>", "<symbol-id-3>"]
-}
-```
-
-Pass `knownEtags` (map of `symbolId → ETag`) to skip unchanged cards — they return `notModified` instead of the full payload:
-
-```json
-{
-  "repoId": "my-repo",
-  "symbolIds": ["<id1>", "<id2>"],
+  "symbolIds": ["<id1>", "<id2>", "<id3>"],
   "knownEtags": { "<id1>": "<etag1>" }
 }
 ```
 
-The response is an array where each entry is either a full card or a `notModified` marker.
+---
 
 ### `sdl.context.summary`
-Generate a token-bounded context summary for symbol/file/task queries.
+
+Generate a token-bounded context summary for a symbol, file, or task query. Useful for getting a quick overview of relevant symbols, dependencies, and risk areas without building a full slice.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `query` | `string` | Yes | Search query (min length: 1) |
+| `budget` | `integer` | No | Max tokens for the summary (min: 1) |
+| `format` | `"markdown" \| "json" \| "clipboard"` | No | Output format |
+| `scope` | `"symbol" \| "file" \| "task"` | No | Query scope |
+
+**Response includes:**
+
+- `summary` — keySymbols, dependencyGraph, riskAreas, filesTouched, metadata (query, summaryTokens, budget, truncated, indexVersion)
+- `content` — formatted summary string in the requested format
+
+**Example:**
 
 ```json
 {
@@ -149,10 +262,42 @@ Generate a token-bounded context summary for symbol/file/task queries.
 }
 ```
 
-## Graph Slice Workflows
+---
+
+## Graph Slice Workflows (3 tools)
 
 ### `sdl.slice.build`
-Build a task-scoped graph slice. `taskText` alone is sufficient — it triggers auto-discovery of relevant symbols via full-text search in a single round trip, no `entrySymbols` required. Adding `entrySymbols` improves precision.
+
+Build a task-scoped graph slice. `taskText` alone is sufficient — it triggers auto-discovery of relevant symbols via full-text search in a single round trip. Adding `entrySymbols` improves precision.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `taskText` | `string` | No | Natural language task description (auto-discovers symbols) |
+| `entrySymbols` | `string[]` | No | Symbol IDs to start the slice from |
+| `editedFiles` | `string[]` | No | Files whose symbols (+ callers) are forced into the slice |
+| `stackTrace` | `string` | No | Stack trace to bias toward call-path symbols |
+| `failingTestPath` | `string` | No | Failing test file to bias toward code under test |
+| `budget` | `{ maxCards?, maxEstimatedTokens? }` | No | Token/card budget constraints |
+| `minConfidence` | `number` | No | Edge confidence threshold (0-1, default: 0.5) |
+| `knownCardEtags` | `Record<string, string>` | No | ETags for cards already held; unchanged return as `cardRefs` |
+| `cardDetail` | `"minimal" \| "signature" \| "deps" \| "compact" \| "full"` | No | Card detail level (leave unset for mixed) |
+| `adaptiveDetail` | `boolean` | No | Enable adaptive detail level selection |
+| `wireFormat` | `"standard" \| "compact"` | No | Wire format (default: compact) |
+| `wireFormatVersion` | `1 \| 2 \| 3` | No | Wire format version (default: 2) |
+
+**Response:** `{ sliceHandle, ledgerVersion, lease, sliceEtag?, slice }` or `{ notModified }`.
+
+The slice contains `symbolIndex`, `cards`, optional `cardRefs` (for ETag matches), `edges`, optional `frontier`, and optional `truncation` with resume info.
+
+**Tips:**
+- Raise `minConfidence` toward 0.8-0.95 for precision-focused runs; keep near 0.5 for recall-oriented work
+- Use `knownCardEtags` on subsequent calls to reduce token cost
+- Use `editedFiles` for impact analysis after code changes
+
+**Examples:**
 
 ```json
 {
@@ -163,8 +308,6 @@ Build a task-scoped graph slice. `taskText` alone is sufficient — it triggers 
 }
 ```
 
-When `editedFiles` is provided, all symbols in those files plus their immediate callers are forced into the slice regardless of score threshold — useful for impact analysis after a code change:
-
 ```json
 {
   "repoId": "my-repo",
@@ -174,42 +317,101 @@ When `editedFiles` is provided, all symbols in those files plus their immediate 
 }
 ```
 
-Key optional parameters:
-
-- `minConfidence` (default `0.5`): raise toward `0.8`–`0.95` for precision-focused runs; keep near `0.5` for recall-oriented work
-- `knownCardEtags` (map of `symbolId → ETag`): cards with unchanged ETags return as `cardRefs` instead of full payloads, reducing token cost on subsequent slice builds
-- `cardDetail` (`"minimal"` | `"signature"` | `"deps"` | `"compact"` | `"full"`): leave unset for default mixed behavior; use `"full"` only when all slice cards are needed in full
-- `wireFormatVersion` (default `2`): use `2` for compact wire encoding
-- `failingTestPath`: provide a failing test file path to bias slice discovery toward code under test
-- `stackTrace`: provide a stack trace to bias slice discovery toward call-path symbols
+---
 
 ### `sdl.slice.refresh`
-Refresh an existing handle and receive changes relative to known version.
+
+Refresh an existing slice handle and receive changes relative to a known version. Prefer this over rebuilding slices when you already have a handle.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sliceHandle` | `string` | Yes | Handle from a previous `sdl.slice.build` |
+| `knownVersion` | `string` | Yes | Version ID the client currently holds |
+
+**Response:** `{ sliceHandle, knownVersion, currentVersion, notModified?, delta?, lease? }`
+
+If nothing changed, `notModified: true` is returned. Otherwise, `delta` contains the incremental changes (changedSymbols, blastRadius, trimmedSet, etc.).
+
+**Example:**
 
 ```json
 { "sliceHandle": "h_abc123", "knownVersion": "v1770600000000" }
 ```
 
+---
+
 ### `sdl.slice.spillover.get`
-Paginate additional symbols from spillover.
+
+Paginate additional symbols that exceeded the slice budget. Only use when the slice was truncated and you need more symbols.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `spilloverHandle` | `string` | Yes | Spillover handle from a truncated slice |
+| `cursor` | `string` | No | Pagination cursor from previous page |
+| `pageSize` | `integer` | No | Items per page (1-100, default: 20) |
+
+**Response:** `{ spilloverHandle, cursor?, hasMore, symbols: SymbolCard[] }`
+
+**Example:**
 
 ```json
 { "spilloverHandle": "sp_abc123", "pageSize": 20 }
 ```
 
-## Delta and Risk
+---
+
+## Delta and Risk (2 tools)
 
 ### `sdl.delta.get`
-Compute delta between two versions with blast-radius support.
+
+Compute a delta pack between two ledger versions, showing changed symbols and blast radius.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `fromVersion` | `string` | Yes | Base version ID |
+| `toVersion` | `string` | Yes | Target version ID |
+| `budget` | `{ maxCards?, maxEstimatedTokens? }` | No | Budget to constrain blast-radius work |
+
+**Response includes:**
+
+- `delta` — changedSymbols (with changeType, signatureDiff, invariantDiff, sideEffectDiff), blastRadius (ranked by distance/signal with fanInTrend), diagnosticsSummary, diagnosticSuspects, truncation, trimmedSet, spilloverHandle
+- `amplifiers` — multipliers for dependent symbols (symbolId, growthRate, previous/current fan-in) that increase blast-radius scoring
+
+**Example:**
 
 ```json
 { "repoId": "my-repo", "fromVersion": "v1", "toVersion": "v2" }
 ```
 
-The response includes an `amplifiers` field containing multipliers for dependent symbols that increase blast-radius scoring based on test proximity, fan-in, and change severity. Amplifiers help prioritize high-impact symbols for testing and review.
+---
 
 ### `sdl.pr.risk.analyze`
-Assess PR-level risk from delta + blast radius and produce test recommendations.
+
+Assess PR-level risk from delta and blast radius, producing findings, impact analysis, and test recommendations.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `fromVersion` | `string` | Yes | Base version ID |
+| `toVersion` | `string` | Yes | Target version ID |
+| `riskThreshold` | `integer` | No | Risk threshold 0-100 (raise to focus on highest-risk changes) |
+
+**Response includes:**
+
+- `analysis` — riskScore (0-100), riskLevel (low/medium/high), findings (type, severity, message, affectedSymbols), impactedSymbols, evidence, recommendedTests (type, description, targetSymbols, priority), changedSymbolsCount, blastRadiusCount
+- `escalationRequired` — whether the risk exceeds the threshold
+- `policyDecision` (optional) — decision, deniedReasons, auditHash
+
+**Example:**
 
 ```json
 {
@@ -220,17 +422,66 @@ Assess PR-level risk from delta + blast radius and produce test recommendations.
 }
 ```
 
-## Code Access Ladder
+---
+
+## Code Access Ladder (3 tools)
+
+These tools form an escalation path. Use them in order: skeleton first, then hot-path, then raw window only when necessary.
 
 ### `sdl.code.getSkeleton`
-Get structure-first symbol code view. Returns `null` for files exceeding the configured `maxFileBytes` limit.
+
+Get a skeleton view of code showing signatures, control flow structure, and elided function bodies. Returns `null` for files exceeding the configured `maxFileBytes` limit.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `symbolId` | `string` | No* | Symbol to get skeleton for |
+| `file` | `string` | No* | File path to get skeleton for |
+| `exportedOnly` | `boolean` | No | Only show exported symbols (file mode) |
+| `maxLines` | `integer` | No | Max output lines (min: 1) |
+| `maxTokens` | `integer` | No | Max output tokens (min: 1) |
+| `identifiersToFind` | `string[]` | No | Highlight specific identifiers |
+
+*Either `symbolId` or `file` must be provided.
+
+In file mode, prefer `exportedOnly: true` when possible to reduce output size.
+
+**Response:** `{ skeleton, file, range, estimatedTokens, originalLines, truncated, truncation? }`
+
+**Example:**
 
 ```json
 { "repoId": "my-repo", "symbolId": "<symbol-id>" }
 ```
 
+```json
+{ "repoId": "my-repo", "file": "src/auth/token.ts", "exportedOnly": true }
+```
+
+---
+
 ### `sdl.code.getHotPath`
-Get identifier-focused excerpt with context. The `matchedIdentifiers` field in the response contains only identifiers that were actually found in the AST, not the full request list.
+
+Get an identifier-focused code excerpt showing only lines that match the requested identifiers, with surrounding context.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `symbolId` | `string` | Yes | Symbol to search within |
+| `identifiersToFind` | `string[]` | Yes | Identifiers to locate (min: 1) |
+| `contextLines` | `integer` | No | Lines of context around matches (default: 3, min: 0) |
+| `maxLines` | `integer` | No | Max output lines (min: 1) |
+| `maxTokens` | `integer` | No | Max output tokens (min: 1) |
+
+The `matchedIdentifiers` field in the response contains only identifiers that were actually found in the AST, not the full request list.
+
+**Response:** `{ excerpt, file, range, estimatedTokens, matchedIdentifiers, matchedLineNumbers, truncated }`
+
+**Example:**
 
 ```json
 {
@@ -241,30 +492,96 @@ Get identifier-focused excerpt with context. The `matchedIdentifiers` field in t
 }
 ```
 
+---
+
 ### `sdl.code.needWindow`
-Request raw code window (policy-gated). The `expectedLines` and `maxTokens` values are clamped to the effective policy limits (`maxWindowLines`, `maxWindowTokens`), so requests exceeding policy caps are silently reduced rather than rejected.
+
+Request raw code for a symbol. This is policy-gated and should be used as a last resort after trying skeleton and hot-path.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `symbolId` | `string` | Yes | Symbol to get code for |
+| `reason` | `string` | Yes | Justification for raw code access (min length: 1) |
+| `expectedLines` | `integer` | Yes | Expected lines needed (min: 1, clamped to policy max: 180) |
+| `identifiersToFind` | `string[]` | Yes | Identifiers expected in the code (required by policy) |
+| `granularity` | `"symbol" \| "block" \| "fileWindow"` | No | Code extraction scope |
+| `maxTokens` | `integer` | No | Max tokens (min: 1, clamped to policy max: 1400) |
+| `sliceContext` | `object` | No | Slice context for approval scoring |
+
+`sliceContext` fields: `taskText` (required), `stackTrace`, `failingTestPath`, `editedFiles`, `entrySymbols`, `budget`.
+
+The `expectedLines` and `maxTokens` values are clamped to the effective policy limits, so requests exceeding policy caps are silently reduced rather than rejected.
+
+**Response (approved):** `{ approved: true, symbolId, file, range, code, whyApproved, estimatedTokens, downgradedFrom?, matchedIdentifiers?, matchedLineNumbers?, truncation? }`
+
+**Response (denied):** `{ approved: false, whyDenied, suggestedNextRequest?, nextBestAction? }`
+
+When denied, `nextBestAction` suggests an alternative tool and args to try instead.
+
+**Example:**
 
 ```json
 {
   "repoId": "my-repo",
   "symbolId": "<symbol-id>",
-  "reason": "Need exact branch logic",
+  "reason": "Need exact branch logic for debugging auth timeout",
   "expectedLines": 80,
-  "identifiersToFind": ["if", "catch"]
+  "identifiersToFind": ["if", "catch", "tokenExpiry"]
 }
 ```
 
-## Policy and Agent
+---
+
+## Policy Management (2 tools)
 
 ### `sdl.policy.get`
-Fetch effective policy for a repo.
+
+Fetch the effective policy configuration for a repository.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+
+**Response:** `{ policy: { maxWindowLines, maxWindowTokens, requireIdentifiers, allowBreakGlass } }`
+
+Default policy values: `maxWindowLines: 180`, `maxWindowTokens: 1400`, `requireIdentifiers: true`, `allowBreakGlass: true`.
+
+**Example:**
 
 ```json
 { "repoId": "my-repo" }
 ```
 
+---
+
 ### `sdl.policy.set`
-Patch policy values.
+
+Update policy configuration for a repository. Accepts a partial patch — only specified fields are updated.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `policyPatch` | `object` | Yes | Partial policy to apply |
+
+`policyPatch` fields (all optional):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `maxWindowLines` | `integer` | 180 | Max lines per code window |
+| `maxWindowTokens` | `integer` | 1400 | Max tokens per code window |
+| `requireIdentifiers` | `boolean` | true | Require identifiersToFind in needWindow |
+| `allowBreakGlass` | `boolean` | true | Allow break-glass override for denied requests |
+
+**Response:** `{ ok: boolean, repoId: string }`
+
+**Example:**
 
 ```json
 {
@@ -278,8 +595,52 @@ Patch policy values.
 }
 ```
 
+---
+
+## Agent Orchestration and Feedback (3 tools)
+
 ### `sdl.agent.orchestrate`
-Run automated rung selection with evidence capture for agent tasks.
+
+Orchestrate automated task execution with rung path selection and evidence capture. The planner selects an optimal path through the context ladder (card -> skeleton -> hotPath -> raw) based on the task type and budget.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `taskType` | `"debug" \| "review" \| "implement" \| "explain"` | Yes | Type of task |
+| `taskText` | `string` | Yes | Task description or prompt |
+| `budget` | `object` | No | Budget constraints |
+| `options` | `object` | No | Task-specific options |
+
+`budget` fields (all optional):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `maxTokens` | `number` | Maximum tokens to consume |
+| `maxActions` | `number` | Maximum number of actions to execute |
+| `maxDurationMs` | `number` | Maximum duration in milliseconds |
+
+`options` fields (all optional):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `focusSymbols` | `string[]` | Symbol IDs to focus on |
+| `focusPaths` | `string[]` | File paths to focus on |
+| `includeTests` | `boolean` | Include test files in analysis |
+| `requireDiagnostics` | `boolean` | Include diagnostic info (may add a raw rung) |
+
+**Response includes:**
+
+- `taskId`, `taskType`, `success`, `summary`, `error?`, `answer?`, `nextBestAction?`
+- `path` — rungs selected, estimatedTokens, estimatedDurationMs, reasoning
+- `actionsTaken` — array of actions with id, type, status, input, output, error, timestamp, durationMs, evidence
+- `finalEvidence` — array of evidence items (type, reference, summary, timestamp)
+- `metrics` — totalDurationMs, totalTokens, totalActions, successfulActions, failedActions, cacheHits
+
+Planner token estimates: card ~50, skeleton ~200, hotPath ~500, raw ~2000. When over budget, the planner trims rungs from the end while keeping at least one.
+
+**Example:**
 
 ```json
 {
@@ -287,14 +648,32 @@ Run automated rung selection with evidence capture for agent tasks.
   "taskType": "debug",
   "taskText": "find root cause of auth timeout",
   "budget": { "maxTokens": 4000, "maxActions": 12 },
-  "options": { "includeTests": true, "requireDiagnostics": true }
+  "options": { "includeTests": true, "focusPaths": ["src/auth/"] }
 }
 ```
 
+---
+
 ### `sdl.agent.feedback`
+
 Record which symbols were useful or missing during a task. Feedback is stored per version and used for offline slice-ranking tuning.
 
-Required: `repoId`, `versionId` (from `sdl.repo.status`), `sliceHandle` (from the slice you used), `usefulSymbols` (at least one symbol ID).
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `versionId` | `string` | Yes | Version ID (from `sdl.repo.status`) |
+| `sliceHandle` | `string` | Yes | Slice handle used during the task |
+| `usefulSymbols` | `string[]` | Yes | Symbol IDs that were useful (min: 1) |
+| `missingSymbols` | `string[]` | No | Symbol IDs that were expected but missing |
+| `taskTags` | `string[]` | No | Tags describing the task type |
+| `taskType` | `"debug" \| "review" \| "implement" \| "explain"` | No | Type of task performed |
+| `taskText` | `string` | No | Task description for context |
+
+**Response:** `{ ok: boolean, feedbackId: integer, repoId, versionId, symbolsRecorded: integer }`
+
+**Example:**
 
 ```json
 {
@@ -308,38 +687,62 @@ Required: `repoId`, `versionId` (from `sdl.repo.status`), `sliceHandle` (from th
 }
 ```
 
-Response includes `feedbackId`, `symbolsRecorded`, and confirmation fields.
+---
 
 ### `sdl.agent.feedback.query`
+
 Query stored feedback records and aggregated statistics. Useful for offline tuning pipelines to understand which symbols are consistently useful or missing.
 
-```json
-{
-  "repoId": "my-repo",
-  "versionId": "v1770600000000",
-  "limit": 50
-}
-```
+**Parameters:**
 
-Filter by time window with `since` (ISO timestamp):
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `versionId` | `string` | No | Filter by version |
+| `limit` | `integer` | No | Max records to return (1-1000) |
+| `since` | `string` | No | ISO timestamp to filter feedback from |
+
+**Response includes:**
+
+- `feedback` — array of records (feedbackId, versionId, sliceHandle, usefulSymbols, missingSymbols, taskTags, taskType, taskText, createdAt)
+- `aggregatedStats` — totalFeedback, topUsefulSymbols (symbolId + count), topMissingSymbols (symbolId + count)
+- `hasMore` — pagination flag
+
+**Examples:**
+
+```json
+{ "repoId": "my-repo", "versionId": "v1770600000000", "limit": 50 }
+```
 
 ```json
 { "repoId": "my-repo", "since": "2026-01-01T00:00:00Z", "limit": 100 }
 ```
 
-Response includes `feedback` (array of records), `aggregatedStats` (top useful/missing symbols with counts), and `hasMore` (pagination flag).
+---
 
 ## Tool-Usage Pattern for Agents
 
-Use in this order for most tasks:
+Use tools in this order for most tasks:
 
-1. `sdl.symbol.search`
-2. `sdl.symbol.getCard` — or `sdl.symbol.getCards` when fetching multiple symbols at once
-3. `sdl.slice.build`
-4. `sdl.code.getSkeleton`
-5. `sdl.code.getHotPath`
-6. `sdl.code.needWindow` only when necessary
-7. `sdl.agent.feedback` after completing a task to record which symbols were useful
+1. `sdl.repo.status` — check repo state and version
+2. `sdl.repo.overview` — understand codebase structure (start with `level: "stats"`)
+3. `sdl.symbol.search` — find relevant symbols (start with tight limits)
+4. `sdl.symbol.getCard` / `sdl.symbol.getCards` — understand what symbols do
+5. `sdl.slice.build` — get related symbols for a task
+6. `sdl.code.getSkeleton` — see code structure without full bodies
+7. `sdl.code.getHotPath` — find specific identifiers in code
+8. `sdl.code.needWindow` — raw code only when necessary
+9. `sdl.agent.feedback` — record which symbols were useful after completing a task
+
+### Task-Specific Workflows
+
+| Task | Workflow |
+|------|----------|
+| **Debug** | search -> card -> slice.build -> hotPath -> needWindow (if still ambiguous) |
+| **Feature** | repo.overview -> search -> card -> slice.build |
+| **PR Review** | delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols |
+
+---
 
 ## HTTP Surface (Non-MCP)
 

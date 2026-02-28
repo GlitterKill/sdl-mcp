@@ -82,6 +82,7 @@ export const IndexingConfigSchema = z.object({
         .default(WATCHER_DEFAULT_MAX_WATCHED_FILES),
     workerPoolSize: z.number().int().min(1).max(16).optional(),
     engine: z.enum(["typescript", "rust"]).default("typescript"),
+    watchDebounceMs: z.number().int().min(50).max(5000).default(300),
 });
 export const EdgeWeightsSchema = z.object({
     call: z.number().min(0).default(1.0),
@@ -140,7 +141,7 @@ export const AnnConfigSchema = z.object({
     maxElements: z.number().int().min(1000).max(1000000).default(200000),
 });
 export const SemanticConfigSchema = z.object({
-    enabled: z.boolean().default(false),
+    enabled: z.boolean().default(true),
     alpha: z.number().min(0).max(1).default(0.6),
     provider: z.enum(["api", "local", "mock"]).default("mock"),
     model: z.string().default("all-MiniLM-L6-v2"),

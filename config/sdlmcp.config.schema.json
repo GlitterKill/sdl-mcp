@@ -410,7 +410,8 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "default": false
+          "description": "Enable semantic reranking in symbol search",
+          "default": true
         },
         "alpha": {
           "type": "number",
@@ -506,7 +507,7 @@
         }
       },
       "default": {
-        "enabled": false,
+        "enabled": true,
         "alpha": 0.6,
         "provider": "mock",
         "model": "all-MiniLM-L6-v2",

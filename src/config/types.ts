@@ -188,7 +188,7 @@ export const AnnConfigSchema = z.object({
 export type AnnConfig = z.infer<typeof AnnConfigSchema>;
 
 export const SemanticConfigSchema = z.object({
-  enabled: z.boolean().default(false),
+  enabled: z.boolean().default(true),
   alpha: z.number().min(0).max(1).default(0.6),
   provider: z.enum(["api", "local", "mock"]).default("mock"),
   model: z.string().default("all-MiniLM-L6-v2"),
