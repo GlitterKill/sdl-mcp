@@ -1,0 +1,26 @@
+[
+  {
+    "callLine": 4,
+    "callCol": 0,
+    "calleeName": "foo",
+    "calleeFile": "utils.ts",
+    "calleeKind": "function",
+    "confidence": 1
+  },
+  {
+    "callLine": 5,
+    "callCol": 0,
+    "calleeName": "foo",
+    "calleeFile": "utils.ts",
+    "calleeKind": "function",
+    "confidence": 1
+  },
+  {
+    "callLine": 6,
+    "callCol": 0,
+    "calleeName": "foo",
+    "calleeFile": "utils.ts",
+    "calleeKind": "function",
+    "confidence": 1
+  }
+]
