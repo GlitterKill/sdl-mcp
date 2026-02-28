@@ -458,6 +458,17 @@ export const AWS_KEY_MAX_LENGTH = 32;
 export const GITHUB_TOKEN_LENGTH = 36;
 
 // ============================================================================
+// Blast Radius Constants
+// ============================================================================
+
+/**
+ * Growth rate threshold above which a symbol is considered a fan-in amplifier.
+ * A growthRate > 0.20 means the symbol's dependency count grew by more than 20%.
+ * Amplifiers are sorted to the top of the blast radius list within the same distance tier.
+ */
+export const FAN_IN_AMPLIFIER_THRESHOLD = 0.20;
+
+// ============================================================================
 // Stability & Diff Constants
 // ============================================================================
 

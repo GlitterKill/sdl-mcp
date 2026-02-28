@@ -220,13 +220,21 @@
           "description": "Pass-1 indexing engine implementation",
           "enum": ["typescript", "rust"],
           "default": "typescript"
+        },
+        "watchDebounceMs": {
+          "type": "integer",
+          "description": "Debounce delay in milliseconds for file watch events",
+          "minimum": 50,
+          "maximum": 5000,
+          "default": 300
         }
       },
       "default": {
         "concurrency": 8,
         "enableFileWatching": true,
         "maxWatchedFiles": 25000,
-        "engine": "typescript"
+        "engine": "typescript",
+        "watchDebounceMs": 300
       }
     },
     "slice": {
@@ -423,6 +431,33 @@
           "type": "boolean",
           "default": false
         },
+        "summaryModel": {
+          "type": "string",
+          "description": "Model name to use for LLM-generated summaries (Anthropic or OpenAI-compatible)",
+          "default": "claude-haiku-4-5-20251001"
+        },
+        "summaryApiKey": {
+          "type": "string",
+          "description": "API key for the summary LLM provider. Falls back to ANTHROPIC_API_KEY environment variable."
+        },
+        "summaryApiBaseUrl": {
+          "type": "string",
+          "description": "Base URL for OpenAI-compatible local providers (e.g., http://localhost:11434 for Ollama)"
+        },
+        "summaryMaxConcurrency": {
+          "type": "integer",
+          "description": "Maximum concurrent LLM requests for summary generation",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 5
+        },
+        "summaryBatchSize": {
+          "type": "integer",
+          "description": "Number of symbols to batch per summary generation pass",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 20
+        },
         "ann": {
           "type": "object",
           "description": "HNSW approximate nearest neighbor index configuration for semantic retrieval",
@@ -476,6 +511,9 @@
         "provider": "mock",
         "model": "all-MiniLM-L6-v2",
         "generateSummaries": false,
+        "summaryModel": "claude-haiku-4-5-20251001",
+        "summaryMaxConcurrency": 5,
+        "summaryBatchSize": 20,
         "ann": {
           "enabled": false,
           "m": 16,
@@ -491,7 +529,7 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "default": false
+          "default": true
         },
         "maxBudgetPercent": {
           "type": "integer",
@@ -506,7 +544,7 @@
         }
       },
       "default": {
-        "enabled": false,
+        "enabled": true,
         "maxBudgetPercent": 20,
         "warmTopN": 50
       }

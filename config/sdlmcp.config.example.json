@@ -121,7 +121,8 @@
     "concurrency": 4,
     "enableFileWatching": true,
     "maxWatchedFiles": 25000,
-    "engine": "typescript"
+    "engine": "typescript",
+    "watchDebounceMs": 300
   },
   "slice": {
     "defaultMaxCards": 60,
@@ -144,10 +145,15 @@
     "alpha": 0.6,
     "provider": "mock",
     "model": "all-MiniLM-L6-v2",
-    "generateSummaries": false
+    "generateSummaries": false,
+    "summaryModel": "claude-haiku-4-5-20251001",
+    "summaryApiKey": null,
+    "summaryApiBaseUrl": null,
+    "summaryMaxConcurrency": 5,
+    "summaryBatchSize": 20
   },
   "prefetch": {
-    "enabled": false,
+    "enabled": true,
     "maxBudgetPercent": 20,
     "warmTopN": 50
   }

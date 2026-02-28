@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MAX_FILE_BYTES, DEFAULT_MAX_WINDOW_LINES, DEFAULT_MAX_WINDOW_TOKENS, DEFAULT_INDEXING_CONCURRENCY, MAX_INDEXING_CONCURRENCY, DEFAULT_MAX_CARDS, DEFAULT_MAX_TOKENS_SLICE, TS_DIAGNOSTICS_MAX_ERRORS, DEFAULT_OPERATION_TIMEOUT_MS, MIN_OPERATION_TIMEOUT_MS, DEFAULT_SYMBOL_CARD_CACHE_MAX_ENTRIES, DEFAULT_SYMBOL_CARD_CACHE_MAX_SIZE_BYTES, DEFAULT_GRAPH_SLICE_CACHE_MAX_ENTRIES, DEFAULT_GRAPH_SLICE_CACHE_MAX_SIZE_BYTES, } from "./constants.js";
+import { MAX_FILE_BYTES, DEFAULT_MAX_WINDOW_LINES, DEFAULT_MAX_WINDOW_TOKENS, DEFAULT_INDEXING_CONCURRENCY, MAX_INDEXING_CONCURRENCY, DEFAULT_MAX_CARDS, DEFAULT_MAX_TOKENS_SLICE, TS_DIAGNOSTICS_MAX_ERRORS, DEFAULT_OPERATION_TIMEOUT_MS, MIN_OPERATION_TIMEOUT_MS, DEFAULT_SYMBOL_CARD_CACHE_MAX_ENTRIES, DEFAULT_SYMBOL_CARD_CACHE_MAX_SIZE_BYTES, DEFAULT_GRAPH_SLICE_CACHE_MAX_ENTRIES, DEFAULT_GRAPH_SLICE_CACHE_MAX_SIZE_BYTES, WATCHER_DEFAULT_MAX_WATCHED_FILES, } from "./constants.js";
 export const LanguageSchema = z.enum([
     "ts",
     "tsx",
@@ -46,6 +46,7 @@ export const RepoConfigSchema = z.object({
         "sh",
     ]),
     maxFileBytes: z.number().int().min(1).default(MAX_FILE_BYTES),
+    includeNodeModulesTypes: z.boolean().default(true),
     packageJsonPath: z.string().optional(),
     tsconfigPath: z.string().optional(),
     workspaceGlobs: z.array(z.string()).optional(),
@@ -73,8 +74,14 @@ export const IndexingConfigSchema = z.object({
         .min(1)
         .max(MAX_INDEXING_CONCURRENCY)
         .default(DEFAULT_INDEXING_CONCURRENCY),
-    enableFileWatching: z.boolean().default(false),
+    enableFileWatching: z.boolean().default(true),
+    maxWatchedFiles: z
+        .number()
+        .int()
+        .min(1)
+        .default(WATCHER_DEFAULT_MAX_WATCHED_FILES),
     workerPoolSize: z.number().int().min(1).max(16).optional(),
+    engine: z.enum(["typescript", "rust"]).default("typescript"),
 });
 export const EdgeWeightsSchema = z.object({
     call: z.number().min(0).default(1.0),
@@ -120,6 +127,48 @@ export const CacheConfigSchema = z.object({
         .min(1024)
         .default(DEFAULT_GRAPH_SLICE_CACHE_MAX_SIZE_BYTES),
 });
+export const PluginConfigSchema = z.object({
+    paths: z.array(z.string()).default([]),
+    enabled: z.boolean().default(true),
+    strictVersioning: z.boolean().default(true),
+});
+export const AnnConfigSchema = z.object({
+    enabled: z.boolean().default(false),
+    m: z.number().int().min(4).max(64).default(16),
+    efConstruction: z.number().int().min(16).max(500).default(200),
+    efSearch: z.number().int().min(8).max(256).default(50),
+    maxElements: z.number().int().min(1000).max(1000000).default(200000),
+});
+export const SemanticConfigSchema = z.object({
+    enabled: z.boolean().default(false),
+    alpha: z.number().min(0).max(1).default(0.6),
+    provider: z.enum(["api", "local", "mock"]).default("mock"),
+    model: z.string().default("all-MiniLM-L6-v2"),
+    generateSummaries: z.boolean().default(false),
+    ann: AnnConfigSchema.optional(),
+    summaryModel: z.string().default("claude-haiku-4-5-20251001"),
+    summaryApiKey: z.string().nullish(),
+    summaryApiBaseUrl: z.string().nullish(),
+    summaryMaxConcurrency: z.number().int().min(1).max(20).default(5),
+    summaryBatchSize: z.number().int().min(1).max(50).default(20),
+});
+export const PrefetchConfigSchema = z.object({
+    enabled: z.boolean().default(false),
+    maxBudgetPercent: z.number().int().min(1).max(100).default(20),
+    warmTopN: z.number().int().min(1).default(50),
+});
+export const TracingConfigSchema = z.object({
+    enabled: z.boolean().default(false),
+    serviceName: z.string().default("sdl-mcp"),
+    exporterType: z.enum(["console", "otlp", "memory"]).default("console"),
+    otlpEndpoint: z.string().optional(),
+    sampleRate: z.number().min(0).max(1).default(1.0),
+});
+export const ParallelScorerConfigSchema = z.object({
+    enabled: z.boolean().default(false),
+    poolSize: z.number().int().min(1).max(8).optional(),
+    minBatchSize: z.number().int().min(1).max(100).optional(),
+});
 export const AppConfigSchema = z.object({
     repos: z.array(RepoConfigSchema),
     dbPath: z.string().min(1),
@@ -129,5 +178,10 @@ export const AppConfigSchema = z.object({
     slice: SliceConfigSchema.optional(),
     diagnostics: DiagnosticsConfigSchema.optional(),
     cache: CacheConfigSchema.optional(),
+    plugins: PluginConfigSchema.optional(),
+    semantic: SemanticConfigSchema.optional(),
+    prefetch: PrefetchConfigSchema.optional(),
+    tracing: TracingConfigSchema.optional(),
+    parallelScorer: ParallelScorerConfigSchema.optional(),
 });
 //# sourceMappingURL=types.js.map

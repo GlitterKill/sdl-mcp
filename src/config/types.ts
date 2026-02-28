@@ -110,6 +110,7 @@ export const IndexingConfigSchema = z.object({
     .default(WATCHER_DEFAULT_MAX_WATCHED_FILES),
   workerPoolSize: z.number().int().min(1).max(16).optional(),
   engine: z.enum(["typescript", "rust"]).default("typescript"),
+  watchDebounceMs: z.number().int().min(50).max(5000).default(300),
 });
 
 export type IndexingConfig = z.infer<typeof IndexingConfigSchema>;
@@ -192,6 +193,11 @@ export const SemanticConfigSchema = z.object({
   provider: z.enum(["api", "local", "mock"]).default("mock"),
   model: z.string().default("all-MiniLM-L6-v2"),
   generateSummaries: z.boolean().default(false),
+  summaryModel: z.string().default("claude-haiku-4-5-20251001"),
+  summaryApiKey: z.string().nullish(),       // falls back to ANTHROPIC_API_KEY env var
+  summaryApiBaseUrl: z.string().nullish(),   // for OpenAI-compatible endpoints (e.g., ollama)
+  summaryMaxConcurrency: z.number().int().min(1).max(20).default(5),
+  summaryBatchSize: z.number().int().min(1).max(50).default(20),
   ann: AnnConfigSchema.optional(),
 });
 
