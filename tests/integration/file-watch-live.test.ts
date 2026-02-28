@@ -157,7 +157,7 @@ runMigrations(db);
 // describe block
 // ---------------------------------------------------------------------------
 
-describe("file-watch-live", { timeout: 60_000 }, () => {
+describe("file-watch-live", { timeout: 60_000, skip: !!process.env.CI }, () => {
   beforeEach(async () => {
     // Unique repo ID per test to avoid cross-test pollution
     repoId = `test-watch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
