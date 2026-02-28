@@ -237,6 +237,14 @@ describe("Golden parity: start node resolver exports", () => {
 
     const limitsWithEntry = computeStartNodeLimits({ entrySymbols: ["s1"] }, 1);
     assert.ok(limitsWithEntry.maxTotalStartNodes >= 12);
+
+    // Text-only mode golden case: resolveStartNodes with only taskText should
+    // use effectiveTaskTextLimit = maxTaskTextStartNodes * 2. This is validated
+    // in tests/unit/text-to-slice.test.ts. Adding a note here so the golden
+    // test suite documents the expected behavior:
+    //   { taskText: "build graph slice", expectedMinCards: 1 }
+    // A full integration test for this requires a live DB and is deferred to
+    // the test:harness suite.
   });
 });
 
@@ -378,6 +386,40 @@ describe("Golden parity: known etag behavior", () => {
       cardRefs?.length ?? 0,
       1,
       "changed card should be in cardRefs",
+    );
+  });
+});
+
+// T6: editedFiles expansion — golden regression guard
+// Verifies that the START_NODE_SOURCE_PRIORITY and START_NODE_SOURCE_SCORE
+// constants retain their expected values after the T6 editedFile auto-expansion
+// changes. A full integration test (slice.build with editedFiles → callers
+// appear in output) requires a live DB and is deferred to the test:harness suite.
+describe("Golden parity: T6 editedFiles expansion constants", () => {
+  it("editedFile source priority is 5 (between failingTestPath=4 and taskText=6)", () => {
+    assert.strictEqual(START_NODE_SOURCE_PRIORITY.editedFile, 5);
+    assert.ok(
+      START_NODE_SOURCE_PRIORITY.failingTestPath <
+        START_NODE_SOURCE_PRIORITY.editedFile,
+      "failingTestPath priority < editedFile priority",
+    );
+    assert.ok(
+      START_NODE_SOURCE_PRIORITY.editedFile <
+        START_NODE_SOURCE_PRIORITY.taskText,
+      "editedFile priority < taskText priority",
+    );
+  });
+
+  it("editedFile source score is -1.0 (between failingTestPath=-1.1 and taskText=-0.6)", () => {
+    assert.strictEqual(START_NODE_SOURCE_SCORE.editedFile, -1.0);
+    assert.ok(
+      START_NODE_SOURCE_SCORE.failingTestPath <
+        START_NODE_SOURCE_SCORE.editedFile,
+      "failingTestPath score < editedFile score (both negative)",
+    );
+    assert.ok(
+      START_NODE_SOURCE_SCORE.editedFile < START_NODE_SOURCE_SCORE.taskText,
+      "editedFile score < taskText score (more negative = higher beam priority)",
     );
   });
 });

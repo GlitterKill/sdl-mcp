@@ -246,6 +246,10 @@ export function toCompactGraphSliceV1(slice: GraphSlice): CompactGraphSlice {
     compact.t = truncation;
   }
 
+  if (slice.staleSymbols && slice.staleSymbols.length > 0) {
+    compact.staleSymbols = slice.staleSymbols;
+  }
+
   return compact;
 }
 
@@ -397,6 +401,10 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
       };
     }
     compact.t = truncation;
+  }
+
+  if (slice.staleSymbols && slice.staleSymbols.length > 0) {
+    compact.staleSymbols = slice.staleSymbols;
   }
 
   return compact;
@@ -552,6 +560,10 @@ export function toCompactGraphSliceV3(slice: GraphSlice): CompactGraphSliceV3 {
     compact.t = truncation;
   }
 
+  if (slice.staleSymbols && slice.staleSymbols.length > 0) {
+    compact.staleSymbols = slice.staleSymbols;
+  }
+
   return compact;
 }
 
@@ -647,6 +659,27 @@ export function decodeCompactEdgesV3ToV1(
 export async function handleSliceBuild(
   args: unknown,
 ): Promise<SliceBuildResponse | SliceErrorResponse> {
+  // Validate that at least one entry hint is provided before parsing the full
+  // request. This check must come first since taskText is now optional in the
+  // schema and the internal handler relies on start-node resolution to proceed.
+  const rawArgs = safeParseArgs(args);
+  if (rawArgs !== null) {
+    const a = args as Record<string, unknown>;
+    const hasAnyEntryHint =
+      (Array.isArray(a.entrySymbols) && a.entrySymbols.length > 0) ||
+      Boolean(a.taskText) ||
+      (Array.isArray(a.editedFiles) && a.editedFiles.length > 0) ||
+      Boolean(a.stackTrace) ||
+      Boolean(a.failingTestPath);
+
+    if (!hasAnyEntryHint) {
+      return sliceErrorToResponse({
+        type: "no_symbols",
+        repoId: rawArgs.repoId ?? "unknown",
+      });
+    }
+  }
+
   try {
     return await handleSliceBuildInternal(args);
   } catch (error) {
@@ -851,6 +884,15 @@ async function handleSliceBuildInternal(
     };
 
     db.createSliceHandle(handleRow);
+
+    // For a fresh build, staleSymbols is always empty since we just built
+    // from the current version. Assign explicitly to signal feature is active.
+    const cardSymbolIds = slice.cards.map((c) => c.symbolId);
+    slice.staleSymbols = db.getChangedSymbolsSinceVersion(
+      repoId,
+      cardSymbolIds,
+      handleRow.max_version ?? "",
+    );
 
     return {
       sliceHandle: handle,

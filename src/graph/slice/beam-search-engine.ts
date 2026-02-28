@@ -136,6 +136,13 @@ export function beamSearch(
   let highConfidenceCards = 0;
   const recentAcceptedScores: number[] = [];
 
+  // Collect forced symbolIds: editedFile nodes bypass score threshold pruning
+  const forcedSymbolIds = new Set<SymbolId>(
+    startNodes
+      .filter((n) => n.source === "editedFile")
+      .map((n) => n.symbolId),
+  );
+
   for (const { symbolId, source } of startNodes) {
     if (!visited.has(symbolId) && graph.symbols.has(symbolId)) {
       frontier.insert({
@@ -177,7 +184,10 @@ export function beamSearch(
       break;
     }
 
-    if (actualScore < SLICE_SCORE_THRESHOLD) {
+    if (
+      actualScore < SLICE_SCORE_THRESHOLD &&
+      !forcedSymbolIds.has(current.symbolId)
+    ) {
       belowThresholdCount++;
       if (belowThresholdCount >= 5) break;
       continue;
@@ -704,6 +714,13 @@ export async function beamSearchAsync(
   let highConfidenceCards = 0;
   const recentAcceptedScores: number[] = [];
 
+  // Collect forced symbolIds: editedFile nodes bypass score threshold pruning
+  const forcedSymbolIds = new Set<SymbolId>(
+    startNodes
+      .filter((n) => n.source === "editedFile")
+      .map((n) => n.symbolId),
+  );
+
   for (const { symbolId, source } of startNodes) {
     if (!visited.has(symbolId) && graph.symbols.has(symbolId)) {
       frontier.insert({
@@ -745,7 +762,10 @@ export async function beamSearchAsync(
       break;
     }
 
-    if (actualScore < SLICE_SCORE_THRESHOLD) {
+    if (
+      actualScore < SLICE_SCORE_THRESHOLD &&
+      !forcedSymbolIds.has(current.symbolId)
+    ) {
       belowThresholdCount++;
       if (belowThresholdCount >= 5) break;
       continue;

@@ -7,6 +7,7 @@ import type {
   CodeWindowRequest,
   CodeWindowResponse,
   GraphSlice,
+  NextBestActionCallable,
 } from "../mcp/types.js";
 import type { PolicyConfig } from "../config/types.js";
 import type { SymbolRow } from "../db/schema.js";
@@ -22,6 +23,17 @@ export interface GateContext {
   slice?: GraphSlice;
   symbol?: SymbolRow;
   policy?: PolicyConfig;
+}
+
+/**
+ * Result returned by generateDenialGuidance. Includes the legacy
+ * suggestedNextRequest (parameter tweaks for needWindow) plus a new
+ * nextBestAction that describes an immediately-executable alternative
+ * tool call the agent should use instead.
+ */
+export interface DenialGuidance {
+  suggestedNextRequest: Partial<CodeWindowRequest>;
+  nextBestAction: NextBestActionCallable;
 }
 
 export function evaluateRequest(
@@ -69,15 +81,17 @@ export function evaluateRequest(
   }
 
   if (policyViolations.length > 0) {
-    const suggestedNextRequest = generateDenialGuidance(
+    const guidance = generateDenialGuidance(
       request,
       "general",
       policy,
+      symbol,
     );
     return {
       approved: false,
       whyDenied: policyViolations,
-      suggestedNextRequest,
+      suggestedNextRequest: guidance.suggestedNextRequest,
+      nextBestAction: guidance.nextBestAction,
     };
   }
 
@@ -130,10 +144,11 @@ export function evaluateRequest(
   }
 
   const whyDenied: string[] = [];
-  const suggestedNextRequest = generateDenialGuidance(
+  const guidance = generateDenialGuidance(
     request,
     "general",
     policy,
+    symbol,
   );
 
   if (
@@ -151,53 +166,80 @@ export function evaluateRequest(
   return {
     approved: false,
     whyDenied,
-    suggestedNextRequest,
+    suggestedNextRequest: guidance.suggestedNextRequest,
+    nextBestAction: guidance.nextBestAction,
   };
 }
 
+/**
+ * Extract identifier suggestions from a symbol's signature JSON.
+ * Returns up to 3 param names, falling back to the symbol name.
+ */
+function extractSignatureIdentifiers(symbol: SymbolRow): string[] {
+  if (symbol.signature_json) {
+    try {
+      const signature = JSON.parse(symbol.signature_json) as {
+        params?: Array<{ name: string; type?: string }>;
+        returns?: string;
+      };
+      if (signature.params && Array.isArray(signature.params) && signature.params.length > 0) {
+        return signature.params.map((p) => p.name).slice(0, 3);
+      }
+    } catch (error) {
+      logger.warn(
+        "Failed to parse signature_json for identifier suggestions",
+        {
+          symbolId: symbol.symbol_id,
+          error: String(error),
+        },
+      );
+    }
+  }
+  return [symbol.name];
+}
+
+/**
+ * Generates denial guidance including parameter suggestions for retrying
+ * needWindow and a nextBestAction describing an alternative tool call.
+ *
+ * The nextBestAction follows these rules:
+ * - expectedLines > maxWindowLines  → getSkeleton (cheaper than full window)
+ * - identifiers not found in window → getHotPath with those identifiers
+ * - identifiersToFind is empty      → getSkeleton with sig-derived identifiers
+ * - token cap exceeded              → getSkeleton (no identifiers required)
+ */
 export function generateDenialGuidance(
   request: CodeWindowRequest,
   reason: string,
   policyOverride?: PolicyConfig,
-): Partial<CodeWindowRequest> {
+  symbolHint?: SymbolRow,
+): DenialGuidance {
   const config = loadConfig();
   const policy = policyOverride ?? config.policy;
 
   const suggestions: Partial<CodeWindowRequest> = {};
 
-  if (request.expectedLines > policy.maxWindowLines) {
+  // Determine which denial scenario we are in so we can build nextBestAction
+  const tooBroad = request.expectedLines > policy.maxWindowLines;
+  const tokenCapExceeded =
+    !!(request.maxTokens && request.maxTokens > policy.maxWindowTokens);
+  const noIdentifiers = request.identifiersToFind.length === 0;
+
+  if (tooBroad) {
     suggestions.expectedLines = policy.maxWindowLines;
   }
 
-  if (request.maxTokens && request.maxTokens > policy.maxWindowTokens) {
+  if (tokenCapExceeded) {
     suggestions.maxTokens = policy.maxWindowTokens;
   }
 
-  if (request.identifiersToFind.length === 0) {
-    const symbol = db.getSymbol(request.symbolId);
-    if (symbol && symbol.signature_json) {
-      try {
-        const signature = JSON.parse(symbol.signature_json) as {
-          params?: Array<{ name: string; type?: string }>;
-          returns?: string;
-        };
-        if (signature.params && Array.isArray(signature.params)) {
-          suggestions.identifiersToFind = signature.params
-            .map((p) => p.name)
-            .slice(0, 3);
-        }
-      } catch (error) {
-        logger.warn(
-          "Failed to parse signature_json for identifier suggestions",
-          {
-            symbolId: request.symbolId,
-            error: String(error),
-          },
-        );
-        suggestions.identifiersToFind = [symbol.name];
-      }
-    } else if (symbol) {
-      suggestions.identifiersToFind = [symbol.name];
+  // Resolve the symbol once for identifier extraction
+  const symbol = symbolHint ?? db.getSymbol(request.symbolId);
+
+  if (noIdentifiers) {
+    if (symbol) {
+      const ids = extractSignatureIdentifiers(symbol);
+      suggestions.identifiersToFind = ids;
     }
   }
 
@@ -209,5 +251,66 @@ export function generateDenialGuidance(
     suggestions.reason = `${request.reason} (please add context or identifiers)`;
   }
 
-  return suggestions;
+  // Build nextBestAction based on the primary denial reason
+  let nextBestAction: NextBestActionCallable;
+
+  const symbolName = symbol?.name ?? request.symbolId;
+
+  if (tooBroad) {
+    // Window too large — suggest skeleton which shows control flow cheaply
+    const sigIds = symbol ? extractSignatureIdentifiers(symbol) : [];
+    const skeletonArgs: Record<string, unknown> = {
+      repoId: request.repoId,
+      symbolId: request.symbolId,
+    };
+    if (sigIds.length > 0) {
+      skeletonArgs.identifiersToFind = sigIds;
+    }
+    nextBestAction = {
+      tool: "sdl.code.getSkeleton",
+      args: skeletonArgs,
+      rationale: `getSkeleton shows control flow of ${symbolName} without loading the full ${request.expectedLines}-line window`,
+    };
+  } else if (!noIdentifiers) {
+    // Identifiers were provided but presumably not found in window
+    nextBestAction = {
+      tool: "sdl.code.getHotPath",
+      args: {
+        repoId: request.repoId,
+        symbolId: request.symbolId,
+        identifiersToFind: request.identifiersToFind,
+      },
+      rationale: `getHotPath finds the exact lines where ${request.identifiersToFind.slice(0, 3).join(", ")} appear in ${symbolName}`,
+    };
+  } else if (tokenCapExceeded) {
+    // Token cap exceeded — suggest skeleton (no identifiers required)
+    nextBestAction = {
+      tool: "sdl.code.getSkeleton",
+      args: {
+        repoId: request.repoId,
+        symbolId: request.symbolId,
+      },
+      rationale: `getSkeleton fits within token budget by eliding function bodies of ${symbolName}`,
+    };
+  } else {
+    // No identifiers provided — suggest skeleton with sig-derived identifiers
+    const sigIds = symbol ? extractSignatureIdentifiers(symbol) : [];
+    const skeletonArgs: Record<string, unknown> = {
+      repoId: request.repoId,
+      symbolId: request.symbolId,
+    };
+    if (sigIds.length > 0) {
+      skeletonArgs.identifiersToFind = sigIds;
+    }
+    nextBestAction = {
+      tool: "sdl.code.getSkeleton",
+      args: skeletonArgs,
+      rationale: `getSkeleton shows the structure of ${symbolName}; add identifiersToFind to narrow further`,
+    };
+  }
+
+  return {
+    suggestedNextRequest: suggestions,
+    nextBestAction,
+  };
 }

@@ -123,6 +123,9 @@ export async function handleCodeNeedWindow(
   const suggestedNextRequest = !gateResult.approved
     ? gateResult.suggestedNextRequest
     : undefined;
+  const gateNextBestAction = !gateResult.approved
+    ? gateResult.nextBestAction
+    : undefined;
 
   const policyContext: PolicyRequestContext = {
     requestType: "codeWindow",
@@ -165,6 +168,7 @@ export async function handleCodeNeedWindow(
       approved: false,
       whyDenied: policyDecision.deniedReasons ?? ["Policy denied request"],
       suggestedNextRequest,
+      nextBestAction: gateNextBestAction,
     };
   }
 
@@ -310,6 +314,7 @@ export async function handleCodeNeedWindow(
         approved: false,
         whyDenied,
         suggestedNextRequest,
+        nextBestAction: gateNextBestAction,
       };
     }
 
@@ -372,6 +377,7 @@ export async function handleCodeNeedWindow(
       approved: false,
       whyDenied: gateResult.whyDenied,
       suggestedNextRequest: gateResult.suggestedNextRequest,
+      nextBestAction: gateResult.nextBestAction,
     };
   }
 }

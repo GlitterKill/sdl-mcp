@@ -138,6 +138,20 @@ export function resolveStartNodes(
 
   const limits = computeStartNodeLimits(request, explicitEntrySymbols.length);
 
+  // Text-only mode: no explicit entry points of any kind, only taskText provided.
+  // Double the taskText start node limit so the FTS path gets more seeds to
+  // compensate for the absence of high-priority entry symbol signals.
+  const textOnlyMode =
+    (request.entrySymbols?.length ?? 0) === 0 &&
+    !request.stackTrace &&
+    !request.failingTestPath &&
+    (request.editedFiles?.length ?? 0) === 0 &&
+    Boolean(request.taskText);
+
+  const effectiveTaskTextLimit = textOnlyMode
+    ? limits.maxTaskTextStartNodes * 2
+    : limits.maxTaskTextStartNodes;
+
   for (const symbolId of explicitEntrySymbols) {
     if (startNodes.size >= limits.maxTotalStartNodes) break;
     const firstHopSymbols = collectEntryFirstHopSymbols(
@@ -188,12 +202,26 @@ export function resolveStartNodes(
   }
 
   if (request.editedFiles) {
+    const allEditedFileSymbolIds: string[] = [];
     for (const filePath of request.editedFiles) {
       if (startNodes.size >= limits.maxTotalStartNodes) break;
       const fileSymbols = getSymbolsByPath(graph.repoId, filePath);
       for (const symbolId of fileSymbols) {
         if (startNodes.size >= limits.maxTotalStartNodes) break;
         addStartNode(symbolId, "editedFile");
+        allEditedFileSymbolIds.push(symbolId);
+      }
+    }
+
+    // Add immediate callers/importers of edited file symbols as forced entry nodes
+    if (allEditedFileSymbolIds.length > 0) {
+      const callerIds = db.getCallersOfSymbols(
+        graph.repoId,
+        allEditedFileSymbolIds,
+      );
+      for (const callerId of callerIds) {
+        if (startNodes.size >= limits.maxTotalStartNodes) break;
+        addStartNode(callerId, "editedFile");
       }
     }
   }
@@ -203,12 +231,12 @@ export function resolveStartNodes(
     let taskTextSeedCount = 0;
     for (const token of taskTokens) {
       if (
-        taskTextSeedCount >= limits.maxTaskTextStartNodes ||
+        taskTextSeedCount >= effectiveTaskTextLimit ||
         startNodes.size >= limits.maxTotalStartNodes
       ) {
         break;
       }
-      const remaining = limits.maxTaskTextStartNodes - taskTextSeedCount;
+      const remaining = effectiveTaskTextLimit - taskTextSeedCount;
       const perTokenLimit = Math.max(
         1,
         Math.min(
@@ -220,7 +248,7 @@ export function resolveStartNodes(
       const results = db.searchSymbolsLite(graph.repoId, token, perTokenLimit);
       for (const result of results) {
         if (
-          taskTextSeedCount >= limits.maxTaskTextStartNodes ||
+          taskTextSeedCount >= effectiveTaskTextLimit ||
           startNodes.size >= limits.maxTotalStartNodes
         ) {
           break;
