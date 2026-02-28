@@ -108,6 +108,7 @@ export interface MetricsRow {
   fan_out: number;
   churn_30d: number;
   test_refs_json: string | null;
+  canonical_test_json: string | null;
   updated_at: string;
 }
 
@@ -209,5 +210,16 @@ export interface SymbolFeedbackWeightRow {
   positive_count: number;
   negative_count: number;
   weight_adjustment: number;
+  updated_at: string;
+}
+
+export interface SymbolSummaryCacheRow {
+  symbol_id: string;
+  summary: string;
+  provider: string;
+  model: string;
+  card_hash: string;
+  cost_usd: number;
+  created_at: string;
   updated_at: string;
 }
