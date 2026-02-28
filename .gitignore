@@ -57,9 +57,8 @@ temp/
 .tmp/
 .tmp_*
 
-# Benchmark results (keep configs and task packs)
-.benchmark/
-!.benchmark/
+# Benchmark results (keep baseline snapshots only)
+.benchmark/*
 !.benchmark/baseline.json
 !.benchmark/baseline.zod-oss.json
 !.benchmark/baseline.windows.json
