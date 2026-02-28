@@ -56,8 +56,8 @@
     "benchmark:v067:save": "tsx scripts/benchmark/v067-baseline.ts --out devdocs/benchmarks/v067-baseline.json",
     "package:exe": "node scripts/build-exe.js",
     "prepack": "npm run build:runtime",
-    "build:native": "cd native && npx @napi-rs/cli build --release",
-    "build:native:debug": "cd native && npx @napi-rs/cli build",
+    "build:native": "napi build --release --cargo-cwd native --config native/package.json native",
+    "build:native:debug": "napi build --cargo-cwd native --config native/package.json native",
     "test:native-parity": "node --import tsx tests/native/parity-test.ts",
     "check:config-sync": "tsx scripts/check-config-sync.ts",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck"

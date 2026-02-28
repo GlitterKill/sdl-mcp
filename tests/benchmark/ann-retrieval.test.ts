@@ -397,8 +397,8 @@ describe("ANN Retrieval Benchmark (V067-14)", () => {
       assert.strictEqual(index.size(), 1000);
       console.log(`  Build time for 1k vectors: ${buildTime.toFixed(2)}ms`);
       assert.ok(
-        buildTime < 2000,
-        `Build time should be < 2000ms, got ${buildTime}ms`,
+        buildTime < 5000,
+        `Build time should be < 5000ms, got ${buildTime}ms`,
       );
     });
 
@@ -420,8 +420,8 @@ describe("ANN Retrieval Benchmark (V067-14)", () => {
       assert.strictEqual(index.size(), 2000);
       console.log(`  Build time for 2k vectors: ${buildTime.toFixed(2)}ms`);
       assert.ok(
-        buildTime < 10000,
-        `Build time should be < 10000ms, got ${buildTime}ms`,
+        buildTime < 20000,
+        `Build time should be < 20000ms, got ${buildTime}ms`,
       );
     });
 

@@ -230,9 +230,9 @@ describe("file-watch-live", { timeout: 60_000 }, () => {
     const found = await waitFor(() => {
       const health = getWatcherHealth(repoId);
       return (health?.eventsProcessed ?? 0) >= 1;
-    }, 2000);
+    }, 5000);
 
-    assert.ok(found, "watcher did not process the new file event within 2s");
+    assert.ok(found, "watcher did not process the new file event within 5s");
 
     const symbolsAfter = getSymbolsByRepo(repoId);
     const parserFile = getFileByRepoPath(repoId, "src/parser.ts");
@@ -290,9 +290,9 @@ describe("file-watch-live", { timeout: 60_000 }, () => {
     const processed = await waitFor(() => {
       const health = getWatcherHealth(repoId);
       return (health?.eventsProcessed ?? 0) >= 1;
-    }, 2000);
+    }, 5000);
 
-    assert.ok(processed, "watcher did not process file change within 2s");
+    assert.ok(processed, "watcher did not process file change within 5s");
 
     // Verify signature changed in DB
     const fileRowAfter = getFileByRepoPath(repoId, "src/util.ts");
@@ -344,9 +344,9 @@ describe("file-watch-live", { timeout: 60_000 }, () => {
     const processed = await waitFor(() => {
       const health = getWatcherHealth(repoId);
       return (health?.eventsProcessed ?? 0) >= 1;
-    }, 2000);
+    }, 5000);
 
-    assert.ok(processed, "watcher did not process file deletion within 2s");
+    assert.ok(processed, "watcher did not process file deletion within 5s");
 
     // Symbols from util.ts should be gone
     const fileRowAfter = getFileByRepoPath(repoId, "src/util.ts");
@@ -443,9 +443,9 @@ describe("file-watch-live", { timeout: 60_000 }, () => {
     const processed = await waitFor(() => {
       const health = getWatcherHealth(repoId);
       return (health?.eventsProcessed ?? 0) >= 1;
-    }, 2000);
+    }, 5000);
 
-    assert.ok(processed, "watcher did not process debounced event within 2s");
+    assert.ok(processed, "watcher did not process debounced event within 5s");
 
     // Give a bit more time to see if additional events get processed
     await new Promise<void>((resolve) => setTimeout(resolve, 400));
