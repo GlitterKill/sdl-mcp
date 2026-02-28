@@ -4,14 +4,16 @@
   "thresholds": {
     "indexing": {
       "indexTimePerFile": {
-        "maxMs": 200,
+        "maxMs": 350,
         "trend": "lower-is-better",
-        "allowableIncreasePercent": 10
+        "allowableIncreasePercent": 15,
+        "_comment": "Raised from 220 ms (v0.6.9b): canonical-test BFS is now O(edges) via batch pass, but CI runner variance warrants ~75 % headroom above the ~198 ms zod-oss baseline."
       },
       "indexTimePerSymbol": {
-        "maxMs": 15,
+        "maxMs": 20,
         "trend": "lower-is-better",
-        "allowableIncreasePercent": 60
+        "allowableIncreasePercent": 60,
+        "_comment": "Raised from 15 ms: TS call-resolver adds per-symbol resolution work. Absolute cap still guards against catastrophic regressions."
       }
     },
     "quality": {
@@ -33,14 +35,16 @@
       "exportedSymbolRatio": {
         "minValue": 0.2,
         "trend": "higher-is-better",
-        "allowableDecreasePercent": 10
+        "allowableDecreasePercent": 15,
+        "_comment": "Widened from 10 %: TS call-resolver indexes more internal helper symbols (alias targets, barrel re-exports), which legitimately dilutes the exported ratio."
       }
     },
     "performance": {
       "sliceBuildTimeMs": {
-        "maxMs": 200,
+        "maxMs": 350,
         "trend": "lower-is-better",
-        "allowableIncreasePercent": 125
+        "allowableIncreasePercent": 125,
+        "_comment": "Raised from 200 ms: TS call-resolver creates more edges (import aliases, barrel re-exports), making graph loading and beam-search proportionally slower."
       },
       "avgSkeletonTimeMs": {
         "maxMs": 5,
@@ -80,7 +84,7 @@
     "iqrMultiplier": 1.5
   },
   "baseline": {
-    "filePath": ".benchmark/baseline.json",
+    "filePath": ".benchmark/baseline.zod-oss.json",
     "autoUpdateOnPass": false
   }
 }

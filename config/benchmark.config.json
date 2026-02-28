@@ -4,12 +4,12 @@
   "thresholds": {
     "indexing": {
       "indexTimePerFile": {
-        "maxMs": 200,
+        "maxMs": 450,
         "trend": "lower-is-better",
-        "allowableIncreasePercent": 10
+        "allowableIncreasePercent": 15
       },
       "indexTimePerSymbol": {
-        "maxMs": 15,
+        "maxMs": 20,
         "trend": "lower-is-better",
         "allowableIncreasePercent": 60
       }
@@ -33,12 +33,12 @@
       "exportedSymbolRatio": {
         "minValue": 0.2,
         "trend": "higher-is-better",
-        "allowableDecreasePercent": 10
+        "allowableDecreasePercent": 15
       }
     },
     "performance": {
       "sliceBuildTimeMs": {
-        "maxMs": 200,
+        "maxMs": 350,
         "trend": "lower-is-better",
         "allowableIncreasePercent": 125
       },

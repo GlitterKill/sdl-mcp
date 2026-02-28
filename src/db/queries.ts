@@ -23,7 +23,9 @@ import type {
   TsconfigHashRow,
   SymbolReferenceRow,
   AgentFeedbackRow,
+  SymbolSummaryCacheRow,
 } from "./schema.js";
+import type { CanonicalTest } from "../mcp/types.js";
 import { z } from "zod";
 
 const stmtCache = new Map<string, Statement>();
@@ -422,6 +424,13 @@ export function countSymbolsByRepo(repoId: string): number {
   return result.count;
 }
 
+export function countEdgesByRepo(repoId: string): number {
+  const result = stmt(
+    "SELECT COUNT(*) as count FROM edges WHERE repo_id = ?",
+  ).get(repoId) as { count: number };
+  return result.count;
+}
+
 /**
  * Batch fetch symbols by IDs. Uses chunked queries to avoid SQLite parameter limits.
  * Returns a Map for O(1) lookup by symbol_id.
@@ -719,8 +728,12 @@ export function deleteSymbolsByFileWithEdges(fileId: number): void {
  * @param edge - Edge record with all required fields
  */
 export function createEdge(edge: EdgeRow): void {
+  // INSERT OR IGNORE silently skips duplicates on the unique natural key
+  // (from_symbol_id, to_symbol_id, type) added by migration 0020.  This
+  // prevents edge-count inflation when multiple indexing passes (tree-sitter
+  // pass-1 + TS call-resolver pass-2) would otherwise insert the same edge.
   stmt(
-    "INSERT INTO edges (repo_id, from_symbol_id, to_symbol_id, type, weight, provenance, created_at, confidence, resolution_strategy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT OR IGNORE INTO edges (repo_id, from_symbol_id, to_symbol_id, type, weight, provenance, created_at, confidence, resolution_strategy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     edge.repo_id,
     edge.from_symbol_id,
@@ -1033,16 +1046,18 @@ export function upsertMetrics(metrics: {
   fanOut: number;
   churn30d: number;
   testRefsJson: string;
+  canonicalTestJson?: string | null;
   updatedAt: string;
 }): void {
   stmt(
-    `INSERT INTO metrics (symbol_id, fan_in, fan_out, churn_30d, test_refs_json, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO metrics (symbol_id, fan_in, fan_out, churn_30d, test_refs_json, canonical_test_json, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(symbol_id) DO UPDATE SET
      fan_in = excluded.fan_in,
      fan_out = excluded.fan_out,
      churn_30d = excluded.churn_30d,
      test_refs_json = excluded.test_refs_json,
+     canonical_test_json = excluded.canonical_test_json,
      updated_at = excluded.updated_at`,
   ).run(
     metrics.symbolId,
@@ -1050,6 +1065,7 @@ export function upsertMetrics(metrics: {
     metrics.fanOut,
     metrics.churn30d,
     metrics.testRefsJson,
+    metrics.canonicalTestJson ?? null,
     metrics.updatedAt,
   );
 }
@@ -1058,6 +1074,72 @@ export function getMetrics(symbolId: string): MetricsRow | null {
   return stmt("SELECT * FROM metrics WHERE symbol_id = ?").get(
     symbolId,
   ) as MetricsRow | null;
+}
+
+/**
+ * Returns the parsed CanonicalTest for a symbol, or null if none is stored.
+ */
+export function getCanonicalTest(symbolId: string): CanonicalTest | null {
+  const row = stmt(
+    "SELECT canonical_test_json FROM metrics WHERE symbol_id = ?",
+  ).get(symbolId) as { canonical_test_json: string | null } | null;
+  if (!row || !row.canonical_test_json) {
+    return null;
+  }
+  try {
+    return JSON.parse(row.canonical_test_json) as CanonicalTest;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns the fan-in count for a symbol at a given ledger version.
+ *
+ * Note: Edge history is not versioned separately in the schema. This function
+ * uses the best available approximation: it counts only edges whose source
+ * symbols were also present at the given version (via symbol_versions). This
+ * means that `previous` and `current` values will differ when symbols were
+ * added or removed between versions — giving a version-sensitive fan-in
+ * estimate without requiring a historical edge snapshot table.
+ *
+ * If the symbol did not exist at the given version, falls back to the current
+ * fan_in value from the metrics table.
+ *
+ * @param repoId - Repository identifier
+ * @param symbolId - Symbol identifier
+ * @param versionId - Ledger version ID to query at
+ * @returns Fan-in count at that version (or current fallback)
+ */
+export function getFanInAtVersion(
+  repoId: string,
+  symbolId: string,
+  versionId: string,
+): number {
+  // Check if the symbol had a snapshot at this version
+  const versionRow = stmt(
+    "SELECT symbol_id FROM symbol_versions WHERE version_id = ? AND symbol_id = ?",
+  ).get(versionId, symbolId) as { symbol_id: string } | null;
+
+  if (versionRow) {
+    // Count fan-in scoped to source symbols that existed at this version.
+    // This gives a version-sensitive approximation: if callers were added/removed
+    // between fromVersion and toVersion, the counts will differ.
+    const row = stmt(
+      `SELECT COUNT(*) as cnt FROM edges
+       WHERE to_symbol_id = ? AND repo_id = ?
+       AND from_symbol_id IN (
+         SELECT symbol_id FROM symbol_versions WHERE version_id = ?
+       )`,
+    ).get(symbolId, repoId, versionId) as { cnt: number } | null;
+    return row?.cnt ?? 0;
+  }
+
+  // Fall back to current metrics fan_in
+  const metrics = stmt("SELECT fan_in FROM metrics WHERE symbol_id = ?").get(
+    symbolId,
+  ) as { fan_in: number } | null;
+  return metrics?.fan_in ?? 0;
 }
 
 /**
@@ -2061,4 +2143,153 @@ export function batchUpdateSymbolFeedbackWeights(
     }
   });
   tx();
+}
+
+/**
+ * Returns the symbol IDs of all symbols that directly call or import any of
+ * the provided target symbol IDs.
+ *
+ * Used by editedFiles auto-expansion to add immediate callers/importers of
+ * symbols in edited files as forced entry nodes in the beam search.
+ *
+ * @param repoId - Repository identifier
+ * @param symbolIds - Target symbol IDs to find callers/importers for
+ * @returns Deduplicated array of from_symbol_id values (callers/importers)
+ */
+export function getCallersOfSymbols(
+  repoId: string,
+  symbolIds: string[],
+): string[] {
+  if (symbolIds.length === 0) return [];
+  const results: string[] = [];
+  for (let i = 0; i < symbolIds.length; i += DB_CHUNK_SIZE) {
+    const batch = symbolIds.slice(i, i + DB_CHUNK_SIZE);
+    const ph = batch.map(() => "?").join(",");
+    const rows = getDb()
+      .prepare(
+        `SELECT DISTINCT e.from_symbol_id FROM edges e
+         JOIN symbols s ON e.to_symbol_id = s.symbol_id
+         WHERE s.repo_id = ? AND e.to_symbol_id IN (${ph})
+         AND e.type IN ('call', 'import')`,
+      )
+      .all(repoId, ...batch) as { from_symbol_id: string }[];
+    results.push(...rows.map((r) => r.from_symbol_id));
+  }
+  // Deduplicate across batches
+  return [...new Set(results)];
+}
+
+/**
+ * Returns symbolIds from the given list whose updated_at timestamp is newer
+ * than the created_at of the specified sinceVersion.
+ *
+ * Used to detect stale symbols in a slice: symbols that have been re-indexed
+ * after the slice handle was issued.
+ *
+ * @param repoId - Repository identifier
+ * @param symbolIds - Symbol identifiers to check for staleness
+ * @param sinceVersion - Version ID (e.g. "v1771518600381") to compare against
+ * @returns Array of symbolIds that have been updated after sinceVersion was created
+ */
+export function getChangedSymbolsSinceVersion(
+  repoId: string,
+  symbolIds: string[],
+  sinceVersion: string,
+): string[] {
+  if (symbolIds.length === 0) return [];
+  if (!sinceVersion) return [];
+
+  const versionRow = getVersion(sinceVersion);
+  if (!versionRow) return [];
+
+  const versionCreatedAt = versionRow.created_at;
+  const results: string[] = [];
+
+  for (let i = 0; i < symbolIds.length; i += DB_CHUNK_SIZE) {
+    const batch = symbolIds.slice(i, i + DB_CHUNK_SIZE);
+    const placeholders = batch.map(() => "?").join(",");
+    const rows = getDb()
+      .prepare(
+        `SELECT symbol_id FROM symbols WHERE repo_id = ? AND symbol_id IN (${placeholders}) AND updated_at > ?`,
+      )
+      .all(repoId, ...batch, versionCreatedAt) as { symbol_id: string }[];
+    results.push(...rows.map((r) => r.symbol_id));
+  }
+
+  return results;
+}
+
+// ============================================================================
+// Symbol Summary Cache Operations
+// ============================================================================
+
+/**
+ * Retrieves a cached summary for a symbol.
+ *
+ * @param symbolId - Symbol identifier
+ * @returns Cache row or null if not found
+ */
+export function getSummaryCache(
+  symbolId: string,
+): SymbolSummaryCacheRow | null {
+  return (
+    (stmt(
+      "SELECT * FROM symbol_summary_cache WHERE symbol_id = ?",
+    ).get(symbolId) as SymbolSummaryCacheRow | undefined) ?? null
+  );
+}
+
+/**
+ * Inserts or updates a summary cache entry for a symbol.
+ * On conflict, updates summary, provider, model, card_hash, cost_usd, and updated_at.
+ *
+ * @param row - Complete cache row
+ */
+export function upsertSummaryCache(row: SymbolSummaryCacheRow): void {
+  stmt(
+    `INSERT INTO symbol_summary_cache (
+       symbol_id, summary, provider, model, card_hash, cost_usd, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(symbol_id) DO UPDATE SET
+       summary = excluded.summary,
+       provider = excluded.provider,
+       model = excluded.model,
+       card_hash = excluded.card_hash,
+       cost_usd = excluded.cost_usd,
+       updated_at = excluded.updated_at`,
+  ).run(
+    row.symbol_id,
+    row.summary,
+    row.provider,
+    row.model,
+    row.card_hash,
+    row.cost_usd,
+    row.created_at,
+    row.updated_at,
+  );
+}
+
+/**
+ * Deletes all summary cache entries belonging to a repository.
+ * Joins with the symbols table to find symbol_ids for the given repo_id.
+ *
+ * @param repoId - Repository identifier
+ */
+export function deleteSummaryCacheByRepo(repoId: string): void {
+  stmt(
+    `DELETE FROM symbol_summary_cache
+     WHERE symbol_id IN (SELECT symbol_id FROM symbols WHERE repo_id = ?)`,
+  ).run(repoId);
+}
+
+/**
+ * Updates the summary field on an existing symbol row.
+ *
+ * @param symbolId - Symbol identifier
+ * @param summary - New summary text
+ */
+export function updateSymbolSummary(symbolId: string, summary: string): void {
+  stmt(
+    `UPDATE symbols SET summary = ?, updated_at = ? WHERE symbol_id = ?`,
+  ).run(summary, new Date().toISOString(), symbolId);
 }
