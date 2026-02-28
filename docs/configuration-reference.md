@@ -52,7 +52,7 @@ Main config file:
     "concurrency": 8,
     "enableFileWatching": true,
     "maxWatchedFiles": 25000,
-    "engine": "typescript",
+    "engine": "rust",
     "watchDebounceMs": 300
   },
   "slice": {
