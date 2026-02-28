@@ -21,5 +21,9 @@ describe("MCP tool registration", () => {
       names.includes("sdl.context.summary"),
       "expected sdl.context.summary to be registered",
     );
+    assert.ok(
+      names.includes("sdl.symbol.getCards"),
+      "expected sdl.symbol.getCards to be registered",
+    );
   });
 });

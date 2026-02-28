@@ -289,6 +289,10 @@ export async function handleRepoStatus(
       healthComponents: health.components,
       healthAvailable: health.available,
       watcherHealth,
+      watcherNote:
+        watcherHealth === null
+          ? "Watcher not active. Run 'sdl-mcp serve' or call sdl.index.refresh after edits."
+          : undefined,
       prefetchStats,
     };
   };

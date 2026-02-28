@@ -8,7 +8,7 @@ import {
   IndexWatchHandle,
   IndexResult,
 } from "../../indexer/indexer.js";
-import { getRepo, createRepo } from "../../db/queries.js";
+import { getRepo, createRepo, countSymbolsByRepo, countEdgesByRepo } from "../../db/queries.js";
 import { getCurrentTimestamp } from "../../util/time.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 
@@ -62,10 +62,18 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
           lastProgressLine = line;
         }
       });
+      const totalSymbols = countSymbolsByRepo(repo.repoId);
+      const totalEdges = countEdgesByRepo(repo.repoId);
       console.log(`  Files: ${stats.filesProcessed}`);
-      console.log(`  Symbols: ${stats.symbolsIndexed}`);
-      console.log(`  Edges: ${stats.edgesCreated}`);
+      console.log(`  Symbols: ${stats.symbolsIndexed} new (${totalSymbols} total)`);
+      console.log(`  Edges: ${stats.edgesCreated} new (${totalEdges} total)`);
       console.log(`  Duration: ${stats.durationMs}ms`);
+      if (stats.summaryStats) {
+        const s = stats.summaryStats;
+        console.log(
+          `  Summaries: ${s.generated} new ($${s.totalCostUsd.toFixed(4)}), ${s.skipped} cached, ${s.failed} failed`,
+        );
+      }
     } catch (error) {
       console.error(
         `  Error: ${error instanceof Error ? error.message : String(error)}`,

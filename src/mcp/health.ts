@@ -25,6 +25,12 @@ export interface HealthScoreInput {
   totalFiles: number;
   resolvedCallEdges: number;
   totalCallEdges: number;
+  /**
+   * Number of call edges with `resolution_strategy = 'exact'` or
+   * `confidence >= 0.9`. Used to compute `callResolution`. When omitted,
+   * falls back to `resolvedCallEdges` for backward compatibility.
+   */
+  exactCallEdges?: number;
   minutesSinceLastIndex: number | null;
   minIndexedFiles?: number;
   minIndexedSymbols?: number;
@@ -53,6 +59,7 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
         coverage: 0,
         errorRate: 0,
         edgeQuality: 0,
+        callResolution: 0,
       },
     };
   }
@@ -76,6 +83,15 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
       : input.resolvedCallEdges / input.totalCallEdges,
   );
 
+  // callResolution: ratio of call edges resolved to 'exact' strategy or with
+  // confidence >= 0.9 (high-confidence threshold). Falls back to edgeQuality
+  // when resolution_strategy-level counts are unavailable (legacy code paths).
+  const callResolution = clamp01(
+    input.totalCallEdges <= 0
+      ? 0
+      : (input.exactCallEdges ?? input.resolvedCallEdges) / input.totalCallEdges,
+  );
+
   const weighted =
     WEIGHTS.freshness * freshness +
     WEIGHTS.coverage * coverage +
@@ -90,6 +106,7 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
       coverage,
       errorRate,
       edgeQuality,
+      callResolution,
     },
   };
 }
@@ -136,6 +153,13 @@ export async function getRepoHealthSnapshot(
     (edge) => !edge.to_symbol_id.startsWith("unresolved:"),
   );
 
+  // High-confidence call edges: resolution_strategy = 'exact' OR confidence >= 0.9.
+  const exactCallEdges = callEdges.filter(
+    (edge) =>
+      edge.resolution_strategy === "exact" ||
+      (edge.confidence !== undefined && edge.confidence !== null && edge.confidence >= 0.9),
+  );
+
   const score = computeHealthScore({
     indexedFiles: files.length,
     totalEligibleFiles: eligibleFiles.length,
@@ -143,6 +167,7 @@ export async function getRepoHealthSnapshot(
     totalFiles: Math.max(eligibleFiles.length, files.length),
     resolvedCallEdges: resolvedCallEdges.length,
     totalCallEdges: callEdges.length,
+    exactCallEdges: exactCallEdges.length,
     minutesSinceLastIndex,
     indexedSymbols,
   });

@@ -46,6 +46,14 @@ const SymbolMetricsSchema = z.object({
   fanOut: z.number().int().min(0).optional(),
   churn30d: z.number().int().min(0).optional(),
   testRefs: z.array(z.string()).optional(),
+  canonicalTest: z
+    .object({
+      file: z.string(),
+      symbolId: z.string().optional(),
+      distance: z.number(),
+      proximity: z.number(),
+    })
+    .optional(),
 });
 
 const SymbolCardVersionSchema = z.object({
@@ -267,6 +275,7 @@ const CompactGraphSliceSchema = z.object({
   e: z.array(CompressedEdgeSchema),
   f: z.array(CompactFrontierItemSchema).optional(),
   t: CompactSliceTruncationSchema.optional(),
+  staleSymbols: z.array(z.string()).optional(),
 });
 
 // ============================================================================
@@ -337,6 +346,7 @@ const CompactGraphSliceV2Schema = z.object({
   e: z.array(CompactEdgeV2Schema),
   f: z.array(CompactFrontierItemV2Schema).optional(),
   t: CompactSliceTruncationSchema.optional(),
+  staleSymbols: z.array(z.string()).optional(),
 });
 
 // ============================================================================
@@ -364,6 +374,7 @@ const CompactGraphSliceV3Schema = z.object({
   e: z.array(CompactGroupedEdgeV3Schema),
   f: z.array(CompactFrontierItemV2Schema).optional(),
   t: CompactSliceTruncationSchema.optional(),
+  staleSymbols: z.array(z.string()).optional(),
 });
 
 export {
@@ -395,12 +406,20 @@ const DeltaSymbolChangeSchema = z.object({
     .optional(),
 });
 
+const FanInTrendSchema = z.object({
+  previous: z.number().int().min(0),
+  current: z.number().int().min(0),
+  growthRate: z.number(),
+  isAmplifier: z.boolean(),
+});
+
 const BlastRadiusItemSchema = z.object({
   symbolId: z.string(),
   reason: z.string().optional(),
   distance: z.number(),
   rank: z.number(),
   signal: z.enum(["diagnostic", "directDependent", "graph"]),
+  fanInTrend: FanInTrendSchema.optional(),
 });
 
 const DiagnosticsSummarySchema = z.object({
@@ -516,8 +535,16 @@ export const RepoStatusResponseSchema = z.object({
     coverage: z.number().min(0).max(1),
     errorRate: z.number().min(0).max(1),
     edgeQuality: z.number().min(0).max(1),
+    callResolution: z.number().min(0).max(1).optional(),
   }),
   healthAvailable: z.boolean(),
+  /**
+   * Watcher health states:
+   * - null: server never started watchers for this repo
+   * - { enabled: false }: explicitly disabled in config
+   * - { enabled: true, running: true }: active and healthy
+   * - { enabled: true, running: false, stale: true }: started but unhealthy
+   */
   watcherHealth: z
     .object({
       enabled: z.boolean(),
@@ -533,6 +560,7 @@ export const RepoStatusResponseSchema = z.object({
       lastSuccessfulReindexAt: z.string().nullable(),
     })
     .nullable(),
+  watcherNote: z.string().optional(),
   prefetchStats: z.object({
     enabled: z.boolean(),
     queueDepth: z.number().int().min(0),
@@ -614,6 +642,16 @@ export const SymbolGetCardRequestSchema = z.object({
   ifNoneMatch: z.string().optional(),
 });
 
+export const SymbolGetCardsRequestSchema = z.object({
+  repoId: z.string().describe("Repository ID"),
+  symbolIds: z.array(z.string()).min(1).max(100).describe(
+    "Array of symbol IDs to fetch (max 100)",
+  ),
+  knownEtags: z.record(z.string(), z.string()).optional().describe(
+    "Map of symbolId → known ETag. Matching symbols return notModified instead of full card.",
+  ),
+});
+
 const CardWithETagSchema = SymbolCardSchema.extend({
   etag: z.string(),
 });
@@ -639,7 +677,11 @@ export const SymbolGetCardResponseSchema = z.union([
 
 export const SliceBuildRequestSchema = z.object({
   repoId: z.string(),
-  taskText: z.string().min(1),
+  taskText: z.string().min(1).optional().describe(
+    "Natural language task description. Can be used alone (without entrySymbols) " +
+    "to auto-discover relevant symbols via full-text search and build the slice " +
+    "in a single round trip.",
+  ),
   stackTrace: z.string().optional(),
   failingTestPath: z.string().optional(),
   editedFiles: z.array(z.string()).optional(),
@@ -732,8 +774,16 @@ export const DeltaGetRequestSchema = z.object({
   budget: SliceBudgetSchema.optional(),
 });
 
+const AmplifierSummaryItemSchema = z.object({
+  symbolId: z.string(),
+  growthRate: z.number(),
+  previous: z.number().int().min(0),
+  current: z.number().int().min(0),
+});
+
 export const DeltaGetResponseSchema = z.object({
   delta: DeltaPackSchema,
+  amplifiers: z.array(AmplifierSummaryItemSchema),
 });
 
 export const SliceSpilloverGetRequestSchema = z.object({
@@ -799,6 +849,13 @@ const CodeWindowResponseDeniedSchema = z.object({
   approved: z.literal(false),
   whyDenied: z.array(z.string()),
   suggestedNextRequest: CodeWindowRequestSchema.partial().optional(),
+  nextBestAction: z
+    .object({
+      tool: z.string(),
+      args: z.record(z.unknown()),
+      rationale: z.string(),
+    })
+    .optional(),
 });
 
 export const CodeNeedWindowResponseSchema = z.discriminatedUnion("approved", [
@@ -1074,6 +1131,10 @@ export type SymbolSearchRequest = z.infer<typeof SymbolSearchRequestSchema>;
 export type SymbolSearchResponse = z.infer<typeof SymbolSearchResponseSchema>;
 export type SymbolGetCardRequest = z.infer<typeof SymbolGetCardRequestSchema>;
 export type SymbolGetCardResponse = z.infer<typeof SymbolGetCardResponseSchema>;
+export type SymbolGetCardsRequest = z.infer<typeof SymbolGetCardsRequestSchema>;
+export type SymbolGetCardsResponse = {
+  cards: Array<import("./types.js").CardWithETag | import("./types.js").NotModifiedResponse>;
+};
 export type SliceBuildRequest = z.infer<typeof SliceBuildRequestSchema>;
 export type SliceBuildResponse = z.infer<typeof SliceBuildResponseSchema>;
 export type SliceBuildWireFormat = z.infer<typeof SliceBuildWireFormatSchema>;

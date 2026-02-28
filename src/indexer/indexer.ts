@@ -64,6 +64,10 @@ import type { ExtractedCall } from "./treesitter/extractCalls.js";
 import type { ExtractedImport } from "./treesitter/extractImports.js";
 import { calibrateResolutionConfidence } from "./edge-confidence.js";
 import { refreshSymbolEmbeddings } from "./embeddings.js";
+import {
+  generateSummariesForRepo,
+  type SummaryBatchResult,
+} from "./summary-generator.js";
 import { prefetchFileExports } from "../graph/prefetch.js";
 import {
   parseFilesRust,
@@ -94,6 +98,7 @@ export interface IndexResult {
   symbolsIndexed: number;
   edgesCreated: number;
   durationMs: number;
+  summaryStats?: SummaryBatchResult;
 }
 
 export interface IndexWatchHandle {
@@ -2618,6 +2623,18 @@ export async function indexRepo(
     }
   }
 
+  let summaryStats: SummaryBatchResult | undefined;
+  if (appConfig.semantic?.enabled && appConfig.semantic?.generateSummaries) {
+    try {
+      summaryStats = await generateSummariesForRepo(repoId, appConfig);
+      logger.info(
+        `Summaries: ${summaryStats.generated} generated, ${summaryStats.skipped} cached, ${summaryStats.failed} failed ($${summaryStats.totalCostUsd.toFixed(4)})`,
+      );
+    } catch (error) {
+      logger.warn(`Summary generation skipped: ${String(error)}`);
+    }
+  }
+
   return {
     versionId,
     filesProcessed,
@@ -2626,6 +2643,7 @@ export async function indexRepo(
     symbolsIndexed: totalSymbolsIndexed,
     edgesCreated: totalEdgesCreated + configEdgesCreated,
     durationMs,
+    summaryStats,
   };
   };
 
@@ -2700,6 +2718,40 @@ export function getAllWatcherHealth(): Record<string, WatcherHealth> {
   return out;
 }
 
+/**
+ * For testing only: seed a watcher health entry without starting a real watcher.
+ * @internal
+ */
+export function _setWatcherHealthForTesting(
+  repoId: string,
+  health: Partial<WatcherHealth> & { errors?: number },
+): void {
+  const existing = watcherHealthByRepo.get(repoId);
+  const base: MutableWatcherHealth = existing ?? {
+    enabled: true,
+    running: true,
+    filesWatched: 0,
+    eventsReceived: 0,
+    eventsProcessed: 0,
+    errors: 0,
+    queueDepth: 0,
+    restartCount: 0,
+    stale: false,
+    lastEventAt: null,
+    lastSuccessfulReindexAt: null,
+    pendingChanges: 0,
+  };
+  watcherHealthByRepo.set(repoId, { ...base, ...health, pendingChanges: 0 });
+}
+
+/**
+ * For testing only: remove a watcher health entry.
+ * @internal
+ */
+export function _clearWatcherHealthForTesting(repoId: string): void {
+  watcherHealthByRepo.delete(repoId);
+}
+
 export function watchRepository(repoId: string): IndexWatchHandle {
   const repoRow = getRepo(repoId);
   if (!repoRow) {
@@ -2757,6 +2809,12 @@ export function watchRepository(repoId: string): IndexWatchHandle {
     if (watcherErrors.length > WATCHER_ERROR_MAX_COUNT) {
       watcherErrors.shift();
     }
+    if (health.errors >= WATCHER_ERROR_MAX_COUNT && !health.stale) {
+      health.stale = true;
+      process.stderr.write(
+        `[sdl-mcp] Watcher error budget exceeded for ${repoId}. Run: sdl-mcp index --force\n`,
+      );
+    }
   };
 
   const markEventReceived = (): void => {
@@ -2793,6 +2851,9 @@ export function watchRepository(repoId: string): IndexWatchHandle {
     }
   };
 
+  const debounceMs =
+    appConfig.indexing?.watchDebounceMs ?? WATCH_DEBOUNCE_MS;
+
   const schedule = (filePath: string): void => {
     const existing = pending.get(filePath);
     if (existing) {
@@ -2806,20 +2867,21 @@ export function watchRepository(repoId: string): IndexWatchHandle {
         pending.delete(filePath);
         updateQueueDepth();
         void reindexWithRetry(filePath);
-      }, WATCH_DEBOUNCE_MS),
+      }, debounceMs),
     );
     updateQueueDepth();
   };
 
   const handler = (relativeFilePath: string): void => {
-    if (shouldIgnorePath(relativeFilePath, ignorePatterns)) {
+    const normalizedFilePath = normalizePath(relativeFilePath);
+    if (shouldIgnorePath(normalizedFilePath, ignorePatterns)) {
       return;
     }
-    if (!matchesExtensions(relativeFilePath, extensions)) {
+    if (!matchesExtensions(normalizedFilePath, extensions)) {
       return;
     }
     markEventReceived();
-    schedule(relativeFilePath);
+    schedule(normalizedFilePath);
   };
 
   const startWatcher = (): RuntimeWatcher => {

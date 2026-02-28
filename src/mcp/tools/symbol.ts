@@ -3,6 +3,8 @@ import {
   SymbolSearchResponse,
   SymbolGetCardRequestSchema,
   SymbolGetCardResponse,
+  SymbolGetCardsRequestSchema,
+  SymbolGetCardsResponse,
 } from "../tools.js";
 import {
   SYMBOL_CARD_MAX_DEPS_PER_KIND,
@@ -407,30 +409,22 @@ export async function handleSymbolSearch(
 }
 
 /**
- * Handles requests for symbol cards with ETag support.
- * Returns comprehensive symbol metadata including dependencies, metrics, and version info.
- * Supports conditional requests with ifNoneMatch for cache validation.
+ * Core card-building logic shared by handleSymbolGetCard and handleSymbolGetCards.
+ * Given a repoId, symbolId, and optional ifNoneMatch ETag, fetches and builds the
+ * full symbol card, returning either a CardWithETag or a NotModifiedResponse.
  *
- * @param args - Raw arguments containing repoId, symbolId, and optional ifNoneMatch
- * @returns Symbol card with metadata or notModified response if ETag matches
+ * @param repoId - The repository ID
+ * @param symbolId - The symbol ID to fetch
+ * @param ifNoneMatch - Optional ETag for conditional requests
+ * @returns Symbol card with ETag or notModified response if ETag matches
  * @throws {DatabaseError} If symbol or file not found
  * @throws {PolicyError} If policy denies the request
  */
-export async function handleSymbolGetCard(
-  args: unknown,
-): Promise<SymbolGetCardResponse | NotModifiedResponse> {
-  const request = SymbolGetCardRequestSchema.parse(args);
-  const { repoId, symbolId, ifNoneMatch } = request;
-
-  recordToolTrace({
-    repoId,
-    taskType: "card",
-    tool: "symbol.getCard",
-    symbolId,
-  });
-
-  consumePrefetchedKey(repoId, `card:${symbolId}`);
-
+async function buildCardForSymbol(
+  repoId: string,
+  symbolId: string,
+  ifNoneMatch: string | undefined,
+): Promise<CardWithETag | NotModifiedResponse> {
   const config = loadConfig();
   const cacheConfig = config.cache;
   const cacheEnabled = cacheConfig?.enabled ?? true;
@@ -462,7 +456,7 @@ export async function handleSymbolGetCard(
         ...normalizedCachedCard,
         etag: cachedETag,
       };
-      return { card: cardWithETag };
+      return cardWithETag;
     }
   }
 
@@ -481,8 +475,8 @@ export async function handleSymbolGetCard(
 
   const policyContext: PolicyRequestContext = {
     requestType: "symbolCard",
-    repoId: request.repoId,
-    symbolId: request.symbolId,
+    repoId,
+    symbolId,
     symbolData: symbol,
   };
 
@@ -585,6 +579,7 @@ export async function handleSymbolGetCard(
     ),
   };
 
+  const canonicalTest = db.getCanonicalTest(symbolId);
   const cardMetrics: SymbolMetrics | undefined = metrics
     ? {
         fanIn: metrics.fan_in,
@@ -596,6 +591,7 @@ export async function handleSymbolGetCard(
               SYMBOL_CARD_MAX_TEST_REFS,
             )
           : undefined,
+        canonicalTest: canonicalTest ?? undefined,
       }
     : undefined;
 
@@ -660,5 +656,59 @@ export async function handleSymbolGetCard(
     );
   }
 
-  return { card: cardWithETag };
+  return cardWithETag;
+}
+
+/**
+ * Handles requests for symbol cards with ETag support.
+ * Returns comprehensive symbol metadata including dependencies, metrics, and version info.
+ * Supports conditional requests with ifNoneMatch for cache validation.
+ *
+ * @param args - Raw arguments containing repoId, symbolId, and optional ifNoneMatch
+ * @returns Symbol card with metadata or notModified response if ETag matches
+ * @throws {DatabaseError} If symbol or file not found
+ * @throws {PolicyError} If policy denies the request
+ */
+export async function handleSymbolGetCard(
+  args: unknown,
+): Promise<SymbolGetCardResponse | NotModifiedResponse> {
+  const request = SymbolGetCardRequestSchema.parse(args);
+  const { repoId, symbolId, ifNoneMatch } = request;
+
+  recordToolTrace({
+    repoId,
+    taskType: "card",
+    tool: "symbol.getCard",
+    symbolId,
+  });
+
+  consumePrefetchedKey(repoId, `card:${symbolId}`);
+
+  const result = await buildCardForSymbol(repoId, symbolId, ifNoneMatch);
+
+  if ("notModified" in result) {
+    return result;
+  }
+
+  return { card: result };
+}
+
+/**
+ * Handles batch requests for symbol cards with ETag support.
+ * Fetches N symbol cards in a single round trip, using knownEtags to skip unchanged cards.
+ *
+ * @param args - Raw arguments containing repoId, symbolIds array, and optional knownEtags map
+ * @returns Array of symbol cards (full CardWithETag or notModified) preserving input order
+ * @throws {DatabaseError} If a symbol or file is not found
+ * @throws {PolicyError} If policy denies any card request
+ */
+export async function handleSymbolGetCards(
+  args: unknown,
+): Promise<SymbolGetCardsResponse> {
+  const { repoId, symbolIds, knownEtags } =
+    SymbolGetCardsRequestSchema.parse(args);
+  const cards = await Promise.all(
+    symbolIds.map((id) => buildCardForSymbol(repoId, id, knownEtags?.[id])),
+  );
+  return { cards };
 }

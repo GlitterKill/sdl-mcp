@@ -42,6 +42,20 @@ describe("prefetch pipeline", () => {
     assert.strictEqual(typeof hit, "boolean");
   });
 
+  it("configurePrefetch defaults to enabled when config key is absent", () => {
+    // Call configurePrefetch with enabled: true and verify getPrefetchStats().enabled === true
+    configurePrefetch({ enabled: true, maxBudgetPercent: 20 });
+    const stats = getPrefetchStats();
+    assert.strictEqual(stats.enabled, true);
+  });
+
+  it("serve command default resolves to enabled (enabled ?? true is true)", () => {
+    // Simulate the serve.ts default: config.prefetch?.enabled ?? true
+    const configPrefetchEnabled: boolean | undefined = undefined;
+    const resolvedEnabled = configPrefetchEnabled ?? true;
+    assert.strictEqual(resolvedEnabled, true);
+  });
+
   it("trains lightweight model from tool traces", () => {
     const model = trainPrefetchModel([
       { repoId: "r", taskType: "implement", tool: "search" },

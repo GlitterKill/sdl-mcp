@@ -14,8 +14,13 @@ import {
 import {
   SymbolSearchRequestSchema,
   SymbolGetCardRequestSchema,
+  SymbolGetCardsRequestSchema,
 } from "../tools.js";
-import { handleSymbolSearch, handleSymbolGetCard } from "./symbol.js";
+import {
+  handleSymbolSearch,
+  handleSymbolGetCard,
+  handleSymbolGetCards,
+} from "./symbol.js";
 import {
   SliceBuildRequestSchema,
   SliceRefreshRequestSchema,
@@ -94,8 +99,20 @@ export function registerTools(server: MCPServer): void {
   );
 
   server.registerTool(
+    "sdl.symbol.getCards",
+    "Batch fetch symbol cards for multiple symbolIds in a single round trip. " +
+      "Pass knownEtags (map of symbolId → ETag) to skip unchanged cards — " +
+      "they return notModified instead of the full card payload.",
+    SymbolGetCardsRequestSchema,
+    handleSymbolGetCards,
+  );
+
+  server.registerTool(
     "sdl.slice.build",
-    "Build a graph slice for a task context",
+    "Build a graph slice for a task context. Accepts taskText alone (no entrySymbols required) " +
+      "to auto-discover relevant symbols via full-text search in a single round trip. " +
+      "Providing entrySymbols in addition to taskText improves precision. " +
+      "When editedFiles is provided, all symbols in those files plus their immediate callers are included as forced entries regardless of score threshold.",
     SliceBuildRequestSchema,
     handleSliceBuild,
   );
