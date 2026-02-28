@@ -1,0 +1,12 @@
+{
+  "name": "sdl-mcp-native",
+  "version": "0.1.0",
+  "description": "Native Rust indexer for SDL-MCP with tree-sitter parsing and Rayon parallelism",
+  "license": "SEE LICENSE IN LICENSE",
+  "napi": {
+    "name": "sdl-mcp-native",
+    "triples": {
+      "defaults": true
+    }
+  }
+}
