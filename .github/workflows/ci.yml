@@ -164,15 +164,53 @@ jobs:
       - name: Verify runtime entrypoints
         shell: bash
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            echo "Checking Windows entrypoints..."
-            node dist/main.js --help || echo "main.js runs"
-            node dist/cli/index.js --help || echo "cli/index.js runs"
-          else
-            echo "Checking Unix entrypoints..."
-            node dist/main.js --help || echo "main.js runs"
-            node dist/cli/index.js --help || echo "cli/index.js runs"
+          echo "Verifying CLI help exits cleanly..."
+          node dist/cli/index.js --help
+          echo "Verifying version command works..."
+          node dist/cli/index.js version
+
+      - name: Smoke test serve --stdio stays alive (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "Testing that serve --stdio does not exit prematurely on Linux..."
+
+          # Pipe stdin from a long-running process so the server has a live
+          # stdin handle (mirrors a real MCP client connection).
+          node dist/cli/index.js serve --stdio \
+            2>/tmp/sdl-mcp-serve-stderr.log \
+            < <(sleep 15) &
+          SERVER_PID=$!
+
+          # Give the server 2 seconds to fully start up
+          sleep 2
+
+          # Must still be running — silent exit is the reported bug
+          if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+            echo "[FAIL] serve --stdio exited prematurely on Linux"
+            echo "--- stderr output ---"
+            cat /tmp/sdl-mcp-serve-stderr.log || true
+            exit 1
           fi
+
+          echo "[PASS] serve --stdio is still running after 2 s"
+
+          # Verify the startup message reached stderr
+          if grep -q "Starting MCP server on stdio transport" /tmp/sdl-mcp-serve-stderr.log; then
+            echo "[PASS] Startup message confirmed in stderr"
+          else
+            echo "[FAIL] Expected startup message not found in stderr"
+            echo "--- stderr output ---"
+            cat /tmp/sdl-mcp-serve-stderr.log || true
+            kill "${SERVER_PID}" 2>/dev/null || true
+            exit 1
+          fi
+
+          # Graceful teardown
+          kill "${SERVER_PID}" 2>/dev/null || true
+          wait "${SERVER_PID}" 2>/dev/null || true
+          rm -f /tmp/sdl-mcp-serve-stderr.log
+          echo "Smoke test passed"
 
       - name: Display test summary
         if: always()

@@ -82,6 +82,15 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   process.once("SIGINT", () => handleShutdown("SIGINT"));
   process.once("SIGTERM", () => handleShutdown("SIGTERM"));
 
+  if (options.transport === "stdio") {
+    // Mirror main.ts: keep stdin active and exit gracefully when the MCP
+    // client disconnects. Without these handlers, Node.js silently exits on
+    // non-TTY environments (CI, Nix shells, piped invocations) because the
+    // MCP SDK's readline closes and leaves no active I/O handles.
+    process.stdin.once("end", () => void shutdown("stdin-end"));
+    process.stdin.once("close", () => void shutdown("stdin-close"));
+  }
+
   try {
     if (options.transport === "stdio") {
       console.error("Starting MCP server on stdio transport...");
