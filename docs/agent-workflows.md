@@ -44,7 +44,7 @@ Use this order unless task constraints force escalation:
 
 1. `sdl.repo.overview` (start with `level: "stats"`; use `directories`/`full` only when needed).
 2. `sdl.symbol.search` with a tight `limit` (`5-20` to start; default is `50`, max is `1000`).
-3. `sdl.symbol.getCard`; send `ifNoneMatch` when re-checking known symbols to get `notModified` responses.
+3. `sdl.symbol.getCard` for single lookups; send `ifNoneMatch` to get `notModified` responses. Use `sdl.symbol.getCards` (batch, up to 100 IDs) when fetching multiple symbols at once — one round trip instead of many.
 4. `sdl.slice.build` with explicit budget and compact output:
    - Keep `wireFormat: "compact"` (default) and `wireFormatVersion: 2` (default).
    - Set budget early, for example: `{ "maxCards": 30, "maxEstimatedTokens": 4000 }`.
@@ -99,5 +99,20 @@ Use this order unless task constraints force escalation:
 - Do not call `sdl.code.needWindow` before trying `sdl.code.getSkeleton`/`sdl.code.getHotPath`.
 - Do not use broad `sdl.symbol.search` limits by default.
 - Do not rebuild slices repeatedly when `sdl.slice.refresh` can provide incremental deltas.
+- Do not call `sdl.symbol.getCard` N times when `sdl.symbol.getCards` can fetch all N in one call.
+
+### 6) After completing a task
+
+Call `sdl.agent.feedback` with the `sliceHandle` you used, at least one `usefulSymbols` ID, and optionally any `missingSymbols`. This trains the slice ranker over time and improves context quality for the repo.
+
+```json
+{
+  "repoId": "[repoid]",
+  "versionId": "<from sdl.repo.status>",
+  "sliceHandle": "<from sdl.slice.build>",
+  "usefulSymbols": ["<id1>", "<id2>"],
+  "missingSymbols": ["<id3>"],
+  "taskType": "debug"
+}
 ```
 

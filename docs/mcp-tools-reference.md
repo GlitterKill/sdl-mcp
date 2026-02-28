@@ -61,11 +61,26 @@ In incremental mode, files whose modification time predates their last indexed t
 ### `sdl.repo.overview`
 Return token-efficient repository overview with directory summaries and hotspots.
 
-Example:
+Start with `level: "stats"` (cheapest), escalate to `"directories"` or `"full"` only when you need per-directory breakdowns.
 
 ```json
-{ "repoId": "my-repo", "level": "full", "includeHotspots": true }
+{ "repoId": "my-repo", "level": "stats" }
 ```
+
+Filter output to specific directories and bound payload size:
+
+```json
+{
+  "repoId": "my-repo",
+  "level": "directories",
+  "directories": ["src/auth", "src/api"],
+  "maxDirectories": 20,
+  "maxExportsPerDirectory": 10,
+  "includeHotspots": true
+}
+```
+
+`level: "full"` auto-enables hotspots unless `includeHotspots: false` is set explicitly.
 
 ## Symbol Discovery
 
@@ -93,6 +108,34 @@ Fetch one symbol card.
 
 The returned card includes `metrics.canonicalTest` (if available), which contains the file path, distance, and proximity information for the nearest test associated with this symbol.
 
+Pass `ifNoneMatch` with the card's ETag to get a lightweight `notModified` response when the symbol has not changed:
+
+```json
+{ "repoId": "my-repo", "symbolId": "<symbol-id>", "ifNoneMatch": "<etag>" }
+```
+
+### `sdl.symbol.getCards`
+Batch fetch up to 100 symbol cards in a single round trip. Prefer this over multiple sequential `sdl.symbol.getCard` calls when you already have a list of symbol IDs.
+
+```json
+{
+  "repoId": "my-repo",
+  "symbolIds": ["<symbol-id-1>", "<symbol-id-2>", "<symbol-id-3>"]
+}
+```
+
+Pass `knownEtags` (map of `symbolId → ETag`) to skip unchanged cards — they return `notModified` instead of the full payload:
+
+```json
+{
+  "repoId": "my-repo",
+  "symbolIds": ["<id1>", "<id2>"],
+  "knownEtags": { "<id1>": "<etag1>" }
+}
+```
+
+The response is an array where each entry is either a full card or a `notModified` marker.
+
 ### `sdl.context.summary`
 Generate a token-bounded context summary for symbol/file/task queries.
 
@@ -109,7 +152,7 @@ Generate a token-bounded context summary for symbol/file/task queries.
 ## Graph Slice Workflows
 
 ### `sdl.slice.build`
-Build a task-scoped graph slice.
+Build a task-scoped graph slice. `taskText` alone is sufficient — it triggers auto-discovery of relevant symbols via full-text search in a single round trip, no `entrySymbols` required. Adding `entrySymbols` improves precision.
 
 ```json
 {
@@ -119,6 +162,26 @@ Build a task-scoped graph slice.
   "budget": { "maxCards": 50, "maxEstimatedTokens": 4000 }
 }
 ```
+
+When `editedFiles` is provided, all symbols in those files plus their immediate callers are forced into the slice regardless of score threshold — useful for impact analysis after a code change:
+
+```json
+{
+  "repoId": "my-repo",
+  "taskText": "review changes to auth module",
+  "editedFiles": ["src/auth/token.ts"],
+  "budget": { "maxCards": 30, "maxEstimatedTokens": 3000 }
+}
+```
+
+Key optional parameters:
+
+- `minConfidence` (default `0.5`): raise toward `0.8`–`0.95` for precision-focused runs; keep near `0.5` for recall-oriented work
+- `knownCardEtags` (map of `symbolId → ETag`): cards with unchanged ETags return as `cardRefs` instead of full payloads, reducing token cost on subsequent slice builds
+- `cardDetail` (`"minimal"` | `"signature"` | `"deps"` | `"compact"` | `"full"`): leave unset for default mixed behavior; use `"full"` only when all slice cards are needed in full
+- `wireFormatVersion` (default `2`): use `2` for compact wire encoding
+- `failingTestPath`: provide a failing test file path to bias slice discovery toward code under test
+- `stackTrace`: provide a stack trace to bias slice discovery toward call-path symbols
 
 ### `sdl.slice.refresh`
 Refresh an existing handle and receive changes relative to known version.
@@ -228,16 +291,55 @@ Run automated rung selection with evidence capture for agent tasks.
 }
 ```
 
+### `sdl.agent.feedback`
+Record which symbols were useful or missing during a task. Feedback is stored per version and used for offline slice-ranking tuning.
+
+Required: `repoId`, `versionId` (from `sdl.repo.status`), `sliceHandle` (from the slice you used), `usefulSymbols` (at least one symbol ID).
+
+```json
+{
+  "repoId": "my-repo",
+  "versionId": "v1770600000000",
+  "sliceHandle": "h_abc123",
+  "usefulSymbols": ["<symbol-id-1>", "<symbol-id-2>"],
+  "missingSymbols": ["<symbol-id-3>"],
+  "taskType": "debug",
+  "taskText": "traced auth timeout to token expiry logic"
+}
+```
+
+Response includes `feedbackId`, `symbolsRecorded`, and confirmation fields.
+
+### `sdl.agent.feedback.query`
+Query stored feedback records and aggregated statistics. Useful for offline tuning pipelines to understand which symbols are consistently useful or missing.
+
+```json
+{
+  "repoId": "my-repo",
+  "versionId": "v1770600000000",
+  "limit": 50
+}
+```
+
+Filter by time window with `since` (ISO timestamp):
+
+```json
+{ "repoId": "my-repo", "since": "2026-01-01T00:00:00Z", "limit": 100 }
+```
+
+Response includes `feedback` (array of records), `aggregatedStats` (top useful/missing symbols with counts), and `hasMore` (pagination flag).
+
 ## Tool-Usage Pattern for Agents
 
 Use in this order for most tasks:
 
 1. `sdl.symbol.search`
-2. `sdl.symbol.getCard`
+2. `sdl.symbol.getCard` — or `sdl.symbol.getCards` when fetching multiple symbols at once
 3. `sdl.slice.build`
 4. `sdl.code.getSkeleton`
 5. `sdl.code.getHotPath`
 6. `sdl.code.needWindow` only when necessary
+7. `sdl.agent.feedback` after completing a task to record which symbols were useful
 
 ## HTTP Surface (Non-MCP)
 

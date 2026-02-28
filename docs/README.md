@@ -54,7 +54,7 @@ Use this page as the entry point for SDL-MCP documentation.
 
 - Supported languages: TS, JS, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, Shell
 - CLI: init, doctor, index, serve, export, import, pull, benchmark:ci, summary, health, version
-- MCP tools include repository overview, context summary, PR risk analysis, and agent orchestration
+- MCP tools (19 total): repository overview, symbol search and batch card fetch, graph slice workflows, delta and PR risk analysis, code access ladder, context summary, agent orchestration, and agent feedback recording/query
 - Semantic and summary features: optional semantic reranking and generated symbol summaries (feature-flagged)
 - HTTP graph surface: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
 - VSCode extension MVP: see `../sdl-mcp-vscode/README.md`
