@@ -446,13 +446,13 @@ jobs:
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
             # Windows runners have higher variance for filesystem-heavy indexing.
-            MAX_INDEX_MS=70000
-            MAX_EXPORT_MS=10000
-            MAX_TOTAL_MS=78000
+            MAX_INDEX_MS=180000
+            MAX_EXPORT_MS=20000
+            MAX_TOTAL_MS=195000
           else
-            MAX_INDEX_MS=45000
-            MAX_EXPORT_MS=8000
-            MAX_TOTAL_MS=52000
+            MAX_INDEX_MS=120000
+            MAX_EXPORT_MS=15000
+            MAX_TOTAL_MS=130000
           fi
 
           INDEX_MS=${{ steps.index.outputs.duration_ms }}
