@@ -53,7 +53,7 @@ class DiagnosticsManager {
       return this.servicesCache.get(cacheKey)!;
     }
 
-    const tsConfigPath = this.findTsConfig(repo.rootPath, repo.tsconfigPath);
+    const tsConfigPath = this.findTsConfig(repo.rootPath, repo.tsconfigPath ?? undefined);
     const projectRoot = path.dirname(tsConfigPath);
 
     const parsedConfig = this.readTsConfig(tsConfigPath);

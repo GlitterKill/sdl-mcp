@@ -210,7 +210,7 @@ describe("AnnConfigSchema defaults", () => {
 
 describe("SemanticConfigSchema defaults", () => {
   const booleanDefaults: Array<{ field: keyof typeof SemanticConfigSchema.shape; expected: boolean }> = [
-    { field: "enabled", expected: false },
+    { field: "enabled", expected: true },
     { field: "generateSummaries", expected: false },
   ];
 

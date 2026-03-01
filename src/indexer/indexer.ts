@@ -2256,7 +2256,7 @@ export async function indexRepo(
   let workerPool: ParserWorkerPool | null = null;
   if (!useRustEngine) {
     const workerPoolSize = resolveParserWorkerPoolSize({
-      configuredWorkerPoolSize: appConfig.indexing?.workerPoolSize,
+      configuredWorkerPoolSize: appConfig.indexing?.workerPoolSize ?? undefined,
       concurrency,
       fileCount: files.length,
     });

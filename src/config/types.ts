@@ -65,9 +65,9 @@ export const RepoConfigSchema = z.object({
     ]),
   maxFileBytes: z.number().int().min(1).default(MAX_FILE_BYTES),
   includeNodeModulesTypes: z.boolean().default(true),
-  packageJsonPath: z.string().optional(),
-  tsconfigPath: z.string().optional(),
-  workspaceGlobs: z.array(z.string()).optional(),
+  packageJsonPath: z.string().nullish(),
+  tsconfigPath: z.string().nullish(),
+  workspaceGlobs: z.array(z.string()).nullish(),
 });
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
@@ -108,7 +108,7 @@ export const IndexingConfigSchema = z.object({
     .int()
     .min(1)
     .default(WATCHER_DEFAULT_MAX_WATCHED_FILES),
-  workerPoolSize: z.number().int().min(1).max(16).optional(),
+  workerPoolSize: z.number().int().min(1).max(16).nullish(),
   engine: z.enum(["typescript", "rust"]).default("typescript"),
   watchDebounceMs: z.number().int().min(50).max(5000).default(300),
 });
@@ -215,7 +215,7 @@ export const TracingConfigSchema = z.object({
   enabled: z.boolean().default(false),
   serviceName: z.string().default("sdl-mcp"),
   exporterType: z.enum(["console", "otlp", "memory"]).default("console"),
-  otlpEndpoint: z.string().optional(),
+  otlpEndpoint: z.string().nullish(),
   sampleRate: z.number().min(0).max(1).default(1.0),
 });
 
@@ -223,8 +223,8 @@ export type TracingConfig = z.infer<typeof TracingConfigSchema>;
 
 export const ParallelScorerConfigSchema = z.object({
   enabled: z.boolean().default(false),
-  poolSize: z.number().int().min(1).max(8).optional(),
-  minBatchSize: z.number().int().min(1).max(100).optional(),
+  poolSize: z.number().int().min(1).max(8).nullish(),
+  minBatchSize: z.number().int().min(1).max(100).nullish(),
 });
 
 export type ParallelScorerConfig = z.infer<typeof ParallelScorerConfigSchema>;
