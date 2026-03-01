@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp-native-linux-x64-gnu",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Native Rust indexer for SDL-MCP - Linux x64 (glibc)",
   "license": "SEE LICENSE IN LICENSE",
   "os": [
