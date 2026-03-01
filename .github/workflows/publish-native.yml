@@ -187,26 +187,49 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          FAILED=0
           for dir in native/npm/*/; do
             pkg_name=$(node -e "console.log(require('./${dir}package.json').name)")
-            echo "Publishing ${pkg_name}..."
+            pkg_version=$(node -e "console.log(require('./${dir}package.json').version)")
+            echo "Publishing ${pkg_name}@${pkg_version}..."
             if [ "${DRY_RUN}" = "true" ]; then
               echo "  [DRY RUN] npm publish ${dir} --access public"
               npm publish "${dir}" --access public --dry-run
             else
-              npm publish "${dir}" --access public
+              # Check if already published
+              EXISTING=$(npm view "${pkg_name}@${pkg_version}" version 2>/dev/null || echo "")
+              if [ "${EXISTING}" = "${pkg_version}" ]; then
+                echo "  SKIP: ${pkg_name}@${pkg_version} already published"
+              else
+                if npm publish "${dir}" --access public; then
+                  echo "  OK: ${pkg_name}@${pkg_version} published"
+                else
+                  echo "  FAIL: ${pkg_name}@${pkg_version} publish failed"
+                  FAILED=1
+                fi
+              fi
             fi
           done
+          if [ "${FAILED}" -eq 1 ]; then
+            echo "WARNING: Some platform packages failed to publish"
+            exit 1
+          fi
 
       - name: Publish umbrella package
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          echo "Publishing sdl-mcp-native umbrella package..."
+          PKG_VERSION=$(node -e "console.log(require('./native/package.json').version)")
+          echo "Publishing sdl-mcp-native@${PKG_VERSION}..."
           if [ "${DRY_RUN}" = "true" ]; then
             echo "  [DRY RUN] npm publish native/ --access public"
             npm publish native/ --access public --dry-run
           else
-            npm publish native/ --access public
+            EXISTING=$(npm view "sdl-mcp-native@${PKG_VERSION}" version 2>/dev/null || echo "")
+            if [ "${EXISTING}" = "${PKG_VERSION}" ]; then
+              echo "  SKIP: sdl-mcp-native@${PKG_VERSION} already published"
+            else
+              npm publish native/ --access public --ignore-scripts
+            fi
           fi
