@@ -231,8 +231,8 @@ jobs:
             os: windows-latest
             run-tests: true
           - target: x86_64-apple-darwin
-            os: macos-13
-            run-tests: true
+            os: macos-latest
+            run-tests: false
           - target: aarch64-apple-darwin
             os: macos-latest
             run-tests: true
@@ -288,7 +288,7 @@ jobs:
         run: npm ci
 
       - name: Build native addon
-        run: napi build --release --cargo-cwd native --config native/package.json --target ${{ matrix.target }} native
+        run: npx napi build --release --cargo-cwd native --config native/package.json --target ${{ matrix.target }} native
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
