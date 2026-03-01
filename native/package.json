@@ -26,7 +26,6 @@
   "scripts": {
     "build": "napi build --release --cargo-cwd . --config package.json .",
     "artifacts": "napi artifacts",
-    "prepublishOnly": "napi prepublish -t npm",
     "version": "napi version"
   },
   "optionalDependencies": {
