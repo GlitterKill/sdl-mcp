@@ -6,7 +6,12 @@
 
 # SDL-MCP
 
-[![npm version](https://img.shields.io/npm/v/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) [![npm downloads](https://img.shields.io/npm/dm/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/GlitterKill/sdl-mcp/ci.yml)
+[![npm version](https://img.shields.io/npm/v/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) https://img.shields.io/npm/last-update/sdl-mcp
+ [![npm downloads](https://img.shields.io/npm/dm/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/GlitterKill/sdl-mcp/ci.yml?label=CI%20Builds)
+ ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/GlitterKill/sdl-mcp/publish-native.yml?label=Rust%20Indexer%20Builds) ![GitHub commit activity](https://img.shields.io/github/commit-activity/w/GlitterKill/sdl-mcp) 
+
+
+
 
 
 <div align="right">
