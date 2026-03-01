@@ -6,7 +6,8 @@
 
 # SDL-MCP
 
-[![npm version](https://img.shields.io/npm/v/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) [![npm downloads](https://img.shields.io/npm/dm/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) 
+[![npm version](https://img.shields.io/npm/v/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) [![npm downloads](https://img.shields.io/npm/dm/sdl-mcp.svg)](https://www.npmjs.com/package/sdl-mcp) ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/GlitterKill/sdl-mcp/ci.yml)
+
 
 <div align="right">
 <details>
