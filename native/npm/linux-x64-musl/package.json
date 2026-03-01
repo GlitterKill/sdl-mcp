@@ -1,0 +1,24 @@
+{
+  "name": "sdl-mcp-native-linux-x64-musl",
+  "version": "0.7.0",
+  "description": "Native Rust indexer for SDL-MCP - Linux x64 (musl)",
+  "license": "SEE LICENSE IN LICENSE",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "sdl-mcp-native.linux-x64-musl.node",
+  "files": [
+    "sdl-mcp-native.linux-x64-musl.node"
+  ],
+  "libc": [
+    "musl"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GlitterKill/sdl-mcp.git",
+    "directory": "native"
+  }
+}

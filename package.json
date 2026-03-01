@@ -58,6 +58,8 @@
     "prepack": "npm run build:runtime",
     "build:native": "napi build --release --cargo-cwd native --config native/package.json native",
     "build:native:debug": "napi build --cargo-cwd native --config native/package.json native",
+    "native:artifacts": "napi artifacts --config native/package.json --npm-dir native/npm",
+    "native:version": "node scripts/sync-native-version.mjs",
     "test:native-parity": "node --import tsx tests/native/parity-test.ts",
     "check:config-sync": "tsx scripts/check-config-sync.ts",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck"
@@ -101,7 +103,8 @@
   },
   "optionalDependencies": {
     "chokidar": "^3.5.3",
-    "onnxruntime-node": "^1.22.0"
+    "onnxruntime-node": "^1.22.0",
+    "sdl-mcp-native": "0.7.0"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",

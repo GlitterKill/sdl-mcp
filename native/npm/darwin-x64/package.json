@@ -1,0 +1,21 @@
+{
+  "name": "sdl-mcp-native-darwin-x64",
+  "version": "0.7.0",
+  "description": "Native Rust indexer for SDL-MCP - macOS x64",
+  "license": "SEE LICENSE IN LICENSE",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "sdl-mcp-native.darwin-x64.node",
+  "files": [
+    "sdl-mcp-native.darwin-x64.node"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GlitterKill/sdl-mcp.git",
+    "directory": "native"
+  }
+}

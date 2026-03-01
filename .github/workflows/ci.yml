@@ -220,13 +220,31 @@ jobs:
           echo "This validates cross-platform behavior for all language adapters:"
 
   native-build:
-    name: Native Rust Build (${{ matrix.os }})
+    name: Native Rust Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            run-tests: true
+          - target: x86_64-apple-darwin
+            os: macos-13
+            run-tests: true
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            run-tests: true
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            run-tests: true
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            run-tests: false
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            run-tests: false
 
     steps:
       - name: Checkout code
@@ -240,6 +258,20 @@ jobs:
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (aarch64-linux-gnu)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Install cross-compilation tools (x86_64-linux-musl)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
 
       - name: Cache Cargo registry
         uses: actions/cache@v4
@@ -248,26 +280,30 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             native/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('native/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('native/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Install dependencies
         run: npm ci
 
       - name: Build native addon
-        run: npm run build:native
+        run: napi build --release --cargo-cwd native --config native/package.json --target ${{ matrix.target }} native
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
       - name: Build TypeScript
+        if: matrix.run-tests
         run: npm run build:all
 
       - name: Run native parity tests
+        if: matrix.run-tests
         run: npm run test:native-parity
 
       - name: Upload native addon
         uses: actions/upload-artifact@v4
         with:
-          name: native-addon-${{ matrix.os }}
+          name: native-addon-${{ matrix.target }}
           path: native/*.node
           retention-days: 7
 

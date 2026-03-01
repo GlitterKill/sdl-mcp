@@ -102,12 +102,11 @@ function loadNativeAddon(): NativeAddon | null {
   loadAttempted = true;
 
   const paths = [
-    // Development: built in native/ directory
+    // Umbrella package with platform-detection loader (installed via npm)
+    "sdl-mcp-native",
+    // Development: built in native/ directory (local dev builds)
     join(__dirname, "..", "..", "native", "sdl-mcp-native.node"),
     join(__dirname, "..", "..", "native", "index.node"),
-    // npm package: prebuilt binaries
-    "sdl-mcp-native",
-    "@sdl-mcp/native",
   ];
 
   for (const addonPath of paths) {
