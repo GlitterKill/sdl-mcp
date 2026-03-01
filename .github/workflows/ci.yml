@@ -285,7 +285,7 @@ jobs:
             ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --ignore-scripts
 
       - name: Build native addon
         run: npx napi build --release --cargo-cwd native --config native/package.json --target ${{ matrix.target }} native
