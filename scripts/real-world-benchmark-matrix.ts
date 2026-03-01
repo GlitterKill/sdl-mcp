@@ -163,6 +163,7 @@ function main(): void {
   const familyToReductions = new Map<string, number[]>();
   const allReductions: number[] = [];
   const runSummaries: MatrixAggregate["runs"] = [];
+  const failedRuns: string[] = [];
 
   console.log(`[matrix] executing ${selectedRuns.length} run(s) from ${matrixPath}`);
 
@@ -185,7 +186,15 @@ function main(): void {
     console.log(
       `[matrix] run=${run.id} family=${run.family} repo=${run.repoId} skipIndex=${skipIndex}`,
     );
-    execSync(cmd, { stdio: "inherit" });
+
+    try {
+      execSync(cmd, { stdio: "inherit" });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[matrix] run=${run.id} FAILED: ${msg}`);
+      failedRuns.push(run.id);
+      continue;
+    }
     indexedRepos.add(run.repoId);
 
     const payload = JSON.parse(
@@ -238,6 +247,13 @@ function main(): void {
   console.log(
     `[matrix] overall avg=${aggregate.overall.avgTokenReductionPct.toFixed(1)}% p50=${aggregate.overall.p50TokenReductionPct.toFixed(1)}% tasks=${aggregate.taskCount}`,
   );
+
+  if (failedRuns.length > 0) {
+    console.error(
+      `\n[matrix] ${failedRuns.length} run(s) failed: ${failedRuns.join(", ")}`,
+    );
+    process.exit(1);
+  }
 }
 
 main();

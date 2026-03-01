@@ -1,17 +1,13 @@
+import { createRequire } from "node:module";
 import Parser from "tree-sitter";
-import TypeScript from "tree-sitter-typescript";
-import Python from "tree-sitter-python";
-import Go from "tree-sitter-go";
-import Java from "tree-sitter-java";
-import CSharp from "tree-sitter-c-sharp";
-import C from "tree-sitter-c";
-import Cpp from "tree-sitter-cpp";
-import PHP from "tree-sitter-php";
-import Rust from "tree-sitter-rust";
-import Kotlin from "tree-sitter-kotlin";
-import Bash from "tree-sitter-bash";
 import { logger } from "../../util/logger.js";
 import { GRAMMAR_QUERY_LENGTH } from "../../config/constants.js";
+
+// Lazy synchronous require for native tree-sitter grammars.
+// Using createRequire instead of top-level static imports so that
+// a missing native binary for one language (e.g. tree-sitter-kotlin
+// on Linux) does not crash the entire process at module load time.
+const require = createRequire(import.meta.url);
 
 export type SupportedLanguage =
   | "typescript"
@@ -29,6 +25,28 @@ export type SupportedLanguage =
 const parserCache = new Map<SupportedLanguage, Parser | null>();
 const languageCache = new Map<SupportedLanguage, any | null>();
 
+/**
+ * Map from language ID to npm package name and optional property path.
+ * Property path is used for packages that export sub-languages
+ * (e.g. tree-sitter-typescript exports .typescript, tree-sitter-php exports .php).
+ */
+const GRAMMAR_PACKAGES: Record<
+  SupportedLanguage,
+  { pkg: string; prop?: string }
+> = {
+  typescript: { pkg: "tree-sitter-typescript", prop: "typescript" },
+  python: { pkg: "tree-sitter-python" },
+  go: { pkg: "tree-sitter-go" },
+  java: { pkg: "tree-sitter-java" },
+  csharp: { pkg: "tree-sitter-c-sharp" },
+  c: { pkg: "tree-sitter-c" },
+  cpp: { pkg: "tree-sitter-cpp" },
+  php: { pkg: "tree-sitter-php", prop: "php" },
+  rust: { pkg: "tree-sitter-rust" },
+  kotlin: { pkg: "tree-sitter-kotlin" },
+  bash: { pkg: "tree-sitter-bash" },
+};
+
 function getLanguageModule(language: SupportedLanguage): any | null {
   const cached = languageCache.get(language);
   if (cached !== undefined) {
@@ -38,43 +56,15 @@ function getLanguageModule(language: SupportedLanguage): any | null {
   let lang: any | null = null;
 
   try {
-    switch (language) {
-      case "typescript":
-        lang = TypeScript.typescript;
-        break;
-      case "python":
-        lang = Python;
-        break;
-      case "go":
-        lang = Go;
-        break;
-      case "java":
-        lang = Java;
-        break;
-      case "csharp":
-        lang = CSharp;
-        break;
-      case "c":
-        lang = C;
-        break;
-      case "cpp":
-        lang = Cpp;
-        break;
-      case "php":
-        lang = PHP.php;
-        break;
-      case "rust":
-        lang = Rust;
-        break;
-      case "kotlin":
-        lang = Kotlin;
-        break;
-      case "bash":
-        lang = Bash;
-        break;
+    const spec = GRAMMAR_PACKAGES[language];
+    if (!spec) {
+      lang = null;
+    } else {
+      const mod = require(spec.pkg);
+      lang = spec.prop ? mod[spec.prop] : mod;
     }
   } catch (error) {
-    logger.error(`Failed to load language module for ${language}`, {
+    logger.warn(`Grammar not available for ${language} on this platform`, {
       error: error instanceof Error ? error.message : String(error),
     });
     lang = null;
