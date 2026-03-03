@@ -24,6 +24,7 @@ import {
   deleteOutgoingCallEdgesBySymbol,
   deleteSymbolReferencesByFileId,
   insertSymbolReference,
+  logAuditEvent,
 } from "../db/queries.js";
 import { getDb } from "../db/db.js";
 import { SymbolRow, EdgeRow, SymbolKind, FileRow } from "../db/schema.js";
@@ -81,6 +82,121 @@ const TS_CALL_RESOLUTION_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx"]);
 function isTsCallResolutionFile(relPath: string): boolean {
   const ext = relPath.split(".").pop()?.toLowerCase() ?? "";
   return TS_CALL_RESOLUTION_EXTENSIONS.has(ext);
+}
+
+const CALL_RESOLUTION_TELEMETRY_SAMPLE_LIMIT = 20;
+
+type CallResolutionTelemetry = {
+  repoId: string;
+  mode: "full" | "incremental";
+  tsFileCount: number;
+
+  pass2Targets: number;
+  pass2FilesProcessed: number;
+  pass2FilesNoExistingSymbols: number;
+  pass2FilesNoMappedSymbols: number;
+
+  pass2SymbolMapping: {
+    extractedSymbols: number;
+    existingSymbols: number;
+    mappedSymbols: number;
+    unmappedSymbols: number;
+    strategyCounts: Record<string, number>;
+  };
+
+  adapterCalls: {
+    total: number;
+    resolved: number;
+    unresolved: number;
+    resolvedByStrategy: Record<string, number>;
+    skippedBuiltin: number;
+    returnedNull: number;
+    duplicates: number;
+  };
+
+  tsResolverCalls: {
+    total: number;
+    edgesCreated: number;
+    skippedNoCaller: number;
+    skippedNoFromSymbol: number;
+    skippedNoToSymbol: number;
+    skippedDuplicate: number;
+  };
+
+  samples: {
+    noMappedSymbols: string[];
+    mappingFailures: Array<{
+      file: string;
+      kind: SymbolKind;
+      name: string;
+      startLine: number;
+      startCol: number;
+    }>;
+    tsNoToSymbol: Array<{
+      file: string;
+      calleeFile: string;
+      calleeName: string;
+      calleeKind: SymbolKind;
+    }>;
+  };
+};
+
+function createCallResolutionTelemetry(params: {
+  repoId: string;
+  mode: "full" | "incremental";
+  tsFileCount: number;
+}): CallResolutionTelemetry {
+  return {
+    repoId: params.repoId,
+    mode: params.mode,
+    tsFileCount: params.tsFileCount,
+    pass2Targets: 0,
+    pass2FilesProcessed: 0,
+    pass2FilesNoExistingSymbols: 0,
+    pass2FilesNoMappedSymbols: 0,
+    pass2SymbolMapping: {
+      extractedSymbols: 0,
+      existingSymbols: 0,
+      mappedSymbols: 0,
+      unmappedSymbols: 0,
+      strategyCounts: {},
+    },
+    adapterCalls: {
+      total: 0,
+      resolved: 0,
+      unresolved: 0,
+      resolvedByStrategy: {},
+      skippedBuiltin: 0,
+      returnedNull: 0,
+      duplicates: 0,
+    },
+    tsResolverCalls: {
+      total: 0,
+      edgesCreated: 0,
+      skippedNoCaller: 0,
+      skippedNoFromSymbol: 0,
+      skippedNoToSymbol: 0,
+      skippedDuplicate: 0,
+    },
+    samples: {
+      noMappedSymbols: [],
+      mappingFailures: [],
+      tsNoToSymbol: [],
+    },
+  };
+}
+
+function incRecord(
+  record: Record<string, number>,
+  key: string,
+  by = 1,
+): void {
+  record[key] = (record[key] ?? 0) + by;
+}
+
+function pushTelemetrySample<T>(arr: T[], value: T): void {
+  if (arr.length >= CALL_RESOLUTION_TELEMETRY_SAMPLE_LIMIT) return;
+  arr.push(value);
 }
 
 export interface IndexProgress {
@@ -1686,6 +1802,7 @@ async function resolveTsCallEdgesPass2(params: {
   languages: string[];
   createdCallEdges: Set<string>;
   globalNameToSymbolIds?: Map<string, string[]>;
+  telemetry?: CallResolutionTelemetry;
 }): Promise<number> {
   const {
     repoId,
@@ -1696,6 +1813,7 @@ async function resolveTsCallEdgesPass2(params: {
     languages,
     createdCallEdges,
     globalNameToSymbolIds,
+    telemetry,
   } = params;
   if (!isTsCallResolutionFile(fileMeta.path)) {
     return 0;
@@ -1717,6 +1835,9 @@ async function resolveTsCallEdgesPass2(params: {
     }
 
     const extractedSymbols = adapter.extractSymbols(tree, content, filePath);
+    if (telemetry) {
+      telemetry.pass2SymbolMapping.extractedSymbols += extractedSymbols.length;
+    }
     const symbolsWithNodeIds = extractedSymbols.map((symbol) => ({
       nodeId: symbol.nodeId,
       kind: symbol.kind,
@@ -1739,60 +1860,192 @@ async function resolveTsCallEdgesPass2(params: {
       return 0;
     }
     const existingSymbols = getSymbolsByFile(fileRecord.file_id);
-    const toSymbolKey = (
-      kind: SymbolKind,
-      name: string,
-      range: {
-        startLine: number;
-        startCol: number;
-        endLine: number;
-        endCol: number;
-      },
-    ): string =>
-      `${kind}:${name}:${range.startLine}:${range.startCol}:${range.endLine}:${range.endCol}`;
-    const symbolIdByKey = new Map<string, string>();
-    for (const symbol of existingSymbols) {
-      symbolIdByKey.set(
-        toSymbolKey(symbol.kind, symbol.name, {
+    if (telemetry) {
+      telemetry.pass2SymbolMapping.existingSymbols += existingSymbols.length;
+    }
+
+    if (existingSymbols.length === 0) {
+      if (telemetry) telemetry.pass2FilesNoExistingSymbols++;
+      if (telemetry) {
+        pushTelemetrySample(telemetry.samples.noMappedSymbols, fileMeta.path);
+      }
+      return 0;
+    }
+
+    const toFullKey = (
+        kind: SymbolKind,
+        name: string,
+        range: {
+          startLine: number;
+          startCol: number;
+          endLine: number;
+          endCol: number;
+        },
+      ): string =>
+        `${kind}:${name}:${range.startLine}:${range.startCol}:${range.endLine}:${range.endCol}`;
+
+      const toStartKey = (
+        kind: SymbolKind,
+        name: string,
+        range: {
+          startLine: number;
+          startCol: number;
+        },
+      ): string => `${kind}:${name}:${range.startLine}:${range.startCol}`;
+
+      const toStartLineKey = (
+        kind: SymbolKind,
+        name: string,
+        range: {
+          startLine: number;
+        },
+      ): string => `${kind}:${name}:${range.startLine}`;
+
+      const toNameKindKey = (kind: SymbolKind, name: string): string =>
+        `${kind}:${name}`;
+
+      const symbolIdByFullKey = new Map<string, string>();
+      const symbolsByStartKey = new Map<string, SymbolRow[]>();
+      const symbolsByStartLineKey = new Map<string, SymbolRow[]>();
+      const symbolsByNameKindKey = new Map<string, SymbolRow[]>();
+
+      const pushSymbol = (
+        map: Map<string, SymbolRow[]>,
+        key: string,
+        symbol: SymbolRow,
+      ): void => {
+        const existing = map.get(key) ?? [];
+        existing.push(symbol);
+        map.set(key, existing);
+      };
+
+      for (const symbol of existingSymbols) {
+        const range = {
           startLine: symbol.range_start_line,
           startCol: symbol.range_start_col,
           endLine: symbol.range_end_line,
           endCol: symbol.range_end_col,
-        }),
-        symbol.symbol_id,
-      );
-    }
+        };
 
-    const symbolDetails = symbolsWithNodeIds.map((extractedSymbol) => {
-      const symbolId =
-        symbolIdByKey.get(
-          toSymbolKey(
+        symbolIdByFullKey.set(
+          toFullKey(symbol.kind, symbol.name, range),
+          symbol.symbol_id,
+        );
+        pushSymbol(
+          symbolsByStartKey,
+          toStartKey(symbol.kind, symbol.name, range),
+          symbol,
+        );
+        pushSymbol(
+          symbolsByStartLineKey,
+          toStartLineKey(symbol.kind, symbol.name, range),
+          symbol,
+        );
+        pushSymbol(
+          symbolsByNameKindKey,
+          toNameKindKey(symbol.kind, symbol.name),
+          symbol,
+        );
+      }
+
+      const mapExtractedSymbolId = (
+        extractedSymbol: (typeof symbolsWithNodeIds)[number],
+      ): { symbolId: string; strategy: string } | null => {
+        const fullMatch = symbolIdByFullKey.get(
+          toFullKey(
             extractedSymbol.kind,
             extractedSymbol.name,
             extractedSymbol.range,
           ),
-        ) ??
-        generateSymbolId(
-          repoId,
-          fileMeta.path,
-          extractedSymbol.kind,
-          extractedSymbol.name,
-          "",
         );
-      return {
-        extractedSymbol,
-        symbolId,
+        if (fullMatch) {
+          return { symbolId: fullMatch, strategy: "full_range" };
+        }
+
+        const startCandidates = symbolsByStartKey.get(
+          toStartKey(
+            extractedSymbol.kind,
+            extractedSymbol.name,
+            extractedSymbol.range,
+          ),
+        );
+        if (startCandidates && startCandidates.length === 1) {
+          return {
+            symbolId: startCandidates[0].symbol_id,
+            strategy: "start_only",
+          };
+        }
+
+        const startLineCandidates = symbolsByStartLineKey.get(
+          toStartLineKey(
+            extractedSymbol.kind,
+            extractedSymbol.name,
+            extractedSymbol.range,
+          ),
+        );
+        if (startLineCandidates && startLineCandidates.length === 1) {
+          return {
+            symbolId: startLineCandidates[0].symbol_id,
+            strategy: "start_line",
+          };
+        }
+
+        const nameKindCandidates = symbolsByNameKindKey.get(
+          toNameKindKey(extractedSymbol.kind, extractedSymbol.name),
+        );
+        if (nameKindCandidates && nameKindCandidates.length === 1) {
+          return {
+            symbolId: nameKindCandidates[0].symbol_id,
+            strategy: "name_kind_unique",
+          };
+        }
+
+        return null;
       };
-    });
 
-    const existingSymbolIds = new Set(existingSymbols.map((symbol) => symbol.symbol_id));
-    const filteredSymbolDetails = symbolDetails.filter((detail) =>
-      existingSymbolIds.has(detail.symbolId),
-    );
+      const filteredSymbolDetails = symbolsWithNodeIds
+        .map((extractedSymbol) => {
+          const mapped = mapExtractedSymbolId(extractedSymbol);
+          if (!mapped) {
+            if (telemetry) telemetry.pass2SymbolMapping.unmappedSymbols++;
+            if (telemetry) {
+              pushTelemetrySample(telemetry.samples.mappingFailures, {
+                file: fileMeta.path,
+                kind: extractedSymbol.kind,
+                name: extractedSymbol.name,
+                startLine: extractedSymbol.range.startLine,
+                startCol: extractedSymbol.range.startCol,
+              });
+            }
+            return null;
+          }
 
-    if (filteredSymbolDetails.length === 0) {
-      return 0;
-    }
+          if (telemetry) telemetry.pass2SymbolMapping.mappedSymbols++;
+          if (telemetry) {
+            incRecord(telemetry.pass2SymbolMapping.strategyCounts, mapped.strategy);
+          }
+
+          return {
+            extractedSymbol,
+            symbolId: mapped.symbolId,
+          };
+        })
+        .filter(
+          (
+            detail,
+          ): detail is {
+            extractedSymbol: (typeof symbolsWithNodeIds)[number];
+            symbolId: string;
+          } => Boolean(detail),
+        );
+
+      if (filteredSymbolDetails.length === 0) {
+        if (telemetry) telemetry.pass2FilesNoMappedSymbols++;
+        if (telemetry) {
+          pushTelemetrySample(telemetry.samples.noMappedSymbols, fileMeta.path);
+        }
+        return 0;
+      }
 
     for (const detail of filteredSymbolDetails) {
       deleteOutgoingCallEdgesBySymbol(detail.symbolId);
@@ -1829,6 +2082,7 @@ async function resolveTsCallEdgesPass2(params: {
         if (call.callerNodeId !== detail.extractedSymbol.nodeId) {
           continue;
         }
+        if (telemetry) telemetry.adapterCalls.total++;
         const resolved = resolveCallTarget(
           call,
           nodeIdToSymbolId,
@@ -1838,11 +2092,17 @@ async function resolveTsCallEdgesPass2(params: {
           adapter,
           globalNameToSymbolIds,
         );
-        if (!resolved) continue;
+        if (!resolved) {
+          if (telemetry) telemetry.adapterCalls.returnedNull++;
+          continue;
+        }
 
         if (resolved.isResolved && resolved.symbolId) {
           const edgeKey = `${detail.symbolId}->${resolved.symbolId}`;
-          if (createdCallEdges.has(edgeKey)) continue;
+          if (createdCallEdges.has(edgeKey)) {
+            if (telemetry) telemetry.adapterCalls.duplicates++;
+            continue;
+          }
           createEdgeTransaction({
             repo_id: repoId,
             from_symbol_id: detail.symbolId,
@@ -1856,14 +2116,25 @@ async function resolveTsCallEdgesPass2(params: {
           });
           createdCallEdges.add(edgeKey);
           createdEdges++;
+          if (telemetry) telemetry.adapterCalls.resolved++;
+          if (telemetry) {
+            incRecord(
+              telemetry.adapterCalls.resolvedByStrategy,
+              resolved.strategy ?? "unknown",
+            );
+          }
         } else if (resolved.targetName) {
           // Skip built-in method/constructor calls that can never resolve
           if (isBuiltinCall(resolved.targetName)) {
+            if (telemetry) telemetry.adapterCalls.skippedBuiltin++;
             continue;
           }
           const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
           const edgeKey = `${detail.symbolId}->${unresolvedTargetId}`;
-          if (createdCallEdges.has(edgeKey)) continue;
+          if (createdCallEdges.has(edgeKey)) {
+            if (telemetry) telemetry.adapterCalls.duplicates++;
+            continue;
+          }
           createEdgeTransaction({
             repo_id: repoId,
             from_symbol_id: detail.symbolId,
@@ -1877,17 +2148,25 @@ async function resolveTsCallEdgesPass2(params: {
           });
           createdCallEdges.add(edgeKey);
           createdEdges++;
+          if (telemetry) telemetry.adapterCalls.unresolved++;
         }
       }
     }
 
     if (tsResolver) {
       const tsCalls = tsResolver.getResolvedCalls(fileMeta.path);
+      if (telemetry) telemetry.tsResolverCalls.total += tsCalls.length;
       for (const tsCall of tsCalls) {
         const callerNodeId = findEnclosingSymbolByRange(tsCall.caller, filteredSymbolDetails);
-        if (!callerNodeId) continue;
+        if (!callerNodeId) {
+          if (telemetry) telemetry.tsResolverCalls.skippedNoCaller++;
+          continue;
+        }
         const fromSymbolId = nodeIdToSymbolId.get(callerNodeId);
-        if (!fromSymbolId) continue;
+        if (!fromSymbolId) {
+          if (telemetry) telemetry.tsResolverCalls.skippedNoFromSymbol++;
+          continue;
+        }
         const toSymbolId = resolveSymbolIdFromIndex(
           symbolIndex,
           repoId,
@@ -1896,9 +2175,23 @@ async function resolveTsCallEdgesPass2(params: {
           tsCall.callee.kind,
           adapter.languageId,
         );
-        if (!toSymbolId) continue;
+        if (!toSymbolId) {
+          if (telemetry) telemetry.tsResolverCalls.skippedNoToSymbol++;
+          if (telemetry) {
+            pushTelemetrySample(telemetry.samples.tsNoToSymbol, {
+              file: fileMeta.path,
+              calleeFile: tsCall.callee.filePath,
+              calleeName: tsCall.callee.name,
+              calleeKind: tsCall.callee.kind,
+            });
+          }
+          continue;
+        }
         const edgeKey = `${fromSymbolId}->${toSymbolId}`;
-        if (createdCallEdges.has(edgeKey)) continue;
+        if (createdCallEdges.has(edgeKey)) {
+          if (telemetry) telemetry.tsResolverCalls.skippedDuplicate++;
+          continue;
+        }
         createEdgeTransaction({
           repo_id: repoId,
           from_symbol_id: fromSymbolId,
@@ -1912,6 +2205,7 @@ async function resolveTsCallEdgesPass2(params: {
         });
         createdCallEdges.add(edgeKey);
         createdEdges++;
+        if (telemetry) telemetry.tsResolverCalls.edgesCreated++;
       }
     }
 
@@ -2499,6 +2793,11 @@ export async function indexRepo(
   const changedFileIds = new Set<number>();
   const changedTsFilePaths = new Set<string>();
   const tsFiles = files.filter((file) => isTsCallResolutionFile(file.path));
+  const callResolutionTelemetry = createCallResolutionTelemetry({
+    repoId,
+    mode,
+    tsFileCount: tsFiles.length,
+  });
 
   let nextIndex = 0;
   const updatePass1Progress = (currentFile?: string): void => {
@@ -2681,8 +2980,10 @@ export async function indexRepo(
     tsFiles,
     changedTsFilePaths,
   });
+  callResolutionTelemetry.pass2Targets = pass2Targets.length;
   let pass2Processed = 0;
   for (const fileMeta of pass2Targets) {
+    callResolutionTelemetry.pass2FilesProcessed++;
     onProgress?.({
       stage: "pass2",
       current: pass2Processed,
@@ -2698,6 +2999,7 @@ export async function indexRepo(
       languages: config.languages,
       createdCallEdges,
       globalNameToSymbolIds,
+      telemetry: callResolutionTelemetry,
     });
     totalEdgesCreated += pass2Edges;
     pass2Processed++;
@@ -2826,6 +3128,23 @@ export async function indexRepo(
       );
     } catch (error) {
       logger.warn(`Summary generation skipped: ${String(error)}`);
+    }
+  }
+
+  if (callResolutionTelemetry.tsFileCount > 0) {
+    try {
+      logAuditEvent({
+        timestamp: new Date().toISOString(),
+        tool: "index.callResolution",
+        decision: "stats",
+        repoId,
+        detailsJson: JSON.stringify({
+          versionId,
+          ...callResolutionTelemetry,
+        }),
+      });
+    } catch (error) {
+      logger.warn(`Failed to log call-resolution telemetry: ${String(error)}`);
     }
   }
 
