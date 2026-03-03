@@ -50,6 +50,7 @@ import {
   prefetchSliceFrontier,
 } from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
+import { attachRawContext } from "../token-usage.js";
 type SearchRow = {
   symbol_id: string;
   name: string;
@@ -408,7 +409,7 @@ export async function handleSymbolSearch(
     prefetchCardsForSymbols(request.repoId, topSymbolIds);
   }
 
-  return {
+  const response = {
     results: rankedRows.map((row) => ({
       symbolId: row.symbol_id,
       name: row.name,
@@ -416,6 +417,10 @@ export async function handleSymbolSearch(
       kind: row.kind,
     })),
   };
+  attachRawContext(response, {
+    fileIds: [...new Set(rankedRows.map((r) => r.file_id))],
+  });
+  return response;
 }
 
 /**
@@ -703,7 +708,12 @@ export async function handleSymbolGetCard(
   // Prefetch edge targets for anticipated slice.build
   prefetchSliceFrontier(repoId, [symbolId]);
 
-  return { card: result };
+  const response = { card: result };
+  const sym = db.getSymbol(symbolId);
+  if (sym) {
+    attachRawContext(response, { fileIds: [sym.file_id] });
+  }
+  return response;
 }
 
 /**
@@ -729,5 +739,12 @@ export async function handleSymbolGetCards(
   const cards = await Promise.all(
     symbolIds.map((id) => buildCardForSymbol(repoId, id, knownEtags?.[id])),
   );
-  return { cards };
+
+  const response = { cards };
+  const symbolMap = db.getSymbolsByIdsLite(symbolIds);
+  const fileIds = [...new Set(
+    Array.from(symbolMap.values()).map((s) => s.file_id),
+  )];
+  attachRawContext(response, { fileIds });
+  return response;
 }

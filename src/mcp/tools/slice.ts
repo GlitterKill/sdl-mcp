@@ -56,6 +56,7 @@ import {
   isTracingEnabled,
   type SpanAttributes,
 } from "../../util/tracing.js";
+import { attachRawContext } from "../token-usage.js";
 
 const policyEngine = new PolicyEngine();
 
@@ -902,7 +903,12 @@ async function handleSliceBuildInternal(
       handleRow.max_version ?? "",
     );
 
-    return {
+    const symbolMap = db.getSymbolsByIdsLite(cardSymbolIds);
+    const fileIds = [...new Set(
+      Array.from(symbolMap.values()).map((s) => s.file_id),
+    )];
+
+    const response = {
       sliceHandle: handle,
       ledgerVersion: latestVersion.version_id,
       lease,
@@ -913,6 +919,8 @@ async function handleSliceBuildInternal(
         effectiveWireFormatVersion,
       ),
     };
+    attachRawContext(response, { fileIds });
+    return response;
   };
 
   if (isTracingEnabled()) {
@@ -1032,7 +1040,7 @@ export async function handleSliceRefresh(
   };
   db.createSliceHandle(newHandleRow);
 
-  return {
+  const response = {
     sliceHandle,
     knownVersion,
     currentVersion: latestVersion.version_id,
@@ -1040,6 +1048,16 @@ export async function handleSliceRefresh(
     delta: delta as DeltaPackWithGovernance | null,
     lease,
   };
+
+  if (delta && delta.changedSymbols.length > 0) {
+    const changedIds = delta.changedSymbols.map((c) => c.symbolId);
+    const symbolMap = db.getSymbolsByIdsLite(changedIds);
+    attachRawContext(response, {
+      fileIds: [...new Set(Array.from(symbolMap.values()).map((s) => s.file_id))],
+    });
+  }
+
+  return response;
 }
 
 /**
@@ -1111,11 +1129,13 @@ export async function handleSliceSpilloverGet(
 
   const pageSymbols = droppedSymbols.slice(startIndex, endIndex);
 
+  const spilloverFileIds: number[] = [];
   const symbols = pageSymbols
     .map((item) => {
       const symbolRow = db.getSymbol(item.symbolId);
       if (!symbolRow) return null;
 
+      spilloverFileIds.push(symbolRow.file_id);
       const file = db.getFile(symbolRow.file_id);
       const metrics = db.getMetrics(item.symbolId);
 
@@ -1245,10 +1265,12 @@ export async function handleSliceSpilloverGet(
   const hasMore = endIndex < droppedSymbols.length;
   const nextCursor = hasMore ? endIndex.toString() : undefined;
 
-  return {
+  const response = {
     spilloverHandle,
     cursor: nextCursor,
     hasMore,
     symbols,
   };
+  attachRawContext(response, { fileIds: [...new Set(spilloverFileIds)] });
+  return response;
 }

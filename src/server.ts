@@ -10,6 +10,11 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { errorToMcpResponse } from "./mcp/errors.js";
 import { logToolCall } from "./mcp/telemetry.js";
+import {
+  shouldAttachUsage,
+  computeTokenUsage,
+  stripRawContext,
+} from "./mcp/token-usage.js";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../package.json");
@@ -96,10 +101,21 @@ export class MCPServer {
 
           try {
             const result = await tool.handler(request.params.arguments, toolContext);
+
+            // Inject _tokenUsage and strip _rawContext before serialization
+            let finalResult = result;
+            if (result && typeof result === "object") {
+              const r = result as Record<string, unknown>;
+              if (shouldAttachUsage(request.params.name) && r._rawContext) {
+                r._tokenUsage = computeTokenUsage(r);
+              }
+              finalResult = stripRawContext(r);
+            }
+
             logToolCall({
               tool: request.params.name,
               request: request.params.arguments as Record<string, unknown>,
-              response: result as Record<string, unknown>,
+              response: finalResult as Record<string, unknown>,
               durationMs: Date.now() - start,
               repoId,
               symbolId,
@@ -109,7 +125,7 @@ export class MCPServer {
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify(result, null, 2),
+                  text: JSON.stringify(finalResult, null, 2),
                 },
               ],
             };

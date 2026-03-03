@@ -27,6 +27,7 @@ import {
   isTracingEnabled,
   type SpanAttributes,
 } from "../../util/tracing.js";
+import { attachRawContext } from "../token-usage.js";
 
 /**
  * Handles delta pack requests.
@@ -173,7 +174,14 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
         current: item.fanInTrend!.current,
       }));
 
-    return { delta, amplifiers };
+    const symbolMap = db.getSymbolsByIdsLite(changedSymbolIds);
+    const fileIds = [...new Set(
+      Array.from(symbolMap.values()).map((s) => s.file_id),
+    )];
+
+    const response = { delta, amplifiers };
+    attachRawContext(response, { fileIds });
+    return response;
   };
 
   if (isTracingEnabled()) {

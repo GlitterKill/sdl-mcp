@@ -23,10 +23,12 @@ import {
 import {
   getSymbol,
   getFile,
+  getFileByRepoPath,
   getRepo,
   getLatestVersion,
 } from "../../db/queries.js";
 import { logCodeWindowDecision, logPolicyDecision } from "../telemetry.js";
+import { attachRawContext } from "../token-usage.js";
 import type { Range } from "../types.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
@@ -233,7 +235,7 @@ export async function handleCodeNeedWindow(
       truncation: skeletonTruncation,
     };
 
-    return response;
+    return attachRawContext(response, { fileIds: [symbol.file_id] });
   }
 
   if (policyDecision.decision === "downgrade-to-hotpath") {
@@ -287,7 +289,7 @@ export async function handleCodeNeedWindow(
       truncation: hotpathTruncation,
     };
 
-    return response;
+    return attachRawContext(response, { fileIds: [symbol.file_id] });
   }
 
   if (gateResult.approved) {
@@ -375,7 +377,7 @@ export async function handleCodeNeedWindow(
       truncation: codeTruncation,
     };
 
-    return response;
+    return attachRawContext(response, { fileIds: [symbol.file_id] });
   } else {
     logCodeWindowDecision({
       symbolId: request.symbolId,
@@ -454,6 +456,9 @@ export async function handleGetSkeleton(
       truncation: skeletonTruncation,
     };
 
+    if (symbol) {
+      attachRawContext(response, { fileIds: [symbol.file_id] });
+    }
     return response;
   } else if (request.file) {
     const result = generateFileSkeleton(
@@ -493,6 +498,10 @@ export async function handleGetSkeleton(
       truncation: skeletonTruncation,
     };
 
+    const fileRow = getFileByRepoPath(request.repoId, request.file);
+    if (fileRow) {
+      attachRawContext(response, { fileIds: [fileRow.file_id] });
+    }
     return response;
   }
 
@@ -541,7 +550,7 @@ export async function handleGetHotPath(
   const file = getSymbol(request.symbolId);
   const fileData = file ? getFile(file.file_id) : null;
 
-  return {
+  const response = {
     excerpt: result.excerpt,
     file: fileData?.rel_path ?? "",
     range: result.actualRange,
@@ -550,4 +559,8 @@ export async function handleGetHotPath(
     matchedLineNumbers: result.matchedLineNumbers,
     truncated: result.truncated,
   };
+  if (file) {
+    attachRawContext(response, { fileIds: [file.file_id] });
+  }
+  return response;
 }

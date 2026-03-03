@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { orchestrator } from "../../agent/orchestrator.js";
 import type { AgentTask } from "../../agent/types.js";
+import { attachRawContext } from "../token-usage.js";
 
 export const AgentOrchestrateRequestSchema = z.object({
   repoId: z.string().describe("Repository ID to work with"),
@@ -128,6 +129,7 @@ export async function handleAgentOrchestrate(
   };
 
   const result = await orchestrator.orchestrate(task);
-
-  return result as AgentOrchestrateResponse;
+  const response = result as AgentOrchestrateResponse;
+  attachRawContext(response, { rawTokens: response.metrics.totalTokens * 3 });
+  return response;
 }
