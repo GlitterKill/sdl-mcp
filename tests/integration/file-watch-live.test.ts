@@ -217,8 +217,9 @@ describe("file-watch-live", { timeout: 60_000, skip: !!process.env.CI }, () => {
     const countBefore = symbolsBefore.length;
     assert.ok(countBefore > 0, "expected at least one symbol before adding file");
 
-    // Start watcher
+    // Start watcher and wait for chokidar to finish initial directory scan
     watcher = watchRepository(repoId);
+    await watcher.ready;
 
     // Add a new file
     writeFileSync(
@@ -227,12 +228,16 @@ describe("file-watch-live", { timeout: 60_000, skip: !!process.env.CI }, () => {
       "utf-8",
     );
 
+    // Let the filesystem settle before polling (chokidar awaitWriteFinish
+    // needs time to detect file stability, especially on Windows/NTFS)
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+
     const found = await waitFor(() => {
       const health = getWatcherHealth(repoId);
       return (health?.eventsProcessed ?? 0) >= 1;
-    }, 5000);
+    }, 15000);
 
-    assert.ok(found, "watcher did not process the new file event within 5s");
+    assert.ok(found, "watcher did not process the new file event within 15s");
 
     const symbolsAfter = getSymbolsByRepo(repoId);
     const parserFile = getFileByRepoPath(repoId, "src/parser.ts");
@@ -277,8 +282,9 @@ describe("file-watch-live", { timeout: 60_000, skip: !!process.env.CI }, () => {
     const addBefore = symbolsBefore.find((s) => s.name === "add");
     assert.ok(addBefore, "expected symbol 'add' to exist");
 
-    // Start watcher
+    // Start watcher and wait for chokidar to finish initial directory scan
     watcher = watchRepository(repoId);
+    await watcher.ready;
 
     // Modify the file — add a third parameter
     writeFileSync(
@@ -287,12 +293,15 @@ describe("file-watch-live", { timeout: 60_000, skip: !!process.env.CI }, () => {
       "utf-8",
     );
 
+    // Let the filesystem settle before polling
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+
     const processed = await waitFor(() => {
       const health = getWatcherHealth(repoId);
       return (health?.eventsProcessed ?? 0) >= 1;
-    }, 5000);
+    }, 15000);
 
-    assert.ok(processed, "watcher did not process file change within 5s");
+    assert.ok(processed, "watcher did not process file change within 15s");
 
     // Verify signature changed in DB
     const fileRowAfter = getFileByRepoPath(repoId, "src/util.ts");
@@ -335,18 +344,22 @@ describe("file-watch-live", { timeout: 60_000, skip: !!process.env.CI }, () => {
     const symbolsBefore = getSymbolsByFile(fileRowBefore!.file_id);
     assert.ok(symbolsBefore.length > 0, "expected symbols before deletion");
 
-    // Start watcher
+    // Start watcher and wait for chokidar to finish initial directory scan
     watcher = watchRepository(repoId);
+    await watcher.ready;
 
     // Delete the file
     unlinkSync(filePath);
 
+    // Let the filesystem settle before polling
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+
     const processed = await waitFor(() => {
       const health = getWatcherHealth(repoId);
       return (health?.eventsProcessed ?? 0) >= 1;
-    }, 5000);
+    }, 15000);
 
-    assert.ok(processed, "watcher did not process file deletion within 5s");
+    assert.ok(processed, "watcher did not process file deletion within 15s");
 
     // Symbols from util.ts should be gone
     const fileRowAfter = getFileByRepoPath(repoId, "src/util.ts");
@@ -384,8 +397,9 @@ describe("file-watch-live", { timeout: 60_000, skip: !!process.env.CI }, () => {
 
     await indexRepo(repoId, "full");
 
-    // Start watcher
+    // Start watcher and wait for chokidar to finish initial directory scan
     watcher = watchRepository(repoId);
+    await watcher.ready;
 
     const healthBefore = getWatcherHealth(repoId);
     const eventsProcessedBefore = healthBefore?.eventsProcessed ?? 0;
@@ -429,8 +443,9 @@ describe("file-watch-live", { timeout: 60_000, skip: !!process.env.CI }, () => {
 
     await indexRepo(repoId, "full");
 
-    // Start watcher
+    // Start watcher and wait for chokidar to finish initial directory scan
     watcher = watchRepository(repoId);
+    await watcher.ready;
 
     // Write 10 rapid changes within ~100ms (debounce is 150ms)
     for (let i = 0; i < 10; i++) {

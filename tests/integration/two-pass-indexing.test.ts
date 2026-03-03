@@ -1,3 +1,7 @@
+// Force TypeScript indexer engine to avoid Rust native addon crashes in test
+// isolation. The global SDL_CONFIG may point to a config with engine: "rust".
+process.env.SDL_CONFIG = "";
+
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";

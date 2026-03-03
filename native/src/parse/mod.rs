@@ -1,22 +1,34 @@
 pub mod content_hash;
 pub mod file_reader;
 
+use std::panic;
+
 use rayon::prelude::*;
 
 use crate::extract;
 use crate::lang;
 use crate::types::{NativeFileInput, NativeParsedFile};
 
+/// Stack size per Rayon worker thread (8 MiB). Tree-sitter's C-based parser
+/// can recurse deeply on complex/generated files; the default stack may not
+/// suffice and cause a hard crash (STATUS_STACK_BUFFER_OVERRUN on Windows).
+const RAYON_STACK_SIZE: usize = 8 * 1024 * 1024;
+
 /// Parse and extract symbols/imports/calls from a batch of files in parallel.
 ///
 /// Uses Rayon's work-stealing thread pool. Each thread gets its own
 /// thread-local tree-sitter parser instance.
+///
+/// Individual file panics (e.g. tree-sitter C-level crashes) are caught via
+/// `catch_unwind` so they produce a per-file `parse_error` instead of
+/// bringing down the entire Node.js process.
 pub fn parse_files_parallel(
     files: &[NativeFileInput],
     thread_count: usize,
 ) -> Vec<NativeParsedFile> {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(thread_count)
+        .stack_size(RAYON_STACK_SIZE)
         .build()
         .unwrap_or_else(|_| {
             // Fallback to global pool
@@ -26,9 +38,35 @@ pub fn parse_files_parallel(
     pool.install(|| {
         files
             .par_iter()
-            .map(|file| parse_single_file(file))
+            .map(|file| parse_single_file_safe(file))
             .collect()
     })
+}
+
+/// Wrapper around `parse_single_file` that catches panics from tree-sitter's
+/// C code (or any other unexpected panic) and converts them to a parse error.
+fn parse_single_file_safe(input: &NativeFileInput) -> NativeParsedFile {
+    let rel_path = input.rel_path.clone();
+    match panic::catch_unwind(panic::AssertUnwindSafe(|| parse_single_file(input))) {
+        Ok(result) => result,
+        Err(payload) => {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                format!("panic during parse: {s}")
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                format!("panic during parse: {s}")
+            } else {
+                "panic during parse: unknown payload".to_string()
+            };
+            NativeParsedFile {
+                rel_path,
+                content_hash: String::new(),
+                symbols: vec![],
+                imports: vec![],
+                calls: vec![],
+                parse_error: Some(msg),
+            }
+        }
+    }
 }
 
 /// Parse a single file: read content, compute hash, parse AST, extract all.

@@ -102,6 +102,8 @@ export interface IndexResult {
 }
 
 export interface IndexWatchHandle {
+  /** Resolves when the underlying file watcher has completed its initial scan. */
+  ready: Promise<void>;
   close: () => Promise<void>;
 }
 
@@ -2877,7 +2879,7 @@ function loadChokidar(): ChokidarModule | null {
 
 const watcherErrors: string[] = [];
 type MutableWatcherHealth = WatcherHealth & { pendingChanges: number };
-type RuntimeWatcher = { close: () => Promise<void> };
+type RuntimeWatcher = { close: () => Promise<void>; ready: Promise<void> };
 
 const watcherHealthByRepo = new Map<string, MutableWatcherHealth>();
 
@@ -3088,20 +3090,18 @@ export function watchRepository(repoId: string): IndexWatchHandle {
         },
       });
 
-      (watcher as any).on("error", (error: Error) => {
-        recordWatcherError(`[sdl-mcp] File watcher error: ${error}`);
-      });
-
-      (watcher as any).on("ready", () => {
-        const watched = (watcher as any).getWatched?.();
-        if (!watched || typeof watched !== "object") {
-          return;
-        }
-        const count = Object.values(watched as Record<string, string[]>).reduce(
-          (total, entries) => total + entries.length,
-          0,
-        );
-        health.filesWatched = count;
+      const readyPromise = new Promise<void>((resolveReady) => {
+        (watcher as any).on("ready", () => {
+          const watched = (watcher as any).getWatched?.();
+          if (watched && typeof watched === "object") {
+            const count = Object.values(watched as Record<string, string[]>).reduce(
+              (total, entries) => total + entries.length,
+              0,
+            );
+            health.filesWatched = count;
+          }
+          resolveReady();
+        });
       });
 
       const chokidarHandler = (filePath: string): void => {
@@ -3113,7 +3113,12 @@ export function watchRepository(repoId: string): IndexWatchHandle {
       (watcher as any).on("change", chokidarHandler);
       (watcher as any).on("unlink", chokidarHandler);
 
+      (watcher as any).on("error", (error: Error) => {
+        recordWatcherError(`[sdl-mcp] File watcher error: ${error}`);
+      });
+
       return {
+        ready: readyPromise,
         close: async () => {
           await (watcher as any).close();
         },
@@ -3130,6 +3135,7 @@ export function watchRepository(repoId: string): IndexWatchHandle {
     );
 
     return {
+      ready: Promise.resolve(),
       close: async () => {
         fsWatcher.close();
       },
@@ -3187,6 +3193,7 @@ export function watchRepository(repoId: string): IndexWatchHandle {
   activeWatcher = startWatcher();
 
   return {
+    ready: activeWatcher.ready,
     close: async () => {
       closed = true;
       clearInterval(staleTimer);
