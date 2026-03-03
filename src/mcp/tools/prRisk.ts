@@ -12,9 +12,16 @@ import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyEngine } from "../../policy/engine.js";
 import { logger } from "../../util/logger.js";
 import { PRRiskAnalysisRequestSchema } from "../tools.js";
+import { recordToolTrace } from "../../graph/prefetch-model.js";
 
 export async function handlePRRiskAnalysis(args: unknown) {
   const validated = PRRiskAnalysisRequestSchema.parse(args);
+
+  recordToolTrace({
+    repoId: validated.repoId,
+    taskType: "pr-risk",
+    tool: "pr.risk.analyze",
+  });
 
   logger.info("PR Risk Analysis requested", {
     repoId: validated.repoId,

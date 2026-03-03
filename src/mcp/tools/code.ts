@@ -41,6 +41,8 @@ import {
   PolicyEngine,
   type PolicyRequestContext,
 } from "../../policy/engine.js";
+import { consumePrefetchedKey } from "../../graph/prefetch.js";
+import { recordToolTrace } from "../../graph/prefetch-model.js";
 
 /**
  * Handles code window requests with policy evaluation.
@@ -55,6 +57,14 @@ export async function handleCodeNeedWindow(
   args: unknown,
 ): Promise<CodeNeedWindowResponse> {
   const request = CodeNeedWindowRequestSchema.parse(args);
+
+  recordToolTrace({
+    repoId: request.repoId,
+    taskType: "code",
+    tool: "code.needWindow",
+    symbolId: request.symbolId,
+  });
+  consumePrefetchedKey(request.repoId, `card:${request.symbolId}`);
 
   const symbol = getSymbol(request.symbolId);
   if (!symbol) {
@@ -396,6 +406,16 @@ export async function handleGetSkeleton(
 ): Promise<GetSkeletonResponse> {
   const request = GetSkeletonRequestSchema.parse(args);
 
+  recordToolTrace({
+    repoId: request.repoId,
+    taskType: "code",
+    tool: "code.getSkeleton",
+    symbolId: request.symbolId,
+  });
+  if (request.symbolId) {
+    consumePrefetchedKey(request.repoId, `card:${request.symbolId}`);
+  }
+
   if (request.symbolId) {
     const result = generateSymbolSkeleton(request.repoId, request.symbolId, {
       maxLines: request.maxLines,
@@ -492,6 +512,14 @@ export async function handleGetHotPath(
   args: unknown,
 ): Promise<GetHotPathResponse> {
   const request = GetHotPathRequestSchema.parse(args);
+
+  recordToolTrace({
+    repoId: request.repoId,
+    taskType: "code",
+    tool: "code.getHotPath",
+    symbolId: request.symbolId,
+  });
+  consumePrefetchedKey(request.repoId, `card:${request.symbolId}`);
 
   const result = extractHotPath(
     request.repoId,

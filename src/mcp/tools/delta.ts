@@ -16,7 +16,11 @@ import {
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
 } from "../../config/constants.js";
-import { prefetchDeltaBlastRadius } from "../../graph/prefetch.js";
+import {
+  prefetchDeltaBlastRadius,
+  consumePrefetchedKey,
+} from "../../graph/prefetch.js";
+import { recordToolTrace } from "../../graph/prefetch-model.js";
 import {
   withSpan,
   SPAN_NAMES,
@@ -35,6 +39,12 @@ import {
  */
 export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
   const validated = DeltaGetRequestSchema.parse(args);
+
+  recordToolTrace({
+    repoId: validated.repoId,
+    taskType: "delta",
+    tool: "delta.get",
+  });
 
   const executeDelta = async () => {
     let delta;
@@ -55,6 +65,11 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     const changedSymbolIds = delta.changedSymbols.map(
       (change) => change.symbolId,
     );
+
+    // Consume prefetched blast-radius keys
+    for (const symbolId of changedSymbolIds) {
+      consumePrefetchedKey(validated.repoId, `blast:${symbolId}`);
+    }
 
     let graph;
     if (changedSymbolIds.length > 0 && changedSymbolIds.length < 500) {

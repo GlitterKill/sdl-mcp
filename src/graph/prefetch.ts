@@ -13,6 +13,7 @@ import {
 
 type PrefetchTaskType =
   | "slice-frontier"
+  | "search-cards"
   | "file-open"
   | "delta-blast"
   | "startup-warm";
@@ -203,6 +204,25 @@ export function prefetchSliceFrontier(
         for (const edge of edges) {
           markPrefetched(repoId, `card:${edge.to_symbol_id}`);
         }
+      }
+    },
+  });
+}
+
+export function prefetchCardsForSymbols(
+  repoId: string,
+  symbolIds: string[],
+): void {
+  const top = symbolIds.slice(0, 5);
+  if (top.length === 0) return;
+  enqueuePrefetchTask({
+    repoId,
+    key: `search-cards:${top.join(",")}`,
+    type: "search-cards",
+    priority: 70,
+    run: async () => {
+      for (const symbolId of top) {
+        markPrefetched(repoId, `card:${symbolId}`);
       }
     },
   });

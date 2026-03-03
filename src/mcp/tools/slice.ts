@@ -37,6 +37,7 @@ import {
   consumePrefetchedKey,
   prefetchSliceFrontier,
 } from "../../graph/prefetch.js";
+import { recordToolTrace } from "../../graph/prefetch-model.js";
 import {
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
@@ -740,6 +741,13 @@ async function handleSliceBuildInternal(
     minConfidence,
   } = request;
 
+  recordToolTrace({
+    repoId,
+    taskType: "slice",
+    tool: "slice.build",
+    symbolId: entrySymbols?.[0],
+  });
+
   const buildSliceWithTracing = async (): Promise<SliceBuildResponse> => {
     const requestedWireFormat: SliceBuildWireFormat = wireFormat ?? "compact";
     const effectiveWireFormatVersion =
@@ -952,6 +960,13 @@ export async function handleSliceRefresh(
   const { sliceHandle, knownVersion } = request;
 
   const handleRow = db.getSliceHandle(sliceHandle);
+  if (handleRow) {
+    recordToolTrace({
+      repoId: handleRow.repo_id,
+      taskType: "slice",
+      tool: "slice.refresh",
+    });
+  }
   if (!handleRow) {
     throw new Error(`Slice handle not found: ${sliceHandle}`);
   }
@@ -1057,6 +1072,12 @@ export async function handleSliceSpilloverGet(
   if (!handleRow) {
     throw new Error(`Spillover handle not found: ${spilloverHandle}`);
   }
+
+  recordToolTrace({
+    repoId: handleRow.repo_id,
+    taskType: "slice",
+    tool: "slice.spillover",
+  });
 
   if (!handleRow.spillover_ref) {
     return {

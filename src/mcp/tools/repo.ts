@@ -79,6 +79,12 @@ export async function handleRepoRegister(
   const request = RepoRegisterRequestSchema.parse(args);
   const { repoId, rootPath, ignore, languages, maxFileBytes } = request;
 
+  recordToolTrace({
+    repoId,
+    taskType: "repo",
+    tool: "repo.register",
+  });
+
   const normalizedRoot = normalizePath(rootPath);
   if (
     normalizedRoot.includes("/../") ||
@@ -331,6 +337,12 @@ export async function handleIndexRefresh(
 ): Promise<IndexRefreshResponse> {
   const request = IndexRefreshRequestSchema.parse(args);
   const { repoId, mode } = request;
+
+  recordToolTrace({
+    repoId,
+    taskType: "index",
+    tool: "index.refresh",
+  });
 
   const executeRefresh = async () => {
     const repo = db.getRepo(repoId);

@@ -44,7 +44,11 @@ import { symbolCardCache } from "../../graph/cache.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { rerankByEmbeddings } from "../../indexer/embeddings.js";
 import { generateSummaryWithGuardrails } from "../../indexer/summary-generator.js";
-import { consumePrefetchedKey } from "../../graph/prefetch.js";
+import {
+  consumePrefetchedKey,
+  prefetchCardsForSymbols,
+  prefetchSliceFrontier,
+} from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 type SearchRow = {
   symbol_id: string;
@@ -398,6 +402,12 @@ export async function handleSymbolSearch(
     alpha: config.semantic?.alpha ?? 0.6,
   });
 
+  // Prefetch cards for top search results (anticipating getCard calls)
+  const topSymbolIds = rankedRows.slice(0, 5).map((row) => row.symbol_id);
+  if (topSymbolIds.length > 0) {
+    prefetchCardsForSymbols(request.repoId, topSymbolIds);
+  }
+
   return {
     results: rankedRows.map((row) => ({
       symbolId: row.symbol_id,
@@ -690,6 +700,9 @@ export async function handleSymbolGetCard(
     return result;
   }
 
+  // Prefetch edge targets for anticipated slice.build
+  prefetchSliceFrontier(repoId, [symbolId]);
+
   return { card: result };
 }
 
@@ -707,6 +720,12 @@ export async function handleSymbolGetCards(
 ): Promise<SymbolGetCardsResponse> {
   const { repoId, symbolIds, knownEtags } =
     SymbolGetCardsRequestSchema.parse(args);
+
+  // Consume prefetched keys for batch card requests
+  for (const symbolId of symbolIds) {
+    consumePrefetchedKey(repoId, `card:${symbolId}`);
+  }
+
   const cards = await Promise.all(
     symbolIds.map((id) => buildCardForSymbol(repoId, id, knownEtags?.[id])),
   );

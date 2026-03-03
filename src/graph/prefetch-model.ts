@@ -183,6 +183,23 @@ export function computePriorityBoost(
   if (!gatingConfig.enabled || !predictedTool) {
     return 0;
   }
+  const toolNameToShort: Record<string, string> = {
+    "symbol.getCard": "card",
+    "symbol.getCards": "card",
+    "symbol.search": "search",
+    "slice.build": "slice",
+    "slice.refresh": "slice",
+    "slice.spillover": "slice",
+    "code.getSkeleton": "skeleton",
+    "code.getHotPath": "hotPath",
+    "code.needWindow": "hotPath",
+    "delta.get": "slice",
+    "repo.status": "search",
+    "repo.register": "search",
+    "index.refresh": "search",
+    "pr.risk.analyze": "slice",
+  };
+  const normalized = toolNameToShort[predictedTool] ?? predictedTool;
   const predictedToPrefetchPriority: Record<string, Record<string, number>> = {
     card: {
       "slice-frontier": 20,
@@ -215,7 +232,7 @@ export function computePriorityBoost(
       "startup-warm": 5,
     },
   };
-  const mapping = predictedToPrefetchPriority[predictedTool];
+  const mapping = predictedToPrefetchPriority[normalized];
   if (!mapping) return 0;
   return mapping[taskType] ?? 0;
 }
