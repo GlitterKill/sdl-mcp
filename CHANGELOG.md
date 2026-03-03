@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-03-03
+
+### Added
+
+- Prefetch cache for search→card transitions: `prefetchCardsForSymbols()` eagerly caches cards for top-5 search results, anticipating the most common `symbol.search` → `symbol.getCard` workflow
+- Prefetch edge targets after `symbol.getCard` for anticipated `slice.build` calls via `prefetchSliceFrontier`
+- `"search-cards"` prefetch task type with priority 70 (highest among non-blast-radius tasks)
+- `catch_unwind` safety wrapper in Rust native indexer (`native/src/parse/mod.rs`): tree-sitter C-level panics are caught per-file and converted to `parse_error` strings instead of crashing the Node.js process
+- 8 MiB stack size on Rayon worker threads to prevent stack overflows from deeply-nested ASTs
+- `ready: Promise<void>` on `IndexWatchHandle` interface: resolves when chokidar completes its initial directory scan, enabling callers to reliably wait before performing file operations
+
+### Changed
+
+- Tool trace recording now covers all 13 MCP tools (was 3/13); the prefetch model can now learn real transition patterns across the full tool surface
+- `computePriorityBoost` in `prefetch-model.ts` now normalizes full tool names (e.g., `"symbol.getCard"`) to short keys (e.g., `"card"`) before priority lookup, fixing a mapping gap that caused model predictions to never boost queue priorities
+- Batch `symbol.getCards` now consumes prefetched `card:` keys for each requested symbol
+- Code tools (`needWindow`, `getSkeleton`, `getHotPath`) now consume prefetched `card:` keys at request start
+- Delta tool now consumes prefetched `blast:` keys after computing changed symbols
+- File watcher integration tests await `watcher.ready` before writing files, with increased timeouts (5s→15s) and 500ms FS settle delays
+
+### Fixed
+
+- Prefetch system 0% cache hit rate: search→card prefetch alone targets 40%+ hit rate; combined with edge prefetch and full tool traces, expected 50%+
+- Rust native indexer crash (exit code 0xC0000409 / STATUS_STACK_BUFFER_OVERRUN on Windows) when `SDL_CONFIG` specifies `engine: "rust"`: tree-sitter panics in Rayon worker threads no longer abort the process
+- Three integration tests (`index-refresh-timeout-fixes`, `otel-tracing`, `two-pass-indexing`) crashing with exit code 3221226505 due to inheriting global `SDL_CONFIG` with Rust engine; tests now force `SDL_CONFIG=""` for isolation
+- File watcher integration tests (`file-watch-live`) timing out because `watchRepository()` returned before chokidar's `ready` event fired, causing file events written immediately after to be missed
+
 ## [0.7.1] - 2026-02-28
 
 ### Added
