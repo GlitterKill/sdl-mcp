@@ -7,7 +7,6 @@ import type { IndexProgress } from "./indexer.js";
 
 export interface ScanRepoForIndexResult {
   files: FileMetadata[];
-  existingFiles: FileRow[];
   existingByPath: Map<string, FileRow>;
   removedFiles: number;
 }
@@ -36,6 +35,6 @@ export async function scanRepoForIndex(params: {
     }
   }
 
-  return { files, existingFiles, existingByPath, removedFiles };
+  return { files, existingByPath, removedFiles };
 }
 

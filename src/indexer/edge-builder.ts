@@ -11,9 +11,13 @@ export {
 } from "./edge-builder/symbol-index.js";
 export { resolvePendingCallEdges } from "./edge-builder/pending.js";
 export {
-  cleanupUnresolvedEdges,
-  findEnclosingSymbolByRange,
+  BUILTIN_CONSTRUCTORS,
+  BUILTIN_IDENTIFIERS,
   isBuiltinCall,
+} from "./edge-builder/builtins.js";
+export { cleanupUnresolvedEdges } from "./edge-builder/cleanup.js";
+export {
+  findEnclosingSymbolByRange,
   resolvePass2Targets,
   resolveTsCallEdgesPass2,
 } from "./edge-builder/pass2.js";

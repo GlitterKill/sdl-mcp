@@ -59,6 +59,50 @@ describe("indexer.ts monolith shattering", () => {
     );
   });
 
+  it("keeps edge-builder sub-modules under size limit", () => {
+    const subModuleMaxLines = 700;
+    const edgeBuilderDir = join(repoRoot, "src/indexer/edge-builder");
+    const subModules = [
+      "builtins.ts",
+      "call-resolution.ts",
+      "cleanup.ts",
+      "import-resolution.ts",
+      "pass2.ts",
+      "pending.ts",
+      "symbol-index.ts",
+      "telemetry.ts",
+      "types.ts",
+    ];
+    for (const mod of subModules) {
+      const modPath = join(edgeBuilderDir, mod);
+      assert.ok(existsSync(modPath), `missing edge-builder/${mod}`);
+      const lines = countLines(modPath);
+      assert.ok(
+        lines <= subModuleMaxLines,
+        `edge-builder/${mod} too large (${lines} lines, max ${subModuleMaxLines}); split further`,
+      );
+    }
+  });
+
+  it("keeps parser sub-modules under size limit", () => {
+    const subModuleMaxLines = 700;
+    const parserDir = join(repoRoot, "src/indexer/parser");
+    const subModules = [
+      "helpers.ts",
+      "process-file.ts",
+      "rust-process-file.ts",
+    ];
+    for (const mod of subModules) {
+      const modPath = join(parserDir, mod);
+      assert.ok(existsSync(modPath), `missing parser/${mod}`);
+      const lines = countLines(modPath);
+      assert.ok(
+        lines <= subModuleMaxLines,
+        `parser/${mod} too large (${lines} lines, max ${subModuleMaxLines}); split further`,
+      );
+    }
+  });
+
   it("keeps src/indexer/indexer.ts as a thin orchestrator", () => {
     const indexer = readFileSync(indexerPath, "utf-8");
 
