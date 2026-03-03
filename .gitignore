@@ -88,3 +88,6 @@ nul
 sdl-mcp/.tmp-scripts/
 march2_devsuggestions.md
 index-output.txt
+
+# StrykerJS
+.stryker-tmp/

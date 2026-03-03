@@ -101,7 +101,9 @@ function loadNativeAddon(): NativeAddon | null {
   if (loadAttempted) return nativeAddon;
   loadAttempted = true;
 
+  const overridePath = process.env.SDL_MCP_NATIVE_ADDON_PATH;
   const paths = [
+    ...(overridePath ? [overridePath] : []),
     // Umbrella package with platform-detection loader (installed via npm)
     "sdl-mcp-native",
     // Development: built in native/ directory (local dev builds)
@@ -214,10 +216,36 @@ export function parseFilesRust(
   });
 
   // Call native addon
-  const nativeResults = addon.parseFiles(inputs, threadCount);
+  let nativeResults: NativeParsedFile[];
+  try {
+    nativeResults = addon.parseFiles(inputs, threadCount);
+  } catch (error) {
+    logger.error("Native Rust indexer parseFiles failed; disabling native addon", {
+      error,
+    });
+    nativeAddon = null;
+    return null;
+  }
+
+  if (nativeResults.length !== inputs.length) {
+    logger.error("Native Rust indexer returned unexpected result count", {
+      expected: inputs.length,
+      actual: nativeResults.length,
+    });
+    nativeAddon = null;
+    return null;
+  }
 
   // Convert NativeParsedFile to RustParseResult
-  return nativeResults.map(mapNativeResult);
+  try {
+    return nativeResults.map(mapNativeResult);
+  } catch (error) {
+    logger.error("Failed to map native Rust indexer results; disabling native addon", {
+      error,
+    });
+    nativeAddon = null;
+    return null;
+  }
 }
 
 /**

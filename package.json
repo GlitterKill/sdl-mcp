@@ -62,7 +62,8 @@
     "native:version": "node scripts/sync-native-version.mjs",
     "test:native-parity": "node --import tsx tests/native/parity-test.ts",
     "check:config-sync": "tsx scripts/check-config-sync.ts",
-    "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck"
+    "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck",
+    "test:mutation": "stryker run stryker.conf.cjs"
   },
   "keywords": [
     "mcp",
@@ -109,6 +110,7 @@
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",
     "@opentelemetry/sdk-trace-web": "^1.30.0",
+    "@stryker-mutator/core": "^9.6.0",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
