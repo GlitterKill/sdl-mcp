@@ -139,6 +139,7 @@ export interface ProcessFileParams {
   onProgress?: (progress: IndexProgress) => void;
   workerPool?: ParserWorkerPool | null;
   skipCallResolution?: boolean;
+  globalNameToSymbolIds?: Map<string, string[]>;
 }
 
 async function processFile(params: ProcessFileParams): Promise<{
@@ -163,6 +164,7 @@ async function processFile(params: ProcessFileParams): Promise<{
     onProgress: _onProgress,
     workerPool,
     skipCallResolution,
+    globalNameToSymbolIds,
   } = params;
   try {
     if (mode === "incremental" && existingFile?.last_indexed_at) {
@@ -537,6 +539,7 @@ async function processFile(params: ProcessFileParams): Promise<{
             importResolution.importedNameToSymbolIds,
             importResolution.namespaceImports,
             adapter,
+            globalNameToSymbolIds,
           );
 
           if (!resolved) {
@@ -566,6 +569,10 @@ async function processFile(params: ProcessFileParams): Promise<{
             createdCallEdges?.add(edgeKey);
             edgesCreated++;
           } else if (resolved.targetName) {
+            // Skip built-in method/constructor calls that can never resolve
+            if (isBuiltinCall(resolved.targetName)) {
+              continue;
+            }
             // 36-1.3: Unresolved edge - still useful for graph traversal
             // Use a placeholder symbol ID that encodes the unresolved target
             const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
@@ -706,6 +713,7 @@ async function processFileFromRustResult(params: {
   config: RepoConfig;
   allSymbolsByName: Map<string, SymbolRow[]>;
   skipCallResolution: boolean;
+  globalNameToSymbolIds?: Map<string, string[]>;
 }): Promise<{
   symbolsIndexed: number;
   edgesCreated: number;
@@ -727,6 +735,7 @@ async function processFileFromRustResult(params: {
     config: _config,
     allSymbolsByName: _allSymbolsByName,
     skipCallResolution,
+    globalNameToSymbolIds,
   } = params;
 
   try {
@@ -993,6 +1002,7 @@ async function processFileFromRustResult(params: {
             importResolution.importedNameToSymbolIds,
             importResolution.namespaceImports,
             adapter,
+            globalNameToSymbolIds,
           );
 
           if (!resolved) continue;
@@ -1016,6 +1026,10 @@ async function processFileFromRustResult(params: {
             createdCallEdges.add(edgeKey);
             edgesCreated++;
           } else if (resolved.targetName) {
+            // Skip built-in method/constructor calls that can never resolve
+            if (isBuiltinCall(resolved.targetName)) {
+              continue;
+            }
             const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
             const edgeKey = `${symbolId}->${unresolvedTargetId}`;
             if (createdCallEdges.has(edgeKey)) continue;
@@ -1390,6 +1404,7 @@ function resolveCallTarget(
   importedNameToSymbolIds: Map<string, string[]>,
   namespaceImports: Map<string, Map<string, string>>,
   adapter?: LanguageAdapter | null,
+  globalNameToSymbolIds?: Map<string, string[]>,
 ): ResolvedCallTarget | null {
   if (adapter?.resolveCall) {
     const adapterResolved = adapter.resolveCall({
@@ -1468,7 +1483,7 @@ function resolveCallTarget(
       symbolId: candidates[0],
       isResolved: true,
       strategy: "heuristic",
-      confidence: cleaned.includes(".") ? 0.68 : 0.8,
+      confidence: cleaned.includes(".") ? 0.68 : 0.9,
     });
   }
 
@@ -1481,6 +1496,20 @@ function resolveCallTarget(
       candidateCount: candidates.length,
       targetName: identifier,
     });
+  }
+
+  // Global symbol index fallback: try repo-wide symbol lookup for cross-file calls.
+  // Only resolve when there is a single unique match (high confidence).
+  if (globalNameToSymbolIds && identifier) {
+    const globalCandidates = globalNameToSymbolIds.get(identifier);
+    if (globalCandidates && globalCandidates.length === 1) {
+      return finalizeCallResolution({
+        symbolId: globalCandidates[0],
+        isResolved: true,
+        strategy: "heuristic",
+        confidence: 0.9,
+      });
+    }
   }
 
   // No candidates at all - still create an unresolved edge if we have a name
@@ -1654,6 +1683,7 @@ async function resolveTsCallEdgesPass2(params: {
   tsResolver: TsCallResolver | null;
   languages: string[];
   createdCallEdges: Set<string>;
+  globalNameToSymbolIds?: Map<string, string[]>;
 }): Promise<number> {
   const {
     repoId,
@@ -1663,6 +1693,7 @@ async function resolveTsCallEdgesPass2(params: {
     tsResolver,
     languages,
     createdCallEdges,
+    globalNameToSymbolIds,
   } = params;
   if (!isTsCallResolutionFile(fileMeta.path)) {
     return 0;
@@ -1803,6 +1834,7 @@ async function resolveTsCallEdgesPass2(params: {
           importResolution.importedNameToSymbolIds,
           importResolution.namespaceImports,
           adapter,
+          globalNameToSymbolIds,
         );
         if (!resolved) continue;
 
@@ -1823,6 +1855,10 @@ async function resolveTsCallEdgesPass2(params: {
           createdCallEdges.add(edgeKey);
           createdEdges++;
         } else if (resolved.targetName) {
+          // Skip built-in method/constructor calls that can never resolve
+          if (isBuiltinCall(resolved.targetName)) {
+            continue;
+          }
           const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
           const edgeKey = `${detail.symbolId}->${unresolvedTargetId}`;
           if (createdCallEdges.has(edgeKey)) continue;
@@ -1886,6 +1922,112 @@ async function resolveTsCallEdgesPass2(params: {
     );
     return 0;
   }
+}
+
+// Built-in JS/TS method names that can never resolve to repo symbols.
+// Filtering these from unresolved edges reduces totalCallEdges denominator.
+const BUILTIN_IDENTIFIERS = new Set([
+  // Array prototype
+  "push", "pop", "shift", "unshift", "splice", "slice", "concat",
+  "map", "filter", "reduce", "reduceRight", "find", "findIndex",
+  "some", "every", "includes", "indexOf", "lastIndexOf",
+  "sort", "reverse", "flat", "flatMap", "fill", "copyWithin",
+  "forEach", "entries", "keys", "values", "join", "at",
+  // String prototype
+  "split", "trim", "trimStart", "trimEnd", "replace", "replaceAll",
+  "startsWith", "endsWith",
+  "toLowerCase", "toUpperCase", "toLocaleLowerCase", "toLocaleUpperCase",
+  "match", "matchAll", "search", "padStart", "padEnd",
+  "charAt", "charCodeAt", "codePointAt", "repeat", "substring",
+  "localeCompare",
+  // Object static
+  "assign", "freeze", "defineProperty",
+  "getOwnPropertyNames", "getPrototypeOf", "create", "fromEntries",
+  // Math static
+  "floor", "ceil", "round", "max", "min", "abs", "sqrt", "pow", "random", "log",
+  // JSON
+  "stringify", "parse",
+  // Number/Date
+  "toFixed", "toPrecision", "toISOString", "getTime", "toLocaleString",
+  "parseInt", "parseFloat", "isNaN", "isFinite", "isInteger",
+  // Promise
+  "then", "catch", "finally",
+  // Map/Set/WeakMap/WeakSet instance
+  "has", "get", "set", "delete", "clear", "add",
+  // Console
+  "warn", "error", "info", "debug", "trace",
+  // RegExp
+  "test", "exec",
+  // Node.js fs/path/url/events
+  "readFileSync", "writeFileSync", "existsSync", "mkdirSync",
+  "readFile", "writeFile", "readdir", "readdirSync", "stat", "statSync",
+  "resolve", "dirname", "basename", "extname", "relative", "isAbsolute",
+  "fileURLToPath", "pathToFileURL",
+  "on", "off", "once", "emit", "removeListener", "removeAllListeners",
+  // process
+  "exit", "cwd", "env",
+  // SQLite/DB
+  "prepare", "run", "all", "transaction", "close",
+  // Zod schema builder methods
+  "object", "string", "number", "boolean", "array", "enum", "optional",
+  "nullable", "default", "describe", "int", "transform", "refine",
+  "union", "intersection", "literal", "tuple", "record", "lazy",
+  "coerce", "safeParse", "parseAsync", "passthrough", "strict",
+  "extend", "merge", "pick", "omit", "partial", "required", "shape",
+  "min", "max", "length", "email", "url", "uuid", "regex",
+  // tree-sitter AST node methods
+  "childForFieldName", "children", "namedChildren", "childCount",
+  "namedChild", "child", "firstChild", "lastChild", "nextSibling",
+  "previousSibling", "parent", "descendantsOfType", "walk",
+  "startPosition", "endPosition",
+  // Rust standard library
+  "to_string", "unwrap", "unwrap_or", "unwrap_or_else",
+  "expect", "is_some", "is_none", "is_ok", "is_err",
+  "ok", "err", "as_ref", "as_mut", "as_str", "as_bytes",
+  "collect", "iter", "into_iter", "len", "is_empty",
+  "contains", "clone", "to_owned", "into", "from",
+  "fmt", "display", "write_str", "write_fmt",
+  // Testing frameworks
+  "it", "beforeEach", "afterEach", "beforeAll", "afterAll",
+  // Global functions
+  "encodeURIComponent", "decodeURIComponent", "encodeURI", "decodeURI",
+  "setTimeout", "clearTimeout", "setInterval", "clearInterval",
+  "requestAnimationFrame", "cancelAnimationFrame",
+  "atob", "btoa", "fetch",
+  // Misc
+  "toString", "valueOf", "toJSON", "iterator",
+  "isArray", "write", "update", "next", "done", "send", "end",
+]);
+
+// Built-in constructors that will never resolve to repo symbols
+const BUILTIN_CONSTRUCTORS = new Set([
+  "Map", "Set", "WeakMap", "WeakSet", "Error", "TypeError", "RangeError",
+  "SyntaxError", "ReferenceError", "Date", "RegExp", "Promise",
+  "Array", "Object", "Number", "String", "Boolean", "Symbol",
+  "Int8Array", "Uint8Array", "Float32Array", "Float64Array",
+  "ArrayBuffer", "SharedArrayBuffer", "DataView", "Proxy", "Reflect",
+  "URL", "URLSearchParams", "AbortController", "AbortSignal",
+  "TextEncoder", "TextDecoder", "ReadableStream", "WritableStream",
+  "Buffer", "EventEmitter", "Headers", "Request", "Response", "FormData",
+  // Rust standard types (extracted as constructors)
+  "Vec", "HashMap", "HashSet", "BTreeMap", "BTreeSet",
+  "Some", "None", "Ok", "Err", "Box", "Rc", "Arc", "Cell", "RefCell",
+  "Mutex", "RwLock", "PathBuf", "OsString", "CString",
+]);
+
+/** Check if an unresolved call target is a built-in that should be skipped. */
+function isBuiltinCall(targetName: string): boolean {
+  if (BUILTIN_IDENTIFIERS.has(targetName) || BUILTIN_CONSTRUCTORS.has(targetName)) {
+    return true;
+  }
+  // Handle compound names like "Vec::new", "HashMap::new", "Some(x)"
+  if (targetName.includes(":")) {
+    const parts = targetName.split(":");
+    if (parts.some(p => BUILTIN_CONSTRUCTORS.has(p) || BUILTIN_IDENTIFIERS.has(p))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function cleanupUnresolvedEdges(repoId: string): void {
@@ -1968,6 +2110,14 @@ function cleanupUnresolvedEdges(repoId: string): void {
       if (nodeBuiltins.has(namePart)) {
         return true;
       }
+      // Skip built-in JS/TS method calls that can never resolve to repo symbols
+      if (BUILTIN_IDENTIFIERS.has(namePart)) {
+        return true;
+      }
+      // Skip built-in constructor calls
+      if (BUILTIN_CONSTRUCTORS.has(namePart)) {
+        return true;
+      }
       // Skip if name contains package-like pattern (e.g., "tree-sitter:Parser")
       if (
         namePart.includes(":") &&
@@ -2009,18 +2159,34 @@ function cleanupUnresolvedEdges(repoId: string): void {
   for (const edge of unresolvedEdges) {
     const target = edge.to_symbol_id;
 
-    // IE-K.3: Skip external package edges (don't try to resolve, don't warn)
+    // Delete built-in JS/TS method and constructor call edges that can never resolve.
+    // These inflate the totalCallEdges denominator without providing value.
+    if (target.startsWith("unresolved:call:")) {
+      const namePart = target.slice("unresolved:call:".length);
+      if (isBuiltinCall(namePart)) {
+        deleteEdgeStmt.run(edge.from_symbol_id, edge.to_symbol_id);
+        continue;
+      }
+    }
+
+    // IE-K.3: External package edges - delete call edges (they inflate the
+    // denominator), skip import edges (they represent real dependencies).
     if (isExternalPackage(target, edge.type)) {
+      if (edge.type === "call") {
+        deleteEdgeStmt.run(edge.from_symbol_id, edge.to_symbol_id);
+      }
       continue;
     }
 
     let matchingSymbolId: string | undefined;
+    let isUniqueMatch = false;
 
     // Format 1: unresolved:call:functionName - simple call edge
     const callMatch = target.match(/^unresolved:call:(.+)$/);
     if (callMatch) {
       const targetName = callMatch[1];
-      const match = getRepoSymbolsCached().find((sym: SymbolRow) => {
+      // Find ALL matches to determine uniqueness for confidence scoring
+      const allMatches = getRepoSymbolsCached().filter((sym: SymbolRow) => {
         if (sym.name === targetName) return true;
         if (targetName.includes(":")) {
           const parts: string[] = targetName.split(":");
@@ -2028,7 +2194,10 @@ function cleanupUnresolvedEdges(repoId: string): void {
         }
         return false;
       });
-      matchingSymbolId = match?.symbol_id;
+      if (allMatches.length > 0) {
+        matchingSymbolId = allMatches[0].symbol_id;
+        isUniqueMatch = allMatches.length === 1;
+      }
     }
 
     // Format 2: unresolved:path/to/file.js:symbolName - import edge with file path
@@ -2134,17 +2303,32 @@ function cleanupUnresolvedEdges(repoId: string): void {
     if (matchingSymbolId) {
       deleteEdgeStmt.run(edge.from_symbol_id, edge.to_symbol_id);
 
+      // Set proper strategy/confidence based on match quality instead of
+      // copying the original "unresolved" strategy and low confidence.
+      const resolvedStrategy: "heuristic" | "exact" = callMatch
+        ? "heuristic"
+        : (edge.resolution_strategy === "exact" ? "exact" : "heuristic");
+      const resolvedConfidence = callMatch
+        ? (isUniqueMatch ? 0.9 : 0.5)
+        : ((edge.confidence ?? 0) >= 0.9 ? edge.confidence! : 0.7);
+
       createEdgeTransaction({
         repo_id: edge.repo_id,
         from_symbol_id: edge.from_symbol_id,
         to_symbol_id: matchingSymbolId,
         type: edge.type,
         weight: edge.type === "import" ? 0.6 : 1.0,
-        confidence: edge.confidence,
-        resolution_strategy: edge.resolution_strategy,
+        confidence: resolvedConfidence,
+        resolution_strategy: resolvedStrategy,
         provenance: edge.provenance,
         created_at: new Date().toISOString(),
       });
+    } else if (callMatch) {
+      // Unresolved call edge with no matching symbol in the repo.
+      // These are calls to external APIs (VS Code, D3, TypeScript compiler,
+      // etc.) that will never resolve. Delete them to avoid inflating the
+      // totalCallEdges denominator.
+      deleteEdgeStmt.run(edge.from_symbol_id, edge.to_symbol_id);
     }
   }
 }
@@ -2292,11 +2476,16 @@ export async function indexRepo(
   });
 
   const allSymbolsByName = new Map<string, SymbolRow[]>();
+  const globalNameToSymbolIds = new Map<string, string[]>();
   const repoSymbols = getSymbolsByRepo(repoId);
   for (const symbol of repoSymbols) {
     const byName = allSymbolsByName.get(symbol.name) ?? [];
     byName.push(symbol);
     allSymbolsByName.set(symbol.name, byName);
+
+    const byId = globalNameToSymbolIds.get(symbol.name) ?? [];
+    byId.push(symbol.symbol_id);
+    globalNameToSymbolIds.set(symbol.name, byId);
   }
 
   let filesProcessed = 0;
@@ -2375,6 +2564,7 @@ export async function indexRepo(
             config,
             allSymbolsByName,
             skipCallResolution,
+            globalNameToSymbolIds,
           });
           filesProcessed++;
           if (result.changed) {
@@ -2432,6 +2622,7 @@ export async function indexRepo(
             onProgress,
             workerPool,
             skipCallResolution,
+            globalNameToSymbolIds,
           });
           filesProcessed++;
           if (result.changed) {
@@ -2504,6 +2695,7 @@ export async function indexRepo(
       tsResolver,
       languages: config.languages,
       createdCallEdges,
+      globalNameToSymbolIds,
     });
     totalEdgesCreated += pass2Edges;
     pass2Processed++;
