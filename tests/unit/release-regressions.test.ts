@@ -61,7 +61,7 @@ describe("release regression guards", () => {
   });
 
   it("uses native Rust symbol IDs/fingerprints and full-file content in Rust pass-1", () => {
-    const source = readSource("src/indexer/indexer.ts");
+    const source = readSource("src/indexer/parser/rust-process-file.ts");
 
     assert.match(
       source,
