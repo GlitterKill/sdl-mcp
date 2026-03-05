@@ -1,5 +1,7 @@
 import * as crypto from "crypto";
+
 import type { SymbolCard } from "../mcp/types.js";
+import { normalizePath } from "./paths.js";
 
 export type NormalizedValue =
   | null
@@ -21,6 +23,11 @@ export function generateSymbolId(
   astFingerprint: string,
 ): string {
   const combined = `${repoId}:${relPath}:${kind}:${name}:${astFingerprint}`;
+  return crypto.createHash("sha256").update(combined).digest("hex");
+}
+
+export function generateFileId(repoId: string, relPath: string): string {
+  const combined = `${repoId}:${normalizePath(relPath)}`;
   return crypto.createHash("sha256").update(combined).digest("hex");
 }
 

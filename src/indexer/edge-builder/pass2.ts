@@ -1,15 +1,8 @@
 import { join } from "path";
 
-import {
-  createEdgeTransaction,
-  deleteOutgoingCallEdgesBySymbol,
-  getEdgesByRepo,
-  getFile,
-  getFileByRepoPath,
-  getSymbol,
-  getSymbolsByFile,
-} from "../../db/queries.js";
-import type { SymbolKind, SymbolRow } from "../../db/schema.js";
+import type { SymbolKind } from "../../db/schema.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import { readFileAsync } from "../../util/asyncFs.js";
 import { logger } from "../../util/logger.js";
 import { getAdapterForExtension } from "../adapter/registry.js";
@@ -23,12 +16,12 @@ import { incRecord, isTsCallResolutionFile, pushTelemetrySample } from "./teleme
 import type { CallResolutionTelemetry } from "./telemetry.js";
 import type { SymbolIndex, TsCallResolver } from "./types.js";
 
-function resolvePass2Targets(params: {
+async function resolvePass2Targets(params: {
   repoId: string;
   mode: "full" | "incremental";
   tsFiles: FileMetadata[];
   changedTsFilePaths: Set<string>;
-}): FileMetadata[] {
+}): Promise<FileMetadata[]> {
   const { repoId, mode, tsFiles, changedTsFilePaths } = params;
   if (mode === "full") {
     return tsFiles;
@@ -37,16 +30,18 @@ function resolvePass2Targets(params: {
     return [];
   }
 
+  const conn = await getKuzuConn();
+
   const tsFilesByPath = new Map(tsFiles.map((file) => [file.path, file]));
   const targetPaths = new Set<string>(changedTsFilePaths);
   const changedSymbolIds = new Set<string>();
 
   for (const changedPath of changedTsFilePaths) {
-    const file = getFileByRepoPath(repoId, changedPath);
+    const file = await kuzuDb.getFileByRepoPath(conn, repoId, changedPath);
     if (!file) continue;
-    const symbols = getSymbolsByFile(file.file_id);
-    for (const symbol of symbols) {
-      changedSymbolIds.add(symbol.symbol_id);
+    const symbolIds = await kuzuDb.getSymbolIdsByFile(conn, file.fileId);
+    for (const symbolId of symbolIds) {
+      changedSymbolIds.add(symbolId);
     }
   }
 
@@ -56,15 +51,40 @@ function resolvePass2Targets(params: {
       .filter((file): file is FileMetadata => Boolean(file));
   }
 
-  const importEdges = getEdgesByRepo(repoId).filter((edge) => edge.type === "import");
-  for (const edge of importEdges) {
-    if (!changedSymbolIds.has(edge.to_symbol_id)) continue;
-    const fromSymbol = getSymbol(edge.from_symbol_id);
-    if (!fromSymbol) continue;
-    const fromFile = getFile(fromSymbol.file_id);
-    if (!fromFile) continue;
-    if (!isTsCallResolutionFile(fromFile.rel_path)) continue;
-    targetPaths.add(fromFile.rel_path);
+  const incomingByToSymbol = await kuzuDb.getEdgesToSymbols(
+    conn,
+    Array.from(changedSymbolIds),
+  );
+
+  const importerSymbolIds = new Set<string>();
+  for (const edges of incomingByToSymbol.values()) {
+    for (const edge of edges) {
+      if (edge.edgeType !== "import") continue;
+      importerSymbolIds.add(edge.fromSymbolId);
+    }
+  }
+
+  if (importerSymbolIds.size === 0) {
+    return Array.from(targetPaths)
+      .map((path) => tsFilesByPath.get(path))
+      .filter((file): file is FileMetadata => Boolean(file));
+  }
+
+  const importerSymbols = await kuzuDb.getSymbolsByIds(
+    conn,
+    Array.from(importerSymbolIds),
+  );
+  const fileIds = new Set<string>();
+  for (const symbol of importerSymbols.values()) {
+    fileIds.add(symbol.fileId);
+  }
+
+  const importerFiles = await kuzuDb.getFilesByIds(conn, Array.from(fileIds));
+  for (const symbol of importerSymbols.values()) {
+    const file = importerFiles.get(symbol.fileId);
+    if (!file) continue;
+    if (!isTsCallResolutionFile(file.relPath)) continue;
+    targetPaths.add(file.relPath);
   }
 
   return Array.from(targetPaths)
@@ -99,6 +119,7 @@ async function resolveTsCallEdgesPass2(params: {
   }
 
   try {
+    const conn = await getKuzuConn();
     const filePath = join(repoRoot, fileMeta.path);
     const content = await readFileAsync(filePath, "utf-8");
     const ext = fileMeta.path.split(".").pop() || "";
@@ -134,11 +155,11 @@ async function resolveTsCallEdgesPass2(params: {
       symbolsWithNodeIds as any,
     );
 
-    const fileRecord = getFileByRepoPath(repoId, fileMeta.path);
+    const fileRecord = await kuzuDb.getFileByRepoPath(conn, repoId, fileMeta.path);
     if (!fileRecord) {
       return 0;
     }
-    const existingSymbols = getSymbolsByFile(fileRecord.file_id);
+    const existingSymbols = await kuzuDb.getSymbolsByFile(conn, fileRecord.fileId);
     if (telemetry) {
       telemetry.pass2SymbolMapping.existingSymbols += existingSymbols.length;
     }
@@ -184,14 +205,14 @@ async function resolveTsCallEdgesPass2(params: {
       `${kind}:${name}`;
 
     const symbolIdByFullKey = new Map<string, string>();
-    const symbolsByStartKey = new Map<string, SymbolRow[]>();
-    const symbolsByStartLineKey = new Map<string, SymbolRow[]>();
-    const symbolsByNameKindKey = new Map<string, SymbolRow[]>();
+    const symbolsByStartKey = new Map<string, kuzuDb.SymbolRow[]>();
+    const symbolsByStartLineKey = new Map<string, kuzuDb.SymbolRow[]>();
+    const symbolsByNameKindKey = new Map<string, kuzuDb.SymbolRow[]>();
 
     const pushSymbol = (
-      map: Map<string, SymbolRow[]>,
+      map: Map<string, kuzuDb.SymbolRow[]>,
       key: string,
-      symbol: SymbolRow,
+      symbol: kuzuDb.SymbolRow,
     ): void => {
       const existing = map.get(key) ?? [];
       existing.push(symbol);
@@ -200,29 +221,29 @@ async function resolveTsCallEdgesPass2(params: {
 
     for (const symbol of existingSymbols) {
       const range = {
-        startLine: symbol.range_start_line,
-        startCol: symbol.range_start_col,
-        endLine: symbol.range_end_line,
-        endCol: symbol.range_end_col,
+        startLine: symbol.rangeStartLine,
+        startCol: symbol.rangeStartCol,
+        endLine: symbol.rangeEndLine,
+        endCol: symbol.rangeEndCol,
       };
 
       symbolIdByFullKey.set(
-        toFullKey(symbol.kind, symbol.name, range),
-        symbol.symbol_id,
+        toFullKey(symbol.kind as SymbolKind, symbol.name, range),
+        symbol.symbolId,
       );
       pushSymbol(
         symbolsByStartKey,
-        toStartKey(symbol.kind, symbol.name, range),
+        toStartKey(symbol.kind as SymbolKind, symbol.name, range),
         symbol,
       );
       pushSymbol(
         symbolsByStartLineKey,
-        toStartLineKey(symbol.kind, symbol.name, range),
+        toStartLineKey(symbol.kind as SymbolKind, symbol.name, range),
         symbol,
       );
       pushSymbol(
         symbolsByNameKindKey,
-        toNameKindKey(symbol.kind, symbol.name),
+        toNameKindKey(symbol.kind as SymbolKind, symbol.name),
         symbol,
       );
     }
@@ -250,7 +271,7 @@ async function resolveTsCallEdgesPass2(params: {
       );
       if (startCandidates && startCandidates.length === 1) {
         return {
-          symbolId: startCandidates[0].symbol_id,
+          symbolId: startCandidates[0].symbolId,
           strategy: "start_only",
         };
       }
@@ -264,7 +285,7 @@ async function resolveTsCallEdgesPass2(params: {
       );
       if (startLineCandidates && startLineCandidates.length === 1) {
         return {
-          symbolId: startLineCandidates[0].symbol_id,
+          symbolId: startLineCandidates[0].symbolId,
           strategy: "start_line",
         };
       }
@@ -274,7 +295,7 @@ async function resolveTsCallEdgesPass2(params: {
       );
       if (nameKindCandidates && nameKindCandidates.length === 1) {
         return {
-          symbolId: nameKindCandidates[0].symbol_id,
+          symbolId: nameKindCandidates[0].symbolId,
           strategy: "name_kind_unique",
         };
       }
@@ -326,10 +347,15 @@ async function resolveTsCallEdgesPass2(params: {
       return 0;
     }
 
-    for (const detail of filteredSymbolDetails) {
-      deleteOutgoingCallEdgesBySymbol(detail.symbolId);
+    const symbolIdsToRefresh = filteredSymbolDetails.map((detail) => detail.symbolId);
+    await kuzuDb.deleteOutgoingEdgesByTypeForSymbols(
+      conn,
+      symbolIdsToRefresh,
+      "call",
+    );
+    for (const symbolId of symbolIdsToRefresh) {
       for (const edgeKey of Array.from(createdCallEdges)) {
-        if (edgeKey.startsWith(`${detail.symbolId}->`)) {
+        if (edgeKey.startsWith(`${symbolId}->`)) {
           createdCallEdges.delete(edgeKey);
         }
       }
@@ -354,6 +380,9 @@ async function resolveTsCallEdgesPass2(params: {
       adapter.languageId,
       content,
     );
+
+    const edgesToInsert: kuzuDb.EdgeRow[] = [];
+    const now = new Date().toISOString();
 
     let createdEdges = 0;
     for (const detail of filteredSymbolDetails) {
@@ -382,16 +411,16 @@ async function resolveTsCallEdgesPass2(params: {
             if (telemetry) telemetry.adapterCalls.duplicates++;
             continue;
           }
-          createEdgeTransaction({
-            repo_id: repoId,
-            from_symbol_id: detail.symbolId,
-            to_symbol_id: resolved.symbolId,
-            type: "call",
+          edgesToInsert.push({
+            repoId,
+            fromSymbolId: detail.symbolId,
+            toSymbolId: resolved.symbolId,
+            edgeType: "call",
             weight: 1.0,
             confidence: resolved.confidence,
-            resolution_strategy: resolved.strategy,
+            resolution: resolved.strategy,
             provenance: `call:${call.calleeIdentifier}`,
-            created_at: new Date().toISOString(),
+            createdAt: now,
           });
           createdCallEdges.add(edgeKey);
           createdEdges++;
@@ -414,16 +443,16 @@ async function resolveTsCallEdgesPass2(params: {
             if (telemetry) telemetry.adapterCalls.duplicates++;
             continue;
           }
-          createEdgeTransaction({
-            repo_id: repoId,
-            from_symbol_id: detail.symbolId,
-            to_symbol_id: unresolvedTargetId,
-            type: "call",
+          edgesToInsert.push({
+            repoId,
+            fromSymbolId: detail.symbolId,
+            toSymbolId: unresolvedTargetId,
+            edgeType: "call",
             weight: 0.5,
             confidence: resolved.confidence,
-            resolution_strategy: "unresolved",
+            resolution: "unresolved",
             provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
-            created_at: new Date().toISOString(),
+            createdAt: now,
           });
           createdCallEdges.add(edgeKey);
           createdEdges++;
@@ -446,7 +475,7 @@ async function resolveTsCallEdgesPass2(params: {
           if (telemetry) telemetry.tsResolverCalls.skippedNoFromSymbol++;
           continue;
         }
-        const toSymbolId = resolveSymbolIdFromIndex(
+        const toSymbolId = await resolveSymbolIdFromIndex(
           symbolIndex,
           repoId,
           tsCall.callee.filePath,
@@ -471,16 +500,16 @@ async function resolveTsCallEdgesPass2(params: {
           if (telemetry) telemetry.tsResolverCalls.skippedDuplicate++;
           continue;
         }
-        createEdgeTransaction({
-          repo_id: repoId,
-          from_symbol_id: fromSymbolId,
-          to_symbol_id: toSymbolId,
-          type: "call",
+        edgesToInsert.push({
+          repoId,
+          fromSymbolId,
+          toSymbolId,
+          edgeType: "call",
           weight: 1.0,
           confidence: tsCall.confidence ?? 1.0,
-          resolution_strategy: "exact",
+          resolution: "exact",
           provenance: `ts-call:${tsCall.callee.name}`,
-          created_at: new Date().toISOString(),
+          createdAt: now,
         });
         createdCallEdges.add(edgeKey);
         createdEdges++;
@@ -488,6 +517,7 @@ async function resolveTsCallEdgesPass2(params: {
       }
     }
 
+    await kuzuDb.insertEdges(conn, edgesToInsert);
     return createdEdges;
   } catch (error) {
     logger.warn(
@@ -509,6 +539,7 @@ function findEnclosingSymbolByRange(
   symbols: Array<{
     extractedSymbol: {
       nodeId: string;
+      kind: string;
       range: {
         startLine: number;
         startCol: number;
@@ -518,7 +549,8 @@ function findEnclosingSymbolByRange(
     };
   }>,
 ): string | null {
-  let bestMatch: { nodeId: string; size: number } | null = null;
+  let bestNonVariable: { nodeId: string; size: number } | null = null;
+  let bestVariable: { nodeId: string; size: number } | null = null;
 
   for (const detail of symbols) {
     const symRange = detail.extractedSymbol.range;
@@ -539,12 +571,20 @@ function findEnclosingSymbolByRange(
       symRange.endLine -
       symRange.startLine +
       (symRange.endCol - symRange.startCol);
-    if (!bestMatch || size < bestMatch.size) {
-      bestMatch = { nodeId: detail.extractedSymbol.nodeId, size };
+
+    if (detail.extractedSymbol.kind === "variable") {
+      if (!bestVariable || size < bestVariable.size) {
+        bestVariable = { nodeId: detail.extractedSymbol.nodeId, size };
+      }
+      continue;
+    }
+
+    if (!bestNonVariable || size < bestNonVariable.size) {
+      bestNonVariable = { nodeId: detail.extractedSymbol.nodeId, size };
     }
   }
 
-  return bestMatch?.nodeId ?? null;
+  return bestNonVariable?.nodeId ?? bestVariable?.nodeId ?? null;
 }
 
 

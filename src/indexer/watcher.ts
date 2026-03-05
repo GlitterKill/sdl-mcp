@@ -15,7 +15,8 @@ import {
   WATCHER_DEFAULT_MAX_WATCHED_FILES,
 } from "../config/constants.js";
 import { loadConfig } from "../config/loadConfig.js";
-import { getFilesByRepo, getRepo } from "../db/queries.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 import { normalizePath } from "../util/paths.js";
 
 import type { IndexWatchHandle, WatcherHealth } from "./indexer.js";
@@ -106,23 +107,24 @@ export function _clearWatcherHealthForTesting(repoId: string): void {
   watcherHealthByRepo.delete(repoId);
 }
 
-export function watchRepositoryWithIndexer(
+export async function watchRepositoryWithIndexer(
   repoId: string,
   indexRepo: IndexRepoFn,
-): IndexWatchHandle {
-  const repoRow = getRepo(repoId);
+): Promise<IndexWatchHandle> {
+  const conn = await getKuzuConn();
+  const repoRow = await kuzuDb.getRepo(conn, repoId);
   if (!repoRow) {
     throw new Error(`Repository ${repoId} not found`);
   }
 
-  const repoConfig: RepoConfig = JSON.parse(repoRow.config_json);
+  const repoConfig: RepoConfig = JSON.parse(repoRow.configJson);
   const ignorePatterns = repoConfig.ignore ?? [];
   const extensions = repoConfig.languages.map((lang) => `.${lang}`);
 
   const appConfig = loadConfig();
   const maxWatchedFiles =
     appConfig.indexing?.maxWatchedFiles ?? WATCHER_DEFAULT_MAX_WATCHED_FILES;
-  const estimatedFileCount = getFilesByRepo(repoId).length;
+  const estimatedFileCount = await kuzuDb.getFileCount(conn, repoId);
   if (estimatedFileCount > maxWatchedFiles) {
     throw new Error(
       `Watcher cap exceeded for ${repoId}: ${estimatedFileCount} files > maxWatchedFiles ${maxWatchedFiles}`,
@@ -240,7 +242,7 @@ export function watchRepositoryWithIndexer(
   const startWatcher = (): RuntimeWatcher => {
     const chokidar = loadChokidar();
     if (chokidar) {
-      const watcher = chokidar.watch(repoRow.root_path, {
+      const watcher = chokidar.watch(repoRow.rootPath, {
         ignored: ignorePatterns,
         ignoreInitial: true,
         awaitWriteFinish: {
@@ -264,7 +266,7 @@ export function watchRepositoryWithIndexer(
       });
 
       const chokidarHandler = (filePath: string): void => {
-        const relPath = normalizePath(relative(repoRow.root_path, filePath));
+        const relPath = normalizePath(relative(repoRow.rootPath, filePath));
         handler(relPath);
       };
 
@@ -285,7 +287,7 @@ export function watchRepositoryWithIndexer(
     }
 
     const fsWatcher = watch(
-      repoRow.root_path,
+      repoRow.rootPath,
       { recursive: true },
       (_eventType, filename) => {
         if (!filename) return;
@@ -391,4 +393,3 @@ function shouldIgnorePath(path: string, ignorePatterns: string[]): boolean {
   }
   return false;
 }
-

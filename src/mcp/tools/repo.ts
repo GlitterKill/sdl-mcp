@@ -10,7 +10,8 @@ import {
   RepoOverviewRequestSchema,
   RepoOverviewResponse,
 } from "../tools.js";
-import * as db from "../../db/queries.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import {
   getWatcherHealth,
   indexRepo,
@@ -123,24 +124,15 @@ export async function handleRepoRegister(
     workspaceGlobs,
   };
 
-  const existingRepo = db.getRepo(repoId);
+  const conn = await getKuzuConn();
+  const existingRepo = await kuzuDb.getRepo(conn, repoId);
 
-  if (existingRepo) {
-    // Update existing repo
-    db.updateRepo(repoId, {
-      root_path: rootPath,
-      config_json: JSON.stringify(config),
-    });
-  } else {
-    // Create new repo
-    const repoRow = {
-      repo_id: repoId,
-      root_path: rootPath,
-      config_json: JSON.stringify(config),
-      created_at: new Date().toISOString(),
-    };
-    db.createRepo(repoRow);
-  }
+  await kuzuDb.upsertRepo(conn, {
+    repoId,
+    rootPath: normalizedRoot,
+    configJson: JSON.stringify(config),
+    createdAt: existingRepo?.createdAt ?? new Date().toISOString(),
+  });
 
   return {
     ok: true,
@@ -245,14 +237,15 @@ export async function handleRepoStatus(
       tool: "repo.status",
     });
 
-    const repo = db.getRepo(repoId);
+    const conn = await getKuzuConn();
+    const repo = await kuzuDb.getRepo(conn, repoId);
     if (!repo) {
       throw new DatabaseError(`Repository ${repoId} not found`);
     }
 
-    const latestVersion = db.getLatestVersion(repoId);
-    const files = db.getFilesByRepo(repoId);
-    const symbolsIndexed = db.countSymbolsByRepo(repoId);
+    const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+    const files = await kuzuDb.getFilesByRepo(conn, repoId);
+    const symbolsIndexed = await kuzuDb.getSymbolCount(conn, repoId);
     const health = await getRepoHealthSnapshot(repoId);
     const watcherHealth = getWatcherHealth(repoId);
     const prefetchStats = getPrefetchStats(repoId);
@@ -277,20 +270,20 @@ export async function handleRepoStatus(
     });
 
     const lastIndexedFile = files
-      .filter((f) => f.last_indexed_at !== null)
+      .filter((f) => f.lastIndexedAt !== null)
       .sort(
         (a, b) =>
-          new Date(b.last_indexed_at!).getTime() -
-          new Date(a.last_indexed_at!).getTime(),
+          new Date(b.lastIndexedAt!).getTime() -
+          new Date(a.lastIndexedAt!).getTime(),
       )[0];
 
     return {
       repoId,
-      rootPath: repo.root_path,
-      latestVersionId: latestVersion?.version_id ?? null,
+      rootPath: repo.rootPath,
+      latestVersionId: latestVersion?.versionId ?? null,
       filesIndexed: files.length,
       symbolsIndexed,
-      lastIndexedAt: lastIndexedFile?.last_indexed_at ?? null,
+      lastIndexedAt: lastIndexedFile?.lastIndexedAt ?? null,
       healthScore: health.score,
       healthComponents: health.components,
       healthAvailable: health.available,
@@ -345,7 +338,8 @@ export async function handleIndexRefresh(
   });
 
   const executeRefresh = async () => {
-    const repo = db.getRepo(repoId);
+    const conn = await getKuzuConn();
+    const repo = await kuzuDb.getRepo(conn, repoId);
     if (!repo) {
       throw new DatabaseError(`Repository ${repoId} not found`);
     }
@@ -419,12 +413,13 @@ export async function handleRepoOverview(
   const request = RepoOverviewRequestSchema.parse(args);
   const { repoId } = request;
 
-  const repo = db.getRepo(repoId);
+  const conn = await getKuzuConn();
+  const repo = await kuzuDb.getRepo(conn, repoId);
   if (!repo) {
     throw new DatabaseError(`Repository ${repoId} not found`);
   }
 
-  const overview = buildRepoOverview(request);
+  const overview = await buildRepoOverview(request);
 
   return overview;
 }

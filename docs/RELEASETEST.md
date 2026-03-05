@@ -27,8 +27,8 @@ cd F:\Claude\projects\sdl-mcp\sdl-mcp
 # Clean build
 npm run build:all
 
-# Clean database (fresh start)
-Remove-Item .\\data\\sdlmcp.sqlite* -ErrorAction SilentlyContinue
+# Clean graph database (fresh start)
+Remove-Item -Recurse -Force .\\data\\sdl-mcp-graph -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force .\\.sdl-sync -ErrorAction SilentlyContinue
 ```
 
@@ -96,7 +96,7 @@ node dist/cli/index.js serve --stdio
 **Expected:** Server starts and shows startup logs on stderr.
 
 - [ ] "Loading configuration..." appears
-- [ ] "Running database migrations..." appears
+- [ ] "Initializing KuzuDB..." appears
 - [ ] "Registering MCP tools..." appears
 - [ ] "SDL-MCP server running..." appears
 - [ ] No stdout output (stdout reserved for JSON-RPC)
@@ -551,5 +551,5 @@ Test with each supported client:
 
 **Tested By:** _______________
 **Date:** _______________
-**Version:** 0.6.0
+**Version:** 0.8.0
 **Result:** PASS / FAIL

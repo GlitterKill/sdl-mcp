@@ -1,34 +1,39 @@
 import { readFileSync, statSync } from "fs";
 import { join } from "path";
-import * as db from "../db/queries.js";
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { CodeWindowResponse, Range } from "../mcp/types.js";
 import { normalizePath } from "../util/paths.js";
 import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
 import { MAX_FILE_BYTES } from "../config/constants.js";
 import { logger } from "../util/logger.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 
-export function extractCodeWindow(
+export async function extractCodeWindow(
   repoId: RepoId,
   symbolId: SymbolId,
-): CodeWindowResponse | null {
-  const symbol = db.getSymbol(symbolId);
-  if (!symbol) return null;
+): Promise<CodeWindowResponse | null> {
+  const conn = await getKuzuConn();
 
-  const file = db.getFile(symbol.file_id);
+  const symbol = await kuzuDb.getSymbol(conn, symbolId);
+  if (!symbol) return null;
+  if (symbol.repoId !== repoId) return null;
+
+  const files = await kuzuDb.getFilesByIds(conn, [symbol.fileId]);
+  const file = files.get(symbol.fileId);
   if (!file) return null;
 
-  const repo = db.getRepo(repoId);
+  const repo = await kuzuDb.getRepo(conn, repoId);
   if (!repo) return null;
 
-  const filePath = join(repo.root_path, file.rel_path);
+  const filePath = join(repo.rootPath, file.relPath);
 
   let fileContent: string;
   try {
     const fileStat = statSync(filePath);
     if (fileStat.size > MAX_FILE_BYTES) {
       logger.warn("File exceeds size limit for code window", {
-        filePath: file.rel_path,
+        filePath: file.relPath,
         fileSize: fileStat.size,
         maxFileBytes: MAX_FILE_BYTES,
       });
@@ -37,7 +42,7 @@ export function extractCodeWindow(
     fileContent = readFileSync(filePath, "utf-8");
   } catch (error) {
     logger.warn("Failed to read file for code window", {
-      filePath: file.rel_path,
+      filePath: file.relPath,
       error: error instanceof Error ? error.message : String(error),
     });
     return null;
@@ -45,8 +50,8 @@ export function extractCodeWindow(
 
   const lines = fileContent.split("\n");
 
-  const startLine = symbol.range_start_line;
-  const endLine = symbol.range_end_line;
+  const startLine = symbol.rangeStartLine;
+  const endLine = symbol.rangeEndLine;
 
   if (startLine < 1 || endLine > lines.length || startLine > endLine) {
     return null;
@@ -57,9 +62,9 @@ export function extractCodeWindow(
 
   const range: Range = {
     startLine,
-    startCol: symbol.range_start_col,
+    startCol: symbol.rangeStartCol,
     endLine,
-    endCol: symbol.range_end_col,
+    endCol: symbol.rangeEndCol,
   };
 
   const estimatedTokens = Math.ceil(code.length / 4);
@@ -68,7 +73,7 @@ export function extractCodeWindow(
     approved: true,
     repoId,
     symbolId,
-    file: file.rel_path,
+    file: file.relPath,
     range,
     code,
     whyApproved: [],

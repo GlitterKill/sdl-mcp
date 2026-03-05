@@ -1,8 +1,9 @@
 import { MCPServer } from "./server.js";
 import { ConfigError, DatabaseError } from "./mcp/errors.js";
 import { loadConfig } from "./config/loadConfig.js";
-import { getDb } from "./db/db.js";
-import { runMigrations } from "./db/migrations.js";
+import { activateCliConfigPath } from "./config/configPath.js";
+import { initGraphDb } from "./db/initGraphDb.js";
+import { closeKuzuDb } from "./db/kuzu.js";
 import { CLEANUP_INTERVAL_MS } from "./config/constants.js";
 
 // MCP servers must use stderr for logging - stdout is reserved for JSON-RPC
@@ -25,20 +26,11 @@ async function main(): Promise<void> {
 
   try {
     log("Loading configuration...");
-    const configPath = process.env.SDL_CONFIG;
-    const config = loadConfig(configPath);
+    const resolvedConfigPath = activateCliConfigPath(process.env.SDL_CONFIG);
+    const config = loadConfig(resolvedConfigPath);
 
-    const dbPath = process.env.SDL_DB_PATH ?? config.dbPath;
-    log(`Initializing database connection at ${dbPath}...`);
-    const db = getDb(dbPath);
-
-    log("Running database migrations...");
-    const migrationResult = runMigrations(db);
-    if (migrationResult.applied.length > 0) {
-      log(`Applied ${migrationResult.applied.length} migration(s).`);
-    } else {
-      log("No pending migrations to apply.");
-    }
+    const graphDbPath = await initGraphDb(config, resolvedConfigPath);
+    log(`Graph database initialized at ${graphDbPath}`);
 
     // Dynamic imports AFTER migrations - these modules prepare SQL statements
     log("Registering MCP tools...");
@@ -48,9 +40,10 @@ async function main(): Promise<void> {
     if (config.indexing?.enableFileWatching) {
       log("Starting file watchers...");
       const { watchRepository } = await import("./indexer/indexer.js");
-      for (const repo of config.repos) {
-        watchers.push(watchRepository(repo.repoId));
-      }
+      const handles = await Promise.all(
+        config.repos.map((repo) => watchRepository(repo.repoId)),
+      );
+      watchers.push(...handles);
       log(`File watchers started for ${watchers.length} repo(s).`);
     }
 
@@ -58,10 +51,21 @@ async function main(): Promise<void> {
     const { cleanupExpiredSliceHandles } = await import("./mcp/tools/slice.js");
     const cleanupInterval = setInterval(() => {
       try {
-        const deleted = cleanupExpiredSliceHandles();
-        if (deleted > 0) {
-          log(`Cleaned up ${deleted} expired slice handle(s)`);
-        }
+        const maybePromise = cleanupExpiredSliceHandles() as unknown as
+          | number
+          | Promise<number>;
+
+        void Promise.resolve(maybePromise)
+          .then((deleted) => {
+            if (deleted > 0) {
+              log(`Cleaned up ${deleted} expired slice handle(s)`);
+            }
+          })
+          .catch((error: unknown) => {
+            process.stderr.write(
+              `[sdl-mcp] Slice handle cleanup error: ${error}\n`,
+            );
+          });
       } catch (error) {
         process.stderr.write(
           `[sdl-mcp] Slice handle cleanup error: ${error}\n`,
@@ -82,6 +86,7 @@ async function main(): Promise<void> {
       );
       clearInterval(cleanupInterval);
       await server.stop();
+      await closeKuzuDb();
       for (const watcher of watchers) {
         try {
           await watcher.close();

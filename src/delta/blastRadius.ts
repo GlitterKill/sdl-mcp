@@ -1,6 +1,17 @@
-import type { Graph } from "../graph/buildGraph.js";
-import type { SymbolId, RepoId } from "../db/schema.js";
+import * as crypto from "crypto";
+import type { Connection } from "kuzu";
+import type { RepoId, SymbolId } from "../db/schema.js";
+import {
+  batchComputeFanInOut,
+  batchGetFanInAtVersion,
+  getEdgesToSymbols,
+  getFilesByIds,
+  getProcessStepsAfterSymbol,
+  getProcessesForSymbol,
+  getSymbolsByIds,
+} from "../db/kuzu-queries.js";
 import { logger } from "../util/logger.js";
+import { DatabaseError } from "../mcp/errors.js";
 import type {
   BlastRadiusItem,
   DiagnosticSuspect,
@@ -8,9 +19,6 @@ import type {
   SpilloverHandle,
   SliceBudget,
 } from "../mcp/types.js";
-import { getNeighbors } from "../graph/buildGraph.js";
-import * as db from "../db/queries.js";
-import * as crypto from "crypto";
 import {
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
@@ -43,104 +51,187 @@ export interface GovernorLoopResult {
 
 interface DependentMetrics {
   distance: number;
-  fanIn: number;
-  testProximity: number;
 }
 
-export function computeBlastRadius(
+interface ProcessDependentMetrics {
+  distance: number;
+  rank: number;
+  reason: string;
+}
+
+function assertSafeInt(value: number, name: string): void {
+  if (!Number.isSafeInteger(value)) {
+    throw new DatabaseError(`${name} must be a safe integer, got: ${String(value)}`);
+  }
+}
+
+export async function computeBlastRadius(
+  conn: Connection,
   changedSymbols: SymbolId[],
-  graph: Graph,
   options?: BlastRadiusOptions,
-): BlastRadiusItem[] {
+): Promise<BlastRadiusItem[]> {
   const maxHops = options?.maxHops ?? 3;
   const maxResults = options?.maxResults ?? 20;
+  const repoId = options?.repoId;
 
   if (maxHops <= 0) {
     logger.warn("Invalid maxHops value, using default of 3", { maxHops });
     return [];
   }
 
-  const dependentScores = new Map<SymbolId, DependentMetrics>();
-  const processedChangedSymbols = new Set<SymbolId>(changedSymbols);
+  if (changedSymbols.length === 0) {
+    return [];
+  }
 
-  for (const changedSymbol of changedSymbols) {
-    const queue: Array<{ symbolId: SymbolId; distance: number }> = [
-      { symbolId: changedSymbol, distance: 0 },
-    ];
-    const visited = new Set<SymbolId>();
+  assertSafeInt(maxHops, "maxHops");
+  assertSafeInt(maxResults, "maxResults");
 
-    while (queue.length > 0) {
-      const { symbolId, distance } = queue.shift()!;
+  const safeMaxHops = Math.max(1, Math.min(maxHops, 10));
+  const safeMaxResults = Math.max(0, Math.min(maxResults, 5000));
 
-      if (visited.has(symbolId)) continue;
-      visited.add(symbolId);
+  const changedSet = new Set(changedSymbols);
+  const visited = new Set<SymbolId>(changedSet);
+  const distanceBySymbol = new Map<SymbolId, DependentMetrics>();
 
-      if (distance > maxHops) continue;
-      if (processedChangedSymbols.has(symbolId)) continue;
+  let frontier: SymbolId[] = Array.from(changedSet);
 
-      const symbol = graph.symbols.get(symbolId);
-      if (!symbol) {
-        logger.warn("Symbol not found in graph, skipping", { symbolId });
-        continue;
+  for (let distance = 1; distance <= safeMaxHops; distance++) {
+    if (frontier.length === 0) break;
+
+    const incoming = await getEdgesToSymbols(conn, frontier);
+    const nextFrontier: SymbolId[] = [];
+
+    for (const edges of incoming.values()) {
+      for (const edge of edges) {
+        if (repoId && edge.repoId !== repoId) continue;
+
+        const dependentId = edge.fromSymbolId as SymbolId;
+        if (changedSet.has(dependentId)) continue;
+        if (visited.has(dependentId)) continue;
+
+        visited.add(dependentId);
+        distanceBySymbol.set(dependentId, { distance });
+        nextFrontier.push(dependentId);
       }
+    }
 
-      const fanIn = graph.adjacencyIn.get(symbolId)?.length ?? 0;
-      const file = db.getFile(symbol.file_id);
-      const testProximity = file && isTestFile(file.rel_path) ? 1 : 0;
+    frontier = nextFrontier;
+  }
 
-      const existing = dependentScores.get(symbolId);
-      if (!existing || distance < existing.distance) {
-        dependentScores.set(symbolId, {
-          distance,
-          fanIn,
-          testProximity,
-        });
-      }
+  const dependentIds = Array.from(distanceBySymbol.keys());
+  const graphDependents: BlastRadiusItem[] = [];
 
-      const incomingNeighbors = getNeighbors(graph, symbolId, "in");
-      for (const neighbor of incomingNeighbors) {
-        if (!visited.has(neighbor) && !processedChangedSymbols.has(neighbor)) {
-          queue.push({ symbolId: neighbor, distance: distance + 1 });
-        }
-      }
+  if (dependentIds.length > 0) {
+    const fanInOutMap = await batchComputeFanInOut(conn, dependentIds);
+    const symbolsMap = await getSymbolsByIds(conn, dependentIds);
+
+    const fileIds = new Set<string>();
+    for (const symbol of symbolsMap.values()) {
+      fileIds.add(symbol.fileId);
+    }
+    const filesMap = await getFilesByIds(conn, Array.from(fileIds));
+
+    for (const [symbolId, { distance }] of distanceBySymbol) {
+      const fanIn = fanInOutMap.get(symbolId)?.fanIn ?? 0;
+      const symbol = symbolsMap.get(symbolId);
+      const relPath = symbol ? filesMap.get(symbol.fileId)?.relPath : null;
+      const testProximity = relPath && isTestFile(relPath) ? 1 : 0;
+
+      const normalizedDistance = 1 - distance / safeMaxHops;
+      const normalizedFanIn = Math.log(fanIn + 1) / Math.log(100);
+      const rank =
+        0.6 * normalizedDistance +
+        0.3 * normalizedFanIn +
+        0.1 * testProximity;
+
+      const reason =
+        distance === 1 ? "calls changed symbol" : "dependency of changed symbol";
+
+      const signal: BlastRadiusItem["signal"] =
+        distance === 1 ? "directDependent" : "graph";
+
+      graphDependents.push({
+        symbolId,
+        reason,
+        distance,
+        rank: Math.max(0, Math.min(1, rank)),
+        signal,
+      });
     }
   }
 
-  const dependents: BlastRadiusItem[] = [];
+  const processDependentsBySymbol = new Map<SymbolId, ProcessDependentMetrics>();
 
-  Array.from(dependentScores.entries()).forEach(([symbolId, metrics]) => {
-    const normalizedDistance = 1 - metrics.distance / maxHops;
-    const normalizedFanIn = Math.log(metrics.fanIn + 1) / Math.log(100);
-    const rank =
-      0.6 * normalizedDistance +
-      0.3 * normalizedFanIn +
-      0.1 * metrics.testProximity;
+  try {
+    for (const changedSymbolId of changedSet) {
+      const processes = await getProcessesForSymbol(conn, changedSymbolId);
+      for (const proc of processes) {
+        const downstream = await getProcessStepsAfterSymbol(
+          conn,
+          proc.processId,
+          changedSymbolId,
+        );
 
-    const reason =
-      metrics.distance === 0
-        ? "calls changed symbol"
-        : "dependency of changed symbol";
+        for (const step of downstream) {
+          const symbolId = step.symbolId as SymbolId;
+          if (changedSet.has(symbolId)) continue;
 
-    const signal: "diagnostic" | "directDependent" | "graph" =
-      metrics.distance === 0 ? "directDependent" : "graph";
+          const stepDistance = step.stepOrder - proc.stepOrder;
+          if (stepDistance <= 0) continue;
 
-    dependents.push({
-      symbolId,
-      reason,
-      distance: metrics.distance,
-      rank: Math.max(0, Math.min(1, rank)),
-      signal,
-    });
-  });
+          const existing = processDependentsBySymbol.get(symbolId);
+          if (existing && existing.distance <= stepDistance) continue;
 
-  const ranked = rankDependents(dependents).slice(0, maxResults);
+          const rank = Math.max(0, Math.min(1, 1 - stepDistance / 20));
+          processDependentsBySymbol.set(symbolId, {
+            distance: stepDistance,
+            rank,
+            reason: `downstream in ${proc.label}`,
+          });
+        }
+      }
+    }
+  } catch {
+    // graceful degradation without process data
+  }
+
+  const processDependents: BlastRadiusItem[] = Array.from(
+    processDependentsBySymbol.entries(),
+  ).map(([symbolId, info]) => ({
+    symbolId,
+    reason: info.reason,
+    distance: info.distance,
+    rank: info.rank,
+    signal: "process" as const,
+  }));
+
+  const mergedBySymbol = new Map<SymbolId, BlastRadiusItem>();
+  for (const item of processDependents) {
+    mergedBySymbol.set(item.symbolId, item);
+  }
+  for (const item of graphDependents) {
+    mergedBySymbol.set(item.symbolId, item);
+  }
+
+  const mergedDependents = Array.from(mergedBySymbol.values());
+  if (mergedDependents.length === 0) {
+    return [];
+  }
+
+  const ranked = rankDependents(mergedDependents).slice(0, safeMaxResults);
 
   // Attach fan-in trend data when version IDs are provided
-  const { fromVersionId, toVersionId, repoId } = options ?? {};
+  const { fromVersionId, toVersionId } = options ?? {};
   if (fromVersionId && toVersionId && repoId) {
+    const rankedSymbolIds = ranked.map((item) => item.symbolId);
+    const [previousMap, currentMap] = await Promise.all([
+      batchGetFanInAtVersion(conn, repoId, rankedSymbolIds, fromVersionId),
+      batchGetFanInAtVersion(conn, repoId, rankedSymbolIds, toVersionId),
+    ]);
+
     for (const item of ranked) {
-      const previous = db.getFanInAtVersion(repoId, item.symbolId, fromVersionId);
-      const current = db.getFanInAtVersion(repoId, item.symbolId, toVersionId);
+      const previous = previousMap.get(item.symbolId) ?? 0;
+      const current = currentMap.get(item.symbolId) ?? 0;
       const growthRate = (current - previous) / Math.max(previous, 1);
 
       if (growthRate !== 0) {
@@ -217,8 +308,8 @@ function generateSpilloverHandle(): SpilloverHandle {
 }
 
 export async function runGovernorLoop(
+  conn: Connection,
   changedSymbols: SymbolId[],
-  graph: Graph,
   options: GovernorLoopOptions,
 ): Promise<GovernorLoopResult> {
   const budget = options.budget ?? {
@@ -228,7 +319,7 @@ export async function runGovernorLoop(
   const maxHops = options.maxHops ?? 3;
   const maxBlastRadius = budget.maxCards ?? DEFAULT_MAX_CARDS;
 
-  const candidateBlastRadius = computeBlastRadius(changedSymbols, graph, {
+  const candidateBlastRadius = await computeBlastRadius(conn, changedSymbols, {
     maxHops,
     maxResults: maxBlastRadius * 2,
     repoId: options.repoId,
@@ -246,10 +337,7 @@ export async function runGovernorLoop(
       const timeoutMs = options.diagnosticsTimeoutMs ?? 5000;
       const startTime = Date.now();
 
-      const { suspects } = await runDiagnosticsWithTimeout(
-        options.repoId,
-        timeoutMs,
-      );
+      const { suspects } = await runDiagnosticsWithTimeout(options.repoId, timeoutMs);
 
       if (Date.now() - startTime <= timeoutMs) {
         diagnosticSuspects = suspects;
@@ -268,9 +356,15 @@ export async function runGovernorLoop(
     maxBlastRadius * 2,
   );
 
+  const symbolIdsForBudget = Array.from(
+    new Set(mergedBlastRadius.map((item) => item.symbolId)),
+  );
+  const symbolsById = await getSymbolsByIds(conn, symbolIdsForBudget);
+
   const { trimmedSet, spilloverHandle } = applyBudgetedSelection(
     mergedBlastRadius,
     budget,
+    symbolsById,
   );
 
   const finalBlastRadius = trimmedBlastRadius(mergedBlastRadius, trimmedSet);
@@ -294,6 +388,7 @@ async function runDiagnosticsWithTimeout(
 function applyBudgetedSelection(
   blastRadius: BlastRadiusItem[],
   budget: SliceBudget,
+  symbolsById: Map<string, { name: string; signatureJson: string | null; summary: string | null }>,
 ): { trimmedSet: TrimmedSet; spilloverHandle: SpilloverHandle | null } {
   const maxCards = budget.maxCards ?? DEFAULT_MAX_CARDS;
   const maxTokens = budget.maxEstimatedTokens ?? DEFAULT_MAX_TOKENS_SLICE;
@@ -318,7 +413,8 @@ function applyBudgetedSelection(
   }> = [];
 
   for (const item of prioritized) {
-    const estimatedTokens = estimateItemTokens(item);
+    const symbol = symbolsById.get(item.symbolId);
+    const estimatedTokens = symbol ? estimateSymbolTokens(symbol) : 50;
 
     if (
       keptSymbols.length >= maxCards ||
@@ -352,6 +448,25 @@ function applyBudgetedSelection(
   return { trimmedSet, spilloverHandle };
 }
 
+function estimateSymbolTokens(symbol: {
+  name: string;
+  signatureJson: string | null;
+  summary: string | null;
+}): number {
+  let tokens = 50;
+  tokens += symbol.name.length / 4;
+
+  if (symbol.signatureJson) {
+    tokens += symbol.signatureJson.length / 4;
+  }
+
+  if (symbol.summary) {
+    tokens += Math.min(symbol.summary.length / 4, 150);
+  }
+
+  return Math.ceil(tokens);
+}
+
 interface PrioritizedBlastRadiusItem extends BlastRadiusItem {
   priority: "must" | "should" | "optional";
 }
@@ -366,9 +481,11 @@ function prioritizeBlastRadius(
 
     if (item.signal === "diagnostic") {
       priority = "must";
-    } else if (item.distance === 0 && item.signal === "directDependent") {
+    } else if (item.distance === 1 && item.signal === "directDependent") {
       priority = "must";
-    } else if (item.distance === 1) {
+    } else if (item.signal === "process") {
+      priority = "should";
+    } else if (item.distance === 2) {
       priority = "should";
     } else {
       priority = "optional";
@@ -383,8 +500,7 @@ function prioritizeBlastRadius(
   const priorityWeight = { must: 3, should: 2, optional: 1 };
 
   return prioritized.sort((a, b) => {
-    const priorityDiff =
-      priorityWeight[b.priority] - priorityWeight[a.priority];
+    const priorityDiff = priorityWeight[b.priority] - priorityWeight[a.priority];
     if (priorityDiff !== 0) return priorityDiff;
 
     const rankDiff = b.rank - a.rank;
@@ -395,24 +511,6 @@ function prioritizeBlastRadius(
 
     return a.symbolId.localeCompare(b.symbolId);
   });
-}
-
-function estimateItemTokens(item: BlastRadiusItem): number {
-  const symbol = db.getSymbol(item.symbolId);
-  if (!symbol) return 50;
-
-  let tokens = 50;
-  tokens += symbol.name.length / 4;
-
-  if (symbol.signature_json) {
-    tokens += symbol.signature_json.length / 4;
-  }
-
-  if (symbol.summary) {
-    tokens += Math.min(symbol.summary.length / 4, 150);
-  }
-
-  return Math.ceil(tokens);
 }
 
 function trimmedBlastRadius(

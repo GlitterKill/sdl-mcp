@@ -20,6 +20,7 @@ import type {
   ExtractedSymbol as CallExtractedSymbol,
 } from "./treesitter/extractCalls.js";
 import type { FileMetadata } from "./fileScanner.js";
+import type { ClusterAssignment, ProcessTrace } from "./cluster-types.js";
 
 const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -80,6 +81,43 @@ interface NativeParsedFile {
   parseError: string | null;
 }
 
+interface NativeClusterSymbol {
+  symbolId: string;
+}
+
+interface NativeClusterEdge {
+  fromSymbolId: string;
+  toSymbolId: string;
+}
+
+interface NativeClusterAssignment {
+  symbolId: string;
+  clusterId: string;
+  membershipScore: number;
+}
+
+interface NativeProcessSymbol {
+  symbolId: string;
+  name: string;
+}
+
+interface NativeProcessCallEdge {
+  callerId: string;
+  calleeId: string;
+}
+
+interface NativeProcessStep {
+  symbolId: string;
+  stepOrder: number;
+}
+
+interface NativeProcess {
+  processId: string;
+  entrySymbolId: string;
+  steps: NativeProcessStep[];
+  depth: number;
+}
+
 interface NativeAddon {
   parseFiles(files: NativeFileInput[], threadCount: number): NativeParsedFile[];
   hashContentNative(content: string): string;
@@ -90,12 +128,36 @@ interface NativeAddon {
     name: string,
     fingerprint: string,
   ): string;
+  computeClusters(
+    symbols: NativeClusterSymbol[],
+    edges: NativeClusterEdge[],
+    minClusterSize: number,
+  ): NativeClusterAssignment[];
+  traceProcesses(
+    symbols: NativeProcessSymbol[],
+    callEdges: NativeProcessCallEdge[],
+    maxDepth: number,
+    entryPatterns: string[],
+  ): NativeProcess[];
 }
 
 // --- Addon loading ---
 
 let nativeAddon: NativeAddon | null = null;
 let loadAttempted = false;
+
+function isCompatibleNativeAddon(addon: unknown): addon is NativeAddon {
+  if (!addon || typeof addon !== "object") return false;
+
+  const maybe = addon as Partial<NativeAddon>;
+  return (
+    typeof maybe.parseFiles === "function" &&
+    typeof maybe.hashContentNative === "function" &&
+    typeof maybe.generateSymbolIdNative === "function" &&
+    typeof maybe.computeClusters === "function" &&
+    typeof maybe.traceProcesses === "function"
+  );
+}
 
 function loadNativeAddon(): NativeAddon | null {
   if (loadAttempted) return nativeAddon;
@@ -104,18 +166,28 @@ function loadNativeAddon(): NativeAddon | null {
   const overridePath = process.env.SDL_MCP_NATIVE_ADDON_PATH;
   const paths = [
     ...(overridePath ? [overridePath] : []),
-    // Umbrella package with platform-detection loader (installed via npm)
-    "sdl-mcp-native",
     // Development: built in native/ directory (local dev builds)
     join(__dirname, "..", "..", "native", "sdl-mcp-native.node"),
     join(__dirname, "..", "..", "native", "index.node"),
+    // Umbrella package with platform-detection loader (installed via npm)
+    "sdl-mcp-native",
   ];
 
   for (const addonPath of paths) {
     try {
-      nativeAddon = require(addonPath) as NativeAddon;
+      const loaded = require(addonPath) as unknown;
+      if (!isCompatibleNativeAddon(loaded)) {
+        logger.warn("Native Rust indexer found but incompatible; ignoring", {
+          path: addonPath,
+          exports:
+            loaded && typeof loaded === "object" ? Object.keys(loaded) : [],
+        });
+        continue;
+      }
+
+      nativeAddon = loaded;
       logger.info("Loaded native Rust indexer", { path: addonPath });
-      return nativeAddon;
+      return loaded;
     } catch {
       // Try next path
     }
@@ -270,6 +342,45 @@ export function generateSymbolIdRust(
   const addon = loadNativeAddon();
   if (!addon) return null;
   return addon.generateSymbolIdNative(repoId, relPath, kind, name, fingerprint);
+}
+
+export function computeClustersRust(
+  symbols: NativeClusterSymbol[],
+  edges: NativeClusterEdge[],
+  minClusterSize: number = 3,
+): ClusterAssignment[] | null {
+  const addon = loadNativeAddon();
+  if (!addon) return null;
+
+  try {
+    return addon.computeClusters(symbols, edges, minClusterSize);
+  } catch (error) {
+    logger.error("Native Rust cluster detection failed; disabling native addon", {
+      error,
+    });
+    nativeAddon = null;
+    return null;
+  }
+}
+
+export function traceProcessesRust(
+  symbols: NativeProcessSymbol[],
+  callEdges: NativeProcessCallEdge[],
+  maxDepth: number = 20,
+  entryPatterns: string[] = [],
+): ProcessTrace[] | null {
+  const addon = loadNativeAddon();
+  if (!addon) return null;
+
+  try {
+    return addon.traceProcesses(symbols, callEdges, maxDepth, entryPatterns);
+  } catch (error) {
+    logger.error("Native Rust process tracing failed; disabling native addon", {
+      error,
+    });
+    nativeAddon = null;
+    return null;
+  }
 }
 
 // --- Type mapping ---

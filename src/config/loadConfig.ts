@@ -33,10 +33,11 @@ export function loadConfig(configPath?: string): AppConfig {
 
   try {
     const rawContent = readFileSync(filePath, "utf-8");
+    const normalizedContent = rawContent.replace(/^\uFEFF/, "");
     let parsedConfig: unknown;
 
     try {
-      parsedConfig = JSON.parse(rawContent);
+      parsedConfig = JSON.parse(normalizedContent);
     } catch (err) {
       if (err instanceof SyntaxError) {
         throw new Error(`Invalid JSON in config file: ${filePath}`);

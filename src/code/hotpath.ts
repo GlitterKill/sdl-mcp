@@ -1,7 +1,6 @@
 import { readFileSync, statSync } from "fs";
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { Range } from "../mcp/types.js";
-import { getSymbol, getFile, getRepo } from "../db/queries.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
 import Parser from "tree-sitter";
@@ -13,6 +12,8 @@ import {
   MAX_FILE_BYTES,
 } from "../config/constants.js";
 import { logger } from "../util/logger.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 
 const tsParser = new Parser();
 const tsxParser = new Parser();
@@ -251,32 +252,35 @@ function buildHotPathExcerpt(
   };
 }
 
-export function extractHotPath(
+export async function extractHotPath(
   repoId: RepoId,
   symbolId: SymbolId,
   identifiersToFind: string[],
   options: HotPathOptions = {},
-): HotPathResult | null {
-  const symbol = getSymbol(symbolId);
+): Promise<HotPathResult | null> {
+  const conn = await getKuzuConn();
+
+  const symbol = await kuzuDb.getSymbol(conn, symbolId);
   if (!symbol) return null;
 
-  if (symbol.repo_id !== repoId) return null;
+  if (symbol.repoId !== repoId) return null;
 
-  const file = getFile(symbol.file_id);
+  const files = await kuzuDb.getFilesByIds(conn, [symbol.fileId]);
+  const file = files.get(symbol.fileId);
   if (!file) return null;
 
-  const repo = getRepo(repoId);
+  const repo = await kuzuDb.getRepo(conn, repoId);
   if (!repo) return null;
 
-  const filePath = getAbsolutePathFromRepoRoot(repo.root_path, file.rel_path);
-  const extension = file.rel_path.split(".").pop() || "";
+  const filePath = getAbsolutePathFromRepoRoot(repo.rootPath, file.relPath);
+  const extension = file.relPath.split(".").pop() || "";
 
   let content: string;
   try {
     const fileStat = statSync(filePath);
     if (fileStat.size > MAX_FILE_BYTES) {
       logger.warn("File exceeds size limit for hot path extraction", {
-        filePath: file.rel_path,
+        filePath: file.relPath,
         fileSize: fileStat.size,
         maxFileBytes: MAX_FILE_BYTES,
       });
@@ -285,7 +289,7 @@ export function extractHotPath(
     content = readFileSync(filePath, "utf-8");
   } catch (error) {
     logger.warn("Failed to read file for hot path extraction", {
-      filePath: file.rel_path,
+      filePath: file.relPath,
       error: error instanceof Error ? error.message : String(error),
     });
     return null;

@@ -4,7 +4,8 @@ import {
   PolicySetRequestSchema,
   PolicySetResponse,
 } from "../tools.js";
-import * as db from "../../db/queries.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { DatabaseError } from "../errors.js";
@@ -23,13 +24,14 @@ export async function handlePolicyGet(
   const request = PolicyGetRequestSchema.parse(args);
   const { repoId } = request;
 
-  const repo = db.getRepo(repoId);
+  const conn = await getKuzuConn();
+  const repo = await kuzuDb.getRepo(conn, repoId);
   if (!repo) {
     throw new DatabaseError(`Repository ${repoId} not found`);
   }
 
   const appConfig = loadConfig();
-  const configJson = JSON.parse(repo.config_json);
+  const configJson = JSON.parse(repo.configJson);
   const repoPolicy =
     configJson.policy && typeof configJson.policy === "object"
       ? configJson.policy
@@ -58,13 +60,14 @@ export async function handlePolicySet(
   const request = PolicySetRequestSchema.parse(args);
   const { repoId, policyPatch } = request;
 
-  const repo = db.getRepo(repoId);
+  const conn = await getKuzuConn();
+  const repo = await kuzuDb.getRepo(conn, repoId);
   if (!repo) {
     throw new DatabaseError(`Repository ${repoId} not found`);
   }
 
   const appConfig = loadConfig();
-  const configJson = JSON.parse(repo.config_json);
+  const configJson = JSON.parse(repo.configJson);
   const existingPolicyOverrides =
     configJson.policy && typeof configJson.policy === "object"
       ? configJson.policy
@@ -76,8 +79,11 @@ export async function handlePolicySet(
   });
   configJson.policy = mergedOverrides;
 
-  db.updateRepo(repoId, {
-    config_json: JSON.stringify(configJson),
+  await kuzuDb.upsertRepo(conn, {
+    repoId,
+    rootPath: repo.rootPath,
+    configJson: JSON.stringify(configJson),
+    createdAt: repo.createdAt,
   });
 
   return {

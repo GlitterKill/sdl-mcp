@@ -1,31 +1,36 @@
-import type { VersionId, SymbolVersionRow } from "../db/schema.js";
+import type { Connection } from "kuzu";
+
+import type { VersionId } from "../db/schema.js";
 import type {
   DeltaPack,
   DeltaSymbolChange,
   DeltaSymbolChangeWithTiers,
   StalenessTiers,
 } from "../mcp/types.js";
-import { getDb } from "../db/db.js";
 import { logger } from "../util/logger.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 import {
   STABILITY_SCORE_INTERFACE,
   STABILITY_SCORE_BEHAVIOR,
   STABILITY_SCORE_SIDE_EFFECTS,
 } from "../config/constants.js";
 
-function getSymbolVersions(versionId: string): SymbolVersionRow[] {
-  return getDb()
-    .prepare("SELECT * FROM symbol_versions WHERE version_id = ?")
-    .all(versionId) as SymbolVersionRow[];
+async function getSymbolVersions(
+  conn: Connection,
+  versionId: string,
+): Promise<kuzuDb.SymbolVersionRow[]> {
+  return kuzuDb.getSymbolVersionsAtVersion(conn, versionId);
 }
 
-export function computeDelta(
+export async function computeDelta(
   repoId: string,
   fromVersion: VersionId,
   toVersion: VersionId,
-): DeltaPack {
-  const fromVersions = getSymbolVersions(fromVersion);
-  const toVersions = getSymbolVersions(toVersion);
+): Promise<DeltaPack> {
+  const conn = await getKuzuConn();
+  const fromVersions = await getSymbolVersions(conn, fromVersion);
+  const toVersions = await getSymbolVersions(conn, toVersion);
 
   if (fromVersions.length === 0) {
     throw new Error(
@@ -39,11 +44,11 @@ export function computeDelta(
     );
   }
 
-  const fromMap = new Map<string, SymbolVersionRow>(
-    fromVersions.map((v) => [v.symbol_id, v]),
+  const fromMap = new Map<string, kuzuDb.SymbolVersionRow>(
+    fromVersions.map((v) => [v.symbolId, v]),
   );
-  const toMap = new Map<string, SymbolVersionRow>(
-    toVersions.map((v) => [v.symbol_id, v]),
+  const toMap = new Map<string, kuzuDb.SymbolVersionRow>(
+    toVersions.map((v) => [v.symbolId, v]),
   );
 
   const changedSymbols: DeltaSymbolChange[] = [];
@@ -60,20 +65,20 @@ export function computeDelta(
     }
 
     const signatureDiff = diffSignature(
-      fromRow.signature_json,
-      toRow.signature_json,
+      fromRow.signatureJson,
+      toRow.signatureJson,
     );
     const invariantDiff = diffArray(
-      fromRow.invariants_json,
-      toRow.invariants_json,
+      fromRow.invariantsJson,
+      toRow.invariantsJson,
     );
     const sideEffectDiff = diffArray(
-      fromRow.side_effects_json,
-      toRow.side_effects_json,
+      fromRow.sideEffectsJson,
+      toRow.sideEffectsJson,
     );
 
     const isModified =
-      fromRow.ast_fingerprint !== toRow.ast_fingerprint ||
+      fromRow.astFingerprint !== toRow.astFingerprint ||
       fromRow.summary !== toRow.summary ||
       signatureDiff !== undefined ||
       invariantDiff !== undefined ||
@@ -210,8 +215,8 @@ export function diffArray(
 
 export function computeStalenessTiers(
   change: DeltaSymbolChange,
-  fromRow: SymbolVersionRow | null,
-  toRow: SymbolVersionRow | null,
+  fromRow: kuzuDb.SymbolVersionRow | null,
+  toRow: kuzuDb.SymbolVersionRow | null,
 ): StalenessTiers {
   const interfaceStable = change.signatureDiff === undefined;
   const sideEffectsStable = change.sideEffectDiff === undefined;
@@ -220,7 +225,7 @@ export function computeStalenessTiers(
 
   if (fromRow && toRow) {
     const astFingerprintUnchanged =
-      fromRow.ast_fingerprint === toRow.ast_fingerprint;
+      fromRow.astFingerprint === toRow.astFingerprint;
     const summaryUnchanged = fromRow.summary === toRow.summary;
 
     behaviorStable = astFingerprintUnchanged && summaryUnchanged;
@@ -245,13 +250,14 @@ export function computeStalenessTiers(
   };
 }
 
-export function computeDeltaWithTiers(
+export async function computeDeltaWithTiers(
   repoId: string,
   fromVersion: VersionId,
   toVersion: VersionId,
-): DeltaPack & { changedSymbols: DeltaSymbolChangeWithTiers[] } {
-  const fromVersions = getSymbolVersions(fromVersion);
-  const toVersions = getSymbolVersions(toVersion);
+): Promise<DeltaPack & { changedSymbols: DeltaSymbolChangeWithTiers[] }> {
+  const conn = await getKuzuConn();
+  const fromVersions = await getSymbolVersions(conn, fromVersion);
+  const toVersions = await getSymbolVersions(conn, toVersion);
 
   if (fromVersions.length === 0) {
     throw new Error(
@@ -265,11 +271,11 @@ export function computeDeltaWithTiers(
     );
   }
 
-  const fromMap = new Map<string, SymbolVersionRow>(
-    fromVersions.map((v) => [v.symbol_id, v]),
+  const fromMap = new Map<string, kuzuDb.SymbolVersionRow>(
+    fromVersions.map((v) => [v.symbolId, v]),
   );
-  const toMap = new Map<string, SymbolVersionRow>(
-    toVersions.map((v) => [v.symbol_id, v]),
+  const toMap = new Map<string, kuzuDb.SymbolVersionRow>(
+    toVersions.map((v) => [v.symbolId, v]),
   );
 
   const changedSymbols: DeltaSymbolChangeWithTiers[] = [];
@@ -293,20 +299,20 @@ export function computeDeltaWithTiers(
     }
 
     const signatureDiff = diffSignature(
-      fromRow.signature_json,
-      toRow.signature_json,
+      fromRow.signatureJson,
+      toRow.signatureJson,
     );
     const invariantDiff = diffArray(
-      fromRow.invariants_json,
-      toRow.invariants_json,
+      fromRow.invariantsJson,
+      toRow.invariantsJson,
     );
     const sideEffectDiff = diffArray(
-      fromRow.side_effects_json,
-      toRow.side_effects_json,
+      fromRow.sideEffectsJson,
+      toRow.sideEffectsJson,
     );
 
     const isModified =
-      fromRow.ast_fingerprint !== toRow.ast_fingerprint ||
+      fromRow.astFingerprint !== toRow.astFingerprint ||
       fromRow.summary !== toRow.summary ||
       signatureDiff !== undefined ||
       invariantDiff !== undefined ||

@@ -1,0 +1,284 @@
+/**
+ * KuzuDB Schema Definition for SDL-MCP v0.8
+ *
+ * Defines complete Cypher schema for the graph database.
+ * Schema is auto-created via initKuzuDb() and is idempotent.
+ *
+ * Note: KuzuDB doesn't support NOT NULL constraints - all properties
+ * are nullable by default except PRIMARY KEY.
+ *
+ * Node tables: Repo, File, Symbol, Version, SymbolVersion, Metrics,
+ *              Cluster, Process, SliceHandle, CardHash, Audit,
+ *              AgentFeedback, SymbolEmbedding, SummaryCache, SyncArtifact,
+ *              SymbolReference, SchemaVersion
+ *
+ * Rel tables: FILE_IN_REPO, SYMBOL_IN_FILE, SYMBOL_IN_REPO, DEPENDS_ON,
+ *             VERSION_OF_REPO, BELONGS_TO_CLUSTER, PARTICIPATES_IN,
+ *             CLUSTER_IN_REPO, PROCESS_IN_REPO
+ */
+
+import type { Connection } from "kuzu";
+
+const NODE_TABLES: string[] = [
+  `CREATE NODE TABLE IF NOT EXISTS Repo (
+    repoId STRING PRIMARY KEY,
+    rootPath STRING,
+    configJson STRING,
+    createdAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS File (
+    fileId STRING PRIMARY KEY,
+    relPath STRING,
+    contentHash STRING,
+    language STRING,
+    byteSize INT64,
+    lastIndexedAt STRING,
+    directory STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS Symbol (
+    symbolId STRING PRIMARY KEY,
+    kind STRING,
+    name STRING,
+    exported BOOLEAN,
+    visibility STRING,
+    language STRING,
+    rangeStartLine INT64,
+    rangeStartCol INT64,
+    rangeEndLine INT64,
+    rangeEndCol INT64,
+    astFingerprint STRING,
+    signatureJson STRING,
+    summary STRING,
+    invariantsJson STRING,
+    sideEffectsJson STRING,
+    updatedAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS Version (
+    versionId STRING PRIMARY KEY,
+    createdAt STRING,
+    reason STRING,
+    prevVersionHash STRING,
+    versionHash STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS SymbolVersion (
+    id STRING PRIMARY KEY,
+    versionId STRING,
+    symbolId STRING,
+    astFingerprint STRING,
+    signatureJson STRING,
+    summary STRING,
+    invariantsJson STRING,
+    sideEffectsJson STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS Metrics (
+    symbolId STRING PRIMARY KEY,
+    fanIn INT64 DEFAULT 0,
+    fanOut INT64 DEFAULT 0,
+    churn30d INT64 DEFAULT 0,
+    testRefsJson STRING,
+    canonicalTestJson STRING,
+    updatedAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS Cluster (
+    clusterId STRING PRIMARY KEY,
+    repoId STRING,
+    label STRING,
+    symbolCount INT32 DEFAULT 0,
+    cohesionScore DOUBLE DEFAULT 0.0,
+    versionId STRING,
+    createdAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS Process (
+    processId STRING PRIMARY KEY,
+    repoId STRING,
+    entrySymbolId STRING,
+    label STRING,
+    depth INT32 DEFAULT 0,
+    versionId STRING,
+    createdAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS SliceHandle (
+    handle STRING PRIMARY KEY,
+    repoId STRING,
+    createdAt STRING,
+    expiresAt STRING,
+    minVersion STRING,
+    maxVersion STRING,
+    sliceHash STRING,
+    spilloverRef STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS CardHash (
+    cardHash STRING PRIMARY KEY,
+    cardBlob STRING,
+    createdAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS Audit (
+    eventId STRING PRIMARY KEY,
+    timestamp STRING,
+    tool STRING,
+    decision STRING,
+    repoId STRING,
+    symbolId STRING,
+    detailsJson STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS AgentFeedback (
+    feedbackId STRING PRIMARY KEY,
+    repoId STRING,
+    versionId STRING,
+    sliceHandle STRING,
+    usefulSymbolsJson STRING DEFAULT '[]',
+    missingSymbolsJson STRING DEFAULT '[]',
+    taskTagsJson STRING,
+    taskType STRING,
+    taskText STRING,
+    createdAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS SymbolEmbedding (
+    symbolId STRING PRIMARY KEY,
+    model STRING,
+    embeddingVector STRING,
+    version STRING,
+    cardHash STRING,
+    createdAt STRING,
+    updatedAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS SummaryCache (
+    symbolId STRING PRIMARY KEY,
+    summary STRING,
+    provider STRING,
+    model STRING,
+    cardHash STRING,
+    costUsd DOUBLE DEFAULT 0.0,
+    createdAt STRING,
+    updatedAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS SyncArtifact (
+    artifactId STRING PRIMARY KEY,
+    repoId STRING,
+    versionId STRING,
+    commitSha STRING,
+    branch STRING,
+    artifactHash STRING,
+    compressedData STRING,
+    createdAt STRING,
+    sizeBytes INT64
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS SymbolReference (
+    refId STRING PRIMARY KEY,
+    repoId STRING,
+    symbolName STRING,
+    fileId STRING,
+    lineNumber INT64,
+    createdAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS ToolPolicyHash (
+    policyHash STRING PRIMARY KEY,
+    policyBlob STRING,
+    createdAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS TsconfigHash (
+    tsconfigHash STRING PRIMARY KEY,
+    tsconfigBlob STRING,
+    createdAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (
+    id STRING PRIMARY KEY,
+    schemaVersion INT64,
+    createdAt STRING,
+    updatedAt STRING
+  )`,
+];
+
+const REL_TABLES: string[] = [
+  `CREATE REL TABLE IF NOT EXISTS FILE_IN_REPO (
+    FROM File TO Repo
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS SYMBOL_IN_FILE (
+    FROM Symbol TO File
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS SYMBOL_IN_REPO (
+    FROM Symbol TO Repo
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS DEPENDS_ON (
+    FROM Symbol TO Symbol,
+    edgeType STRING DEFAULT 'call',
+    weight DOUBLE DEFAULT 1.0,
+    confidence DOUBLE DEFAULT 1.0,
+    resolution STRING DEFAULT 'exact',
+    provenance STRING,
+    createdAt STRING
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS VERSION_OF_REPO (
+    FROM Version TO Repo
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS BELONGS_TO_CLUSTER (
+    FROM Symbol TO Cluster,
+    membershipScore DOUBLE DEFAULT 0.0
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS PARTICIPATES_IN (
+    FROM Symbol TO Process,
+    stepOrder INT32 DEFAULT 0,
+    role STRING
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS CLUSTER_IN_REPO (
+    FROM Cluster TO Repo
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS PROCESS_IN_REPO (
+    FROM Process TO Repo
+  )`,
+];
+
+async function execDdl(conn: Connection, ddl: string): Promise<void> {
+  const result = await conn.query(ddl);
+  if (Array.isArray(result)) {
+    for (const r of result) r.close();
+  } else {
+    result.close();
+  }
+}
+
+export async function createSchema(conn: Connection): Promise<void> {
+  for (const ddl of NODE_TABLES) {
+    await execDdl(conn, ddl);
+  }
+
+  for (const ddl of REL_TABLES) {
+    await execDdl(conn, ddl);
+  }
+
+  // Insert or verify schema version
+  const now = new Date().toISOString();
+  await execDdl(
+    conn,
+    `MERGE (sv:SchemaVersion {id: 'current'})
+     ON CREATE SET sv.schemaVersion = ${KUZU_SCHEMA_VERSION}, sv.createdAt = '${now}', sv.updatedAt = '${now}'`,
+  );
+}
+
+export const KUZU_SCHEMA_VERSION = 1;

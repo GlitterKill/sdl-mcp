@@ -21,9 +21,9 @@ describe("collectTestRefs Caching", () => {
   };
 
   const symbols = [
-    { symbol_id: "sym1", name: "calculateFanMetrics" },
-    { symbol_id: "sym2", name: "updateMetricsForRepo" },
-    { symbol_id: "sym3", name: "nonexistentSymbol" },
+    { symbolId: "sym1", name: "calculateFanMetrics" },
+    { symbolId: "sym2", name: "updateMetricsForRepo" },
+    { symbolId: "sym3", name: "nonexistentSymbol" },
   ];
 
   before(() => {

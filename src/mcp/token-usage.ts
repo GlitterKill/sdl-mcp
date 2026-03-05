@@ -1,5 +1,6 @@
-import { getFilesByIds } from "../db/queries.js";
 import { estimateTokens } from "../util/tokenize.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 
 export interface TokenUsageMetadata {
   sdlTokens: number;
@@ -8,7 +9,7 @@ export interface TokenUsageMetadata {
 }
 
 export interface RawContextHint {
-  fileIds?: number[];
+  fileIds?: string[];
   rawTokens?: number;
 }
 
@@ -42,9 +43,9 @@ export function computeSavings(
   return { sdlTokens, rawEquivalent, savingsPercent };
 }
 
-export function computeTokenUsage(
+export async function computeTokenUsage(
   result: Record<string, unknown>,
-): TokenUsageMetadata {
+): Promise<TokenUsageMetadata> {
   const hint = result._rawContext as RawContextHint | undefined;
   if (!hint) {
     return { sdlTokens: 0, rawEquivalent: 0, savingsPercent: 0 };
@@ -57,9 +58,10 @@ export function computeTokenUsage(
   if (hint.rawTokens !== undefined) {
     rawEquivalent = hint.rawTokens;
   } else if (hint.fileIds && hint.fileIds.length > 0) {
-    const files = getFilesByIds(hint.fileIds);
+    const conn = await getKuzuConn();
+    const files = await kuzuDb.getFilesByIds(conn, hint.fileIds);
     for (const file of files.values()) {
-      rawEquivalent += Math.ceil(file.byte_size / BYTES_PER_TOKEN);
+      rawEquivalent += Math.ceil(file.byteSize / BYTES_PER_TOKEN);
     }
   }
 

@@ -1,9 +1,11 @@
 import type { SymbolKind } from "../db/schema.js";
-import * as db from "../db/queries.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 import {
   estimateTokens,
   tokenize,
 } from "../util/tokenize.js";
+import { SYMBOL_CARD_MAX_PROCESSES } from "../config/constants.js";
 import type {
   ContextSummary,
   ContextSummaryDependency,
@@ -170,36 +172,50 @@ export function buildContextSummary(input: {
   };
 }
 
-function buildSeed(repoId: string, query: string): SummarySeed {
-  const results = db.searchSymbolsLite(repoId, query, SUMMARY_MAX_RESULTS);
+async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
+  const conn = await getKuzuConn();
+  const results = await kuzuDb.searchSymbolsLite(
+    conn,
+    repoId,
+    query,
+    SUMMARY_MAX_RESULTS,
+  );
   if (results.length === 0) {
-    const tokenResults: Array<
-      Pick<ReturnType<typeof db.searchSymbolsLite>[number], "symbol_id" | "name" | "file_id" | "kind">
-    > = [];
+    const tokenResults: kuzuDb.SearchSymbolLiteRow[] = [];
     const seen = new Set<string>();
     const tokens = tokenize(query).filter((token) => token.length >= 2);
-    const perTokenLimit = Math.max(5, Math.floor(SUMMARY_MAX_RESULTS / Math.max(1, tokens.length)));
+    const perTokenLimit = Math.max(
+      5,
+      Math.floor(SUMMARY_MAX_RESULTS / Math.max(1, tokens.length)),
+    );
     for (const token of tokens) {
-      const partial = db.searchSymbolsLite(repoId, token, perTokenLimit);
+      const partial = await kuzuDb.searchSymbolsLite(
+        conn,
+        repoId,
+        token,
+        perTokenLimit,
+      );
       for (const row of partial) {
-        if (seen.has(row.symbol_id)) continue;
-        seen.add(row.symbol_id);
+        if (seen.has(row.symbolId)) continue;
+        seen.add(row.symbolId);
         tokenResults.push(row);
       }
     }
     results.push(...tokenResults.slice(0, SUMMARY_MAX_RESULTS));
   }
-  const symbolIds = results.map((row) => row.symbol_id);
+  const symbolIds = results.map((row) => row.symbolId);
   const symbolIdSet = new Set(symbolIds);
-  const symbolsMap = db.getSymbolsByIds(symbolIds);
+  const symbolsMap = await kuzuDb.getSymbolsByIds(conn, symbolIds);
 
-  const fileIds = new Set<number>();
+  const fileIds = new Set<string>();
   for (const symbol of symbolsMap.values()) {
-    fileIds.add(symbol.file_id);
+    fileIds.add(symbol.fileId);
   }
-  const filesMap = db.getFilesByIds([...fileIds]);
-  const metricsMap = db.getMetricsBySymbolIds(symbolIds);
-  const edgesMap = db.getEdgesFromSymbolsForSlice(symbolIds);
+  const filesMap = await kuzuDb.getFilesByIds(conn, [...fileIds]);
+  const metricsMap = await kuzuDb.getMetricsBySymbolIds(conn, symbolIds);
+  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, symbolIds);
+  const clustersMap = await kuzuDb.getClustersForSymbols(conn, symbolIds);
+  const processesMap = await kuzuDb.getProcessesForSymbols(conn, symbolIds);
 
   const keySymbols: ContextSummarySymbol[] = [];
   const fileCounts = new Map<string, number>();
@@ -207,46 +223,69 @@ function buildSeed(repoId: string, query: string): SummarySeed {
   const dependencyGraph: ContextSummaryDependency[] = [];
 
   for (const row of results) {
-    const symbol = symbolsMap.get(row.symbol_id);
+    const symbol = symbolsMap.get(row.symbolId);
     if (!symbol) continue;
-    const file = filesMap.get(symbol.file_id);
+    const file = filesMap.get(symbol.fileId);
     if (!file) continue;
 
     keySymbols.push({
-      symbolId: symbol.symbol_id,
+      symbolId: symbol.symbolId,
       name: symbol.name,
       kind: symbol.kind as SymbolKind,
-      signature: toSignature(symbol.signature_json, symbol.name),
+      signature: toSignature(symbol.signatureJson, symbol.name),
       summary: symbol.summary ?? `${symbol.kind} ${symbol.name}`,
+      cluster: clustersMap.get(symbol.symbolId)
+        ? {
+            clusterId: clustersMap.get(symbol.symbolId)!.clusterId,
+            label: clustersMap.get(symbol.symbolId)!.label,
+            memberCount: clustersMap.get(symbol.symbolId)!.symbolCount,
+          }
+        : undefined,
+      processes: processesMap.get(symbol.symbolId)?.length
+        ? processesMap
+            .get(symbol.symbolId)!
+            .slice(0, SYMBOL_CARD_MAX_PROCESSES)
+            .map((row) => ({
+              processId: row.processId,
+              label: row.label,
+              role:
+                row.role === "entry" ||
+                row.role === "exit" ||
+                row.role === "intermediate"
+                  ? row.role
+                  : "intermediate",
+              depth: row.depth,
+            }))
+        : undefined,
     });
 
-    fileCounts.set(file.rel_path, (fileCounts.get(file.rel_path) ?? 0) + 1);
+    fileCounts.set(file.relPath, (fileCounts.get(file.relPath) ?? 0) + 1);
 
-    const metrics = metricsMap.get(symbol.symbol_id);
+    const metrics = metricsMap.get(symbol.symbolId);
     const reasons: string[] = [];
-    if (metrics && metrics.fan_in >= 15) {
+    if (metrics && metrics.fanIn >= 15) {
       reasons.push("high fan-in");
     }
-    if (metrics && metrics.churn_30d > 0) {
+    if (metrics && metrics.churn30d > 0) {
       reasons.push("recent churn");
     }
     if (reasons.length > 0) {
       riskAreas.push({
-        symbolId: symbol.symbol_id,
+        symbolId: symbol.symbolId,
         name: symbol.name,
         reasons,
       });
     }
 
-    const outgoing = edgesMap.get(symbol.symbol_id) ?? [];
+    const outgoing = edgesMap.get(symbol.symbolId) ?? [];
     const toSymbolIds = outgoing
-      .filter((edge) => symbolIdSet.has(edge.to_symbol_id))
-      .map((edge) => edge.to_symbol_id);
+      .filter((edge) => symbolIdSet.has(edge.toSymbolId))
+      .map((edge) => edge.toSymbolId);
 
     if (toSymbolIds.length > 0) {
       const uniqueSorted = [...new Set(toSymbolIds)].sort();
       dependencyGraph.push({
-        fromSymbolId: symbol.symbol_id,
+        fromSymbolId: symbol.symbolId,
         toSymbolIds: uniqueSorted,
       });
     }
@@ -271,25 +310,26 @@ function buildSeed(repoId: string, query: string): SummarySeed {
   };
 }
 
-export function generateContextSummary(args: {
+export async function generateContextSummary(args: {
   repoId: string;
   query: string;
   budget?: number;
   scope?: ContextSummaryScope;
-}): ContextSummary {
+}): Promise<ContextSummary> {
   const query = args.query.trim();
   if (!query) {
     throw new Error("query must be a non-empty string");
   }
 
-  const latestVersion = db.getLatestVersion(args.repoId);
-  const indexVersion = latestVersion?.version_id ?? "0";
+  const conn = await getKuzuConn();
+  const latestVersion = await kuzuDb.getLatestVersion(conn, args.repoId);
+  const indexVersion = latestVersion?.versionId ?? "0";
   const scope = args.scope ?? detectSummaryScope(query);
   const cacheKey = `${args.repoId}:${indexVersion}:${query.toLowerCase()}`;
 
   let seed = summarySeedCache.get(cacheKey);
   if (!seed) {
-    seed = buildSeed(args.repoId, query);
+    seed = await buildSeed(args.repoId, query);
     summarySeedCache.set(cacheKey, seed);
     evictSummaryCache();
   }
@@ -325,8 +365,22 @@ export function renderContextSummary(
     lines.push("- None");
   } else {
     for (const symbol of summary.keySymbols) {
+      const extras: string[] = [];
+      if (symbol.cluster) {
+        extras.push(
+          `cluster: ${symbol.cluster.label} (${symbol.cluster.memberCount})`,
+        );
+      }
+      if (symbol.processes && symbol.processes.length > 0) {
+        const procLabels = symbol.processes
+          .slice(0, SYMBOL_CARD_MAX_PROCESSES)
+          .map((p) => `${p.label} [${p.role}]`);
+        extras.push(`processes: ${procLabels.join(", ")}`);
+      }
+
+      const extraText = extras.length > 0 ? ` (${extras.join("; ")})` : "";
       lines.push(
-        `- ${symbol.name} [${symbol.kind}] ${symbol.signature ?? ""} - ${symbol.summary}`.trim(),
+        `${`- ${symbol.name} [${symbol.kind}] ${symbol.signature ?? ""} - ${symbol.summary}`.trim()}${extraText}`,
       );
     }
   }

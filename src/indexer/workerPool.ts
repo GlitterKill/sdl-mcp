@@ -7,6 +7,10 @@ import { findPackageRoot } from "../util/findPackageRoot.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+import type { ExtractedCall } from "./treesitter/extractCalls.js";
+import type { ExtractedImport } from "./treesitter/extractImports.js";
+import type { SymbolWithNodeId } from "./worker.js";
+
 interface ParseTask {
   filePath: string;
   content: string;
@@ -14,10 +18,10 @@ interface ParseTask {
 }
 
 interface ParseResult {
-  tree: any;
-  symbols: Array<any>;
-  imports: Array<any>;
-  calls: Array<any>;
+  tree?: null;
+  symbols: Array<SymbolWithNodeId>;
+  imports: Array<ExtractedImport>;
+  calls: Array<ExtractedCall>;
 }
 
 interface QueuedTask {

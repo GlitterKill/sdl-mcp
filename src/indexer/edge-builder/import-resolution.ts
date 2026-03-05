@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from "path";
 
-import { getFileByRepoPath, getSymbolsByFileLite } from "../../db/queries.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import { existsAsync } from "../../util/asyncFs.js";
 import { normalizePath } from "../../util/paths.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
@@ -24,6 +25,8 @@ export async function resolveImportTargets(
   const allImports = sourceContent
     ? [...imports, ...extractCommonJsRequireImports(sourceContent)]
     : imports;
+
+  const conn = await getKuzuConn();
 
   for (const imp of allImports) {
     const resolvedPath = await resolveImportToPath(
@@ -57,7 +60,7 @@ export async function resolveImportTargets(
       continue;
     }
 
-    const targetFile = getFileByRepoPath(repoId, resolvedPath);
+    const targetFile = await kuzuDb.getFileByRepoPath(conn, repoId, resolvedPath);
     if (!targetFile) {
       for (const name of importedNames) {
         targets.push({
@@ -91,8 +94,8 @@ export async function resolveImportTargets(
       }
     }
 
-    const targetSymbols = getSymbolsByFileLite(targetFile.file_id).filter(
-      (symbol) => symbol.exported === 1,
+    const targetSymbols = (await kuzuDb.getSymbolsByFile(conn, targetFile.fileId)).filter(
+      (symbol) => symbol.exported,
     );
 
     for (const name of importedNames) {
@@ -111,11 +114,11 @@ export async function resolveImportTargets(
 
       if (match) {
         targets.push({
-          symbolId: match.symbol_id,
+          symbolId: match.symbolId,
           provenance: `${resolvedPath}:${name}`,
         });
         const existing = importedNameToSymbolIds.get(name) ?? [];
-        existing.push(match.symbol_id);
+        existing.push(match.symbolId);
         importedNameToSymbolIds.set(name, existing);
       } else {
         targets.push({
@@ -128,9 +131,9 @@ export async function resolveImportTargets(
     if (imp.namespaceImport) {
       const namespaceMap = new Map<string, string>();
       for (const symbol of targetSymbols) {
-        namespaceMap.set(symbol.name, symbol.symbol_id);
+        namespaceMap.set(symbol.name, symbol.symbolId);
         targets.push({
-          symbolId: symbol.symbol_id,
+          symbolId: symbol.symbolId,
           provenance: `${resolvedPath}:*`,
         });
       }
@@ -246,4 +249,3 @@ async function resolveImportToPath(
 
   return null;
 }
-

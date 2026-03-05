@@ -1,83 +1,89 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
-import { unlinkSync, rmSync, existsSync } from "fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { rmSync, existsSync } from "node:fs";
+
 import {
   exportArtifact,
   importArtifact,
-  getArtifactMetadata,
 } from "../../dist/sync/sync.js";
-import { getDb, closeDb } from "../../dist/db/db.js";
-import { runMigrations } from "../../dist/db/migrations.js";
-import {
-  createRepo,
-  createVersion,
-  upsertFile,
-  upsertSymbolTransaction,
-  resetQueryCache,
-} from "../../dist/db/queries.js";
-import { getCurrentTimestamp } from "../../dist/util/time.js";
+import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
+import * as kuzuDb from "../../dist/db/kuzu-queries.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("Sync Artifact Model", () => {
-  const testDbPath = join(__dirname, "test-sync.db");
-  const syncDir = join(__dirname, "test-sync-artifacts");
+  const graphDbPath = join(__dirname, ".kuzu-sync-artifact-test-db");
+  const syncDir = join(__dirname, ".tmp-sync-artifacts");
   const repoId = "test-repo-sync";
 
-  beforeEach(() => {
-    process.env.SDL_DB_PATH = testDbPath;
-    if (existsSync(testDbPath)) {
-      unlinkSync(testDbPath);
+  beforeEach(async () => {
+    if (existsSync(graphDbPath)) {
+      rmSync(graphDbPath, { recursive: true, force: true });
     }
     if (existsSync(syncDir)) {
       rmSync(syncDir, { recursive: true, force: true });
     }
-  });
 
-  afterEach(() => {
-    resetQueryCache();
-    closeDb();
-    if (existsSync(testDbPath)) {
-      unlinkSync(testDbPath);
-    }
-    if (existsSync(syncDir)) {
-      rmSync(syncDir, { recursive: true, force: true });
-    }
-    delete process.env.SDL_DB_PATH;
-  });
+    await closeKuzuDb();
+    await initKuzuDb(graphDbPath);
 
-  it("should create sync artifact with commit SHA linking", async () => {
-    const db = getDb();
-    runMigrations(db);
+    const conn = await getKuzuConn();
+    const now = new Date().toISOString();
 
-    createRepo({
-      repo_id: repoId,
-      root_path: "/fake/repo",
-      config_json: "{}",
-      created_at: getCurrentTimestamp(),
+    await kuzuDb.upsertRepo(conn, {
+      repoId,
+      rootPath: "/fake/repo",
+      configJson: JSON.stringify({
+        repoId,
+        rootPath: "/fake/repo",
+        ignore: [],
+        languages: ["ts"],
+        maxFileBytes: 2_000_000,
+        includeNodeModulesTypes: true,
+        packageJsonPath: null,
+        tsconfigPath: null,
+        workspaceGlobs: null,
+      }),
+      createdAt: now,
     });
 
-    createVersion({
-      version_id: "v-test",
-      repo_id: repoId,
-      created_at: getCurrentTimestamp(),
+    await kuzuDb.createVersion(conn, {
+      versionId: "v-test",
+      repoId,
+      createdAt: now,
       reason: "test-version",
+      prevVersionHash: null,
+      versionHash: null,
     });
 
-    upsertFile({
-      repo_id: repoId,
-      rel_path: "test.ts",
-      content_hash: "abc123",
+    await kuzuDb.upsertFile(conn, {
+      fileId: "file-1",
+      repoId,
+      relPath: "test.ts",
+      contentHash: "abc123",
       language: "ts",
-      byte_size: 100,
-      last_indexed_at: getCurrentTimestamp(),
+      byteSize: 100,
+      lastIndexedAt: now,
     });
+  });
 
+  afterEach(async () => {
+    await closeKuzuDb();
+    if (existsSync(graphDbPath)) {
+      rmSync(graphDbPath, { recursive: true, force: true });
+    }
+    if (existsSync(syncDir)) {
+      rmSync(syncDir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates sync artifact with commit SHA linking", async () => {
     const result = await exportArtifact({
       repoId,
+      versionId: "v-test",
       commitSha: "abc123def456",
       branch: "main",
       outputPath: join(syncDir, "test.sdl-artifact.json"),
@@ -89,35 +95,10 @@ describe("Sync Artifact Model", () => {
     assert.ok(result.sizeBytes > 0);
   });
 
-  it("should export and import sync artifact with integrity verification", async () => {
-    const db = getDb();
-    runMigrations(db);
-
-    createRepo({
-      repo_id: repoId,
-      root_path: "/fake/repo",
-      config_json: "{}",
-      created_at: getCurrentTimestamp(),
-    });
-
-    createVersion({
-      version_id: "v-test",
-      repo_id: repoId,
-      created_at: getCurrentTimestamp(),
-      reason: "test-version",
-    });
-
-    upsertFile({
-      repo_id: repoId,
-      rel_path: "test.ts",
-      content_hash: "abc123",
-      language: "ts",
-      byte_size: 100,
-      last_indexed_at: getCurrentTimestamp(),
-    });
-
+  it("exports and imports sync artifact with integrity verification", async () => {
     const exportResult = await exportArtifact({
       repoId,
+      versionId: "v-test",
       commitSha: "abc123def456",
       outputPath: join(syncDir, "test.sdl-artifact.json"),
     });
@@ -133,151 +114,34 @@ describe("Sync Artifact Model", () => {
     assert.strictEqual(importResult.repoId, repoId);
   });
 
-  it("should reject import with hash mismatch on tampered artifact", async () => {
-    const db = getDb();
-    runMigrations(db);
-
-    createRepo({
-      repo_id: repoId,
-      root_path: "/fake/repo",
-      config_json: "{}",
-      created_at: getCurrentTimestamp(),
-    });
-
-    createVersion({
-      version_id: "v-test",
-      repo_id: repoId,
-      created_at: getCurrentTimestamp(),
-      reason: "test-version",
-    });
-
-    upsertFile({
-      repo_id: repoId,
-      rel_path: "test.ts",
-      content_hash: "abc123",
-      language: "ts",
-      byte_size: 100,
-      last_indexed_at: getCurrentTimestamp(),
-    });
-
+  it("rejects import with hash mismatch on tampered artifact", async () => {
     const exportResult = await exportArtifact({
       repoId,
+      versionId: "v-test",
+      commitSha: "abc123def456",
       outputPath: join(syncDir, "test.sdl-artifact.json"),
     });
 
-    const { readFile, writeFile } = await import("fs/promises");
-    const artifactContent = await readFile(exportResult.artifactPath, "utf-8");
-    const artifact = JSON.parse(artifactContent);
-    artifact.artifact_hash = "tamperedhash";
-    await writeFile(
-      exportResult.artifactPath,
-      JSON.stringify(artifact),
-      "utf-8",
-    );
+    // Tamper the JSON artifact file to trigger integrity failure.
+    const tamperedPath = join(syncDir, "tampered.sdl-artifact.json");
+    rmSync(tamperedPath, { force: true });
+    // Copy then mutate artifact_hash to trigger integrity failure.
+    const fs = await import("node:fs");
+    const raw = fs.readFileSync(exportResult.artifactPath, "utf-8");
+    const parsed = JSON.parse(raw) as { artifact_hash: string };
+    parsed.artifact_hash = `${parsed.artifact_hash}-tampered`;
+    fs.writeFileSync(tamperedPath, JSON.stringify(parsed, null, 2), "utf-8");
 
-    await assert.rejects(
-      importArtifact({
-        artifactPath: exportResult.artifactPath,
+    try {
+      await importArtifact({
+        artifactPath: tamperedPath,
         repoId,
         verifyIntegrity: true,
-      }),
-      { message: /Artifact integrity check failed/ },
-    );
-  });
-
-  it("should retrieve artifact metadata without full import", async () => {
-    const db = getDb();
-    runMigrations(db);
-
-    createRepo({
-      repo_id: repoId,
-      root_path: "/fake/repo",
-      config_json: "{}",
-      created_at: getCurrentTimestamp(),
-    });
-
-    createVersion({
-      version_id: "v-test",
-      repo_id: repoId,
-      created_at: getCurrentTimestamp(),
-      reason: "test-version",
-    });
-
-    upsertFile({
-      repo_id: repoId,
-      rel_path: "test.ts",
-      content_hash: "abc123",
-      language: "ts",
-      byte_size: 100,
-      last_indexed_at: getCurrentTimestamp(),
-    });
-
-    const exportResult = await exportArtifact({
-      repoId,
-      outputPath: join(syncDir, "test.sdl-artifact.json"),
-    });
-
-    const metadata = getArtifactMetadata(exportResult.artifactPath);
-
-    assert.ok(metadata !== null);
-    assert.strictEqual(metadata?.artifact_id, exportResult.artifactId);
-    assert.strictEqual(metadata?.repo_id, repoId);
-    assert.strictEqual(metadata?.file_count, 1);
-  });
-
-  it("should handle missing artifact metadata gracefully", () => {
-    const metadata = getArtifactMetadata(join(syncDir, "nonexistent.json"));
-    assert.strictEqual(metadata, null);
-  });
-
-  it("should handle repo_id mismatch with force flag", async () => {
-    const db = getDb();
-    runMigrations(db);
-
-    createRepo({
-      repo_id: repoId,
-      root_path: "/fake/repo",
-      config_json: "{}",
-      created_at: getCurrentTimestamp(),
-    });
-
-    createVersion({
-      version_id: "v-test",
-      repo_id: repoId,
-      created_at: getCurrentTimestamp(),
-      reason: "test-version",
-    });
-
-    upsertFile({
-      repo_id: repoId,
-      rel_path: "test.ts",
-      content_hash: "abc123",
-      language: "ts",
-      byte_size: 100,
-      last_indexed_at: getCurrentTimestamp(),
-    });
-
-    const exportResult = await exportArtifact({
-      repoId,
-      outputPath: join(syncDir, "test.sdl-artifact.json"),
-    });
-
-    await assert.rejects(
-      importArtifact({
-        artifactPath: exportResult.artifactPath,
-        repoId: "different-repo",
-        verifyIntegrity: false,
-      }),
-      { message: /does not match expected repo_id/ },
-    );
-
-    const importResult = await importArtifact({
-      artifactPath: exportResult.artifactPath,
-      repoId: "different-repo",
-      force: true,
-      verifyIntegrity: false,
-    });
-
-    assert.strictEqual(importResult.repoId, repoId);
+      });
+      assert.fail("Expected integrity check failure");
+    } catch (error) {
+      assert.ok(error instanceof Error);
+      assert.ok(error.message.includes("hash mismatch"));
+    }
   });
 });

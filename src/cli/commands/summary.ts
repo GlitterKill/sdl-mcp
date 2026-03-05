@@ -3,8 +3,7 @@ import { resolve } from "path";
 import type { SummaryOptions } from "../types.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { getDb } from "../../db/db.js";
-import { runMigrations } from "../../db/migrations.js";
+import { initGraphDb } from "../../db/initGraphDb.js";
 import {
   detectSummaryScope,
   generateContextSummary,
@@ -33,8 +32,7 @@ export async function summaryCommand(options: SummaryOptions): Promise<void> {
   const startedAt = Date.now();
   const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
-  const db = getDb(config.dbPath);
-  runMigrations(db);
+  await initGraphDb(config, configPath);
 
   const repoId = resolveRepoId(options.repoId, config.repos);
   if (!repoId) {
@@ -47,7 +45,7 @@ export async function summaryCommand(options: SummaryOptions): Promise<void> {
     detectSummaryScope(options.query)) as ContextSummaryScope;
   const budget = options.budget ?? 2000;
 
-  const summary = generateContextSummary({
+  const summary = await generateContextSummary({
     repoId,
     query: options.query,
     budget,

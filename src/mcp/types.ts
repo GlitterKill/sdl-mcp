@@ -49,6 +49,21 @@ export interface SymbolMetrics {
   canonicalTest?: CanonicalTest;
 }
 
+export interface SymbolClusterInfo {
+  clusterId: string;
+  label: string;
+  memberCount: number;
+}
+
+export type ProcessRole = "entry" | "intermediate" | "exit";
+
+export interface SymbolProcessInfo {
+  processId: string;
+  label: string;
+  role: ProcessRole;
+  depth: number;
+}
+
 export type CardDetailLevel =
   | "minimal"
   | "signature"
@@ -115,6 +130,9 @@ export interface SymbolCard {
   summary?: string;
   invariants?: string[];
   sideEffects?: string[];
+
+  cluster?: SymbolClusterInfo;
+  processes?: SymbolProcessInfo[];
 
   deps: SymbolDeps;
   metrics?: SymbolMetrics;
@@ -224,7 +242,7 @@ export interface BlastRadiusItem {
   reason?: string;
   distance: number;
   rank: number;
-  signal: "diagnostic" | "directDependent" | "graph";
+  signal: "diagnostic" | "directDependent" | "graph" | "process";
   fanInTrend?: {
     previous: number;
     current: number;
@@ -658,6 +676,19 @@ export interface RepoOverview {
   /** Entry points (files named main, index, server, etc.) */
   entryPoints?: string[];
 
+  clusters?: {
+    totalClusters: number;
+    averageClusterSize: number;
+    largestClusters: Array<{ clusterId: string; label: string; size: number }>;
+  };
+
+  processes?: {
+    totalProcesses: number;
+    averageDepth: number;
+    entryPoints: number;
+    longestProcesses: Array<{ processId: string; label: string; depth: number }>;
+  };
+
   /** Token efficiency metrics */
   tokenMetrics: {
     /** Estimated tokens if rendering all symbols as full cards */
@@ -700,6 +731,8 @@ export interface ContextSummarySymbol {
   kind: SymbolKind;
   signature?: string;
   summary: string;
+  cluster?: SymbolClusterInfo;
+  processes?: SymbolProcessInfo[];
 }
 
 export interface ContextSummaryDependency {

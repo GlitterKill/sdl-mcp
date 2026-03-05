@@ -1,5 +1,8 @@
 import type { AppConfig } from "../config/types.js";
-import { logAuditEvent } from "../db/queries.js";
+import * as crypto from "crypto";
+
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 import { updateMetricsForRepo } from "../graph/metrics.js";
 import { logger } from "../util/logger.js";
 import { refreshSymbolEmbeddings } from "./embeddings.js";
@@ -15,7 +18,7 @@ export interface FinalizeIndexingParams {
   repoId: string;
   versionId: string;
   appConfig: AppConfig;
-  changedFileIds?: Set<number>;
+  changedFileIds?: Set<string>;
   callResolutionTelemetry: CallResolutionTelemetry;
 }
 
@@ -58,11 +61,14 @@ export async function finalizeIndexing({
 
   if (callResolutionTelemetry.tsFileCount > 0) {
     try {
-      logAuditEvent({
+      const conn = await getKuzuConn();
+      await kuzuDb.insertAuditEvent(conn, {
+        eventId: `audit_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`,
         timestamp: new Date().toISOString(),
         tool: "index.callResolution",
         decision: "stats",
         repoId,
+        symbolId: null,
         detailsJson: JSON.stringify({
           versionId,
           ...callResolutionTelemetry,
@@ -75,4 +81,3 @@ export async function finalizeIndexing({
 
   return { summaryStats };
 }
-

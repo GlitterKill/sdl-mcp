@@ -2,49 +2,37 @@ import {
   handleSymbolGetCard,
   handleSymbolSearch,
 } from "../src/mcp/tools/symbol.js";
+import { resolveCliConfigPath } from "../src/config/configPath.js";
 import { loadConfig } from "../src/config/loadConfig.js";
 import type { SymbolCard } from "../src/mcp/types.js";
-import * as db from "../src/db/queries.js";
+import { initGraphDb } from "../src/db/initGraphDb.js";
+import { getKuzuConn } from "../src/db/kuzu.js";
+import * as kuzuDb from "../src/db/kuzu-queries.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
   if (args.length < 2) {
-    console.error(
-      "Usage: npx tsx scripts/dump-symbol.ts <repoId> <symbolId|name>",
-    );
+    console.error("Usage: npx tsx scripts/dump-symbol.ts <repoId> <symbolId|name>");
     process.exit(1);
   }
 
   const [repoId, query] = args;
 
-  try {
-    loadConfig();
-  } catch (err) {
-    console.error(
-      "Failed to load config:",
-      err instanceof Error ? err.message : err,
-    );
-    process.exit(1);
-  }
+  const configPath = resolveCliConfigPath(undefined, "read");
+  const config = loadConfig(configPath);
+  await initGraphDb(config, configPath);
+  const conn = await getKuzuConn();
 
   let card: SymbolCard | null = null;
   const isSymbolId = /[-_]/.test(query);
 
   if (isSymbolId) {
-    try {
-      const cardResponse = await handleSymbolGetCard({ symbolId: query });
-      if ("card" in cardResponse) {
-        card = cardResponse.card;
-      } else {
-        console.error("Symbol not modified, cannot dump");
-        process.exit(1);
-      }
-    } catch (err) {
-      console.error(
-        "Error getting symbol by ID:",
-        err instanceof Error ? err.message : err,
-      );
+    const cardResponse = await handleSymbolGetCard({ symbolId: query });
+    if ("card" in cardResponse) {
+      card = cardResponse.card;
+    } else {
+      console.error("Symbol not modified, cannot dump");
       process.exit(1);
     }
   } else {
@@ -66,21 +54,13 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    try {
-      const cardResponse = await handleSymbolGetCard({
-        symbolId: searchResponse.results[0].symbolId,
-      });
-      if ("card" in cardResponse) {
-        card = cardResponse.card;
-      } else {
-        console.error("Symbol not modified, cannot dump");
-        process.exit(1);
-      }
-    } catch (err) {
-      console.error(
-        "Error getting symbol card:",
-        err instanceof Error ? err.message : err,
-      );
+    const cardResponse = await handleSymbolGetCard({
+      symbolId: searchResponse.results[0].symbolId,
+    });
+    if ("card" in cardResponse) {
+      card = cardResponse.card;
+    } else {
+      console.error("Symbol not modified, cannot dump");
       process.exit(1);
     }
   }
@@ -90,18 +70,19 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const edgesFrom = db.getEdgesFrom(card.symbolId);
-  const edgesTo = db.getEdgesTo(card.symbolId);
+  const edgesFrom = await kuzuDb.getEdgesFrom(conn, card.symbolId);
+  const edgesToMap = await kuzuDb.getEdgesToSymbols(conn, [card.symbolId]);
+  const edgesTo = edgesToMap.get(card.symbolId) ?? [];
 
   const edgesSummary = {
     outgoing: edgesFrom.map((e) => ({
-      to: e.to_symbol_id,
-      type: e.type,
+      to: e.toSymbolId,
+      type: e.edgeType,
       weight: e.weight,
     })),
     incoming: edgesTo.map((e) => ({
-      from: e.from_symbol_id,
-      type: e.type,
+      from: e.fromSymbolId,
+      type: e.edgeType,
       weight: e.weight,
     })),
   };
@@ -113,10 +94,10 @@ async function main(): Promise<void> {
   };
 
   console.log(JSON.stringify(output, null, 2));
-  process.exit(0);
 }
 
 main().catch((err) => {
-  console.error("Unexpected error:", err instanceof Error ? err.message : err);
+  console.error("Unexpected error:", err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
+

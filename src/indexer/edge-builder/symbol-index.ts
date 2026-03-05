@@ -1,5 +1,6 @@
-import { getFileByRepoPath } from "../../db/queries.js";
 import type { SymbolKind } from "../../db/schema.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import { normalizePath } from "../../util/paths.js";
 
 import type { SymbolIndex } from "./types.js";
@@ -29,14 +30,14 @@ export function addToSymbolIndex(
   nameEntry.set(kind, kindEntry);
 }
 
-export function resolveSymbolIdFromIndex(
+export async function resolveSymbolIdFromIndex(
   index: SymbolIndex,
   repoId: string,
   filePath: string,
   name: string,
   kind: SymbolKind,
   callerLanguage?: string,
-): string | null {
+): Promise<string | null> {
   const fileEntry = index.get(normalizePath(filePath));
   if (!fileEntry) return null;
   const nameEntry = fileEntry.get(name);
@@ -47,7 +48,8 @@ export function resolveSymbolIdFromIndex(
   // ML-D.1: Language-aware symbol resolution
   // If callerLanguage is provided, check if the target file is the same language
   if (callerLanguage) {
-    const targetFile = getFileByRepoPath(repoId, filePath);
+    const conn = await getKuzuConn();
+    const targetFile = await kuzuDb.getFileByRepoPath(conn, repoId, filePath);
     if (targetFile && targetFile.language !== callerLanguage) {
       // Cross-language call - return null to mark as unresolved
       return null;
@@ -56,4 +58,3 @@ export function resolveSymbolIdFromIndex(
 
   return candidates[0];
 }
-

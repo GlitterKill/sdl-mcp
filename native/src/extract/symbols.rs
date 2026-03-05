@@ -224,11 +224,11 @@ fn is_exported(node: Node<'_>) -> bool {
     false
 }
 
-fn extract_visibility(node: Node<'_>) -> String {
+fn extract_visibility(node: Node<'_>, source: &[u8]) -> String {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "accessibility_modifier" {
-            let text = child.utf8_text(&[]).unwrap_or("");
+            let text = node_text(child, source);
             match text {
                 "public" | "private" | "protected" => return text.to_string(),
                 _ => {}
@@ -253,7 +253,7 @@ fn make_symbol(
     name: &str,
     kind: &str,
     node: Node<'_>,
-    _source: &[u8],
+    source: &[u8],
     repo_id: &str,
     rel_path: &str,
     params: &[ParamInfo],
@@ -262,7 +262,7 @@ fn make_symbol(
     visibility: &str,
     _decorators: &[String],
 ) -> NativeParsedSymbol {
-    let fingerprint = generate_ast_fingerprint(node);
+    let fingerprint = generate_ast_fingerprint(node, source);
     let symbol_id = generate_symbol_id(repo_id, rel_path, kind, name, &fingerprint);
 
     let signature = build_signature_json(params, returns, generics);
@@ -335,7 +335,7 @@ fn process_method_definition(
 
     let params = extract_parameters(node, source);
     let returns = extract_return_type(node, source);
-    let visibility = extract_visibility(node);
+    let visibility = extract_visibility(node, source);
     let decorators = extract_decorators(node, source);
     let generics = extract_generics(node, source);
 
@@ -463,7 +463,7 @@ fn process_variable_declaration(
                 };
 
                 if let Some(name) = pattern_name {
-                    let fingerprint = generate_ast_fingerprint(child);
+                    let fingerprint = generate_ast_fingerprint(child, source);
                     let symbol_id =
                         generate_symbol_id(repo_id, rel_path, "variable", &name, &fingerprint);
 

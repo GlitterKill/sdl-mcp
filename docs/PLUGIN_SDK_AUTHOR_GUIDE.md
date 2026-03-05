@@ -399,7 +399,7 @@ Add plugin to `config/sdlmcp.config.json`:
       "rootPath": "/path/to/repo"
     }
   ],
-  "dbPath": "./data/sdlmcp.sqlite",
+  "graphDatabase": { "path": "./data/sdl-mcp-graph" },
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,

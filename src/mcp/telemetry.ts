@@ -1,4 +1,8 @@
 import type { RepoId, SymbolId } from "../db/schema.js";
+import * as crypto from "crypto";
+
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 import { logger } from "../util/logger.js";
 import { getCurrentTimestamp } from "../util/time.js";
 import type { PolicyRequestContext } from "../policy/types.js";
@@ -123,7 +127,7 @@ export interface PrefetchTelemetryEvent {
 }
 
 export interface AuditEvent {
-  eventId: number;
+  eventId: string;
   timestamp: string;
   tool: string;
   decision: string;
@@ -132,37 +136,48 @@ export interface AuditEvent {
   details: Record<string, unknown>;
 }
 
-// Lazy import to avoid loading queries.ts before migrations run
-let _queries: typeof import("../db/queries.js") | null = null;
-async function getQueries() {
-  if (!_queries) {
-    _queries = await import("../db/queries.js");
+function generateAuditEventId(): string {
+  return `audit_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
+}
+
+async function recordAuditEvent(event: {
+  tool: string;
+  decision: string;
+  repoId?: string;
+  symbolId?: string;
+  detailsJson: string;
+}): Promise<void> {
+  try {
+    const conn = await getKuzuConn();
+    await kuzuDb.insertAuditEvent(conn, {
+      eventId: generateAuditEventId(),
+      timestamp: getCurrentTimestamp(),
+      tool: event.tool,
+      decision: event.decision,
+      repoId: event.repoId ?? null,
+      symbolId: event.symbolId ?? null,
+      detailsJson: event.detailsJson,
+    });
+  } catch (err) {
+    logger.error(`Failed to log audit event: ${String(err)}`);
   }
-  return _queries;
 }
 
 export function logToolCall(event: ToolCallEvent): void {
   const decision = event.response.error ? "error" : "success";
 
   // Fire-and-forget async logging
-  getQueries()
-    .then((queries) => {
-      queries.logAuditEvent({
-        timestamp: getCurrentTimestamp(),
-        tool: event.tool,
-        decision,
-        repoId: event.repoId,
-        symbolId: event.symbolId,
-        detailsJson: JSON.stringify({
-          request: event.request,
-          response: event.response,
-          durationMs: event.durationMs,
-        }),
-      });
-    })
-    .catch((err) => {
-      logger.error(`Failed to log audit event: ${err}`);
-    });
+  void recordAuditEvent({
+    tool: event.tool,
+    decision,
+    repoId: event.repoId,
+    symbolId: event.symbolId,
+    detailsJson: JSON.stringify({
+      request: event.request,
+      response: event.response,
+      durationMs: event.durationMs,
+    }),
+  });
 
   logger.info(`Tool call logged: ${event.tool}`, {
     decision,
@@ -173,22 +188,15 @@ export function logToolCall(event: ToolCallEvent): void {
 export function logCodeWindowDecision(event: CodeWindowDecisionEvent): void {
   const decision = event.approved ? "approved" : "denied";
 
-  getQueries()
-    .then((queries) => {
-      queries.logAuditEvent({
-        timestamp: getCurrentTimestamp(),
-        tool: "code.needWindow",
-        decision,
-        symbolId: event.symbolId,
-        detailsJson: JSON.stringify({
-          approved: event.approved,
-          reason: event.reason,
-        }),
-      });
-    })
-    .catch((err) => {
-      logger.error(`Failed to log audit event: ${err}`);
-    });
+  void recordAuditEvent({
+    tool: "code.needWindow",
+    decision,
+    symbolId: event.symbolId,
+    detailsJson: JSON.stringify({
+      approved: event.approved,
+      reason: event.reason,
+    }),
+  });
 
   logger.info(`Code window decision: ${decision}`, {
     symbolId: event.symbolId,
@@ -197,22 +205,15 @@ export function logCodeWindowDecision(event: CodeWindowDecisionEvent): void {
 }
 
 export function logIndexEvent(event: IndexEvent): void {
-  getQueries()
-    .then((queries) => {
-      queries.logAuditEvent({
-        timestamp: getCurrentTimestamp(),
-        tool: "index.refresh",
-        decision: "success",
-        repoId: event.repoId,
-        detailsJson: JSON.stringify({
-          versionId: event.versionId,
-          ...event.stats,
-        }),
-      });
-    })
-    .catch((err) => {
-      logger.error(`Failed to log audit event: ${err}`);
-    });
+  void recordAuditEvent({
+    tool: "index.refresh",
+    decision: "success",
+    repoId: event.repoId,
+    detailsJson: JSON.stringify({
+      versionId: event.versionId,
+      ...event.stats,
+    }),
+  });
 
   logger.info(`Index event logged: ${event.repoId}`, {
     versionId: event.versionId,
@@ -224,17 +225,20 @@ export async function getAuditTrail(
   repoId?: RepoId,
   limit?: number,
 ): Promise<AuditEvent[]> {
-  const queries = await getQueries();
-  const events = queries.getAuditEvents(repoId, limit ?? DB_QUERY_LIMIT_MAX);
+  const conn = await getKuzuConn();
+  const events = await kuzuDb.getAuditEvents(conn, {
+    repoId,
+    limit: limit ?? DB_QUERY_LIMIT_MAX,
+  });
 
   return events.map((event) => ({
-    eventId: event.event_id,
+    eventId: event.eventId,
     timestamp: event.timestamp,
     tool: event.tool,
     decision: event.decision,
-    repoId: event.repo_id,
-    symbolId: event.symbol_id,
-    details: JSON.parse(event.details_json),
+    repoId: event.repoId,
+    symbolId: event.symbolId,
+    details: JSON.parse(event.detailsJson),
   }));
 }
 
@@ -250,28 +254,21 @@ export function logPolicyDecision(event: PolicyDecisionEvent): void {
     ...rest
   } = event;
 
-  getQueries()
-    .then((queries) => {
-      queries.logAuditEvent({
-        timestamp: getCurrentTimestamp(),
-        tool: `policy.${rest.requestType}`,
-        decision,
-        repoId: event.repoId,
-        symbolId: event.symbolId,
-        detailsJson: JSON.stringify({
-          auditHash,
-          evidenceUsed,
-          deniedReasons,
-          nextBestAction,
-          requiredFieldsForNext,
-          downgradeTarget,
-          context: rest.context,
-        }),
-      });
-    })
-    .catch((err) => {
-      logger.error(`Failed to log audit event: ${err}`);
-    });
+  void recordAuditEvent({
+    tool: `policy.${rest.requestType}`,
+    decision,
+    repoId: event.repoId,
+    symbolId: event.symbolId,
+    detailsJson: JSON.stringify({
+      auditHash,
+      evidenceUsed,
+      deniedReasons,
+      nextBestAction,
+      requiredFieldsForNext,
+      downgradeTarget,
+      context: rest.context,
+    }),
+  });
 
   logger.info(`Policy decision: ${decision}`, {
     requestType: rest.requestType,
@@ -283,52 +280,31 @@ export function logPolicyDecision(event: PolicyDecisionEvent): void {
 }
 
 export function logSetupPipelineEvent(event: SetupPipelineEvent): void {
-  getQueries()
-    .then((queries) => {
-      queries.logAuditEvent({
-        timestamp: getCurrentTimestamp(),
-        tool: "phaseA.setup",
-        decision: "success",
-        repoId: event.repoId,
-        detailsJson: JSON.stringify(event),
-      });
-    })
-    .catch((err) => {
-      logger.error(`Failed to log setup pipeline event: ${err}`);
-    });
+  void recordAuditEvent({
+    tool: "phaseA.setup",
+    decision: "success",
+    repoId: event.repoId,
+    detailsJson: JSON.stringify(event),
+  });
 }
 
 export function logSummaryGenerationEvent(event: SummaryGenerationEvent): void {
-  getQueries()
-    .then((queries) => {
-      queries.logAuditEvent({
-        timestamp: getCurrentTimestamp(),
-        tool: "phaseA.summary",
-        decision: "success",
-        repoId: event.repoId,
-        detailsJson: JSON.stringify(event),
-      });
-    })
-    .catch((err) => {
-      logger.error(`Failed to log summary generation event: ${err}`);
-    });
+  void recordAuditEvent({
+    tool: "phaseA.summary",
+    decision: "success",
+    repoId: event.repoId,
+    detailsJson: JSON.stringify(event),
+  });
 }
 
 export function logWatcherHealthTelemetry(
   event: WatcherHealthTelemetryEvent,
 ): void {
-  getQueries()
-    .then((queries) => {
-      queries.logAuditEvent({
-        timestamp: getCurrentTimestamp(),
-        tool: "phaseA.watcher",
-        decision: event.stale || event.errors > 0 ? "warn" : "success",
-        repoId: event.repoId,
-        detailsJson: JSON.stringify(event),
-      });
-    })
-    .catch((err) => {
-      logger.error(`Failed to log watcher telemetry event: ${err}`);
+  void recordAuditEvent({
+    tool: "phaseA.watcher",
+    decision: event.stale || event.errors > 0 ? "warn" : "success",
+    repoId: event.repoId,
+    detailsJson: JSON.stringify(event),
   });
 }
 

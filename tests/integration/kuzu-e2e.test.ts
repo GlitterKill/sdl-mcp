@@ -1,0 +1,348 @@
+import { describe, before, after, it } from "node:test";
+import assert from "node:assert";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+
+import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
+import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import type { SymbolRow } from "../../dist/db/kuzu-queries.js";
+import { indexRepo } from "../../dist/indexer/indexer.js";
+import { buildSlice } from "../../dist/graph/slice.js";
+import { buildRepoOverview } from "../../dist/graph/overview.js";
+import { computeDelta } from "../../dist/delta/diff.js";
+import { runGovernorLoop } from "../../dist/delta/blastRadius.js";
+import { handleSymbolGetCard } from "../../dist/mcp/tools/symbol.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const REPO_ID = "test-kuzu-e2e-repo";
+
+function findSymbol(
+  symbols: SymbolRow[],
+  name: string,
+  kind: string = "function",
+): SymbolRow {
+  const match = symbols.find((s) => s.name === name && s.kind === kind);
+  assert.ok(match, `Expected symbol ${kind}:${name} to exist`);
+  return match;
+}
+
+describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
+  const fixtureRoot = join(__dirname, "..", "fixtures", "clustered-repo");
+  const graphDbPath = join(__dirname, ".kuzu-e2e-test-db");
+  const configPath = join(graphDbPath, "test-config.json");
+  let repoDir: string | null = null;
+  const prevSDL_CONFIG = process.env.SDL_CONFIG;
+  const prevSDL_CONFIG_PATH = process.env.SDL_CONFIG_PATH;
+
+  before(async () => {
+    if (!existsSync(fixtureRoot)) {
+      throw new Error(`Fixture not found: ${fixtureRoot}`);
+    }
+
+    if (existsSync(graphDbPath)) {
+      rmSync(graphDbPath, { recursive: true, force: true });
+    }
+    mkdirSync(graphDbPath, { recursive: true });
+
+    repoDir = mkdtempSync(join(tmpdir(), "sdl-mcp-kuzu-e2e-repo-"));
+    cpSync(fixtureRoot, repoDir, { recursive: true });
+
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          repos: [],
+          policy: {},
+          indexing: { engine: "typescript", enableFileWatching: false },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    process.env.SDL_CONFIG = configPath;
+    delete process.env.SDL_CONFIG_PATH;
+
+    await closeKuzuDb();
+    await initKuzuDb(graphDbPath);
+    const conn = await getKuzuConn();
+
+    const now = new Date().toISOString();
+    await kuzuDb.upsertRepo(conn, {
+      repoId: REPO_ID,
+      rootPath: repoDir,
+      configJson: JSON.stringify({
+        repoId: REPO_ID,
+        rootPath: repoDir,
+        ignore: [],
+        languages: ["ts"],
+        maxFileBytes: 2_000_000,
+        includeNodeModulesTypes: true,
+        packageJsonPath: "package.json",
+        tsconfigPath: "tsconfig.json",
+        workspaceGlobs: null,
+      }),
+      createdAt: now,
+    });
+  });
+
+  after(async () => {
+    await closeKuzuDb();
+
+    if (prevSDL_CONFIG === undefined) {
+      delete process.env.SDL_CONFIG;
+    } else {
+      process.env.SDL_CONFIG = prevSDL_CONFIG;
+    }
+    if (prevSDL_CONFIG_PATH === undefined) {
+      delete process.env.SDL_CONFIG_PATH;
+    } else {
+      process.env.SDL_CONFIG_PATH = prevSDL_CONFIG_PATH;
+    }
+
+    try {
+      rmSync(graphDbPath, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+    if (repoDir) {
+      try {
+        rmSync(repoDir, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+      repoDir = null;
+    }
+  });
+
+  it("indexes fixture, detects clusters/processes, builds slice, and computes process blast radius", async () => {
+    assert.ok(repoDir, "repoDir should be initialized in before()");
+
+    const full = await indexRepo(REPO_ID, "full");
+    assert.ok(full.versionId.length > 0);
+
+    const conn = await getKuzuConn();
+    const clusters = await kuzuDb.getClustersForRepo(conn, REPO_ID);
+    assert.ok(clusters.length >= 3, `Expected >=3 clusters, got ${clusters.length}`);
+
+    const procStats = await kuzuDb.getProcessOverviewStats(conn, REPO_ID);
+    assert.strictEqual(procStats.totalProcesses, 2);
+    assert.strictEqual(procStats.entryPoints, 2);
+
+    const symbols = await kuzuDb.getSymbolsByRepo(conn, REPO_ID);
+
+    const login = findSymbol(symbols, "login");
+    const session = findSymbol(symbols, "session");
+    const token = findSymbol(symbols, "token");
+    const query = findSymbol(symbols, "query");
+    const transform = findSymbol(symbols, "transform");
+    const cache = findSymbol(symbols, "cache");
+    const routesApi = findSymbol(symbols, "routesApi");
+    const loginHandler = findSymbol(symbols, "loginhandler");
+    const dataHandler = findSymbol(symbols, "datahandler");
+    const middleware = findSymbol(symbols, "middleware");
+
+    const authCluster = await kuzuDb.getClusterForSymbol(conn, login.symbolId);
+    const dataCluster = await kuzuDb.getClusterForSymbol(conn, query.symbolId);
+    const apiCluster = await kuzuDb.getClusterForSymbol(conn, routesApi.symbolId);
+
+    assert.ok(authCluster);
+    assert.ok(dataCluster);
+    assert.ok(apiCluster);
+
+    const authMembers = [
+      await kuzuDb.getClusterForSymbol(conn, session.symbolId),
+      await kuzuDb.getClusterForSymbol(conn, token.symbolId),
+    ];
+    assert.ok(authMembers[0] && authMembers[1]);
+    assert.strictEqual(authMembers[0].clusterId, authCluster.clusterId);
+    assert.strictEqual(authMembers[1].clusterId, authCluster.clusterId);
+
+    const dataMembers = [
+      await kuzuDb.getClusterForSymbol(conn, transform.symbolId),
+      await kuzuDb.getClusterForSymbol(conn, cache.symbolId),
+    ];
+    assert.ok(dataMembers[0] && dataMembers[1]);
+    assert.strictEqual(dataMembers[0].clusterId, dataCluster.clusterId);
+    assert.strictEqual(dataMembers[1].clusterId, dataCluster.clusterId);
+
+    const apiMembers = [
+      await kuzuDb.getClusterForSymbol(conn, loginHandler.symbolId),
+      await kuzuDb.getClusterForSymbol(conn, dataHandler.symbolId),
+      await kuzuDb.getClusterForSymbol(conn, middleware.symbolId),
+    ];
+    assert.ok(apiMembers[0] && apiMembers[1] && apiMembers[2]);
+    assert.strictEqual(apiMembers[0].clusterId, apiCluster.clusterId);
+    assert.strictEqual(apiMembers[1].clusterId, apiCluster.clusterId);
+    assert.strictEqual(apiMembers[2].clusterId, apiCluster.clusterId);
+
+    assert.notStrictEqual(apiCluster.clusterId, authCluster.clusterId);
+    assert.notStrictEqual(apiCluster.clusterId, dataCluster.clusterId);
+    assert.notStrictEqual(authCluster.clusterId, dataCluster.clusterId);
+
+    const loginProcesses = await kuzuDb.getProcessesForSymbol(conn, loginHandler.symbolId);
+    assert.ok(loginProcesses.length >= 1);
+    assert.strictEqual(loginProcesses[0]!.stepOrder, 0);
+    assert.strictEqual(loginProcesses[0]!.role, "entry");
+
+    const loginFlow = await kuzuDb.getProcessFlow(conn, loginProcesses[0]!.processId);
+    const nameById = new Map(symbols.map((s) => [s.symbolId, s.name] as const));
+    const loginNames = loginFlow.map((step) => nameById.get(step.symbolId));
+    for (const expected of ["loginhandler", "login", "session", "token"]) {
+      assert.ok(
+        loginNames.includes(expected),
+        `Expected login process to include ${expected}`,
+      );
+    }
+
+    const dataProcesses = await kuzuDb.getProcessesForSymbol(conn, dataHandler.symbolId);
+    assert.ok(dataProcesses.length >= 1);
+    assert.strictEqual(dataProcesses[0]!.stepOrder, 0);
+    assert.strictEqual(dataProcesses[0]!.role, "entry");
+
+    const dataFlow = await kuzuDb.getProcessFlow(conn, dataProcesses[0]!.processId);
+    const dataNames = dataFlow.map((step) => nameById.get(step.symbolId));
+    for (const expected of ["datahandler", "query", "transform", "cache"]) {
+      assert.ok(
+        dataNames.includes(expected),
+        `Expected data process to include ${expected}`,
+      );
+    }
+
+    const chainEdges = await kuzuDb.getEdgesFromSymbolsLite(conn, [
+      loginHandler.symbolId,
+      login.symbolId,
+      session.symbolId,
+      dataHandler.symbolId,
+      query.symbolId,
+      transform.symbolId,
+    ]);
+
+    const hasCall = (fromId: string, toId: string): boolean =>
+      (chainEdges.get(fromId) ?? []).some(
+        (e) => e.edgeType === "call" && e.toSymbolId === toId,
+      );
+
+    assert.ok(hasCall(loginHandler.symbolId, login.symbolId));
+    assert.ok(hasCall(login.symbolId, session.symbolId));
+    assert.ok(hasCall(session.symbolId, token.symbolId));
+
+    assert.ok(hasCall(dataHandler.symbolId, query.symbolId));
+    assert.ok(hasCall(query.symbolId, transform.symbolId));
+    assert.ok(hasCall(transform.symbolId, cache.symbolId));
+
+    const slice = await buildSlice({
+      repoId: REPO_ID,
+      versionId: full.versionId,
+      conn,
+      entrySymbols: [routesApi.symbolId],
+      taskText: "inspect api routes and related logic",
+      budget: { maxCards: 20, maxEstimatedTokens: 20_000 },
+      cardDetail: "deps",
+      minConfidence: 0.5,
+    });
+
+    assert.ok(slice.cards.some((c) => c.symbolId === routesApi.symbolId));
+    assert.ok(slice.cards.some((c) => c.symbolId === middleware.symbolId));
+    assert.ok(slice.cards.some((c) => c.symbolId === loginHandler.symbolId));
+    assert.ok(slice.cards.some((c) => c.symbolId === dataHandler.symbolId));
+
+    const entryClusterId = slice.cards.find((c) => c.symbolId === routesApi.symbolId)?.cluster?.clusterId;
+    assert.strictEqual(entryClusterId, apiCluster.clusterId);
+
+    const sameClusterCount = slice.cards.filter((c) => c.cluster?.clusterId === entryClusterId).length;
+    assert.ok(
+      sameClusterCount >= 3,
+      `Expected >=3 same-cluster symbols in slice, got ${sameClusterCount}`,
+    );
+
+    const beforeVersion = full.versionId;
+
+    // Change login.ts structurally to force AST fingerprint change (literals are ignored in subtree hash).
+    const loginPath = join(repoDir, "src", "auth", "login.ts");
+    writeFileSync(
+      loginPath,
+      [
+        "import { session } from \"./session\";",
+        "",
+        "export function login(user: string): string {",
+        "  const normalizedUser = user;",
+        "  return session(normalizedUser);",
+        "}",
+        "",
+        "function loginAudit(user: string): string {",
+        "  return login(user);",
+        "}",
+        "",
+        "export function loginAuditEntry(): string {",
+        "  return loginAudit(\"audit\");",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const inc = await indexRepo(REPO_ID, "incremental");
+    const afterVersion = inc.versionId;
+    assert.notStrictEqual(afterVersion, beforeVersion);
+
+    const delta = await computeDelta(REPO_ID, beforeVersion, afterVersion);
+    const changedSymbolIds = delta.changedSymbols.map((c) => c.symbolId);
+    assert.ok(changedSymbolIds.length > 0);
+
+    const governor = await runGovernorLoop(conn, changedSymbolIds, {
+      repoId: REPO_ID,
+      budget: { maxCards: 50, maxEstimatedTokens: 50_000 },
+      runDiagnostics: false,
+      fromVersionId: beforeVersion,
+      toVersionId: afterVersion,
+    });
+
+    const blastItems = governor.blastRadius;
+    assert.ok(blastItems.length > 0);
+
+    const blastSymbolIds = Array.from(new Set(blastItems.map((i) => i.symbolId)));
+    const blastSymbols = await kuzuDb.getSymbolsByIds(conn, blastSymbolIds);
+    const blastNameById = new Map(
+      Array.from(blastSymbols.values()).map((s) => [s.symbolId, s.name] as const),
+    );
+
+    const byName = new Map<string, { symbolId: string; signal: string }>();
+    for (const item of blastItems) {
+      const name = blastNameById.get(item.symbolId);
+      if (!name) continue;
+      if (!byName.has(name)) {
+        byName.set(name, { symbolId: item.symbolId, signal: item.signal });
+      }
+    }
+
+    assert.strictEqual(byName.get("session")?.signal, "process");
+    assert.strictEqual(byName.get("token")?.signal, "process");
+
+    const cardResponse = await handleSymbolGetCard({ repoId: REPO_ID, symbolId: loginHandler.symbolId });
+    if ("notModified" in cardResponse) {
+      throw new Error("Expected full card response, got notModified");
+    }
+    assert.ok(cardResponse.card.cluster);
+    assert.ok(Array.isArray(cardResponse.card.processes));
+    assert.ok(cardResponse.card.processes.length >= 1);
+
+    const overview = await buildRepoOverview({ repoId: REPO_ID, level: "stats" });
+    assert.ok(overview.clusters);
+    assert.strictEqual(overview.clusters.totalClusters, 3);
+    assert.ok(overview.processes);
+    assert.strictEqual(overview.processes.totalProcesses, 2);
+  });
+});

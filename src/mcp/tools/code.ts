@@ -20,13 +20,8 @@ import {
   redactSecrets,
   shouldRedactFile,
 } from "../../code/redact.js";
-import {
-  getSymbol,
-  getFile,
-  getFileByRepoPath,
-  getRepo,
-  getLatestVersion,
-} from "../../db/queries.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import { logCodeWindowDecision, logPolicyDecision } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
 import type { Range } from "../types.js";
@@ -45,6 +40,7 @@ import {
 } from "../../policy/engine.js";
 import { consumePrefetchedKey } from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
+import { toLegacySymbolRow } from "./symbol-utils.js";
 
 /**
  * Handles code window requests with policy evaluation.
@@ -68,35 +64,40 @@ export async function handleCodeNeedWindow(
   });
   consumePrefetchedKey(request.repoId, `card:${request.symbolId}`);
 
-  const symbol = getSymbol(request.symbolId);
+  const conn = await getKuzuConn();
+
+  const symbol = await kuzuDb.getSymbol(conn, request.symbolId);
   if (!symbol) {
     throw new Error(`Symbol not found: ${request.symbolId}`);
   }
 
-  if (symbol.repo_id !== request.repoId) {
+  if (symbol.repoId !== request.repoId) {
     throw new Error(
-      `Symbol ${request.symbolId} belongs to repo "${symbol.repo_id}", not "${request.repoId}"`,
+      `Symbol ${request.symbolId} belongs to repo "${symbol.repoId}", not "${request.repoId}"`,
     );
   }
 
-  const file = getFile(symbol.file_id);
+  const files = await kuzuDb.getFilesByIds(conn, [symbol.fileId]);
+  const file = files.get(symbol.fileId);
   if (!file) {
-    throw new Error(`File not found: ${symbol.file_id}`);
+    throw new Error(`File not found: ${symbol.fileId}`);
   }
 
-  const repo = getRepo(request.repoId);
+  const repo = await kuzuDb.getRepo(conn, request.repoId);
   if (!repo) {
     throw new Error(`Repository not found: ${request.repoId}`);
   }
 
+  const legacySymbol = toLegacySymbolRow(symbol);
+
   const symbolRange: Range = {
-    startLine: symbol.range_start_line,
-    startCol: symbol.range_start_col,
-    endLine: symbol.range_end_line,
-    endCol: symbol.range_end_col,
+    startLine: symbol.rangeStartLine,
+    startCol: symbol.rangeStartCol,
+    endLine: symbol.rangeEndLine,
+    endCol: symbol.rangeEndCol,
   };
 
-  const repoConfig = JSON.parse(repo.config_json);
+  const repoConfig = JSON.parse(repo.configJson);
   const appConfig = loadConfig();
   const validatedPolicy = PolicyConfigSchema.parse({
     ...appConfig.policy,
@@ -115,23 +116,23 @@ export async function handleCodeNeedWindow(
   });
 
   const context: GateContext = {
-    symbol,
+    symbol: legacySymbol,
     policy: validatedPolicy,
   };
 
   if (request.sliceContext) {
-    const latestVersion = getLatestVersion(request.repoId);
+    const latestVersion = await kuzuDb.getLatestVersion(conn, request.repoId);
     if (latestVersion) {
       const slice = await buildSlice({
         repoId: request.repoId,
-        versionId: latestVersion.version_id,
+        versionId: latestVersion.versionId,
         ...request.sliceContext,
       });
       context.slice = slice;
     }
   }
 
-  const gateResult = evaluateRequest(request, context);
+  const gateResult = await evaluateRequest(request, context);
   const suggestedNextRequest = !gateResult.approved
     ? gateResult.suggestedNextRequest
     : undefined;
@@ -148,7 +149,7 @@ export async function handleCodeNeedWindow(
     identifiersToFind: request.identifiersToFind,
     reason: request.reason,
     sliceContext: context.slice,
-    symbolData: symbol,
+    symbolData: legacySymbol,
   };
 
   const policyDecision = policyEngine.evaluate(policyContext);
@@ -185,7 +186,7 @@ export async function handleCodeNeedWindow(
   }
 
   if (policyDecision.decision === "downgrade-to-skeleton") {
-    const skeletonResult = generateSymbolSkeleton(
+    const skeletonResult = await generateSymbolSkeleton(
       request.repoId,
       request.symbolId,
       {
@@ -226,7 +227,7 @@ export async function handleCodeNeedWindow(
     const response: CodeNeedWindowResponse = {
       approved: true,
       symbolId: request.symbolId,
-      file: file.rel_path,
+      file: file.relPath,
       range: skeletonResult.actualRange,
       code: skeletonResult.skeleton,
       whyApproved: ["Policy approved (downgraded to skeleton)"],
@@ -235,11 +236,11 @@ export async function handleCodeNeedWindow(
       truncation: skeletonTruncation,
     };
 
-    return attachRawContext(response, { fileIds: [symbol.file_id] });
+    return attachRawContext(response, { fileIds: [symbol.fileId] });
   }
 
   if (policyDecision.decision === "downgrade-to-hotpath") {
-    const hotpathResult = extractHotPath(
+    const hotpathResult = await extractHotPath(
       request.repoId,
       request.symbolId,
       request.identifiersToFind ?? [],
@@ -278,7 +279,7 @@ export async function handleCodeNeedWindow(
     const response: CodeNeedWindowResponse = {
       approved: true,
       symbolId: request.symbolId,
-      file: file.rel_path,
+      file: file.relPath,
       range: hotpathResult.actualRange,
       code: hotpathResult.excerpt,
       whyApproved: ["Policy approved (downgraded to hotpath)"],
@@ -289,13 +290,13 @@ export async function handleCodeNeedWindow(
       truncation: hotpathTruncation,
     };
 
-    return attachRawContext(response, { fileIds: [symbol.file_id] });
+    return attachRawContext(response, { fileIds: [symbol.fileId] });
   }
 
   if (gateResult.approved) {
     const granularity = request.granularity ?? "symbol";
 
-    const filePath = getAbsolutePathFromRepoRoot(repo.root_path, file.rel_path);
+    const filePath = getAbsolutePathFromRepoRoot(repo.rootPath, file.relPath);
     const isSensitive = shouldRedactFile(filePath);
 
     const maxLines = Math.min(request.expectedLines, validatedPolicy.maxWindowLines);
@@ -369,7 +370,7 @@ export async function handleCodeNeedWindow(
     const response: CodeNeedWindowResponse = {
       approved: true,
       symbolId: request.symbolId,
-      file: file.rel_path,
+      file: file.relPath,
       range: windowResult.actualRange,
       code: redactedCode,
       whyApproved,
@@ -377,7 +378,7 @@ export async function handleCodeNeedWindow(
       truncation: codeTruncation,
     };
 
-    return attachRawContext(response, { fileIds: [symbol.file_id] });
+    return attachRawContext(response, { fileIds: [symbol.fileId] });
   } else {
     logCodeWindowDecision({
       symbolId: request.symbolId,
@@ -419,7 +420,7 @@ export async function handleGetSkeleton(
   }
 
   if (request.symbolId) {
-    const result = generateSymbolSkeleton(request.repoId, request.symbolId, {
+    const result = await generateSymbolSkeleton(request.repoId, request.symbolId, {
       maxLines: request.maxLines,
       maxTokens: request.maxTokens,
       includeIdentifiers: request.identifiersToFind,
@@ -431,8 +432,11 @@ export async function handleGetSkeleton(
       );
     }
 
-    const symbol = getSymbol(request.symbolId);
-    const file = symbol ? getFile(symbol.file_id) : null;
+    const conn = await getKuzuConn();
+    const symbol = await kuzuDb.getSymbol(conn, request.symbolId);
+    const file = symbol
+      ? (await kuzuDb.getFilesByIds(conn, [symbol.fileId])).get(symbol.fileId) ?? null
+      : null;
 
     const skeletonTruncation = result.truncated
       ? {
@@ -448,7 +452,7 @@ export async function handleGetSkeleton(
 
     const response: GetSkeletonResponse = {
       skeleton: result.skeleton,
-      file: file?.rel_path || "",
+      file: file?.relPath || "",
       range: result.actualRange,
       estimatedTokens: result.estimatedTokens,
       originalLines: result.originalLines,
@@ -457,11 +461,11 @@ export async function handleGetSkeleton(
     };
 
     if (symbol) {
-      attachRawContext(response, { fileIds: [symbol.file_id] });
+      attachRawContext(response, { fileIds: [symbol.fileId] });
     }
     return response;
   } else if (request.file) {
-    const result = generateFileSkeleton(
+    const result = await generateFileSkeleton(
       request.repoId,
       request.file,
       request.exportedOnly ?? false,
@@ -498,9 +502,10 @@ export async function handleGetSkeleton(
       truncation: skeletonTruncation,
     };
 
-    const fileRow = getFileByRepoPath(request.repoId, request.file);
+    const conn = await getKuzuConn();
+    const fileRow = await kuzuDb.getFileByRepoPath(conn, request.repoId, request.file);
     if (fileRow) {
-      attachRawContext(response, { fileIds: [fileRow.file_id] });
+      attachRawContext(response, { fileIds: [fileRow.fileId] });
     }
     return response;
   }
@@ -530,7 +535,7 @@ export async function handleGetHotPath(
   });
   consumePrefetchedKey(request.repoId, `card:${request.symbolId}`);
 
-  const result = extractHotPath(
+  const result = await extractHotPath(
     request.repoId,
     request.symbolId,
     request.identifiersToFind,
@@ -547,20 +552,23 @@ export async function handleGetHotPath(
     );
   }
 
-  const file = getSymbol(request.symbolId);
-  const fileData = file ? getFile(file.file_id) : null;
+  const conn = await getKuzuConn();
+  const symbol = await kuzuDb.getSymbol(conn, request.symbolId);
+  const fileData = symbol
+    ? (await kuzuDb.getFilesByIds(conn, [symbol.fileId])).get(symbol.fileId) ?? null
+    : null;
 
   const response = {
     excerpt: result.excerpt,
-    file: fileData?.rel_path ?? "",
+    file: fileData?.relPath ?? "",
     range: result.actualRange,
     estimatedTokens: result.estimatedTokens,
     matchedIdentifiers: result.matchedIdentifiers,
     matchedLineNumbers: result.matchedLineNumbers,
     truncated: result.truncated,
   };
-  if (file) {
-    attachRawContext(response, { fileIds: [file.file_id] });
+  if (symbol) {
+    attachRawContext(response, { fileIds: [symbol.fileId] });
   }
   return response;
 }

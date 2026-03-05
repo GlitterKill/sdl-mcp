@@ -7,28 +7,23 @@
  * @module graph/slice/beam-search-engine
  */
 
-import type { SymbolId, EdgeType, SymbolRow } from "../../db/schema.js";
-import type { SliceBudget } from "../../mcp/types.js";
-import type { Graph } from "../buildGraph.js";
-import type { ResolvedStartNode } from "./start-node-resolver.js";
-import type {
-  ScoreCandidate,
-  ScoreWorkerInput,
-  ScoreWorkerOutput,
-} from "./beam-score-worker.js";
-import {
-  START_NODE_SOURCE_SCORE,
-  getStartNodeWhy,
-} from "./start-node-resolver.js";
-import { scoreSymbolWithMetrics, SliceContext } from "../score.js";
-import * as db from "../../db/queries.js";
-import { MinHeap } from "../minHeap.js";
-import { logger } from "../../util/logger.js";
-import { findPackageRoot } from "../../util/findPackageRoot.js";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-import { Worker } from "worker_threads";
 import * as os from "os";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+import { Worker } from "worker_threads";
+
+import type { Connection } from "kuzu";
+
+import type {
+  EdgeType,
+  FileRow,
+  MetricsRow,
+  RepoId,
+  SymbolId,
+  SymbolRow,
+} from "../../db/schema.js";
+import type { SliceBudget } from "../../mcp/types.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import {
   SLICE_SCORE_THRESHOLD,
   MAX_FRONTIER,
@@ -36,6 +31,105 @@ import {
   TOKENS_PER_CHAR_ESTIMATE,
   SYMBOL_TOKEN_ADDITIONAL_MAX,
 } from "../../config/constants.js";
+import { logger } from "../../util/logger.js";
+import { findPackageRoot } from "../../util/findPackageRoot.js";
+
+import type { Graph } from "../buildGraph.js";
+import { MinHeap } from "../minHeap.js";
+import {
+  calculateClusterCohesion,
+  scoreSymbolWithMetrics,
+  SliceContext,
+} from "../score.js";
+import type { ResolvedStartNode } from "./start-node-resolver.js";
+import {
+  START_NODE_SOURCE_SCORE,
+  getStartNodeWhy,
+} from "./start-node-resolver.js";
+import type {
+  ScoreCandidate,
+  ScoreWorkerInput,
+  ScoreWorkerOutput,
+} from "./beam-score-worker.js";
+
+function toLegacySymbolRow(symbol: kuzuDb.SymbolRow): SymbolRow {
+  return {
+    symbol_id: symbol.symbolId,
+    repo_id: symbol.repoId as RepoId,
+    file_id: 0,
+    kind: symbol.kind as SymbolRow["kind"],
+    name: symbol.name,
+    exported: symbol.exported ? 1 : 0,
+    visibility: symbol.visibility as SymbolRow["visibility"],
+    language: symbol.language,
+    range_start_line: symbol.rangeStartLine,
+    range_start_col: symbol.rangeStartCol,
+    range_end_line: symbol.rangeEndLine,
+    range_end_col: symbol.rangeEndCol,
+    ast_fingerprint: symbol.astFingerprint,
+    signature_json: symbol.signatureJson,
+    summary: symbol.summary,
+    invariants_json: symbol.invariantsJson,
+    side_effects_json: symbol.sideEffectsJson,
+    updated_at: symbol.updatedAt,
+  };
+}
+
+function toLegacyFileRow(file: kuzuDb.FileRow): FileRow {
+  return {
+    file_id: 0,
+    repo_id: file.repoId as RepoId,
+    rel_path: file.relPath,
+    content_hash: file.contentHash,
+    language: file.language,
+    byte_size: file.byteSize,
+    last_indexed_at: file.lastIndexedAt,
+    directory: file.directory,
+  };
+}
+
+function toLegacyMetricsRow(metrics: kuzuDb.MetricsRow): MetricsRow {
+  return {
+    symbol_id: metrics.symbolId,
+    fan_in: metrics.fanIn,
+    fan_out: metrics.fanOut,
+    churn_30d: metrics.churn30d,
+    test_refs_json: metrics.testRefsJson,
+    canonical_test_json: metrics.canonicalTestJson,
+    updated_at: metrics.updatedAt,
+  };
+}
+
+function normalizeEdgeType(value: string): EdgeType | null {
+  if (value === "call" || value === "import" || value === "config") {
+    return value;
+  }
+  return null;
+}
+
+function estimateCardTokensKuzu(
+  symbol: { name: string; signatureJson: string | null; summary: string | null },
+  outgoingEdgeCount: number,
+): number {
+  let tokens = SYMBOL_TOKEN_BASE;
+
+  tokens += symbol.name.length / TOKENS_PER_CHAR_ESTIMATE;
+
+  if (symbol.signatureJson) {
+    tokens += symbol.signatureJson.length / TOKENS_PER_CHAR_ESTIMATE;
+  }
+
+  if (symbol.summary) {
+    tokens += Math.min(
+      symbol.summary.length / TOKENS_PER_CHAR_ESTIMATE,
+      SYMBOL_TOKEN_ADDITIONAL_MAX,
+    );
+  }
+
+  tokens += outgoingEdgeCount * 5;
+
+  return Math.ceil(tokens);
+}
 
 export interface FrontierItem {
   symbolId: SymbolId;
@@ -75,6 +169,10 @@ export interface BeamSearchRequest {
   stackTrace?: string;
   failingTestPath?: string;
   editedFiles?: string[];
+  clusterContext?: {
+    entryClusterIds: string[];
+    relatedClusterIds: string[];
+  };
 }
 
 export function normalizeEdgeConfidence(
@@ -242,10 +340,6 @@ export function beamSearch(
 
     if (neighborsMap.size === 0) continue;
 
-    const metricsMap = db.getMetricsBySymbolIds([...neighborsMap.keys()]);
-    const fileIds = new Set([...neighborsMap.values()].map((s) => s.file_id));
-    const filesMap = db.getFilesByIds([...fileIds]);
-
     for (const [neighborId, neighborSymbol] of neighborsMap) {
       if (visited.has(neighborId)) continue;
       visited.add(neighborId);
@@ -267,8 +361,8 @@ export function beamSearch(
         scoreSymbolWithMetrics(
           neighborSymbol,
           context,
-          metricsMap.get(neighborId) ?? null,
-          filesMap.get(neighborSymbol.file_id),
+          null,
+          undefined,
         ) * edgeWeight
       );
 
@@ -325,6 +419,372 @@ export function beamSearch(
     priority: item.priority,
     sequence: item.sequence,
   }));
+  if (sliceCards.size >= budget.maxCards || frontierArray.length > 0) {
+    wasTruncated = true;
+    droppedCandidates += frontierArray.length;
+  }
+
+  return {
+    sliceCards,
+    frontier: frontierArray,
+    wasTruncated,
+    droppedCandidates,
+  };
+}
+
+export async function beamSearchKuzu(
+  conn: Connection,
+  repoId: RepoId,
+  startNodes: ResolvedStartNode[],
+  budget: Required<SliceBudget>,
+  request: BeamSearchRequest,
+  edgeWeights: Record<EdgeType, number>,
+  minConfidence: number,
+): Promise<BeamSearchResult> {
+  const sliceCards = new Set<SymbolId>();
+  const visited = new Set<SymbolId>();
+  const frontier = new MinHeap<FrontierItem>();
+  let droppedCandidates = 0;
+  let sequence = 0;
+  let effectiveCardCap = budget.maxCards;
+  const entrySymbols = new Set(request.entrySymbols ?? []);
+  const requiredEntryCoverage = entrySymbols.size;
+  const minCardsForDynamicCap = computeMinCardsForDynamicCap(
+    budget.maxCards,
+    requiredEntryCoverage,
+  );
+  let coveredEntrySymbols = 0;
+  let highConfidenceCards = 0;
+  const recentAcceptedScores: number[] = [];
+
+  // Collect forced symbolIds: editedFile nodes bypass score threshold pruning
+  const forcedSymbolIds = new Set<SymbolId>(
+    startNodes
+      .filter((n) => n.source === "editedFile")
+      .map((n) => n.symbolId),
+  );
+
+  const symbolCache = new Map<SymbolId, kuzuDb.SymbolRow>();
+  const fileCache = new Map<string, kuzuDb.FileRow>();
+  const metricsCache = new Map<SymbolId, kuzuDb.MetricsRow | null>();
+  const outgoingEdgesCache = new Map<SymbolId, kuzuDb.EdgeForSlice[]>();
+
+  const entryClusterIds = new Set<string>(request.clusterContext?.entryClusterIds ?? []);
+  const relatedClusterIds = new Set<string>(request.clusterContext?.relatedClusterIds ?? []);
+  const clusterCohesionEnabled =
+    entryClusterIds.size > 0 || relatedClusterIds.size > 0;
+  const clusterCache = new Map<SymbolId, string | null>();
+
+  const getClusters = async (symbolIds: SymbolId[]): Promise<void> => {
+    if (!clusterCohesionEnabled) return;
+
+    const missing = symbolIds.filter((id) => !clusterCache.has(id));
+    if (missing.length === 0) return;
+
+    const map = await kuzuDb.getClustersForSymbols(conn, missing);
+    for (const symbolId of missing) {
+      clusterCache.set(symbolId, map.get(symbolId)?.clusterId ?? null);
+    }
+  };
+
+  const getSymbol = async (symbolId: SymbolId): Promise<kuzuDb.SymbolRow | null> => {
+    const cached = symbolCache.get(symbolId);
+    if (cached) return cached;
+
+    const map = await kuzuDb.getSymbolsByIds(conn, [symbolId]);
+    const symbol = map.get(symbolId) ?? null;
+    if (!symbol || symbol.repoId !== repoId) {
+      return null;
+    }
+
+    symbolCache.set(symbolId, symbol);
+    return symbol;
+  };
+
+  const getMetrics = async (symbolIds: SymbolId[]): Promise<void> => {
+    const missing = symbolIds.filter((id) => !metricsCache.has(id));
+    if (missing.length === 0) return;
+
+    const map = await kuzuDb.getMetricsBySymbolIds(conn, missing);
+    for (const id of missing) {
+      metricsCache.set(id, map.get(id) ?? null);
+    }
+  };
+
+  const getOutgoingEdges = async (
+    symbolId: SymbolId,
+  ): Promise<kuzuDb.EdgeForSlice[]> => {
+    const cached = outgoingEdgesCache.get(symbolId);
+    if (cached) return cached;
+
+    const map = await kuzuDb.getEdgesFromSymbolsForSlice(conn, [symbolId]);
+    const edges = map.get(symbolId) ?? [];
+
+    edges.sort((a, b) => {
+      const toDiff = a.toSymbolId.localeCompare(b.toSymbolId);
+      if (toDiff !== 0) return toDiff;
+      return a.edgeType.localeCompare(b.edgeType);
+    });
+
+    outgoingEdgesCache.set(symbolId, edges);
+    return edges;
+  };
+
+  const startNodeIds = Array.from(new Set(startNodes.map((n) => n.symbolId)));
+  if (startNodeIds.length > 0) {
+    const startSymbols = await kuzuDb.getSymbolsByIds(conn, startNodeIds);
+    for (const [symbolId, symbol] of startSymbols) {
+      if (symbol.repoId === repoId) {
+        symbolCache.set(symbolId, symbol);
+      }
+    }
+    await getClusters(startNodeIds);
+  }
+
+  for (const { symbolId, source } of startNodes) {
+    if (visited.has(symbolId)) continue;
+    if (!symbolCache.has(symbolId)) continue;
+
+    frontier.insert({
+      symbolId,
+      score: START_NODE_SOURCE_SCORE[source],
+      why: getStartNodeWhy(source),
+      priority: 0,
+      sequence: sequence++,
+    });
+    visited.add(symbolId);
+  }
+
+  const context: SliceContext = {
+    query: request.taskText ?? "",
+    queryTokens: request.taskText ? tokenize(request.taskText) : undefined,
+    stackTrace: request.stackTrace,
+    failingTestPath: request.failingTestPath,
+    editedFiles: request.editedFiles,
+    entrySymbols: request.entrySymbols,
+  };
+
+  let belowThresholdCount = 0;
+  let wasTruncated = false;
+  let totalTokens = 0;
+  let effectiveMinConfidence = minConfidence;
+
+  while (!frontier.isEmpty() && sliceCards.size < effectiveCardCap) {
+    effectiveMinConfidence = getAdaptiveMinConfidence(
+      minConfidence,
+      totalTokens,
+      budget.maxEstimatedTokens,
+    );
+
+    const current = frontier.extractMin()!;
+    const actualScore = -current.score;
+
+    if (sliceCards.size >= effectiveCardCap) {
+      wasTruncated = true;
+      break;
+    }
+
+    if (
+      actualScore < SLICE_SCORE_THRESHOLD &&
+      !forcedSymbolIds.has(current.symbolId)
+    ) {
+      belowThresholdCount++;
+      if (belowThresholdCount >= 5) break;
+      continue;
+    }
+
+    belowThresholdCount = 0;
+
+    const currentSymbol = await getSymbol(current.symbolId);
+    if (!currentSymbol) {
+      continue;
+    }
+
+    sliceCards.add(current.symbolId);
+    if (entrySymbols.has(current.symbolId)) {
+      coveredEntrySymbols++;
+    }
+    if (
+      actualScore >=
+      SLICE_SCORE_THRESHOLD + DYNAMIC_CAP_HIGH_CONFIDENCE_MARGIN
+    ) {
+      highConfidenceCards++;
+    }
+    recentAcceptedScores.push(actualScore);
+    if (recentAcceptedScores.length > DYNAMIC_CAP_RECENT_SCORE_WINDOW) {
+      recentAcceptedScores.shift();
+    }
+
+    const outgoing = await getOutgoingEdges(current.symbolId);
+    const cardTokens = estimateCardTokensKuzu(currentSymbol, outgoing.length);
+    totalTokens += cardTokens;
+
+    if (totalTokens > budget.maxEstimatedTokens) {
+      sliceCards.delete(current.symbolId);
+      totalTokens -= cardTokens;
+      wasTruncated = true;
+      droppedCandidates++;
+      break;
+    }
+
+    const edgeByTarget = new Map<SymbolId, { edgeType: EdgeType; confidence: number | undefined }>();
+    const edgeTypePriority: Record<EdgeType, number> = {
+      call: 0,
+      import: 1,
+      config: 2,
+    };
+
+    for (const edge of outgoing) {
+      const edgeType = normalizeEdgeType(edge.edgeType);
+      if (!edgeType) continue;
+
+      const toId = edge.toSymbolId as SymbolId;
+      if (visited.has(toId) || sliceCards.has(toId)) continue;
+
+      const candidateScore = applyEdgeConfidenceWeight(
+        edgeWeights[edgeType] ?? 0.5,
+        edge.confidence,
+      );
+
+      const existing = edgeByTarget.get(toId);
+      if (!existing) {
+        edgeByTarget.set(toId, { edgeType, confidence: edge.confidence });
+        continue;
+      }
+
+      const existingScore = applyEdgeConfidenceWeight(
+        edgeWeights[existing.edgeType] ?? 0.5,
+        existing.confidence,
+      );
+
+      if (
+        candidateScore > existingScore ||
+        (candidateScore === existingScore &&
+          edgeTypePriority[edgeType] < edgeTypePriority[existing.edgeType])
+      ) {
+        edgeByTarget.set(toId, { edgeType, confidence: edge.confidence });
+      }
+    }
+
+    if (edgeByTarget.size === 0) continue;
+
+    const neighborIds = Array.from(edgeByTarget.keys());
+    const neighborSymbolsMap = await kuzuDb.getSymbolsByIds(conn, neighborIds);
+
+    const validNeighborIds: SymbolId[] = [];
+    const fileIds = new Set<string>();
+    for (const neighborId of neighborIds) {
+      const symbol = neighborSymbolsMap.get(neighborId);
+      if (!symbol || symbol.repoId !== repoId) continue;
+      symbolCache.set(neighborId, symbol);
+      validNeighborIds.push(neighborId);
+      fileIds.add(symbol.fileId);
+    }
+
+    if (validNeighborIds.length === 0) continue;
+
+    await getClusters(validNeighborIds);
+    await getMetrics(validNeighborIds);
+
+    const missingFileIds = Array.from(fileIds).filter((id) => !fileCache.has(id));
+    if (missingFileIds.length > 0) {
+      const filesMap = await kuzuDb.getFilesByIds(conn, missingFileIds);
+      for (const [fileId, file] of filesMap) {
+        fileCache.set(fileId, file);
+      }
+    }
+
+    for (const neighborId of neighborIds) {
+      const neighborSymbol = symbolCache.get(neighborId);
+      if (!neighborSymbol || neighborSymbol.repoId !== repoId) continue;
+      if (visited.has(neighborId)) continue;
+      visited.add(neighborId);
+
+      const edge = edgeByTarget.get(neighborId);
+      if (!edge) continue;
+
+      const edgeConfidence = normalizeEdgeConfidence(edge.confidence);
+      if (edgeConfidence < effectiveMinConfidence) {
+        droppedCandidates++;
+        continue;
+      }
+
+      const edgeWeight = applyEdgeConfidenceWeight(
+        edgeWeights[edge.edgeType] ?? 0.5,
+        edgeConfidence,
+      );
+
+      const metrics = metricsCache.get(neighborId) ?? null;
+      const file = fileCache.get(neighborSymbol.fileId);
+      const baseScore = scoreSymbolWithMetrics(
+          toLegacySymbolRow(neighborSymbol),
+          context,
+          metrics ? toLegacyMetricsRow(metrics) : null,
+          file ? toLegacyFileRow(file) : undefined,
+      );
+      const cohesionBoost = clusterCohesionEnabled
+        ? calculateClusterCohesion({
+            symbolClusterId: clusterCache.get(neighborId),
+            entryClusterIds,
+            relatedClusterIds,
+          })
+        : 0;
+      const neighborScore = -(baseScore * edgeWeight + cohesionBoost);
+
+      if (-neighborScore < SLICE_SCORE_THRESHOLD) {
+        droppedCandidates++;
+        continue;
+      }
+
+      if (frontier.size() < MAX_FRONTIER) {
+        frontier.insert({
+          symbolId: neighborId,
+          score: neighborScore,
+          why: getEdgeWhy(edge.edgeType),
+          priority: 10,
+          sequence: sequence++,
+        });
+      } else {
+        const min = frontier.peek();
+        const candidate: FrontierItem = {
+          symbolId: neighborId,
+          score: neighborScore,
+          why: getEdgeWhy(edge.edgeType),
+          priority: 10,
+          sequence: sequence++,
+        };
+        if (min && compareFrontierItems(min, candidate) > 0) {
+          frontier.extractMin();
+          frontier.insert(candidate);
+        } else {
+          droppedCandidates++;
+        }
+      }
+    }
+
+    if (
+      shouldTightenDynamicCardCap({
+        sliceSize: sliceCards.size,
+        minCardsForDynamicCap,
+        highConfidenceCards,
+        requiredEntryCoverage,
+        coveredEntrySymbols,
+        recentAcceptedScores,
+        nextFrontierScore: frontier.peek() ? -frontier.peek()!.score : null,
+      })
+    ) {
+      effectiveCardCap = Math.min(effectiveCardCap, sliceCards.size);
+    }
+  }
+
+  const frontierArray = frontier.toHeapArray().map((item) => ({
+    symbolId: item.symbolId,
+    score: -item.score,
+    why: item.why,
+    priority: item.priority,
+    sequence: item.sequence,
+  }));
+
   if (sliceCards.size >= budget.maxCards || frontierArray.length > 0) {
     wasTruncated = true;
     droppedCandidates += frontierArray.length;
@@ -820,9 +1280,8 @@ export async function beamSearchAsync(
 
     if (neighborsMap.size === 0) continue;
 
-    const metricsMap = db.getMetricsBySymbolIds([...neighborsMap.keys()]);
-    const fileIds = new Set([...neighborsMap.values()].map((s) => s.file_id));
-    const filesMap = db.getFilesByIds([...fileIds]);
+    const metricsMap = new Map<SymbolId, MetricsRow>();
+    const filesMap = new Map<number, FileRow>();
 
     const candidates: ScoreCandidate[] = [];
     for (const [neighborId, neighborSymbol] of neighborsMap) {

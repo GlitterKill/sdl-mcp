@@ -217,7 +217,7 @@ SDL-MCP resolves config path in this order:
       "maxFileBytes": 2000000
     }
   ],
-  "dbPath": "./data/sdlmcp.sqlite",
+  "graphDatabase": { "path": "./data/sdl-mcp-graph" },
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,

@@ -2,7 +2,6 @@ import { readFileSync, statSync } from "fs";
 import { createHash } from "crypto";
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { Range, SkeletonOp, SkeletonIR } from "../mcp/types.js";
-import { getSymbol, getFile, getRepo } from "../db/queries.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
 import Parser from "tree-sitter";
@@ -14,6 +13,8 @@ import {
   DEFAULT_MAX_TOKENS_SKELETON_DETAILED,
   MAX_FILE_BYTES,
 } from "../config/constants.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 
 const tsParser = new Parser();
 const tsxParser = new Parser();
@@ -413,24 +414,26 @@ function findNodeByRange(
   return node;
 }
 
-export function generateSymbolSkeleton(
+export async function generateSymbolSkeleton(
   repoId: RepoId,
   symbolId: SymbolId,
   options: SkeletonOptions = {},
-): SkeletonResult | null {
-  const symbol = getSymbol(symbolId);
+): Promise<SkeletonResult | null> {
+  const conn = await getKuzuConn();
+  const symbol = await kuzuDb.getSymbol(conn, symbolId);
   if (!symbol) return null;
 
-  if (symbol.repo_id !== repoId) return null;
+  if (symbol.repoId !== repoId) return null;
 
-  const file = getFile(symbol.file_id);
+  const files = await kuzuDb.getFilesByIds(conn, [symbol.fileId]);
+  const file = files.get(symbol.fileId);
   if (!file) return null;
 
-  const repo = getRepo(repoId);
+  const repo = await kuzuDb.getRepo(conn, repoId);
   if (!repo) return null;
 
-  const filePath = getAbsolutePathFromRepoRoot(repo.root_path, file.rel_path);
-  const extension = file.rel_path.split(".").pop() || "";
+  const filePath = getAbsolutePathFromRepoRoot(repo.rootPath, file.relPath);
+  const extension = file.relPath.split(".").pop() || "";
 
   try {
     const fileStat = statSync(filePath);
@@ -449,8 +452,8 @@ export function generateSymbolSkeleton(
   }
 
   const symbolRange = {
-    startLine: symbol.range_start_line,
-    endLine: symbol.range_end_line,
+    startLine: symbol.rangeStartLine,
+    endLine: symbol.rangeEndLine,
   };
 
   const rootNode = tree.rootNode;
@@ -477,31 +480,35 @@ export function generateSymbolSkeleton(
   const skeletonLines = code.split("\n");
 
   const actualRange: Range = {
-    startLine: symbol.range_start_line,
-    startCol: symbol.range_start_col,
-    endLine: Math.max(symbol.range_start_line, symbol.range_start_line + skeletonLines.length - 1),
-    endCol: truncated ? 0 : symbol.range_end_col,
+    startLine: symbol.rangeStartLine,
+    startCol: symbol.rangeStartCol,
+    endLine: Math.max(
+      symbol.rangeStartLine,
+      symbol.rangeStartLine + skeletonLines.length - 1,
+    ),
+    endCol: truncated ? 0 : symbol.rangeEndCol,
   };
 
   return {
     skeleton: code,
     actualRange,
     estimatedTokens: estimateTokenCount(code),
-    originalLines: symbol.range_end_line - symbol.range_start_line + 1,
+    originalLines: symbol.rangeEndLine - symbol.rangeStartLine + 1,
     truncated,
   };
 }
 
-export function generateFileSkeleton(
+export async function generateFileSkeleton(
   repoId: RepoId,
   filePath: string,
   exportedOnly: boolean = false,
   options: SkeletonOptions = {},
-): SkeletonResult | null {
-  const repo = getRepo(repoId);
+): Promise<SkeletonResult | null> {
+  const conn = await getKuzuConn();
+  const repo = await kuzuDb.getRepo(conn, repoId);
   if (!repo) return null;
 
-  const absPath = getAbsolutePathFromRepoRoot(repo.root_path, filePath);
+  const absPath = getAbsolutePathFromRepoRoot(repo.rootPath, filePath);
   const extension = filePath.split(".").pop() || "";
 
   try {
@@ -804,24 +811,26 @@ function generateIROpsFromNode(
   return ops;
 }
 
-export function generateSkeletonIR(
+export async function generateSkeletonIR(
   repoId: RepoId,
   symbolId: SymbolId,
   options: SkeletonOptions = {},
-): SkeletonIRResult | null {
-  const symbol = getSymbol(symbolId);
+): Promise<SkeletonIRResult | null> {
+  const conn = await getKuzuConn();
+  const symbol = await kuzuDb.getSymbol(conn, symbolId);
   if (!symbol) return null;
 
-  if (symbol.repo_id !== repoId) return null;
+  if (symbol.repoId !== repoId) return null;
 
-  const file = getFile(symbol.file_id);
+  const files = await kuzuDb.getFilesByIds(conn, [symbol.fileId]);
+  const file = files.get(symbol.fileId);
   if (!file) return null;
 
-  const repo = getRepo(repoId);
+  const repo = await kuzuDb.getRepo(conn, repoId);
   if (!repo) return null;
 
-  const filePath = getAbsolutePathFromRepoRoot(repo.root_path, file.rel_path);
-  const extension = file.rel_path.split(".").pop() || "";
+  const filePath = getAbsolutePathFromRepoRoot(repo.rootPath, file.relPath);
+  const extension = file.relPath.split(".").pop() || "";
 
   try {
     const fileStat = statSync(filePath);
@@ -840,8 +849,8 @@ export function generateSkeletonIR(
   }
 
   const symbolRange = {
-    startLine: symbol.range_start_line,
-    endLine: symbol.range_end_line,
+    startLine: symbol.rangeStartLine,
+    endLine: symbol.rangeEndLine,
   };
 
   const rootNode = tree.rootNode;
@@ -855,7 +864,7 @@ export function generateSkeletonIR(
 
   const hash = computeIRHash(ops);
 
-  const totalLines = symbol.range_end_line - symbol.range_start_line + 1;
+  const totalLines = symbol.rangeEndLine - symbol.rangeStartLine + 1;
 
   let elidedLines = 0;
   for (const op of ops) {
@@ -877,9 +886,9 @@ export function generateSkeletonIR(
   const skeletonLines = code.split("\n");
 
   const actualRange: Range = {
-    startLine: symbol.range_start_line,
-    startCol: symbol.range_start_col,
-    endLine: symbol.range_start_line + skeletonLines.length - 1,
+    startLine: symbol.rangeStartLine,
+    startCol: symbol.rangeStartCol,
+    endLine: symbol.rangeStartLine + skeletonLines.length - 1,
     endCol: skeletonLines[skeletonLines.length - 1]?.length ?? 0,
   };
 

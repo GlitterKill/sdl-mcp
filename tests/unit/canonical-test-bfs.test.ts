@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { computeCanonicalTest } from "../../src/graph/metrics.js";
-import type { Graph } from "../../src/graph/buildGraph.js";
-import type { SymbolRow, EdgeRow } from "../../src/db/schema.js";
+import type { Graph } from "../../src/graph/metrics.js";
+import type { SymbolRow, EdgeRow } from "../../src/db/kuzu-queries.js";
 
 // ---------------------------------------------------------------------------
 // Minimal mock helpers
@@ -12,39 +12,41 @@ let nextFileId = 1;
 
 function makeSymbol(
   id: string,
-  fileId: number,
+  fileId: string,
 ): SymbolRow {
   return {
-    symbol_id: id,
-    repo_id: "test-repo",
-    file_id: fileId,
+    symbolId: id,
+    repoId: "test-repo",
+    fileId,
     kind: "function",
     name: id,
-    exported: 1,
+    exported: true,
     visibility: "public",
     language: "typescript",
-    range_start_line: 1,
-    range_start_col: 0,
-    range_end_line: 10,
-    range_end_col: 1,
-    ast_fingerprint: `fp-${id}`,
-    signature_json: null,
+    rangeStartLine: 1,
+    rangeStartCol: 0,
+    rangeEndLine: 10,
+    rangeEndCol: 1,
+    astFingerprint: `fp-${id}`,
+    signatureJson: null,
     summary: null,
-    invariants_json: null,
-    side_effects_json: null,
-    updated_at: new Date().toISOString(),
+    invariantsJson: null,
+    sideEffectsJson: null,
+    updatedAt: new Date().toISOString(),
   };
 }
 
 function makeEdge(from: string, to: string): EdgeRow {
   return {
-    repo_id: "test-repo",
-    from_symbol_id: from,
-    to_symbol_id: to,
-    type: "call",
+    repoId: "test-repo",
+    fromSymbolId: from,
+    toSymbolId: to,
+    edgeType: "call",
     weight: 1.0,
+    confidence: 1.0,
+    resolution: "exact",
     provenance: null,
-    created_at: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
   };
 }
 
@@ -55,14 +57,14 @@ function makeEdge(from: string, to: string): EdgeRow {
 function buildGraph(
   symbolDefs: Array<{ id: string; relPath: string }>,
   edgeDefs: Array<{ from: string; to: string }>,
-): { graph: Graph; fileById: Map<number, string> } {
-  const fileById = new Map<number, string>();
-  const pathToFileId = new Map<string, number>();
+): { graph: Graph; fileById: Map<string, string> } {
+  const fileById = new Map<string, string>();
+  const pathToFileId = new Map<string, string>();
 
   // Assign file IDs — multiple symbols can share the same file
   for (const def of symbolDefs) {
     if (!pathToFileId.has(def.relPath)) {
-      const fid = nextFileId++;
+      const fid = `f${nextFileId++}`;
       pathToFileId.set(def.relPath, fid);
       fileById.set(fid, def.relPath);
     }

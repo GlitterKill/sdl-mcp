@@ -1,11 +1,7 @@
 import { hashContent } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
-import {
-  getSummaryCache,
-  upsertSummaryCache,
-  getSymbolsByRepo,
-  updateSymbolSummary,
-} from "../db/queries.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 import type { AppConfig } from "../config/types.js";
 
 export interface GeneratedSummaryResult {
@@ -267,6 +263,7 @@ export async function generateSummaryWithGuardrails(input: {
   summaryApiKey?: string;
   summaryApiBaseUrl?: string;
 }): Promise<GeneratedSummaryResult> {
+  const conn = await getKuzuConn();
   const summaryProvider = createSummaryProvider(input.provider, {
     summaryModel: input.summaryModel,
     summaryApiKey: input.summaryApiKey,
@@ -280,8 +277,8 @@ export async function generateSummaryWithGuardrails(input: {
 
   // Check summary cache when symbolId is available
   if (input.symbolId) {
-    const cached = getSummaryCache(input.symbolId);
-    if (cached != null && cached.card_hash === cardHash) {
+    const cached = await kuzuDb.getSummaryCache(conn, input.symbolId);
+    if (cached != null && cached.cardHash === cardHash) {
       const divergenceScore = tokenDistance(
         cached.summary,
         input.heuristicSummary ?? "",
@@ -311,15 +308,15 @@ export async function generateSummaryWithGuardrails(input: {
   // Persist to cache when symbolId is available
   if (input.symbolId) {
     const now = new Date().toISOString();
-    upsertSummaryCache({
-      symbol_id: input.symbolId,
+    await kuzuDb.upsertSummaryCache(conn, {
+      symbolId: input.symbolId,
       summary,
       provider: summaryProvider.name,
       model: input.summaryModel ?? summaryProvider.name,
-      card_hash: cardHash,
-      cost_usd: costUsd,
-      created_at: now,
-      updated_at: now,
+      cardHash,
+      costUsd,
+      createdAt: now,
+      updatedAt: now,
     });
   }
 
@@ -359,6 +356,7 @@ export async function generateSummariesForRepo(
   repoId: string,
   config: AppConfig,
 ): Promise<SummaryBatchResult> {
+  const conn = await getKuzuConn();
   const semantic = config.semantic;
   if (!semantic) {
     return { generated: 0, skipped: 0, failed: 0, totalCostUsd: 0 };
@@ -372,20 +370,20 @@ export async function generateSummariesForRepo(
   const summaryApiBaseUrl = semantic.summaryApiBaseUrl;
 
   // Fetch all symbols for the repo
-  const symbols = getSymbolsByRepo(repoId);
+  const symbols = await kuzuDb.getSymbolsByRepo(conn, repoId);
 
   // Determine which symbols need a new summary by checking the cache
-  const needsSummary = symbols.filter((sym) => {
+  const needsSummary: typeof symbols = [];
+  for (const sym of symbols) {
     const cardHash = hashContent(
-      [sym.name, sym.kind ?? "", sym.signature_json ?? ""].join("|"),
+      [sym.name, sym.kind ?? "", sym.signatureJson ?? ""].join("|"),
     );
-    const cached = getSummaryCache(sym.symbol_id);
-    // Skip if cache entry exists and cardHash matches
-    if (cached != null && cached.card_hash === cardHash) {
-      return false;
+    const cached = await kuzuDb.getSummaryCache(conn, sym.symbolId);
+    if (cached != null && cached.cardHash === cardHash) {
+      continue;
     }
-    return true;
-  });
+    needsSummary.push(sym);
+  }
 
   const result: SummaryBatchResult = {
     generated: 0,
@@ -416,24 +414,24 @@ export async function generateSummariesForRepo(
 
     for (const sym of batch) {
       try {
-        const signatureText = sym.signature_json
+        const signatureText = sym.signatureJson
           ? (() => {
               try {
-                const parsed = JSON.parse(sym.signature_json) as
+                const parsed = JSON.parse(sym.signatureJson) as
                   | { text?: string }
                   | string;
                 return typeof parsed === "string"
                   ? parsed
-                  : (parsed?.text ?? sym.signature_json);
+                  : (parsed?.text ?? sym.signatureJson);
               } catch {
-                return sym.signature_json;
+                return sym.signatureJson;
               }
             })()
           : undefined;
 
         const genResult = await generateSummaryWithGuardrails({
           symbolName: sym.name,
-          symbolId: sym.symbol_id,
+          symbolId: sym.symbolId,
           kind: sym.kind,
           signature: signatureText,
           heuristicSummary: sym.summary ?? undefined,
@@ -444,13 +442,13 @@ export async function generateSummariesForRepo(
         });
 
         // Update the symbol row with the new summary
-        updateSymbolSummary(sym.symbol_id, genResult.summary);
+        await kuzuDb.updateSymbolSummary(conn, sym.symbolId, genResult.summary);
 
         batchGenerated += 1;
         batchCost += genResult.costUsd;
       } catch (err) {
         logger.warn(
-          `Failed to generate summary for symbol ${sym.symbol_id}: ${String(err)}`,
+          `Failed to generate summary for symbol ${sym.symbolId}: ${String(err)}`,
         );
         batchFailed += 1;
       }

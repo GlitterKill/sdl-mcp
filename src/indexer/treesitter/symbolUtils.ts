@@ -5,8 +5,11 @@ export function findEnclosingSymbol(
   node: Parser.SyntaxNode,
   symbols: ExtractedSymbol[],
 ): string {
-  let bestMatch: ExtractedSymbol | null = null;
-  let smallestSize = Infinity;
+  let bestNonVariable: ExtractedSymbol | null = null;
+  let smallestNonVariableSize = Infinity;
+
+  let bestVariable: ExtractedSymbol | null = null;
+  let smallestVariableSize = Infinity;
 
   const nodeLine = node.startPosition.row + 1;
   const nodeCol = node.startPosition.column;
@@ -29,12 +32,21 @@ export function findEnclosingSymbol(
       const size =
         (symbol.range.endLine - symbol.range.startLine) * 1000 +
         (symbol.range.endCol - symbol.range.startCol);
-      if (size < smallestSize) {
-        smallestSize = size;
-        bestMatch = symbol;
+
+      if (symbol.kind === "variable") {
+        if (size < smallestVariableSize) {
+          smallestVariableSize = size;
+          bestVariable = symbol;
+        }
+        continue;
+      }
+
+      if (size < smallestNonVariableSize) {
+        smallestNonVariableSize = size;
+        bestNonVariable = symbol;
       }
     }
   }
 
-  return bestMatch?.nodeId || "global";
+  return bestNonVariable?.nodeId || bestVariable?.nodeId || "global";
 }

@@ -45,6 +45,7 @@ Instead of opening large files first, SDL-MCP indexes repositories into symbol c
 - Better relevance with dependency-aware context retrieval
 - Safer context access via policy controls and auditing
 - Faster iteration through incremental indexing and refresh workflows
+- KuzuDB-backed graph persistence means indexing happens once, not every session
 - Works across TypeScript, JavaScript, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, and Shell
 
 ## Claude Opus 4.6 High Overview
@@ -132,7 +133,7 @@ Response: "# What is SDL-MCP?
 
   - Scales to thousands of files without blowing context windows
   - Symbol-level tracking survives whitespace changes and trivial refactors
-  - SQLite-backed persistence means indexing happens once, not every session
+  - KuzuDB-backed graph persistence means indexing happens once, not every session
 
   **For teams:**
 
@@ -147,7 +148,7 @@ Response: "# What is SDL-MCP?
   SDL-MCP runs as a CLI with 5 commands:
 
   ```bash
-  sdl-mcp init      # Create config + database
+  sdl-mcp init      # Create config + graph DB directory
   sdl-mcp index     # Index your repositories
   sdl-mcp serve     # Start the MCP server (stdio or HTTP)
   sdl-mcp doctor    # Health check
@@ -206,6 +207,7 @@ sdl-mcp serve --stdio --no-watch
 - Optional native Rust pass-1 indexing engine (`indexing.engine: "rust"`)
 - Symbol cards with signatures, deps, metrics, and versioning
 - Graph slices with handles, leases, refresh, and spillover
+- Graph enrichment: clusters (community detection) + processes (call-chain traces) surfaced in cards/slices/overview/blast radius
 - Delta analysis and blast radius support with amplifier scoring
 - Semantic symbol search reranking (`sdl.symbol.search` with `semantic: true`)
 - LLM-generated symbol summaries with configurable concurrency and batching (`semantic.summaryModel`, `summaryMaxConcurrency`, `summaryBatchSize`)

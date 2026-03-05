@@ -1,9 +1,8 @@
 import { pullWithFallback } from "../../sync/pull.js";
 import type { SyncPullOptions } from "../../sync/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { getDb } from "../../db/db.js";
-import { runMigrations } from "../../db/migrations.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
+import { initGraphDb } from "../../db/initGraphDb.js";
 
 interface PullCommandOptions {
   config?: string;
@@ -17,9 +16,7 @@ interface PullCommandOptions {
 export async function pullCommand(options: PullCommandOptions): Promise<void> {
   const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
-
-  const db = getDb(config.dbPath);
-  runMigrations(db);
+  await initGraphDb(config, configPath);
 
   const repoId = options.repoId ?? config.repos[0]?.repoId;
   if (!repoId) {

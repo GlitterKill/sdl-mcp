@@ -40,7 +40,7 @@ const BUILTIN_IDENTIFIERS = new Set([
   "on", "off", "once", "emit", "removeListener", "removeAllListeners",
   // process
   "exit", "cwd", "env",
-  // SQLite/DB
+  // Database
   "prepare", "run", "all", "transaction", "close",
   // Zod schema builder methods
   "object", "string", "number", "boolean", "array", "enum", "optional",

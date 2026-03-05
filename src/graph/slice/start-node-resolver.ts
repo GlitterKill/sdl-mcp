@@ -13,9 +13,10 @@
  * @module graph/slice/start-node-resolver
  */
 
+import type { Connection } from "kuzu";
+
 import type { RepoId, SymbolId } from "../../db/schema.js";
-import type { Graph } from "../buildGraph.js";
-import * as db from "../../db/queries.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import { tokenize } from "../../util/tokenize.js";
 import {
   TASK_TEXT_START_NODE_MAX,
@@ -28,6 +29,8 @@ import {
   DEFAULT_MAX_CARDS,
   DB_QUERY_LIMIT_DEFAULT,
 } from "../../config/constants.js";
+
+import type { Graph } from "../buildGraph.js";
 
 export type StartNodeSource =
   | "entrySymbol"
@@ -202,26 +205,12 @@ export function resolveStartNodes(
   }
 
   if (request.editedFiles) {
-    const allEditedFileSymbolIds: string[] = [];
     for (const filePath of request.editedFiles) {
       if (startNodes.size >= limits.maxTotalStartNodes) break;
       const fileSymbols = getSymbolsByPath(graph.repoId, filePath);
       for (const symbolId of fileSymbols) {
         if (startNodes.size >= limits.maxTotalStartNodes) break;
         addStartNode(symbolId, "editedFile");
-        allEditedFileSymbolIds.push(symbolId);
-      }
-    }
-
-    // Add immediate callers/importers of edited file symbols as forced entry nodes
-    if (allEditedFileSymbolIds.length > 0) {
-      const callerIds = db.getCallersOfSymbols(
-        graph.repoId,
-        allEditedFileSymbolIds,
-      );
-      for (const callerId of callerIds) {
-        if (startNodes.size >= limits.maxTotalStartNodes) break;
-        addStartNode(callerId, "editedFile");
       }
     }
   }
@@ -245,19 +234,26 @@ export function resolveStartNodes(
           remaining,
         ),
       );
-      const results = db.searchSymbolsLite(graph.repoId, token, perTokenLimit);
-      for (const result of results) {
+
+      let addedForToken = 0;
+      const tokenLower = token.toLowerCase();
+      for (const [symbolId, symbol] of graph.symbols) {
         if (
           taskTextSeedCount >= effectiveTaskTextLimit ||
           startNodes.size >= limits.maxTotalStartNodes
         ) {
           break;
         }
-        const symbolId = result.symbol_id;
+        if (addedForToken >= perTokenLimit) break;
         if (startNodes.has(symbolId)) continue;
+
+        const haystack = `${symbol.name} ${symbol.summary ?? ""}`.toLowerCase();
+        if (!haystack.includes(tokenLower)) continue;
+
         addStartNode(symbolId, "taskText");
         if (startNodes.has(symbolId)) {
           taskTextSeedCount++;
+          addedForToken++;
         }
       }
     }
@@ -270,6 +266,306 @@ export function resolveStartNodes(
         START_NODE_SOURCE_PRIORITY[sourceB],
     )
     .map(([symbolId, source]) => ({ symbolId, source }));
+}
+
+export async function resolveStartNodesKuzu(
+  conn: Connection,
+  repoId: RepoId,
+  request: SliceBuildRequestBase,
+): Promise<ResolvedStartNode[]> {
+  const startNodes = new Map<SymbolId, StartNodeSource>();
+  const explicitEntrySymbols: SymbolId[] = [];
+
+  const addStartNode = (symbolId: SymbolId, source: StartNodeSource): void => {
+    const existingSource = startNodes.get(symbolId);
+    if (
+      existingSource &&
+      START_NODE_SOURCE_PRIORITY[existingSource] <=
+        START_NODE_SOURCE_PRIORITY[source]
+    ) {
+      return;
+    }
+    startNodes.set(symbolId, source);
+  };
+
+  const entrySymbols =
+    request.entrySymbols?.filter((id) => id && id.length > 0) ?? [];
+  if (entrySymbols.length > 0) {
+    const existing = await kuzuDb.getSymbolsByIds(conn, entrySymbols);
+    for (const symbolId of entrySymbols) {
+      const row = existing.get(symbolId);
+      if (!row || row.repoId !== repoId) continue;
+      explicitEntrySymbols.push(symbolId);
+      addStartNode(symbolId, "entrySymbol");
+    }
+  }
+
+  const limits = computeStartNodeLimits(request, explicitEntrySymbols.length);
+
+  const textOnlyMode =
+    (request.entrySymbols?.length ?? 0) === 0 &&
+    !request.stackTrace &&
+    !request.failingTestPath &&
+    (request.editedFiles?.length ?? 0) === 0 &&
+    Boolean(request.taskText);
+
+  const effectiveTaskTextLimit = textOnlyMode
+    ? limits.maxTaskTextStartNodes * 2
+    : limits.maxTaskTextStartNodes;
+
+  for (const symbolId of explicitEntrySymbols) {
+    if (startNodes.size >= limits.maxTotalStartNodes) break;
+    const firstHopSymbols = await collectEntryFirstHopSymbolsKuzu(
+      conn,
+      repoId,
+      symbolId,
+      limits.maxFirstHopPerEntry,
+    );
+    for (const firstHopSymbolId of firstHopSymbols) {
+      if (startNodes.size >= limits.maxTotalStartNodes) break;
+      addStartNode(firstHopSymbolId, "entryFirstHop");
+    }
+  }
+
+  for (const symbolId of explicitEntrySymbols) {
+    if (startNodes.size >= limits.maxTotalStartNodes) break;
+    const siblingSymbols = await collectEntrySiblingSymbolsKuzu(
+      conn,
+      repoId,
+      symbolId,
+      limits.maxSiblingPerEntry,
+    );
+    for (const siblingSymbolId of siblingSymbols) {
+      if (startNodes.size >= limits.maxTotalStartNodes) break;
+      addStartNode(siblingSymbolId, "entrySibling");
+    }
+  }
+
+  if (request.stackTrace) {
+    const stackSymbols = await extractSymbolsFromStackTraceKuzu(
+      conn,
+      repoId,
+      request.stackTrace,
+    );
+    for (const symbolId of stackSymbols) {
+      if (startNodes.size >= limits.maxTotalStartNodes) break;
+      addStartNode(symbolId, "stackTrace");
+    }
+  }
+
+  if (request.failingTestPath) {
+    const fileSymbols = await getSymbolsByPathKuzu(
+      conn,
+      repoId,
+      request.failingTestPath,
+    );
+    for (const symbolId of fileSymbols) {
+      if (startNodes.size >= limits.maxTotalStartNodes) break;
+      addStartNode(symbolId, "failingTestPath");
+    }
+  }
+
+  if (request.editedFiles) {
+    const allEditedFileSymbolIds: string[] = [];
+
+    for (const filePath of request.editedFiles) {
+      if (startNodes.size >= limits.maxTotalStartNodes) break;
+      const fileSymbols = await getSymbolsByPathKuzu(conn, repoId, filePath);
+      for (const symbolId of fileSymbols) {
+        if (startNodes.size >= limits.maxTotalStartNodes) break;
+        addStartNode(symbolId, "editedFile");
+        allEditedFileSymbolIds.push(symbolId);
+      }
+    }
+
+    if (allEditedFileSymbolIds.length > 0) {
+      const callerIds = await kuzuDb.getCallersOfSymbols(
+        conn,
+        repoId,
+        allEditedFileSymbolIds,
+      );
+      for (const callerId of callerIds) {
+        if (startNodes.size >= limits.maxTotalStartNodes) break;
+        addStartNode(callerId, "editedFile");
+      }
+    }
+  }
+
+  if (request.taskText) {
+    const taskTokens = collectTaskTextSeedTokens(request.taskText);
+    let taskTextSeedCount = 0;
+    for (const token of taskTokens) {
+      if (
+        taskTextSeedCount >= effectiveTaskTextLimit ||
+        startNodes.size >= limits.maxTotalStartNodes
+      ) {
+        break;
+      }
+      const remaining = effectiveTaskTextLimit - taskTextSeedCount;
+      const perTokenLimit = Math.max(
+        1,
+        Math.min(DB_QUERY_LIMIT_DEFAULT, TASK_TEXT_TOKEN_QUERY_LIMIT, remaining),
+      );
+
+      const results = await kuzuDb.searchSymbolsLite(
+        conn,
+        repoId,
+        token,
+        perTokenLimit,
+      );
+
+      for (const result of results) {
+        if (
+          taskTextSeedCount >= effectiveTaskTextLimit ||
+          startNodes.size >= limits.maxTotalStartNodes
+        ) {
+          break;
+        }
+        const symbolId = result.symbolId;
+        if (startNodes.has(symbolId)) continue;
+        addStartNode(symbolId, "taskText");
+        if (startNodes.has(symbolId)) {
+          taskTextSeedCount++;
+        }
+      }
+    }
+  }
+
+  return Array.from(startNodes.entries())
+    .map(([symbolId, source]) => ({ symbolId, source }))
+    .sort((a, b) => {
+      const pa = START_NODE_SOURCE_PRIORITY[a.source];
+      const pb = START_NODE_SOURCE_PRIORITY[b.source];
+      if (pa !== pb) return pa - pb;
+      return a.symbolId.localeCompare(b.symbolId);
+    })
+    .slice(0, limits.maxTotalStartNodes);
+}
+
+async function collectEntryFirstHopSymbolsKuzu(
+  conn: Connection,
+  repoId: RepoId,
+  entrySymbolId: SymbolId,
+  maxPerSymbol: number,
+): Promise<SymbolId[]> {
+  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, [entrySymbolId]);
+  const outgoing = edgesMap.get(entrySymbolId) ?? [];
+  if (outgoing.length === 0) return [];
+
+  const ranked = new Map<SymbolId, number>();
+
+  const targetIds = Array.from(
+    new Set(
+      outgoing
+        .filter((e) => e.edgeType === "call" || e.edgeType === "import")
+        .map((e) => e.toSymbolId),
+    ),
+  );
+
+  const targets = await kuzuDb.getSymbolsByIds(conn, targetIds);
+
+  for (const edge of outgoing) {
+    if (edge.edgeType !== "call" && edge.edgeType !== "import") continue;
+    const target = targets.get(edge.toSymbolId);
+    if (!target) continue;
+    if (target.repoId !== repoId) continue;
+
+    let rank = edge.edgeType === "call" ? 4 : 2;
+    if (target.exported) rank += 1;
+    if (target.kind === "function" || target.kind === "method") rank += 1;
+
+    const previous = ranked.get(edge.toSymbolId);
+    if (previous === undefined || rank > previous) {
+      ranked.set(edge.toSymbolId, rank);
+    }
+  }
+
+  return Array.from(ranked.entries())
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      const nameA = targets.get(a[0])?.name ?? "";
+      const nameB = targets.get(b[0])?.name ?? "";
+      return nameA.localeCompare(nameB);
+    })
+    .slice(0, maxPerSymbol)
+    .map(([symbolId]) => symbolId);
+}
+
+async function collectEntrySiblingSymbolsKuzu(
+  conn: Connection,
+  repoId: RepoId,
+  entrySymbolId: SymbolId,
+  maxPerSymbol: number,
+): Promise<SymbolId[]> {
+  const entrySymbol = await kuzuDb.getSymbol(conn, entrySymbolId);
+  if (!entrySymbol) return [];
+  if (entrySymbol.repoId !== repoId) return [];
+
+  const symbolsInFile = await kuzuDb.getSymbolsByFile(conn, entrySymbol.fileId);
+  if (symbolsInFile.length <= 1) return [];
+
+  const entryName = entrySymbol.name.toLowerCase();
+  const ranked: Array<{ symbolId: SymbolId; rank: number; name: string }> = [];
+
+  for (const candidate of symbolsInFile) {
+    if (candidate.symbolId === entrySymbolId) continue;
+    if (candidate.kind !== entrySymbol.kind) continue;
+
+    const sharedPrefix = commonPrefixLength(entryName, candidate.name.toLowerCase());
+    if (sharedPrefix < ENTRY_SIBLING_MIN_SHARED_PREFIX) continue;
+
+    let rank = sharedPrefix;
+    if (candidate.exported) rank += 2;
+    ranked.push({ symbolId: candidate.symbolId, rank, name: candidate.name });
+  }
+
+  return ranked
+    .sort((a, b) => {
+      if (b.rank !== a.rank) return b.rank - a.rank;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, maxPerSymbol)
+    .map((item) => item.symbolId);
+}
+
+async function extractSymbolsFromStackTraceKuzu(
+  conn: Connection,
+  repoId: RepoId,
+  stackTrace: string,
+): Promise<SymbolId[]> {
+  const symbols = new Set<SymbolId>();
+  const lines = stackTrace.split("\n");
+
+  const filesByRepo = await kuzuDb.getFilesByRepoLite(conn, repoId);
+  const filePaths = new Map<string, string>();
+
+  for (const file of filesByRepo) {
+    filePaths.set(file.relPath, file.fileId);
+  }
+
+  for (const [path, fileId] of filePaths.entries()) {
+    for (const line of lines) {
+      if (line.includes(path)) {
+        const symbolIds = await kuzuDb.getSymbolIdsByFile(conn, fileId);
+        for (const symbolId of symbolIds) {
+          symbols.add(symbolId);
+        }
+        break;
+      }
+    }
+  }
+
+  return Array.from(symbols);
+}
+
+async function getSymbolsByPathKuzu(
+  conn: Connection,
+  repoId: RepoId,
+  filePath: string,
+): Promise<SymbolId[]> {
+  const file = await kuzuDb.getFileByRepoPath(conn, repoId, filePath);
+  if (!file) return [];
+  return kuzuDb.getSymbolIdsByFile(conn, file.fileId);
 }
 
 export function collectTaskTextSeedTokens(taskText: string): string[] {
@@ -444,39 +740,15 @@ export function extractSymbolsFromStackTrace(
   stackTrace: string,
   repoId: RepoId,
 ): SymbolId[] {
-  const symbols = new Set<SymbolId>();
-  const lines = stackTrace.split("\n");
-
-  const filesByRepo = db.getFilesByRepoLite(repoId);
-  const filePaths = new Map<string, number>();
-
-  for (const file of filesByRepo) {
-    filePaths.set(file.rel_path, file.file_id);
-  }
-
-  for (const [path, fileId] of filePaths.entries()) {
-    for (const line of lines) {
-      if (line.includes(path)) {
-        const symbolIds = db.getSymbolIdsByFile(fileId);
-        for (const symbolId of symbolIds) {
-          symbols.add(symbolId);
-        }
-        break;
-      }
-    }
-  }
-
-  return Array.from(symbols);
+  void stackTrace;
+  void repoId;
+  return [];
 }
 
 export function getSymbolsByPath(repoId: RepoId, filePath: string): SymbolId[] {
-  const filesByRepo = db.getFilesByRepoLite(repoId);
-  const file = filesByRepo.find((f) => f.rel_path === filePath);
-
-  if (!file) return [];
-
-  const symbolIds = db.getSymbolIdsByFile(file.file_id);
-  return symbolIds;
+  void repoId;
+  void filePath;
+  return [];
 }
 
 export function getStartNodeWhy(source: StartNodeSource): string {

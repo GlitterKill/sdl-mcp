@@ -1,4 +1,5 @@
-import * as db from "../db/queries.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 
 export interface CardResource {
   uri: string;
@@ -18,49 +19,56 @@ export interface ResourceList {
   resources: Array<CardResource | SliceResource>;
 }
 
-export function listCardResources(repoId: string): CardResource[] {
-  const symbols = db.getSymbolsByRepo(repoId);
-  const latestVersion = db.getLatestVersion(repoId);
+export async function listCardResources(repoId: string): Promise<CardResource[]> {
+  const conn = await getKuzuConn();
+  const symbols = await kuzuDb.getSymbolsByRepo(conn, repoId);
+  const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
 
   if (!latestVersion) {
     return [];
   }
 
   return symbols.map((symbol) => ({
-    uri: `card://${repoId}/${symbol.symbol_id}@${latestVersion.version_id}`,
+    uri: `card://${repoId}/${symbol.symbolId}@${latestVersion.versionId}`,
     name: symbol.name,
     description: `${symbol.kind} in ${symbol.name}`,
     mimeType: "application/json",
   }));
 }
 
-export function listSliceResources(repoId: string): SliceResource[] {
-  const versions = db.listVersions(repoId, 50);
+export async function listSliceResources(
+  repoId: string,
+): Promise<SliceResource[]> {
+  const conn = await getKuzuConn();
+  const versions = await kuzuDb.getVersionsByRepo(conn, repoId);
 
-  return versions.map((version) => ({
-    uri: `slice://${repoId}/${version.version_id}`,
-    name: `Slice v${version.version_id}`,
-    description: `Graph slice for version ${version.version_id}`,
+  return versions.slice(0, 50).map((version) => ({
+    uri: `slice://${repoId}/${version.versionId}`,
+    name: `Slice v${version.versionId}`,
+    description: `Graph slice for version ${version.versionId}`,
     mimeType: "application/json",
   }));
 }
 
-export function listAllResources(repoId?: string): ResourceList {
+export async function listAllResources(repoId?: string): Promise<ResourceList> {
   if (repoId) {
-    const cards = listCardResources(repoId);
-    const slices = listSliceResources(repoId);
+    const [cards, slices] = await Promise.all([
+      listCardResources(repoId),
+      listSliceResources(repoId),
+    ]);
 
     return {
       resources: [...cards, ...slices],
     };
   }
 
-  const repos = db.listRepos();
+  const conn = await getKuzuConn();
+  const repos = await kuzuDb.listRepos(conn);
   const allResources: Array<CardResource | SliceResource> = [];
 
   for (const repo of repos) {
-    allResources.push(...listCardResources(repo.repo_id));
-    allResources.push(...listSliceResources(repo.repo_id));
+    allResources.push(...(await listCardResources(repo.repoId)));
+    allResources.push(...(await listSliceResources(repo.repoId)));
   }
 
   return {
@@ -68,7 +76,7 @@ export function listAllResources(repoId?: string): ResourceList {
   };
 }
 
-export function readCardResource(uri: string): string | null {
+export async function readCardResource(uri: string): Promise<string | null> {
   const match = uri.match(/^card:\/\/([^\/]+)\/([^@]+)@(.+)$/);
   if (!match) {
     return null;
@@ -76,64 +84,67 @@ export function readCardResource(uri: string): string | null {
 
   const [, , symbolId, versionId] = match;
 
-  const symbol = db.getSymbol(symbolId);
+  const conn = await getKuzuConn();
+  const symbol = await kuzuDb.getSymbol(conn, symbolId);
   if (!symbol) {
     return null;
   }
 
-  const file = db.getFile(symbol.file_id);
+  const file = (await kuzuDb.getFilesByIds(conn, [symbol.fileId])).get(
+    symbol.fileId,
+  );
   if (!file) {
     return null;
   }
 
-  const edgesFrom = db.getEdgesFrom(symbolId);
-  const metrics = db.getMetrics(symbolId);
+  const edgesFrom = await kuzuDb.getEdgesFrom(conn, symbolId);
+  const metrics = await kuzuDb.getMetrics(conn, symbolId);
 
-  const signature = symbol.signature_json
-    ? JSON.parse(symbol.signature_json)
+  const signature = symbol.signatureJson
+    ? (JSON.parse(symbol.signatureJson) as unknown)
     : { name: symbol.name };
 
-  const invariants = symbol.invariants_json
-    ? JSON.parse(symbol.invariants_json)
+  const invariants = symbol.invariantsJson
+    ? (JSON.parse(symbol.invariantsJson) as unknown)
     : undefined;
 
-  const sideEffects = symbol.side_effects_json
-    ? JSON.parse(symbol.side_effects_json)
+  const sideEffects = symbol.sideEffectsJson
+    ? (JSON.parse(symbol.sideEffectsJson) as unknown)
     : undefined;
 
   const deps = {
     imports: edgesFrom
-      .filter((edge) => edge.type === "import")
-      .map((edge) => edge.to_symbol_id),
+      .filter((edge) => edge.edgeType === "import")
+      .map((edge) => edge.toSymbolId),
     calls: edgesFrom
-      .filter((edge) => edge.type === "call")
-      .map((edge) => edge.to_symbol_id),
+      .filter((edge) => edge.edgeType === "call")
+      .map((edge) => edge.toSymbolId),
   };
 
   const metricsData = metrics
     ? {
-        fanIn: metrics.fan_in,
-        fanOut: metrics.fan_out,
-        churn30d: metrics.churn_30d,
-        testRefs: metrics.test_refs_json
-          ? JSON.parse(metrics.test_refs_json)
+        fanIn: metrics.fanIn,
+        fanOut: metrics.fanOut,
+        churn30d: metrics.churn30d,
+        testRefs: metrics.testRefsJson
+          ? (JSON.parse(metrics.testRefsJson) as unknown)
           : undefined,
       }
     : undefined;
 
   const card = {
-    symbolId: symbol.symbol_id,
-    repoId: symbol.repo_id,
-    file: file.rel_path,
+    symbolId: symbol.symbolId,
+    repoId: symbol.repoId,
+    file: file.relPath,
     range: {
-      startLine: symbol.range_start_line,
-      startCol: symbol.range_start_col,
-      endLine: symbol.range_end_line,
-      endCol: symbol.range_end_col,
+      startLine: symbol.rangeStartLine,
+      startCol: symbol.rangeStartCol,
+      endLine: symbol.rangeEndLine,
+      endCol: symbol.rangeEndCol,
     },
     kind: symbol.kind,
     name: symbol.name,
-    exported: symbol.exported === 1,
+    exported: symbol.exported,
     visibility: symbol.visibility ?? undefined,
     signature,
     summary: symbol.summary ?? undefined,
@@ -143,7 +154,7 @@ export function readCardResource(uri: string): string | null {
     metrics: metricsData,
     version: {
       ledgerVersion: versionId,
-      astFingerprint: symbol.ast_fingerprint,
+      astFingerprint: symbol.astFingerprint,
     },
   };
 
@@ -168,9 +179,11 @@ export function readSliceResource(uri: string): string | null {
   );
 }
 
-export function readResource(uri: string): { contents: string } | null {
+export async function readResource(
+  uri: string,
+): Promise<{ contents: string } | null> {
   if (uri.startsWith("card://")) {
-    const contents = readCardResource(uri);
+    const contents = await readCardResource(uri);
     if (contents === null) {
       return null;
     }

@@ -5,9 +5,10 @@ import type {
 } from "./types.js";
 import { listArtifacts, getArtifactMetadata, importArtifact } from "./sync.js";
 import { indexRepo, type IndexResult } from "../indexer/indexer.js";
-import { getRepo } from "../db/queries.js";
 import { join } from "path";
 import { sleep } from "../util/time.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 
 const DEFAULT_MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
@@ -22,7 +23,8 @@ export async function pullLatestState(
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const startTime = Date.now();
-      const repo = getRepo(options.repoId);
+      const conn = await getKuzuConn();
+      const repo = await kuzuDb.getRepo(conn, options.repoId);
       if (!repo) {
         throw new Error(`Repository not found: ${options.repoId}`);
       }

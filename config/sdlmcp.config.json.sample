@@ -30,7 +30,9 @@
       "maxFileBytes": 2000000
     }
   ],
-  "dbPath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\data\\sdlmcp.sqlite",
+  "graphDatabase": {
+    "path": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\data\\sdl-mcp-graph"
+  },
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,

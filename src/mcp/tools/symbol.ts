@@ -9,106 +9,34 @@ import {
 import {
   SYMBOL_CARD_MAX_DEPS_PER_KIND,
   SYMBOL_CARD_MAX_INVARIANTS,
+  SYMBOL_CARD_MAX_PROCESSES,
   SYMBOL_CARD_MAX_SIDE_EFFECTS,
   SYMBOL_CARD_MAX_TEST_REFS,
   SYMBOL_CARD_SUMMARY_MAX_CHARS,
   SYMBOL_SEARCH_DEFAULT_LIMIT,
-  SYMBOL_SEARCH_MAX_QUERY_TOKENS,
-  SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH,
 } from "../../config/constants.js";
-import type { SymbolRow } from "../../db/schema.js";
+import type { SymbolKind } from "../../db/schema.js";
 import type {
-  SymbolCard,
-  SymbolSignature,
-  SymbolDeps,
-  SymbolMetrics,
   CardWithETag,
   NotModifiedResponse,
+  SymbolCard,
+  SymbolDeps,
+  SymbolMetrics,
+  SymbolSignature,
 } from "../types.js";
-import * as db from "../../db/queries.js";
-import { getFile } from "../../db/queries.js";
-import { hashCard } from "../../util/hashing.js";
-import { tokenize } from "../../util/tokenize.js";
-import { pickDepLabel } from "../../util/depLabels.js";
-import {
-  PolicyEngine,
-  type PolicyRequestContext,
-} from "../../policy/engine.js";
-import {
-  logPolicyDecision,
-  logSemanticSearchTelemetry,
-  logSummaryQualityTelemetry,
-} from "../telemetry.js";
-import { DatabaseError, createPolicyDenial } from "../errors.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import { symbolCardCache } from "../../graph/cache.js";
-import { loadConfig } from "../../config/loadConfig.js";
-import { rerankByEmbeddings } from "../../indexer/embeddings.js";
-import { generateSummaryWithGuardrails } from "../../indexer/summary-generator.js";
-import {
-  consumePrefetchedKey,
-  prefetchCardsForSymbols,
-  prefetchSliceFrontier,
-} from "../../graph/prefetch.js";
+import { consumePrefetchedKey, prefetchCardsForSymbols, prefetchSliceFrontier } from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
+import { loadConfig } from "../../config/loadConfig.js";
+import { pickDepLabel } from "../../util/depLabels.js";
+import { hashCard } from "../../util/hashing.js";
+import { DatabaseError, createPolicyDenial } from "../errors.js";
+import { PolicyEngine, type PolicyRequestContext } from "../../policy/engine.js";
+import { logPolicyDecision, logSemanticSearchTelemetry } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
-type SearchRow = {
-  symbol_id: string;
-  name: string;
-  file_id: number;
-  file_path: string;
-  kind: SymbolRow["kind"];
-};
-type ScoredSearchRow = { row: SearchRow; score: number };
-const SYMBOL_SEARCH_STOP_WORDS = new Set([
-  "a",
-  "an",
-  "and",
-  "are",
-  "as",
-  "at",
-  "be",
-  "by",
-  "for",
-  "from",
-  "how",
-  "in",
-  "is",
-  "it",
-  "of",
-  "on",
-  "or",
-  "that",
-  "the",
-  "this",
-  "to",
-  "with",
-]);
-const UNDERSTANDING_INTENT_TOKENS = new Set([
-  "understand",
-  "understanding",
-  "explain",
-  "flow",
-  "lifecycle",
-  "pipeline",
-  "request",
-  "response",
-  "refresh",
-  "cache",
-]);
-const UNDERSTANDING_SYMBOL_TOKENS = new Set([
-  "build",
-  "refresh",
-  "handle",
-  "load",
-  "resolve",
-  "cache",
-  "request",
-  "response",
-  "slice",
-  "state",
-]);
-const AGGREGATOR_PATH_RE =
-  /(^|\/)(index|tools|types|main|mod|util|utils)\.[^.]+$/;
+import { toLegacySymbolRow } from "./symbol-utils.js";
 
 function uniqueLimit(values: string[], max: number): string[] {
   const seen = new Set<string>();
@@ -122,210 +50,15 @@ function uniqueLimit(values: string[], max: number): string[] {
   return result;
 }
 
-function splitIdentifierTokens(value: string): string[] {
-  return value
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .split(/[^A-Za-z0-9]+/)
-    .map((token) => token.trim().toLowerCase())
-    .filter(
-      (token) =>
-        token.length >= SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH &&
-        !SYMBOL_SEARCH_STOP_WORDS.has(token),
-    );
-}
-
-function isAggregatorPath(path: string): boolean {
-  return AGGREGATOR_PATH_RE.test(path);
-}
-
-function countTokenOverlap(tokens: string[], queryTokens: Set<string>): number {
-  let count = 0;
-  for (const token of tokens) {
-    if (queryTokens.has(token)) count++;
+function parseJson<T>(raw: string | null): T | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return undefined;
   }
-  return count;
 }
 
-function isUnderstandingIntent(queryTokens: Set<string>): boolean {
-  for (const token of queryTokens) {
-    if (UNDERSTANDING_INTENT_TOKENS.has(token)) return true;
-  }
-  return false;
-}
-
-function expandSemanticQueryTokens(tokens: string[]): string[] {
-  const expanded = new Set(tokens);
-  for (const token of tokens) {
-    if (
-      token === "understand" ||
-      token === "understanding" ||
-      token === "explain"
-    ) {
-      expanded.add("flow");
-      expanded.add("lifecycle");
-      expanded.add("request");
-      expanded.add("refresh");
-    } else if (token === "flow" || token === "lifecycle") {
-      expanded.add("build");
-      expanded.add("handle");
-      expanded.add("refresh");
-      expanded.add("cache");
-      expanded.add("slice");
-    }
-  }
-  return uniqueLimit(Array.from(expanded), SYMBOL_SEARCH_MAX_QUERY_TOKENS);
-}
-
-function enrichSearchRowsWithFilePath(
-  rows: Array<Omit<SearchRow, "file_path">>,
-): SearchRow[] {
-  const filePathCache = new Map<number, string>();
-  return rows.map((row) => {
-    let filePath = filePathCache.get(row.file_id);
-    if (filePath === undefined) {
-      filePath = getFile(row.file_id)?.rel_path ?? "";
-      filePathCache.set(row.file_id, filePath);
-    }
-    return {
-      ...row,
-      file_path: filePath,
-    };
-  });
-}
-
-function rankSymbolMatch(
-  row: SearchRow,
-  term: string,
-  queryTokens: Set<string>,
-  understandingIntent: boolean,
-): number {
-  const name = row.name.toLowerCase();
-  const filePath = row.file_path.toLowerCase();
-  const nameTokens = splitIdentifierTokens(name);
-  const fileTokens = splitIdentifierTokens(filePath);
-  let score = 0;
-
-  if (name === term) score += 30;
-  else if (name.startsWith(term)) score += 16;
-  else if (name.includes(term)) score += 8;
-
-  if (row.kind === "class") score += 4;
-  else if (row.kind === "function" || row.kind === "method") score += 3;
-  else if (row.kind === "interface" || row.kind === "type") score += 2;
-
-  const nameOverlap = countTokenOverlap(nameTokens, queryTokens);
-  const pathOverlap = countTokenOverlap(fileTokens, queryTokens);
-  score += nameOverlap * 5;
-  score += pathOverlap * 2;
-
-  if (understandingIntent) {
-    if (row.kind === "function" || row.kind === "method") score += 4;
-    if (nameTokens.some((token) => UNDERSTANDING_SYMBOL_TOKENS.has(token))) {
-      score += 5;
-    }
-    if (nameOverlap >= 2) score += 4;
-    if (isAggregatorPath(filePath)) score -= 9;
-    if (row.kind === "module" || row.kind === "variable") score -= 4;
-  } else if (isAggregatorPath(filePath)) {
-    score -= 2;
-  }
-
-  if (
-    filePath.includes("/tests/") ||
-    filePath.startsWith("tests/") ||
-    filePath.includes(".test.") ||
-    filePath.includes(".spec.")
-  ) {
-    score -= 2;
-  }
-
-  return score;
-}
-
-function searchSymbolsNaturalLanguage(
-  repoId: string,
-  rawQuery: string,
-  limit: number,
-): ScoredSearchRow[] {
-  const query = rawQuery.trim().toLowerCase();
-  if (!query) return [];
-
-  const scored = new Map<string, { row: SearchRow; score: number }>();
-
-  const queryTokens = expandSemanticQueryTokens(
-    uniqueLimit(
-      tokenize(query)
-        .map((token) => token.toLowerCase())
-        .filter(
-          (token) =>
-            token.length >= SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH &&
-            !SYMBOL_SEARCH_STOP_WORDS.has(token),
-        )
-        .flatMap((token) => splitIdentifierTokens(token)),
-      SYMBOL_SEARCH_MAX_QUERY_TOKENS,
-    ),
-  );
-  const queryTokenSet = new Set(queryTokens);
-  const understandingIntent = isUnderstandingIntent(queryTokenSet);
-
-  const addResults = (
-    rawResults: Array<Omit<SearchRow, "file_path">>,
-    delta: (row: SearchRow, idx: number) => number,
-  ): void => {
-    const results = enrichSearchRowsWithFilePath(rawResults);
-    for (let i = 0; i < results.length; i++) {
-      const row = results[i];
-      const existing = scored.get(row.symbol_id);
-      const increment = delta(row, i);
-      if (!existing) {
-        scored.set(row.symbol_id, { row, score: increment });
-      } else {
-        existing.score += increment;
-      }
-    }
-  };
-
-  const direct = db.searchSymbolsLite(repoId, query, Math.max(limit, 20));
-  addResults(
-    direct,
-    (row, idx) =>
-      50 -
-      Math.min(idx, 20) +
-      rankSymbolMatch(row, query, queryTokenSet, understandingIntent),
-  );
-
-  for (const token of queryTokens) {
-    const tokenResults = db.searchSymbolsLite(
-      repoId,
-      token,
-      Math.max(limit, 12),
-    );
-    addResults(tokenResults, (row, idx) => {
-      const rankBonus = Math.max(0, 20 - idx);
-      return (
-        rankBonus +
-        rankSymbolMatch(row, token, queryTokenSet, understandingIntent)
-      );
-    });
-  }
-
-  return Array.from(scored.values())
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      if (a.row.kind !== b.row.kind)
-        return a.row.kind.localeCompare(b.row.kind);
-      return a.row.name.localeCompare(b.row.name);
-    })
-    .slice(0, limit);
-}
-
-/**
- * Handles symbol search requests.
- * Searches for symbols by name or summary with optional limit.
- *
- * @param args - Raw arguments containing repoId, query, and optional limit
- * @returns Search results with repoId and array of symbol summaries
- */
 export async function handleSymbolSearch(
   args: unknown,
 ): Promise<SymbolSearchResponse> {
@@ -339,119 +72,51 @@ export async function handleSymbolSearch(
     tool: "symbol.search",
   });
 
-  const lexicalScored = searchSymbolsNaturalLanguage(
-    request.repoId,
-    request.query,
-    Math.max(limit, 100),
-  );
+  const conn = await getKuzuConn();
+  const rows = await kuzuDb.searchSymbolsLite(conn, request.repoId, request.query, limit);
 
-  const config = loadConfig();
-  const semanticEnabled = request.semantic ?? config.semantic?.enabled ?? false;
-  let rankedRows = lexicalScored.slice(0, limit).map((item) => item.row);
+  const fileIds = [...new Set(rows.map((row) => row.fileId))];
+  const filesById = await kuzuDb.getFilesByIds(conn, fileIds);
 
-  if (semanticEnabled && lexicalScored.length > 0) {
-    try {
-      const maxLexical = Math.max(
-        1,
-        ...lexicalScored.map((item) => item.score),
-      );
-      const symbolCandidates = lexicalScored
-        .map((item) => ({
-          row: item.row,
-          symbol: db.getSymbol(item.row.symbol_id),
-          lexicalScore: item.score / maxLexical,
-        }))
-        .filter(
-          (
-            item,
-          ): item is {
-            row: SearchRow;
-            symbol: SymbolRow;
-            lexicalScore: number;
-          } => item.symbol !== null,
-        );
-
-      const reranked = await rerankByEmbeddings({
-        query: request.query,
-        symbols: symbolCandidates.map((item) => ({
-          symbol: item.symbol,
-          lexicalScore: item.lexicalScore,
-        })),
-        provider: config.semantic?.provider ?? "mock",
-        alpha: config.semantic?.alpha ?? 0.6,
-        model: config.semantic?.model ?? "all-MiniLM-L6-v2",
-      });
-
-      const rowBySymbol = new Map(
-        symbolCandidates.map((item) => [item.symbol.symbol_id, item.row]),
-      );
-      rankedRows = reranked
-        .slice(0, limit)
-        .map((item) => rowBySymbol.get(item.symbol.symbol_id))
-        .filter((row): row is SearchRow => Boolean(row));
-    } catch {
-      // Embedding provider unavailable: fall back to lexical results.
-      rankedRows = lexicalScored.slice(0, limit).map((item) => item.row);
-    }
-  }
-
-  logSemanticSearchTelemetry({
-    repoId: request.repoId,
-    semanticEnabled,
-    latencyMs: Date.now() - startedAt,
-    candidateCount: lexicalScored.length,
-    alpha: config.semantic?.alpha ?? 0.6,
-  });
+  const results = rows.map((row) => ({
+    symbolId: row.symbolId,
+    name: row.name,
+    file: filesById.get(row.fileId)?.relPath ?? "",
+    kind: row.kind as SymbolKind,
+  }));
 
   // Prefetch cards for top search results (anticipating getCard calls)
-  const topSymbolIds = rankedRows.slice(0, 5).map((row) => row.symbol_id);
+  const topSymbolIds = rows.slice(0, 5).map((row) => row.symbolId);
   if (topSymbolIds.length > 0) {
     prefetchCardsForSymbols(request.repoId, topSymbolIds);
   }
 
-  const response = {
-    results: rankedRows.map((row) => ({
-      symbolId: row.symbol_id,
-      name: row.name,
-      file: row.file_path,
-      kind: row.kind,
-    })),
-  };
-  attachRawContext(response, {
-    fileIds: [...new Set(rankedRows.map((r) => r.file_id))],
+  logSemanticSearchTelemetry({
+    repoId: request.repoId,
+    semanticEnabled: false,
+    latencyMs: Date.now() - startedAt,
+    candidateCount: rows.length,
+    alpha: loadConfig().semantic?.alpha ?? 0.6,
   });
+
+  const response = { results };
+  attachRawContext(response, { fileIds });
   return response;
 }
 
-/**
- * Core card-building logic shared by handleSymbolGetCard and handleSymbolGetCards.
- * Given a repoId, symbolId, and optional ifNoneMatch ETag, fetches and builds the
- * full symbol card, returning either a CardWithETag or a NotModifiedResponse.
- *
- * @param repoId - The repository ID
- * @param symbolId - The symbol ID to fetch
- * @param ifNoneMatch - Optional ETag for conditional requests
- * @returns Symbol card with ETag or notModified response if ETag matches
- * @throws {DatabaseError} If symbol or file not found
- * @throws {PolicyError} If policy denies the request
- */
 async function buildCardForSymbol(
   repoId: string,
   symbolId: string,
   ifNoneMatch: string | undefined,
 ): Promise<CardWithETag | NotModifiedResponse> {
   const config = loadConfig();
-  const cacheConfig = config.cache;
-  const cacheEnabled = cacheConfig?.enabled ?? true;
+  const cacheEnabled = config.cache?.enabled ?? true;
 
-  const latestVersion = db.getLatestVersion(repoId);
+  const conn = await getKuzuConn();
+  const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
 
   if (cacheEnabled && latestVersion) {
-    const cachedCard = symbolCardCache.get(
-      repoId,
-      symbolId,
-      latestVersion.version_id,
-    );
+    const cachedCard = symbolCardCache.get(repoId, symbolId, latestVersion.versionId);
     if (cachedCard && cachedCard.detailLevel !== "compact") {
       const normalizedCachedCard: SymbolCard = {
         ...cachedCard,
@@ -460,39 +125,37 @@ async function buildCardForSymbol(
       delete normalizedCachedCard.etag;
       const cachedETag = hashCard(normalizedCachedCard);
       if (ifNoneMatch && ifNoneMatch === cachedETag) {
-        const notModified: NotModifiedResponse = {
+        return {
           notModified: true,
           etag: cachedETag,
-          ledgerVersion: latestVersion.version_id,
+          ledgerVersion: latestVersion.versionId,
         };
-        return notModified;
       }
-      const cardWithETag: CardWithETag = {
+      return {
         ...normalizedCachedCard,
         etag: cachedETag,
       };
-      return cardWithETag;
     }
   }
 
-  const symbol = db.getSymbol(symbolId);
+  const symbol = await kuzuDb.getSymbol(conn, symbolId);
   if (!symbol) {
     throw new DatabaseError(`Symbol not found: ${symbolId}`);
   }
-
-  if (symbol.repo_id !== repoId) {
+  if (symbol.repoId !== repoId) {
     throw new DatabaseError(
-      `Symbol ${symbolId} belongs to repo "${symbol.repo_id}", not "${repoId}"`,
+      `Symbol ${symbolId} belongs to repo "${symbol.repoId}", not "${repoId}"`,
     );
   }
 
-  const policyEngine = new PolicyEngine();
+  const legacySymbol = toLegacySymbolRow(symbol);
 
+  const policyEngine = new PolicyEngine();
   const policyContext: PolicyRequestContext = {
     requestType: "symbolCard",
     repoId,
     symbolId,
-    symbolData: symbol,
+    symbolData: legacySymbol,
   };
 
   const policyDecision = policyEngine.evaluate(policyContext);
@@ -513,67 +176,42 @@ async function buildCardForSymbol(
   });
 
   if (policyDecision.decision === "deny") {
-    const error = createPolicyDenial(
+    throw createPolicyDenial(
       `Policy denied symbol card request: ${policyDecision.deniedReasons?.join(", ")}`,
       nextBestAction,
       requiredFieldsForNext,
     );
-    throw error;
   }
 
-  const file = getFile(symbol.file_id);
-  if (!file) {
-    throw new DatabaseError(`File not found: ${symbol.file_id}`);
+  const fileRow = (await kuzuDb.getFilesByIds(conn, [symbol.fileId])).get(symbol.fileId);
+  if (!fileRow) {
+    throw new DatabaseError(`File not found: ${symbol.fileId}`);
   }
 
-  const edgesFrom = db.getEdgesFrom(symbolId);
-  const metrics = db.getMetrics(symbolId);
+  const [edgesFrom, metrics, clusterRow, processesRows] = await Promise.all([
+    kuzuDb.getEdgesFrom(conn, symbolId),
+    kuzuDb.getMetrics(conn, symbolId),
+    kuzuDb.getClusterForSymbol(conn, symbolId).catch(() => null),
+    kuzuDb.getProcessesForSymbol(conn, symbolId).catch(() => []),
+  ]);
 
-  const signature: SymbolSignature | undefined = symbol.signature_json
-    ? JSON.parse(symbol.signature_json)
-    : undefined;
+  const signature = parseJson<SymbolSignature>(symbol.signatureJson);
+  const invariants = parseJson<string[]>(symbol.invariantsJson);
+  const sideEffects = parseJson<string[]>(symbol.sideEffectsJson);
 
-  const invariants: string[] | undefined = symbol.invariants_json
-    ? JSON.parse(symbol.invariants_json)
-    : undefined;
-
-  const sideEffects: string[] | undefined = symbol.side_effects_json
-    ? JSON.parse(symbol.side_effects_json)
-    : undefined;
-
-  let cardSummary = symbol.summary
+  const cardSummary = symbol.summary
     ? symbol.summary.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS)
     : undefined;
-  if (config.semantic?.generateSummaries) {
-    try {
-      const generated = await generateSummaryWithGuardrails({
-        symbolName: symbol.name,
-        heuristicSummary: cardSummary,
-        provider: config.semantic.provider ?? "mock",
-      });
-      logSummaryQualityTelemetry({
-        repoId,
-        provider: generated.provider,
-        divergenceScore: generated.divergenceScore,
-        costUsd: generated.costUsd,
-      });
-      if (generated.divergenceScore <= 0.85) {
-        cardSummary = generated.summary.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS);
-      }
-    } catch {
-      // Keep heuristic summary if generation fails.
-    }
-  }
 
   const importTargetIds = edgesFrom
-    .filter((edge) => edge.type === "import")
-    .map((edge) => edge.to_symbol_id);
+    .filter((edge) => edge.edgeType === "import")
+    .map((edge) => edge.toSymbolId);
   const callTargetIds = edgesFrom
-    .filter((edge) => edge.type === "call")
-    .map((edge) => edge.to_symbol_id);
-  const targetNamesById = db.getSymbolsByIdsLite(
-    Array.from(new Set([...importTargetIds, ...callTargetIds])),
-  );
+    .filter((edge) => edge.edgeType === "call")
+    .map((edge) => edge.toSymbolId);
+
+  const targetIds = Array.from(new Set([...importTargetIds, ...callTargetIds]));
+  const targetNamesById = await kuzuDb.getSymbolsByIdsLite(conn, targetIds);
 
   const deps: SymbolDeps = {
     imports: uniqueLimit(
@@ -594,36 +232,37 @@ async function buildCardForSymbol(
     ),
   };
 
-  const canonicalTest = db.getCanonicalTest(symbolId);
   const cardMetrics: SymbolMetrics | undefined = metrics
     ? {
-        fanIn: metrics.fan_in,
-        fanOut: metrics.fan_out,
-        churn30d: metrics.churn_30d,
-        testRefs: metrics.test_refs_json
+        fanIn: metrics.fanIn,
+        fanOut: metrics.fanOut,
+        churn30d: metrics.churn30d,
+        testRefs: metrics.testRefsJson
           ? uniqueLimit(
-              JSON.parse(metrics.test_refs_json),
+              JSON.parse(metrics.testRefsJson) as string[],
               SYMBOL_CARD_MAX_TEST_REFS,
             )
           : undefined,
-        canonicalTest: canonicalTest ?? undefined,
+        canonicalTest: metrics.canonicalTestJson
+          ? (parseJson(metrics.canonicalTestJson) as SymbolMetrics["canonicalTest"])
+          : undefined,
       }
     : undefined;
 
   const card: SymbolCard = {
-    symbolId: symbol.symbol_id,
-    repoId: symbol.repo_id,
-    file: file.rel_path,
+    symbolId: symbol.symbolId,
+    repoId: symbol.repoId,
+    file: fileRow.relPath,
     range: {
-      startLine: symbol.range_start_line,
-      startCol: symbol.range_start_col,
-      endLine: symbol.range_end_line,
-      endCol: symbol.range_end_col,
+      startLine: symbol.rangeStartLine,
+      startCol: symbol.rangeStartCol,
+      endLine: symbol.rangeEndLine,
+      endCol: symbol.rangeEndCol,
     },
-    kind: symbol.kind,
+    kind: symbol.kind as SymbolCard["kind"],
     name: symbol.name,
-    exported: symbol.exported === 1,
-    visibility: symbol.visibility ?? undefined,
+    exported: symbol.exported,
+    visibility: (symbol.visibility ?? undefined) as SymbolCard["visibility"],
     signature,
     summary: cardSummary,
     invariants: invariants
@@ -632,58 +271,56 @@ async function buildCardForSymbol(
     sideEffects: sideEffects
       ? sideEffects.slice(0, SYMBOL_CARD_MAX_SIDE_EFFECTS)
       : undefined,
+    cluster: clusterRow
+      ? {
+          clusterId: clusterRow.clusterId,
+          label: clusterRow.label,
+          memberCount: clusterRow.symbolCount,
+        }
+      : undefined,
+    processes:
+      processesRows && processesRows.length > 0
+        ? processesRows
+            .slice(0, SYMBOL_CARD_MAX_PROCESSES)
+            .map((row) => ({
+              processId: row.processId,
+              label: row.label,
+              role:
+                row.role === "entry" || row.role === "exit" || row.role === "intermediate"
+                  ? row.role
+                  : "intermediate",
+              depth: row.depth,
+            }))
+        : undefined,
     deps,
     metrics: cardMetrics,
     detailLevel: "full",
     version: {
-      ledgerVersion: latestVersion?.version_id ?? "current",
-      astFingerprint: symbol.ast_fingerprint,
+      ledgerVersion: latestVersion?.versionId ?? "current",
+      astFingerprint: symbol.astFingerprint,
     },
   };
 
   const etag = hashCard(card);
-
   if (ifNoneMatch && ifNoneMatch === etag) {
-    const notModified: NotModifiedResponse = {
+    return {
       notModified: true,
       etag,
-      ledgerVersion: latestVersion?.version_id ?? "current",
+      ledgerVersion: latestVersion?.versionId ?? "current",
     };
-    return notModified;
   }
 
-  const cardWithETag: CardWithETag = {
-    ...card,
-    etag,
-  };
+  const cardWithETag: CardWithETag = { ...card, etag };
 
   if (cacheEnabled && latestVersion) {
-    const cacheCard: SymbolCard = {
-      ...card,
-      detailLevel: "full",
-    };
+    const cacheCard: SymbolCard = { ...card, detailLevel: "full" };
     delete cacheCard.etag;
-    await symbolCardCache.set(
-      repoId,
-      symbolId,
-      latestVersion.version_id,
-      cacheCard,
-    );
+    await symbolCardCache.set(repoId, symbolId, latestVersion.versionId, cacheCard);
   }
 
   return cardWithETag;
 }
 
-/**
- * Handles requests for symbol cards with ETag support.
- * Returns comprehensive symbol metadata including dependencies, metrics, and version info.
- * Supports conditional requests with ifNoneMatch for cache validation.
- *
- * @param args - Raw arguments containing repoId, symbolId, and optional ifNoneMatch
- * @returns Symbol card with metadata or notModified response if ETag matches
- * @throws {DatabaseError} If symbol or file not found
- * @throws {PolicyError} If policy denies the request
- */
 export async function handleSymbolGetCard(
   args: unknown,
 ): Promise<SymbolGetCardResponse | NotModifiedResponse> {
@@ -696,11 +333,9 @@ export async function handleSymbolGetCard(
     tool: "symbol.getCard",
     symbolId,
   });
-
   consumePrefetchedKey(repoId, `card:${symbolId}`);
 
   const result = await buildCardForSymbol(repoId, symbolId, ifNoneMatch);
-
   if ("notModified" in result) {
     return result;
   }
@@ -709,29 +344,20 @@ export async function handleSymbolGetCard(
   prefetchSliceFrontier(repoId, [symbolId]);
 
   const response = { card: result };
-  const sym = db.getSymbol(symbolId);
-  if (sym) {
-    attachRawContext(response, { fileIds: [sym.file_id] });
+  const conn = await getKuzuConn();
+  const symbol = await kuzuDb.getSymbol(conn, symbolId);
+  if (symbol) {
+    attachRawContext(response, { fileIds: [symbol.fileId] });
   }
   return response;
 }
 
-/**
- * Handles batch requests for symbol cards with ETag support.
- * Fetches N symbol cards in a single round trip, using knownEtags to skip unchanged cards.
- *
- * @param args - Raw arguments containing repoId, symbolIds array, and optional knownEtags map
- * @returns Array of symbol cards (full CardWithETag or notModified) preserving input order
- * @throws {DatabaseError} If a symbol or file is not found
- * @throws {PolicyError} If policy denies any card request
- */
 export async function handleSymbolGetCards(
   args: unknown,
 ): Promise<SymbolGetCardsResponse> {
   const { repoId, symbolIds, knownEtags } =
     SymbolGetCardsRequestSchema.parse(args);
 
-  // Consume prefetched keys for batch card requests
   for (const symbolId of symbolIds) {
     consumePrefetchedKey(repoId, `card:${symbolId}`);
   }
@@ -740,11 +366,13 @@ export async function handleSymbolGetCards(
     symbolIds.map((id) => buildCardForSymbol(repoId, id, knownEtags?.[id])),
   );
 
+  const conn = await getKuzuConn();
+  const symbolMap = await kuzuDb.getSymbolsByIds(conn, symbolIds);
+  const fileIds = [
+    ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
+  ];
+
   const response = { cards };
-  const symbolMap = db.getSymbolsByIdsLite(symbolIds);
-  const fileIds = [...new Set(
-    Array.from(symbolMap.values()).map((s) => s.file_id),
-  )];
   attachRawContext(response, { fileIds });
   return response;
 }

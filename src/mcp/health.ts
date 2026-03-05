@@ -1,6 +1,7 @@
-import * as db from "../db/queries.js";
 import type { HealthComponents } from "./types.js";
 import type { RepoConfig } from "../config/types.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 import { scanRepository } from "../indexer/fileScanner.js";
 
 const DEFAULT_MIN_INDEXED_FILES = 1;
@@ -124,50 +125,39 @@ export interface RepoHealthSnapshot extends HealthScoreResult {
 export async function getRepoHealthSnapshot(
   repoId: string,
 ): Promise<RepoHealthSnapshot> {
-  const repo = db.getRepo(repoId);
+  const conn = await getKuzuConn();
+  const repo = await kuzuDb.getRepo(conn, repoId);
   if (!repo) {
     throw new Error(`Repository ${repoId} not found`);
   }
 
-  const repoConfig = JSON.parse(repo.config_json) as RepoConfig;
-  const eligibleFiles = await scanRepository(repo.root_path, repoConfig);
-  const files = db.getFilesByRepo(repoId);
-  const indexedSymbols = db.countSymbolsByRepo(repoId);
-  const edges = db.getEdgesByRepo(repoId);
+  const repoConfig = JSON.parse(repo.configJson) as RepoConfig;
+  const eligibleFiles = await scanRepository(repo.rootPath, repoConfig);
+  const files = await kuzuDb.getFilesByRepo(conn, repoId);
+  const indexedSymbols = await kuzuDb.getSymbolCount(conn, repoId);
+  const callCounts = await kuzuDb.getCallEdgeResolutionCounts(conn, repoId);
 
   const lastIndexedFile = files
-    .filter((f) => f.last_indexed_at !== null)
+    .filter((f) => f.lastIndexedAt !== null)
     .sort(
       (a, b) =>
-        new Date(b.last_indexed_at ?? 0).getTime() -
-        new Date(a.last_indexed_at ?? 0).getTime(),
+        new Date(b.lastIndexedAt ?? 0).getTime() -
+        new Date(a.lastIndexedAt ?? 0).getTime(),
     )[0];
 
-  const lastIndexedAt = lastIndexedFile?.last_indexed_at ?? null;
+  const lastIndexedAt = lastIndexedFile?.lastIndexedAt ?? null;
   const minutesSinceLastIndex = lastIndexedAt
     ? Math.max(0, (Date.now() - new Date(lastIndexedAt).getTime()) / 60000)
     : null;
-
-  const callEdges = edges.filter((edge) => edge.type === "call");
-  const resolvedCallEdges = callEdges.filter(
-    (edge) => !edge.to_symbol_id.startsWith("unresolved:"),
-  );
-
-  // High-confidence call edges: resolution_strategy = 'exact' OR confidence >= 0.9.
-  const exactCallEdges = callEdges.filter(
-    (edge) =>
-      edge.resolution_strategy === "exact" ||
-      (edge.confidence !== undefined && edge.confidence !== null && edge.confidence >= 0.9),
-  );
 
   const score = computeHealthScore({
     indexedFiles: files.length,
     totalEligibleFiles: eligibleFiles.length,
     indexErrors: 0,
     totalFiles: Math.max(eligibleFiles.length, files.length),
-    resolvedCallEdges: resolvedCallEdges.length,
-    totalCallEdges: callEdges.length,
-    exactCallEdges: exactCallEdges.length,
+    resolvedCallEdges: callCounts.resolvedCallEdges,
+    totalCallEdges: callCounts.totalCallEdges,
+    exactCallEdges: callCounts.exactCallEdges,
     minutesSinceLastIndex,
     indexedSymbols,
   });
@@ -178,8 +168,8 @@ export async function getRepoHealthSnapshot(
     indexedFiles: files.length,
     indexedSymbols,
     totalEligibleFiles: eligibleFiles.length,
-    totalCallEdges: callEdges.length,
-    resolvedCallEdges: resolvedCallEdges.length,
+    totalCallEdges: callCounts.totalCallEdges,
+    resolvedCallEdges: callCounts.resolvedCallEdges,
     minutesSinceLastIndex,
   };
 }
@@ -189,4 +179,3 @@ export function getBadgeColor(score: number): "green" | "yellow" | "red" {
   if (score >= 60) return "yellow";
   return "red";
 }
-

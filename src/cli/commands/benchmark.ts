@@ -2,17 +2,18 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { dirname, resolve } from "path";
+import type { Connection } from "kuzu";
 import type { CLIOptions } from "../types.js";
-import { getDb } from "../../db/db.js";
-import { runMigrations } from "../../db/migrations.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
+import { initGraphDb } from "../../db/initGraphDb.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import type { RepoConfig } from "../../config/types.js";
-import * as db from "../../db/queries.js";
 import { indexRepo } from "../../indexer/indexer.js";
 import { buildSlice } from "../../graph/slice.js";
 import { generateSymbolSkeleton } from "../../code/skeleton.js";
-import type { SymbolRow } from "../../db/schema.js";
+import type { SymbolRow } from "../../db/kuzu-queries.js";
 import { generateContextSummary } from "../../mcp/summary.js";
 import { getRepoHealthSnapshot } from "../../mcp/health.js";
 import {
@@ -151,12 +152,8 @@ function buildBenchmarkRuntimeRepoConfig(repoConfig: RepoConfig): {
   );
   return {
     runtimeConfigJson: JSON.stringify({
+      ...repoConfig,
       ignore: mergedIgnore,
-      languages: repoConfig.languages,
-      maxFileBytes: repoConfig.maxFileBytes,
-      packageJsonPath: repoConfig.packageJsonPath,
-      tsconfigPath: repoConfig.tsconfigPath,
-      workspaceGlobs: repoConfig.workspaceGlobs,
     }),
     addedScopePatterns,
   };
@@ -188,60 +185,61 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-function buildCardFromSymbol(
+async function buildCardFromSymbol(
+  conn: Connection,
   repoId: string,
   symbol: SymbolRow,
-): { card: unknown; tokens: number } | null {
-  const file = db.getFile(symbol.file_id);
-  if (!file) return null;
+  fileRelPath: string,
+): Promise<{ card: unknown; tokens: number } | null> {
+  if (!fileRelPath) return null;
 
-  const latestVersion = db.getLatestVersion(repoId);
-  const edgesFrom = db.getEdgesFrom(symbol.symbol_id);
-  const metrics = db.getMetrics(symbol.symbol_id);
+  const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+  const edgesFrom = await kuzuDb.getEdgesFrom(conn, symbol.symbolId);
+  const metrics = await kuzuDb.getMetrics(conn, symbol.symbolId);
 
-  const signature = symbol.signature_json
-    ? JSON.parse(symbol.signature_json)
+  const signature = symbol.signatureJson
+    ? JSON.parse(symbol.signatureJson)
     : undefined;
-  const invariants = symbol.invariants_json
-    ? JSON.parse(symbol.invariants_json)
+  const invariants = symbol.invariantsJson
+    ? JSON.parse(symbol.invariantsJson)
     : undefined;
-  const sideEffects = symbol.side_effects_json
-    ? JSON.parse(symbol.side_effects_json)
+  const sideEffects = symbol.sideEffectsJson
+    ? JSON.parse(symbol.sideEffectsJson)
     : undefined;
 
   const deps = {
     imports: edgesFrom
-      .filter((e) => e.type === "import")
-      .map((e) => e.to_symbol_id),
+      .filter((e) => e.edgeType === "import")
+      .map((e) => e.toSymbolId),
     calls: edgesFrom
-      .filter((e) => e.type === "call")
-      .map((e) => e.to_symbol_id),
+      .filter((e) => e.edgeType === "call")
+      .map((e) => e.toSymbolId),
   };
 
   const cardMetrics = metrics
     ? {
-        fanIn: metrics.fan_in,
-        fanOut: metrics.fan_out,
-        churn30d: metrics.churn_30d,
-        testRefs: metrics.test_refs_json
-          ? JSON.parse(metrics.test_refs_json)
+        fanIn: metrics.fanIn,
+        fanOut: metrics.fanOut,
+        churn30d: metrics.churn30d,
+        testRefs: metrics.testRefsJson
+          ? JSON.parse(metrics.testRefsJson)
           : undefined,
       }
     : undefined;
 
   const card = {
-    symbolId: symbol.symbol_id,
-    repoId: symbol.repo_id,
-    file: file.rel_path,
+    symbolId: symbol.symbolId,
+    repoId: symbol.repoId,
+    file: fileRelPath,
     range: {
-      startLine: symbol.range_start_line,
-      startCol: symbol.range_start_col,
-      endLine: symbol.range_end_line,
-      endCol: symbol.range_end_col,
+      startLine: symbol.rangeStartLine,
+      startCol: symbol.rangeStartCol,
+      endLine: symbol.rangeEndLine,
+      endCol: symbol.rangeEndCol,
     },
     kind: symbol.kind,
     name: symbol.name,
-    exported: symbol.exported === 1,
+    exported: symbol.exported,
     visibility: symbol.visibility,
     signature,
     summary: symbol.summary ?? undefined,
@@ -250,8 +248,8 @@ function buildCardFromSymbol(
     deps,
     metrics: cardMetrics,
     version: {
-      ledgerVersion: latestVersion?.version_id ?? "current",
-      astFingerprint: symbol.ast_fingerprint,
+      ledgerVersion: latestVersion?.versionId ?? "current",
+      astFingerprint: symbol.astFingerprint,
     },
   };
 
@@ -260,14 +258,11 @@ function buildCardFromSymbol(
 }
 
 async function collectBenchmarkMetrics(
+  conn: Connection,
   repoId: string,
   _repoPath: string,
   skipIndexing: boolean,
 ): Promise<BenchmarkMetrics> {
-  const config = loadConfig();
-  const database = getDb(config.dbPath);
-  runMigrations(database);
-
   let indexTimeMs = 0;
   let filesIndexed = 0;
 
@@ -278,28 +273,30 @@ async function collectBenchmarkMetrics(
     filesIndexed = indexResult.filesProcessed;
   }
 
-  const allSymbols = db.getSymbolsByRepo(repoId);
-  const edges = db.getEdgesByRepo(repoId);
-  const filesById = new Map(
-    db.getFilesByRepo(repoId).map((file) => [file.file_id, file.rel_path]),
-  );
+  const [allSymbols, edges, files] = await Promise.all([
+    kuzuDb.getSymbolsByRepo(conn, repoId),
+    kuzuDb.getEdgesByRepo(conn, repoId),
+    kuzuDb.getFilesByRepo(conn, repoId),
+  ]);
+
+  const filesById = new Map(files.map((file) => [file.fileId, file.relPath]));
 
   // Ensure benchmark symbol sampling is deterministic across platforms/runs.
   const sortedSymbols = [...allSymbols].sort((a, b) => {
-    const pathA = filesById.get(a.file_id) ?? "";
-    const pathB = filesById.get(b.file_id) ?? "";
+    const pathA = filesById.get(a.fileId) ?? "";
+    const pathB = filesById.get(b.fileId) ?? "";
     return (
       pathA.localeCompare(pathB) ||
-      a.range_start_line - b.range_start_line ||
-      a.range_start_col - b.range_start_col ||
+      a.rangeStartLine - b.rangeStartLine ||
+      a.rangeStartCol - b.rangeStartCol ||
       a.kind.localeCompare(b.kind) ||
       a.name.localeCompare(b.name) ||
-      a.symbol_id.localeCompare(b.symbol_id)
+      a.symbolId.localeCompare(b.symbolId)
     );
   });
 
   const srcSymbols = sortedSymbols.filter(
-    (symbol) => (filesById.get(symbol.file_id) ?? "").startsWith("src/"),
+    (symbol) => (filesById.get(symbol.fileId) ?? "").startsWith("src/"),
   );
   const samplingPool = srcSymbols.length > 0 ? srcSymbols : sortedSymbols;
   const sampleSize = Math.min(20, samplingPool.length);
@@ -312,7 +309,13 @@ async function collectBenchmarkMetrics(
 
   for (const symbol of sampleSymbols) {
     try {
-      const cardResult = buildCardFromSymbol(repoId, symbol);
+      const fileRelPath = filesById.get(symbol.fileId) ?? "";
+      const cardResult = await buildCardFromSymbol(
+        conn,
+        repoId,
+        symbol,
+        fileRelPath,
+      );
       if (cardResult) {
         totalCardTokens += cardResult.tokens;
       }
@@ -320,7 +323,7 @@ async function collectBenchmarkMetrics(
       if (symbol.kind === "function" || symbol.kind === "method") {
         const skelStart = performance.now();
         try {
-          const skeleton = generateSymbolSkeleton(repoId, symbol.symbol_id);
+          const skeleton = await generateSymbolSkeleton(repoId, symbol.symbolId);
           skeletonTimeMs += performance.now() - skelStart;
           if (skeleton?.skeleton) {
             totalSkeletonTokens += estimateTokens(skeleton.skeleton);
@@ -343,7 +346,7 @@ async function collectBenchmarkMetrics(
 
   if (sortedSymbols.length > 0) {
     const outDegreeBySymbol = edges.reduce((counts, edge) => {
-      counts.set(edge.from_symbol_id, (counts.get(edge.from_symbol_id) ?? 0) + 1);
+      counts.set(edge.fromSymbolId, (counts.get(edge.fromSymbolId) ?? 0) + 1);
       return counts;
     }, new Map<string, number>());
 
@@ -358,21 +361,21 @@ async function collectBenchmarkMetrics(
 
     const seedSymbol =
       seedCandidates.find((sym) => {
-        const outDegree = outDegreeBySymbol.get(sym.symbol_id) ?? 0;
+        const outDegree = outDegreeBySymbol.get(sym.symbolId) ?? 0;
         return outDegree >= 3 && outDegree <= 40;
       }) ??
       seedCandidates[0] ??
       sortedSymbols[0];
 
-    const latestVersion = db.getLatestVersion(repoId);
-    const versionId = latestVersion?.version_id ?? "current";
+    const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+    const versionId = latestVersion?.versionId ?? "current";
 
     try {
       const sliceStart = performance.now();
       await buildSlice({
         repoId,
         versionId,
-        entrySymbols: [seedSymbol.symbol_id],
+        entrySymbols: [seedSymbol.symbolId],
         taskText: "understand implementation",
         budget: { maxCards: 20, maxEstimatedTokens: 4000 },
       });
@@ -386,7 +389,7 @@ async function collectBenchmarkMetrics(
   let summaryTokens = 0;
   try {
     const summaryStart = performance.now();
-    const summary = generateContextSummary({
+    const summary = await generateContextSummary({
       repoId,
       query: "repo status",
       budget: 500,
@@ -400,15 +403,15 @@ async function collectBenchmarkMetrics(
   const health = await getRepoHealthSnapshot(repoId);
   const watcher = getWatcherHealth(repoId);
 
-  const exportedCount = allSymbols.filter((s) => s.exported === 1).length;
+  const exportedCount = allSymbols.filter((s) => s.exported).length;
   const functionMethodCount = allSymbols.filter(
     (s) => s.kind === "function" || s.kind === "method",
   ).length;
 
-  const indexedSymbolIds = new Set(allSymbols.map((s) => s.symbol_id));
+  const indexedSymbolIds = new Set(allSymbols.map((s) => s.symbolId));
   const symbolsWithInternalEdges = new Set(
     edges
-      .flatMap((e) => [e.from_symbol_id, e.to_symbol_id])
+      .flatMap((e) => [e.fromSymbolId, e.toSymbolId])
       .filter((id) => indexedSymbolIds.has(id)),
   ).size;
   const graphConnectivity =
@@ -416,7 +419,7 @@ async function collectBenchmarkMetrics(
 
   const edgeTypes = edges.reduce(
     (acc, e) => {
-      acc[e.type] = (acc[e.type] || 0) + 1;
+      acc[e.edgeType] = (acc[e.edgeType] || 0) + 1;
       return acc;
     },
     {} as Record<string, number>,
@@ -484,8 +487,8 @@ export async function benchmarkCICommand(
     console.warn(`[WARN] Falling back to current working directory: ${repoPath}`);
   }
 
-  const database = getDb(config.dbPath);
-  runMigrations(database);
+  await initGraphDb(config, configPath);
+  const conn = await getKuzuConn();
 
   const { runtimeConfigJson: repoRuntimeConfigJson, addedScopePatterns } =
     buildBenchmarkRuntimeRepoConfig(repoConfig);
@@ -495,28 +498,13 @@ export async function benchmarkCICommand(
     );
   }
 
-  const persistedRepo = db.getRepo(repoId);
-  if (!persistedRepo) {
-    db.createRepo({
-      repo_id: repoId,
-      root_path: repoPath,
-      config_json: repoRuntimeConfigJson,
-      created_at: new Date().toISOString(),
-    });
-  } else {
-    const repoUpdates: { root_path?: string; config_json?: string } = {};
-
-    if (persistedRepo.root_path !== repoPath) {
-      repoUpdates.root_path = repoPath;
-    }
-    if (persistedRepo.config_json !== repoRuntimeConfigJson) {
-      repoUpdates.config_json = repoRuntimeConfigJson;
-    }
-
-    if (Object.keys(repoUpdates).length > 0) {
-      db.updateRepo(repoId, repoUpdates);
-    }
-  }
+  const persistedRepo = await kuzuDb.getRepo(conn, repoId);
+  await kuzuDb.upsertRepo(conn, {
+    repoId,
+    rootPath: repoPath,
+    configJson: repoRuntimeConfigJson,
+    createdAt: persistedRepo?.createdAt ?? new Date().toISOString(),
+  });
 
   const thresholdPath =
     options.thresholdPath ??
@@ -573,6 +561,7 @@ export async function benchmarkCICommand(
       thresholds.smoothing,
       () =>
         collectBenchmarkMetrics(
+          conn,
           repoId,
           repoPath,
           options.skipIndexing ?? false,
@@ -583,6 +572,7 @@ export async function benchmarkCICommand(
   } else {
     console.log(`\nRunning benchmark (single run)...`);
     benchmarkMetrics = await collectBenchmarkMetrics(
+      conn,
       repoId,
       repoPath,
       options.skipIndexing ?? false,

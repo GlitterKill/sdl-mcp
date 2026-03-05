@@ -184,11 +184,11 @@ export class Planner {
     const context: string[] = [];
 
     if (options.focusSymbols && options.focusSymbols.length > 0) {
-      context.push(...options.focusSymbols);
+      context.push(...options.focusSymbols.map((symbolId) => `symbol:${symbolId}`));
     }
 
     if (options.focusPaths && options.focusPaths.length > 0) {
-      context.push(...options.focusPaths);
+      context.push(...options.focusPaths.map((filePath) => `file:${filePath}`));
     }
 
     return context;

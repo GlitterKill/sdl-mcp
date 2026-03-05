@@ -1,18 +1,15 @@
 import { computeDeltaWithTiers } from "../../delta/diff.js";
 import { computeBlastRadius } from "../../delta/blastRadius.js";
-import {
-  loadGraphForRepo,
-  loadNeighborhood,
-  logGraphTelemetry,
-  getLastLoadStats,
-  LAZY_GRAPH_LOADING_DEFAULT_HOPS,
-  LAZY_GRAPH_LOADING_MAX_SYMBOLS,
-} from "../../graph/buildGraph.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyEngine } from "../../policy/engine.js";
 import { logger } from "../../util/logger.js";
 import { PRRiskAnalysisRequestSchema } from "../tools.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import type { BlastRadiusItem } from "../types.js";
+
+type ComputedDeltaWithTiers = Awaited<ReturnType<typeof computeDeltaWithTiers>>;
+type ChangedSymbol = ComputedDeltaWithTiers["changedSymbols"][number];
 
 export async function handlePRRiskAnalysis(args: unknown) {
   const validated = PRRiskAnalysisRequestSchema.parse(args);
@@ -31,9 +28,9 @@ export async function handlePRRiskAnalysis(args: unknown) {
 
   const config = loadConfig();
 
-  let delta;
+  let delta: ComputedDeltaWithTiers;
   try {
-    delta = computeDeltaWithTiers(
+    delta = await computeDeltaWithTiers(
       validated.repoId,
       validated.fromVersion,
       validated.toVersion,
@@ -44,30 +41,13 @@ export async function handlePRRiskAnalysis(args: unknown) {
     throw new Error(`Delta pack error: ${message}`);
   }
 
-  const changedSymbolIds = delta.changedSymbols.map((c) => c.symbolId);
+  const changedSymbolIds = delta.changedSymbols.map((c: ChangedSymbol) => c.symbolId);
 
-  let graph;
-  if (changedSymbolIds.length > 0 && changedSymbolIds.length < 500) {
-    graph = loadNeighborhood(validated.repoId, changedSymbolIds, {
-      maxHops: LAZY_GRAPH_LOADING_DEFAULT_HOPS,
-      direction: "both",
-      maxSymbols: LAZY_GRAPH_LOADING_MAX_SYMBOLS,
-    });
-  } else {
-    graph = loadGraphForRepo(validated.repoId);
-  }
-
-  const loadStats = getLastLoadStats();
-  if (loadStats) {
-    logGraphTelemetry({
-      repoId: validated.repoId,
-      ...loadStats,
-    });
-  }
-
-  const blastRadiusItems = computeBlastRadius(changedSymbolIds, graph, {
+  const conn = await getKuzuConn();
+  const blastRadiusItems = await computeBlastRadius(conn, changedSymbolIds, {
     maxHops: 3,
     maxResults: 50,
+    repoId: validated.repoId,
   });
 
   const policyEngine = new PolicyEngine(config.policy ?? {});
@@ -76,7 +56,7 @@ export async function handlePRRiskAnalysis(args: unknown) {
 
   const riskScore = computeOverallRiskScore(delta, blastRadiusItems);
 
-  const impactedSymbols = blastRadiusItems.map((item) => item.symbolId);
+  const impactedSymbols = blastRadiusItems.map((item: BlastRadiusItem) => item.symbolId);
 
   const evidence = collectEvidence(delta, blastRadiusItems);
 
@@ -125,8 +105,8 @@ export async function handlePRRiskAnalysis(args: unknown) {
 }
 
 function generateFindings(
-  delta: any,
-  blastRadiusItems: any[],
+  delta: ComputedDeltaWithTiers,
+  blastRadiusItems: BlastRadiusItem[],
 ): Array<{
   type: string;
   severity: "low" | "medium" | "high";
@@ -137,14 +117,14 @@ function generateFindings(
   const findings = [];
 
   const highRiskChanges = delta.changedSymbols.filter(
-    (c: any) => c.tiers?.riskScore >= 70,
+    (c: ChangedSymbol) => (c.tiers?.riskScore ?? 0) >= 70,
   );
   if (highRiskChanges.length > 0) {
     findings.push({
       type: "high-risk-changes",
       severity: "high" as const,
       message: `${highRiskChanges.length} changed symbol(s) with high risk score (≥70)`,
-      affectedSymbols: highRiskChanges.map((c: any) => c.symbolId),
+      affectedSymbols: highRiskChanges.map((c: ChangedSymbol) => c.symbolId),
       metadata: {
         highRiskCount: highRiskChanges.length,
       },
@@ -152,14 +132,14 @@ function generateFindings(
   }
 
   const interfaceBreakingChanges = delta.changedSymbols.filter(
-    (c: any) => !c.tiers?.interfaceStable && c.changeType === "modified",
+    (c: ChangedSymbol) => !c.tiers?.interfaceStable && c.changeType === "modified",
   );
   if (interfaceBreakingChanges.length > 0) {
     findings.push({
       type: "interface-breaking-changes",
       severity: "high" as const,
       message: `${interfaceBreakingChanges.length} symbol(s) with interface-breaking changes`,
-      affectedSymbols: interfaceBreakingChanges.map((c: any) => c.symbolId),
+      affectedSymbols: interfaceBreakingChanges.map((c: ChangedSymbol) => c.symbolId),
       metadata: {
         breakingChangeCount: interfaceBreakingChanges.length,
       },
@@ -167,31 +147,31 @@ function generateFindings(
   }
 
   const sideEffectChanges = delta.changedSymbols.filter(
-    (c: any) => !c.tiers?.sideEffectsStable && c.changeType === "modified",
+    (c: ChangedSymbol) => !c.tiers?.sideEffectsStable && c.changeType === "modified",
   );
   if (sideEffectChanges.length > 0) {
     findings.push({
       type: "side-effect-changes",
       severity: "medium" as const,
       message: `${sideEffectChanges.length} symbol(s) with side effect changes`,
-      affectedSymbols: sideEffectChanges.map((c: any) => c.symbolId),
+      affectedSymbols: sideEffectChanges.map((c: ChangedSymbol) => c.symbolId),
     });
   }
 
   const removedSymbols = delta.changedSymbols.filter(
-    (c: any) => c.changeType === "removed",
+    (c: ChangedSymbol) => c.changeType === "removed",
   );
   if (removedSymbols.length > 0) {
     findings.push({
       type: "removed-symbols",
       severity: "medium" as const,
       message: `${removedSymbols.length} symbol(s) removed`,
-      affectedSymbols: removedSymbols.map((c: any) => c.symbolId),
+      affectedSymbols: removedSymbols.map((c: ChangedSymbol) => c.symbolId),
     });
   }
 
   const largeBlastRadius = blastRadiusItems.filter(
-    (item) => item.distance === 0,
+    (item: BlastRadiusItem) => item.signal === "directDependent",
   );
   if (largeBlastRadius.length > 10) {
     findings.push({
@@ -200,7 +180,7 @@ function generateFindings(
       message: `${largeBlastRadius.length} direct dependents may be affected`,
       affectedSymbols: largeBlastRadius
         .slice(0, 10)
-        .map((item) => item.symbolId),
+        .map((item: BlastRadiusItem) => item.symbolId),
       metadata: {
         directDependentCount: largeBlastRadius.length,
       },
@@ -208,14 +188,14 @@ function generateFindings(
   }
 
   const addedSymbols = delta.changedSymbols.filter(
-    (c: any) => c.changeType === "added",
+    (c: ChangedSymbol) => c.changeType === "added",
   );
   if (addedSymbols.length > 0) {
     findings.push({
       type: "new-symbols",
       severity: "low" as const,
       message: `${addedSymbols.length} new symbol(s) added`,
-      affectedSymbols: addedSymbols.map((c: any) => c.symbolId),
+      affectedSymbols: addedSymbols.map((c: ChangedSymbol) => c.symbolId),
     });
   }
 
@@ -225,7 +205,7 @@ function generateFindings(
   });
 }
 
-function computeOverallRiskScore(delta: any, blastRadiusItems: any[]): number {
+function computeOverallRiskScore(delta: ComputedDeltaWithTiers, blastRadiusItems: BlastRadiusItem[]): number {
   let totalRisk = 0;
   let weightSum = 0;
 
@@ -238,7 +218,7 @@ function computeOverallRiskScore(delta: any, blastRadiusItems: any[]): number {
 
   if (delta.changedSymbols.length > 0) {
     const avgChangeRisk =
-      delta.changedSymbols.reduce((sum: number, c: any) => {
+      delta.changedSymbols.reduce((sum: number, c: ChangedSymbol) => {
         const risk = c.tiers?.riskScore ?? 100;
         return sum + risk;
       }, 0) / delta.changedSymbols.length;
@@ -248,15 +228,15 @@ function computeOverallRiskScore(delta: any, blastRadiusItems: any[]): number {
 
   if (blastRadiusItems.length > 0) {
     const avgBlastRadiusScore =
-      blastRadiusItems.reduce((sum: number, item: any) => {
-        return sum + item.rank * 100;
+      blastRadiusItems.reduce((sum: number, item: BlastRadiusItem) => {
+        return sum + (item.rank || 0) * 100;
       }, 0) / blastRadiusItems.length;
     totalRisk += avgBlastRadiusScore * riskWeights.blastRadius;
     weightSum += riskWeights.blastRadius;
   }
 
   const interfaceUnstable = delta.changedSymbols.filter(
-    (c: any) => !c.tiers?.interfaceStable,
+    (c: ChangedSymbol) => !c.tiers?.interfaceStable,
   ).length;
   if (delta.changedSymbols.length > 0) {
     const interfaceRisk =
@@ -266,7 +246,7 @@ function computeOverallRiskScore(delta: any, blastRadiusItems: any[]): number {
   }
 
   const sideEffectUnstable = delta.changedSymbols.filter(
-    (c: any) => !c.tiers?.sideEffectsStable,
+    (c: ChangedSymbol) => !c.tiers?.sideEffectsStable,
   ).length;
   if (delta.changedSymbols.length > 0) {
     const sideEffectRisk =
@@ -285,8 +265,8 @@ function getRiskLevel(riskScore: number): "low" | "medium" | "high" {
 }
 
 function collectEvidence(
-  delta: any,
-  blastRadiusItems: any[],
+  delta: ComputedDeltaWithTiers,
+  blastRadiusItems: BlastRadiusItem[],
 ): Array<{
   type: string;
   description: string;
@@ -300,19 +280,19 @@ function collectEvidence(
     description: "Delta analysis summary",
     data: {
       totalChanges: delta.changedSymbols.length,
-      added: delta.changedSymbols.filter((c: any) => c.changeType === "added")
+      added: delta.changedSymbols.filter((c: ChangedSymbol) => c.changeType === "added")
         .length,
       removed: delta.changedSymbols.filter(
-        (c: any) => c.changeType === "removed",
+        (c: ChangedSymbol) => c.changeType === "removed",
       ).length,
       modified: delta.changedSymbols.filter(
-        (c: any) => c.changeType === "modified",
+        (c: ChangedSymbol) => c.changeType === "modified",
       ).length,
     },
   });
 
   const highRiskChanges = delta.changedSymbols.filter(
-    (c: any) => (c.tiers?.riskScore ?? 0) >= 70,
+    (c: ChangedSymbol) => (c.tiers?.riskScore ?? 0) >= 70,
   );
   if (highRiskChanges.length > 0) {
     evidence.push({
@@ -320,7 +300,7 @@ function collectEvidence(
       description: "Changes with high risk scores",
       data: {
         count: highRiskChanges.length,
-        symbols: highRiskChanges.map((c: any) => ({
+        symbols: highRiskChanges.map((c: ChangedSymbol) => ({
           symbolId: c.symbolId,
           riskScore: c.tiers?.riskScore,
           changeType: c.changeType,
@@ -330,7 +310,7 @@ function collectEvidence(
   }
 
   const interfaceBreaks = delta.changedSymbols.filter(
-    (c: any) => !c.tiers?.interfaceStable && c.changeType === "modified",
+    (c: ChangedSymbol) => !c.tiers?.interfaceStable && c.changeType === "modified",
   );
   if (interfaceBreaks.length > 0) {
     evidence.push({
@@ -338,9 +318,9 @@ function collectEvidence(
       description: "Interface-breaking changes detected",
       data: {
         count: interfaceBreaks.length,
-        symbols: interfaceBreaks.map((c: any) => ({
+        symbols: interfaceBreaks.map((c: ChangedSymbol) => ({
           symbolId: c.symbolId,
-          signatureDiff: c.signatureDiff,
+          signatureDiff: (c as any).signatureDiff,
         })),
       },
     });
@@ -351,11 +331,11 @@ function collectEvidence(
     description: "Impact radius analysis",
     data: {
       totalImpacted: blastRadiusItems.length,
-      directDependents: blastRadiusItems.filter((i: any) => i.distance === 0)
+      directDependents: blastRadiusItems.filter((i: BlastRadiusItem) => i.signal === "directDependent")
         .length,
-      transitiveDependents: blastRadiusItems.filter((i: any) => i.distance > 0)
+      transitiveDependents: blastRadiusItems.filter((i: BlastRadiusItem) => i.signal !== "directDependent")
         .length,
-      topImpacted: blastRadiusItems.slice(0, 10).map((item: any) => ({
+      topImpacted: blastRadiusItems.slice(0, 10).map((item: BlastRadiusItem) => ({
         symbolId: item.symbolId,
         distance: item.distance,
         rank: item.rank,
@@ -368,8 +348,8 @@ function collectEvidence(
 }
 
 function generateRecommendedTests(
-  delta: any,
-  blastRadiusItems: any[],
+  delta: ComputedDeltaWithTiers,
+  blastRadiusItems: BlastRadiusItem[],
 ): Array<{
   type: string;
   description: string;
@@ -379,31 +359,31 @@ function generateRecommendedTests(
   const tests = [];
 
   const modifiedSymbols = delta.changedSymbols.filter(
-    (c: any) => c.changeType === "modified",
+    (c: ChangedSymbol) => c.changeType === "modified",
   );
   if (modifiedSymbols.length > 0) {
     tests.push({
       type: "unit-tests",
       description: "Run unit tests for modified symbols",
-      targetSymbols: modifiedSymbols.slice(0, 20).map((c: any) => c.symbolId),
+      targetSymbols: modifiedSymbols.slice(0, 20).map((c: ChangedSymbol) => c.symbolId),
       priority: "high" as const,
     });
   }
 
   const interfaceBreakingSymbols = delta.changedSymbols.filter(
-    (c: any) => !c.tiers?.interfaceStable && c.changeType === "modified",
+    (c: ChangedSymbol) => !c.tiers?.interfaceStable && c.changeType === "modified",
   );
   if (interfaceBreakingSymbols.length > 0) {
     tests.push({
       type: "integration-tests",
       description: "Run integration tests for symbols with interface changes",
-      targetSymbols: interfaceBreakingSymbols.map((c: any) => c.symbolId),
+      targetSymbols: interfaceBreakingSymbols.map((c: ChangedSymbol) => c.symbolId),
       priority: "high" as const,
     });
   }
 
   const directDependents = blastRadiusItems.filter(
-    (item) => item.distance === 0,
+    (item: BlastRadiusItem) => item.signal === "directDependent",
   );
   if (directDependents.length > 0) {
     tests.push({
@@ -411,31 +391,31 @@ function generateRecommendedTests(
       description: "Run regression tests on direct dependents",
       targetSymbols: directDependents
         .slice(0, 20)
-        .map((item: any) => item.symbolId),
+        .map((item: BlastRadiusItem) => item.symbolId),
       priority: "medium" as const,
     });
   }
 
   const removedSymbols = delta.changedSymbols.filter(
-    (c: any) => c.changeType === "removed",
+    (c: ChangedSymbol) => c.changeType === "removed",
   );
   if (removedSymbols.length > 0) {
     tests.push({
       type: "api-breakage-tests",
       description: "Verify no references to removed symbols",
-      targetSymbols: removedSymbols.map((c: any) => c.symbolId),
+      targetSymbols: removedSymbols.map((c: ChangedSymbol) => c.symbolId),
       priority: "high" as const,
     });
   }
 
   const addedSymbols = delta.changedSymbols.filter(
-    (c: any) => c.changeType === "added",
+    (c: ChangedSymbol) => c.changeType === "added",
   );
   if (addedSymbols.length > 0) {
     tests.push({
       type: "new-coverage-tests",
       description: "Add test coverage for new symbols",
-      targetSymbols: addedSymbols.map((c: any) => c.symbolId),
+      targetSymbols: addedSymbols.map((c: ChangedSymbol) => c.symbolId),
       priority: "low" as const,
     });
   }

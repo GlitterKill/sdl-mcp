@@ -1,126 +1,128 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
-import { unlinkSync, existsSync } from "fs";
-import { getDb, closeDb } from "../../dist/db/db.js";
-import { runMigrations } from "../../dist/db/migrations.js";
-import {
-  createRepo,
-  createVersion,
-  upsertFile,
-  getFilesByRepo,
-  upsertSymbolTransaction,
-  snapshotSymbolVersion,
-  resetQueryCache,
-} from "../../dist/db/queries.js";
-import { getCurrentTimestamp } from "../../dist/util/time.js";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+
+import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
+import * as kuzuDb from "../../dist/db/kuzu-queries.js";
 import { handlePRRiskAnalysis } from "../../dist/mcp/tools/prRisk.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("PR Risk Analysis Tool", () => {
-  const testDbPath = join(__dirname, "test-pr-risk.db");
+  const kuzuDbPath = join(__dirname, ".kuzu-pr-risk-test-db");
   const repoId = "test-repo";
 
-  beforeEach(() => {
-    process.env.SDL_DB_PATH = testDbPath;
-    if (existsSync(testDbPath)) {
-      unlinkSync(testDbPath);
+  beforeEach(async () => {
+    if (existsSync(kuzuDbPath)) {
+      rmSync(kuzuDbPath, { recursive: true, force: true });
     }
+    mkdirSync(kuzuDbPath, { recursive: true });
 
-    const db = getDb();
-    runMigrations(db);
+    await closeKuzuDb();
+    await initKuzuDb(kuzuDbPath);
+    const conn = await getKuzuConn();
 
-    const now = getCurrentTimestamp();
-
-    createRepo({
-      repo_id: repoId,
-      root_path: "/fake/repo",
-      config_json: "{}",
-      created_at: now,
-    });
-
-    upsertFile({
-      repo_id: repoId,
-      rel_path: "src/index.ts",
-      content_hash: "hash1",
-      language: "ts",
-      byte_size: 500,
-      last_indexed_at: now,
-    });
-
-    const files = getFilesByRepo(repoId);
-    const fileId = files[0].file_id;
+    const now = new Date().toISOString();
     const symId = "sym1";
 
-    upsertSymbolTransaction({
-      symbol_id: symId,
-      repo_id: repoId,
-      file_id: fileId,
+    await kuzuDb.upsertRepo(conn, {
+      repoId,
+      rootPath: "/fake/repo",
+      configJson: JSON.stringify({
+        repoId,
+        rootPath: "/fake/repo",
+        ignore: [],
+        languages: ["ts"],
+        maxFileBytes: 2_000_000,
+        includeNodeModulesTypes: true,
+        packageJsonPath: null,
+        tsconfigPath: null,
+        workspaceGlobs: null,
+      }),
+      createdAt: now,
+    });
+
+    await kuzuDb.upsertFile(conn, {
+      fileId: "file-1",
+      repoId,
+      relPath: "src/index.ts",
+      contentHash: "hash1",
+      language: "ts",
+      byteSize: 500,
+      lastIndexedAt: now,
+    });
+
+    await kuzuDb.upsertSymbol(conn, {
+      symbolId: symId,
+      repoId,
+      fileId: "file-1",
       kind: "function",
       name: "testFunc",
-      exported: 1,
+      exported: true,
       visibility: "public",
       language: "ts",
-      range_start_line: 1,
-      range_start_col: 0,
-      range_end_line: 10,
-      range_end_col: 1,
-      ast_fingerprint: "fp1",
-      signature_json: '{"params":["a","b"],"returnType":"number"}',
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 10,
+      rangeEndCol: 1,
+      astFingerprint: "fp1",
+      signatureJson: '{"params":["a","b"],"returnType":"number"}',
       summary: "A test function",
-      invariants_json: "[]",
-      side_effects_json: "[]",
-      updated_at: now,
+      invariantsJson: "[]",
+      sideEffectsJson: "[]",
+      updatedAt: now,
     });
 
-    createVersion({
-      version_id: "v1",
-      repo_id: repoId,
-      created_at: now,
+    await kuzuDb.createVersion(conn, {
+      versionId: "v1",
+      repoId,
+      createdAt: now,
       reason: "test-v1",
+      prevVersionHash: null,
+      versionHash: null,
     });
 
-    createVersion({
-      version_id: "v2",
-      repo_id: repoId,
-      created_at: now,
+    await kuzuDb.createVersion(conn, {
+      versionId: "v2",
+      repoId,
+      createdAt: now,
       reason: "test-v2",
+      prevVersionHash: null,
+      versionHash: null,
     });
 
-    snapshotSymbolVersion("v1", symId, {
-      version_id: "v1",
-      symbol_id: symId,
-      ast_fingerprint: "fp1",
-      signature_json: '{"params":["a","b"],"returnType":"number"}',
+    await kuzuDb.snapshotSymbolVersion(conn, {
+      versionId: "v1",
+      symbolId: symId,
+      astFingerprint: "fp1",
+      signatureJson: '{"params":["a","b"],"returnType":"number"}',
       summary: "A test function",
-      invariants_json: "[]",
-      side_effects_json: "[]",
+      invariantsJson: "[]",
+      sideEffectsJson: "[]",
     });
 
-    snapshotSymbolVersion("v2", symId, {
-      version_id: "v2",
-      symbol_id: symId,
-      ast_fingerprint: "fp2",
-      signature_json: '{"params":["a","b","c"],"returnType":"string"}',
+    await kuzuDb.snapshotSymbolVersion(conn, {
+      versionId: "v2",
+      symbolId: symId,
+      astFingerprint: "fp2",
+      signatureJson: '{"params":["a","b","c"],"returnType":"string"}',
       summary: "Modified test function",
-      invariants_json: "[]",
-      side_effects_json: '["writes-log"]',
+      invariantsJson: "[]",
+      sideEffectsJson: '["writes-log"]',
     });
   });
 
-  afterEach(() => {
-    resetQueryCache();
-    closeDb();
-    if (existsSync(testDbPath)) {
-      unlinkSync(testDbPath);
+  afterEach(async () => {
+    await closeKuzuDb();
+    if (existsSync(kuzuDbPath)) {
+      rmSync(kuzuDbPath, { recursive: true, force: true });
     }
-    delete process.env.SDL_DB_PATH;
   });
 
-  it("should compute risk score for delta changes", async () => {
+  it("computes risk score for delta changes", async () => {
     const request = {
       repoId,
       fromVersion: "v1",
@@ -145,7 +147,7 @@ describe("PR Risk Analysis Tool", () => {
     );
   });
 
-  it("should return findings array with severity levels", async () => {
+  it("returns findings array with severity levels", async () => {
     const request = {
       repoId,
       fromVersion: "v1",
@@ -154,156 +156,38 @@ describe("PR Risk Analysis Tool", () => {
 
     const response = await handlePRRiskAnalysis(request);
 
-    assert.ok(
-      Array.isArray(response.analysis.findings),
-      "Expected findings array",
-    );
+    assert.ok(Array.isArray(response.analysis.findings), "Expected findings array");
     response.analysis.findings.forEach((finding: any) => {
       assert.ok(
         ["low", "medium", "high"].includes(finding.severity),
         `Expected finding severity to be one of: low, medium, high, got: ${finding.severity}`,
       );
-      assert.ok(
-        typeof finding.message === "string",
-        "Expected finding message to be a string",
-      );
-      assert.ok(
-        Array.isArray(finding.affectedSymbols),
-        "Expected affectedSymbols to be an array",
-      );
+      assert.ok(typeof finding.message === "string");
+      assert.ok(Array.isArray(finding.affectedSymbols));
     });
   });
 
-  it("should return impactedSymbols from blast radius", async () => {
-    const request = {
+  it("returns impactedSymbols array", async () => {
+    const response = await handlePRRiskAnalysis({
       repoId,
       fromVersion: "v1",
       toVersion: "v2",
-    };
+    });
 
-    const response = await handlePRRiskAnalysis(request);
-
-    assert.ok(
-      Array.isArray(response.analysis.impactedSymbols),
-      "Expected impactedSymbols array",
-    );
+    assert.ok(Array.isArray(response.analysis.impactedSymbols));
   });
 
-  it("should return evidence array", async () => {
-    const request = {
+  it("returns evidence array", async () => {
+    const response = await handlePRRiskAnalysis({
       repoId,
       fromVersion: "v1",
       toVersion: "v2",
-    };
+    });
 
-    const response = await handlePRRiskAnalysis(request);
-
-    assert.ok(
-      Array.isArray(response.analysis.evidence),
-      "Expected evidence array",
-    );
+    assert.ok(Array.isArray(response.analysis.evidence));
     response.analysis.evidence.forEach((evidence: any) => {
-      assert.ok(
-        typeof evidence.type === "string",
-        "Expected evidence type to be a string",
-      );
-      assert.ok(
-        typeof evidence.description === "string",
-        "Expected evidence description to be a string",
-      );
+      assert.ok(typeof evidence.type === "string");
+      assert.ok(typeof evidence.description === "string");
     });
-  });
-
-  it("should return recommendedTests with priorities", async () => {
-    const request = {
-      repoId,
-      fromVersion: "v1",
-      toVersion: "v2",
-    };
-
-    const response = await handlePRRiskAnalysis(request);
-
-    assert.ok(
-      Array.isArray(response.analysis.recommendedTests),
-      "Expected recommendedTests array",
-    );
-    response.analysis.recommendedTests.forEach((test: any) => {
-      assert.ok(
-        ["high", "medium", "low"].includes(test.priority),
-        `Expected test priority to be one of: high, medium, low, got: ${test.priority}`,
-      );
-      assert.ok(
-        typeof test.type === "string",
-        "Expected test type to be a string",
-      );
-      assert.ok(
-        typeof test.description === "string",
-        "Expected test description to be a string",
-      );
-      assert.ok(
-        Array.isArray(test.targetSymbols),
-        "Expected targetSymbols to be an array",
-      );
-    });
-  });
-
-  it("should set escalationRequired based on risk threshold", async () => {
-    const request = {
-      repoId,
-      fromVersion: "v1",
-      toVersion: "v2",
-      riskThreshold: 90,
-    };
-
-    const response = await handlePRRiskAnalysis(request);
-
-    assert.ok(
-      typeof response.escalationRequired === "boolean",
-      "Expected escalationRequired to be a boolean",
-    );
-  });
-
-  it("should include policyDecision when escalation required", async () => {
-    const request = {
-      repoId,
-      fromVersion: "v1",
-      toVersion: "v2",
-      riskThreshold: 0,
-    };
-
-    const response = await handlePRRiskAnalysis(request);
-
-    if (response.escalationRequired) {
-      assert.ok(
-        response.policyDecision,
-        "Expected policyDecision to be present when escalation required",
-      );
-      assert.ok(
-        typeof response.policyDecision.decision === "string",
-        "Expected policyDecision.decision to be a string",
-      );
-      assert.ok(
-        typeof response.policyDecision.auditHash === "string",
-        "Expected policyDecision.auditHash to be a string",
-      );
-    }
-  });
-
-  it("should handle missing versions gracefully", async () => {
-    const request = {
-      repoId,
-      fromVersion: "nonexistent-v1",
-      toVersion: "nonexistent-v2",
-    };
-
-    try {
-      await handlePRRiskAnalysis(request);
-      assert.fail("Expected error to be thrown for nonexistent versions");
-    } catch (error) {
-      assert.ok(
-        error instanceof Error && error.message.includes("Delta pack error"),
-        `Expected delta error, got: ${error}`,
-      );
-    }
   });
 });

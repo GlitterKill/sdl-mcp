@@ -33,8 +33,9 @@ describe("Config Loading (RR-H.8)", () => {
     );
     const config = loadConfig(exampleConfigPath);
 
-    assert.strictEqual(typeof config.dbPath, "string");
-    assert.ok(config.dbPath.endsWith(".sqlite"));
+    assert.ok(config.graphDatabase, "Expected graphDatabase section in example config");
+    assert.strictEqual(typeof config.graphDatabase.path, "string");
+    assert.ok(config.graphDatabase.path.length > 0);
   });
 
   it("should throw error for non-existent config", () => {

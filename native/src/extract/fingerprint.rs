@@ -11,7 +11,7 @@ use crate::parse::content_hash::hash_content;
 ///    visibility, returnType, subtree hash
 /// 2. Subtree hash: comma-delimited node types, skipping comments and literals
 /// 3. Hash via SHA-256
-pub fn generate_ast_fingerprint(node: Node<'_>) -> String {
+pub fn generate_ast_fingerprint(node: Node<'_>, source: &[u8]) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     // type:{node_type}
@@ -19,7 +19,7 @@ pub fn generate_ast_fingerprint(node: Node<'_>) -> String {
 
     // name:{name}
     if let Some(name_node) = node.child_by_field_name("name") {
-        let name_text = name_node.utf8_text(&[]).unwrap_or("");
+        let name_text = name_node.utf8_text(source).unwrap_or("");
         parts.push(format!("name:{name_text}"));
     }
 
@@ -131,12 +131,9 @@ fn collect_normalized_parts(node: Node<'_>, parts: &mut Vec<String>) {
     }
 }
 
-/// Generate AST fingerprint from source bytes (needs the node to have
-/// access to source for text extraction via `utf8_text`).
-pub fn generate_ast_fingerprint_with_source(node: Node<'_>, _source: &[u8]) -> String {
-    // The node already has access to source through its tree.
-    // We pass source separately for the API but use node.utf8_text internally.
-    generate_ast_fingerprint(node)
+/// Backwards-compatible wrapper for callers that pass source explicitly.
+pub fn generate_ast_fingerprint_with_source(node: Node<'_>, source: &[u8]) -> String {
+    generate_ast_fingerprint(node, source)
 }
 
 #[cfg(test)]

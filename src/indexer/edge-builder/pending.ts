@@ -1,16 +1,21 @@
-import { createEdgeTransaction } from "../../db/queries.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 
 import { resolveSymbolIdFromIndex } from "./symbol-index.js";
 import type { PendingCallEdge, SymbolIndex } from "./types.js";
 
-export function resolvePendingCallEdges(
+export async function resolvePendingCallEdges(
   pending: PendingCallEdge[],
   index: SymbolIndex,
   created: Set<string>,
   repoId: string,
-): void {
+): Promise<void> {
+  const conn = await getKuzuConn();
+  const now = new Date().toISOString();
+  const edgesToInsert: kuzuDb.EdgeRow[] = [];
+
   for (const edge of pending) {
-    const toSymbolId = resolveSymbolIdFromIndex(
+    const toSymbolId = await resolveSymbolIdFromIndex(
       index,
       repoId,
       edge.toFile,
@@ -27,18 +32,19 @@ export function resolvePendingCallEdges(
       continue;
     }
 
-    createEdgeTransaction({
-      repo_id: repoId,
-      from_symbol_id: edge.fromSymbolId,
-      to_symbol_id: toSymbolId,
-      type: "call",
+    edgesToInsert.push({
+      repoId,
+      fromSymbolId: edge.fromSymbolId,
+      toSymbolId,
+      edgeType: "call",
       weight: 1.0,
       confidence: edge.confidence ?? 1.0,
-      resolution_strategy: edge.strategy ?? "heuristic",
-      provenance: edge.provenance,
-      created_at: new Date().toISOString(),
+      resolution: edge.strategy ?? "heuristic",
+      provenance: edge.provenance ?? null,
+      createdAt: now,
     });
     created.add(edgeKey);
   }
-}
 
+  await kuzuDb.insertEdges(conn, edgesToInsert);
+}

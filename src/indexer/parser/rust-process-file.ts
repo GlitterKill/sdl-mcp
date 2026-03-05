@@ -1,22 +1,18 @@
 import { join } from "path";
 
 import type { RepoConfig } from "../../config/types.js";
-import {
-  createEdgeTransaction,
-  deleteSymbolsByFileWithEdges,
-  deleteSymbolReferencesByFileId,
-  getFileByRepoPath,
-  getSymbolsByFile,
-  upsertFile,
-  upsertSymbolTransaction,
-} from "../../db/queries.js";
-import { SymbolKind, type EdgeRow, type SymbolRow } from "../../db/schema.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
+import type { EdgeRow, SymbolRow } from "../../db/kuzu-queries.js";
+import type { SymbolKind } from "../../db/schema.js";
 import { prefetchFileExports } from "../../graph/prefetch.js";
 import { readFileAsync } from "../../util/asyncFs.js";
 import { logger } from "../../util/logger.js";
+import { normalizePath } from "../../util/paths.js";
 import type { PendingCallEdge, SymbolIndex, TsCallResolver } from "../edge-builder.js";
 import {
   addToSymbolIndex,
+  isTsCallResolutionFile,
   isBuiltinCall,
   resolveCallTarget,
   resolveImportTargets,
@@ -43,9 +39,9 @@ export async function processFileFromRustResult(params: {
   languages: string[];
   mode: "full" | "incremental";
   existingFile?: {
-    file_id: number;
-    content_hash: string;
-    last_indexed_at: string | null;
+    fileId: string;
+    contentHash: string;
+    lastIndexedAt: string | null;
   };
   symbolIndex: SymbolIndex;
   pendingCallEdges: PendingCallEdge[];
@@ -60,6 +56,7 @@ export async function processFileFromRustResult(params: {
   edgesCreated: number;
   changed: boolean;
   configEdges: ConfigEdge[];
+  pass2HintPaths: string[];
 }> {
   const {
     repoId,
@@ -76,20 +73,23 @@ export async function processFileFromRustResult(params: {
   } = params;
 
   try {
-    if (mode === "incremental" && existingFile?.last_indexed_at) {
-      const lastIndexedMs = new Date(existingFile.last_indexed_at).getTime();
+    if (mode === "incremental" && existingFile?.lastIndexedAt) {
+      const lastIndexedMs = new Date(existingFile.lastIndexedAt).getTime();
       if (fileMeta.mtime <= lastIndexedMs) {
         return {
           symbolsIndexed: 0,
           edgesCreated: 0,
           changed: false,
           configEdges: [],
+          pass2HintPaths: [],
         };
       }
     }
 
     const ext = fileMeta.path.split(".").pop() || "";
     const contentHash = rustResult.contentHash;
+    const relPath = normalizePath(fileMeta.path);
+    const fileId = existingFile?.fileId ?? `${repoId}:${relPath}`;
 
     if (rustResult.parseError) {
       logger.warn(
@@ -100,33 +100,38 @@ export async function processFileFromRustResult(params: {
     if (
       mode === "incremental" &&
       existingFile &&
-      existingFile.content_hash === contentHash
+      existingFile.contentHash === contentHash
     ) {
       return {
         symbolsIndexed: 0,
         edgesCreated: 0,
         changed: false,
         configEdges: [],
+        pass2HintPaths: [],
       };
     }
 
+    const conn = await getKuzuConn();
+
     if (!languages.includes(ext)) {
       if (existingFile) {
-        deleteSymbolsByFileWithEdges(existingFile.file_id);
+        await kuzuDb.deleteSymbolsByFileId(conn, existingFile.fileId);
       }
-      upsertFile({
-        repo_id: repoId,
-        rel_path: fileMeta.path,
-        content_hash: contentHash,
+      await kuzuDb.upsertFile(conn, {
+        fileId,
+        repoId,
+        relPath,
+        contentHash,
         language: ext,
-        byte_size: fileMeta.size,
-        last_indexed_at: new Date().toISOString(),
+        byteSize: fileMeta.size,
+        lastIndexedAt: new Date().toISOString(),
       });
       return {
         symbolsIndexed: 0,
         edgesCreated: 0,
         changed: true,
         configEdges: [],
+        pass2HintPaths: [],
       };
     }
 
@@ -135,44 +140,98 @@ export async function processFileFromRustResult(params: {
     const filePath = join(repoRoot, fileMeta.path);
     const content = await readFileAsync(filePath, "utf-8");
 
+    let pass2HintPaths: string[] = [];
+
     // Preserve previous symbol metadata before deleting rows for this file.
+    let existingSymbols: SymbolRow[] = [];
     const existingSymbolsById = new Map<string, SymbolRow>();
     if (existingFile) {
-      const existingSymbols = getSymbolsByFile(existingFile.file_id);
+      existingSymbols = await kuzuDb.getSymbolsByFile(
+        conn,
+        existingFile.fileId,
+      );
       for (const symbol of existingSymbols) {
-        existingSymbolsById.set(symbol.symbol_id, symbol);
+        existingSymbolsById.set(symbol.symbolId, symbol);
       }
     }
 
-    const fileRecord = {
-      repo_id: repoId,
-      rel_path: fileMeta.path,
-      content_hash: contentHash,
-      language: ext,
-      byte_size: fileMeta.size,
-      last_indexed_at: new Date().toISOString(),
-    };
-    upsertFile(fileRecord);
+    if (
+      mode === "incremental" &&
+      skipCallResolution &&
+      existingFile &&
+      existingSymbols.length > 0
+    ) {
+      try {
+        const incomingByToSymbol = await kuzuDb.getEdgesToSymbols(
+          conn,
+          existingSymbols.map((s) => s.symbolId),
+        );
 
-    const file = getFileByRepoPath(repoId, fileMeta.path);
-    if (!file) {
-      return {
-        symbolsIndexed: rustResult.symbols.length,
-        edgesCreated: 0,
-        changed: true,
-        configEdges: [],
-      };
+        const importerSymbolIds = new Set<string>();
+        for (const edges of incomingByToSymbol.values()) {
+          for (const edge of edges) {
+            if (edge.edgeType !== "import" && edge.edgeType !== "call") continue;
+            importerSymbolIds.add(edge.fromSymbolId);
+          }
+        }
+
+        if (importerSymbolIds.size > 0) {
+          const importerSymbols = await kuzuDb.getSymbolsByIds(
+            conn,
+            Array.from(importerSymbolIds),
+          );
+
+          const fileIds = new Set<string>();
+          for (const symbol of importerSymbols.values()) {
+            fileIds.add(symbol.fileId);
+          }
+
+          const importerFiles = await kuzuDb.getFilesByIds(
+            conn,
+            Array.from(fileIds),
+          );
+
+          const hinted = new Set<string>();
+          for (const symbol of importerSymbols.values()) {
+            const file = importerFiles.get(symbol.fileId);
+            if (!file) continue;
+            if (!isTsCallResolutionFile(file.relPath)) continue;
+            hinted.add(file.relPath);
+          }
+
+          pass2HintPaths = Array.from(hinted).sort();
+        }
+      } catch (error) {
+        logger.warn(
+          "Failed to compute pass2 hint paths for incremental call resolution",
+          {
+            repoId,
+            file: fileMeta.path,
+            error: String(error),
+          },
+        );
+      }
     }
 
+    await kuzuDb.upsertFile(conn, {
+      fileId,
+      repoId,
+      relPath,
+      contentHash,
+      language: ext,
+      byteSize: fileMeta.size,
+      lastIndexedAt: new Date().toISOString(),
+    });
+
     if (existingFile) {
-      deleteSymbolsByFileWithEdges(existingFile.file_id);
-      deleteSymbolReferencesByFileId(existingFile.file_id);
+      await kuzuDb.deleteSymbolsByFileId(conn, existingFile.fileId);
+      await kuzuDb.deleteSymbolReferencesByFileId(conn, existingFile.fileId);
     }
 
     // Rebuild test symbol reference index from the current file content.
-    if (isTestFile(fileMeta.path, languages)) {
+    if (isTestFile(relPath, languages)) {
       try {
-        extractSymbolReferences(content, repoId, file.file_id);
+        await extractSymbolReferences(content, repoId, fileId);
       } catch {
         // Non-critical: skip reference extraction on read failure
       }
@@ -236,6 +295,8 @@ export async function processFileFromRustResult(params: {
     const edgeSourceDetails =
       exportSymbols.length > 0 ? exportSymbols : symbolDetails;
 
+    const edgesToInsert: EdgeRow[] = [];
+
     for (const detail of symbolDetails) {
       const extracted = detail.extractedSymbol;
       const symbolId = detail.symbolId;
@@ -253,7 +314,7 @@ export async function processFileFromRustResult(params: {
       }
 
       let invariantsJson =
-        existingSymbol?.invariants_json ??
+        existingSymbol?.invariantsJson ??
         (nativeInvariantsJson.length > 0 && nativeInvariantsJson !== "[]"
           ? nativeInvariantsJson
           : null);
@@ -264,7 +325,7 @@ export async function processFileFromRustResult(params: {
       }
 
       let sideEffectsJson =
-        existingSymbol?.side_effects_json ??
+        existingSymbol?.sideEffectsJson ??
         (nativeSideEffectsJson.length > 0 && nativeSideEffectsJson !== "[]"
           ? nativeSideEffectsJson
           : null);
@@ -275,35 +336,35 @@ export async function processFileFromRustResult(params: {
       }
 
       const symbol: SymbolRow = {
-        symbol_id: symbolId,
-        repo_id: repoId,
-        file_id: file.file_id,
+        symbolId,
+        repoId,
+        fileId,
         kind: extracted.kind,
         name: extracted.name,
-        exported: extracted.exported ? 1 : 0,
+        exported: extracted.exported,
         visibility: extracted.visibility || null,
         language: adapter?.languageId ?? ext,
-        range_start_line: extracted.range.startLine,
-        range_start_col: extracted.range.startCol,
-        range_end_line: extracted.range.endLine,
-        range_end_col: extracted.range.endCol,
-        ast_fingerprint: detail.astFingerprint,
-        signature_json: extracted.signature
+        rangeStartLine: extracted.range.startLine,
+        rangeStartCol: extracted.range.startCol,
+        rangeEndLine: extracted.range.endLine,
+        rangeEndCol: extracted.range.endCol,
+        astFingerprint: detail.astFingerprint,
+        signatureJson: extracted.signature
           ? JSON.stringify(extracted.signature)
           : null,
         summary,
-        invariants_json: invariantsJson,
-        side_effects_json: sideEffectsJson,
-        updated_at: new Date().toISOString(),
+        invariantsJson,
+        sideEffectsJson,
+        updatedAt: new Date().toISOString(),
       };
 
-      upsertSymbolTransaction(symbol);
+      await kuzuDb.upsertSymbol(conn, symbol);
       addToSymbolIndex(
         symbolIndex,
         fileMeta.path,
-        symbol.symbol_id,
+        symbol.symbolId,
         symbol.name,
-        symbol.kind,
+        symbol.kind as SymbolKind,
       );
 
       if (
@@ -313,15 +374,17 @@ export async function processFileFromRustResult(params: {
       ) {
         for (const target of importTargets) {
           const edge: EdgeRow = {
-            repo_id: repoId,
-            from_symbol_id: symbolId,
-            to_symbol_id: target.symbolId,
-            type: "import",
+            repoId,
+            fromSymbolId: symbolId,
+            toSymbolId: target.symbolId,
+            edgeType: "import",
             weight: 0.6,
+            confidence: 1.0,
+            resolution: "exact",
             provenance: `import:${target.provenance}`,
-            created_at: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
           };
-          createEdgeTransaction(edge);
+          edgesToInsert.push(edge);
           edgesCreated++;
         }
       }
@@ -349,17 +412,17 @@ export async function processFileFromRustResult(params: {
             if (createdCallEdges.has(edgeKey)) continue;
 
             const edge: EdgeRow = {
-              repo_id: repoId,
-              from_symbol_id: symbolId,
-              to_symbol_id: resolved.symbolId,
-              type: "call",
+              repoId,
+              fromSymbolId: symbolId,
+              toSymbolId: resolved.symbolId,
+              edgeType: "call",
               weight: 1.0,
               confidence: resolved.confidence,
-              resolution_strategy: resolved.strategy,
+              resolution: resolved.strategy,
               provenance: `call:${call.calleeIdentifier}`,
-              created_at: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
             };
-            createEdgeTransaction(edge);
+            edgesToInsert.push(edge);
             createdCallEdges.add(edgeKey);
             edgesCreated++;
           } else if (resolved.targetName) {
@@ -372,17 +435,17 @@ export async function processFileFromRustResult(params: {
             if (createdCallEdges.has(edgeKey)) continue;
 
             const edge: EdgeRow = {
-              repo_id: repoId,
-              from_symbol_id: symbolId,
-              to_symbol_id: unresolvedTargetId,
-              type: "call",
+              repoId,
+              fromSymbolId: symbolId,
+              toSymbolId: unresolvedTargetId,
+              edgeType: "call",
               weight: 0.5,
               confidence: resolved.confidence,
-              resolution_strategy: "unresolved",
+              resolution: "unresolved",
               provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
-              created_at: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
             };
-            createEdgeTransaction(edge);
+            edgesToInsert.push(edge);
             createdCallEdges.add(edgeKey);
             edgesCreated++;
           }
@@ -390,9 +453,11 @@ export async function processFileFromRustResult(params: {
       }
     }
 
+    await kuzuDb.insertEdges(conn, edgesToInsert);
+
     prefetchFileExports(repoId, fileMeta.path);
 
-    return { symbolsIndexed, edgesCreated, changed: true, configEdges: [] };
+    return { symbolsIndexed, edgesCreated, changed: true, configEdges: [], pass2HintPaths };
   } catch (error) {
     logger.error(`Error processing Rust result for ${fileMeta.path}: ${error}`);
     return {
@@ -400,6 +465,7 @@ export async function processFileFromRustResult(params: {
       edgesCreated: 0,
       changed: false,
       configEdges: [],
+      pass2HintPaths: [],
     };
   }
 }

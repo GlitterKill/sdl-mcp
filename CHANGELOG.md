@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-03-05
+
+### Added
+
+- KuzuDB (`kuzu`) embedded graph backend as the sole persisted graph store, with directory-based initialization, idempotent schema bootstrap, and async query coverage across repo/file/symbol/version/slice flows
+- One-time SQLite-to-Kuzu migration support plus Kuzu-aware setup/health surfaces (`graphDatabase.path`, updated `init`/`doctor`, `spike:kuzu`, and refreshed release-test guidance)
+- Symbol graph enrichment via clusters (community detection) and processes (call-chain traces), surfaced in symbol cards, slices, `sdl.context.summary`, `sdl.repo.overview`, and blast-radius analysis
+- Rust + TypeScript cluster/process support with new parity, unit, and integration coverage, including `tests/integration/kuzu-e2e.test.ts`
+
+### Changed
+
+- Config now uses `graphDatabase.path` for graph DB directory control; `dbPath` is deprecated and only retained for the one-time SQLite-to-Kuzu migration path
+- Graph queries, indexing flows, and MCP tool responses now read from Kuzu-backed storage/types instead of SQLite tables
+- Incremental indexing refreshes pass-2 caller contexts more reliably via incoming call/import edge hints
+
+### Fixed
+
+- Call attribution for calls in variable initializers now attributes to the enclosing function (not the variable symbol)
+- Kuzu incremental deletes now remove cluster/process edges before deleting `Symbol` nodes
+- Worker-pool extraction now preserves `astFingerprint` for delta correctness when parse trees are not returned
+
+### Removed
+
+- SQLite runtime dependencies and legacy persistence modules from the main v0.8.0 code path (`better-sqlite3`, legacy query/migration modules, and SQLite-only concurrency coverage)
+- Checked-in generated `src/**/*.js` companion files for TypeScript sources; generated runtime artifacts now come from the normal build pipeline
+
+### Documentation
+
+- Updated the README, configuration reference, MCP tools reference, and release test checklist for KuzuDB storage, `graphDatabase.path`, and cluster/process metadata
+
+### Upgrade Notes
+
+- Existing v0.7.x installs should re-index into a fresh Kuzu graph directory or run the one-time SQLite-to-Kuzu migration flow before depending on historical `dbPath` data
+
 ## [0.7.2] - 2026-03-03
 
 ### Added
@@ -473,6 +507,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.8.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.0
+[0.7.2]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.7.2
 [0.7.1]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.7.1
 [0.7.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.7.0
 [0.6.9]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.6.9

@@ -1,12 +1,12 @@
-import type { SymbolRow } from "../db/schema.js";
-import * as db from "../db/queries.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 import { hashContent } from "../util/hashing.js";
 import { ensureLocalEmbeddingRuntime } from "./embeddings-local.js";
 
 export const EMBEDDING_DIMENSION = 64;
 
 export interface EmbeddingScoredSymbol {
-  symbol: SymbolRow;
+  symbol: kuzuDb.SymbolRow;
   lexicalScore: number;
   semanticScore: number;
   finalScore: number;
@@ -90,22 +90,23 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / denom;
 }
 
-function toFloat16Blob(vector: number[]): Buffer {
+function toFloat16Blob(vector: number[]): string {
   const ints = new Int16Array(vector.length);
   for (let i = 0; i < vector.length; i++) {
     ints[i] = Math.max(-32767, Math.min(32767, Math.round(vector[i] * 10000)));
   }
-  return Buffer.from(ints.buffer);
+  return Buffer.from(ints.buffer).toString("base64");
 }
 
-function fromFloat16Blob(blob: Buffer): number[] {
-  if (blob.byteLength === 0) {
+function fromFloat16Blob(blob: string): number[] {
+  if (!blob) {
     return [];
   }
+  const buffer = Buffer.from(blob, "base64");
   const view = new Int16Array(
-    blob.buffer,
-    blob.byteOffset,
-    blob.byteLength / 2,
+    buffer.buffer,
+    buffer.byteOffset,
+    buffer.byteLength / 2,
   );
   const vector = new Array<number>(view.length);
   for (let i = 0; i < view.length; i++) {
@@ -114,15 +115,15 @@ function fromFloat16Blob(blob: Buffer): number[] {
   return normalizeVector(vector);
 }
 
-function buildCardHash(symbol: SymbolRow): string {
+function buildCardHash(symbol: kuzuDb.SymbolRow): string {
   return hashContent(
     [
-      symbol.symbol_id,
+      symbol.symbolId,
       symbol.name,
       symbol.kind,
-      symbol.ast_fingerprint,
+      symbol.astFingerprint,
       symbol.summary ?? "",
-      symbol.signature_json ?? "",
+      symbol.signatureJson ?? "",
     ].join("|"),
   );
 }
@@ -145,20 +146,21 @@ export async function refreshSymbolEmbeddings(params: {
   repoId: string;
   provider: "api" | "local" | "mock";
   model: string;
-  symbols?: SymbolRow[];
+  symbols?: kuzuDb.SymbolRow[];
 }): Promise<{ embedded: number; skipped: number }> {
   const provider = getEmbeddingProvider(params.provider);
-  const symbols = params.symbols ?? db.getSymbolsByRepo(params.repoId);
+  const conn = await getKuzuConn();
+  const symbols = params.symbols ?? (await kuzuDb.getSymbolsByRepo(conn, params.repoId));
   let embedded = 0;
   let skipped = 0;
 
   for (const symbol of symbols) {
     const cardHash = buildCardHash(symbol);
-    const existing = db.getSymbolEmbedding(symbol.symbol_id);
+    const existing = await kuzuDb.getSymbolEmbedding(conn, symbol.symbolId);
     if (
       existing &&
       existing.model === params.model &&
-      existing.card_hash === cardHash
+      existing.cardHash === cardHash
     ) {
       skipped += 1;
       continue;
@@ -166,14 +168,14 @@ export async function refreshSymbolEmbeddings(params: {
 
     const text = `${symbol.name}\n${symbol.kind}\n${symbol.summary ?? ""}`;
     const [vector] = await provider.embed([text]);
-    db.upsertSymbolEmbedding({
-      symbol_id: symbol.symbol_id,
+    await kuzuDb.upsertSymbolEmbedding(conn, {
+      symbolId: symbol.symbolId,
       model: params.model,
-      embedding_vector: toFloat16Blob(vector),
+      embeddingVector: toFloat16Blob(vector),
       version: "v1",
-      card_hash: cardHash,
-      created_at: existing?.created_at ?? new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      cardHash,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
     embedded += 1;
   }
@@ -183,7 +185,7 @@ export async function refreshSymbolEmbeddings(params: {
 
 export async function rerankByEmbeddings(params: {
   query: string;
-  symbols: Array<{ symbol: SymbolRow; lexicalScore: number }>;
+  symbols: Array<{ symbol: kuzuDb.SymbolRow; lexicalScore: number }>;
   provider: "api" | "local" | "mock";
   alpha: number;
   model: string;
@@ -196,23 +198,26 @@ export async function rerankByEmbeddings(params: {
   const provider = getEmbeddingProvider(params.provider);
   const queryEmbedding = (await provider.embed([params.query]))[0];
 
-  const embeddingMap = db.getSymbolEmbeddings(
-    params.symbols.map((item) => item.symbol.symbol_id),
+  const conn = await getKuzuConn();
+  const embeddingMap = await kuzuDb.getSymbolEmbeddings(
+    conn,
+    params.symbols.map((item) => item.symbol.symbolId),
   );
 
   const missing = params.symbols
     .map((item) => item.symbol)
-    .filter((symbol) => !embeddingMap.has(symbol.symbol_id));
+    .filter((symbol) => !embeddingMap.has(symbol.symbolId));
 
   if (missing.length > 0) {
     await refreshSymbolEmbeddings({
-      repoId: missing[0].repo_id,
+      repoId: missing[0].repoId,
       provider: params.provider,
       model: params.model,
       symbols: missing,
     });
-    const refreshed = db.getSymbolEmbeddings(
-      missing.map((symbol) => symbol.symbol_id),
+    const refreshed = await kuzuDb.getSymbolEmbeddings(
+      conn,
+      missing.map((symbol) => symbol.symbolId),
     );
     for (const [key, value] of refreshed) {
       embeddingMap.set(key, value);
@@ -221,11 +226,11 @@ export async function rerankByEmbeddings(params: {
 
   return params.symbols
     .map((item) => {
-      const embeddingRow = embeddingMap.get(item.symbol.symbol_id);
+      const embeddingRow = embeddingMap.get(item.symbol.symbolId);
       const semanticScore = embeddingRow
         ? cosineSimilarity(
             queryEmbedding,
-            fromFloat16Blob(embeddingRow.embedding_vector),
+            fromFloat16Blob(embeddingRow.embeddingVector),
           )
         : 0;
       const finalScore =

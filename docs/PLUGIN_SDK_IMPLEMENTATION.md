@@ -131,7 +131,7 @@ export const PluginConfigSchema = z.object({
 ```json
 {
   "repos": [...],
-  "dbPath": "./data/sdlmcp.sqlite",
+  "graphDatabase": { "path": "./data/sdl-mcp-graph" },
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,

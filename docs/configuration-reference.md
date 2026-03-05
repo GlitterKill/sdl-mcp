@@ -31,15 +31,16 @@ The `sdl-mcp init` command creates this file interactively. You can also copy `c
 
 ### Required Top-Level Fields
 
-Only three fields are required — everything else has sensible defaults:
+Only two fields are required — everything else has sensible defaults:
 
 ```json
 {
   "repos": [{ "repoId": "...", "rootPath": "..." }],
-  "dbPath": "./data/sdlmcp.sqlite",
   "policy": {}
 }
 ```
+
+KuzuDB storage is directory-based. If `graphDatabase.path` is omitted, SDL-MCP defaults to `<configDir>/sdl-mcp-graph`.
 
 ---
 
@@ -95,12 +96,19 @@ Below is every option with inline commentary. JSON does not support comments, so
   ],
 
   // ──────────────────────────────────────────────────────────
-  // DATABASE — SQLite ledger storage
+  // GRAPH DATABASE — KuzuDB directory storage
   // ──────────────────────────────────────────────────────────
 
-  // Path to SQLite database file. Keep on fast local storage (SSD) for best performance.
+  // Optional override for the KuzuDB database directory.
+  // If omitted, SDL-MCP defaults to <configDir>/sdl-mcp-graph.
   // Supports ${VAR_NAME} environment variable expansion.
-  "dbPath": "./data/sdlmcp.sqlite",
+  "graphDatabase": {
+    "path": "./data/sdl-mcp-graph"
+  },
+
+  // Deprecated legacy database file path (v0.7.x). Only used by the one-time
+  // SQLite→Kuzu migration script in v0.8.
+  // "dbPath": "./data/sdlmcp.sqlite",
 
   // ──────────────────────────────────────────────────────────
   // POLICY — gated code access controls
@@ -384,15 +392,25 @@ Each entry registers a codebase for indexing. You can index multiple repos in on
 
 ---
 
-### `dbPath` (required)
+### `graphDatabase` (optional)
 
-Path to the SQLite database file. Supports `${ENV_VAR}` expansion.
+Controls where SDL-MCP stores the KuzuDB graph database (directory path). Supports `${ENV_VAR}` expansion.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `dbPath` | `string` | — | **Required.** SQLite file path |
+| `graphDatabase.path` | `string?` | `<configDir>/sdl-mcp-graph` | Path to KuzuDB database directory |
 
-> **When to change:** Move to a fast SSD path if indexing is slow. Use `${SDL_DB_PATH}` for CI environments where paths differ between machines.
+> **When to change:** Move to a fast SSD path if indexing is slow. Use `${SDL_GRAPH_DB_PATH}` (or `${SDL_GRAPH_DB_DIR}`) in CI environments where paths differ between machines.
+
+---
+
+### `dbPath` (deprecated)
+
+Legacy v0.7.x SQLite database file path, only used by the one-time SQLite→Kuzu migration script.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `dbPath` | `string?` | — | Legacy SQLite file path (migration only) |
 
 ---
 
@@ -610,7 +628,9 @@ Worker-thread acceleration for beam search scoring in `sdl.slice.build`.
 |----------|-------------|
 | `SDL_CONFIG` / `SDL_CONFIG_PATH` | Path to config file |
 | `SDL_CONFIG_HOME` | Directory for default global config resolution |
-| `SDL_DB_PATH` | Override database path (takes precedence over config) |
+| `SDL_GRAPH_DB_PATH` | Override graph DB directory path (takes precedence over config) |
+| `SDL_GRAPH_DB_DIR` | Alias for graph DB directory path override |
+| `SDL_DB_PATH` | Legacy alias for graph DB path override (v0.7.x) |
 | `SDL_LOG_LEVEL` | Log level: `debug`, `info`, `warn`, `error` |
 | `SDL_LOG_FORMAT` | Log format: `json`, `text` |
 | `ANTHROPIC_API_KEY` | Fallback API key for `semantic.generateSummaries` |
@@ -708,7 +728,7 @@ Full semantic search with local Ollama for summaries.
       "languages": ["ts"]
     }
   ],
-  "dbPath": "./data/sdlmcp.sqlite"
+  "graphDatabase": { "path": "./data/sdl-mcp-graph" }
 }
 ```
 

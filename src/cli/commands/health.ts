@@ -1,8 +1,7 @@
 import type { HealthOptions } from "../types.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { getDb } from "../../db/db.js";
-import { runMigrations } from "../../db/migrations.js";
+import { initGraphDb } from "../../db/initGraphDb.js";
 import { getBadgeColor, getRepoHealthSnapshot } from "../../mcp/health.js";
 
 function resolveRepoId(
@@ -15,8 +14,7 @@ function resolveRepoId(
 export async function healthCommand(options: HealthOptions): Promise<void> {
   const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
-  const db = getDb(config.dbPath);
-  runMigrations(db);
+  await initGraphDb(config, configPath);
 
   const repoId = resolveRepoId(options.repoId, config.repos);
   if (!repoId) {
@@ -62,4 +60,3 @@ export async function healthCommand(options: HealthOptions): Promise<void> {
     `  Edge Quality: ${(snapshot.components.edgeQuality * 100).toFixed(1)}%`,
   );
 }
-

@@ -1,20 +1,15 @@
 import { join } from "path";
 
 import type { RepoConfig } from "../../config/types.js";
-import {
-  createEdgeTransaction,
-  deleteSymbolsByFileWithEdges,
-  deleteSymbolReferencesByFileId,
-  getFileByRepoPath,
-  getSymbolsByFile,
-  upsertFile,
-  upsertSymbolTransaction,
-} from "../../db/queries.js";
-import { SymbolKind, type EdgeRow, type SymbolRow } from "../../db/schema.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
+import type { EdgeRow, SymbolRow } from "../../db/kuzu-queries.js";
+import type { SymbolKind } from "../../db/schema.js";
 import { prefetchFileExports } from "../../graph/prefetch.js";
 import { readFileAsync } from "../../util/asyncFs.js";
 import { hashContent } from "../../util/hashing.js";
 import { logger } from "../../util/logger.js";
+import { normalizePath } from "../../util/paths.js";
 import type {
   PendingCallEdge,
   SymbolIndex,
@@ -23,6 +18,7 @@ import type {
 import {
   addToSymbolIndex,
   findEnclosingSymbolByRange,
+  isTsCallResolutionFile,
   isBuiltinCall,
   resolveCallTarget,
   resolveImportTargets,
@@ -35,6 +31,7 @@ import { generateAstFingerprint, generateSymbolId } from "../fingerprints.js";
 import type { IndexProgress } from "../indexer.js";
 import { extractInvariants, extractSideEffects, generateSummary } from "../summaries.js";
 import type { ParserWorkerPool } from "../workerPool.js";
+import type { SymbolWithNodeId } from "../worker.js";
 import type { ExtractedCall } from "../treesitter/extractCalls.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
 import { extractSymbolReferences, isTestFile } from "./helpers.js";
@@ -46,9 +43,9 @@ export interface ProcessFileParams {
   languages: string[];
   mode: "full" | "incremental";
   existingFile?: {
-    file_id: number;
-    content_hash: string;
-    last_indexed_at: string | null;
+    fileId: string;
+    contentHash: string;
+    lastIndexedAt: string | null;
   };
   symbolIndex?: SymbolIndex;
   pendingCallEdges?: PendingCallEdge[];
@@ -67,6 +64,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
   edgesCreated: number;
   changed: boolean;
   configEdges: ConfigEdge[];
+  pass2HintPaths: string[];
 }> {
   const {
     repoId,
@@ -86,14 +84,15 @@ export async function processFile(params: ProcessFileParams): Promise<{
     globalNameToSymbolIds,
   } = params;
   try {
-    if (mode === "incremental" && existingFile?.last_indexed_at) {
-      const lastIndexedMs = new Date(existingFile.last_indexed_at).getTime();
+    if (mode === "incremental" && existingFile?.lastIndexedAt) {
+      const lastIndexedMs = new Date(existingFile.lastIndexedAt).getTime();
       if (fileMeta.mtime <= lastIndexedMs) {
         return {
           symbolsIndexed: 0,
           edgesCreated: 0,
           changed: false,
           configEdges: [],
+          pass2HintPaths: [],
         };
       }
     }
@@ -103,40 +102,47 @@ export async function processFile(params: ProcessFileParams): Promise<{
     const contentHash = hashContent(content);
     const ext = fileMeta.path.split(".").pop() || "";
     const extWithDot = `.${ext}`;
+    const relPath = normalizePath(fileMeta.path);
+    const fileId = existingFile?.fileId ?? `${repoId}:${relPath}`;
 
     if (
       mode === "incremental" &&
       existingFile &&
-      existingFile.content_hash === contentHash
+      existingFile.contentHash === contentHash
     ) {
       return {
         symbolsIndexed: 0,
         edgesCreated: 0,
         changed: false,
         configEdges: [],
+        pass2HintPaths: [],
       };
     }
+
+    const conn = await getKuzuConn();
 
     if (!languages.includes(ext)) {
       logger.debug(
         `Language ${ext} not in enabled languages, skipping ${fileMeta.path}`,
       );
       if (existingFile) {
-        deleteSymbolsByFileWithEdges(existingFile.file_id);
+        await kuzuDb.deleteSymbolsByFileId(conn, existingFile.fileId);
       }
-      upsertFile({
-        repo_id: repoId,
-        rel_path: fileMeta.path,
-        content_hash: contentHash,
+      await kuzuDb.upsertFile(conn, {
+        fileId,
+        repoId,
+        relPath,
+        contentHash,
         language: ext,
-        byte_size: fileMeta.size,
-        last_indexed_at: new Date().toISOString(),
+        byteSize: fileMeta.size,
+        lastIndexedAt: new Date().toISOString(),
       });
       return {
         symbolsIndexed: 0,
         edgesCreated: 0,
         changed: true,
         configEdges: [],
+        pass2HintPaths: [],
       };
     }
 
@@ -147,38 +153,27 @@ export async function processFile(params: ProcessFileParams): Promise<{
         `No adapter found for ${extWithDot}, skipping ${fileMeta.path}`,
       );
       if (existingFile) {
-        deleteSymbolsByFileWithEdges(existingFile.file_id);
+        await kuzuDb.deleteSymbolsByFileId(conn, existingFile.fileId);
       }
-      upsertFile({
-        repo_id: repoId,
-        rel_path: fileMeta.path,
-        content_hash: contentHash,
+      await kuzuDb.upsertFile(conn, {
+        fileId,
+        repoId,
+        relPath,
+        contentHash,
         language: ext,
-        byte_size: fileMeta.size,
-        last_indexed_at: new Date().toISOString(),
+        byteSize: fileMeta.size,
+        lastIndexedAt: new Date().toISOString(),
       });
       return {
         symbolsIndexed: 0,
         edgesCreated: 0,
         changed: true,
         configEdges: [],
+        pass2HintPaths: [],
       };
     }
 
-    let symbolsWithNodeIds: Array<{
-      nodeId: string;
-      kind: SymbolKind;
-      name: string;
-      exported: boolean;
-      range: {
-        startLine: number;
-        startCol: number;
-        endLine: number;
-        endCol: number;
-      };
-      signature: any;
-      visibility: any;
-    }> = [];
+    let symbolsWithNodeIds: Array<SymbolWithNodeId> = [];
     let imports: ExtractedImport[] = [];
     let calls: ExtractedCall[] = [];
     let parseError: Error | null = null;
@@ -207,21 +202,23 @@ export async function processFile(params: ProcessFileParams): Promise<{
         tree = adapter.parse(content, filePath);
         if (!tree) {
           if (existingFile) {
-            deleteSymbolsByFileWithEdges(existingFile.file_id);
+            await kuzuDb.deleteSymbolsByFileId(conn, existingFile.fileId);
           }
-          upsertFile({
-            repo_id: repoId,
-            rel_path: fileMeta.path,
-            content_hash: contentHash,
+          await kuzuDb.upsertFile(conn, {
+            fileId,
+            repoId,
+            relPath,
+            contentHash,
             language: adapter.languageId,
-            byte_size: fileMeta.size,
-            last_indexed_at: new Date().toISOString(),
+            byteSize: fileMeta.size,
+            lastIndexedAt: new Date().toISOString(),
           });
           return {
             symbolsIndexed: 0,
             edgesCreated: 0,
             changed: true,
             configEdges: [],
+            pass2HintPaths: [],
           };
         }
 
@@ -243,6 +240,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
           range: symbol.range,
           signature: symbol.signature,
           visibility: symbol.visibility,
+          astFingerprint: "",
         }));
         calls = adapter.extractCalls(
           tree,
@@ -258,43 +256,101 @@ export async function processFile(params: ProcessFileParams): Promise<{
         edgesCreated: 0,
         changed: false,
         configEdges: [],
+        pass2HintPaths: [],
       };
     }
 
     const symbolsIndexed = symbolsWithNodeIds.length;
     let edgesCreated = 0;
 
+    let pass2HintPaths: string[] = [];
+
+    let existingSymbols: SymbolRow[] = [];
     const existingSymbolsById = new Map<string, SymbolRow>();
     if (existingFile) {
-      const existingSymbols = getSymbolsByFile(existingFile.file_id);
+      existingSymbols = await kuzuDb.getSymbolsByFile(
+        conn,
+        existingFile.fileId,
+      );
       for (const symbol of existingSymbols) {
-        existingSymbolsById.set(symbol.symbol_id, symbol);
+        existingSymbolsById.set(symbol.symbolId, symbol);
       }
     }
 
-    const fileRecord = {
-      repo_id: repoId,
-      rel_path: fileMeta.path,
-      content_hash: contentHash,
-      language: ext,
-      byte_size: fileMeta.size,
-      last_indexed_at: new Date().toISOString(),
-    };
+    if (
+      mode === "incremental" &&
+      skipCallResolution &&
+      existingFile &&
+      existingSymbols.length > 0
+    ) {
+      try {
+        const incomingByToSymbol = await kuzuDb.getEdgesToSymbols(
+          conn,
+          existingSymbols.map((s) => s.symbolId),
+        );
 
-    upsertFile(fileRecord);
+        const importerSymbolIds = new Set<string>();
+        for (const edges of incomingByToSymbol.values()) {
+          for (const edge of edges) {
+            if (edge.edgeType !== "import" && edge.edgeType !== "call") continue;
+            importerSymbolIds.add(edge.fromSymbolId);
+          }
+        }
 
-    const file = getFileByRepoPath(repoId, fileMeta.path);
-    if (!file) {
-      return { symbolsIndexed, edgesCreated, changed: true, configEdges: [] };
+        if (importerSymbolIds.size > 0) {
+          const importerSymbols = await kuzuDb.getSymbolsByIds(
+            conn,
+            Array.from(importerSymbolIds),
+          );
+
+          const fileIds = new Set<string>();
+          for (const symbol of importerSymbols.values()) {
+            fileIds.add(symbol.fileId);
+          }
+
+          const importerFiles = await kuzuDb.getFilesByIds(
+            conn,
+            Array.from(fileIds),
+          );
+
+          const hinted = new Set<string>();
+          for (const symbol of importerSymbols.values()) {
+            const file = importerFiles.get(symbol.fileId);
+            if (!file) continue;
+            if (!isTsCallResolutionFile(file.relPath)) continue;
+            hinted.add(file.relPath);
+          }
+          pass2HintPaths = Array.from(hinted).sort();
+        }
+      } catch (error) {
+        logger.warn(
+          "Failed to compute pass2 hint paths for incremental call resolution",
+          {
+            repoId,
+            file: fileMeta.path,
+            error: String(error),
+          },
+        );
+      }
     }
+
+    await kuzuDb.upsertFile(conn, {
+      fileId,
+      repoId,
+      relPath,
+      contentHash,
+      language: ext,
+      byteSize: fileMeta.size,
+      lastIndexedAt: new Date().toISOString(),
+    });
 
     if (existingFile) {
-      deleteSymbolsByFileWithEdges(existingFile.file_id);
-      deleteSymbolReferencesByFileId(existingFile.file_id);
+      await kuzuDb.deleteSymbolsByFileId(conn, existingFile.fileId);
+      await kuzuDb.deleteSymbolReferencesByFileId(conn, existingFile.fileId);
     }
 
-    if (isTestFile(fileMeta.path, languages)) {
-      extractSymbolReferences(content, repoId, file.file_id);
+    if (isTestFile(relPath, languages)) {
+      await extractSymbolReferences(content, repoId, fileId);
     }
 
     const exportSymbols = symbolsWithNodeIds.filter(
@@ -316,9 +372,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
     const importTargets = importResolution.targets;
 
     const symbolDetails = symbolsWithNodeIds.map((extractedSymbol) => {
-      // When using worker pool, tree is null - use empty fingerprint
-      // The fingerprint is still useful for change detection but not critical
-      let astFingerprint = "";
+      let astFingerprint = extractedSymbol.astFingerprint ?? "";
 
       if (tree) {
         const astNode = tree.rootNode
@@ -342,7 +396,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
             return nameNode?.text === extractedSymbol.name;
           });
 
-        astFingerprint = astNode ? generateAstFingerprint(astNode) : "";
+        astFingerprint = astNode ? generateAstFingerprint(astNode) : astFingerprint;
       }
 
       const symbolId = generateSymbolId(
@@ -370,6 +424,9 @@ export async function processFile(params: ProcessFileParams): Promise<{
       nameToSymbolIds.set(detail.extractedSymbol.name, existing);
     }
 
+    const edgesToInsert: EdgeRow[] = [];
+    const fileSymbols: SymbolRow[] = [];
+
     for (const detail of symbolDetails) {
       const extractedSymbol = detail.extractedSymbol;
       const symbolId = detail.symbolId;
@@ -381,14 +438,14 @@ export async function processFile(params: ProcessFileParams): Promise<{
         summary = generateSummary(extractedSymbol, content);
       }
 
-      let invariantsJson = existingSymbol?.invariants_json ?? null;
+      let invariantsJson = existingSymbol?.invariantsJson ?? null;
       if (invariantsJson === null) {
         const invariants = extractInvariants(extractedSymbol, content);
         invariantsJson =
           invariants.length > 0 ? JSON.stringify(invariants) : null;
       }
 
-      let sideEffectsJson = existingSymbol?.side_effects_json ?? null;
+      let sideEffectsJson = existingSymbol?.sideEffectsJson ?? null;
       if (sideEffectsJson === null) {
         const sideEffects = extractSideEffects(extractedSymbol, content);
         sideEffectsJson =
@@ -396,51 +453,54 @@ export async function processFile(params: ProcessFileParams): Promise<{
       }
 
       const symbol: SymbolRow = {
-        symbol_id: symbolId,
-        repo_id: repoId,
-        file_id: file.file_id,
+        symbolId,
+        repoId,
+        fileId,
         kind: extractedSymbol.kind,
         name: extractedSymbol.name,
-        exported: extractedSymbol.exported ? 1 : 0,
+        exported: extractedSymbol.exported,
         visibility: extractedSymbol.visibility || null,
         language: adapter.languageId,
-        range_start_line: extractedSymbol.range.startLine,
-        range_start_col: extractedSymbol.range.startCol,
-        range_end_line: extractedSymbol.range.endLine,
-        range_end_col: extractedSymbol.range.endCol,
-        ast_fingerprint: detail.astFingerprint,
-        signature_json: extractedSymbol.signature
+        rangeStartLine: extractedSymbol.range.startLine,
+        rangeStartCol: extractedSymbol.range.startCol,
+        rangeEndLine: extractedSymbol.range.endLine,
+        rangeEndCol: extractedSymbol.range.endCol,
+        astFingerprint: detail.astFingerprint,
+        signatureJson: extractedSymbol.signature
           ? JSON.stringify(extractedSymbol.signature)
           : null,
         summary,
-        invariants_json: invariantsJson,
-        side_effects_json: sideEffectsJson,
-        updated_at: new Date().toISOString(),
+        invariantsJson,
+        sideEffectsJson: sideEffectsJson,
+        updatedAt: new Date().toISOString(),
       };
 
-      upsertSymbolTransaction(symbol);
+      await kuzuDb.upsertSymbol(conn, symbol);
+      fileSymbols.push(symbol);
       if (symbolIndex) {
         addToSymbolIndex(
           symbolIndex,
           fileMeta.path,
-          symbol.symbol_id,
+          symbol.symbolId,
           symbol.name,
-          symbol.kind,
+          symbol.kind as SymbolKind,
         );
       }
 
       if (edgeSourceSymbols.some((s) => s.nodeId === extractedSymbol.nodeId)) {
         for (const target of importTargets) {
           const edge: EdgeRow = {
-            repo_id: repoId,
-            from_symbol_id: symbolId,
-            to_symbol_id: target.symbolId,
-            type: "import",
+            repoId,
+            fromSymbolId: symbolId,
+            toSymbolId: target.symbolId,
+            edgeType: "import",
             weight: 0.6,
+            confidence: 1.0,
+            resolution: "exact",
             provenance: `import:${target.provenance}`,
-            created_at: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
           };
-          createEdgeTransaction(edge);
+          edgesToInsert.push(edge);
           edgesCreated++;
         }
       }
@@ -474,17 +534,17 @@ export async function processFile(params: ProcessFileParams): Promise<{
             }
 
             const edge: EdgeRow = {
-              repo_id: repoId,
-              from_symbol_id: symbolId,
-              to_symbol_id: resolved.symbolId,
-              type: "call",
+              repoId,
+              fromSymbolId: symbolId,
+              toSymbolId: resolved.symbolId,
+              edgeType: "call",
               weight: 1.0,
               confidence: resolved.confidence,
-              resolution_strategy: resolved.strategy,
+              resolution: resolved.strategy,
               provenance: `call:${call.calleeIdentifier}`,
-              created_at: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
             };
-            createEdgeTransaction(edge);
+            edgesToInsert.push(edge);
             createdCallEdges?.add(edgeKey);
             edgesCreated++;
           } else if (resolved.targetName) {
@@ -501,17 +561,17 @@ export async function processFile(params: ProcessFileParams): Promise<{
             }
 
             const edge: EdgeRow = {
-              repo_id: repoId,
-              from_symbol_id: symbolId,
-              to_symbol_id: unresolvedTargetId,
-              type: "call",
+              repoId,
+              fromSymbolId: symbolId,
+              toSymbolId: unresolvedTargetId,
+              edgeType: "call",
               weight: 0.5, // Lower weight for unresolved edges
               confidence: resolved.confidence,
-              resolution_strategy: "unresolved",
+              resolution: "unresolved",
               provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
-              created_at: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
             };
-            createEdgeTransaction(edge);
+            edgesToInsert.push(edge);
             createdCallEdges?.add(edgeKey);
             edgesCreated++;
           }
@@ -537,7 +597,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
         const fromSymbolId = nodeIdToSymbolId.get(callerNodeId);
         if (!fromSymbolId) continue;
 
-        const toSymbolId = resolveSymbolIdFromIndex(
+        const toSymbolId = await resolveSymbolIdFromIndex(
           symbolIndex,
           repoId,
           tsCall.callee.filePath,
@@ -550,16 +610,16 @@ export async function processFile(params: ProcessFileParams): Promise<{
           const edgeKey = `${fromSymbolId}->${toSymbolId}`;
           if (createdCallEdges.has(edgeKey)) continue;
 
-          createEdgeTransaction({
-            repo_id: repoId,
-            from_symbol_id: fromSymbolId,
-            to_symbol_id: toSymbolId,
-            type: "call",
+          edgesToInsert.push({
+            repoId,
+            fromSymbolId,
+            toSymbolId,
+            edgeType: "call",
             weight: 1.0,
             confidence: tsCall.confidence ?? 1.0,
-            resolution_strategy: "exact",
+            resolution: "exact",
             provenance: `ts-call:${tsCall.callee.name}`,
-            created_at: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
           });
           createdCallEdges.add(edgeKey);
           edgesCreated++;
@@ -581,7 +641,6 @@ export async function processFile(params: ProcessFileParams): Promise<{
     let configEdges: ConfigEdge[] = [];
     // Config edges require the AST tree - skip when using worker pool (tree is null)
     if (config && allSymbolsByName && tree) {
-      const fileSymbols = getSymbolsByFile(file.file_id);
       configEdges = extractConfigEdgesFromTree({
         repoId,
         repoRoot,
@@ -592,9 +651,11 @@ export async function processFile(params: ProcessFileParams): Promise<{
       });
     }
 
+    await kuzuDb.insertEdges(conn, edgesToInsert);
+
     prefetchFileExports(repoId, fileMeta.path);
 
-    return { symbolsIndexed, edgesCreated, changed: true, configEdges };
+    return { symbolsIndexed, edgesCreated, changed: true, configEdges, pass2HintPaths };
   } catch (error) {
     console.error(`Error processing file ${fileMeta.path}:`, error);
     return {
@@ -602,6 +663,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
       edgesCreated: 0,
       changed: false,
       configEdges: [],
+      pass2HintPaths: [],
     };
   }
 }

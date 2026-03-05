@@ -1,5 +1,6 @@
 import { cpus, loadavg, platform } from "os";
-import * as db from "../db/queries.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 import {
   predictNextToolFromRecent,
   computePriorityBoost,
@@ -199,10 +200,11 @@ export function prefetchSliceFrontier(
     type: "slice-frontier",
     priority: 60,
     run: async () => {
+      const conn = await getKuzuConn();
       for (const symbolId of seeds) {
-        const edges = db.getEdgesFrom(symbolId).slice(0, 5);
+        const edges = (await kuzuDb.getEdgesFrom(conn, symbolId)).slice(0, 5);
         for (const edge of edges) {
-          markPrefetched(repoId, `card:${edge.to_symbol_id}`);
+          markPrefetched(repoId, `card:${edge.toSymbolId}`);
         }
       }
     },
@@ -235,13 +237,14 @@ export function prefetchFileExports(repoId: string, filePath: string): void {
     type: "file-open",
     priority: 40,
     run: async () => {
-      const file = db.getFileByRepoPath(repoId, filePath);
+      const conn = await getKuzuConn();
+      const file = await kuzuDb.getFileByRepoPath(conn, repoId, filePath);
       if (!file) return;
-      const symbols = db
-        .getSymbolsByFileLite(file.file_id)
-        .filter((symbol) => symbol.exported === 1);
+      const symbols = (await kuzuDb.getSymbolsByFile(conn, file.fileId)).filter(
+        (symbol) => symbol.exported,
+      );
       for (const symbol of symbols) {
-        markPrefetched(repoId, `slice:${symbol.symbol_id}`);
+        markPrefetched(repoId, `slice:${symbol.symbolId}`);
       }
     },
   });
@@ -275,9 +278,10 @@ export function warmPrefetchOnServeStart(repoId: string, topN = 50): void {
     type: "startup-warm",
     priority: 30,
     run: async () => {
-      const top = db.getTopSymbolsByFanIn(repoId, topN);
+      const conn = await getKuzuConn();
+      const top = await kuzuDb.getTopSymbolsByFanIn(conn, repoId, topN);
       for (const symbol of top) {
-        markPrefetched(repoId, `card:${symbol.symbol_id}`);
+        markPrefetched(repoId, `card:${symbol.symbolId}`);
       }
     },
   });

@@ -89,5 +89,13 @@ sdl-mcp/.tmp-scripts/
 march2_devsuggestions.md
 index-output.txt
 
+# Local Kuzu scratch artifacts
+.kuzu-spike-db/
+.tmp-kuzu-reuse-db/
+.tmp-spike2/
+fix-kuzu.cjs
+fix_prRisk.js
+sdl-mcp_upgrades.md
+
 # StrykerJS
 .stryker-tmp/

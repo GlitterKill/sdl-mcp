@@ -1,9 +1,11 @@
 import { access, constants, existsSync } from "fs";
+import { dirname, resolve } from "path";
 import { DoctorOptions } from "../types.js";
-import { getDb } from "../../db/db.js";
 import { NODE_MIN_MAJOR_VERSION } from "../../config/constants.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { getAllWatcherHealth } from "../../indexer/indexer.js";
+import { closeKuzuDb, getKuzuConn, getKuzuDbPath, initKuzuDb, isKuzuAvailable } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import Parser from "tree-sitter";
 import TypeScript from "tree-sitter-typescript";
 import C from "tree-sitter-c";
@@ -17,12 +19,11 @@ const DOCTOR_CHECKS = [
   { name: "Node.js version", check: checkNodeVersion },
   { name: "Config file exists", check: checkConfigExists },
   { name: "Config file readable", check: checkConfigReadable },
-  { name: "Database path writable", check: checkDatabaseWritable },
-  { name: "Database integrity", check: checkDatabaseIntegrity },
   { name: "Tree-sitter grammars available", check: checkTreeSitterGrammar },
   { name: "Repo paths accessible", check: checkRepoPaths },
   { name: "Stale index detection", check: checkStaleIndex },
   { name: "Watcher health telemetry", check: checkWatcherHealth },
+  { name: "Graph database (KuzuDB)", check: checkKuzuDb },
 ];
 
 interface DoctorResult {
@@ -132,21 +133,6 @@ async function checkConfigReadable(
   }
 }
 
-async function checkDatabaseWritable(
-  _options: DoctorOptions,
-): Promise<Omit<DoctorResult, "name">> {
-  try {
-    const db = getDb(":memory:");
-    db.close();
-    return { status: "pass", message: "SQLite database initialization works" };
-  } catch (error) {
-    return {
-      status: "fail",
-      message: `SQLite error: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-}
-
 async function checkTreeSitterGrammar(
   _options: DoctorOptions,
 ): Promise<Omit<DoctorResult, "name">> {
@@ -222,28 +208,6 @@ async function checkTreeSitterGrammar(
   }
 }
 
-async function checkDatabaseIntegrity(
-  _options: DoctorOptions,
-): Promise<Omit<DoctorResult, "name">> {
-  try {
-    const db = getDb();
-    const result = db.pragma("integrity_check") as Array<{ integrity_check: string }>;
-    const status = result[0]?.integrity_check;
-    if (status === "ok") {
-      return { status: "pass", message: "PRAGMA integrity_check passed" };
-    }
-    return {
-      status: "fail",
-      message: `Database integrity check failed: ${status}`,
-    };
-  } catch (error) {
-    return {
-      status: "warn",
-      message: `Cannot check database integrity: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-}
-
 async function checkStaleIndex(
   options: DoctorOptions,
 ): Promise<Omit<DoctorResult, "name">> {
@@ -255,25 +219,36 @@ async function checkStaleIndex(
   try {
     const { loadConfig } = await import("../../config/loadConfig.js");
     const config = loadConfig(configPath);
-    const db = getDb();
+    const configuredPath = config.graphDatabase?.path;
+    const derivedPath = resolve(dirname(configPath), "sdl-mcp-graph");
+    const kuzuDbPath =
+      configuredPath === null ||
+      configuredPath === undefined ||
+      configuredPath === ""
+        ? derivedPath
+        : configuredPath;
+
+    await initKuzuDb(kuzuDbPath);
+    const conn = await getKuzuConn();
 
     const staleRepos: string[] = [];
     const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
 
     for (const repo of config.repos) {
-      const row = db
-        .prepare(
-          `SELECT MAX(last_indexed_at) as last_indexed FROM files WHERE repo_id = (SELECT repo_id FROM repos WHERE repo_id = ?)`,
-        )
-        .get(repo.repoId) as { last_indexed: string | null } | undefined;
+      const files = await kuzuDb.getFilesByRepo(conn, repo.repoId);
 
-      if (!row?.last_indexed) {
+      const lastIndexed = files
+        .map((f) => f.lastIndexedAt)
+        .filter((t): t is string => typeof t === "string" && t.length > 0)
+        .sort((a, b) => b.localeCompare(a))[0];
+
+      if (!lastIndexed) {
         staleRepos.push(`${repo.repoId} (never indexed)`);
         continue;
       }
 
-      const lastIndexed = new Date(row.last_indexed).getTime();
-      const age = Date.now() - lastIndexed;
+      const lastIndexedMs = new Date(lastIndexed).getTime();
+      const age = Date.now() - lastIndexedMs;
       if (age > STALE_THRESHOLD_MS) {
         const hoursAgo = Math.round(age / (60 * 60 * 1000));
         staleRepos.push(`${repo.repoId} (${hoursAgo}h ago)`);
@@ -296,6 +271,8 @@ async function checkStaleIndex(
       status: "warn",
       message: `Cannot check index staleness: ${error instanceof Error ? error.message : String(error)}`,
     };
+  } finally {
+    await closeKuzuDb();
   }
 }
 
@@ -395,6 +372,114 @@ async function checkWatcherHealth(
   }
 }
 
+
+
+async function checkKuzuDb(
+  options: DoctorOptions,
+): Promise<Omit<DoctorResult, "name">> {
+  const configPath = options.config ?? activateCliConfigPath();
+  if (!existsSync(configPath)) {
+    return { status: "warn", message: "Config not found (skip KuzuDB check)" };
+  }
+
+  if (!isKuzuAvailable()) {
+    return {
+      status: "warn",
+      message: "KuzuDB module not installed. Install with: npm install kuzu",
+    };
+  }
+
+  try {
+    const { loadConfig } = await import("../../config/loadConfig.js");
+    const config = loadConfig(configPath);
+
+    if (!config.graphDatabase) {
+      return {
+        status: "warn",
+        message: "Graph database not configured (missing graphDatabase section)",
+      };
+    }
+
+    const configuredPath = config.graphDatabase.path;
+    const derivedPath = resolve(dirname(configPath), "sdl-mcp-graph");
+    const kuzuDbPath =
+      configuredPath === null || configuredPath === undefined || configuredPath === ""
+        ? derivedPath
+        : configuredPath;
+
+    if (!existsSync(kuzuDbPath)) {
+      return {
+        status: "warn",
+        message: `KuzuDB directory not found: ${kuzuDbPath}`,
+      };
+    }
+
+    const toNumber = (value: unknown): number => {
+      if (typeof value === "number") return value;
+      if (typeof value === "bigint") return Number(value);
+      if (typeof value === "string") return Number(value);
+      return 0;
+    };
+
+    const closeQueryResults = (result: unknown): void => {
+      if (Array.isArray(result)) {
+        for (const r of result) {
+          (r as { close?: () => void }).close?.();
+        }
+        return;
+      }
+      (result as { close?: () => void }).close?.();
+    };
+
+    await initKuzuDb(kuzuDbPath);
+    const conn = await getKuzuConn();
+
+    const symbolCountResult = await conn.query(
+      "MATCH (s:Symbol) RETURN count(s) AS symbolCount",
+    );
+    let symbolCount = 0;
+    try {
+      const qr = Array.isArray(symbolCountResult)
+        ? symbolCountResult[symbolCountResult.length - 1]
+        : symbolCountResult;
+      const row = await qr.getNext();
+      symbolCount = toNumber(
+        (row as { symbolCount?: unknown }).symbolCount ?? 0,
+      );
+    } finally {
+      closeQueryResults(symbolCountResult);
+    }
+
+    const dependsOnCountResult = await conn.query(
+      "MATCH ()-[d:DEPENDS_ON]->() RETURN count(d) AS edgeCount",
+    );
+    let edgeCount = 0;
+    try {
+      const qr = Array.isArray(dependsOnCountResult)
+        ? dependsOnCountResult[dependsOnCountResult.length - 1]
+        : dependsOnCountResult;
+      const row = await qr.getNext();
+      edgeCount = toNumber((row as { edgeCount?: unknown }).edgeCount ?? 0);
+    } finally {
+      closeQueryResults(dependsOnCountResult);
+    }
+
+    const currentPath = getKuzuDbPath();
+    const pathInfo = currentPath ? ` (active: ${currentPath})` : "";
+
+    return {
+      status: "pass",
+      message: `KuzuDB OK: ${kuzuDbPath}${pathInfo} (symbols: ${symbolCount}, edges: ${edgeCount})`,
+    };
+  } catch (error) {
+    return {
+      status: "warn",
+      message: `Cannot verify KuzuDB: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  } finally {
+    await closeKuzuDb();
+  }
+}
 function displayResults(results: DoctorResult[]): void {
   for (const result of results) {
     const icon =

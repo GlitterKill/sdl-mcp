@@ -90,7 +90,7 @@ export interface SyncIndexState {
   version_hash: string | null;
   prev_version_hash: string | null;
   files: Array<{
-    file_id: number;
+    file_id: string;
     rel_path: string;
     content_hash: string;
     language: string;
@@ -98,7 +98,7 @@ export interface SyncIndexState {
   }>;
   symbols: Array<{
     symbol_id: string;
-    file_id: number;
+    file_id: string;
     kind: string;
     name: string;
     exported: 0 | 1;
@@ -130,6 +130,8 @@ export interface SyncIndexState {
     to_symbol_id: string;
     type: "import" | "call" | "config";
     weight: number;
+    confidence: number;
+    resolution: string;
     provenance: string | null;
     created_at: string;
   }>;
@@ -139,6 +141,7 @@ export interface SyncIndexState {
     fan_out: number;
     churn_30d: number;
     test_refs_json: string | null;
+    canonical_test_json: string | null;
     updated_at: string;
   }>;
 }

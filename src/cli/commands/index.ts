@@ -1,14 +1,14 @@
 import { IndexOptions } from "../types.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { getDb } from "../../db/db.js";
-import { runMigrations } from "../../db/migrations.js";
 import {
   indexRepo,
   watchRepository,
   IndexWatchHandle,
   IndexResult,
 } from "../../indexer/indexer.js";
-import { getRepo, createRepo, countSymbolsByRepo, countEdgesByRepo } from "../../db/queries.js";
+import { initGraphDb } from "../../db/initGraphDb.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import { getCurrentTimestamp } from "../../util/time.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 
@@ -16,8 +16,8 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
   const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
 
-  const db = getDb(config.dbPath);
-  runMigrations(db);
+  await initGraphDb(config, configPath);
+  const conn = await getKuzuConn();
 
   const reposToIndex = options.repoId
     ? config.repos.filter((r) => r.repoId === options.repoId)
@@ -36,16 +36,18 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
 
   for (const repo of reposToIndex) {
     // Register repo in database if it doesn't exist
-    const existingRepo = getRepo(repo.repoId);
+    const existingRepo = await kuzuDb.getRepo(conn, repo.repoId);
     if (!existingRepo) {
       console.log(`Registering repository: ${repo.repoId}`);
-      createRepo({
-        repo_id: repo.repoId,
-        root_path: repo.rootPath,
-        config_json: JSON.stringify(repo),
-        created_at: getCurrentTimestamp(),
-      });
     }
+
+    // Keep the DB's repo config in sync with the active config file.
+    await kuzuDb.upsertRepo(conn, {
+      repoId: repo.repoId,
+      rootPath: repo.rootPath,
+      configJson: JSON.stringify(repo),
+      createdAt: existingRepo?.createdAt ?? getCurrentTimestamp(),
+    });
 
     const mode = options.force || !existingRepo ? "full" : "incremental";
     console.log(`\nIndexing ${repo.repoId} (${repo.rootPath}) [mode=${mode}]...`);
@@ -62,8 +64,8 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
           lastProgressLine = line;
         }
       });
-      const totalSymbols = countSymbolsByRepo(repo.repoId);
-      const totalEdges = countEdgesByRepo(repo.repoId);
+      const totalSymbols = await kuzuDb.getSymbolCount(conn, repo.repoId);
+      const totalEdges = await kuzuDb.getEdgeCount(conn, repo.repoId);
       console.log(`  Files: ${stats.filesProcessed}`);
       console.log(`  Symbols: ${stats.symbolsIndexed} new (${totalSymbols} total)`);
       console.log(`  Edges: ${stats.edgesCreated} new (${totalEdges} total)`);
@@ -90,12 +92,22 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     console.log("\nWatching for file changes (Ctrl+C to stop)...");
 
     const watchers: IndexWatchHandle[] = [];
-    for (const repo of reposToIndex) {
-      try {
-        const watcher = watchRepository(repo.repoId);
-        watchers.push(watcher);
-      } catch (error) {
-        console.error(`Failed to start watcher for ${repo.repoId}: ${error}`);
+    const results = await Promise.allSettled(
+      reposToIndex.map(async (repo) => {
+        try {
+          return { repoId: repo.repoId, handle: await watchRepository(repo.repoId) };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          throw new Error(`[${repo.repoId}] ${msg}`);
+        }
+      }),
+    );
+
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        watchers.push(result.value.handle);
+      } else {
+        console.error(`Failed to start watcher: ${String(result.reason)}`);
       }
     }
 

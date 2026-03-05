@@ -11,7 +11,7 @@ export async function handleContextSummary(
   args: unknown,
 ): Promise<ContextSummaryResponse> {
   const request = ContextSummaryRequestSchema.parse(args);
-  const summary = generateContextSummary({
+  const summary = await generateContextSummary({
     repoId: request.repoId,
     query: request.query,
     budget: request.budget,
@@ -26,4 +26,3 @@ export async function handleContextSummary(
     content: renderContextSummary(summary, format),
   };
 }
-

@@ -1,3 +1,13 @@
+import { readFileSync } from "fs";
+import { mkdir, readdir, readFile, writeFile } from "fs/promises";
+import { dirname, join } from "path";
+import { promisify } from "util";
+import { gzip, gunzip, gunzipSync } from "zlib";
+
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
+import { hashContent } from "../util/hashing.js";
+import { getCurrentTimestamp } from "../util/time.js";
 import type {
   SyncArtifact,
   SyncArtifactMetadata,
@@ -7,23 +17,6 @@ import type {
   SyncImportResult,
   SyncIndexState,
 } from "./types.js";
-import { getDb } from "../db/db.js";
-import type { SymbolVersionRow, MetricsRow } from "../db/schema.js";
-import { hashContent } from "../util/hashing.js";
-import { getCurrentTimestamp } from "../util/time.js";
-import {
-  getRepo,
-  getFilesByRepo,
-  getSymbolsByRepo,
-  getEdgesByRepo,
-  getVersion,
-  getLatestVersion,
-} from "../db/queries.js";
-import { readdir, readFile, writeFile, mkdir } from "fs/promises";
-import { readFileSync } from "fs";
-import { join, dirname } from "path";
-import { gzip, gunzip, gunzipSync } from "zlib";
-import { promisify } from "util";
 
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
@@ -32,72 +25,100 @@ export async function exportArtifact(
   options: SyncExportOptions,
 ): Promise<SyncExportResult> {
   const startTime = Date.now();
-  const db = getDb();
+  const conn = await getKuzuConn();
 
-  const repo = getRepo(options.repoId);
+  const repo = await kuzuDb.getRepo(conn, options.repoId);
   if (!repo) {
     throw new Error(`Repository not found: ${options.repoId}`);
   }
 
   const versionId =
-    options.versionId ?? getLatestVersion(options.repoId)?.version_id;
+    options.versionId ??
+    (await kuzuDb.getLatestVersion(conn, options.repoId))?.versionId;
   if (!versionId) {
     throw new Error(
       `No version found for repository: ${options.repoId}. Please index the repository first.`,
     );
   }
 
-  const version = getVersion(versionId);
+  const version = await kuzuDb.getVersion(conn, versionId);
   if (!version) {
     throw new Error(`Version not found: ${versionId}`);
   }
 
-  const commitSha =
-    options.commitSha ?? (await getGitCommitSha(repo.root_path));
+  const commitSha = options.commitSha ?? (await getGitCommitSha(repo.rootPath));
 
-  const files = getFilesByRepo(options.repoId);
-  const symbols = getSymbolsByRepo(options.repoId);
+  const files = await kuzuDb.getFilesByRepo(conn, options.repoId);
+  const symbols = await kuzuDb.getSymbolsByRepo(conn, options.repoId);
+  const edges = await kuzuDb.getEdgesByRepo(conn, options.repoId);
+  const symbolVersions = await kuzuDb.getSymbolVersionsAtVersion(conn, versionId);
+
+  const metricsMap = await kuzuDb.getMetricsBySymbolIds(
+    conn,
+    symbols.map((s) => s.symbolId),
+  );
+  const metrics = Array.from(metricsMap.values());
 
   const state: SyncIndexState = {
     repo_id: options.repoId,
     version_id: versionId,
-    version_hash: version.version_hash,
-    prev_version_hash: version.prev_version_hash,
+    version_hash: version.versionHash,
+    prev_version_hash: version.prevVersionHash,
     files: files.map((f) => ({
-      file_id: f.file_id,
-      rel_path: f.rel_path,
-      content_hash: f.content_hash,
+      file_id: f.fileId,
+      rel_path: f.relPath,
+      content_hash: f.contentHash,
       language: f.language,
-      byte_size: f.byte_size,
+      byte_size: f.byteSize,
     })),
     symbols: symbols.map((s) => ({
-      symbol_id: s.symbol_id,
-      file_id: s.file_id,
+      symbol_id: s.symbolId,
+      file_id: s.fileId,
       kind: s.kind,
       name: s.name,
-      exported: s.exported,
+      exported: s.exported ? 1 : 0,
       visibility: s.visibility,
       language: s.language,
-      range_start_line: s.range_start_line,
-      range_start_col: s.range_start_col,
-      range_end_line: s.range_end_line,
-      range_end_col: s.range_end_col,
-      ast_fingerprint: s.ast_fingerprint,
-      signature_json: s.signature_json,
+      range_start_line: s.rangeStartLine,
+      range_start_col: s.rangeStartCol,
+      range_end_line: s.rangeEndLine,
+      range_end_col: s.rangeEndCol,
+      ast_fingerprint: s.astFingerprint,
+      signature_json: s.signatureJson,
       summary: s.summary,
-      invariants_json: s.invariants_json,
-      side_effects_json: s.side_effects_json,
-      updated_at: s.updated_at,
+      invariants_json: s.invariantsJson,
+      side_effects_json: s.sideEffectsJson,
+      updated_at: s.updatedAt,
     })),
-    symbol_versions: db
-      .prepare("SELECT * FROM symbol_versions WHERE version_id = ?")
-      .all(versionId) as SymbolVersionRow[],
-    edges: getEdgesByRepo(options.repoId),
-    metrics: db
-      .prepare(
-        "SELECT * FROM metrics WHERE symbol_id IN (SELECT symbol_id FROM symbols WHERE repo_id = ?)",
-      )
-      .all(options.repoId) as MetricsRow[],
+    symbol_versions: symbolVersions.map((sv) => ({
+      version_id: sv.versionId,
+      symbol_id: sv.symbolId,
+      ast_fingerprint: sv.astFingerprint,
+      signature_json: sv.signatureJson,
+      summary: sv.summary,
+      invariants_json: sv.invariantsJson,
+      side_effects_json: sv.sideEffectsJson,
+    })),
+    edges: edges.map((e) => ({
+      repo_id: e.repoId,
+      from_symbol_id: e.fromSymbolId,
+      to_symbol_id: e.toSymbolId,
+      type: e.edgeType as "import" | "call" | "config",
+      weight: e.weight,
+      confidence: e.confidence,
+      resolution: e.resolution,
+      provenance: e.provenance,
+      created_at: e.createdAt,
+    })),
+    metrics: metrics.map((m) => ({
+      symbol_id: m.symbolId,
+      fan_in: m.fanIn,
+      fan_out: m.fanOut,
+      churn_30d: m.churn30d,
+      test_refs_json: m.testRefsJson,
+      canonical_test_json: m.canonicalTestJson,
+      updated_at: m.updatedAt,
+    })),
   };
 
   const stateJson = JSON.stringify(state, null, 0);
@@ -111,7 +132,7 @@ export async function exportArtifact(
     repo_id: options.repoId,
     version_id: versionId,
     commit_sha: commitSha,
-    branch: options.branch ?? (await getGitBranch(repo.root_path)),
+    branch: options.branch ?? (await getGitBranch(repo.rootPath)),
     artifact_hash: artifactHash,
     compressed_data: compressed.toString("base64"),
     created_at: getCurrentTimestamp(),
@@ -124,6 +145,18 @@ export async function exportArtifact(
 
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(artifact, null, 2), "utf-8");
+
+  await kuzuDb.upsertSyncArtifact(conn, {
+    artifactId,
+    repoId: options.repoId,
+    versionId,
+    commitSha: artifact.commit_sha,
+    branch: artifact.branch,
+    artifactHash,
+    compressedData: artifact.compressed_data,
+    createdAt: artifact.created_at,
+    sizeBytes: artifact.size_bytes,
+  });
 
   const durationMs = Date.now() - startTime;
 
@@ -144,7 +177,7 @@ export async function importArtifact(
   options: SyncImportOptions,
 ): Promise<SyncImportResult> {
   const startTime = Date.now();
-  const db = getDb();
+  const conn = await getKuzuConn();
 
   const artifactContent = await readFile(options.artifactPath, "utf-8");
   const artifact: SyncArtifact = JSON.parse(artifactContent);
@@ -157,140 +190,121 @@ export async function importArtifact(
     }
   }
 
-  if (options.verifyIntegrity) {
-    const compressed = Buffer.from(artifact.compressed_data, "base64");
-    const decompressed = await gunzipAsync(compressed);
-    const state: SyncIndexState = JSON.parse(decompressed.toString("utf-8"));
-    const computedHash = hashContent(JSON.stringify(state, null, 0));
+  const compressed = Buffer.from(artifact.compressed_data, "base64");
+  const decompressed = await gunzipAsync(compressed);
+  const state: SyncIndexState = JSON.parse(decompressed.toString("utf-8"));
 
+  if (options.verifyIntegrity) {
+    const computedHash = hashContent(JSON.stringify(state, null, 0));
     if (computedHash !== artifact.artifact_hash) {
       throw new Error("Artifact integrity check failed: hash mismatch");
     }
   }
 
-  const compressed = Buffer.from(artifact.compressed_data, "base64");
-  const decompressed = await gunzipAsync(compressed);
-  const state: SyncIndexState = JSON.parse(decompressed.toString("utf-8"));
+  const existingRepo = await kuzuDb.getRepo(conn, artifact.repo_id);
+  if (!existingRepo) {
+    await kuzuDb.upsertRepo(conn, {
+      repoId: artifact.repo_id,
+      rootPath: "",
+      configJson: "{}",
+      createdAt: getCurrentTimestamp(),
+    });
+  }
 
-  const tx = db.transaction(() => {
-    const existingRepo = db
-      .prepare("SELECT repo_id FROM repos WHERE repo_id = ?")
-      .get(artifact.repo_id) as { repo_id: string } | undefined;
+  for (const file of state.files) {
+    await kuzuDb.upsertFile(conn, {
+      fileId: file.file_id,
+      repoId: artifact.repo_id,
+      relPath: file.rel_path,
+      contentHash: file.content_hash,
+      language: file.language,
+      byteSize: file.byte_size,
+      lastIndexedAt: getCurrentTimestamp(),
+    });
+  }
 
-    if (!existingRepo) {
-      db.prepare(
-        "INSERT INTO repos (repo_id, root_path, config_json, created_at) VALUES (?, ?, ?, ?)",
-      ).run(state.repo_id, "", "{}", getCurrentTimestamp());
-    }
+  for (const symbol of state.symbols) {
+    await kuzuDb.upsertSymbol(conn, {
+      symbolId: symbol.symbol_id,
+      repoId: artifact.repo_id,
+      fileId: symbol.file_id,
+      kind: symbol.kind,
+      name: symbol.name,
+      exported: Boolean(symbol.exported),
+      visibility: symbol.visibility,
+      language: symbol.language,
+      rangeStartLine: symbol.range_start_line,
+      rangeStartCol: symbol.range_start_col,
+      rangeEndLine: symbol.range_end_line,
+      rangeEndCol: symbol.range_end_col,
+      astFingerprint: symbol.ast_fingerprint,
+      signatureJson: symbol.signature_json,
+      summary: symbol.summary,
+      invariantsJson: symbol.invariants_json,
+      sideEffectsJson: symbol.side_effects_json,
+      updatedAt: symbol.updated_at,
+    });
+  }
 
-    for (const file of state.files) {
-      db.prepare(
-        `INSERT OR REPLACE INTO files
-           (file_id, repo_id, rel_path, content_hash, language, byte_size, last_indexed_at, directory)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        file.file_id,
-        artifact.repo_id,
-        file.rel_path,
-        file.content_hash,
-        file.language,
-        file.byte_size,
-        getCurrentTimestamp(),
-        dirname(file.rel_path),
-      );
-    }
-
-    for (const symbol of state.symbols) {
-      db.prepare(
-        `INSERT OR REPLACE INTO symbols
-           (symbol_id, repo_id, file_id, kind, name, exported, visibility, language,
-            range_start_line, range_start_col, range_end_line, range_end_col,
-            ast_fingerprint, signature_json, summary, invariants_json, side_effects_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        symbol.symbol_id,
-        artifact.repo_id,
-        symbol.file_id,
-        symbol.kind,
-        symbol.name,
-        symbol.exported,
-        symbol.visibility,
-        symbol.language,
-        symbol.range_start_line,
-        symbol.range_start_col,
-        symbol.range_end_line,
-        symbol.range_end_col,
-        symbol.ast_fingerprint,
-        symbol.signature_json,
-        symbol.summary,
-        symbol.invariants_json,
-        symbol.side_effects_json,
-        symbol.updated_at,
-      );
-    }
-
-    for (const sv of state.symbol_versions) {
-      db.prepare(
-        `INSERT OR REPLACE INTO symbol_versions 
-           (version_id, symbol_id, ast_fingerprint, signature_json, summary, invariants_json, side_effects_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        sv.version_id,
-        sv.symbol_id,
-        sv.ast_fingerprint,
-        sv.signature_json,
-        sv.summary,
-        sv.invariants_json,
-        sv.side_effects_json,
-      );
-    }
-
-    db.prepare(
-      `INSERT OR REPLACE INTO versions 
-         (version_id, repo_id, created_at, reason, prev_version_hash, version_hash)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(
-      state.version_id,
-      state.repo_id,
-      getCurrentTimestamp(),
-      "Imported from sync artifact",
-      state.prev_version_hash,
-      state.version_hash,
-    );
-
-    for (const edge of state.edges) {
-      db.prepare(
-        `INSERT INTO edges 
-           (repo_id, from_symbol_id, to_symbol_id, type, weight, provenance, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        edge.repo_id,
-        edge.from_symbol_id,
-        edge.to_symbol_id,
-        edge.type,
-        edge.weight,
-        edge.provenance,
-        edge.created_at,
-      );
-    }
-
-    for (const metric of state.metrics) {
-      db.prepare(
-        `INSERT OR REPLACE INTO metrics 
-           (symbol_id, fan_in, fan_out, churn_30d, test_refs_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(
-        metric.symbol_id,
-        metric.fan_in,
-        metric.fan_out,
-        metric.churn_30d,
-        metric.test_refs_json,
-        metric.updated_at,
-      );
-    }
+  await kuzuDb.createVersion(conn, {
+    versionId: state.version_id,
+    repoId: state.repo_id,
+    createdAt: getCurrentTimestamp(),
+    reason: "Imported from sync artifact",
+    prevVersionHash: state.prev_version_hash,
+    versionHash: state.version_hash,
   });
 
-  tx();
+  for (const sv of state.symbol_versions) {
+    await kuzuDb.snapshotSymbolVersion(conn, {
+      versionId: sv.version_id,
+      symbolId: sv.symbol_id,
+      astFingerprint: sv.ast_fingerprint,
+      signatureJson: sv.signature_json,
+      summary: sv.summary,
+      invariantsJson: sv.invariants_json,
+      sideEffectsJson: sv.side_effects_json,
+    });
+  }
+
+  await kuzuDb.insertEdges(
+    conn,
+    state.edges.map((e) => ({
+      repoId: e.repo_id,
+      fromSymbolId: e.from_symbol_id,
+      toSymbolId: e.to_symbol_id,
+      edgeType: e.type,
+      weight: e.weight,
+      confidence: e.confidence,
+      resolution: e.resolution,
+      provenance: e.provenance,
+      createdAt: e.created_at,
+    })),
+  );
+
+  for (const metric of state.metrics) {
+    await kuzuDb.upsertMetrics(conn, {
+      symbolId: metric.symbol_id,
+      fanIn: metric.fan_in,
+      fanOut: metric.fan_out,
+      churn30d: metric.churn_30d,
+      testRefsJson: metric.test_refs_json,
+      canonicalTestJson: metric.canonical_test_json,
+      updatedAt: metric.updated_at,
+    });
+  }
+
+  await kuzuDb.upsertSyncArtifact(conn, {
+    artifactId: artifact.artifact_id,
+    repoId: artifact.repo_id,
+    versionId: artifact.version_id,
+    commitSha: artifact.commit_sha,
+    branch: artifact.branch,
+    artifactHash: artifact.artifact_hash,
+    compressedData: artifact.compressed_data,
+    createdAt: artifact.created_at,
+    sizeBytes: artifact.size_bytes,
+  });
 
   const durationMs = Date.now() - startTime;
 
@@ -331,7 +345,7 @@ export function getArtifactMetadata(
       symbol_count: state.symbols.length,
       edge_count: state.edges.length,
     };
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -345,11 +359,12 @@ export async function listArtifacts(
     const artifacts: SyncArtifactMetadata[] = [];
 
     for (const file of files) {
-      if (file.endsWith(".sdl-artifact.json")) {
-        const metadata = getArtifactMetadata(join(directory, file));
-        if (metadata && metadata.repo_id === repoId) {
-          artifacts.push(metadata);
-        }
+      if (!file.endsWith(".sdl-artifact.json")) {
+        continue;
+      }
+      const metadata = getArtifactMetadata(join(directory, file));
+      if (metadata && metadata.repo_id === repoId) {
+        artifacts.push(metadata);
       }
     }
 
@@ -357,7 +372,7 @@ export async function listArtifacts(
       (a, b) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
-  } catch (error) {
+  } catch {
     return [];
   }
 }
@@ -370,7 +385,7 @@ async function getGitCommitSha(repoPath: string): Promise<string | null> {
       encoding: "utf-8",
     }).trim();
     return sha;
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -383,7 +398,7 @@ async function getGitBranch(repoPath: string): Promise<string | null> {
       encoding: "utf-8",
     }).trim();
     return branch;
-  } catch (error) {
+  } catch {
     return null;
   }
 }

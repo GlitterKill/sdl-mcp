@@ -1,7 +1,5 @@
 import { ServeOptions } from "../types.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { getDb } from "../../db/db.js";
-import { runMigrations } from "../../db/migrations.js";
 import { MCPServer } from "../../server.js";
 import { registerTools } from "../../mcp/tools/index.js";
 import { watchRepository, IndexWatchHandle } from "../../indexer/indexer.js";
@@ -9,6 +7,10 @@ import { setupStdioTransport } from "../transport/stdio.js";
 import { setupHttpTransport } from "../transport/http.js";
 import { configureLogger } from "../logging.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
+import { initGraphDb } from "../../db/initGraphDb.js";
+import { closeKuzuDb, getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getCurrentTimestamp } from "../../util/time.js";
 import {
   configurePrefetch,
   warmPrefetchOnServeStart,
@@ -20,8 +22,23 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
 
   configureLogger(options.logLevel ?? "info", options.logFormat ?? "pretty");
 
-  const db = getDb(config.dbPath);
-  runMigrations(db);
+  const graphDbPath = await initGraphDb(config, configPath);
+  console.error(`Graph database initialized at ${graphDbPath}`);
+
+  // Auto-register repositories if missing in database
+  const conn = await getKuzuConn();
+  for (const repo of config.repos) {
+    const existingRepo = await kuzuDb.getRepo(conn, repo.repoId);
+    if (!existingRepo) {
+      console.error(`Registering repository in database: ${repo.repoId}`);
+      await kuzuDb.upsertRepo(conn, {
+        repoId: repo.repoId,
+        rootPath: repo.rootPath,
+        configJson: JSON.stringify(repo),
+        createdAt: getCurrentTimestamp(),
+      });
+    }
+  }
 
   configurePrefetch({
     enabled: config.prefetch?.enabled ?? true,
@@ -39,11 +56,22 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     console.error(
       `Starting file watchers for ${config.repos.length} repo(s)...`,
     );
-    for (const repo of config.repos) {
-      try {
-        watchers.push(watchRepository(repo.repoId));
-      } catch (error) {
-        console.error(`Failed to start watcher for ${repo.repoId}: ${error}`);
+    const results = await Promise.allSettled(
+      config.repos.map(async (repo) => {
+        try {
+          return { repoId: repo.repoId, handle: await watchRepository(repo.repoId) };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          throw new Error(`[${repo.repoId}] ${msg}`);
+        }
+      }),
+    );
+
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        watchers.push(result.value.handle);
+      } else {
+        console.error(`Failed to start watcher: ${String(result.reason)}`);
       }
     }
     console.error(`Watching ${watchers.length} repo(s)`);
@@ -62,6 +90,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     shutdownCalled = true;
     console.error(`\nReceived ${signal}, shutting down gracefully...`);
     await server.stop();
+    await closeKuzuDb();
     for (const watcher of watchers) {
       await watcher.close();
     }
@@ -99,7 +128,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       const host = options.host ?? "localhost";
       const port = options.port ?? 3000;
       console.error(`Starting MCP server on http://${host}:${port}...`);
-      await setupHttpTransport(server, host, port, config.dbPath);
+      await setupHttpTransport(server, host, port, graphDbPath);
     }
 
     await new Promise(() => {});

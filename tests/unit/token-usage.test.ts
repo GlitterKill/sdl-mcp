@@ -62,40 +62,40 @@ describe("token-usage", () => {
   });
 
   describe("computeTokenUsage with rawTokens hint", () => {
-    it("uses rawTokens override and computes savings", () => {
+    it("uses rawTokens override and computes savings", async () => {
       const result = {
         data: "some content",
         _rawContext: { rawTokens: 5000 },
       };
-      const usage = computeTokenUsage(result as Record<string, unknown>);
+      const usage = await computeTokenUsage(result as Record<string, unknown>);
       assert.strictEqual(usage.rawEquivalent, 5000);
       assert.ok(usage.sdlTokens > 0);
       assert.ok(usage.savingsPercent > 0);
     });
 
-    it("returns zeros when no _rawContext", () => {
+    it("returns zeros when no _rawContext", async () => {
       const result = { card: { name: "test" } };
-      const usage = computeTokenUsage(result as Record<string, unknown>);
+      const usage = await computeTokenUsage(result as Record<string, unknown>);
       assert.strictEqual(usage.sdlTokens, 0);
       assert.strictEqual(usage.rawEquivalent, 0);
       assert.strictEqual(usage.savingsPercent, 0);
     });
 
-    it("clamps savings to 0 when sdlTokens exceed rawEquivalent", () => {
+    it("clamps savings to 0 when sdlTokens exceed rawEquivalent", async () => {
       const result = {
         data: "a".repeat(1000),
         _rawContext: { rawTokens: 1 },
       };
-      const usage = computeTokenUsage(result as Record<string, unknown>);
+      const usage = await computeTokenUsage(result as Record<string, unknown>);
       assert.strictEqual(usage.savingsPercent, 0);
     });
 
-    it("excludes _rawContext from sdlTokens estimate", () => {
+    it("excludes _rawContext from sdlTokens estimate", async () => {
       const result = {
         card: { name: "test" },
         _rawContext: { rawTokens: 10000 },
       };
-      const usage = computeTokenUsage(result as Record<string, unknown>);
+      const usage = await computeTokenUsage(result as Record<string, unknown>);
       // sdlTokens should be based on { card: { name: "test" } } only
       assert.ok(usage.sdlTokens < 50);
     });

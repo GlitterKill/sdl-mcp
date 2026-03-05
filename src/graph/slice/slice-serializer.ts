@@ -24,6 +24,7 @@ import {
   SYMBOL_CARD_MAX_DEPS_PER_KIND_LIGHT,
   SYMBOL_CARD_MAX_INVARIANTS,
   SYMBOL_CARD_MAX_INVARIANTS_LIGHT,
+  SYMBOL_CARD_MAX_PROCESSES,
   SYMBOL_CARD_MAX_SIDE_EFFECTS,
   SYMBOL_CARD_MAX_SIDE_EFFECTS_LIGHT,
   SYMBOL_CARD_MAX_TEST_REFS,
@@ -117,6 +118,9 @@ export function toFullCard(card: SymbolCard): SymbolCard {
     ...card,
     detailLevel: "full",
   };
+  if (normalized.processes) {
+    normalized.processes = normalized.processes.slice(0, SYMBOL_CARD_MAX_PROCESSES);
+  }
   delete normalized.etag;
   return normalized;
 }
@@ -143,6 +147,10 @@ export function toMinimalCard(card: SymbolCard): SymbolCard {
     version: card.version,
   };
 
+  if (card.cluster) {
+    minimal.cluster = card.cluster;
+  }
+
   return minimal;
 }
 
@@ -159,6 +167,10 @@ export function toSignatureCard(card: SymbolCard): SymbolCard {
     detailLevel: "signature",
     version: card.version,
   };
+
+  if (card.cluster) {
+    signature.cluster = card.cluster;
+  }
 
   if (card.visibility) {
     signature.visibility = card.visibility;
@@ -200,6 +212,14 @@ export function toDepsCard(card: SymbolCard): SymbolCard {
     detailLevel: "deps",
     version: card.version,
   };
+
+  if (card.cluster) {
+    deps.cluster = card.cluster;
+  }
+
+  if (card.processes && card.processes.length > 0) {
+    deps.processes = card.processes.slice(0, SYMBOL_CARD_MAX_PROCESSES);
+  }
 
   if (card.visibility) {
     deps.visibility = card.visibility;
@@ -300,6 +320,14 @@ export function toSliceSymbolCard(
 
   if (card.summary) {
     sliceCard.summary = card.summary;
+  }
+
+  if (card.cluster) {
+    sliceCard.cluster = card.cluster;
+  }
+
+  if (card.processes && card.processes.length > 0) {
+    sliceCard.processes = card.processes.slice(0, SYMBOL_CARD_MAX_PROCESSES);
   }
 
   if (card.invariants && card.invariants.length > 0) {
@@ -443,6 +471,15 @@ export function estimateTokens(
         estimateTextTokens(card.summary),
         SYMBOL_TOKEN_ADDITIONAL_MAX,
       );
+    }
+
+    if ("cluster" in card && card.cluster) {
+      cardTokens += 15;
+    }
+
+    if ("processes" in card && Array.isArray(card.processes)) {
+      cardTokens +=
+        Math.min(card.processes.length, SYMBOL_CARD_MAX_PROCESSES) * 20;
     }
 
     cardTokens += card.deps.imports.length * 5;

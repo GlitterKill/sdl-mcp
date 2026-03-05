@@ -11,6 +11,13 @@
     "noImplicitAny": false,
     "skipLibCheck": true
   },
-  "include": ["scripts/**/*.ts", "tests/harness/*.ts"],
+  "include": [
+    "scripts/migrate.ts",
+    "scripts/index-repo.ts",
+    "scripts/dump-symbol.ts",
+    "scripts/migrate-sqlite-to-kuzu.ts",
+    "tests/harness/*.ts",
+    "src/types/**/*.d.ts"
+  ],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
 }

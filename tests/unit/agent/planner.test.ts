@@ -169,7 +169,11 @@ describe("Agent Planner", () => {
       const context = planner.selectContext(task);
 
       assert.strictEqual(context.length, 3);
-      assert.deepStrictEqual(context, ["symbol1", "symbol2", "symbol3"]);
+      assert.deepStrictEqual(context, [
+        "symbol:symbol1",
+        "symbol:symbol2",
+        "symbol:symbol3",
+      ]);
     });
 
     it("selects focus paths from options", () => {
@@ -179,7 +183,7 @@ describe("Agent Planner", () => {
       const context = planner.selectContext(task);
 
       assert.strictEqual(context.length, 2);
-      assert.deepStrictEqual(context, ["file1.ts", "file2.ts"]);
+      assert.deepStrictEqual(context, ["file:file1.ts", "file:file2.ts"]);
     });
 
     it("selects both symbols and paths when provided", () => {
@@ -192,7 +196,7 @@ describe("Agent Planner", () => {
       const context = planner.selectContext(task);
 
       assert.strictEqual(context.length, 2);
-      assert.deepStrictEqual(context, ["symbol1", "file1.ts"]);
+      assert.deepStrictEqual(context, ["symbol:symbol1", "file:file1.ts"]);
     });
 
     it("returns empty context when no options provided", () => {

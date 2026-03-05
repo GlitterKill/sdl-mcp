@@ -1,6 +1,8 @@
-import Database from "better-sqlite3";
-import { runMigrations, getAppliedMigrations, getPendingMigrations, MigrationResult, MigrationRow } from "../src/db/migrations.js";
+import { resolveCliConfigPath } from "../src/config/configPath.js";
 import { loadConfig } from "../src/config/loadConfig.js";
+import { initGraphDb } from "../src/db/initGraphDb.js";
+import { getKuzuConn } from "../src/db/kuzu.js";
+import * as kuzuDb from "../src/db/kuzu-queries.js";
 
 interface CliArgs {
   status: boolean;
@@ -8,9 +10,7 @@ interface CliArgs {
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = {
-    status: false
-  };
+  const args: CliArgs = { status: false };
 
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
@@ -30,68 +30,37 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 async function main(): Promise<void> {
-  try {
-    const args = parseArgs(process.argv);
+  const args = parseArgs(process.argv);
 
-    let dbPath: string;
-    try {
-      const config = loadConfig(args.config);
-      dbPath = config.dbPath;
-    } catch (err) {
-      dbPath = "./sdl-ledger.db";
+  const configPath = resolveCliConfigPath(args.config, "read");
+  const config = loadConfig(configPath);
+
+  const graphDbPath = await initGraphDb(config, configPath);
+  console.log(`Graph database: ${graphDbPath}`);
+
+  if (args.status) {
+    const conn = await getKuzuConn();
+    const repos = await kuzuDb.listRepos(conn, 1000);
+    console.log(`Repos: ${repos.length}`);
+
+    const repoId = repos[0]?.repoId;
+    if (repoId) {
+      const [files, symbols, edges] = await Promise.all([
+        kuzuDb.getFileCount(conn, repoId),
+        kuzuDb.getSymbolCount(conn, repoId),
+        kuzuDb.getEdgeCount(conn, repoId),
+      ]);
+
+      console.log(
+        `Repo ${repoId}: files=${files}, symbols=${symbols}, edges=${edges}`,
+      );
     }
-
-    const db = new Database(dbPath);
-    db.pragma("journal_mode = WAL");
-    db.pragma("synchronous = NORMAL");
-
-    if (args.status) {
-      const applied = getAppliedMigrations(db);
-      const pending = getPendingMigrations(db);
-
-      console.log(`Database: ${dbPath}`);
-      console.log(`\nApplied migrations: ${applied.length}`);
-      for (const migration of applied) {
-        console.log(`  ✓ ${migration.name} (${migration.applied_at})`);
-      }
-
-      console.log(`\nPending migrations: ${pending.length}`);
-      if (pending.length === 0) {
-        console.log("  (none)");
-      } else {
-        for (const migration of pending) {
-          console.log(`  ○ ${migration}`);
-        }
-      }
-    } else {
-      const result = runMigrations(db);
-
-      console.log(`Database: ${dbPath}`);
-
-      if (result.applied.length === 0) {
-        console.log("\nNo pending migrations to apply.");
-      } else {
-        console.log(`\nApplied ${result.applied.length} migration(s):`);
-        for (const migration of result.applied) {
-          console.log(`  ✓ ${migration}`);
-        }
-      }
-
-      if (result.alreadyApplied.length > 0) {
-        console.log(`\n${result.alreadyApplied.length} migration(s) already applied.`);
-      }
-    }
-
-    db.close();
-    process.exit(0);
-  } catch (err) {
-    if (err instanceof Error) {
-      console.error(`Error: ${err.message}`);
-    } else {
-      console.error("Unknown error occurred");
-    }
-    process.exit(1);
   }
 }
 
-main();
+main().catch((err) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error(`Error: ${msg}`);
+  process.exit(1);
+});
+

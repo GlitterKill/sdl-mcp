@@ -6,6 +6,8 @@ import type {
 import { Planner } from "./planner.js";
 import { Executor } from "./executor.js";
 import { PolicyEngine } from "../policy/engine.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 
 export class Orchestrator {
   private planner: Planner;
@@ -31,12 +33,14 @@ export class Orchestrator {
     try {
       const path = this.planner.plan(task);
       const context = this.planner.selectContext(task);
+      const { expandedContext, clusterExpandedCount } =
+        await this.expandContextForClusters(context);
 
       const executor = new Executor(this.policyEngine);
       const { actions, evidence, success } = await executor.execute(
         task,
         path.rungs,
-        context,
+        expandedContext,
       );
 
       const metrics = executor.getMetrics();
@@ -48,7 +52,9 @@ export class Orchestrator {
         actionsTaken: actions,
         path,
         finalEvidence: evidence,
-        summary: this.generateSummary(task, actions, evidence, success),
+        summary: this.generateSummary(task, actions, evidence, success, {
+          clusterExpandedCount,
+        }),
         success,
         metrics,
         answer: this.generateAnswer(task, evidence, success),
@@ -87,12 +93,17 @@ export class Orchestrator {
     actions: unknown[],
     evidence: unknown[],
     success: boolean,
+    extras: { clusterExpandedCount: number } = { clusterExpandedCount: 0 },
   ): string {
     const status = success ? "completed successfully" : "failed";
     const actionCount = actions.length;
     const evidenceCount = evidence.length;
+    const clusterNote =
+      extras.clusterExpandedCount > 0
+        ? ` Context expanded with ${extras.clusterExpandedCount} same-cluster symbol(s).`
+        : "";
 
-    return `Task "${task.taskType}" ${status}. Executed ${actionCount} action(s), collected ${evidenceCount} evidence item(s).`;
+    return `Task "${task.taskType}" ${status}. Executed ${actionCount} action(s), collected ${evidenceCount} evidence item(s).${clusterNote}`;
   }
 
   private generateAnswer(
@@ -148,6 +159,56 @@ export class Orchestrator {
       answer: `Task execution failed: ${error}`,
       nextBestAction: "retryWithDifferentInputs",
     };
+  }
+
+  private async expandContextForClusters(
+    context: string[],
+  ): Promise<{ expandedContext: string[]; clusterExpandedCount: number }> {
+    const symbolIds = context
+      .filter((c) => c.startsWith("symbol:"))
+      .map((s) => s.slice("symbol:".length))
+      .filter(Boolean);
+
+    if (symbolIds.length === 0) {
+      return { expandedContext: context, clusterExpandedCount: 0 };
+    }
+
+    try {
+      const conn = await getKuzuConn();
+      const clustersBySymbol = await kuzuDb.getClustersForSymbols(conn, symbolIds);
+      const clusterIds = new Set<string>();
+      for (const row of clustersBySymbol.values()) {
+        clusterIds.add(row.clusterId);
+      }
+      if (clusterIds.size === 0) {
+        return { expandedContext: context, clusterExpandedCount: 0 };
+      }
+
+      const memberLists = await Promise.all(
+        Array.from(clusterIds).map((clusterId) => kuzuDb.getClusterMembers(conn, clusterId)),
+      );
+
+      const already = new Set(context);
+      const additional: string[] = [];
+
+      for (const members of memberLists) {
+        for (const m of members) {
+          const ref = `symbol:${m.symbolId}`;
+          if (already.has(ref)) continue;
+          additional.push(ref);
+          already.add(ref);
+          if (additional.length >= 20) break;
+        }
+        if (additional.length >= 20) break;
+      }
+
+      return {
+        expandedContext: additional.length > 0 ? [...context, ...additional] : context,
+        clusterExpandedCount: additional.length,
+      };
+    } catch {
+      return { expandedContext: context, clusterExpandedCount: 0 };
+    }
   }
 }
 

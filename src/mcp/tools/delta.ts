@@ -1,17 +1,11 @@
 import { DeltaGetRequestSchema, type DeltaGetResponse } from "../tools.js";
 import { computeDelta } from "../../delta/diff.js";
 import { runGovernorLoop } from "../../delta/blastRadius.js";
-import {
-  loadGraphForRepo,
-  loadNeighborhood,
-  logGraphTelemetry,
-  getLastLoadStats,
-  LAZY_GRAPH_LOADING_DEFAULT_HOPS,
-  LAZY_GRAPH_LOADING_MAX_SYMBOLS,
-} from "../../graph/buildGraph.js";
 import { truncateArray } from "../../util/truncation.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import * as db from "../../db/queries.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import { getSliceHandle, updateSliceHandleSpillover } from "../../db/kuzu-queries.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import {
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
@@ -50,7 +44,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
   const executeDelta = async () => {
     let delta;
     try {
-      delta = computeDelta(
+      delta = await computeDelta(
         validated.repoId,
         validated.fromVersion,
         validated.toVersion,
@@ -72,25 +66,6 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       consumePrefetchedKey(validated.repoId, `blast:${symbolId}`);
     }
 
-    let graph;
-    if (changedSymbolIds.length > 0 && changedSymbolIds.length < 500) {
-      graph = loadNeighborhood(validated.repoId, changedSymbolIds, {
-        maxHops: LAZY_GRAPH_LOADING_DEFAULT_HOPS,
-        direction: "both",
-        maxSymbols: LAZY_GRAPH_LOADING_MAX_SYMBOLS,
-      });
-    } else {
-      graph = loadGraphForRepo(validated.repoId);
-    }
-
-    const loadStats = getLastLoadStats();
-    if (loadStats) {
-      logGraphTelemetry({
-        repoId: validated.repoId,
-        ...loadStats,
-      });
-    }
-
     prefetchDeltaBlastRadius(validated.repoId, changedSymbolIds);
 
     const config = loadConfig();
@@ -108,11 +83,8 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       toVersionId: validated.toVersion,
     };
 
-    const governorResult = await runGovernorLoop(
-      changedSymbolIds,
-      graph,
-      governorOptions,
-    );
+    const conn = await getKuzuConn();
+    const governorResult = await runGovernorLoop(conn, changedSymbolIds, governorOptions);
 
     delta.blastRadius = governorResult.blastRadius;
     delta.trimmedSet = governorResult.trimmedSet;
@@ -120,9 +92,10 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     if (governorResult.spilloverHandle) {
       delta.spilloverHandle = governorResult.spilloverHandle;
 
-      const handleRow = db.getSliceHandle(governorResult.spilloverHandle);
+      const handleRow = await getSliceHandle(conn, governorResult.spilloverHandle);
       if (handleRow) {
-        db.updateSliceHandleSpillover(
+        await updateSliceHandleSpillover(
+          conn,
           governorResult.spilloverHandle,
           JSON.stringify(governorResult.trimmedSet.droppedSymbols),
         );
@@ -174,10 +147,10 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
         current: item.fanInTrend!.current,
       }));
 
-    const symbolMap = db.getSymbolsByIdsLite(changedSymbolIds);
-    const fileIds = [...new Set(
-      Array.from(symbolMap.values()).map((s) => s.file_id),
-    )];
+    const symbolMap = await kuzuDb.getSymbolsByIds(conn, changedSymbolIds);
+    const fileIds = [
+      ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
+    ];
 
     const response = { delta, amplifiers };
     attachRawContext(response, { fileIds });

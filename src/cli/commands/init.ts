@@ -11,9 +11,6 @@ import {
 import { basename, dirname, join, resolve } from "path";
 import { createInterface } from "readline";
 import { fileURLToPath } from "url";
-import { getDb } from "../../db/db.js";
-import { createRepo, getRepo } from "../../db/queries.js";
-import { runMigrations } from "../../db/migrations.js";
 import { WATCHER_DEFAULT_MAX_WATCHED_FILES } from "../../config/constants.js";
 import {
   DEFAULT_INDEXING_CONCURRENCY,
@@ -24,6 +21,9 @@ import {
   MAX_FILE_BYTES,
 } from "../../config/constants.js";
 import { resolveCliConfigPath } from "../../config/configPath.js";
+import { initGraphDb } from "../../db/initGraphDb.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import { indexRepo } from "../../indexer/indexer.js";
 import { logSetupPipelineEvent } from "../../mcp/telemetry.js";
 import { normalizePath } from "../../util/paths.js";
@@ -434,8 +434,10 @@ export async function initCommand(options: InitOptions): Promise<void> {
   }
 
   const dbPath = resolve(dirname(configPath), "sdlmcp.sqlite");
+  const kuzuDbPath = resolve(dirname(configPath), "sdl-mcp-graph");
   const configDir = dirname(configPath);
   const dbDir = dirname(dbPath);
+  const kuzuDbDir = kuzuDbPath;
 
   const repoId = detectRepoId(repoRoot);
   const ignorePatterns = mergeIgnorePatterns(repoRoot);
@@ -458,9 +460,16 @@ export async function initCommand(options: InitOptions): Promise<void> {
         ignore: ignorePatterns,
         languages,
         maxFileBytes: MAX_FILE_BYTES,
+        includeNodeModulesTypes: true,
+        packageJsonPath: null,
+        tsconfigPath: null,
+        workspaceGlobs: null,
       },
     ],
     dbPath,
+    graphDatabase: {
+      path: kuzuDbPath,
+    },
     policy: {
       maxWindowLines: DEFAULT_MAX_WINDOW_LINES,
       maxWindowTokens: DEFAULT_MAX_WINDOW_TOKENS,
@@ -476,6 +485,8 @@ export async function initCommand(options: InitOptions): Promise<void> {
       concurrency: DEFAULT_INDEXING_CONCURRENCY,
       enableFileWatching: true,
       maxWatchedFiles: WATCHER_DEFAULT_MAX_WATCHED_FILES,
+      engine: "typescript" as const,
+      watchDebounceMs: 300,
     },
     slice: {
       defaultMaxCards: DEFAULT_MAX_CARDS,
@@ -526,12 +537,17 @@ export async function initCommand(options: InitOptions): Promise<void> {
       mkdirSync(dbDir, { recursive: true });
       createdDirs.push(dbDir);
     }
+    if (!existsSync(kuzuDbDir)) {
+      mkdirSync(kuzuDbDir, { recursive: true });
+      createdDirs.push(kuzuDbDir);
+    }
 
     writeFileSync(configPath, JSON.stringify(config, null, 2));
     createdPaths.push(configPath);
 
     console.log(`Configuration created: ${normalizePath(configPath)}`);
     console.log(`Database path: ${normalizePath(dbPath)}`);
+    console.log(`Graph database path: ${normalizePath(kuzuDbPath)}`);
     console.log(`Repository: ${normalizedRepoPath} (id: ${repoId})`);
     console.log(`Languages: ${languages.join(", ")}`);
 
@@ -555,15 +571,16 @@ export async function initCommand(options: InitOptions): Promise<void> {
 
     if (autoIndex) {
       const setupStartedAt = Date.now();
-      const db = getDb(config.dbPath);
-      runMigrations(db);
+      await initGraphDb(config, configPath);
+      const conn = await getKuzuConn();
 
-      if (!getRepo(repoId)) {
-        createRepo({
-          repo_id: repoId,
-          root_path: normalizedRepoPath,
-          config_json: JSON.stringify(config.repos[0]),
-          created_at: new Date().toISOString(),
+      const existingRepo = await kuzuDb.getRepo(conn, repoId);
+      if (!existingRepo) {
+        await kuzuDb.upsertRepo(conn, {
+          repoId,
+          rootPath: normalizedRepoPath,
+          configJson: JSON.stringify(config.repos[0]),
+          createdAt: new Date().toISOString(),
         });
       }
 

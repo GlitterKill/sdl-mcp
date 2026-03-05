@@ -1,9 +1,8 @@
 import { exportArtifact, listArtifacts } from "../../sync/sync.js";
 import type { SyncExportOptions } from "../../sync/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { getDb } from "../../db/db.js";
-import { runMigrations } from "../../db/migrations.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
+import { initGraphDb } from "../../db/initGraphDb.js";
 
 interface ExportCommandOptions {
   config?: string;
@@ -20,9 +19,7 @@ export async function exportCommand(
 ): Promise<void> {
   const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
-
-  const db = getDb(config.dbPath);
-  runMigrations(db);
+  await initGraphDb(config, configPath);
 
   if (options.list) {
     const repoId = options.repoId ?? config.repos[0]?.repoId;

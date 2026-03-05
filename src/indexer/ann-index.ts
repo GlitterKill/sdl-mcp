@@ -1,5 +1,6 @@
-import type { SymbolEmbeddingRow } from "../db/schema.js";
-import * as db from "../db/queries.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
+import type { SymbolEmbeddingRow } from "../db/kuzu-queries.js";
 import { hashContent } from "../util/hashing.js";
 
 export const EMBEDDING_DIMENSION = 64;
@@ -39,12 +40,13 @@ function normalizeVector(vector: number[]): number[] {
   return vector.map((v) => v / norm);
 }
 
-function fromFloat16Blob(blob: Buffer): number[] {
-  if (blob.byteLength === 0) return [];
+function fromFloat16Blob(blob: string): number[] {
+  if (!blob) return [];
+  const buffer = Buffer.from(blob, "base64");
   const view = new Int16Array(
-    blob.buffer,
-    blob.byteOffset,
-    blob.byteLength / 2,
+    buffer.buffer,
+    buffer.byteOffset,
+    buffer.byteLength / 2,
   );
   const vector = new Array<number>(view.length);
   for (let i = 0; i < view.length; i++) {
@@ -70,9 +72,9 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / denom;
 }
 
-function computeVersionHash(rows: SymbolEmbeddingRow[]): string {
+function computeVersionHash(rows: kuzuDb.SymbolEmbeddingRow[]): string {
   const payload = rows
-    .map((r) => `${r.symbol_id}:${r.model}:${r.version}:${r.card_hash}`)
+    .map((r) => `${r.symbolId}:${r.model}:${r.version}:${r.cardHash}`)
     .sort()
     .join("|");
   return hashContent(payload);
@@ -395,21 +397,22 @@ export class AnnIndexManager {
   async buildIndex(params: {
     repoId: string;
     model: string;
-    embeddingRows?: SymbolEmbeddingRow[];
+    embeddingRows?: kuzuDb.SymbolEmbeddingRow[];
   }): Promise<{ indexed: number; skipped: number }> {
     if (!this.config.enabled) {
       return { indexed: 0, skipped: 0 };
     }
 
     try {
-      const allSymbols = db.getSymbolsByRepo(params.repoId);
-      const symbolIds = allSymbols.map((s) => s.symbol_id);
+      const conn = await getKuzuConn();
+      const allSymbols = await kuzuDb.getSymbolsByRepo(conn, params.repoId);
+      const symbolIds = allSymbols.map((s) => s.symbolId);
 
-      let embeddingRows: SymbolEmbeddingRow[];
+      let embeddingRows: kuzuDb.SymbolEmbeddingRow[];
       if (params.embeddingRows) {
         embeddingRows = params.embeddingRows;
       } else {
-        const embeddingMap = db.getSymbolEmbeddings(symbolIds);
+        const embeddingMap = await kuzuDb.getSymbolEmbeddings(conn, symbolIds);
         embeddingRows = Array.from(embeddingMap.values()).filter(
           (r) => r.model === params.model,
         );
@@ -427,12 +430,12 @@ export class AnnIndexManager {
           skipped++;
           continue;
         }
-        const vector = fromFloat16Blob(row.embedding_vector);
+        const vector = fromFloat16Blob(row.embeddingVector);
         if (vector.length === 0) {
           skipped++;
           continue;
         }
-        newIndex.insert(row.symbol_id, vector, rng);
+        newIndex.insert(row.symbolId, vector, rng);
         indexed++;
       }
 
@@ -487,11 +490,11 @@ export class AnnIndexManager {
     return this.state.index.search(query, k);
   }
 
-  searchWithFallback(params: {
+  async searchWithFallback(params: {
     query: number[];
     k: number;
     symbolIds: string[];
-  }): SearchResult[] {
+  }): Promise<SearchResult[]> {
     if (
       !this.config.enabled ||
       this.state.status !== "ready" ||
@@ -506,7 +509,7 @@ export class AnnIndexManager {
     const missing = params.symbolIds.filter((id) => !annSet.has(id));
 
     if (missing.length > 0) {
-      const exactResults = this.exactSearch(
+      const exactResults = await this.exactSearch(
         params.query,
         missing,
         Math.ceil(params.k * 0.2),
@@ -519,20 +522,21 @@ export class AnnIndexManager {
     return annResults.slice(0, params.k);
   }
 
-  private exactSearch(
+  private async exactSearch(
     query: number[],
     symbolIds: string[],
     k: number,
-  ): SearchResult[] {
+  ): Promise<SearchResult[]> {
     const normalizedQuery = normalizeVector(query);
-    const embeddingMap = db.getSymbolEmbeddings(symbolIds);
+    const conn = await getKuzuConn();
+    const embeddingMap = await kuzuDb.getSymbolEmbeddings(conn, symbolIds);
 
     const results: SearchResult[] = [];
     for (const symbolId of symbolIds) {
       const row = embeddingMap.get(symbolId);
       if (!row) continue;
 
-      const vector = fromFloat16Blob(row.embedding_vector);
+      const vector = fromFloat16Blob(row.embeddingVector);
       if (vector.length === 0) continue;
 
       const score = cosineSimilarity(normalizedQuery, vector);
@@ -594,24 +598,28 @@ export function exactCosineSearch(params: {
   query: number[];
   symbolIds: string[];
   k: number;
-}): SearchResult[] {
+}): Promise<SearchResult[]> {
   const normalizedQuery = normalizeVector(params.query);
-  const embeddingMap = db.getSymbolEmbeddings(params.symbolIds);
 
-  const results: SearchResult[] = [];
-  for (const symbolId of params.symbolIds) {
-    const row = embeddingMap.get(symbolId);
-    if (!row) continue;
+  return (async () => {
+    const conn = await getKuzuConn();
+    const embeddingMap = await kuzuDb.getSymbolEmbeddings(conn, params.symbolIds);
 
-    const vector = fromFloat16Blob(row.embedding_vector);
-    if (vector.length === 0) continue;
+    const results: SearchResult[] = [];
+    for (const symbolId of params.symbolIds) {
+      const row = embeddingMap.get(symbolId);
+      if (!row) continue;
 
-    const score = cosineSimilarity(normalizedQuery, vector);
-    results.push({ symbolId, score });
-  }
+      const vector = fromFloat16Blob(row.embeddingVector);
+      if (vector.length === 0) continue;
 
-  results.sort((a, b) => b.score - a.score);
-  return results.slice(0, params.k);
+      const score = cosineSimilarity(normalizedQuery, vector);
+      results.push({ symbolId, score });
+    }
+
+    results.sort((a, b) => b.score - a.score);
+    return results.slice(0, params.k);
+  })();
 }
 
 export { cosineSimilarity, normalizeVector };

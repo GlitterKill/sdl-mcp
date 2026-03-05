@@ -418,7 +418,7 @@ const BlastRadiusItemSchema = z.object({
   reason: z.string().optional(),
   distance: z.number(),
   rank: z.number(),
-  signal: z.enum(["diagnostic", "directDependent", "graph"]),
+  signal: z.enum(["diagnostic", "directDependent", "graph", "process"]),
   fanInTrend: FanInTrendSchema.optional(),
 });
 
@@ -1044,6 +1044,33 @@ export const RepoOverviewResponseSchema = z.object({
   hotspots: CodebaseHotspotsSchema.optional(),
   layers: z.array(z.string()).optional(),
   entryPoints: z.array(z.string()).optional(),
+  clusters: z
+    .object({
+      totalClusters: z.number().int().min(0),
+      averageClusterSize: z.number(),
+      largestClusters: z.array(
+        z.object({
+          clusterId: z.string(),
+          label: z.string(),
+          size: z.number().int().min(0),
+        }),
+      ),
+    })
+    .optional(),
+  processes: z
+    .object({
+      totalProcesses: z.number().int().min(0),
+      averageDepth: z.number(),
+      entryPoints: z.number().int().min(0),
+      longestProcesses: z.array(
+        z.object({
+          processId: z.string(),
+          label: z.string(),
+          depth: z.number().int().min(0),
+        }),
+      ),
+    })
+    .optional(),
   tokenMetrics: TokenMetricsSchema,
 });
 
@@ -1069,6 +1096,23 @@ const ContextSummarySymbolSchema = z.object({
   ]),
   signature: z.string().optional(),
   summary: z.string(),
+  cluster: z
+    .object({
+      clusterId: z.string(),
+      label: z.string(),
+      memberCount: z.number().int().min(0),
+    })
+    .optional(),
+  processes: z
+    .array(
+      z.object({
+        processId: z.string(),
+        label: z.string(),
+        role: z.enum(["entry", "intermediate", "exit"]),
+        depth: z.number().int().min(0),
+      }),
+    )
+    .optional(),
 });
 
 const ContextSummaryDependencySchema = z.object({
@@ -1395,8 +1439,7 @@ export const AgentFeedbackRequestSchema = z.object({
 export const AgentFeedbackResponseSchema = z.object({
   ok: z.boolean().describe("Whether the feedback was recorded successfully"),
   feedbackId: z
-    .number()
-    .int()
+    .string()
     .describe("The ID of the created feedback record"),
   repoId: z.string().describe("Repository identifier"),
   versionId: z.string().describe("Version identifier"),
@@ -1430,7 +1473,7 @@ export const AgentFeedbackQueryResponseSchema = z.object({
   feedback: z
     .array(
       z.object({
-        feedbackId: z.number().int(),
+        feedbackId: z.string(),
         versionId: z.string(),
         sliceHandle: z.string(),
         usefulSymbols: z.array(z.string()),

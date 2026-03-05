@@ -463,7 +463,7 @@ src/utils/helper.ts  # Same file, different case
       "ignore": ["**/node_modules/**", "**/dist/**"]
     }
   ],
-  "dbPath": "./data/sdlmcp.sqlite",
+  "graphDatabase": { "path": "./data/sdl-mcp-graph" },
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,

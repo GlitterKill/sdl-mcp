@@ -10,6 +10,8 @@
  * @module graph/slice
  */
 
+import type { Connection } from "kuzu";
+
 import type { RepoId, SymbolId, VersionId, EdgeType } from "../db/schema.js";
 import type {
   SliceBudget,
@@ -24,23 +26,17 @@ import {
   normalizeCardDetailLevel,
   CARD_DETAIL_LEVEL_RANK,
 } from "../mcp/types.js";
-import {
-  loadGraphForRepo,
-  loadNeighborhood,
-  logGraphTelemetry,
-  getLastLoadStats,
-  LAZY_GRAPH_LOADING_DEFAULT_HOPS,
-  LAZY_GRAPH_LOADING_MAX_SYMBOLS,
-} from "./buildGraph.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { pickDepLabel } from "../util/depLabels.js";
-import * as db from "../db/queries.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 import {
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
   SYMBOL_CARD_MAX_DEPS_PER_KIND,
   SYMBOL_CARD_MAX_DEPS_PER_KIND_LIGHT,
   SYMBOL_CARD_MAX_INVARIANTS,
+  SYMBOL_CARD_MAX_PROCESSES,
   SYMBOL_CARD_MAX_SIDE_EFFECTS,
   SYMBOL_CARD_MAX_TEST_REFS,
   SYMBOL_CARD_SUMMARY_MAX_CHARS,
@@ -56,6 +52,7 @@ import {
 
 import {
   resolveStartNodes,
+  resolveStartNodesKuzu,
   type StartNodeSource,
   type ResolvedStartNode,
   type StartNodeLimits,
@@ -65,7 +62,7 @@ import {
 } from "./slice/start-node-resolver.js";
 
 import {
-  beamSearch,
+  beamSearchKuzu,
   normalizeEdgeConfidence,
   applyEdgeConfidenceWeight,
   getAdaptiveMinConfidence,
@@ -116,6 +113,11 @@ export {
 interface SliceBuildRequest {
   repoId: RepoId;
   versionId: VersionId;
+  /**
+   * Optional Kuzu connection override (primarily for tests).
+   * Not exposed via MCP tool schemas.
+   */
+  conn?: Connection;
   taskText?: string;
   stackTrace?: string;
   failingTestPath?: string;
@@ -166,43 +168,52 @@ export async function buildSlice(
   };
   const minConfidence = request.minConfidence ?? 0.5;
 
-  const hasEntrySymbols =
-    request.entrySymbols && request.entrySymbols.length > 0;
-  const repoSymbolCount = hasEntrySymbols
-    ? db.countSymbolsByRepo(request.repoId)
-    : 0;
-  const useLazyLoading =
-    hasEntrySymbols && repoSymbolCount > LAZY_GRAPH_LOADING_MAX_SYMBOLS;
-  let graph;
+  const conn = request.conn ?? (await getKuzuConn());
 
-  if (useLazyLoading && request.entrySymbols) {
-    graph = loadNeighborhood(request.repoId, request.entrySymbols, {
-      maxHops: LAZY_GRAPH_LOADING_DEFAULT_HOPS,
-      direction: "both",
-      maxSymbols: LAZY_GRAPH_LOADING_MAX_SYMBOLS,
-    });
-  } else {
-    graph = loadGraphForRepo(request.repoId);
-  }
-
-  const loadStats = getLastLoadStats();
-  if (loadStats) {
-    logGraphTelemetry({
-      repoId: request.repoId,
-      ...loadStats,
-    });
-  }
-
-  const startNodes = resolveStartNodes(graph, request);
+  const startNodes = await resolveStartNodesKuzu(conn, request.repoId, request);
   const startSymbols = startNodes.map((node) => node.symbolId);
-  const { sliceCards, frontier, wasTruncated, droppedCandidates } = beamSearch(
-    graph,
-    startNodes,
-    budget,
-    request,
-    edgeWeights,
-    minConfidence,
-  );
+
+  let clusterContext: { entryClusterIds: string[]; relatedClusterIds: string[] } | undefined;
+  try {
+    const clustersBySymbolId = await kuzuDb.getClustersForSymbols(conn, startSymbols);
+    const entryClusterIds = new Set<string>();
+    for (const row of clustersBySymbolId.values()) {
+      entryClusterIds.add(row.clusterId);
+    }
+
+    if (entryClusterIds.size > 0) {
+      const relatedClusterIds = new Set<string>();
+      const relatedLists = await Promise.all(
+        Array.from(entryClusterIds).map((clusterId) =>
+          kuzuDb.getRelatedClusters(conn, clusterId, 20),
+        ),
+      );
+      for (const related of relatedLists) {
+        for (const row of related) {
+          relatedClusterIds.add(row.clusterId);
+        }
+      }
+
+      clusterContext = {
+        entryClusterIds: Array.from(entryClusterIds).sort(),
+        relatedClusterIds: Array.from(relatedClusterIds).sort(),
+      };
+    }
+  } catch {
+    // ignore cluster context errors (graceful degradation)
+  }
+
+  const beamRequest = clusterContext ? { ...request, clusterContext } : request;
+  const { sliceCards, frontier, wasTruncated, droppedCandidates } =
+    await beamSearchKuzu(
+      conn,
+      request.repoId,
+      startNodes,
+      budget,
+      beamRequest,
+      edgeWeights,
+      minConfidence,
+    );
 
   const cardCount = sliceCards.size;
   const requestedLevel = normalizeCardDetailLevel(request.cardDetail);
@@ -215,6 +226,7 @@ export async function buildSlice(
     request.adaptiveDetail !== false && effectiveLevel !== requestedLevel;
 
   const { cards, sliceDepsBySymbol } = await loadSymbolCards(
+    conn,
     Array.from(sliceCards),
     request.versionId,
     request.repoId,
@@ -227,7 +239,8 @@ export async function buildSlice(
     sliceCards,
   );
   const { symbolIndex, edges, confidenceDistribution } =
-    loadEdgesBetweenSymbols(
+    await loadEdgesBetweenSymbols(
+      conn,
       Array.from(sliceCards),
       request.repoId,
       minConfidence,
@@ -324,6 +337,7 @@ function buildDetailLevelMetadata(
 }
 
 async function loadSymbolCards(
+  conn: Connection,
   symbolIds: SymbolId[],
   versionId: VersionId,
   repoId: RepoId,
@@ -365,37 +379,44 @@ async function loadSymbolCards(
   if (uncachedSymbolIds.length === 0) {
     return {
       cards,
-      sliceDepsBySymbol: buildSliceDepsBySymbol(symbolIds),
+      sliceDepsBySymbol: await buildSliceDepsBySymbol(conn, symbolIds),
     };
   }
 
   uncachedSymbolIds.sort();
 
-  const symbolsMap = db.getSymbolsByIds(uncachedSymbolIds);
+  const symbolsMap = await kuzuDb.getSymbolsByIds(conn, uncachedSymbolIds);
 
-  const fileIds = new Set<number>();
+  const fileIds = new Set<string>();
   for (const symbol of symbolsMap.values()) {
-    fileIds.add(symbol.file_id);
+    if (symbol.repoId !== repoId) continue;
+    fileIds.add(symbol.fileId);
   }
-  const filesMap = db.getFilesByIds([...fileIds]);
+  const filesMap = await kuzuDb.getFilesByIds(conn, [...fileIds]);
 
-  const metricsMap = db.getMetricsBySymbolIds(uncachedSymbolIds);
+  const metricsMap = await kuzuDb.getMetricsBySymbolIds(conn, uncachedSymbolIds);
 
-  const edgesMap = db.getEdgesFromSymbolsForSlice(uncachedSymbolIds);
+  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, uncachedSymbolIds);
 
   const importedSymbolIds = new Set<string>();
   const calledSymbolIds = new Set<string>();
   for (const edges of edgesMap.values()) {
     for (const edge of edges) {
-      if (edge.type === "import") {
-        importedSymbolIds.add(edge.to_symbol_id);
-      } else if (edge.type === "call") {
-        calledSymbolIds.add(edge.to_symbol_id);
+      if (edge.edgeType === "import") {
+        importedSymbolIds.add(edge.toSymbolId);
+      } else if (edge.edgeType === "call") {
+        calledSymbolIds.add(edge.toSymbolId);
       }
     }
   }
-  const importedSymbolsMap = db.getSymbolsByIdsLite([...importedSymbolIds]);
-  const calledSymbolsMap = db.getSymbolsByIdsLite([...calledSymbolIds]);
+  const importedSymbolsMap = await kuzuDb.getSymbolsByIdsLite(
+    conn,
+    [...importedSymbolIds],
+  );
+  const calledSymbolsMap = await kuzuDb.getSymbolsByIdsLite(
+    conn,
+    [...calledSymbolIds],
+  );
 
   const includeDeps =
     CARD_DETAIL_LEVEL_RANK[effectiveLevel] >= CARD_DETAIL_LEVEL_RANK.deps;
@@ -403,11 +424,24 @@ async function loadSymbolCards(
     CARD_DETAIL_LEVEL_RANK[effectiveLevel] >= CARD_DETAIL_LEVEL_RANK.signature;
   const includeFullDetails = effectiveLevel === "full";
 
+  const clustersBySymbolId = await kuzuDb.getClustersForSymbols(
+    conn,
+    uncachedSymbolIds,
+  );
+  const processesBySymbolId = includeDeps
+    ? await kuzuDb.getProcessesForSymbols(conn, uncachedSymbolIds)
+    : new Map<string, kuzuDb.ProcessForSymbolRow[]>();
+
   for (const symbolId of uncachedSymbolIds) {
     const symbolRow = symbolsMap.get(symbolId);
-    if (!symbolRow) continue;
+    if (!symbolRow || symbolRow.repoId !== repoId) continue;
 
-    const file = filesMap.get(symbolRow.file_id);
+    const clusterRow = clustersBySymbolId.get(symbolId);
+    const processRows = includeDeps
+      ? processesBySymbolId.get(symbolId) ?? []
+      : [];
+
+    const file = filesMap.get(symbolRow.fileId);
     const metrics = metricsMap.get(symbolId);
     const outgoingEdges = edgesMap.get(symbolId) ?? [];
 
@@ -416,18 +450,18 @@ async function loadSymbolCards(
 
     if (includeDeps) {
       for (const edge of outgoingEdges) {
-        if (edge.type === "import") {
-          const importedSymbol = importedSymbolsMap.get(edge.to_symbol_id);
+        if (edge.edgeType === "import") {
+          const importedSymbol = importedSymbolsMap.get(edge.toSymbolId);
           const depLabel = pickDepLabel(
-            edge.to_symbol_id,
+            edge.toSymbolId,
             importedSymbol?.name,
           );
           if (depLabel) {
             importDeps.push(depLabel);
           }
-        } else if (edge.type === "call") {
-          const calledSymbol = calledSymbolsMap.get(edge.to_symbol_id);
-          const depLabel = pickDepLabel(edge.to_symbol_id, calledSymbol?.name);
+        } else if (edge.edgeType === "call") {
+          const calledSymbol = calledSymbolsMap.get(edge.toSymbolId);
+          const depLabel = pickDepLabel(edge.toSymbolId, calledSymbol?.name);
           if (depLabel) {
             callDeps.push(depLabel);
           }
@@ -444,12 +478,12 @@ async function loadSymbolCards(
     };
 
     let signature;
-    if (includeSignature && symbolRow.signature_json) {
+    if (includeSignature && symbolRow.signatureJson) {
       try {
-        signature = JSON.parse(symbolRow.signature_json);
+        signature = JSON.parse(symbolRow.signatureJson);
       } catch (error) {
         process.stderr.write(
-          `[sdl-mcp] Failed to parse signature_json for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
+          `[sdl-mcp] Failed to parse signatureJson for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
         );
         signature = { name: symbolRow.name };
       }
@@ -458,25 +492,25 @@ async function loadSymbolCards(
     }
 
     let invariants: string[] | undefined;
-    if (includeFullDetails && symbolRow.invariants_json) {
+    if (includeFullDetails && symbolRow.invariantsJson) {
       try {
-        const parsed = JSON.parse(symbolRow.invariants_json);
+        const parsed = JSON.parse(symbolRow.invariantsJson);
         invariants = parsed.slice(0, SYMBOL_CARD_MAX_INVARIANTS);
       } catch (error) {
         process.stderr.write(
-          `[sdl-mcp] Failed to parse invariants_json for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
+          `[sdl-mcp] Failed to parse invariantsJson for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
         );
       }
     }
 
     let sideEffects: string[] | undefined;
-    if (includeFullDetails && symbolRow.side_effects_json) {
+    if (includeFullDetails && symbolRow.sideEffectsJson) {
       try {
-        const parsed = JSON.parse(symbolRow.side_effects_json);
+        const parsed = JSON.parse(symbolRow.sideEffectsJson);
         sideEffects = parsed.slice(0, SYMBOL_CARD_MAX_SIDE_EFFECTS);
       } catch (error) {
         process.stderr.write(
-          `[sdl-mcp] Failed to parse side_effects_json for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
+          `[sdl-mcp] Failed to parse sideEffectsJson for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
         );
       }
     }
@@ -484,12 +518,12 @@ async function loadSymbolCards(
     let metricsData;
     if (includeFullDetails && metrics) {
       let testRefs: string[] | undefined;
-      if (metrics.test_refs_json) {
+      if (metrics.testRefsJson) {
         try {
-          testRefs = JSON.parse(metrics.test_refs_json);
+          testRefs = JSON.parse(metrics.testRefsJson);
         } catch (error) {
           process.stderr.write(
-            `[sdl-mcp] Failed to parse test_refs_json for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
+            `[sdl-mcp] Failed to parse testRefsJson for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
           );
         }
       }
@@ -499,9 +533,9 @@ async function loadSymbolCards(
       }
 
       metricsData = {
-        fanIn: metrics.fan_in,
-        fanOut: metrics.fan_out,
-        churn30d: metrics.churn_30d,
+        fanIn: metrics.fanIn,
+        fanOut: metrics.fanOut,
+        churn30d: metrics.churn30d,
         testRefs,
       };
     }
@@ -511,19 +545,19 @@ async function loadSymbolCards(
       : SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT;
 
     const baseCard: SymbolCard = {
-      symbolId: symbolRow.symbol_id,
-      repoId: symbolRow.repo_id,
-      file: file?.rel_path ?? "",
+      symbolId: symbolRow.symbolId,
+      repoId: symbolRow.repoId as RepoId,
+      file: file?.relPath ?? "",
       range: {
-        startLine: symbolRow.range_start_line,
-        startCol: symbolRow.range_start_col,
-        endLine: symbolRow.range_end_line,
-        endCol: symbolRow.range_end_col,
+        startLine: symbolRow.rangeStartLine,
+        startCol: symbolRow.rangeStartCol,
+        endLine: symbolRow.rangeEndLine,
+        endCol: symbolRow.rangeEndCol,
       },
-      kind: symbolRow.kind,
+      kind: symbolRow.kind as SymbolCard["kind"],
       name: symbolRow.name,
-      exported: symbolRow.exported === 1,
-      visibility: symbolRow.visibility ?? undefined,
+      exported: symbolRow.exported,
+      visibility: (symbolRow.visibility as SymbolCard["visibility"]) ?? undefined,
       signature: includeSignature ? signature : undefined,
       summary: symbolRow.summary
         ? symbolRow.summary.slice(0, summaryMaxLength)
@@ -531,12 +565,33 @@ async function loadSymbolCards(
       invariants: invariants && invariants.length > 0 ? invariants : undefined,
       sideEffects:
         sideEffects && sideEffects.length > 0 ? sideEffects : undefined,
+      cluster: clusterRow
+        ? {
+            clusterId: clusterRow.clusterId,
+            label: clusterRow.label,
+            memberCount: clusterRow.symbolCount,
+          }
+        : undefined,
+      processes:
+        includeDeps && processRows.length > 0
+          ? processRows.slice(0, SYMBOL_CARD_MAX_PROCESSES).map((row) => ({
+              processId: row.processId,
+              label: row.label,
+              role:
+                row.role === "entry" ||
+                row.role === "exit" ||
+                row.role === "intermediate"
+                  ? row.role
+                  : "intermediate",
+              depth: row.depth,
+            }))
+          : undefined,
       deps,
       metrics: includeFullDetails ? metricsData : undefined,
       detailLevel: effectiveLevel,
       version: {
         ledgerVersion: versionId,
-        astFingerprint: symbolRow.ast_fingerprint,
+        astFingerprint: symbolRow.astFingerprint,
       },
     };
 
@@ -546,7 +601,7 @@ async function loadSymbolCards(
     if (cacheEnabled) {
       await symbolCardCache.set(
         repoId,
-        symbolRow.symbol_id,
+        symbolRow.symbolId,
         versionId,
         toFullCard(baseCard),
       );
@@ -555,7 +610,7 @@ async function loadSymbolCards(
 
   return {
     cards,
-    sliceDepsBySymbol: buildSliceDepsBySymbol(symbolIds, edgesMap),
+    sliceDepsBySymbol: await buildSliceDepsBySymbol(conn, symbolIds, edgesMap),
   };
 }
 
@@ -567,16 +622,17 @@ type SliceEdgeProjection = {
   confidence?: number;
 };
 
-function buildSliceDepsBySymbol(
+async function buildSliceDepsBySymbol(
+  conn: Connection,
   symbolIds: SymbolId[],
-  prefetchedEdgesMap?: Map<SymbolId, SliceEdgeProjection[]>,
-): Map<SymbolId, SliceSymbolDeps> {
+  prefetchedEdgesMap?: Map<SymbolId, kuzuDb.EdgeForSlice[]>,
+): Promise<Map<SymbolId, SliceSymbolDeps>> {
   const depMap = new Map<SymbolId, SliceSymbolDeps>();
   if (symbolIds.length === 0) {
     return depMap;
   }
 
-  const edgesMap = new Map<SymbolId, SliceEdgeProjection[]>();
+  const edgesMap = new Map<SymbolId, kuzuDb.EdgeForSlice[]>();
   if (prefetchedEdgesMap) {
     for (const [symbolId, edges] of prefetchedEdgesMap) {
       edgesMap.set(symbolId, edges);
@@ -587,7 +643,10 @@ function buildSliceDepsBySymbol(
     (symbolId) => !edgesMap.has(symbolId),
   );
   if (missingSymbolIds.length > 0) {
-    const missingEdgesMap = db.getEdgesFromSymbolsForSlice(missingSymbolIds);
+    const missingEdgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(
+      conn,
+      missingSymbolIds,
+    );
     for (const [symbolId, edges] of missingEdgesMap) {
       edgesMap.set(symbolId, edges);
     }
@@ -600,12 +659,12 @@ function buildSliceDepsBySymbol(
 
     for (const edge of outgoing) {
       const depRef = {
-        symbolId: edge.to_symbol_id,
+        symbolId: edge.toSymbolId,
         confidence: normalizeEdgeConfidence(edge.confidence),
       };
-      if (edge.type === "import") {
+      if (edge.edgeType === "import") {
         imports.push(depRef);
-      } else if (edge.type === "call") {
+      } else if (edge.edgeType === "call") {
         calls.push(depRef);
       }
     }
@@ -620,15 +679,16 @@ function buildSliceDepsBySymbol(
 }
 
 
-function loadEdgesBetweenSymbols(
+async function loadEdgesBetweenSymbols(
+  conn: Connection,
   symbolIds: SymbolId[],
   _repoId: RepoId,
   minConfidence: number,
-): {
+): Promise<{
   symbolIndex: SymbolId[];
   edges: [number, number, EdgeType, number][];
   confidenceDistribution: ConfidenceDistribution;
-} {
+}> {
   if (symbolIds.length === 0) {
     return {
       symbolIndex: [],
@@ -651,10 +711,19 @@ function loadEdgesBetweenSymbols(
     unknown: 0,
   };
 
-  const edgesMap = db.getEdgesFromSymbolsForSlice(symbolIds);
+  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, symbolIds);
 
   for (const [_fromId, outgoing] of edgesMap) {
     for (const edge of outgoing) {
+      const edgeType = edge.edgeType as EdgeType;
+      if (
+        edgeType !== "call" &&
+        edgeType !== "import" &&
+        edgeType !== "config"
+      ) {
+        continue;
+      }
+
       const edgeConfidence = normalizeEdgeConfidence(edge.confidence);
       if (
         typeof edge.confidence !== "number" ||
@@ -668,8 +737,14 @@ function loadEdgesBetweenSymbols(
       } else {
         confidenceDistribution.low++;
       }
-      if (symbolSet.has(edge.to_symbol_id) && edgeConfidence >= minConfidence) {
-        dbEdges.push(edge);
+      if (symbolSet.has(edge.toSymbolId) && edgeConfidence >= minConfidence) {
+        dbEdges.push({
+          from_symbol_id: edge.fromSymbolId,
+          to_symbol_id: edge.toSymbolId,
+          type: edgeType,
+          weight: edge.weight,
+          confidence: edge.confidence,
+        });
       }
     }
   }

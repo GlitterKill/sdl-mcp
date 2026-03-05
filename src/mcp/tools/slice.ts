@@ -23,10 +23,11 @@ import {
   type SliceErrorResponse,
   sliceErrorToResponse,
 } from "../../graph/slice/result.js";
-import * as db from "../../db/queries.js";
 import * as crypto from "crypto";
-import type { SliceHandleRow } from "../../db/schema.js";
 import { computeDelta } from "../../delta/diff.js";
+import { getKuzuConn } from "../../db/kuzu.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
+import type { SymbolKind, Visibility } from "../../db/schema.js";
 import {
   PolicyEngine,
   type PolicyRequestContext,
@@ -59,6 +60,21 @@ import {
 import { attachRawContext } from "../token-usage.js";
 
 const policyEngine = new PolicyEngine();
+
+const VISIBILITY_VALUES: readonly Visibility[] = [
+  "public",
+  "protected",
+  "private",
+  "exported",
+  "internal",
+] as const;
+
+function normalizeVisibility(value: string | null): Visibility | undefined {
+  if (!value) return undefined;
+  return (VISIBILITY_VALUES as readonly string[]).includes(value)
+    ? (value as Visibility)
+    : undefined;
+}
 
 function clampInt(value: number, min: number, max: number): number {
   const v = Math.trunc(value);
@@ -761,11 +777,13 @@ async function handleSliceBuildInternal(
         consumePrefetchedKey(repoId, `slice:${symbolId}`);
       }
     }
-    const repo = db.getRepo(repoId);
+    const conn = await getKuzuConn();
+
+    const repo = await kuzuDb.getRepo(conn, repoId);
     if (!repo) {
       throw new Error(`Repository not found: ${repoId}`);
     }
-    const repoConfig = JSON.parse(repo.config_json);
+    const repoConfig = JSON.parse(repo.configJson);
     const mergedPolicy = PolicyConfigSchema.parse({
       ...config.policy,
       ...(repoConfig.policy ?? {}),
@@ -812,7 +830,7 @@ async function handleSliceBuildInternal(
       });
     }
 
-    const latestVersion = db.getLatestVersion(repoId);
+    const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
     if (!latestVersion) {
       throw new Error(
         `No version found for repo ${repoId}. Please run indexing first.`,
@@ -821,7 +839,7 @@ async function handleSliceBuildInternal(
 
     const sliceRequest = {
       repoId,
-      versionId: latestVersion.version_id,
+      versionId: latestVersion.versionId,
       taskText,
       stackTrace,
       failingTestPath,
@@ -836,7 +854,7 @@ async function handleSliceBuildInternal(
     const policyContext: PolicyRequestContext = {
       requestType: "graphSlice",
       repoId: request.repoId,
-      versionId: latestVersion.version_id,
+      versionId: latestVersion.versionId,
       budget: effectiveBudget,
     };
 
@@ -874,43 +892,39 @@ async function handleSliceBuildInternal(
 
     const handle = generateSliceHandle();
     const sliceHash = generateSliceHash(slice);
-    const lease = createLease(latestVersion.version_id);
+    const lease = createLease(latestVersion.versionId);
     const sliceEtag = createSliceEtag(
       handle,
-      latestVersion.version_id,
+      latestVersion.versionId,
       sliceHash,
     );
 
-    const handleRow: SliceHandleRow = {
+    const handleRow: kuzuDb.SliceHandleRow = {
       handle,
-      repo_id: repoId,
-      created_at: new Date().toISOString(),
-      expires_at: lease.expiresAt,
-      min_version: lease.minVersion,
-      max_version: lease.maxVersion,
-      slice_hash: sliceHash,
-      spillover_ref: null,
+      repoId,
+      createdAt: new Date().toISOString(),
+      expiresAt: lease.expiresAt,
+      minVersion: lease.minVersion,
+      maxVersion: lease.maxVersion,
+      sliceHash: sliceHash,
+      spilloverRef: null,
     };
 
-    db.createSliceHandle(handleRow);
+    await kuzuDb.upsertSliceHandle(conn, handleRow);
 
     // For a fresh build, staleSymbols is always empty since we just built
     // from the current version. Assign explicitly to signal feature is active.
-    const cardSymbolIds = slice.cards.map((c) => c.symbolId);
-    slice.staleSymbols = db.getChangedSymbolsSinceVersion(
-      repoId,
-      cardSymbolIds,
-      handleRow.max_version ?? "",
-    );
+    slice.staleSymbols = [];
 
-    const symbolMap = db.getSymbolsByIdsLite(cardSymbolIds);
-    const fileIds = [...new Set(
-      Array.from(symbolMap.values()).map((s) => s.file_id),
-    )];
+    const cardSymbolIds = slice.cards.map((c) => c.symbolId);
+    const symbolMap = await kuzuDb.getSymbolsByIds(conn, cardSymbolIds);
+    const fileIds = [
+      ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
+    ];
 
     const response = {
       sliceHandle: handle,
-      ledgerVersion: latestVersion.version_id,
+      ledgerVersion: latestVersion.versionId,
       lease,
       sliceEtag,
       slice: serializeSliceForWireFormat(
@@ -967,10 +981,11 @@ export async function handleSliceRefresh(
   const request = SliceRefreshRequestSchema.parse(args);
   const { sliceHandle, knownVersion } = request;
 
-  const handleRow = db.getSliceHandle(sliceHandle);
+  const conn = await getKuzuConn();
+  const handleRow = await kuzuDb.getSliceHandle(conn, sliceHandle);
   if (handleRow) {
     recordToolTrace({
-      repoId: handleRow.repo_id,
+      repoId: handleRow.repoId,
       taskType: "slice",
       tool: "slice.refresh",
     });
@@ -980,9 +995,9 @@ export async function handleSliceRefresh(
   }
 
   const now = new Date();
-  if (new Date(handleRow.expires_at) < now) {
+  if (new Date(handleRow.expiresAt) < now) {
     const error = createPolicyDenial(
-      `Slice handle expired at ${handleRow.expires_at}. NextBestAction: 'refreshSlice' or build new slice`,
+      `Slice handle expired at ${handleRow.expiresAt}. NextBestAction: 'refreshSlice' or build new slice`,
       "refreshSlice",
       {
         refreshSlice: {
@@ -994,56 +1009,54 @@ export async function handleSliceRefresh(
     throw error;
   }
 
-  const latestVersion = db.getLatestVersion(handleRow.repo_id);
+  const latestVersion = await kuzuDb.getLatestVersion(conn, handleRow.repoId);
   if (!latestVersion) {
-    throw new Error(`No version found for repo ${handleRow.repo_id}`);
+    throw new Error(`No version found for repo ${handleRow.repoId}`);
   }
 
-  if (knownVersion === latestVersion.version_id) {
-    const lease = createLease(latestVersion.version_id);
-    db.deleteSliceHandle(sliceHandle);
-    const newHandleRow: SliceHandleRow = {
+  if (knownVersion === latestVersion.versionId) {
+    const lease = createLease(latestVersion.versionId);
+    const newHandleRow: kuzuDb.SliceHandleRow = {
       ...handleRow,
       handle: sliceHandle,
-      created_at: new Date().toISOString(),
-      expires_at: lease.expiresAt,
-      min_version: handleRow.max_version,
-      max_version: latestVersion.version_id,
+      createdAt: new Date().toISOString(),
+      expiresAt: lease.expiresAt,
+      minVersion: handleRow.maxVersion,
+      maxVersion: latestVersion.versionId,
     };
-    db.createSliceHandle(newHandleRow);
+    await kuzuDb.upsertSliceHandle(conn, newHandleRow);
 
     return {
       sliceHandle,
       knownVersion,
-      currentVersion: latestVersion.version_id,
+      currentVersion: latestVersion.versionId,
       notModified: true,
       delta: null,
       lease,
     };
   }
 
-  const delta = computeDelta(
-    handleRow.repo_id,
+  const delta = await computeDelta(
+    handleRow.repoId,
     knownVersion,
-    latestVersion.version_id,
+    latestVersion.versionId,
   );
 
-  const lease = createLease(latestVersion.version_id);
-  db.deleteSliceHandle(sliceHandle);
-  const newHandleRow: SliceHandleRow = {
+  const lease = createLease(latestVersion.versionId);
+  const newHandleRow: kuzuDb.SliceHandleRow = {
     ...handleRow,
     handle: sliceHandle,
-    created_at: new Date().toISOString(),
-    expires_at: lease.expiresAt,
-    min_version: knownVersion,
-    max_version: latestVersion.version_id,
+    createdAt: new Date().toISOString(),
+    expiresAt: lease.expiresAt,
+    minVersion: knownVersion,
+    maxVersion: latestVersion.versionId,
   };
-  db.createSliceHandle(newHandleRow);
+  await kuzuDb.upsertSliceHandle(conn, newHandleRow);
 
   const response = {
     sliceHandle,
     knownVersion,
-    currentVersion: latestVersion.version_id,
+    currentVersion: latestVersion.versionId,
     notModified: false,
     delta: delta as DeltaPackWithGovernance | null,
     lease,
@@ -1051,9 +1064,9 @@ export async function handleSliceRefresh(
 
   if (delta && delta.changedSymbols.length > 0) {
     const changedIds = delta.changedSymbols.map((c) => c.symbolId);
-    const symbolMap = db.getSymbolsByIdsLite(changedIds);
+    const symbolMap = await kuzuDb.getSymbolsByIds(conn, changedIds);
     attachRawContext(response, {
-      fileIds: [...new Set(Array.from(symbolMap.values()).map((s) => s.file_id))],
+      fileIds: [...new Set(Array.from(symbolMap.values()).map((s) => s.fileId))],
     });
   }
 
@@ -1066,9 +1079,10 @@ export async function handleSliceRefresh(
  *
  * @returns Number of deleted handles
  */
-export function cleanupExpiredSliceHandles(): number {
+export async function cleanupExpiredSliceHandles(): Promise<number> {
+  const conn = await getKuzuConn();
   const now = new Date().toISOString();
-  return db.deleteExpiredSliceHandles(now);
+  return kuzuDb.deleteExpiredSliceHandles(conn, now);
 }
 
 /**
@@ -1086,18 +1100,19 @@ export async function handleSliceSpilloverGet(
   const request = SliceSpilloverGetRequestSchema.parse(args);
   const { spilloverHandle, cursor, pageSize } = request;
 
-  const handleRow = db.getSliceHandle(spilloverHandle);
+  const conn = await getKuzuConn();
+  const handleRow = await kuzuDb.getSliceHandle(conn, spilloverHandle);
   if (!handleRow) {
     throw new Error(`Spillover handle not found: ${spilloverHandle}`);
   }
 
   recordToolTrace({
-    repoId: handleRow.repo_id,
+    repoId: handleRow.repoId,
     taskType: "slice",
     tool: "slice.spillover",
   });
 
-  if (!handleRow.spillover_ref) {
+  if (!handleRow.spilloverRef) {
     return {
       spilloverHandle,
       cursor: undefined,
@@ -1113,7 +1128,7 @@ export async function handleSliceSpilloverGet(
   }>;
 
   try {
-    droppedSymbols = JSON.parse(handleRow.spillover_ref);
+    droppedSymbols = JSON.parse(handleRow.spilloverRef);
   } catch (error) {
     throw new Error(
       `Failed to parse spillover_ref JSON for handle ${spilloverHandle}: ${String(error)}`,
@@ -1129,71 +1144,74 @@ export async function handleSliceSpilloverGet(
 
   const pageSymbols = droppedSymbols.slice(startIndex, endIndex);
 
-  const spilloverFileIds: number[] = [];
+  const symbolIds = pageSymbols.map((item) => item.symbolId);
+  const symbolsById = await kuzuDb.getSymbolsByIds(conn, symbolIds);
+  const pageFileIds = [...new Set(Array.from(symbolsById.values()).map((s) => s.fileId))];
+  const filesById = await kuzuDb.getFilesByIds(conn, pageFileIds);
+  const metricsById = await kuzuDb.getMetricsBySymbolIds(conn, symbolIds);
+  const edgesFromBySymbol = await kuzuDb.getEdgesFromSymbols(conn, symbolIds);
+
+  const allTargetIds = new Set<string>();
+  for (const edges of edgesFromBySymbol.values()) {
+    for (const edge of edges) {
+      allTargetIds.add(edge.toSymbolId);
+    }
+  }
+  const targetSymbolsById =
+    allTargetIds.size > 0
+      ? await kuzuDb.getSymbolsByIdsLite(conn, Array.from(allTargetIds))
+      : new Map<string, { symbolId: string; name: string; kind: string }>();
+
+  const spilloverFileIds: string[] = [];
   const symbols = pageSymbols
     .map((item) => {
-      const symbolRow = db.getSymbol(item.symbolId);
+      const symbolRow = symbolsById.get(item.symbolId);
       if (!symbolRow) return null;
 
-      spilloverFileIds.push(symbolRow.file_id);
-      const file = db.getFile(symbolRow.file_id);
-      const metrics = db.getMetrics(item.symbolId);
+      spilloverFileIds.push(symbolRow.fileId);
+      const file = filesById.get(symbolRow.fileId) ?? null;
+      const metrics = metricsById.get(item.symbolId) ?? null;
 
       const deps = {
         imports: [] as string[],
         calls: [] as string[],
       };
 
-      const outgoingEdges = db.getEdgesFrom(item.symbolId);
-      const targetSymbolIds = Array.from(
-        new Set(outgoingEdges.map((edge) => edge.to_symbol_id)),
-      );
-      const targetSymbolsById =
-        targetSymbolIds.length > 0
-          ? db.getSymbolsByIdsLite(targetSymbolIds)
-          : new Map<string, { symbol_id: string; name: string }>();
-
+      const outgoingEdges = edgesFromBySymbol.get(item.symbolId) ?? [];
       for (const edge of outgoingEdges) {
-        if (edge.type === "import") {
+        if (edge.edgeType === "import") {
           const depLabel = pickDepLabel(
-            edge.to_symbol_id,
-            targetSymbolsById.get(edge.to_symbol_id)?.name,
+            edge.toSymbolId,
+            targetSymbolsById.get(edge.toSymbolId)?.name,
           );
-          if (depLabel) {
-            deps.imports.push(depLabel);
-          }
-        } else if (edge.type === "call") {
+          if (depLabel) deps.imports.push(depLabel);
+        } else if (edge.edgeType === "call") {
           const depLabel = pickDepLabel(
-            edge.to_symbol_id,
-            targetSymbolsById.get(edge.to_symbol_id)?.name,
+            edge.toSymbolId,
+            targetSymbolsById.get(edge.toSymbolId)?.name,
           );
-          if (depLabel) {
-            deps.calls.push(depLabel);
-          }
+          if (depLabel) deps.calls.push(depLabel);
         }
       }
 
-      let signature;
-      if (symbolRow.signature_json) {
+      let signature: unknown = { name: symbolRow.name };
+      if (symbolRow.signatureJson) {
         try {
-          signature = JSON.parse(symbolRow.signature_json);
+          signature = JSON.parse(symbolRow.signatureJson);
         } catch (error) {
-          logger.warn("Failed to parse signature_json JSON", {
+          logger.warn("Failed to parse signatureJson JSON", {
             symbolId: item.symbolId,
             error: String(error),
           });
-          signature = { name: symbolRow.name };
         }
-      } else {
-        signature = { name: symbolRow.name };
       }
 
       let invariants: string[] | undefined;
-      if (symbolRow.invariants_json) {
+      if (symbolRow.invariantsJson) {
         try {
-          invariants = JSON.parse(symbolRow.invariants_json);
+          invariants = JSON.parse(symbolRow.invariantsJson);
         } catch (error) {
-          logger.warn("Failed to parse invariants_json JSON", {
+          logger.warn("Failed to parse invariantsJson JSON", {
             symbolId: item.symbolId,
             error: String(error),
           });
@@ -1201,11 +1219,11 @@ export async function handleSliceSpilloverGet(
       }
 
       let sideEffects: string[] | undefined;
-      if (symbolRow.side_effects_json) {
+      if (symbolRow.sideEffectsJson) {
         try {
-          sideEffects = JSON.parse(symbolRow.side_effects_json);
+          sideEffects = JSON.parse(symbolRow.sideEffectsJson);
         } catch (error) {
-          logger.warn("Failed to parse side_effects_json JSON", {
+          logger.warn("Failed to parse sideEffectsJson JSON", {
             symbolId: item.symbolId,
             error: String(error),
           });
@@ -1215,11 +1233,11 @@ export async function handleSliceSpilloverGet(
       let metricsData;
       if (metrics) {
         let testRefs: string[] | undefined;
-        if (metrics.test_refs_json) {
+        if (metrics.testRefsJson) {
           try {
-            testRefs = JSON.parse(metrics.test_refs_json);
+            testRefs = JSON.parse(metrics.testRefsJson);
           } catch (error) {
-            logger.warn("Failed to parse test_refs_json JSON", {
+            logger.warn("Failed to parse testRefsJson JSON", {
               symbolId: item.symbolId,
               error: String(error),
             });
@@ -1227,36 +1245,36 @@ export async function handleSliceSpilloverGet(
         }
 
         metricsData = {
-          fanIn: metrics.fan_in,
-          fanOut: metrics.fan_out,
-          churn30d: metrics.churn_30d,
+          fanIn: metrics.fanIn,
+          fanOut: metrics.fanOut,
+          churn30d: metrics.churn30d,
           testRefs,
         };
       }
 
       return {
-        symbolId: symbolRow.symbol_id,
-        repoId: symbolRow.repo_id,
-        file: file?.rel_path ?? "",
+        symbolId: symbolRow.symbolId,
+        repoId: symbolRow.repoId,
+        file: file?.relPath ?? "",
         range: {
-          startLine: symbolRow.range_start_line,
-          startCol: symbolRow.range_start_col,
-          endLine: symbolRow.range_end_line,
-          endCol: symbolRow.range_end_col,
+          startLine: symbolRow.rangeStartLine,
+          startCol: symbolRow.rangeStartCol,
+          endLine: symbolRow.rangeEndLine,
+          endCol: symbolRow.rangeEndCol,
         },
-        kind: symbolRow.kind,
+        kind: symbolRow.kind as SymbolKind,
         name: symbolRow.name,
-        exported: symbolRow.exported === 1,
-        visibility: symbolRow.visibility ?? undefined,
-        signature,
+        exported: symbolRow.exported,
+        visibility: normalizeVisibility(symbolRow.visibility),
+        signature: signature as any,
         summary: symbolRow.summary ?? undefined,
         invariants,
         sideEffects,
         deps,
         metrics: metricsData,
         version: {
-          ledgerVersion: handleRow.max_version ?? "",
-          astFingerprint: symbolRow.ast_fingerprint,
+          ledgerVersion: handleRow.maxVersion ?? "",
+          astFingerprint: symbolRow.astFingerprint,
         },
       };
     })

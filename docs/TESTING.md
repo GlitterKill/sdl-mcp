@@ -59,7 +59,7 @@ Golden File Tests (fixture output validation)
 
 ### All Tests
 
-SDL-MCP tests rely on `dist/` for some runtime entrypoints (for example, DB migrations). Build first, then run tests.
+SDL-MCP tests rely on `dist/` for some runtime entrypoints (for example, graph DB schema init). Build first, then run tests.
 
 ```bash
 npm run build
@@ -176,7 +176,7 @@ EOF
       "languages": ["ts", "py", "go", "java"]
     }
   ],
-  "dbPath": "/tmp/test-polyglot/sdlmcp.sqlite",
+  "graphDatabase": { "path": "/tmp/test-polyglot/sdl-mcp-graph" },
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,

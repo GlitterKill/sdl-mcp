@@ -1,5 +1,9 @@
 import { parentPort } from "worker_threads";
 import { getAdapterForExtension } from "./adapter/registry.js";
+import { generateAstFingerprint } from "./fingerprints.js";
+
+import type { ExtractedSymbol, ExtractedCall } from "./treesitter/extractCalls.js";
+import type { ExtractedImport } from "./treesitter/extractImports.js";
 
 interface WorkerMessage {
   filePath: string;
@@ -7,11 +11,13 @@ interface WorkerMessage {
   ext: string;
 }
 
+export type SymbolWithNodeId = ExtractedSymbol & { astFingerprint: string };
+
 interface WorkerResult {
-  tree?: any;
-  symbols: Array<any>;
-  imports: Array<any>;
-  calls: Array<any>;
+  tree?: null;
+  symbols: Array<SymbolWithNodeId>;
+  imports: Array<ExtractedImport>;
+  calls: Array<ExtractedCall>;
   error?: string;
 }
 
@@ -50,15 +56,55 @@ parentPort?.on("message", (msg: WorkerMessage) => {
     }
 
     const imports = adapter.extractImports(tree, msg.content, msg.filePath);
-    const symbolsWithNodeIds = extractedSymbols.map((symbol) => ({
-      nodeId: symbol.nodeId,
-      kind: symbol.kind,
-      name: symbol.name,
-      exported: symbol.exported,
-      range: symbol.range,
-      signature: symbol.signature,
-      visibility: symbol.visibility,
-    }));
+
+    const nodesByType = new Map<string, any[]>();
+    const getNodeTypeForKind = (kind: string): string =>
+      kind === "function"
+        ? "function_declaration"
+        : kind === "class"
+          ? "class_declaration"
+          : kind === "interface"
+            ? "interface_declaration"
+            : kind === "type"
+              ? "type_alias_declaration"
+              : kind === "method"
+                ? "method_definition"
+                : kind === "variable"
+                  ? "variable_declaration"
+                  : "ambient_statement";
+
+    const symbolsWithNodeIds = extractedSymbols.map((symbol) => {
+      let astFingerprint = "";
+      try {
+        const nodeType = getNodeTypeForKind(symbol.kind);
+        const candidates =
+          nodesByType.get(nodeType) ??
+          tree.rootNode.descendantsOfType(nodeType);
+        if (!nodesByType.has(nodeType)) {
+          nodesByType.set(nodeType, candidates);
+        }
+
+        const astNode = candidates.find((node: any) => {
+          const nameNode = node.childForFieldName?.("name");
+          return nameNode?.text === symbol.name;
+        });
+
+        astFingerprint = astNode ? generateAstFingerprint(astNode) : "";
+      } catch {
+        astFingerprint = "";
+      }
+
+      return {
+        nodeId: symbol.nodeId,
+        kind: symbol.kind,
+        name: symbol.name,
+        exported: symbol.exported,
+        range: symbol.range,
+        signature: symbol.signature,
+        visibility: symbol.visibility,
+        astFingerprint,
+      };
+    });
 
     const calls = adapter.extractCalls(
       tree,

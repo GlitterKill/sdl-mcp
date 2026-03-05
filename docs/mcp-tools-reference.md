@@ -125,6 +125,8 @@ Start with `level: "stats"` (cheapest). Escalate to `"directories"` or `"full"` 
 - `stats` — fileCount, symbolCount, edgeCount, exportedSymbolCount, byKind, byEdgeType, avgSymbolsPerFile, avgEdgesPerSymbol
 - `directories` — array of summaries with path, fileCount, symbolCount, exports, topByFanIn, topByChurn
 - `hotspots` (optional) — mostDepended, mostChanged, largestFiles, mostConnected
+- `clusters` (optional) — totalClusters, averageClusterSize, largestClusters
+- `processes` (optional) — totalProcesses, averageDepth, entryPoints, longestProcesses
 - `tokenMetrics` — fullCardsEstimate, overviewTokens, compressionRatio
 
 **Examples:**
@@ -189,7 +191,7 @@ Fetch a single symbol card by ID with ETag support.
 | `symbolId` | `string` | Yes | Symbol identifier |
 | `ifNoneMatch` | `string` | No | ETag for conditional fetch (returns `notModified` if unchanged) |
 
-The returned card includes identity, signature, summary, invariants, side effects, dependency edges (imports/calls), and metrics. `metrics.canonicalTest` (if available) contains the file path, distance, and proximity of the nearest associated test.
+The returned card includes identity, signature, summary, invariants, side effects, dependency edges (imports/calls), metrics, and (when available) cluster/process metadata (`card.cluster`, `card.processes`). `metrics.canonicalTest` (if available) contains the file path, distance, and proximity of the nearest associated test.
 
 **Response:** Either `{ card: SymbolCard }` or `{ notModified: true, etag, ledgerVersion }`.
 
@@ -290,7 +292,7 @@ Build a task-scoped graph slice. `taskText` alone is sufficient — it triggers 
 
 **Response:** `{ sliceHandle, ledgerVersion, lease, sliceEtag?, slice }` or `{ notModified }`.
 
-The slice contains `symbolIndex`, `cards`, optional `cardRefs` (for ETag matches), `edges`, optional `frontier`, and optional `truncation` with resume info.
+The slice contains `symbolIndex`, `cards`, optional `cardRefs` (for ETag matches), `edges`, optional `frontier`, and optional `truncation` with resume info. Slice cards may include cluster/process metadata (`card.cluster`, `card.processes`) when available.
 
 **Tips:**
 - Raise `minConfidence` toward 0.8-0.95 for precision-focused runs; keep near 0.5 for recall-oriented work
@@ -381,7 +383,7 @@ Compute a delta pack between two ledger versions, showing changed symbols and bl
 
 **Response includes:**
 
-- `delta` — changedSymbols (with changeType, signatureDiff, invariantDiff, sideEffectDiff), blastRadius (ranked by distance/signal with fanInTrend), diagnosticsSummary, diagnosticSuspects, truncation, trimmedSet, spilloverHandle
+- `delta` — changedSymbols (with changeType, signatureDiff, invariantDiff, sideEffectDiff), blastRadius (ranked by distance/signal: diagnostic|directDependent|graph|process, with fanInTrend), diagnosticsSummary, diagnosticSuspects, truncation, trimmedSet, spilloverHandle
 - `amplifiers` — multipliers for dependent symbols (symbolId, growthRate, previous/current fan-in) that increase blast-radius scoring
 
 **Example:**

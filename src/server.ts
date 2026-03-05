@@ -107,7 +107,7 @@ export class MCPServer {
             if (result && typeof result === "object") {
               const r = result as Record<string, unknown>;
               if (shouldAttachUsage(request.params.name) && r._rawContext) {
-                r._tokenUsage = computeTokenUsage(r);
+                r._tokenUsage = await computeTokenUsage(r);
               }
               finalResult = stripRawContext(r);
             }

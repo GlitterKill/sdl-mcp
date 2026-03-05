@@ -1,6 +1,5 @@
 {
   "$schema": "./sdlmcp.config.schema.json",
-
   "repos": [
     {
       "repoId": "my-repo",
@@ -14,10 +13,20 @@
         "**/coverage/**"
       ],
       "languages": [
-        "ts", "tsx", "js", "jsx",
-        "py", "go", "java", "cs",
-        "c", "cpp", "php", "rs",
-        "kt", "sh"
+        "ts",
+        "tsx",
+        "js",
+        "jsx",
+        "py",
+        "go",
+        "java",
+        "cs",
+        "c",
+        "cpp",
+        "php",
+        "rs",
+        "kt",
+        "sh"
       ],
       "maxFileBytes": 2000000,
       "includeNodeModulesTypes": true,
@@ -26,22 +35,17 @@
       "workspaceGlobs": null
     }
   ],
-
-  "dbPath": "./data/sdlmcp.sqlite",
-
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,
     "requireIdentifiers": true,
     "allowBreakGlass": true
   },
-
   "redaction": {
     "enabled": true,
     "includeDefaults": true,
     "patterns": []
   },
-
   "indexing": {
     "concurrency": 8,
     "enableFileWatching": true,
@@ -50,17 +54,15 @@
     "engine": "typescript",
     "watchDebounceMs": 300
   },
-
   "slice": {
     "defaultMaxCards": 60,
     "defaultMaxTokens": 12000,
     "edgeWeights": {
-      "call": 1.0,
+      "call": 1,
       "import": 0.6,
       "config": 0.8
     }
   },
-
   "diagnostics": {
     "enabled": true,
     "mode": "tsLS",
@@ -68,7 +70,6 @@
     "timeoutMs": 2000,
     "scope": "changedFiles"
   },
-
   "cache": {
     "enabled": true,
     "symbolCardMaxEntries": 2000,
@@ -76,13 +77,11 @@
     "graphSliceMaxEntries": 1000,
     "graphSliceMaxSizeBytes": 52428800
   },
-
   "plugins": {
     "paths": [],
     "enabled": true,
     "strictVersioning": true
   },
-
   "semantic": {
     "enabled": true,
     "alpha": 0.6,
@@ -102,24 +101,24 @@
       "maxElements": 200000
     }
   },
-
   "prefetch": {
     "enabled": true,
     "maxBudgetPercent": 20,
     "warmTopN": 50
   },
-
   "tracing": {
     "enabled": false,
     "serviceName": "sdl-mcp",
     "exporterType": "console",
     "otlpEndpoint": null,
-    "sampleRate": 1.0
+    "sampleRate": 1
   },
-
   "parallelScorer": {
     "enabled": false,
     "poolSize": null,
     "minBatchSize": null
+  },
+  "graphDatabase": {
+    "path": "./data/sdl-mcp-graph"
   }
 }

@@ -1,21 +1,14 @@
+import { createHash } from "crypto";
 import { exec } from "child_process";
-import { promisify } from "util";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { createHash } from "crypto";
+import { promisify } from "util";
 import fg from "fast-glob";
-import {
-  getEdgesByRepo,
-  getFilesByRepo,
-  getMetrics,
-  getRepo,
-  getSymbolsByRepo,
-  upsertMetrics,
-} from "../db/queries.js";
-import type { EdgeRow } from "../db/schema.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
+import type { EdgeRow, MetricsRow, SymbolRow } from "../db/kuzu-queries.js";
 import type { RepoConfig } from "../config/types.js";
 import type { CanonicalTest, StalenessTiers } from "../mcp/types.js";
-import type { Graph } from "./buildGraph.js";
 import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
 
@@ -62,16 +55,16 @@ function calculateFanMetrics(
   const metrics = new Map<string, FanMetrics>();
 
   for (const edge of edges) {
-    if (!symbols.has(edge.from_symbol_id) || !symbols.has(edge.to_symbol_id)) {
+    if (!symbols.has(edge.fromSymbolId) || !symbols.has(edge.toSymbolId)) {
       continue;
     }
-    const from = metrics.get(edge.from_symbol_id) ?? { fanIn: 0, fanOut: 0 };
+    const from = metrics.get(edge.fromSymbolId) ?? { fanIn: 0, fanOut: 0 };
     from.fanOut += 1;
-    metrics.set(edge.from_symbol_id, from);
+    metrics.set(edge.fromSymbolId, from);
 
-    const to = metrics.get(edge.to_symbol_id) ?? { fanIn: 0, fanOut: 0 };
+    const to = metrics.get(edge.toSymbolId) ?? { fanIn: 0, fanOut: 0 };
     to.fanIn += 1;
-    metrics.set(edge.to_symbol_id, to);
+    metrics.set(edge.toSymbolId, to);
   }
 
   return metrics;
@@ -147,7 +140,7 @@ function computeFileHash(content: string): string {
 
 function collectTestRefs(
   repoRoot: string,
-  symbols: Array<{ symbol_id: string; name: string }>,
+  symbols: Array<{ symbolId: string; name: string }>,
   config: RepoConfig,
   _changedTestFiles?: Set<string>,
 ): Map<string, Set<string>> {
@@ -168,7 +161,7 @@ function collectTestRefs(
   const nameToSymbolIds = new Map<string, string[]>();
   for (const symbol of symbols) {
     const existing = nameToSymbolIds.get(symbol.name) ?? [];
-    existing.push(symbol.symbol_id);
+    existing.push(symbol.symbolId);
     nameToSymbolIds.set(symbol.name, existing);
   }
 
@@ -292,7 +285,7 @@ interface BfsCandidate {
 export function computeCanonicalTest(
   symbolId: string,
   graph: Graph,
-  fileById?: Map<number, string>,
+  fileById?: Map<string, string>,
 ): CanonicalTest | null {
   /**
    * Resolve a relative file path for a given symbolId in the graph.
@@ -304,11 +297,11 @@ export function computeCanonicalTest(
     const sym = graph.symbols.get(sid);
     if (!sym) return null;
     if (fileById) {
-      return fileById.get(sym.file_id) ?? null;
+      return fileById.get(sym.fileId) ?? null;
     }
-    // For pure unit tests the SymbolRow may carry rel_path as an extension
-    const extended = sym as unknown as { rel_path?: string };
-    return extended.rel_path ?? null;
+    // For pure unit tests the SymbolRow may carry rel_path/relPath as an extension
+    const extended = sym as unknown as { rel_path?: string; relPath?: string };
+    return extended.relPath ?? extended.rel_path ?? null;
   }
 
   const visited = new Set<string>();
@@ -336,7 +329,7 @@ export function computeCanonicalTest(
     // Forward edges (outgoing)
     const outgoing = graph.adjacencyOut.get(current) ?? [];
     for (const edge of outgoing) {
-      const neighbor = edge.to_symbol_id;
+      const neighbor = edge.toSymbolId;
       if (visited.has(neighbor)) continue;
       visited.add(neighbor);
       const neighborPath = getRelPath(neighbor);
@@ -349,7 +342,7 @@ export function computeCanonicalTest(
     // Backward edges (incoming)
     const incoming = graph.adjacencyIn.get(current) ?? [];
     for (const edge of incoming) {
-      const neighbor = edge.from_symbol_id;
+      const neighbor = edge.fromSymbolId;
       if (visited.has(neighbor)) continue;
       visited.add(neighbor);
       const neighborPath = getRelPath(neighbor);
@@ -395,7 +388,7 @@ export function computeCanonicalTest(
  */
 function batchComputeCanonicalTests(
   graph: Graph,
-  fileById: Map<number, string>,
+  fileById: Map<string, string>,
 ): Map<string, CanonicalTest | null> {
   // Seed the BFS from every symbol that lives in a test file.
   interface QueueItem {
@@ -410,7 +403,7 @@ function batchComputeCanonicalTests(
   let queueHead = 0;
 
   for (const [symId, sym] of graph.symbols) {
-    const relPath = fileById.get(sym.file_id);
+    const relPath = fileById.get(sym.fileId);
     if (relPath && isTestFile(relPath)) {
       if (!nearest.has(symId)) {
         nearest.set(symId, { file: relPath, symbolId: symId, distance: 0 });
@@ -437,7 +430,7 @@ function batchComputeCanonicalTests(
 
     // Traverse outgoing edges (forward)
     for (const edge of graph.adjacencyOut.get(current) ?? []) {
-      const neighbor = edge.to_symbol_id;
+      const neighbor = edge.toSymbolId;
       if (!nearest.has(neighbor)) {
         nearest.set(neighbor, { file: testFile, symbolId: testSymbolId, distance: distance + 1 });
         queue.push({ symbolId: neighbor, distance: distance + 1, testSymbolId, testFile });
@@ -446,7 +439,7 @@ function batchComputeCanonicalTests(
 
     // Traverse incoming edges (backward)
     for (const edge of graph.adjacencyIn.get(current) ?? []) {
-      const neighbor = edge.from_symbol_id;
+      const neighbor = edge.fromSymbolId;
       if (!nearest.has(neighbor)) {
         nearest.set(neighbor, { file: testFile, symbolId: testSymbolId, distance: distance + 1 });
         queue.push({ symbolId: neighbor, distance: distance + 1, testSymbolId, testFile });
@@ -496,18 +489,19 @@ export function calculateRiskScore(
 export function calculateRiskScoresForSymbols(
   symbolTiers: Map<string, StalenessTiers>,
   diagnostics: Map<string, boolean>,
+  metricsBySymbolId: Map<string, MetricsRow | null>,
 ): Map<string, number> {
   const riskScores = new Map<string, number>();
 
   for (const [symbolId, tiers] of symbolTiers) {
-    const metrics = getMetrics(symbolId);
+    const metrics = metricsBySymbolId.get(symbolId) ?? null;
     if (!metrics) continue;
 
     const hasDiagnostics = diagnostics.get(symbolId) ?? false;
     const riskScore = calculateRiskScore(
       tiers,
-      metrics.fan_in,
-      metrics.fan_out,
+      metrics.fanIn,
+      metrics.fanOut,
       hasDiagnostics,
     );
 
@@ -519,18 +513,24 @@ export function calculateRiskScoresForSymbols(
 
 export async function updateMetricsForRepo(
   repoId: string,
-  changedFileIds?: Set<number>,
+  changedFileIds?: Set<string>,
 ): Promise<void> {
-  const edges = getEdgesByRepo(repoId);
-  const repo = getRepo(repoId);
+  const conn = await getKuzuConn();
+
+  const [edges, repo] = await Promise.all([
+    kuzuDb.getEdgesByRepo(conn, repoId),
+    kuzuDb.getRepo(conn, repoId),
+  ]);
   if (!repo) {
     return;
   }
-  const config: RepoConfig = JSON.parse(repo.config_json);
-  const files = getFilesByRepo(repoId);
-  const fileById = new Map(files.map((file) => [file.file_id, file.rel_path]));
-  const allSymbols = getSymbolsByRepo(repoId);
-  const symbolIds = new Set(allSymbols.map((symbol) => symbol.symbol_id));
+  const config: RepoConfig = JSON.parse(repo.configJson);
+  const [files, allSymbols] = await Promise.all([
+    kuzuDb.getFilesByRepo(conn, repoId),
+    kuzuDb.getSymbolsByRepo(conn, repoId),
+  ]);
+  const fileById = new Map(files.map((file) => [file.fileId, file.relPath]));
+  const symbolIds = new Set(allSymbols.map((symbol) => symbol.symbolId));
 
   let symbols = allSymbols;
 
@@ -544,42 +544,42 @@ export async function updateMetricsForRepo(
     const affectedSymbolIds = new Set<string>();
 
     for (const symbol of allSymbols) {
-      if (changedFileIds.has(symbol.file_id)) {
-        affectedSymbolIds.add(symbol.symbol_id);
+      if (changedFileIds.has(symbol.fileId)) {
+        affectedSymbolIds.add(symbol.symbolId);
       }
     }
 
     for (const edge of edges) {
-      if (affectedSymbolIds.has(edge.from_symbol_id)) {
-        affectedSymbolIds.add(edge.to_symbol_id);
+      if (affectedSymbolIds.has(edge.fromSymbolId)) {
+        affectedSymbolIds.add(edge.toSymbolId);
       }
-      if (affectedSymbolIds.has(edge.to_symbol_id)) {
-        affectedSymbolIds.add(edge.from_symbol_id);
+      if (affectedSymbolIds.has(edge.toSymbolId)) {
+        affectedSymbolIds.add(edge.fromSymbolId);
       }
     }
 
-    symbols = allSymbols.filter((s) => affectedSymbolIds.has(s.symbol_id));
+    symbols = allSymbols.filter((s) => affectedSymbolIds.has(s.symbolId));
     logger.debug(
       `Incremental metrics: updating ${symbols.length} of ${allSymbols.length} symbols for ${changedFileIds.size} changed files`,
     );
   }
 
   const fanMetrics = calculateFanMetrics(edges, symbolIds);
-  const churnByFile = await getChurnByFileCached(repo.root_path);
-  const testRefs = collectTestRefs(repo.root_path, allSymbols, config);
+  const churnByFile = await getChurnByFileCached(repo.rootPath);
+  const testRefs = collectTestRefs(repo.rootPath, allSymbols, config);
 
   // Build a lightweight Graph for canonicalTest BFS
-  const symbolMap = new Map(allSymbols.map((s) => [s.symbol_id, s]));
+  const symbolMap = new Map(allSymbols.map((s) => [s.symbolId, s]));
   const adjacencyOut = new Map<string, EdgeRow[]>();
   const adjacencyIn = new Map<string, EdgeRow[]>();
   for (const s of allSymbols) {
-    adjacencyOut.set(s.symbol_id, []);
-    adjacencyIn.set(s.symbol_id, []);
+    adjacencyOut.set(s.symbolId, []);
+    adjacencyIn.set(s.symbolId, []);
   }
   for (const edge of edges) {
-    const outList = adjacencyOut.get(edge.from_symbol_id);
+    const outList = adjacencyOut.get(edge.fromSymbolId);
     if (outList) outList.push(edge);
-    const inList = adjacencyIn.get(edge.to_symbol_id);
+    const inList = adjacencyIn.get(edge.toSymbolId);
     if (inList) inList.push(edge);
   }
   const graph: Graph = {
@@ -597,13 +597,13 @@ export async function updateMetricsForRepo(
   const now = monotonicIsoNow();
 
   for (const symbol of symbols) {
-    const metric = fanMetrics.get(symbol.symbol_id) ?? { fanIn: 0, fanOut: 0 };
-    const relPath = fileById.get(symbol.file_id);
+    const metric = fanMetrics.get(symbol.symbolId) ?? { fanIn: 0, fanOut: 0 };
+    const relPath = fileById.get(symbol.fileId);
     const churn = relPath ? (churnByFile.get(relPath) ?? 0) : 0;
-    const refs = Array.from(testRefs.get(symbol.symbol_id) ?? []);
-    const canonicalTest = batchCanonical.get(symbol.symbol_id) ?? null;
-    upsertMetrics({
-      symbolId: symbol.symbol_id,
+    const refs = Array.from(testRefs.get(symbol.symbolId) ?? []);
+    const canonicalTest = batchCanonical.get(symbol.symbolId) ?? null;
+    await kuzuDb.upsertMetrics(conn, {
+      symbolId: symbol.symbolId,
       fanIn: metric.fanIn,
       fanOut: metric.fanOut,
       churn30d: churn,
@@ -612,4 +612,12 @@ export async function updateMetricsForRepo(
       updatedAt: now,
     });
   }
+}
+
+export interface Graph {
+  repoId: string;
+  symbols: Map<string, SymbolRow>;
+  edges: EdgeRow[];
+  adjacencyIn: Map<string, EdgeRow[]>;
+  adjacencyOut: Map<string, EdgeRow[]>;
 }

@@ -3,14 +3,20 @@
   "title": "SDL-MCP Configuration",
   "description": "Configuration schema for SDL-MCP (Symbol Delta Ledger MCP Server)",
   "type": "object",
-  "required": ["repos", "dbPath", "policy"],
+  "required": [
+    "repos",
+    "policy"
+  ],
   "properties": {
     "repos": {
       "type": "array",
       "description": "List of repositories to index",
       "items": {
         "type": "object",
-        "required": ["repoId", "rootPath"],
+        "required": [
+          "repoId",
+          "rootPath"
+        ],
         "properties": {
           "repoId": {
             "type": "string",
@@ -105,7 +111,7 @@
     },
     "dbPath": {
       "type": "string",
-      "description": "Path to SQLite database file",
+      "description": "Deprecated legacy SQLite database path (v0.7.x). Only used by the one-time SQLite→Kuzu migration script in v0.8.",
       "minLength": 1
     },
     "policy": {
@@ -161,7 +167,9 @@
           "description": "Custom redaction patterns",
           "items": {
             "type": "object",
-            "required": ["pattern"],
+            "required": [
+              "pattern"
+            ],
             "properties": {
               "name": {
                 "type": "string",
@@ -218,7 +226,10 @@
         "engine": {
           "type": "string",
           "description": "Pass-1 indexing engine implementation",
-          "enum": ["typescript", "rust"],
+          "enum": [
+            "typescript",
+            "rust"
+          ],
           "default": "typescript"
         },
         "watchDebounceMs": {
@@ -261,7 +272,7 @@
               "type": "number",
               "description": "Weight for call edges",
               "minimum": 0,
-              "default": 1.0
+              "default": 1
             },
             "import": {
               "type": "number",
@@ -277,7 +288,7 @@
             }
           },
           "default": {
-            "call": 1.0,
+            "call": 1,
             "import": 0.6,
             "config": 0.8
           }
@@ -287,7 +298,7 @@
         "defaultMaxCards": 60,
         "defaultMaxTokens": 12000,
         "edgeWeights": {
-          "call": 1.0,
+          "call": 1,
           "import": 0.6,
           "config": 0.8
         }
@@ -305,7 +316,10 @@
         "mode": {
           "type": "string",
           "description": "Diagnostics mode",
-          "enum": ["tsLS", "tsc"],
+          "enum": [
+            "tsLS",
+            "tsc"
+          ],
           "default": "tsLS"
         },
         "maxErrors": {
@@ -323,7 +337,10 @@
         "scope": {
           "type": "string",
           "description": "Diagnostics scope",
-          "enum": ["changedFiles", "workspace"],
+          "enum": [
+            "changedFiles",
+            "workspace"
+          ],
           "default": "changedFiles"
         }
       },
@@ -384,7 +401,9 @@
         "paths": {
           "type": "array",
           "description": "Paths to plugin entrypoints (files or directories)",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": []
         },
         "enabled": {
@@ -421,7 +440,11 @@
         },
         "provider": {
           "type": "string",
-          "enum": ["api", "local", "mock"],
+          "enum": [
+            "api",
+            "local",
+            "mock"
+          ],
           "default": "mock"
         },
         "model": {
@@ -567,7 +590,11 @@
         "exporterType": {
           "type": "string",
           "description": "Exporter type for traces",
-          "enum": ["console", "otlp", "memory"],
+          "enum": [
+            "console",
+            "otlp",
+            "memory"
+          ],
           "default": "console"
         },
         "otlpEndpoint": {
@@ -613,6 +640,20 @@
       },
       "default": {
         "enabled": false
+      }
+    },
+    "graphDatabase": {
+      "type": "object",
+      "description": "KuzuDB graph database configuration for advanced graph queries",
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Path to KuzuDB database directory",
+          "default": null
+        }
       }
     }
   }

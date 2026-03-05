@@ -12,21 +12,20 @@
 
 /**
  * Timeout for database busy state in milliseconds.
- * SQLite returns SQLITE_BUSY if the database is locked; this sets how long
+ * KuzuDB may block if the database is locked; this sets how long
  * to wait before giving up.
  */
 export const DB_BUSY_TIMEOUT_MS = 5000;
 
 /**
- * Maximum number of prepared SQL statements to cache.
+ * Maximum number of prepared statements to cache.
  * Caching improves performance by avoiding statement recompilation.
  */
 export const MAX_STATEMENT_CACHE_SIZE = 500;
 
 /**
  * Number of rows to insert in a single batch transaction.
- * SQLite performs better with batched inserts; this size balances
- * memory usage with transaction efficiency.
+ * Batched inserts balance memory usage with transaction efficiency.
  */
 export const DB_CHUNK_SIZE = 500;
 
@@ -148,6 +147,16 @@ export const ENTRY_SIBLING_MIN_SHARED_PREFIX = 6;
  * Minimum score threshold for including nodes in slice results.
  */
 export const SLICE_SCORE_THRESHOLD = 0.2;
+
+/**
+ * Beam-search scoring boost for symbols in the same cluster as entry symbols.
+ */
+export const CLUSTER_COHESION_SAME_BOOST = 0.15;
+
+/**
+ * Beam-search scoring boost for symbols in clusters related to entry clusters.
+ */
+export const CLUSTER_COHESION_RELATED_BOOST = 0.05;
 
 /**
  * Number of frontier candidates to include as suggestions when slice is truncated.
@@ -308,6 +317,11 @@ export const SYMBOL_CARD_MAX_DEPS_PER_KIND_LIGHT = 6;
 export const SYMBOL_CARD_MAX_TEST_REFS = 8;
 
 /**
+ * Maximum number of processes included in a symbol card.
+ */
+export const SYMBOL_CARD_MAX_PROCESSES = 3;
+
+/**
  * Maximum number of invariants kept in card payload.
  */
 export const SYMBOL_CARD_MAX_INVARIANTS = 8;
@@ -411,7 +425,7 @@ export const DEFAULT_HTTP_PORT = 3000;
 /**
  * SDL-MCP package version. Keep in sync with package.json.
  */
-export const SDL_MCP_VERSION = "0.6.7";
+export const SDL_MCP_VERSION = "0.8.0";
 
 // ============================================================================
 // Configuration Defaults
@@ -419,7 +433,7 @@ export const SDL_MCP_VERSION = "0.6.7";
 
 /**
  * Default concurrency level for indexing operations.
- * Set to 8 for modern SSD systems; parsing and SQLite are the actual bottlenecks.
+ * Set to 8 for modern SSD systems; parsing and graph DB writes are the actual bottlenecks.
  */
 export const DEFAULT_INDEXING_CONCURRENCY = 8;
 

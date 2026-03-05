@@ -1,4 +1,4 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 import {
   MAX_FILE_BYTES,
   DEFAULT_MAX_WINDOW_LINES,
@@ -194,8 +194,8 @@ export const SemanticConfigSchema = z.object({
   model: z.string().default("all-MiniLM-L6-v2"),
   generateSummaries: z.boolean().default(false),
   summaryModel: z.string().default("claude-haiku-4-5-20251001"),
-  summaryApiKey: z.string().nullish(),       // falls back to ANTHROPIC_API_KEY env var
-  summaryApiBaseUrl: z.string().nullish(),   // for OpenAI-compatible endpoints (e.g., ollama)
+  summaryApiKey: z.string().nullish(),
+  summaryApiBaseUrl: z.string().nullish(),
   summaryMaxConcurrency: z.number().int().min(1).max(20).default(5),
   summaryBatchSize: z.number().int().min(1).max(50).default(20),
   ann: AnnConfigSchema.optional(),
@@ -229,9 +229,20 @@ export const ParallelScorerConfigSchema = z.object({
 
 export type ParallelScorerConfig = z.infer<typeof ParallelScorerConfigSchema>;
 
+export const GraphDatabaseConfigSchema = z.object({
+  path: z.string().nullish(),
+});
+
+export type GraphDatabaseConfig = z.infer<typeof GraphDatabaseConfigSchema>;
+
 export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
-  dbPath: z.string().min(1),
+  /**
+   * Deprecated legacy SQLite path (v0.7.x). Only used by the one-time
+   * SQLite→Kuzu migration script in v0.8.
+   */
+  dbPath: z.string().min(1).optional(),
+  graphDatabase: GraphDatabaseConfigSchema.optional(),
   policy: PolicyConfigSchema,
   redaction: RedactionConfigSchema.optional(),
   indexing: IndexingConfigSchema.optional(),

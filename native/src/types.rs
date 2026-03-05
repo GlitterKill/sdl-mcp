@@ -105,3 +105,9 @@ pub struct NativeParsedFile {
     /// Parse error message, if any.
     pub parse_error: Option<String>,
 }
+
+// Cluster + process analysis types (see native/src/cluster/types.rs, native/src/process/types.rs)
+pub use crate::cluster::types::{NativeClusterAssignment, NativeClusterEdge, NativeClusterSymbol};
+pub use crate::process::types::{
+    NativeProcess, NativeProcessCallEdge, NativeProcessStep, NativeProcessSymbol,
+};

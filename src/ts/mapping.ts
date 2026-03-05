@@ -2,11 +2,8 @@ import type { RepoId } from "../db/schema.js";
 import type { RepoConfig } from "../config/types.js";
 import type { Diagnostic, DiagnosticSummary } from "./diagnostics.js";
 import { diagnosticsManager } from "./diagnostics.js";
-import {
-  getFileByRepoPath,
-  findSymbolsInRangeLite,
-  getRepo,
-} from "../db/queries.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 import { normalizePath, getRelativePath } from "../util/paths.js";
 
 export interface DiagnosticSuspect {
@@ -28,12 +25,13 @@ export interface DiagnosticMappingOptions {
   maxSuspects?: number;
 }
 
-export function mapDiagnosticsToSymbols(
+export async function mapDiagnosticsToSymbols(
   options: DiagnosticMappingOptions,
-): DiagnosticSuspect[] {
+): Promise<DiagnosticSuspect[]> {
   const { repoId, diagnostics, maxSuspects = 50 } = options;
 
-  const repo = getRepo(repoId);
+  const conn = await getKuzuConn();
+  const repo = await kuzuDb.getRepo(conn, repoId);
   if (!repo) {
     throw new Error(`Repository not found: ${repoId}`);
   }
@@ -44,17 +42,18 @@ export function mapDiagnosticsToSymbols(
     if (suspects.length >= maxSuspects) break;
 
     const relativePath = normalizePath(
-      getRelativePath(repo.root_path, diagnostic.filePath),
+      getRelativePath(repo.rootPath, diagnostic.filePath),
     );
-    const fileRecord = getFileByRepoPath(repoId, relativePath);
+    const fileRecord = await kuzuDb.getFileByRepoPath(conn, repoId, relativePath);
 
     if (!fileRecord) {
       continue;
     }
 
-    const symbols = findSymbolsInRangeLite(
+    const symbols = await kuzuDb.findSymbolsInRange(
+      conn,
       repoId,
-      fileRecord.file_id,
+      fileRecord.fileId,
       diagnostic.startLine,
       diagnostic.endLine,
     );
@@ -67,7 +66,7 @@ export function mapDiagnosticsToSymbols(
     const messageShort = truncateMessage(diagnostic.message, 100);
 
     suspects.push({
-      symbolId: symbol.symbol_id,
+      symbolId: symbol.symbolId,
       file: relativePath,
       range: {
         startLine: diagnostic.startLine,
@@ -93,12 +92,13 @@ export async function getDiagnosticsWithSuspects(
   repoId: RepoId,
   changedFiles?: string[],
 ): Promise<DiagnosticsWithSuspects> {
-  const repo = getRepo(repoId);
+  const conn = await getKuzuConn();
+  const repo = await kuzuDb.getRepo(conn, repoId);
   if (!repo) {
     throw new Error(`Repository not found: ${repoId}`);
   }
 
-  const repoConfig: RepoConfig = JSON.parse(repo.config_json);
+  const repoConfig: RepoConfig = JSON.parse(repo.configJson);
 
   const { diagnostics, summary } = await diagnosticsManager.getDiagnostics(
     repoConfig,
@@ -110,7 +110,7 @@ export async function getDiagnosticsWithSuspects(
     },
   );
 
-  const suspects = mapDiagnosticsToSymbols({
+  const suspects = await mapDiagnosticsToSymbols({
     repoId,
     diagnostics,
     maxSuspects: 50,

@@ -24,22 +24,38 @@ const nodeArgs = [
   "tsx",
   "--test-concurrency=1",
   "--test",
-  ...testFiles.map((file) => resolve(repoRoot, file)),
+  resolve(repoRoot, "tests", "runner.test.ts"),
 ];
 
 const testTempDir = mkdtempSync(join(tmpdir(), "sdl-mcp-tests-"));
-const testDbPath = join(testTempDir, "sdl-ledger.db");
+const testGraphDbPath = join(testTempDir, "sdl-mcp-graph");
 const testEnv = {
   ...process.env,
-  SDL_DB_PATH: testDbPath,
+  SDL_GRAPH_DB_PATH: testGraphDbPath,
+  SDL_DB_PATH: testGraphDbPath,
 };
 
-const migrationResult = spawnSync(
+const buildCmd = process.platform === "win32" ? "cmd.exe" : "npm";
+const buildArgs =
+  process.platform === "win32"
+    ? ["/c", "npm", "run", "build:runtime"]
+    : ["run", "build:runtime"];
+const buildResult = spawnSync(buildCmd, buildArgs, {
+  cwd: repoRoot,
+  stdio: "inherit",
+  env: testEnv,
+});
+
+if ((buildResult.status ?? 1) !== 0) {
+  process.exit(buildResult.status ?? 1);
+}
+
+const initResult = spawnSync(
   process.execPath,
   [
     "--input-type=module",
     "-e",
-    "import { runDefaultMigrations } from './dist/db/migrations.js'; runDefaultMigrations();",
+    "import { initKuzuDb } from './dist/db/kuzu.js'; await initKuzuDb(process.env.SDL_GRAPH_DB_PATH);",
   ],
   {
     cwd: repoRoot,
@@ -48,8 +64,8 @@ const migrationResult = spawnSync(
   },
 );
 
-if ((migrationResult.status ?? 1) !== 0) {
-  process.exit(migrationResult.status ?? 1);
+if ((initResult.status ?? 1) !== 0) {
+  process.exit(initResult.status ?? 1);
 }
 
 const result = spawnSync(process.execPath, nodeArgs, {

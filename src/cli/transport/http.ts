@@ -3,12 +3,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import type { Connection } from "kuzu";
 import { MCPServer } from "../../server.js";
-import { getDb } from "../../db/db.js";
-import * as db from "../../db/queries.js";
+import * as kuzuDb from "../../db/kuzu-queries.js";
 import { computeDelta } from "../../delta/diff.js";
 import { runGovernorLoop } from "../../delta/blastRadius.js";
-import { loadGraphForRepo } from "../../graph/buildGraph.js";
+import { getKuzuConn, initKuzuDb } from "../../db/kuzu.js";
 import { indexRepo } from "../../indexer/indexer.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -51,42 +51,68 @@ function toClusterPath(filePath: string): string {
   return filePath.slice(0, slash) || "root";
 }
 
-function buildNode(symbolId: string): GraphNode | null {
-  const symbol = db.getSymbol(symbolId);
-  if (!symbol) {
-    return null;
+async function buildNodes(
+  conn: Connection,
+  symbolIds: string[],
+): Promise<GraphNode[]> {
+  const symbolMap = await kuzuDb.getSymbolsByIds(conn, symbolIds);
+  const metricsMap = await kuzuDb.getMetricsBySymbolIds(conn, symbolIds);
+
+  const fileIds = new Set<string>();
+  for (const symbol of symbolMap.values()) {
+    fileIds.add(symbol.fileId);
   }
-  const file = db.getFile(symbol.file_id);
-  const metrics = db.getMetrics(symbolId);
-  return {
-    id: symbolId,
-    label: symbol.name,
-    kind: symbol.kind,
-    file: file?.rel_path,
-    fanIn: metrics?.fan_in,
-    fanOut: metrics?.fan_out,
-    size: Math.max(5, Math.min(40, (metrics?.fan_in ?? 0) + 6)),
-    cluster: toClusterPath(file?.rel_path ?? ""),
-  };
+  const fileMap = await kuzuDb.getFilesByIds(conn, Array.from(fileIds));
+
+  const nodes: GraphNode[] = [];
+  for (const symbolId of symbolIds) {
+    const symbol = symbolMap.get(symbolId);
+    if (!symbol) continue;
+    const file = fileMap.get(symbol.fileId);
+    const metrics = metricsMap.get(symbolId);
+
+    nodes.push({
+      id: symbolId,
+      label: symbol.name,
+      kind: symbol.kind,
+      file: file?.relPath,
+      fanIn: metrics?.fanIn,
+      fanOut: metrics?.fanOut,
+      size: Math.max(5, Math.min(40, (metrics?.fanIn ?? 0) + 6)),
+      cluster: toClusterPath(file?.relPath ?? ""),
+    });
+  }
+
+  return nodes;
 }
 
-function buildLinksForNodes(repoId: string, ids: Set<string>): GraphLink[] {
+async function buildLinksForNodes(
+  conn: Connection,
+  ids: Set<string>,
+): Promise<GraphLink[]> {
+  const idList = Array.from(ids);
+  const edgeMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, idList);
+
   const links: GraphLink[] = [];
-  for (const edge of db.getEdgesByRepo(repoId)) {
-    if (!ids.has(edge.from_symbol_id) || !ids.has(edge.to_symbol_id)) {
-      continue;
+  for (const fromSymbolId of idList) {
+    const edges = edgeMap.get(fromSymbolId) ?? [];
+    for (const edge of edges) {
+      if (!ids.has(edge.toSymbolId)) continue;
+      links.push({
+        source: fromSymbolId,
+        target: edge.toSymbolId,
+        type: edge.edgeType,
+        weight: edge.weight,
+      });
     }
-    links.push({
-      source: edge.from_symbol_id,
-      target: edge.to_symbol_id,
-      type: edge.type,
-      weight: edge.weight,
-    });
   }
   return links;
 }
 
-function collapseClusters(nodes: GraphNode[], maxChildrenPerCluster = 10): GraphNode[] {
+function collapseClusters(
+  nodes: GraphNode[],
+  maxChildrenPerCluster = 10,
+): GraphNode[] {
   const byCluster = new Map<string, GraphNode[]>();
   for (const node of nodes) {
     const key = node.cluster ?? "root";
@@ -115,25 +141,28 @@ function collapseClusters(nodes: GraphNode[], maxChildrenPerCluster = 10): Graph
   return collapsed;
 }
 
-function buildNeighborhood(repoId: string, symbolId: string, maxNodes: number): {
+async function buildNeighborhood(
+  conn: Connection,
+  symbolId: string,
+  maxNodes: number,
+): Promise<{
   nodes: GraphNode[];
   links: GraphLink[];
-} {
+}> {
   const ids = new Set<string>();
   ids.add(symbolId);
 
-  for (const edge of db.getEdgesFrom(symbolId)) {
-    ids.add(edge.to_symbol_id);
+  for (const edge of await kuzuDb.getEdgesFrom(conn, symbolId)) {
+    ids.add(edge.toSymbolId);
   }
-  for (const edge of db.getEdgesTo(symbolId)) {
-    ids.add(edge.from_symbol_id);
+  const edgesTo = await kuzuDb.getEdgesToSymbols(conn, [symbolId]);
+  for (const edge of edgesTo.get(symbolId) ?? []) {
+    ids.add(edge.fromSymbolId);
   }
 
   const limited = new Set(Array.from(ids).slice(0, maxNodes));
-  const nodes = Array.from(limited)
-    .map((id) => buildNode(id))
-    .filter((node): node is GraphNode => Boolean(node));
-  const links = buildLinksForNodes(repoId, limited);
+  const nodes = await buildNodes(conn, Array.from(limited));
+  const links = await buildLinksForNodes(conn, limited);
 
   return {
     nodes: collapseClusters(nodes),
@@ -141,16 +170,19 @@ function buildNeighborhood(repoId: string, symbolId: string, maxNodes: number): 
   };
 }
 
-function buildRepoPreview(repoId: string, maxNodes: number): {
+async function buildRepoPreview(
+  conn: Connection,
+  repoId: string,
+  maxNodes: number,
+): Promise<{
   nodes: GraphNode[];
   links: GraphLink[];
-} {
-  const top = db.getTopSymbolsByFanIn(repoId, maxNodes);
-  const ids = new Set(top.map((row) => row.symbol_id));
-  const nodes = top
-    .map((row) => buildNode(row.symbol_id))
-    .filter((node): node is GraphNode => Boolean(node));
-  const links = buildLinksForNodes(repoId, ids);
+}> {
+  const top = await kuzuDb.getTopSymbolsByFanIn(conn, repoId, maxNodes);
+  const symbolIds = top.map((row) => row.symbolId);
+  const ids = new Set(symbolIds);
+  const nodes = await buildNodes(conn, symbolIds);
+  const links = await buildLinksForNodes(conn, ids);
 
   return {
     nodes: collapseClusters(nodes),
@@ -159,15 +191,15 @@ function buildRepoPreview(repoId: string, maxNodes: number): {
 }
 
 async function buildBlastRadiusGraph(
+  conn: Connection,
   repoId: string,
   fromVersion: string,
   toVersion: string,
   maxNodes: number,
 ): Promise<{ nodes: GraphNode[]; links: GraphLink[] }> {
-  const delta = computeDelta(repoId, fromVersion, toVersion);
+  const delta = await computeDelta(repoId, fromVersion, toVersion);
   const changedSymbolIds = delta.changedSymbols.map((change) => change.symbolId);
-  const graph = loadGraphForRepo(repoId);
-  const governor = await runGovernorLoop(changedSymbolIds, graph, {
+  const governor = await runGovernorLoop(conn, changedSymbolIds, {
     repoId,
     budget: { maxCards: maxNodes, maxEstimatedTokens: 4000 },
     runDiagnostics: false,
@@ -182,10 +214,8 @@ async function buildBlastRadiusGraph(
   }
 
   const limited = new Set(Array.from(ids).slice(0, maxNodes));
-  const nodes = Array.from(limited)
-    .map((id) => buildNode(id))
-    .filter((node): node is GraphNode => Boolean(node));
-  const links = buildLinksForNodes(repoId, limited);
+  const nodes = await buildNodes(conn, Array.from(limited));
+  const links = await buildLinksForNodes(conn, limited);
 
   return {
     nodes: collapseClusters(nodes),
@@ -221,7 +251,8 @@ async function handleRestRequest(
   res: ServerResponse,
   host: string,
   port: number,
-  checkHealth: () => boolean,
+  checkHealth: () => Promise<boolean>,
+  conn: Connection,
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", `http://${host}:${port}`);
   const pathname = url.pathname;
@@ -236,7 +267,7 @@ async function handleRestRequest(
   }
 
   if (req.method === "GET" && pathname === "/health") {
-    const isHealthy = checkHealth();
+    const isHealthy = await checkHealth();
     json(res, isHealthy ? 200 : 503, {
       status: isHealthy ? "ok" : "unhealthy",
       timestamp: Date.now(),
@@ -252,17 +283,21 @@ async function handleRestRequest(
   if (req.method === "GET" && graphSliceMatch) {
     const [, repoId, handle] = graphSliceMatch;
     const maxNodes = Number(url.searchParams.get("maxNodes") ?? "200");
-    const graph = buildRepoPreview(repoId, Math.min(500, Math.max(10, maxNodes)));
-    const handleRow = db.getSliceHandle(handle);
+    const graph = await buildRepoPreview(
+      conn,
+      repoId,
+      Math.min(500, Math.max(10, maxNodes)),
+    );
+    const handleRow = await kuzuDb.getSliceHandle(conn, handle);
     json(res, 200, {
       repoId,
       handle,
       handleMetadata: handleRow
         ? {
-            createdAt: handleRow.created_at,
-            expiresAt: handleRow.expires_at,
-            minVersion: handleRow.min_version,
-            maxVersion: handleRow.max_version,
+            createdAt: handleRow.createdAt,
+            expiresAt: handleRow.expiresAt,
+            minVersion: handleRow.minVersion,
+            maxVersion: handleRow.maxVersion,
           }
         : null,
       ...graph,
@@ -276,7 +311,11 @@ async function handleRestRequest(
   if (req.method === "GET" && graphNeighborhoodMatch) {
     const [, repoId, symbolId] = graphNeighborhoodMatch;
     const maxNodes = Number(url.searchParams.get("maxNodes") ?? "200");
-    const graph = buildNeighborhood(repoId, decodeURIComponent(symbolId), Math.min(500, Math.max(10, maxNodes)));
+    const graph = await buildNeighborhood(
+      conn,
+      decodeURIComponent(symbolId),
+      Math.min(500, Math.max(10, maxNodes)),
+    );
     json(res, 200, { repoId, symbolId: decodeURIComponent(symbolId), ...graph });
     return true;
   }
@@ -288,6 +327,7 @@ async function handleRestRequest(
     const [, repoId, fromVersion, toVersion] = graphBlastMatch;
     const maxNodes = Number(url.searchParams.get("maxNodes") ?? "200");
     const graph = await buildBlastRadiusGraph(
+      conn,
       repoId,
       decodeURIComponent(fromVersion),
       decodeURIComponent(toVersion),
@@ -306,14 +346,21 @@ async function handleRestRequest(
       json(res, 200, { repoId, results: [] });
       return true;
     }
-    const results = db.searchSymbolsLite(repoId, query, Math.min(100, Math.max(1, limit)));
+    const results = await kuzuDb.searchSymbolsLite(
+      conn,
+      repoId,
+      query,
+      Math.min(100, Math.max(1, limit)),
+    );
+    const fileIds = results.map((row) => row.fileId);
+    const fileMap = await kuzuDb.getFilesByIds(conn, fileIds);
     json(res, 200, {
       repoId,
       results: results.map((row) => ({
-        symbolId: row.symbol_id,
+        symbolId: row.symbolId,
         name: row.name,
         kind: row.kind,
-        file: db.getFile(row.file_id)?.rel_path ?? "",
+        file: fileMap.get(row.fileId)?.relPath ?? "",
       })),
     });
     return true;
@@ -323,21 +370,22 @@ async function handleRestRequest(
   if (req.method === "GET" && symbolCardMatch) {
     const [, _repoId, symbolIdRaw] = symbolCardMatch;
     const symbolId = decodeURIComponent(symbolIdRaw);
-    const symbol = db.getSymbol(symbolId);
+    const symbol = await kuzuDb.getSymbol(conn, symbolId);
     if (!symbol) {
       json(res, 404, { error: `Symbol not found: ${symbolId}` });
       return true;
     }
-    const file = db.getFile(symbol.file_id);
-    const metrics = db.getMetrics(symbolId);
+    const fileMap = await kuzuDb.getFilesByIds(conn, [symbol.fileId]);
+    const file = fileMap.get(symbol.fileId);
+    const metrics = await kuzuDb.getMetrics(conn, symbolId);
     json(res, 200, {
       symbolId,
       name: symbol.name,
       kind: symbol.kind,
       summary: symbol.summary,
-      file: file?.rel_path,
-      fanIn: metrics?.fan_in ?? 0,
-      fanOut: metrics?.fan_out ?? 0,
+      file: file?.relPath,
+      fanIn: metrics?.fanIn ?? 0,
+      fanOut: metrics?.fanOut ?? 0,
     });
     return true;
   }
@@ -345,17 +393,17 @@ async function handleRestRequest(
   const repoStatusMatch = pathname.match(/^\/api\/repo\/([^/]+)\/status$/);
   if (req.method === "GET" && repoStatusMatch) {
     const [, repoId] = repoStatusMatch;
-    const repo = db.getRepo(repoId);
+    const repo = await kuzuDb.getRepo(conn, repoId);
     if (!repo) {
       json(res, 404, { error: `Repository not found: ${repoId}` });
       return true;
     }
-    const latestVersion = db.getLatestVersion(repoId);
+    const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
     json(res, 200, {
       repoId,
-      latestVersionId: latestVersion?.version_id ?? null,
-      symbolCount: db.countSymbolsByRepo(repoId),
-      fileCount: db.getFilesByRepo(repoId).length,
+      latestVersionId: latestVersion?.versionId ?? null,
+      symbolCount: await kuzuDb.getSymbolCount(conn, repoId),
+      fileCount: await kuzuDb.getFileCount(conn, repoId),
     });
     return true;
   }
@@ -381,15 +429,22 @@ export async function setupHttpTransport(
   server: MCPServer,
   host: string,
   port: number,
-  dbPath: string,
+  graphDbPath: string,
 ): Promise<void> {
   const sessions = new Map<string, SSEServerTransport>();
   let activeSseTransport: SSEServerTransport | null = null;
 
-  const checkHealth = (): boolean => {
+  await initKuzuDb(graphDbPath);
+  const conn = await getKuzuConn();
+
+  const checkHealth = async (): Promise<boolean> => {
     try {
-      const dbInstance = getDb(dbPath);
-      dbInstance.prepare("SELECT 1").get();
+      const result = await conn.query("RETURN 1 AS ok");
+      if (Array.isArray(result)) {
+        for (const r of result) r.close();
+      } else {
+        result.close();
+      }
       return true;
     } catch {
       return false;
@@ -398,7 +453,14 @@ export async function setupHttpTransport(
 
   const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
     void (async () => {
-      const handled = await handleRestRequest(req, res, host, port, checkHealth);
+      const handled = await handleRestRequest(
+        req,
+        res,
+        host,
+        port,
+        checkHealth,
+        conn,
+      );
       if (handled) {
         return;
       }

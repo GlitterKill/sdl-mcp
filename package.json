@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "Symbol Delta Ledger MCP Server - Cards-first code context for TypeScript/JavaScript repositories",
   "type": "module",
   "main": "dist/main.js",
@@ -63,6 +63,7 @@
     "test:native-parity": "node --import tsx tests/native/parity-test.ts",
     "check:config-sync": "tsx scripts/check-config-sync.ts",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck",
+    "spike:kuzu": "tsx scripts/kuzu-spike.ts",
     "test:mutation": "stryker run stryker.conf.cjs"
   },
   "keywords": [
@@ -84,7 +85,6 @@
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/sdk-trace-base": "^1.30.0",
     "@opentelemetry/sdk-trace-node": "^1.30.0",
-    "better-sqlite3": "^11.0.0",
     "fast-glob": "^3.3.3",
     "tree-sitter": "^0.21.1",
     "tree-sitter-bash": "^0.21.0",
@@ -104,6 +104,7 @@
   },
   "optionalDependencies": {
     "chokidar": "^3.5.3",
+    "kuzu": "^0.8.2",
     "onnxruntime-node": "^1.22.0",
     "sdl-mcp-native": "0.7.2"
   },
@@ -111,7 +112,6 @@
     "@napi-rs/cli": "^2.18.0",
     "@opentelemetry/sdk-trace-web": "^1.30.0",
     "@stryker-mutator/core": "^9.6.0",
-    "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",

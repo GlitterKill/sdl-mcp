@@ -1,6 +1,9 @@
 import type { SymbolRow, MetricsRow, FileRow } from "../db/schema.js";
+import {
+  CLUSTER_COHESION_RELATED_BOOST,
+  CLUSTER_COHESION_SAME_BOOST,
+} from "../config/constants.js";
 import { tokenize } from "../util/tokenize.js";
-import * as db from "../db/queries.js";
 
 export interface SliceContext {
   query: string;
@@ -22,61 +25,6 @@ export interface ScoreResult {
   factors: Map<string, number>;
 }
 
-export function calculateQueryOverlap(
-  symbol: SymbolRow,
-  query: string,
-  queryTokens?: string[],
-): number {
-  const tokens = queryTokens ?? tokenize(query);
-  if (tokens.length === 0) return 0;
-
-  const symbolName = symbol.name.toLowerCase();
-  const file = db.getFile(symbol.file_id);
-  const filePath = file?.rel_path.toLowerCase() || "";
-
-  let matches = 0;
-  for (const token of tokens) {
-    if (symbolName.includes(token) || filePath.includes(token)) {
-      matches++;
-    }
-  }
-
-  return matches / tokens.length;
-}
-
-export function calculateStacktraceLocality(
-  symbol: SymbolRow,
-  stackTrace: string,
-): number {
-  if (!stackTrace) return 0;
-
-  const lines = stackTrace.split("\n");
-  const file = db.getFile(symbol.file_id);
-  const filePath = file?.rel_path || "";
-  const symbolRange = {
-    startLine: symbol.range_start_line,
-    endLine: symbol.range_end_line,
-  };
-
-  for (const line of lines) {
-    if (line.includes(filePath)) {
-      const lineMatch = line.match(/:(\d+)(?::(\d+))?/);
-      if (lineMatch) {
-        const lineNum = parseInt(lineMatch[1], 10);
-        if (
-          lineNum >= symbolRange.startLine &&
-          lineNum <= symbolRange.endLine
-        ) {
-          return 1;
-        }
-      }
-      return 0.5;
-    }
-  }
-
-  return 0;
-}
-
 export function calculateHotness(metrics: MetricsRow | null): number {
   if (!metrics) return 0;
 
@@ -96,42 +44,13 @@ export function calculateHotness(metrics: MetricsRow | null): number {
   return 0.5 * fanInScore + 0.3 * fanOutScore + 0.2 * churnScore;
 }
 
-export function scoreSymbol(symbol: SymbolRow, context: SliceContext): number {
-  const factors = new Map<string, number>();
-  const file = db.getFile(symbol.file_id);
-
-  factors.set(
-    "query",
-    calculateQueryOverlapWithFile(
-      symbol,
-      context.query,
-      context.queryTokens,
-      file ?? undefined,
-    ),
-  );
-  factors.set(
-    "stacktrace",
-    calculateStacktraceLocalityWithFile(
-      symbol,
-      context.stackTrace || "",
-      file ?? undefined,
-    ),
-  );
-  factors.set("structure", calculateStructuralSpecificity(file ?? undefined));
-  factors.set("kind", calculateSymbolKindSpecificity(symbol));
-
-  const weights = new Map<string, number>([
-    ["query", 0.4],
-    ["stacktrace", 0.2],
-    ["hotness", 0.15],
-    ["structure", 0.15],
-    ["kind", 0.1],
-  ]);
-
-  const metrics = db.getMetrics(symbol.symbol_id);
-  factors.set("hotness", calculateHotness(metrics));
-
-  return combineScores(factors, weights);
+export function scoreSymbol(
+  symbol: SymbolRow,
+  context: SliceContext,
+  metrics: MetricsRow | null = null,
+  file?: FileRow,
+): number {
+  return scoreSymbolWithMetrics(symbol, context, metrics, file);
 }
 
 export function scoreSymbolWithMetrics(
@@ -327,4 +246,18 @@ export function combineScores(
   }
 
   return totalWeight > 0 ? totalScore / totalWeight : 0;
+}
+
+export function calculateClusterCohesion(params: {
+  symbolClusterId: string | null | undefined;
+  entryClusterIds: ReadonlySet<string>;
+  relatedClusterIds: ReadonlySet<string>;
+}): number {
+  const { symbolClusterId, entryClusterIds, relatedClusterIds } = params;
+  if (!symbolClusterId) return 0;
+  if (entryClusterIds.has(symbolClusterId)) return CLUSTER_COHESION_SAME_BOOST;
+  if (relatedClusterIds.has(symbolClusterId)) {
+    return CLUSTER_COHESION_RELATED_BOOST;
+  }
+  return 0;
 }

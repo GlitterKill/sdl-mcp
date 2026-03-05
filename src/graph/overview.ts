@@ -22,8 +22,9 @@ import type {
   CompactSymbolRef,
   SymbolCountsByKind,
 } from "../mcp/types.js";
-import * as db from "../db/queries.js";
 import { SYMBOL_TOKEN_MAX } from "../config/constants.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 
 // ============================================================================
 // Constants
@@ -60,6 +61,21 @@ const DEFAULT_MAX_EXPORTS_PER_DIRECTORY = 10;
  */
 const DEFAULT_MAX_HOTSPOT_SYMBOLS = 10;
 
+const SYMBOL_KINDS: SymbolKind[] = [
+  "function",
+  "class",
+  "interface",
+  "type",
+  "method",
+  "variable",
+  "module",
+  "constructor",
+];
+
+function isSymbolKind(value: string): value is SymbolKind {
+  return (SYMBOL_KINDS as string[]).includes(value);
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -81,16 +97,26 @@ function emptySymbolCounts(): SymbolCountsByKind {
 }
 
 /**
- * Converts a TopSymbolRow to CompactSymbolRef.
+ * Converts a SymbolRow-like object to CompactSymbolRef.
  */
-function toCompactRef(row: db.TopSymbolRow): CompactSymbolRef {
+function toCompactRef(row: {
+  symbolId: string;
+  name: string;
+  kind: string;
+  exported: boolean;
+  signatureJson: string | null;
+}): CompactSymbolRef {
   let signature: string | undefined;
-  if (row.signature_json) {
+  if (row.signatureJson) {
     try {
-      const sig = JSON.parse(row.signature_json);
+      const sig = JSON.parse(row.signatureJson) as {
+        name?: string;
+        params?: Array<{ name: string; type?: string }>;
+        returns?: string;
+      };
       if (sig.name) {
         const params = sig.params
-          ? `(${sig.params.map((p: { name: string; type?: string }) => p.name).join(", ")})`
+          ? `(${sig.params.map((p) => p.name).join(", ")})`
           : "()";
         const ret = sig.returns ? `: ${sig.returns}` : "";
         signature = `${sig.name}${params}${ret}`;
@@ -101,10 +127,10 @@ function toCompactRef(row: db.TopSymbolRow): CompactSymbolRef {
   }
 
   return {
-    symbolId: row.symbol_id,
+    symbolId: row.symbolId,
     name: row.name,
-    kind: row.kind as SymbolKind,
-    exported: row.exported === 1,
+    kind: (isSymbolKind(row.kind) ? row.kind : "function") as SymbolKind,
+    exported: row.exported,
     signature,
   };
 }
@@ -130,7 +156,10 @@ function estimateDirectorySummaryTokens(summary: DirectorySummary): number {
  * @param request - Overview request parameters
  * @returns Repository overview with stats, directories, and optionally hotspots
  */
-export function buildRepoOverview(request: RepoOverviewRequest): RepoOverview {
+export async function buildRepoOverview(
+  request: RepoOverviewRequest,
+): Promise<RepoOverview> {
+  const conn = await getKuzuConn();
   const {
     repoId,
     level,
@@ -141,17 +170,30 @@ export function buildRepoOverview(request: RepoOverviewRequest): RepoOverview {
   } = request;
 
   // Get current version
-  const latestVersion = db.getLatestVersion(repoId);
-  const versionId = latestVersion?.version_id ?? "0";
+  const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+  const versionId = latestVersion?.versionId ?? "0";
+
+  // Fetch core rows once
+  const [files, symbols, edgeCount, edgeCountsByType, clusterStats, processStats] =
+    await Promise.all([
+    kuzuDb.getFilesByRepo(conn, repoId),
+    kuzuDb.getSymbolsByRepo(conn, repoId),
+    kuzuDb.getEdgeCount(conn, repoId),
+    kuzuDb.getEdgeCountsByType(conn, repoId),
+    kuzuDb.getClusterOverviewStats(conn, repoId),
+    kuzuDb.getProcessOverviewStats(conn, repoId),
+  ]);
 
   // Always build stats
-  const stats = buildRepoStats(repoId);
+  const stats = buildRepoStats(files, symbols, edgeCount, edgeCountsByType);
 
   // Build directory summaries if requested
   const directorySummaries: DirectorySummary[] = [];
   if (level === "directories" || level === "full") {
-    const summaries = buildDirectorySummaries(
+    const summaries = await buildDirectorySummaries(
       repoId,
+      files,
+      symbols,
       maxDirectories,
       maxExportsPerDirectory,
       directoryFilter,
@@ -162,14 +204,14 @@ export function buildRepoOverview(request: RepoOverviewRequest): RepoOverview {
   // Build hotspots if requested
   let hotspots: CodebaseHotspots | undefined;
   if (includeHotspots || level === "full") {
-    hotspots = buildCodebaseHotspots(repoId);
+    hotspots = await buildCodebaseHotspots(repoId, files, symbols);
   }
 
   // Identify architectural layers from directory structure
   const layers = identifyArchitecturalLayers(directorySummaries);
 
   // Find entry points
-  const entryPoints = findEntryPoints(repoId);
+  const entryPoints = findEntryPoints(files);
 
   // Calculate token metrics
   const fullCardsEstimate = stats.symbolCount * SYMBOL_TOKEN_MAX;
@@ -181,7 +223,7 @@ export function buildRepoOverview(request: RepoOverviewRequest): RepoOverview {
   const compressionRatio =
     fullCardsEstimate > 0 ? fullCardsEstimate / overviewTokens : 1;
 
-  return {
+  const overview: RepoOverview = {
     repoId,
     versionId,
     generatedAt: new Date().toISOString(),
@@ -196,43 +238,63 @@ export function buildRepoOverview(request: RepoOverviewRequest): RepoOverview {
       compressionRatio,
     },
   };
+
+  if (clusterStats.totalClusters > 0) {
+    overview.clusters = {
+      totalClusters: clusterStats.totalClusters,
+      averageClusterSize:
+        Math.round(clusterStats.averageClusterSize * 10) / 10,
+      largestClusters: clusterStats.largestClusters,
+    };
+  }
+
+  if (processStats.totalProcesses > 0) {
+    overview.processes = {
+      totalProcesses: processStats.totalProcesses,
+      averageDepth: Math.round(processStats.averageDepth * 10) / 10,
+      entryPoints: processStats.entryPoints,
+      longestProcesses: processStats.longestProcesses,
+    };
+  }
+
+  return overview;
 }
 
 /**
  * Builds high-level repository statistics.
  */
-function buildRepoStats(repoId: RepoId): RepoStats {
-  const totals = db.getRepoTotals(repoId);
-  const edgesByType = db.getEdgeCountsByType(repoId);
-  const dirAggregates = db.getDirectoryAggregates(repoId);
-
-  // Aggregate symbol counts by kind across all directories
+function buildRepoStats(
+  files: kuzuDb.FileRow[],
+  symbols: kuzuDb.SymbolRow[],
+  edgeCount: number,
+  edgesByType: Record<string, number>,
+): RepoStats {
   const byKind = emptySymbolCounts();
-  for (const dir of dirAggregates) {
-    byKind.function += dir.function_count;
-    byKind.class += dir.class_count;
-    byKind.interface += dir.interface_count;
-    byKind.type += dir.type_count;
-    byKind.method += dir.method_count;
-    byKind.variable += dir.variable_count;
-    byKind.module += dir.module_count;
-    byKind.constructor += dir.constructor_count;
+  let exportedCount = 0;
+
+  for (const sym of symbols) {
+    if (sym.exported) exportedCount += 1;
+    if (isSymbolKind(sym.kind)) {
+      byKind[sym.kind] += 1;
+    }
   }
 
   return {
-    fileCount: totals.fileCount,
-    symbolCount: totals.symbolCount,
-    edgeCount: totals.edgeCount,
-    exportedSymbolCount: totals.exportedCount,
+    fileCount: files.length,
+    symbolCount: symbols.length,
+    edgeCount,
+    exportedSymbolCount: exportedCount,
     byKind,
-    byEdgeType: edgesByType,
+    byEdgeType: {
+      call: edgesByType.call ?? 0,
+      import: edgesByType.import ?? 0,
+      config: edgesByType.config ?? 0,
+    },
     avgSymbolsPerFile:
-      totals.fileCount > 0
-        ? Math.round((totals.symbolCount / totals.fileCount) * 10) / 10
-        : 0,
+      files.length > 0 ? Math.round((symbols.length / files.length) * 10) / 10 : 0,
     avgEdgesPerSymbol:
-      totals.symbolCount > 0
-        ? Math.round((totals.edgeCount / totals.symbolCount) * 10) / 10
+      symbols.length > 0
+        ? Math.round((edgeCount / symbols.length) * 10) / 10
         : 0,
   };
 }
@@ -240,67 +302,124 @@ function buildRepoStats(repoId: RepoId): RepoStats {
 /**
  * Builds directory-level summaries.
  */
-function buildDirectorySummaries(
+async function buildDirectorySummaries(
   repoId: RepoId,
+  files: kuzuDb.FileRow[],
+  symbols: kuzuDb.SymbolRow[],
   maxDirectories: number,
   maxExportsPerDirectory: number,
   directoryFilter?: string[],
-): DirectorySummary[] {
-  const dirAggregates = db.getDirectoryAggregates(repoId);
-  const exportedSymbols = db.getExportedSymbolsByDirectory(
-    repoId,
-    maxExportsPerDirectory,
-  );
-  const topByFanIn = db.getTopSymbolsByFanIn(repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS * 2);
-  const topByChurn = db.getTopSymbolsByChurn(repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS * 2);
+): Promise<DirectorySummary[]> {
+  const conn = await getKuzuConn();
 
-  // Group exported symbols by directory
-  const exportsByDir = new Map<string, string[]>();
-  for (const exp of exportedSymbols) {
-    const dir = exp.directory;
-    if (!exportsByDir.has(dir)) {
-      exportsByDir.set(dir, []);
-    }
-    exportsByDir.get(dir)!.push(exp.name);
+  const fileById = new Map(files.map((f) => [f.fileId, f]));
+  const symbolById = new Map(symbols.map((s) => [s.symbolId, s]));
+
+  interface DirAgg {
+    directory: string;
+    fileCount: number;
+    symbolCount: number;
+    exportedCount: number;
+    byKind: SymbolCountsByKind;
   }
+
+  const aggregates = new Map<string, DirAgg>();
+
+  for (const file of files) {
+    const dir = file.directory ?? "";
+    const agg =
+      aggregates.get(dir) ??
+      ({
+        directory: dir,
+        fileCount: 0,
+        symbolCount: 0,
+        exportedCount: 0,
+        byKind: emptySymbolCounts(),
+      } satisfies DirAgg);
+    agg.fileCount += 1;
+    aggregates.set(dir, agg);
+  }
+
+  const exportsByDir = new Map<string, string[]>();
+
+  for (const symbol of symbols) {
+    const file = fileById.get(symbol.fileId);
+    const dir = file?.directory ?? "";
+    const agg =
+      aggregates.get(dir) ??
+      ({
+        directory: dir,
+        fileCount: 0,
+        symbolCount: 0,
+        exportedCount: 0,
+        byKind: emptySymbolCounts(),
+      } satisfies DirAgg);
+
+    agg.symbolCount += 1;
+    if (symbol.exported) {
+      agg.exportedCount += 1;
+      const list = exportsByDir.get(dir) ?? [];
+      list.push(symbol.name);
+      exportsByDir.set(dir, list);
+    }
+    if (isSymbolKind(symbol.kind)) {
+      agg.byKind[symbol.kind] += 1;
+    }
+    aggregates.set(dir, agg);
+  }
+
+  const topByFanIn = await kuzuDb.getTopSymbolsByFanIn(
+    conn,
+    repoId,
+    DEFAULT_MAX_HOTSPOT_SYMBOLS * 2,
+  );
+  const topByChurn = await kuzuDb.getTopSymbolsByChurn(
+    conn,
+    repoId,
+    DEFAULT_MAX_HOTSPOT_SYMBOLS * 2,
+  );
 
   // Group top symbols by directory
   const topFanInByDir = new Map<string, CompactSymbolRef[]>();
-  for (const sym of topByFanIn) {
-    const dir = sym.directory;
-    if (!topFanInByDir.has(dir)) {
-      topFanInByDir.set(dir, []);
-    }
-    const refs = topFanInByDir.get(dir)!;
+  for (const row of topByFanIn) {
+    const symbol = symbolById.get(row.symbolId);
+    if (!symbol) continue;
+    const file = fileById.get(symbol.fileId);
+    const dir = file?.directory ?? "";
+    const refs = topFanInByDir.get(dir) ?? [];
     if (refs.length < 3) {
-      refs.push(toCompactRef(sym));
+      refs.push(toCompactRef(symbol));
+      topFanInByDir.set(dir, refs);
     }
   }
 
   const topChurnByDir = new Map<string, CompactSymbolRef[]>();
-  for (const sym of topByChurn) {
-    const dir = sym.directory;
-    if (!topChurnByDir.has(dir)) {
-      topChurnByDir.set(dir, []);
-    }
-    const refs = topChurnByDir.get(dir)!;
+  for (const row of topByChurn) {
+    const symbol = symbolById.get(row.symbolId);
+    if (!symbol) continue;
+    const file = fileById.get(symbol.fileId);
+    const dir = file?.directory ?? "";
+    const refs = topChurnByDir.get(dir) ?? [];
     if (refs.length < 3) {
-      refs.push(toCompactRef(sym));
+      refs.push(toCompactRef(symbol));
+      topChurnByDir.set(dir, refs);
     }
   }
 
   // Build summaries
   const summaries: DirectorySummary[] = [];
-  const allDirectories = new Set<string>();
+  const allDirectories = new Set(Array.from(aggregates.keys()));
 
-  for (const agg of dirAggregates) {
+  const sortedAggregates = Array.from(aggregates.values()).sort(
+    (a, b) => b.symbolCount - a.symbolCount,
+  );
+
+  for (const agg of sortedAggregates) {
     // Apply directory filter if specified
     if (directoryFilter && directoryFilter.length > 0) {
       const matches = directoryFilter.some((pattern) => {
         if (pattern.includes("*")) {
-          const regex = new RegExp(
-            "^" + pattern.replace(/\*/g, ".*") + "$",
-          );
+          const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
           return regex.test(agg.directory);
         }
         return agg.directory.startsWith(pattern);
@@ -308,27 +427,19 @@ function buildDirectorySummaries(
       if (!matches) continue;
     }
 
-    allDirectories.add(agg.directory);
+    const exportNames = exportsByDir.get(agg.directory) ?? [];
+    exportNames.sort((a, b) => a.localeCompare(b));
 
     const summary: DirectorySummary = {
       path: agg.directory || "(root)",
-      fileCount: agg.file_count,
-      symbolCount: agg.symbol_count,
-      exportedCount: agg.exported_count,
-      byKind: {
-        function: agg.function_count,
-        class: agg.class_count,
-        interface: agg.interface_count,
-        type: agg.type_count,
-        method: agg.method_count,
-        variable: agg.variable_count,
-        module: agg.module_count,
-        constructor: agg.constructor_count,
-      },
-      exports: exportsByDir.get(agg.directory) ?? [],
+      fileCount: agg.fileCount,
+      symbolCount: agg.symbolCount,
+      exportedCount: agg.exportedCount,
+      byKind: agg.byKind,
+      exports: exportNames.slice(0, maxExportsPerDirectory),
       topByFanIn: topFanInByDir.get(agg.directory) ?? [],
       topByChurn: topChurnByDir.get(agg.directory) ?? [],
-      estimatedFullTokens: agg.symbol_count * SYMBOL_TOKEN_MAX,
+      estimatedFullTokens: agg.symbolCount * SYMBOL_TOKEN_MAX,
       summaryTokens: 0, // Will be calculated below
     };
 
@@ -360,32 +471,83 @@ function buildDirectorySummaries(
 /**
  * Builds codebase hotspot analysis.
  */
-function buildCodebaseHotspots(repoId: RepoId): CodebaseHotspots {
-  const topByFanIn = db.getTopSymbolsByFanIn(repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS);
-  const topByChurn = db.getTopSymbolsByChurn(repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS);
-  const largestFiles = db.getFilesBySymbolCount(repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS);
-  const mostConnected = db.getFilesByEdgeCount(repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS);
+async function buildCodebaseHotspots(
+  repoId: RepoId,
+  files: kuzuDb.FileRow[],
+  symbols: kuzuDb.SymbolRow[],
+): Promise<CodebaseHotspots> {
+  const conn = await getKuzuConn();
+
+  const symbolById = new Map(symbols.map((s) => [s.symbolId, s]));
+  const fileById = new Map(files.map((f) => [f.fileId, f]));
+
+  const [topByFanIn, topByChurn] = await Promise.all([
+    kuzuDb.getTopSymbolsByFanIn(conn, repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS),
+    kuzuDb.getTopSymbolsByChurn(conn, repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS),
+  ]);
+
+  const mostDepended: CompactSymbolRef[] = [];
+  for (const row of topByFanIn) {
+    const sym = symbolById.get(row.symbolId);
+    if (!sym) continue;
+    mostDepended.push(toCompactRef(sym));
+  }
+
+  const mostChanged: CompactSymbolRef[] = [];
+  for (const row of topByChurn) {
+    const sym = symbolById.get(row.symbolId);
+    if (!sym) continue;
+    mostChanged.push(toCompactRef(sym));
+  }
+
+  // Largest files by symbol count
+  const symbolCountByFile = new Map<string, number>();
+  for (const sym of symbols) {
+    symbolCountByFile.set(sym.fileId, (symbolCountByFile.get(sym.fileId) ?? 0) + 1);
+  }
+
+  const largestFiles = Array.from(symbolCountByFile.entries())
+    .map(([fileId, symbolCount]) => ({
+      file: fileById.get(fileId)?.relPath ?? "",
+      symbolCount,
+    }))
+    .filter((f) => Boolean(f.file))
+    .sort((a, b) => b.symbolCount - a.symbolCount)
+    .slice(0, DEFAULT_MAX_HOTSPOT_SYMBOLS);
+
+  // Most connected files by estimated edge endpoints (fanIn+fanOut per symbol)
+  const metricsMap = await kuzuDb.getMetricsBySymbolIds(
+    conn,
+    symbols.map((s) => s.symbolId),
+  );
+  const edgeCountByFile = new Map<string, number>();
+  for (const sym of symbols) {
+    const metrics = metricsMap.get(sym.symbolId);
+    const endpoints = (metrics?.fanIn ?? 0) + (metrics?.fanOut ?? 0);
+    edgeCountByFile.set(sym.fileId, (edgeCountByFile.get(sym.fileId) ?? 0) + endpoints);
+  }
+
+  const mostConnected = Array.from(edgeCountByFile.entries())
+    .map(([fileId, edgeCount]) => ({
+      file: fileById.get(fileId)?.relPath ?? "",
+      edgeCount,
+    }))
+    .filter((f) => Boolean(f.file))
+    .sort((a, b) => b.edgeCount - a.edgeCount)
+    .slice(0, DEFAULT_MAX_HOTSPOT_SYMBOLS);
 
   return {
-    mostDepended: topByFanIn.map(toCompactRef),
-    mostChanged: topByChurn.map(toCompactRef),
-    largestFiles: largestFiles.map((f) => ({
-      file: f.rel_path,
-      symbolCount: f.symbol_count,
-    })),
-    mostConnected: mostConnected.map((f) => ({
-      file: f.rel_path,
-      edgeCount: f.edge_count,
-    })),
+    mostDepended,
+    mostChanged,
+    largestFiles,
+    mostConnected,
   };
 }
 
 /**
  * Identifies architectural layers from directory structure.
  */
-function identifyArchitecturalLayers(
-  directories: DirectorySummary[],
-): string[] {
+function identifyArchitecturalLayers(directories: DirectorySummary[]): string[] {
   const layers: string[] = [];
   const layerPatterns = [
     { pattern: /^src\/?(api|routes|controllers|handlers)\/?/, layer: "API" },
@@ -414,7 +576,7 @@ function identifyArchitecturalLayers(
 /**
  * Finds entry point files.
  */
-function findEntryPoints(repoId: RepoId): string[] {
+function findEntryPoints(files: kuzuDb.FileRow[]): string[] {
   const entryPatterns = [
     "main.ts",
     "index.ts",
@@ -428,16 +590,13 @@ function findEntryPoints(repoId: RepoId): string[] {
     "cli.js",
   ];
 
-  const files = db.getFilesByRepo(repoId);
   const entryPoints: string[] = [];
-
   for (const file of files) {
-    const fileName = file.rel_path.split("/").pop() ?? "";
+    const fileName = file.relPath.split("/").pop() ?? "";
     if (entryPatterns.includes(fileName)) {
-      entryPoints.push(file.rel_path);
+      entryPoints.push(file.relPath);
     }
   }
-
   return entryPoints;
 }
 

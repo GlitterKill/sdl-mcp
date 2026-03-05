@@ -1,8 +1,9 @@
-import * as db from "../db/queries.js";
 import * as score from "../graph/score.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { extractCodeWindow, identifiersExistInWindow } from "./windows.js";
 import { logger } from "../util/logger.js";
+import { getKuzuConn } from "../db/kuzu.js";
+import * as kuzuDb from "../db/kuzu-queries.js";
 import type {
   CodeWindowRequest,
   CodeWindowResponse,
@@ -36,14 +37,41 @@ export interface DenialGuidance {
   nextBestAction: NextBestActionCallable;
 }
 
-export function evaluateRequest(
+async function getSymbolFromKuzu(symbolId: string): Promise<SymbolRow | null> {
+  const conn = await getKuzuConn();
+  const symbol = await kuzuDb.getSymbol(conn, symbolId);
+  if (!symbol) return null;
+
+  return {
+    symbol_id: symbol.symbolId,
+    repo_id: symbol.repoId,
+    file_id: 0,
+    kind: symbol.kind as SymbolRow["kind"],
+    name: symbol.name,
+    exported: symbol.exported ? 1 : 0,
+    visibility: symbol.visibility as SymbolRow["visibility"],
+    language: symbol.language,
+    range_start_line: symbol.rangeStartLine,
+    range_start_col: symbol.rangeStartCol,
+    range_end_line: symbol.rangeEndLine,
+    range_end_col: symbol.rangeEndCol,
+    ast_fingerprint: symbol.astFingerprint,
+    signature_json: symbol.signatureJson,
+    summary: symbol.summary,
+    invariants_json: symbol.invariantsJson,
+    side_effects_json: symbol.sideEffectsJson,
+    updated_at: symbol.updatedAt,
+  };
+}
+
+export async function evaluateRequest(
   request: CodeWindowRequest,
   context: GateContext,
-): CodeWindowResponse {
+): Promise<CodeWindowResponse> {
   const config = loadConfig();
   const policy = context.policy ?? config.policy;
 
-  const window = extractCodeWindow(request.repoId, request.symbolId);
+  const window = await extractCodeWindow(request.repoId, request.symbolId);
   if (!window) {
     return {
       approved: false,
@@ -52,7 +80,7 @@ export function evaluateRequest(
     };
   }
 
-  const symbol = context.symbol || db.getSymbol(request.symbolId);
+  const symbol = context.symbol || (await getSymbolFromKuzu(request.symbolId));
   if (!symbol) {
     return {
       approved: false,
@@ -234,7 +262,7 @@ export function generateDenialGuidance(
   }
 
   // Resolve the symbol once for identifier extraction
-  const symbol = symbolHint ?? db.getSymbol(request.symbolId);
+  const symbol = symbolHint;
 
   if (noIdentifiers) {
     if (symbol) {
