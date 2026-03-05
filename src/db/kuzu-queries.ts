@@ -227,17 +227,16 @@ export async function listRepos(
 ): Promise<RepoRow[]> {
   assertSafeInt(limit, "limit");
 
-  return queryAll<RepoRow>(
+  const rows = await queryAll<RepoRow>(
     conn,
     `MATCH (r:Repo)
      RETURN r.repoId AS repoId,
             r.rootPath AS rootPath,
             r.configJson AS configJson,
             r.createdAt AS createdAt
-     ORDER BY r.repoId
-     LIMIT $limit`,
-    { limit },
+     ORDER BY r.repoId`,
   );
+  return rows.slice(0, limit);
 }
 
 export async function deleteRepo(conn: Connection, repoId: string): Promise<void> {
@@ -1249,12 +1248,11 @@ export async function searchSymbols(
             s.invariantsJson AS invariantsJson,
             s.sideEffectsJson AS sideEffectsJson,
             s.updatedAt AS updatedAt
-     ORDER BY exactNameRank, ciExactNameRank, filePenalty, kindRank, nameMatchRank
-     LIMIT $limit`,
-    { repoId, query: trimmed, limit: safeLimit },
+     ORDER BY exactNameRank, ciExactNameRank, filePenalty, kindRank, nameMatchRank`,
+    { repoId, query: trimmed },
   );
 
-  return rows.map((row) => ({
+  return rows.slice(0, safeLimit).map((row) => ({
     symbolId: row.symbolId,
     repoId,
     fileId: row.fileId,
@@ -1320,17 +1318,16 @@ export async function searchSymbolsLite(
             WHEN 'module' THEN 6
             ELSE 7
           END AS kindRank,
-          CASE WHEN lower(s.name) CONTAINS lower($query) THEN 0 ELSE 1 END AS nameMatchRank
+           CASE WHEN lower(s.name) CONTAINS lower($query) THEN 0 ELSE 1 END AS nameMatchRank
      RETURN s.symbolId AS symbolId,
             s.name AS name,
             f.fileId AS fileId,
             s.kind AS kind
-     ORDER BY exactNameRank, ciExactNameRank, filePenalty, kindRank, nameMatchRank
-     LIMIT $limit`,
-    { repoId, query: trimmed, limit: safeLimit },
+     ORDER BY exactNameRank, ciExactNameRank, filePenalty, kindRank, nameMatchRank`,
+    { repoId, query: trimmed },
   );
 
-  return rows;
+  return rows.slice(0, safeLimit);
 }
 
 export interface EdgeRow {
@@ -2087,12 +2084,11 @@ export async function getVersionsByRepo(
             v.reason AS reason,
             v.prevVersionHash AS prevVersionHash,
             v.versionHash AS versionHash
-     ORDER BY v.createdAt DESC
-     LIMIT $limit`,
+     ORDER BY v.createdAt DESC`,
     { repoId },
   );
 
-  return rows.map((row) => ({ repoId, ...row }));
+  return rows.slice(0, limit).map((row) => ({ repoId, ...row }));
 }
 
 export async function snapshotSymbolVersion(
@@ -2497,12 +2493,11 @@ export async function getTopSymbolsByFanIn(
             m.fanIn AS fanIn,
             m.fanOut AS fanOut,
             m.churn30d AS churn30d
-     ORDER BY m.fanIn DESC
-     LIMIT $limit`,
+     ORDER BY m.fanIn DESC`,
     { repoId },
   );
 
-  return rows.map((row) => ({
+  return rows.slice(0, limit).map((row) => ({
     symbolId: row.symbolId,
     fanIn: toNumber(row.fanIn),
     fanOut: toNumber(row.fanOut),
@@ -2531,12 +2526,11 @@ export async function getTopSymbolsByChurn(
             m.fanIn AS fanIn,
             m.fanOut AS fanOut,
             m.churn30d AS churn30d
-     ORDER BY m.churn30d DESC
-     LIMIT $limit`,
+     ORDER BY m.churn30d DESC`,
     { repoId },
   );
 
-  return rows.map((row) => ({
+  return rows.slice(0, limit).map((row) => ({
     symbolId: row.symbolId,
     fanIn: toNumber(row.fanIn),
     fanOut: toNumber(row.fanOut),
@@ -2686,7 +2680,7 @@ export async function getAuditEvents(
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  return queryAll<AuditRow>(
+  const rows = await queryAll<AuditRow>(
     conn,
     `MATCH (a:Audit)
      ${whereClause}
@@ -2697,10 +2691,10 @@ export async function getAuditEvents(
             a.repoId AS repoId,
             a.symbolId AS symbolId,
             a.detailsJson AS detailsJson
-     ORDER BY a.timestamp DESC
-     LIMIT $limit`,
+     ORDER BY a.timestamp DESC`,
     params,
   );
+  return rows.slice(0, safeLimit);
 }
 
 export interface AgentFeedbackRow {
@@ -2775,7 +2769,7 @@ export async function getAgentFeedbackByRepo(
   limit: number,
 ): Promise<AgentFeedbackRow[]> {
   assertSafeInt(limit, "limit");
-  return queryAll<AgentFeedbackRow>(
+  const rows = await queryAll<AgentFeedbackRow>(
     conn,
     `MATCH (f:AgentFeedback {repoId: $repoId})
      RETURN f.feedbackId AS feedbackId,
@@ -2788,10 +2782,10 @@ export async function getAgentFeedbackByRepo(
             f.taskType AS taskType,
             f.taskText AS taskText,
             f.createdAt AS createdAt
-     ORDER BY f.createdAt DESC
-     LIMIT $limit`,
+     ORDER BY f.createdAt DESC`,
     { repoId },
   );
+  return rows.slice(0, limit);
 }
 
 export async function getAgentFeedbackByVersion(
@@ -2801,7 +2795,7 @@ export async function getAgentFeedbackByVersion(
   limit: number,
 ): Promise<AgentFeedbackRow[]> {
   assertSafeInt(limit, "limit");
-  return queryAll<AgentFeedbackRow>(
+  const rows = await queryAll<AgentFeedbackRow>(
     conn,
     `MATCH (f:AgentFeedback {repoId: $repoId, versionId: $versionId})
      RETURN f.feedbackId AS feedbackId,
@@ -2814,10 +2808,10 @@ export async function getAgentFeedbackByVersion(
             f.taskType AS taskType,
             f.taskText AS taskText,
             f.createdAt AS createdAt
-     ORDER BY f.createdAt DESC
-     LIMIT $limit`,
+     ORDER BY f.createdAt DESC`,
     { repoId, versionId },
   );
+  return rows.slice(0, limit);
 }
 
 export interface AggregatedFeedback {
@@ -3200,12 +3194,11 @@ export async function getSyncArtifactsByRepo(
             a.compressedData AS compressedData,
             a.createdAt AS createdAt,
             a.sizeBytes AS sizeBytes
-     ORDER BY a.createdAt DESC
-     LIMIT $limit`,
+     ORDER BY a.createdAt DESC`,
     { repoId },
   );
 
-  return rows.map((row) => ({
+  return rows.slice(0, limit).map((row) => ({
     artifactId: row.artifactId,
     repoId: row.repoId,
     versionId: row.versionId,

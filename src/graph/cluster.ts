@@ -42,13 +42,13 @@ function labelPropagation(
       let maxCount = 0;
 
       for (const n of neighbors) {
-        const lbl = labels[n]!;
+        const lbl = labels[n];
         const next = (counts.get(lbl) ?? 0) + 1;
         counts.set(lbl, next);
         if (next > maxCount) maxCount = next;
       }
 
-      let bestLabel = labels[node]!;
+      let bestLabel = labels[node];
       for (const [lbl, c] of counts) {
         if (c === maxCount && lbl < bestLabel) bestLabel = lbl;
       }
@@ -65,18 +65,18 @@ function labelPropagation(
   // Canonicalize labels by mapping each label to the min node index in that group.
   const labelToMin = Array.from({ length: nodeCount }, (_, i) => i);
   for (let node = 0; node < nodeCount; node++) {
-    const label = labels[node]!;
-    if (node < labelToMin[label]!) {
+    const label = labels[node];
+    if (node < labelToMin[label]) {
       labelToMin[label] = node;
     }
   }
 
-  const canonical = labels.map((lbl) => labelToMin[lbl]!);
+  const canonical = labels.map((lbl) => labelToMin[lbl]);
 
   const communities = new Map<number, number[]>();
   for (let node = 0; node < nodeCount; node++) {
-    if (adjacency[node]!.length === 0) continue;
-    const key = canonical[node]!;
+    if (adjacency[node].length === 0) continue;
+    const key = canonical[node];
     const members = communities.get(key) ?? [];
     members.push(node);
     communities.set(key, members);
@@ -121,8 +121,8 @@ export async function computeClustersTS(
 
   edgePairs.sort(([a1, b1], [a2, b2]) => a1 - a2 || b1 - b2);
   for (let i = edgePairs.length - 1; i > 0; i--) {
-    const [a, b] = edgePairs[i]!;
-    const [pa, pb] = edgePairs[i - 1]!;
+    const [a, b] = edgePairs[i];
+    const [pa, pb] = edgePairs[i - 1];
     if (a === pa && b === pb) edgePairs.splice(i, 1);
   }
 
@@ -132,7 +132,7 @@ export async function computeClustersTS(
   for (const members of communities.values()) {
     if (members.length < minClusterSize) continue;
 
-    const memberSymbolIds = members.map((idx) => symbolIds[idx]!).sort();
+    const memberSymbolIds = members.map((idx) => symbolIds[idx]).sort();
     const seed = memberSymbolIds.join("|");
     const clusterId = hashContent(`cluster:${seed}`);
 

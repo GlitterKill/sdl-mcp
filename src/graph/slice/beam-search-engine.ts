@@ -55,7 +55,7 @@ import type {
 function toLegacySymbolRow(symbol: kuzuDb.SymbolRow): SymbolRow {
   return {
     symbol_id: symbol.symbolId,
-    repo_id: symbol.repoId as RepoId,
+    repo_id: symbol.repoId,
     file_id: 0,
     kind: symbol.kind as SymbolRow["kind"],
     name: symbol.name,
@@ -78,7 +78,7 @@ function toLegacySymbolRow(symbol: kuzuDb.SymbolRow): SymbolRow {
 function toLegacyFileRow(file: kuzuDb.FileRow): FileRow {
   return {
     file_id: 0,
-    repo_id: file.repoId as RepoId,
+    repo_id: file.repoId,
     rel_path: file.relPath,
     content_hash: file.contentHash,
     language: file.language,
@@ -638,7 +638,7 @@ export async function beamSearchKuzu(
       const edgeType = normalizeEdgeType(edge.edgeType);
       if (!edgeType) continue;
 
-      const toId = edge.toSymbolId as SymbolId;
+      const toId = edge.toSymbolId;
       if (visited.has(toId) || sliceCards.has(toId)) continue;
 
       const candidateScore = applyEdgeConfidenceWeight(

@@ -129,7 +129,7 @@ function toCompactRef(row: {
   return {
     symbolId: row.symbolId,
     name: row.name,
-    kind: (isSymbolKind(row.kind) ? row.kind : "function") as SymbolKind,
+    kind: (isSymbolKind(row.kind) ? row.kind : "function"),
     exported: row.exported,
     signature,
   };

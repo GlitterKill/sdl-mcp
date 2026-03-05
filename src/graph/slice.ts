@@ -546,7 +546,7 @@ async function loadSymbolCards(
 
     const baseCard: SymbolCard = {
       symbolId: symbolRow.symbolId,
-      repoId: symbolRow.repoId as RepoId,
+      repoId: symbolRow.repoId,
       file: file?.relPath ?? "",
       range: {
         startLine: symbolRow.rangeStartLine,

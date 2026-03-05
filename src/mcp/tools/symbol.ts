@@ -244,7 +244,7 @@ async function buildCardForSymbol(
             )
           : undefined,
         canonicalTest: metrics.canonicalTestJson
-          ? (parseJson(metrics.canonicalTestJson) as SymbolMetrics["canonicalTest"])
+          ? (parseJson(metrics.canonicalTestJson))
           : undefined,
       }
     : undefined;

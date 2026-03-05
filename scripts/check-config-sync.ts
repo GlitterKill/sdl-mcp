@@ -2,8 +2,9 @@
 /**
  * check-config-sync.ts
  *
- * Reads src/config/types.ts and src/config/types.js, extracts all .default(...)
- * values, and compares them. Exits with code 1 if any mismatch is found.
+ * Reads src/config/types.ts and the compiled config output, extracts all
+ * .default(...) values, and compares them. Exits with code 1 if any mismatch
+ * is found.
  *
  * Usage:
  *   tsx scripts/check-config-sync.ts
@@ -15,6 +16,11 @@ import { fileURLToPath } from "url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = resolve(__dirname, "..");
+const TS_PATH = resolve(ROOT, "src/config/types.ts");
+const JS_CANDIDATE_PATHS = [
+  resolve(ROOT, "dist/config/types.js"),
+  resolve(ROOT, "src/config/types.js"),
+];
 
 interface DefaultEntry {
   context: string;
@@ -157,25 +163,34 @@ function compareDefaults(
 }
 
 function main(): void {
-  const tsPath = resolve(ROOT, "src/config/types.ts");
-  const jsPath = resolve(ROOT, "src/config/types.js");
-
   let tsSource: string;
-  let jsSource: string;
   try {
-    tsSource = readFileSync(tsPath, "utf-8");
+    tsSource = readFileSync(TS_PATH, "utf-8");
   } catch {
-    console.error(`ERROR: Could not read ${tsPath}`);
-    process.exit(1);
-  }
-  try {
-    jsSource = readFileSync(jsPath, "utf-8");
-  } catch {
-    console.error(`ERROR: Could not read ${jsPath}`);
+    console.error(`ERROR: Could not read ${TS_PATH}`);
     process.exit(1);
   }
 
-  const tsDefaults = extractDefaults(tsSource, tsPath);
+  let jsPath: string | undefined;
+  let jsSource: string | undefined;
+  for (const candidatePath of JS_CANDIDATE_PATHS) {
+    try {
+      jsSource = readFileSync(candidatePath, "utf-8");
+      jsPath = candidatePath;
+      break;
+    } catch {
+      continue;
+    }
+  }
+
+  if (!jsPath || !jsSource) {
+    console.error(
+      `ERROR: Could not read compiled config defaults. Checked: ${JS_CANDIDATE_PATHS.join(", ")}`,
+    );
+    process.exit(1);
+  }
+
+  const tsDefaults = extractDefaults(tsSource, TS_PATH);
   const jsDefaults = extractDefaults(jsSource, jsPath);
 
   const mismatches = compareDefaults(tsDefaults, jsDefaults);

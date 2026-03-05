@@ -247,13 +247,13 @@ export async function getPath(
   const symbolIds: SymbolId[] = [];
   for (const node of rawNodes) {
     if (typeof node === "string") {
-      symbolIds.push(node as SymbolId);
+      symbolIds.push(node);
       continue;
     }
     if (node && typeof node === "object" && "symbolId" in node) {
       const value = (node as { symbolId?: unknown }).symbolId;
       if (typeof value === "string") {
-        symbolIds.push(value as SymbolId);
+        symbolIds.push(value);
       }
     }
   }

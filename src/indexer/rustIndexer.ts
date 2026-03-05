@@ -128,12 +128,12 @@ interface NativeAddon {
     name: string,
     fingerprint: string,
   ): string;
-  computeClusters(
+  computeClusters?(
     symbols: NativeClusterSymbol[],
     edges: NativeClusterEdge[],
     minClusterSize: number,
   ): NativeClusterAssignment[];
-  traceProcesses(
+  traceProcesses?(
     symbols: NativeProcessSymbol[],
     callEdges: NativeProcessCallEdge[],
     maxDepth: number,
@@ -153,9 +153,7 @@ function isCompatibleNativeAddon(addon: unknown): addon is NativeAddon {
   return (
     typeof maybe.parseFiles === "function" &&
     typeof maybe.hashContentNative === "function" &&
-    typeof maybe.generateSymbolIdNative === "function" &&
-    typeof maybe.computeClusters === "function" &&
-    typeof maybe.traceProcesses === "function"
+    typeof maybe.generateSymbolIdNative === "function"
   );
 }
 
@@ -350,15 +348,14 @@ export function computeClustersRust(
   minClusterSize: number = 3,
 ): ClusterAssignment[] | null {
   const addon = loadNativeAddon();
-  if (!addon) return null;
+  if (!addon?.computeClusters) return null;
 
   try {
     return addon.computeClusters(symbols, edges, minClusterSize);
   } catch (error) {
-    logger.error("Native Rust cluster detection failed; disabling native addon", {
+    logger.error("Native Rust cluster detection failed; falling back to TypeScript", {
       error,
     });
-    nativeAddon = null;
     return null;
   }
 }
@@ -370,15 +367,14 @@ export function traceProcessesRust(
   entryPatterns: string[] = [],
 ): ProcessTrace[] | null {
   const addon = loadNativeAddon();
-  if (!addon) return null;
+  if (!addon?.traceProcesses) return null;
 
   try {
     return addon.traceProcesses(symbols, callEdges, maxDepth, entryPatterns);
   } catch (error) {
-    logger.error("Native Rust process tracing failed; disabling native addon", {
+    logger.error("Native Rust process tracing failed; falling back to TypeScript", {
       error,
     });
-    nativeAddon = null;
     return null;
   }
 }

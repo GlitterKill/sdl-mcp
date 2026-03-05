@@ -132,7 +132,13 @@ export async function getKuzuConn(): Promise<KuzuConnection> {
   
   if (!(await isConnectionHealthy(conn))) {
     logger.warn(`KuzuDB connection ${connectionIndex} unhealthy, recreating`);
-    try { await conn.close(); } catch {}
+    try {
+      await conn.close();
+    } catch (closeError) {
+      logger.debug("Failed to close unhealthy KuzuDB connection before recreation", {
+        error: closeError instanceof Error ? closeError.message : String(closeError),
+      });
+    }
     
     const modules = await loadKuzu();
     const newConn = new modules.Connection(db);

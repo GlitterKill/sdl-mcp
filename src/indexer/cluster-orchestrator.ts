@@ -139,7 +139,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
   await kuzuDb.deleteProcessesByRepo(conn, repoId);
 
   for (const proc of processes) {
-    const lastOrder = proc.steps.length > 0 ? proc.steps[proc.steps.length - 1]!.stepOrder : 0;
+    const lastOrder = proc.steps.length > 0 ? proc.steps[proc.steps.length - 1].stepOrder : 0;
 
     await kuzuDb.upsertProcess(conn, {
       processId: proc.processId,

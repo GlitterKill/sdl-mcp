@@ -4,9 +4,7 @@ import { parseArgs } from "util";
 import type {
   CLIOptions,
   DoctorOptions,
-  SummaryOptions,
   VersionOptions,
-  HealthOptions,
 } from "./types.js";
 import { initCommand } from "./commands/init.js";
 import { doctorCommand } from "./commands/doctor.js";
@@ -199,7 +197,7 @@ async function main(): Promise<void> {
         global,
         values as Record<string, unknown>,
       );
-      await summaryCommand(options as SummaryOptions);
+      await summaryCommand(options);
       break;
     }
 
@@ -209,7 +207,7 @@ async function main(): Promise<void> {
         global,
         values as Record<string, unknown>,
       );
-      await healthCommand(options as HealthOptions);
+      await healthCommand(options);
       break;
     }
 

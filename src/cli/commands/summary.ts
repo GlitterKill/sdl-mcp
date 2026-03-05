@@ -10,7 +10,7 @@ import {
   renderContextSummary,
 } from "../../mcp/summary.js";
 import { logSummaryGenerationEvent } from "../../mcp/telemetry.js";
-import type { ContextSummaryFormat, ContextSummaryScope } from "../../mcp/types.js";
+import type { ContextSummaryFormat } from "../../mcp/types.js";
 
 function resolveRepoId(
   repoId: string | undefined,
@@ -42,7 +42,7 @@ export async function summaryCommand(options: SummaryOptions): Promise<void> {
 
   const format = (options.format ?? "markdown") as ContextSummaryFormat;
   const scope = (options.scope ??
-    detectSummaryScope(options.query)) as ContextSummaryScope;
+    detectSummaryScope(options.query));
   const budget = options.budget ?? 2000;
 
   const summary = await generateContextSummary({

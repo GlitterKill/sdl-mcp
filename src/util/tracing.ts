@@ -135,7 +135,7 @@ function flattenAttributes(
         }
       }
     } else {
-      result[key] = value as string | number | boolean;
+      result[key] = value;
     }
   }
 
@@ -218,7 +218,7 @@ export function runInSpanContext<T>(span: Span, fn: () => T): T {
 
 export function resetTracingForTest(): void {
   if (provider) {
-    provider.forceFlush();
+    void provider.forceFlush();
   }
   tracer = null;
   provider = null;

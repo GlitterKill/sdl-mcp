@@ -105,7 +105,7 @@ export async function computeBlastRadius(
       for (const edge of edges) {
         if (repoId && edge.repoId !== repoId) continue;
 
-        const dependentId = edge.fromSymbolId as SymbolId;
+        const dependentId = edge.fromSymbolId;
         if (changedSet.has(dependentId)) continue;
         if (visited.has(dependentId)) continue;
 
@@ -173,7 +173,7 @@ export async function computeBlastRadius(
         );
 
         for (const step of downstream) {
-          const symbolId = step.symbolId as SymbolId;
+          const symbolId = step.symbolId;
           if (changedSet.has(symbolId)) continue;
 
           const stepDistance = step.stepOrder - proc.stepOrder;

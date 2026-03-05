@@ -320,7 +320,7 @@ export function computeCanonicalTest(
   }
 
   while (queueHead < queue.length && visited.size < MAX_BFS_VISITED) {
-    const [current, depth] = queue[queueHead++]!;
+    const [current, depth] = queue[queueHead++];
 
     if (depth >= MAX_BFS_DEPTH) {
       continue;

@@ -172,9 +172,9 @@ export function createTsCallResolver(
           // Determine the callee expression.
           let calleeExpr: ts.Expression;
           if (isTaggedTemplate) {
-            calleeExpr = (node as ts.TaggedTemplateExpression).tag;
+            calleeExpr = (node).tag;
           } else {
-            calleeExpr = (node as ts.CallExpression | ts.NewExpression).expression;
+            calleeExpr = (node).expression;
           }
 
           let symbol = checker.getSymbolAtLocation(calleeExpr);
@@ -200,7 +200,7 @@ export function createTsCallResolver(
 
             // Try resolved signature first for concrete method resolution.
             if (ts.isCallExpression(node)) {
-              const sig = checker.getResolvedSignature(node as ts.CallExpression);
+              const sig = checker.getResolvedSignature(node);
               if (sig) {
                 const sigDecl = sig.declaration;
                 if (sigDecl && !ts.isJSDocSignature(sigDecl)) {
