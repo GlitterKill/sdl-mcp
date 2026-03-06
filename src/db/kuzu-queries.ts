@@ -841,6 +841,19 @@ export async function getSymbolIdsByFile(
   return rows.map((row) => row.symbolId);
 }
 
+export async function getSymbolIdsByRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<string[]> {
+  const rows = await queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     RETURN s.symbolId AS symbolId`,
+    { repoId },
+  );
+  return rows.map((row) => row.symbolId);
+}
+
 export async function getSymbolsByRepo(
   conn: Connection,
   repoId: string,

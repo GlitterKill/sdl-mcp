@@ -50,12 +50,20 @@ export async function exportArtifact(
   const commitSha = options.commitSha ?? (await getGitCommitSha(repo.rootPath));
 
   const files = await kuzuDb.getFilesByRepo(conn, options.repoId);
-  const symbols = await kuzuDb.getSymbolsByRepo(conn, options.repoId);
-  const symbolIds = symbols.map((s) => s.symbolId);
+  const symbolIds = await kuzuDb.getSymbolIdsByRepo(conn, options.repoId);
+
+  // Fetch full symbols in chunks
+  const symbols: import("../db/kuzu-queries.js").SymbolRow[] = [];
+  const SYMBOL_CHUNK_SIZE = 200;
+  for (let i = 0; i < symbolIds.length; i += SYMBOL_CHUNK_SIZE) {
+    const chunkIds = symbolIds.slice(i, i + SYMBOL_CHUNK_SIZE);
+    const chunkMap = await kuzuDb.getSymbolsByIds(conn, chunkIds);
+    symbols.push(...chunkMap.values());
+  }
 
   // Fetch edges in chunks to avoid KuzuDB buffer pool exhaustion on large repos
   const edges: import("../db/kuzu-queries.js").EdgeRow[] = [];
-  const EDGE_CHUNK_SIZE = 500;
+  const EDGE_CHUNK_SIZE = 200;
   for (let i = 0; i < symbolIds.length; i += EDGE_CHUNK_SIZE) {
     const chunkIds = symbolIds.slice(i, i + EDGE_CHUNK_SIZE);
     const chunkMap = await kuzuDb.getEdgesFromSymbols(conn, chunkIds);
@@ -67,11 +75,11 @@ export async function exportArtifact(
   const symbolVersions = await kuzuDb.getSymbolVersionsAtVersion(conn, versionId);
 
   const metricsMap = new Map();
-  const CHUNK_SIZE = 500;
-  for (let i = 0; i < symbolIds.length; i += CHUNK_SIZE) {
+  const METRICS_CHUNK_SIZE = 200;
+  for (let i = 0; i < symbolIds.length; i += METRICS_CHUNK_SIZE) {
     const chunkMap = await kuzuDb.getMetricsBySymbolIds(
       conn,
-      symbolIds.slice(i, i + CHUNK_SIZE),
+      symbolIds.slice(i, i + METRICS_CHUNK_SIZE),
     );
     for (const [k, v] of chunkMap) {
       metricsMap.set(k, v);

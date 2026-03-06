@@ -2093,9 +2093,9 @@ async function runBenchmark(): Promise<void> {
   if (!persistedRepo) {
     await db.upsertRepo(conn, {
       repoId: repoConfig.repoId,
-      root_path: repoConfig.rootPath,
-      config_json: JSON.stringify(repoConfig),
-      created_at: new Date().toISOString(),
+      rootPath: repoConfig.rootPath,
+      configJson: JSON.stringify(repoConfig),
+      createdAt: new Date().toISOString(),
     });
   }
 
