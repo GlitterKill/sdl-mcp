@@ -42,9 +42,12 @@ function inferGraphDbPathHint(
 }
 
 export function normalizeGraphDbPath(
-  rawPath: string,
+  rawPath: string | undefined | null,
   hint: GraphDbPathHint = "auto",
 ): string {
+  if (!rawPath) {
+    return resolve(DEFAULT_GRAPH_DB_FILENAME);
+  }
   const trimmedPath = rawPath.trim();
   const resolvedPath = resolve(trimmedPath);
   const effectiveHint =

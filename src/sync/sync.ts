@@ -51,11 +51,22 @@ export async function exportArtifact(
 
   const files = await kuzuDb.getFilesByRepo(conn, options.repoId);
   const symbols = await kuzuDb.getSymbolsByRepo(conn, options.repoId);
-  const edges = await kuzuDb.getEdgesByRepo(conn, options.repoId);
+  const symbolIds = symbols.map((s) => s.symbolId);
+
+  // Fetch edges in chunks to avoid KuzuDB buffer pool exhaustion on large repos
+  const edges: import("../db/kuzu-queries.js").EdgeRow[] = [];
+  const EDGE_CHUNK_SIZE = 500;
+  for (let i = 0; i < symbolIds.length; i += EDGE_CHUNK_SIZE) {
+    const chunkIds = symbolIds.slice(i, i + EDGE_CHUNK_SIZE);
+    const chunkMap = await kuzuDb.getEdgesFromSymbols(conn, chunkIds);
+    for (const idEdges of chunkMap.values()) {
+      edges.push(...idEdges);
+    }
+  }
+
   const symbolVersions = await kuzuDb.getSymbolVersionsAtVersion(conn, versionId);
 
   const metricsMap = new Map();
-  const symbolIds = symbols.map((s) => s.symbolId);
   const CHUNK_SIZE = 500;
   for (let i = 0; i < symbolIds.length; i += CHUNK_SIZE) {
     const chunkMap = await kuzuDb.getMetricsBySymbolIds(

@@ -17,6 +17,7 @@ import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import fg from "fast-glob";
 import { initKuzuDb, getKuzuConn } from "../src/db/kuzu.js";
+import { resolveGraphDbPath } from "../src/db/graph-db-path.js";
 import type { Connection } from "kuzu";
 import { loadConfig } from "../src/config/loadConfig.js";
 import * as db from "../src/db/kuzu-queries.js";
@@ -2075,7 +2076,9 @@ async function runBenchmark(): Promise<void> {
   const normalized = normalizeTaskFile(parsed);
 
   const config = loadConfig(configPath);
-  await initKuzuDb(config.dbPath);
+  const resolvedConfigPath = configPath ? resolve(configPath) : resolve(process.cwd(), "config/sdlmcp.config.json");
+  const graphDbPath = resolveGraphDbPath(config, resolvedConfigPath);
+  await initKuzuDb(graphDbPath);
   const conn = await getKuzuConn();
   
   const repoConfig = repoOverride
@@ -2471,7 +2474,7 @@ async function runBenchmark(): Promise<void> {
 
 runBenchmark().catch((error) => {
   console.error(
-    `Benchmark failed: ${error instanceof Error ? error.message : String(error)}`,
+    `Benchmark failed: ${error instanceof Error ? error.stack : String(error)}`,
   );
   process.exit(1);
 });
