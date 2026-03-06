@@ -1,11 +1,13 @@
 import { describe, before, after, it } from "node:test";
 import assert from "node:assert";
 import {
-  cpSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
@@ -26,6 +28,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const REPO_ID = "test-kuzu-e2e-repo";
+
+/** Reliable recursive directory copy (cpSync is experimental before Node 22). */
+function copyDirSync(src: string, dest: string): void {
+  mkdirSync(dest, { recursive: true });
+  for (const entry of readdirSync(src)) {
+    const srcPath = join(src, entry);
+    const destPath = join(dest, entry);
+    if (statSync(srcPath).isDirectory()) {
+      copyDirSync(srcPath, destPath);
+    } else {
+      copyFileSync(srcPath, destPath);
+    }
+  }
+}
 
 function findSymbol(
   symbols: SymbolRow[],
@@ -62,7 +78,7 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     mkdirSync(graphDbPath, { recursive: true });
 
     repoDir = mkdtempSync(join(tmpdir(), "sdl-mcp-kuzu-e2e-repo-"));
-    cpSync(fixtureRoot, repoDir, { recursive: true });
+    copyDirSync(fixtureRoot, repoDir);
 
     writeFileSync(
       configPath,
