@@ -8,10 +8,10 @@ import {
   addToSymbolIndex,
   cleanupUnresolvedEdges,
   createCallResolutionTelemetry,
-  isTsCallResolutionFile,
+  recordPass2ResolverResult,
+  recordPass2ResolverTarget,
   resolvePass2Targets,
   resolvePendingCallEdges,
-  resolveTsCallEdgesPass2,
 } from "./edge-builder.js";
 import {
   processFile,
@@ -34,6 +34,10 @@ import {
   parseFilesRust,
   type RustParseResult,
 } from "./rustIndexer.js";
+import {
+  createDefaultPass2ResolverRegistry,
+  toPass2Target,
+} from "./pass2/registry.js";
 import { createTsCallResolver } from "./ts/tsParser.js";
 import { ParserWorkerPool } from "./workerPool.js";
 
@@ -215,12 +219,26 @@ export async function indexRepo(
     let configEdgesCreated = 0;
     const allConfigEdges: ConfigEdge[] = [];
     const changedFileIds = new Set<string>();
-    const changedTsFilePaths = new Set<string>();
-    const tsFiles = files.filter((file) => isTsCallResolutionFile(file.path));
+    const changedPass2FilePaths = new Set<string>();
+    const pass2ResolverRegistry = createDefaultPass2ResolverRegistry();
+    const registeredPass2Resolvers = pass2ResolverRegistry
+      .listResolvers()
+      .map((resolver) => resolver.id);
+    const supportsPass2FilePath = (relPath: string): boolean =>
+      pass2ResolverRegistry.supports(
+        toPass2Target({
+          path: relPath,
+        }),
+      );
+    const pass2EligibleFiles = files.filter((file) =>
+      pass2ResolverRegistry.supports(toPass2Target(file)),
+    );
+    const pass2ResolverCache = new Map<string, unknown>();
     const callResolutionTelemetry = createCallResolutionTelemetry({
       repoId,
       mode,
-      tsFileCount: tsFiles.length,
+      pass2EligibleFileCount: pass2EligibleFiles.length,
+      registeredResolvers: registeredPass2Resolvers,
     });
 
     let nextIndex = 0;
@@ -277,7 +295,9 @@ export async function indexRepo(
             continue;
           }
 
-          const skipCallResolution = isTsCallResolutionFile(file.path);
+          const skipCallResolution = pass2ResolverRegistry.supports(
+            toPass2Target(file),
+          );
 
           try {
             const result = await processFileFromRustResult({
@@ -296,15 +316,16 @@ export async function indexRepo(
               allSymbolsByName,
               skipCallResolution,
               globalNameToSymbolIds,
+              supportsPass2FilePath,
             });
             filesProcessed++;
             if (result.changed) {
               changedFiles++;
               changedFileIds.add(fileIdForPath(repoId, file.path, existingByPath));
               if (skipCallResolution) {
-                changedTsFilePaths.add(file.path);
+                changedPass2FilePaths.add(file.path);
                 for (const hinted of result.pass2HintPaths) {
-                  changedTsFilePaths.add(hinted);
+                  changedPass2FilePaths.add(hinted);
                 }
               }
             }
@@ -332,7 +353,9 @@ export async function indexRepo(
 
           const file = files[index];
           updatePass1Progress(file.path);
-          const skipCallResolution = isTsCallResolutionFile(file.path);
+          const skipCallResolution = pass2ResolverRegistry.supports(
+            toPass2Target(file),
+          );
 
           try {
             const result = await processFile({
@@ -352,15 +375,16 @@ export async function indexRepo(
               workerPool,
               skipCallResolution,
               globalNameToSymbolIds,
+              supportsPass2FilePath,
             });
             filesProcessed++;
             if (result.changed) {
               changedFiles++;
               changedFileIds.add(fileIdForPath(repoId, file.path, existingByPath));
               if (skipCallResolution) {
-                changedTsFilePaths.add(file.path);
+                changedPass2FilePaths.add(file.path);
                 for (const hinted of result.pass2HintPaths) {
-                  changedTsFilePaths.add(hinted);
+                  changedPass2FilePaths.add(hinted);
                 }
               }
             }
@@ -426,8 +450,9 @@ export async function indexRepo(
     const pass2Targets = await resolvePass2Targets({
       repoId,
       mode,
-      tsFiles,
-      changedTsFilePaths,
+      pass2Files: pass2EligibleFiles,
+      changedPass2FilePaths,
+      supportsPass2FilePath,
     });
     callResolutionTelemetry.pass2Targets = pass2Targets.length;
 
@@ -440,18 +465,33 @@ export async function indexRepo(
         total: pass2Targets.length,
         currentFile: fileMeta.path,
       });
-      const pass2Edges = await resolveTsCallEdgesPass2({
-        repoId,
-        repoRoot: repoRow.rootPath,
-        fileMeta,
-        symbolIndex,
-        tsResolver,
-        languages: config.languages,
-        createdCallEdges,
-        globalNameToSymbolIds,
-        telemetry: callResolutionTelemetry,
+      const resolver = pass2ResolverRegistry.getResolver(
+        toPass2Target({ ...fileMeta, repoId }),
+      );
+      if (!resolver) {
+        pass2Processed++;
+        continue;
+      }
+      recordPass2ResolverTarget(callResolutionTelemetry, resolver.id);
+      const resolverStartedAt = Date.now();
+      const pass2Result = await resolver.resolve(
+        toPass2Target({ ...fileMeta, repoId }),
+        {
+          repoRoot: repoRow.rootPath,
+          symbolIndex,
+          tsResolver,
+          languages: config.languages,
+          createdCallEdges,
+          globalNameToSymbolIds,
+          telemetry: callResolutionTelemetry,
+          cache: pass2ResolverCache,
+        },
+      );
+      recordPass2ResolverResult(callResolutionTelemetry, resolver.id, {
+        edgesCreated: pass2Result.edgesCreated,
+        elapsedMs: Date.now() - resolverStartedAt,
       });
-      totalEdgesCreated += pass2Edges;
+      totalEdgesCreated += pass2Result.edgesCreated;
       pass2Processed++;
     }
     if (pass2Targets.length > 0) {

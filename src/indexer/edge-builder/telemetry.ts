@@ -9,15 +9,31 @@ export function isTsCallResolutionFile(relPath: string): boolean {
 
 const CALL_RESOLUTION_TELEMETRY_SAMPLE_LIMIT = 20;
 
+export type Pass2ResolverTelemetry = {
+  targets: number;
+  filesProcessed: number;
+  edgesCreated: number;
+  elapsedMs: number;
+};
+
 export type CallResolutionTelemetry = {
   repoId: string;
   mode: "full" | "incremental";
+  pass2EligibleFileCount: number;
+  registeredResolvers: string[];
+
+  /**
+   * Legacy field retained for compatibility with existing audit-event readers.
+   * It now represents the total number of pass2-eligible files across all
+   * registered resolvers, not just TypeScript/JavaScript files.
+   */
   tsFileCount: number;
 
   pass2Targets: number;
   pass2FilesProcessed: number;
   pass2FilesNoExistingSymbols: number;
   pass2FilesNoMappedSymbols: number;
+  resolverBreakdown: Record<string, Pass2ResolverTelemetry>;
 
   pass2SymbolMapping: {
     extractedSymbols: number;
@@ -67,16 +83,32 @@ export type CallResolutionTelemetry = {
 export function createCallResolutionTelemetry(params: {
   repoId: string;
   mode: "full" | "incremental";
-  tsFileCount: number;
+  pass2EligibleFileCount: number;
+  registeredResolvers?: string[];
 }): CallResolutionTelemetry {
+  const resolverBreakdown = Object.fromEntries(
+    (params.registeredResolvers ?? []).map((resolverId) => [
+      resolverId,
+      {
+        targets: 0,
+        filesProcessed: 0,
+        edgesCreated: 0,
+        elapsedMs: 0,
+      } satisfies Pass2ResolverTelemetry,
+    ]),
+  );
+
   return {
     repoId: params.repoId,
     mode: params.mode,
-    tsFileCount: params.tsFileCount,
+    pass2EligibleFileCount: params.pass2EligibleFileCount,
+    registeredResolvers: [...(params.registeredResolvers ?? [])],
+    tsFileCount: params.pass2EligibleFileCount,
     pass2Targets: 0,
     pass2FilesProcessed: 0,
     pass2FilesNoExistingSymbols: 0,
     pass2FilesNoMappedSymbols: 0,
+    resolverBreakdown,
     pass2SymbolMapping: {
       extractedSymbols: 0,
       existingSymbols: 0,
@@ -109,6 +141,42 @@ export function createCallResolutionTelemetry(params: {
   };
 }
 
+function getResolverTelemetryBucket(
+  telemetry: CallResolutionTelemetry,
+  resolverId: string,
+): Pass2ResolverTelemetry {
+  if (!telemetry.resolverBreakdown[resolverId]) {
+    telemetry.resolverBreakdown[resolverId] = {
+      targets: 0,
+      filesProcessed: 0,
+      edgesCreated: 0,
+      elapsedMs: 0,
+    };
+  }
+  return telemetry.resolverBreakdown[resolverId];
+}
+
+export function recordPass2ResolverTarget(
+  telemetry: CallResolutionTelemetry,
+  resolverId: string,
+): void {
+  getResolverTelemetryBucket(telemetry, resolverId).targets++;
+}
+
+export function recordPass2ResolverResult(
+  telemetry: CallResolutionTelemetry,
+  resolverId: string,
+  params: {
+    edgesCreated: number;
+    elapsedMs: number;
+  },
+): void {
+  const bucket = getResolverTelemetryBucket(telemetry, resolverId);
+  bucket.filesProcessed++;
+  bucket.edgesCreated += params.edgesCreated;
+  bucket.elapsedMs += params.elapsedMs;
+}
+
 export function incRecord(
   record: Record<string, number>,
   key: string,
@@ -121,4 +189,3 @@ export function pushTelemetrySample<T>(arr: T[], value: T): void {
   if (arr.length >= CALL_RESOLUTION_TELEMETRY_SAMPLE_LIMIT) return;
   arr.push(value);
 }
-

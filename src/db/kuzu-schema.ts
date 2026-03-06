@@ -207,6 +207,13 @@ const NODE_TABLES: string[] = [
   )`,
 ];
 
+export const CALL_EDGE_METADATA_FIELDS = [
+  "confidence",
+  "resolution",
+  "resolverId",
+  "resolutionPhase",
+] as const;
+
 const REL_TABLES: string[] = [
   `CREATE REL TABLE IF NOT EXISTS FILE_IN_REPO (
     FROM File TO Repo
@@ -226,6 +233,8 @@ const REL_TABLES: string[] = [
     weight DOUBLE DEFAULT 1.0,
     confidence DOUBLE DEFAULT 1.0,
     resolution STRING DEFAULT 'exact',
+    resolverId STRING DEFAULT 'pass1-generic',
+    resolutionPhase STRING DEFAULT 'pass1',
     provenance STRING,
     createdAt STRING
   )`,
@@ -281,4 +290,34 @@ export async function createSchema(conn: Connection): Promise<void> {
   );
 }
 
-export const KUZU_SCHEMA_VERSION = 1;
+export async function getSchemaVersion(conn: Connection): Promise<number | null> {
+  const result = await conn.query(
+    `MATCH (sv:SchemaVersion {id: 'current'})
+     RETURN sv.schemaVersion AS schemaVersion`,
+  );
+  const queryResult = Array.isArray(result) ? result[result.length - 1] : result;
+  try {
+    const rows = (await queryResult.getAll()) as Array<{ schemaVersion?: unknown }>;
+    const value = rows[0]?.schemaVersion;
+    if (typeof value === "number") return value;
+    if (typeof value === "bigint") return Number(value);
+    if (typeof value === "string") return Number(value);
+    return null;
+  } finally {
+    if (Array.isArray(result)) {
+      for (const entry of result) {
+        entry.close();
+      }
+    } else {
+      result.close();
+    }
+  }
+}
+
+export const KUZU_SCHEMA_VERSION = 2;
+
+export function supportsCallResolutionMetadata(
+  schemaVersion: number | null | undefined,
+): boolean {
+  return typeof schemaVersion === "number" && schemaVersion >= 2;
+}

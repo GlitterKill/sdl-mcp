@@ -2,6 +2,7 @@ import type { HealthOptions } from "../types.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
+import { KUZU_SCHEMA_VERSION } from "../../db/kuzu-schema.js";
 import { getBadgeColor, getRepoHealthSnapshot } from "../../mcp/health.js";
 
 function resolveRepoId(
@@ -30,7 +31,7 @@ export async function healthCommand(options: HealthOptions): Promise<void> {
     process.stdout.write(
       `${JSON.stringify(
         {
-          schemaVersion: 1,
+          schemaVersion: KUZU_SCHEMA_VERSION,
           label: "sdl-mcp health",
           message,
           color,

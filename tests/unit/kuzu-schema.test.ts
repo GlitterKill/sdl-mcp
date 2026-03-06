@@ -96,7 +96,7 @@ describe("KuzuDB Schema", () => {
     it("should export schema version", async () => {
       const { KUZU_SCHEMA_VERSION } =
         await import("../../dist/db/kuzu-schema.js");
-      assert.strictEqual(KUZU_SCHEMA_VERSION, 1);
+      assert.strictEqual(KUZU_SCHEMA_VERSION, 2);
     });
   });
 

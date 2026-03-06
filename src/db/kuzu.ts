@@ -6,7 +6,11 @@ import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
 import { DatabaseError } from "../mcp/errors.js";
 import { normalizeGraphDbPath } from "./graph-db-path.js";
-import { createSchema } from "./kuzu-schema.js";
+import {
+  createSchema,
+  getSchemaVersion,
+  KUZU_SCHEMA_VERSION,
+} from "./kuzu-schema.js";
 
 type KuzuModule = typeof import("kuzu");
 type KuzuDatabase = import("kuzu").Database;
@@ -208,6 +212,12 @@ export async function initKuzuDb(dbPath: string): Promise<void> {
 
   try {
     await createSchema(conn);
+    const schemaVersion = await getSchemaVersion(conn);
+    if (schemaVersion !== KUZU_SCHEMA_VERSION) {
+      throw new DatabaseError(
+        `KuzuDB schema version mismatch: expected ${KUZU_SCHEMA_VERSION}, found ${schemaVersion ?? "unknown"}. Rebuild or reindex the graph database with this version of SDL-MCP.`,
+      );
+    }
 
     logger.info("KuzuDB schema initialized", { path: normalizedPath });
   } catch (err) {

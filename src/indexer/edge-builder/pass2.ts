@@ -19,24 +19,31 @@ import type { SymbolIndex, TsCallResolver } from "./types.js";
 async function resolvePass2Targets(params: {
   repoId: string;
   mode: "full" | "incremental";
-  tsFiles: FileMetadata[];
-  changedTsFilePaths: Set<string>;
+  pass2Files: FileMetadata[];
+  changedPass2FilePaths: Set<string>;
+  supportsPass2FilePath?: (relPath: string) => boolean;
 }): Promise<FileMetadata[]> {
-  const { repoId, mode, tsFiles, changedTsFilePaths } = params;
+  const {
+    repoId,
+    mode,
+    pass2Files,
+    changedPass2FilePaths,
+    supportsPass2FilePath = isTsCallResolutionFile,
+  } = params;
   if (mode === "full") {
-    return tsFiles;
+    return pass2Files;
   }
-  if (changedTsFilePaths.size === 0) {
+  if (changedPass2FilePaths.size === 0) {
     return [];
   }
 
   const conn = await getKuzuConn();
 
-  const tsFilesByPath = new Map(tsFiles.map((file) => [file.path, file]));
-  const targetPaths = new Set<string>(changedTsFilePaths);
+  const pass2FilesByPath = new Map(pass2Files.map((file) => [file.path, file]));
+  const targetPaths = new Set<string>(changedPass2FilePaths);
   const changedSymbolIds = new Set<string>();
 
-  for (const changedPath of changedTsFilePaths) {
+  for (const changedPath of changedPass2FilePaths) {
     const file = await kuzuDb.getFileByRepoPath(conn, repoId, changedPath);
     if (!file) continue;
     const symbolIds = await kuzuDb.getSymbolIdsByFile(conn, file.fileId);
@@ -47,7 +54,7 @@ async function resolvePass2Targets(params: {
 
   if (changedSymbolIds.size === 0) {
     return Array.from(targetPaths)
-      .map((path) => tsFilesByPath.get(path))
+      .map((path) => pass2FilesByPath.get(path))
       .filter((file): file is FileMetadata => Boolean(file));
   }
 
@@ -66,7 +73,7 @@ async function resolvePass2Targets(params: {
 
   if (importerSymbolIds.size === 0) {
     return Array.from(targetPaths)
-      .map((path) => tsFilesByPath.get(path))
+      .map((path) => pass2FilesByPath.get(path))
       .filter((file): file is FileMetadata => Boolean(file));
   }
 
@@ -83,12 +90,12 @@ async function resolvePass2Targets(params: {
   for (const symbol of importerSymbols.values()) {
     const file = importerFiles.get(symbol.fileId);
     if (!file) continue;
-    if (!isTsCallResolutionFile(file.relPath)) continue;
+    if (!supportsPass2FilePath(file.relPath)) continue;
     targetPaths.add(file.relPath);
   }
 
   return Array.from(targetPaths)
-    .map((path) => tsFilesByPath.get(path))
+    .map((path) => pass2FilesByPath.get(path))
     .filter((file): file is FileMetadata => Boolean(file));
 }
 
@@ -419,6 +426,8 @@ async function resolveTsCallEdgesPass2(params: {
             weight: 1.0,
             confidence: resolved.confidence,
             resolution: resolved.strategy,
+            resolverId: "pass2-ts",
+            resolutionPhase: "pass2",
             provenance: `call:${call.calleeIdentifier}`,
             createdAt: now,
           });
@@ -451,6 +460,8 @@ async function resolveTsCallEdgesPass2(params: {
             weight: 0.5,
             confidence: resolved.confidence,
             resolution: "unresolved",
+            resolverId: "pass2-ts",
+            resolutionPhase: "pass2",
             provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
             createdAt: now,
           });
@@ -508,6 +519,8 @@ async function resolveTsCallEdgesPass2(params: {
           weight: 1.0,
           confidence: tsCall.confidence ?? 1.0,
           resolution: "exact",
+          resolverId: "pass2-ts",
+          resolutionPhase: "pass2",
           provenance: `ts-call:${tsCall.callee.name}`,
           createdAt: now,
         });

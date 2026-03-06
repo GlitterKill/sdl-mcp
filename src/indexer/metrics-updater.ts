@@ -59,7 +59,7 @@ export async function finalizeIndexing({
     }
   }
 
-  if (callResolutionTelemetry.tsFileCount > 0) {
+  if (callResolutionTelemetry.pass2EligibleFileCount > 0) {
     try {
       const conn = await getKuzuConn();
       await kuzuDb.insertAuditEvent(conn, {

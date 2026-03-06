@@ -1356,6 +1356,8 @@ export interface EdgeRow {
   weight: number;
   confidence: number;
   resolution: string;
+  resolverId?: string;
+  resolutionPhase?: string;
   provenance: string | null;
   createdAt: string;
 }
@@ -1366,12 +1368,30 @@ export interface EdgeForSlice {
   edgeType: string;
   weight: number;
   confidence: number;
+  resolution?: string;
+  resolverId?: string;
+  resolutionPhase?: string;
 }
 
 export interface EdgeLite {
   fromSymbolId: string;
   toSymbolId: string;
   edgeType: string;
+}
+
+export interface EdgeQueryOptions {
+  minCallConfidence?: number;
+}
+
+function buildMinCallConfidenceClause(
+  alias: string,
+  minCallConfidence: number | undefined,
+): string {
+  if (minCallConfidence === undefined) {
+    return "";
+  }
+
+  return ` AND (${alias}.edgeType <> 'call' OR ${alias}.confidence >= $minCallConfidence)`;
 }
 
 export async function insertEdge(conn: Connection, edge: EdgeRow): Promise<void> {
@@ -1386,6 +1406,8 @@ export async function insertEdge(conn: Connection, edge: EdgeRow): Promise<void>
      SET d.weight = $weight,
          d.confidence = $confidence,
          d.resolution = $resolution,
+         d.resolverId = $resolverId,
+         d.resolutionPhase = $resolutionPhase,
          d.provenance = $provenance,
          d.createdAt = $createdAt`,
     {
@@ -1396,6 +1418,8 @@ export async function insertEdge(conn: Connection, edge: EdgeRow): Promise<void>
       weight: edge.weight,
       confidence: edge.confidence,
       resolution: edge.resolution,
+      resolverId: edge.resolverId ?? "pass1-generic",
+      resolutionPhase: edge.resolutionPhase ?? "pass1",
       provenance: edge.provenance,
       createdAt: edge.createdAt,
     },
@@ -1438,6 +1462,8 @@ export async function insertEdges(
            SET d.weight = $weight,
                d.confidence = $confidence,
                d.resolution = $resolution,
+               d.resolverId = $resolverId,
+               d.resolutionPhase = $resolutionPhase,
                d.provenance = $provenance,
                d.createdAt = $createdAt`,
           {
@@ -1447,6 +1473,8 @@ export async function insertEdges(
             weight: edge.weight,
             confidence: edge.confidence,
             resolution: edge.resolution,
+            resolverId: edge.resolverId ?? "pass1-generic",
+            resolutionPhase: edge.resolutionPhase ?? "pass1",
             provenance: edge.provenance,
             createdAt: edge.createdAt,
           },
@@ -1476,7 +1504,12 @@ export async function deleteEdge(
 export async function getEdgesFrom(
   conn: Connection,
   symbolId: string,
+  options?: EdgeQueryOptions,
 ): Promise<EdgeRow[]> {
+  const minCallConfidenceClause = buildMinCallConfidenceClause(
+    "d",
+    options?.minCallConfidence,
+  );
   const rows = await queryAll<{
     repoId: string;
     fromSymbolId: string;
@@ -1485,11 +1518,14 @@ export async function getEdgesFrom(
     weight: unknown;
     confidence: unknown;
     resolution: string;
+    resolverId: string | null;
+    resolutionPhase: string | null;
     provenance: string | null;
     createdAt: string;
   }>(
     conn,
     `MATCH (a:Symbol {symbolId: $symbolId})-[d:DEPENDS_ON]->(b:Symbol)
+     WHERE 1 = 1${minCallConfidenceClause}
      MATCH (a)-[:SYMBOL_IN_REPO]->(r:Repo)
      RETURN r.repoId AS repoId,
             a.symbolId AS fromSymbolId,
@@ -1498,9 +1534,16 @@ export async function getEdgesFrom(
             d.weight AS weight,
             d.confidence AS confidence,
             d.resolution AS resolution,
+            d.resolverId AS resolverId,
+            d.resolutionPhase AS resolutionPhase,
             d.provenance AS provenance,
             d.createdAt AS createdAt`,
-    { symbolId },
+    {
+      symbolId,
+      ...(options?.minCallConfidence !== undefined
+        ? { minCallConfidence: options.minCallConfidence }
+        : {}),
+    },
   );
 
   return rows.map((row) => ({
@@ -1511,6 +1554,8 @@ export async function getEdgesFrom(
     weight: toNumber(row.weight),
     confidence: toNumber(row.confidence),
     resolution: row.resolution,
+    resolverId: row.resolverId ?? undefined,
+    resolutionPhase: row.resolutionPhase ?? undefined,
     provenance: row.provenance,
     createdAt: row.createdAt,
   }));
@@ -1519,11 +1564,17 @@ export async function getEdgesFrom(
 export async function getEdgesFromSymbols(
   conn: Connection,
   symbolIds: string[],
+  options?: EdgeQueryOptions,
 ): Promise<Map<string, EdgeRow[]>> {
   if (symbolIds.length === 0) return new Map();
 
   const result = new Map<string, EdgeRow[]>();
   for (const id of symbolIds) result.set(id, []);
+
+  const minCallConfidenceClause = buildMinCallConfidenceClause(
+    "d",
+    options?.minCallConfidence,
+  );
 
   const rows = await queryAll<{
     repoId: string;
@@ -1533,12 +1584,14 @@ export async function getEdgesFromSymbols(
     weight: unknown;
     confidence: unknown;
     resolution: string;
+    resolverId: string | null;
+    resolutionPhase: string | null;
     provenance: string | null;
     createdAt: string;
   }>(
     conn,
     `MATCH (a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
-     WHERE a.symbolId IN $symbolIds
+     WHERE a.symbolId IN $symbolIds${minCallConfidenceClause}
      MATCH (a)-[:SYMBOL_IN_REPO]->(r:Repo)
      RETURN r.repoId AS repoId,
             a.symbolId AS fromSymbolId,
@@ -1547,9 +1600,16 @@ export async function getEdgesFromSymbols(
             d.weight AS weight,
             d.confidence AS confidence,
             d.resolution AS resolution,
+            d.resolverId AS resolverId,
+            d.resolutionPhase AS resolutionPhase,
             d.provenance AS provenance,
             d.createdAt AS createdAt`,
-    { symbolIds },
+    {
+      symbolIds,
+      ...(options?.minCallConfidence !== undefined
+        ? { minCallConfidence: options.minCallConfidence }
+        : {}),
+    },
   );
 
   for (const row of rows) {
@@ -1563,6 +1623,8 @@ export async function getEdgesFromSymbols(
       weight: toNumber(row.weight),
       confidence: toNumber(row.confidence),
       resolution: row.resolution,
+      resolverId: row.resolverId ?? undefined,
+      resolutionPhase: row.resolutionPhase ?? undefined,
       provenance: row.provenance,
       createdAt: row.createdAt,
     });
@@ -1574,11 +1636,17 @@ export async function getEdgesFromSymbols(
 export async function getEdgesFromSymbolsForSlice(
   conn: Connection,
   symbolIds: string[],
+  options?: EdgeQueryOptions,
 ): Promise<Map<string, EdgeForSlice[]>> {
   if (symbolIds.length === 0) return new Map();
 
   const result = new Map<string, EdgeForSlice[]>();
   for (const id of symbolIds) result.set(id, []);
+
+  const minCallConfidenceClause = buildMinCallConfidenceClause(
+    "d",
+    options?.minCallConfidence,
+  );
 
   const rows = await queryAll<{
     fromSymbolId: string;
@@ -1586,16 +1654,27 @@ export async function getEdgesFromSymbolsForSlice(
     edgeType: string;
     weight: unknown;
     confidence: unknown;
+    resolution: string | null;
+    resolverId: string | null;
+    resolutionPhase: string | null;
   }>(
     conn,
     `MATCH (a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
-     WHERE a.symbolId IN $symbolIds
+     WHERE a.symbolId IN $symbolIds${minCallConfidenceClause}
      RETURN a.symbolId AS fromSymbolId,
             b.symbolId AS toSymbolId,
             d.edgeType AS edgeType,
             d.weight AS weight,
-            d.confidence AS confidence`,
-    { symbolIds },
+            d.confidence AS confidence,
+            d.resolution AS resolution,
+            d.resolverId AS resolverId,
+            d.resolutionPhase AS resolutionPhase`,
+    {
+      symbolIds,
+      ...(options?.minCallConfidence !== undefined
+        ? { minCallConfidence: options.minCallConfidence }
+        : {}),
+    },
   );
 
   for (const row of rows) {
@@ -1607,6 +1686,9 @@ export async function getEdgesFromSymbolsForSlice(
       edgeType: row.edgeType,
       weight: toNumber(row.weight),
       confidence: toNumber(row.confidence),
+      resolution: row.resolution ?? undefined,
+      resolverId: row.resolverId ?? undefined,
+      resolutionPhase: row.resolutionPhase ?? undefined,
     });
   }
 
@@ -1652,15 +1734,22 @@ export async function getEdgesFromSymbolsLite(
 export async function getEdgesToSymbols(
   conn: Connection,
   symbolIds: string[],
+  options?: EdgeQueryOptions,
 ): Promise<Map<string, EdgeRow[]>> {
   if (symbolIds.length === 0) return new Map();
 
   const result = new Map<string, EdgeRow[]>();
   for (const id of symbolIds) result.set(id, []);
 
+  const minCallConfidenceClause = buildMinCallConfidenceClause(
+    "d",
+    options?.minCallConfidence,
+  );
+
   const queryWithHint = `MATCH (b:Symbol)
      WHERE b.symbolId IN $symbolIds
      MATCH (a:Symbol)-[d:DEPENDS_ON]->(b)
+     WHERE 1 = 1${minCallConfidenceClause}
      MATCH (a)-[:SYMBOL_IN_REPO]->(r:Repo)
      WITH b, d, a, r
      HINT (b JOIN (d JOIN a))
@@ -1671,6 +1760,8 @@ export async function getEdgesToSymbols(
             d.weight AS weight,
             d.confidence AS confidence,
             d.resolution AS resolution,
+            d.resolverId AS resolverId,
+            d.resolutionPhase AS resolutionPhase,
             d.provenance AS provenance,
             d.createdAt AS createdAt
      ORDER BY a.symbolId`;
@@ -1678,6 +1769,7 @@ export async function getEdgesToSymbols(
   const queryWithoutHint = `MATCH (b:Symbol)
      WHERE b.symbolId IN $symbolIds
      MATCH (a:Symbol)-[d:DEPENDS_ON]->(b)
+     WHERE 1 = 1${minCallConfidenceClause}
      MATCH (a)-[:SYMBOL_IN_REPO]->(r:Repo)
      RETURN r.repoId AS repoId,
             a.symbolId AS fromSymbolId,
@@ -1686,6 +1778,8 @@ export async function getEdgesToSymbols(
             d.weight AS weight,
             d.confidence AS confidence,
             d.resolution AS resolution,
+            d.resolverId AS resolverId,
+            d.resolutionPhase AS resolutionPhase,
             d.provenance AS provenance,
             d.createdAt AS createdAt
      ORDER BY a.symbolId`;
@@ -1698,6 +1792,8 @@ export async function getEdgesToSymbols(
     weight: unknown;
     confidence: unknown;
     resolution: string;
+    resolverId: string | null;
+    resolutionPhase: string | null;
     provenance: string | null;
     createdAt: string;
   }>;
@@ -1711,12 +1807,19 @@ export async function getEdgesToSymbols(
     weight: unknown;
     confidence: unknown;
     resolution: string;
+    resolverId: string | null;
+    resolutionPhase: string | null;
     provenance: string | null;
     createdAt: string;
   }>(
       conn,
       joinHintSupported === false ? queryWithoutHint : queryWithHint,
-      { symbolIds },
+      {
+        symbolIds,
+        ...(options?.minCallConfidence !== undefined
+          ? { minCallConfidence: options.minCallConfidence }
+          : {}),
+      },
     );
     if (joinHintSupported === null) {
       joinHintSupported = true;
@@ -1732,9 +1835,16 @@ export async function getEdgesToSymbols(
         weight: unknown;
         confidence: unknown;
         resolution: string;
+        resolverId: string | null;
+        resolutionPhase: string | null;
         provenance: string | null;
         createdAt: string;
-      }>(conn, queryWithoutHint, { symbolIds });
+      }>(conn, queryWithoutHint, {
+        symbolIds,
+        ...(options?.minCallConfidence !== undefined
+          ? { minCallConfidence: options.minCallConfidence }
+          : {}),
+      });
     } else {
       throw error;
     }
@@ -1751,6 +1861,8 @@ export async function getEdgesToSymbols(
       weight: toNumber(row.weight),
       confidence: toNumber(row.confidence),
       resolution: row.resolution,
+      resolverId: row.resolverId ?? undefined,
+      resolutionPhase: row.resolutionPhase ?? undefined,
       provenance: row.provenance,
       createdAt: row.createdAt,
     });
@@ -1771,6 +1883,8 @@ export async function getEdgesByRepo(
     weight: unknown;
     confidence: unknown;
     resolution: string;
+    resolverId: string | null;
+    resolutionPhase: string | null;
     provenance: string | null;
     createdAt: string;
   }>(
@@ -1783,6 +1897,8 @@ export async function getEdgesByRepo(
             d.weight AS weight,
             d.confidence AS confidence,
             d.resolution AS resolution,
+            d.resolverId AS resolverId,
+            d.resolutionPhase AS resolutionPhase,
             d.provenance AS provenance,
             d.createdAt AS createdAt`,
     { repoId },
@@ -1796,6 +1912,8 @@ export async function getEdgesByRepo(
     weight: toNumber(row.weight),
     confidence: toNumber(row.confidence),
     resolution: row.resolution,
+    resolverId: row.resolverId ?? undefined,
+    resolutionPhase: row.resolutionPhase ?? undefined,
     provenance: row.provenance,
     createdAt: row.createdAt,
   }));

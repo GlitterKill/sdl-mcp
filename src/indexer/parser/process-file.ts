@@ -57,6 +57,7 @@ export interface ProcessFileParams {
   workerPool?: ParserWorkerPool | null;
   skipCallResolution?: boolean;
   globalNameToSymbolIds?: Map<string, string[]>;
+  supportsPass2FilePath?: (relPath: string) => boolean;
 }
 
 export async function processFile(params: ProcessFileParams): Promise<{
@@ -82,6 +83,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
     workerPool,
     skipCallResolution,
     globalNameToSymbolIds,
+    supportsPass2FilePath = isTsCallResolutionFile,
   } = params;
   try {
     if (mode === "incremental" && existingFile?.lastIndexedAt) {
@@ -323,7 +325,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
           for (const symbol of importerSymbols.values()) {
             const file = importerFiles.get(symbol.fileId);
             if (!file) continue;
-            if (!isTsCallResolutionFile(file.relPath)) continue;
+            if (!supportsPass2FilePath(file.relPath)) continue;
             hinted.add(file.relPath);
           }
           pass2HintPaths = Array.from(hinted).sort();
@@ -532,6 +534,8 @@ export async function processFile(params: ProcessFileParams): Promise<{
               weight: 1.0,
               confidence: resolved.confidence,
               resolution: resolved.strategy,
+              resolverId: "pass1-generic",
+              resolutionPhase: "pass1",
               provenance: `call:${call.calleeIdentifier}`,
               createdAt: new Date().toISOString(),
             };
@@ -559,6 +563,8 @@ export async function processFile(params: ProcessFileParams): Promise<{
               weight: 0.5, // Lower weight for unresolved edges
               confidence: resolved.confidence,
               resolution: "unresolved",
+              resolverId: "pass1-generic",
+              resolutionPhase: "pass1",
               provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
               createdAt: new Date().toISOString(),
             };
@@ -609,6 +615,8 @@ export async function processFile(params: ProcessFileParams): Promise<{
             weight: 1.0,
             confidence: tsCall.confidence ?? 1.0,
             resolution: "exact",
+            resolverId: "pass1-generic",
+            resolutionPhase: "pass1",
             provenance: `ts-call:${tsCall.callee.name}`,
             createdAt: new Date().toISOString(),
           });

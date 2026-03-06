@@ -1,10 +1,7 @@
-import { dirname, join, resolve } from "path";
-
 import { getKuzuConn } from "../../db/kuzu.js";
 import * as kuzuDb from "../../db/kuzu-queries.js";
-import { existsAsync } from "../../util/asyncFs.js";
-import { normalizePath } from "../../util/paths.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
+import { resolveImportCandidatePaths } from "../import-resolution/registry.js";
 
 export async function resolveImportTargets(
   repoId: string,
@@ -29,12 +26,13 @@ export async function resolveImportTargets(
   const conn = await getKuzuConn();
 
   for (const imp of allImports) {
-    const resolvedPath = await resolveImportToPath(
+    const resolvedPaths = await resolveImportCandidatePaths({
+      language: importerLanguage,
       repoRoot,
       importerRelPath,
-      imp.specifier,
+      specifier: imp.specifier,
       extensions,
-    );
+    });
 
     const importedNames = new Set<string>();
     if (imp.defaultImport) importedNames.add(imp.defaultImport);
@@ -44,7 +42,7 @@ export async function resolveImportTargets(
       importedNames.add("*");
     }
 
-    if (!resolvedPath) {
+    if (resolvedPaths.length === 0) {
       for (const name of importedNames) {
         targets.push({
           symbolId: `unresolved:${imp.specifier}:${name}`,
@@ -60,18 +58,23 @@ export async function resolveImportTargets(
       continue;
     }
 
-    const targetFile = await kuzuDb.getFileByRepoPath(conn, repoId, resolvedPath);
-    if (!targetFile) {
+    const targetFiles = (
+      await Promise.all(
+        resolvedPaths.map((relPath) => kuzuDb.getFileByRepoPath(conn, repoId, relPath)),
+      )
+    ).flatMap((targetFile) => (targetFile ? [targetFile] : []));
+
+    if (targetFiles.length === 0) {
       for (const name of importedNames) {
         targets.push({
-          symbolId: `unresolved:${resolvedPath}:${name}`,
-          provenance: `${resolvedPath}:${name}`,
+          symbolId: `unresolved:${resolvedPaths[0]}:${name}`,
+          provenance: `${resolvedPaths[0]}:${name}`,
         });
       }
       if (imp.namespaceImport) {
         targets.push({
-          symbolId: `unresolved:${resolvedPath}:* as ${imp.namespaceImport}`,
-          provenance: `${resolvedPath}:* as ${imp.namespaceImport}`,
+          symbolId: `unresolved:${resolvedPaths[0]}:* as ${imp.namespaceImport}`,
+          provenance: `${resolvedPaths[0]}:* as ${imp.namespaceImport}`,
         });
       }
       continue;
@@ -79,30 +82,42 @@ export async function resolveImportTargets(
 
     // ML-D.1: Language-aware import resolution
     // Cross-language imports are resolved when possible
-    if (targetFile.language !== importerLanguage) {
-      for (const name of importedNames) {
-        targets.push({
-          symbolId: `unresolved:${resolvedPath}:${name}`,
-          provenance: `cross-language:${targetFile.language}->${importerLanguage}:${name}`,
-        });
+    const sameLanguageFiles = targetFiles.filter(
+      (targetFile) => targetFile.language === importerLanguage,
+    );
+    if (sameLanguageFiles.length === 0) {
+      for (const targetFile of targetFiles) {
+        for (const name of importedNames) {
+          targets.push({
+            symbolId: `unresolved:${targetFile.relPath}:${name}`,
+            provenance: `cross-language:${targetFile.language}->${importerLanguage}:${name}`,
+          });
+        }
+        if (imp.namespaceImport) {
+          targets.push({
+            symbolId: `unresolved:${targetFile.relPath}:* as ${imp.namespaceImport}`,
+            provenance: `cross-language:${targetFile.language}->${importerLanguage}:* as ${imp.namespaceImport}`,
+          });
+        }
       }
-      if (imp.namespaceImport) {
-        targets.push({
-          symbolId: `unresolved:${resolvedPath}:* as ${imp.namespaceImport}`,
-          provenance: `cross-language:${targetFile.language}->${importerLanguage}:* as ${imp.namespaceImport}`,
-        });
-      }
+      continue;
     }
 
-    const targetSymbols = (await kuzuDb.getSymbolsByFile(conn, targetFile.fileId)).filter(
-      (symbol) => symbol.exported,
-    );
+    const targetSymbols = (
+      await Promise.all(
+        sameLanguageFiles.map((targetFile) =>
+          kuzuDb.getSymbolsByFile(conn, targetFile.fileId),
+        ),
+      )
+    )
+      .flat()
+      .filter((symbol) => symbol.exported);
 
     for (const name of importedNames) {
       if (name.startsWith("*")) {
         targets.push({
-          symbolId: `unresolved:${resolvedPath}:${name}`,
-          provenance: `${resolvedPath}:${name}`,
+          symbolId: `unresolved:${resolvedPaths[0]}:${name}`,
+          provenance: `${resolvedPaths[0]}:${name}`,
         });
         continue;
       }
@@ -115,15 +130,15 @@ export async function resolveImportTargets(
       if (match) {
         targets.push({
           symbolId: match.symbolId,
-          provenance: `${resolvedPath}:${name}`,
+          provenance: `${resolvedPaths[0]}:${name}`,
         });
         const existing = importedNameToSymbolIds.get(name) ?? [];
         existing.push(match.symbolId);
         importedNameToSymbolIds.set(name, existing);
       } else {
         targets.push({
-          symbolId: `unresolved:${resolvedPath}:${name}`,
-          provenance: `${resolvedPath}:${name}`,
+          symbolId: `unresolved:${resolvedPaths[0]}:${name}`,
+          provenance: `${resolvedPaths[0]}:${name}`,
         });
       }
     }
@@ -134,15 +149,15 @@ export async function resolveImportTargets(
         namespaceMap.set(symbol.name, symbol.symbolId);
         targets.push({
           symbolId: symbol.symbolId,
-          provenance: `${resolvedPath}:*`,
+          provenance: `${resolvedPaths[0]}:*`,
         });
       }
       if (namespaceMap.size > 0) {
         namespaceImports.set(imp.namespaceImport, namespaceMap);
       } else {
         targets.push({
-          symbolId: `unresolved:${resolvedPath}:* as ${imp.namespaceImport}`,
-          provenance: `${resolvedPath}:* as ${imp.namespaceImport}`,
+          symbolId: `unresolved:${resolvedPaths[0]}:* as ${imp.namespaceImport}`,
+          provenance: `${resolvedPaths[0]}:* as ${imp.namespaceImport}`,
         });
       }
     }
@@ -206,46 +221,4 @@ function extractCommonJsRequireImports(content: string): ExtractedImport[] {
   }
 
   return imports;
-}
-
-async function resolveImportToPath(
-  repoRoot: string,
-  importerRelPath: string,
-  specifier: string,
-  extensions: string[],
-): Promise<string | null> {
-  if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
-    return null;
-  }
-
-  const importerDir = dirname(importerRelPath);
-  const baseRelPath = normalizePath(join(importerDir, specifier));
-  const baseAbsPath = resolve(repoRoot, baseRelPath);
-
-  const hasExtension = extensions.some((ext) => baseRelPath.endsWith(ext));
-  const candidates: string[] = [];
-
-  if (hasExtension) {
-    candidates.push(baseRelPath);
-  } else {
-    for (const ext of extensions) {
-      candidates.push(`${baseRelPath}${ext}`);
-    }
-    for (const ext of extensions) {
-      candidates.push(normalizePath(join(baseRelPath, `index${ext}`)));
-    }
-  }
-
-  for (const relPath of candidates) {
-    const absPath = resolve(repoRoot, relPath);
-    if (await existsAsync(absPath)) {
-      return normalizePath(relPath);
-    }
-  }
-
-  if (hasExtension && (await existsAsync(baseAbsPath))) {
-    return normalizePath(baseRelPath);
-  }
-
-  return null;
 }

@@ -229,6 +229,41 @@ describe("KuzuDB Edge Queries", () => {
     assert.strictEqual(incoming.get("missing-to")!.length, 0);
   });
 
+  it("persists resolver metadata on call edges", { skip: !kuzuAvailable }, async () => {
+    await queries.insertEdge(
+      conn as unknown as import("kuzu").Connection,
+      {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-to",
+        edgeType: "call",
+        weight: 1,
+        confidence: 0.98,
+        resolution: "compiler-semantic",
+        resolverId: "pass2-ts",
+        resolutionPhase: "pass2",
+        provenance: "ts-call:testFn",
+        createdAt: "2026-03-04T00:00:00Z",
+      } as any,
+    );
+
+    const result = await conn.query(
+      `MATCH (:Symbol {symbolId: 'edge-from'})-[d:DEPENDS_ON {edgeType: 'call'}]->(:Symbol {symbolId: 'edge-to'})
+       RETURN d.confidence AS confidence,
+              d.resolution AS resolution,
+              d.resolverId AS resolverId,
+              d.resolutionPhase AS resolutionPhase`,
+    );
+    assert.strictEqual(result.hasNext(), true);
+    const row = await result.getNext();
+    result.close();
+
+    assert.strictEqual(row.confidence, 0.98);
+    assert.strictEqual(row.resolution, "compiler-semantic");
+    assert.strictEqual(row.resolverId, "pass2-ts");
+    assert.strictEqual(row.resolutionPhase, "pass2");
+  });
+
   it("deleteEdgesByFileId removes edges for symbols in file", { skip: !kuzuAvailable }, async () => {
     await exec(conn, "CREATE (:Symbol {symbolId: 'edge-in-file'})");
     await exec(

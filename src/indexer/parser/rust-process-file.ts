@@ -51,6 +51,7 @@ export async function processFileFromRustResult(params: {
   allSymbolsByName: Map<string, SymbolRow[]>;
   skipCallResolution: boolean;
   globalNameToSymbolIds?: Map<string, string[]>;
+  supportsPass2FilePath?: (relPath: string) => boolean;
 }): Promise<{
   symbolsIndexed: number;
   edgesCreated: number;
@@ -70,6 +71,7 @@ export async function processFileFromRustResult(params: {
     createdCallEdges,
     skipCallResolution,
     globalNameToSymbolIds,
+    supportsPass2FilePath = isTsCallResolutionFile,
   } = params;
 
   try {
@@ -197,7 +199,7 @@ export async function processFileFromRustResult(params: {
           for (const symbol of importerSymbols.values()) {
             const file = importerFiles.get(symbol.fileId);
             if (!file) continue;
-            if (!isTsCallResolutionFile(file.relPath)) continue;
+            if (!supportsPass2FilePath(file.relPath)) continue;
             hinted.add(file.relPath);
           }
 
@@ -401,6 +403,8 @@ export async function processFileFromRustResult(params: {
               weight: 1.0,
               confidence: resolved.confidence,
               resolution: resolved.strategy,
+              resolverId: "pass1-generic",
+              resolutionPhase: "pass1",
               provenance: `call:${call.calleeIdentifier}`,
               createdAt: new Date().toISOString(),
             };
@@ -424,6 +428,8 @@ export async function processFileFromRustResult(params: {
               weight: 0.5,
               confidence: resolved.confidence,
               resolution: "unresolved",
+              resolverId: "pass1-generic",
+              resolutionPhase: "pass1",
               provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
               createdAt: new Date().toISOString(),
             };

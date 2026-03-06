@@ -40,6 +40,8 @@ export async function resolvePendingCallEdges(
       weight: 1.0,
       confidence: edge.confidence ?? 1.0,
       resolution: edge.strategy ?? "heuristic",
+      resolverId: "pass1-generic",
+      resolutionPhase: "pass1",
       provenance: edge.provenance ?? null,
       createdAt: now,
     });
