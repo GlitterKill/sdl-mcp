@@ -33,7 +33,13 @@ function findSymbol(
   kind: string = "function",
 ): SymbolRow {
   const match = symbols.find((s) => s.name === name && s.kind === kind);
-  assert.ok(match, `Expected symbol ${kind}:${name} to exist`);
+  if (!match) {
+    const byName = symbols.filter((s) => s.name === name);
+    const hint = byName.length > 0
+      ? ` (found with kinds: ${byName.map((s) => s.kind).join(", ")})`
+      : ` (not found at all among ${symbols.length} symbols)`;
+    assert.fail(`Expected symbol ${kind}:${name} to exist${hint}`);
+  }
   return match;
 }
 
@@ -142,6 +148,10 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     assert.strictEqual(procStats.entryPoints, 2);
 
     const symbols = await kuzuDb.getSymbolsByRepo(conn, REPO_ID);
+
+    // Diagnostic: log all symbol names for CI debugging
+    const symSummary = symbols.map((s) => `${s.kind}:${s.name}`).sort();
+    console.log(`[E2E] Indexed ${symbols.length} symbols: ${symSummary.join(", ")}`);
 
     const login = findSymbol(symbols, "login");
     const session = findSymbol(symbols, "session");
