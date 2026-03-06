@@ -69,8 +69,12 @@ jobs:
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm install --ignore-scripts
 
-      - name: Rebuild native modules (kuzu)
-        run: npm rebuild kuzu 2>/dev/null || true
+      - name: Setup kuzu native binary
+        shell: bash
+        run: |
+          if [ -f node_modules/kuzu/install.js ]; then
+            cd node_modules/kuzu && node install.js
+          fi
 
       - name: Build all
         run: npm run build:all
@@ -290,9 +294,13 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Rebuild native modules (kuzu)
+      - name: Setup kuzu native binary
         if: matrix.run-tests
-        run: npm rebuild kuzu 2>/dev/null || true
+        shell: bash
+        run: |
+          if [ -f node_modules/kuzu/install.js ]; then
+            cd node_modules/kuzu && node install.js
+          fi
 
       - name: Build native addon
         run: npx napi build --release --cargo-cwd native --config native/package.json --target ${{ matrix.target }} native
@@ -334,8 +342,12 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Rebuild native modules (kuzu)
-        run: npm rebuild kuzu 2>/dev/null || true
+      - name: Setup kuzu native binary
+        shell: bash
+        run: |
+          if [ -f node_modules/kuzu/install.js ]; then
+            cd node_modules/kuzu && node install.js
+          fi
 
       - name: Build all
         run: npm run build:all
@@ -410,8 +422,12 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Rebuild native modules (kuzu)
-        run: npm rebuild kuzu 2>/dev/null || true
+      - name: Setup kuzu native binary
+        shell: bash
+        run: |
+          if [ -f node_modules/kuzu/install.js ]; then
+            cd node_modules/kuzu && node install.js
+          fi
 
       - name: Build all
         run: npm run build:all
@@ -549,8 +565,12 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Rebuild native modules (kuzu)
-        run: npm rebuild kuzu 2>/dev/null || true
+      - name: Setup kuzu native binary
+        shell: bash
+        run: |
+          if [ -f node_modules/kuzu/install.js ]; then
+            cd node_modules/kuzu && node install.js
+          fi
 
       - name: Build all
         run: npm run build:all
