@@ -80,6 +80,22 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     repoDir = mkdtempSync(join(tmpdir(), "sdl-mcp-kuzu-e2e-repo-"));
     copyDirSync(fixtureRoot, repoDir);
 
+    // Diagnostic: verify fixture files were copied
+    const listFiles = (dir: string, prefix = ""): string[] => {
+      const results: string[] = [];
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        const rel = prefix ? `${prefix}/${entry}` : entry;
+        if (statSync(full).isDirectory()) {
+          results.push(...listFiles(full, rel));
+        } else {
+          results.push(rel);
+        }
+      }
+      return results;
+    };
+    console.log(`[E2E] Copied fixture files: ${listFiles(repoDir).sort().join(", ")}`);
+
     writeFileSync(
       configPath,
       JSON.stringify(
@@ -156,6 +172,11 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     assert.ok(full.versionId.length > 0);
 
     const conn = await getKuzuConn();
+
+    // Diagnostic: check which files were indexed
+    const files = await kuzuDb.getFilesByRepo(conn, REPO_ID);
+    console.log(`[E2E] Indexed ${files.length} files: ${files.map((f) => f.relPath).sort().join(", ")}`);
+
     const clusters = await kuzuDb.getClustersForRepo(conn, REPO_ID);
     assert.ok(clusters.length >= 2, `Expected >=2 clusters, got ${clusters.length}`);
 
