@@ -64,7 +64,8 @@
     "check:config-sync": "tsx scripts/check-config-sync.ts",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck",
     "spike:kuzu": "tsx scripts/kuzu-spike.ts",
-    "test:mutation": "stryker run stryker.conf.cjs"
+    "test:mutation": "stryker run stryker.conf.cjs",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit"
   },
   "keywords": [
     "mcp",

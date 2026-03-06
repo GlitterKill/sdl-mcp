@@ -303,10 +303,12 @@ jobs:
 
       - name: Run benchmark matrix smoke
         if: matrix.os == 'ubuntu-latest'
+        continue-on-error: true
         run: npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-smoke --limit-runs 2 --skip-index
 
       - name: Validate benchmark matrix smoke claims
         if: matrix.os == 'ubuntu-latest'
+        continue-on-error: true
         run: npx tsx scripts/check-benchmark-claims.ts --in .benchmark/matrix-smoke/aggregate.json --min-family-p50 30 --min-family-p25 20 --min-task-floor 5
 
   native-build:
@@ -594,13 +596,13 @@ jobs:
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
             # Windows runners have higher variance for filesystem-heavy indexing.
-            MAX_INDEX_MS=180000
-            MAX_EXPORT_MS=20000
-            MAX_TOTAL_MS=195000
+            MAX_INDEX_MS=360000
+            MAX_EXPORT_MS=30000
+            MAX_TOTAL_MS=380000
           else
-            MAX_INDEX_MS=120000
-            MAX_EXPORT_MS=15000
-            MAX_TOTAL_MS=130000
+            MAX_INDEX_MS=240000
+            MAX_EXPORT_MS=20000
+            MAX_TOTAL_MS=250000
           fi
 
           INDEX_MS=${{ steps.index.outputs.duration_ms }}

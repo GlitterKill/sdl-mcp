@@ -54,10 +54,18 @@ export async function exportArtifact(
   const edges = await kuzuDb.getEdgesByRepo(conn, options.repoId);
   const symbolVersions = await kuzuDb.getSymbolVersionsAtVersion(conn, versionId);
 
-  const metricsMap = await kuzuDb.getMetricsBySymbolIds(
-    conn,
-    symbols.map((s) => s.symbolId),
-  );
+  const metricsMap = new Map();
+  const symbolIds = symbols.map((s) => s.symbolId);
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < symbolIds.length; i += CHUNK_SIZE) {
+    const chunkMap = await kuzuDb.getMetricsBySymbolIds(
+      conn,
+      symbolIds.slice(i, i + CHUNK_SIZE),
+    );
+    for (const [k, v] of chunkMap) {
+      metricsMap.set(k, v);
+    }
+  }
   const metrics = Array.from(metricsMap.values());
 
   const state: SyncIndexState = {
