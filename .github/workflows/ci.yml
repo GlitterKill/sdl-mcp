@@ -92,7 +92,20 @@ jobs:
         run: npm audit --audit-level=moderate
 
       - name: Run tests (including 6 new language adapters + cross-platform paths)
-        run: npm test
+        shell: bash
+        run: |
+          npm run build:runtime
+          echo "=== Initializing test KuzuDB ==="
+          TEST_GRAPH_DIR=$(mktemp -d)
+          export SDL_GRAPH_DB_PATH="$TEST_GRAPH_DIR/sdl-mcp-graph"
+          export SDL_DB_PATH="$SDL_GRAPH_DB_PATH"
+          node --input-type=module -e "import { initKuzuDb } from './dist/db/kuzu.js'; await initKuzuDb(process.env.SDL_GRAPH_DB_PATH);"
+          echo "=== KuzuDB initialized at $SDL_GRAPH_DB_PATH ==="
+          echo "=== Running test suite ==="
+          node --import tsx --test-concurrency=1 --test tests/runner.test.ts 2>&1 || {
+            echo "=== Tests failed with exit code $? ==="
+            exit 1
+          }
 
       - name: Run test harness
         run: npm run test:harness
