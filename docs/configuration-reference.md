@@ -40,7 +40,7 @@ Only two fields are required — everything else has sensible defaults:
 }
 ```
 
-KuzuDB storage is directory-based. If `graphDatabase.path` is omitted, SDL-MCP defaults to `<configDir>/sdl-mcp-graph`.
+KuzuDB storage is file-based. If `graphDatabase.path` is omitted, SDL-MCP defaults to `<configDir>/sdl-mcp-graph.kuzu`.
 
 ---
 
@@ -96,14 +96,14 @@ Below is every option with inline commentary. JSON does not support comments, so
   ],
 
   // ──────────────────────────────────────────────────────────
-  // GRAPH DATABASE — KuzuDB directory storage
+  // GRAPH DATABASE — KuzuDB single-file storage
   // ──────────────────────────────────────────────────────────
 
-  // Optional override for the KuzuDB database directory.
-  // If omitted, SDL-MCP defaults to <configDir>/sdl-mcp-graph.
+  // Optional override for the KuzuDB database file.
+  // If omitted, SDL-MCP defaults to <configDir>/sdl-mcp-graph.kuzu.
   // Supports ${VAR_NAME} environment variable expansion.
   "graphDatabase": {
-    "path": "./data/sdl-mcp-graph"
+    "path": "./data/sdl-mcp-graph.kuzu"
   },
 
   // Deprecated legacy database file path (v0.7.x). Only used by the one-time
@@ -394,13 +394,13 @@ Each entry registers a codebase for indexing. You can index multiple repos in on
 
 ### `graphDatabase` (optional)
 
-Controls where SDL-MCP stores the KuzuDB graph database (directory path). Supports `${ENV_VAR}` expansion.
+Controls where SDL-MCP stores the KuzuDB graph database (file path). Supports `${ENV_VAR}` expansion.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `graphDatabase.path` | `string?` | `<configDir>/sdl-mcp-graph` | Path to KuzuDB database directory |
+| `graphDatabase.path` | `string?` | `<configDir>/sdl-mcp-graph.kuzu` | Path to the KuzuDB database file |
 
-> **When to change:** Move to a fast SSD path if indexing is slow. Use `${SDL_GRAPH_DB_PATH}` (or `${SDL_GRAPH_DB_DIR}`) in CI environments where paths differ between machines.
+> **When to change:** Move to a fast SSD path if indexing is slow. Use `${SDL_GRAPH_DB_PATH}` for an explicit file path, or `${SDL_GRAPH_DB_DIR}` to point at a containing directory and let SDL-MCP place `sdl-mcp-graph.kuzu` inside it.
 
 ---
 
@@ -628,8 +628,8 @@ Worker-thread acceleration for beam search scoring in `sdl.slice.build`.
 |----------|-------------|
 | `SDL_CONFIG` / `SDL_CONFIG_PATH` | Path to config file |
 | `SDL_CONFIG_HOME` | Directory for default global config resolution |
-| `SDL_GRAPH_DB_PATH` | Override graph DB directory path (takes precedence over config) |
-| `SDL_GRAPH_DB_DIR` | Alias for graph DB directory path override |
+| `SDL_GRAPH_DB_PATH` | Override graph DB file path (takes precedence over config) |
+| `SDL_GRAPH_DB_DIR` | Legacy directory-style override; SDL-MCP stores `sdl-mcp-graph.kuzu` inside it |
 | `SDL_DB_PATH` | Legacy alias for graph DB path override (v0.7.x) |
 | `SDL_LOG_LEVEL` | Log level: `debug`, `info`, `warn`, `error` |
 | `SDL_LOG_FORMAT` | Log format: `json`, `text` |
@@ -728,7 +728,7 @@ Full semantic search with local Ollama for summaries.
       "languages": ["ts"]
     }
   ],
-  "graphDatabase": { "path": "./data/sdl-mcp-graph" }
+  "graphDatabase": { "path": "./data/sdl-mcp-graph.kuzu" }
 }
 ```
 

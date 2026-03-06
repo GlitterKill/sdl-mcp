@@ -148,7 +148,7 @@ Response: "# What is SDL-MCP?
   SDL-MCP runs as a CLI with 5 commands:
 
   ```bash
-  sdl-mcp init      # Create config + graph DB directory
+  sdl-mcp init      # Create config + graph DB path
   sdl-mcp index     # Index your repositories
   sdl-mcp serve     # Start the MCP server (stdio or HTTP)
   sdl-mcp doctor    # Health check

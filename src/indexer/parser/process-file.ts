@@ -34,7 +34,7 @@ import type { ParserWorkerPool } from "../workerPool.js";
 import type { SymbolWithNodeId } from "../worker.js";
 import type { ExtractedCall } from "../treesitter/extractCalls.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
-import { extractSymbolReferences, isTestFile } from "./helpers.js";
+import { buildSymbolReferences, isTestFile } from "./helpers.js";
 
 export interface ProcessFileParams {
   repoId: string;
@@ -125,17 +125,19 @@ export async function processFile(params: ProcessFileParams): Promise<{
       logger.debug(
         `Language ${ext} not in enabled languages, skipping ${fileMeta.path}`,
       );
-      if (existingFile) {
-        await kuzuDb.deleteSymbolsByFileId(conn, existingFile.fileId);
-      }
-      await kuzuDb.upsertFile(conn, {
-        fileId,
-        repoId,
-        relPath,
-        contentHash,
-        language: ext,
-        byteSize: fileMeta.size,
-        lastIndexedAt: new Date().toISOString(),
+      await kuzuDb.withTransaction(conn, async (txConn) => {
+        if (existingFile) {
+          await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+        }
+        await kuzuDb.upsertFile(txConn, {
+          fileId,
+          repoId,
+          relPath,
+          contentHash,
+          language: ext,
+          byteSize: fileMeta.size,
+          lastIndexedAt: new Date().toISOString(),
+        });
       });
       return {
         symbolsIndexed: 0,
@@ -152,17 +154,19 @@ export async function processFile(params: ProcessFileParams): Promise<{
       logger.debug(
         `No adapter found for ${extWithDot}, skipping ${fileMeta.path}`,
       );
-      if (existingFile) {
-        await kuzuDb.deleteSymbolsByFileId(conn, existingFile.fileId);
-      }
-      await kuzuDb.upsertFile(conn, {
-        fileId,
-        repoId,
-        relPath,
-        contentHash,
-        language: ext,
-        byteSize: fileMeta.size,
-        lastIndexedAt: new Date().toISOString(),
+      await kuzuDb.withTransaction(conn, async (txConn) => {
+        if (existingFile) {
+          await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+        }
+        await kuzuDb.upsertFile(txConn, {
+          fileId,
+          repoId,
+          relPath,
+          contentHash,
+          language: ext,
+          byteSize: fileMeta.size,
+          lastIndexedAt: new Date().toISOString(),
+        });
       });
       return {
         symbolsIndexed: 0,
@@ -201,17 +205,19 @@ export async function processFile(params: ProcessFileParams): Promise<{
       if (parseError || !workerPool) {
         tree = adapter.parse(content, filePath);
         if (!tree) {
-          if (existingFile) {
-            await kuzuDb.deleteSymbolsByFileId(conn, existingFile.fileId);
-          }
-          await kuzuDb.upsertFile(conn, {
-            fileId,
-            repoId,
-            relPath,
-            contentHash,
-            language: adapter.languageId,
-            byteSize: fileMeta.size,
-            lastIndexedAt: new Date().toISOString(),
+          await kuzuDb.withTransaction(conn, async (txConn) => {
+            if (existingFile) {
+              await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+            }
+            await kuzuDb.upsertFile(txConn, {
+              fileId,
+              repoId,
+              relPath,
+              contentHash,
+              language: adapter.languageId,
+              byteSize: fileMeta.size,
+              lastIndexedAt: new Date().toISOString(),
+            });
           });
           return {
             symbolsIndexed: 0,
@@ -334,25 +340,6 @@ export async function processFile(params: ProcessFileParams): Promise<{
       }
     }
 
-    await kuzuDb.upsertFile(conn, {
-      fileId,
-      repoId,
-      relPath,
-      contentHash,
-      language: ext,
-      byteSize: fileMeta.size,
-      lastIndexedAt: new Date().toISOString(),
-    });
-
-    if (existingFile) {
-      await kuzuDb.deleteSymbolsByFileId(conn, existingFile.fileId);
-      await kuzuDb.deleteSymbolReferencesByFileId(conn, existingFile.fileId);
-    }
-
-    if (isTestFile(relPath, languages)) {
-      await extractSymbolReferences(content, repoId, fileId);
-    }
-
     const exportSymbols = symbolsWithNodeIds.filter(
       (symbol) => symbol.exported,
     );
@@ -426,6 +413,10 @@ export async function processFile(params: ProcessFileParams): Promise<{
 
     const edgesToInsert: EdgeRow[] = [];
     const fileSymbols: SymbolRow[] = [];
+    const symbolsToUpsert: SymbolRow[] = [];
+    const symbolReferences = isTestFile(relPath, languages)
+      ? buildSymbolReferences(content, repoId, fileId)
+      : [];
 
     for (const detail of symbolDetails) {
       const extractedSymbol = detail.extractedSymbol;
@@ -475,7 +466,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
         updatedAt: new Date().toISOString(),
       };
 
-      await kuzuDb.upsertSymbol(conn, symbol);
+      symbolsToUpsert.push(symbol);
       fileSymbols.push(symbol);
       if (symbolIndex) {
         addToSymbolIndex(
@@ -651,7 +642,30 @@ export async function processFile(params: ProcessFileParams): Promise<{
       });
     }
 
-    await kuzuDb.insertEdges(conn, edgesToInsert);
+    await kuzuDb.withTransaction(conn, async (txConn) => {
+      await kuzuDb.upsertFile(txConn, {
+        fileId,
+        repoId,
+        relPath,
+        contentHash,
+        language: ext,
+        byteSize: fileMeta.size,
+        lastIndexedAt: new Date().toISOString(),
+      });
+
+      if (existingFile) {
+        await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+        await kuzuDb.deleteSymbolReferencesByFileId(txConn, existingFile.fileId);
+      }
+
+      await kuzuDb.insertSymbolReferences(txConn, symbolReferences);
+
+      for (const symbol of symbolsToUpsert) {
+        await kuzuDb.upsertSymbol(txConn, symbol);
+      }
+
+      await kuzuDb.insertEdges(txConn, edgesToInsert);
+    });
 
     prefetchFileExports(repoId, fileMeta.path);
 

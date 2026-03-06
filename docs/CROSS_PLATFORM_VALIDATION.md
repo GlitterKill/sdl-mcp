@@ -463,7 +463,7 @@ src/utils/helper.ts  # Same file, different case
       "ignore": ["**/node_modules/**", "**/dist/**"]
     }
   ],
-  "graphDatabase": { "path": "./data/sdl-mcp-graph" },
+  "graphDatabase": { "path": "./data/sdl-mcp-graph.kuzu" },
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,

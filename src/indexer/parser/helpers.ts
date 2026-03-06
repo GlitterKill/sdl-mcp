@@ -1,5 +1,8 @@
+import type { Connection } from "kuzu";
+
 import { getKuzuConn } from "../../db/kuzu.js";
 import * as kuzuDb from "../../db/kuzu-queries.js";
+import type { SymbolReferenceRow } from "../../db/kuzu-queries.js";
 
 export function isTestFile(relPath: string, languages: string[]): boolean {
   const ext = relPath.split(".").pop() || "";
@@ -21,24 +24,34 @@ export function extractSymbolReferences(
   content: string,
   repoId: string,
   fileId: string,
+  conn?: Connection,
 ): Promise<void> {
+  const references = buildSymbolReferences(content, repoId, fileId);
+  if (references.length === 0) return Promise.resolve();
+
+  return (async () => {
+    const activeConn = conn ?? (await getKuzuConn());
+    await kuzuDb.insertSymbolReferences(activeConn, references);
+  })();
+}
+
+export function buildSymbolReferences(
+  content: string,
+  repoId: string,
+  fileId: string,
+): SymbolReferenceRow[] {
   const tokens = content.match(/[A-Za-z_][A-Za-z0-9_]*/g);
-  if (!tokens) return Promise.resolve();
+  if (!tokens) return [];
 
   const uniqueTokens = new Set(tokens);
   const createdAt = new Date().toISOString();
 
-  return (async () => {
-    const conn = await getKuzuConn();
-    for (const token of uniqueTokens) {
-      await kuzuDb.insertSymbolReference(conn, {
-        refId: `ref_${repoId}_${fileId}_${token}`,
-        repoId,
-        symbolName: token,
-        fileId,
-        lineNumber: null,
-        createdAt,
-      });
-    }
-  })();
+  return Array.from(uniqueTokens, (token) => ({
+    refId: `ref_${repoId}_${fileId}_${token}`,
+    repoId,
+    symbolName: token,
+    fileId,
+    lineNumber: null,
+    createdAt,
+  }));
 }

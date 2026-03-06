@@ -1,8 +1,8 @@
 import { access, constants, existsSync } from "fs";
-import { dirname, resolve } from "path";
 import { DoctorOptions } from "../types.js";
 import { NODE_MIN_MAJOR_VERSION } from "../../config/constants.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
+import { resolveGraphDbPath } from "../../db/graph-db-path.js";
 import { getAllWatcherHealth } from "../../indexer/indexer.js";
 import { closeKuzuDb, getKuzuConn, getKuzuDbPath, initKuzuDb, isKuzuAvailable } from "../../db/kuzu.js";
 import * as kuzuDb from "../../db/kuzu-queries.js";
@@ -219,14 +219,7 @@ async function checkStaleIndex(
   try {
     const { loadConfig } = await import("../../config/loadConfig.js");
     const config = loadConfig(configPath);
-    const configuredPath = config.graphDatabase?.path;
-    const derivedPath = resolve(dirname(configPath), "sdl-mcp-graph");
-    const kuzuDbPath =
-      configuredPath === null ||
-      configuredPath === undefined ||
-      configuredPath === ""
-        ? derivedPath
-        : configuredPath;
+    const kuzuDbPath = resolveGraphDbPath(config, configPath);
 
     await initKuzuDb(kuzuDbPath);
     const conn = await getKuzuConn();
@@ -400,17 +393,12 @@ async function checkKuzuDb(
       };
     }
 
-    const configuredPath = config.graphDatabase.path;
-    const derivedPath = resolve(dirname(configPath), "sdl-mcp-graph");
-    const kuzuDbPath =
-      configuredPath === null || configuredPath === undefined || configuredPath === ""
-        ? derivedPath
-        : configuredPath;
+    const kuzuDbPath = resolveGraphDbPath(config, configPath);
 
     if (!existsSync(kuzuDbPath)) {
       return {
         status: "warn",
-        message: `KuzuDB directory not found: ${kuzuDbPath}`,
+        message: `KuzuDB file not found: ${kuzuDbPath}`,
       };
     }
 

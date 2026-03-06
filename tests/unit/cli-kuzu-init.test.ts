@@ -2,7 +2,7 @@ import { describe, it, mock, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 
 describe("CLI init command - KuzuDB", () => {
   let tempDir: string;
@@ -36,9 +36,9 @@ describe("CLI init command - KuzuDB", () => {
     }
   });
 
-  it("creates kuzudb directory alongside sqlite database", async () => {
+  it("writes a .kuzu graph database path alongside the legacy sqlite path", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const expectedKuzuPath = join(tempDir, "sdl-mcp-graph");
+    const expectedKuzuPath = join(tempDir, "sdl-mcp-graph.kuzu");
 
     const { initCommand } = await import("../../src/cli/commands/init.js");
 
@@ -51,7 +51,14 @@ describe("CLI init command - KuzuDB", () => {
     });
 
     assert.ok(existsSync(configPath), "Config file should exist");
-    assert.ok(existsSync(expectedKuzuPath), "KuzuDB directory should exist");
+    assert.ok(
+      existsSync(dirname(expectedKuzuPath)),
+      "KuzuDB parent directory should exist",
+    );
+    assert.ok(
+      !existsSync(expectedKuzuPath),
+      "KuzuDB file should not be created before initialization",
+    );
 
     const configContent = JSON.parse(
       readFileSync(configPath, "utf-8"),
@@ -60,7 +67,7 @@ describe("CLI init command - KuzuDB", () => {
     assert.strictEqual(
       configContent.graphDatabase.path,
       expectedKuzuPath,
-      "graphDatabase.path should point to kuzudb directory"
+      "graphDatabase.path should point to the KuzuDB file",
     );
   });
 
@@ -84,14 +91,14 @@ describe("CLI init command - KuzuDB", () => {
     assert.ok(configContent.graphDatabase, "Config should have graphDatabase");
     assert.ok(configContent.graphDatabase.path, "graphDatabase should have path");
     assert.ok(
-      configContent.graphDatabase.path.endsWith("sdl-mcp-graph"),
-      "graphDatabase.path should end with sdl-mcp-graph",
+      configContent.graphDatabase.path.endsWith("sdl-mcp-graph.kuzu"),
+      "graphDatabase.path should end with sdl-mcp-graph.kuzu",
     );
   });
 
-  it("dry-run mode does not create kuzudb directory", async () => {
+  it("dry-run mode does not create the KuzuDB file path", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const expectedKuzuPath = join(tempDir, "sdl-mcp-graph");
+    const expectedKuzuPath = join(tempDir, "sdl-mcp-graph.kuzu");
 
     const { initCommand } = await import("../../src/cli/commands/init.js");
 
@@ -104,6 +111,6 @@ describe("CLI init command - KuzuDB", () => {
     });
 
     assert.ok(!existsSync(configPath), "Config file should not exist in dry-run");
-    assert.ok(!existsSync(expectedKuzuPath), "KuzuDB directory should not exist in dry-run");
+    assert.ok(!existsSync(expectedKuzuPath), "KuzuDB file should not exist in dry-run");
   });
 });

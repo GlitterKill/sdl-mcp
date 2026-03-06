@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-slice-handle-test-db");
+const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-slice-handle-test-db.kuzu");
 
 interface KuzuConnection {
   query: (q: string) => Promise<{
@@ -28,7 +28,7 @@ async function createTestDb(): Promise<{
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
   }
-  mkdirSync(TEST_DB_PATH, { recursive: true });
+  mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
 
   const kuzu = await import("kuzu");
   const db = new kuzu.Database(TEST_DB_PATH);
@@ -141,4 +141,3 @@ describe("KuzuDB Slice Handle & Cache Queries", () => {
     assert.strictEqual(row.cardBlob, "blob");
   });
 });
-

@@ -17,7 +17,7 @@ import { dirname } from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-schema-test-db");
+const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-schema-test-db.kuzu");
 
 interface KuzuConnection {
   query: (
@@ -40,7 +40,7 @@ async function createTestDb() {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
   }
-  mkdirSync(TEST_DB_PATH, { recursive: true });
+  mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
 
   const db = new kuzu.Database(TEST_DB_PATH) as KuzuDatabase;
   const conn = new kuzu.Connection(db) as KuzuConnection;

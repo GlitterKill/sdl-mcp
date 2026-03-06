@@ -651,7 +651,7 @@
             "string",
             "null"
           ],
-          "description": "Path to KuzuDB database directory",
+          "description": "Path to the KuzuDB database file",
           "default": null
         }
       }

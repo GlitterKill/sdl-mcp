@@ -74,8 +74,8 @@ The CI workflow uses these environment variables:
 | `SDL_CONFIG`     | Path to config file | auto-discovered if unset |
 | `SDL_CONFIG_PATH` | Alternate config path env var | (none)               |
 | `SDL_CONFIG_HOME` | Default global config directory override | platform default |
-| `SDL_GRAPH_DB_PATH` | Override graph DB directory path | (none) |
-| `SDL_GRAPH_DB_DIR` | Alias for graph DB directory path override | (none) |
+| `SDL_GRAPH_DB_PATH` | Override graph DB file path | (none) |
+| `SDL_GRAPH_DB_DIR` | Legacy directory-style graph DB override | (none) |
 | `SDL_DB_PATH`    | Legacy alias for graph DB path override (v0.7.x) | (none) |
 
 ### Workflow Configuration
@@ -441,7 +441,7 @@ time sdl-mcp index --repo-id my-repo
       "maxFileBytes": 2000000
     }
   ],
-  "graphDatabase": { "path": "./data/sdl-mcp-graph" },
+  "graphDatabase": { "path": "./data/sdl-mcp-graph.kuzu" },
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,

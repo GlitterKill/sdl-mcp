@@ -217,7 +217,7 @@ SDL-MCP resolves config path in this order:
       "maxFileBytes": 2000000
     }
   ],
-  "graphDatabase": { "path": "./data/sdl-mcp-graph" },
+  "graphDatabase": { "path": "./data/sdl-mcp-graph.kuzu" },
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,

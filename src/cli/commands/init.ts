@@ -21,6 +21,7 @@ import {
   MAX_FILE_BYTES,
 } from "../../config/constants.js";
 import { resolveCliConfigPath } from "../../config/configPath.js";
+import { defaultGraphDbPath } from "../../db/graph-db-path.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
 import { getKuzuConn } from "../../db/kuzu.js";
 import * as kuzuDb from "../../db/kuzu-queries.js";
@@ -434,10 +435,10 @@ export async function initCommand(options: InitOptions): Promise<void> {
   }
 
   const dbPath = resolve(dirname(configPath), "sdlmcp.sqlite");
-  const kuzuDbPath = resolve(dirname(configPath), "sdl-mcp-graph");
+  const kuzuDbPath = defaultGraphDbPath(configPath);
   const configDir = dirname(configPath);
   const dbDir = dirname(dbPath);
-  const kuzuDbDir = kuzuDbPath;
+  const kuzuDbDir = dirname(kuzuDbPath);
 
   const repoId = detectRepoId(repoRoot);
   const ignorePatterns = mergeIgnorePatterns(repoRoot);

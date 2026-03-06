@@ -119,6 +119,6 @@
     "minBatchSize": null
   },
   "graphDatabase": {
-    "path": "./data/sdl-mcp-graph"
+    "path": "./data/sdl-mcp-graph.kuzu"
   }
 }

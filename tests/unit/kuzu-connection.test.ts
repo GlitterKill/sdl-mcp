@@ -102,19 +102,19 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
       }
     });
 
-    it("should create database directory if missing", async () => {
+    it("should create database parent directory if missing", async () => {
       const testPath = getTestDbPath("create-dir");
       cleanupTestDb("create-dir");
 
       try {
         assert.ok(
           !existsSync(testPath),
-          "Directory should not exist initially",
+          "Parent directory should not exist initially",
         );
 
         await getKuzuDb(testPath);
 
-        assert.ok(existsSync(testPath), "Directory should be created");
+        assert.ok(existsSync(testPath), "Parent directory should be created");
       } finally {
         await closeKuzuDb();
         cleanupTestDb("create-dir");
@@ -123,7 +123,9 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
 
     it("should normalize Windows paths to forward slashes", async () => {
       const testPath = getTestDbPath("windows-path") + "\\subdir";
-      const expected = normalizePath(testPath);
+      const expected = normalizePath(
+        join(testPath, "sdl-mcp-graph.kuzu"),
+      );
       cleanupTestDb("windows-path");
 
       try {
@@ -193,7 +195,9 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
       try {
         await initKuzuDb(testPath);
 
-        assert.ok(existsSync(testPath), "Database directory should exist");
+        const actualPath = getKuzuDbPath();
+        assert.ok(actualPath, "Database path should be set");
+        assert.ok(existsSync(actualPath), "Database file should exist");
 
         const conn = await getKuzuConn();
         assert.ok(conn, "Connection should be available after init");

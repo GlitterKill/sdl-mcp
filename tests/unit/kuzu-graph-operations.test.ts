@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-graph-ops-test-db");
+const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-graph-ops-test-db.kuzu");
 
 interface KuzuConnection {
   query: (q: string) => Promise<{
@@ -25,7 +25,7 @@ async function createTestDb(): Promise<{ db: KuzuDatabase; conn: KuzuConnection 
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
   }
-  mkdirSync(TEST_DB_PATH, { recursive: true });
+  mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
 
   const kuzu = await import("kuzu");
   const db = new kuzu.Database(TEST_DB_PATH);
@@ -250,4 +250,3 @@ describe("KuzuDB Graph Operations", () => {
     assert.ok(subgraph.edges.every((e) => e.fromSymbolId !== "x"));
   });
 });
-

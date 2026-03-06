@@ -16,7 +16,7 @@ const SQLITE_DB_PATH = join(
   "..",
   ".sqlite-to-kuzu-migration-test.sqlite",
 );
-const KUZU_DB_PATH = join(__dirname, "..", "..", ".kuzu-migration-test-db");
+const KUZU_DB_PATH = join(__dirname, "..", "..", ".kuzu-migration-test-db.kuzu");
 
 function cleanup(): void {
   if (existsSync(SQLITE_DB_PATH)) {
@@ -31,7 +31,7 @@ describe("SQLite → Kuzu migration (integration)", () => {
   beforeEach(() => {
     cleanup();
     mkdirSync(dirname(SQLITE_DB_PATH), { recursive: true });
-    mkdirSync(KUZU_DB_PATH, { recursive: true });
+    mkdirSync(dirname(KUZU_DB_PATH), { recursive: true });
   });
 
   afterEach(() => {

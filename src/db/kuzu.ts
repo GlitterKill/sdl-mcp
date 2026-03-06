@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync } from "fs";
 import { createRequire } from "node:module";
+import { totalmem } from "node:os";
 import { dirname } from "path";
 import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
 import { DatabaseError } from "../mcp/errors.js";
+import { normalizeGraphDbPath } from "./graph-db-path.js";
 import { createSchema } from "./kuzu-schema.js";
 
 type KuzuModule = typeof import("kuzu");
@@ -15,6 +17,11 @@ const require = createRequire(import.meta.url);
 let kuzuModule: KuzuModule | null = null;
 let dbInstance: KuzuDatabase | null = null;
 let currentDbPath: string | null = null;
+
+const ONE_GB = 1024 * 1024 * 1024;
+const FOUR_GB = 4 * ONE_GB;
+const DEFAULT_BUFFER_MANAGER_RATIO = 0.25;
+const DEFAULT_CHECKPOINT_THRESHOLD_BYTES = 128 * 1024 * 1024;
 
 // Connection Pool
 // NOTE: Kuzu write transactions are sensitive to concurrent execution across
@@ -42,10 +49,25 @@ async function loadKuzu(): Promise<KuzuModule> {
   }
 }
 
+export function resolveKuzuBufferManagerSizeBytes(
+  totalMemoryBytes = totalmem(),
+  envValue = process.env.SDL_KUZU_BUFFER_POOL_BYTES,
+): number {
+  const parsedEnvValue = envValue ? Number(envValue) : Number.NaN;
+  if (Number.isFinite(parsedEnvValue) && parsedEnvValue >= ONE_GB) {
+    return Math.floor(parsedEnvValue);
+  }
+
+  const autoSized = Math.floor(totalMemoryBytes * DEFAULT_BUFFER_MANAGER_RATIO);
+  return Math.min(Math.max(autoSized, ONE_GB), FOUR_GB);
+}
+
 export async function getKuzuDb(dbPath?: string): Promise<KuzuDatabase> {
   const modules = await loadKuzu();
 
-  const resolvedPath = dbPath ? normalizePath(dbPath) : currentDbPath;
+  const resolvedPath = dbPath
+    ? normalizePath(normalizeGraphDbPath(dbPath))
+    : currentDbPath;
 
   if (!resolvedPath) {
     throw new DatabaseError(
@@ -64,25 +86,36 @@ export async function getKuzuDb(dbPath?: string): Promise<KuzuDatabase> {
 
   const normalizedPath = normalizePath(resolvedPath);
 
-  if (!existsSync(normalizedPath)) {
+  const parentDir = dirname(normalizedPath);
+  if (parentDir && parentDir !== "." && !existsSync(parentDir)) {
     try {
-      mkdirSync(normalizedPath, { recursive: true });
-      logger.debug("Created KuzuDB directory", { path: normalizedPath });
+      mkdirSync(parentDir, { recursive: true });
+      logger.debug("Created KuzuDB parent directory", { path: parentDir });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new DatabaseError(
-        `Failed to create KuzuDB directory at ${normalizedPath}: ${msg}`,
+        `Failed to create KuzuDB parent directory at ${parentDir}: ${msg}`,
       );
     }
   }
 
   try {
-    // Pass memory limit as second argument. Kuzu uses ~80% of system memory by default.
-    // Constrain the buffer pool to 1GB to prevent the Node process from OOMing on large repos.
-    const ONE_GB = 1024 * 1024 * 1024;
-    dbInstance = new modules.Database(normalizedPath, ONE_GB);
+    const bufferManagerSize = resolveKuzuBufferManagerSizeBytes();
+    dbInstance = new modules.Database(
+      normalizedPath,
+      bufferManagerSize,
+      true,
+      false,
+      0,
+      true,
+      DEFAULT_CHECKPOINT_THRESHOLD_BYTES,
+    );
     currentDbPath = normalizedPath;
-    logger.info("KuzuDB database opened", { path: normalizedPath });
+    logger.info("KuzuDB database opened", {
+      path: normalizedPath,
+      bufferManagerSizeBytes: bufferManagerSize,
+      checkpointThresholdBytes: DEFAULT_CHECKPOINT_THRESHOLD_BYTES,
+    });
     return dbInstance;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -153,7 +186,7 @@ export async function getKuzuConn(): Promise<KuzuConnection> {
 }
 
 export async function initKuzuDb(dbPath: string): Promise<void> {
-  const normalizedPath = normalizePath(dbPath);
+  const normalizedPath = normalizePath(normalizeGraphDbPath(dbPath));
 
   logger.info("Initializing KuzuDB", { path: normalizedPath });
 

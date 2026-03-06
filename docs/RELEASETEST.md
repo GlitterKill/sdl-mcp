@@ -28,7 +28,7 @@ cd F:\Claude\projects\sdl-mcp\sdl-mcp
 npm run build:all
 
 # Clean graph database (fresh start)
-Remove-Item -Recurse -Force .\\data\\sdl-mcp-graph -ErrorAction SilentlyContinue
+Remove-Item -Force .\\data\\sdl-mcp-graph.kuzu -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force .\\.sdl-sync -ErrorAction SilentlyContinue
 ```
 

@@ -22,7 +22,7 @@ import type { ConfigEdge } from "../configEdges.js";
 import type { FileMetadata } from "../fileScanner.js";
 import type { RustParseResult } from "../rustIndexer.js";
 import { extractInvariants, extractSideEffects, generateSummary } from "../summaries.js";
-import { extractSymbolReferences, isTestFile } from "./helpers.js";
+import { buildSymbolReferences, isTestFile } from "./helpers.js";
 
 /**
  * Process a file using pre-parsed results from the Rust native engine.
@@ -114,17 +114,19 @@ export async function processFileFromRustResult(params: {
     const conn = await getKuzuConn();
 
     if (!languages.includes(ext)) {
-      if (existingFile) {
-        await kuzuDb.deleteSymbolsByFileId(conn, existingFile.fileId);
-      }
-      await kuzuDb.upsertFile(conn, {
-        fileId,
-        repoId,
-        relPath,
-        contentHash,
-        language: ext,
-        byteSize: fileMeta.size,
-        lastIndexedAt: new Date().toISOString(),
+      await kuzuDb.withTransaction(conn, async (txConn) => {
+        if (existingFile) {
+          await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+        }
+        await kuzuDb.upsertFile(txConn, {
+          fileId,
+          repoId,
+          relPath,
+          contentHash,
+          language: ext,
+          byteSize: fileMeta.size,
+          lastIndexedAt: new Date().toISOString(),
+        });
       });
       return {
         symbolsIndexed: 0,
@@ -213,35 +215,14 @@ export async function processFileFromRustResult(params: {
       }
     }
 
-    await kuzuDb.upsertFile(conn, {
-      fileId,
-      repoId,
-      relPath,
-      contentHash,
-      language: ext,
-      byteSize: fileMeta.size,
-      lastIndexedAt: new Date().toISOString(),
-    });
-
-    if (existingFile) {
-      await kuzuDb.deleteSymbolsByFileId(conn, existingFile.fileId);
-      await kuzuDb.deleteSymbolReferencesByFileId(conn, existingFile.fileId);
-    }
-
-    // Rebuild test symbol reference index from the current file content.
-    if (isTestFile(relPath, languages)) {
-      try {
-        await extractSymbolReferences(content, repoId, fileId);
-      } catch {
-        // Non-critical: skip reference extraction on read failure
-      }
-    }
-
     const symbolsWithIds = rustResult.symbols;
     const imports = rustResult.imports;
     const calls = rustResult.calls;
     const symbolsIndexed = symbolsWithIds.length;
     let edgesCreated = 0;
+    const symbolReferences = isTestFile(relPath, languages)
+      ? buildSymbolReferences(content, repoId, fileId)
+      : [];
 
     // Build symbol details directly from native Rust identity/metadata fields.
     const symbolDetails = symbolsWithIds.map((extracted) => {
@@ -296,6 +277,7 @@ export async function processFileFromRustResult(params: {
       exportSymbols.length > 0 ? exportSymbols : symbolDetails;
 
     const edgesToInsert: EdgeRow[] = [];
+    const symbolsToUpsert: SymbolRow[] = [];
 
     for (const detail of symbolDetails) {
       const extracted = detail.extractedSymbol;
@@ -358,7 +340,7 @@ export async function processFileFromRustResult(params: {
         updatedAt: new Date().toISOString(),
       };
 
-      await kuzuDb.upsertSymbol(conn, symbol);
+      symbolsToUpsert.push(symbol);
       addToSymbolIndex(
         symbolIndex,
         fileMeta.path,
@@ -453,7 +435,30 @@ export async function processFileFromRustResult(params: {
       }
     }
 
-    await kuzuDb.insertEdges(conn, edgesToInsert);
+    await kuzuDb.withTransaction(conn, async (txConn) => {
+      await kuzuDb.upsertFile(txConn, {
+        fileId,
+        repoId,
+        relPath,
+        contentHash,
+        language: ext,
+        byteSize: fileMeta.size,
+        lastIndexedAt: new Date().toISOString(),
+      });
+
+      if (existingFile) {
+        await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+        await kuzuDb.deleteSymbolReferencesByFileId(txConn, existingFile.fileId);
+      }
+
+      await kuzuDb.insertSymbolReferences(txConn, symbolReferences);
+
+      for (const symbol of symbolsToUpsert) {
+        await kuzuDb.upsertSymbol(txConn, symbol);
+      }
+
+      await kuzuDb.insertEdges(txConn, edgesToInsert);
+    });
 
     prefetchFileExports(repoId, fileMeta.path);
 

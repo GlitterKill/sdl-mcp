@@ -47,8 +47,7 @@ describe("CLI doctor command - KuzuDB", () => {
 
   it("reports KuzuDB status when configured", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const kuzuPath = join(tempDir, "sdl-mcp-graph");
-    mkdirSync(kuzuPath, { recursive: true });
+    const kuzuPath = join(tempDir, "sdl-mcp-graph.kuzu");
 
     const config = {
       repos: [{ repoId: "test", rootPath: tempDir }],
@@ -57,7 +56,9 @@ describe("CLI doctor command - KuzuDB", () => {
     };
     writeFileSync(configPath, JSON.stringify(config));
 
+    const { initKuzuDb, closeKuzuDb } = await import("../../src/db/kuzu.js");
     const { doctorCommand } = await import("../../src/cli/commands/doctor.js");
+    await initKuzuDb(kuzuPath);
 
     let output = "";
     const originalLog = console.log;
@@ -70,6 +71,7 @@ describe("CLI doctor command - KuzuDB", () => {
     } catch (e) {
       // May throw on failed checks
     } finally {
+      await closeKuzuDb();
       console.log = originalLog;
     }
 
@@ -79,13 +81,13 @@ describe("CLI doctor command - KuzuDB", () => {
     );
   });
 
-  it("warns when KuzuDB directory does not exist", async () => {
+  it("warns when KuzuDB file does not exist", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
 
     const config = {
       repos: [{ repoId: "test", rootPath: tempDir }],
       dbPath: join(tempDir, "sdlmcp.sqlite"),
-      graphDatabase: { path: join(tempDir, "nonexistent-kuzudb") },
+      graphDatabase: { path: join(tempDir, "nonexistent-kuzudb.kuzu") },
     };
     writeFileSync(configPath, JSON.stringify(config));
 
@@ -107,7 +109,7 @@ describe("CLI doctor command - KuzuDB", () => {
 
     assert.ok(
       output.includes("not found") || output.includes("warn"),
-      "Output should indicate KuzuDB directory not found"
+      "Output should indicate KuzuDB file not found"
     );
   });
 

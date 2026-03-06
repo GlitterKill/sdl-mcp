@@ -9,6 +9,7 @@ const preparedStatementCacheByConn = new WeakMap<
   Connection,
   Map<string, PreparedStatement>
 >();
+const transactionDepthByConn = new WeakMap<Connection, number>();
 
 let joinHintSupported: boolean | null = null;
 
@@ -128,18 +129,35 @@ export async function withTransaction<T>(
   conn: Connection,
   fn: (conn: Connection) => Promise<T>,
 ): Promise<T> {
-  await exec(conn, "BEGIN TRANSACTION");
+  const depth = transactionDepthByConn.get(conn) ?? 0;
+  transactionDepthByConn.set(conn, depth + 1);
+
+  if (depth === 0) {
+    await exec(conn, "BEGIN TRANSACTION");
+  }
+
   try {
     const result = await fn(conn);
-    await exec(conn, "COMMIT");
+    if (depth === 0) {
+      await exec(conn, "COMMIT");
+    }
     return result;
   } catch (err) {
-    try {
-      await exec(conn, "ROLLBACK");
-    } catch {
-      // Ignore rollback failures
+    if (depth === 0) {
+      try {
+        await exec(conn, "ROLLBACK");
+      } catch {
+        // Ignore rollback failures
+      }
     }
     throw err;
+  } finally {
+    const nextDepth = (transactionDepthByConn.get(conn) ?? 1) - 1;
+    if (nextDepth > 0) {
+      transactionDepthByConn.set(conn, nextDepth);
+    } else {
+      transactionDepthByConn.delete(conn);
+    }
   }
 }
 
@@ -1390,50 +1408,52 @@ export async function insertEdges(
 ): Promise<void> {
   if (edges.length === 0) return;
 
-  const edgesByRepo = new Map<string, EdgeRow[]>();
-  for (const edge of edges) {
-    const bucket = edgesByRepo.get(edge.repoId);
-    if (bucket) bucket.push(edge);
-    else edgesByRepo.set(edge.repoId, [edge]);
-  }
-
-  for (const [repoId, repoEdges] of edgesByRepo) {
-    const fromSymbolIds = [...new Set(repoEdges.map((e) => e.fromSymbolId))];
-
-    for (const symbolId of fromSymbolIds) {
-      await exec(
-        conn,
-        `MATCH (r:Repo {repoId: $repoId})
-         MERGE (s:Symbol {symbolId: $symbolId})
-         MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
-        { repoId, symbolId },
-      );
+  await withTransaction(conn, async (txConn) => {
+    const edgesByRepo = new Map<string, EdgeRow[]>();
+    for (const edge of edges) {
+      const bucket = edgesByRepo.get(edge.repoId);
+      if (bucket) bucket.push(edge);
+      else edgesByRepo.set(edge.repoId, [edge]);
     }
 
-    for (const edge of repoEdges) {
-      await exec(
-        conn,
-        `MERGE (a:Symbol {symbolId: $fromSymbolId})
-         MERGE (b:Symbol {symbolId: $toSymbolId})
-         MERGE (a)-[d:DEPENDS_ON {edgeType: $edgeType}]->(b)
-         SET d.weight = $weight,
-             d.confidence = $confidence,
-             d.resolution = $resolution,
-             d.provenance = $provenance,
-             d.createdAt = $createdAt`,
-        {
-          fromSymbolId: edge.fromSymbolId,
-          toSymbolId: edge.toSymbolId,
-          edgeType: edge.edgeType,
-          weight: edge.weight,
-          confidence: edge.confidence,
-          resolution: edge.resolution,
-          provenance: edge.provenance,
-          createdAt: edge.createdAt,
-        },
-      );
+    for (const [repoId, repoEdges] of edgesByRepo) {
+      const fromSymbolIds = [...new Set(repoEdges.map((e) => e.fromSymbolId))];
+
+      for (const symbolId of fromSymbolIds) {
+        await exec(
+          txConn,
+          `MATCH (r:Repo {repoId: $repoId})
+           MERGE (s:Symbol {symbolId: $symbolId})
+           MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
+          { repoId, symbolId },
+        );
+      }
+
+      for (const edge of repoEdges) {
+        await exec(
+          txConn,
+          `MERGE (a:Symbol {symbolId: $fromSymbolId})
+           MERGE (b:Symbol {symbolId: $toSymbolId})
+           MERGE (a)-[d:DEPENDS_ON {edgeType: $edgeType}]->(b)
+           SET d.weight = $weight,
+               d.confidence = $confidence,
+               d.resolution = $resolution,
+               d.provenance = $provenance,
+               d.createdAt = $createdAt`,
+          {
+            fromSymbolId: edge.fromSymbolId,
+            toSymbolId: edge.toSymbolId,
+            edgeType: edge.edgeType,
+            weight: edge.weight,
+            confidence: edge.confidence,
+            resolution: edge.resolution,
+            provenance: edge.provenance,
+            createdAt: edge.createdAt,
+          },
+        );
+      }
     }
-  }
+  });
 }
 
 export async function deleteEdge(
@@ -3241,6 +3261,19 @@ export async function insertSymbolReference(
       createdAt: row.createdAt,
     },
   );
+}
+
+export async function insertSymbolReferences(
+  conn: Connection,
+  rows: SymbolReferenceRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+
+  await withTransaction(conn, async (txConn) => {
+    for (const row of rows) {
+      await insertSymbolReference(txConn, row);
+    }
+  });
 }
 
 export async function getTestRefsForSymbol(
