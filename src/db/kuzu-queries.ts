@@ -2093,7 +2093,7 @@ export async function getCallEdgeResolutionCounts(
   const resolved = await querySingle<{ count: unknown }>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[d:DEPENDS_ON]->(t:Symbol)
-     WHERE d.edgeType = 'call' AND NOT startsWith(t.symbolId, 'unresolved:')
+     WHERE d.edgeType = 'call' AND NOT (t.symbolId STARTS WITH 'unresolved:')
      RETURN count(d) AS count`,
     { repoId },
   );
