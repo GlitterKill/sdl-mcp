@@ -29,6 +29,7 @@ import { extractConfigEdgesFromTree, type ConfigEdge } from "../configEdges.js";
 import type { FileMetadata } from "../fileScanner.js";
 import { generateAstFingerprint, generateSymbolId } from "../fingerprints.js";
 import type { IndexProgress } from "../indexer.js";
+import { resolveSymbolEnrichment } from "../symbol-enrichment.js";
 import { extractInvariants, extractSideEffects, generateSummary } from "../summaries.js";
 import type { ParserWorkerPool } from "../workerPool.js";
 import type { SymbolWithNodeId } from "../worker.js";
@@ -445,6 +446,14 @@ export async function processFile(params: ProcessFileParams): Promise<{
           sideEffects.length > 0 ? JSON.stringify(sideEffects) : null;
       }
 
+      const { roleTagsJson, searchText } = resolveSymbolEnrichment({
+        kind: extractedSymbol.kind,
+        name: extractedSymbol.name,
+        relPath,
+        summary,
+        signature: extractedSymbol.signature,
+      });
+
       const symbol: SymbolRow = {
         symbolId,
         repoId,
@@ -465,6 +474,8 @@ export async function processFile(params: ProcessFileParams): Promise<{
         summary,
         invariantsJson,
         sideEffectsJson: sideEffectsJson,
+        roleTagsJson,
+        searchText,
         updatedAt: new Date().toISOString(),
       };
 

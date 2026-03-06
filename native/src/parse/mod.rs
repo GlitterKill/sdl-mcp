@@ -119,13 +119,31 @@ fn parse_single_file(input: &NativeFileInput) -> NativeParsedFile {
     let root = tree.root_node();
 
     // Extract symbols
-    let symbols = extract::symbols::extract_symbols(
+    let mut symbols = extract::symbols::extract_symbols(
         root,
         content.as_bytes(),
         &input.repo_id,
         &input.rel_path,
         &input.language,
     );
+
+    for symbol in &mut symbols {
+        symbol.summary = extract::summary::generate_summary(symbol, &content);
+
+        let invariants = extract::invariants::extract_invariants(symbol, &content);
+        symbol.invariants_json =
+            serde_json::to_string(&invariants).unwrap_or_else(|_| "[]".to_string());
+
+        let side_effects = extract::side_effects::extract_side_effects(symbol, &content);
+        symbol.side_effects_json =
+            serde_json::to_string(&side_effects).unwrap_or_else(|_| "[]".to_string());
+
+        let role_tags = extract::roles::extract_role_tags(symbol, &input.rel_path);
+        symbol.role_tags_json =
+            serde_json::to_string(&role_tags).unwrap_or_else(|_| "[]".to_string());
+        symbol.search_text =
+            extract::search_text::build_search_text(symbol, &input.rel_path, &role_tags);
+    }
 
     // Extract imports
     let imports = extract::imports::extract_imports(

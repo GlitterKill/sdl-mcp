@@ -53,6 +53,8 @@ interface NativeParsedSymbol {
   summary: string;
   invariantsJson: string;
   sideEffectsJson: string;
+  roleTagsJson: string;
+  searchText: string;
 }
 
 interface NativeParsedImport {
@@ -213,6 +215,8 @@ export interface RustExtractedSymbol extends CallExtractedSymbol {
   summary: string;
   invariantsJson: string;
   sideEffectsJson: string;
+  roleTagsJson: string;
+  searchText: string;
 }
 
 export interface RustParseResult {
@@ -421,6 +425,8 @@ function mapNativeSymbol(sym: NativeParsedSymbol): RustExtractedSymbol {
     summary: sym.summary,
     invariantsJson: sym.invariantsJson,
     sideEffectsJson: sym.sideEffectsJson,
+    roleTagsJson: typeof sym.roleTagsJson === "string" ? sym.roleTagsJson : "[]",
+    searchText: typeof sym.searchText === "string" ? sym.searchText : "",
   };
 }
 

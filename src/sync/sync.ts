@@ -6,6 +6,7 @@ import { gzip, gunzip, gunzipSync } from "zlib";
 
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
+import { resolveSymbolEnrichment } from "../indexer/symbol-enrichment.js";
 import { hashContent } from "../util/hashing.js";
 import { getCurrentTimestamp } from "../util/time.js";
 import type {
@@ -88,6 +89,8 @@ export async function exportArtifact(
       summary: s.summary,
       invariants_json: s.invariantsJson,
       side_effects_json: s.sideEffectsJson,
+      role_tags_json: s.roleTagsJson ?? null,
+      search_text: s.searchText ?? null,
       updated_at: s.updatedAt,
     })),
     symbol_versions: symbolVersions.map((sv) => ({
@@ -193,6 +196,9 @@ export async function importArtifact(
   const compressed = Buffer.from(artifact.compressed_data, "base64");
   const decompressed = await gunzipAsync(compressed);
   const state: SyncIndexState = JSON.parse(decompressed.toString("utf-8"));
+  const relPathByFileId = new Map(
+    state.files.map((file) => [file.file_id, file.rel_path] as const),
+  );
 
   if (options.verifyIntegrity) {
     const computedHash = hashContent(JSON.stringify(state, null, 0));
@@ -224,6 +230,16 @@ export async function importArtifact(
   }
 
   for (const symbol of state.symbols) {
+    const { roleTagsJson, searchText } = resolveSymbolEnrichment({
+      kind: symbol.kind,
+      name: symbol.name,
+      relPath: relPathByFileId.get(symbol.file_id) ?? "",
+      summary: symbol.summary,
+      signature: parseSignatureJson(symbol.signature_json),
+      nativeRoleTagsJson: symbol.role_tags_json,
+      nativeSearchText: symbol.search_text,
+    });
+
     await kuzuDb.upsertSymbol(conn, {
       symbolId: symbol.symbol_id,
       repoId: artifact.repo_id,
@@ -242,6 +258,8 @@ export async function importArtifact(
       summary: symbol.summary,
       invariantsJson: symbol.invariants_json,
       sideEffectsJson: symbol.side_effects_json,
+      roleTagsJson,
+      searchText,
       updatedAt: symbol.updated_at,
     });
   }
@@ -374,6 +392,21 @@ export async function listArtifacts(
     );
   } catch {
     return [];
+  }
+}
+
+function parseSignatureJson(signatureJson: string | null): {
+  params?: Array<{ name?: string | null } | null> | null;
+} | null {
+  if (!signatureJson) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(signatureJson);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
   }
 }
 

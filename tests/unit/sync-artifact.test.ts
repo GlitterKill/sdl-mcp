@@ -3,6 +3,7 @@ import assert from "node:assert";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rmSync, existsSync } from "node:fs";
+import { gunzipSync, gzipSync } from "node:zlib";
 
 import {
   exportArtifact,
@@ -112,6 +113,171 @@ describe("Sync Artifact Model", () => {
     assert.strictEqual(importResult.verified, true);
     assert.strictEqual(importResult.filesRestored, 1);
     assert.strictEqual(importResult.repoId, repoId);
+  });
+
+  it("round-trips enrichment metadata through sync artifacts", async () => {
+    const conn = await getKuzuConn();
+    const now = new Date().toISOString();
+
+    await kuzuDb.upsertSymbol(conn, {
+      symbolId: "sym-1",
+      repoId,
+      fileId: "file-1",
+      kind: "function",
+      name: "handleLoginRequest",
+      exported: true,
+      visibility: "public",
+      language: "ts",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 5,
+      rangeEndCol: 1,
+      astFingerprint: "fp-1",
+      signatureJson: JSON.stringify({
+        params: [{ name: "authRequest", type: "Request" }],
+      }),
+      summary: "Handle login requests",
+      invariantsJson: null,
+      sideEffectsJson: null,
+      roleTagsJson: JSON.stringify(["handler", "entrypoint"]),
+      searchText: "handleloginrequest handle login requests handler entrypoint auth request",
+      updatedAt: now,
+    });
+
+    const exportResult = await exportArtifact({
+      repoId,
+      versionId: "v-test",
+      commitSha: "abc123def456",
+      outputPath: join(syncDir, "enrichment.sdl-artifact.json"),
+    });
+
+    const fs = await import("node:fs");
+    const artifact = JSON.parse(
+      fs.readFileSync(exportResult.artifactPath, "utf-8"),
+    ) as { compressed_data: string };
+    const state = JSON.parse(
+      gunzipSync(Buffer.from(artifact.compressed_data, "base64")).toString("utf-8"),
+    ) as {
+      symbols: Array<{
+        role_tags_json: string | null;
+        search_text: string | null;
+      }>;
+    };
+
+    assert.strictEqual(
+      state.symbols[0]?.role_tags_json,
+      JSON.stringify(["handler", "entrypoint"]),
+    );
+    assert.match(state.symbols[0]?.search_text ?? "", /\bhandler\b/);
+
+    await closeKuzuDb();
+    rmSync(graphDbPath, { recursive: true, force: true });
+    await initKuzuDb(graphDbPath);
+
+    const importResult = await importArtifact({
+      artifactPath: exportResult.artifactPath,
+      repoId,
+      verifyIntegrity: true,
+    });
+
+    assert.strictEqual(importResult.symbolsRestored, 1);
+
+    const restoredConn = await getKuzuConn();
+    const restoredSymbols = await kuzuDb.getSymbolsByRepo(restoredConn, repoId);
+
+    assert.strictEqual(restoredSymbols.length, 1);
+    assert.strictEqual(
+      restoredSymbols[0]?.roleTagsJson,
+      JSON.stringify(["handler", "entrypoint"]),
+    );
+    assert.match(restoredSymbols[0]?.searchText ?? "", /\bauth\b/);
+  });
+
+  it("rebuilds enrichment metadata when importing legacy artifacts", async () => {
+    const conn = await getKuzuConn();
+    const now = new Date().toISOString();
+
+    await kuzuDb.upsertFile(conn, {
+      fileId: "file-1",
+      repoId,
+      relPath: "src/main.tsx",
+      contentHash: "abc123",
+      language: "tsx",
+      byteSize: 100,
+      lastIndexedAt: now,
+    });
+
+    await kuzuDb.upsertSymbol(conn, {
+      symbolId: "sym-legacy",
+      repoId,
+      fileId: "file-1",
+      kind: "function",
+      name: "renderApp",
+      exported: true,
+      visibility: "public",
+      language: "tsx",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 5,
+      rangeEndCol: 1,
+      astFingerprint: "fp-legacy",
+      signatureJson: JSON.stringify({
+        params: [{ name: "rootElement", type: "HTMLElement" }],
+      }),
+      summary: "Render app shell",
+      invariantsJson: null,
+      sideEffectsJson: null,
+      roleTagsJson: JSON.stringify(["entrypoint"]),
+      searchText: "render app shell entrypoint root element main tsx",
+      updatedAt: now,
+    });
+
+    const exportResult = await exportArtifact({
+      repoId,
+      versionId: "v-test",
+      outputPath: join(syncDir, "legacy.sdl-artifact.json"),
+    });
+
+    const fs = await import("node:fs");
+    const artifact = JSON.parse(
+      fs.readFileSync(exportResult.artifactPath, "utf-8"),
+    ) as {
+      artifact_hash: string;
+      compressed_data: string;
+    };
+    const state = JSON.parse(
+      gunzipSync(Buffer.from(artifact.compressed_data, "base64")).toString("utf-8"),
+    ) as {
+      symbols: Array<Record<string, unknown>>;
+    };
+
+    for (const symbol of state.symbols) {
+      delete symbol.role_tags_json;
+      delete symbol.search_text;
+    }
+
+    const rewrittenStateJson = JSON.stringify(state, null, 0);
+    const { hashContent } = await import("../../dist/util/hashing.js");
+    artifact.compressed_data = gzipSync(Buffer.from(rewrittenStateJson)).toString("base64");
+    artifact.artifact_hash = hashContent(rewrittenStateJson);
+    fs.writeFileSync(exportResult.artifactPath, JSON.stringify(artifact, null, 2), "utf-8");
+
+    await closeKuzuDb();
+    rmSync(graphDbPath, { recursive: true, force: true });
+    await initKuzuDb(graphDbPath);
+
+    await importArtifact({
+      artifactPath: exportResult.artifactPath,
+      repoId,
+      verifyIntegrity: true,
+    });
+
+    const restoredConn = await getKuzuConn();
+    const restoredSymbols = await kuzuDb.getSymbolsByRepo(restoredConn, repoId);
+
+    assert.strictEqual(restoredSymbols[0]?.roleTagsJson, JSON.stringify(["entrypoint"]));
+    assert.match(restoredSymbols[0]?.searchText ?? "", /\brender\b/);
+    assert.match(restoredSymbols[0]?.searchText ?? "", /\broot\b/);
   });
 
   it("rejects import with hash mismatch on tampered artifact", async () => {

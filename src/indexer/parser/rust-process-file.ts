@@ -21,6 +21,7 @@ import { getAdapterForExtension } from "../adapter/registry.js";
 import type { ConfigEdge } from "../configEdges.js";
 import type { FileMetadata } from "../fileScanner.js";
 import type { RustParseResult } from "../rustIndexer.js";
+import { resolveSymbolEnrichment } from "../symbol-enrichment.js";
 import { extractInvariants, extractSideEffects, generateSummary } from "../summaries.js";
 import { buildSymbolReferences, isTestFile } from "./helpers.js";
 
@@ -246,6 +247,8 @@ export async function processFileFromRustResult(params: {
         nativeSummary: extracted.summary,
         nativeInvariantsJson: extracted.invariantsJson,
         nativeSideEffectsJson: extracted.sideEffectsJson,
+        nativeRoleTagsJson: extracted.roleTagsJson,
+        nativeSearchText: extracted.searchText,
       };
     });
 
@@ -286,9 +289,21 @@ export async function processFileFromRustResult(params: {
       const symbolId = detail.symbolId;
 
       const existingSymbol = existingSymbolsById.get(symbolId);
-      const nativeSummary = detail.nativeSummary.trim();
-      const nativeInvariantsJson = detail.nativeInvariantsJson.trim();
-      const nativeSideEffectsJson = detail.nativeSideEffectsJson.trim();
+      const nativeSummary = typeof detail.nativeSummary === "string"
+        ? detail.nativeSummary.trim()
+        : "";
+      const nativeInvariantsJson = typeof detail.nativeInvariantsJson === "string"
+        ? detail.nativeInvariantsJson.trim()
+        : "";
+      const nativeSideEffectsJson = typeof detail.nativeSideEffectsJson === "string"
+        ? detail.nativeSideEffectsJson.trim()
+        : "";
+      const nativeRoleTagsJson = typeof detail.nativeRoleTagsJson === "string"
+        ? detail.nativeRoleTagsJson.trim()
+        : "";
+      const nativeSearchText = typeof detail.nativeSearchText === "string"
+        ? detail.nativeSearchText.trim()
+        : "";
 
       // Prefer existing values for stable IDs, then Rust-native metadata, then TS fallback.
       let summary =
@@ -319,6 +334,16 @@ export async function processFileFromRustResult(params: {
           sideEffects.length > 0 ? JSON.stringify(sideEffects) : null;
       }
 
+      const { roleTagsJson, searchText } = resolveSymbolEnrichment({
+        kind: extracted.kind,
+        name: extracted.name,
+        relPath,
+        summary,
+        signature: extracted.signature,
+        nativeRoleTagsJson,
+        nativeSearchText,
+      });
+
       const symbol: SymbolRow = {
         symbolId,
         repoId,
@@ -339,6 +364,8 @@ export async function processFileFromRustResult(params: {
         summary,
         invariantsJson,
         sideEffectsJson,
+        roleTagsJson,
+        searchText,
         updatedAt: new Date().toISOString(),
       };
 

@@ -40,6 +40,8 @@ export interface SymbolRow {
   summary: string | null;
   invariants_json: string | null;
   side_effects_json: string | null;
+  role_tags_json?: string | null;
+  search_text?: string | null;
 
   updated_at: string;
 }
@@ -100,6 +102,8 @@ export interface SymbolVersionRow {
   summary: string | null;
   invariants_json: string | null;
   side_effects_json: string | null;
+  role_tags_json?: string | null;
+  search_text?: string | null;
 }
 
 export interface MetricsRow {

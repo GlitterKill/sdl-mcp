@@ -279,6 +279,8 @@ fn make_symbol(
         summary: String::new(),    // Filled by summary module later
         invariants_json: "[]".into(),
         side_effects_json: "[]".into(),
+        role_tags_json: "[]".into(),
+        search_text: String::new(),
     }
 }
 
@@ -479,6 +481,8 @@ fn process_variable_declaration(
                         summary: String::new(),
                         invariants_json: "[]".to_string(),
                         side_effects_json: "[]".to_string(),
+                        role_tags_json: "[]".to_string(),
+                        search_text: String::new(),
                     });
                 }
             }

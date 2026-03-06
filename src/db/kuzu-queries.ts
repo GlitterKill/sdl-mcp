@@ -600,6 +600,8 @@ export interface SymbolRow {
   summary: string | null;
   invariantsJson: string | null;
   sideEffectsJson: string | null;
+  roleTagsJson?: string | null;
+  searchText?: string | null;
   updatedAt: string;
 }
 
@@ -635,6 +637,8 @@ export async function upsertSymbol(
          s.summary = $summary,
          s.invariantsJson = $invariantsJson,
          s.sideEffectsJson = $sideEffectsJson,
+         s.roleTagsJson = $roleTagsJson,
+         s.searchText = $searchText,
          s.updatedAt = $updatedAt
      MERGE (s)-[:SYMBOL_IN_FILE]->(f)
      MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
@@ -656,6 +660,8 @@ export async function upsertSymbol(
       summary: symbol.summary,
       invariantsJson: symbol.invariantsJson,
       sideEffectsJson: symbol.sideEffectsJson,
+      roleTagsJson: symbol.roleTagsJson ?? null,
+      searchText: symbol.searchText ?? null,
       updatedAt: symbol.updatedAt,
     },
   );
@@ -769,6 +775,8 @@ export async function getSymbolsByFile(
     summary: string | null;
     invariantsJson: string | null;
     sideEffectsJson: string | null;
+    roleTagsJson: string | null;
+    searchText: string | null;
     updatedAt: string;
   }>(
     conn,
@@ -790,6 +798,8 @@ export async function getSymbolsByFile(
             s.summary AS summary,
             s.invariantsJson AS invariantsJson,
             s.sideEffectsJson AS sideEffectsJson,
+            s.roleTagsJson AS roleTagsJson,
+            s.searchText AS searchText,
             s.updatedAt AS updatedAt`,
     { fileId },
   );
@@ -812,6 +822,8 @@ export async function getSymbolsByFile(
     summary: row.summary,
     invariantsJson: row.invariantsJson,
     sideEffectsJson: row.sideEffectsJson,
+    roleTagsJson: row.roleTagsJson,
+    searchText: row.searchText,
     updatedAt: row.updatedAt,
   }));
 }
@@ -850,6 +862,8 @@ export async function getSymbolsByRepo(
     summary: string | null;
     invariantsJson: string | null;
     sideEffectsJson: string | null;
+    roleTagsJson: string | null;
+    searchText: string | null;
     updatedAt: string;
   }>(
     conn,
@@ -871,6 +885,8 @@ export async function getSymbolsByRepo(
             s.summary AS summary,
             s.invariantsJson AS invariantsJson,
             s.sideEffectsJson AS sideEffectsJson,
+            s.roleTagsJson AS roleTagsJson,
+            s.searchText AS searchText,
             s.updatedAt AS updatedAt`,
     { repoId },
   );
@@ -893,6 +909,8 @@ export async function getSymbolsByRepo(
     summary: row.summary,
     invariantsJson: row.invariantsJson,
     sideEffectsJson: row.sideEffectsJson,
+    roleTagsJson: row.roleTagsJson,
+    searchText: row.searchText,
     updatedAt: row.updatedAt,
   }));
 }
@@ -952,6 +970,8 @@ export async function getSymbolsByIds(
     summary: string | null;
     invariantsJson: string | null;
     sideEffectsJson: string | null;
+    roleTagsJson: string | null;
+    searchText: string | null;
     updatedAt: string;
   }>(
     conn,
@@ -976,6 +996,8 @@ export async function getSymbolsByIds(
             s.summary AS summary,
             s.invariantsJson AS invariantsJson,
             s.sideEffectsJson AS sideEffectsJson,
+            s.roleTagsJson AS roleTagsJson,
+            s.searchText AS searchText,
             s.updatedAt AS updatedAt`,
     { symbolIds },
   );
@@ -1000,6 +1022,8 @@ export async function getSymbolsByIds(
       summary: row.summary,
       invariantsJson: row.invariantsJson,
       sideEffectsJson: row.sideEffectsJson,
+      roleTagsJson: row.roleTagsJson,
+      searchText: row.searchText,
       updatedAt: row.updatedAt,
     });
   }
@@ -1228,6 +1252,7 @@ export async function searchSymbols(
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
      WHERE lower(s.name) CONTAINS lower($query)
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
+        OR lower(coalesce(s.searchText, '')) CONTAINS lower($query)
      WITH s, f,
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
@@ -1316,6 +1341,7 @@ export async function searchSymbolsLite(
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
      WHERE lower(s.name) CONTAINS lower($query)
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
+        OR lower(coalesce(s.searchText, '')) CONTAINS lower($query)
      WITH s, f,
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,

@@ -53,6 +53,8 @@ const NODE_TABLES: string[] = [
     summary STRING,
     invariantsJson STRING,
     sideEffectsJson STRING,
+    roleTagsJson STRING,
+    searchText STRING,
     updatedAt STRING
   )`,
 
@@ -314,7 +316,7 @@ export async function getSchemaVersion(conn: Connection): Promise<number | null>
   }
 }
 
-export const KUZU_SCHEMA_VERSION = 2;
+export const KUZU_SCHEMA_VERSION = 3;
 
 export function supportsCallResolutionMetadata(
   schemaVersion: number | null | undefined,

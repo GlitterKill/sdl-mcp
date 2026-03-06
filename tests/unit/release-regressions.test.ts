@@ -49,13 +49,13 @@ describe("release regression guards", () => {
 
     assert.match(
       source,
-      /export interface RustExtractedSymbol[\s\S]*symbolId:\s*string;[\s\S]*astFingerprint:\s*string;[\s\S]*summary:\s*string;[\s\S]*invariantsJson:\s*string;[\s\S]*sideEffectsJson:\s*string;/,
+      /export interface RustExtractedSymbol[\s\S]*symbolId:\s*string;[\s\S]*astFingerprint:\s*string;[\s\S]*summary:\s*string;[\s\S]*invariantsJson:\s*string;[\s\S]*sideEffectsJson:\s*string;[\s\S]*roleTagsJson:\s*string;[\s\S]*searchText:\s*string;/,
       "RustExtractedSymbol should include identity and metadata fields from native output",
     );
 
     assert.match(
       source,
-      /function mapNativeSymbol\(sym: NativeParsedSymbol\): RustExtractedSymbol[\s\S]*symbolId:\s*sym\.symbolId,[\s\S]*astFingerprint:\s*sym\.astFingerprint,[\s\S]*summary:\s*sym\.summary,[\s\S]*invariantsJson:\s*sym\.invariantsJson,[\s\S]*sideEffectsJson:\s*sym\.sideEffectsJson,/,
+      /function mapNativeSymbol\(sym: NativeParsedSymbol\): RustExtractedSymbol[\s\S]*symbolId:\s*sym\.symbolId,[\s\S]*astFingerprint:\s*sym\.astFingerprint,[\s\S]*summary:\s*sym\.summary,[\s\S]*invariantsJson:\s*sym\.invariantsJson,[\s\S]*sideEffectsJson:\s*sym\.sideEffectsJson,[\s\S]*roleTagsJson:\s*typeof sym\.roleTagsJson === "string" \? sym\.roleTagsJson : "\[\]",[\s\S]*searchText:\s*typeof sym\.searchText === "string" \? sym\.searchText : "",/,
       "native symbol mapper should pass through symbol identity and metadata",
     );
   });
@@ -73,6 +73,43 @@ describe("release regression guards", () => {
       source,
       /const symbolId = extracted\.symbolId;\s*const astFingerprint = extracted\.astFingerprint;/,
       "Rust pass-1 should use native symbol identity instead of regenerating",
+    );
+  });
+
+  it("keeps native enrichment metadata compatible across legacy, TS, and sync paths", () => {
+    const rustSource = readSource("src/indexer/parser/rust-process-file.ts");
+    const tsSource = readSource("src/indexer/parser/process-file.ts");
+    const syncTypesSource = readSource("src/sync/types.ts");
+    const syncSource = readSource("src/sync/sync.ts");
+
+    assert.match(
+      rustSource,
+      /const nativeRoleTagsJson = typeof detail\.nativeRoleTagsJson === "string"\s*\?\s*detail\.nativeRoleTagsJson\.trim\(\)\s*:\s*"";/,
+      "Rust path should tolerate older native addons that omit enrichment fields",
+    );
+
+    assert.match(
+      tsSource,
+      /roleTagsJson,\s*searchText,\s*updatedAt:/s,
+      "TypeScript parsing path should also persist derived search metadata",
+    );
+
+    assert.match(
+      syncTypesSource,
+      /role_tags_json: string \| null;\s*search_text: string \| null;/s,
+      "sync state type should carry enrichment metadata",
+    );
+
+    assert.match(
+      syncSource,
+      /role_tags_json:\s*s\.roleTagsJson\s*\?\?\s*null,\s*search_text:\s*s\.searchText\s*\?\?\s*null,/s,
+      "artifact export should serialize enrichment metadata",
+    );
+
+    assert.match(
+      syncSource,
+      /const \{ roleTagsJson, searchText \} = resolveSymbolEnrichment\(\{[\s\S]*nativeRoleTagsJson:\s*symbol\.role_tags_json,[\s\S]*nativeSearchText:\s*symbol\.search_text,[\s\S]*}\);/s,
+      "artifact import should preserve or rebuild enrichment metadata",
     );
   });
 

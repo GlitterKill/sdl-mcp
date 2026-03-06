@@ -78,6 +78,10 @@ export interface NativeParsedSymbol {
   invariantsJson: string
   /** JSON-encoded side-effects array. */
   sideEffectsJson: string
+  /** JSON-encoded role tags inferred from name/path heuristics. */
+  roleTagsJson: string
+  /** Search-oriented text including identifier splits, summary, tags, and path hints. */
+  searchText: string
 }
 /** Extracted import statement. */
 export interface NativeParsedImport {

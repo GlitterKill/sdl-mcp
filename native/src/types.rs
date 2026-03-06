@@ -51,6 +51,10 @@ pub struct NativeParsedSymbol {
     pub invariants_json: String,
     /// JSON-encoded side-effects array.
     pub side_effects_json: String,
+    /// JSON-encoded role tags inferred from name/path heuristics.
+    pub role_tags_json: String,
+    /// Search-oriented text including identifier splits, summary, tags, and path hints.
+    pub search_text: String,
 }
 
 /// Extracted import statement.
