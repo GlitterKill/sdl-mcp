@@ -99,13 +99,14 @@ jobs:
           export SDL_GRAPH_DB_PATH="$TEST_GRAPH_DIR/sdl-mcp-graph"
           export SDL_DB_PATH="$SDL_GRAPH_DB_PATH"
           node --input-type=module -e "import { initKuzuDb } from './dist/db/kuzu.js'; await initKuzuDb(process.env.SDL_GRAPH_DB_PATH);"
-          node --import tsx --test-concurrency=1 --test tests/runner.test.ts > /tmp/test-output.txt 2>&1 || true
-          cat /tmp/test-output.txt
-          grep -c "^not ok" /tmp/test-output.txt && FAILURES=true || FAILURES=false
-          if [ "$FAILURES" = "true" ] || ! grep -q "# fail 0" /tmp/test-output.txt; then
+          TEST_OUT="${RUNNER_TEMP}/test-output.txt"
+          node --import tsx --test-concurrency=1 --test tests/runner.test.ts > "$TEST_OUT" 2>&1 || true
+          cat "$TEST_OUT"
+          grep -c "^not ok" "$TEST_OUT" && FAILURES=true || FAILURES=false
+          if [ "$FAILURES" = "true" ] || ! grep -q "# fail 0" "$TEST_OUT"; then
             echo "## Test Failures (${{ matrix.os }}, Node ${{ matrix.node-version }})" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -E "not ok|failureType|error:.*'|# fail|# tests|# pass" /tmp/test-output.txt | head -80 >> $GITHUB_STEP_SUMMARY
+            grep -E "not ok|failureType|error:.*'|# fail|# tests|# pass" "$TEST_OUT" | head -80 >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
@@ -115,7 +116,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-output-${{ matrix.os }}-node${{ matrix.node-version }}
-          path: /tmp/test-output.txt
+          path: ${{ runner.temp }}/test-output.txt
           retention-days: 3
 
       - name: Run test harness
