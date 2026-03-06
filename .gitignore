@@ -99,3 +99,8 @@ sdl-mcp_upgrades.md
 
 # StrykerJS
 .stryker-tmp/
+tmp-search-regression-lite/graph/sdl-mcp-graph.kuzu
+tmp-agent-feedback-regression-repo/graph/sdl-mcp-graph.kuzu
+tmp-agent-feedback-regression-version/graph/sdl-mcp-graph.kuzu
+tmp-search-regression-full/graph/sdl-mcp-graph.kuzu
+tmp-search-regression-lite/graph/sdl-mcp-graph.kuzu
