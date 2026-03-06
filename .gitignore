@@ -71,7 +71,7 @@ benchmarks/**/budget-sensitivity/
 *.tgz
 
 # Local-only project artifacts
-data/
+/data/
 devdocs/
 AGENTS.md
 CLAUDE.md
