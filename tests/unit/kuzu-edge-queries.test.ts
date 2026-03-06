@@ -191,6 +191,9 @@ describe("KuzuDB Edge Queries", () => {
       "confidence",
       "edgeType",
       "fromSymbolId",
+      "resolution",
+      "resolutionPhase",
+      "resolverId",
       "toSymbolId",
       "weight",
     ]);

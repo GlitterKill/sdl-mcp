@@ -529,9 +529,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
             continue;
           }
 
-          // 36-1.3: Handle both resolved and unresolved edges
           if (resolved.isResolved && resolved.symbolId) {
-            // Fully resolved edge
             const edgeKey = `${symbolId}->${resolved.symbolId}`;
             if (createdCallEdges && createdCallEdges.has(edgeKey)) {
               continue;
@@ -554,12 +552,9 @@ export async function processFile(params: ProcessFileParams): Promise<{
             createdCallEdges?.add(edgeKey);
             edgesCreated++;
           } else if (resolved.targetName) {
-            // Skip built-in method/constructor calls that can never resolve
             if (isBuiltinCall(resolved.targetName)) {
               continue;
             }
-            // 36-1.3: Unresolved edge - still useful for graph traversal
-            // Use a placeholder symbol ID that encodes the unresolved target
             const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
             const edgeKey = `${symbolId}->${unresolvedTargetId}`;
             if (createdCallEdges && createdCallEdges.has(edgeKey)) {

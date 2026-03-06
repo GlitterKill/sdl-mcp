@@ -80,7 +80,7 @@ describe("doctor command - call resolution capabilities", () => {
     assert.match(output, /Call resolution capabilities/i);
     assert.match(output, /pass2-ts/i);
     assert.match(output, /pass2-go/i);
-    assert.match(output, /schema v2/i);
+    assert.match(output, /schema v3/i);
     assert.match(output, /confidence, resolution, resolverId, resolutionPhase/i);
     assert.match(output, /request-only/i);
   });
