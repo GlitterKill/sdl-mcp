@@ -139,6 +139,12 @@
           "type": "boolean",
           "description": "Allow break-glass mode to override policy temporarily",
           "default": true
+        },
+        "defaultMinCallConfidence": {
+          "type": "number",
+          "description": "Optional default minCallConfidence for symbol-card and slice call-edge filtering",
+          "minimum": 0,
+          "maximum": 1
         }
       },
       "default": {

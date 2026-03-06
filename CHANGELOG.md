@@ -13,12 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - One-time SQLite-to-Kuzu migration support plus Kuzu-aware setup/health surfaces (`graphDatabase.path`, updated `init`/`doctor`, `spike:kuzu`, and refreshed release-test guidance)
 - Symbol graph enrichment via clusters (community detection) and processes (call-chain traces), surfaced in symbol cards, slices, `sdl.context.summary`, `sdl.repo.overview`, and blast-radius analysis
 - Rust + TypeScript cluster/process support with new parity, unit, and integration coverage, including `tests/integration/kuzu-e2e.test.ts`
+- Generalized pass2 resolver registry with `pass2-ts` and `pass2-go`, plus import-resolution adapters for Go, Java/Kotlin, Rust, and PHP
+- Confidence-aware MCP graph filtering (`minCallConfidence`) and optional per-call provenance metadata (`resolverId`, `resolutionPhase`, `resolutionReason`) on symbol-card and slice responses
 
 ### Changed
 
 - Config now uses `graphDatabase.path` for graph DB directory control; `dbPath` is deprecated and only retained for the one-time SQLite-to-Kuzu migration path
 - Graph queries, indexing flows, and MCP tool responses now read from Kuzu-backed storage/types instead of SQLite tables
 - Incremental indexing refreshes pass-2 caller contexts more reliably via incoming call/import edge hints
+- Graph schema version bumped to `2` so `DEPENDS_ON` edges can persist resolver provenance, and `doctor` now reports pass2 resolver coverage plus confidence-filtering mode
 
 ### Fixed
 

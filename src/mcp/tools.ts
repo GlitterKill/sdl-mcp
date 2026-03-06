@@ -41,6 +41,20 @@ const SliceSymbolDepsSchema = z.object({
   calls: z.array(SliceDepRefSchema),
 });
 
+const CallResolutionRefSchema = z.object({
+  symbolId: z.string(),
+  label: z.string(),
+  confidence: z.number().min(0).max(1),
+  resolutionReason: z.string().optional(),
+  resolverId: z.string().optional(),
+  resolutionPhase: z.string().optional(),
+});
+
+const CallResolutionSchema = z.object({
+  minCallConfidence: z.number().min(0).max(1).optional(),
+  calls: z.array(CallResolutionRefSchema),
+});
+
 const SymbolMetricsSchema = z.object({
   fanIn: z.number().int().min(0).optional(),
   fanOut: z.number().int().min(0).optional(),
@@ -99,6 +113,7 @@ const SymbolCardSchema = z.object({
   summary: z.string().optional(),
   invariants: z.array(z.string()).optional(),
   sideEffects: z.array(z.string()).optional(),
+  callResolution: CallResolutionSchema.optional(),
   deps: SymbolDepsSchema,
   metrics: SymbolMetricsSchema.optional(),
   detailLevel: CardDetailLevelSchema.optional(),
@@ -228,6 +243,7 @@ const CompactSliceSymbolCardSchema = z.object({
   inv: z.array(z.string()).optional(),
   se: z.array(z.string()).optional(),
   d: CompactSymbolDepsSchema,
+  cr: z.array(CallResolutionRefSchema).optional(),
   m: CompactSymbolMetricsSchema.optional(),
   dl: CardDetailLevelSchema.optional(),
   af: z.string(),
@@ -307,6 +323,7 @@ const CompactSliceSymbolCardV2Schema = z.object({
   inv: z.array(z.string()).optional(),
   se: z.array(z.string()).optional(),
   d: CompactSymbolDepsSchema,
+  cr: z.array(CallResolutionRefSchema).optional(),
   m: CompactSymbolMetricsSchema.optional(),
   dl: CardDetailLevelSchema.optional(),
   af: z.string().optional(),
@@ -640,6 +657,8 @@ export const SymbolGetCardRequestSchema = z.object({
   repoId: z.string(),
   symbolId: z.string(),
   ifNoneMatch: z.string().optional(),
+  minCallConfidence: z.number().min(0).max(1).optional(),
+  includeResolutionMetadata: z.boolean().optional(),
 });
 
 export const SymbolGetCardsRequestSchema = z.object({
@@ -647,6 +666,8 @@ export const SymbolGetCardsRequestSchema = z.object({
   symbolIds: z.array(z.string()).min(1).max(100).describe(
     "Array of symbol IDs to fetch (max 100)",
   ),
+  minCallConfidence: z.number().min(0).max(1).optional(),
+  includeResolutionMetadata: z.boolean().optional(),
   knownEtags: z.record(z.string(), z.string()).optional().describe(
     "Map of symbolId → known ETag. Matching symbols return notModified instead of full card.",
   ),
@@ -693,6 +714,8 @@ export const SliceBuildRequestSchema = z.object({
   wireFormatVersion: SliceBuildWireFormatVersionSchema.optional(),
   budget: SliceBudgetSchema.optional(),
   minConfidence: z.number().min(0).max(1).default(0.5),
+  minCallConfidence: z.number().min(0).max(1).optional(),
+  includeResolutionMetadata: z.boolean().optional(),
 });
 
 const SliceLeaseSchema = z.object({

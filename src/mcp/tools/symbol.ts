@@ -19,6 +19,7 @@ import type { SymbolKind } from "../../db/schema.js";
 import type {
   CardWithETag,
   NotModifiedResponse,
+  CallResolution,
   SymbolCard,
   SymbolDeps,
   SymbolMetrics,
@@ -57,6 +58,21 @@ function parseJson<T>(raw: string | null): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+interface BuildCardOptions {
+  minCallConfidence?: number;
+  includeResolutionMetadata?: boolean;
+}
+
+function getEffectiveMinCallConfidence(
+  requestedMinCallConfidence: number | undefined,
+): number | undefined {
+  if (requestedMinCallConfidence !== undefined) {
+    return requestedMinCallConfidence;
+  }
+
+  return loadConfig().policy.defaultMinCallConfidence;
 }
 
 export async function handleSymbolSearch(
@@ -108,14 +124,22 @@ async function buildCardForSymbol(
   repoId: string,
   symbolId: string,
   ifNoneMatch: string | undefined,
+  options: BuildCardOptions = {},
 ): Promise<CardWithETag | NotModifiedResponse> {
   const config = loadConfig();
   const cacheEnabled = config.cache?.enabled ?? true;
+  const effectiveMinCallConfidence = getEffectiveMinCallConfidence(
+    options.minCallConfidence,
+  );
+  const useCache =
+    cacheEnabled &&
+    effectiveMinCallConfidence === undefined &&
+    !options.includeResolutionMetadata;
 
   const conn = await getKuzuConn();
   const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
 
-  if (cacheEnabled && latestVersion) {
+  if (useCache && latestVersion) {
     const cachedCard = symbolCardCache.get(repoId, symbolId, latestVersion.versionId);
     if (cachedCard && cachedCard.detailLevel !== "compact") {
       const normalizedCachedCard: SymbolCard = {
@@ -189,7 +213,9 @@ async function buildCardForSymbol(
   }
 
   const [edgesFrom, metrics, clusterRow, processesRows] = await Promise.all([
-    kuzuDb.getEdgesFrom(conn, symbolId),
+    kuzuDb.getEdgesFrom(conn, symbolId, {
+      minCallConfidence: effectiveMinCallConfidence,
+    }),
     kuzuDb.getMetrics(conn, symbolId),
     kuzuDb.getClusterForSymbol(conn, symbolId).catch(() => null),
     kuzuDb.getProcessesForSymbol(conn, symbolId).catch(() => []),
@@ -231,6 +257,25 @@ async function buildCardForSymbol(
       SYMBOL_CARD_MAX_DEPS_PER_KIND,
     ),
   };
+
+  const callResolution: CallResolution | undefined = options.includeResolutionMetadata
+    ? {
+        minCallConfidence: effectiveMinCallConfidence,
+        calls: edgesFrom
+          .filter((edge) => edge.edgeType === "call")
+          .map((edge) => ({
+            symbolId: edge.toSymbolId,
+            label: pickDepLabel(
+              edge.toSymbolId,
+              targetNamesById.get(edge.toSymbolId)?.name,
+            ) ?? edge.toSymbolId,
+            confidence: edge.confidence,
+            resolutionReason: edge.resolution,
+            resolverId: edge.resolverId,
+            resolutionPhase: edge.resolutionPhase,
+          })),
+      }
+    : undefined;
 
   const cardMetrics: SymbolMetrics | undefined = metrics
     ? {
@@ -292,6 +337,10 @@ async function buildCardForSymbol(
               depth: row.depth,
             }))
         : undefined,
+    callResolution:
+      callResolution && callResolution.calls.length > 0
+        ? callResolution
+        : undefined,
     deps,
     metrics: cardMetrics,
     detailLevel: "full",
@@ -312,7 +361,7 @@ async function buildCardForSymbol(
 
   const cardWithETag: CardWithETag = { ...card, etag };
 
-  if (cacheEnabled && latestVersion) {
+  if (useCache && latestVersion) {
     const cacheCard: SymbolCard = { ...card, detailLevel: "full" };
     delete cacheCard.etag;
     await symbolCardCache.set(repoId, symbolId, latestVersion.versionId, cacheCard);
@@ -325,7 +374,13 @@ export async function handleSymbolGetCard(
   args: unknown,
 ): Promise<SymbolGetCardResponse | NotModifiedResponse> {
   const request = SymbolGetCardRequestSchema.parse(args);
-  const { repoId, symbolId, ifNoneMatch } = request;
+  const {
+    repoId,
+    symbolId,
+    ifNoneMatch,
+    minCallConfidence,
+    includeResolutionMetadata,
+  } = request;
 
   recordToolTrace({
     repoId,
@@ -335,7 +390,10 @@ export async function handleSymbolGetCard(
   });
   consumePrefetchedKey(repoId, `card:${symbolId}`);
 
-  const result = await buildCardForSymbol(repoId, symbolId, ifNoneMatch);
+  const result = await buildCardForSymbol(repoId, symbolId, ifNoneMatch, {
+    minCallConfidence,
+    includeResolutionMetadata,
+  });
   if ("notModified" in result) {
     return result;
   }
@@ -355,7 +413,13 @@ export async function handleSymbolGetCard(
 export async function handleSymbolGetCards(
   args: unknown,
 ): Promise<SymbolGetCardsResponse> {
-  const { repoId, symbolIds, knownEtags } =
+  const {
+    repoId,
+    symbolIds,
+    knownEtags,
+    minCallConfidence,
+    includeResolutionMetadata,
+  } =
     SymbolGetCardsRequestSchema.parse(args);
 
   for (const symbolId of symbolIds) {
@@ -363,7 +427,12 @@ export async function handleSymbolGetCards(
   }
 
   const cards = await Promise.all(
-    symbolIds.map((id) => buildCardForSymbol(repoId, id, knownEtags?.[id])),
+    symbolIds.map((id) =>
+      buildCardForSymbol(repoId, id, knownEtags?.[id], {
+        minCallConfidence,
+        includeResolutionMetadata,
+      })
+    ),
   );
 
   const conn = await getKuzuConn();

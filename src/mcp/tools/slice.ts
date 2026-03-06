@@ -218,6 +218,9 @@ export function toCompactGraphSliceV1(slice: GraphSlice): CompactGraphSlice {
           compactCard.m = metrics;
         }
       }
+      if (card.callResolution && card.callResolution.calls.length > 0) {
+        compactCard.cr = card.callResolution.calls;
+      }
       if (card.detailLevel && card.detailLevel !== "compact") {
         compactCard.dl = card.detailLevel;
       }
@@ -366,6 +369,9 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
         if (Object.keys(metrics).length > 0) {
           compactCard.m = metrics;
         }
+      }
+      if (card.callResolution && card.callResolution.calls.length > 0) {
+        compactCard.cr = card.callResolution.calls;
       }
       if (card.detailLevel && card.detailLevel !== "compact") {
         compactCard.dl = card.detailLevel;
@@ -531,6 +537,9 @@ export function toCompactGraphSliceV3(slice: GraphSlice): CompactGraphSliceV3 {
         if (Object.keys(metrics).length > 0) {
           compactCard.m = metrics;
         }
+      }
+      if (card.callResolution && card.callResolution.calls.length > 0) {
+        compactCard.cr = card.callResolution.calls;
       }
       if (card.detailLevel && card.detailLevel !== "compact") {
         compactCard.dl = card.detailLevel;
@@ -756,6 +765,8 @@ async function handleSliceBuildInternal(
     wireFormatVersion,
     budget,
     minConfidence,
+    minCallConfidence,
+    includeResolutionMetadata,
   } = request;
 
   recordToolTrace({
@@ -849,6 +860,9 @@ async function handleSliceBuildInternal(
       cardDetail,
       budget: effectiveBudget,
       minConfidence,
+      minCallConfidence:
+        minCallConfidence ?? mergedPolicy.defaultMinCallConfidence,
+      includeResolutionMetadata,
     };
 
     const policyContext: PolicyRequestContext = {

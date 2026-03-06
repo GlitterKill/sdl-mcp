@@ -77,6 +77,7 @@ export const PolicyConfigSchema = z.object({
   maxWindowTokens: z.number().int().min(1).default(DEFAULT_MAX_WINDOW_TOKENS),
   requireIdentifiers: z.boolean().default(true),
   allowBreakGlass: z.boolean().default(true),
+  defaultMinCallConfidence: z.number().min(0).max(1).optional(),
 });
 
 export type PolicyConfig = z.infer<typeof PolicyConfigSchema>;

@@ -11,6 +11,7 @@ import type { SymbolId, EdgeType } from "../../db/schema.js";
 import type {
   SymbolCard,
   SliceSymbolCard,
+  CallResolution,
   SliceDepRef,
   SliceSymbolDeps,
   CompressedEdge,
@@ -113,6 +114,27 @@ export function filterDepsBySliceSymbolSet(
   };
 }
 
+export function filterCallResolutionBySliceSymbolSet(
+  callResolution: CallResolution | undefined,
+  sliceSymbolSet: Set<SymbolId>,
+): CallResolution | undefined {
+  if (!callResolution) {
+    return undefined;
+  }
+
+  const calls = callResolution.calls.filter((call) =>
+    sliceSymbolSet.has(call.symbolId),
+  );
+  if (calls.length === 0) {
+    return undefined;
+  }
+
+  return {
+    minCallConfidence: callResolution.minCallConfidence,
+    calls,
+  };
+}
+
 export function toFullCard(card: SymbolCard): SymbolCard {
   const normalized: SymbolCard = {
     ...card,
@@ -151,6 +173,10 @@ export function toMinimalCard(card: SymbolCard): SymbolCard {
     minimal.cluster = card.cluster;
   }
 
+  if (card.callResolution) {
+    minimal.callResolution = card.callResolution;
+  }
+
   return minimal;
 }
 
@@ -185,6 +211,10 @@ export function toSignatureCard(card: SymbolCard): SymbolCard {
       0,
       SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT,
     );
+  }
+
+  if (card.callResolution) {
+    signature.callResolution = card.callResolution;
   }
 
   return signature;
@@ -231,6 +261,10 @@ export function toDepsCard(card: SymbolCard): SymbolCard {
 
   if (card.summary) {
     deps.summary = card.summary.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT);
+  }
+
+  if (card.callResolution) {
+    deps.callResolution = card.callResolution;
   }
 
   return deps;
@@ -290,6 +324,7 @@ export function selectAdaptiveDetailLevel(
 export function toSliceSymbolCard(
   card: SymbolCard,
   deps?: SliceSymbolDeps,
+  callResolution?: CallResolution,
 ): SliceSymbolCard {
   const detailLevel = card.detailLevel ?? "compact";
   const astFingerprint = card.version.astFingerprint.slice(
@@ -309,6 +344,10 @@ export function toSliceSymbolCard(
       astFingerprint,
     },
   };
+
+  if (callResolution) {
+    sliceCard.callResolution = callResolution;
+  }
 
   if (card.visibility) {
     sliceCard.visibility = card.visibility;
@@ -376,7 +415,13 @@ export function buildPayloadCardsAndRefs(
           sliceDepsBySymbol,
           sliceSymbolSet,
         );
-        return toSliceSymbolCard(normalized, deps);
+        const callResolution = sliceSymbolSet
+          ? filterCallResolutionBySliceSymbolSet(
+              normalized.callResolution,
+              sliceSymbolSet,
+            )
+          : normalized.callResolution;
+        return toSliceSymbolCard(normalized, deps, callResolution);
       }),
     };
   }
@@ -411,7 +456,13 @@ export function buildPayloadCardsAndRefs(
       sliceDepsBySymbol,
       sliceSymbolSet,
     );
-    cardsForPayload.push(toSliceSymbolCard(cardWithoutEtag, deps));
+    const callResolution = sliceSymbolSet
+      ? filterCallResolutionBySliceSymbolSet(
+          cardWithoutEtag.callResolution,
+          sliceSymbolSet,
+        )
+      : cardWithoutEtag.callResolution;
+    cardsForPayload.push(toSliceSymbolCard(cardWithoutEtag, deps, callResolution));
   }
 
   return {

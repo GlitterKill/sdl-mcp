@@ -46,6 +46,7 @@ Instead of opening large files first, SDL-MCP indexes repositories into symbol c
 - Safer context access via policy controls and auditing
 - Faster iteration through incremental indexing and refresh workflows
 - KuzuDB-backed graph persistence means indexing happens once, not every session
+- Confidence-aware call resolution filtering and pass2 provenance in symbol cards and slices
 - Works across TypeScript, JavaScript, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, and Shell
 
 ## Claude Opus 4.6 High Overview
@@ -208,6 +209,7 @@ sdl-mcp serve --stdio --no-watch
 - Symbol cards with signatures, deps, metrics, and versioning
 - Graph slices with handles, leases, refresh, and spillover
 - Graph enrichment: clusters (community detection) + processes (call-chain traces) surfaced in cards/slices/overview/blast radius
+- Generalized pass2 resolver registry with TypeScript/JavaScript semantic pass2 plus Go pass2, and confidence-scored call metadata available through `symbol.getCard` and `slice.build`
 - Delta analysis and blast radius support with amplifier scoring
 - Semantic symbol search reranking (`sdl.symbol.search` with `semantic: true`)
 - LLM-generated symbol summaries with configurable concurrency and batching (`semantic.summaryModel`, `summaryMaxConcurrency`, `summaryBatchSize`)
@@ -226,7 +228,7 @@ sdl-mcp serve --stdio --no-watch
 ## CLI Commands
 
 - `init` - bootstrap config and optional client template
-- `doctor` - validate runtime, config, DB path, grammars, repo access
+- `doctor` - validate runtime, config, DB path, grammars, repo access, and call-resolution capabilities
 - `index` - index repositories (optionally watch)
 - `serve` - run MCP server (`--stdio` or `--http`)
 - `export` - export sync artifact

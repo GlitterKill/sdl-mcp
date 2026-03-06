@@ -169,6 +169,7 @@ export interface BeamSearchRequest {
   stackTrace?: string;
   failingTestPath?: string;
   editedFiles?: string[];
+  minCallConfidence?: number;
   clusterContext?: {
     entryClusterIds: string[];
     relatedClusterIds: string[];
@@ -517,7 +518,9 @@ export async function beamSearchKuzu(
     const cached = outgoingEdgesCache.get(symbolId);
     if (cached) return cached;
 
-    const map = await kuzuDb.getEdgesFromSymbolsForSlice(conn, [symbolId]);
+    const map = await kuzuDb.getEdgesFromSymbolsForSlice(conn, [symbolId], {
+      minCallConfidence: request.minCallConfidence,
+    });
     const edges = map.get(symbolId) ?? [];
 
     edges.sort((a, b) => {

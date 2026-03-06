@@ -424,10 +424,13 @@ Controls the proof-of-need gating system for raw code access via `sdl.code.needW
 | `maxWindowTokens` | `integer` | `1400` | Max tokens per code window (min: 1) |
 | `requireIdentifiers` | `boolean` | `true` | Require `identifiersToFind` in needWindow calls |
 | `allowBreakGlass` | `boolean` | `true` | Allow emergency override of policy denials |
+| `defaultMinCallConfidence` | `number?` | — | Optional server-side default for `symbol.getCard` / `slice.build` call-edge filtering |
 
 Requests exceeding `maxWindowLines` or `maxWindowTokens` are silently clamped (not rejected). Policy can also be changed at runtime via `sdl.policy.set`.
 
-> **When to change:** Increase limits for codebases with large functions. Set `allowBreakGlass: false` in production to enforce strict gating. In CI, tighten to `maxWindowLines: 120, maxWindowTokens: 1000` to control token spend.
+`defaultMinCallConfidence` is optional. Leave it unset to keep call-edge filtering request-driven. When set, it becomes the default threshold for `minCallConfidence` unless the client overrides it per request.
+
+> **When to change:** Increase limits for codebases with large functions. Set `allowBreakGlass: false` in production to enforce strict gating. In CI, tighten to `maxWindowLines: 120, maxWindowTokens: 1000` to control token spend. Set `defaultMinCallConfidence` only if you want low-confidence heuristic calls hidden by default.
 
 ---
 
@@ -786,4 +789,4 @@ The JSON Schema is at `config/sdlmcp.config.schema.json`. Add a `$schema` refere
 }
 ```
 
-Run `sdl-mcp doctor` to validate your config and check environment health.
+Run `sdl-mcp doctor` to validate your config and check environment health. The doctor report now includes registered pass2 resolvers, call-edge metadata schema support, and whether `minCallConfidence` is request-only or driven by a policy default.

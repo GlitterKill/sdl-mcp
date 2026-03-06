@@ -34,6 +34,20 @@ export interface SliceSymbolDeps {
   calls: SliceDepRef[];
 }
 
+export interface CallResolutionRef {
+  symbolId: SymbolId;
+  label: string;
+  confidence: number;
+  resolutionReason?: string;
+  resolverId?: string;
+  resolutionPhase?: string;
+}
+
+export interface CallResolution {
+  minCallConfidence?: number;
+  calls: CallResolutionRef[];
+}
+
 export interface CanonicalTest {
   file: string;        // relative path to the test file
   symbolId?: SymbolId; // specific test function symbolId, if resolvable
@@ -133,6 +147,7 @@ export interface SymbolCard {
 
   cluster?: SymbolClusterInfo;
   processes?: SymbolProcessInfo[];
+  callResolution?: CallResolution;
 
   deps: SymbolDeps;
   metrics?: SymbolMetrics;
@@ -192,6 +207,8 @@ export interface SliceBuildInput {
   adaptiveDetail?: boolean;
   budget?: SliceBudget;
   minConfidence?: number;
+  minCallConfidence?: number;
+  includeResolutionMetadata?: boolean;
 }
 
 export interface ConfidenceDistribution {

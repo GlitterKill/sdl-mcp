@@ -88,6 +88,7 @@ export interface PolicyConfig {
   maxWindowTokens: number;
   requireIdentifiers: boolean;
   allowBreakGlass: boolean;
+  defaultMinCallConfidence?: number;
   defaultDenyRaw: boolean;
   budgetCaps: {
     maxCards: number;
@@ -100,6 +101,7 @@ export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   maxWindowTokens: 1400,
   requireIdentifiers: true,
   allowBreakGlass: true,
+  defaultMinCallConfidence: undefined,
   defaultDenyRaw: true,
   budgetCaps: {
     maxCards: 60,

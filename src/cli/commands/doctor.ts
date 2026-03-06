@@ -3,7 +3,13 @@ import { DoctorOptions } from "../types.js";
 import { NODE_MIN_MAJOR_VERSION } from "../../config/constants.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { resolveGraphDbPath } from "../../db/graph-db-path.js";
+import {
+  CALL_EDGE_METADATA_FIELDS,
+  KUZU_SCHEMA_VERSION,
+  supportsCallResolutionMetadata,
+} from "../../db/kuzu-schema.js";
 import { getAllWatcherHealth } from "../../indexer/indexer.js";
+import { createDefaultPass2ResolverRegistry } from "../../indexer/pass2/registry.js";
 import { closeKuzuDb, getKuzuConn, getKuzuDbPath, initKuzuDb, isKuzuAvailable } from "../../db/kuzu.js";
 import * as kuzuDb from "../../db/kuzu-queries.js";
 import Parser from "tree-sitter";
@@ -23,6 +29,7 @@ const DOCTOR_CHECKS = [
   { name: "Repo paths accessible", check: checkRepoPaths },
   { name: "Stale index detection", check: checkStaleIndex },
   { name: "Watcher health telemetry", check: checkWatcherHealth },
+  { name: "Call resolution capabilities", check: checkCallResolutionCapabilities },
   { name: "Graph database (KuzuDB)", check: checkKuzuDb },
 ];
 
@@ -363,6 +370,44 @@ async function checkWatcherHealth(
       message: `Cannot evaluate watcher health: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
+}
+
+async function checkCallResolutionCapabilities(
+  options: DoctorOptions,
+): Promise<Omit<DoctorResult, "name">> {
+  const resolverIds = createDefaultPass2ResolverRegistry()
+    .listResolvers()
+    .map((resolver) => resolver.id);
+
+  let minCallConfidenceMode = "request-only";
+  const configPath = options.config ?? activateCliConfigPath();
+
+  if (existsSync(configPath)) {
+    try {
+      const { loadConfig } = await import("../../config/loadConfig.js");
+      const config = loadConfig(configPath);
+      const configuredDefault = config.policy.defaultMinCallConfidence;
+      if (configuredDefault !== undefined) {
+        minCallConfidenceMode = `policy default ${configuredDefault}`;
+      }
+    } catch (error) {
+      minCallConfidenceMode = `request-only (config unreadable: ${error instanceof Error ? error.message : String(error)})`;
+    }
+  } else {
+    minCallConfidenceMode = "request-only (config not found)";
+  }
+
+  const metadataAvailable = supportsCallResolutionMetadata(KUZU_SCHEMA_VERSION);
+  const metadataFields = CALL_EDGE_METADATA_FIELDS.join(", ");
+
+  return {
+    status: "pass",
+    message:
+      `pass2 resolvers: ${resolverIds.join(", ")}; ` +
+      `call-edge metadata: ${metadataAvailable ? "enabled" : "disabled"} ` +
+      `(schema v${KUZU_SCHEMA_VERSION}: ${metadataFields}); ` +
+      `minCallConfidence: ${minCallConfidenceMode}`,
+  };
 }
 
 

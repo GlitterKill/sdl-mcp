@@ -109,6 +109,7 @@ export interface SliceBuildRequestBase {
   editedFiles?: string[];
   entrySymbols?: SymbolId[];
   budget?: { maxCards?: number };
+  minCallConfidence?: number;
 }
 
 export function resolveStartNodes(
@@ -320,6 +321,7 @@ export async function resolveStartNodesKuzu(
       repoId,
       symbolId,
       limits.maxFirstHopPerEntry,
+      request.minCallConfidence,
     );
     for (const firstHopSymbolId of firstHopSymbols) {
       if (startNodes.size >= limits.maxTotalStartNodes) break;
@@ -447,8 +449,13 @@ async function collectEntryFirstHopSymbolsKuzu(
   repoId: RepoId,
   entrySymbolId: SymbolId,
   maxPerSymbol: number,
+  minCallConfidence?: number,
 ): Promise<SymbolId[]> {
-  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, [entrySymbolId]);
+  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(
+    conn,
+    [entrySymbolId],
+    { minCallConfidence },
+  );
   const outgoing = edgesMap.get(entrySymbolId) ?? [];
   if (outgoing.length === 0) return [];
 

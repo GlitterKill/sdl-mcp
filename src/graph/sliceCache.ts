@@ -15,6 +15,9 @@ interface SliceBuildRequest {
     maxCards?: number;
     maxEstimatedTokens?: number;
   };
+  minConfidence?: number;
+  minCallConfidence?: number;
+  includeResolutionMetadata?: boolean;
 }
 
 interface SliceCacheEntry {
@@ -93,6 +96,9 @@ export function getSliceCacheKey(request: SliceBuildRequest): string {
       : null,
     cardDetail: request.cardDetail ?? "deps",
     budget: request.budget ?? null,
+    minConfidence: request.minConfidence ?? 0.5,
+    minCallConfidence: request.minCallConfidence ?? null,
+    includeResolutionMetadata: request.includeResolutionMetadata ?? false,
   };
   return `${request.repoId}:${request.versionId}:${stableStringify(context)}`;
 }

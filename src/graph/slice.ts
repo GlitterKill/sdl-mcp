@@ -21,6 +21,7 @@ import type {
   ConfidenceDistribution,
   CardDetailLevel,
   DetailLevelMetadata,
+  CallResolution,
 } from "../mcp/types.js";
 import {
   normalizeCardDetailLevel,
@@ -128,6 +129,8 @@ interface SliceBuildRequest {
   adaptiveDetail?: boolean;
   budget?: SliceBudget;
   minConfidence?: number;
+  minCallConfidence?: number;
+  includeResolutionMetadata?: boolean;
 }
 
 export async function buildSlice(
@@ -167,6 +170,7 @@ export async function buildSlice(
       DEFAULT_MAX_TOKENS_SLICE,
   };
   const minConfidence = request.minConfidence ?? 0.5;
+  const minCallConfidence = request.minCallConfidence;
 
   const conn = request.conn ?? (await getKuzuConn());
 
@@ -231,6 +235,8 @@ export async function buildSlice(
     request.versionId,
     request.repoId,
     effectiveLevel,
+    minCallConfidence,
+    request.includeResolutionMetadata,
   );
   const { cardsForPayload, cardRefs } = buildPayloadCardsAndRefs(
     cards,
@@ -244,6 +250,7 @@ export async function buildSlice(
       Array.from(sliceCards),
       request.repoId,
       minConfidence,
+      minCallConfidence,
     );
   const estimatedTokens = estimateTokens(cardsForPayload);
   const slice: GraphSlice = {
@@ -336,12 +343,51 @@ function buildDetailLevelMetadata(
   };
 }
 
+function buildCallResolution(
+  outgoingEdges: kuzuDb.EdgeForSlice[],
+  calledSymbolsMap: Map<string, { name: string }>,
+  minCallConfidence: number | undefined,
+): CallResolution | undefined {
+  const calls = outgoingEdges
+    .filter((edge) => edge.edgeType === "call")
+    .map((edge) => {
+      const label = pickDepLabel(
+        edge.toSymbolId,
+        calledSymbolsMap.get(edge.toSymbolId)?.name,
+      );
+      if (!label) {
+        return null;
+      }
+
+      return {
+        symbolId: edge.toSymbolId,
+        label,
+        confidence: normalizeEdgeConfidence(edge.confidence),
+        resolutionReason: edge.resolution,
+        resolverId: edge.resolverId,
+        resolutionPhase: edge.resolutionPhase,
+      };
+    })
+    .filter((call): call is NonNullable<typeof call> => call !== null);
+
+  if (calls.length === 0) {
+    return undefined;
+  }
+
+  return {
+    minCallConfidence,
+    calls,
+  };
+}
+
 async function loadSymbolCards(
   conn: Connection,
   symbolIds: SymbolId[],
   versionId: VersionId,
   repoId: RepoId,
   effectiveLevel: CardDetailLevel,
+  minCallConfidence?: number,
+  includeResolutionMetadata?: boolean,
 ): Promise<{
   cards: SymbolCard[];
   sliceDepsBySymbol: Map<SymbolId, SliceSymbolDeps>;
@@ -356,11 +402,12 @@ async function loadSymbolCards(
   const config = loadConfig();
   const cacheConfig = config.cache;
   const cacheEnabled = cacheConfig?.enabled ?? true;
+  const canUseCache = cacheEnabled && !includeResolutionMetadata;
 
   const cards: SymbolCard[] = [];
   const uncachedSymbolIds: SymbolId[] = [];
 
-  if (cacheEnabled) {
+  if (canUseCache) {
     for (const symbolId of symbolIds) {
       const cachedCard = symbolCardCache.get(repoId, symbolId, versionId);
 
@@ -379,7 +426,12 @@ async function loadSymbolCards(
   if (uncachedSymbolIds.length === 0) {
     return {
       cards,
-      sliceDepsBySymbol: await buildSliceDepsBySymbol(conn, symbolIds),
+      sliceDepsBySymbol: await buildSliceDepsBySymbol(
+        conn,
+        symbolIds,
+        undefined,
+        minCallConfidence,
+      ),
     };
   }
 
@@ -396,7 +448,11 @@ async function loadSymbolCards(
 
   const metricsMap = await kuzuDb.getMetricsBySymbolIds(conn, uncachedSymbolIds);
 
-  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, uncachedSymbolIds);
+  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(
+    conn,
+    uncachedSymbolIds,
+    { minCallConfidence },
+  );
 
   const importedSymbolIds = new Set<string>();
   const calledSymbolIds = new Set<string>();
@@ -586,6 +642,9 @@ async function loadSymbolCards(
               depth: row.depth,
             }))
           : undefined,
+      callResolution: includeResolutionMetadata
+        ? buildCallResolution(outgoingEdges, calledSymbolsMap, minCallConfidence)
+        : undefined,
       deps,
       metrics: includeFullDetails ? metricsData : undefined,
       detailLevel: effectiveLevel,
@@ -598,7 +657,7 @@ async function loadSymbolCards(
     const card = toCardAtDetailLevel(baseCard, effectiveLevel);
     cards.push(card);
 
-    if (cacheEnabled) {
+    if (canUseCache) {
       await symbolCardCache.set(
         repoId,
         symbolRow.symbolId,
@@ -610,7 +669,12 @@ async function loadSymbolCards(
 
   return {
     cards,
-    sliceDepsBySymbol: await buildSliceDepsBySymbol(conn, symbolIds, edgesMap),
+    sliceDepsBySymbol: await buildSliceDepsBySymbol(
+      conn,
+      symbolIds,
+      edgesMap,
+      minCallConfidence,
+    ),
   };
 }
 
@@ -626,6 +690,7 @@ async function buildSliceDepsBySymbol(
   conn: Connection,
   symbolIds: SymbolId[],
   prefetchedEdgesMap?: Map<SymbolId, kuzuDb.EdgeForSlice[]>,
+  minCallConfidence?: number,
 ): Promise<Map<SymbolId, SliceSymbolDeps>> {
   const depMap = new Map<SymbolId, SliceSymbolDeps>();
   if (symbolIds.length === 0) {
@@ -646,6 +711,7 @@ async function buildSliceDepsBySymbol(
     const missingEdgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(
       conn,
       missingSymbolIds,
+      { minCallConfidence },
     );
     for (const [symbolId, edges] of missingEdgesMap) {
       edgesMap.set(symbolId, edges);
@@ -684,6 +750,7 @@ async function loadEdgesBetweenSymbols(
   symbolIds: SymbolId[],
   _repoId: RepoId,
   minConfidence: number,
+  minCallConfidence?: number,
 ): Promise<{
   symbolIndex: SymbolId[];
   edges: [number, number, EdgeType, number][];
@@ -711,7 +778,9 @@ async function loadEdgesBetweenSymbols(
     unknown: 0,
   };
 
-  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, symbolIds);
+  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, symbolIds, {
+    minCallConfidence,
+  });
 
   for (const [_fromId, outgoing] of edgesMap) {
     for (const edge of outgoing) {
