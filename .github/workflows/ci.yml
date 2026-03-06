@@ -95,17 +95,19 @@ jobs:
         shell: bash
         run: |
           npm run build:runtime
-          echo "=== Initializing test KuzuDB ==="
           TEST_GRAPH_DIR=$(mktemp -d)
           export SDL_GRAPH_DB_PATH="$TEST_GRAPH_DIR/sdl-mcp-graph"
           export SDL_DB_PATH="$SDL_GRAPH_DB_PATH"
           node --input-type=module -e "import { initKuzuDb } from './dist/db/kuzu.js'; await initKuzuDb(process.env.SDL_GRAPH_DB_PATH);"
-          echo "=== KuzuDB initialized at $SDL_GRAPH_DB_PATH ==="
-          echo "=== Running test suite ==="
-          node --import tsx --test-concurrency=1 --test tests/runner.test.ts 2>&1 || {
-            echo "=== Tests failed with exit code $? ==="
+          node --import tsx --test-concurrency=1 --test tests/runner.test.ts 2>&1 | tee /tmp/test-output.txt
+          TEST_EXIT=${PIPESTATUS[0]}
+          if [ $TEST_EXIT -ne 0 ]; then
+            echo "## Test Failures" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "not ok|failureType|error:|ERR_|# fail|# tests|# pass" /tmp/test-output.txt | head -100 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
             exit 1
-          }
+          fi
 
       - name: Run test harness
         run: npm run test:harness
