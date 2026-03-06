@@ -16,10 +16,10 @@
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import fg from "fast-glob";
-import { getDb } from "../src/db/db.js";
-import { runMigrations } from "../src/db/migrations.js";
+import { initKuzuDb, getKuzuConn } from "../src/db/kuzu.js";
+import type { Connection } from "kuzu";
 import { loadConfig } from "../src/config/loadConfig.js";
-import * as db from "../src/db/queries.js";
+import * as db from "../src/db/kuzu-queries.js";
 import { indexRepo } from "../src/indexer/indexer.js";
 import { buildSlice } from "../src/graph/slice.js";
 import { generateSymbolSkeleton } from "../src/code/skeleton.js";
@@ -27,7 +27,7 @@ import { handleSymbolGetCard } from "../src/mcp/tools/symbol.js";
 import { estimateTokens, tokenize } from "../src/util/tokenize.js";
 import { hashCard } from "../src/util/hashing.js";
 import { normalizePath, getRelativePath } from "../src/util/paths.js";
-import type { SymbolRow } from "../src/db/schema.js";
+import type { SymbolRow } from "../src/db/kuzu-queries.js";
 import type { CardWithETag, GraphSlice, SymbolCard } from "../src/mcp/types.js";
 
 // ============================================================================
@@ -720,13 +720,13 @@ function buildCorpus(
   return result;
 }
 
-function buildFileSymbolNameMap(repoId: string): Map<string, Set<string>> {
+async function buildFileSymbolNameMap(conn: Connection, repoId: string): Promise<Map<string, Set<string>>> {
   const map = new Map<string, Set<string>>();
-  const files = db.getFilesByRepoLite(repoId);
+  const files = await db.getFilesByRepoLite(conn, repoId);
 
   for (const file of files) {
-    const relPath = normalizePath(file.rel_path);
-    const symbols = db.getSymbolsByFileLite(file.file_id);
+    const relPath = normalizePath(file.relPath);
+    const symbols = await db.getSymbolsByFile(conn, file.fileId);
     map.set(
       relPath,
       new Set(
@@ -740,33 +740,33 @@ function buildFileSymbolNameMap(repoId: string): Map<string, Set<string>> {
   return map;
 }
 
-function buildFileRepresentativeSymbolMap(repoId: string): Map<string, string> {
+async function buildFileRepresentativeSymbolMap(conn: Connection, repoId: string): Promise<Map<string, string>> {
   const map = new Map<string, string>();
-  const files = db.getFilesByRepoLite(repoId);
+  const files = await db.getFilesByRepoLite(conn, repoId);
 
   for (const file of files) {
-    const relPath = normalizePath(file.rel_path);
-    const symbols = db.getSymbolsByFileLite(file.file_id);
+    const relPath = normalizePath(file.relPath);
+    const symbols = await db.getSymbolsByFile(conn, file.fileId);
     if (symbols.length === 0) continue;
     const representative =
-      symbols.find((symbol) => symbol.exported === 1) ?? symbols[0];
-    if (!representative?.symbol_id) continue;
-    map.set(relPath, representative.symbol_id);
+      symbols.find((symbol) => symbol.exported === true) ?? symbols[0];
+    if (!representative?.symbolId) continue;
+    map.set(relPath, representative.symbolId);
   }
 
   return map;
 }
 
-function findSymbolsByName(
+async function findSymbolsByName(conn: Connection, 
   repoId: string,
   names: string[],
   limit: number,
-): SymbolRow[] {
+): Promise<SymbolRow[]> {
   const results: SymbolRow[] = [];
 
   for (const name of names) {
     if (!name) continue;
-    const matches = db.searchSymbols(repoId, name, limit);
+    const matches = await db.searchSymbols(conn, repoId, name, limit);
     if (matches.length === 0) continue;
     const exact = matches.find((m) => m.name === name);
     results.push(exact ?? matches[0]);
@@ -775,14 +775,14 @@ function findSymbolsByName(
   return results;
 }
 
-function scoreSymbolCandidate(
+async function scoreSymbolCandidate(conn: Connection, 
   symbol: SymbolRow,
   terms: string[],
   changedFiles: Set<string>,
-): number {
+): Promise<number> {
   const name = symbol.name.toLowerCase();
-  const file = db.getFile(symbol.file_id);
-  const relPath = file ? normalizePath(file.rel_path) : "";
+  const file = (await db.getFilesByIds(conn, [symbol.fileId]))[0];
+  const relPath = file ? normalizePath(file.relPath) : "";
 
   let score = 0;
 
@@ -804,7 +804,7 @@ function scoreSymbolCandidate(
   if (symbol.kind === "function" || symbol.kind === "method") {
     score += 2;
   }
-  if (symbol.exported === 1) {
+  if (symbol.exported === true) {
     score += 1;
   }
   if (relPath && changedFiles.has(relPath)) {
@@ -814,21 +814,21 @@ function scoreSymbolCandidate(
   return score;
 }
 
-function searchSymbolsByTerms(
+async function searchSymbolsByTerms(conn: Connection, 
   repoId: string,
   terms: string[],
   maxResultsPerTerm: number,
   changedFiles: Set<string>,
-): SymbolRow[] {
+): Promise<SymbolRow[]> {
   const scored = new Map<string, { symbol: SymbolRow; score: number }>();
 
   for (const term of terms) {
-    const matches = db.searchSymbols(repoId, term, maxResultsPerTerm);
+    const matches = await db.searchSymbols(conn, repoId, term, maxResultsPerTerm);
     for (const match of matches) {
-      const extra = scoreSymbolCandidate(match, [term], changedFiles);
-      const existing = scored.get(match.symbol_id);
+      const extra = await scoreSymbolCandidate(conn, match, [term], changedFiles);
+      const existing = scored.get(match.symbolId);
       if (!existing) {
-        scored.set(match.symbol_id, { symbol: match, score: extra });
+        scored.set(match.symbolId, { symbol: match, score: extra });
       } else {
         existing.score += extra;
       }
@@ -843,9 +843,9 @@ function searchSymbolsByTerms(
     .map((entry) => entry.symbol);
 }
 
-function collectDependencyNames(
+async function collectDependencyNames(conn: Connection, 
   deps: Array<string | { symbolId: string; confidence?: number }>,
-): Set<string> {
+): Promise<Set<string>> {
   const names = new Set<string>();
 
   for (const dep of deps) {
@@ -859,24 +859,24 @@ function collectDependencyNames(
       continue;
     }
 
-    const depSymbol = db.getSymbol(symbolId);
+    const depSymbol = await db.getSymbol(conn, symbolId);
     if (depSymbol?.name) names.add(depSymbol.name.toLowerCase());
   }
 
   return names;
 }
 
-function applyCardContext(state: SdlState, card: SymbolCard): void {
+async function applyCardContext(conn: Connection, state: SdlState, card: SymbolCard): Promise<void> {
   state.cardsBySymbolId.set(card.symbolId, card);
   state.symbolNames.add(card.name.toLowerCase());
   if (card.file) state.files.add(normalizePath(card.file));
 
   if (card.deps?.imports?.length) {
-    const names = collectDependencyNames(card.deps.imports);
+    const names = await collectDependencyNames(conn, card.deps.imports);
     for (const name of names) state.symbolNames.add(name);
   }
   if (card.deps?.calls?.length) {
-    const names = collectDependencyNames(card.deps.calls);
+    const names = await collectDependencyNames(conn, card.deps.calls);
     for (const name of names) state.symbolNames.add(name);
   }
 }
@@ -1247,7 +1247,7 @@ function addSdlRawFileContext(
   return true;
 }
 
-async function runCompletionPass(
+async function runCompletionPass(conn: Connection, 
   repoId: string,
   task: WorkflowTask,
   defaults: BenchmarkDefaults,
@@ -1283,13 +1283,13 @@ async function runCompletionPass(
   );
 
   for (const symbolName of missingBaselineSymbols) {
-    const matches = db.searchSymbols(repoId, symbolName, 8);
+    const matches = await db.searchSymbols(conn, repoId, symbolName, 8);
     if (matches.length === 0) continue;
     const exact = matches.find((match) => normalizeSymbolName(match.name) === symbolName);
     const chosen = exact ?? matches[0];
-    const file = db.getFile(chosen.file_id);
+    const file = (await db.getFilesByIds(conn, [chosen.fileId]))[0];
     if (!file) continue;
-    const relPath = normalizePath(file.rel_path);
+    const relPath = normalizePath(file.relPath);
 
     if (!addBaselineFileContext(relPath, corpusByRelPath, defaults.baseline.maxTokensPerFile, baselineState)) {
       continue;
@@ -1309,16 +1309,16 @@ async function runCompletionPass(
   const completionEntries: string[] = [];
 
   for (const symbolName of missingSdlSymbols) {
-    const matches = db.searchSymbols(repoId, symbolName, 8);
+    const matches = await db.searchSymbols(conn, repoId, symbolName, 8);
     if (matches.length === 0) continue;
     const exact = matches.find((match) => normalizeSymbolName(match.name) === symbolName);
     const chosen = exact ?? matches[0];
-    completionEntries.push(chosen.symbol_id);
+    completionEntries.push(chosen.symbolId);
 
     const response = await handleSymbolGetCard({
       repoId,
-      symbolId: chosen.symbol_id,
-      ifNoneMatch: sdlState.cardEtags.get(chosen.symbol_id),
+      symbolId: chosen.symbolId,
+      ifNoneMatch: sdlState.cardEtags.get(chosen.symbolId),
     });
     const responseTokens = estimateTokens(JSON.stringify(response));
     sdlAddedTokens += responseTokens;
@@ -1326,7 +1326,7 @@ async function runCompletionPass(
     sdlState.cardTokens += responseTokens;
 
     if ("notModified" in response && response.notModified) {
-      sdlState.cardEtags.set(chosen.symbol_id, response.etag);
+      sdlState.cardEtags.set(chosen.symbolId, response.etag);
       continue;
     }
     if (!("card" in response) || !response.card) {
@@ -1334,13 +1334,13 @@ async function runCompletionPass(
     }
 
     const card = response.card as CardWithETag;
-    if (!sdlState.fetchedCardSymbols.has(chosen.symbol_id)) {
-      sdlState.fetchedCardSymbols.add(chosen.symbol_id);
+    if (!sdlState.fetchedCardSymbols.has(chosen.symbolId)) {
+      sdlState.fetchedCardSymbols.add(chosen.symbolId);
       sdlState.cardsFetched += 1;
       sdlAddedCards += 1;
     }
-    sdlState.cardEtags.set(chosen.symbol_id, card.etag);
-    applyCardContext(sdlState, card);
+    sdlState.cardEtags.set(chosen.symbolId, card.etag);
+    applyCardContext(conn, sdlState, card);
   }
 
   const sdlSymbolHitsAfterCards = collectSdlSymbolHits(relevantSymbols, sdlState);
@@ -1356,8 +1356,8 @@ async function runCompletionPass(
     (remainingSdlSymbolsAfterCards.length > 0 ||
       missingSdlFilesAfterCards.length > 0)
   ) {
-    const latestVersion = db.getLatestVersion(repoId);
-    const versionId = latestVersion?.version_id ?? "current";
+    const latestVersion = await db.getLatestVersion(conn, repoId);
+    const versionId = latestVersion?.versionId ?? "current";
     const knownCardEtags = Object.fromEntries(sdlState.cardEtags.entries());
     const completionGapSize =
       remainingSdlSymbolsAfterCards.length + missingSdlFilesAfterCards.length;
@@ -1464,7 +1464,7 @@ async function runCompletionPass(
       sdlAddedCards += 1;
     }
     sdlState.cardEtags.set(representativeSymbolId, card.etag);
-    applyCardContext(sdlState, card);
+    applyCardContext(conn, sdlState, card);
   }
 
   // Final safety net: in real workflows agents may open raw files when needed.
@@ -1511,7 +1511,7 @@ async function runCompletionPass(
   };
 }
 
-async function runSdlStep(
+async function runSdlStep(conn: Connection, 
   repoId: string,
   task: WorkflowTask,
   step: WorkflowStep,
@@ -1532,62 +1532,63 @@ async function runSdlStep(
   const shouldRunSearch =
     state.fetchedCardSymbols.size === 0 || hasExplicitHints;
 
-  const searchMatches = shouldRunSearch
-    ? searchSymbolsByTerms(
-        repoId,
+  const searchMatches = shouldRunSearch ? await searchSymbolsByTerms(conn, repoId,
         terms,
         defaults.sdl.maxSearchResultsPerTerm,
-        changedFiles,
-      )
-    : [];
+        changedFiles,) : [];
 
-  const hintMatches = findSymbolsByName(
+  const hintMatches = await findSymbolsByName(conn, 
     repoId,
     step.entrySymbolHints ?? [],
     4,
   );
-  const hintSymbolIds = new Set(hintMatches.map((symbol) => symbol.symbol_id));
+  const hintSymbolIds = new Set(hintMatches.map((symbol) => symbol.symbolId));
 
   const deduped = new Map<string, SymbolRow>();
-  for (const symbol of hintMatches) deduped.set(symbol.symbol_id, symbol);
+  for (const symbol of hintMatches) deduped.set(symbol.symbolId, symbol);
   for (const symbol of searchMatches) {
-    if (!deduped.has(symbol.symbol_id)) deduped.set(symbol.symbol_id, symbol);
+    if (!deduped.has(symbol.symbolId)) deduped.set(symbol.symbolId, symbol);
   }
 
-  const ranked = Array.from(deduped.values()).sort((a, b) => {
-    const aIsHint = hintSymbolIds.has(a.symbol_id);
-    const bIsHint = hintSymbolIds.has(b.symbol_id);
+  const scoredEntries = await Promise.all(
+    Array.from(deduped.values()).map(async (sym) => {
+      const score = await scoreSymbolCandidate(conn, sym, terms, changedFiles);
+      return { sym, score };
+    })
+  );
+
+  const ranked = scoredEntries.sort((a, b) => {
+    const aIsHint = hintSymbolIds.has(a.sym.symbolId);
+    const bIsHint = hintSymbolIds.has(b.sym.symbolId);
     if (aIsHint !== bIsHint) return aIsHint ? -1 : 1;
 
-    const aScore = scoreSymbolCandidate(a, terms, changedFiles);
-    const bScore = scoreSymbolCandidate(b, terms, changedFiles);
-    if (bScore !== aScore) return bScore - aScore;
-    return a.name.localeCompare(b.name);
-  });
+    if (b.score !== a.score) return b.score - a.score;
+    return a.sym.name.localeCompare(b.sym.name);
+  }).map(e => e.sym);
 
   const searchPayloadLimit =
     state.slicesBuilt === 0
       ? INITIAL_STEP_SEARCH_PREVIEW_LIMIT
       : SEARCH_PAYLOAD_PREVIEW_LIMIT;
-  const searchPayload = ranked.slice(0, searchPayloadLimit).map((symbol) => {
-    const file = db.getFile(symbol.file_id);
+  const searchPayload = await Promise.all(ranked.slice(0, searchPayloadLimit).map(async (symbol) => {
+    const file = (await db.getFilesByIds(conn, [symbol.fileId]))[0];
     return {
-      symbolId: symbol.symbol_id,
+      symbolId: symbol.symbolId,
       name: symbol.name,
       kind: symbol.kind,
-      file: file ? normalizePath(file.rel_path) : "",
+      file: file ? normalizePath(file.relPath) : "",
     };
-  });
+  }));
 
   const searchTokens = estimateTokens(JSON.stringify(searchPayload));
   state.tokens += searchTokens;
   state.searchTokens += searchTokens;
 
   const entrySymbols = ranked.slice(0, defaults.sdl.maxEntrySymbols);
-  const entrySymbolIds = entrySymbols.map((symbol) => symbol.symbol_id);
+  const entrySymbolIds = entrySymbols.map((symbol) => symbol.symbolId);
   const hintEntrySymbolIds = hintMatches
     .slice(0, defaults.sdl.maxEntrySymbols)
-    .map((symbol) => symbol.symbol_id);
+    .map((symbol) => symbol.symbolId);
   const newHintEntrySymbolIds = hintEntrySymbolIds.filter(
     (symbolId) => !state.entrySymbols.has(symbolId),
   );
@@ -1607,36 +1608,36 @@ async function runSdlStep(
       : defaults.sdl.maxCardsPerStep;
   const cardCandidateMap = new Map<string, SymbolRow>();
   for (const symbol of hintMatches) {
-    cardCandidateMap.set(symbol.symbol_id, symbol);
+    cardCandidateMap.set(symbol.symbolId, symbol);
     if (cardCandidateMap.size >= maxCardsForStep) break;
   }
   for (const symbol of entrySymbols) {
-    if (!cardCandidateMap.has(symbol.symbol_id)) {
-      cardCandidateMap.set(symbol.symbol_id, symbol);
+    if (!cardCandidateMap.has(symbol.symbolId)) {
+      cardCandidateMap.set(symbol.symbolId, symbol);
       if (cardCandidateMap.size >= maxCardsForStep) break;
     }
   }
   if (cardCandidateMap.size < maxCardsForStep && state.fetchedCardSymbols.size === 0) {
     for (const symbol of ranked) {
-      if (!cardCandidateMap.has(symbol.symbol_id)) {
-        cardCandidateMap.set(symbol.symbol_id, symbol);
+      if (!cardCandidateMap.has(symbol.symbolId)) {
+        cardCandidateMap.set(symbol.symbolId, symbol);
         if (cardCandidateMap.size >= maxCardsForStep) break;
       }
     }
   }
 
   for (const symbol of cardCandidateMap.values()) {
-    if (state.fetchedCardSymbols.has(symbol.symbol_id)) continue;
+    if (state.fetchedCardSymbols.has(symbol.symbolId)) continue;
     const response = await handleSymbolGetCard({
       repoId,
-      symbolId: symbol.symbol_id,
-      ifNoneMatch: state.cardEtags.get(symbol.symbol_id),
+      symbolId: symbol.symbolId,
+      ifNoneMatch: state.cardEtags.get(symbol.symbolId),
     });
 
     cardTokens += estimateTokens(JSON.stringify(response));
 
     if ("notModified" in response && response.notModified) {
-      state.cardEtags.set(symbol.symbol_id, response.etag);
+      state.cardEtags.set(symbol.symbolId, response.etag);
       continue;
     }
     if (!("card" in response) || !response.card) {
@@ -1644,10 +1645,10 @@ async function runSdlStep(
     }
 
     const card = response.card as CardWithETag;
-    state.fetchedCardSymbols.add(symbol.symbol_id);
-    state.cardEtags.set(symbol.symbol_id, card.etag);
+    state.fetchedCardSymbols.add(symbol.symbolId);
+    state.cardEtags.set(symbol.symbolId, card.etag);
     cardsFetched++;
-    applyCardContext(state, card);
+    await applyCardContext(conn, state, card);
   }
 
   state.tokens += cardTokens;
@@ -1671,8 +1672,8 @@ async function runSdlStep(
       hasMeaningfulNewHints);
 
   if (shouldBuildSlice) {
-    const latestVersion = db.getLatestVersion(repoId);
-    const versionId = latestVersion?.version_id ?? "current";
+    const latestVersion = await db.getLatestVersion(conn, repoId);
+    const versionId = latestVersion?.versionId ?? "current";
     const isFollowUpSlice = state.slicesBuilt > 0;
     const sliceBudget = isFollowUpSlice
       ? {
@@ -1753,9 +1754,9 @@ async function runSdlStep(
       for (const card of slice.cards) {
         if (skeletonTargets.length >= defaults.sdl.maxSkeletonsPerStep) break;
         if (card.kind !== "function" && card.kind !== "method") continue;
-        const symbol = db.getSymbol(card.symbolId);
+        const symbol = await db.getSymbol(conn, card.symbolId);
         if (!symbol) continue;
-        if (skeletonTargets.some((existing) => existing.symbol_id === symbol.symbol_id)) {
+        if (skeletonTargets.some((existing) => existing.symbolId === symbol.symbolId)) {
           continue;
         }
         skeletonTargets.push(symbol);
@@ -1767,24 +1768,24 @@ async function runSdlStep(
   let skeletonTokens = 0;
 
   for (const symbol of skeletonTargets) {
-    if (state.generatedSkeletonSymbols.has(symbol.symbol_id)) continue;
+    if (state.generatedSkeletonSymbols.has(symbol.symbolId)) continue;
 
-    const skeleton = generateSymbolSkeleton(repoId, symbol.symbol_id, {
+    const skeleton = await generateSymbolSkeleton(repoId, symbol.symbolId, {
       maxLines: defaults.sdl.skeletonMaxLines,
       maxTokens: defaults.sdl.skeletonMaxTokens,
     });
 
     if (!skeleton) continue;
 
-    state.generatedSkeletonSymbols.add(symbol.symbol_id);
+    state.generatedSkeletonSymbols.add(symbol.symbolId);
     skeletons++;
     skeletonTokens += skeleton.estimatedTokens;
 
     if (skeleton.skeleton) state.textFragments.push(skeleton.skeleton);
     state.symbolNames.add(symbol.name.toLowerCase());
 
-    const file = db.getFile(symbol.file_id);
-    if (file) state.files.add(normalizePath(file.rel_path));
+    const file = (await db.getFilesByIds(conn, [symbol.fileId]))[0];
+    if (file) state.files.add(normalizePath(file.relPath));
   }
 
   state.tokens += skeletonTokens;
@@ -2074,9 +2075,9 @@ async function runBenchmark(): Promise<void> {
   const normalized = normalizeTaskFile(parsed);
 
   const config = loadConfig(configPath);
-  const database = getDb(config.dbPath);
-  runMigrations(database);
-
+  await initKuzuDb(config.dbPath);
+  const conn = await getKuzuConn();
+  
   const repoConfig = repoOverride
     ? config.repos.find((repo) => repo.repoId === repoOverride)
     : config.repos[0];
@@ -2085,10 +2086,10 @@ async function runBenchmark(): Promise<void> {
     throw new Error("No repository configured for benchmark.");
   }
 
-  const persistedRepo = db.getRepo(repoConfig.repoId);
+  const persistedRepo = await db.getRepo(conn, repoConfig.repoId);
   if (!persistedRepo) {
-    db.createRepo({
-      repo_id: repoConfig.repoId,
+    await db.upsertRepo(conn, {
+      repoId: repoConfig.repoId,
       root_path: repoConfig.rootPath,
       config_json: JSON.stringify(repoConfig),
       created_at: new Date().toISOString(),
@@ -2108,8 +2109,8 @@ async function runBenchmark(): Promise<void> {
   const corpus = buildCorpus(repoConfig.rootPath, candidateFiles);
   const corpusByRelPath = new Map(corpus.map((file) => [file.relPath, file]));
   const corpusPaths = new Set(corpus.map((file) => file.relPath));
-  const fileSymbolMap = buildFileSymbolNameMap(repoConfig.repoId);
-  const fileRepresentativeSymbolMap = buildFileRepresentativeSymbolMap(
+  const fileSymbolMap = await buildFileSymbolNameMap(conn, repoConfig.repoId);
+  const fileRepresentativeSymbolMap = await buildFileRepresentativeSymbolMap(conn, 
     repoConfig.repoId,
   );
 
@@ -2192,7 +2193,7 @@ async function runBenchmark(): Promise<void> {
         baselineState,
       );
 
-      const sdlStep = await runSdlStep(
+      const sdlStep = await runSdlStep(conn, 
         repoConfig.repoId,
         task,
         step,
@@ -2269,7 +2270,7 @@ async function runBenchmark(): Promise<void> {
       corpusPaths,
     });
 
-    const completion = await runCompletionPass(
+    const completion = await runCompletionPass(conn, 
       repoConfig.repoId,
       task,
       normalized.defaults,

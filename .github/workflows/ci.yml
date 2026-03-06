@@ -303,12 +303,10 @@ jobs:
 
       - name: Run benchmark matrix smoke
         if: matrix.os == 'ubuntu-latest'
-        continue-on-error: true
         run: npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-smoke --limit-runs 2 --skip-index
 
       - name: Validate benchmark matrix smoke claims
         if: matrix.os == 'ubuntu-latest'
-        continue-on-error: true
         run: npx tsx scripts/check-benchmark-claims.ts --in .benchmark/matrix-smoke/aggregate.json --min-family-p50 30 --min-family-p25 20 --min-task-floor 5
 
   native-build:
