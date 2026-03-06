@@ -76,8 +76,8 @@
     }
   },
   "smoothing": {
-    "warmupRuns": 2,
-    "sampleRuns": 3,
+    "warmupRuns": 1,
+    "sampleRuns": 2,
     "outlierMethod": "iqr",
     "iqrMultiplier": 1.5
   },

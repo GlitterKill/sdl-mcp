@@ -12,15 +12,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  ci:
-    name: CI (${{ matrix.os }}, Node ${{ matrix.node-version }})
+  tests:
+    name: Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node-version: [18.x, 20.x]
 
     steps:
       - name: Checkout code
@@ -28,10 +27,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 20.x
           cache: "npm"
 
       - name: Cache node_modules
@@ -39,9 +38,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: ${{ runner.os }}-node-${{ matrix.node-version }}-modules-${{ hashFiles('package-lock.json') }}
+          key: ${{ runner.os }}-node-20.x-modules-${{ hashFiles('package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-node-${{ matrix.node-version }}-modules-
+            ${{ runner.os }}-node-20.x-modules-
 
       - name: Cache dist build artifacts
         id: cache-dist
@@ -104,7 +103,7 @@ jobs:
           cat "$TEST_OUT"
           grep -c "^not ok" "$TEST_OUT" && FAILURES=true || FAILURES=false
           if [ "$FAILURES" = "true" ] || ! grep -q "# fail 0" "$TEST_OUT"; then
-            echo "## Test Failures (${{ matrix.os }}, Node ${{ matrix.node-version }})" >> $GITHUB_STEP_SUMMARY
+            echo "## Test Failures (${{ matrix.os }}, Node 20.x)" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             grep -E "not ok|failureType|error:.*'|# fail|# tests|# pass" "$TEST_OUT" | head -80 >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
@@ -115,83 +114,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-output-${{ matrix.os }}-node${{ matrix.node-version }}
+          name: test-output-${{ matrix.os }}
           path: ${{ runner.temp }}/test-output.txt
           retention-days: 3
 
       - name: Run test harness
         run: npm run test:harness
-
-      - name: Cache locked benchmark repos
-        id: cache-benchmark-repos
-        uses: actions/cache@v4
-        with:
-          path: .tmp/external-benchmarks
-          key: benchmark-repos-${{ hashFiles('scripts/benchmark/phase-a-benchmark-lock.json') }}
-
-      - name: Setup locked benchmark repos
-        if: steps.cache-benchmark-repos.outputs.cache-hit != 'true'
-        run: npm run benchmark:setup-external
-
-      - name: Run Benchmark CI Guardrails (locked OSS repo)
-        shell: bash
-        run: |
-          echo "Running benchmark CI against locked OSS repo (zod-oss)..."
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            THRESHOLD_PATH="config/benchmark.ci.windows.config.json"
-          else
-            THRESHOLD_PATH="config/benchmark.ci.config.json"
-          fi
-          echo "Using threshold config: ${THRESHOLD_PATH}"
-          npm run build
-          node dist/cli/index.js benchmark:ci --repo-id zod-oss --threshold-path "${THRESHOLD_PATH}" --json --out .benchmark/latest-result.json
-          BENCHMARK_EXIT_CODE=$?
-
-          echo "Benchmark exit code: ${BENCHMARK_EXIT_CODE}"
-
-          if [ $BENCHMARK_EXIT_CODE -ne 0 ]; then
-            echo "[FAIL] Benchmark guardrails failed"
-            echo "Review the results in .benchmark/latest-result.json"
-            exit 1
-          fi
-
-          echo "[PASS] Benchmark guardrails passed"
-
-      - name: Auto-update benchmark baseline on main
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: bash
-        run: |
-          echo "Auto-updating benchmark baseline on main..."
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            THRESHOLD_PATH="config/benchmark.ci.windows.config.json"
-          else
-            THRESHOLD_PATH="config/benchmark.ci.config.json"
-          fi
-          node dist/cli/index.js benchmark:ci --repo-id zod-oss --threshold-path "${THRESHOLD_PATH}" --update-baseline --out .benchmark/latest-result.json
-
-      - name: Setup external benchmark repos (matrix smoke)
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
-        run: npm run benchmark:setup-external
-
-      - name: Build benchmark matrix config (matrix smoke)
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
-        shell: bash
-        run: |
-          node -e "
-            const fs = require('fs');
-            const base = JSON.parse(fs.readFileSync('config/sdlmcp.config.json', 'utf8'));
-            const ext = JSON.parse(fs.readFileSync('benchmarks/real-world/external-repos.config.json', 'utf8'));
-            const merged = { ...base, repos: [...(base.repos || []), ...(ext.repos || [])] };
-            fs.writeFileSync('benchmarks/real-world/benchmark.config.json', JSON.stringify(merged, null, 2) + '\\n');
-          "
-
-      - name: Run benchmark matrix smoke
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
-        run: npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-smoke --limit-runs 2 --skip-index
-
-      - name: Validate benchmark matrix smoke claims
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
-        run: npx tsx scripts/check-benchmark-claims.ts --in .benchmark/matrix-smoke/aggregate.json --min-family-p50 30 --min-family-p25 20 --min-task-floor 5
 
       - name: Verify runtime entrypoints
         shell: bash
@@ -248,8 +176,138 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo "CI completed on ${{ matrix.os }} with Node ${{ matrix.node-version }}"
-          echo "This validates cross-platform behavior for all language adapters:"
+          echo "Tests completed on ${{ matrix.os }} with Node 20.x"
+          echo "This validates cross-platform behavior for all language adapters."
+
+  benchmarks:
+    name: Benchmarks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: "npm"
+
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-20.x-modules-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-20.x-modules-
+
+      - name: Cache dist build artifacts
+        id: cache-dist
+        uses: actions/cache@v4
+        with:
+          path: |
+            dist
+          key: ${{ runner.os }}-dist-${{ hashFiles('src/**/*.ts', 'tsconfig*.json') }}
+          restore-keys: |
+            ${{ runner.os }}-dist-
+
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm install --ignore-scripts
+
+      - name: Setup kuzu native binary
+        shell: bash
+        run: |
+          if [ -f node_modules/kuzu/install.js ]; then
+            cd node_modules/kuzu && node install.js
+          fi
+
+      - name: Build all
+        run: npm run build:all
+
+      - name: Cache locked benchmark repos
+        id: cache-benchmark-repos
+        uses: actions/cache@v4
+        with:
+          path: .tmp/external-benchmarks
+          key: benchmark-repos-${{ hashFiles('scripts/benchmark/phase-a-benchmark-lock.json') }}
+
+      - name: Setup locked benchmark repos
+        if: steps.cache-benchmark-repos.outputs.cache-hit != 'true'
+        run: npm run benchmark:setup-external
+
+      - name: Run Benchmark CI Guardrails (locked OSS repo)
+        shell: bash
+        run: |
+          echo "Running benchmark CI against locked OSS repo (zod-oss)..."
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            THRESHOLD_PATH="config/benchmark.ci.windows.config.json"
+          else
+            THRESHOLD_PATH="config/benchmark.ci.config.json"
+          fi
+          echo "Using threshold config: ${THRESHOLD_PATH}"
+          npm run build
+          node dist/cli/index.js benchmark:ci --repo-id zod-oss --threshold-path "${THRESHOLD_PATH}" --json --out .benchmark/latest-result.json
+          BENCHMARK_EXIT_CODE=$?
+
+          echo "Benchmark exit code: ${BENCHMARK_EXIT_CODE}"
+
+          if [ $BENCHMARK_EXIT_CODE -ne 0 ]; then
+            echo "[FAIL] Benchmark guardrails failed"
+            echo "Review the results in .benchmark/latest-result.json"
+            exit 1
+          fi
+
+          echo "[PASS] Benchmark guardrails passed"
+
+      - name: Auto-update benchmark baseline on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            BASELINE_PATH=".benchmark/baseline.windows.json"
+          else
+            BASELINE_PATH=".benchmark/baseline.zod-oss.json"
+          fi
+          if [ -f .benchmark/latest-result.json ]; then
+            mkdir -p "$(dirname "$BASELINE_PATH")"
+            cp .benchmark/latest-result.json "$BASELINE_PATH"
+            echo "Baseline updated: $BASELINE_PATH"
+          else
+            echo "No result file found, skipping baseline update"
+          fi
+
+      - name: Setup external benchmark repos (matrix smoke)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run benchmark:setup-external
+
+      - name: Build benchmark matrix config (matrix smoke)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const base = JSON.parse(fs.readFileSync('config/sdlmcp.config.json', 'utf8'));
+            const ext = JSON.parse(fs.readFileSync('benchmarks/real-world/external-repos.config.json', 'utf8'));
+            const merged = { ...base, repos: [...(base.repos || []), ...(ext.repos || [])] };
+            fs.writeFileSync('benchmarks/real-world/benchmark.config.json', JSON.stringify(merged, null, 2) + '\\n');
+          "
+
+      - name: Run benchmark matrix smoke
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-smoke --limit-runs 2 --skip-index
+
+      - name: Validate benchmark matrix smoke claims
+        if: matrix.os == 'ubuntu-latest'
+        run: npx tsx scripts/check-benchmark-claims.ts --in .benchmark/matrix-smoke/aggregate.json --min-family-p50 30 --min-family-p25 20 --min-task-floor 5
 
   native-build:
     name: Native Rust Build (${{ matrix.target }})
@@ -407,7 +465,7 @@ jobs:
   sync-memory:
     name: Sync Indexed Memory (${{ matrix.os }}, Node ${{ matrix.node-version }})
     runs-on: ${{ matrix.os }}
-    needs: ci
+    needs: tests
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     strategy:
       fail-fast: false
@@ -632,13 +690,13 @@ jobs:
             const fs = require('fs');
             const linux = JSON.parse(fs.readFileSync('${LINUX_ARTIFACT}', 'utf-8'));
             const windows = JSON.parse(fs.readFileSync('${WINDOWS_ARTIFACT}', 'utf-8'));
-            
+
             console.log('Artifact comparison:');
             console.log('  Linux artifact_hash:', linux.artifact_hash);
             console.log('  Windows artifact_hash:', windows.artifact_hash);
             console.log('  Linux files extracted:', linux.compressed_data.length);
             console.log('  Windows files extracted:', windows.compressed_data.length);
-            
+
             if (linux.artifact_hash === windows.artifact_hash) {
               console.log('[OK] Artifacts match across platforms');
             } else {
