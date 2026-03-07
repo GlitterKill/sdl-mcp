@@ -463,7 +463,9 @@ jobs:
           retention-days: 14
 
   sync-memory:
-    name: Sync Indexed Memory (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    # Keep the job name static because skipped matrix jobs can surface the raw
+    # `${{ matrix.* }}` expression in the Actions UI before matrix expansion.
+    name: Sync Indexed Memory
     runs-on: ${{ matrix.os }}
     needs: tests
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
