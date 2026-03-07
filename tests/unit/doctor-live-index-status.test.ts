@@ -7,7 +7,10 @@ import { tmpdir } from "node:os";
 import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
 import * as kuzuDb from "../../src/db/kuzu-queries.js";
 import { handleBufferPush } from "../../src/mcp/tools/buffer.js";
-import { resetDefaultLiveIndexCoordinator } from "../../src/live-index/coordinator.js";
+import {
+  resetDefaultLiveIndexCoordinator,
+  waitForDefaultLiveIndexIdle,
+} from "../../src/live-index/coordinator.js";
 
 describe("doctor command - live index runtime health", () => {
   let tempDir = "";
@@ -52,6 +55,7 @@ describe("doctor command - live index runtime health", () => {
       throw new Error(`Process.exit(${code})`);
     }) as typeof process.exit;
 
+    await waitForDefaultLiveIndexIdle();
     resetDefaultLiveIndexCoordinator();
     await closeKuzuDb();
     await initKuzuDb(kuzuPath);
@@ -73,6 +77,7 @@ describe("doctor command - live index runtime health", () => {
 
   afterEach(async () => {
     process.exit = originalExit;
+    await waitForDefaultLiveIndexIdle();
     resetDefaultLiveIndexCoordinator();
     await closeKuzuDb();
 
@@ -97,6 +102,10 @@ describe("doctor command - live index runtime health", () => {
       dirty: true,
       timestamp: "2026-03-07T12:05:00.000Z",
     });
+
+    // Wait for debounced parse to complete so overlay state is stable
+    // and KuzuDB is not accessed concurrently during doctorCommand
+    await waitForDefaultLiveIndexIdle();
 
     const { doctorCommand } = await import("../../src/cli/commands/doctor.js");
     let output = "";
