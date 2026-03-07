@@ -9,6 +9,7 @@ type PendingJob<T> = {
   resolveCompletion: () => void;
   rejectCompletion: (err: any) => void;
   payload: T;
+  alreadyRun: boolean;
 };
 
 export function createDebouncedJobScheduler<T>(options: SchedulerOptions<T>) {
@@ -18,7 +19,10 @@ export function createDebouncedJobScheduler<T>(options: SchedulerOptions<T>) {
     const existing = jobs.get(key);
     if (existing) {
       clearTimeout(existing.timer);
-      existing.resolveCompletion(); // Unblock old waiters
+      if (!existing.alreadyRun) {
+        existing.alreadyRun = true;
+        existing.resolveCompletion(); // Unblock old waiters
+      }
     }
 
     let resolveCompletion: () => void = () => undefined;
@@ -36,11 +40,20 @@ export function createDebouncedJobScheduler<T>(options: SchedulerOptions<T>) {
         }
         try {
           await options.run(key, current.payload);
-          current.resolveCompletion();
+          if (!current.alreadyRun) {
+            current.alreadyRun = true;
+            current.resolveCompletion();
+          }
         } catch (err) {
-          current.rejectCompletion(err);
+          if (!current.alreadyRun) {
+            current.alreadyRun = true;
+            current.rejectCompletion(err);
+          }
         } finally {
-          jobs.delete(key);
+          // Double check it's still our job before deleting
+          if (jobs.get(key) === current) {
+            jobs.delete(key);
+          }
         }
       })();
     }, options.delayMs);
@@ -51,6 +64,7 @@ export function createDebouncedJobScheduler<T>(options: SchedulerOptions<T>) {
       resolveCompletion,
       rejectCompletion,
       payload,
+      alreadyRun: false,
     });
 
     return completion;
@@ -63,7 +77,10 @@ export function createDebouncedJobScheduler<T>(options: SchedulerOptions<T>) {
     }
     clearTimeout(existing.timer);
     jobs.delete(key);
-    existing.resolveCompletion();
+    if (!existing.alreadyRun) {
+      existing.alreadyRun = true;
+      existing.resolveCompletion();
+    }
   }
 
   function cancelAll(): void {

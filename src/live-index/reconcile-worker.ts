@@ -11,6 +11,7 @@ const MAX_DRAIN_ITERATIONS = 500;
 
 export class ReconcileWorker {
   private draining = false;
+  private pendingDrain: Promise<void> | null = null;
   private idleWaiters: Array<() => void> = [];
 
   private readonly clusterScheduler = createDebouncedJobScheduler({
@@ -30,10 +31,17 @@ export class ReconcileWorker {
 
   enqueue(repoId: string, frontier: DependencyFrontier, enqueuedAt = new Date().toISOString()): void {
     this.queue.enqueue(repoId, frontier, enqueuedAt);
-    void this.drain();
+    if (!this.pendingDrain) {
+      this.pendingDrain = this.drain().finally(() => {
+        this.pendingDrain = null;
+      });
+    }
   }
 
   async waitForIdle(): Promise<void> {
+    while (this.pendingDrain) {
+      await this.pendingDrain;
+    }
     if (this.draining) {
       await new Promise<void>((resolve) => {
         this.idleWaiters.push(resolve);
