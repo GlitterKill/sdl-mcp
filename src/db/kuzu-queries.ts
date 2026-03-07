@@ -183,6 +183,14 @@ export interface FanInOut {
   fanOut: number;
 }
 
+function toBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "bigint") return value !== 0n;
+  if (typeof value === "string") return value === "true" || value === "1";
+  return false;
+}
+
 export interface RepoRow {
   repoId: string;
   rootPath: string;
@@ -574,14 +582,6 @@ export async function getFilesByRepoLite(
   return rows;
 }
 
-function toBoolean(value: unknown): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value !== 0;
-  if (typeof value === "bigint") return value !== 0n;
-  if (typeof value === "string") return value === "true" || value === "1";
-  return false;
-}
-
 export interface SymbolRow {
   symbolId: string;
   repoId: string;
@@ -841,6 +841,48 @@ export async function getSymbolIdsByFile(
   return rows.map((row) => row.symbolId);
 }
 
+export interface SymbolLiteRow {
+  symbolId: string;
+  repoId: string;
+  fileId: string;
+  name: string;
+  kind: string;
+  exported: boolean;
+}
+
+export async function getSymbolsByRepoLite(
+  conn: Connection,
+  repoId: string,
+): Promise<SymbolLiteRow[]> {
+  const rows = await queryAll<{
+    symbolId: string;
+    repoId: string;
+    fileId: string;
+    name: string;
+    kind: string;
+    exported: unknown;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
+     RETURN s.symbolId AS symbolId,
+            r.repoId AS repoId,
+            f.fileId AS fileId,
+            s.name AS name,
+            s.kind AS kind,
+            s.exported AS exported`,
+    { repoId },
+  );
+  return rows.map((row) => ({
+    symbolId: row.symbolId,
+    repoId: row.repoId,
+    fileId: row.fileId,
+    name: row.name,
+    kind: row.kind,
+    exported: toBoolean(row.exported),
+  }));
+}
+
 export async function getSymbolIdsByRepo(
   conn: Connection,
   repoId: string,
@@ -1049,11 +1091,17 @@ export interface SymbolLiteRow {
   kind: string;
 }
 
+export interface SymbolBasicInfo {
+  symbolId: string;
+  name: string;
+  kind: string;
+}
+
 export async function getSymbolsByIdsLite(
   conn: Connection,
   symbolIds: string[],
-): Promise<Map<string, SymbolLiteRow>> {
-  const result = new Map<string, SymbolLiteRow>();
+): Promise<Map<string, SymbolBasicInfo>> {
+  const result = new Map<string, SymbolBasicInfo>();
   if (symbolIds.length === 0) return result;
 
   const rows = await queryAll<{
@@ -2295,6 +2343,30 @@ export async function snapshotSymbolVersion(
       sideEffectsJson: row.sideEffectsJson,
     },
   );
+}
+
+export async function getSymbolVersionsByIds(
+  conn: Connection,
+  versionId: string,
+  symbolIds: string[],
+): Promise<SymbolVersionRow[]> {
+  if (symbolIds.length === 0) return [];
+
+  const rows = await queryAll<SymbolVersionRow>(
+    conn,
+    `MATCH (sv:SymbolVersion {versionId: $versionId})
+     WHERE sv.symbolId IN $symbolIds
+     RETURN sv.id AS id,
+            sv.versionId AS versionId,
+            sv.symbolId AS symbolId,
+            sv.astFingerprint AS astFingerprint,
+            sv.signatureJson AS signatureJson,
+            sv.summary AS summary,
+            sv.invariantsJson AS invariantsJson,
+            sv.sideEffectsJson AS sideEffectsJson`,
+    { versionId, symbolIds },
+  );
+  return rows;
 }
 
 export async function getSymbolVersionsAtVersion(

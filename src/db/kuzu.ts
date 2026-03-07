@@ -23,8 +23,8 @@ let dbInstance: KuzuDatabase | null = null;
 let currentDbPath: string | null = null;
 
 const ONE_GB = 1024 * 1024 * 1024;
-const FOUR_GB = 4 * ONE_GB;
-const DEFAULT_BUFFER_MANAGER_RATIO = 0.25;
+const EIGHT_GB = 8 * ONE_GB;
+const DEFAULT_BUFFER_MANAGER_RATIO = 0.5;
 const DEFAULT_CHECKPOINT_THRESHOLD_BYTES = 128 * 1024 * 1024;
 
 // Connection Pool
@@ -63,7 +63,7 @@ export function resolveKuzuBufferManagerSizeBytes(
   }
 
   const autoSized = Math.floor(totalMemoryBytes * DEFAULT_BUFFER_MANAGER_RATIO);
-  return Math.min(Math.max(autoSized, ONE_GB), FOUR_GB);
+  return Math.min(Math.max(autoSized, ONE_GB), EIGHT_GB);
 }
 
 export async function getKuzuDb(dbPath?: string): Promise<KuzuDatabase> {

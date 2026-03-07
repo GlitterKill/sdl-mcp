@@ -53,7 +53,7 @@ export interface ProcessFileParams {
   createdCallEdges?: Set<string>;
   tsResolver?: TsCallResolver | null;
   config?: RepoConfig;
-  allSymbolsByName?: Map<string, SymbolRow[]>;
+  allSymbolsByName?: Map<string, kuzuDb.SymbolLiteRow[]>;
   onProgress?: (progress: IndexProgress) => void;
   workerPool?: ParserWorkerPool | null;
   skipCallResolution?: boolean;

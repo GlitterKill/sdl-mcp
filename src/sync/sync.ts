@@ -72,7 +72,18 @@ export async function exportArtifact(
     }
   }
 
-  const symbolVersions = await kuzuDb.getSymbolVersionsAtVersion(conn, versionId);
+  // Fetch symbol versions in chunks
+  const symbolVersions: import("../db/kuzu-queries.js").SymbolVersionRow[] = [];
+  const VERSION_CHUNK_SIZE = 200;
+  for (let i = 0; i < symbolIds.length; i += VERSION_CHUNK_SIZE) {
+    const chunkIds = symbolIds.slice(i, i + VERSION_CHUNK_SIZE);
+    const chunkVersions = await kuzuDb.getSymbolVersionsByIds(
+      conn,
+      versionId,
+      chunkIds,
+    );
+    symbolVersions.push(...chunkVersions);
+  }
 
   const metricsMap = new Map();
   const METRICS_CHUNK_SIZE = 200;

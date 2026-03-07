@@ -197,10 +197,10 @@ export async function indexRepo(
       enabled: Boolean(tsResolver),
     });
 
-    const allSymbolsByName = new Map<string, kuzuDb.SymbolRow[]>();
+    const allSymbolsByName = new Map<string, kuzuDb.SymbolLiteRow[]>();
     const globalNameToSymbolIds = new Map<string, string[]>();
     logger.debug("Loading existing symbols", { repoId });
-    const repoSymbols = await kuzuDb.getSymbolsByRepo(conn, repoId);
+    const repoSymbols = await kuzuDb.getSymbolsByRepoLite(conn, repoId);
     logger.debug("Loaded existing symbols", { repoId, count: repoSymbols.length });
     for (const symbol of repoSymbols) {
       const byName = allSymbolsByName.get(symbol.name) ?? [];

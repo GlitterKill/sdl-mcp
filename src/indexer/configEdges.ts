@@ -1,5 +1,8 @@
 import type { RepoConfig } from "../config/types.js";
-import type { SymbolRow as KuzuSymbolRow } from "../db/kuzu-queries.js";
+import type {
+  SymbolRow as KuzuSymbolRow,
+  SymbolLiteRow,
+} from "../db/kuzu-queries.js";
 import { normalizePath } from "../util/paths.js";
 import type Parser from "tree-sitter";
 
@@ -16,7 +19,7 @@ export interface PerTreeConfigEdgeContext {
   config: RepoConfig;
   tree: Parser.Tree;
   fileSymbols: KuzuSymbolRow[];
-  allSymbolsByName: Map<string, KuzuSymbolRow[]>;
+  allSymbolsByName: Map<string, SymbolLiteRow[]>;
 }
 
 export function extractConfigEdgesFromTree(
@@ -125,9 +128,11 @@ function extractHandlerName(node: Parser.SyntaxNode | null | undefined): string 
 function resolveHandlerSymbol(
   handlerName: string,
   fileSymbols: KuzuSymbolRow[],
-  nameToSymbols: Map<string, KuzuSymbolRow[]>,
-): KuzuSymbolRow | null {
-  const localMatches = fileSymbols.filter((symbol) => symbol.name === handlerName);
+  nameToSymbols: Map<string, SymbolLiteRow[]>,
+): { symbolId: string; name: string; exported: boolean } | null {
+  const localMatches = fileSymbols.filter(
+    (symbol) => symbol.name === handlerName,
+  );
   if (localMatches.length === 1) {
     return localMatches[0];
   }

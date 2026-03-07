@@ -49,7 +49,7 @@ export async function processFileFromRustResult(params: {
   createdCallEdges: Set<string>;
   tsResolver: TsCallResolver | null;
   config: RepoConfig;
-  allSymbolsByName: Map<string, SymbolRow[]>;
+  allSymbolsByName: Map<string, kuzuDb.SymbolLiteRow[]>;
   skipCallResolution: boolean;
   globalNameToSymbolIds?: Map<string, string[]>;
   supportsPass2FilePath?: (relPath: string) => boolean;
