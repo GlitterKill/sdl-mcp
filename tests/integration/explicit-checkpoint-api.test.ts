@@ -111,13 +111,24 @@ describe("explicit checkpoint API", () => {
 
     assert.ok(response);
     assert.strictEqual(response?.status, 202);
-    assert.partialDeepStrictEqual(response?.payload, {
-      repoId,
-      requested: true,
-      checkpointedFiles: 1,
-      failedFiles: 0,
-      pendingBuffers: 0,
-    });
+    const payload = response?.payload as Record<string, unknown> | undefined;
+    assert.ok(payload);
+    assert.deepStrictEqual(
+      {
+        repoId: payload.repoId,
+        requested: payload.requested,
+        checkpointedFiles: payload.checkpointedFiles,
+        failedFiles: payload.failedFiles,
+        pendingBuffers: payload.pendingBuffers,
+      },
+      {
+        repoId,
+        requested: true,
+        checkpointedFiles: 1,
+        failedFiles: 0,
+        pendingBuffers: 0,
+      },
+    );
     assert.strictEqual(
       getDefaultOverlayStore().getDraft(repoId, "src/example.ts"),
       null,
