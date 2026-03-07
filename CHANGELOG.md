@@ -5,23 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] - 2026-03-06
 
 ### Added
 
 - Live editor-buffer indexing transport and MCP tools (`sdl.buffer.push`, `sdl.buffer.status`, `sdl.buffer.checkpoint`) with HTTP endpoints for buffer push, live status, and explicit checkpointing
 - In-memory draft overlay, draft-aware symbol/search/slice reads, file-scoped save patching, background reconciliation, idle checkpoint compaction, and live-index runtime health coverage in `doctor`
 - `liveIndex` configuration block with defaults for enablement, debounce, idle checkpointing, draft capacity, and reconciliation tuning
-
-### Changed
-
-- Save events now compact clean overlay state through checkpoint service after durable Kuzu patching instead of leaving saved drafts resident in memory
-- `repo.status` and live buffer status now report checkpoint and reconciliation diagnostics for the live indexing path
-
-## [0.8.0] - 2026-03-05
-
-### Added
-
 - KuzuDB (`kuzu`) embedded graph backend as the sole persisted graph store, with directory-based initialization, idempotent schema bootstrap, and async query coverage across repo/file/symbol/version/slice flows
 - One-time SQLite-to-Kuzu migration support plus Kuzu-aware setup/health surfaces (`graphDatabase.path`, updated `init`/`doctor`, `spike:kuzu`, and refreshed release-test guidance)
 - Symbol graph enrichment via clusters (community detection) and processes (call-chain traces), surfaced in symbol cards, slices, `sdl.context.summary`, `sdl.repo.overview`, and blast-radius analysis
@@ -31,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Save events now compact clean overlay state through checkpoint service after durable Kuzu patching instead of leaving saved drafts resident in memory
+- `repo.status` and live buffer status now report checkpoint and reconciliation diagnostics for the live indexing path
 - Config now uses `graphDatabase.path` for graph DB directory control; `dbPath` is deprecated and only retained for the one-time SQLite-to-Kuzu migration path
 - Graph queries, indexing flows, and MCP tool responses now read from Kuzu-backed storage/types instead of SQLite tables
 - Incremental indexing refreshes pass-2 caller contexts more reliably via incoming call/import edge hints

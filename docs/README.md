@@ -6,6 +6,8 @@
 
 - [Overview](../README.md)
 - [Documentation Hub (this page)](./README.md)
+  - [Iris Gate Ladder](./IRIS_GATE_LADDER.md)
+  - [Architecture](./ARCHITECTURE.md)
   - [Getting Started](./getting-started.md)
   - [CLI Reference](./cli-reference.md)
   - [MCP Tools Reference](./mcp-tools-reference.md)
@@ -21,6 +23,8 @@ Use this page as the entry point for SDL-MCP documentation.
 
 ## Read By Goal
 
+- I want to understand the technical stack and data flow:
+  - [Architecture](./ARCHITECTURE.md)
 - I want to install and run SDL-MCP quickly:
   - [Getting Started](./getting-started.md)
 - I need command syntax and examples:
@@ -29,8 +33,9 @@ Use this page as the entry point for SDL-MCP documentation.
   - [MCP Tools Reference](./mcp-tools-reference.md)
 - I need to tune repository, policy, and slice behavior:
   - [Configuration Reference](./configuration-reference.md)
-- I want agent best practices and context-ladder workflows:
+- I want agent best practices and Iris Gate Ladder workflows:
   - [Agent Workflows](./agent-workflows.md)
+  - [Iris Gate Ladder](./IRIS_GATE_LADDER.md)
 - I need operational debugging guidance:
   - [Troubleshooting](./troubleshooting.md)
 

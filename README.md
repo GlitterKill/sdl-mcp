@@ -72,7 +72,7 @@ Response: "# What is SDL-MCP?
   - **No awareness of what changed.** Every interaction starts from scratch with no incremental understanding.
 
   SDL-MCP addresses all three by maintaining a **persistent, indexed understanding** of your codebase and serving
-  context through a 4-rung escalation ladder.
+  context through the **Iris Gate Ladder**.
 
   ---
 
@@ -88,16 +88,16 @@ Response: "# What is SDL-MCP?
   dependency edges** tracked. A full card dump would cost ~2.3M tokens. The overview costs **825 tokens** — a **2,782x
   compression ratio**.
 
-  ### 2. The Context Ladder (4 Rungs)
+  ### 2. The Iris Gate Ladder (4 Rungs)
 
-  Instead of "here's the whole file," SDL-MCP provides context in escalating detail:
+  Instead of "here's the whole file," SDL-MCP provides context in escalating detail using the **Iris Gate Ladder**. This approach ensures AI agents have the minimum context needed to be effective, preserving your token budget.
 
-  | Rung | What You Get | Token Cost | When Used |
-  |------|-------------|------------|-----------|
-  | **Symbol Cards** | Name, signature, summary, dependencies | ~50 tokens | Always start here |
-  | **Skeleton IR** | Signatures + control flow, bodies elided | ~200 tokens | Understanding structure |
-  | **Hot-Path Excerpt** | Only lines matching specific identifiers | ~500 tokens | Finding specific logic |
-  | **Full Code Window** | Complete source (gated, requires justification) | ~2,000 tokens | Last resort |
+  | Rung | Tool | Est. Tokens | When Used |
+  |------|------|------------|-----------|
+  | **1. Symbol Cards** | `sdl.symbol.getCard` | ~50 tokens | Always start here: signatures, summaries, and dependencies. |
+  | **2. Skeleton IR** | `sdl.code.getSkeleton` | ~200 tokens | Understanding logic flow and structure without bodies. |
+  | **3. Hot-Path Excerpt** | `sdl.code.getHotPath` | ~500 tokens | Verifying specific identifier usage in context. |
+  | **4. Raw Code Window** | `sdl.code.needWindow` | ~2,000 tokens | Final escalation: policy-gated access to full source. |
 
   Most questions can be answered at rungs 1-2 without ever reading raw code.
 
@@ -257,6 +257,8 @@ See: [MCP Tools Reference](./docs/mcp-tools-reference.md)
 ## Documentation
 
 - [Documentation Hub](./docs/README.md)
+- [Iris Gate Ladder](./docs/IRIS_GATE_LADDER.md) - Context escalation methodology
+- [Architecture](./docs/ARCHITECTURE.md) - Tech stack and data flow
 - [Getting Started](./docs/getting-started.md)
 - [CLI Reference](./docs/cli-reference.md)
 - [MCP Tools Reference](./docs/mcp-tools-reference.md)

@@ -38,7 +38,7 @@ Copy this block into `AGENTS.md` for token-efficient SDL-MCP usage on the curren
    - `maxWindowTokens: 1400`
    - `requireIdentifiers: true`
 
-### 1) Default token-first ladder
+### 1) The Iris Gate Ladder (Token-Efficient Context Escalation)
 
 Use this order unless task constraints force escalation:
 

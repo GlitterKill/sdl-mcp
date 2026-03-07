@@ -112,7 +112,7 @@
     "chokidar": "^3.5.3",
     "kuzu": "^0.11.3",
     "onnxruntime-node": "^1.22.0",
-    "sdl-mcp-native": "0.7.2"
+    "sdl-mcp-native": "0.8.0"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",
