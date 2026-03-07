@@ -39,6 +39,17 @@ pub struct ProcessTracer {
     config: TracerConfig,
 }
 
+/// Compact index-based representation of the call graph used during DFS tracing.
+///
+/// `id_to_index` and `index_to_id` are inverse maps between symbol IDs and
+/// dense integer indices. `adjacency[caller_idx]` holds the sorted, deduplicated
+/// list of callee indices reachable in one call step.
+struct Graph<'a> {
+    id_to_index: HashMap<&'a str, usize>,
+    index_to_id: Vec<&'a str>,
+    adjacency: Vec<Vec<usize>>,
+}
+
 impl ProcessTracer {
     pub fn new(config: Option<TracerConfig>) -> Self {
         Self {
@@ -46,33 +57,92 @@ impl ProcessTracer {
         }
     }
 
-    pub fn trace(&self, entry_symbol_id: &str, edges: &[CallEdge]) -> TraceResult {
-        let process_id = format!("trace:{}", entry_symbol_id);
-        let mut steps = Vec::new();
-        let mut visited = HashSet::new();
-        let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
-        let mut max_depth_reached: u32 = 0;
+    /// Build the index-based call graph from `edges`, seeding it with `entry_symbols`
+    /// so they are guaranteed to appear in `index_to_id` even if they have no edges.
+    fn build_graph<'a>(&self, entry_symbols: &[&'a str], edges: &'a [CallEdge]) -> Graph<'a> {
+        let mut id_to_index: HashMap<&'a str, usize> = HashMap::new();
+        let mut index_to_id: Vec<&'a str> = Vec::new();
 
-        for edge in edges {
-            adjacency
-                .entry(edge.caller_id.clone())
-                .or_default()
-                .push(edge.callee_id.clone());
+        let get_or_insert = |id: &'a str, id_to_index: &mut HashMap<&'a str, usize>, index_to_id: &mut Vec<&'a str>| -> usize {
+            if let Some(&idx) = id_to_index.get(id) {
+                idx
+            } else {
+                let idx = index_to_id.len();
+                id_to_index.insert(id, idx);
+                index_to_id.push(id);
+                idx
+            }
+        };
+
+        for id in entry_symbols {
+            get_or_insert(id, &mut id_to_index, &mut index_to_id);
         }
 
-        for callees in adjacency.values_mut() {
-            callees.sort();
+        let mut adjacency: Vec<Vec<usize>> = Vec::new();
+
+        for edge in edges {
+            let caller_idx = get_or_insert(&edge.caller_id, &mut id_to_index, &mut index_to_id);
+            let callee_idx = get_or_insert(&edge.callee_id, &mut id_to_index, &mut index_to_id);
+
+            if caller_idx >= adjacency.len() {
+                adjacency.resize(caller_idx + 1, Vec::new());
+            }
+            adjacency[caller_idx].push(callee_idx);
+        }
+
+        for callees in &mut adjacency {
+            callees.sort_unstable();
             callees.dedup();
         }
 
-        self.dfs(
-            entry_symbol_id,
-            0,
-            &mut steps,
-            &mut visited,
-            &adjacency,
-            &mut max_depth_reached,
-        );
+        Graph {
+            id_to_index,
+            index_to_id,
+            adjacency,
+        }
+    }
+
+    pub fn trace(&self, entry_symbol_id: &str, edges: &[CallEdge]) -> TraceResult {
+        let graph = self.build_graph(&[entry_symbol_id], edges);
+        self.trace_with_graph(entry_symbol_id, &graph)
+    }
+
+    pub fn trace_multiple(&self, entry_symbol_ids: &[String], edges: &[CallEdge]) -> Vec<TraceResult> {
+        let entry_refs: Vec<&str> = entry_symbol_ids.iter().map(|s| s.as_str()).collect();
+        let graph = self.build_graph(&entry_refs, edges);
+        entry_refs
+            .iter()
+            .map(|entry_id| self.trace_with_graph(entry_id, &graph))
+            .collect()
+    }
+
+    /// Run DFS from `entry_symbol_id` over the pre-built `graph`, returning an
+    /// ordered `TraceResult`. Steps appear in DFS visit order with 0-based `step_order`.
+    fn trace_with_graph(&self, entry_symbol_id: &str, graph: &Graph) -> TraceResult {
+        let process_id = format!("trace:{}", entry_symbol_id);
+        let mut steps_indices = Vec::new();
+        let mut visited = vec![false; graph.index_to_id.len()];
+        let mut max_depth_reached = 0;
+
+        if let Some(&entry_idx) = graph.id_to_index.get(entry_symbol_id) {
+            self.dfs(
+                entry_idx,
+                0,
+                &mut steps_indices,
+                &mut visited,
+                &graph.adjacency,
+                &mut max_depth_reached,
+            );
+        }
+
+        let steps = steps_indices
+            .into_iter()
+            .enumerate()
+            .map(|(step_order, idx)| TraceStep {
+                symbol_id: graph.index_to_id[idx].to_string(),
+                step_order: step_order as u32,
+            })
+            .collect();
 
         TraceResult {
             process_id,
@@ -82,41 +152,31 @@ impl ProcessTracer {
         }
     }
 
-    pub fn trace_multiple(&self, entry_symbol_ids: &[String], edges: &[CallEdge]) -> Vec<TraceResult> {
-        entry_symbol_ids
-            .iter()
-            .map(|entry_id| self.trace(entry_id, edges))
-            .collect()
-    }
-
     fn dfs(
         &self,
-        current_id: &str,
+        current_idx: usize,
         depth: u32,
-        steps: &mut Vec<TraceStep>,
-        visited: &mut HashSet<String>,
-        adjacency: &HashMap<String, Vec<String>>,
+        steps: &mut Vec<usize>,
+        visited: &mut [bool],
+        adjacency: &[Vec<usize>],
         max_depth_reached: &mut u32,
     ) {
         if depth > self.config.max_depth {
             return;
         }
 
-        if visited.contains(current_id) {
+        if visited[current_idx] {
             return;
         }
 
         *max_depth_reached = (*max_depth_reached).max(depth);
-        visited.insert(current_id.to_string());
-        steps.push(TraceStep {
-            symbol_id: current_id.to_string(),
-            step_order: steps.len() as u32,
-        });
+        visited[current_idx] = true;
+        steps.push(current_idx);
 
-        if let Some(callees) = adjacency.get(current_id) {
-            for callee_id in callees {
+        if current_idx < adjacency.len() {
+            for &callee_idx in &adjacency[current_idx] {
                 self.dfs(
-                    callee_id,
+                    callee_idx,
                     depth + 1,
                     steps,
                     visited,

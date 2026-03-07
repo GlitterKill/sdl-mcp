@@ -265,7 +265,7 @@ fn make_symbol(
     let fingerprint = generate_ast_fingerprint(node, source);
     let symbol_id = generate_symbol_id(repo_id, rel_path, kind, name, &fingerprint);
 
-    let signature = build_signature_json(params, returns, generics);
+    let signature = build_signature(params, returns, generics);
 
     NativeParsedSymbol {
         symbol_id,
@@ -275,11 +275,11 @@ fn make_symbol(
         exported: is_exported(node),
         visibility: visibility.to_string(),
         range: extract_range(node),
-        signature_json: signature,
+        signature,
         summary: String::new(),    // Filled by summary module later
-        invariants_json: "[]".into(),
-        side_effects_json: "[]".into(),
-        role_tags_json: "[]".into(),
+        invariants: vec![],
+        side_effects: vec![],
+        role_tags: vec![],
         search_text: String::new(),
     }
 }
@@ -477,11 +477,11 @@ fn process_variable_declaration(
                         exported: is_exported(parent_node),
                         visibility: String::new(),
                         range: extract_range(child),
-                        signature_json: "{}".to_string(),
+                        signature: None,
                         summary: String::new(),
-                        invariants_json: "[]".to_string(),
-                        side_effects_json: "[]".to_string(),
-                        role_tags_json: "[]".to_string(),
+                        invariants: vec![],
+                        side_effects: vec![],
+                        role_tags: vec![],
                         search_text: String::new(),
                     });
                 }
@@ -592,49 +592,32 @@ fn find_child_by_kind(parent: Node<'_>, kind: &str, source: &[u8]) -> Option<Str
     None
 }
 
-fn build_signature_json(
+/// Convert AST-extracted param/return/generic data into a typed
+/// [`NativeSymbolSignature`], or `None` when the symbol carries no
+/// signature information (e.g. a plain variable declaration).
+///
+/// Returning `None` instead of a zero-field struct keeps the napi
+/// payload small and lets consumers use a simple `if let Some(sig)` guard.
+fn build_signature(
     params: &[ParamInfo],
     returns: Option<&str>,
     generics: &[String],
-) -> String {
-    let mut parts = Vec::new();
+) -> Option<crate::types::NativeSymbolSignature> {
+    if params.is_empty() && returns.is_none() && generics.is_empty() {
+        return None;
+    }
 
-    // params
-    let param_entries: Vec<String> = params
+    let native_params: Vec<crate::types::NativeSymbolSignatureParam> = params
         .iter()
-        .map(|p| {
-            if let Some(ref t) = p.type_annotation {
-                format!(
-                    "{{\"name\":{},\"type\":{}}}",
-                    serde_json::to_string(&p.name).unwrap_or_default(),
-                    serde_json::to_string(t).unwrap_or_default()
-                )
-            } else {
-                format!(
-                    "{{\"name\":{}}}",
-                    serde_json::to_string(&p.name).unwrap_or_default()
-                )
-            }
+        .map(|p| crate::types::NativeSymbolSignatureParam {
+            name: p.name.clone(),
+            type_name: p.type_annotation.clone(),
         })
         .collect();
-    parts.push(format!("\"params\":[{}]", param_entries.join(",")));
 
-    // returns
-    if let Some(ret) = returns {
-        parts.push(format!(
-            "\"returns\":{}",
-            serde_json::to_string(ret).unwrap_or_default()
-        ));
-    }
-
-    // generics
-    if !generics.is_empty() {
-        let gen_entries: Vec<String> = generics
-            .iter()
-            .map(|g| serde_json::to_string(g).unwrap_or_default())
-            .collect();
-        parts.push(format!("\"generics\":[{}]", gen_entries.join(",")));
-    }
-
-    format!("{{{}}}", parts.join(","))
+    Some(crate::types::NativeSymbolSignature {
+        params: if native_params.is_empty() { None } else { Some(native_params) },
+        returns: returns.map(|s| s.to_string()),
+        generics: if generics.is_empty() { None } else { Some(generics.to_vec()) },
+    })
 }

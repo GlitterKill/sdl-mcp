@@ -218,8 +218,11 @@ export function computeStalenessTiers(
   fromRow: kuzuDb.SymbolVersionRow | null,
   toRow: kuzuDb.SymbolVersionRow | null,
 ): StalenessTiers {
-  const interfaceStable = change.signatureDiff === undefined;
-  const sideEffectsStable = change.sideEffectDiff === undefined;
+  // `signatureDiff` and `sideEffectDiff` only exist on the "modified" variant of
+  // the DeltaSymbolChange discriminated union. For "added"/"removed" changes the
+  // interface/side-effects are inherently unstable (one side is missing entirely).
+  const interfaceStable = change.changeType === "modified" ? change.signatureDiff === undefined : false;
+  const sideEffectsStable = change.changeType === "modified" ? change.sideEffectDiff === undefined : false;
 
   let behaviorStable = false;
 

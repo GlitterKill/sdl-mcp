@@ -49,11 +49,15 @@ interface NativeParsedSymbol {
   exported: boolean;
   visibility: string;
   range: NativeRange;
-  signatureJson: string;
+  signature?: {
+    params?: Array<{ name: string; typeName?: string }>;
+    returns?: string;
+    generics?: string[];
+  };
   summary: string;
-  invariantsJson: string;
-  sideEffectsJson: string;
-  roleTagsJson: string;
+  invariants: string[];
+  sideEffects: string[];
+  roleTags: string[];
   searchText: string;
 }
 
@@ -411,8 +415,6 @@ function mapNativeResult(native: NativeParsedFile): RustParseResult {
 }
 
 function mapNativeSymbol(sym: NativeParsedSymbol): RustExtractedSymbol {
-  const signature = safeJsonParse(sym.signatureJson);
-
   return {
     nodeId: sym.name,
     symbolId: sym.symbolId,
@@ -429,17 +431,22 @@ function mapNativeSymbol(sym: NativeParsedSymbol): RustExtractedSymbol {
       endLine: sym.range.endLine,
       endCol: sym.range.endCol,
     },
-    signature: signature?.params && Array.isArray(signature.params)
+    // Rust now returns a typed NativeSymbolSignature instead of a JSON string.
+    // Guard on `params` presence because a signature with no params (and no
+    // return/generics) is represented as `undefined` on the Rust side.
+    signature: sym.signature?.params
       ? {
-          params: signature.params as Array<{ name: string; type?: string }>,
-          returns: signature.returns as string | undefined,
-          generics: signature.generics as string[] | undefined,
+          params: sym.signature.params.map(p => ({ name: p.name, type: p.typeName })),
+          returns: sym.signature.returns,
+          generics: sym.signature.generics,
         }
       : undefined,
     summary: sym.summary,
-    invariantsJson: sym.invariantsJson,
-    sideEffectsJson: sym.sideEffectsJson,
-    roleTagsJson: typeof sym.roleTagsJson === "string" ? sym.roleTagsJson : "[]",
+    // Downstream kuzu persistence still expects JSON strings for these arrays;
+    // re-serialise here rather than changing every write path.
+    invariantsJson: sym.invariants.length > 0 ? JSON.stringify(sym.invariants) : "[]",
+    sideEffectsJson: sym.sideEffects.length > 0 ? JSON.stringify(sym.sideEffects) : "[]",
+    roleTagsJson: sym.roleTags.length > 0 ? JSON.stringify(sym.roleTags) : "[]",
     searchText: typeof sym.searchText === "string" ? sym.searchText : "",
   };
 }
@@ -492,10 +499,3 @@ function mapCallType(
   }
 }
 
-function safeJsonParse(json: string): Record<string, unknown> | null {
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}

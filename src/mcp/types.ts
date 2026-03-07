@@ -246,13 +246,23 @@ export interface GraphSlice {
   staleSymbols?: SymbolId[];  // symbolIds that changed since this slice was issued
 }
 
-export interface DeltaSymbolChange {
-  symbolId: SymbolId;
-  changeType: "added" | "removed" | "modified";
-  signatureDiff?: { before?: string; after?: string };
-  invariantDiff?: { added: string[]; removed: string[] };
-  sideEffectDiff?: { added: string[]; removed: string[] };
-}
+/**
+ * Discriminated union for a single symbol change in a delta pack.
+ *
+ * `"added"` and `"removed"` variants carry no diff fields — there is nothing
+ * to diff when one side is absent. Diff fields are exclusive to `"modified"`
+ * so TypeScript's narrowing (`change.changeType === "modified"`) gates access
+ * to `signatureDiff`, `invariantDiff`, and `sideEffectDiff` at compile time.
+ */
+export type DeltaSymbolChange =
+  | { symbolId: SymbolId; changeType: "added" | "removed" }
+  | {
+      symbolId: SymbolId;
+      changeType: "modified";
+      signatureDiff?: { before?: string; after?: string };
+      invariantDiff?: { added: string[]; removed: string[] };
+      sideEffectDiff?: { added: string[]; removed: string[] };
+    };
 
 export interface BlastRadiusItem {
   symbolId: SymbolId;
@@ -539,9 +549,9 @@ export interface StalenessTiers {
   riskScore: number;
 }
 
-export interface DeltaSymbolChangeWithTiers extends DeltaSymbolChange {
+export type DeltaSymbolChangeWithTiers = DeltaSymbolChange & {
   tiers?: StalenessTiers;
-}
+};
 
 export interface DeltaPackWithGovernance extends DeltaPack {
   trimmedSet?: TrimmedSet;

@@ -19,7 +19,7 @@ pub fn build_search_text(
     parts.push(symbol.kind.clone());
     parts.extend(role_tags.iter().cloned());
     parts.extend(split_path_tokens(rel_path));
-    parts.extend(extract_signature_terms(&symbol.signature_json));
+    parts.extend(extract_signature_terms(&symbol.signature));
 
     let mut seen = HashSet::new();
     let mut normalized = Vec::new();
@@ -72,18 +72,16 @@ fn split_path_tokens(rel_path: &str) -> Vec<String> {
         .collect()
 }
 
-fn extract_signature_terms(signature_json: &str) -> Vec<String> {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(signature_json) else {
+fn extract_signature_terms(signature: &Option<crate::types::NativeSymbolSignature>) -> Vec<String> {
+    let Some(sig) = signature else {
         return Vec::new();
     };
 
     let mut terms = Vec::new();
-    if let Some(params) = value.get("params").and_then(|raw| raw.as_array()) {
+    if let Some(ref params) = sig.params {
         for param in params {
-            if let Some(name) = param.get("name").and_then(|raw| raw.as_str()) {
-                terms.push(name.to_string());
-                terms.extend(split_identifier_like_text(name));
-            }
+            terms.push(param.name.clone());
+            terms.extend(split_identifier_like_text(&param.name));
         }
     }
 
@@ -92,7 +90,7 @@ fn extract_signature_terms(signature_json: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::{NativeParsedSymbol, NativeRange};
+    use crate::types::{NativeParsedSymbol, NativeRange, NativeSymbolSignature, NativeSymbolSignatureParam};
 
     use super::build_search_text;
 
@@ -110,14 +108,18 @@ mod tests {
                 end_line: 3,
                 end_col: 0,
             },
-            signature_json: serde_json::json!({
-                "params": [{ "name": "authRequest", "type": "Request" }]
-            })
-            .to_string(),
+            signature: Some(NativeSymbolSignature {
+                params: Some(vec![NativeSymbolSignatureParam {
+                    name: "authRequest".to_string(),
+                    type_name: Some("Request".to_string()),
+                }]),
+                returns: None,
+                generics: None,
+            }),
             summary: "Handle login requests".to_string(),
-            invariants_json: "[]".to_string(),
-            side_effects_json: "[]".to_string(),
-            role_tags_json: "[]".to_string(),
+            invariants: vec![],
+            side_effects: vec![],
+            role_tags: vec![],
             search_text: String::new(),
         }
     }

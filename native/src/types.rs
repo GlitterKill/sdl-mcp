@@ -24,6 +24,37 @@ pub struct NativeRange {
     pub end_col: u32,
 }
 
+/// A single parameter in a function/method signature.
+///
+/// Typed fields replace the previous JSON-encoded `signature_json: String` so
+/// that callers receive structured data rather than opaque text that must be
+/// re-parsed on the TypeScript side.
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct NativeSymbolSignatureParam {
+    /// Parameter name as it appears in source.
+    pub name: String,
+    /// Declared type annotation, if present (e.g. `"string"`, `"Request | null"`).
+    pub type_name: Option<String>,
+}
+
+/// Structured representation of a function or method signature.
+///
+/// `None` fields are omitted rather than serialised as empty arrays/strings,
+/// keeping the napi payload compact. The struct is `None` on the parent symbol
+/// when there are no params, no return type, and no generics (e.g. plain
+/// variables or class declarations).
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct NativeSymbolSignature {
+    /// Parameter list. `None` when the symbol has no parameters.
+    pub params: Option<Vec<NativeSymbolSignatureParam>>,
+    /// Return type annotation, if present (e.g. `"Promise<User>"`).
+    pub returns: Option<String>,
+    /// Generic type parameters (e.g. `["T", "U extends Serializable"]`).
+    pub generics: Option<Vec<String>>,
+}
+
 /// Extracted symbol from AST analysis.
 #[napi(object)]
 #[derive(Debug, Clone)]
@@ -43,16 +74,16 @@ pub struct NativeParsedSymbol {
     pub visibility: String,
     /// Source range.
     pub range: NativeRange,
-    /// JSON-encoded signature object.
-    pub signature_json: String,
+    /// Parsed signature object.
+    pub signature: Option<NativeSymbolSignature>,
     /// One-line summary from JSDoc or auto-generated.
     pub summary: String,
-    /// JSON-encoded invariants array.
-    pub invariants_json: String,
-    /// JSON-encoded side-effects array.
-    pub side_effects_json: String,
-    /// JSON-encoded role tags inferred from name/path heuristics.
-    pub role_tags_json: String,
+    /// Invariants array.
+    pub invariants: Vec<String>,
+    /// Side-effects array.
+    pub side_effects: Vec<String>,
+    /// Role tags inferred from name/path heuristics.
+    pub role_tags: Vec<String>,
     /// Search-oriented text including identifier splits, summary, tags, and path hints.
     pub search_text: String,
 }

@@ -41,11 +41,11 @@ pub fn generate_summary(
     let mut summary = capitalized;
 
     // Add param context
-    if let Ok(sig) = serde_json::from_str::<serde_json::Value>(&symbol.signature_json) {
-        if let Some(params) = sig.get("params").and_then(|p| p.as_array()) {
+    if let Some(ref sig) = symbol.signature {
+        if let Some(ref params) = sig.params {
             let param_infos: Vec<String> = params
                 .iter()
-                .filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+                .map(|p| p.name.clone())
                 .collect();
             let context = generate_param_context(&param_infos);
             if !context.is_empty() {
@@ -56,7 +56,7 @@ pub fn generate_summary(
 
         // Add return type
         if symbol.kind == "function" {
-            if let Some(returns) = sig.get("returns").and_then(|r| r.as_str()) {
+            if let Some(ref returns) = sig.returns {
                 let simple_type = extract_simple_type(returns);
                 if !simple_type.is_empty()
                     && simple_type != "void"

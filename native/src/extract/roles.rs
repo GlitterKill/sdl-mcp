@@ -152,11 +152,11 @@ mod tests {
                 end_line: 2,
                 end_col: 0,
             },
-            signature_json: "{}".to_string(),
+            signature: None,
             summary: String::new(),
-            invariants_json: "[]".to_string(),
-            side_effects_json: "[]".to_string(),
-            role_tags_json: "[]".to_string(),
+            invariants: vec![],
+            side_effects: vec![],
+            role_tags: vec![],
             search_text: String::new(),
         }
     }
