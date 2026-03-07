@@ -174,7 +174,7 @@ describe("release regression guards", () => {
 
     assert.match(
       source,
-      /function mapNativeSymbol\(sym: NativeParsedSymbol\): RustExtractedSymbol[\s\S]*symbolId:\s*sym\.symbolId,[\s\S]*astFingerprint:\s*sym\.astFingerprint,[\s\S]*summary:\s*sym\.summary,[\s\S]*invariantsJson:\s*sym\.invariantsJson,[\s\S]*sideEffectsJson:\s*sym\.sideEffectsJson,[\s\S]*roleTagsJson:\s*typeof sym\.roleTagsJson === "string" \? sym\.roleTagsJson : "\[\]",[\s\S]*searchText:\s*typeof sym\.searchText === "string" \? sym\.searchText : "",/,
+      /function mapNativeSymbol\(sym: NativeParsedSymbol\): RustExtractedSymbol[\s\S]*symbolId:\s*sym\.symbolId,[\s\S]*astFingerprint:\s*sym\.astFingerprint,[\s\S]*summary:\s*sym\.summary,[\s\S]*invariantsJson:\s*sym\.invariants[\s\S]*sideEffectsJson:\s*sym\.sideEffects[\s\S]*roleTagsJson:\s*sym\.roleTags[\s\S]*searchText:\s*typeof sym\.searchText === "string" \? sym\.searchText : "",/,
       "native symbol mapper should pass through symbol identity and metadata",
     );
   });
