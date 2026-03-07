@@ -24,7 +24,12 @@ import { getKuzuConn } from "../../db/kuzu.js";
 import * as kuzuDb from "../../db/kuzu-queries.js";
 import { logCodeWindowDecision, logPolicyDecision } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
-import type { Range } from "../types.js";
+import type {
+  NextBestAction,
+  NextBestActionCallable,
+  Range,
+  RequiredFieldsForNext,
+} from "../types.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { buildSlice } from "../../graph/slice.js";
@@ -41,6 +46,135 @@ import {
 import { consumePrefetchedKey } from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { toLegacySymbolRow } from "./symbol-utils.js";
+import type { CodeNeedWindowRequest } from "../tools.js";
+
+function buildPolicyNextBestAction(params: {
+  request: CodeNeedWindowRequest;
+  policyNextBestAction?: NextBestAction;
+  requiredFieldsForNext?: RequiredFieldsForNext;
+  deniedReasons?: string[];
+  fallback?: NextBestActionCallable;
+}): NextBestActionCallable | undefined {
+  const {
+    request,
+    policyNextBestAction,
+    requiredFieldsForNext,
+    deniedReasons,
+    fallback,
+  } = params;
+
+  const rationale =
+    deniedReasons?.join("; ") ??
+    fallback?.rationale ??
+    "Policy denied request";
+
+  switch (policyNextBestAction) {
+    case "requestSkeleton":
+      return {
+        tool: "sdl.code.getSkeleton",
+        args: {
+          repoId:
+            requiredFieldsForNext?.requestSkeleton?.repoId ?? request.repoId,
+          symbolId:
+            requiredFieldsForNext?.requestSkeleton?.symbolId ?? request.symbolId,
+          ...(request.identifiersToFind.length > 0
+            ? { identifiersToFind: request.identifiersToFind }
+            : {}),
+        },
+        rationale,
+      };
+    case "requestHotPath":
+      return {
+        tool: "sdl.code.getHotPath",
+        args: {
+          repoId:
+            requiredFieldsForNext?.requestHotPath?.repoId ?? request.repoId,
+          symbolId:
+            requiredFieldsForNext?.requestHotPath?.symbolId ?? request.symbolId,
+          identifiersToFind:
+            requiredFieldsForNext?.requestHotPath?.identifiersToFind ??
+            request.identifiersToFind,
+          ...(requiredFieldsForNext?.requestHotPath?.maxTokens
+            ? { maxTokens: requiredFieldsForNext.requestHotPath.maxTokens }
+            : {}),
+        },
+        rationale,
+      };
+    case "requestRaw":
+      return {
+        tool: "sdl.code.needWindow",
+        args: {
+          repoId: requiredFieldsForNext?.requestRaw?.repoId ?? request.repoId,
+          symbolId:
+            requiredFieldsForNext?.requestRaw?.symbolId ?? request.symbolId,
+          reason: requiredFieldsForNext?.requestRaw?.reason ?? request.reason,
+          expectedLines:
+            requiredFieldsForNext?.requestRaw?.expectedLines ??
+            request.expectedLines,
+          identifiersToFind:
+            requiredFieldsForNext?.requestRaw?.identifiersToFind ??
+            request.identifiersToFind,
+          ...(requiredFieldsForNext?.requestRaw?.granularity
+            ? { granularity: requiredFieldsForNext.requestRaw.granularity }
+            : {}),
+          ...(request.maxTokens ? { maxTokens: request.maxTokens } : {}),
+        },
+        rationale,
+      };
+    case "provideIdentifiersToFind": {
+      const examples =
+        requiredFieldsForNext?.provideIdentifiersToFind?.examples?.filter(
+          (value): value is string =>
+            typeof value === "string" && value.length > 0,
+        ) ?? [];
+
+      if (examples.length === 0) {
+        return fallback;
+      }
+
+      return {
+        tool: "sdl.code.getHotPath",
+        args: {
+          repoId: request.repoId,
+          symbolId: request.symbolId,
+          identifiersToFind: examples,
+        },
+        rationale,
+      };
+    }
+    case "narrowScope":
+      if (request.identifiersToFind.length > 0) {
+        return {
+          tool: "sdl.code.getHotPath",
+          args: {
+            repoId: request.repoId,
+            symbolId: request.symbolId,
+            identifiersToFind: request.identifiersToFind,
+          },
+          rationale:
+            requiredFieldsForNext?.narrowScope?.reason ?? rationale,
+        };
+      }
+      return {
+        tool: "sdl.code.getSkeleton",
+        args: {
+          repoId: request.repoId,
+          symbolId: request.symbolId,
+        },
+        rationale: requiredFieldsForNext?.narrowScope?.reason ?? rationale,
+      };
+    case "retryWithSameInputs":
+      return {
+        tool: "sdl.code.needWindow",
+        args: {
+          ...request,
+        },
+        rationale,
+      };
+    default:
+      return fallback;
+  }
+}
 
 /**
  * Handles code window requests with policy evaluation.
@@ -153,8 +287,15 @@ export async function handleCodeNeedWindow(
   };
 
   const policyDecision = policyEngine.evaluate(policyContext);
-  const { nextBestAction, requiredFieldsForNext } =
+  const { nextBestAction: policyNextBestAction, requiredFieldsForNext } =
     policyEngine.generateNextBestAction(policyDecision, policyContext);
+  const policyAction = buildPolicyNextBestAction({
+    request,
+    policyNextBestAction,
+    requiredFieldsForNext,
+    deniedReasons: policyDecision.deniedReasons,
+    fallback: gateNextBestAction,
+  });
 
   logPolicyDecision({
     requestType: policyContext.requestType,
@@ -164,7 +305,7 @@ export async function handleCodeNeedWindow(
     auditHash: policyDecision.auditHash,
     evidenceUsed: policyDecision.evidenceUsed,
     deniedReasons: policyDecision.deniedReasons,
-    nextBestAction,
+    nextBestAction: policyNextBestAction,
     requiredFieldsForNext,
     downgradeTarget: policyDecision.downgradeTarget,
     context: policyContext,
@@ -181,7 +322,7 @@ export async function handleCodeNeedWindow(
       approved: false,
       whyDenied: policyDecision.deniedReasons ?? ["Policy denied request"],
       suggestedNextRequest,
-      nextBestAction: gateNextBestAction,
+      nextBestAction: policyAction,
     };
   }
 

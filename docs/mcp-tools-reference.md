@@ -17,7 +17,7 @@
 </details>
 </div>
 
-Complete reference for all 21 MCP tools exposed by `registerTools`. Tools are organized by category and listed in the recommended usage order within each category.
+Complete reference for all 24 MCP tools exposed by `registerTools`. Tools are organized by category and listed in the recommended usage order within each category.
 
 ---
 
@@ -144,6 +144,100 @@ Start with `level: "stats"` (cheapest). Escalate to `"directories"` or `"full"` 
   "maxExportsPerDirectory": 10,
   "includeHotspots": true
 }
+```
+
+---
+
+## Live Buffer and Draft Indexing (3 tools)
+
+### `sdl.buffer.push`
+
+Push an editor buffer update into the live draft overlay so symbol/search/slice reads can see unsaved changes.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `eventType` | `"change" \| "save" \| "close"` | Yes | Buffer lifecycle event |
+| `filePath` | `string` | Yes | Repository-relative file path |
+| `content` | `string` | Yes | Current buffer contents |
+| `language` | `string` | No | Explicit language hint |
+| `version` | `integer` | Yes | Monotonic buffer version |
+| `dirty` | `boolean` | Yes | Whether the buffer has unsaved edits |
+| `timestamp` | `string` | Yes | ISO timestamp for the event |
+
+**Response includes:**
+
+- `accepted`, `repoId`, `overlayVersion`
+- `parseScheduled` and `checkpointScheduled`
+- `warnings` for stale updates, disabled live index, or draft-limit pressure
+
+**Example:**
+
+```json
+{
+  "repoId": "my-repo",
+  "eventType": "change",
+  "filePath": "src/auth/token.ts",
+  "content": "export function validateToken() {}",
+  "language": "typescript",
+  "version": 12,
+  "dirty": true,
+  "timestamp": "2026-03-07T12:00:00.000Z"
+}
+```
+
+---
+
+### `sdl.buffer.checkpoint`
+
+Flush the live draft overlay for a repository into a durable checkpoint.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `reason` | `string` | No | Human-readable checkpoint reason |
+
+**Response includes:**
+
+- `repoId`, `requested`, `checkpointId`
+- `pendingBuffers`, `checkpointedFiles`, `failedFiles`
+- `lastCheckpointAt`
+
+**Example:**
+
+```json
+{
+  "repoId": "my-repo",
+  "reason": "manual"
+}
+```
+
+---
+
+### `sdl.buffer.status`
+
+Inspect the current live draft overlay health for a repository.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+
+**Response includes:**
+
+- `enabled`, `pendingBuffers`, `dirtyBuffers`, `parseQueueDepth`
+- `checkpointPending`, `lastBufferEventAt`, `lastCheckpointAt`
+- `reconcileQueueDepth`, `lastReconciledAt`, `reconcileInflight`
+
+**Example:**
+
+```json
+{ "repoId": "my-repo" }
 ```
 
 ---

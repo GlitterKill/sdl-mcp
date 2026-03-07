@@ -19,7 +19,7 @@
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - npm
 - A local repository you want to index
 

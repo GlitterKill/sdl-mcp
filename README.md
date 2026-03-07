@@ -155,7 +155,7 @@ Response: "# What is SDL-MCP?
   sdl-mcp doctor    # Health check
   sdl-mcp version   # Version info
 
-  Once running, any MCP client (Claude Code, Claude Desktop, etc.) connects to it and gains access to 13 tools for
+  Once running, any MCP client (Claude Code, Claude Desktop, etc.) connects to it and gains access to 24 tools for
   navigating your codebase efficiently.
 
   ---
