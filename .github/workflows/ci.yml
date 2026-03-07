@@ -448,6 +448,19 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
+      - name: Normalize native addon artifact name
+        shell: bash
+        run: |
+          SOURCE_ADDON_PATH="native/sdl-mcp-native.node"
+          TARGET_ADDON_PATH="native/${{ matrix.addon-file }}"
+          if [ ! -f "$SOURCE_ADDON_PATH" ]; then
+            echo "[ERROR] Built native addon not found at $SOURCE_ADDON_PATH"
+            find native -maxdepth 3 -name "*.node" -print || true
+            exit 1
+          fi
+          cp "$SOURCE_ADDON_PATH" "$TARGET_ADDON_PATH"
+          echo "Normalized native addon artifact: $TARGET_ADDON_PATH"
+
       - name: Configure built native addon path
         shell: bash
         run: |
@@ -521,6 +534,19 @@ jobs:
 
       - name: Build native addon
         run: npx napi build --release --cargo-cwd native --config native/package.json --target x86_64-unknown-linux-gnu native
+
+      - name: Normalize native addon artifact name
+        shell: bash
+        run: |
+          SOURCE_ADDON_PATH="native/sdl-mcp-native.node"
+          TARGET_ADDON_PATH="native/sdl-mcp-native.linux-x64-gnu.node"
+          if [ ! -f "$SOURCE_ADDON_PATH" ]; then
+            echo "[ERROR] Built native addon not found at $SOURCE_ADDON_PATH"
+            find native -maxdepth 3 -name "*.node" -print || true
+            exit 1
+          fi
+          cp "$SOURCE_ADDON_PATH" "$TARGET_ADDON_PATH"
+          echo "Normalized native addon artifact: $TARGET_ADDON_PATH"
 
       - name: Configure Rust indexer addon path
         shell: bash

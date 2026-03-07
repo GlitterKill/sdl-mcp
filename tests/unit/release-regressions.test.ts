@@ -97,6 +97,16 @@ describe("release regression guards", () => {
     );
   });
 
+  it("renames the built native addon to the target-specific artifact name before upload", () => {
+    const ciSource = readSource(".github/workflows/ci.yml");
+
+    assert.match(
+      ciSource,
+      /native-build:[\s\S]*name:\s*Normalize native addon artifact name[\s\S]*SOURCE_ADDON_PATH="native\/sdl-mcp-native\.node"[\s\S]*TARGET_ADDON_PATH="native\/\$\{\{\s*matrix\.addon-file\s*\}\}"[\s\S]*(cp|Copy-Item)\s+"\$SOURCE_ADDON_PATH"\s+"\$TARGET_ADDON_PATH"/s,
+      "native-build should copy the unsuffixed napi output to the target-specific addon filename before upload",
+    );
+  });
+
   it("preserves native Rust symbol identity fields in mapper output", () => {
     const source = readSource("src/indexer/rustIndexer.ts");
 
