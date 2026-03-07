@@ -10,6 +10,18 @@ import { computeDelta } from "../../delta/diff.js";
 import { runGovernorLoop } from "../../delta/blastRadius.js";
 import { getKuzuConn, initKuzuDb } from "../../db/kuzu.js";
 import { indexRepo } from "../../indexer/indexer.js";
+import {
+  BufferCheckpointRequestSchema,
+  BufferPushRequestSchema,
+} from "../../mcp/tools.js";
+import {
+  handleSymbolGetCard,
+  handleSymbolSearch,
+} from "../../mcp/tools/symbol.js";
+import {
+  getDefaultLiveIndexCoordinator,
+} from "../../live-index/coordinator.js";
+import type { LiveIndexCoordinator } from "../../live-index/types.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const UI_DIR = join(__dirname, "..", "..", "ui");
@@ -32,6 +44,21 @@ type GraphLink = {
   weight: number;
 };
 
+export type LiveIndexApiRequest = {
+  method?: string;
+  pathname: string;
+  body?: unknown;
+};
+
+type LiveIndexApiResponse = {
+  status: number;
+  payload: unknown;
+};
+
+type HttpTransportServices = {
+  liveIndex?: LiveIndexCoordinator;
+};
+
 function setCorsHeaders(res: ServerResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -41,6 +68,96 @@ function setCorsHeaders(res: ServerResponse): void {
 function json(res: ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(payload));
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of req) {
+    if (typeof chunk === "string") {
+      chunks.push(Buffer.from(chunk));
+    } else {
+      chunks.push(chunk);
+    }
+  }
+
+  if (chunks.length === 0) {
+    return {};
+  }
+
+  const body = Buffer.concat(chunks).toString("utf8").trim();
+  if (!body) {
+    return {};
+  }
+
+  return JSON.parse(body);
+}
+
+export async function routeLiveIndexApiRequest(
+  request: LiveIndexApiRequest,
+  services: HttpTransportServices = {},
+): Promise<LiveIndexApiResponse | null> {
+  const method = request.method ?? "GET";
+  const liveIndex = services.liveIndex ?? getDefaultLiveIndexCoordinator();
+  const bufferMatch = request.pathname.match(/^\/api\/repo\/([^/]+)\/buffer$/);
+  if (method === "POST" && bufferMatch) {
+    try {
+      const [, repoId] = bufferMatch;
+      const parsed = BufferPushRequestSchema.parse({
+        ...(request.body as Record<string, unknown> | undefined),
+        repoId: decodeURIComponent(repoId),
+      });
+      const result = await liveIndex.pushBufferUpdate(parsed);
+      return {
+        status: 202,
+        payload: result,
+      };
+    } catch (error) {
+      return {
+        status: 400,
+        payload: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
+
+  const checkpointMatch = request.pathname.match(
+    /^\/api\/repo\/([^/]+)\/checkpoint$/,
+  );
+  if (method === "POST" && checkpointMatch) {
+    try {
+      const [, repoId] = checkpointMatch;
+      const parsed = BufferCheckpointRequestSchema.parse({
+        ...(request.body as Record<string, unknown> | undefined),
+        repoId: decodeURIComponent(repoId),
+      });
+      const result = await liveIndex.checkpointRepo(parsed);
+      return {
+        status: 202,
+        payload: result,
+      };
+    } catch (error) {
+      return {
+        status: 400,
+        payload: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
+
+  const liveStatusMatch = request.pathname.match(
+    /^\/api\/repo\/([^/]+)\/live-status$/,
+  );
+  if (method === "GET" && liveStatusMatch) {
+    const [, repoId] = liveStatusMatch;
+    return {
+      status: 200,
+      payload: await liveIndex.getLiveStatus(decodeURIComponent(repoId)),
+    };
+  }
+
+  return null;
 }
 
 function toClusterPath(filePath: string): string {
@@ -253,6 +370,7 @@ async function handleRestRequest(
   port: number,
   checkHealth: () => Promise<boolean>,
   conn: Connection,
+  services: HttpTransportServices,
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", `http://${host}:${port}`);
   const pathname = url.pathname;
@@ -277,6 +395,22 @@ async function handleRestRequest(
 
   if (req.method === "GET" && serveUiAsset(pathname, res)) {
     return true;
+  }
+
+  if (/^\/api\/repo\/[^/]+\/(?:buffer|checkpoint|live-status)$/.test(pathname)) {
+    const body = req.method === "POST" ? await readJsonBody(req) : undefined;
+    const response = await routeLiveIndexApiRequest(
+      {
+        method: req.method,
+        pathname,
+        body,
+      },
+      services,
+    );
+    if (response) {
+      json(res, response.status, response.payload);
+      return true;
+    }
   }
 
   const graphSliceMatch = pathname.match(/^\/api\/graph\/([^/]+)\/slice\/([^/]+)$/);
@@ -346,46 +480,42 @@ async function handleRestRequest(
       json(res, 200, { repoId, results: [] });
       return true;
     }
-    const results = await kuzuDb.searchSymbolsLite(
-      conn,
+    const response = await handleSymbolSearch({
       repoId,
       query,
-      Math.min(100, Math.max(1, limit)),
-    );
-    const fileIds = results.map((row) => row.fileId);
-    const fileMap = await kuzuDb.getFilesByIds(conn, fileIds);
+      limit: Math.min(100, Math.max(1, limit)),
+    });
     json(res, 200, {
       repoId,
-      results: results.map((row) => ({
-        symbolId: row.symbolId,
-        name: row.name,
-        kind: row.kind,
-        file: fileMap.get(row.fileId)?.relPath ?? "",
-      })),
+      results: response.results,
     });
     return true;
   }
 
   const symbolCardMatch = pathname.match(/^\/api\/symbol\/([^/]+)\/card\/([^/]+)$/);
   if (req.method === "GET" && symbolCardMatch) {
-    const [, _repoId, symbolIdRaw] = symbolCardMatch;
+    const [, repoId, symbolIdRaw] = symbolCardMatch;
     const symbolId = decodeURIComponent(symbolIdRaw);
-    const symbol = await kuzuDb.getSymbol(conn, symbolId);
-    if (!symbol) {
+    const response = await handleSymbolGetCard({
+      repoId,
+      symbolId,
+    });
+    if ("notModified" in response) {
+      json(res, 304, response);
+      return true;
+    }
+    if (!response.card) {
       json(res, 404, { error: `Symbol not found: ${symbolId}` });
       return true;
     }
-    const fileMap = await kuzuDb.getFilesByIds(conn, [symbol.fileId]);
-    const file = fileMap.get(symbol.fileId);
-    const metrics = await kuzuDb.getMetrics(conn, symbolId);
     json(res, 200, {
       symbolId,
-      name: symbol.name,
-      kind: symbol.kind,
-      summary: symbol.summary,
-      file: file?.relPath,
-      fanIn: metrics?.fanIn ?? 0,
-      fanOut: metrics?.fanOut ?? 0,
+      name: response.card.name,
+      kind: response.card.kind,
+      summary: response.card.summary,
+      file: response.card.file,
+      fanIn: response.card.metrics?.fanIn ?? 0,
+      fanOut: response.card.metrics?.fanOut ?? 0,
     });
     return true;
   }
@@ -430,6 +560,7 @@ export async function setupHttpTransport(
   host: string,
   port: number,
   graphDbPath: string,
+  services: HttpTransportServices = {},
 ): Promise<void> {
   const sessions = new Map<string, SSEServerTransport>();
   let activeSseTransport: SSEServerTransport | null = null;
@@ -460,6 +591,7 @@ export async function setupHttpTransport(
         port,
         checkHealth,
         conn,
+        services,
       );
       if (handled) {
         return;

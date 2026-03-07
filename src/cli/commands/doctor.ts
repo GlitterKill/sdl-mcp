@@ -12,6 +12,7 @@ import { getAllWatcherHealth } from "../../indexer/indexer.js";
 import { createDefaultPass2ResolverRegistry } from "../../indexer/pass2/registry.js";
 import { closeKuzuDb, getKuzuConn, getKuzuDbPath, initKuzuDb, isKuzuAvailable } from "../../db/kuzu.js";
 import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import Parser from "tree-sitter";
 import TypeScript from "tree-sitter-typescript";
 import C from "tree-sitter-c";
@@ -29,6 +30,7 @@ const DOCTOR_CHECKS = [
   { name: "Repo paths accessible", check: checkRepoPaths },
   { name: "Stale index detection", check: checkStaleIndex },
   { name: "Watcher health telemetry", check: checkWatcherHealth },
+  { name: "Live index runtime", check: checkLiveIndexRuntime },
   { name: "Call resolution capabilities", check: checkCallResolutionCapabilities },
   { name: "Graph database (KuzuDB)", check: checkKuzuDb },
 ];
@@ -368,6 +370,86 @@ async function checkWatcherHealth(
     return {
       status: "warn",
       message: `Cannot evaluate watcher health: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+async function checkLiveIndexRuntime(
+  options: DoctorOptions,
+): Promise<Omit<DoctorResult, "name">> {
+  const configPath = options.config ?? activateCliConfigPath();
+  if (!existsSync(configPath)) {
+    return { status: "warn", message: "Config not found (skip live index runtime)" };
+  }
+
+  try {
+    const { loadConfig } = await import("../../config/loadConfig.js");
+    const config = loadConfig(configPath);
+    if (config.liveIndex?.enabled === false) {
+      return { status: "warn", message: "Live indexing disabled in config" };
+    }
+
+    const liveIndex = getDefaultLiveIndexCoordinator();
+    const statuses = await Promise.all(
+      config.repos.map((repo) => liveIndex.getLiveStatus(repo.repoId)),
+    );
+
+    const interesting = statuses.filter(
+      (status) =>
+        status.pendingBuffers > 0 ||
+        status.parseQueueDepth > 0 ||
+        status.reconcileQueueDepth !== undefined ||
+        status.lastBufferEventAt !== null ||
+        status.lastCheckpointAttemptAt !== null,
+    );
+
+    if (interesting.length === 0) {
+      return {
+        status: "warn",
+        message:
+          "No live index telemetry in this process (push editor buffers or start `sdl-mcp serve` to observe runtime state)",
+      };
+    }
+
+    const totalPendingBuffers = interesting.reduce(
+      (sum, status) => sum + status.pendingBuffers,
+      0,
+    );
+    const totalDirtyBuffers = interesting.reduce(
+      (sum, status) => sum + status.dirtyBuffers,
+      0,
+    );
+    const pendingCheckpointRepos = interesting.filter(
+      (status) => status.checkpointPending,
+    ).length;
+    const reconcileFailures = interesting
+      .filter((status) => status.reconcileLastError)
+      .map((status) => status.repoId);
+    const checkpointFailures = interesting
+      .filter(
+        (status) =>
+          status.lastCheckpointResult === "failed" ||
+          status.lastCheckpointResult === "partial",
+      )
+      .map((status) => status.repoId);
+
+    const status =
+      reconcileFailures.length > 0 || checkpointFailures.length > 0
+        ? "warn"
+        : "pass";
+    const message =
+      `repos=${interesting.length}; ` +
+      `pendingBuffers=${totalPendingBuffers}; ` +
+      `dirtyBuffers=${totalDirtyBuffers}; ` +
+      `checkpointPending=${pendingCheckpointRepos > 0}; ` +
+      `reconcileFailures=${reconcileFailures.length}; ` +
+      `checkpointFailures=${checkpointFailures.length}`;
+
+    return { status, message };
+  } catch (error) {
+    return {
+      status: "warn",
+      message: `Cannot evaluate live index runtime: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }

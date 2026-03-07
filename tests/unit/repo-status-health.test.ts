@@ -45,9 +45,29 @@ describe("repo status health fields", () => {
         avgLatencyReductionMs: 0,
         lastRunAt: null,
       },
+      liveIndexStatus: {
+        enabled: true,
+        pendingBuffers: 0,
+        dirtyBuffers: 0,
+        parseQueueDepth: 0,
+        checkpointPending: false,
+        lastBufferEventAt: null,
+        lastCheckpointAt: null,
+        lastCheckpointAttemptAt: "2026-03-07T12:02:00.000Z",
+        lastCheckpointResult: "success",
+        lastCheckpointError: null,
+        lastCheckpointReason: "save",
+        reconcileQueueDepth: 0,
+        oldestReconcileAt: null,
+        lastReconciledAt: null,
+        reconcileInflight: false,
+        reconcileLastError: null,
+      },
     });
 
     assert.strictEqual(parsed.healthScore, 88);
     assert.strictEqual(parsed.healthAvailable, true);
+    assert.strictEqual(parsed.liveIndexStatus?.enabled, true);
+    assert.strictEqual(parsed.liveIndexStatus?.lastCheckpointResult, "success");
   });
 });

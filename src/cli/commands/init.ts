@@ -489,6 +489,14 @@ export async function initCommand(options: InitOptions): Promise<void> {
       engine: "rust" as const,
       watchDebounceMs: 300,
     },
+    liveIndex: {
+      enabled: true,
+      debounceMs: 75,
+      idleCheckpointMs: 15_000,
+      maxDraftFiles: 200,
+      reconcileConcurrency: 1,
+      clusterRefreshThreshold: 25,
+    },
     slice: {
       defaultMaxCards: DEFAULT_MAX_CARDS,
       defaultMaxTokens: DEFAULT_MAX_TOKENS_SLICE,

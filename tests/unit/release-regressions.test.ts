@@ -107,6 +107,28 @@ describe("release regression guards", () => {
     );
   });
 
+  it("compacts successful save-time live index overlays via checkpoint service", () => {
+    const source = readSource("src/live-index/coordinator.ts");
+
+    assert.match(
+      source,
+      /await this\.checkpointService\.checkpointRepo\(/,
+      "save flow should invoke checkpoint service after a successful durable patch",
+    );
+
+    assert.match(
+      source,
+      /reason:\s*"save"/,
+      "save flow should tag live index compaction with the save reason",
+    );
+
+    assert.match(
+      source,
+      /skipDurablePatch:\s*true/,
+      "save flow should compact overlay state without redundantly re-patching the same file",
+    );
+  });
+
   it("preserves native Rust symbol identity fields in mapper output", () => {
     const source = readSource("src/indexer/rustIndexer.ts");
 

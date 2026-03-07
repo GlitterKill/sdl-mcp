@@ -40,6 +40,7 @@ import {
   type SpanAttributes,
 } from "../../util/tracing.js";
 import type { ToolContext } from "../../server.js";
+import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 
 const SUPPORTED_LANGUAGES = [...LanguageSchema.options];
 
@@ -249,6 +250,9 @@ export async function handleRepoStatus(
     const health = await getRepoHealthSnapshot(repoId);
     const watcherHealth = getWatcherHealth(repoId);
     const prefetchStats = getPrefetchStats(repoId);
+    const liveIndexStatus = await getDefaultLiveIndexCoordinator()
+      .getLiveStatus(repoId)
+      .catch(() => undefined);
     if (watcherHealth) {
       logWatcherHealthTelemetry({
         repoId,
@@ -293,6 +297,7 @@ export async function handleRepoStatus(
           ? "Watcher not active. Run 'sdl-mcp serve' or call sdl.index.refresh after edits."
           : undefined,
       prefetchStats,
+      liveIndexStatus,
     };
   };
 

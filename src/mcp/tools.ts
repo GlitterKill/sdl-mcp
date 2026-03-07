@@ -592,6 +592,29 @@ export const RepoStatusResponseSchema = z.object({
     avgLatencyReductionMs: z.number().min(0),
     lastRunAt: z.string().nullable(),
   }),
+  liveIndexStatus: z
+    .object({
+      enabled: z.boolean(),
+      pendingBuffers: z.number().int().min(0),
+      dirtyBuffers: z.number().int().min(0),
+      parseQueueDepth: z.number().int().min(0),
+      checkpointPending: z.boolean(),
+      lastBufferEventAt: z.string().nullable(),
+      lastCheckpointAt: z.string().nullable(),
+      lastCheckpointAttemptAt: z.string().nullable().optional(),
+      lastCheckpointResult: z
+        .enum(["success", "partial", "failed"])
+        .nullable()
+        .optional(),
+      lastCheckpointError: z.string().nullable().optional(),
+      lastCheckpointReason: z.string().nullable().optional(),
+      reconcileQueueDepth: z.number().int().min(0).optional(),
+      oldestReconcileAt: z.string().nullable().optional(),
+      lastReconciledAt: z.string().nullable().optional(),
+      reconcileInflight: z.boolean().optional(),
+      reconcileLastError: z.string().nullable().optional(),
+    })
+    .optional(),
 });
 
 export const IndexRefreshRequestSchema = z.object({
@@ -605,6 +628,85 @@ export const IndexRefreshResponseSchema = z.object({
   repoId: z.string(),
   versionId: z.string(),
   changedFiles: z.number().int(),
+});
+
+const BufferSelectionSchema = z.object({
+  startLine: z.number().int().min(0),
+  startCol: z.number().int().min(0),
+  endLine: z.number().int().min(0),
+  endCol: z.number().int().min(0),
+});
+
+const BufferCursorSchema = z.object({
+  line: z.number().int().min(0),
+  col: z.number().int().min(0),
+});
+
+export const BufferPushRequestSchema = z.object({
+  repoId: z.string(),
+  eventType: z.enum(["open", "change", "save", "close", "checkpoint"]),
+  filePath: z.string().min(1).refine(
+    (p) => !p.includes(".."),
+    { message: "filePath must not contain path traversal sequences" },
+  ),
+  content: z.string(),
+  language: z.string().optional(),
+  version: z.number().int().min(0),
+  dirty: z.boolean(),
+  timestamp: z.string(),
+  cursor: BufferCursorSchema.optional(),
+  selections: z.array(BufferSelectionSchema).optional(),
+});
+
+export const BufferPushResponseSchema = z.object({
+  accepted: z.boolean(),
+  repoId: z.string(),
+  overlayVersion: z.number().int().min(0),
+  parseScheduled: z.boolean(),
+  checkpointScheduled: z.boolean(),
+  warnings: z.array(z.string()),
+});
+
+export const BufferCheckpointRequestSchema = z.object({
+  repoId: z.string(),
+  reason: z.string().optional(),
+});
+
+export const BufferCheckpointResponseSchema = z.object({
+  repoId: z.string(),
+  requested: z.boolean(),
+  checkpointId: z.string(),
+  pendingBuffers: z.number().int().min(0),
+  checkpointedFiles: z.number().int().min(0),
+  failedFiles: z.number().int().min(0),
+  lastCheckpointAt: z.string().nullable(),
+});
+
+export const BufferStatusRequestSchema = z.object({
+  repoId: z.string(),
+});
+
+export const BufferStatusResponseSchema = z.object({
+  repoId: z.string(),
+  enabled: z.boolean(),
+  pendingBuffers: z.number().int().min(0),
+  dirtyBuffers: z.number().int().min(0),
+  parseQueueDepth: z.number().int().min(0),
+  checkpointPending: z.boolean(),
+  lastBufferEventAt: z.string().nullable(),
+  lastCheckpointAt: z.string().nullable(),
+  lastCheckpointAttemptAt: z.string().nullable().optional(),
+  lastCheckpointResult: z
+    .enum(["success", "partial", "failed"])
+    .nullable()
+    .optional(),
+  lastCheckpointError: z.string().nullable().optional(),
+  lastCheckpointReason: z.string().nullable().optional(),
+  reconcileQueueDepth: z.number().int().min(0).optional(),
+  oldestReconcileAt: z.string().nullable().optional(),
+  lastReconciledAt: z.string().nullable().optional(),
+  reconcileInflight: z.boolean().optional(),
+  reconcileLastError: z.string().nullable().optional(),
 });
 
 const SymbolSearchResultSchema = z.object({
@@ -1194,6 +1296,16 @@ export type RepoStatusRequest = z.infer<typeof RepoStatusRequestSchema>;
 export type RepoStatusResponse = z.infer<typeof RepoStatusResponseSchema>;
 export type IndexRefreshRequest = z.infer<typeof IndexRefreshRequestSchema>;
 export type IndexRefreshResponse = z.infer<typeof IndexRefreshResponseSchema>;
+export type BufferPushRequest = z.infer<typeof BufferPushRequestSchema>;
+export type BufferPushResponse = z.infer<typeof BufferPushResponseSchema>;
+export type BufferCheckpointRequest = z.infer<
+  typeof BufferCheckpointRequestSchema
+>;
+export type BufferCheckpointResponse = z.infer<
+  typeof BufferCheckpointResponseSchema
+>;
+export type BufferStatusRequest = z.infer<typeof BufferStatusRequestSchema>;
+export type BufferStatusResponse = z.infer<typeof BufferStatusResponseSchema>;
 export type SymbolSearchRequest = z.infer<typeof SymbolSearchRequestSchema>;
 export type SymbolSearchResponse = z.infer<typeof SymbolSearchResponseSchema>;
 export type SymbolGetCardRequest = z.infer<typeof SymbolGetCardRequestSchema>;

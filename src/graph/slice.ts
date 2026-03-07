@@ -89,6 +89,13 @@ import {
   sliceOk,
   sliceErr,
 } from "./slice/result.js";
+import {
+  getOverlaySnapshot,
+  getTargetNamesWithOverlay,
+  mergeEdgeMapWithOverlay,
+  mergeSymbolRowsWithOverlay,
+  type OverlaySnapshot,
+} from "../live-index/overlay-reader.js";
 
 export {
   type StartNodeSource,
@@ -173,6 +180,7 @@ export async function buildSlice(
   const minCallConfidence = request.minCallConfidence;
 
   const conn = request.conn ?? (await getKuzuConn());
+  const overlaySnapshot = getOverlaySnapshot(request.repoId);
 
   const startNodes = await resolveStartNodesKuzu(conn, request.repoId, request);
   const startSymbols = startNodes.map((node) => node.symbolId);
@@ -237,6 +245,7 @@ export async function buildSlice(
     effectiveLevel,
     minCallConfidence,
     request.includeResolutionMetadata,
+    overlaySnapshot,
   );
   const { cardsForPayload, cardRefs } = buildPayloadCardsAndRefs(
     cards,
@@ -251,6 +260,7 @@ export async function buildSlice(
       request.repoId,
       minConfidence,
       minCallConfidence,
+      overlaySnapshot,
     );
   const estimatedTokens = estimateTokens(cardsForPayload);
   const slice: GraphSlice = {
@@ -388,6 +398,7 @@ async function loadSymbolCards(
   effectiveLevel: CardDetailLevel,
   minCallConfidence?: number,
   includeResolutionMetadata?: boolean,
+  overlaySnapshot?: OverlaySnapshot,
 ): Promise<{
   cards: SymbolCard[];
   sliceDepsBySymbol: Map<SymbolId, SliceSymbolDeps>;
@@ -406,9 +417,14 @@ async function loadSymbolCards(
 
   const cards: SymbolCard[] = [];
   const uncachedSymbolIds: SymbolId[] = [];
+  const snapshot = overlaySnapshot ?? getOverlaySnapshot(repoId);
 
   if (canUseCache) {
     for (const symbolId of symbolIds) {
+      if (snapshot.symbolsById.has(symbolId)) {
+        uncachedSymbolIds.push(symbolId);
+        continue;
+      }
       const cachedCard = symbolCardCache.get(repoId, symbolId, versionId);
 
       if (!cachedCard) {
@@ -437,7 +453,12 @@ async function loadSymbolCards(
 
   uncachedSymbolIds.sort();
 
-  const symbolsMap = await kuzuDb.getSymbolsByIds(conn, uncachedSymbolIds);
+  const durableSymbolsMap = await kuzuDb.getSymbolsByIds(conn, uncachedSymbolIds);
+  const symbolsMap = mergeSymbolRowsWithOverlay(
+    snapshot,
+    uncachedSymbolIds,
+    durableSymbolsMap,
+  );
 
   const fileIds = new Set<string>();
   for (const symbol of symbolsMap.values()) {
@@ -445,13 +466,24 @@ async function loadSymbolCards(
     fileIds.add(symbol.fileId);
   }
   const filesMap = await kuzuDb.getFilesByIds(conn, [...fileIds]);
+  for (const [fileId, file] of snapshot.filesById) {
+    if (fileIds.has(fileId)) {
+      filesMap.set(fileId, file);
+    }
+  }
 
   const metricsMap = await kuzuDb.getMetricsBySymbolIds(conn, uncachedSymbolIds);
 
-  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(
+  const durableEdgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(
     conn,
     uncachedSymbolIds,
     { minCallConfidence },
+  );
+  const edgesMap = mergeEdgeMapWithOverlay(
+    snapshot,
+    uncachedSymbolIds,
+    durableEdgesMap,
+    minCallConfidence,
   );
 
   const importedSymbolIds = new Set<string>();
@@ -465,12 +497,14 @@ async function loadSymbolCards(
       }
     }
   }
-  const importedSymbolsMap = await kuzuDb.getSymbolsByIdsLite(
+  const importedSymbolsMap = await getTargetNamesWithOverlay(
     conn,
+    snapshot,
     [...importedSymbolIds],
   );
-  const calledSymbolsMap = await kuzuDb.getSymbolsByIdsLite(
+  const calledSymbolsMap = await getTargetNamesWithOverlay(
     conn,
+    snapshot,
     [...calledSymbolIds],
   );
 
@@ -657,7 +691,7 @@ async function loadSymbolCards(
     const card = toCardAtDetailLevel(baseCard, effectiveLevel);
     cards.push(card);
 
-    if (canUseCache) {
+    if (canUseCache && !snapshot.symbolsById.has(symbolRow.symbolId)) {
       await symbolCardCache.set(
         repoId,
         symbolRow.symbolId,
@@ -748,9 +782,10 @@ async function buildSliceDepsBySymbol(
 async function loadEdgesBetweenSymbols(
   conn: Connection,
   symbolIds: SymbolId[],
-  _repoId: RepoId,
+  repoId: RepoId,
   minConfidence: number,
   minCallConfidence?: number,
+  overlaySnapshot?: OverlaySnapshot,
 ): Promise<{
   symbolIndex: SymbolId[];
   edges: [number, number, EdgeType, number][];
@@ -778,9 +813,16 @@ async function loadEdgesBetweenSymbols(
     unknown: 0,
   };
 
-  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, symbolIds, {
+  const durableEdgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, symbolIds, {
     minCallConfidence,
   });
+  const snapshot = overlaySnapshot ?? getOverlaySnapshot(repoId);
+  const edgesMap = mergeEdgeMapWithOverlay(
+    snapshot,
+    symbolIds,
+    durableEdgesMap,
+    minCallConfidence,
+  );
 
   for (const [_fromId, outgoing] of edgesMap) {
     for (const edge of outgoing) {

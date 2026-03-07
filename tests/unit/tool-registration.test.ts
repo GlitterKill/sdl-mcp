@@ -3,7 +3,7 @@ import assert from "node:assert";
 import { registerTools } from "../../src/mcp/tools/index.js";
 
 describe("MCP tool registration", () => {
-  it("registers sdl.slice.refresh", () => {
+  it("registers live buffer tools alongside existing slice tools", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -24,6 +24,18 @@ describe("MCP tool registration", () => {
     assert.ok(
       names.includes("sdl.symbol.getCards"),
       "expected sdl.symbol.getCards to be registered",
+    );
+    assert.ok(
+      names.includes("sdl.buffer.push"),
+      "expected sdl.buffer.push to be registered",
+    );
+    assert.ok(
+      names.includes("sdl.buffer.checkpoint"),
+      "expected sdl.buffer.checkpoint to be registered",
+    );
+    assert.ok(
+      names.includes("sdl.buffer.status"),
+      "expected sdl.buffer.status to be registered",
     );
   });
 });

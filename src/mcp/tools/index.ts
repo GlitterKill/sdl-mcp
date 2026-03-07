@@ -4,6 +4,9 @@ import {
   RepoStatusRequestSchema,
   IndexRefreshRequestSchema,
   RepoOverviewRequestSchema,
+  BufferPushRequestSchema,
+  BufferCheckpointRequestSchema,
+  BufferStatusRequestSchema,
 } from "../tools.js";
 import {
   handleRepoRegister,
@@ -11,6 +14,11 @@ import {
   handleIndexRefresh,
   handleRepoOverview,
 } from "./repo.js";
+import {
+  handleBufferPush,
+  handleBufferCheckpoint,
+  handleBufferStatus,
+} from "./buffer.js";
 import {
   SymbolSearchRequestSchema,
   SymbolGetCardRequestSchema,
@@ -61,8 +69,16 @@ import {
   handleAgentFeedback,
   handleAgentFeedbackQuery,
 } from "./agent-feedback.js";
+import type { LiveIndexCoordinator } from "../../live-index/types.js";
 
-export function registerTools(server: MCPServer): void {
+type ToolServices = {
+  liveIndex?: LiveIndexCoordinator;
+};
+
+export function registerTools(
+  server: MCPServer,
+  services: ToolServices = {},
+): void {
   server.registerTool(
     "sdl.repo.register",
     "Register a new repository for indexing",
@@ -82,6 +98,28 @@ export function registerTools(server: MCPServer): void {
     "Refresh index for a repository (full or incremental)",
     IndexRefreshRequestSchema,
     handleIndexRefresh,
+  );
+
+  server.registerTool(
+    "sdl.buffer.push",
+    "Push editor buffer updates for live draft indexing",
+    BufferPushRequestSchema,
+    (args, context) => handleBufferPush(args, context, services.liveIndex),
+  );
+
+  server.registerTool(
+    "sdl.buffer.checkpoint",
+    "Request a live draft checkpoint for a repository",
+    BufferCheckpointRequestSchema,
+    (args, context) =>
+      handleBufferCheckpoint(args, context, services.liveIndex),
+  );
+
+  server.registerTool(
+    "sdl.buffer.status",
+    "Get live draft buffer status for a repository",
+    BufferStatusRequestSchema,
+    (args, context) => handleBufferStatus(args, context, services.liveIndex),
   );
 
   server.registerTool(

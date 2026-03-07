@@ -18,6 +18,7 @@ import { loadConfig } from "../config/loadConfig.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
 import { normalizePath } from "../util/paths.js";
+import { patchSavedFile } from "../live-index/file-patcher.js";
 
 import type { IndexWatchHandle, WatcherHealth } from "./indexer.js";
 
@@ -25,6 +26,25 @@ export type IndexRepoFn = (
   repoId: string,
   mode: "full" | "incremental",
 ) => Promise<unknown>;
+
+export async function processWatchedFileChange(params: {
+  repoId: string;
+  filePath: string;
+  indexRepo: IndexRepoFn;
+  patchSavedFileFn?: (input: { repoId: string; filePath: string }) => Promise<unknown>;
+}): Promise<void> {
+  const { repoId, filePath, indexRepo, patchSavedFileFn } = params;
+  if (patchSavedFileFn) {
+    try {
+      await patchSavedFileFn({ repoId, filePath });
+      return;
+    } catch {
+      // Fall back to repo-wide incremental indexing below.
+    }
+  }
+
+  await indexRepo(repoId, "incremental");
+}
 
 type ChokidarModule = { watch: (path: string, options?: unknown) => unknown };
 
@@ -187,7 +207,16 @@ export async function watchRepositoryWithIndexer(
   ): Promise<void> => {
     try {
       process.stderr.write(`[sdl-mcp] File change detected: ${filePath}\n`);
-      await indexRepo(repoId, "incremental");
+      await processWatchedFileChange({
+        repoId,
+        filePath,
+        indexRepo,
+        patchSavedFileFn: ({ repoId: changedRepoId, filePath: changedFilePath }) =>
+          patchSavedFile({
+            repoId: changedRepoId,
+            filePath: changedFilePath,
+          }),
+      });
       health.eventsProcessed += 1;
       health.pendingChanges = Math.max(0, health.pendingChanges - 1);
       health.lastSuccessfulReindexAt = new Date().toISOString();

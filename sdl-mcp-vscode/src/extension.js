@@ -1,9 +1,11 @@
 const vscode = require("vscode");
+const { createLiveSyncClient } = require("./live-sync.js");
 
 let statusBarItem;
 let diagnosticsChannel;
 let reindexTimer = null;
 let reindexInFlight = false;
+let bufferSyncClient;
 
 function getConfig() {
   const cfg = vscode.workspace.getConfiguration("sdl");
@@ -143,6 +145,30 @@ function scheduleOnSaveReindex() {
   }, 500);
 }
 
+function getDocumentLanguage(document) {
+  return document.languageId || "plaintext";
+}
+
+async function pushBufferEvent(document, eventType, dirty) {
+  if (!bufferSyncClient) {
+    return;
+  }
+  const cfg = getConfig();
+  try {
+    await bufferSyncClient.pushBufferEvent(cfg, {
+      eventType,
+      filePath: vscode.workspace.asRelativePath(document.uri, false),
+      content: document.getText(),
+      language: getDocumentLanguage(document),
+      version: document.version,
+      dirty,
+      timestamp: new Date().toISOString(),
+    });
+  } catch {
+    // Ignore transient live-sync failures. Save fallback handles durability.
+  }
+}
+
 function registerCommands(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand("sdl.showBlastRadius", async () => {
@@ -204,6 +230,7 @@ function registerCommands(context) {
 }
 
 function activate(context) {
+  bufferSyncClient = createLiveSyncClient({ requestJson });
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBarItem.command = "sdl.showDiagnostics";
   statusBarItem.show();
@@ -227,10 +254,31 @@ function activate(context) {
   );
 
   context.subscriptions.push(
-    vscode.workspace.onDidSaveTextDocument(() => {
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      if (event.contentChanges.length === 0) {
+        return;
+      }
+      void pushBufferEvent(event.document, "change", true);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((document) => {
       const cfg = getConfig();
-      if (!cfg.enableOnSaveReindex) return;
-      scheduleOnSaveReindex();
+      void bufferSyncClient.pushSaveWithFallback(cfg, {
+        filePath: vscode.workspace.asRelativePath(document.uri, false),
+        content: document.getText(),
+        language: getDocumentLanguage(document),
+        version: document.version,
+        dirty: false,
+        timestamp: new Date().toISOString(),
+      }).catch(() => undefined);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      void pushBufferEvent(document, "close", document.isDirty);
     }),
   );
 

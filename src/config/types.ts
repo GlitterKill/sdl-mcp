@@ -116,6 +116,17 @@ export const IndexingConfigSchema = z.object({
 
 export type IndexingConfig = z.infer<typeof IndexingConfigSchema>;
 
+export const LiveIndexConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  debounceMs: z.number().int().min(25).max(5000).default(75),
+  idleCheckpointMs: z.number().int().min(1000).max(300000).default(15_000),
+  maxDraftFiles: z.number().int().min(1).max(10_000).default(200),
+  reconcileConcurrency: z.number().int().min(1).max(8).default(1),
+  clusterRefreshThreshold: z.number().int().min(1).max(1000).default(25),
+});
+
+export type LiveIndexConfig = z.infer<typeof LiveIndexConfigSchema>;
+
 export const EdgeWeightsSchema = z.object({
   call: z.number().min(0).default(1.0),
   import: z.number().min(0).default(0.6),
@@ -247,6 +258,7 @@ export const AppConfigSchema = z.object({
   policy: PolicyConfigSchema,
   redaction: RedactionConfigSchema.optional(),
   indexing: IndexingConfigSchema.optional(),
+  liveIndex: LiveIndexConfigSchema.optional(),
   slice: SliceConfigSchema.optional(),
   diagnostics: DiagnosticsConfigSchema.optional(),
   cache: CacheConfigSchema.optional(),

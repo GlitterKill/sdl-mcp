@@ -54,6 +54,14 @@
     "engine": "rust",
     "watchDebounceMs": 300
   },
+  "liveIndex": {
+    "enabled": true,
+    "debounceMs": 75,
+    "idleCheckpointMs": 15000,
+    "maxDraftFiles": 200,
+    "reconcileConcurrency": 1,
+    "clusterRefreshThreshold": 25
+  },
   "slice": {
     "defaultMaxCards": 60,
     "defaultMaxTokens": 12000,

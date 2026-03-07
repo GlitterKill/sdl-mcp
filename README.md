@@ -206,6 +206,7 @@ sdl-mcp serve --stdio --no-watch
 
 - Multi-language repository indexing with tree-sitter adapters
 - Native Rust pass-1 indexing engine by default (`indexing.engine: "rust"`, with TypeScript fallback)
+- Live editor-buffer indexing with draft-aware symbol/search/slice reads, save-time Kuzu patching, background reconciliation, and automatic checkpoint compaction (`liveIndex.*`)
 - Symbol cards with signatures, deps, metrics, and versioning
 - Graph slices with handles, leases, refresh, and spillover
 - Graph enrichment: clusters (community detection) + processes (call-chain traces) surfaced in cards/slices/overview/blast radius
@@ -220,6 +221,7 @@ sdl-mcp serve --stdio --no-watch
 - Agent orchestration tool (`sdl.agent.orchestrate`)
 - Predictive prefetch heuristics with status metrics (`prefetchStats`)
 - File watch debouncing for efficient incremental indexing (`indexing.watchDebounceMs`)
+- Live overlay controls for editor-buffer parsing and idle checkpointing (`liveIndex.debounceMs`, `liveIndex.idleCheckpointMs`, `liveIndex.maxDraftFiles`)
 - Canonical test mapping in symbol cards (`metrics.canonicalTest`)
 - Graph HTTP surface and browser explorer (`/api/graph/*`, `/ui/graph`)
 - VSCode extension MVP in `sdl-mcp-vscode/`

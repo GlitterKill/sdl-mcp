@@ -15,6 +15,16 @@ import {
   configurePrefetch,
   warmPrefetchOnServeStart,
 } from "../../graph/prefetch.js";
+import {
+  configureDefaultLiveIndexCoordinator,
+  getDefaultLiveIndexCoordinator,
+  getDefaultOverlayStore,
+} from "../../live-index/coordinator.js";
+import {
+  DEFAULT_IDLE_CHECKPOINT_INTERVAL_MS,
+  DEFAULT_IDLE_CHECKPOINT_QUIET_PERIOD_MS,
+  IdleMonitor,
+} from "../../live-index/idle-monitor.js";
 
 export async function serveCommand(options: ServeOptions): Promise<void> {
   const configPath = activateCliConfigPath(options.config);
@@ -80,7 +90,24 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   }
 
   const server = new MCPServer();
-  registerTools(server);
+  configureDefaultLiveIndexCoordinator({
+    enabled: config.liveIndex?.enabled ?? true,
+    debounceMs: config.liveIndex?.debounceMs,
+    maxDraftFiles: config.liveIndex?.maxDraftFiles,
+  });
+  const liveIndex = getDefaultLiveIndexCoordinator();
+  const idleMonitor = new IdleMonitor({
+    overlayStore: getDefaultOverlayStore(),
+    checkpointRepo: (request) => liveIndex.checkpointRepo(request),
+    intervalMs: DEFAULT_IDLE_CHECKPOINT_INTERVAL_MS,
+    quietPeriodMs:
+      config.liveIndex?.idleCheckpointMs ??
+      DEFAULT_IDLE_CHECKPOINT_QUIET_PERIOD_MS,
+  });
+  if (config.liveIndex?.enabled ?? true) {
+    idleMonitor.start();
+  }
+  registerTools(server, { liveIndex });
 
   let shutdownCalled = false;
   const shutdown = async (signal: string): Promise<void> => {
@@ -90,6 +117,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     shutdownCalled = true;
     console.error(`\nReceived ${signal}, shutting down gracefully...`);
     await server.stop();
+    idleMonitor.stop();
     await closeKuzuDb();
     for (const watcher of watchers) {
       await watcher.close();
@@ -128,7 +156,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       const host = options.host ?? "localhost";
       const port = options.port ?? 3000;
       console.error(`Starting MCP server on http://${host}:${port}...`);
-      await setupHttpTransport(server, host, port, graphDbPath);
+      await setupHttpTransport(server, host, port, graphDbPath, { liveIndex });
     }
 
     await new Promise(() => {});

@@ -254,6 +254,60 @@
         "watchDebounceMs": 300
       }
     },
+    "liveIndex": {
+      "type": "object",
+      "description": "Live editor-buffer indexing and overlay reconciliation settings",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable live buffer indexing and draft-aware reads",
+          "default": true
+        },
+        "debounceMs": {
+          "type": "integer",
+          "description": "Debounce delay in milliseconds for editor buffer parse work",
+          "minimum": 25,
+          "maximum": 5000,
+          "default": 75
+        },
+        "idleCheckpointMs": {
+          "type": "integer",
+          "description": "Quiet-period threshold in milliseconds before idle checkpoint compaction runs",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 15000
+        },
+        "maxDraftFiles": {
+          "type": "integer",
+          "description": "Maximum number of in-memory draft files allowed per repo",
+          "minimum": 1,
+          "maximum": 10000,
+          "default": 200
+        },
+        "reconcileConcurrency": {
+          "type": "integer",
+          "description": "Reserved concurrency cap for background reconciliation work",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 1
+        },
+        "clusterRefreshThreshold": {
+          "type": "integer",
+          "description": "Touched-symbol threshold that should trigger broader cluster/process refresh behavior",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 25
+        }
+      },
+      "default": {
+        "enabled": true,
+        "debounceMs": 75,
+        "idleCheckpointMs": 15000,
+        "maxDraftFiles": 200,
+        "reconcileConcurrency": 1,
+        "clusterRefreshThreshold": 25
+      }
+    },
     "slice": {
       "type": "object",
       "description": "Graph slice configuration",

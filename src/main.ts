@@ -5,6 +5,16 @@ import { activateCliConfigPath } from "./config/configPath.js";
 import { initGraphDb } from "./db/initGraphDb.js";
 import { closeKuzuDb } from "./db/kuzu.js";
 import { CLEANUP_INTERVAL_MS } from "./config/constants.js";
+import {
+  configureDefaultLiveIndexCoordinator,
+  getDefaultLiveIndexCoordinator,
+  getDefaultOverlayStore,
+} from "./live-index/coordinator.js";
+import {
+  DEFAULT_IDLE_CHECKPOINT_INTERVAL_MS,
+  DEFAULT_IDLE_CHECKPOINT_QUIET_PERIOD_MS,
+  IdleMonitor,
+} from "./live-index/idle-monitor.js";
 
 // MCP servers must use stderr for logging - stdout is reserved for JSON-RPC
 const log = (msg: string) => process.stderr.write(`[sdl-mcp] ${msg}\n`);
@@ -35,7 +45,24 @@ async function main(): Promise<void> {
     // Dynamic imports AFTER migrations - these modules prepare SQL statements
     log("Registering MCP tools...");
     const { registerTools } = await import("./mcp/tools/index.js");
-    registerTools(server);
+    configureDefaultLiveIndexCoordinator({
+      enabled: config.liveIndex?.enabled ?? true,
+      debounceMs: config.liveIndex?.debounceMs,
+      maxDraftFiles: config.liveIndex?.maxDraftFiles,
+    });
+    const liveIndex = getDefaultLiveIndexCoordinator();
+    const idleMonitor = new IdleMonitor({
+      overlayStore: getDefaultOverlayStore(),
+      checkpointRepo: (request) => liveIndex.checkpointRepo(request),
+      intervalMs: DEFAULT_IDLE_CHECKPOINT_INTERVAL_MS,
+      quietPeriodMs:
+        config.liveIndex?.idleCheckpointMs ??
+        DEFAULT_IDLE_CHECKPOINT_QUIET_PERIOD_MS,
+    });
+    if (config.liveIndex?.enabled ?? true) {
+      idleMonitor.start();
+    }
+    registerTools(server, { liveIndex });
 
     if (config.indexing?.enableFileWatching) {
       log("Starting file watchers...");
@@ -85,6 +112,7 @@ async function main(): Promise<void> {
         `\n[sdl-mcp] Received ${signal}, shutting down gracefully...\n`,
       );
       clearInterval(cleanupInterval);
+      idleMonitor.stop();
       await server.stop();
       await closeKuzuDb();
       for (const watcher of watchers) {
