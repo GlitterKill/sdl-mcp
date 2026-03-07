@@ -236,7 +236,7 @@
             "typescript",
             "rust"
           ],
-          "default": "typescript"
+          "default": "rust"
         },
         "watchDebounceMs": {
           "type": "integer",
@@ -250,7 +250,7 @@
         "concurrency": 8,
         "enableFileWatching": true,
         "maxWatchedFiles": 25000,
-        "engine": "typescript",
+        "engine": "rust",
         "watchDebounceMs": 300
       }
     },

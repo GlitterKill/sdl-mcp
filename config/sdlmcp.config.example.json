@@ -51,7 +51,7 @@
     "enableFileWatching": true,
     "maxWatchedFiles": 25000,
     "workerPoolSize": null,
-    "engine": "typescript",
+    "engine": "rust",
     "watchDebounceMs": 300
   },
   "slice": {

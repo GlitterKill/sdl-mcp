@@ -15,11 +15,18 @@ jobs:
   tests:
     name: Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    needs: native-build
     if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            native-artifact: native-addon-x86_64-unknown-linux-gnu
+            native-addon-file: sdl-mcp-native.linux-x64-gnu.node
+          - os: windows-latest
+            native-artifact: native-addon-x86_64-pc-windows-msvc
+            native-addon-file: sdl-mcp-native.win32-x64-msvc.node
 
     steps:
       - name: Checkout code
@@ -74,6 +81,25 @@ jobs:
           if [ -f node_modules/kuzu/install.js ]; then
             cd node_modules/kuzu && node install.js
           fi
+
+      - name: Download native addon artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.native-artifact }}
+          path: native
+
+      - name: Configure Rust indexer addon path
+        shell: bash
+        run: |
+          RELATIVE_ADDON_PATH="native/${{ matrix.native-addon-file }}"
+          if [ ! -f "$RELATIVE_ADDON_PATH" ]; then
+            echo "[ERROR] Native addon not found at $RELATIVE_ADDON_PATH"
+            find native -maxdepth 3 -name "*.node" -print || true
+            exit 1
+          fi
+          ADDON_PATH=$(node -e "const path=require('path'); console.log(path.resolve(process.cwd(), process.argv[1]).replace(/\\\\/g, '/'))" "$RELATIVE_ADDON_PATH")
+          echo "SDL_MCP_NATIVE_ADDON_PATH=$ADDON_PATH" >> "$GITHUB_ENV"
+          echo "Using native addon: $ADDON_PATH"
 
       - name: Build all
         run: npm run build:all
@@ -182,11 +208,18 @@ jobs:
   benchmarks:
     name: Benchmarks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    needs: native-build
     if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            native-artifact: native-addon-x86_64-unknown-linux-gnu
+            native-addon-file: sdl-mcp-native.linux-x64-gnu.node
+          - os: windows-latest
+            native-artifact: native-addon-x86_64-pc-windows-msvc
+            native-addon-file: sdl-mcp-native.win32-x64-msvc.node
 
     steps:
       - name: Checkout code
@@ -229,6 +262,25 @@ jobs:
           if [ -f node_modules/kuzu/install.js ]; then
             cd node_modules/kuzu && node install.js
           fi
+
+      - name: Download native addon artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.native-artifact }}
+          path: native
+
+      - name: Configure Rust indexer addon path
+        shell: bash
+        run: |
+          RELATIVE_ADDON_PATH="native/${{ matrix.native-addon-file }}"
+          if [ ! -f "$RELATIVE_ADDON_PATH" ]; then
+            echo "[ERROR] Native addon not found at $RELATIVE_ADDON_PATH"
+            find native -maxdepth 3 -name "*.node" -print || true
+            exit 1
+          fi
+          ADDON_PATH=$(node -e "const path=require('path'); console.log(path.resolve(process.cwd(), process.argv[1]).replace(/\\\\/g, '/'))" "$RELATIVE_ADDON_PATH")
+          echo "SDL_MCP_NATIVE_ADDON_PATH=$ADDON_PATH" >> "$GITHUB_ENV"
+          echo "Using native addon: $ADDON_PATH"
 
       - name: Build all
         run: npm run build:all
@@ -320,21 +372,27 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             run-tests: true
+            addon-file: sdl-mcp-native.win32-x64-msvc.node
           - target: x86_64-apple-darwin
             os: macos-latest
             run-tests: false
+            addon-file: sdl-mcp-native.darwin-x64.node
           - target: aarch64-apple-darwin
             os: macos-latest
             run-tests: true
+            addon-file: sdl-mcp-native.darwin-arm64.node
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             run-tests: true
+            addon-file: sdl-mcp-native.linux-x64-gnu.node
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             run-tests: false
+            addon-file: sdl-mcp-native.linux-x64-musl.node
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             run-tests: false
+            addon-file: sdl-mcp-native.linux-arm64-gnu.node
 
     steps:
       - name: Checkout code
@@ -390,6 +448,19 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
+      - name: Configure built native addon path
+        shell: bash
+        run: |
+          RELATIVE_ADDON_PATH="native/${{ matrix.addon-file }}"
+          if [ ! -f "$RELATIVE_ADDON_PATH" ]; then
+            echo "[ERROR] Built native addon not found at $RELATIVE_ADDON_PATH"
+            find native -maxdepth 3 -name "*.node" -print || true
+            exit 1
+          fi
+          ADDON_PATH=$(node -e "const path=require('path'); console.log(path.resolve(process.cwd(), process.argv[1]).replace(/\\\\/g, '/'))" "$RELATIVE_ADDON_PATH")
+          echo "SDL_MCP_NATIVE_ADDON_PATH=$ADDON_PATH" >> "$GITHUB_ENV"
+          echo "Using built native addon: $ADDON_PATH"
+
       - name: Build TypeScript
         if: matrix.run-tests
         run: npm run build:all
@@ -402,7 +473,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-addon-${{ matrix.target }}
-          path: native/*.node
+          path: native/${{ matrix.addon-file }}
           retention-days: 7
 
   benchmark-matrix-nightly:
@@ -425,12 +496,44 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-${{ hashFiles('native/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-
+
       - name: Setup kuzu native binary
         shell: bash
         run: |
           if [ -f node_modules/kuzu/install.js ]; then
             cd node_modules/kuzu && node install.js
           fi
+
+      - name: Build native addon
+        run: npx napi build --release --cargo-cwd native --config native/package.json --target x86_64-unknown-linux-gnu native
+
+      - name: Configure Rust indexer addon path
+        shell: bash
+        run: |
+          RELATIVE_ADDON_PATH="native/sdl-mcp-native.linux-x64-gnu.node"
+          if [ ! -f "$RELATIVE_ADDON_PATH" ]; then
+            echo "[ERROR] Native addon not found at $RELATIVE_ADDON_PATH"
+            find native -maxdepth 3 -name "*.node" -print || true
+            exit 1
+          fi
+          ADDON_PATH=$(node -e "const path=require('path'); console.log(path.resolve(process.cwd(), process.argv[1]).replace(/\\\\/g, '/'))" "$RELATIVE_ADDON_PATH")
+          echo "SDL_MCP_NATIVE_ADDON_PATH=$ADDON_PATH" >> "$GITHUB_ENV"
+          echo "Using native addon: $ADDON_PATH"
 
       - name: Build all
         run: npm run build:all
@@ -467,13 +570,20 @@ jobs:
     # `${{ matrix.* }}` expression in the Actions UI before matrix expansion.
     name: Sync Indexed Memory
     runs-on: ${{ matrix.os }}
-    needs: tests
+    needs: [tests, native-build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        node-version: [20.x]
+        include:
+          - os: ubuntu-latest
+            node-version: 20.x
+            native-artifact: native-addon-x86_64-unknown-linux-gnu
+            native-addon-file: sdl-mcp-native.linux-x64-gnu.node
+          - os: windows-latest
+            node-version: 20.x
+            native-artifact: native-addon-x86_64-pc-windows-msvc
+            native-addon-file: sdl-mcp-native.win32-x64-msvc.node
 
     steps:
       - name: Checkout code
@@ -513,6 +623,25 @@ jobs:
           if [ -f node_modules/kuzu/install.js ]; then
             cd node_modules/kuzu && node install.js
           fi
+
+      - name: Download native addon artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.native-artifact }}
+          path: native
+
+      - name: Configure Rust indexer addon path
+        shell: bash
+        run: |
+          RELATIVE_ADDON_PATH="native/${{ matrix.native-addon-file }}"
+          if [ ! -f "$RELATIVE_ADDON_PATH" ]; then
+            echo "[ERROR] Native addon not found at $RELATIVE_ADDON_PATH"
+            find native -maxdepth 3 -name "*.node" -print || true
+            exit 1
+          fi
+          ADDON_PATH=$(node -e "const path=require('path'); console.log(path.resolve(process.cwd(), process.argv[1]).replace(/\\\\/g, '/'))" "$RELATIVE_ADDON_PATH")
+          echo "SDL_MCP_NATIVE_ADDON_PATH=$ADDON_PATH" >> "$GITHUB_ENV"
+          echo "Using native addon: $ADDON_PATH"
 
       - name: Build all
         run: npm run build:all

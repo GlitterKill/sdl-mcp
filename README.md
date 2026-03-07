@@ -80,7 +80,7 @@ Response: "# What is SDL-MCP?
 
   ### 1. Symbol Indexing
 
-  SDL-MCP parses your TypeScript/JavaScript codebase using tree-sitter (or an optional Rust native indexer) and extracts
+  SDL-MCP parses your TypeScript/JavaScript codebase using a Rust native indexer by default, with the TypeScript tree-sitter path as fallback, and extracts
    every function, class, interface, type, and variable into **Symbol Cards** — compact metadata records containing the
   symbol's signature, a brief summary, dependency edges, and metrics like fan-in/out.
 
@@ -205,7 +205,7 @@ sdl-mcp serve --stdio --no-watch
 ## Core Feature Set
 
 - Multi-language repository indexing with tree-sitter adapters
-- Optional native Rust pass-1 indexing engine (`indexing.engine: "rust"`)
+- Native Rust pass-1 indexing engine by default (`indexing.engine: "rust"`, with TypeScript fallback)
 - Symbol cards with signatures, deps, metrics, and versioning
 - Graph slices with handles, leases, refresh, and spillover
 - Graph enrichment: clusters (community detection) + processes (call-chain traces) surfaced in cards/slices/overview/blast radius

@@ -56,12 +56,12 @@ describe("IndexingConfigSchema defaults", () => {
     );
   });
 
-  it("engine defaults to 'typescript' when not specified", () => {
+  it("engine defaults to 'rust' when not specified", () => {
     const result = IndexingConfigSchema.parse({});
     assert.strictEqual(
       result.engine,
-      "typescript",
-      "engine should default to 'typescript'",
+      "rust",
+      "engine should default to 'rust'",
     );
   });
 

@@ -486,7 +486,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
       concurrency: DEFAULT_INDEXING_CONCURRENCY,
       enableFileWatching: true,
       maxWatchedFiles: WATCHER_DEFAULT_MAX_WATCHED_FILES,
-      engine: "typescript" as const,
+      engine: "rust" as const,
       watchDebounceMs: 300,
     },
     slice: {

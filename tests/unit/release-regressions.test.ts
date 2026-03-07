@@ -44,6 +44,59 @@ describe("release regression guards", () => {
     );
   });
 
+  it("defaults install-time indexing config to the Rust engine", () => {
+    const configTypesSource = readSource("src/config/types.ts");
+    const initSource = readSource("src/cli/commands/init.ts");
+    const exampleConfigSource = readSource("config/sdlmcp.config.example.json");
+    const schemaSource = readSource("config/sdlmcp.config.schema.json");
+
+    assert.match(
+      configTypesSource,
+      /engine:\s*z\.enum\(\["typescript", "rust"\]\)\.default\("rust"\)/,
+      "Zod config defaults should prefer the Rust indexer",
+    );
+
+    assert.match(
+      initSource,
+      /indexing:\s*\{[\s\S]*engine:\s*"rust"\s+as\s+const,/s,
+      "init command should scaffold Rust as the default indexing engine",
+    );
+
+    assert.match(
+      exampleConfigSource,
+      /"engine":\s*"rust"/,
+      "example config should advertise the Rust indexer as the default",
+    );
+
+    assert.match(
+      schemaSource,
+      /"engine":\s*\{[\s\S]*"default":\s*"rust"[\s\S]*\}[\s\S]*"default":\s*\{[\s\S]*"engine":\s*"rust"/s,
+      "JSON schema should default indexing.engine to rust in both field and object defaults",
+    );
+  });
+
+  it("downloads freshly built native addons before CI test and benchmark jobs run", () => {
+    const ciSource = readSource(".github/workflows/ci.yml");
+
+    assert.match(
+      ciSource,
+      /tests:\s*[\s\S]*needs:\s*native-build[\s\S]*uses:\s*actions\/download-artifact@v4[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
+      "tests job should wait for native builds and export the downloaded addon path",
+    );
+
+    assert.match(
+      ciSource,
+      /benchmarks:\s*[\s\S]*needs:\s*native-build[\s\S]*uses:\s*actions\/download-artifact@v4[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
+      "benchmarks job should run against the freshly built native addon",
+    );
+
+    assert.match(
+      ciSource,
+      /sync-memory:\s*[\s\S]*needs:\s*\[[^\]]*tests[^\]]*native-build[^\]]*\][\s\S]*uses:\s*actions\/download-artifact@v4[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
+      "sync-memory job should also consume the freshly built native addon",
+    );
+  });
+
   it("preserves native Rust symbol identity fields in mapper output", () => {
     const source = readSource("src/indexer/rustIndexer.ts");
 
