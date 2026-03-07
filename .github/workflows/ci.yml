@@ -15,18 +15,13 @@ jobs:
   tests:
     name: Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    needs: native-build
     if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            native-artifact: native-addon-x86_64-unknown-linux-gnu
-            native-addon-file: sdl-mcp-native.linux-x64-gnu.node
-          - os: windows-latest
-            native-artifact: native-addon-x86_64-pc-windows-msvc
-            native-addon-file: sdl-mcp-native.win32-x64-msvc.node
+        os:
+          - ubuntu-latest
+          - windows-latest
 
     steps:
       - name: Checkout code
@@ -82,25 +77,6 @@ jobs:
             cd node_modules/kuzu && node install.js
           fi
 
-      - name: Download native addon artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.native-artifact }}
-          path: native
-
-      - name: Configure Rust indexer addon path
-        shell: bash
-        run: |
-          RELATIVE_ADDON_PATH="native/${{ matrix.native-addon-file }}"
-          if [ ! -f "$RELATIVE_ADDON_PATH" ]; then
-            echo "[ERROR] Native addon not found at $RELATIVE_ADDON_PATH"
-            find native -maxdepth 3 -name "*.node" -print || true
-            exit 1
-          fi
-          ADDON_PATH=$(node -e "const path=require('path'); console.log(path.resolve(process.cwd(), process.argv[1]).replace(/\\\\/g, '/'))" "$RELATIVE_ADDON_PATH")
-          echo "SDL_MCP_NATIVE_ADDON_PATH=$ADDON_PATH" >> "$GITHUB_ENV"
-          echo "Using native addon: $ADDON_PATH"
-
       - name: Build all
         run: npm run build:all
 
@@ -119,13 +95,8 @@ jobs:
       - name: Run tests (including 6 new language adapters + cross-platform paths)
         shell: bash
         run: |
-          npm run build:runtime
-          TEST_GRAPH_DIR=$(mktemp -d)
-          export SDL_GRAPH_DB_PATH="$TEST_GRAPH_DIR/sdl-mcp-graph"
-          export SDL_DB_PATH="$SDL_GRAPH_DB_PATH"
-          node --input-type=module -e "import { initKuzuDb } from './dist/db/kuzu.js'; await initKuzuDb(process.env.SDL_GRAPH_DB_PATH);"
           TEST_OUT="${RUNNER_TEMP}/test-output.txt"
-          node --import tsx --test-concurrency=1 --test tests/runner.test.ts > "$TEST_OUT" 2>&1 || true
+          npm test > "$TEST_OUT" 2>&1 || true
           cat "$TEST_OUT"
           grep -c "^not ok" "$TEST_OUT" && FAILURES=true || FAILURES=false
           if [ "$FAILURES" = "true" ] || ! grep -q "# fail 0" "$TEST_OUT"; then

@@ -10,11 +10,16 @@ describe("Native parser chaos", () => {
   const throwsAddon = resolve(process.cwd(), "tests/fixtures/native-addon/throws.cjs");
   const badCountAddon = resolve(process.cwd(), "tests/fixtures/native-addon/bad-count.cjs");
 
-  const run = (addonPath: string): unknown => {
+  const run = (
+    addonPath: string,
+    envOverrides: Record<string, string> = {},
+  ): unknown => {
     const proc = spawnSync(process.execPath, ["--import", "tsx", runner], {
       env: {
         ...process.env,
         SDL_MCP_NATIVE_ADDON_PATH: addonPath,
+        SDL_MCP_DISABLE_NATIVE_ADDON: "",
+        ...envOverrides,
       },
       encoding: "utf8",
     });
@@ -63,6 +68,13 @@ describe("Native parser chaos", () => {
 
   it("returns null when native addon returns mismatched result count", () => {
     const result = run(badCountAddon);
+    assert.strictEqual(result, null);
+  });
+
+  it("returns null when native addon loading is explicitly disabled", () => {
+    const result = run(okAddon, {
+      SDL_MCP_DISABLE_NATIVE_ADDON: "1",
+    });
     assert.strictEqual(result, null);
   });
 });

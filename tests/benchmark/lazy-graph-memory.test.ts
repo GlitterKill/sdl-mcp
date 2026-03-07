@@ -75,8 +75,11 @@ describe("Lazy Graph Memory Benchmark (Kuzu)", () => {
   let graphOps: typeof import("../../dist/graph/buildGraph.js");
   let queries: typeof import("../../dist/db/kuzu-queries.js");
   let kuzuAvailable = true;
+  let setupError: unknown = null;
 
   beforeEach(async () => {
+    kuzuAvailable = true;
+    setupError = null;
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
@@ -84,8 +87,9 @@ describe("Lazy Graph Memory Benchmark (Kuzu)", () => {
       queries = await import("../../dist/db/kuzu-queries.js");
       graphOps.resetLoadStats();
       forceGC();
-    } catch {
+    } catch (error) {
       kuzuAvailable = false;
+      setupError = error;
     }
   });
 
@@ -94,7 +98,14 @@ describe("Lazy Graph Memory Benchmark (Kuzu)", () => {
     await cleanupTestDb(db, conn);
   });
 
-  it("measures memory usage for neighborhood loads", { skip: !kuzuAvailable }, async () => {
+  it("measures memory usage for neighborhood loads", async (t) => {
+    if (!kuzuAvailable) {
+      const reason =
+        setupError instanceof Error ? setupError.message : "Kuzu setup unavailable";
+      t.skip(reason);
+      return;
+    }
+
     const kConn = conn as unknown as import("kuzu").Connection;
 
     await queries.upsertRepo(kConn, {

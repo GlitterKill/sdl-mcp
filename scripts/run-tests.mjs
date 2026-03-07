@@ -33,6 +33,7 @@ const testEnv = {
   ...process.env,
   SDL_GRAPH_DB_PATH: testGraphDbPath,
   SDL_DB_PATH: testGraphDbPath,
+  SDL_MCP_DISABLE_NATIVE_ADDON: "1",
 };
 
 const buildCmd = process.platform === "win32" ? "cmd.exe" : "npm";

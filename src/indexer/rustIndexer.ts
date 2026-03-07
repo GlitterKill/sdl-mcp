@@ -147,6 +147,7 @@ interface NativeAddon {
 
 let nativeAddon: NativeAddon | null = null;
 let loadAttempted = false;
+let nativeDisableLogged = false;
 
 function isCompatibleNativeAddon(addon: unknown): addon is NativeAddon {
   if (!addon || typeof addon !== "object") return false;
@@ -160,6 +161,18 @@ function isCompatibleNativeAddon(addon: unknown): addon is NativeAddon {
 }
 
 function loadNativeAddon(): NativeAddon | null {
+  const disableNativeAddon = /^(1|true)$/i.test(
+    process.env.SDL_MCP_DISABLE_NATIVE_ADDON ?? "",
+  );
+  if (disableNativeAddon) {
+    if (!nativeDisableLogged) {
+      logger.info("Native Rust indexer explicitly disabled by environment");
+      nativeDisableLogged = true;
+    }
+    return null;
+  }
+  nativeDisableLogged = false;
+
   if (loadAttempted) return nativeAddon;
   loadAttempted = true;
 

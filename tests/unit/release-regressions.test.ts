@@ -75,24 +75,58 @@ describe("release regression guards", () => {
     );
   });
 
-  it("downloads freshly built native addons before CI test and benchmark jobs run", () => {
+  it("keeps the broad CI suite non-native while native-dependent jobs consume built addons", () => {
     const ciSource = readSource(".github/workflows/ci.yml");
+    const runTestsSource = readSource("scripts/run-tests.mjs");
+    const testsJob = ciSource.match(/tests:\s*[\s\S]*?\n  benchmarks:/)?.[0] ?? "";
+    const benchmarksJob =
+      ciSource.match(/benchmarks:\s*[\s\S]*?\n  native-build:/)?.[0] ?? "";
+    const syncMemoryJob =
+      ciSource.match(/sync-memory:\s*[\s\S]*?\n  sync-validation:/)?.[0] ?? "";
 
-    assert.match(
-      ciSource,
-      /tests:\s*[\s\S]*needs:\s*native-build[\s\S]*uses:\s*actions\/download-artifact@v4[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
-      "tests job should wait for native builds and export the downloaded addon path",
+    assert.ok(testsJob, "tests job section should be present in ci workflow");
+    assert.ok(
+      benchmarksJob,
+      "benchmarks job section should be present in ci workflow",
+    );
+    assert.ok(
+      syncMemoryJob,
+      "sync-memory job section should be present in ci workflow",
     );
 
     assert.match(
-      ciSource,
-      /benchmarks:\s*[\s\S]*needs:\s*native-build[\s\S]*uses:\s*actions\/download-artifact@v4[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
+      runTestsSource,
+      /SDL_MCP_DISABLE_NATIVE_ADDON:\s*"1"/,
+      "generic npm test harness should explicitly disable the native addon to avoid flaky teardown crashes",
+    );
+
+    assert.doesNotMatch(
+      testsJob,
+      /tests:\s*[\s\S]*needs:\s*native-build/s,
+      "tests job should not depend on native-build once the generic test harness disables the native addon",
+    );
+
+    assert.doesNotMatch(
+      testsJob,
+      /name:\s*Download native addon artifact[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}/s,
+      "tests job should not download native artifacts when the generic suite is intentionally non-native",
+    );
+
+    assert.doesNotMatch(
+      testsJob,
+      /SDL_MCP_NATIVE_ADDON_PATH=/s,
+      "tests job should not export a native addon path",
+    );
+
+    assert.match(
+      benchmarksJob,
+      /needs:\s*native-build[\s\S]*uses:\s*actions\/download-artifact@v4[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
       "benchmarks job should run against the freshly built native addon",
     );
 
     assert.match(
-      ciSource,
-      /sync-memory:\s*[\s\S]*needs:\s*\[[^\]]*tests[^\]]*native-build[^\]]*\][\s\S]*uses:\s*actions\/download-artifact@v4[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
+      syncMemoryJob,
+      /needs:\s*\[[^\]]*tests[^\]]*native-build[^\]]*\][\s\S]*uses:\s*actions\/download-artifact@v4[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
       "sync-memory job should also consume the freshly built native addon",
     );
   });
