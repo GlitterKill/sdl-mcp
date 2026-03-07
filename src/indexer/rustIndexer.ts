@@ -171,6 +171,7 @@ function loadNativeAddon(): NativeAddon | null {
     }
     return null;
   }
+  // Reset so toggling the env var at runtime re-emits the log on the next disable.
   nativeDisableLogged = false;
 
   if (loadAttempted) return nativeAddon;

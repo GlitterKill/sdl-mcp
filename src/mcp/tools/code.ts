@@ -83,7 +83,14 @@ function buildPolicyNextBestAction(params: {
         },
         rationale,
       };
-    case "requestHotPath":
+    case "requestHotPath": {
+      const identifiersToFind =
+        requiredFieldsForNext?.requestHotPath?.identifiersToFind ??
+        request.identifiersToFind;
+      // getHotPath requires minItems:1; fall back rather than emit an invalid call.
+      if (identifiersToFind.length === 0) {
+        return fallback;
+      }
       return {
         tool: "sdl.code.getHotPath",
         args: {
@@ -91,15 +98,14 @@ function buildPolicyNextBestAction(params: {
             requiredFieldsForNext?.requestHotPath?.repoId ?? request.repoId,
           symbolId:
             requiredFieldsForNext?.requestHotPath?.symbolId ?? request.symbolId,
-          identifiersToFind:
-            requiredFieldsForNext?.requestHotPath?.identifiersToFind ??
-            request.identifiersToFind,
+          identifiersToFind,
           ...(requiredFieldsForNext?.requestHotPath?.maxTokens
             ? { maxTokens: requiredFieldsForNext.requestHotPath.maxTokens }
             : {}),
         },
         rationale,
       };
+    }
     case "requestRaw":
       return {
         tool: "sdl.code.needWindow",
@@ -164,6 +170,8 @@ function buildPolicyNextBestAction(params: {
         rationale: requiredFieldsForNext?.narrowScope?.reason ?? rationale,
       };
     case "retryWithSameInputs":
+      // Forward all original request fields (including sliceContext if present),
+      // unlike "requestRaw" which rebuilds args selectively from requiredFieldsForNext.
       return {
         tool: "sdl.code.needWindow",
         args: {
