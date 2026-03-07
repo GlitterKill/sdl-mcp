@@ -28,19 +28,21 @@ export function createDebouncedJobScheduler<T>(options: SchedulerOptions<T>) {
       rejectCompletion = reject;
     });
 
-    const timer = setTimeout(async () => {
-      const current = jobs.get(key);
-      if (!current) {
-        return;
-      }
-      try {
-        await options.run(key, current.payload);
-        current.resolveCompletion();
-      } catch (err) {
-        current.rejectCompletion(err);
-      } finally {
-        jobs.delete(key);
-      }
+    const timer = setTimeout(() => {
+      void (async () => {
+        const current = jobs.get(key);
+        if (!current) {
+          return;
+        }
+        try {
+          await options.run(key, current.payload);
+          current.resolveCompletion();
+        } catch (err) {
+          current.rejectCompletion(err);
+        } finally {
+          jobs.delete(key);
+        }
+      })();
     }, options.delayMs);
 
     jobs.set(key, {

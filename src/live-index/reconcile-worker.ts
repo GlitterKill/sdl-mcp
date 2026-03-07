@@ -52,7 +52,7 @@ export class ReconcileWorker {
       const visitedFiles = new Set<string>();
       let iterations = 0;
 
-      while (true) {
+      while (this.draining) {
         if (iterations >= MAX_DRAIN_ITERATIONS) {
           console.error(`[ReconcileWorker] Reached MAX_DRAIN_ITERATIONS (${MAX_DRAIN_ITERATIONS}). Possible infinite loop in dependency frontier expansion.`);
           break;
