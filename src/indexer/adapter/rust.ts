@@ -452,7 +452,7 @@ function extractGenerics(node: Parser.SyntaxNode): string[] | undefined {
   if (!typeParametersNode) return undefined;
 
   for (const child of typeParametersNode.children) {
-    if (child.type === "type_identifier") {
+    if (child.type === "type_identifier" || child.type === "type_parameter") {
       generics.push(child.text);
     }
   }

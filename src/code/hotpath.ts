@@ -18,8 +18,8 @@ import * as kuzuDb from "../db/kuzu-queries.js";
 const tsParser = new Parser();
 const tsxParser = new Parser();
 
-tsParser.setLanguage(TypeScript.typescript);
-tsxParser.setLanguage(TypeScript.tsx);
+tsParser.setLanguage(TypeScript.typescript as unknown as Parser.Language);
+tsxParser.setLanguage(TypeScript.tsx as unknown as Parser.Language);
 
 export interface HotPathOptions {
   maxLines?: number;

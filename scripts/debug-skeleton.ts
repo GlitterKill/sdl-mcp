@@ -86,9 +86,9 @@ for (const symbol of srcFunctions.slice(0, 3)) {
   const parser = new Parser();
   try {
     if (isTS) {
-      parser.setLanguage(TypeScript.typescript);
+      parser.setLanguage(TypeScript.typescript as unknown as Parser.Language);
     } else {
-      parser.setLanguage(TypeScript.tsx);
+      parser.setLanguage(TypeScript.tsx as unknown as Parser.Language);
     }
     console.log(`   Parser language set`);
   } catch (e) {

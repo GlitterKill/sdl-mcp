@@ -559,6 +559,12 @@ function extractImports(tree: Parser.Tree): ExtractedImport[] {
           continue;
         }
 
+        // Skip alias name captures (tree-sitter-php 0.24.2+ matches both
+        // qualified_name and alias name separately)
+        if (node.previousSibling && node.previousSibling.type === "as") {
+          continue;
+        }
+
         const statement = useClause.parent;
         if (!statement || statement.type !== "namespace_use_declaration") {
           continue;
@@ -575,23 +581,21 @@ function extractImports(tree: Parser.Tree): ExtractedImport[] {
           imports: [],
           isReExport: false,
         };
+        // tree-sitter-php 0.24.2+: alias is flat: qualified_name, "as", name
+        // tree-sitter-php 0.22.x: alias was wrapped in namespace_aliasing_clause
+        const hasAs = useClause.children.some((c) => c.type === "as");
+        const aliasNode = hasAs
+          ? useClause.children.find(
+              (c) => c.type === "name" && c.text !== node.text,
+            )
+          : undefined;
 
-        const aliasingClause = useClause.children.find(
-          (c) => c.type === "namespace_aliasing_clause",
-        );
-
-        if (aliasingClause) {
-          const aliasNameNode = aliasingClause.children.find(
-            (c) => c.type === "name",
-          );
-          if (aliasNameNode) {
-            result.imports.push(aliasNameNode.text);
-          }
+        if (aliasNode) {
+          result.imports.push(aliasNode.text);
         } else {
           const parts = specifier.split("\\");
           result.imports.push(parts[parts.length - 1]);
         }
-
         imports.push(result);
       } else if (capture.name === "include_path") {
         const node = capture.node;
