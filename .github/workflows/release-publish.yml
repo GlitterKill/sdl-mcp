@@ -135,7 +135,7 @@ jobs:
             ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Build native addon
         run: npx napi build --release --cargo-cwd native --config native/package.json --target ${{ matrix.target }} native
@@ -183,7 +183,7 @@ jobs:
           echo "npm $(npm --version)"
 
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Set package versions from release
         shell: bash

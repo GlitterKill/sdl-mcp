@@ -68,7 +68,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup kuzu native binary
         shell: bash
@@ -225,7 +225,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup kuzu native binary
         shell: bash
@@ -404,7 +404,7 @@ jobs:
             ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup kuzu native binary
         if: matrix.run-tests
@@ -478,7 +478,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -612,7 +612,7 @@ jobs:
             ${{ runner.os }}-dist-
 
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup kuzu native binary
         shell: bash
@@ -774,7 +774,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup kuzu native binary
         shell: bash
