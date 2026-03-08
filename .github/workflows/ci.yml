@@ -70,6 +70,9 @@ jobs:
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts --legacy-peer-deps
 
+      - name: Setup tree-sitter native binding
+        run: npm rebuild tree-sitter
+
       - name: Setup kuzu native binary
         shell: bash
         run: |
@@ -226,6 +229,9 @@ jobs:
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Setup tree-sitter native binding
+        run: npm rebuild tree-sitter
 
       - name: Setup kuzu native binary
         shell: bash
@@ -406,6 +412,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
+      - name: Setup tree-sitter native binding
+        run: npm rebuild tree-sitter
+
       - name: Setup kuzu native binary
         if: matrix.run-tests
         shell: bash
@@ -479,6 +488,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Setup tree-sitter native binding
+        run: npm rebuild tree-sitter
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -613,6 +625,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Setup tree-sitter native binding
+        run: npm rebuild tree-sitter
 
       - name: Setup kuzu native binary
         shell: bash
@@ -775,6 +790,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Setup tree-sitter native binding
+        run: npm rebuild tree-sitter
 
       - name: Setup kuzu native binary
         shell: bash

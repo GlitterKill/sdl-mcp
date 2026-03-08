@@ -83,6 +83,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
+      - name: Setup tree-sitter native binding
+        run: npm rebuild tree-sitter
+
       - name: Build native addon
         run: npx napi build --release --cargo-cwd native --config native/package.json --target ${{ matrix.target }} native
         env:
@@ -112,6 +115,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Setup tree-sitter native binding
+        run: npm rebuild tree-sitter
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
