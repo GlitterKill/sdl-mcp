@@ -184,14 +184,14 @@ export async function indexRepo(
     const pendingCallEdges: PendingCallEdge[] = [];
     const createdCallEdges = new Set<string>();
 
-    logger.debug("Initializing TS call resolver", { repoId });
-    const tsResolver: TsCallResolver | null = createTsCallResolver(
-      repoRow.rootPath,
-      files,
-      {
-        includeNodeModulesTypes: config.includeNodeModulesTypes ?? true,
-      },
-    );
+    // Skip TS call resolver when Rust engine is active — it starts a full
+    // TypeScript compiler program which is expensive and unused in that path.
+    logger.debug("Initializing TS call resolver", { repoId, useRustEngine });
+    const tsResolver: TsCallResolver | null = useRustEngine
+      ? null
+      : createTsCallResolver(repoRow.rootPath, files, {
+          includeNodeModulesTypes: config.includeNodeModulesTypes ?? true,
+        });
     logger.debug("TS call resolver initialized", {
       repoId,
       enabled: Boolean(tsResolver),

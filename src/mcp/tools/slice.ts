@@ -49,7 +49,7 @@ import {
 } from "../../config/constants.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyConfigSchema } from "../../config/types.js";
-import { createPolicyDenial } from "../errors.js";
+import { createPolicyDenial, DatabaseError, ValidationError } from "../errors.js";
 import { pickDepLabel } from "../../util/depLabels.js";
 import {
   withSpan,
@@ -710,31 +710,33 @@ export async function handleSliceBuild(
   try {
     return await handleSliceBuildInternal(args);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const parsed = safeParseArgs(args);
 
-    if (message.includes("Repository not found")) {
-      const parsed = safeParseArgs(args);
+    if (error instanceof DatabaseError) {
       return sliceErrorToResponse({
         type: "invalid_repo",
         repoId: parsed?.repoId ?? "unknown",
       });
     }
 
-    if (message.includes("No version found")) {
-      const parsed = safeParseArgs(args);
+    if (error instanceof ValidationError) {
       return sliceErrorToResponse({
         type: "no_version",
         repoId: parsed?.repoId ?? "unknown",
       });
     }
 
-    if (message.includes("Policy denied")) {
+    // PolicyDenialError (from createPolicyDenial) has code === POLICY_ERROR
+    const codeError = error as { code?: string };
+    if (codeError.code === "POLICY_ERROR") {
+      const message = error instanceof Error ? error.message : String(error);
       return sliceErrorToResponse({
         type: "policy_denied",
         reason: message.replace("Policy denied slice request: ", ""),
       });
     }
 
+    const message = error instanceof Error ? error.message : String(error);
     return sliceErrorToResponse({
       type: "internal",
       message,
@@ -792,7 +794,7 @@ async function handleSliceBuildInternal(
 
     const repo = await kuzuDb.getRepo(conn, repoId);
     if (!repo) {
-      throw new Error(`Repository not found: ${repoId}`);
+      throw new DatabaseError(`Repository not found: ${repoId}`);
     }
     const repoConfig = JSON.parse(repo.configJson);
     const mergedPolicy = PolicyConfigSchema.parse({
@@ -843,7 +845,7 @@ async function handleSliceBuildInternal(
 
     const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
     if (!latestVersion) {
-      throw new Error(
+      throw new ValidationError(
         `No version found for repo ${repoId}. Please run indexing first.`,
       );
     }

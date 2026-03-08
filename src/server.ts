@@ -99,8 +99,47 @@ export class MCPServer {
             "symbolId",
           );
 
+          // Centralized input validation: parse against the registered Zod schema
+          // before dispatching to the handler. This ensures all tools receive
+          // validated, coerced arguments regardless of individual handler logic.
+          const parseResult = tool.inputSchema.safeParse(request.params.arguments);
+          if (!parseResult.success) {
+            const validationError = {
+              error: {
+                message: "Invalid tool arguments",
+                code: "VALIDATION_ERROR",
+                details: parseResult.error.issues.map((issue) => ({
+                  path: issue.path.join("."),
+                  message: issue.message,
+                })),
+              },
+            };
+            process.stderr.write(
+              `[sdl-mcp] Tool ${request.params.name} validation error: ${JSON.stringify(validationError)}
+`,
+            );
+            logToolCall({
+              tool: request.params.name,
+              request: request.params.arguments as Record<string, unknown>,
+              response: validationError,
+              durationMs: Date.now() - start,
+              repoId,
+              symbolId,
+            });
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(validationError, null, 2),
+                },
+              ],
+              isError: true,
+            };
+          }
+
           try {
-            const result = await tool.handler(request.params.arguments, toolContext);
+            // Pass the parsed (validated + coerced) data to the handler
+            const result = await tool.handler(parseResult.data, toolContext);
 
             // Inject _tokenUsage and strip _rawContext before serialization
             let finalResult = result;

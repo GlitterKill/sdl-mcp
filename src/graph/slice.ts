@@ -28,6 +28,7 @@ import {
   CARD_DETAIL_LEVEL_RANK,
 } from "../mcp/types.js";
 import { loadConfig } from "../config/loadConfig.js";
+import { DatabaseError, ValidationError } from "../mcp/errors.js";
 import { pickDepLabel } from "../util/depLabels.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
@@ -884,32 +885,31 @@ export async function buildSliceWithResult(
 
     return sliceOk(slice);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-
-    if (
-      message.includes("Repository not found") ||
-      message.includes("not indexed")
-    ) {
+    if (error instanceof DatabaseError) {
       return sliceErr({
         type: "invalid_repo",
         repoId: request.repoId,
       });
     }
 
-    if (message.includes("No version found")) {
+    if (error instanceof ValidationError) {
       return sliceErr({
         type: "no_version",
         repoId: request.repoId,
       });
     }
 
-    if (message.includes("Policy denied")) {
+    // PolicyDenialError (from createPolicyDenial) has code === POLICY_ERROR
+    const codeError = error as { code?: string };
+    if (codeError.code === "POLICY_ERROR") {
+      const message = error instanceof Error ? error.message : String(error);
       return sliceErr({
         type: "policy_denied",
         reason: message.replace("Policy denied slice request: ", ""),
       });
     }
 
+    const message = error instanceof Error ? error.message : String(error);
     return sliceErr({
       type: "internal",
       message,

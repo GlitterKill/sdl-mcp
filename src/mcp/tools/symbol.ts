@@ -37,6 +37,7 @@ import { DatabaseError, createPolicyDenial } from "../errors.js";
 import { PolicyEngine, type PolicyRequestContext } from "../../policy/engine.js";
 import { logPolicyDecision, logSemanticSearchTelemetry } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
+import { uniqueLimit } from "../../graph/slice/slice-serializer.js";
 import { toLegacySymbolRow } from "./symbol-utils.js";
 import {
   getOverlaySnapshot,
@@ -46,17 +47,6 @@ import {
   searchSymbolsWithOverlay,
 } from "../../live-index/overlay-reader.js";
 
-function uniqueLimit(values: string[], max: number): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const value of values) {
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    result.push(value);
-    if (result.length >= max) break;
-  }
-  return result;
-}
 
 function parseJson<T>(raw: string | null): T | undefined {
   if (!raw) return undefined;
