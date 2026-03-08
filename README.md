@@ -30,25 +30,6 @@
 </details>
 </div>
 
-SDL-MCP (Symbol Delta Ledger MCP Server) is a cards-first context system for coding agents.
-
-Instead of opening large files first, SDL-MCP indexes repositories into symbol cards and graph edges so agents can:
-
-- Search and retrieve small, structured context first
-- Build task-specific graph slices with token budgets
-- Refresh context with deltas between versions
-- Request code windows through policy-gated access
-
-## Why It Helps Coding Agents
-
-- Lower token usage by default through cards/slices/skeletons
-- Better relevance with dependency-aware context retrieval
-- Safer context access via policy controls and auditing
-- Faster iteration through incremental indexing and refresh workflows
-- KuzuDB-backed graph persistence means indexing happens once, not every session
-- Confidence-aware call resolution filtering and pass2 provenance in symbol cards and slices
-- Works across TypeScript, JavaScript, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, and Shell
-
 ## Claude Opus 4.6 High Overview
 
 Question: "Review the code for SDL-MCP and explain to potential new users what this MCP server does and the benefits of
@@ -56,150 +37,140 @@ Question: "Review the code for SDL-MCP and explain to potential new users what t
 
 Response: "# What is SDL-MCP?
 
-  **SDL-MCP** (Symbol Delta Ledger - Model Context Protocol) is an MCP server that fundamentally changes how AI coding
-  assistants interact with your codebase. Instead of dumping entire files into the AI's context window, SDL-MCP provides
-   a structured, token-efficient way to give AI agents exactly the code context they need — and nothing more.
+  **SDL-MCP** (Symbol Delta Ledger - Model Context Protocol) is an MCP server that gives AI coding agents a structured,
+  token-efficient way to understand your codebase. Instead of feeding entire files into the context window, SDL-MCP
+  indexes your repository into a **searchable knowledge graph** of symbols and their relationships, then serves exactly
+  the right amount of context through a controlled escalation path.
+
+  It ships as an npm package (`npm install -g sdl-mcp`) with a CLI for setup and a server that any MCP-compatible client
+   (Claude Code, Claude Desktop, etc.) can connect to.
 
   ---
 
   ## The Problem It Solves
 
-  When AI assistants like Claude work with code, they typically read entire files — sometimes many files — to understand
-   enough context to help you. This is wasteful:
+  When AI assistants work with code, they typically read whole files — often many of them — to gather enough context.
+  This has three costs:
 
-  - **Context windows fill up fast.** A modest codebase can easily exceed token limits.
-  - **Irrelevant code dilutes focus.** The AI spends tokens processing code unrelated to your task.
-  - **No awareness of what changed.** Every interaction starts from scratch with no incremental understanding.
+  1. **Context windows fill up fast.** A modest codebase can exceed token limits quickly.
+  2. **Irrelevant code dilutes focus.** Tokens are spent on code unrelated to the task.
+  3. **No incremental understanding.** Every interaction starts fresh with no memory of what was already analyzed.
 
-  SDL-MCP addresses all three by maintaining a **persistent, indexed understanding** of your codebase and serving
-  context through the **Iris Gate Ladder**.
+  SDL-MCP addresses all three by maintaining a **persistent, indexed graph** of your codebase and controlling context
+  retrieval through the **Iris Gate Ladder**.
 
   ---
 
   ## How It Works
 
-  ### 1. Symbol Indexing
+  ### 1. Repository Indexing
 
-  SDL-MCP parses your TypeScript/JavaScript codebase using a Rust native indexer by default, with the TypeScript tree-sitter path as fallback, and extracts
-   every function, class, interface, type, and variable into **Symbol Cards** — compact metadata records containing the
-  symbol's signature, a brief summary, dependency edges, and metrics like fan-in/out.
+  SDL-MCP parses your codebase using either a **native Rust indexer** (default, fast, multi-threaded) or a **tree-sitter
+   TypeScript fallback**, and extracts every function, class, interface, type, and variable into **Symbol Cards** —
+  compact metadata records containing signatures, summaries, dependency edges, and metrics like fan-in/out.
 
-  The stats speak for themselves: this repository has **11,475 symbols** across **1,553 files** with **261,813
-  dependency edges** tracked. A full card dump would cost ~2.3M tokens. The overview costs **825 tokens** — a **2,782x
-  compression ratio**.
+  **12 languages supported:** TypeScript, JavaScript, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, and Shell.
+
+  Indexing happens once and is persisted in a **KuzuDB embedded graph database**. Incremental re-indexing picks up only
+  what changed.
 
   ### 2. The Iris Gate Ladder (4 Rungs)
 
-  Instead of "here's the whole file," SDL-MCP provides context in escalating detail using the **Iris Gate Ladder**. This approach ensures AI agents have the minimum context needed to be effective, preserving your token budget.
+  Context is served in escalating detail — agents start small and only request more when needed:
 
-  | Rung | Tool | Est. Tokens | When Used |
-  |------|------|------------|-----------|
-  | **1. Symbol Cards** | `sdl.symbol.getCard` | ~50 tokens | Always start here: signatures, summaries, and dependencies. |
-  | **2. Skeleton IR** | `sdl.code.getSkeleton` | ~200 tokens | Understanding logic flow and structure without bodies. |
-  | **3. Hot-Path Excerpt** | `sdl.code.getHotPath` | ~500 tokens | Verifying specific identifier usage in context. |
-  | **4. Raw Code Window** | `sdl.code.needWindow` | ~2,000 tokens | Final escalation: policy-gated access to full source. |
+  | Rung | Tool | ~Tokens | What It Provides |
+  | :--- | :--- | :--- | :--- |
+  | **1. Symbol Cards** | `sdl.symbol.getCard` | 50–150 | Name, signature, summary, dependencies, metrics |
+  | **2. Skeleton IR** | `sdl.code.getSkeleton` | 200–400 | Signatures + control flow, bodies elided |
+  | **3. Hot-Path Excerpt** | `sdl.code.getHotPath` | 400–800 | Lines matching specific identifiers + context |
+  | **4. Raw Code Window** | `sdl.code.needWindow` | 1,000–4,000 | Full source code (policy-gated, requires
+  justification) |
 
-  Most questions can be answered at rungs 1-2 without ever reading raw code.
+  > [!TIP]
+  > Most questions are answered at rungs 1–2 without ever reading raw code.
 
   ### 3. Graph Slices
 
-  When an AI needs to understand context around a task, SDL-MCP builds a **task-scoped subgraph** — a slice of related
-  symbols connected by call, import, and config edges, scored by relevance and bounded by a token budget. This means the
-   AI gets the 20-30 most relevant symbols for a task, not an arbitrary directory listing.
+  When the agent needs broader context for a task, `sdl.slice.build` performs a **BFS/beam search** from entry symbols
+  across weighted dependency edges (call > config > import), bounded by a token budget. The result is the 20–30 most
+  relevant symbols for the task — not an arbitrary directory listing.
 
-  ### 4. Delta Packs
+  ### 4. Delta Packs & Blast Radius
 
-  When code changes, SDL-MCP computes **diffs at the symbol level** — not line-level diffs, but semantic changes to
-  signatures, invariants, and side effects. It also computes a **blast radius**: which other symbols are affected by the
-   change, ranked by proximity and importance.
+  When code changes, SDL-MCP computes **semantic diffs at the symbol level** — not line-level diffs, but changes to
+  signatures, invariants, and side effects. It also computes a **blast radius**: which other symbols are affected,
+  ranked by proximity, fan-in, and test coverage.
 
   ### 5. Proof-of-Need Gating
 
-  Raw code access requires justification. The AI must specify *why* it needs the code, *what identifiers* it expects to
-  find, and *how many lines* it needs. Requests are audited. This prevents lazy "just read the whole file" patterns and
-  keeps token usage disciplined.
+  Raw code access (rung 4) requires the agent to justify _why_ it needs the code, _what identifiers_ it expects to find,
+   and _how many lines_. Requests are audited. This enforces disciplined token usage.
 
   ---
 
   ## Key Benefits
 
-  **For AI-assisted development:**
+  ### Token Efficiency
 
-  - **10-50x fewer tokens** per coding task compared to reading raw files
-  - **More relevant context** — graph-based slicing finds related code that directory-based approaches miss
-  - **Incremental understanding** — delta packs mean the AI doesn't re-read unchanged code
-  - **Audit trail** — every raw code access is logged with justification
+  - **10–50x fewer tokens** per coding task compared to reading raw files
+  - **2,782x compression ratio** for a repository overview vs. a full card dump
 
-  **For large codebases:**
+  ### Better Relevance
 
-  - Scales to thousands of files without blowing context windows
-  - Symbol-level tracking survives whitespace changes and trivial refactors
-  - KuzuDB-backed graph persistence means indexing happens once, not every session
+  - Graph-based slicing finds related code that directory-based approaches miss
+  - Confidence-scored call resolution filters noise from low-confidence edges
 
-  **For teams:**
+  ### Incremental Understanding
 
-  - Consistent context governance via configurable policies
-  - Blast radius analysis shows the ripple effects of changes before they land
-  - Works as a standard MCP server — compatible with any MCP-capable client
+  - Delta packs mean the agent doesn't re-read unchanged code
+  - Slice handles with leases and refresh support avoid rebuilding context from scratch
+
+  ### Governance & Auditability
+
+  - Configurable policies control what agents can access
+  - Every raw code request is logged with justification
+  - Blast radius analysis shows ripple effects before changes land
+
+  ### Multi-Language
+
+  - 12 language adapters with a generalized pass-2 resolver for cross-file semantic resolution
 
   ---
 
-  ## Practical Setup
+  ## Feature Summary
 
-  SDL-MCP runs as a CLI with 5 commands:
+  | Category | Features |
+  | :--- | :--- |
+  | **Indexing** | Native Rust + tree-sitter fallback, incremental indexing, live editor-buffer overlay, file watching |
+  | **Context** | Symbol cards, skeleton IR, hot-path excerpts, gated raw windows |
+  | **Graph** | Slices with handles/leases/refresh/spillover, cluster detection, call-chain tracing |
+  | **Change Tracking** | Delta packs, blast radius analysis, PR risk scoring |
+  | **Intelligence** | Semantic search reranking, LLM-generated summaries, predictive prefetch |
+  | **Governance** | Policy engine, proof-of-need gating, audit logging |
+  | **Agent Support** | `sdl.agent.orchestrate` autopilot, `sdl.context.summary` for copy/paste context |
+  | **Tools** | 17+ MCP tools, 10 CLI commands, HTTP API with graph explorer UI |
+  | **Integrations** | VSCode extension, Claude Code/Desktop, any MCP client |
+
+  ---
+
+  ## Getting Started
 
   ```bash
-  sdl-mcp init      # Create config + graph DB path
-  sdl-mcp index     # Index your repositories
-  sdl-mcp serve     # Start the MCP server (stdio or HTTP)
-  sdl-mcp doctor    # Health check
-  sdl-mcp version   # Version info
+  # Install globally
+  npm install -g sdl-mcp
 
-  Once running, any MCP client (Claude Code, Claude Desktop, etc.) connects to it and gains access to 24 tools for
-  navigating your codebase efficiently.
+  # Initialize config + index your repo
+  sdl-mcp init -y --auto-index
 
-  ---
-  In Summary
+  # Start the MCP server
+  sdl-mcp serve --stdio
 
-  SDL-MCP is a code context server that treats your codebase like a searchable knowledge graph rather than a pile of
-  text files. It gives AI assistants surgical access to exactly what they need, dramatically reducing token waste while
-  improving the quality of code understanding. Think of it as giving your AI a proper IDE-level understanding of your
-  code, rather than having it grep through files."
+  Then point your MCP client at the server — the agent gains access to all SDL-MCP tools and can navigate your codebase
+  through the Iris Gate Ladder instead of bulk file reads.
 
-## Quick Start
+  [!NOTE]
+  See the full ./docs/getting-started.md and ./docs/mcp-tools-reference.md for detailed setup and usage instructions.
 
-### Install
-
-```bash
-npm install -g sdl-mcp
-```
-
-Or run without global install:
-
-```bash
-npx --yes sdl-mcp@latest version
-```
-
-### Configure and Initialize
-
-```bash
-# Tip: If you are using npx, replace `sdl-mcp` with `npx --yes sdl-mcp@latest`.
-# 1) Set config location variable then open a new terminal
-setx SDL_CONFIG_HOME "C:\[your path]"
-
-# 2) One-line non-interactive setup (includes inline index + doctor)
-sdl-mcp init -y --auto-index --config "C:\[same path as SDL_CONFIG_HOME]"
-
-# 3) Start MCP server (stdio for coding agents)
-sdl-mcp serve --stdio
-
-# Optional: start HTTP transport for graph explorer + REST endpoints
-sdl-mcp serve --http --host localhost --port 3000
-
-# Optional: disable watch mode if your environment has watcher instability
-sdl-mcp serve --stdio --no-watch
-
-# 4) Copy the agent instructions from agent-workflows.md and paste them in the AGENTS.md file for your project.
 ```
 
 ## Core Feature Set
