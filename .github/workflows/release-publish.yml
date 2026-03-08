@@ -17,6 +17,7 @@ on:
         type: boolean
 
 permissions:
+  id-token: write
   contents: read
 
 jobs:
@@ -158,7 +159,6 @@ jobs:
       VERSION: ${{ needs.resolve-version.outputs.version }}
       NPM_DIST_TAG: ${{ needs.resolve-version.outputs.npm_dist_tag }}
       DRY_RUN: ${{ needs.resolve-version.outputs.dry_run }}
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -166,9 +166,21 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20.x
+          node-version: 24.x
           registry-url: https://registry.npmjs.org
           cache: npm
+
+      - name: Ensure npm supports trusted publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --version
+          NPM_MAJOR="$(npm --version | cut -d. -f1)"
+          if [[ "${NPM_MAJOR}" -lt 11 ]]; then
+            npm install -g npm@latest
+          fi
+          echo "Node $(node --version)"
+          echo "npm $(npm --version)"
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -287,7 +299,7 @@ jobs:
               continue
             fi
 
-            npm publish "${dir}" --access public --tag "${NPM_DIST_TAG}"
+            npm publish "${dir}" --access public --tag "${NPM_DIST_TAG}" --provenance
           done
 
       - name: Publish native umbrella package
@@ -307,7 +319,7 @@ jobs:
             exit 0
           fi
 
-          npm publish native/ --access public --tag "${NPM_DIST_TAG}" --ignore-scripts
+          npm publish native/ --access public --tag "${NPM_DIST_TAG}" --ignore-scripts --provenance
 
       - name: Build runtime package
         run: npm run build:all
@@ -329,4 +341,4 @@ jobs:
             exit 0
           fi
 
-          npm publish . --access public --tag "${NPM_DIST_TAG}"
+          npm publish . --access public --tag "${NPM_DIST_TAG}" --provenance
