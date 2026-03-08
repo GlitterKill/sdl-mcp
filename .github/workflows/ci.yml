@@ -71,7 +71,7 @@ jobs:
         run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Setup kuzu native binary
         shell: bash
@@ -231,7 +231,7 @@ jobs:
         run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Setup kuzu native binary
         shell: bash
@@ -329,7 +329,6 @@ jobs:
             const merged = { ...base, repos: [...(base.repos || []), ...(ext.repos || [])] };
             fs.writeFileSync('benchmarks/real-world/benchmark.config.json', JSON.stringify(merged, null, 2) + '\\n');
           "
-
       - name: Run benchmark matrix smoke
         if: matrix.os == 'ubuntu-latest'
         run: npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-smoke --limit-runs 2 --skip-index
@@ -413,7 +412,7 @@ jobs:
         run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Setup kuzu native binary
         if: matrix.run-tests
@@ -490,7 +489,7 @@ jobs:
         run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -627,7 +626,7 @@ jobs:
         run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Setup kuzu native binary
         shell: bash
@@ -792,7 +791,7 @@ jobs:
         run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Setup kuzu native binary
         shell: bash
@@ -850,3 +849,4 @@ jobs:
               console.log('  Both artifacts are valid for their respective commits');
             }
           "
+

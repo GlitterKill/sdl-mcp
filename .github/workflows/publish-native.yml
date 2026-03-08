@@ -84,7 +84,7 @@ jobs:
         run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Build native addon
         run: npx napi build --release --cargo-cwd native --config native/package.json --target ${{ matrix.target }} native
@@ -117,7 +117,7 @@ jobs:
         run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -187,7 +187,6 @@ jobs:
             echo "ERROR: Some platform packages are missing binaries"
             exit 1
           fi
-
       - name: Publish platform packages
         shell: bash
         env:
@@ -239,3 +238,4 @@ jobs:
               npm publish native/ --access public --ignore-scripts
             fi
           fi
+
