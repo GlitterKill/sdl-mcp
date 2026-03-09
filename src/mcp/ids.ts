@@ -2,6 +2,8 @@ declare const brandRepoId: unique symbol;
 declare const brandSymbolId: unique symbol;
 declare const brandVersionId: unique symbol;
 
+import { MAX_REPO_ID_LENGTH, MAX_SYMBOL_ID_LENGTH } from "../config/constants.js";
+
 export type RepoId = string & { readonly [brandRepoId]: "RepoId" };
 export type SymbolId = string & { readonly [brandSymbolId]: "SymbolId" };
 export type VersionId = string & { readonly [brandVersionId]: "VersionId" };
@@ -11,12 +13,12 @@ const SYMBOL_ID_PATTERN = /^[a-zA-Z0-9_:./#-]+$/;
 const VERSION_ID_PATTERN = /^v?\d+$/;
 
 function isValidRepoId(value: string): boolean {
-  return value.length > 0 && value.length <= 128 && REPO_ID_PATTERN.test(value);
+  return value.length > 0 && value.length <= MAX_REPO_ID_LENGTH && REPO_ID_PATTERN.test(value);
 }
 
 function isValidSymbolId(value: string): boolean {
   return (
-    value.length > 0 && value.length <= 512 && SYMBOL_ID_PATTERN.test(value)
+    value.length > 0 && value.length <= MAX_SYMBOL_ID_LENGTH && SYMBOL_ID_PATTERN.test(value)
   );
 }
 

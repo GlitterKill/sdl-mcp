@@ -22,6 +22,16 @@ import { patchSavedFile } from "../live-index/file-patcher.js";
 
 import type { IndexWatchHandle, WatcherHealth } from "./indexer.js";
 
+// Local interface for chokidar FSWatcher to avoid 'as any' casts
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+interface ChokidarWatcher {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on(event: string, fn: (...args: any[]) => void): this;
+  close(): Promise<void>;
+  getWatched?(): Record<string, string[]>;
+}
+
+
 export type IndexRepoFn = (
   repoId: string,
   mode: "full" | "incremental",
@@ -279,10 +289,11 @@ export async function watchRepositoryWithIndexer(
           pollInterval: WATCH_POLL_INTERVAL_MS,
         },
       });
+      const typedWatcher = watcher as unknown as ChokidarWatcher;
 
       const readyPromise = new Promise<void>((resolveReady) => {
-        (watcher as any).on("ready", () => {
-          const watched = (watcher as any).getWatched?.();
+        (typedWatcher).on("ready", () => {
+          const watched = (typedWatcher).getWatched?.();
           if (watched && typeof watched === "object") {
             const count = Object.values(watched as Record<string, string[]>).reduce(
               (total, entries) => total + entries.length,
@@ -299,18 +310,18 @@ export async function watchRepositoryWithIndexer(
         handler(relPath);
       };
 
-      (watcher as any).on("add", chokidarHandler);
-      (watcher as any).on("change", chokidarHandler);
-      (watcher as any).on("unlink", chokidarHandler);
+      (typedWatcher).on("add", chokidarHandler);
+      (typedWatcher).on("change", chokidarHandler);
+      (typedWatcher).on("unlink", chokidarHandler);
 
-      (watcher as any).on("error", (error: Error) => {
+      (typedWatcher).on("error", (error: Error) => {
         recordWatcherError(`[sdl-mcp] File watcher error: ${error}`);
       });
 
       return {
         ready: readyPromise,
         close: async () => {
-          await (watcher as any).close();
+          await (typedWatcher).close();
         },
       };
     }

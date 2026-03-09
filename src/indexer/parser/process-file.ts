@@ -685,7 +685,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
 
     return { symbolsIndexed, edgesCreated, changed: true, configEdges, pass2HintPaths };
   } catch (error) {
-    console.error(`Error processing file ${fileMeta.path}:`, error);
+    logger.error(`Error processing file ${fileMeta.path}:`, { error });
     return {
       symbolsIndexed: 0,
       edgesCreated: 0,

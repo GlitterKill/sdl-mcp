@@ -12,11 +12,8 @@ export async function ensureLocalEmbeddingRuntime(): Promise<LocalEmbeddingRunti
 
   try {
     // Keep this import runtime-only so optional dependency absence does not fail typecheck.
-    const dynamicImport = new Function(
-      "specifier",
-      "return import(specifier)",
-    ) as (specifier: string) => Promise<unknown>;
-    await dynamicImport("onnxruntime-node");
+    // Use @vite-ignore to suppress bundler static analysis warnings for optional dependency.
+    await import(/* @vite-ignore */ "onnxruntime-node");
     cachedRuntime = { available: true };
   } catch (error) {
     cachedRuntime = {

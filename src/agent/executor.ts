@@ -11,6 +11,7 @@ import type {
   PolicyRequestContext,
   PolicyDecision,
 } from "../policy/engine.js";
+import { IndexError } from "../mcp/errors.js";
 
 export class Executor {
   private evidenceCapture: EvidenceCapture;
@@ -70,7 +71,7 @@ export class Executor {
           await this.executeRawRung(task, context);
           break;
         default:
-          throw new Error(`Unknown rung type: ${rung}`);
+          throw new IndexError(`Unknown rung type: ${rung}`);
       }
     } catch (error) {
       const action: Action = {
@@ -125,7 +126,7 @@ export class Executor {
       this.actions.push(action);
       this.metrics.successfulActions++;
     } catch (error) {
-      throw new Error(
+      throw new IndexError(
         `Card rung execution failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
@@ -163,7 +164,7 @@ export class Executor {
       this.actions.push(action);
       this.metrics.successfulActions++;
     } catch (error) {
-      throw new Error(
+      throw new IndexError(
         `Skeleton rung execution failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
@@ -201,7 +202,7 @@ export class Executor {
       this.actions.push(action);
       this.metrics.successfulActions++;
     } catch (error) {
-      throw new Error(
+      throw new IndexError(
         `HotPath rung execution failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
@@ -286,7 +287,7 @@ export class Executor {
 
       this.actions.push(action);
     } catch (error) {
-      throw new Error(
+      throw new IndexError(
         `Raw rung execution failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }

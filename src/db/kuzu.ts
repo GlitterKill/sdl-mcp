@@ -12,6 +12,11 @@ import {
   KUZU_SCHEMA_VERSION,
 } from "./kuzu-schema.js";
 
+// Local interface for optional thread-count method on KuzuDB connections
+interface KuzuConnectionWithThreads {
+  setMaxNumThreadForExec(n: number): Promise<void>;
+}
+
 type KuzuModule = typeof import("kuzu");
 type KuzuDatabase = import("kuzu").Database;
 type KuzuConnection = import("kuzu").Connection;
@@ -152,8 +157,8 @@ export async function getKuzuConn(): Promise<KuzuConnection> {
     for (let i = 0; i < MAX_POOL_SIZE; i++) {
       try {
         const conn = new modules.Connection(db);
-        if (typeof (conn as any).setMaxNumThreadForExec === 'function') {
-           await (conn as any).setMaxNumThreadForExec(1);
+        if ('setMaxNumThreadForExec' in conn) {
+           await (conn as unknown as KuzuConnectionWithThreads).setMaxNumThreadForExec(1);
         }
         connectionPool.push(conn);
       } catch (err) {
@@ -179,8 +184,8 @@ export async function getKuzuConn(): Promise<KuzuConnection> {
     
     const modules = await loadKuzu();
     const newConn = new modules.Connection(db);
-    if (typeof (newConn as any).setMaxNumThreadForExec === 'function') {
-        await (newConn as any).setMaxNumThreadForExec(1);
+    if ('setMaxNumThreadForExec' in newConn) {
+        await (newConn as unknown as KuzuConnectionWithThreads).setMaxNumThreadForExec(1);
     }
     connectionPool[connectionIndex === 0 ? connectionPool.length - 1 : connectionIndex - 1] = newConn;
     return newConn;

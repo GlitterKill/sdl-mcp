@@ -1,3 +1,4 @@
+import { logger } from "../util/logger.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
 import { computeAndStoreClustersAndProcesses } from "../indexer/cluster-orchestrator.js";
@@ -62,7 +63,7 @@ export class ReconcileWorker {
 
       while (this.draining) {
         if (iterations >= MAX_DRAIN_ITERATIONS) {
-          console.error(`[ReconcileWorker] Reached MAX_DRAIN_ITERATIONS (${MAX_DRAIN_ITERATIONS}). Possible infinite loop in dependency frontier expansion.`);
+          logger.error(`[ReconcileWorker] Reached MAX_DRAIN_ITERATIONS (${MAX_DRAIN_ITERATIONS}). Possible infinite loop in dependency frontier expansion.`);
           break;
         }
 

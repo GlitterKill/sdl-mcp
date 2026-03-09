@@ -1,4 +1,5 @@
 import { readFileSync, statSync } from "fs";
+import { REGEX_CACHE_MAX_SIZE, REGEX_CACHE_EVICT_COUNT } from "../config/constants.js";
 import { join } from "path";
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { CodeWindowResponse, Range } from "../mcp/types.js";
@@ -100,8 +101,8 @@ export function identifiersExistInWindow(
       "g",
     );
     identifierRegexCache.set(cacheKey, regex);
-    if (identifierRegexCache.size > 500) {
-      const keysToDelete = Array.from(identifierRegexCache.keys()).slice(0, 100);
+    if (identifierRegexCache.size > REGEX_CACHE_MAX_SIZE) {
+      const keysToDelete = Array.from(identifierRegexCache.keys()).slice(0, REGEX_CACHE_EVICT_COUNT);
       for (const key of keysToDelete) {
         identifierRegexCache.delete(key);
       }

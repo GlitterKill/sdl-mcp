@@ -8,6 +8,7 @@ import { Executor } from "./executor.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
+import { ValidationError } from "../mcp/errors.js";
 
 export class Orchestrator {
   private planner: Planner;
@@ -72,7 +73,7 @@ export class Orchestrator {
   async plan(task: AgentTask): Promise<PlannedExecution> {
     const validation = this.planner.validateTask(task);
     if (!validation.valid) {
-      throw new Error(`Task validation failed: ${validation.error}`);
+      throw new ValidationError(`Task validation failed: ${validation.error}`);
     }
 
     const path = this.planner.plan(task);

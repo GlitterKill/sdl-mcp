@@ -1,4 +1,5 @@
 import * as path from "path";
+import { ValidationError } from "../mcp/errors.js";
 
 function toForwardSlashes(p: string): string {
   return p.replace(/\\/g, "/");
@@ -90,7 +91,7 @@ export function validatePathWithinRoot(root: string, target: string): string {
     : `${normalizedRoot}/`;
 
   if (normalizedTarget !== normalizedRoot && !normalizedTarget.startsWith(rootPrefix)) {
-    throw new Error(
+    throw new ValidationError(
       `Path traversal detected: ${target} escapes repository root`,
     );
   }
@@ -103,7 +104,7 @@ export function getAbsolutePathFromRepoRoot(
   relPath: string,
 ): string {
   if (containsPathTraversal(relPath)) {
-    throw new Error(`Path traversal sequence detected in: ${relPath}`);
+    throw new ValidationError(`Path traversal sequence detected in: ${relPath}`);
   }
 
   const absolutePath = validatePathWithinRoot(repoRoot, relPath);

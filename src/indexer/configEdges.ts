@@ -5,6 +5,7 @@ import type {
 } from "../db/kuzu-queries.js";
 import { normalizePath } from "../util/paths.js";
 import type Parser from "tree-sitter";
+import { logger } from "../util/logger.js";
 
 export interface ConfigEdge {
   fromSymbolId: string;
@@ -28,7 +29,7 @@ export function extractConfigEdgesFromTree(
   try {
     return extractExpressEdgesFromTree(context);
   } catch (error) {
-    console.warn("Config edge extractor failed: express-routes", error);
+    logger.warn("Config edge extractor failed: express-routes", { error });
     return [];
   }
 }

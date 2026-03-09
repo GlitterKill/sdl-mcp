@@ -1,62 +1,62 @@
 [
   {
-    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex:call:4:helperFunction",
-    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex",
+    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex:call:4:helperFunction",
+    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex",
     "range": {
       "startLine": 5,
       "startCol": 2,
       "endLine": 5,
       "endCol": 16
     },
-    "targetSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex:fn:helperFunction",
+    "targetSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex:fn:helperFunction",
     "resolution": "resolved"
   },
   {
-    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex:call:5:print",
-    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex",
+    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex:call:5:print",
+    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex",
     "range": {
       "startLine": 6,
       "startCol": 2,
       "endLine": 6,
       "endCol": 7
     },
-    "targetSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex:unresolved:print",
+    "targetSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex:unresolved:print",
     "resolution": "unresolved"
   },
   {
-    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex:call:15:Calculator",
-    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex",
+    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex:call:15:Calculator",
+    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex",
     "range": {
       "startLine": 16,
       "startCol": 9,
       "endLine": 16,
       "endCol": 19
     },
-    "targetSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex:class:Calculator",
+    "targetSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex:class:Calculator",
     "resolution": "resolved"
   },
   {
-    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex:call:16:add",
-    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex",
+    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex:call:16:add",
+    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex",
     "range": {
       "startLine": 17,
       "startCol": 7,
       "endLine": 17,
       "endCol": 10
     },
-    "targetSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex:fn:add",
+    "targetSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex:fn:add",
     "resolution": "resolved"
   },
   {
-    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex:call:17:subtract",
-    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex",
+    "id": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex:call:17:subtract",
+    "filePath": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex",
     "range": {
       "startLine": 18,
       "startCol": 7,
       "endLine": 18,
       "endCol": 15
     },
-    "targetSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\example-plugin\\calls.ex:fn:subtract",
+    "targetSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp-fixes\\tests\\integration\\fixtures\\example-plugin\\calls.ex:fn:subtract",
     "resolution": "resolved"
   }
 ]

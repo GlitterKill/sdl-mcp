@@ -671,6 +671,7 @@ function extractCalls(
   const matches = callQuery.matches(tree.rootNode);
 
   for (const match of matches) {
+    if (match.captures.length === 0) continue;
     const callNode = match.captures[0].node.parent;
 
     if (!callNode) continue;

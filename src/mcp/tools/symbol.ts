@@ -46,6 +46,7 @@ import {
   getTargetNamesWithOverlay,
   searchSymbolsWithOverlay,
 } from "../../live-index/overlay-reader.js";
+import { logger } from "../../util/logger.js";
 
 
 function parseJson<T>(raw: string | null): T | undefined {
@@ -138,8 +139,8 @@ async function buildOverlayCardForSymbol(
 
   const metrics = await kuzuDb.getMetrics(conn, symbolId);
   const [clusterRow, processesRows] = await Promise.all([
-    kuzuDb.getClusterForSymbol(conn, symbolId).catch(() => null),
-    kuzuDb.getProcessesForSymbol(conn, symbolId).catch(() => []),
+    kuzuDb.getClusterForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get cluster for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return null; }),
+    kuzuDb.getProcessesForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get processes for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return []; }),
   ]);
 
   const signature = parseJson<SymbolSignature>(overlay.symbol.signatureJson);
@@ -393,8 +394,8 @@ async function buildCardForSymbol(
       minCallConfidence: effectiveMinCallConfidence,
     }),
     kuzuDb.getMetrics(conn, symbolId),
-    kuzuDb.getClusterForSymbol(conn, symbolId).catch(() => null),
-    kuzuDb.getProcessesForSymbol(conn, symbolId).catch(() => []),
+    kuzuDb.getClusterForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get cluster for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return null; }),
+    kuzuDb.getProcessesForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get processes for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return []; }),
   ]);
 
   const signature = parseJson<SymbolSignature>(symbol.signatureJson);
