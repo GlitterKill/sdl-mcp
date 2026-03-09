@@ -10,6 +10,7 @@ import {
   DEFAULT_MAX_LINES_HOTPATH,
   DEFAULT_MAX_TOKENS_HOTPATH,
   MAX_FILE_BYTES,
+  MAX_TREESITTER_PARSE_BYTES,
 } from "../config/constants.js";
 import { logger } from "../util/logger.js";
 import { getKuzuConn } from "../db/kuzu.js";
@@ -44,6 +45,20 @@ function parseFile(content: string, extension: string): Parser.Tree | null {
     const isJSX = extension === ".jsx";
 
     if (!isTS && !isTSX && !isJS && !isJSX) {
+      return null;
+    }
+
+    // Guard: reject content exceeding the tree-sitter safety limit.
+    const byteLength = Buffer.byteLength(content, "utf-8");
+    if (byteLength > MAX_TREESITTER_PARSE_BYTES) {
+      logger.warn(
+        "File content exceeds tree-sitter parse limit for hot path, skipping",
+        {
+          extension,
+          byteLength,
+          maxBytes: MAX_TREESITTER_PARSE_BYTES,
+        },
+      );
       return null;
     }
 
@@ -92,10 +107,7 @@ function findLinesMatchingIdentifiers(
     }
   }
 
-  function matchesAsMemberExpression(
-    text: string,
-    line: number,
-  ): boolean {
+  function matchesAsMemberExpression(text: string, line: number): boolean {
     const parts = text.split(/[.?\[\]]+/).filter(Boolean);
     for (const part of parts) {
       if (identifierSet.has(part)) {
@@ -121,10 +133,7 @@ function findLinesMatchingIdentifiers(
             recordMatch(funcNode.text, node.startPosition.row + 1);
           }
         } else if (funcNode.type === "member_expression") {
-          matchesAsMemberExpression(
-            funcNode.text,
-            node.startPosition.row + 1,
-          );
+          matchesAsMemberExpression(funcNode.text, node.startPosition.row + 1);
         }
       }
     }
@@ -136,10 +145,7 @@ function findLinesMatchingIdentifiers(
           const constructorNode = thrown.childForFieldName("constructor");
           if (constructorNode && constructorNode.type === "identifier") {
             if (identifierSet.has(constructorNode.text)) {
-              recordMatch(
-                constructorNode.text,
-                node.startPosition.row + 1,
-              );
+              recordMatch(constructorNode.text, node.startPosition.row + 1);
             }
           }
         } else if (thrown.type === "identifier") {
@@ -230,11 +236,12 @@ function buildHotPathExcerpt(
   const truncated = resultLines.length < excerptLines.length;
 
   const startLine = resultLines.length > 0 ? excerptLineNumbers[0] + 1 : 1;
-  const lastIndex = Math.min(resultLines.length - 1, excerptLineNumbers.length - 1);
+  const lastIndex = Math.min(
+    resultLines.length - 1,
+    excerptLineNumbers.length - 1,
+  );
   const endLine =
-    resultLines.length > 0
-      ? excerptLineNumbers[lastIndex] + 1
-      : startLine;
+    resultLines.length > 0 ? excerptLineNumbers[lastIndex] + 1 : startLine;
 
   const actualRange: Range = {
     startLine,
@@ -301,24 +308,44 @@ export async function extractHotPath(
     return null;
   }
 
-  const lines = content.split("\n");
+  // Wrap tree-sitter node traversal in try/catch. The walk() function
+  // recursively visits every node which can throw if the native addon
+  // encounters a corrupted tree or unexpected node structure.
+  try {
+    const lines = content.split("\n");
 
-  const contextLines = options.contextLines ?? DEFAULT_CONTEXT_LINES;
-  const maxLines = options.maxLines ?? DEFAULT_MAX_LINES_HOTPATH;
-  const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS_HOTPATH;
+    const contextLines = options.contextLines ?? DEFAULT_CONTEXT_LINES;
+    const maxLines = options.maxLines ?? DEFAULT_MAX_LINES_HOTPATH;
+    const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS_HOTPATH;
 
-  const { matchedLines, confirmedIdentifiers } =
-    findLinesMatchingIdentifiers(tree, identifiersToFind);
+    const { matchedLines, confirmedIdentifiers } = findLinesMatchingIdentifiers(
+      tree,
+      identifiersToFind,
+    );
 
-  const { excerpt, matchedLineNumbers, truncated, actualRange } =
-    buildHotPathExcerpt(lines, matchedLines, contextLines, maxLines, maxTokens);
+    const { excerpt, matchedLineNumbers, truncated, actualRange } =
+      buildHotPathExcerpt(
+        lines,
+        matchedLines,
+        contextLines,
+        maxLines,
+        maxTokens,
+      );
 
-  return {
-    excerpt,
-    actualRange,
-    estimatedTokens: estimateTokenCount(excerpt),
-    matchedIdentifiers: Array.from(confirmedIdentifiers),
-    matchedLineNumbers,
-    truncated,
-  };
+    return {
+      excerpt,
+      actualRange,
+      estimatedTokens: estimateTokenCount(excerpt),
+      matchedIdentifiers: Array.from(confirmedIdentifiers),
+      matchedLineNumbers,
+      truncated,
+    };
+  } catch (error) {
+    logger.error("Tree-sitter traversal failed during hot-path extraction", {
+      symbolId,
+      file: file.relPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }

@@ -17,6 +17,14 @@ import {
 } from "./live-index/idle-monitor.js";
 import { ShutdownManager } from "./util/shutdown.js";
 import { findExistingProcess, writePidfile } from "./util/pidfile.js";
+import { enableFileLogging, getLogFilePath } from "./util/logger.js";
+
+// Enable file logging by default for the direct MCP entry point so crash
+// evidence is always persisted. The SDL_LOG_FILE env var auto-enables in
+// logger.ts as well, but this ensures a log file exists even without it.
+if (!getLogFilePath()) {
+  enableFileLogging();
+}
 
 // MCP servers must use stderr for logging - stdout is reserved for JSON-RPC
 const log = (msg: string) => process.stderr.write(`[sdl-mcp] ${msg}\n`);
@@ -144,6 +152,11 @@ async function main(): Promise<void> {
     // Register all shutdown triggers.
     shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
     shutdownMgr.monitorStdin(); // stdin end/close (terminal close detection)
+
+    const activeLogFile = getLogFilePath();
+    if (activeLogFile) {
+      log(`File logging enabled: ${activeLogFile}`);
+    }
 
     log("Starting MCP server...");
     await server.start();

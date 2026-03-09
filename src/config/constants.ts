@@ -194,6 +194,14 @@ export const TOKENS_PER_CHAR_ESTIMATE = 4;
 export const MAX_FILE_BYTES = 2000000;
 
 /**
+ * Maximum file size in bytes for tree-sitter parsing (1 MB).
+ * Tree-sitter native addon can crash or OOM on very large files.
+ * This is stricter than MAX_FILE_BYTES to protect the live server
+ * during skeleton/hotpath generation.
+ */
+export const MAX_TREESITTER_PARSE_BYTES = 1024 * 1024;
+
+/**
  * Maximum length of query strings to show in error messages.
  */
 export const QUERY_PREVIEW_LENGTH = 50;

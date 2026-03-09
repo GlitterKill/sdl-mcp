@@ -27,6 +27,22 @@ import {
 } from "../../live-index/idle-monitor.js";
 import { ShutdownManager } from "../../util/shutdown.js";
 import { findExistingProcess, writePidfile } from "../../util/pidfile.js";
+import { enableFileLogging, getLogFilePath } from "../../util/logger.js";
+
+// Enable file logging by default so crash evidence is always persisted.
+if (!getLogFilePath()) {
+  enableFileLogging();
+}
+
+// Catch uncaught errors to prevent silent crashes (parity with main.ts)
+process.on("uncaughtException", (error) => {
+  process.stderr.write(`[sdl-mcp] UNCAUGHT EXCEPTION: ${error}\n`);
+  process.stderr.write(`[sdl-mcp] Stack: ${error.stack}\n`);
+});
+
+process.on("unhandledRejection", (reason) => {
+  process.stderr.write(`[sdl-mcp] UNHANDLED REJECTION: ${reason}\n`);
+});
 
 export async function serveCommand(options: ServeOptions): Promise<void> {
   const configPath = activateCliConfigPath(options.config);
@@ -159,6 +175,11 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   if (options.transport === "stdio") {
     // Monitor stdin so we detect terminal close / MCP client disconnect.
     shutdownMgr.monitorStdin();
+  }
+
+  const activeLogFile = getLogFilePath();
+  if (activeLogFile) {
+    console.error(`[sdl-mcp] File logging enabled: ${activeLogFile}`);
   }
 
   try {

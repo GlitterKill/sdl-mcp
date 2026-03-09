@@ -12,6 +12,7 @@ import {
   DEFAULT_MAX_LINES_SKELETON_DETAILED,
   DEFAULT_MAX_TOKENS_SKELETON_DETAILED,
   MAX_FILE_BYTES,
+  MAX_TREESITTER_PARSE_BYTES,
 } from "../config/constants.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
@@ -369,6 +370,18 @@ export function parseFile(
       return null;
     }
 
+    // Guard: reject content exceeding the tree-sitter safety limit.
+    // Buffer.byteLength is more accurate than .length for multi-byte chars.
+    const byteLength = Buffer.byteLength(content, "utf-8");
+    if (byteLength > MAX_TREESITTER_PARSE_BYTES) {
+      logger.warn("File content exceeds tree-sitter parse limit, skipping", {
+        extension,
+        byteLength,
+        maxBytes: MAX_TREESITTER_PARSE_BYTES,
+      });
+      return null;
+    }
+
     const parser = isTS ? tsParser : tsxParser;
     // Use 1MB buffer to handle files >32KB (tree-sitter default limit)
     const tree = parser.parse(content, undefined, {
@@ -381,7 +394,10 @@ export function parseFile(
 
     return tree;
   } catch (error) {
-    logger.warn("Failed to parse file", { extension, error: error instanceof Error ? error.message : String(error) });
+    logger.warn("Failed to parse file", {
+      extension,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 }
@@ -450,51 +466,67 @@ export async function generateSymbolSkeleton(
     return null;
   }
 
-  const symbolRange = {
-    startLine: symbol.rangeStartLine,
-    endLine: symbol.rangeEndLine,
-  };
+  // Wrap tree-sitter node traversal in try/catch. Native addon crashes
+  // (e.g. segfaults on malformed ASTs) cannot be caught, but JS-level
+  // errors thrown by the tree-sitter bindings can, and returning null
+  // here prevents the error from propagating up and crashing the server.
+  try {
+    const symbolRange = {
+      startLine: symbol.rangeStartLine,
+      endLine: symbol.rangeEndLine,
+    };
 
-  const rootNode = tree.rootNode;
-  const symbolNode = findNodeByRange(rootNode, symbolRange);
+    const rootNode = tree.rootNode;
+    const symbolNode = findNodeByRange(rootNode, symbolRange);
 
-  if (!symbolNode) {
+    if (!symbolNode) {
+      return null;
+    }
+
+    const skeletonText = extractSkeletonFromNode(
+      symbolNode,
+      content,
+      options.includeIdentifiers ?? [],
+    );
+
+    const maxLines = options.maxLines ?? 100;
+    const maxTokens = options.maxTokens ?? 2000;
+
+    const { code, truncated } = trimSkeletonToBounds(
+      skeletonText,
+      maxLines,
+      maxTokens,
+    );
+    const skeletonLines = code.split("\n");
+
+    const actualRange: Range = {
+      startLine: symbol.rangeStartLine,
+      startCol: symbol.rangeStartCol,
+      endLine: Math.max(
+        symbol.rangeStartLine,
+        symbol.rangeStartLine + skeletonLines.length - 1,
+      ),
+      endCol: truncated ? 0 : symbol.rangeEndCol,
+    };
+
+    return {
+      skeleton: code,
+      actualRange,
+      estimatedTokens: estimateTokenCount(code),
+      originalLines: symbol.rangeEndLine - symbol.rangeStartLine + 1,
+      truncated,
+    };
+  } catch (error) {
+    logger.error(
+      "Tree-sitter traversal failed during symbol skeleton generation",
+      {
+        symbolId,
+        file: file.relPath,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    );
     return null;
   }
-
-  const skeletonText = extractSkeletonFromNode(
-    symbolNode,
-    content,
-    options.includeIdentifiers ?? [],
-  );
-
-  const maxLines = options.maxLines ?? 100;
-  const maxTokens = options.maxTokens ?? 2000;
-
-  const { code, truncated } = trimSkeletonToBounds(
-    skeletonText,
-    maxLines,
-    maxTokens,
-  );
-  const skeletonLines = code.split("\n");
-
-  const actualRange: Range = {
-    startLine: symbol.rangeStartLine,
-    startCol: symbol.rangeStartCol,
-    endLine: Math.max(
-      symbol.rangeStartLine,
-      symbol.rangeStartLine + skeletonLines.length - 1,
-    ),
-    endCol: truncated ? 0 : symbol.rangeEndCol,
-  };
-
-  return {
-    skeleton: code,
-    actualRange,
-    estimatedTokens: estimateTokenCount(code),
-    originalLines: symbol.rangeEndLine - symbol.rangeStartLine + 1,
-    truncated,
-  };
 }
 
 export async function generateFileSkeleton(
@@ -526,38 +558,49 @@ export async function generateFileSkeleton(
     return null;
   }
 
-  const skeletonText = extractSkeletonFromNode(
-    tree.rootNode,
-    content,
-    options.includeIdentifiers ?? [],
-    0,
-    exportedOnly,
-  );
+  try {
+    const skeletonText = extractSkeletonFromNode(
+      tree.rootNode,
+      content,
+      options.includeIdentifiers ?? [],
+      0,
+      exportedOnly,
+    );
 
-  const maxLines = options.maxLines ?? DEFAULT_MAX_LINES_SKELETON_DETAILED;
-  const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS_SKELETON_DETAILED;
+    const maxLines = options.maxLines ?? DEFAULT_MAX_LINES_SKELETON_DETAILED;
+    const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS_SKELETON_DETAILED;
 
-  const { code, truncated } = trimSkeletonToBounds(
-    skeletonText,
-    maxLines,
-    maxTokens,
-  );
-  const skeletonLines = code.split("\n");
+    const { code, truncated } = trimSkeletonToBounds(
+      skeletonText,
+      maxLines,
+      maxTokens,
+    );
+    const skeletonLines = code.split("\n");
 
-  const actualRange: Range = {
-    startLine: 1,
-    startCol: 0,
-    endLine: skeletonLines.length,
-    endCol: skeletonLines[skeletonLines.length - 1]?.length ?? 0,
-  };
+    const actualRange: Range = {
+      startLine: 1,
+      startCol: 0,
+      endLine: skeletonLines.length,
+      endCol: skeletonLines[skeletonLines.length - 1]?.length ?? 0,
+    };
 
-  return {
-    skeleton: code,
-    actualRange,
-    estimatedTokens: estimateTokenCount(code),
-    originalLines: content.split("\n").length,
-    truncated,
-  };
+    return {
+      skeleton: code,
+      actualRange,
+      estimatedTokens: estimateTokenCount(code),
+      originalLines: content.split("\n").length,
+      truncated,
+    };
+  } catch (error) {
+    logger.error(
+      "Tree-sitter traversal failed during file skeleton generation",
+      {
+        file: filePath,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    );
+    return null;
+  }
 }
 
 function computeIRHash(ops: SkeletonOp[]): string {
@@ -847,61 +890,70 @@ export async function generateSkeletonIR(
     return null;
   }
 
-  const symbolRange = {
-    startLine: symbol.rangeStartLine,
-    endLine: symbol.rangeEndLine,
-  };
+  try {
+    const symbolRange = {
+      startLine: symbol.rangeStartLine,
+      endLine: symbol.rangeEndLine,
+    };
 
-  const rootNode = tree.rootNode;
-  const symbolNode = findNodeByRange(rootNode, symbolRange);
+    const rootNode = tree.rootNode;
+    const symbolNode = findNodeByRange(rootNode, symbolRange);
 
-  if (!symbolNode) {
+    if (!symbolNode) {
+      return null;
+    }
+
+    const ops = generateIROpsFromNode(symbolNode, content);
+
+    const hash = computeIRHash(ops);
+
+    const totalLines = symbol.rangeEndLine - symbol.rangeStartLine + 1;
+
+    let elidedLines = 0;
+    for (const op of ops) {
+      if (op.op === "elision") {
+        elidedLines += op.estimatedLines;
+      }
+    }
+
+    const skeletonText = extractSkeletonFromNode(
+      symbolNode,
+      content,
+      options.includeIdentifiers ?? [],
+    );
+
+    const maxLines = options.maxLines ?? DEFAULT_MAX_LINES_SKELETON;
+    const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS_SKELETON;
+
+    const { code } = trimSkeletonToBounds(skeletonText, maxLines, maxTokens);
+    const skeletonLines = code.split("\n");
+
+    const actualRange: Range = {
+      startLine: symbol.rangeStartLine,
+      startCol: symbol.rangeStartCol,
+      endLine: symbol.rangeStartLine + skeletonLines.length - 1,
+      endCol: skeletonLines[skeletonLines.length - 1]?.length ?? 0,
+    };
+
+    return {
+      ir: {
+        symbolId,
+        ops,
+        hash,
+        totalLines,
+        elidedLines,
+      },
+      skeletonText: code,
+      actualRange,
+      estimatedTokens: estimateTokenCount(code),
+      originalLines: totalLines,
+    };
+  } catch (error) {
+    logger.error("Tree-sitter traversal failed during skeleton IR generation", {
+      symbolId,
+      file: file.relPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
-
-  const ops = generateIROpsFromNode(symbolNode, content);
-
-  const hash = computeIRHash(ops);
-
-  const totalLines = symbol.rangeEndLine - symbol.rangeStartLine + 1;
-
-  let elidedLines = 0;
-  for (const op of ops) {
-    if (op.op === "elision") {
-      elidedLines += op.estimatedLines;
-    }
-  }
-
-  const skeletonText = extractSkeletonFromNode(
-    symbolNode,
-    content,
-    options.includeIdentifiers ?? [],
-  );
-
-  const maxLines = options.maxLines ?? DEFAULT_MAX_LINES_SKELETON;
-  const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS_SKELETON;
-
-  const { code } = trimSkeletonToBounds(skeletonText, maxLines, maxTokens);
-  const skeletonLines = code.split("\n");
-
-  const actualRange: Range = {
-    startLine: symbol.rangeStartLine,
-    startCol: symbol.rangeStartCol,
-    endLine: symbol.rangeStartLine + skeletonLines.length - 1,
-    endCol: skeletonLines[skeletonLines.length - 1]?.length ?? 0,
-  };
-
-  return {
-    ir: {
-      symbolId,
-      ops,
-      hash,
-      totalLines,
-      elidedLines,
-    },
-    skeletonText: code,
-    actualRange,
-    estimatedTokens: estimateTokenCount(code),
-    originalLines: totalLines,
-  };
 }
