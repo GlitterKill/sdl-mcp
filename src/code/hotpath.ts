@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "fs";
+import { readFile, stat } from "fs/promises";
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { Range } from "../mcp/types.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
@@ -277,7 +277,7 @@ export async function extractHotPath(
 
   let content: string;
   try {
-    const fileStat = statSync(filePath);
+    const fileStat = await stat(filePath);
     if (fileStat.size > MAX_FILE_BYTES) {
       logger.warn("File exceeds size limit for hot path extraction", {
         filePath: file.relPath,
@@ -286,7 +286,7 @@ export async function extractHotPath(
       });
       return null;
     }
-    content = readFileSync(filePath, "utf-8");
+    content = await readFile(filePath, "utf-8");
   } catch (error) {
     logger.warn("Failed to read file for hot path extraction", {
       filePath: file.relPath,

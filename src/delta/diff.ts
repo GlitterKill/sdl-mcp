@@ -1,5 +1,5 @@
 import type { Connection } from "kuzu";
-import { IndexError } from "../mcp/errors.js";
+import { IndexError } from "../domain/errors.js";
 
 import type { VersionId } from "../db/schema.js";
 import type {

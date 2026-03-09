@@ -4,7 +4,7 @@ import { getKuzuConn } from "../db/kuzu.js";
 import { hashContent } from "../util/hashing.js";
 import { getCurrentTimestamp } from "../util/time.js";
 import { logger } from "../util/logger.js";
-import { IndexError } from "../mcp/errors.js";
+import { IndexError } from "../domain/errors.js";
 
 export async function createVersion(
   repoId: string,

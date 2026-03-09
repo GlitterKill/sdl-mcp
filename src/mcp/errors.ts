@@ -1,57 +1,21 @@
 import type { NextBestAction, RequiredFieldsForNext } from "./types.js";
 
-export enum ErrorCode {
-  CONFIG_ERROR = "CONFIG_ERROR",
-  DATABASE_ERROR = "DATABASE_ERROR",
-  INDEX_ERROR = "INDEX_ERROR",
-  VALIDATION_ERROR = "VALIDATION_ERROR",
-  POLICY_ERROR = "POLICY_ERROR",
-}
+// Re-export domain error types for backward compatibility
+export {
+  ErrorCode,
+  ConfigError,
+  DatabaseError,
+  IndexError,
+  ValidationError,
+  PolicyError,
+} from "../domain/errors.js";
+
+import { ErrorCode } from "../domain/errors.js";
 
 export interface PolicyDenialError extends Error {
   code: ErrorCode;
   nextBestAction?: NextBestAction;
   requiredFieldsForNext?: RequiredFieldsForNext;
-}
-
-export class ConfigError extends Error {
-  readonly code = ErrorCode.CONFIG_ERROR;
-  constructor(message: string) {
-    super(message);
-    this.name = "ConfigError";
-  }
-}
-
-export class DatabaseError extends Error {
-  readonly code = ErrorCode.DATABASE_ERROR;
-  constructor(message: string) {
-    super(message);
-    this.name = "DatabaseError";
-  }
-}
-
-export class IndexError extends Error {
-  readonly code = ErrorCode.INDEX_ERROR;
-  constructor(message: string) {
-    super(message);
-    this.name = "IndexError";
-  }
-}
-
-export class ValidationError extends Error {
-  readonly code = ErrorCode.VALIDATION_ERROR;
-  constructor(message: string) {
-    super(message);
-    this.name = "ValidationError";
-  }
-}
-
-export class PolicyError extends Error {
-  readonly code = ErrorCode.POLICY_ERROR;
-  constructor(message: string) {
-    super(message);
-    this.name = "PolicyError";
-  }
 }
 
 export function createPolicyDenial(

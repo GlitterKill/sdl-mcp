@@ -7,6 +7,7 @@ import type {
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
 import { getAdapterForExtension } from "../indexer/adapter/registry.js";
+import { logger } from "../util/logger.js";
 import {
   isBuiltinCall,
   resolveCallTarget,
@@ -140,7 +141,8 @@ export async function parseDraftFile(
     let extractedSymbols: ReturnType<typeof adapter.extractSymbols> = [];
     try {
       extractedSymbols = adapter.extractSymbols(tree, input.content, absolutePath);
-    } catch {
+    } catch (error) {
+      logger.warn("Draft symbol extraction failed", { file: absolutePath, error: String(error) });
       extractedSymbols = [];
     }
 

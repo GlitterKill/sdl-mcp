@@ -4,6 +4,7 @@
  */
 import type { Connection } from "kuzu";
 import { exec, queryAll, querySingle, assertSafeInt } from "./kuzu-core.js";
+import { logger } from "../util/logger.js";
 
 export interface AuditRow {
   eventId: string;
@@ -251,7 +252,8 @@ export async function getAggregatedFeedback(
       usefulSymbols = JSON.parse(row.usefulSymbolsJson) as string[];
       missingSymbols = JSON.parse(row.missingSymbolsJson) as string[];
       taskTags = row.taskTagsJson ? (JSON.parse(row.taskTagsJson) as string[]) : [];
-    } catch {
+    } catch (error) {
+      logger.warn("Failed to parse feedback JSON", { error: String(error) });
       continue;
     }
 

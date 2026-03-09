@@ -8,7 +8,7 @@ import { Executor } from "./executor.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
-import { ValidationError } from "../mcp/errors.js";
+import { ValidationError } from "../domain/errors.js";
 
 export class Orchestrator {
   private planner: Planner;

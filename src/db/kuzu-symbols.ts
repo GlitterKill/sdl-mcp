@@ -508,12 +508,6 @@ export async function getSymbolsByIds(
   return result;
 }
 
-export interface SymbolLiteRow {
-  symbolId: string;
-  name: string;
-  kind: string;
-}
-
 export interface SymbolBasicInfo {
   symbolId: string;
   name: string;

@@ -28,7 +28,7 @@ import {
   CARD_DETAIL_LEVEL_RANK,
 } from "../mcp/types.js";
 import { loadConfig } from "../config/loadConfig.js";
-import { DatabaseError, ValidationError } from "../mcp/errors.js";
+import { DatabaseError, ValidationError } from "../domain/errors.js";
 import { pickDepLabel } from "../util/depLabels.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
@@ -97,6 +97,7 @@ import {
   mergeSymbolRowsWithOverlay,
   type OverlaySnapshot,
 } from "../live-index/overlay-reader.js";
+import { logger } from "../util/logger.js";
 
 export {
   type StartNodeSource,
@@ -212,8 +213,8 @@ export async function buildSlice(
         relatedClusterIds: Array.from(relatedClusterIds).sort(),
       };
     }
-  } catch {
-    // ignore cluster context errors (graceful degradation)
+  } catch (error) {
+    logger.debug("Cluster context resolution failed (graceful degradation)", { error: String(error) });
   }
 
   const beamRequest = clusterContext ? { ...request, clusterContext } : request;
@@ -573,9 +574,7 @@ async function loadSymbolCards(
       try {
         signature = JSON.parse(symbolRow.signatureJson);
       } catch (error) {
-        process.stderr.write(
-          `[sdl-mcp] Failed to parse signatureJson for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
-        );
+        logger.warn("Failed to parse signatureJson", { symbolId, error: error instanceof Error ? error.message : String(error) });
         signature = { name: symbolRow.name };
       }
     } else if (includeSignature) {
@@ -588,9 +587,7 @@ async function loadSymbolCards(
         const parsed = JSON.parse(symbolRow.invariantsJson);
         invariants = parsed.slice(0, SYMBOL_CARD_MAX_INVARIANTS);
       } catch (error) {
-        process.stderr.write(
-          `[sdl-mcp] Failed to parse invariantsJson for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
-        );
+        logger.warn("Failed to parse invariantsJson", { symbolId, error: error instanceof Error ? error.message : String(error) });
       }
     }
 
@@ -600,9 +597,7 @@ async function loadSymbolCards(
         const parsed = JSON.parse(symbolRow.sideEffectsJson);
         sideEffects = parsed.slice(0, SYMBOL_CARD_MAX_SIDE_EFFECTS);
       } catch (error) {
-        process.stderr.write(
-          `[sdl-mcp] Failed to parse sideEffectsJson for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
-        );
+        logger.warn("Failed to parse sideEffectsJson", { symbolId, error: error instanceof Error ? error.message : String(error) });
       }
     }
 
@@ -613,9 +608,7 @@ async function loadSymbolCards(
         try {
           testRefs = JSON.parse(metrics.testRefsJson);
         } catch (error) {
-          process.stderr.write(
-            `[sdl-mcp] Failed to parse testRefsJson for symbol ${symbolId}: ${error instanceof Error ? error.message : String(error)}\n`,
-          );
+          logger.warn("Failed to parse testRefsJson", { symbolId, error: error instanceof Error ? error.message : String(error) });
         }
       }
 

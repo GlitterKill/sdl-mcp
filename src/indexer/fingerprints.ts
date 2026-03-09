@@ -3,6 +3,7 @@ import {
   hashContent,
   generateSymbolId as hashSymbolId,
 } from "../util/hashing.js";
+import { logger } from "../util/logger.js";
 
 const fingerprintCollisionLog = new Map<string, Parser.SyntaxNode>();
 
@@ -73,11 +74,7 @@ export function generateAstFingerprint(node: Parser.SyntaxNode): string {
     const existingName =
       existingNode.childForFieldName("name")?.text || "<unknown>";
     const newName = nameNode?.text || "<unknown>";
-    process.stderr.write(
-      `[sdl-mcp] Fingerprint collision detected: ${fingerprint}\n` +
-        `  Existing: ${existingNode.type}:${existingName} at ${existingNode.startPosition.row}:${existingNode.startPosition.column}\n` +
-        `  New: ${node.type}:${newName} at ${node.startPosition.row}:${node.startPosition.column}\n`,
-    );
+    logger.debug("Fingerprint collision detected", { fingerprint, existing: `${existingNode.type}:${existingName}@${existingNode.startPosition.row}:${existingNode.startPosition.column}`, new_entry: `${node.type}:${newName}@${node.startPosition.row}:${node.startPosition.column}` });
   } else {
     fingerprintCollisionLog.set(fingerprint, node);
   }

@@ -7,7 +7,7 @@
  */
 import type { Connection, PreparedStatement, QueryResult } from "kuzu";
 import { logger } from "../util/logger.js";
-import { DatabaseError } from "../mcp/errors.js";
+import { DatabaseError } from "../domain/errors.js";
 
 const MAX_PREPARED_STATEMENT_CACHE_SIZE = 200;
 

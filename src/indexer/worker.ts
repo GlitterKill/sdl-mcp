@@ -1,5 +1,6 @@
 import { parentPort } from "worker_threads";
 import { getAdapterForExtension } from "./adapter/registry.js";
+import { logger } from "../util/logger.js";
 import { generateAstFingerprint } from "./fingerprints.js";
 
 import type { ExtractedSymbol, ExtractedCall } from "./treesitter/extractCalls.js";
@@ -52,6 +53,7 @@ parentPort?.on("message", (msg: WorkerMessage) => {
         msg.filePath,
       );
     } catch (error) {
+      logger.warn("Symbol extraction failed", { file: msg.filePath, error: String(error) });
       extractedSymbols = [];
     }
 

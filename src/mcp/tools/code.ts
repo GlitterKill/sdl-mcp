@@ -453,7 +453,7 @@ export async function handleCodeNeedWindow(
       ? Math.min(request.maxTokens, validatedPolicy.maxWindowTokens)
       : validatedPolicy.maxWindowTokens;
 
-    const windowResult = extractWindow(
+    const windowResult = await extractWindow(
       filePath,
       symbolRange,
       granularity,

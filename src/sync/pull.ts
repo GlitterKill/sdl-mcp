@@ -9,7 +9,7 @@ import { join } from "path";
 import { sleep } from "../util/time.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
-import { IndexError } from "../mcp/errors.js";
+import { IndexError } from "../domain/errors.js";
 
 const DEFAULT_MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;

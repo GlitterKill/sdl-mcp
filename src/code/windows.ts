@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "fs";
+import { readFile, stat } from "fs/promises";
 import { REGEX_CACHE_MAX_SIZE, REGEX_CACHE_EVICT_COUNT } from "../config/constants.js";
 import { join } from "path";
 import type { RepoId, SymbolId } from "../db/schema.js";
@@ -31,7 +31,7 @@ export async function extractCodeWindow(
 
   let fileContent: string;
   try {
-    const fileStat = statSync(filePath);
+    const fileStat = await stat(filePath);
     if (fileStat.size > MAX_FILE_BYTES) {
       logger.warn("File exceeds size limit for code window", {
         filePath: file.relPath,
@@ -40,7 +40,7 @@ export async function extractCodeWindow(
       });
       return null;
     }
-    fileContent = readFileSync(filePath, "utf-8");
+    fileContent = await readFile(filePath, "utf-8");
   } catch (error) {
     logger.warn("Failed to read file for code window", {
       filePath: file.relPath,
@@ -128,18 +128,18 @@ export interface ExtractWindowResult {
   truncated: boolean;
 }
 
-export function extractWindow(
+export async function extractWindow(
   filePath: string,
   range: Range,
   granularity: "symbol" | "block" | "fileWindow",
   maxLines: number,
   maxTokens: number,
-): ExtractWindowResult {
+): Promise<ExtractWindowResult> {
   const resolvedPath = normalizePath(filePath);
 
   let content: string;
   try {
-    const fileStat = statSync(resolvedPath);
+    const fileStat = await stat(resolvedPath);
     if (fileStat.size > MAX_FILE_BYTES) {
       return {
         code: "",
@@ -150,7 +150,7 @@ export function extractWindow(
         truncated: true,
       };
     }
-    content = readFileSync(resolvedPath, "utf-8");
+    content = await readFile(resolvedPath, "utf-8");
   } catch (error) {
     logger.warn("Failed to read file for extract window", {
       filePath,

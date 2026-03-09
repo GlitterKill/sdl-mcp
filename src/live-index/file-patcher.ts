@@ -5,7 +5,7 @@ import type { RepoConfig } from "../config/types.js";
 import { getAbsolutePathFromRepoRoot, normalizePath } from "../util/paths.js";
 import { buildDependencyFrontier, type DependencyFrontier } from "./dependency-frontier.js";
 import { parseDraftFile, type DraftParseResult } from "./draft-parser.js";
-import { IndexError } from "../mcp/errors.js";
+import { IndexError } from "../domain/errors.js";
 
 export interface SavedFilePatchRequest {
   repoId: string;

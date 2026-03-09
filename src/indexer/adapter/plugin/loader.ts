@@ -169,7 +169,7 @@ export async function getPluginAdapters(
       plugin: plugin.manifest.name,
       error: errorMessage,
     });
-    throw new Error(`Failed to create adapters: ${errorMessage}`);
+    throw new Error(`Failed to create adapters: ${errorMessage}`, { cause: error });
   }
 }
 

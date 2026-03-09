@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import { promisify } from "util";
 import { gzip, gunzip, gunzipSync } from "zlib";
-import { IndexError } from "../mcp/errors.js";
+import { IndexError } from "../domain/errors.js";
 
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";

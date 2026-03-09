@@ -1,5 +1,5 @@
 import { z, ZodSchema } from "zod";
-import { DatabaseError } from "../mcp/errors.js";
+import { DatabaseError } from "../domain/errors.js";
 import { logger } from "./logger.js";
 
 /**

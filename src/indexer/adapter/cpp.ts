@@ -10,6 +10,7 @@ import type {
   ExtractedCall,
 } from "../treesitter/extractCalls.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
+import { logger } from "../../util/logger.js";
 
 class CppAdapter implements LanguageAdapter {
   languageId = "cpp";
@@ -42,9 +43,7 @@ class CppAdapter implements LanguageAdapter {
 
       return tree;
     } catch (error) {
-      process.stderr.write(
-        `[sdl-mcp] Failed to parse C/C++ file ${filePath}: ${error instanceof Error ? error.message : String(error)}\n`
-      );
+      logger.warn("Failed to parse C/C++ file", { filePath, error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }

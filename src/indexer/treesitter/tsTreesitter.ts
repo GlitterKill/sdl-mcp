@@ -1,6 +1,7 @@
 import Parser from "tree-sitter";
 import { getParser, createQuery, SupportedLanguage } from "./grammarLoader.js";
 import { QUERY_PREVIEW_LENGTH } from "../../config/constants.js";
+import { logger } from "../../util/logger.js";
 
 // Tree-sitter has a default 32KB buffer limit that causes "Invalid argument"
 // errors on larger files. We use a 1MB buffer to handle large source files.
@@ -45,9 +46,7 @@ export function parseFile(
       language: "typescript",
     };
   } catch (error) {
-    process.stderr.write(
-      `[sdl-mcp] Failed to parse TypeScript file (extension: ${extension}): ${error instanceof Error ? error.message : String(error)}\n`,
-    );
+    logger.warn("Failed to parse TypeScript file", { extension, error: error instanceof Error ? error.message : String(error) });
     return null;
   }
 }
@@ -65,9 +64,7 @@ export function queryTree(tree: Parser.Tree, query: string): any[] {
       query.length > QUERY_PREVIEW_LENGTH
         ? query.substring(0, QUERY_PREVIEW_LENGTH) + "..."
         : query;
-    process.stderr.write(
-      `[sdl-mcp] Failed to execute tree query "${queryPreview}": ${error instanceof Error ? error.message : String(error)}\n`,
-    );
+    logger.warn("Failed to execute tree query", { queryPreview, error: error instanceof Error ? error.message : String(error) });
     return [];
   }
 }

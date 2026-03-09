@@ -11,7 +11,7 @@ import type {
   PolicyRequestContext,
   PolicyDecision,
 } from "../policy/engine.js";
-import { IndexError } from "../mcp/errors.js";
+import { IndexError } from "../domain/errors.js";
 
 export class Executor {
   private evidenceCapture: EvidenceCapture;

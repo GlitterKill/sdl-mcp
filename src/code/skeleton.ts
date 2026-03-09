@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "fs";
+import { readFile, stat } from "fs/promises";
 import { createHash } from "crypto";
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { Range, SkeletonOp, SkeletonIR } from "../mcp/types.js";
@@ -15,6 +15,7 @@ import {
 } from "../config/constants.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
+import { logger } from "../util/logger.js";
 
 const tsParser = new Parser();
 const tsxParser = new Parser();
@@ -380,9 +381,7 @@ export function parseFile(
 
     return tree;
   } catch (error) {
-    process.stderr.write(
-      `[sdl-mcp] Failed to parse file (extension: ${extension}): ${error instanceof Error ? error.message : String(error)}\n`,
-    );
+    logger.warn("Failed to parse file", { extension, error: error instanceof Error ? error.message : String(error) });
     return null;
   }
 }
@@ -436,7 +435,7 @@ export async function generateSymbolSkeleton(
   const extension = file.relPath.split(".").pop() || "";
 
   try {
-    const fileStat = statSync(filePath);
+    const fileStat = await stat(filePath);
     if (fileStat.size > MAX_FILE_BYTES) {
       return null;
     }
@@ -444,7 +443,7 @@ export async function generateSymbolSkeleton(
     return null;
   }
 
-  const content = readFileSync(filePath, "utf-8");
+  const content = await readFile(filePath, "utf-8");
   const tree = parseFile(content, `.${extension}`);
 
   if (!tree) {
@@ -512,7 +511,7 @@ export async function generateFileSkeleton(
   const extension = filePath.split(".").pop() || "";
 
   try {
-    const fileStat = statSync(absPath);
+    const fileStat = await stat(absPath);
     if (fileStat.size > MAX_FILE_BYTES) {
       return null;
     }
@@ -520,7 +519,7 @@ export async function generateFileSkeleton(
     return null;
   }
 
-  const content = readFileSync(absPath, "utf-8");
+  const content = await readFile(absPath, "utf-8");
   const tree = parseFile(content, `.${extension}`);
 
   if (!tree) {
@@ -833,7 +832,7 @@ export async function generateSkeletonIR(
   const extension = file.relPath.split(".").pop() || "";
 
   try {
-    const fileStat = statSync(filePath);
+    const fileStat = await stat(filePath);
     if (fileStat.size > MAX_FILE_BYTES) {
       return null;
     }
@@ -841,7 +840,7 @@ export async function generateSkeletonIR(
     return null;
   }
 
-  const content = readFileSync(filePath, "utf-8");
+  const content = await readFile(filePath, "utf-8");
   const tree = parseFile(content, `.${extension}`);
 
   if (!tree) {

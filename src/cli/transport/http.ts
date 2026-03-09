@@ -59,8 +59,14 @@ type HttpTransportServices = {
   liveIndex?: LiveIndexCoordinator;
 };
 
-function setCorsHeaders(res: ServerResponse): void {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+
+function setCorsHeaders(req: IncomingMessage, res: ServerResponse): void {
+  const origin = req.headers.origin ?? "";
+  if (LOCALHOST_ORIGIN_RE.test(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
@@ -70,14 +76,20 @@ function json(res: ServerResponse, status: number, payload: unknown): void {
   res.end(JSON.stringify(payload));
 }
 
+const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
   for await (const chunk of req) {
-    if (typeof chunk === "string") {
-      chunks.push(Buffer.from(chunk));
-    } else {
-      chunks.push(chunk);
+    const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+    totalBytes += buf.length;
+    if (totalBytes > MAX_BODY_BYTES) {
+      // Drain remaining chunks to prevent connection issues
+      req.destroy();
+      throw new Error(`Request body too large (limit: ${MAX_BODY_BYTES} bytes)`);
     }
+    chunks.push(buf);
   }
 
   if (chunks.length === 0) {
@@ -89,7 +101,11 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
     return {};
   }
 
-  return JSON.parse(body);
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new Error("Invalid JSON in request body");
+  }
 }
 
 export async function routeLiveIndexApiRequest(
@@ -376,7 +392,7 @@ async function handleRestRequest(
   const pathname = url.pathname;
 
   if (pathname.startsWith("/api/")) {
-    setCorsHeaders(res);
+    setCorsHeaders(req, res);
     if (req.method === "OPTIONS") {
       res.writeHead(204);
       res.end();

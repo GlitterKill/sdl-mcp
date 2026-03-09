@@ -21,6 +21,7 @@ import { normalizePath } from "../util/paths.js";
 import { patchSavedFile } from "../live-index/file-patcher.js";
 
 import type { IndexWatchHandle, WatcherHealth } from "./indexer.js";
+import { logger } from "../util/logger.js";
 
 // Local interface for chokidar FSWatcher to avoid 'as any' casts
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -193,16 +194,14 @@ export async function watchRepositoryWithIndexer(
 
   const recordWatcherError = (message: string): void => {
     health.errors += 1;
-    process.stderr.write(`${message}\n`);
+    logger.warn(message);
     watcherErrors.push(`${new Date().toISOString()} - ${message}`);
     if (watcherErrors.length > WATCHER_ERROR_MAX_COUNT) {
       watcherErrors.shift();
     }
     if (health.errors >= WATCHER_ERROR_MAX_COUNT && !health.stale) {
       health.stale = true;
-      process.stderr.write(
-        `[sdl-mcp] Watcher error budget exceeded for ${repoId}. Run: sdl-mcp index --force\n`,
-      );
+      logger.error("Watcher error budget exceeded", { repoId, hint: "Run: sdl-mcp index --force" });
     }
   };
 
@@ -216,7 +215,7 @@ export async function watchRepositoryWithIndexer(
     attempt = 0,
   ): Promise<void> => {
     try {
-      process.stderr.write(`[sdl-mcp] File change detected: ${filePath}\n`);
+      logger.debug("File change detected", { filePath });
       await processWatchedFileChange({
         repoId,
         filePath,
@@ -354,7 +353,7 @@ export async function watchRepositoryWithIndexer(
     restarting = true;
     lastRestartMs = now;
     health.restartCount += 1;
-    process.stderr.write(`[sdl-mcp] Restarting watcher for ${repoId}: ${reason}\n`);
+    logger.info("Restarting watcher", { repoId, reason });
     try {
       if (activeWatcher) {
         await activeWatcher.close();

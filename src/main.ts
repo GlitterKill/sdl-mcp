@@ -1,5 +1,5 @@
 import { MCPServer } from "./server.js";
-import { ConfigError, DatabaseError } from "./mcp/errors.js";
+import { ConfigError, DatabaseError } from "./domain/errors.js";
 import { loadConfig } from "./config/loadConfig.js";
 import { activateCliConfigPath } from "./config/configPath.js";
 import { initGraphDb } from "./db/initGraphDb.js";

@@ -54,7 +54,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
         error instanceof Error
           ? error.message
           : "Failed to compute delta pack.";
-      throw new Error(`Delta pack error: ${message}`);
+      throw new Error(`Delta pack error: ${message}`, { cause: error });
     }
 
     const changedSymbolIds = delta.changedSymbols.map(

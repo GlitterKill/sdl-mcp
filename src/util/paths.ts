@@ -1,5 +1,5 @@
 import * as path from "path";
-import { ValidationError } from "../mcp/errors.js";
+import { ValidationError } from "../domain/errors.js";
 
 function toForwardSlashes(p: string): string {
   return p.replace(/\\/g, "/");

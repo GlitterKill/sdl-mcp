@@ -15,7 +15,7 @@ import {
   type LiveIndexCoordinator,
   type LiveStatus,
 } from "./types.js";
-import { IndexError } from "../mcp/errors.js";
+import { IndexError } from "../domain/errors.js";
 
 export interface InMemoryLiveIndexCoordinatorOptions {
   enabled?: boolean;

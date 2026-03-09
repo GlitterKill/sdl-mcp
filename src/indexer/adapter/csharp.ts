@@ -11,6 +11,7 @@ import type {
 } from "../treesitter/extractCalls.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
 import { findEnclosingSymbol as findEnclosingSymbolUtil } from "../treesitter/symbolUtils.js";
+import { logger } from "../../util/logger.js";
 
 class CSharpAdapter implements LanguageAdapter {
   languageId = "csharp";
@@ -43,9 +44,7 @@ class CSharpAdapter implements LanguageAdapter {
 
       return tree;
     } catch (error) {
-      process.stderr.write(
-        `[sdl-mcp] Failed to parse C# file ${filePath}: ${error instanceof Error ? error.message : String(error)}\n`,
-      );
+      logger.warn("Failed to parse C# file", { filePath, error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }

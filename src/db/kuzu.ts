@@ -4,7 +4,7 @@ import { totalmem } from "node:os";
 import { dirname } from "path";
 import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
-import { DatabaseError } from "../mcp/errors.js";
+import { DatabaseError } from "../domain/errors.js";
 import { normalizeGraphDbPath } from "./graph-db-path.js";
 import {
   createSchema,

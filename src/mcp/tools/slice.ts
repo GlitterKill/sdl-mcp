@@ -1148,6 +1148,7 @@ export async function handleSliceSpilloverGet(
   } catch (error) {
     throw new Error(
       `Failed to parse spillover_ref JSON for handle ${spilloverHandle}: ${String(error)}`,
+      { cause: error },
     );
   }
 

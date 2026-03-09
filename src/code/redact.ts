@@ -1,4 +1,5 @@
 import path from "path";
+import { logger } from "../util/logger.js";
 
 export interface RedactionPattern {
   name: string;
@@ -82,9 +83,7 @@ export function compilePatterns(
         pattern: new RegExp(input.pattern, input.flags ?? "g"),
       });
     } catch (error) {
-      process.stderr.write(
-        `[WARN] Invalid redaction pattern skipped: ${input.name ?? input.pattern}\n`,
-      );
+      logger.warn("Invalid redaction pattern skipped", { name: input.name ?? input.pattern });
     }
   });
 

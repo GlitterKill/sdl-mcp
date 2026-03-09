@@ -91,7 +91,7 @@ const LegacyCardDetailLevelSchema = z.enum(["compact", "full"]);
 
 const SymbolCardSchema = z.object({
   symbolId: z.string(),
-  repoId: z.string(),
+  repoId: z.string().min(1),
   file: z.string(),
   range: RangeSchema,
   kind: z.enum([
@@ -180,7 +180,7 @@ const SliceBuildWireFormatVersionSchema = z.union([
 ]);
 
 const GraphSliceSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   versionId: z.string(),
   budget: RequiredSliceBudgetSchema,
   startSymbols: z.array(z.string()),
@@ -490,7 +490,7 @@ const TrimmedSetSchema = z.object({
 });
 
 const DeltaPackSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   fromVersion: z.string(),
   toVersion: z.string(),
   changedSymbols: z.array(DeltaSymbolChangeSchema),
@@ -503,11 +503,11 @@ const DeltaPackSchema = z.object({
 });
 
 const CodeWindowRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   symbolId: z.string(),
   reason: z.string(),
   expectedLines: z.number().int().min(1),
-  identifiersToFind: z.array(z.string()),
+  identifiersToFind: z.array(z.string()).max(50),
   granularity: z.enum(["symbol", "block", "fileWindow"]).optional(),
   maxTokens: z.number().int().min(1).optional(),
   sliceContext: z
@@ -515,8 +515,8 @@ const CodeWindowRequestSchema = z.object({
       taskText: z.string().min(1),
       stackTrace: z.string().optional(),
       failingTestPath: z.string().optional(),
-      editedFiles: z.array(z.string()).optional(),
-      entrySymbols: z.array(z.string()).optional(),
+      editedFiles: z.array(z.string()).max(100).optional(),
+      entrySymbols: z.array(z.string()).max(100).optional(),
       budget: SliceBudgetSchema.optional(),
     })
     .optional(),
@@ -532,15 +532,15 @@ export const RepoRegisterRequestSchema = z.object({
 
 export const RepoRegisterResponseSchema = z.object({
   ok: z.boolean(),
-  repoId: z.string(),
+  repoId: z.string().min(1),
 });
 
 export const RepoStatusRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
 });
 
 export const RepoStatusResponseSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   rootPath: z.string(),
   latestVersionId: z.string().nullable(),
   filesIndexed: z.number().int(),
@@ -618,14 +618,14 @@ export const RepoStatusResponseSchema = z.object({
 });
 
 export const IndexRefreshRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   mode: z.enum(["full", "incremental"]),
   reason: z.string().optional(),
 });
 
 export const IndexRefreshResponseSchema = z.object({
   ok: z.boolean(),
-  repoId: z.string(),
+  repoId: z.string().min(1),
   versionId: z.string(),
   changedFiles: z.number().int(),
 });
@@ -643,13 +643,13 @@ const BufferCursorSchema = z.object({
 });
 
 export const BufferPushRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   eventType: z.enum(["open", "change", "save", "close", "checkpoint"]),
   filePath: z.string().min(1).refine(
     (p) => !p.includes(".."),
     { message: "filePath must not contain path traversal sequences" },
   ),
-  content: z.string(),
+  content: z.string().max(5_242_880),
   language: z.string().optional(),
   version: z.number().int().min(0),
   dirty: z.boolean(),
@@ -660,7 +660,7 @@ export const BufferPushRequestSchema = z.object({
 
 export const BufferPushResponseSchema = z.object({
   accepted: z.boolean(),
-  repoId: z.string(),
+  repoId: z.string().min(1),
   overlayVersion: z.number().int().min(0),
   parseScheduled: z.boolean(),
   checkpointScheduled: z.boolean(),
@@ -668,12 +668,12 @@ export const BufferPushResponseSchema = z.object({
 });
 
 export const BufferCheckpointRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   reason: z.string().optional(),
 });
 
 export const BufferCheckpointResponseSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   requested: z.boolean(),
   checkpointId: z.string(),
   pendingBuffers: z.number().int().min(0),
@@ -683,11 +683,11 @@ export const BufferCheckpointResponseSchema = z.object({
 });
 
 export const BufferStatusRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
 });
 
 export const BufferStatusResponseSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   enabled: z.boolean(),
   pendingBuffers: z.number().int().min(0),
   dirtyBuffers: z.number().int().min(0),
@@ -726,7 +726,7 @@ const SymbolSearchResultSchema = z.object({
 });
 
 export const SymbolSearchRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   query: z.string().min(1),
   limit: z.number().int().min(1).max(SYMBOL_SEARCH_MAX_RESULTS).optional(),
   semantic: z.boolean().optional(),
@@ -756,7 +756,7 @@ const NotModifiedResponseSchema = z.object({
 });
 
 export const SymbolGetCardRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   symbolId: z.string(),
   ifNoneMatch: z.string().optional(),
   minCallConfidence: z.number().min(0).max(1).optional(),
@@ -799,7 +799,7 @@ export const SymbolGetCardResponseSchema = z.union([
 ]);
 
 export const SliceBuildRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   taskText: z.string().min(1).optional().describe(
     "Natural language task description. Can be used alone (without entrySymbols) " +
     "to auto-discover relevant symbols via full-text search and build the slice " +
@@ -807,8 +807,8 @@ export const SliceBuildRequestSchema = z.object({
   ),
   stackTrace: z.string().optional(),
   failingTestPath: z.string().optional(),
-  editedFiles: z.array(z.string()).optional(),
-  entrySymbols: z.array(z.string()).optional(),
+  editedFiles: z.array(z.string()).max(100).optional(),
+  entrySymbols: z.array(z.string()).max(100).optional(),
   knownCardEtags: z.record(z.string()).optional(),
   cardDetail: CardDetailLevelSchema.optional(),
   adaptiveDetail: z.boolean().optional(),
@@ -893,7 +893,7 @@ export const SliceBuildResponseSchema = z.union([
 ]);
 
 export const DeltaGetRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   fromVersion: z.string(),
   toVersion: z.string(),
   budget: SliceBudgetSchema.optional(),
@@ -925,11 +925,11 @@ export const SliceSpilloverGetResponseSchema = z.object({
 });
 
 export const CodeNeedWindowRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   symbolId: z.string(),
   reason: z.string().min(1),
   expectedLines: z.number().int().min(1),
-  identifiersToFind: z.array(z.string()),
+  identifiersToFind: z.array(z.string()).max(50),
   granularity: z.enum(["symbol", "block", "fileWindow"]).optional(),
   maxTokens: z.number().int().min(1).optional(),
   sliceContext: z
@@ -937,8 +937,8 @@ export const CodeNeedWindowRequestSchema = z.object({
       taskText: z.string().min(1),
       stackTrace: z.string().optional(),
       failingTestPath: z.string().optional(),
-      editedFiles: z.array(z.string()).optional(),
-      entrySymbols: z.array(z.string()).optional(),
+      editedFiles: z.array(z.string()).max(100).optional(),
+      entrySymbols: z.array(z.string()).max(100).optional(),
       budget: SliceBudgetSchema.optional(),
     })
     .optional(),
@@ -990,13 +990,13 @@ export const CodeNeedWindowResponseSchema = z.discriminatedUnion("approved", [
 
 export const GetSkeletonRequestSchema = z
   .object({
-    repoId: z.string(),
+    repoId: z.string().min(1),
     symbolId: z.string().optional(),
     file: z.string().optional(),
     exportedOnly: z.boolean().optional(),
     maxLines: z.number().int().min(1).optional(),
     maxTokens: z.number().int().min(1).optional(),
-    identifiersToFind: z.array(z.string()).optional(),
+    identifiersToFind: z.array(z.string()).max(50).optional(),
   })
   .refine((data) => data.symbolId !== undefined || data.file !== undefined, {
     message: "Either symbolId or file must be provided",
@@ -1024,9 +1024,9 @@ export const GetSkeletonResponseSchema = z.object({
 });
 
 export const GetHotPathRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   symbolId: z.string(),
-  identifiersToFind: z.array(z.string()).min(1),
+  identifiersToFind: z.array(z.string()).min(1).max(50),
   maxLines: z.number().int().min(1).optional(),
   maxTokens: z.number().int().min(1).optional(),
   contextLines: z.number().int().min(0).optional(),
@@ -1050,7 +1050,7 @@ const PolicyConfigSchema = z.object({
 });
 
 export const PolicyGetRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
 });
 
 export const PolicyGetResponseSchema = z.object({
@@ -1058,13 +1058,13 @@ export const PolicyGetResponseSchema = z.object({
 });
 
 export const PolicySetRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   policyPatch: PolicyConfigSchema.partial(),
 });
 
 export const PolicySetResponseSchema = z.object({
   ok: z.boolean(),
-  repoId: z.string(),
+  repoId: z.string().min(1),
 });
 
 // ============================================================================
@@ -1152,7 +1152,7 @@ const TokenMetricsSchema = z.object({
 });
 
 export const RepoOverviewRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   level: z.enum(["stats", "directories", "full"]),
   includeHotspots: z.boolean().optional(),
   directories: z.array(z.string()).optional(),
@@ -1161,7 +1161,7 @@ export const RepoOverviewRequestSchema = z.object({
 });
 
 export const RepoOverviewResponseSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   versionId: z.string(),
   generatedAt: z.string(),
   stats: RepoStatsSchema,
@@ -1265,7 +1265,7 @@ const ContextSummaryMetadataSchema = z.object({
 });
 
 const ContextSummarySchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   query: z.string(),
   scope: ContextSummaryScopeSchema,
   keySymbols: z.array(ContextSummarySymbolSchema),
@@ -1276,7 +1276,7 @@ const ContextSummarySchema = z.object({
 });
 
 export const ContextSummaryRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   query: z.string().min(1),
   budget: z.number().int().min(1).optional(),
   format: ContextSummaryFormatSchema.optional(),
@@ -1284,7 +1284,7 @@ export const ContextSummaryRequestSchema = z.object({
 });
 
 export const ContextSummaryResponseSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   format: ContextSummaryFormatSchema,
   summary: ContextSummarySchema,
   content: z.string(),
@@ -1380,7 +1380,7 @@ const RecommendedTestSchema = z.object({
 });
 
 const PRRiskAnalysisSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   fromVersion: z.string(),
   toVersion: z.string(),
   riskScore: z.number().int().min(0).max(100),
@@ -1405,7 +1405,7 @@ const PolicyDecisionSummarySchema = z.object({
 });
 
 export const PRRiskAnalysisRequestSchema = z.object({
-  repoId: z.string(),
+  repoId: z.string().min(1),
   fromVersion: z.string(),
   toVersion: z.string(),
   riskThreshold: z.number().int().min(0).max(100).optional(),
