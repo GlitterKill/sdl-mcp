@@ -4,11 +4,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  closeKuzuDb,
-  getKuzuConn,
-  initKuzuDb,
-} from "../../dist/db/kuzu.js";
+import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
 import * as kuzuDb from "../../dist/db/kuzu-queries.js";
 import { handleSymbolGetCard } from "../../dist/mcp/tools/symbol.js";
 import { handleSliceBuild } from "../../dist/mcp/tools/slice.js";
@@ -151,8 +147,10 @@ describe("MCP confidence-aware filtering", () => {
     });
 
     assert.ok("slice" in sliceResponse);
-    const entryCard = sliceResponse.slice.cards.find(
-      (card) => card.symbolId === "sym-entry",
+    const slice = sliceResponse.slice;
+    assert.ok("cards" in slice, "Expected standard wire format with cards");
+    const entryCard = slice.cards.find(
+      (card: { symbolId: string }) => card.symbolId === "sym-entry",
     );
     assert.ok(entryCard);
     assert.deepStrictEqual(entryCard?.deps.calls, [

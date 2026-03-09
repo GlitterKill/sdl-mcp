@@ -89,6 +89,21 @@ const CardDetailLevelSchema = z.enum([
 
 const LegacyCardDetailLevelSchema = z.enum(["compact", "full"]);
 
+const SymbolClusterInfoSchema = z.object({
+  clusterId: z.string(),
+  label: z.string(),
+  memberCount: z.number().int().min(0),
+});
+
+const ProcessRoleSchema = z.enum(["entry", "intermediate", "exit"]);
+
+const SymbolProcessInfoSchema = z.object({
+  processId: z.string(),
+  label: z.string(),
+  role: ProcessRoleSchema,
+  depth: z.number().int().min(0),
+});
+
 const SymbolCardSchema = z.object({
   symbolId: z.string(),
   repoId: z.string().min(1),
@@ -113,6 +128,8 @@ const SymbolCardSchema = z.object({
   summary: z.string().optional(),
   invariants: z.array(z.string()).optional(),
   sideEffects: z.array(z.string()).optional(),
+  cluster: SymbolClusterInfoSchema.optional(),
+  processes: z.array(SymbolProcessInfoSchema).optional(),
   callResolution: CallResolutionSchema.optional(),
   deps: SymbolDepsSchema,
   metrics: SymbolMetricsSchema.optional(),
