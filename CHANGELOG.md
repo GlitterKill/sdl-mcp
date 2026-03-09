@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-03-09
+
+### Added
+
+- PID-file coordination and shutdown-manager utilities so `sdl-mcp serve` and stdio mode can detect an already-running MCP process, avoid duplicate startups, and shut down cleanly when the parent terminal closes
+- File-backed logging with rotation plus new `safeJson` and `safeRegex` utilities for safer parsing and regex compilation in production paths
+- Focused unit coverage for shutdown, pidfile handling, JSON safety, regex safety, Kuzu core helpers, and batched symbol deletion regressions
+
+### Changed
+
+- Tree-sitter runtime packages were upgraded from `0.21.1` to `0.25.0`, with matching native grammar rebuilds and workflow updates to keep CI and release publishing aligned
+- Shared protocol/domain contracts now live in `src/domain/types.ts`, separating canonical types from MCP transport wiring
+- The Kuzu persistence layer was refactored from a monolithic query file into domain-specific modules plus `kuzu-core.ts` for clearer ownership and safer DB access patterns
+- Release and CI workflows now use npm trusted publishing (OIDC), `npm ci --ignore-scripts --legacy-peer-deps`, and more stable sync-memory/runtime-budget validation steps
+
+### Fixed
+
+- Graceful shutdown behavior for stdio and `serve` entry points when the terminal closes, including stale-process detection before startup
+- Security and robustness issues called out in code review: dynamic evaluation was removed from embeddings loading, JSON parsing is validated before use, and regex compilation is guarded against ReDoS-style patterns
+- Resource cleanup and error reporting across watchers, worker pools, live-index services, sync paths, and MCP handlers to reduce leaks and swallowed failures
+- Skeleton/hot-path code access paths now include additional crash protection, memory guards, and logging hardening around tree-sitter-backed operations
+
+### Documentation
+
+- Refreshed README positioning and feature descriptions to match the current Kuzu-backed, cards-first SDL-MCP architecture and release workflow
+
 ## [0.8.0] - 2026-03-06
 
 ### Added
@@ -515,6 +541,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.8.2]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.2
 [0.8.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.0
 [0.7.2]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.7.2
 [0.7.1]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.7.1
