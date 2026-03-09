@@ -1,6 +1,6 @@
 import { readFile, stat } from "fs/promises";
 import type { RepoId, SymbolId } from "../db/schema.js";
-import type { Range } from "../mcp/types.js";
+import type { Range } from "../domain/types.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
 import Parser from "tree-sitter";

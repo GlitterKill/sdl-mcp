@@ -8,7 +8,7 @@
  * - Configurable size limits per cache type
  */
 
-import type { SymbolCard } from "../mcp/types.js";
+import type { SymbolCard } from "../domain/types.js";
 import type { VersionId, SymbolId, RepoId } from "../db/schema.js";
 
 interface CacheEntry<T> {

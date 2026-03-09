@@ -22,7 +22,7 @@ import type {
   SymbolId,
   SymbolRow,
 } from "../../db/schema.js";
-import type { SliceBudget } from "../../mcp/types.js";
+import type { SliceBudget } from "../../domain/types.js";
 import * as kuzuDb from "../../db/kuzu-queries.js";
 import {
   SLICE_SCORE_THRESHOLD,

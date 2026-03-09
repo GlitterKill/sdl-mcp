@@ -8,7 +8,7 @@ import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
 import type { EdgeRow, MetricsRow, SymbolRow } from "../db/kuzu-queries.js";
 import type { RepoConfig } from "../config/types.js";
-import type { CanonicalTest, StalenessTiers } from "../mcp/types.js";
+import type { CanonicalTest, StalenessTiers } from "../domain/types.js";
 import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
 

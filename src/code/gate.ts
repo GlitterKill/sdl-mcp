@@ -9,7 +9,7 @@ import type {
   CodeWindowResponse,
   GraphSlice,
   NextBestActionCallable,
-} from "../mcp/types.js";
+} from "../domain/types.js";
 import type { PolicyConfig } from "../config/types.js";
 import type { SymbolRow } from "../db/schema.js";
 

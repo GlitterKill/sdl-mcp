@@ -1,4 +1,4 @@
-import type { Range } from "../mcp/types.js";
+import type { Range } from "../domain/types.js";
 
 export interface TruncationMetadata {
   truncated: boolean;

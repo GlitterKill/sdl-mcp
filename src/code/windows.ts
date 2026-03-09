@@ -2,7 +2,7 @@ import { readFile, stat } from "fs/promises";
 import { REGEX_CACHE_MAX_SIZE, REGEX_CACHE_EVICT_COUNT } from "../config/constants.js";
 import { join } from "path";
 import type { RepoId, SymbolId } from "../db/schema.js";
-import type { CodeWindowResponse, Range } from "../mcp/types.js";
+import type { CodeWindowResponse, Range } from "../domain/types.js";
 import { normalizePath } from "../util/paths.js";
 import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
 import { MAX_FILE_BYTES } from "../config/constants.js";

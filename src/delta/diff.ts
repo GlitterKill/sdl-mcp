@@ -7,7 +7,7 @@ import type {
   DeltaSymbolChange,
   DeltaSymbolChangeWithTiers,
   StalenessTiers,
-} from "../mcp/types.js";
+} from "../domain/types.js";
 import { logger } from "../util/logger.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";

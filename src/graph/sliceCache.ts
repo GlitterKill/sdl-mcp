@@ -1,4 +1,4 @@
-import type { GraphSlice, CardDetailLevel } from "../mcp/types.js";
+import type { GraphSlice, CardDetailLevel } from "../domain/types.js";
 import type { RepoId, VersionId, SymbolId } from "../db/schema.js";
 
 interface SliceBuildRequest {

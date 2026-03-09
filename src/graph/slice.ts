@@ -22,11 +22,11 @@ import type {
   CardDetailLevel,
   DetailLevelMetadata,
   CallResolution,
-} from "../mcp/types.js";
+} from "../domain/types.js";
 import {
   normalizeCardDetailLevel,
   CARD_DETAIL_LEVEL_RANK,
-} from "../mcp/types.js";
+} from "../domain/types.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { DatabaseError, ValidationError } from "../domain/errors.js";
 import { pickDepLabel } from "../util/depLabels.js";

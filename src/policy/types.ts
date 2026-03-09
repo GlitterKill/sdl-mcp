@@ -4,7 +4,7 @@ import type {
   DeltaPack,
   SliceBudget,
   EvidenceValue,
-} from "../mcp/types.js";
+} from "../domain/types.js";
 import type { SymbolRow } from "../db/schema.js";
 
 export type PolicyRequestType =

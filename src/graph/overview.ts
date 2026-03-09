@@ -21,7 +21,7 @@ import type {
   CodebaseHotspots,
   CompactSymbolRef,
   SymbolCountsByKind,
-} from "../mcp/types.js";
+} from "../domain/types.js";
 import { SYMBOL_TOKEN_MAX } from "../config/constants.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";

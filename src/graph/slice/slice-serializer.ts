@@ -16,8 +16,8 @@ import type {
   SliceSymbolDeps,
   CompressedEdge,
   CardDetailLevel,
-} from "../../mcp/types.js";
-import { CARD_DETAIL_LEVEL_RANK } from "../../mcp/types.js";
+} from "../../domain/types.js";
+import { CARD_DETAIL_LEVEL_RANK } from "../../domain/types.js";
 import { estimateTokens as estimateTextTokens } from "../../util/tokenize.js";
 import { hashCard } from "../../util/hashing.js";
 import {

@@ -1,5 +1,5 @@
 import type { RepoId, SymbolId } from "../../db/schema.js";
-import type { SliceBudget, GraphSlice } from "../../mcp/types.js";
+import type { SliceBudget, GraphSlice } from "../../domain/types.js";
 
 export type SliceError =
   | { type: "invalid_repo"; repoId: RepoId }

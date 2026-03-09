@@ -18,7 +18,7 @@ import type {
   TrimmedSet,
   SpilloverHandle,
   SliceBudget,
-} from "../mcp/types.js";
+} from "../domain/types.js";
 import {
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,

@@ -7,7 +7,7 @@ import type {
   EdgeType,
   EdgeResolutionStrategy,
 } from "../db/schema.js";
-import type { SymbolCard, Range, SymbolSignature } from "../mcp/types.js";
+import type { SymbolCard, Range, SymbolSignature } from "../domain/types.js";
 
 export type EventType =
   | "SYMBOL_UPSERTED"

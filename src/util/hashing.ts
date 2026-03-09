@@ -1,6 +1,6 @@
 import * as crypto from "crypto";
 
-import type { SymbolCard } from "../mcp/types.js";
+import type { SymbolCard } from "../domain/types.js";
 import { normalizePath } from "./paths.js";
 
 export type NormalizedValue =

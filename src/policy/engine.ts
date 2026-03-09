@@ -8,7 +8,7 @@ import type {
 } from "./types.js";
 import { DEFAULT_POLICY_CONFIG } from "./types.js";
 import { logger } from "../util/logger.js";
-import type { NextBestAction, RequiredFieldsForNext } from "../mcp/types.js";
+import type { NextBestAction, RequiredFieldsForNext } from "../domain/types.js";
 import {
   POLICY_PRIORITY_WINDOW_SIZE_LIMIT,
   POLICY_PRIORITY_IDENTIFIERS_REQUIRED,

@@ -5,7 +5,7 @@ import type {
   EdgeType,
   EdgeResolutionStrategy,
 } from "../../db/schema.js";
-import type { SymbolDeps, Range, SymbolSignature } from "../../mcp/types.js";
+import type { SymbolDeps, Range, SymbolSignature } from "../types.js";
 
 export interface SymbolReadModel {
   symbolId: SymbolId;
