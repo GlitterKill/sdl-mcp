@@ -3,6 +3,18 @@ import type { Connection } from "kuzu";
 import { getKuzuConn } from "../../db/kuzu.js";
 import * as kuzuDb from "../../db/kuzu-queries.js";
 import type { SymbolReferenceRow } from "../../db/kuzu-queries.js";
+import type { ConfigEdge } from "../configEdges.js";
+
+interface PersistSkippedFileParams {
+  conn: Connection;
+  existingFileId?: string;
+  fileId: string;
+  repoId: string;
+  relPath: string;
+  contentHash: string;
+  language: string;
+  byteSize: number;
+}
 
 export function isTestFile(relPath: string, languages: string[]): boolean {
   const ext = relPath.split(".").pop() || "";
@@ -54,4 +66,46 @@ export function buildSymbolReferences(
     lineNumber: null,
     createdAt,
   }));
+}
+
+export async function persistSkippedFile({
+  conn,
+  existingFileId,
+  fileId,
+  repoId,
+  relPath,
+  contentHash,
+  language,
+  byteSize,
+}: PersistSkippedFileParams): Promise<void> {
+  await kuzuDb.withTransaction(conn, async (txConn) => {
+    if (existingFileId) {
+      await kuzuDb.deleteSymbolsByFileId(txConn, existingFileId);
+    }
+    await kuzuDb.upsertFile(txConn, {
+      fileId,
+      repoId,
+      relPath,
+      contentHash,
+      language,
+      byteSize,
+      lastIndexedAt: new Date().toISOString(),
+    });
+  });
+}
+
+export function createEmptyProcessFileResult(changed: boolean): {
+  symbolsIndexed: number;
+  edgesCreated: number;
+  changed: boolean;
+  configEdges: ConfigEdge[];
+  pass2HintPaths: string[];
+} {
+  return {
+    symbolsIndexed: 0,
+    edgesCreated: 0,
+    changed,
+    configEdges: [],
+    pass2HintPaths: [],
+  };
 }

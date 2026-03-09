@@ -2,7 +2,10 @@ import { access, constants, existsSync } from "fs";
 import { DoctorOptions } from "../types.js";
 import { NODE_MIN_MAJOR_VERSION } from "../../config/constants.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
-import { resolveGraphDbPath } from "../../db/graph-db-path.js";
+import {
+  defaultGraphDbPath,
+  normalizeGraphDbPath,
+} from "../../db/graph-db-path.js";
 import {
   CALL_EDGE_METADATA_FIELDS,
   KUZU_SCHEMA_VERSION,
@@ -19,14 +22,11 @@ import {
 } from "../../db/kuzu.js";
 import * as kuzuDb from "../../db/kuzu-queries.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
-import Parser from "tree-sitter";
-import TypeScript from "tree-sitter-typescript";
-import C from "tree-sitter-c";
-import Cpp from "tree-sitter-cpp";
-import PHP from "tree-sitter-php";
-import Rust from "tree-sitter-rust";
-import Kotlin from "tree-sitter-kotlin";
-import Bash from "tree-sitter-bash";
+import {
+  getGrammarLoadError,
+  getParser,
+  type SupportedLanguage,
+} from "../../indexer/treesitter/grammarLoader.js";
 
 const DOCTOR_CHECKS = [
   { name: "Node.js version", check: checkNodeVersion },
@@ -154,14 +154,22 @@ async function checkConfigReadable(
 async function checkTreeSitterGrammar(
   _options: DoctorOptions,
 ): Promise<Omit<DoctorResult, "name">> {
-  const grammars = [
-    { name: "TypeScript", module: TypeScript, langProp: "typescript" },
-    { name: "C", module: C, langProp: null },
-    { name: "C++", module: Cpp, langProp: null },
-    { name: "PHP", module: PHP, langProp: "php" },
-    { name: "Rust", module: Rust, langProp: null },
-    { name: "Kotlin", module: Kotlin, langProp: null },
-    { name: "Bash", module: Bash, langProp: null },
+  const grammars: Array<{
+    name: string;
+    language: SupportedLanguage;
+    pkg: string;
+  }> = [
+    {
+      name: "TypeScript",
+      language: "typescript",
+      pkg: "tree-sitter-typescript",
+    },
+    { name: "C", language: "c", pkg: "tree-sitter-c" },
+    { name: "C++", language: "cpp", pkg: "tree-sitter-cpp" },
+    { name: "PHP", language: "php", pkg: "tree-sitter-php" },
+    { name: "Rust", language: "rust", pkg: "tree-sitter-rust" },
+    { name: "Kotlin", language: "kotlin", pkg: "tree-sitter-kotlin" },
+    { name: "Bash", language: "bash", pkg: "tree-sitter-bash" },
   ];
 
   const results: { name: string; success: boolean; error?: string }[] = [];
@@ -169,18 +177,13 @@ async function checkTreeSitterGrammar(
   try {
     for (const grammar of grammars) {
       try {
-        let language: any;
-
-        if (grammar.langProp) {
-          language = (grammar.module as Record<string, unknown>)[
-            grammar.langProp
-          ];
-        } else {
-          language = grammar.module;
+        const parser = getParser(grammar.language);
+        if (!parser) {
+          throw (
+            getGrammarLoadError(grammar.language) ??
+            new Error(`Failed to load ${grammar.pkg}`)
+          );
         }
-
-        const parser = new Parser();
-        parser.setLanguage(language);
 
         results.push({ name: grammar.name, success: true });
       } catch (error) {
@@ -204,22 +207,13 @@ async function checkTreeSitterGrammar(
     const failedPkgs = failed
       .map((f) => {
         const grammar = grammars.find((g) => g.name === f.name);
-        const pkgMap: Record<string, string> = {
-          TypeScript: "tree-sitter-typescript",
-          C: "tree-sitter-c",
-          "C++": "tree-sitter-cpp",
-          PHP: "tree-sitter-php",
-          Rust: "tree-sitter-rust",
-          Kotlin: "tree-sitter-kotlin",
-          Bash: "tree-sitter-bash",
-        };
-        return grammar ? pkgMap[grammar.name] : "";
+        return grammar?.pkg ?? "";
       })
       .filter(Boolean);
     const platform = `${process.platform}/${process.arch}`;
     const nodeVer = process.version;
     return {
-      status: "fail",
+      status: failed.length === grammars.length ? "fail" : "warn",
       message:
         `Failed to load ${failed.length} grammar(s):\n  ${failedList}\n\n` +
         `  Platform: ${platform}, Node: ${nodeVer}\n` +
@@ -236,6 +230,17 @@ async function checkTreeSitterGrammar(
   }
 }
 
+function resolveDoctorGraphDbPath(
+  config: { graphDatabase?: { path?: string | null } },
+  resolvedConfigPath: string,
+): string {
+  const configuredPath = config.graphDatabase?.path;
+  if (configuredPath && configuredPath.trim()) {
+    return normalizeGraphDbPath(configuredPath, "auto");
+  }
+  return defaultGraphDbPath(resolvedConfigPath);
+}
+
 async function checkStaleIndex(
   options: DoctorOptions,
 ): Promise<Omit<DoctorResult, "name">> {
@@ -250,7 +255,7 @@ async function checkStaleIndex(
   try {
     const { loadConfig } = await import("../../config/loadConfig.js");
     const config = loadConfig(configPath);
-    const kuzuDbPath = resolveGraphDbPath(config, configPath);
+    const kuzuDbPath = resolveDoctorGraphDbPath(config, configPath);
 
     await initKuzuDb(kuzuDbPath);
     const conn = await getKuzuConn();
@@ -548,7 +553,7 @@ async function checkKuzuDb(
       };
     }
 
-    const kuzuDbPath = resolveGraphDbPath(config, configPath);
+    const kuzuDbPath = resolveDoctorGraphDbPath(config, configPath);
 
     if (!existsSync(kuzuDbPath)) {
       return {

@@ -1,7 +1,6 @@
 import { existsSync } from "fs";
 import { dirname, resolve } from "path";
 import { pathToFileURL } from "url";
-// @ts-expect-error — node:sqlite types not available in all configurations
 import { DatabaseSync } from "node:sqlite";
 
 import { resolveCliConfigPath } from "../src/config/configPath.js";

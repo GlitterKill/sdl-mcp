@@ -39,7 +39,12 @@ import type { ParserWorkerPool } from "../workerPool.js";
 import type { SymbolWithNodeId } from "../worker.js";
 import type { ExtractedCall } from "../treesitter/extractCalls.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
-import { buildSymbolReferences, isTestFile } from "./helpers.js";
+import {
+  buildSymbolReferences,
+  createEmptyProcessFileResult,
+  isTestFile,
+  persistSkippedFile,
+} from "./helpers.js";
 
 export interface ProcessFileParams {
   repoId: string;
@@ -99,13 +104,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
           fileMtime: fileMeta.mtime,
           lastIndexedMs,
         });
-        return {
-          symbolsIndexed: 0,
-          edgesCreated: 0,
-          changed: false,
-          configEdges: [],
-          pass2HintPaths: [],
-        };
+        return createEmptyProcessFileResult(false);
       }
     }
 
@@ -119,13 +118,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
         logger.warn(`File disappeared before indexing: ${fileMeta.path}`, {
           code,
         });
-        return {
-          symbolsIndexed: 0,
-          edgesCreated: 0,
-          changed: false,
-          configEdges: [],
-          pass2HintPaths: [],
-        };
+        return createEmptyProcessFileResult(false);
       }
       throw readError;
     }
@@ -144,13 +137,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
         file: fileMeta.path,
         contentHash,
       });
-      return {
-        symbolsIndexed: 0,
-        edgesCreated: 0,
-        changed: false,
-        configEdges: [],
-        pass2HintPaths: [],
-      };
+      return createEmptyProcessFileResult(false);
     }
 
     const conn = await getKuzuConn();
@@ -159,27 +146,17 @@ export async function processFile(params: ProcessFileParams): Promise<{
       logger.debug(
         `Language ${ext} not in enabled languages, skipping ${fileMeta.path}`,
       );
-      await kuzuDb.withTransaction(conn, async (txConn) => {
-        if (existingFile) {
-          await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
-        }
-        await kuzuDb.upsertFile(txConn, {
-          fileId,
-          repoId,
-          relPath,
-          contentHash,
-          language: ext,
-          byteSize: fileMeta.size,
-          lastIndexedAt: new Date().toISOString(),
-        });
+      await persistSkippedFile({
+        conn,
+        existingFileId: existingFile?.fileId,
+        fileId,
+        repoId,
+        relPath,
+        contentHash,
+        language: ext,
+        byteSize: fileMeta.size,
       });
-      return {
-        symbolsIndexed: 0,
-        edgesCreated: 0,
-        changed: true,
-        configEdges: [],
-        pass2HintPaths: [],
-      };
+      return createEmptyProcessFileResult(true);
     }
 
     const adapter = getAdapterForExtension(extWithDot);
@@ -188,27 +165,17 @@ export async function processFile(params: ProcessFileParams): Promise<{
       logger.debug(
         `No adapter found for ${extWithDot}, skipping ${fileMeta.path}`,
       );
-      await kuzuDb.withTransaction(conn, async (txConn) => {
-        if (existingFile) {
-          await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
-        }
-        await kuzuDb.upsertFile(txConn, {
-          fileId,
-          repoId,
-          relPath,
-          contentHash,
-          language: ext,
-          byteSize: fileMeta.size,
-          lastIndexedAt: new Date().toISOString(),
-        });
+      await persistSkippedFile({
+        conn,
+        existingFileId: existingFile?.fileId,
+        fileId,
+        repoId,
+        relPath,
+        contentHash,
+        language: ext,
+        byteSize: fileMeta.size,
       });
-      return {
-        symbolsIndexed: 0,
-        edgesCreated: 0,
-        changed: true,
-        configEdges: [],
-        pass2HintPaths: [],
-      };
+      return createEmptyProcessFileResult(true);
     }
 
     let symbolsWithNodeIds: Array<SymbolWithNodeId> = [];
@@ -239,27 +206,17 @@ export async function processFile(params: ProcessFileParams): Promise<{
       if (parseError || !workerPool) {
         tree = adapter.parse(content, filePath);
         if (!tree) {
-          await kuzuDb.withTransaction(conn, async (txConn) => {
-            if (existingFile) {
-              await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
-            }
-            await kuzuDb.upsertFile(txConn, {
-              fileId,
-              repoId,
-              relPath,
-              contentHash,
-              language: adapter.languageId,
-              byteSize: fileMeta.size,
-              lastIndexedAt: new Date().toISOString(),
-            });
+          await persistSkippedFile({
+            conn,
+            existingFileId: existingFile?.fileId,
+            fileId,
+            repoId,
+            relPath,
+            contentHash,
+            language: adapter.languageId,
+            byteSize: fileMeta.size,
           });
-          return {
-            symbolsIndexed: 0,
-            edgesCreated: 0,
-            changed: true,
-            configEdges: [],
-            pass2HintPaths: [],
-          };
+          return createEmptyProcessFileResult(true);
         }
 
         let extractedSymbols: ReturnType<typeof adapter.extractSymbols>;
@@ -291,13 +248,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
       }
     } catch (error) {
       logger.error(`Fatal parse error for ${fileMeta.path}: ${error}`);
-      return {
-        symbolsIndexed: 0,
-        edgesCreated: 0,
-        changed: false,
-        configEdges: [],
-        pass2HintPaths: [],
-      };
+      return createEmptyProcessFileResult(false);
     }
 
     const symbolsIndexed = symbolsWithNodeIds.length;
@@ -729,12 +680,6 @@ export async function processFile(params: ProcessFileParams): Promise<{
     };
   } catch (error) {
     logger.error(`Error processing file ${fileMeta.path}:`, { error });
-    return {
-      symbolsIndexed: 0,
-      edgesCreated: 0,
-      changed: false,
-      configEdges: [],
-      pass2HintPaths: [],
-    };
+    return createEmptyProcessFileResult(false);
   }
 }
