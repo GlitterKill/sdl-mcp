@@ -105,3 +105,4 @@ tmp-agent-feedback-regression-version/graph/sdl-mcp-graph.kuzu
 tmp-search-regression-full/graph/sdl-mcp-graph.kuzu
 tmp-search-regression-lite/graph/sdl-mcp-graph.kuzu
 .sisyphus/
+docs/plans/2026-03-09-language-indexing-reliability.md
