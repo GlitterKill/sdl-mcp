@@ -617,6 +617,40 @@ fun main() {
     });
   });
 
+  describe("ML-C2.5: Windows Regression", () => {
+    it("should produce a non-empty parse tree from fixtures on this platform", () => {
+      const content = readFileSync(
+        join(process.cwd(), "tests/fixtures/kotlin/symbols.kt"),
+        "utf-8",
+      );
+
+      const parser = adapter.getParser();
+      if (!parser) {
+        // Grammar load failure — fail with actionable message
+        assert.fail(
+          "Kotlin grammar failed to load on this platform. " +
+            `process.platform=${process.platform}, process.arch=${process.arch}, ` +
+            `node=${process.version}. Run: npm rebuild tree-sitter-kotlin`,
+        );
+      }
+
+      const tree = adapter.parse(content, "test.kt");
+      assert.ok(
+        tree,
+        "Kotlin parser returned null tree — parse failure, not just empty extraction",
+      );
+      assert.ok(tree.rootNode, "Kotlin tree has no rootNode");
+
+      const symbols = adapter.extractSymbols(tree, content, "test.kt");
+      assert.ok(
+        symbols.length > 0,
+        `Kotlin extraction returned 0 symbols from fixtures. ` +
+          `Tree root type: ${tree.rootNode.type}, hasError: ${tree.rootNode.hasError}. ` +
+          `This indicates an extraction bug, not a grammar loading issue.`,
+      );
+    });
+  });
+
   describe("Edge Cases", () => {
     it("should handle extension function call edge cases", () => {
       const content = readFileSync(

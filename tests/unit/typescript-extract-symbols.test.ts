@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -277,5 +279,79 @@ export interface Config {
         `Symbol ${symbol.name} should be marked as exported`,
       );
     }
+  });
+
+  it("should extract TSX component exports from fixture file", () => {
+    const TypeScript = require("tree-sitter-typescript");
+    const Parser = require("tree-sitter");
+    const {
+      extractSymbols,
+    } = require("../../dist/indexer/treesitter/extractSymbols.js");
+
+    const parser = new Parser();
+    // TSX/JSX files must use the tsx grammar, not the typescript grammar
+    parser.setLanguage(TypeScript.tsx);
+
+    const content = readFileSync(
+      join(process.cwd(), "tests/fixtures/typescript/components.tsx"),
+      "utf-8",
+    );
+
+    const tree = parser.parse(content);
+    assert.ok(tree, "Should parse TSX fixture");
+    assert.strictEqual(
+      tree.rootNode.hasError,
+      false,
+      "TSX should parse without errors",
+    );
+
+    const symbols = extractSymbols(tree);
+
+    const helper = symbols.find((s: any) => s.name === "sdlSmokeTsxHelper");
+    assert.ok(helper, "Should extract sdlSmokeTsxHelper from TSX");
+    assert.strictEqual(helper.kind, "function");
+    assert.strictEqual(helper.exported, true);
+
+    const component = symbols.find((s: any) => s.name === "SdlSmokeTsxCard");
+    assert.ok(component, "Should extract SdlSmokeTsxCard component from TSX");
+    assert.strictEqual(component.kind, "function");
+    assert.strictEqual(component.exported, true);
+  });
+
+  it("should extract JSX component exports from fixture file", () => {
+    const TypeScript = require("tree-sitter-typescript");
+    const Parser = require("tree-sitter");
+    const {
+      extractSymbols,
+    } = require("../../dist/indexer/treesitter/extractSymbols.js");
+
+    const parser = new Parser();
+    // JSX files must also use the tsx grammar
+    parser.setLanguage(TypeScript.tsx);
+
+    const content = readFileSync(
+      join(process.cwd(), "tests/fixtures/typescript/components.jsx"),
+      "utf-8",
+    );
+
+    const tree = parser.parse(content);
+    assert.ok(tree, "Should parse JSX fixture");
+    assert.strictEqual(
+      tree.rootNode.hasError,
+      false,
+      "JSX should parse without errors",
+    );
+
+    const symbols = extractSymbols(tree);
+
+    const helper = symbols.find((s: any) => s.name === "sdlSmokeJsxHelper");
+    assert.ok(helper, "Should extract sdlSmokeJsxHelper from JSX");
+    assert.strictEqual(helper.kind, "function");
+    assert.strictEqual(helper.exported, true);
+
+    const component = symbols.find((s: any) => s.name === "SdlSmokeJsxApp");
+    assert.ok(component, "Should extract SdlSmokeJsxApp component from JSX");
+    assert.strictEqual(component.kind, "function");
+    assert.strictEqual(component.exported, true);
   });
 });

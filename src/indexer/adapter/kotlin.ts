@@ -5,6 +5,7 @@ import {
   getParser,
   clearCache as clearGrammarCache,
   createQuery,
+  getGrammarLoadError,
 } from "../treesitter/grammarLoader.js";
 import type {
   ExtractedSymbol,
@@ -23,6 +24,20 @@ class KotlinAdapter implements LanguageAdapter {
   getParser(): Parser | null {
     if (!this.parser) {
       this.parser = getParser("kotlin");
+
+      if (!this.parser) {
+        const loadError = getGrammarLoadError("kotlin");
+        if (loadError) {
+          logger.error(
+            `Kotlin adapter cannot initialize: ${loadError.message}`,
+          );
+        } else {
+          logger.error(
+            "Kotlin adapter: grammar returned null with no recorded error. " +
+              `Platform: ${process.platform}/${process.arch}, Node: ${process.version}`,
+          );
+        }
+      }
     }
     return this.parser;
   }

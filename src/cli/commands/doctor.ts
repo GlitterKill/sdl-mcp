@@ -10,7 +10,13 @@ import {
 } from "../../db/kuzu-schema.js";
 import { getAllWatcherHealth } from "../../indexer/indexer.js";
 import { createDefaultPass2ResolverRegistry } from "../../indexer/pass2/registry.js";
-import { closeKuzuDb, getKuzuConn, getKuzuDbPath, initKuzuDb, isKuzuAvailable } from "../../db/kuzu.js";
+import {
+  closeKuzuDb,
+  getKuzuConn,
+  getKuzuDbPath,
+  initKuzuDb,
+  isKuzuAvailable,
+} from "../../db/kuzu.js";
 import * as kuzuDb from "../../db/kuzu-queries.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import Parser from "tree-sitter";
@@ -31,7 +37,10 @@ const DOCTOR_CHECKS = [
   { name: "Stale index detection", check: checkStaleIndex },
   { name: "Watcher health telemetry", check: checkWatcherHealth },
   { name: "Live index runtime", check: checkLiveIndexRuntime },
-  { name: "Call resolution capabilities", check: checkCallResolutionCapabilities },
+  {
+    name: "Call resolution capabilities",
+    check: checkCallResolutionCapabilities,
+  },
   { name: "Graph database (KuzuDB)", check: checkKuzuDb },
 ];
 
@@ -205,9 +214,17 @@ async function checkTreeSitterGrammar(
         return grammar ? pkgMap[grammar.name] : "";
       })
       .filter(Boolean);
+    const platform = `${process.platform}/${process.arch}`;
+    const nodeVer = process.version;
     return {
       status: "fail",
-      message: `Failed to load ${failed.length} grammar(s):\n  ${failedList}\n\n  Install missing grammars: npm install ${failedPkgs.join(" ")}`,
+      message:
+        `Failed to load ${failed.length} grammar(s):\n  ${failedList}\n\n` +
+        `  Platform: ${platform}, Node: ${nodeVer}\n` +
+        `  Remediation:\n` +
+        `    1. npm rebuild ${failedPkgs.join(" ")}\n` +
+        `    2. If that fails, check that the native binary is compatible with Node ${nodeVer} on ${platform}\n` +
+        `    3. Try: npm install ${failedPkgs.join(" ")}`,
     };
   } catch (error) {
     return {
@@ -222,7 +239,10 @@ async function checkStaleIndex(
 ): Promise<Omit<DoctorResult, "name">> {
   const configPath = options.config ?? activateCliConfigPath();
   if (!existsSync(configPath)) {
-    return { status: "warn", message: "Config not found (skip stale index check)" };
+    return {
+      status: "warn",
+      message: "Config not found (skip stale index check)",
+    };
   }
 
   try {
@@ -322,7 +342,10 @@ async function checkWatcherHealth(
 ): Promise<Omit<DoctorResult, "name">> {
   const configPath = options.config ?? activateCliConfigPath();
   if (!existsSync(configPath)) {
-    return { status: "warn", message: "Config not found (skip watcher health)" };
+    return {
+      status: "warn",
+      message: "Config not found (skip watcher health)",
+    };
   }
 
   try {
@@ -343,7 +366,8 @@ async function checkWatcherHealth(
     if (active.length === 0) {
       return {
         status: "warn",
-        message: "No active watcher telemetry in this process (start `sdl-mcp serve` to observe runtime watcher health)",
+        message:
+          "No active watcher telemetry in this process (start `sdl-mcp serve` to observe runtime watcher health)",
       };
     }
 
@@ -379,7 +403,10 @@ async function checkLiveIndexRuntime(
 ): Promise<Omit<DoctorResult, "name">> {
   const configPath = options.config ?? activateCliConfigPath();
   if (!existsSync(configPath)) {
-    return { status: "warn", message: "Config not found (skip live index runtime)" };
+    return {
+      status: "warn",
+      message: "Config not found (skip live index runtime)",
+    };
   }
 
   try {
@@ -492,8 +519,6 @@ async function checkCallResolutionCapabilities(
   };
 }
 
-
-
 async function checkKuzuDb(
   options: DoctorOptions,
 ): Promise<Omit<DoctorResult, "name">> {
@@ -516,7 +541,8 @@ async function checkKuzuDb(
     if (!config.graphDatabase) {
       return {
         status: "warn",
-        message: "Graph database not configured (missing graphDatabase section)",
+        message:
+          "Graph database not configured (missing graphDatabase section)",
       };
     }
 
