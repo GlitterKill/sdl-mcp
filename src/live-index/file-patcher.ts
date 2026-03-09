@@ -5,6 +5,7 @@ import type { RepoConfig } from "../config/types.js";
 import { getAbsolutePathFromRepoRoot, normalizePath } from "../util/paths.js";
 import { buildDependencyFrontier, type DependencyFrontier } from "./dependency-frontier.js";
 import { parseDraftFile, type DraftParseResult } from "./draft-parser.js";
+import { IndexError } from "../mcp/errors.js";
 
 export interface SavedFilePatchRequest {
   repoId: string;
@@ -32,7 +33,7 @@ export async function patchSavedFile(
   const conn = await getKuzuConn();
   const repo = await kuzuDb.getRepo(conn, request.repoId);
   if (!repo) {
-    throw new Error(`Repository ${request.repoId} not found`);
+    throw new IndexError(`Repository ${request.repoId} not found`);
   }
 
   const repoConfig = JSON.parse(repo.configJson) as RepoConfig;

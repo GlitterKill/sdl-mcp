@@ -252,7 +252,7 @@ export async function handleRepoStatus(
     const prefetchStats = getPrefetchStats(repoId);
     const liveIndexStatus = await getDefaultLiveIndexCoordinator()
       .getLiveStatus(repoId)
-      .catch(() => undefined);
+      .catch((err) => { logger.warn("Failed to get live index status", { repoId, error: err instanceof Error ? err.message : String(err) }); return undefined; });
     if (watcherHealth) {
       logWatcherHealthTelemetry({
         repoId,
@@ -363,7 +363,7 @@ export async function handleIndexRefresh(
                 total: progress.total,
                 message,
               },
-            }).catch(() => undefined);
+            }).catch((err) => { logger.warn("Failed to send progress notification", { error: err instanceof Error ? err.message : String(err) }); return undefined; });
           }
         : undefined;
 

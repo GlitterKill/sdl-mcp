@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import { promisify } from "util";
 import { gzip, gunzip, gunzipSync } from "zlib";
+import { IndexError } from "../mcp/errors.js";
 
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
@@ -30,21 +31,21 @@ export async function exportArtifact(
 
   const repo = await kuzuDb.getRepo(conn, options.repoId);
   if (!repo) {
-    throw new Error(`Repository not found: ${options.repoId}`);
+    throw new IndexError(`Repository not found: ${options.repoId}`);
   }
 
   const versionId =
     options.versionId ??
     (await kuzuDb.getLatestVersion(conn, options.repoId))?.versionId;
   if (!versionId) {
-    throw new Error(
+    throw new IndexError(
       `No version found for repository: ${options.repoId}. Please index the repository first.`,
     );
   }
 
   const version = await kuzuDb.getVersion(conn, versionId);
   if (!version) {
-    throw new Error(`Version not found: ${versionId}`);
+    throw new IndexError(`Version not found: ${versionId}`);
   }
 
   const commitSha = options.commitSha ?? (await getGitCommitSha(repo.rootPath));
@@ -225,7 +226,7 @@ export async function importArtifact(
 
   if (options.repoId && artifact.repo_id !== options.repoId) {
     if (!options.force) {
-      throw new Error(
+      throw new IndexError(
         `Artifact repo_id (${artifact.repo_id}) does not match expected repo_id (${options.repoId}). Use --force to override.`,
       );
     }
@@ -241,7 +242,7 @@ export async function importArtifact(
   if (options.verifyIntegrity) {
     const computedHash = hashContent(JSON.stringify(state, null, 0));
     if (computedHash !== artifact.artifact_hash) {
-      throw new Error("Artifact integrity check failed: hash mismatch");
+      throw new IndexError("Artifact integrity check failed: hash mismatch");
     }
   }
 

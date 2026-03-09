@@ -524,3 +524,51 @@ export const DEFAULT_GRAPH_SLICE_CACHE_MAX_ENTRIES = 1000;
  * Default maximum size of graph slice cache in bytes (50MB).
  */
 export const DEFAULT_GRAPH_SLICE_CACHE_MAX_SIZE_BYTES = 50 * 1024 * 1024;
+
+// ============================================================================
+// ID Validation Constants
+// ============================================================================
+
+/**
+ * Maximum allowed length for repository IDs.
+ * Repository IDs must be <= 128 characters.
+ */
+export const MAX_REPO_ID_LENGTH = 128;
+
+/**
+ * Maximum allowed length for symbol IDs.
+ * Symbol IDs must be <= 512 characters.
+ */
+export const MAX_SYMBOL_ID_LENGTH = 512;
+
+// ============================================================================
+// Query Limit Constants
+// ============================================================================
+
+/**
+ * Default limit for database queries returning multiple rows.
+ * Used in listRepos and similar functions.
+ */
+export const DEFAULT_QUERY_LIMIT = 1000;
+
+/**
+ * Default limit for batch database queries.
+ * Used in getVersionsByRepo and similar functions.
+ */
+export const DEFAULT_BATCH_QUERY_LIMIT = 100;
+
+// ============================================================================
+// Regex Cache Constants
+// ============================================================================
+
+/**
+ * Maximum number of compiled regex patterns to cache.
+ * When the cache exceeds this size, old entries are evicted.
+ */
+export const REGEX_CACHE_MAX_SIZE = 500;
+
+/**
+ * Number of entries to evict when regex cache is full.
+ * Evicts the oldest entries to make room for new patterns.
+ */
+export const REGEX_CACHE_EVICT_COUNT = 100;

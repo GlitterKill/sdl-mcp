@@ -1,3 +1,4 @@
+import { logger } from "../util/logger.js";
 import { OverlayStore } from "./overlay-store.js";
 import type { CheckpointRequest, CheckpointResult } from "./types.js";
 
@@ -34,7 +35,7 @@ export class IdleMonitor {
 
     this.timer = setInterval(() => {
       this.scanOnce().catch((error) => {
-        console.error(`[IdleMonitor] Scan failed: ${error instanceof Error ? error.message : String(error)}`);
+        logger.error(`[IdleMonitor] Scan failed: ${error instanceof Error ? error.message : String(error)}`);
       });
     }, this.intervalMs);
     this.timer.unref();

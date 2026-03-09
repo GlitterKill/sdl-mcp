@@ -242,9 +242,7 @@ function extractStringField(args: unknown, field: string): string | undefined {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function convertSchema(schema: z.ZodType): Record<string, unknown> {
+  // zodToJsonSchema has deep type instantiation issues with strict Zod types;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return zodToJsonSchema(schema as any, { target: "openApi3" }) as Record<
-    string,
-    unknown
-  >;
+  return zodToJsonSchema(schema as any, { target: "openApi3" }) as Record<string, unknown>;
 }

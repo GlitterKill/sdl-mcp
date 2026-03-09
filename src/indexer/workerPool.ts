@@ -10,6 +10,7 @@ const __dirname = dirname(__filename);
 import type { ExtractedCall } from "./treesitter/extractCalls.js";
 import type { ExtractedImport } from "./treesitter/extractImports.js";
 import type { SymbolWithNodeId } from "./worker.js";
+import { logger } from "../util/logger.js";
 
 interface ParseTask {
   filePath: string;
@@ -84,7 +85,7 @@ export class ParserWorkerPool {
         workerWithQueue.busy = false;
         workerWithQueue.currentTask = undefined;
       }
-      console.error(`Worker ${index} error:`, error);
+      logger.error(`Worker ${index} error:`, { error });
       this.processQueue();
     });
 

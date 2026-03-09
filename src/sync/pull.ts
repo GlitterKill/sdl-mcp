@@ -9,6 +9,7 @@ import { join } from "path";
 import { sleep } from "../util/time.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
+import { IndexError } from "../mcp/errors.js";
 
 const DEFAULT_MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
@@ -26,7 +27,7 @@ export async function pullLatestState(
       const conn = await getKuzuConn();
       const repo = await kuzuDb.getRepo(conn, options.repoId);
       if (!repo) {
-        throw new Error(`Repository not found: ${options.repoId}`);
+        throw new IndexError(`Repository not found: ${options.repoId}`);
       }
 
       const syncDir = join(process.cwd(), ".sdl-sync");
@@ -54,7 +55,7 @@ export async function pullLatestState(
         const metadata = getArtifactMetadata(artifactPath);
 
         if (!metadata) {
-          throw new Error(`Failed to read artifact metadata: ${artifactPath}`);
+          throw new IndexError(`Failed to read artifact metadata: ${artifactPath}`);
         }
 
         const importResult = await importArtifact({
@@ -93,11 +94,11 @@ export async function pullLatestState(
         };
       }
 
-      throw new Error(
+      throw new IndexError(
         `No sync artifact found and fallback to full index disabled`,
       );
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
+      lastError = error instanceof Error ? error : new IndexError(String(error));
       retryCount = attempt;
 
       if (attempt < maxRetries) {

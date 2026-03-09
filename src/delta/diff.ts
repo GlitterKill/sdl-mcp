@@ -1,4 +1,5 @@
 import type { Connection } from "kuzu";
+import { IndexError } from "../mcp/errors.js";
 
 import type { VersionId } from "../db/schema.js";
 import type {
@@ -33,13 +34,13 @@ export async function computeDelta(
   const toVersions = await getSymbolVersions(conn, toVersion);
 
   if (fromVersions.length === 0) {
-    throw new Error(
+    throw new IndexError(
       `No symbol snapshots found for fromVersion ${fromVersion}. Run indexing to create snapshots.`,
     );
   }
 
   if (toVersions.length === 0) {
-    throw new Error(
+    throw new IndexError(
       `No symbol snapshots found for toVersion ${toVersion}. Run indexing to create snapshots.`,
     );
   }
@@ -263,13 +264,13 @@ export async function computeDeltaWithTiers(
   const toVersions = await getSymbolVersions(conn, toVersion);
 
   if (fromVersions.length === 0) {
-    throw new Error(
+    throw new IndexError(
       `No symbol snapshots found for fromVersion ${fromVersion}. Run indexing to create snapshots.`,
     );
   }
 
   if (toVersions.length === 0) {
-    throw new Error(
+    throw new IndexError(
       `No symbol snapshots found for toVersion ${toVersion}. Run indexing to create snapshots.`,
     );
   }

@@ -4,6 +4,7 @@ import { getKuzuConn } from "../db/kuzu.js";
 import { hashContent } from "../util/hashing.js";
 import { getCurrentTimestamp } from "../util/time.js";
 import { logger } from "../util/logger.js";
+import { IndexError } from "../mcp/errors.js";
 
 export async function createVersion(
   repoId: string,
@@ -49,7 +50,7 @@ export async function finalizeVersionHash(
   const conn = await getKuzuConn();
   const version = await kuzuDb.getVersion(conn, versionId);
   if (!version) {
-    throw new Error(`Version ${versionId} not found`);
+    throw new IndexError(`Version ${versionId} not found`);
   }
 
   const versionHash = computeVersionHash(version.prevVersionHash, symbolVersions);

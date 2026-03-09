@@ -320,7 +320,7 @@ function collectEvidence(
         count: interfaceBreaks.length,
         symbols: interfaceBreaks.map((c: ChangedSymbol) => ({
           symbolId: c.symbolId,
-          signatureDiff: (c as any).signatureDiff,
+          signatureDiff: c.changeType === "modified" ? c.signatureDiff : undefined,
         })),
       },
     });

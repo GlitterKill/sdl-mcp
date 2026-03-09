@@ -15,6 +15,7 @@ import {
   type LiveIndexCoordinator,
   type LiveStatus,
 } from "./types.js";
+import { IndexError } from "../mcp/errors.js";
 
 export interface InMemoryLiveIndexCoordinatorOptions {
   enabled?: boolean;
@@ -269,7 +270,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     const conn = await getKuzuConn();
     const repo = await kuzuDb.getRepo(conn, repoId);
     if (!repo) {
-      throw new Error(`Repository ${repoId} not found`);
+      throw new IndexError(`Repository ${repoId} not found`);
     }
     return repo.rootPath;
   }
