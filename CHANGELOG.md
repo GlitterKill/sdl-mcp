@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-03-09
+
+### Added
+
+- Release-publish lockfile coverage to keep npm bootstrap behavior under test in CI
+- Broader multi-language code-access handling in tree-sitter-backed skeleton and hot-path flows
+
+### Changed
+
+- Release publishing now bootstraps on Node 20 with a more reliable npm install path in the publish workflow
+- Slice start-node resolution, graph metrics writes, watcher logging, and pass2/indexing internals were tightened to reduce noisy results and improve stability under load
+
+### Fixed
+
+- ENOENT and parser crash paths across indexing, watcher, and code-access flows to reduce unexpected failures during file churn
+- Security hardening across DB init, plugin loading, regex compilation, symlink handling, JSON parsing, repo path validation, and MCP request budget limits
+
 ## [0.8.2] - 2026-03-09
 
 ### Added
