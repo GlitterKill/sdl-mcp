@@ -55,7 +55,6 @@ describe("repo overview cluster/process stats", () => {
       language: "ts",
       byteSize: 100,
       lastIndexedAt: now,
-      directory: "src",
     });
 
     for (const [symbolId, name] of [
@@ -93,7 +92,10 @@ describe("repo overview cluster/process stats", () => {
   });
 
   it("omits cluster/process stats when no data exists", async () => {
-    const overview = await buildRepoOverview({ repoId: REPO_ID, level: "stats" });
+    const overview = await buildRepoOverview({
+      repoId: REPO_ID,
+      level: "stats",
+    });
     assert.strictEqual(overview.clusters, undefined);
     assert.strictEqual(overview.processes, undefined);
   });
@@ -143,7 +145,10 @@ describe("repo overview cluster/process stats", () => {
       role: "exit",
     });
 
-    const overview = await buildRepoOverview({ repoId: REPO_ID, level: "stats" });
+    const overview = await buildRepoOverview({
+      repoId: REPO_ID,
+      level: "stats",
+    });
 
     assert.ok(overview.clusters);
     assert.strictEqual(overview.clusters.totalClusters, 1);
@@ -159,4 +164,3 @@ describe("repo overview cluster/process stats", () => {
     assert.strictEqual(overview.processes.longestProcesses[0]!.depth, 2);
   });
 });
-

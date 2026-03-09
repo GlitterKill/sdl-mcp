@@ -53,12 +53,8 @@ const symbolKinds: SymbolKind[] = [
   "interface",
   "type",
   "variable",
-  "constant",
+  "constructor",
   "module",
-  "namespace",
-  "enum",
-  "property",
-  "field",
 ];
 const symbolKindArb = fc.constantFrom(...symbolKinds);
 
@@ -187,62 +183,46 @@ describe("Slice Result Invariants (Property Tests)", () => {
   describe("sliceOk / sliceErr duality", () => {
     it("should always produce ok=true for sliceOk", () => {
       fc.assert(
-        fc.property(
-          graphSliceArb,
-          (slice) => {
-            const result = sliceOk(slice);
-            return result.ok === true && result.slice === slice;
-          },
-        ),
+        fc.property(graphSliceArb, (slice) => {
+          const result = sliceOk(slice);
+          return result.ok === true && result.slice === slice;
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
 
     it("should always produce ok=false for sliceErr", () => {
       fc.assert(
-        fc.property(
-          sliceErrorArb,
-          (error) => {
-            const result = sliceErr(error);
-            return result.ok === false && result.error.type === error.type;
-          },
-        ),
+        fc.property(sliceErrorArb, (error) => {
+          const result = sliceErr(error);
+          return result.ok === false && result.error.type === error.type;
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
 
     it("should satisfy isSliceOk(x) === (x.ok === true)", () => {
       fc.assert(
-        fc.property(
-          graphSliceArb,
-          sliceErrorArb,
-          (slice, error) => {
-            const okResult: SliceResult = sliceOk(slice);
-            const errResult: SliceResult = sliceErr(error);
+        fc.property(graphSliceArb, sliceErrorArb, (slice, error) => {
+          const okResult: SliceResult = sliceOk(slice);
+          const errResult: SliceResult = sliceErr(error);
 
-            return (
-              isSliceOk(okResult) === true && isSliceOk(errResult) === false
-            );
-          },
-        ),
+          return isSliceOk(okResult) === true && isSliceOk(errResult) === false;
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
 
     it("should satisfy isSliceErr(x) === (x.ok === false)", () => {
       fc.assert(
-        fc.property(
-          graphSliceArb,
-          sliceErrorArb,
-          (slice, error) => {
-            const okResult: SliceResult = sliceOk(slice);
-            const errResult: SliceResult = sliceErr(error);
+        fc.property(graphSliceArb, sliceErrorArb, (slice, error) => {
+          const okResult: SliceResult = sliceOk(slice);
+          const errResult: SliceResult = sliceErr(error);
 
-            return (
-              isSliceErr(okResult) === false && isSliceErr(errResult) === true
-            );
-          },
-        ),
+          return (
+            isSliceErr(okResult) === false && isSliceErr(errResult) === true
+          );
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
@@ -282,76 +262,61 @@ describe("Slice Result Invariants (Property Tests)", () => {
   describe("Determinism", () => {
     it("should produce identical results for identical sliceOk inputs", () => {
       fc.assert(
-        fc.property(
-          graphSliceArb,
-          (slice) => {
-            const result1 = sliceOk(slice);
-            const result2 = sliceOk(slice);
+        fc.property(graphSliceArb, (slice) => {
+          const result1 = sliceOk(slice);
+          const result2 = sliceOk(slice);
 
-            return JSON.stringify(result1) === JSON.stringify(result2);
-          },
-        ),
+          return JSON.stringify(result1) === JSON.stringify(result2);
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
 
     it("should produce identical results for identical sliceErr inputs", () => {
       fc.assert(
-        fc.property(
-          sliceErrorArb,
-          (error) => {
-            const result1 = sliceErr(error);
-            const result2 = sliceErr(error);
+        fc.property(sliceErrorArb, (error) => {
+          const result1 = sliceErr(error);
+          const result2 = sliceErr(error);
 
-            return JSON.stringify(result1) === JSON.stringify(result2);
-          },
-        ),
+          return JSON.stringify(result1) === JSON.stringify(result2);
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
 
     it("should produce deterministic error messages for same error type", () => {
       fc.assert(
-        fc.property(
-          sliceErrorArb,
-          (error) => {
-            const msg1 = sliceErrorToMessage(error);
-            const msg2 = sliceErrorToMessage(error);
+        fc.property(sliceErrorArb, (error) => {
+          const msg1 = sliceErrorToMessage(error);
+          const msg2 = sliceErrorToMessage(error);
 
-            return msg1 === msg2;
-          },
-        ),
+          return msg1 === msg2;
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
 
     it("should produce deterministic error codes for same error type", () => {
       fc.assert(
-        fc.property(
-          sliceErrorArb,
-          (error) => {
-            const code1 = sliceErrorToCode(error);
-            const code2 = sliceErrorToCode(error);
+        fc.property(sliceErrorArb, (error) => {
+          const code1 = sliceErrorToCode(error);
+          const code2 = sliceErrorToCode(error);
 
-            return code1 === code2;
-          },
-        ),
+          return code1 === code2;
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
 
     it("should produce byte-identical JSON for same inputs (regression test)", () => {
       fc.assert(
-        fc.property(
-          graphSliceArb,
-          (slice) => {
-            const result1 = sliceOk(slice);
-            const result2 = sliceOk(slice);
-            const json1 = Buffer.from(JSON.stringify(result1));
-            const json2 = Buffer.from(JSON.stringify(result2));
-            return json1.equals(json2);
-          },
-        ),
+        fc.property(graphSliceArb, (slice) => {
+          const result1 = sliceOk(slice);
+          const result2 = sliceOk(slice);
+          const json1 = Buffer.from(JSON.stringify(result1));
+          const json2 = Buffer.from(JSON.stringify(result2));
+          return json1.equals(json2);
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
@@ -438,13 +403,10 @@ describe("Slice Result Invariants (Property Tests)", () => {
   describe("Error message structure", () => {
     it("should always produce non-empty error messages", () => {
       fc.assert(
-        fc.property(
-          sliceErrorArb,
-          (error) => {
-            const message = sliceErrorToMessage(error);
-            return message.length > 0;
-          },
-        ),
+        fc.property(sliceErrorArb, (error) => {
+          const message = sliceErrorToMessage(error);
+          return message.length > 0;
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
@@ -458,13 +420,10 @@ describe("Slice Result Invariants (Property Tests)", () => {
         "INTERNAL_ERROR",
       ];
       fc.assert(
-        fc.property(
-          sliceErrorArb,
-          (error) => {
-            const code = sliceErrorToCode(error);
-            return validCodes.includes(code);
-          },
-        ),
+        fc.property(sliceErrorArb, (error) => {
+          const code = sliceErrorToCode(error);
+          return validCodes.includes(code);
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
@@ -479,13 +438,10 @@ describe("Slice Result Invariants (Property Tests)", () => {
       };
 
       fc.assert(
-        fc.property(
-          sliceErrorArb,
-          (error) => {
-            const code = sliceErrorToCode(error);
-            return code === typeToCode[error.type];
-          },
-        ),
+        fc.property(sliceErrorArb, (error) => {
+          const code = sliceErrorToCode(error);
+          return code === typeToCode[error.type];
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
@@ -494,43 +450,34 @@ describe("Slice Result Invariants (Property Tests)", () => {
   describe("Error response structure", () => {
     it("should always include code, message, and type in response", () => {
       fc.assert(
-        fc.property(
-          sliceErrorArb,
-          (error) => {
-            const response = sliceErrorToResponse(error);
-            return (
-              typeof response.error.code === "string" &&
-              typeof response.error.message === "string" &&
-              typeof response.error.type === "string"
-            );
-          },
-        ),
+        fc.property(sliceErrorArb, (error) => {
+          const response = sliceErrorToResponse(error);
+          return (
+            typeof response.error.code === "string" &&
+            typeof response.error.message === "string" &&
+            typeof response.error.type === "string"
+          );
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
 
     it("should include repoId in response when error has repoId", () => {
       fc.assert(
-        fc.property(
-          repoIdErrorArb,
-          (error) => {
-            const response = sliceErrorToResponse(error);
-            return response.error.repoId === error.repoId;
-          },
-        ),
+        fc.property(repoIdErrorArb, (error) => {
+          const response = sliceErrorToResponse(error);
+          return response.error.repoId === error.repoId;
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });
 
     it("should not include repoId for policy_denied and internal errors", () => {
       fc.assert(
-        fc.property(
-          noRepoIdErrorArb,
-          (error) => {
-            const response = sliceErrorToResponse(error);
-            return response.error.repoId === undefined;
-          },
-        ),
+        fc.property(noRepoIdErrorArb, (error) => {
+          const response = sliceErrorToResponse(error);
+          return response.error.repoId === undefined;
+        }),
         { seed: FC_SEED, numRuns: NUM_RUNS },
       );
     });

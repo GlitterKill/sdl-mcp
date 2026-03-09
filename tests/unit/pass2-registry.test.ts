@@ -35,46 +35,68 @@ describe("pass2 resolver registry", () => {
   it("returns the first resolver that supports the target", () => {
     const registry = createPass2ResolverRegistry([
       new FakeResolver("go", (target) => target.language === "go"),
-      new FakeResolver("typescript", (target) => target.language === "typescript"),
+      new FakeResolver(
+        "typescript",
+        (target) => target.language === "typescript",
+      ),
     ]);
 
     const resolver = registry.getResolver(
-      toPass2Target({
-        path: "src/index.ts",
-        size: 10,
-        mtime: 0,
-      }),
+      toPass2Target({ path: "src/index.ts" }),
     );
 
     assert.equal(resolver?.id, "typescript");
-    assert.equal(registry.supports(toPass2Target({ path: "src/index.ts", size: 1, mtime: 0 })), true);
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/index.ts" })),
+      true,
+    );
   });
 
   it("returns undefined for unsupported file types", () => {
     const registry = createPass2ResolverRegistry([
-      new FakeResolver("typescript", (target) => target.language === "typescript"),
+      new FakeResolver(
+        "typescript",
+        (target) => target.language === "typescript",
+      ),
     ]);
 
     const resolver = registry.getResolver(
-      toPass2Target({
-        path: "src/script.py",
-        size: 10,
-        mtime: 0,
-      }),
+      toPass2Target({ path: "src/script.py" }),
     );
 
     assert.equal(resolver, undefined);
-    assert.equal(registry.supports(toPass2Target({ path: "src/script.py", size: 1, mtime: 0 })), false);
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/script.py" })),
+      false,
+    );
   });
 
   it("uses the default registry for current ts and js pass2 targets", () => {
     const registry = createDefaultPass2ResolverRegistry();
 
-    assert.equal(registry.supports(toPass2Target({ path: "src/index.ts", size: 1, mtime: 0 })), true);
-    assert.equal(registry.supports(toPass2Target({ path: "src/view.tsx", size: 1, mtime: 0 })), true);
-    assert.equal(registry.supports(toPass2Target({ path: "src/index.js", size: 1, mtime: 0 })), true);
-    assert.equal(registry.supports(toPass2Target({ path: "src/view.jsx", size: 1, mtime: 0 })), true);
-    assert.equal(registry.supports(toPass2Target({ path: "src/main.go", size: 1, mtime: 0 })), true);
-    assert.equal(registry.supports(toPass2Target({ path: "src/script.py", size: 1, mtime: 0 })), false);
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/index.ts" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/view.tsx" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/index.js" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/view.jsx" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/main.go" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/script.py" })),
+      false,
+    );
   });
 });

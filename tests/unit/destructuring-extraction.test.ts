@@ -5,7 +5,7 @@ import TypeScript from "tree-sitter-typescript";
 import { extractSymbols } from "../../dist/indexer/treesitter/extractSymbols.js";
 
 const parser = new Parser();
-parser.setLanguage(TypeScript.typescript);
+parser.setLanguage(TypeScript.typescript as unknown as Parser.Language);
 
 describe("Destructuring Variable Extraction", () => {
   it("should extract all bindings from object destructuring", () => {
@@ -14,9 +14,18 @@ describe("Destructuring Variable Extraction", () => {
     const symbols = extractSymbols(tree);
 
     const names = symbols.map((s) => s.name);
-    assert.ok(names.includes("foo"), `Expected 'foo' in ${JSON.stringify(names)}`);
-    assert.ok(names.includes("bar"), `Expected 'bar' in ${JSON.stringify(names)}`);
-    assert.ok(names.includes("baz"), `Expected 'baz' in ${JSON.stringify(names)}`);
+    assert.ok(
+      names.includes("foo"),
+      `Expected 'foo' in ${JSON.stringify(names)}`,
+    );
+    assert.ok(
+      names.includes("bar"),
+      `Expected 'bar' in ${JSON.stringify(names)}`,
+    );
+    assert.ok(
+      names.includes("baz"),
+      `Expected 'baz' in ${JSON.stringify(names)}`,
+    );
   });
 
   it("should extract all bindings from array destructuring", () => {
@@ -25,9 +34,18 @@ describe("Destructuring Variable Extraction", () => {
     const symbols = extractSymbols(tree);
 
     const names = symbols.map((s) => s.name);
-    assert.ok(names.includes("first"), `Expected 'first' in ${JSON.stringify(names)}`);
-    assert.ok(names.includes("second"), `Expected 'second' in ${JSON.stringify(names)}`);
-    assert.ok(names.includes("third"), `Expected 'third' in ${JSON.stringify(names)}`);
+    assert.ok(
+      names.includes("first"),
+      `Expected 'first' in ${JSON.stringify(names)}`,
+    );
+    assert.ok(
+      names.includes("second"),
+      `Expected 'second' in ${JSON.stringify(names)}`,
+    );
+    assert.ok(
+      names.includes("third"),
+      `Expected 'third' in ${JSON.stringify(names)}`,
+    );
   });
 
   it("should mark destructured bindings as exported when applicable", () => {

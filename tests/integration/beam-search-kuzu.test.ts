@@ -400,15 +400,8 @@ describe("beamSearchKuzu (integration)", () => {
         createdAt: now,
       });
 
-      const startNodes: Array<{
-        symbolId: string;
-        source:
-          | "entrySymbol"
-          | "entryFirstHop"
-          | "taskText"
-          | "editedFile"
-          | "failingTest";
-      }> = [];
+      const startNodes: import("../../dist/graph/slice/start-node-resolver.js").ResolvedStartNode[] =
+        [];
       const budget = { maxCards: 10, maxEstimatedTokens: 100_000 };
       const request = {};
       const edgeWeights = { call: 1.0, import: 0.6, config: 0.8 };

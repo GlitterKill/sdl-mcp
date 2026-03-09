@@ -428,7 +428,10 @@ function getFlagEnabled(args: string[], name: string): boolean {
   if (args.includes(`--${name}`)) return true;
   const direct = args.find((arg) => arg.startsWith(`--${name}=`));
   if (direct) {
-    const value = direct.slice(name.length + 3).trim().toLowerCase();
+    const value = direct
+      .slice(name.length + 3)
+      .trim()
+      .toLowerCase();
     return value !== "false" && value !== "0" && value !== "no";
   }
 
@@ -442,7 +445,9 @@ function getFlagEnabled(args: string[], name: string): boolean {
 }
 
 function getFallbackOutPath(args: string[]): string | undefined {
-  const positionalJson = args.find((arg) => arg.endsWith(".json") && !arg.startsWith("--"));
+  const positionalJson = args.find(
+    (arg) => arg.endsWith(".json") && !arg.startsWith("--"),
+  );
   if (positionalJson) return positionalJson;
   return undefined;
 }
@@ -601,7 +606,10 @@ function scoreContent(
   return { score, hits };
 }
 
-function computeTokenReduction(baselineTokens: number, sdlTokens: number): number {
+function computeTokenReduction(
+  baselineTokens: number,
+  sdlTokens: number,
+): number {
   if (baselineTokens <= 0) return 0;
   return ((baselineTokens - sdlTokens) / baselineTokens) * 100;
 }
@@ -641,9 +649,7 @@ function isPrecisionExcludedPath(
 ): boolean {
   const normalized = normalizePath(relPath);
   if (
-    PRECISION_EXCLUDED_PREFIXES.some((prefix) =>
-      normalized.startsWith(prefix),
-    )
+    PRECISION_EXCLUDED_PREFIXES.some((prefix) => normalized.startsWith(prefix))
   ) {
     return true;
   }
@@ -696,10 +702,7 @@ function collectCandidateFiles(
   });
 }
 
-function buildCorpus(
-  repoRoot: string,
-  absPaths: string[],
-): CorpusFile[] {
+function buildCorpus(repoRoot: string, absPaths: string[]): CorpusFile[] {
   const result: CorpusFile[] = [];
 
   for (const absPath of absPaths) {
@@ -721,7 +724,10 @@ function buildCorpus(
   return result;
 }
 
-async function buildFileSymbolNameMap(conn: Connection, repoId: string): Promise<Map<string, Set<string>>> {
+async function buildFileSymbolNameMap(
+  conn: Connection,
+  repoId: string,
+): Promise<Map<string, Set<string>>> {
   const map = new Map<string, Set<string>>();
   const files = await db.getFilesByRepoLite(conn, repoId);
 
@@ -741,7 +747,10 @@ async function buildFileSymbolNameMap(conn: Connection, repoId: string): Promise
   return map;
 }
 
-async function buildFileRepresentativeSymbolMap(conn: Connection, repoId: string): Promise<Map<string, string>> {
+async function buildFileRepresentativeSymbolMap(
+  conn: Connection,
+  repoId: string,
+): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   const files = await db.getFilesByRepoLite(conn, repoId);
 
@@ -758,7 +767,8 @@ async function buildFileRepresentativeSymbolMap(conn: Connection, repoId: string
   return map;
 }
 
-async function findSymbolsByName(conn: Connection, 
+async function findSymbolsByName(
+  conn: Connection,
   repoId: string,
   names: string[],
   limit: number,
@@ -776,13 +786,15 @@ async function findSymbolsByName(conn: Connection,
   return results;
 }
 
-async function scoreSymbolCandidate(conn: Connection, 
+async function scoreSymbolCandidate(
+  conn: Connection,
   symbol: SymbolRow,
   terms: string[],
   changedFiles: Set<string>,
 ): Promise<number> {
   const name = symbol.name.toLowerCase();
-  const file = (await db.getFilesByIds(conn, [symbol.fileId]))[0];
+  const fileMap = await db.getFilesByIds(conn, [symbol.fileId]);
+  const file = fileMap.get(symbol.fileId);
   const relPath = file ? normalizePath(file.relPath) : "";
 
   let score = 0;
@@ -815,7 +827,8 @@ async function scoreSymbolCandidate(conn: Connection,
   return score;
 }
 
-async function searchSymbolsByTerms(conn: Connection, 
+async function searchSymbolsByTerms(
+  conn: Connection,
   repoId: string,
   terms: string[],
   maxResultsPerTerm: number,
@@ -824,9 +837,19 @@ async function searchSymbolsByTerms(conn: Connection,
   const scored = new Map<string, { symbol: SymbolRow; score: number }>();
 
   for (const term of terms) {
-    const matches = await db.searchSymbols(conn, repoId, term, maxResultsPerTerm);
+    const matches = await db.searchSymbols(
+      conn,
+      repoId,
+      term,
+      maxResultsPerTerm,
+    );
     for (const match of matches) {
-      const extra = await scoreSymbolCandidate(conn, match, [term], changedFiles);
+      const extra = await scoreSymbolCandidate(
+        conn,
+        match,
+        [term],
+        changedFiles,
+      );
       const existing = scored.get(match.symbolId);
       if (!existing) {
         scored.set(match.symbolId, { symbol: match, score: extra });
@@ -844,7 +867,8 @@ async function searchSymbolsByTerms(conn: Connection,
     .map((entry) => entry.symbol);
 }
 
-async function collectDependencyNames(conn: Connection, 
+async function collectDependencyNames(
+  conn: Connection,
   deps: Array<string | { symbolId: string; confidence?: number }>,
 ): Promise<Set<string>> {
   const names = new Set<string>();
@@ -867,7 +891,11 @@ async function collectDependencyNames(conn: Connection,
   return names;
 }
 
-async function applyCardContext(conn: Connection, state: SdlState, card: SymbolCard): Promise<void> {
+async function applyCardContext(
+  conn: Connection,
+  state: SdlState,
+  card: SymbolCard,
+): Promise<void> {
   state.cardsBySymbolId.set(card.symbolId, card);
   state.symbolNames.add(card.name.toLowerCase());
   if (card.file) state.files.add(normalizePath(card.file));
@@ -915,31 +943,45 @@ function normalizeTags(tags?: string[]): string[] {
   return normalized;
 }
 
-function normalizeTaskFile(taskFile: TaskFile): { defaults: BenchmarkDefaults; tasks: WorkflowTask[] } {
+function normalizeTaskFile(taskFile: TaskFile): {
+  defaults: BenchmarkDefaults;
+  tasks: WorkflowTask[];
+} {
   const mergedDefaults: BenchmarkDefaults = {
     baseline: {
       maxFilesPerStep:
-        taskFile.defaults?.baseline?.maxFilesPerStep ?? FALLBACK_DEFAULTS.baseline.maxFilesPerStep,
+        taskFile.defaults?.baseline?.maxFilesPerStep ??
+        FALLBACK_DEFAULTS.baseline.maxFilesPerStep,
       maxTokensPerFile:
-        taskFile.defaults?.baseline?.maxTokensPerFile ?? FALLBACK_DEFAULTS.baseline.maxTokensPerFile,
+        taskFile.defaults?.baseline?.maxTokensPerFile ??
+        FALLBACK_DEFAULTS.baseline.maxTokensPerFile,
     },
     sdl: {
       maxSearchTerms:
-        taskFile.defaults?.sdl?.maxSearchTerms ?? FALLBACK_DEFAULTS.sdl.maxSearchTerms,
+        taskFile.defaults?.sdl?.maxSearchTerms ??
+        FALLBACK_DEFAULTS.sdl.maxSearchTerms,
       maxSearchResultsPerTerm:
-        taskFile.defaults?.sdl?.maxSearchResultsPerTerm ?? FALLBACK_DEFAULTS.sdl.maxSearchResultsPerTerm,
+        taskFile.defaults?.sdl?.maxSearchResultsPerTerm ??
+        FALLBACK_DEFAULTS.sdl.maxSearchResultsPerTerm,
       maxEntrySymbols:
-        taskFile.defaults?.sdl?.maxEntrySymbols ?? FALLBACK_DEFAULTS.sdl.maxEntrySymbols,
+        taskFile.defaults?.sdl?.maxEntrySymbols ??
+        FALLBACK_DEFAULTS.sdl.maxEntrySymbols,
       maxCardsPerStep:
-        taskFile.defaults?.sdl?.maxCardsPerStep ?? FALLBACK_DEFAULTS.sdl.maxCardsPerStep,
-      maxCards: taskFile.defaults?.sdl?.maxCards ?? FALLBACK_DEFAULTS.sdl.maxCards,
-      maxTokens: taskFile.defaults?.sdl?.maxTokens ?? FALLBACK_DEFAULTS.sdl.maxTokens,
+        taskFile.defaults?.sdl?.maxCardsPerStep ??
+        FALLBACK_DEFAULTS.sdl.maxCardsPerStep,
+      maxCards:
+        taskFile.defaults?.sdl?.maxCards ?? FALLBACK_DEFAULTS.sdl.maxCards,
+      maxTokens:
+        taskFile.defaults?.sdl?.maxTokens ?? FALLBACK_DEFAULTS.sdl.maxTokens,
       maxSkeletonsPerStep:
-        taskFile.defaults?.sdl?.maxSkeletonsPerStep ?? FALLBACK_DEFAULTS.sdl.maxSkeletonsPerStep,
+        taskFile.defaults?.sdl?.maxSkeletonsPerStep ??
+        FALLBACK_DEFAULTS.sdl.maxSkeletonsPerStep,
       skeletonMaxLines:
-        taskFile.defaults?.sdl?.skeletonMaxLines ?? FALLBACK_DEFAULTS.sdl.skeletonMaxLines,
+        taskFile.defaults?.sdl?.skeletonMaxLines ??
+        FALLBACK_DEFAULTS.sdl.skeletonMaxLines,
       skeletonMaxTokens:
-        taskFile.defaults?.sdl?.skeletonMaxTokens ?? FALLBACK_DEFAULTS.sdl.skeletonMaxTokens,
+        taskFile.defaults?.sdl?.skeletonMaxTokens ??
+        FALLBACK_DEFAULTS.sdl.skeletonMaxTokens,
     },
     scoring: {
       weights: {
@@ -967,40 +1009,42 @@ function normalizeTaskFile(taskFile: TaskFile): { defaults: BenchmarkDefaults; t
     },
   };
 
-  const normalizedTasks: WorkflowTask[] = taskFile.tasks.map((task): WorkflowTask => {
-    if ("workflow" in task && Array.isArray(task.workflow)) {
-      const workflowTask = task as WorkflowTask;
-      return {
-        ...workflowTask,
-        tags: normalizeTags(workflowTask.tags),
-        difficulty: workflowTask.difficulty ?? "medium",
-      };
-    }
+  const normalizedTasks: WorkflowTask[] = taskFile.tasks.map(
+    (task): WorkflowTask => {
+      if ("workflow" in task && Array.isArray(task.workflow)) {
+        const workflowTask = task as WorkflowTask;
+        return {
+          ...workflowTask,
+          tags: normalizeTags(workflowTask.tags),
+          difficulty: workflowTask.difficulty ?? "medium",
+        };
+      }
 
-    const legacy = task as LegacyTask;
-    return {
-      id: legacy.id,
-      category: "understanding",
-      title: legacy.title,
-      description: legacy.description,
-      tags: normalizeTags(legacy.tags),
-      difficulty: "medium",
-      repoId: legacy.repoId,
-      contextTargets: {
-        files: legacy.relevantFiles,
-        symbols: legacy.relevantSymbols,
-      },
-      workflow: [
-        {
-          id: "legacy-step",
-          phase: "investigate",
-          goal: legacy.description,
-          prompt: `${legacy.title}. ${legacy.description}`,
-          entrySymbolHints: legacy.entrySymbolNames,
+      const legacy = task as LegacyTask;
+      return {
+        id: legacy.id,
+        category: "understanding",
+        title: legacy.title,
+        description: legacy.description,
+        tags: normalizeTags(legacy.tags),
+        difficulty: "medium",
+        repoId: legacy.repoId,
+        contextTargets: {
+          files: legacy.relevantFiles,
+          symbols: legacy.relevantSymbols,
         },
-      ],
-    };
-  });
+        workflow: [
+          {
+            id: "legacy-step",
+            phase: "investigate",
+            goal: legacy.description,
+            prompt: `${legacy.title}. ${legacy.description}`,
+            entrySymbolHints: legacy.entrySymbolNames,
+          },
+        ],
+      };
+    },
+  );
 
   return { defaults: mergedDefaults, tasks: normalizedTasks };
 }
@@ -1060,8 +1104,14 @@ function buildApproachMetrics(params: {
   const contextUnitsTotal = params.filesTotal + params.symbolsTotal;
   const contextUnitsFound = params.filesFound + params.symbolsFound;
   const fileCoveragePct = computePercent(params.filesFound, params.filesTotal);
-  const symbolCoveragePct = computePercent(params.symbolsFound, params.symbolsTotal);
-  const contextCoveragePct = computePercent(contextUnitsFound, contextUnitsTotal);
+  const symbolCoveragePct = computePercent(
+    params.symbolsFound,
+    params.symbolsTotal,
+  );
+  const contextCoveragePct = computePercent(
+    contextUnitsFound,
+    contextUnitsTotal,
+  );
   return {
     tokens: params.tokens,
     tokensUncapped: params.tokensUncapped,
@@ -1160,8 +1210,8 @@ function captureCoverageFromStates(params: {
     params.baselineState.openedFiles,
     params.fileSymbolMap,
   );
-  const baselineSymbolsFound = Array.from(params.relevantSymbols).filter((symbol) =>
-    baselineSymbolNames.has(symbol),
+  const baselineSymbolsFound = Array.from(params.relevantSymbols).filter(
+    (symbol) => baselineSymbolNames.has(symbol),
   ).length;
 
   const sdlFilesFound = Array.from(params.relevantFiles).filter((file) =>
@@ -1248,7 +1298,8 @@ function addSdlRawFileContext(
   return true;
 }
 
-async function runCompletionPass(conn: Connection, 
+async function runCompletionPass(
+  conn: Connection,
   repoId: string,
   task: WorkflowTask,
   defaults: BenchmarkDefaults,
@@ -1270,15 +1321,29 @@ async function runCompletionPass(conn: Connection,
 
   // Baseline completion: keep reading until task targets are covered.
   for (const relPath of relevantFiles) {
-    if (!addBaselineFileContext(relPath, corpusByRelPath, defaults.baseline.maxTokensPerFile, baselineState)) {
+    if (
+      !addBaselineFileContext(
+        relPath,
+        corpusByRelPath,
+        defaults.baseline.maxTokensPerFile,
+        baselineState,
+      )
+    ) {
       continue;
     }
     baselineAddedFiles++;
     const file = corpusByRelPath.get(relPath);
-    if (file) baselineAddedTokens += Math.min(file.tokens, defaults.baseline.maxTokensPerFile);
+    if (file)
+      baselineAddedTokens += Math.min(
+        file.tokens,
+        defaults.baseline.maxTokensPerFile,
+      );
   }
 
-  let baselineSymbolNames = collectBaselineSymbolNames(baselineState.openedFiles, fileSymbolMap);
+  let baselineSymbolNames = collectBaselineSymbolNames(
+    baselineState.openedFiles,
+    fileSymbolMap,
+  );
   const missingBaselineSymbols = Array.from(relevantSymbols).filter(
     (symbolName) => !baselineSymbolNames.has(symbolName),
   );
@@ -1286,21 +1351,38 @@ async function runCompletionPass(conn: Connection,
   for (const symbolName of missingBaselineSymbols) {
     const matches = await db.searchSymbols(conn, repoId, symbolName, 8);
     if (matches.length === 0) continue;
-    const exact = matches.find((match) => normalizeSymbolName(match.name) === symbolName);
+    const exact = matches.find(
+      (match) => normalizeSymbolName(match.name) === symbolName,
+    );
     const chosen = exact ?? matches[0];
-    const file = (await db.getFilesByIds(conn, [chosen.fileId]))[0];
+    const chosenFileMap = await db.getFilesByIds(conn, [chosen.fileId]);
+    const file = chosenFileMap.get(chosen.fileId);
     if (!file) continue;
     const relPath = normalizePath(file.relPath);
 
-    if (!addBaselineFileContext(relPath, corpusByRelPath, defaults.baseline.maxTokensPerFile, baselineState)) {
+    if (
+      !addBaselineFileContext(
+        relPath,
+        corpusByRelPath,
+        defaults.baseline.maxTokensPerFile,
+        baselineState,
+      )
+    ) {
       continue;
     }
     baselineAddedSymbolFiles++;
     const corpusFile = corpusByRelPath.get(relPath);
-    if (corpusFile) baselineAddedTokens += Math.min(corpusFile.tokens, defaults.baseline.maxTokensPerFile);
+    if (corpusFile)
+      baselineAddedTokens += Math.min(
+        corpusFile.tokens,
+        defaults.baseline.maxTokensPerFile,
+      );
   }
 
-  baselineSymbolNames = collectBaselineSymbolNames(baselineState.openedFiles, fileSymbolMap);
+  baselineSymbolNames = collectBaselineSymbolNames(
+    baselineState.openedFiles,
+    fileSymbolMap,
+  );
 
   // SDL completion: target missing symbols/files through normal tool ladder first.
   const initialSdlSymbolHits = collectSdlSymbolHits(relevantSymbols, sdlState);
@@ -1312,7 +1394,9 @@ async function runCompletionPass(conn: Connection,
   for (const symbolName of missingSdlSymbols) {
     const matches = await db.searchSymbols(conn, repoId, symbolName, 8);
     if (matches.length === 0) continue;
-    const exact = matches.find((match) => normalizeSymbolName(match.name) === symbolName);
+    const exact = matches.find(
+      (match) => normalizeSymbolName(match.name) === symbolName,
+    );
     const chosen = exact ?? matches[0];
     completionEntries.push(chosen.symbolId);
 
@@ -1344,7 +1428,10 @@ async function runCompletionPass(conn: Connection,
     applyCardContext(conn, sdlState, card);
   }
 
-  const sdlSymbolHitsAfterCards = collectSdlSymbolHits(relevantSymbols, sdlState);
+  const sdlSymbolHitsAfterCards = collectSdlSymbolHits(
+    relevantSymbols,
+    sdlState,
+  );
   const remainingSdlSymbolsAfterCards = Array.from(relevantSymbols).filter(
     (symbolName) => !sdlSymbolHitsAfterCards.has(symbolName),
   );
@@ -1384,7 +1471,10 @@ async function runCompletionPass(conn: Connection,
     const slice = await buildSlice({
       repoId,
       versionId,
-      entrySymbols: uniqueLimit(completionEntries, defaults.sdl.maxEntrySymbols),
+      entrySymbols: uniqueLimit(
+        completionEntries,
+        defaults.sdl.maxEntrySymbols,
+      ),
       taskText: `${task.title}\n${task.description}\nCompletion pass: continue until required context is reached.`,
       knownCardEtags,
       cardDetail: "compact",
@@ -1408,19 +1498,21 @@ async function runCompletionPass(conn: Connection,
     const refsBySymbolId = new Map(
       (slice.cardRefs ?? []).map((ref) => [ref.symbolId, ref]),
     );
-    const cardsBySymbolId = new Map(slice.cards.map((card) => [card.symbolId, card]));
+    const cardsBySymbolId = new Map(
+      slice.cards.map((card) => [card.symbolId, card]),
+    );
     for (const card of slice.cards) {
       const inflatedCard = inflateSliceCard(slice, card);
       const ref = refsBySymbolId.get(card.symbolId);
       const etag = ref?.etag ?? hashCard(inflatedCard);
       sdlState.cardEtags.set(card.symbolId, etag);
-      applyCardContext(sdlState, inflatedCard);
+      await applyCardContext(conn, sdlState, inflatedCard);
     }
     for (const ref of slice.cardRefs ?? []) {
       sdlState.cardEtags.set(ref.symbolId, ref.etag);
       if (cardsBySymbolId.has(ref.symbolId)) continue;
       const cachedCard = sdlState.cardsBySymbolId.get(ref.symbolId);
-      if (cachedCard) applyCardContext(sdlState, cachedCard);
+      if (cachedCard) await applyCardContext(conn, sdlState, cachedCard);
     }
   }
 
@@ -1434,7 +1526,7 @@ async function runCompletionPass(conn: Connection,
 
     if (sdlState.fetchedCardSymbols.has(representativeSymbolId)) {
       const cachedCard = sdlState.cardsBySymbolId.get(representativeSymbolId);
-      if (cachedCard) applyCardContext(sdlState, cachedCard);
+      if (cachedCard) await applyCardContext(conn, sdlState, cachedCard);
       continue;
     }
 
@@ -1451,7 +1543,7 @@ async function runCompletionPass(conn: Connection,
     if ("notModified" in response && response.notModified) {
       sdlState.cardEtags.set(representativeSymbolId, response.etag);
       const cachedCard = sdlState.cardsBySymbolId.get(representativeSymbolId);
-      if (cachedCard) applyCardContext(sdlState, cachedCard);
+      if (cachedCard) await applyCardContext(conn, sdlState, cachedCard);
       continue;
     }
     if (!("card" in response) || !response.card) {
@@ -1470,7 +1562,15 @@ async function runCompletionPass(conn: Connection,
 
   // Final safety net: in real workflows agents may open raw files when needed.
   for (const relPath of relevantFiles) {
-    if (!addSdlRawFileContext(relPath, corpusByRelPath, fileSymbolMap, defaults.baseline.maxTokensPerFile, sdlState)) {
+    if (
+      !addSdlRawFileContext(
+        relPath,
+        corpusByRelPath,
+        fileSymbolMap,
+        defaults.baseline.maxTokensPerFile,
+        sdlState,
+      )
+    ) {
       continue;
     }
     sdlAddedRawFiles++;
@@ -1512,7 +1612,8 @@ async function runCompletionPass(conn: Connection,
   };
 }
 
-async function runSdlStep(conn: Connection, 
+async function runSdlStep(
+  conn: Connection,
   repoId: string,
   task: WorkflowTask,
   step: WorkflowStep,
@@ -1533,12 +1634,18 @@ async function runSdlStep(conn: Connection,
   const shouldRunSearch =
     state.fetchedCardSymbols.size === 0 || hasExplicitHints;
 
-  const searchMatches = shouldRunSearch ? await searchSymbolsByTerms(conn, repoId,
+  const searchMatches = shouldRunSearch
+    ? await searchSymbolsByTerms(
+        conn,
+        repoId,
         terms,
         defaults.sdl.maxSearchResultsPerTerm,
-        changedFiles,) : [];
+        changedFiles,
+      )
+    : [];
 
-  const hintMatches = await findSymbolsByName(conn, 
+  const hintMatches = await findSymbolsByName(
+    conn,
     repoId,
     step.entrySymbolHints ?? [],
     4,
@@ -1555,31 +1662,36 @@ async function runSdlStep(conn: Connection,
     Array.from(deduped.values()).map(async (sym) => {
       const score = await scoreSymbolCandidate(conn, sym, terms, changedFiles);
       return { sym, score };
-    })
+    }),
   );
 
-  const ranked = scoredEntries.sort((a, b) => {
-    const aIsHint = hintSymbolIds.has(a.sym.symbolId);
-    const bIsHint = hintSymbolIds.has(b.sym.symbolId);
-    if (aIsHint !== bIsHint) return aIsHint ? -1 : 1;
+  const ranked = scoredEntries
+    .sort((a, b) => {
+      const aIsHint = hintSymbolIds.has(a.sym.symbolId);
+      const bIsHint = hintSymbolIds.has(b.sym.symbolId);
+      if (aIsHint !== bIsHint) return aIsHint ? -1 : 1;
 
-    if (b.score !== a.score) return b.score - a.score;
-    return a.sym.name.localeCompare(b.sym.name);
-  }).map(e => e.sym);
+      if (b.score !== a.score) return b.score - a.score;
+      return a.sym.name.localeCompare(b.sym.name);
+    })
+    .map((e) => e.sym);
 
   const searchPayloadLimit =
     state.slicesBuilt === 0
       ? INITIAL_STEP_SEARCH_PREVIEW_LIMIT
       : SEARCH_PAYLOAD_PREVIEW_LIMIT;
-  const searchPayload = await Promise.all(ranked.slice(0, searchPayloadLimit).map(async (symbol) => {
-    const file = (await db.getFilesByIds(conn, [symbol.fileId]))[0];
-    return {
-      symbolId: symbol.symbolId,
-      name: symbol.name,
-      kind: symbol.kind,
-      file: file ? normalizePath(file.relPath) : "",
-    };
-  }));
+  const searchPayload = await Promise.all(
+    ranked.slice(0, searchPayloadLimit).map(async (symbol) => {
+      const symFileMap = await db.getFilesByIds(conn, [symbol.fileId]);
+      const file = symFileMap.get(symbol.fileId);
+      return {
+        symbolId: symbol.symbolId,
+        name: symbol.name,
+        kind: symbol.kind,
+        file: file ? normalizePath(file.relPath) : "",
+      };
+    }),
+  );
 
   const searchTokens = estimateTokens(JSON.stringify(searchPayload));
   state.tokens += searchTokens;
@@ -1618,7 +1730,10 @@ async function runSdlStep(conn: Connection,
       if (cardCandidateMap.size >= maxCardsForStep) break;
     }
   }
-  if (cardCandidateMap.size < maxCardsForStep && state.fetchedCardSymbols.size === 0) {
+  if (
+    cardCandidateMap.size < maxCardsForStep &&
+    state.fetchedCardSymbols.size === 0
+  ) {
     for (const symbol of ranked) {
       if (!cardCandidateMap.has(symbol.symbolId)) {
         cardCandidateMap.set(symbol.symbolId, symbol);
@@ -1662,8 +1777,8 @@ async function runSdlStep(conn: Connection,
   let slice: GraphSlice | null = null;
   const hasWorkflowFocusSignal = Boolean(
     step.artifacts?.stackTrace ||
-      step.artifacts?.failingTest ||
-      (step.artifacts?.changedFiles?.length ?? 0) > 0,
+    step.artifacts?.failingTest ||
+    (step.artifacts?.changedFiles?.length ?? 0) > 0,
   );
   const hasMeaningfulNewHints = newHintEntrySymbolIds.length >= 2;
   const shouldBuildSlice =
@@ -1716,19 +1831,21 @@ async function runSdlStep(conn: Connection,
     const refsBySymbolId = new Map(
       (slice.cardRefs ?? []).map((ref) => [ref.symbolId, ref]),
     );
-    const cardsBySymbolId = new Map(slice.cards.map((card) => [card.symbolId, card]));
+    const cardsBySymbolId = new Map(
+      slice.cards.map((card) => [card.symbolId, card]),
+    );
     for (const card of slice.cards) {
       const inflatedCard = inflateSliceCard(slice, card);
       const ref = refsBySymbolId.get(card.symbolId);
       const etag = ref?.etag ?? hashCard(inflatedCard);
       state.cardEtags.set(card.symbolId, etag);
-      applyCardContext(state, inflatedCard);
+      await applyCardContext(conn, state, inflatedCard);
     }
     for (const ref of slice.cardRefs ?? []) {
       state.cardEtags.set(ref.symbolId, ref.etag);
       if (cardsBySymbolId.has(ref.symbolId)) continue;
       const cachedCard = state.cardsBySymbolId.get(ref.symbolId);
-      if (cachedCard) applyCardContext(state, cachedCard);
+      if (cachedCard) await applyCardContext(conn, state, cachedCard);
     }
   } else if (entrySymbolIds.length > 0) {
     // In normal usage, agents reuse prior slice context when focus is unchanged.
@@ -1757,7 +1874,11 @@ async function runSdlStep(conn: Connection,
         if (card.kind !== "function" && card.kind !== "method") continue;
         const symbol = await db.getSymbol(conn, card.symbolId);
         if (!symbol) continue;
-        if (skeletonTargets.some((existing) => existing.symbolId === symbol.symbolId)) {
+        if (
+          skeletonTargets.some(
+            (existing) => existing.symbolId === symbol.symbolId,
+          )
+        ) {
           continue;
         }
         skeletonTargets.push(symbol);
@@ -1785,7 +1906,8 @@ async function runSdlStep(conn: Connection,
     if (skeleton.skeleton) state.textFragments.push(skeleton.skeleton);
     state.symbolNames.add(symbol.name.toLowerCase());
 
-    const file = (await db.getFilesByIds(conn, [symbol.fileId]))[0];
+    const skelFileMap = await db.getFilesByIds(conn, [symbol.fileId]);
+    const file = skelFileMap.get(symbol.fileId);
     if (file) state.files.add(normalizePath(file.relPath));
   }
 
@@ -1848,7 +1970,10 @@ function runBaselineStep(
     if (state.openedFiles.has(relPath)) continue;
     state.openedFiles.add(relPath);
     filesOpened++;
-    const cappedTokens = Math.min(entry.file.tokens, defaults.baseline.maxTokensPerFile);
+    const cappedTokens = Math.min(
+      entry.file.tokens,
+      defaults.baseline.maxTokensPerFile,
+    );
     tokensAdded += cappedTokens;
     state.tokens += cappedTokens;
     state.uncappedTokens += entry.file.tokens;
@@ -1879,7 +2004,9 @@ function analyzeLoss(taskResult: TaskResult): LossAnalysis {
     );
   }
 
-  if (taskResult.sdl.symbolCoveragePct < taskResult.baseline.symbolCoveragePct) {
+  if (
+    taskResult.sdl.symbolCoveragePct < taskResult.baseline.symbolCoveragePct
+  ) {
     reasons.push(
       "SDL surfaced fewer target symbols, indicating ranking/recall issues for symbol discovery.",
     );
@@ -1932,9 +2059,12 @@ function printComparisonTable(result: TaskResult): void {
     "  |---------------------------+----------------+----------------+--------|",
   );
 
-  const tokenWinner = s.tokens < b.tokens ? "SDL" : b.tokens < s.tokens ? "Trad" : "Tie";
-  const baselineTokensPerCoverage = b.tokensPerCoveragePoint ?? Number.POSITIVE_INFINITY;
-  const sdlTokensPerCoverage = s.tokensPerCoveragePoint ?? Number.POSITIVE_INFINITY;
+  const tokenWinner =
+    s.tokens < b.tokens ? "SDL" : b.tokens < s.tokens ? "Trad" : "Tie";
+  const baselineTokensPerCoverage =
+    b.tokensPerCoveragePoint ?? Number.POSITIVE_INFINITY;
+  const sdlTokensPerCoverage =
+    s.tokensPerCoveragePoint ?? Number.POSITIVE_INFINITY;
   const tokenEfficiencyWinner =
     sdlTokensPerCoverage < baselineTokensPerCoverage
       ? "SDL"
@@ -1954,17 +2084,32 @@ function printComparisonTable(result: TaskResult): void {
     `  | Tokens/Coverage Point     | ${formatTokensPerCoveragePoint(b.tokensPerCoveragePoint).padStart(12)} | ${formatTokensPerCoveragePoint(s.tokensPerCoveragePoint).padStart(12)} | ${tokenEfficiencyWinner.padStart(6)} |`,
   );
 
-  const fileWinner = s.fileCoveragePct > b.fileCoveragePct ? "SDL" : b.fileCoveragePct > s.fileCoveragePct ? "Trad" : "Tie";
+  const fileWinner =
+    s.fileCoveragePct > b.fileCoveragePct
+      ? "SDL"
+      : b.fileCoveragePct > s.fileCoveragePct
+        ? "Trad"
+        : "Tie";
   console.log(
     `  | File Coverage             | ${formatPercent(b.fileCoveragePct).padStart(12)} | ${formatPercent(s.fileCoveragePct).padStart(12)} | ${fileWinner.padStart(6)} |`,
   );
 
-  const symbolWinner = s.symbolCoveragePct > b.symbolCoveragePct ? "SDL" : b.symbolCoveragePct > s.symbolCoveragePct ? "Trad" : "Tie";
+  const symbolWinner =
+    s.symbolCoveragePct > b.symbolCoveragePct
+      ? "SDL"
+      : b.symbolCoveragePct > s.symbolCoveragePct
+        ? "Trad"
+        : "Tie";
   console.log(
     `  | Symbol Coverage           | ${formatPercent(b.symbolCoveragePct).padStart(12)} | ${formatPercent(s.symbolCoveragePct).padStart(12)} | ${symbolWinner.padStart(6)} |`,
   );
 
-  const contextWinner = s.contextCoveragePct > b.contextCoveragePct ? "SDL" : b.contextCoveragePct > s.contextCoveragePct ? "Trad" : "Tie";
+  const contextWinner =
+    s.contextCoveragePct > b.contextCoveragePct
+      ? "SDL"
+      : b.contextCoveragePct > s.contextCoveragePct
+        ? "Trad"
+        : "Tie";
   console.log(
     `  | Context Coverage          | ${formatPercent(b.contextCoveragePct).padStart(12)} | ${formatPercent(s.contextCoveragePct).padStart(12)} | ${contextWinner.padStart(6)} |`,
   );
@@ -1972,12 +2117,18 @@ function printComparisonTable(result: TaskResult): void {
     `  | Natural Context Coverage  | ${formatPercent(nB.contextCoveragePct).padStart(12)} | ${formatPercent(nS.contextCoveragePct).padStart(12)} | ${naturalContextWinner.padStart(6)} |`,
   );
 
-  const precisionWinner = s.precision > b.precision ? "SDL" : b.precision > s.precision ? "Trad" : "Tie";
+  const precisionWinner =
+    s.precision > b.precision
+      ? "SDL"
+      : b.precision > s.precision
+        ? "Trad"
+        : "Tie";
   console.log(
     `  | Precision                 | ${formatPercent(b.precision * 100).padStart(12)} | ${formatPercent(s.precision * 100).padStart(12)} | ${precisionWinner.padStart(6)} |`,
   );
 
-  const recallWinner = s.recall > b.recall ? "SDL" : b.recall > s.recall ? "Trad" : "Tie";
+  const recallWinner =
+    s.recall > b.recall ? "SDL" : b.recall > s.recall ? "Trad" : "Tie";
   console.log(
     `  | Recall                    | ${formatPercent(b.recall * 100).padStart(12)} | ${formatPercent(s.recall * 100).padStart(12)} | ${recallWinner.padStart(6)} |`,
   );
@@ -2003,9 +2154,15 @@ function printComparisonTable(result: TaskResult): void {
   console.log("  " + "-".repeat(68));
 
   console.log("  Coverage score definitions:");
-  console.log("    File Coverage   = relevant files found / total relevant files for the task.");
-  console.log("    Symbol Coverage = relevant symbols found / total relevant symbols for the task.");
-  console.log("    Natural Coverage = coverage before completion pass retrieval.");
+  console.log(
+    "    File Coverage   = relevant files found / total relevant files for the task.",
+  );
+  console.log(
+    "    Symbol Coverage = relevant symbols found / total relevant symbols for the task.",
+  );
+  console.log(
+    "    Natural Coverage = coverage before completion pass retrieval.",
+  );
 }
 
 function printSummary(summary: BenchmarkSummary): void {
@@ -2032,7 +2189,9 @@ function printSummary(summary: BenchmarkSummary): void {
 }
 
 function printLosses(results: TaskResult[]): void {
-  const losses = results.filter((result) => result.comparison.winner === "Traditional");
+  const losses = results.filter(
+    (result) => result.comparison.winner === "Traditional",
+  );
   if (losses.length === 0) return;
 
   console.log("\n  SDL-MCP LOSS ANALYSIS");
@@ -2063,12 +2222,9 @@ async function runBenchmark(): Promise<void> {
   );
   const repoOverride =
     getArgValue(args, "repo-id") ?? getNpmConfigValue("repo-id");
-  const configPath =
-    getArgValue(args, "config") ?? getNpmConfigValue("config");
+  const configPath = getArgValue(args, "config") ?? getNpmConfigValue("config");
   const outPath =
-    getArgValue(args, "out") ??
-    getFallbackOutPath(args) ??
-    getNpmOutPath();
+    getArgValue(args, "out") ?? getFallbackOutPath(args) ?? getNpmOutPath();
   const skipIndex = getFlagEnabled(args, "skip-index");
 
   const taskFileRaw = readFileSync(tasksPath, "utf-8");
@@ -2076,11 +2232,13 @@ async function runBenchmark(): Promise<void> {
   const normalized = normalizeTaskFile(parsed);
 
   const config = loadConfig(configPath);
-  const resolvedConfigPath = configPath ? resolve(configPath) : resolve(process.cwd(), "config/sdlmcp.config.json");
+  const resolvedConfigPath = configPath
+    ? resolve(configPath)
+    : resolve(process.cwd(), "config/sdlmcp.config.json");
   const graphDbPath = resolveGraphDbPath(config, resolvedConfigPath);
   await initKuzuDb(graphDbPath);
   const conn = await getKuzuConn();
-  
+
   const repoConfig = repoOverride
     ? config.repos.find((repo) => repo.repoId === repoOverride)
     : config.repos[0];
@@ -2113,7 +2271,8 @@ async function runBenchmark(): Promise<void> {
   const corpusByRelPath = new Map(corpus.map((file) => [file.relPath, file]));
   const corpusPaths = new Set(corpus.map((file) => file.relPath));
   const fileSymbolMap = await buildFileSymbolNameMap(conn, repoConfig.repoId);
-  const fileRepresentativeSymbolMap = await buildFileRepresentativeSymbolMap(conn, 
+  const fileRepresentativeSymbolMap = await buildFileRepresentativeSymbolMap(
+    conn,
     repoConfig.repoId,
   );
 
@@ -2196,7 +2355,8 @@ async function runBenchmark(): Promise<void> {
         baselineState,
       );
 
-      const sdlStep = await runSdlStep(conn, 
+      const sdlStep = await runSdlStep(
+        conn,
         repoConfig.repoId,
         task,
         step,
@@ -2228,7 +2388,8 @@ async function runBenchmark(): Promise<void> {
           : null;
       const baselineDeadWeight =
         baselineStep.tokensAdded > 0 && baselineMarginalCoveragePct <= 0;
-      const sdlDeadWeight = sdlStep.tokensAdded > 0 && sdlMarginalCoveragePct <= 0;
+      const sdlDeadWeight =
+        sdlStep.tokensAdded > 0 && sdlMarginalCoveragePct <= 0;
 
       stepResults.push({
         id: step.id,
@@ -2273,7 +2434,8 @@ async function runBenchmark(): Promise<void> {
       corpusPaths,
     });
 
-    const completion = await runCompletionPass(conn, 
+    const completion = await runCompletionPass(
+      conn,
       repoConfig.repoId,
       task,
       normalized.defaults,
@@ -2328,10 +2490,14 @@ async function runBenchmark(): Promise<void> {
       sdlMetrics.tokens,
     );
 
-    const fileCoverageGainPct = sdlMetrics.fileCoveragePct - baselineMetrics.fileCoveragePct;
-    const symbolCoverageGainPct = sdlMetrics.symbolCoveragePct - baselineMetrics.symbolCoveragePct;
-    const contextCoverageGainPct = sdlMetrics.contextCoveragePct - baselineMetrics.contextCoveragePct;
-    const precisionGainPct = (sdlMetrics.precision - baselineMetrics.precision) * 100;
+    const fileCoverageGainPct =
+      sdlMetrics.fileCoveragePct - baselineMetrics.fileCoveragePct;
+    const symbolCoverageGainPct =
+      sdlMetrics.symbolCoveragePct - baselineMetrics.symbolCoveragePct;
+    const contextCoverageGainPct =
+      sdlMetrics.contextCoveragePct - baselineMetrics.contextCoveragePct;
+    const precisionGainPct =
+      (sdlMetrics.precision - baselineMetrics.precision) * 100;
     const recallGainPct = (sdlMetrics.recall - baselineMetrics.recall) * 100;
     const { compositeScore, scoreBreakdown } = computeCompositeScore(
       baselineMetrics,
@@ -2393,20 +2559,30 @@ async function runBenchmark(): Promise<void> {
 
   const taskCount = results.length;
   const avgTokenReductionPct =
-    results.reduce((sum, result) => sum + result.comparison.tokenReductionPct, 0) /
-    Math.max(1, taskCount);
+    results.reduce(
+      (sum, result) => sum + result.comparison.tokenReductionPct,
+      0,
+    ) / Math.max(1, taskCount);
   const avgContextCoverageGainPct =
-    results.reduce((sum, result) => sum + result.comparison.contextCoverageGainPct, 0) /
-    Math.max(1, taskCount);
+    results.reduce(
+      (sum, result) => sum + result.comparison.contextCoverageGainPct,
+      0,
+    ) / Math.max(1, taskCount);
   const avgFileCoverageGainPct =
-    results.reduce((sum, result) => sum + result.comparison.fileCoverageGainPct, 0) /
-    Math.max(1, taskCount);
+    results.reduce(
+      (sum, result) => sum + result.comparison.fileCoverageGainPct,
+      0,
+    ) / Math.max(1, taskCount);
   const avgSymbolCoverageGainPct =
-    results.reduce((sum, result) => sum + result.comparison.symbolCoverageGainPct, 0) /
-    Math.max(1, taskCount);
+    results.reduce(
+      (sum, result) => sum + result.comparison.symbolCoverageGainPct,
+      0,
+    ) / Math.max(1, taskCount);
   const avgPrecisionGainPct =
-    results.reduce((sum, result) => sum + result.comparison.precisionGainPct, 0) /
-    Math.max(1, taskCount);
+    results.reduce(
+      (sum, result) => sum + result.comparison.precisionGainPct,
+      0,
+    ) / Math.max(1, taskCount);
   const avgRecallGainPct =
     results.reduce((sum, result) => sum + result.comparison.recallGainPct, 0) /
     Math.max(1, taskCount);
@@ -2414,9 +2590,15 @@ async function runBenchmark(): Promise<void> {
     results.reduce((sum, result) => sum + result.comparison.compositeScore, 0) /
     Math.max(1, taskCount);
 
-  const sdlWins = results.filter((result) => result.comparison.winner === "SDL-MCP").length;
-  const traditionalWins = results.filter((result) => result.comparison.winner === "Traditional").length;
-  const ties = results.filter((result) => result.comparison.winner === "Tie").length;
+  const sdlWins = results.filter(
+    (result) => result.comparison.winner === "SDL-MCP",
+  ).length;
+  const traditionalWins = results.filter(
+    (result) => result.comparison.winner === "Traditional",
+  ).length;
+  const ties = results.filter(
+    (result) => result.comparison.winner === "Tie",
+  ).length;
 
   const extraContextValues = results
     .map((result) => result.comparison.extraContextPctWhenCheaper)

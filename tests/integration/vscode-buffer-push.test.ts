@@ -1,14 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  createLiveSyncClient,
-} from "../../sdl-mcp-vscode/src/live-sync.js";
+// @ts-expect-error — vscode extension source has no type declarations
+import { createLiveSyncClient } from "../../sdl-mcp-vscode/src/live-sync.js";
 
 describe("VS Code live buffer sync client", () => {
   it("posts buffer updates to the live buffer endpoint", async () => {
     const requests: Array<{ url: string; options?: RequestInit }> = [];
     const client = createLiveSyncClient({
-      requestJson: async (url, options) => {
+      requestJson: async (url: string, options: RequestInit) => {
         requests.push({ url, options });
         return { accepted: true };
       },
@@ -42,7 +41,7 @@ describe("VS Code live buffer sync client", () => {
   it("falls back to incremental reindex when save push fails", async () => {
     const requests: Array<{ url: string; options?: RequestInit }> = [];
     const client = createLiveSyncClient({
-      requestJson: async (url, options) => {
+      requestJson: async (url: string, options: RequestInit) => {
         requests.push({ url, options });
         if (url.endsWith("/buffer")) {
           throw new Error("404");

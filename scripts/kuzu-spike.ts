@@ -106,7 +106,7 @@ async function runSpike(): Promise<void> {
     const testStart = performance.now();
     try {
       db = new kuzu.Database(dbPath);
-      conn = new kuzu.Connection(db, 1);
+      conn = new kuzu.Connection(db as import("kuzu").Database);
       recordResult(
         "db_init",
         true,
@@ -148,9 +148,9 @@ async function runSpike(): Promise<void> {
     `;
     const tableStart = performance.now();
     try {
-      const result = await (conn as { query: (q: string) => Promise<unknown> }).query(
-        createSymbolTable,
-      );
+      const result = await (
+        conn as { query: (q: string) => Promise<unknown> }
+      ).query(createSymbolTable);
       await closeQueryResult(result);
       recordResult(
         "node_table_string_pk",
@@ -179,9 +179,9 @@ async function runSpike(): Promise<void> {
     `;
     const relStart = performance.now();
     try {
-      const result = await (conn as { query: (q: string) => Promise<unknown> }).query(
-        createDependsTable,
-      );
+      const result = await (
+        conn as { query: (q: string) => Promise<unknown> }
+      ).query(createDependsTable);
       await closeQueryResult(result);
       recordResult(
         "rel_table_with_props",
@@ -229,9 +229,9 @@ async function runSpike(): Promise<void> {
             summary: 'Summary for symbol ' + cast(i, 'STRING')
           })
         `;
-        const result = await (conn as { query: (q: string) => Promise<unknown> }).query(
-          insertQuery,
-        );
+        const result = await (
+          conn as { query: (q: string) => Promise<unknown> }
+        ).query(insertQuery);
         await closeQueryResult(result);
       }
       recordResult(
@@ -272,9 +272,9 @@ async function runSpike(): Promise<void> {
             confidence: to_float(i % 5) / 5.0 + 0.2
           }]->(to)
         `;
-        const result = await (conn as { query: (q: string) => Promise<unknown> }).query(
-          insertEdgesQuery,
-        );
+        const result = await (
+          conn as { query: (q: string) => Promise<unknown> }
+        ).query(insertEdgesQuery);
         await closeQueryResult(result);
       }
       recordResult(

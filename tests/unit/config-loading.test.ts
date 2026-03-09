@@ -12,7 +12,10 @@ describe("Config Loading (RR-H.8)", () => {
   it("should resolve default path relative to module (RR-H.8.1)", () => {
     const loadConfigDir = resolve(__dirname, "../../dist/config");
     // From dist/config, go up two levels (to sdl-mcp root) then into config/
-    const expectedPath = resolve(loadConfigDir, "../../config/sdlmcp.config.json");
+    const expectedPath = resolve(
+      loadConfigDir,
+      "../../config/sdlmcp.config.json",
+    );
 
     const absoluteExpected = resolve(
       __dirname,
@@ -33,9 +36,12 @@ describe("Config Loading (RR-H.8)", () => {
     );
     const config = loadConfig(exampleConfigPath);
 
-    assert.ok(config.graphDatabase, "Expected graphDatabase section in example config");
-    assert.strictEqual(typeof config.graphDatabase.path, "string");
-    assert.ok(config.graphDatabase.path.length > 0);
+    assert.ok(
+      config.graphDatabase,
+      "Expected graphDatabase section in example config",
+    );
+    assert.strictEqual(typeof config.graphDatabase!.path, "string");
+    assert.ok(config.graphDatabase!.path!.length > 0);
   });
 
   it("should throw error for non-existent config", () => {

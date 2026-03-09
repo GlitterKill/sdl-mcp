@@ -20,7 +20,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const FIXTURE_ROOT = path.resolve(__dirname, "../fixtures/typescript");
-const GOLDEN_PATH = path.resolve(__dirname, "../fixtures/ts-resolver-golden.json");
+const GOLDEN_PATH = path.resolve(
+  __dirname,
+  "../fixtures/ts-resolver-golden.json",
+);
 
 /** Shape stored in the golden file. */
 interface GoldenEntry {
@@ -55,8 +58,8 @@ function sortEntries(entries: GoldenEntry[]): GoldenEntry[] {
 }
 
 const ALL_FILES = [
-  { path: "utils.ts" },
-  { path: "calls.ts" },
+  { path: "utils.ts", size: 0, mtime: 0 },
+  { path: "calls.ts", size: 0, mtime: 0 },
 ];
 
 describe("TsCallResolver – T3-B golden snapshot regression", () => {
@@ -66,12 +69,18 @@ describe("TsCallResolver – T3-B golden snapshot regression", () => {
     const resolver = createTsCallResolver(FIXTURE_ROOT, ALL_FILES, {
       includeNodeModulesTypes: false,
     });
-    assert.ok(resolver !== null, "Expected a non-null TsCallResolver for fixture directory");
+    assert.ok(
+      resolver !== null,
+      "Expected a non-null TsCallResolver for fixture directory",
+    );
     calls = resolver.getResolvedCalls("calls.ts");
   });
 
   it("resolves at least one call in calls.ts", () => {
-    assert.ok(calls.length > 0, `Expected resolved calls in calls.ts, got ${calls.length}`);
+    assert.ok(
+      calls.length > 0,
+      `Expected resolved calls in calls.ts, got ${calls.length}`,
+    );
   });
 
   it("resolution ratio >= 0.75 (T3-A quality floor)", () => {
@@ -96,16 +105,28 @@ describe("TsCallResolver – T3-B golden snapshot regression", () => {
     const current = sortEntries(calls.map(toGoldenEntry));
 
     if (process.env.UPDATE_GOLDENS === "1") {
-      fs.writeFileSync(GOLDEN_PATH, JSON.stringify(current, null, 2) + "\n", "utf8");
-      console.log(`[ts-resolver-regression] Golden snapshot written to ${GOLDEN_PATH}`);
+      fs.writeFileSync(
+        GOLDEN_PATH,
+        JSON.stringify(current, null, 2) + "\n",
+        "utf8",
+      );
+      console.log(
+        `[ts-resolver-regression] Golden snapshot written to ${GOLDEN_PATH}`,
+      );
       // Pass when regenerating.
       return;
     }
 
     if (!fs.existsSync(GOLDEN_PATH)) {
       // First run: write the golden file and pass.
-      fs.writeFileSync(GOLDEN_PATH, JSON.stringify(current, null, 2) + "\n", "utf8");
-      console.log(`[ts-resolver-regression] Golden snapshot initialised at ${GOLDEN_PATH}`);
+      fs.writeFileSync(
+        GOLDEN_PATH,
+        JSON.stringify(current, null, 2) + "\n",
+        "utf8",
+      );
+      console.log(
+        `[ts-resolver-regression] Golden snapshot initialised at ${GOLDEN_PATH}`,
+      );
       return;
     }
 
@@ -114,7 +135,9 @@ describe("TsCallResolver – T3-B golden snapshot regression", () => {
 
     // Build a lookup key for current resolved calls.
     const currentKeys = new Set(
-      current.map((e) => `${e.callLine}:${e.callCol}:${e.calleeName}:${e.calleeFile}`),
+      current.map(
+        (e) => `${e.callLine}:${e.callCol}:${e.calleeName}:${e.calleeFile}`,
+      ),
     );
 
     const regressions: GoldenEntry[] = [];
@@ -129,7 +152,9 @@ describe("TsCallResolver – T3-B golden snapshot regression", () => {
       regressions.length,
       0,
       `The following previously-resolved calls are now unresolved (regression!):\n` +
-        regressions.map((r) => `  line ${r.callLine}: ${r.calleeName} @ ${r.calleeFile}`).join("\n") +
+        regressions
+          .map((r) => `  line ${r.callLine}: ${r.calleeName} @ ${r.calleeFile}`)
+          .join("\n") +
         `\n\nTo reset the golden baseline run:\n  UPDATE_GOLDENS=1 npm test -- --filter ts-resolver-regression`,
     );
   });

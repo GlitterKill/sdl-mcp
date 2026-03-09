@@ -104,9 +104,9 @@ describe("token-usage", () => {
   describe("attachRawContext", () => {
     it("attaches _rawContext to objects via mutation", () => {
       const obj = { card: { name: "test" } } as Record<string, unknown>;
-      const result = attachRawContext(obj, { fileIds: [1, 2] });
+      const result = attachRawContext(obj, { fileIds: ["f1", "f2"] });
       assert.strictEqual(result, obj);
-      assert.deepStrictEqual(obj._rawContext, { fileIds: [1, 2] });
+      assert.deepStrictEqual(obj._rawContext, { fileIds: ["f1", "f2"] });
     });
 
     it("handles rawTokens hint", () => {
@@ -116,7 +116,7 @@ describe("token-usage", () => {
     });
 
     it("is a no-op for non-objects", () => {
-      assert.strictEqual(attachRawContext(null, { fileIds: [1] }), null);
+      assert.strictEqual(attachRawContext(null, { fileIds: ["f1"] }), null);
     });
   });
 
@@ -124,14 +124,13 @@ describe("token-usage", () => {
     it("removes _rawContext from objects", () => {
       const input = {
         card: { name: "test" },
-        _rawContext: { fileIds: [1] },
+        _rawContext: { fileIds: ["f1"] },
       };
       const result = stripRawContext(input);
       assert.ok(!("_rawContext" in result));
-      assert.deepStrictEqual(
-        (result as Record<string, unknown>).card,
-        { name: "test" },
-      );
+      assert.deepStrictEqual((result as Record<string, unknown>).card, {
+        name: "test",
+      });
     });
 
     it("returns non-objects unchanged", () => {

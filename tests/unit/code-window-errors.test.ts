@@ -1,10 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { extractWindow, identifiersExistInWindow } from "../../dist/code/windows.js";
+import {
+  extractWindow,
+  identifiersExistInWindow,
+} from "../../dist/code/windows.js";
 
 describe("Code Window Error Handling", () => {
-  it("should return empty result when file does not exist", () => {
-    const result = extractWindow(
+  it("should return empty result when file does not exist", async () => {
+    const result = await extractWindow(
       "/nonexistent/path/to/file.ts",
       { startLine: 1, startCol: 0, endLine: 10, endCol: 0 },
       "symbol",
@@ -17,8 +20,8 @@ describe("Code Window Error Handling", () => {
     assert.strictEqual(result.truncated, true);
   });
 
-  it("should return empty result when path is a directory", () => {
-    const result = extractWindow(
+  it("should return empty result when path is a directory", async () => {
+    const result = await extractWindow(
       ".",
       { startLine: 1, startCol: 0, endLine: 10, endCol: 0 },
       "symbol",

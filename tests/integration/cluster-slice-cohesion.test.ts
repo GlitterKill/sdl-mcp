@@ -60,7 +60,6 @@ describe("cluster-aware slice cohesion (integration)", () => {
       language: "ts",
       byteSize: 100,
       lastIndexedAt: now,
-      directory: "src",
     });
 
     for (const [symbolId, name] of [
@@ -186,7 +185,10 @@ describe("cluster-aware slice cohesion (integration)", () => {
     assert.ok(slice.cards.some((c) => c.symbolId === symbolB1));
 
     const entryCard = slice.cards.find((c) => c.symbolId === symbolA1);
-    assert.ok(entryCard?.cluster, "Expected entry card to include cluster info");
+    assert.ok(
+      entryCard?.cluster,
+      "Expected entry card to include cluster info",
+    );
     const entryClusterId = entryCard.cluster.clusterId;
 
     const sameClusterCount = slice.cards.filter(
@@ -200,4 +202,3 @@ describe("cluster-aware slice cohesion (integration)", () => {
     );
   });
 });
-

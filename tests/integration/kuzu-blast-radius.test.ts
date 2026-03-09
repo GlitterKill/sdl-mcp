@@ -6,10 +6,18 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-blast-radius-test-db.kuzu");
+const TEST_DB_PATH = join(
+  __dirname,
+  "..",
+  "..",
+  ".kuzu-blast-radius-test-db.kuzu",
+);
 
 interface KuzuConnection {
-  query: (q: string, params?: Record<string, unknown>) => Promise<{
+  query: (
+    q: string,
+    params?: Record<string, unknown>,
+  ) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
     close: () => void;
@@ -22,7 +30,10 @@ interface KuzuDatabase {
   close: () => Promise<void>;
 }
 
-async function createTestDb(): Promise<{ db: KuzuDatabase; conn: KuzuConnection }> {
+async function createTestDb(): Promise<{
+  db: KuzuDatabase;
+  conn: KuzuConnection;
+}> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
   }
@@ -35,7 +46,10 @@ async function createTestDb(): Promise<{ db: KuzuDatabase; conn: KuzuConnection 
   return { db, conn: conn as unknown as KuzuConnection };
 }
 
-async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<void> {
+async function cleanupTestDb(
+  db: KuzuDatabase,
+  conn: KuzuConnection,
+): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -77,90 +91,93 @@ describe("Kuzu Blast Radius (integration)", () => {
     await cleanupTestDb(db, conn);
   });
 
-  it("returns dependents for changed symbols using incoming edges", { skip: !kuzuAvailable }, async () => {
-    const kConn = conn as unknown as import("kuzu").Connection;
-    const now = "2026-03-04T00:00:00.000Z";
+  it(
+    "returns dependents for changed symbols using incoming edges",
+    { skip: !kuzuAvailable },
+    async () => {
+      const kConn = conn as unknown as import("kuzu").Connection;
+      const now = "2026-03-04T00:00:00.000Z";
 
-    await queries.upsertRepo(kConn, {
-      repoId: "repo",
-      rootPath: "C:/repo",
-      configJson: "{}",
-      createdAt: now,
-    });
-
-    await queries.upsertFile(kConn, {
-      fileId: "file-1",
-      repoId: "repo",
-      relPath: "src/app.ts",
-      contentHash: "hash",
-      language: "ts",
-      byteSize: 123,
-      lastIndexedAt: now,
-      directory: "src",
-    });
-
-    for (const symbolId of ["a", "b", "c"]) {
-      await queries.upsertSymbol(kConn, {
-        symbolId,
+      await queries.upsertRepo(kConn, {
         repoId: "repo",
-        fileId: "file-1",
-        kind: "function",
-        name: symbolId,
-        exported: true,
-        visibility: "public",
-        language: "ts",
-        rangeStartLine: 1,
-        rangeStartCol: 0,
-        rangeEndLine: 2,
-        rangeEndCol: 1,
-        astFingerprint: `${symbolId}-fp`,
-        signatureJson: null,
-        summary: null,
-        invariantsJson: null,
-        sideEffectsJson: null,
-        updatedAt: now,
+        rootPath: "C:/repo",
+        configJson: "{}",
+        createdAt: now,
       });
-    }
 
-    await queries.insertEdges(kConn, [
-      {
+      await queries.upsertFile(kConn, {
+        fileId: "file-1",
         repoId: "repo",
-        fromSymbolId: "a",
-        toSymbolId: "b",
-        edgeType: "call",
-        weight: 1,
-        confidence: 1,
-        resolution: "exact",
-        provenance: "static",
-        createdAt: now,
-      },
-      {
+        relPath: "src/app.ts",
+        contentHash: "hash",
+        language: "ts",
+        byteSize: 123,
+        lastIndexedAt: now,
+      });
+
+      for (const symbolId of ["a", "b", "c"]) {
+        await queries.upsertSymbol(kConn, {
+          symbolId,
+          repoId: "repo",
+          fileId: "file-1",
+          kind: "function",
+          name: symbolId,
+          exported: true,
+          visibility: "public",
+          language: "ts",
+          rangeStartLine: 1,
+          rangeStartCol: 0,
+          rangeEndLine: 2,
+          rangeEndCol: 1,
+          astFingerprint: `${symbolId}-fp`,
+          signatureJson: null,
+          summary: null,
+          invariantsJson: null,
+          sideEffectsJson: null,
+          updatedAt: now,
+        });
+      }
+
+      await queries.insertEdges(kConn, [
+        {
+          repoId: "repo",
+          fromSymbolId: "a",
+          toSymbolId: "b",
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "static",
+          createdAt: now,
+        },
+        {
+          repoId: "repo",
+          fromSymbolId: "c",
+          toSymbolId: "a",
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "static",
+          createdAt: now,
+        },
+      ]);
+
+      const results = await blast.computeBlastRadius(kConn, ["b"], {
         repoId: "repo",
-        fromSymbolId: "c",
-        toSymbolId: "a",
-        edgeType: "call",
-        weight: 1,
-        confidence: 1,
-        resolution: "exact",
-        provenance: "static",
-        createdAt: now,
-      },
-    ]);
+        maxHops: 3,
+        maxResults: 10,
+      });
 
-    const results = await blast.computeBlastRadius(kConn, ["b"], {
-      repoId: "repo",
-      maxHops: 3,
-      maxResults: 10,
-    });
+      assert.ok(results.length >= 2);
+      assert.strictEqual(results[0].symbolId, "a");
+      assert.strictEqual(results[0].distance, 1);
+      assert.strictEqual(results[0].signal, "directDependent");
 
-    assert.ok(results.length >= 2);
-    assert.strictEqual(results[0].symbolId, "a");
-    assert.strictEqual(results[0].distance, 1);
-    assert.strictEqual(results[0].signal, "directDependent");
-
-    const c = results.find((r) => r.symbolId === "c");
-    assert.ok(c);
-    assert.strictEqual(c.distance, 2);
-    assert.strictEqual(c.signal, "graph");
-  });
+      const c = results.find((r) => r.symbolId === "c");
+      assert.ok(c);
+      assert.strictEqual(c.distance, 2);
+      assert.strictEqual(c.signal, "graph");
+    },
+  );
 });

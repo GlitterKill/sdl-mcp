@@ -42,9 +42,23 @@ describe("resolveGraphDbPath", () => {
     const configPath = resolve("C:/tmp/sdlmcp.config.json");
     const resolved = resolveGraphDbPath(
       {
-        repos: [{ repoId: "test", rootPath: "." }],
-        policy: { maxWindowLines: 180, maxWindowTokens: 1400 },
-      },
+        repos: [
+          {
+            repoId: "test",
+            rootPath: ".",
+            ignore: [],
+            languages: ["ts"],
+            maxFileBytes: 1_000_000,
+            includeNodeModulesTypes: false,
+          },
+        ],
+        policy: {
+          maxWindowLines: 180,
+          maxWindowTokens: 1400,
+          requireIdentifiers: true,
+          allowBreakGlass: true,
+        },
+      } as any,
       configPath,
     );
 
@@ -55,10 +69,24 @@ describe("resolveGraphDbPath", () => {
     const configPath = resolve("C:/tmp/sdlmcp.config.json");
     const resolved = resolveGraphDbPath(
       {
-        repos: [{ repoId: "test", rootPath: "." }],
+        repos: [
+          {
+            repoId: "test",
+            rootPath: ".",
+            ignore: [],
+            languages: ["ts"],
+            maxFileBytes: 1_000_000,
+            includeNodeModulesTypes: false,
+          },
+        ],
         graphDatabase: { path: "./data/sdl-mcp-graph" },
-        policy: { maxWindowLines: 180, maxWindowTokens: 1400 },
-      },
+        policy: {
+          maxWindowLines: 180,
+          maxWindowTokens: 1400,
+          requireIdentifiers: true,
+          allowBreakGlass: true,
+        },
+      } as any,
       configPath,
     );
 
@@ -72,10 +100,24 @@ describe("resolveGraphDbPath", () => {
     const configPath = resolve("C:/tmp/sdlmcp.config.json");
     const resolved = resolveGraphDbPath(
       {
-        repos: [{ repoId: "test", rootPath: "." }],
+        repos: [
+          {
+            repoId: "test",
+            rootPath: ".",
+            ignore: [],
+            languages: ["ts"],
+            maxFileBytes: 1_000_000,
+            includeNodeModulesTypes: false,
+          },
+        ],
         graphDatabase: { path: "./data/custom-graph.kuzu" },
-        policy: { maxWindowLines: 180, maxWindowTokens: 1400 },
-      },
+        policy: {
+          maxWindowLines: 180,
+          maxWindowTokens: 1400,
+          requireIdentifiers: true,
+          allowBreakGlass: true,
+        },
+      } as any,
       configPath,
     );
 

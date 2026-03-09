@@ -6,7 +6,10 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 
 import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
 import * as kuzuDb from "../../dist/db/kuzu-queries.js";
-import { generateContextSummary, renderContextSummary } from "../../dist/mcp/summary.js";
+import {
+  generateContextSummary,
+  renderContextSummary,
+} from "../../dist/mcp/summary.js";
 
 const REPO_ID = "test-context-summary-enrichment-repo";
 
@@ -14,7 +17,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("context summary enrichment", () => {
-  const graphDbPath = join(__dirname, ".kuzu-context-summary-enrichment-test-db");
+  const graphDbPath = join(
+    __dirname,
+    ".kuzu-context-summary-enrichment-test-db",
+  );
   const symbolMain = `${REPO_ID}-main`;
 
   before(async () => {
@@ -54,7 +60,6 @@ describe("context summary enrichment", () => {
       language: "ts",
       byteSize: 100,
       lastIndexedAt: now,
-      directory: "src",
     });
 
     await kuzuDb.upsertSymbol(conn, {
@@ -120,7 +125,10 @@ describe("context summary enrichment", () => {
   });
 
   it("includes cluster and process participation for key symbols", async () => {
-    const summary = await generateContextSummary({ repoId: REPO_ID, query: "main" });
+    const summary = await generateContextSummary({
+      repoId: REPO_ID,
+      query: "main",
+    });
     assert.ok(summary.keySymbols.length >= 1);
 
     const main = summary.keySymbols.find((s) => s.symbolId === symbolMain);
@@ -133,4 +141,3 @@ describe("context summary enrichment", () => {
     assert.ok(markdown.includes("processes:"));
   });
 });
-

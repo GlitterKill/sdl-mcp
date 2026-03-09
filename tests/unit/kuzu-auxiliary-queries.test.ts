@@ -6,7 +6,12 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-auxiliary-test-db.kuzu");
+const TEST_DB_PATH = join(
+  __dirname,
+  "..",
+  "..",
+  ".kuzu-auxiliary-test-db.kuzu",
+);
 
 interface KuzuConnection {
   query: (q: string) => Promise<{
@@ -21,7 +26,10 @@ interface KuzuDatabase {
   close: () => Promise<void>;
 }
 
-async function createTestDb(): Promise<{ db: KuzuDatabase; conn: KuzuConnection }> {
+async function createTestDb(): Promise<{
+  db: KuzuDatabase;
+  conn: KuzuConnection;
+}> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
   }
@@ -34,7 +42,10 @@ async function createTestDb(): Promise<{ db: KuzuDatabase; conn: KuzuConnection 
   return { db, conn: conn as unknown as KuzuConnection };
 }
 
-async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<void> {
+async function cleanupTestDb(
+  db: KuzuDatabase,
+  conn: KuzuConnection,
+): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -134,69 +145,73 @@ describe("KuzuDB Auxiliary Queries", () => {
     },
   );
 
-  it("agent feedback CRUD + aggregation", { skip: !kuzuAvailable }, async () => {
-    const kConn = conn as unknown as import("kuzu").Connection;
-    await queries.upsertAgentFeedback(kConn, {
-      feedbackId: "fb1",
-      repoId: "repoA",
-      versionId: "v1",
-      sliceHandle: "h1",
-      usefulSymbolsJson: JSON.stringify(["s1", "s2"]),
-      missingSymbolsJson: JSON.stringify(["s3"]),
-      taskTagsJson: JSON.stringify(["debug"]),
-      taskType: "debug",
-      taskText: "text",
-      createdAt: "2026-03-04T00:00:00.000Z",
-    });
-    await queries.upsertAgentFeedback(kConn, {
-      feedbackId: "fb2",
-      repoId: "repoA",
-      versionId: "v2",
-      sliceHandle: "h2",
-      usefulSymbolsJson: JSON.stringify(["s1"]),
-      missingSymbolsJson: "[]",
-      taskTagsJson: null,
-      taskType: null,
-      taskText: null,
-      createdAt: "2026-03-04T01:00:00.000Z",
-    });
+  it(
+    "agent feedback CRUD + aggregation",
+    { skip: !kuzuAvailable },
+    async () => {
+      const kConn = conn as unknown as import("kuzu").Connection;
+      await queries.upsertAgentFeedback(kConn, {
+        feedbackId: "fb1",
+        repoId: "repoA",
+        versionId: "v1",
+        sliceHandle: "h1",
+        usefulSymbolsJson: JSON.stringify(["s1", "s2"]),
+        missingSymbolsJson: JSON.stringify(["s3"]),
+        taskTagsJson: JSON.stringify(["debug"]),
+        taskType: "debug",
+        taskText: "text",
+        createdAt: "2026-03-04T00:00:00.000Z",
+      });
+      await queries.upsertAgentFeedback(kConn, {
+        feedbackId: "fb2",
+        repoId: "repoA",
+        versionId: "v2",
+        sliceHandle: "h2",
+        usefulSymbolsJson: JSON.stringify(["s1"]),
+        missingSymbolsJson: "[]",
+        taskTagsJson: null,
+        taskType: null,
+        taskText: null,
+        createdAt: "2026-03-04T01:00:00.000Z",
+      });
 
-    const fb1 = await queries.getAgentFeedback(kConn, "fb1");
-    assert.ok(fb1);
-    assert.strictEqual(fb1.sliceHandle, "h1");
+      const fb1 = await queries.getAgentFeedback(kConn, "fb1");
+      assert.ok(fb1);
+      assert.strictEqual(fb1.sliceHandle, "h1");
 
-    const byRepo = await queries.getAgentFeedbackByRepo(kConn, "repoA", 10);
-    assert.deepStrictEqual(
-      byRepo.map((r) => r.feedbackId),
-      ["fb2", "fb1"],
-    );
+      const byRepo = await queries.getAgentFeedbackByRepo(kConn, "repoA", 10);
+      assert.deepStrictEqual(
+        byRepo.map((r) => r.feedbackId),
+        ["fb2", "fb1"],
+      );
 
-    const byVersion = await queries.getAgentFeedbackByVersion(
-      kConn,
-      "repoA",
-      "v1",
-      10,
-    );
-    assert.deepStrictEqual(
-      byVersion.map((r) => r.feedbackId),
-      ["fb1"],
-    );
+      const byVersion = await queries.getAgentFeedbackByVersion(
+        kConn,
+        "repoA",
+        "v1",
+        10,
+      );
+      assert.deepStrictEqual(
+        byVersion.map((r) => r.feedbackId),
+        ["fb1"],
+      );
 
-    const aggregated = await queries.getAggregatedFeedback(kConn, "repoA");
-    assert.strictEqual(aggregated.totalFeedback, 2);
-    assert.strictEqual(aggregated.symbolPositiveCounts.get("s1"), 2);
-    assert.strictEqual(aggregated.symbolPositiveCounts.get("s2"), 1);
-    assert.strictEqual(aggregated.symbolNegativeCounts.get("s3"), 1);
-    assert.strictEqual(aggregated.taskTypeCounts.get("debug"), 2);
+      const aggregated = await queries.getAggregatedFeedback(kConn, "repoA");
+      assert.strictEqual(aggregated.totalFeedback, 2);
+      assert.strictEqual(aggregated.symbolPositiveCounts.get("s1"), 2);
+      assert.strictEqual(aggregated.symbolPositiveCounts.get("s2"), 1);
+      assert.strictEqual(aggregated.symbolNegativeCounts.get("s3"), 1);
+      assert.strictEqual(aggregated.taskTypeCounts.get("debug"), 2);
 
-    const aggregatedSince = await queries.getAggregatedFeedback(
-      kConn,
-      "repoA",
-      "2026-03-04T00:30:00.000Z",
-    );
-    assert.strictEqual(aggregatedSince.totalFeedback, 1);
-    assert.strictEqual(aggregatedSince.symbolPositiveCounts.get("s1"), 1);
-  });
+      const aggregatedSince = await queries.getAggregatedFeedback(
+        kConn,
+        "repoA",
+        "2026-03-04T00:30:00.000Z",
+      );
+      assert.strictEqual(aggregatedSince.totalFeedback, 1);
+      assert.strictEqual(aggregatedSince.symbolPositiveCounts.get("s1"), 1);
+    },
+  );
 
   it("symbol embeddings CRUD", { skip: !kuzuAvailable }, async () => {
     const kConn = conn as unknown as import("kuzu").Connection;
@@ -223,7 +238,11 @@ describe("KuzuDB Auxiliary Queries", () => {
     assert.ok(single);
     assert.strictEqual(single.cardHash, "ch1");
 
-    const batch = await queries.getSymbolEmbeddings(kConn, ["s1", "s2", "missing"]);
+    const batch = await queries.getSymbolEmbeddings(kConn, [
+      "s1",
+      "s2",
+      "missing",
+    ]);
     assert.strictEqual(batch.size, 2);
     assert.ok(batch.get("s2"));
 
@@ -232,124 +251,138 @@ describe("KuzuDB Auxiliary Queries", () => {
     assert.strictEqual(deleted, null);
   });
 
-  it("summary cache upsert/get + delete by repo", { skip: !kuzuAvailable }, async () => {
-    const kConn = conn as unknown as import("kuzu").Connection;
+  it(
+    "summary cache upsert/get + delete by repo",
+    { skip: !kuzuAvailable },
+    async () => {
+      const kConn = conn as unknown as import("kuzu").Connection;
 
-    await queries.upsertRepo(kConn, {
-      repoId: "repoA",
-      rootPath: "C:/repoA",
-      configJson: "{}",
-      createdAt: "2026-03-04T00:00:00.000Z",
-    });
-    await queries.upsertFile(kConn, {
-      fileId: "f1",
-      repoId: "repoA",
-      relPath: "src/a.ts",
-      contentHash: "h",
-      language: "ts",
-      byteSize: 1,
-      lastIndexedAt: null,
-      directory: "src",
-    });
-    await queries.upsertSymbol(kConn, {
-      symbolId: "s1",
-      repoId: "repoA",
-      fileId: "f1",
-      kind: "function",
-      name: "foo",
-      exported: true,
-      visibility: null,
-      language: "ts",
-      rangeStartLine: 1,
-      rangeStartCol: 1,
-      rangeEndLine: 1,
-      rangeEndCol: 10,
-      astFingerprint: "fp",
-      signatureJson: null,
-      summary: null,
-      invariantsJson: null,
-      sideEffectsJson: null,
-      updatedAt: "2026-03-04T00:00:00.000Z",
-    });
+      await queries.upsertRepo(kConn, {
+        repoId: "repoA",
+        rootPath: "C:/repoA",
+        configJson: "{}",
+        createdAt: "2026-03-04T00:00:00.000Z",
+      });
+      await queries.upsertFile(kConn, {
+        fileId: "f1",
+        repoId: "repoA",
+        relPath: "src/a.ts",
+        contentHash: "h",
+        language: "ts",
+        byteSize: 1,
+        lastIndexedAt: null,
+      });
+      await queries.upsertSymbol(kConn, {
+        symbolId: "s1",
+        repoId: "repoA",
+        fileId: "f1",
+        kind: "function",
+        name: "foo",
+        exported: true,
+        visibility: null,
+        language: "ts",
+        rangeStartLine: 1,
+        rangeStartCol: 1,
+        rangeEndLine: 1,
+        rangeEndCol: 10,
+        astFingerprint: "fp",
+        signatureJson: null,
+        summary: null,
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-03-04T00:00:00.000Z",
+      });
 
-    await queries.upsertSummaryCache(kConn, {
-      symbolId: "s1",
-      summary: "summary",
-      provider: "mock",
-      model: "m",
-      cardHash: "card-1",
-      costUsd: 0.123,
-      createdAt: "2026-03-04T00:00:00.000Z",
-      updatedAt: "2026-03-04T00:00:00.000Z",
-    });
+      await queries.upsertSummaryCache(kConn, {
+        symbolId: "s1",
+        summary: "summary",
+        provider: "mock",
+        model: "m",
+        cardHash: "card-1",
+        costUsd: 0.123,
+        createdAt: "2026-03-04T00:00:00.000Z",
+        updatedAt: "2026-03-04T00:00:00.000Z",
+      });
 
-    const cached = await queries.getSummaryCache(kConn, "s1");
-    assert.ok(cached);
-    assert.strictEqual(cached.cardHash, "card-1");
+      const cached = await queries.getSummaryCache(kConn, "s1");
+      assert.ok(cached);
+      assert.strictEqual(cached.cardHash, "card-1");
 
-    await queries.deleteSummaryCacheByRepo(kConn, "repoA");
-    const deleted = await queries.getSummaryCache(kConn, "s1");
-    assert.strictEqual(deleted, null);
-  });
+      await queries.deleteSummaryCacheByRepo(kConn, "repoA");
+      const deleted = await queries.getSummaryCache(kConn, "s1");
+      assert.strictEqual(deleted, null);
+    },
+  );
 
-  it("symbol references insert + lookup + delete by file", { skip: !kuzuAvailable }, async () => {
-    const kConn = conn as unknown as import("kuzu").Connection;
+  it(
+    "symbol references insert + lookup + delete by file",
+    { skip: !kuzuAvailable },
+    async () => {
+      const kConn = conn as unknown as import("kuzu").Connection;
 
-    await queries.upsertRepo(kConn, {
-      repoId: "repoA",
-      rootPath: "C:/repoA",
-      configJson: "{}",
-      createdAt: "2026-03-04T00:00:00.000Z",
-    });
-    await queries.upsertFile(kConn, {
-      fileId: "f1",
-      repoId: "repoA",
-      relPath: "test/foo.test.ts",
-      contentHash: "h",
-      language: "ts",
-      byteSize: 1,
-      lastIndexedAt: null,
-      directory: "test",
-    });
+      await queries.upsertRepo(kConn, {
+        repoId: "repoA",
+        rootPath: "C:/repoA",
+        configJson: "{}",
+        createdAt: "2026-03-04T00:00:00.000Z",
+      });
+      await queries.upsertFile(kConn, {
+        fileId: "f1",
+        repoId: "repoA",
+        relPath: "test/foo.test.ts",
+        contentHash: "h",
+        language: "ts",
+        byteSize: 1,
+        lastIndexedAt: null,
+      });
 
-    await queries.insertSymbolReference(kConn, {
-      refId: "ref1",
-      repoId: "repoA",
-      symbolName: "foo",
-      fileId: "f1",
-      lineNumber: 10,
-      createdAt: "2026-03-04T00:00:00.000Z",
-    });
+      await queries.insertSymbolReference(kConn, {
+        refId: "ref1",
+        repoId: "repoA",
+        symbolName: "foo",
+        fileId: "f1",
+        lineNumber: 10,
+        createdAt: "2026-03-04T00:00:00.000Z",
+      });
 
-    const refs = await queries.getTestRefsForSymbol(kConn, "repoA", "foo");
-    assert.deepStrictEqual(refs, ["test/foo.test.ts"]);
+      const refs = await queries.getTestRefsForSymbol(kConn, "repoA", "foo");
+      assert.deepStrictEqual(refs, ["test/foo.test.ts"]);
 
-    await queries.deleteSymbolReferencesByFileId(kConn, "f1");
-    const afterDelete = await queries.getTestRefsForSymbol(kConn, "repoA", "foo");
-    assert.deepStrictEqual(afterDelete, []);
-  });
+      await queries.deleteSymbolReferencesByFileId(kConn, "f1");
+      const afterDelete = await queries.getTestRefsForSymbol(
+        kConn,
+        "repoA",
+        "foo",
+      );
+      assert.deepStrictEqual(afterDelete, []);
+    },
+  );
 
-  it("tool policy + tsconfig hash caches", { skip: !kuzuAvailable }, async () => {
-    const kConn = conn as unknown as import("kuzu").Connection;
+  it(
+    "tool policy + tsconfig hash caches",
+    { skip: !kuzuAvailable },
+    async () => {
+      const kConn = conn as unknown as import("kuzu").Connection;
 
-    await queries.upsertToolPolicyHash(kConn, {
-      policyHash: "ph1",
-      policyBlob: "{\"a\":1}",
-      createdAt: "2026-03-04T00:00:00.000Z",
-    });
-    const ph = await queries.getToolPolicyHash(kConn, "ph1");
-    assert.ok(ph);
-    assert.strictEqual(ph.policyBlob, "{\"a\":1}");
+      await queries.upsertToolPolicyHash(kConn, {
+        policyHash: "ph1",
+        policyBlob: '{"a":1}',
+        createdAt: "2026-03-04T00:00:00.000Z",
+      });
+      const ph = await queries.getToolPolicyHash(kConn, "ph1");
+      assert.ok(ph);
+      assert.strictEqual(ph.policyBlob, '{"a":1}');
 
-    await queries.upsertTsconfigHash(kConn, {
-      tsconfigHash: "th1",
-      tsconfigBlob: "{\"compilerOptions\":{}}",
-      createdAt: "2026-03-04T00:00:00.000Z",
-    });
-    const th = await queries.getTsconfigHash(kConn, "th1");
-    assert.ok(th);
-    assert.strictEqual(th.tsconfigBlob, "{\"compilerOptions\":{}}");
-  });
+      await queries.upsertTsconfigHash(kConn, {
+        tsconfigHash: "th1",
+        tsconfigBlob: '{"compilerOptions":{}}',
+        createdAt: "2026-03-04T00:00:00.000Z",
+      });
+      const th = await queries.getTsconfigHash(kConn, "th1");
+      assert.ok(th);
+      assert.strictEqual(th.tsconfigBlob, '{"compilerOptions":{}}');
+    },
+  );
 
   it("sync artifact upsert/get/list", { skip: !kuzuAvailable }, async () => {
     const kConn = conn as unknown as import("kuzu").Connection;

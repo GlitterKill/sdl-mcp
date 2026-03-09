@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { hashCard } from "../../src/util/hashing.js";
+import type { SymbolCard } from "../../dist/domain/types.js";
 import {
   buildPayloadCardsAndRefs,
   toSliceSymbolCard,
@@ -8,7 +9,7 @@ import {
 import { toCompactGraphSliceV2 } from "../../src/mcp/tools/slice.js";
 
 describe("slice card wire format", () => {
-  const fullCard = {
+  const fullCard: SymbolCard = {
     symbolId: "sym-1",
     repoId: "repo-1",
     file: "src/example.ts",
@@ -63,9 +64,17 @@ describe("slice card wire format", () => {
       [fullCard.symbolId]: knownEtag,
     });
 
-    assert.strictEqual(cardsForPayload.length, 0, "unchanged card should not appear in payload");
+    assert.strictEqual(
+      cardsForPayload.length,
+      0,
+      "unchanged card should not appear in payload",
+    );
     assert.ok(cardRefs, "expected cardRefs to be present");
-    assert.strictEqual(cardRefs?.length, 0, "unchanged card should not appear in cardRefs");
+    assert.strictEqual(
+      cardRefs?.length,
+      0,
+      "unchanged card should not appear in cardRefs",
+    );
   });
 
   it("includes changed cards in both payload and cardRefs", () => {
@@ -73,9 +82,17 @@ describe("slice card wire format", () => {
       [fullCard.symbolId]: "stale-etag",
     });
 
-    assert.strictEqual(cardsForPayload.length, 1, "changed card should appear in payload");
+    assert.strictEqual(
+      cardsForPayload.length,
+      1,
+      "changed card should appear in payload",
+    );
     assert.ok(cardRefs, "expected cardRefs to be present");
-    assert.strictEqual(cardRefs?.length, 1, "changed card should appear in cardRefs");
+    assert.strictEqual(
+      cardRefs?.length,
+      1,
+      "changed card should appear in cardRefs",
+    );
     assert.strictEqual(cardRefs?.[0].symbolId, fullCard.symbolId);
   });
 
@@ -120,7 +137,9 @@ describe("slice card wire format", () => {
           version: { astFingerprint: longFingerprint },
         },
       ],
-      edges: [] as Array<[number, number, "import" | "call" | "config", number]>,
+      edges: [] as Array<
+        [number, number, "import" | "call" | "config", number]
+      >,
     } as const;
 
     const compact = toCompactGraphSliceV2(slice as any);
@@ -149,11 +168,16 @@ describe("slice card wire format", () => {
           version: { astFingerprint: "0123456789abcdef" },
         },
       ],
-      edges: [] as Array<[number, number, "import" | "call" | "config", number]>,
+      edges: [] as Array<
+        [number, number, "import" | "call" | "config", number]
+      >,
     } as const;
 
     const compact = toCompactGraphSliceV2(slice as any);
-    assert.ok(!("af" in compact.c[0]), "af should be omitted for compact detail cards");
+    assert.ok(
+      !("af" in compact.c[0]),
+      "af should be omitted for compact detail cards",
+    );
   });
 
   it("serializes slice deps with confidence metadata", () => {
@@ -179,11 +203,17 @@ describe("slice card wire format", () => {
           version: { astFingerprint: "0123456789abcdef" },
         },
       ],
-      edges: [] as Array<[number, number, "import" | "call" | "config", number]>,
+      edges: [] as Array<
+        [number, number, "import" | "call" | "config", number]
+      >,
     } as const;
 
     const compact = toCompactGraphSliceV2(slice as any);
-    assert.deepStrictEqual(compact.c[0].d.i, [{ symbolId: "sym-2", confidence: 0.9 }]);
-    assert.deepStrictEqual(compact.c[0].d.c, [{ symbolId: "sym-3", confidence: 0.6 }]);
+    assert.deepStrictEqual(compact.c[0].d.i, [
+      { symbolId: "sym-2", confidence: 0.9 },
+    ]);
+    assert.deepStrictEqual(compact.c[0].d.c, [
+      { symbolId: "sym-3", confidence: 0.6 },
+    ]);
   });
 });

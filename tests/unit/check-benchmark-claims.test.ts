@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { evaluateBenchmarkClaims } from "../../scripts/check-benchmark-claims.ts";
+import { evaluateBenchmarkClaims } from "../../scripts/check-benchmark-claims.js";
 
 describe("evaluateBenchmarkClaims", () => {
   it("passes when all families meet thresholds", () => {

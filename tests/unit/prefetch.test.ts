@@ -45,7 +45,7 @@ describe("prefetch pipeline", () => {
   it("configurePrefetch defaults to enabled when config key is absent", () => {
     // Call configurePrefetch with enabled: true and verify getPrefetchStats().enabled === true
     configurePrefetch({ enabled: true, maxBudgetPercent: 20 });
-    const stats = getPrefetchStats();
+    const stats = getPrefetchStats("test-repo");
     assert.strictEqual(stats.enabled, true);
   });
 

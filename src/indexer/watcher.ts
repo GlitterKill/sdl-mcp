@@ -304,15 +304,16 @@ export async function watchRepositoryWithIndexer(
           pollInterval: WATCH_POLL_INTERVAL_MS,
         },
       });
-      const typedWatcher = watcher as unknown as ChokidarWatcher;
+      const typedWatcher = watcher as ChokidarWatcher;
 
       const readyPromise = new Promise<void>((resolveReady) => {
         typedWatcher.on("ready", () => {
           const watched = typedWatcher.getWatched?.();
           if (watched && typeof watched === "object") {
-            const count = Object.values(
-              watched as Record<string, string[]>,
-            ).reduce((total, entries) => total + entries.length, 0);
+            const count = Object.values(watched).reduce(
+              (total, entries) => total + entries.length,
+              0,
+            );
             health.filesWatched = count;
           }
           resolveReady();

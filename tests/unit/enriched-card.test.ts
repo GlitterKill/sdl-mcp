@@ -2,11 +2,15 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 
 import { SYMBOL_CARD_MAX_PROCESSES } from "../../dist/config/constants.js";
-import { toCardAtDetailLevel, estimateTokens } from "../../dist/graph/slice/slice-serializer.js";
+import type { SymbolCard } from "../../dist/domain/types.js";
+import {
+  toCardAtDetailLevel,
+  estimateTokens,
+} from "../../dist/graph/slice/slice-serializer.js";
 import { hashCard } from "../../dist/util/hashing.js";
 
 describe("enriched symbol cards (cluster/process)", () => {
-  const baseCard = {
+  const baseCard: SymbolCard = {
     symbolId: "sym-1",
     repoId: "repo-1",
     file: "src/app.ts",
@@ -25,7 +29,7 @@ describe("enriched symbol cards (cluster/process)", () => {
     ],
     detailLevel: "full",
     version: { ledgerVersion: "v1", astFingerprint: "fp" },
-  } as const;
+  };
 
   it("includes cluster at all detail levels and processes at deps+", () => {
     const minimal = toCardAtDetailLevel(baseCard, "minimal");
@@ -49,9 +53,7 @@ describe("enriched symbol cards (cluster/process)", () => {
 
   it("includes cluster/process in ETag hashing", () => {
     const without = { ...baseCard };
-    // @ts-expect-error - test deletes optional enriched fields
     delete without.cluster;
-    // @ts-expect-error - test deletes optional enriched fields
     delete without.processes;
 
     const etagWithout = hashCard(without);
@@ -61,9 +63,7 @@ describe("enriched symbol cards (cluster/process)", () => {
 
   it("adds fixed token increments and enforces max processes", () => {
     const without = { ...baseCard };
-    // @ts-expect-error - test deletes optional enriched fields
     delete without.cluster;
-    // @ts-expect-error - test deletes optional enriched fields
     delete without.processes;
 
     const tokensWithout = estimateTokens([without]);
@@ -72,4 +72,3 @@ describe("enriched symbol cards (cluster/process)", () => {
     assert.strictEqual(tokensWith - tokensWithout, 75);
   });
 });
-

@@ -3,9 +3,10 @@ import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+// @ts-expect-error — node:sqlite types not available in this TS target
 import { DatabaseSync } from "node:sqlite";
 
-import { migrateSqliteToKuzu } from "../../scripts/migrate-sqlite-to-kuzu.ts";
+import { migrateSqliteToKuzu } from "../../scripts/migrate-sqlite-to-kuzu.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -16,7 +17,12 @@ const SQLITE_DB_PATH = join(
   "..",
   ".sqlite-to-kuzu-migration-test.sqlite",
 );
-const KUZU_DB_PATH = join(__dirname, "..", "..", ".kuzu-migration-test-db.kuzu");
+const KUZU_DB_PATH = join(
+  __dirname,
+  "..",
+  "..",
+  ".kuzu-migration-test-db.kuzu",
+);
 
 function cleanup(): void {
   if (existsSync(SQLITE_DB_PATH)) {
@@ -172,7 +178,9 @@ describe("SQLite → Kuzu migration (integration)", () => {
       const getCount = async (statement: string): Promise<number> => {
         const prepared = await conn.prepare(statement);
         const result = await conn.execute(prepared, {});
-        const queryResult = Array.isArray(result) ? result[result.length - 1] : result;
+        const queryResult = Array.isArray(result)
+          ? result[result.length - 1]
+          : result;
         try {
           const rows = (await queryResult.getAll()) as Array<{ c: unknown }>;
           const c = rows[0]?.c ?? 0;
@@ -182,9 +190,18 @@ describe("SQLite → Kuzu migration (integration)", () => {
         }
       };
 
-      assert.strictEqual(await getCount("MATCH (r:Repo) RETURN COUNT(r) AS c"), 1);
-      assert.strictEqual(await getCount("MATCH (f:File) RETURN COUNT(f) AS c"), 1);
-      assert.strictEqual(await getCount("MATCH (s:Symbol) RETURN COUNT(s) AS c"), 2);
+      assert.strictEqual(
+        await getCount("MATCH (r:Repo) RETURN COUNT(r) AS c"),
+        1,
+      );
+      assert.strictEqual(
+        await getCount("MATCH (f:File) RETURN COUNT(f) AS c"),
+        1,
+      );
+      assert.strictEqual(
+        await getCount("MATCH (s:Symbol) RETURN COUNT(s) AS c"),
+        2,
+      );
       assert.strictEqual(
         await getCount("MATCH ()-[d:DEPENDS_ON]->() RETURN COUNT(d) AS c"),
         1,

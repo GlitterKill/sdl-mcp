@@ -17,19 +17,21 @@ const preparedStatementCacheByConn = new WeakMap<
 >();
 const transactionDepthByConn = new WeakMap<Connection, number>();
 
-let joinHintSupported: boolean | null = null;
+const joinHintSupported: boolean | null = null;
 
 export function isJoinHintSyntaxUnsupported(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return (
     message.includes("extraneous input 'HINT'") ||
-    message.includes("extraneous input \"HINT\"")
+    message.includes('extraneous input "HINT"')
   );
 }
 
 export function assertSafeInt(value: number, name: string): void {
   if (!Number.isSafeInteger(value)) {
-    throw new DatabaseError(`${name} must be a safe integer, got: ${String(value)}`);
+    throw new DatabaseError(
+      `${name} must be a safe integer, got: ${String(value)}`,
+    );
   }
 }
 
@@ -104,7 +106,12 @@ async function execute(
   params: Record<string, unknown> = {},
 ): Promise<QueryResult> {
   const prepared = await getPreparedStatement(conn, statement);
-  const result = await conn.execute(prepared, params);
+  // Kuzu accepts string | number | boolean | null | bigint — callers pass
+  // Record<string, unknown> for convenience; the cast is safe.
+  const result = await conn.execute(
+    prepared,
+    params as Parameters<Connection["execute"]>[1],
+  );
   return coerceQueryResult(result);
 }
 

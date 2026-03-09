@@ -23,6 +23,7 @@ describe("Policy Engine - Window Size Limit Rule", () => {
         versionId: "1",
         budget: { maxCards: 300, maxEstimatedTokens: 12000 },
         startSymbols: ["test-symbol"],
+        symbolIndex: [],
         cards: [{ symbolId: "test-symbol" } as any],
         edges: [],
         frontier: [],
@@ -216,8 +217,8 @@ describe("Policy Engine - Identifiers Required Rule", () => {
     );
 
     assert.ok(evidence);
-    assert.strictEqual(evidence.value.count, 10);
-    assert.strictEqual(evidence.value.identifiers.length, 5);
+    assert.strictEqual((evidence.value as any).count, 10);
+    assert.strictEqual((evidence.value as any).identifiers.length, 5);
   });
 });
 
@@ -348,9 +349,7 @@ describe("Policy Engine - Break Glass Rule", () => {
 
     assert.strictEqual(decision.decision, "downgrade-to-hotpath");
     assert.ok(
-      decision.evidenceUsed.some(
-        (e) => e.type === "break-glass-not-triggered",
-      ),
+      decision.evidenceUsed.some((e) => e.type === "break-glass-not-triggered"),
     );
   });
 
@@ -384,9 +383,7 @@ describe("Policy Engine - Break Glass Rule", () => {
 
     assert.strictEqual(decision.decision, "downgrade-to-hotpath");
     assert.ok(
-      decision.evidenceUsed.some(
-        (e) => e.type === "break-glass-not-triggered",
-      ),
+      decision.evidenceUsed.some((e) => e.type === "break-glass-not-triggered"),
     );
   });
 
@@ -461,6 +458,7 @@ describe("Policy Engine - Default Deny Raw Rule", () => {
         versionId: "1",
         budget: { maxCards: 300, maxEstimatedTokens: 12000 },
         startSymbols: ["test-symbol"],
+        symbolIndex: [],
         cards: [{ symbolId: "test-symbol" } as any],
         edges: [],
         frontier: [],
@@ -486,6 +484,7 @@ describe("Policy Engine - Default Deny Raw Rule", () => {
         versionId: "1",
         budget: { maxCards: 300, maxEstimatedTokens: 12000 },
         startSymbols: ["test-symbol"],
+        symbolIndex: [],
         cards: [],
         edges: [],
         frontier: [{ symbolId: "test-symbol", score: 1.0, why: "test" }],
@@ -687,7 +686,10 @@ describe("Policy Engine - Next Best Action", () => {
     const nextBest = engine.generateNextBestAction(decision, context);
 
     assert.strictEqual(nextBest.nextBestAction, "narrowScope");
-    assert.strictEqual(nextBest.requiredFieldsForNext?.narrowScope?.field, "budget.maxCards");
+    assert.strictEqual(
+      nextBest.requiredFieldsForNext?.narrowScope?.field,
+      "budget.maxCards",
+    );
   });
 
   it("should suggest narrowScope for max-tokens-budget-exceeded", () => {
@@ -1072,7 +1074,7 @@ describe("Policy Engine - Edge Cases", () => {
       (e) => e.type === "identifiers-provided",
     );
     assert.ok(evidence);
-    assert.strictEqual(evidence.value.count, 1000);
+    assert.strictEqual((evidence.value as any).count, 1000);
   });
 });
 
@@ -1110,6 +1112,7 @@ describe("Policy Engine - Integration Tests", () => {
         versionId: "1",
         budget: { maxCards: 300, maxEstimatedTokens: 12000 },
         startSymbols: ["test-symbol"],
+        symbolIndex: [],
         cards: [{ symbolId: "test-symbol" } as any],
         edges: [],
         frontier: [],

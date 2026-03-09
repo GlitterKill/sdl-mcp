@@ -58,7 +58,7 @@ describe("Orchestrator", () => {
       const result = await orchestrator.orchestrate(task);
 
       assert.strictEqual(result.success, false);
-      assert.ok(result.error?.length > 0);
+      assert.ok(result.error!.length > 0);
       assert.strictEqual(result.actionsTaken.length, 0);
     });
   });

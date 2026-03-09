@@ -23,8 +23,10 @@ const __dirname = path.dirname(__filename);
 const FIXTURE_ROOT = path.resolve(__dirname, "../fixtures/ts-resolver");
 
 /** Helper: build a FileMetadata-like list from a list of relative paths. */
-function files(relPaths: string[]): Array<{ path: string }> {
-  return relPaths.map((p) => ({ path: p }));
+function files(
+  relPaths: string[],
+): Array<{ path: string; size: number; mtime: number }> {
+  return relPaths.map((p) => ({ path: p, size: 0, mtime: 0 }));
 }
 
 /** Collect all fixture files so the TS program can resolve cross-file types. */
@@ -53,7 +55,10 @@ describe("TsCallResolver – T3-A improvements", () => {
   it("direct.ts: resolves foo() call with confidence >= 0.9", () => {
     assert.ok(resolver);
     const calls = resolver.getResolvedCalls("direct.ts");
-    assert.ok(calls.length > 0, "Expected at least one resolved call in direct.ts");
+    assert.ok(
+      calls.length > 0,
+      "Expected at least one resolved call in direct.ts",
+    );
 
     const fooCall = calls.find((c) => c.callee.name === "foo");
     assert.ok(fooCall, "Expected a resolved call to 'foo'");
@@ -94,7 +99,10 @@ describe("TsCallResolver – T3-A improvements", () => {
   it("consumer.ts: resolves barrelFn through barrel/index.ts back to barrel/impl.ts", () => {
     assert.ok(resolver);
     const calls = resolver.getResolvedCalls("consumer.ts");
-    assert.ok(calls.length > 0, "Expected at least one resolved call in consumer.ts");
+    assert.ok(
+      calls.length > 0,
+      "Expected at least one resolved call in consumer.ts",
+    );
 
     const barrelCall = calls.find((c) => c.callee.name === "barrelFn");
     assert.ok(
@@ -113,7 +121,10 @@ describe("TsCallResolver – T3-A improvements", () => {
   it("arrow.ts: resolves fn() where fn is a const arrow function variable", () => {
     assert.ok(resolver);
     const calls = resolver.getResolvedCalls("arrow.ts");
-    assert.ok(calls.length > 0, "Expected at least one resolved call in arrow.ts");
+    assert.ok(
+      calls.length > 0,
+      "Expected at least one resolved call in arrow.ts",
+    );
 
     const arrowCall = calls.find((c) => c.callee.name === "fn");
     assert.ok(
@@ -136,7 +147,10 @@ describe("TsCallResolver – T3-A improvements", () => {
   it("template.ts: resolves tagged template literal tag function", () => {
     assert.ok(resolver);
     const calls = resolver.getResolvedCalls("template.ts");
-    assert.ok(calls.length > 0, "Expected at least one resolved call in template.ts");
+    assert.ok(
+      calls.length > 0,
+      "Expected at least one resolved call in template.ts",
+    );
 
     const tagCall = calls.find((c) => c.callee.name === "tag");
     assert.ok(
@@ -151,10 +165,7 @@ describe("TsCallResolver – T3-A improvements", () => {
     assert.ok(resolver);
     const calls = resolver.getResolvedCalls("consumer.ts");
     const barrelCall = calls.find((c) => c.callee.name === "barrelFn");
-    assert.ok(
-      barrelCall,
-      `Expected barrelFn to be resolved`,
-    );
+    assert.ok(barrelCall, `Expected barrelFn to be resolved`);
     // Statically-resolved imports (even through barrels) get full confidence.
     assert.ok(
       (barrelCall.confidence ?? 0) >= 0.9,
@@ -198,7 +209,10 @@ describe("TsCallResolver – T3-A improvements", () => {
 
     // Record call results before invalidation.
     const beforeCalls = resolver.getResolvedCalls("direct.ts");
-    assert.ok(beforeCalls.length > 0, "Should have resolved calls before invalidation");
+    assert.ok(
+      beforeCalls.length > 0,
+      "Should have resolved calls before invalidation",
+    );
 
     // Invalidate a file.
     resolver.invalidateFiles(["utils.ts"]);

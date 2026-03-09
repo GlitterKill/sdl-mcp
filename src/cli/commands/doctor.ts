@@ -172,7 +172,9 @@ async function checkTreeSitterGrammar(
         let language: any;
 
         if (grammar.langProp) {
-          language = grammar.module[grammar.langProp];
+          language = (grammar.module as Record<string, unknown>)[
+            grammar.langProp
+          ];
         } else {
           language = grammar.module;
         }

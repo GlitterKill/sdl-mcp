@@ -1,6 +1,7 @@
 import { existsSync } from "fs";
 import { dirname, resolve } from "path";
 import { pathToFileURL } from "url";
+// @ts-expect-error — node:sqlite types not available in all configurations
 import { DatabaseSync } from "node:sqlite";
 
 import { resolveCliConfigPath } from "../src/config/configPath.js";
@@ -90,9 +91,11 @@ async function kuzuCount(
   statement: string,
   params: Record<string, unknown> = {},
 ): Promise<number> {
-  const prepared = await conn.prepare(statement);
-  const result = await conn.execute(prepared, params);
-  const queryResult = Array.isArray(result) ? result[result.length - 1] : result;
+  const prepared = await (conn as any).prepare(statement);
+  const result = await (conn as any).execute(prepared, params);
+  const queryResult = Array.isArray(result)
+    ? result[result.length - 1]
+    : result;
   try {
     const rows = (await queryResult.getAll()) as Array<Record<string, unknown>>;
     const count = rows[0]?.count ?? rows[0]?.c ?? 0;
@@ -169,7 +172,9 @@ export async function migrateSqliteToKuzu(
           contentHash: String(row.content_hash),
           language: String(row.language),
           byteSize: Number(row.byte_size),
-          lastIndexedAt: row.last_indexed_at ? String(row.last_indexed_at) : null,
+          lastIndexedAt: row.last_indexed_at
+            ? String(row.last_indexed_at)
+            : null,
         });
         migrated++;
         if (migrated % 500 === 0) log(`  files: ${migrated}`, { quiet });
@@ -178,7 +183,9 @@ export async function migrateSqliteToKuzu(
     }
 
     if (tables.has("symbols")) {
-      log(`\nMigrating symbols (${sqliteCount(sqlite, "symbols")})...`, { quiet });
+      log(`\nMigrating symbols (${sqliteCount(sqlite, "symbols")})...`, {
+        quiet,
+      });
       const stmt = sqlite.prepare("SELECT * FROM symbols");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
@@ -198,8 +205,12 @@ export async function migrateSqliteToKuzu(
           astFingerprint: String(row.ast_fingerprint),
           signatureJson: row.signature_json ? String(row.signature_json) : null,
           summary: row.summary ? String(row.summary) : null,
-          invariantsJson: row.invariants_json ? String(row.invariants_json) : null,
-          sideEffectsJson: row.side_effects_json ? String(row.side_effects_json) : null,
+          invariantsJson: row.invariants_json
+            ? String(row.invariants_json)
+            : null,
+          sideEffectsJson: row.side_effects_json
+            ? String(row.side_effects_json)
+            : null,
           updatedAt: String(row.updated_at),
         });
         migrated++;
@@ -249,7 +260,9 @@ export async function migrateSqliteToKuzu(
     }
 
     if (tables.has("versions")) {
-      log(`\nMigrating versions (${sqliteCount(sqlite, "versions")})...`, { quiet });
+      log(`\nMigrating versions (${sqliteCount(sqlite, "versions")})...`, {
+        quiet,
+      });
       const stmt = sqlite.prepare("SELECT * FROM versions");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
@@ -283,17 +296,24 @@ export async function migrateSqliteToKuzu(
           astFingerprint: String(row.ast_fingerprint),
           signatureJson: row.signature_json ? String(row.signature_json) : null,
           summary: row.summary ? String(row.summary) : null,
-          invariantsJson: row.invariants_json ? String(row.invariants_json) : null,
-          sideEffectsJson: row.side_effects_json ? String(row.side_effects_json) : null,
+          invariantsJson: row.invariants_json
+            ? String(row.invariants_json)
+            : null,
+          sideEffectsJson: row.side_effects_json
+            ? String(row.side_effects_json)
+            : null,
         });
         migrated++;
-        if (migrated % 1000 === 0) log(`  symbol_versions: ${migrated}`, { quiet });
+        if (migrated % 1000 === 0)
+          log(`  symbol_versions: ${migrated}`, { quiet });
       }
       log(`  symbol_versions: ${migrated} (done)`, { quiet });
     }
 
     if (tables.has("metrics")) {
-      log(`\nMigrating metrics (${sqliteCount(sqlite, "metrics")})...`, { quiet });
+      log(`\nMigrating metrics (${sqliteCount(sqlite, "metrics")})...`, {
+        quiet,
+      });
       const stmt = sqlite.prepare("SELECT * FROM metrics");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
@@ -333,7 +353,8 @@ export async function migrateSqliteToKuzu(
           spilloverRef: row.spillover_ref ? String(row.spillover_ref) : null,
         });
         migrated++;
-        if (migrated % 200 === 0) log(`  slice_handles: ${migrated}`, { quiet });
+        if (migrated % 200 === 0)
+          log(`  slice_handles: ${migrated}`, { quiet });
       }
       log(`  slice_handles: ${migrated} (done)`, { quiet });
     }
@@ -371,7 +392,8 @@ export async function migrateSqliteToKuzu(
           createdAt: String(row.created_at),
         });
         migrated++;
-        if (migrated % 200 === 0) log(`  tool_policy_hashes: ${migrated}`, { quiet });
+        if (migrated % 200 === 0)
+          log(`  tool_policy_hashes: ${migrated}`, { quiet });
       }
       log(`  tool_policy_hashes: ${migrated} (done)`, { quiet });
     }
@@ -390,7 +412,8 @@ export async function migrateSqliteToKuzu(
           createdAt: String(row.created_at),
         });
         migrated++;
-        if (migrated % 200 === 0) log(`  tsconfig_hashes: ${migrated}`, { quiet });
+        if (migrated % 200 === 0)
+          log(`  tsconfig_hashes: ${migrated}`, { quiet });
       }
       log(`  tsconfig_hashes: ${migrated} (done)`, { quiet });
     }
@@ -436,7 +459,8 @@ export async function migrateSqliteToKuzu(
           createdAt: String(row.created_at),
         });
         migrated++;
-        if (migrated % 200 === 0) log(`  agent_feedback: ${migrated}`, { quiet });
+        if (migrated % 200 === 0)
+          log(`  agent_feedback: ${migrated}`, { quiet });
       }
       log(`  agent_feedback: ${migrated} (done)`, { quiet });
     }
@@ -465,7 +489,8 @@ export async function migrateSqliteToKuzu(
           updatedAt: String(row.updated_at),
         });
         migrated++;
-        if (migrated % 200 === 0) log(`  symbol_embeddings: ${migrated}`, { quiet });
+        if (migrated % 200 === 0)
+          log(`  symbol_embeddings: ${migrated}`, { quiet });
       }
       log(`  symbol_embeddings: ${migrated} (done)`, { quiet });
     }
@@ -489,7 +514,8 @@ export async function migrateSqliteToKuzu(
           updatedAt: String(row.updated_at),
         });
         migrated++;
-        if (migrated % 200 === 0) log(`  symbol_summary_cache: ${migrated}`, { quiet });
+        if (migrated % 200 === 0)
+          log(`  symbol_summary_cache: ${migrated}`, { quiet });
       }
       log(`  symbol_summary_cache: ${migrated} (done)`, { quiet });
     }
@@ -514,7 +540,8 @@ export async function migrateSqliteToKuzu(
           sizeBytes: Number(row.size_bytes),
         });
         migrated++;
-        if (migrated % 200 === 0) log(`  sync_artifacts: ${migrated}`, { quiet });
+        if (migrated % 200 === 0)
+          log(`  sync_artifacts: ${migrated}`, { quiet });
       }
       log(`  sync_artifacts: ${migrated} (done)`, { quiet });
     }
@@ -536,7 +563,8 @@ export async function migrateSqliteToKuzu(
           createdAt: String(row.created_at),
         });
         migrated++;
-        if (migrated % 500 === 0) log(`  symbol_references: ${migrated}`, { quiet });
+        if (migrated % 500 === 0)
+          log(`  symbol_references: ${migrated}`, { quiet });
       }
       log(`  symbol_references: ${migrated} (done)`, { quiet });
     }

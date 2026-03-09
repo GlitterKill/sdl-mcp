@@ -62,7 +62,6 @@ describe("process-aware blast radius", () => {
       language: "ts",
       byteSize: 100,
       lastIndexedAt: now,
-      directory: "src",
     });
 
     for (const [symbolId, name] of [
@@ -219,4 +218,3 @@ describe("process-aware blast radius", () => {
     assert.ok(result.every((i) => i.signal !== "process"));
   });
 });
-

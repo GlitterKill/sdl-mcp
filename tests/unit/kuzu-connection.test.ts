@@ -18,7 +18,6 @@ let DatabaseErrorClass: new (message: string) => Error;
 let normalizePath: (p: string) => string;
 let kuzuAvailable = false;
 
-// @ts-expect-error - dist files don't exist until build
 await import("../../dist/db/kuzu.js")
   .then((kuzu) => {
     getKuzuDb = kuzu.getKuzuDb;
@@ -123,9 +122,7 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
 
     it("should normalize Windows paths to forward slashes", async () => {
       const testPath = getTestDbPath("windows-path") + "\\subdir";
-      const expected = normalizePath(
-        join(testPath, "sdl-mcp-graph.kuzu"),
-      );
+      const expected = normalizePath(join(testPath, "sdl-mcp-graph.kuzu"));
       cleanupTestDb("windows-path");
 
       try {

@@ -3,7 +3,7 @@ import assert from "node:assert";
 import {
   BENCHMARK_SCOPE_IGNORE_PATTERNS,
   mergeBenchmarkIgnorePatterns,
-} from "../../src/cli/commands/benchmark.ts";
+} from "../../src/cli/commands/benchmark.js";
 
 describe("benchmark scope ignore patterns", () => {
   it("adds required benchmark scope excludes and keeps order stable", () => {

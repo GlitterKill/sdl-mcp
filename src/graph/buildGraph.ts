@@ -145,7 +145,12 @@ async function execute(
   params: Record<string, unknown> = {},
 ): Promise<QueryResult> {
   const prepared = await getPreparedStatement(conn, statement);
-  const result = await conn.execute(prepared, params);
+  // Kuzu accepts string | number | boolean | null | bigint — callers pass
+  // Record<string, unknown> for convenience; the cast is safe.
+  const result = await conn.execute(
+    prepared,
+    params as Parameters<Connection["execute"]>[1],
+  );
   return coerceQueryResult(result);
 }
 

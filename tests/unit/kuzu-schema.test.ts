@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Tests for KuzuDB Schema Definition (T1.2)
  *
  * Tests:
@@ -20,9 +20,7 @@ const __dirname = dirname(__filename);
 const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-schema-test-db.kuzu");
 
 interface KuzuConnection {
-  query: (
-    q: string,
-  ) => Promise<{
+  query: (q: string) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
     close: () => void;
@@ -31,7 +29,7 @@ interface KuzuConnection {
 }
 
 interface KuzuDatabase {
-  close: () => Promise<void>;
+  close: () => void | Promise<void>;
 }
 
 async function createTestDb() {
@@ -42,8 +40,10 @@ async function createTestDb() {
   }
   mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
 
-  const db = new kuzu.Database(TEST_DB_PATH) as KuzuDatabase;
-  const conn = new kuzu.Connection(db) as KuzuConnection;
+  const db = new kuzu.Database(TEST_DB_PATH) as unknown as KuzuDatabase;
+  const conn = new kuzu.Connection(
+    db as unknown as import("kuzu").Database,
+  ) as unknown as KuzuConnection;
   return { db, conn, kuzu };
 }
 
@@ -107,7 +107,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (r:Repo {repoId: 'test-repo', rootPath: '/test', configJson: '{}', createdAt: '2024-01-01'})`,
         );
         const result = await conn.query(
@@ -129,7 +130,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (f:File {fileId: 'f1', relPath: 'src/test.ts', contentHash: 'abc123', language: 'typescript', byteSize: 100, lastIndexedAt: '2024-01-01', directory: 'src'})`,
         );
         const result = await conn.query(
@@ -151,7 +153,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (s:Symbol {symbolId: 'sym1', kind: 'function', name: 'testFn', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 5, rangeEndCol: 1, astFingerprint: 'fp1', signatureJson: '{}', updatedAt: '2024-01-01'})`,
         );
         const result = await conn.query(
@@ -173,7 +176,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (v:Version {versionId: 'v1', createdAt: '2024-01-01', reason: 'test', versionHash: 'h1'})`,
         );
         const result = await conn.query(
@@ -195,7 +199,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (sv:SymbolVersion {id: 'sv1', versionId: 'v1', symbolId: 'sym1', astFingerprint: 'fp1', signatureJson: '{}'})`,
         );
         const result = await conn.query(
@@ -217,7 +222,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (m:Metrics {symbolId: 'sym1', fanIn: 5, fanOut: 3, churn30d: 10, testRefsJson: '[]', updatedAt: '2024-01-01'})`,
         );
         const result = await conn.query(
@@ -239,7 +245,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (c:Cluster {clusterId: 'c1', repoId: 'test-repo', label: 'Test Cluster', symbolCount: 10, cohesionScore: 0.85, versionId: 'v1', createdAt: '2024-01-01'})`,
         );
         const result = await conn.query(
@@ -261,7 +268,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (p:Process {processId: 'p1', repoId: 'test-repo', entrySymbolId: 'sym1', label: 'Test Process', depth: 3, versionId: 'v1', createdAt: '2024-01-01'})`,
         );
         const result = await conn.query(
@@ -283,7 +291,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (sh:SliceHandle {handle: 'sh1', repoId: 'test-repo', createdAt: '2024-01-01', expiresAt: '2024-12-31', sliceHash: 'hash1'})`,
         );
         const result = await conn.query(
@@ -305,7 +314,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (ch:CardHash {cardHash: 'ch1', cardBlob: '{"test": true}', createdAt: '2024-01-01'})`,
         );
         const result = await conn.query(
@@ -326,7 +336,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (a:Audit {eventId: 1, timestamp: '2024-01-01', tool: 'test-tool', decision: 'allow', repoId: 'test-repo', detailsJson: '{}'})`,
         );
         const result = await conn.query(
@@ -348,7 +359,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (af:AgentFeedback {feedbackId: 1, repoId: 'test-repo', versionId: 'v1', sliceHandle: 'sh1', usefulSymbolsJson: '["sym1"]', missingSymbolsJson: '[]', taskType: 'debug', createdAt: '2024-01-01'})`,
         );
         const result = await conn.query(
@@ -370,7 +382,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (se:SymbolEmbedding {symbolId: 'sym1', model: 'text-embedding-3-small', embeddingVector: '[0.1, 0.2, 0.3]', version: '1', cardHash: 'ch1', createdAt: '2024-01-01', updatedAt: '2024-01-01'})`,
         );
         const result = await conn.query(
@@ -392,7 +405,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (sc:SummaryCache {symbolId: 'sym1', summary: 'Test summary', provider: 'openai', model: 'gpt-4', cardHash: 'ch1', costUsd: 0.001, createdAt: '2024-01-01', updatedAt: '2024-01-01'})`,
         );
         const result = await conn.query(
@@ -414,7 +428,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (sa:SyncArtifact {artifactId: 'sa1', repoId: 'test-repo', versionId: 'v1', commitSha: 'abc123', branch: 'main', artifactHash: 'h1', compressedData: 'data', createdAt: '2024-01-01', sizeBytes: 1024})`,
         );
         const result = await conn.query(
@@ -436,7 +451,8 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (sr:SymbolReference {refId: 1, repoId: 'test-repo', symbolName: 'testFn', fileId: 'f1', lineNumber: 10, createdAt: '2024-01-01'})`,
         );
         const result = await conn.query(
@@ -460,13 +476,16 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (r:Repo {repoId: 'rel-test-repo', rootPath: '/test', configJson: '{}', createdAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (f:File {fileId: 'rel-f1', relPath: 'src/test.ts', contentHash: 'abc', language: 'typescript', byteSize: 100, directory: 'src'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `MATCH (f:File {fileId: 'rel-f1'}), (r:Repo {repoId: 'rel-test-repo'}) CREATE (f)-[:FILE_IN_REPO]->(r)`,
         );
         const result = await conn.query(
@@ -487,13 +506,16 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (f:File {fileId: 'rel-f1', relPath: 'src/test.ts', contentHash: 'abc', language: 'typescript', byteSize: 100, directory: 'src'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (s:Symbol {symbolId: 'rel-sym1', kind: 'function', name: 'fn1', exported: true, language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 5, rangeEndCol: 1, astFingerprint: 'fp', updatedAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `MATCH (s:Symbol {symbolId: 'rel-sym1'}), (f:File {fileId: 'rel-f1'}) CREATE (s)-[:SYMBOL_IN_FILE]->(f)`,
         );
         const result = await conn.query(
@@ -514,13 +536,16 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (s1:Symbol {symbolId: 'rel-sym1', kind: 'function', name: 'fn1', exported: true, language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 5, rangeEndCol: 1, astFingerprint: 'fp', updatedAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (s2:Symbol {symbolId: 'rel-sym2', kind: 'function', name: 'fn2', exported: true, language: 'typescript', rangeStartLine: 10, rangeStartCol: 0, rangeEndLine: 15, rangeEndCol: 1, astFingerprint: 'fp', updatedAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `MATCH (s1:Symbol {symbolId: 'rel-sym1'}), (s2:Symbol {symbolId: 'rel-sym2'}) CREATE (s1)-[:DEPENDS_ON {edgeType: 'call', weight: 1.0, confidence: 0.9, resolution: 'exact', provenance: 'ts-compiler', createdAt: '2024-01-01'}]->(s2)`,
         );
         const result = await conn.query(
@@ -542,13 +567,16 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (r:Repo {repoId: 'rel-test-repo', rootPath: '/test', configJson: '{}', createdAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (v:Version {versionId: 'rel-v1', createdAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `MATCH (v:Version {versionId: 'rel-v1'}), (r:Repo {repoId: 'rel-test-repo'}) CREATE (v)-[:VERSION_OF_REPO]->(r)`,
         );
         const result = await conn.query(
@@ -569,13 +597,16 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (s:Symbol {symbolId: 'rel-sym1', kind: 'function', name: 'fn1', exported: true, language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 5, rangeEndCol: 1, astFingerprint: 'fp', updatedAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (c:Cluster {clusterId: 'rel-c1', repoId: 'rel-test-repo', label: 'Cluster', symbolCount: 1, cohesionScore: 1.0, versionId: 'rel-v1', createdAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `MATCH (s:Symbol {symbolId: 'rel-sym1'}), (c:Cluster {clusterId: 'rel-c1'}) CREATE (s)-[:BELONGS_TO_CLUSTER]->(c)`,
         );
         const result = await conn.query(
@@ -596,13 +627,16 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (s:Symbol {symbolId: 'rel-sym1', kind: 'function', name: 'fn1', exported: true, language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 5, rangeEndCol: 1, astFingerprint: 'fp', updatedAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (p:Process {processId: 'rel-p1', repoId: 'rel-test-repo', entrySymbolId: 'rel-sym1', label: 'Process', depth: 1, versionId: 'rel-v1', createdAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `MATCH (s:Symbol {symbolId: 'rel-sym1'}), (p:Process {processId: 'rel-p1'}) CREATE (s)-[:PARTICIPATES_IN]->(p)`,
         );
         const result = await conn.query(
@@ -623,13 +657,16 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (r:Repo {repoId: 'rel-test-repo', rootPath: '/test', configJson: '{}', createdAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (c:Cluster {clusterId: 'rel-c1', repoId: 'rel-test-repo', label: 'Cluster', symbolCount: 1, cohesionScore: 1.0, versionId: 'rel-v1', createdAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `MATCH (c:Cluster {clusterId: 'rel-c1'}), (r:Repo {repoId: 'rel-test-repo'}) CREATE (c)-[:CLUSTER_IN_REPO]->(r)`,
         );
         const result = await conn.query(
@@ -650,13 +687,16 @@ describe("KuzuDB Schema", () => {
         const { createSchema } = await import("../../dist/db/kuzu-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (r:Repo {repoId: 'rel-test-repo', rootPath: '/test', configJson: '{}', createdAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `CREATE (p:Process {processId: 'rel-p1', repoId: 'rel-test-repo', entrySymbolId: 'rel-sym1', label: 'Process', depth: 1, versionId: 'rel-v1', createdAt: '2024-01-01'})`,
         );
-        await exec(conn, 
+        await exec(
+          conn,
           `MATCH (p:Process {processId: 'rel-p1'}), (r:Repo {repoId: 'rel-test-repo'}) CREATE (p)-[:PROCESS_IN_REPO]->(r)`,
         );
         const result = await conn.query(

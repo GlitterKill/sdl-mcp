@@ -18,6 +18,7 @@ describe("collectTestRefs Caching", () => {
     languages: ["ts", "js"],
     ignore: ["node_modules"],
     maxFileBytes: 1024 * 1024,
+    includeNodeModulesTypes: false,
   };
 
   const symbols = [
