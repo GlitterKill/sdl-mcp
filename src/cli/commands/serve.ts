@@ -25,6 +25,8 @@ import {
   DEFAULT_IDLE_CHECKPOINT_QUIET_PERIOD_MS,
   IdleMonitor,
 } from "../../live-index/idle-monitor.js";
+import { ShutdownManager } from "../../util/shutdown.js";
+import { findExistingProcess, writePidfile } from "../../util/pidfile.js";
 
 export async function serveCommand(options: ServeOptions): Promise<void> {
   const configPath = activateCliConfigPath(options.config);
@@ -34,6 +36,17 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
 
   const graphDbPath = await initGraphDb(config, configPath);
   console.error(`Graph database initialized at ${graphDbPath}`);
+
+  // Check for an existing live server process (stale PIDs are auto-cleaned).
+  const existing = findExistingProcess(graphDbPath);
+  if (existing) {
+    console.error(
+      `Found existing SDL-MCP server (PID ${existing.pid}, ` +
+        `transport: ${existing.transport}, started: ${existing.startedAt}). ` +
+        `Kill it first or use a different SDL_GRAPH_DB_PATH.`,
+    );
+    process.exit(1);
+  }
 
   // Auto-register repositories if missing in database
   const conn = await getKuzuConn();
@@ -69,7 +82,10 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     const results = await Promise.allSettled(
       config.repos.map(async (repo) => {
         try {
-          return { repoId: repo.repoId, handle: await watchRepository(repo.repoId) };
+          return {
+            repoId: repo.repoId,
+            handle: await watchRepository(repo.repoId),
+          };
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           throw new Error(`[${repo.repoId}] ${msg}`);
@@ -109,43 +125,40 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   }
   registerTools(server, { liveIndex });
 
-  let shutdownCalled = false;
-  const shutdown = async (signal: string): Promise<void> => {
-    if (shutdownCalled) {
-      return;
-    }
-    shutdownCalled = true;
-    console.error(`\nReceived ${signal}, shutting down gracefully...`);
-    await server.stop();
+  // Determine transport type and write PID file for process discovery.
+  const transport: "stdio" | "http" =
+    options.transport === "stdio" ? "stdio" : "http";
+  const httpPort = options.port ?? 3000;
+  const pidfilePath = writePidfile(
+    graphDbPath,
+    transport,
+    transport === "http" ? httpPort : undefined,
+  );
+  console.error(`PID file written: ${pidfilePath}`);
+
+  // Set up centralized shutdown manager.
+  const shutdownMgr = new ShutdownManager({
+    log: (msg) => console.error(`[sdl-mcp] ${msg}`),
+  });
+  shutdownMgr.setPidfilePath(pidfilePath);
+
+  shutdownMgr.addCleanup("idleMonitor", () => {
     idleMonitor.stop();
-    await closeKuzuDb();
+  });
+  shutdownMgr.addCleanup("server", () => server.stop());
+  shutdownMgr.addCleanup("db", () => closeKuzuDb());
+  shutdownMgr.addCleanup("watchers", async () => {
     for (const watcher of watchers) {
       await watcher.close();
     }
-    process.exit(0);
-  };
+  });
 
-  const handleShutdown = (signal: "SIGINT" | "SIGTERM"): void => {
-    void shutdown(signal).catch((error) => {
-      console.error(
-        `Failed to handle ${signal}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      process.exit(1);
-    });
-  };
-
-  process.once("SIGINT", () => handleShutdown("SIGINT"));
-  process.once("SIGTERM", () => handleShutdown("SIGTERM"));
+  // Register all shutdown triggers.
+  shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
 
   if (options.transport === "stdio") {
-    // Mirror main.ts: keep stdin active and exit gracefully when the MCP
-    // client disconnects. Without these handlers, Node.js silently exits on
-    // non-TTY environments (CI, Nix shells, piped invocations) because the
-    // MCP SDK's readline closes and leaves no active I/O handles.
-    process.stdin.once("end", () => void shutdown("stdin-end"));
-    process.stdin.once("close", () => void shutdown("stdin-close"));
+    // Monitor stdin so we detect terminal close / MCP client disconnect.
+    shutdownMgr.monitorStdin();
   }
 
   try {
@@ -154,9 +167,10 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       await setupStdioTransport(server);
     } else {
       const host = options.host ?? "localhost";
-      const port = options.port ?? 3000;
-      console.error(`Starting MCP server on http://${host}:${port}...`);
-      await setupHttpTransport(server, host, port, graphDbPath, { liveIndex });
+      console.error(`Starting MCP server on http://${host}:${httpPort}...`);
+      await setupHttpTransport(server, host, httpPort, graphDbPath, {
+        liveIndex,
+      });
     }
 
     await new Promise(() => {});

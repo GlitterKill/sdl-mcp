@@ -423,6 +423,19 @@ export const NODE_MIN_MAJOR_VERSION = 20;
 export const DEFAULT_HTTP_PORT = 3000;
 
 /**
+ * Name of the PID file written alongside the graph database.
+ * Used for process discovery and stale-process cleanup.
+ */
+export const PIDFILE_NAME = "sdl-mcp.pid";
+
+/**
+ * Maximum time in milliseconds to wait for graceful shutdown before
+ * forcing process exit. Prevents the server from hanging indefinitely
+ * if a cleanup step (e.g. KuzuDB close) blocks.
+ */
+export const SHUTDOWN_FORCE_EXIT_TIMEOUT_MS = 5000;
+
+/**
  * SDL-MCP package version. Keep in sync with package.json.
  */
 export const SDL_MCP_VERSION = "0.8.0";
@@ -480,7 +493,7 @@ export const GITHUB_TOKEN_LENGTH = 36;
  * A growthRate > 0.20 means the symbol's dependency count grew by more than 20%.
  * Amplifiers are sorted to the top of the blast radius list within the same distance tier.
  */
-export const FAN_IN_AMPLIFIER_THRESHOLD = 0.20;
+export const FAN_IN_AMPLIFIER_THRESHOLD = 0.2;
 
 // ============================================================================
 // Stability & Diff Constants

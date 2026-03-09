@@ -15,6 +15,8 @@ import {
   DEFAULT_IDLE_CHECKPOINT_QUIET_PERIOD_MS,
   IdleMonitor,
 } from "./live-index/idle-monitor.js";
+import { ShutdownManager } from "./util/shutdown.js";
+import { findExistingProcess, writePidfile } from "./util/pidfile.js";
 
 // MCP servers must use stderr for logging - stdout is reserved for JSON-RPC
 const log = (msg: string) => process.stderr.write(`[sdl-mcp] ${msg}\n`);
@@ -32,7 +34,7 @@ process.on("unhandledRejection", (reason) => {
 async function main(): Promise<void> {
   const server = new MCPServer();
   const watchers: Array<{ close: () => Promise<void> }> = [];
-  let shutdownCalled = false;
+  const shutdownMgr = new ShutdownManager({ log });
 
   try {
     log("Loading configuration...");
@@ -41,6 +43,22 @@ async function main(): Promise<void> {
 
     const graphDbPath = await initGraphDb(config, resolvedConfigPath);
     log(`Graph database initialized at ${graphDbPath}`);
+
+    // Check for an existing live server process (stale PIDs are auto-cleaned).
+    const existing = findExistingProcess(graphDbPath);
+    if (existing) {
+      log(
+        `Found existing SDL-MCP server (PID ${existing.pid}, ` +
+          `transport: ${existing.transport}, started: ${existing.startedAt}). ` +
+          `Kill it first or use a different SDL_GRAPH_DB_PATH.`,
+      );
+      process.exit(1);
+    }
+
+    // Write PID file for process discovery / reuse.
+    const pidfilePath = writePidfile(graphDbPath, "stdio");
+    shutdownMgr.setPidfilePath(pidfilePath);
+    log(`PID file written: ${pidfilePath}`);
 
     // Dynamic imports AFTER migrations - these modules prepare SQL statements
     log("Registering MCP tools...");
@@ -102,19 +120,16 @@ async function main(): Promise<void> {
     // Do not keep process alive solely because of periodic cleanup timer.
     cleanupInterval.unref();
 
-    const shutdown = async (signal: string): Promise<void> => {
-      if (shutdownCalled) {
-        return;
-      }
-      shutdownCalled = true;
-
-      process.stderr.write(
-        `\n[sdl-mcp] Received ${signal}, shutting down gracefully...\n`,
-      );
+    // Register cleanup callbacks (run in order during shutdown).
+    shutdownMgr.addCleanup("cleanupInterval", () => {
       clearInterval(cleanupInterval);
+    });
+    shutdownMgr.addCleanup("idleMonitor", () => {
       idleMonitor.stop();
-      await server.stop();
-      await closeKuzuDb();
+    });
+    shutdownMgr.addCleanup("server", () => server.stop());
+    shutdownMgr.addCleanup("db", () => closeKuzuDb());
+    shutdownMgr.addCleanup("watchers", async () => {
       for (const watcher of watchers) {
         try {
           await watcher.close();
@@ -124,13 +139,11 @@ async function main(): Promise<void> {
           );
         }
       }
-      process.exit(0);
-    };
+    });
 
-    process.once("SIGINT", () => void shutdown("SIGINT"));
-    process.once("SIGTERM", () => void shutdown("SIGTERM"));
-    process.stdin.once("end", () => void shutdown("stdin-end"));
-    process.stdin.once("close", () => void shutdown("stdin-close"));
+    // Register all shutdown triggers.
+    shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
+    shutdownMgr.monitorStdin(); // stdin end/close (terminal close detection)
 
     log("Starting MCP server...");
     await server.start();

@@ -14,18 +14,53 @@ describe("main stdio shutdown wiring", () => {
     );
   });
 
-  it("handles stdin end/close to trigger graceful shutdown", () => {
+  it("uses ShutdownManager to handle stdin end/close for graceful shutdown", () => {
+    const source = readFileSync(join(process.cwd(), "src", "main.ts"), "utf8");
+
+    // main.ts now delegates to ShutdownManager.monitorStdin() which registers
+    // stdin end/close handlers internally.
+    assert.match(
+      source,
+      /shutdownMgr\.monitorStdin\(\)/,
+      "main.ts should call shutdownMgr.monitorStdin() to detect terminal close",
+    );
+  });
+
+  it("ShutdownManager.monitorStdin registers stdin end/close handlers", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src", "util", "shutdown.ts"),
+      "utf8",
+    );
+
+    assert.match(
+      source,
+      /process\.stdin\.once\("end",/,
+      "ShutdownManager.monitorStdin must register stdin 'end' handler",
+    );
+    assert.match(
+      source,
+      /process\.stdin\.once\("close",/,
+      "ShutdownManager.monitorStdin must register stdin 'close' handler",
+    );
+  });
+
+  it("registers SIGHUP for terminal close detection", () => {
     const source = readFileSync(join(process.cwd(), "src", "main.ts"), "utf8");
 
     assert.match(
       source,
-      /process\.stdin\.once\("end",\s*\(\)\s*=>\s*void shutdown\("stdin-end"\)\);/,
-      "stdin end should trigger shutdown",
+      /registerSignals/,
+      "main.ts should call shutdownMgr.registerSignals()",
+    );
+
+    const shutdownSource = readFileSync(
+      join(process.cwd(), "src", "util", "shutdown.ts"),
+      "utf8",
     );
     assert.match(
-      source,
-      /process\.stdin\.once\("close",\s*\(\)\s*=>\s*void shutdown\("stdin-close"\)\);/,
-      "stdin close should trigger shutdown",
+      shutdownSource,
+      /process\.once\("SIGHUP"/,
+      "ShutdownManager should handle SIGHUP",
     );
   });
 });
