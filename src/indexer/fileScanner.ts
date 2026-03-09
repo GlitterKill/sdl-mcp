@@ -82,6 +82,7 @@ async function discoverFiles(
     absolute: false,
     onlyFiles: true,
     unique: true,
+    followSymbolicLinks: false,
   });
 
   return files;

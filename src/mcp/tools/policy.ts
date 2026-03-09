@@ -31,7 +31,18 @@ export async function handlePolicyGet(
   }
 
   const appConfig = loadConfig();
-  const configJson = JSON.parse(repo.configJson);
+  let configJson: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(repo.configJson);
+    configJson =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+  } catch {
+    throw new DatabaseError(
+      `Repository ${repoId} has corrupt configJson in database`,
+    );
+  }
   const repoPolicy =
     configJson.policy && typeof configJson.policy === "object"
       ? configJson.policy
@@ -67,7 +78,18 @@ export async function handlePolicySet(
   }
 
   const appConfig = loadConfig();
-  const configJson = JSON.parse(repo.configJson);
+  let configJson: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(repo.configJson);
+    configJson =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+  } catch {
+    throw new DatabaseError(
+      `Repository ${repoId} has corrupt configJson in database`,
+    );
+  }
   const existingPolicyOverrides =
     configJson.policy && typeof configJson.policy === "object"
       ? configJson.policy

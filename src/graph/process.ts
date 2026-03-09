@@ -1,16 +1,16 @@
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
 import { hashContent } from "../util/hashing.js";
+import { safeCompileRegex } from "../util/safeRegex.js";
 
 import type { ProcessTrace, ProcessTraceStep } from "./process-types.js";
 
 function compileEntryPatterns(entryPatterns: string[]): RegExp[] {
   const patterns: RegExp[] = [];
   for (const pattern of entryPatterns) {
-    try {
-      patterns.push(new RegExp(pattern));
-    } catch {
-      // ignore invalid patterns
+    const compiled = safeCompileRegex(pattern);
+    if (compiled) {
+      patterns.push(compiled);
     }
   }
   return patterns;
@@ -90,4 +90,3 @@ export async function traceProcessesTS(
 
   return entrySymbolIds.map(trace);
 }
-

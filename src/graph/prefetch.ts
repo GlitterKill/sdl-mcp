@@ -1,6 +1,7 @@
 import { cpus, loadavg, platform } from "os";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
+import { logger } from "../util/logger.js";
 import {
   predictNextToolFromRecent,
   computePriorityBoost,
@@ -136,7 +137,13 @@ async function runQueue(): Promise<void> {
         await task.run();
         stats.completed += 1;
         stats.lastRunAt = new Date().toISOString();
-      } catch {
+      } catch (error) {
+        logger.debug("Prefetch task execution failed", {
+          repoId: task.repoId,
+          taskType: task.type,
+          key: task.key,
+          error: error instanceof Error ? error.message : String(error),
+        });
         stats.cancelled += 1;
         recordWastedPrefetch(task.type);
       } finally {

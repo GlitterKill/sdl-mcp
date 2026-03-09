@@ -139,13 +139,13 @@ const CompressedEdgeSchema = z.tuple([
 ]);
 
 const SliceBudgetSchema = z.object({
-  maxCards: z.number().int().min(1).optional(),
-  maxEstimatedTokens: z.number().int().min(1).optional(),
+  maxCards: z.number().int().min(1).max(500).optional(),
+  maxEstimatedTokens: z.number().int().min(1).max(200000).optional(),
 });
 
 const RequiredSliceBudgetSchema = z.object({
-  maxCards: z.number().int().min(1),
-  maxEstimatedTokens: z.number().int().min(1),
+  maxCards: z.number().int().min(1).max(500),
+  maxEstimatedTokens: z.number().int().min(1).max(200000),
 });
 
 const FrontierItemSchema = z.object({
@@ -274,8 +274,8 @@ const CompactSliceTruncationSchema = z.object({
 });
 
 const CompactSliceBudgetSchema = z.object({
-  mc: z.number().int().min(1),
-  mt: z.number().int().min(1),
+  mc: z.number().int().min(1).max(500),
+  mt: z.number().int().min(1).max(200000),
 });
 
 const CompactGraphSliceSchema = z.object({
@@ -645,10 +645,12 @@ const BufferCursorSchema = z.object({
 export const BufferPushRequestSchema = z.object({
   repoId: z.string().min(1),
   eventType: z.enum(["open", "change", "save", "close", "checkpoint"]),
-  filePath: z.string().min(1).refine(
-    (p) => !p.includes(".."),
-    { message: "filePath must not contain path traversal sequences" },
-  ),
+  filePath: z
+    .string()
+    .min(1)
+    .refine((p) => !p.includes(".."), {
+      message: "filePath must not contain path traversal sequences",
+    }),
   content: z.string().max(5_242_880),
   language: z.string().optional(),
   version: z.number().int().min(0),
@@ -765,14 +767,19 @@ export const SymbolGetCardRequestSchema = z.object({
 
 export const SymbolGetCardsRequestSchema = z.object({
   repoId: z.string().describe("Repository ID"),
-  symbolIds: z.array(z.string()).min(1).max(100).describe(
-    "Array of symbol IDs to fetch (max 100)",
-  ),
+  symbolIds: z
+    .array(z.string())
+    .min(1)
+    .max(100)
+    .describe("Array of symbol IDs to fetch (max 100)"),
   minCallConfidence: z.number().min(0).max(1).optional(),
   includeResolutionMetadata: z.boolean().optional(),
-  knownEtags: z.record(z.string(), z.string()).optional().describe(
-    "Map of symbolId → known ETag. Matching symbols return notModified instead of full card.",
-  ),
+  knownEtags: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe(
+      "Map of symbolId → known ETag. Matching symbols return notModified instead of full card.",
+    ),
 });
 
 const CardWithETagSchema = SymbolCardSchema.extend({
@@ -800,11 +807,15 @@ export const SymbolGetCardResponseSchema = z.union([
 
 export const SliceBuildRequestSchema = z.object({
   repoId: z.string().min(1),
-  taskText: z.string().min(1).optional().describe(
-    "Natural language task description. Can be used alone (without entrySymbols) " +
-    "to auto-discover relevant symbols via full-text search and build the slice " +
-    "in a single round trip.",
-  ),
+  taskText: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "Natural language task description. Can be used alone (without entrySymbols) " +
+        "to auto-discover relevant symbols via full-text search and build the slice " +
+        "in a single round trip.",
+    ),
   stackTrace: z.string().optional(),
   failingTestPath: z.string().optional(),
   editedFiles: z.array(z.string()).max(100).optional(),
@@ -1312,7 +1323,9 @@ export type SymbolGetCardRequest = z.infer<typeof SymbolGetCardRequestSchema>;
 export type SymbolGetCardResponse = z.infer<typeof SymbolGetCardResponseSchema>;
 export type SymbolGetCardsRequest = z.infer<typeof SymbolGetCardsRequestSchema>;
 export type SymbolGetCardsResponse = {
-  cards: Array<import("./types.js").CardWithETag | import("./types.js").NotModifiedResponse>;
+  cards: Array<
+    import("./types.js").CardWithETag | import("./types.js").NotModifiedResponse
+  >;
 };
 export type SliceBuildRequest = z.infer<typeof SliceBuildRequestSchema>;
 export type SliceBuildResponse = z.infer<typeof SliceBuildResponseSchema>;
@@ -1573,9 +1586,7 @@ export const AgentFeedbackRequestSchema = z.object({
 
 export const AgentFeedbackResponseSchema = z.object({
   ok: z.boolean().describe("Whether the feedback was recorded successfully"),
-  feedbackId: z
-    .string()
-    .describe("The ID of the created feedback record"),
+  feedbackId: z.string().describe("The ID of the created feedback record"),
   repoId: z.string().describe("Repository identifier"),
   versionId: z.string().describe("Version identifier"),
   symbolsRecorded: z

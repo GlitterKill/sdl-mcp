@@ -4,6 +4,8 @@ import * as path from "path";
 import type { RepoConfig } from "../config/types.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { TS_DIAGNOSTICS_MAX_ERRORS } from "../config/constants.js";
+import { globToSafeRegex } from "../util/safeRegex.js";
+import { logger } from "../util/logger.js";
 
 export interface DiagnosticSeverity {
   error: number;
@@ -53,7 +55,10 @@ class DiagnosticsManager {
       return this.servicesCache.get(cacheKey)!;
     }
 
-    const tsConfigPath = this.findTsConfig(repo.rootPath, repo.tsconfigPath ?? undefined);
+    const tsConfigPath = this.findTsConfig(
+      repo.rootPath,
+      repo.tsconfigPath ?? undefined,
+    );
     const projectRoot = path.dirname(tsConfigPath);
 
     const parsedConfig = this.readTsConfig(tsConfigPath);
@@ -223,7 +228,14 @@ class DiagnosticsManager {
             }
           }
         }
-      } catch {
+      } catch (error) {
+        logger.debug(
+          "Failed walking directory while collecting TS diagnostics files",
+          {
+            dir,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
         return;
       }
     };
@@ -243,9 +255,7 @@ class DiagnosticsManager {
   ): boolean {
     const normalizedPath = filePath.replace(/\\/g, "/");
     return ignorePatterns.some((pattern) => {
-      const regex = new RegExp(
-        pattern.replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*"),
-      );
+      const regex = globToSafeRegex(pattern);
       return regex.test(normalizedPath);
     });
   }
@@ -253,9 +263,7 @@ class DiagnosticsManager {
   private shouldIgnoreDir(dirPath: string, ignorePatterns: string[]): boolean {
     const normalizedPath = dirPath.replace(/\\/g, "/");
     return ignorePatterns.some((pattern) => {
-      const regex = new RegExp(
-        pattern.replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*"),
-      );
+      const regex = globToSafeRegex(pattern);
       return regex.test(normalizedPath);
     });
   }
@@ -264,7 +272,11 @@ class DiagnosticsManager {
     try {
       const stats = fs.statSync(fileName);
       return stats.mtimeMs.toString();
-    } catch {
+    } catch (error) {
+      logger.debug("Failed to read script version for TS diagnostics", {
+        fileName,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return "0";
     }
   }
@@ -273,7 +285,11 @@ class DiagnosticsManager {
     try {
       const content = fs.readFileSync(fileName, "utf-8");
       return ts.ScriptSnapshot.fromString(content);
-    } catch {
+    } catch (error) {
+      logger.debug("Failed to create script snapshot for TS diagnostics", {
+        fileName,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return undefined;
     }
   }

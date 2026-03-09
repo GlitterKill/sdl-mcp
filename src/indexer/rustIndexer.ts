@@ -206,7 +206,11 @@ function loadNativeAddon(): NativeAddon | null {
       nativeAddon = loaded;
       logger.info("Loaded native Rust indexer", { path: addonPath });
       return loaded;
-    } catch {
+    } catch (error) {
+      logger.debug("Failed to load native Rust indexer candidate", {
+        path: addonPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
       // Try next path
     }
   }
@@ -312,9 +316,12 @@ export function parseFilesRust(
   try {
     nativeResults = addon.parseFiles(inputs, threadCount);
   } catch (error) {
-    logger.error("Native Rust indexer parseFiles failed; disabling native addon", {
-      error,
-    });
+    logger.error(
+      "Native Rust indexer parseFiles failed; disabling native addon",
+      {
+        error,
+      },
+    );
     nativeAddon = null;
     return null;
   }
@@ -332,9 +339,12 @@ export function parseFilesRust(
   try {
     return nativeResults.map(mapNativeResult);
   } catch (error) {
-    logger.error("Failed to map native Rust indexer results; disabling native addon", {
-      error,
-    });
+    logger.error(
+      "Failed to map native Rust indexer results; disabling native addon",
+      {
+        error,
+      },
+    );
     nativeAddon = null;
     return null;
   }
@@ -375,9 +385,12 @@ export function computeClustersRust(
   try {
     return addon.computeClusters(symbols, edges, minClusterSize);
   } catch (error) {
-    logger.error("Native Rust cluster detection failed; falling back to TypeScript", {
-      error,
-    });
+    logger.error(
+      "Native Rust cluster detection failed; falling back to TypeScript",
+      {
+        error,
+      },
+    );
     return null;
   }
 }
@@ -394,9 +407,12 @@ export function traceProcessesRust(
   try {
     return addon.traceProcesses(symbols, callEdges, maxDepth, entryPatterns);
   } catch (error) {
-    logger.error("Native Rust process tracing failed; falling back to TypeScript", {
-      error,
-    });
+    logger.error(
+      "Native Rust process tracing failed; falling back to TypeScript",
+      {
+        error,
+      },
+    );
     return null;
   }
 }
@@ -436,7 +452,10 @@ function mapNativeSymbol(sym: NativeParsedSymbol): RustExtractedSymbol {
     // return/generics) is represented as `undefined` on the Rust side.
     signature: sym.signature?.params
       ? {
-          params: sym.signature.params.map(p => ({ name: p.name, type: p.typeName })),
+          params: sym.signature.params.map((p) => ({
+            name: p.name,
+            type: p.typeName,
+          })),
           returns: sym.signature.returns,
           generics: sym.signature.generics,
         }
@@ -444,8 +463,10 @@ function mapNativeSymbol(sym: NativeParsedSymbol): RustExtractedSymbol {
     summary: sym.summary,
     // Downstream kuzu persistence still expects JSON strings for these arrays;
     // re-serialise here rather than changing every write path.
-    invariantsJson: sym.invariants.length > 0 ? JSON.stringify(sym.invariants) : "[]",
-    sideEffectsJson: sym.sideEffects.length > 0 ? JSON.stringify(sym.sideEffects) : "[]",
+    invariantsJson:
+      sym.invariants.length > 0 ? JSON.stringify(sym.invariants) : "[]",
+    sideEffectsJson:
+      sym.sideEffects.length > 0 ? JSON.stringify(sym.sideEffects) : "[]",
     roleTagsJson: sym.roleTags.length > 0 ? JSON.stringify(sym.roleTags) : "[]",
     searchText: typeof sym.searchText === "string" ? sym.searchText : "",
   };
@@ -478,9 +499,7 @@ function mapNativeCall(call: NativeParsedCall): ExtractedCall {
   };
 }
 
-function mapCallType(
-  rustType: string,
-): ExtractedCall["callType"] {
+function mapCallType(rustType: string): ExtractedCall["callType"] {
   switch (rustType) {
     case "direct":
       return "function";
@@ -498,4 +517,3 @@ function mapCallType(
       return "function";
   }
 }
-

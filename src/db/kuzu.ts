@@ -40,6 +40,11 @@ const MAX_POOL_SIZE = 1;
 const connectionPool: KuzuConnection[] = [];
 let connectionIndex = 0;
 
+// Initialization mutex: prevents concurrent callers from double-initializing
+// the DB instance or connection pool across async boundaries.
+let dbInitPromise: Promise<KuzuDatabase> | null = null;
+let poolInitPromise: Promise<void> | null = null;
+
 async function loadKuzu(): Promise<KuzuModule> {
   if (kuzuModule) {
     return kuzuModule;
@@ -72,8 +77,6 @@ export function resolveKuzuBufferManagerSizeBytes(
 }
 
 export async function getKuzuDb(dbPath?: string): Promise<KuzuDatabase> {
-  const modules = await loadKuzu();
-
   const resolvedPath = dbPath
     ? normalizePath(normalizeGraphDbPath(dbPath))
     : currentDbPath;
@@ -84,53 +87,74 @@ export async function getKuzuDb(dbPath?: string): Promise<KuzuDatabase> {
     );
   }
 
+  // Fast path: already initialized for this path.
   if (dbInstance && currentDbPath === resolvedPath) {
     return dbInstance;
   }
 
-  if (dbInstance) {
-    logger.warn("KuzuDB path changed, closing existing connection");
-    await closeKuzuDb();
-  }
-
-  const normalizedPath = normalizePath(resolvedPath);
-
-  const parentDir = dirname(normalizedPath);
-  if (parentDir && parentDir !== "." && !existsSync(parentDir)) {
-    try {
-      mkdirSync(parentDir, { recursive: true });
-      logger.debug("Created KuzuDB parent directory", { path: parentDir });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new DatabaseError(
-        `Failed to create KuzuDB parent directory at ${parentDir}: ${msg}`,
-      );
+  // Serialize initialization: if another caller is already opening the DB
+  // for this path, await its result instead of double-initializing.
+  if (dbInitPromise) {
+    const existing = await dbInitPromise;
+    if (dbInstance && currentDbPath === resolvedPath) {
+      return existing;
     }
   }
 
+  const initFn = async (): Promise<KuzuDatabase> => {
+    const modules = await loadKuzu();
+
+    if (dbInstance) {
+      logger.warn("KuzuDB path changed, closing existing connection");
+      await closeKuzuDb();
+    }
+
+    const normalizedPath = normalizePath(resolvedPath);
+
+    const parentDir = dirname(normalizedPath);
+    if (parentDir && parentDir !== "." && !existsSync(parentDir)) {
+      try {
+        mkdirSync(parentDir, { recursive: true });
+        logger.debug("Created KuzuDB parent directory", { path: parentDir });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new DatabaseError(
+          `Failed to create KuzuDB parent directory at ${parentDir}: ${msg}`,
+        );
+      }
+    }
+
+    try {
+      const bufferManagerSize = resolveKuzuBufferManagerSizeBytes();
+      dbInstance = new modules.Database(
+        normalizedPath,
+        bufferManagerSize,
+        true,
+        false,
+        0,
+        true,
+        DEFAULT_CHECKPOINT_THRESHOLD_BYTES,
+      );
+      currentDbPath = normalizedPath;
+      logger.info("KuzuDB database opened", {
+        path: normalizedPath,
+        bufferManagerSizeBytes: bufferManagerSize,
+        checkpointThresholdBytes: DEFAULT_CHECKPOINT_THRESHOLD_BYTES,
+      });
+      return dbInstance;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new DatabaseError(
+        `Failed to open KuzuDB at ${normalizedPath}: ${msg}`,
+      );
+    }
+  };
+
+  dbInitPromise = initFn();
   try {
-    const bufferManagerSize = resolveKuzuBufferManagerSizeBytes();
-    dbInstance = new modules.Database(
-      normalizedPath,
-      bufferManagerSize,
-      true,
-      false,
-      0,
-      true,
-      DEFAULT_CHECKPOINT_THRESHOLD_BYTES,
-    );
-    currentDbPath = normalizedPath;
-    logger.info("KuzuDB database opened", {
-      path: normalizedPath,
-      bufferManagerSizeBytes: bufferManagerSize,
-      checkpointThresholdBytes: DEFAULT_CHECKPOINT_THRESHOLD_BYTES,
-    });
-    return dbInstance;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new DatabaseError(
-      `Failed to open KuzuDB at ${normalizedPath}: ${msg}`,
-    );
+    return await dbInitPromise;
+  } finally {
+    dbInitPromise = null;
   }
 }
 
@@ -150,47 +174,77 @@ async function isConnectionHealthy(conn: KuzuConnection): Promise<boolean> {
 
 export async function getKuzuConn(): Promise<KuzuConnection> {
   const db = await getKuzuDb();
-  
-  if (connectionPool.length === 0) {
-    const modules = await loadKuzu();
-    logger.debug(`Initializing KuzuDB connection pool with ${MAX_POOL_SIZE} connections`);
-    for (let i = 0; i < MAX_POOL_SIZE; i++) {
-      try {
-        const conn = new modules.Connection(db);
-        if ('setMaxNumThreadForExec' in conn) {
-           await (conn as unknown as KuzuConnectionWithThreads).setMaxNumThreadForExec(1);
+
+  // Fast path: pool already initialized.
+  if (connectionPool.length > 0) {
+    // skip to round-robin below
+  } else if (poolInitPromise) {
+    // Another caller is initializing the pool — wait for it.
+    await poolInitPromise;
+  } else {
+    // We are the first caller — initialize the pool.
+    const initPool = async (): Promise<void> => {
+      const modules = await loadKuzu();
+      logger.debug(
+        `Initializing KuzuDB connection pool with ${MAX_POOL_SIZE} connections`,
+      );
+      for (let i = 0; i < MAX_POOL_SIZE; i++) {
+        try {
+          const conn = new modules.Connection(db);
+          if ("setMaxNumThreadForExec" in conn) {
+            await (
+              conn as unknown as KuzuConnectionWithThreads
+            ).setMaxNumThreadForExec(1);
+          }
+          connectionPool.push(conn);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new DatabaseError(`Failed to create KuzuDB connection: ${msg}`);
         }
-        connectionPool.push(conn);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        throw new DatabaseError(`Failed to create KuzuDB connection: ${msg}`);
       }
+    };
+
+    poolInitPromise = initPool();
+    try {
+      await poolInitPromise;
+    } finally {
+      poolInitPromise = null;
     }
   }
 
   // Round-robin selection
   const conn = connectionPool[connectionIndex];
   connectionIndex = (connectionIndex + 1) % connectionPool.length;
-  
+
   if (!(await isConnectionHealthy(conn))) {
     logger.warn(`KuzuDB connection ${connectionIndex} unhealthy, recreating`);
     try {
       await conn.close();
     } catch (closeError) {
-      logger.debug("Failed to close unhealthy KuzuDB connection before recreation", {
-        error: closeError instanceof Error ? closeError.message : String(closeError),
-      });
+      logger.debug(
+        "Failed to close unhealthy KuzuDB connection before recreation",
+        {
+          error:
+            closeError instanceof Error
+              ? closeError.message
+              : String(closeError),
+        },
+      );
     }
-    
+
     const modules = await loadKuzu();
     const newConn = new modules.Connection(db);
-    if ('setMaxNumThreadForExec' in newConn) {
-        await (newConn as unknown as KuzuConnectionWithThreads).setMaxNumThreadForExec(1);
+    if ("setMaxNumThreadForExec" in newConn) {
+      await (
+        newConn as unknown as KuzuConnectionWithThreads
+      ).setMaxNumThreadForExec(1);
     }
-    connectionPool[connectionIndex === 0 ? connectionPool.length - 1 : connectionIndex - 1] = newConn;
+    connectionPool[
+      connectionIndex === 0 ? connectionPool.length - 1 : connectionIndex - 1
+    ] = newConn;
     return newConn;
   }
-  
+
   return conn;
 }
 

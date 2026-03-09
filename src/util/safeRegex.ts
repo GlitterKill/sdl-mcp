@@ -10,25 +10,36 @@ import { logger } from "./logger.js";
  * @returns true if pattern has ReDoS risk, false otherwise
  */
 export function isReDoSRisk(pattern: string): boolean {
-  // Check for nested quantifiers: )+, )*, )+?, )*?
-  // This catches patterns like (a+)+, (a*)*,  (a+)*, etc.
-  if (/\)[+*?]/.test(pattern)) {
+  // 1. Nested quantifiers after group closing paren: (a+)+, (a*)*,  (a+)*, etc.
+  if (/\)[+*?{]/.test(pattern)) {
     return true;
   }
 
-  // Check for overlapping alternation: (a|a)* or similar
-  // Simple heuristic: look for alternation with same content
+  // 2. Nested quantifiers without group: a{1,}+  or  [abc]+{2,}
+  //    Catches patterns like \w+\w+, \d+\d+  (adjacent quantified terms
+  //    matching overlapping character sets).
+  if (/[+*}]\s*[+*{]/.test(pattern)) {
+    return true;
+  }
+
+  // 3. Quantified character classes followed by quantifier: [a-z]+[a-z]+
+  if (/\][+*?{][^)]*\][+*?{]/.test(pattern)) {
+    return true;
+  }
+
+  // 4. Star/plus height > 1 within groups: (.+)+ or (.*)+
+  //    Catches nested quantifier even when there's content between
+  if (/\([^)]*[+*][^)]*\)[+*?{]/.test(pattern)) {
+    return true;
+  }
+
+  // 5. Overlapping alternation with quantifier: (a|a)* or similar
   if (/\([^)]*\|[^)]*\)[*+]/.test(pattern)) {
-    // More specific check: detect (x|x) patterns
     const altMatch = pattern.match(/\(([^)]*)\|([^)]*)\)[*+]/);
     if (altMatch) {
       const left = altMatch[1].trim();
       const right = altMatch[2].trim();
-      // If both sides are identical or very similar, it's risky
-      if (
-        left === right ||
-        (left.length > 0 && right.length > 0 && left === right)
-      ) {
+      if (left === right) {
         return true;
       }
     }

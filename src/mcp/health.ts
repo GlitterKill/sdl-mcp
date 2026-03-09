@@ -1,8 +1,9 @@
 import type { HealthComponents } from "./types.js";
-import type { RepoConfig } from "../config/types.js";
+import { RepoConfigSchema } from "../config/types.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
 import { scanRepository } from "../indexer/fileScanner.js";
+import { DatabaseError } from "../domain/errors.js";
 
 const DEFAULT_MIN_INDEXED_FILES = 1;
 const DEFAULT_MIN_INDEXED_SYMBOLS = 1;
@@ -46,7 +47,8 @@ export interface HealthScoreResult {
 
 export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   const minIndexedFiles = input.minIndexedFiles ?? DEFAULT_MIN_INDEXED_FILES;
-  const minIndexedSymbols = input.minIndexedSymbols ?? DEFAULT_MIN_INDEXED_SYMBOLS;
+  const minIndexedSymbols =
+    input.minIndexedSymbols ?? DEFAULT_MIN_INDEXED_SYMBOLS;
   const available =
     input.indexedFiles >= minIndexedFiles &&
     input.indexedSymbols >= minIndexedSymbols;
@@ -90,7 +92,8 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   const callResolution = clamp01(
     input.totalCallEdges <= 0
       ? 0
-      : (input.exactCallEdges ?? input.resolvedCallEdges) / input.totalCallEdges,
+      : (input.exactCallEdges ?? input.resolvedCallEdges) /
+          input.totalCallEdges,
   );
 
   const weighted =
@@ -131,7 +134,15 @@ export async function getRepoHealthSnapshot(
     throw new Error(`Repository ${repoId} not found`);
   }
 
-  const repoConfig = JSON.parse(repo.configJson) as RepoConfig;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(repo.configJson);
+  } catch {
+    throw new DatabaseError(
+      `Repository ${repoId} has corrupt configJson in database`,
+    );
+  }
+  const repoConfig = RepoConfigSchema.parse(parsed);
   const eligibleFiles = await scanRepository(repo.rootPath, repoConfig);
   const files = await kuzuDb.getFilesByRepo(conn, repoId);
   const indexedSymbols = await kuzuDb.getSymbolCount(conn, repoId);

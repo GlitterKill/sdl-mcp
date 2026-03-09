@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "fs";
-import { join, relative } from "path";
+import { join, relative, resolve } from "path";
 import {
   RepoRegisterRequestSchema,
   RepoRegisterResponse,
@@ -87,18 +87,17 @@ export async function handleRepoRegister(
     tool: "repo.register",
   });
 
+  // Resolve the root to an absolute path and validate — this catches
+  // traversal attempts like "../../etc/passwd" that string matching misses.
   const normalizedRoot = normalizePath(rootPath);
-  if (
-    normalizedRoot.includes("/../") ||
-    normalizedRoot.endsWith("/..") ||
-    normalizedRoot.startsWith("..") ||
-    normalizedRoot.includes("\\..\\") ||
-    normalizedRoot.endsWith("\\..")
-  ) {
+  const resolvedRoot = normalizePath(resolve(normalizedRoot));
+
+  // Reject relative paths that don't resolve to themselves (traversal)
+  if (resolvedRoot !== normalizedRoot && normalizedRoot.startsWith("..")) {
     throw new ValidationError(`Root path contains path traversal: ${rootPath}`);
   }
 
-  if (!existsSync(rootPath)) {
+  if (!existsSync(resolvedRoot)) {
     throw new ConfigError(`Path does not exist: ${rootPath}`);
   }
 
@@ -252,7 +251,13 @@ export async function handleRepoStatus(
     const prefetchStats = getPrefetchStats(repoId);
     const liveIndexStatus = await getDefaultLiveIndexCoordinator()
       .getLiveStatus(repoId)
-      .catch((err) => { logger.warn("Failed to get live index status", { repoId, error: err instanceof Error ? err.message : String(err) }); return undefined; });
+      .catch((err) => {
+        logger.warn("Failed to get live index status", {
+          repoId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return undefined;
+      });
     if (watcherHealth) {
       logWatcherHealthTelemetry({
         repoId,
@@ -354,7 +359,8 @@ export async function handleIndexRefresh(
     const onProgress =
       progressToken !== undefined && sendNotification
         ? (progress: IndexProgress) => {
-            const message = `[${progress.stage}] ${progress.currentFile ?? ""}`.trim();
+            const message =
+              `[${progress.stage}] ${progress.currentFile ?? ""}`.trim();
             sendNotification({
               method: "notifications/progress",
               params: {
@@ -363,7 +369,12 @@ export async function handleIndexRefresh(
                 total: progress.total,
                 message,
               },
-            }).catch((err) => { logger.warn("Failed to send progress notification", { error: err instanceof Error ? err.message : String(err) }); return undefined; });
+            }).catch((err) => {
+              logger.warn("Failed to send progress notification", {
+                error: err instanceof Error ? err.message : String(err),
+              });
+              return undefined;
+            });
           }
         : undefined;
 

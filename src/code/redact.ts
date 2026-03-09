@@ -1,5 +1,6 @@
 import path from "path";
 import { logger } from "../util/logger.js";
+import { safeCompileRegex } from "../util/safeRegex.js";
 
 export interface RedactionPattern {
   name: string;
@@ -77,13 +78,16 @@ export function compilePatterns(
   const compiled: RedactionPattern[] = [];
 
   inputs.forEach((input, index) => {
-    try {
+    const compiledPattern = safeCompileRegex(input.pattern, input.flags ?? "g");
+    if (compiledPattern) {
       compiled.push({
         name: input.name ?? `custom-${index}`,
-        pattern: new RegExp(input.pattern, input.flags ?? "g"),
+        pattern: compiledPattern,
       });
-    } catch (error) {
-      logger.warn("Invalid redaction pattern skipped", { name: input.name ?? input.pattern });
+    } else {
+      logger.warn("Unsafe or invalid redaction pattern skipped", {
+        name: input.name ?? input.pattern,
+      });
     }
   });
 

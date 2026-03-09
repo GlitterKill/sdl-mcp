@@ -15,11 +15,28 @@ const loadedPlugins = new Map<string, AdapterPlugin>();
 
 export async function loadPlugin(
   pluginPath: string,
+  allowedRoot?: string,
 ): Promise<PluginLoadResult> {
   const errors: string[] = [];
   const warnings: string[] = [];
 
   const absolutePath = path.resolve(pluginPath);
+
+  // Path containment: if an allowed root is specified, verify the resolved
+  // plugin path is within it.  This prevents config-driven arbitrary code
+  // execution via `import()` by blocking paths that escape the project tree.
+  if (allowedRoot) {
+    const normalizedRoot = path.resolve(allowedRoot) + path.sep;
+    if (!absolutePath.startsWith(normalizedRoot)) {
+      return {
+        plugin: null as never,
+        loaded: false,
+        errors: [
+          `Plugin path escapes allowed root: ${absolutePath} is not within ${normalizedRoot}`,
+        ],
+      };
+    }
+  }
 
   try {
     if (!existsSync(absolutePath)) {
@@ -169,7 +186,9 @@ export async function getPluginAdapters(
       plugin: plugin.manifest.name,
       error: errorMessage,
     });
-    throw new Error(`Failed to create adapters: ${errorMessage}`, { cause: error });
+    throw new Error(`Failed to create adapters: ${errorMessage}`, {
+      cause: error,
+    });
   }
 }
 

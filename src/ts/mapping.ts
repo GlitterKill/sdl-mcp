@@ -1,5 +1,5 @@
 import type { RepoId } from "../db/schema.js";
-import type { RepoConfig } from "../config/types.js";
+import { RepoConfigSchema } from "../config/types.js";
 import type { Diagnostic, DiagnosticSummary } from "./diagnostics.js";
 import { diagnosticsManager } from "./diagnostics.js";
 import { getKuzuConn } from "../db/kuzu.js";
@@ -44,7 +44,11 @@ export async function mapDiagnosticsToSymbols(
     const relativePath = normalizePath(
       getRelativePath(repo.rootPath, diagnostic.filePath),
     );
-    const fileRecord = await kuzuDb.getFileByRepoPath(conn, repoId, relativePath);
+    const fileRecord = await kuzuDb.getFileByRepoPath(
+      conn,
+      repoId,
+      relativePath,
+    );
 
     if (!fileRecord) {
       continue;
@@ -98,7 +102,7 @@ export async function getDiagnosticsWithSuspects(
     throw new Error(`Repository not found: ${repoId}`);
   }
 
-  const repoConfig: RepoConfig = JSON.parse(repo.configJson);
+  const repoConfig = RepoConfigSchema.parse(JSON.parse(repo.configJson));
 
   const { diagnostics, summary } = await diagnosticsManager.getDiagnostics(
     repoConfig,

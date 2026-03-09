@@ -455,7 +455,12 @@ export async function generateSymbolSkeleton(
     if (fileStat.size > MAX_FILE_BYTES) {
       return null;
     }
-  } catch {
+  } catch (error) {
+    logger.debug("Failed to stat file during symbol skeleton generation", {
+      file: file.relPath,
+      symbolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 
@@ -547,7 +552,11 @@ export async function generateFileSkeleton(
     if (fileStat.size > MAX_FILE_BYTES) {
       return null;
     }
-  } catch {
+  } catch (error) {
+    logger.debug("Failed to stat file during file skeleton generation", {
+      file: filePath,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 
@@ -879,7 +888,12 @@ export async function generateSkeletonIR(
     if (fileStat.size > MAX_FILE_BYTES) {
       return null;
     }
-  } catch {
+  } catch (error) {
+    logger.debug("Failed to stat file during skeleton IR generation", {
+      file: file.relPath,
+      symbolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 
