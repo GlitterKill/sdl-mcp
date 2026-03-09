@@ -32,7 +32,6 @@ interface ChokidarWatcher {
   getWatched?(): Record<string, string[]>;
 }
 
-
 export type IndexRepoFn = (
   repoId: string,
   mode: "full" | "incremental",
@@ -42,15 +41,24 @@ export async function processWatchedFileChange(params: {
   repoId: string;
   filePath: string;
   indexRepo: IndexRepoFn;
-  patchSavedFileFn?: (input: { repoId: string; filePath: string }) => Promise<unknown>;
+  patchSavedFileFn?: (input: {
+    repoId: string;
+    filePath: string;
+  }) => Promise<unknown>;
 }): Promise<void> {
   const { repoId, filePath, indexRepo, patchSavedFileFn } = params;
   if (patchSavedFileFn) {
     try {
       await patchSavedFileFn({ repoId, filePath });
       return;
-    } catch {
+    } catch (patchError: unknown) {
       // Fall back to repo-wide incremental indexing below.
+      logger.debug("patchSavedFile failed, falling back to incremental index", {
+        repoId,
+        filePath,
+        error:
+          patchError instanceof Error ? patchError.message : String(patchError),
+      });
     }
   }
 
@@ -201,7 +209,10 @@ export async function watchRepositoryWithIndexer(
     }
     if (health.errors >= WATCHER_ERROR_MAX_COUNT && !health.stale) {
       health.stale = true;
-      logger.error("Watcher error budget exceeded", { repoId, hint: "Run: sdl-mcp index --force" });
+      logger.error("Watcher error budget exceeded", {
+        repoId,
+        hint: "Run: sdl-mcp index --force",
+      });
     }
   };
 
@@ -220,7 +231,10 @@ export async function watchRepositoryWithIndexer(
         repoId,
         filePath,
         indexRepo,
-        patchSavedFileFn: ({ repoId: changedRepoId, filePath: changedFilePath }) =>
+        patchSavedFileFn: ({
+          repoId: changedRepoId,
+          filePath: changedFilePath,
+        }) =>
           patchSavedFile({
             repoId: changedRepoId,
             filePath: changedFilePath,
@@ -232,7 +246,9 @@ export async function watchRepositoryWithIndexer(
       health.stale = false;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      recordWatcherError(`[sdl-mcp] Failed incremental index for ${filePath}: ${msg}`);
+      recordWatcherError(
+        `[sdl-mcp] Failed incremental index for ${filePath}: ${msg}`,
+      );
       if (attempt + 1 < WATCHER_REINDEX_MAX_ATTEMPTS && !closed) {
         const delay = Math.min(
           WATCHER_REINDEX_RETRY_MAX_MS,
@@ -291,13 +307,12 @@ export async function watchRepositoryWithIndexer(
       const typedWatcher = watcher as unknown as ChokidarWatcher;
 
       const readyPromise = new Promise<void>((resolveReady) => {
-        (typedWatcher).on("ready", () => {
-          const watched = (typedWatcher).getWatched?.();
+        typedWatcher.on("ready", () => {
+          const watched = typedWatcher.getWatched?.();
           if (watched && typeof watched === "object") {
-            const count = Object.values(watched as Record<string, string[]>).reduce(
-              (total, entries) => total + entries.length,
-              0,
-            );
+            const count = Object.values(
+              watched as Record<string, string[]>,
+            ).reduce((total, entries) => total + entries.length, 0);
             health.filesWatched = count;
           }
           resolveReady();
@@ -309,18 +324,18 @@ export async function watchRepositoryWithIndexer(
         handler(relPath);
       };
 
-      (typedWatcher).on("add", chokidarHandler);
-      (typedWatcher).on("change", chokidarHandler);
-      (typedWatcher).on("unlink", chokidarHandler);
+      typedWatcher.on("add", chokidarHandler);
+      typedWatcher.on("change", chokidarHandler);
+      typedWatcher.on("unlink", chokidarHandler);
 
-      (typedWatcher).on("error", (error: Error) => {
+      typedWatcher.on("error", (error: Error) => {
         recordWatcherError(`[sdl-mcp] File watcher error: ${error}`);
       });
 
       return {
         ready: readyPromise,
         close: async () => {
-          await (typedWatcher).close();
+          await typedWatcher.close();
         },
       };
     }
@@ -363,7 +378,9 @@ export async function watchRepositoryWithIndexer(
       health.stale = false;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      recordWatcherError(`[sdl-mcp] Failed to restart watcher for ${repoId}: ${msg}`);
+      recordWatcherError(
+        `[sdl-mcp] Failed to restart watcher for ${repoId}: ${msg}`,
+      );
     } finally {
       restarting = false;
     }
@@ -381,7 +398,8 @@ export async function watchRepositoryWithIndexer(
       ? Date.parse(health.lastSuccessfulReindexAt)
       : 0;
     const stale =
-      lastSuccessMs === 0 || Date.now() - lastSuccessMs > WATCHER_STALE_THRESHOLD_MS;
+      lastSuccessMs === 0 ||
+      Date.now() - lastSuccessMs > WATCHER_STALE_THRESHOLD_MS;
     health.stale = stale;
     if (stale) {
       const staleMsg = `[sdl-mcp] Watcher stale detected for ${repoId}: pending=${health.pendingChanges}, queueDepth=${health.queueDepth}`;

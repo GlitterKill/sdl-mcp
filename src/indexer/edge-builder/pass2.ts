@@ -12,7 +12,11 @@ import { isBuiltinCall } from "./builtins.js";
 import { resolveCallTarget } from "./call-resolution.js";
 import { resolveImportTargets } from "./import-resolution.js";
 import { resolveSymbolIdFromIndex } from "./symbol-index.js";
-import { incRecord, isTsCallResolutionFile, pushTelemetrySample } from "./telemetry.js";
+import {
+  incRecord,
+  isTsCallResolutionFile,
+  pushTelemetrySample,
+} from "./telemetry.js";
 import type { CallResolutionTelemetry } from "./telemetry.js";
 import type { SymbolIndex, TsCallResolver } from "./types.js";
 
@@ -128,7 +132,20 @@ async function resolveTsCallEdgesPass2(params: {
   try {
     const conn = await getKuzuConn();
     const filePath = join(repoRoot, fileMeta.path);
-    const content = await readFileAsync(filePath, "utf-8");
+    let content: string;
+    try {
+      content = await readFileAsync(filePath, "utf-8");
+    } catch (readError: unknown) {
+      const code = (readError as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "EPERM") {
+        logger.warn(
+          `File disappeared before pass2 resolution: ${fileMeta.path}`,
+          { code },
+        );
+        return 0;
+      }
+      throw readError;
+    }
     const ext = fileMeta.path.split(".").pop() || "";
     const extWithDot = `.${ext}`;
     const adapter = getAdapterForExtension(extWithDot);
@@ -162,11 +179,18 @@ async function resolveTsCallEdgesPass2(params: {
       symbolsWithNodeIds as any,
     );
 
-    const fileRecord = await kuzuDb.getFileByRepoPath(conn, repoId, fileMeta.path);
+    const fileRecord = await kuzuDb.getFileByRepoPath(
+      conn,
+      repoId,
+      fileMeta.path,
+    );
     if (!fileRecord) {
       return 0;
     }
-    const existingSymbols = await kuzuDb.getSymbolsByFile(conn, fileRecord.fileId);
+    const existingSymbols = await kuzuDb.getSymbolsByFile(
+      conn,
+      fileRecord.fileId,
+    );
     if (telemetry) {
       telemetry.pass2SymbolMapping.existingSymbols += existingSymbols.length;
     }
@@ -329,7 +353,10 @@ async function resolveTsCallEdgesPass2(params: {
 
         if (telemetry) telemetry.pass2SymbolMapping.mappedSymbols++;
         if (telemetry) {
-          incRecord(telemetry.pass2SymbolMapping.strategyCounts, mapped.strategy);
+          incRecord(
+            telemetry.pass2SymbolMapping.strategyCounts,
+            mapped.strategy,
+          );
         }
 
         return {
@@ -354,7 +381,9 @@ async function resolveTsCallEdgesPass2(params: {
       return 0;
     }
 
-    const symbolIdsToRefresh = filteredSymbolDetails.map((detail) => detail.symbolId);
+    const symbolIdsToRefresh = filteredSymbolDetails.map(
+      (detail) => detail.symbolId,
+    );
     await kuzuDb.deleteOutgoingEdgesByTypeForSymbols(
       conn,
       symbolIdsToRefresh,
@@ -476,7 +505,10 @@ async function resolveTsCallEdgesPass2(params: {
       const tsCalls = tsResolver.getResolvedCalls(fileMeta.path);
       if (telemetry) telemetry.tsResolverCalls.total += tsCalls.length;
       for (const tsCall of tsCalls) {
-        const callerNodeId = findEnclosingSymbolByRange(tsCall.caller, filteredSymbolDetails);
+        const callerNodeId = findEnclosingSymbolByRange(
+          tsCall.caller,
+          filteredSymbolDetails,
+        );
         if (!callerNodeId) {
           if (telemetry) telemetry.tsResolverCalls.skippedNoCaller++;
           continue;
@@ -599,7 +631,6 @@ function findEnclosingSymbolByRange(
 
   return bestNonVariable?.nodeId ?? bestVariable?.nodeId ?? null;
 }
-
 
 export {
   findEnclosingSymbolByRange,

@@ -1,10 +1,21 @@
 /**
- * kuzu-metrics.ts — Metrics Operations
+ * kuzu-metrics.ts ï¿½ Metrics Operations
  * Extracted from kuzu-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber, assertSafeInt } from "./kuzu-core.js";
-import type { MetricsRow, TopSymbolByFanInRow, FanInOut } from "./kuzu-repos.js";
+import {
+  exec,
+  queryAll,
+  querySingle,
+  toNumber,
+  assertSafeInt,
+  withTransaction,
+} from "./kuzu-core.js";
+import type {
+  MetricsRow,
+  TopSymbolByFanInRow,
+  FanInOut,
+} from "./kuzu-repos.js";
 
 export async function upsertMetrics(
   conn: Connection,
@@ -29,6 +40,40 @@ export async function upsertMetrics(
       updatedAt: metrics.updatedAt,
     },
   );
+}
+
+/**
+ * Batch-upsert metrics rows within a single transaction to reduce per-row
+ * round-trip overhead during full metric refreshes.
+ */
+export async function upsertMetricsBatch(
+  conn: Connection,
+  rows: MetricsRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  await withTransaction(conn, async (txConn) => {
+    for (const metrics of rows) {
+      await exec(
+        txConn,
+        `MERGE (m:Metrics {symbolId: $symbolId})
+         SET m.fanIn = $fanIn,
+             m.fanOut = $fanOut,
+             m.churn30d = $churn30d,
+             m.testRefsJson = $testRefsJson,
+             m.canonicalTestJson = $canonicalTestJson,
+             m.updatedAt = $updatedAt`,
+        {
+          symbolId: metrics.symbolId,
+          fanIn: metrics.fanIn,
+          fanOut: metrics.fanOut,
+          churn30d: metrics.churn30d,
+          testRefsJson: metrics.testRefsJson,
+          canonicalTestJson: metrics.canonicalTestJson,
+          updatedAt: metrics.updatedAt,
+        },
+      );
+    }
+  });
 }
 
 export async function getMetrics(
@@ -251,4 +296,3 @@ export async function batchComputeFanInOut(
 // ============================================================================
 // Auxiliary queries (audit, feedback, embeddings, caches, artifacts)
 // ============================================================================
-

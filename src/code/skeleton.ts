@@ -17,6 +17,7 @@ import {
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
 import { logger } from "../util/logger.js";
+import { getParser as getGrammarParser } from "../indexer/treesitter/grammarLoader.js";
 
 const tsParser = new Parser();
 const tsxParser = new Parser();
@@ -54,6 +55,83 @@ function shouldIncludeIdentifier(
   return includeIdentifiers.includes(identifier);
 }
 
+/**
+ * Node types that represent top-level containers (file/module root).
+ * These get their children recursively processed.
+ */
+const ROOT_CONTAINER_TYPES = new Set([
+  // JS/TS
+  "source_file",
+  "program",
+  // Python
+  "module",
+  // Go, Rust, C/C++
+  "translation_unit",
+]);
+
+/**
+ * Node types that are rendered verbatim (imports, type declarations).
+ */
+const VERBATIM_TYPES = new Set([
+  // JS/TS
+  "import_statement",
+  "interface_declaration",
+  "type_alias_declaration",
+  "enum_declaration",
+  // Python
+  "import_from_statement",
+  // Go
+  "import_declaration",
+  // Rust
+  "use_declaration",
+  // Java/Kotlin/C#
+  "import_declaration",
+  // C/C++
+  "preproc_include",
+  "preproc_def",
+]);
+
+/**
+ * Node types for functions/classes/methods that have a body to elide.
+ */
+const FUNCTION_LIKE_TYPES = new Set([
+  // JS/TS
+  "function_declaration",
+  "class_declaration",
+  "method_definition",
+  // Python
+  "function_definition",
+  "class_definition",
+  // Go
+  "function_declaration",
+  "method_declaration",
+  // Rust
+  "function_item",
+  "impl_item",
+  "struct_item",
+  // Java/Kotlin/C#
+  "method_declaration",
+  "constructor_declaration",
+  // C/C++
+  "function_definition",
+]);
+
+/**
+ * Node types that represent function/class bodies across languages.
+ */
+const BODY_TYPES = new Set([
+  // JS/TS
+  "statement_block",
+  // Python
+  "block",
+  // Go, Rust, Java, C#, C/C++
+  "block",
+  "compound_statement",
+  "declaration_list",
+  "field_declaration_list",
+  "class_body",
+]);
+
 export function extractSkeletonFromNode(
   node: Parser.SyntaxNode,
   content: string,
@@ -63,13 +141,12 @@ export function extractSkeletonFromNode(
 ): string {
   const nodeType = node.type;
 
-  if (nodeType === "source_file" || nodeType === "program") {
+  // Root containers: process children
+  if (ROOT_CONTAINER_TYPES.has(nodeType)) {
     let result = "";
+    // First pass: imports
     for (const child of node.children) {
-      if (
-        child.type === "import_statement" ||
-        child.type === "export_statement"
-      ) {
+      if (VERBATIM_TYPES.has(child.type) || child.type === "export_statement") {
         result += extractSkeletonFromNode(
           child,
           content,
@@ -79,10 +156,11 @@ export function extractSkeletonFromNode(
         );
       }
     }
+    // Second pass: non-imports
     if (!exportedOnly) {
       for (const child of node.children) {
         if (
-          child.type !== "import_statement" &&
+          !VERBATIM_TYPES.has(child.type) &&
           child.type !== "export_statement"
         ) {
           result += extractSkeletonFromNode(
@@ -98,15 +176,17 @@ export function extractSkeletonFromNode(
     return result;
   }
 
-  if (
-    nodeType === "import_statement" ||
-    nodeType === "interface_declaration" ||
-    nodeType === "type_alias_declaration" ||
-    nodeType === "enum_declaration"
-  ) {
+  // Verbatim types: render as-is
+  if (VERBATIM_TYPES.has(nodeType)) {
     return node.text + "\n";
   }
 
+  // Python: import_statement (different from JS import_statement handled above)
+  if (nodeType === "import_statement" && !node.text.startsWith("import {")) {
+    return node.text + "\n";
+  }
+
+  // Export statement (JS/TS)
   if (nodeType === "export_statement") {
     let result = "export ";
     for (const child of node.children) {
@@ -122,6 +202,7 @@ export function extractSkeletonFromNode(
     return result;
   }
 
+  // Variable declaration (JS/TS)
   if (nodeType === "variable_declaration") {
     const isExported = node.children.some(
       (c) => c.type === "export_clause" || c.text === "export",
@@ -137,21 +218,59 @@ export function extractSkeletonFromNode(
     return "";
   }
 
+  // Python: decorated_definition — unwrap and process the inner definition
+  if (nodeType === "decorated_definition") {
+    let result = "";
+    for (const child of node.children) {
+      if (child.type === "decorator") {
+        result += child.text + "\n";
+      } else {
+        result += extractSkeletonFromNode(
+          child,
+          content,
+          includeIdentifiers,
+          depth,
+          exportedOnly,
+        );
+      }
+    }
+    return result;
+  }
+
+  // Rust: type declarations rendered verbatim
   if (
-    nodeType === "function_declaration" ||
-    nodeType === "class_declaration" ||
-    nodeType === "method_definition"
+    nodeType === "struct_item" ||
+    nodeType === "enum_item" ||
+    nodeType === "trait_item" ||
+    nodeType === "type_item"
   ) {
+    const lines = node.text.split("\n");
+    if (lines.length > 5) {
+      const firstLine = lines[0] || "";
+      return firstLine + "\n// …\n";
+    }
+    return node.text + "\n";
+  }
+
+  // Go: type_declaration rendered verbatim
+  if (nodeType === "type_declaration") {
+    const lines = node.text.split("\n");
+    if (lines.length > 5) {
+      const firstLine = lines[0] || "";
+      return firstLine + "\n// …\n";
+    }
+    return node.text + "\n";
+  }
+
+  // Function/class/method-like types: extract signature + elide body
+  if (FUNCTION_LIKE_TYPES.has(nodeType)) {
     const lines = node.text.split("\n");
     const signature = lines[0] || "";
 
-    const hasBody = node.children.some((c) => c.type === "statement_block");
-    if (!hasBody) {
-      return node.text + "\n";
-    }
-
-    const bodyNode = node.children.find((c) => c.type === "statement_block");
+    // Find the body node using the language-agnostic body type set
+    const bodyNode = node.children.find((c) => BODY_TYPES.has(c.type));
     if (!bodyNode) {
+      // No body (e.g., abstract method, forward declaration)
       return node.text + "\n";
     }
 
@@ -161,10 +280,16 @@ export function extractSkeletonFromNode(
       includeIdentifiers,
     );
 
+    // Python uses indentation, not braces
+    if (nodeType === "function_definition" || nodeType === "class_definition") {
+      return signature + "\n" + bodySkeleton;
+    }
+
     const result = signature + " {\n" + bodySkeleton + "}\n";
     return result;
   }
 
+  // Arrow function (JS/TS)
   if (nodeType === "arrow_function") {
     const lines = node.text.split("\n");
     const signature = lines[0] || "";
@@ -188,12 +313,28 @@ export function extractSkeletonFromNode(
     return signature + " {\n" + bodySkeleton + "}";
   }
 
-  if (nodeType === "statement_block") {
+  // Body blocks: delegate to body extraction
+  if (BODY_TYPES.has(nodeType)) {
     return extractSkeletonFromBody(node, content, includeIdentifiers);
   }
 
   return node.text;
 }
+
+/**
+ * Node types that represent return/throw/raise across languages.
+ */
+const RETURN_LIKE_TYPES = new Set([
+  "return_statement",
+  "throw_statement",
+  // Python
+  "return_statement",
+  "raise_statement",
+  // Go
+  "return_statement",
+  // Rust
+  "return_expression",
+]);
 
 function extractSkeletonFromBody(
   bodyNode: Parser.SyntaxNode,
@@ -213,6 +354,17 @@ function extractSkeletonFromBody(
     const childType = child.type;
     const childText = child.text.trim();
 
+    // Skip whitespace/comment-only nodes
+    if (
+      !childText ||
+      childType === "comment" ||
+      childType === "line_comment" ||
+      childType === "block_comment"
+    ) {
+      continue;
+    }
+
+    // Lexical declarations (JS/TS: const/let/var)
     if (childType === "lexical_declaration") {
       const hasImportantIdentifier = includeIdentifiers.some((id) =>
         childText.includes(id),
@@ -222,9 +374,11 @@ function extractSkeletonFromBody(
         result += child.text.trim() + "\n";
         processedStatements++;
       }
-    } else if (childType === "expression_statement") {
-      const isReturn = child.children.some(
-        (c) => c.type === "return_statement",
+    }
+    // Expression statements (common across languages)
+    else if (childType === "expression_statement") {
+      const isReturn = child.children.some((c) =>
+        RETURN_LIKE_TYPES.has(c.type),
       );
       const isThrow = child.children.some((c) => c.type === "throw_statement");
 
@@ -236,14 +390,21 @@ function extractSkeletonFromBody(
         result += child.text.trim() + "\n";
         processedStatements++;
       }
-    } else if (childType === "if_statement") {
+    }
+    // Return/raise/throw statements (when they appear directly, not inside expression_statement)
+    else if (RETURN_LIKE_TYPES.has(childType)) {
+      result += child.text.trim() + "\n";
+      processedStatements++;
+    }
+    // If statements (language-agnostic)
+    else if (childType === "if_statement" || childType === "if_expression") {
       const condition = child.children.find(
-        (c) => c.type === "parenthesized_expression",
+        (c) =>
+          c.type === "parenthesized_expression" ||
+          c.type === "condition_clause",
       );
       const conditionText = condition ? condition.text : "";
-      const thenBlock = child.children.find(
-        (c) => c.type === "statement_block",
-      );
+      const thenBlock = child.children.find((c) => BODY_TYPES.has(c.type));
       const elseBlock = child.children.find((c) => c.text.startsWith("else"));
 
       let ifLine = "if " + conditionText;
@@ -257,8 +418,8 @@ function extractSkeletonFromBody(
       }
 
       if (elseBlock) {
-        const elseChild = elseBlock.children.find(
-          (c) => c.type === "statement_block",
+        const elseChild = elseBlock.children.find((c) =>
+          BODY_TYPES.has(c.type),
         );
         if (elseChild) {
           const elseSkeleton = extractSkeletonFromBody(
@@ -272,19 +433,24 @@ function extractSkeletonFromBody(
 
       result += ifLine + "\n";
       processedStatements++;
-    } else if (
+    }
+    // Loop statements (language-agnostic)
+    else if (
       childType === "for_statement" ||
       childType === "for_in_statement" ||
-      childType === "while_statement"
+      childType === "while_statement" ||
+      childType === "for_expression" ||
+      childType === "while_expression"
     ) {
       const condition = child.children.find(
         (c) => c.type === "parenthesized_expression",
       );
       const conditionText = condition ? condition.text : "";
-      const body = child.children.find((c) => c.type === "statement_block");
+      const body = child.children.find((c) => BODY_TYPES.has(c.type));
 
       const loopKeyword = childType
         .replace("_statement", "")
+        .replace("_expression", "")
         .replace("_in", "");
       let loopLine = loopKeyword + " " + conditionText;
       if (body) {
@@ -298,13 +464,38 @@ function extractSkeletonFromBody(
 
       result += loopLine + "\n";
       processedStatements++;
-    } else if (
+    }
+    // Try/catch/finally (language-agnostic)
+    else if (
       childType === "try_statement" ||
       childType === "catch_clause" ||
+      childType === "except_clause" ||
       childType === "finally_clause"
     ) {
       result += child.text.trim() + "\n";
       processedStatements++;
+    }
+    // Nested function/class definitions (Python, Go, Rust)
+    else if (
+      FUNCTION_LIKE_TYPES.has(childType) ||
+      childType === "decorated_definition"
+    ) {
+      result +=
+        extractSkeletonFromNode(child, content, includeIdentifiers, 1) + "\n";
+      processedStatements++;
+    }
+    // Assignment (Python)
+    else if (
+      childType === "assignment" ||
+      childType === "short_var_declaration"
+    ) {
+      const hasImportantIdentifier = includeIdentifiers.some((id) =>
+        childText.includes(id),
+      );
+      if (hasImportantIdentifier) {
+        result += child.text.trim() + "\n";
+        processedStatements++;
+      }
     }
   }
 
@@ -356,20 +547,37 @@ export function trimSkeletonToBounds(
   return { code: result.join("\n"), truncated };
 }
 
+/**
+ * Maps file extensions to grammarLoader language IDs for non-JS/TS languages.
+ * JS/TS uses the dedicated tsParser/tsxParser (which handle JSX/TSX correctly).
+ */
+const EXTENSION_TO_LANGUAGE: Record<
+  string,
+  import("../indexer/treesitter/grammarLoader.js").SupportedLanguage
+> = {
+  ".py": "python",
+  ".go": "go",
+  ".java": "java",
+  ".rs": "rust",
+  ".cs": "csharp",
+  ".c": "c",
+  ".h": "c",
+  ".cpp": "cpp",
+  ".cc": "cpp",
+  ".cxx": "cpp",
+  ".hpp": "cpp",
+  ".php": "php",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".sh": "bash",
+  ".bash": "bash",
+};
+
 export function parseFile(
   content: string,
   extension: string,
 ): Parser.Tree | null {
   try {
-    const isTS = extension === ".ts";
-    const isTSX = extension === ".tsx";
-    const isJS = extension === ".js";
-    const isJSX = extension === ".jsx";
-
-    if (!isTS && !isTSX && !isJS && !isJSX) {
-      return null;
-    }
-
     // Guard: reject content exceeding the tree-sitter safety limit.
     // Buffer.byteLength is more accurate than .length for multi-byte chars.
     const byteLength = Buffer.byteLength(content, "utf-8");
@@ -382,7 +590,35 @@ export function parseFile(
       return null;
     }
 
-    const parser = isTS ? tsParser : tsxParser;
+    // JS/TS: use dedicated parsers (handle JSX/TSX correctly)
+    const isTS = extension === ".ts";
+    const isTSX = extension === ".tsx";
+    const isJS = extension === ".js";
+    const isJSX = extension === ".jsx";
+
+    let parser: Parser | null = null;
+
+    if (isTS || isTSX || isJS || isJSX) {
+      parser = isTS || isJS ? tsParser : tsxParser;
+    } else {
+      // All other languages: use the shared grammarLoader
+      const language = EXTENSION_TO_LANGUAGE[extension];
+      if (!language) {
+        logger.debug("No grammar available for skeleton generation", {
+          extension,
+        });
+        return null;
+      }
+      parser = getGrammarParser(language);
+      if (!parser) {
+        logger.debug("Grammar parser not loaded for skeleton generation", {
+          extension,
+          language,
+        });
+        return null;
+      }
+    }
+
     // Use 1MB buffer to handle files >32KB (tree-sitter default limit)
     const tree = parser.parse(content, undefined, {
       bufferSize: 1024 * 1024,

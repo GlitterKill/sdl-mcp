@@ -74,6 +74,7 @@ export const START_NODE_SOURCE_SCORE: Record<StartNodeSource, number> = {
 };
 
 export const TASK_TEXT_STOP_WORDS = new Set([
+  // English stop words
   "a",
   "an",
   "and",
@@ -100,6 +101,95 @@ export const TASK_TEXT_STOP_WORDS = new Set([
   "this",
   "to",
   "with",
+  // Code-common words that produce excessive false-positive matches
+  // across unrelated symbols when used as taskText tokens.
+  "add",
+  "all",
+  "app",
+  "args",
+  "build",
+  "call",
+  "check",
+  "class",
+  "code",
+  "config",
+  "create",
+  "data",
+  "default",
+  "delete",
+  "error",
+  "event",
+  "export",
+  "file",
+  "find",
+  "function",
+  "generate",
+  "get",
+  "handle",
+  "has",
+  "help",
+  "import",
+  "index",
+  "info",
+  "init",
+  "input",
+  "item",
+  "key",
+  "let",
+  "list",
+  "load",
+  "log",
+  "make",
+  "map",
+  "message",
+  "method",
+  "module",
+  "name",
+  "new",
+  "node",
+  "not",
+  "null",
+  "object",
+  "option",
+  "options",
+  "output",
+  "parse",
+  "path",
+  "process",
+  "query",
+  "read",
+  "remove",
+  "report",
+  "request",
+  "response",
+  "result",
+  "return",
+  "run",
+  "save",
+  "send",
+  "server",
+  "set",
+  "should",
+  "show",
+  "start",
+  "state",
+  "status",
+  "stop",
+  "string",
+  "test",
+  "text",
+  "token",
+  "type",
+  "update",
+  "use",
+  "util",
+  "value",
+  "var",
+  "version",
+  "want",
+  "will",
+  "work",
+  "write",
 ]);
 
 export interface SliceBuildRequestBase {
@@ -406,7 +496,11 @@ export async function resolveStartNodesKuzu(
       const remaining = effectiveTaskTextLimit - taskTextSeedCount;
       const perTokenLimit = Math.max(
         1,
-        Math.min(DB_QUERY_LIMIT_DEFAULT, TASK_TEXT_TOKEN_QUERY_LIMIT, remaining),
+        Math.min(
+          DB_QUERY_LIMIT_DEFAULT,
+          TASK_TEXT_TOKEN_QUERY_LIMIT,
+          remaining,
+        ),
       );
 
       const results = await kuzuDb.searchSymbolsLite(
@@ -518,7 +612,10 @@ async function collectEntrySiblingSymbolsKuzu(
     if (candidate.symbolId === entrySymbolId) continue;
     if (candidate.kind !== entrySymbol.kind) continue;
 
-    const sharedPrefix = commonPrefixLength(entryName, candidate.name.toLowerCase());
+    const sharedPrefix = commonPrefixLength(
+      entryName,
+      candidate.name.toLowerCase(),
+    );
     if (sharedPrefix < ENTRY_SIBLING_MIN_SHARED_PREFIX) continue;
 
     let rank = sharedPrefix;

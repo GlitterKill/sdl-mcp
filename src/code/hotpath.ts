@@ -15,12 +15,38 @@ import {
 import { logger } from "../util/logger.js";
 import { getKuzuConn } from "../db/kuzu.js";
 import * as kuzuDb from "../db/kuzu-queries.js";
+import { getParser as getGrammarParser } from "../indexer/treesitter/grammarLoader.js";
 
 const tsParser = new Parser();
 const tsxParser = new Parser();
 
 tsParser.setLanguage(TypeScript.typescript as unknown as Parser.Language);
 tsxParser.setLanguage(TypeScript.tsx as unknown as Parser.Language);
+
+/**
+ * Maps file extensions to grammarLoader language IDs for non-JS/TS languages.
+ */
+const EXTENSION_TO_LANGUAGE: Record<
+  string,
+  import("../indexer/treesitter/grammarLoader.js").SupportedLanguage
+> = {
+  ".py": "python",
+  ".go": "go",
+  ".java": "java",
+  ".rs": "rust",
+  ".cs": "csharp",
+  ".c": "c",
+  ".h": "c",
+  ".cpp": "cpp",
+  ".cc": "cpp",
+  ".cxx": "cpp",
+  ".hpp": "cpp",
+  ".php": "php",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".sh": "bash",
+  ".bash": "bash",
+};
 
 export interface HotPathOptions {
   maxLines?: number;
@@ -39,15 +65,6 @@ export interface HotPathResult {
 
 function parseFile(content: string, extension: string): Parser.Tree | null {
   try {
-    const isTS = extension === ".ts";
-    const isTSX = extension === ".tsx";
-    const isJS = extension === ".js";
-    const isJSX = extension === ".jsx";
-
-    if (!isTS && !isTSX && !isJS && !isJSX) {
-      return null;
-    }
-
     // Guard: reject content exceeding the tree-sitter safety limit.
     const byteLength = Buffer.byteLength(content, "utf-8");
     if (byteLength > MAX_TREESITTER_PARSE_BYTES) {
@@ -62,7 +79,35 @@ function parseFile(content: string, extension: string): Parser.Tree | null {
       return null;
     }
 
-    const parser = isTS ? tsParser : tsxParser;
+    // JS/TS: use dedicated parsers (handle JSX/TSX correctly)
+    const isTS = extension === ".ts";
+    const isTSX = extension === ".tsx";
+    const isJS = extension === ".js";
+    const isJSX = extension === ".jsx";
+
+    let parser: Parser | null = null;
+
+    if (isTS || isTSX || isJS || isJSX) {
+      parser = isTS || isJS ? tsParser : tsxParser;
+    } else {
+      // All other languages: use the shared grammarLoader
+      const language = EXTENSION_TO_LANGUAGE[extension];
+      if (!language) {
+        logger.debug("No grammar available for hot path generation", {
+          extension,
+        });
+        return null;
+      }
+      parser = getGrammarParser(language);
+      if (!parser) {
+        logger.debug("Grammar parser not loaded for hot path generation", {
+          extension,
+          language,
+        });
+        return null;
+      }
+    }
+
     // Use 1MB buffer to handle files >32KB (tree-sitter default limit)
     const tree = parser.parse(content, undefined, {
       bufferSize: 1024 * 1024,

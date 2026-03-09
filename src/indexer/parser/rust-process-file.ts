@@ -9,7 +9,11 @@ import { prefetchFileExports } from "../../graph/prefetch.js";
 import { readFileAsync } from "../../util/asyncFs.js";
 import { logger } from "../../util/logger.js";
 import { normalizePath } from "../../util/paths.js";
-import type { PendingCallEdge, SymbolIndex, TsCallResolver } from "../edge-builder.js";
+import type {
+  PendingCallEdge,
+  SymbolIndex,
+  TsCallResolver,
+} from "../edge-builder.js";
 import {
   addToSymbolIndex,
   isTsCallResolutionFile,
@@ -22,7 +26,11 @@ import type { ConfigEdge } from "../configEdges.js";
 import type { FileMetadata } from "../fileScanner.js";
 import type { RustParseResult } from "../rustIndexer.js";
 import { resolveSymbolEnrichment } from "../symbol-enrichment.js";
-import { extractInvariants, extractSideEffects, generateSummary } from "../summaries.js";
+import {
+  extractInvariants,
+  extractSideEffects,
+  generateSummary,
+} from "../summaries.js";
 import { buildSymbolReferences, isTestFile } from "./helpers.js";
 
 /**
@@ -79,6 +87,11 @@ export async function processFileFromRustResult(params: {
     if (mode === "incremental" && existingFile?.lastIndexedAt) {
       const lastIndexedMs = new Date(existingFile.lastIndexedAt).getTime();
       if (fileMeta.mtime <= lastIndexedMs) {
+        logger.debug("Skipping file (mtime not newer than lastIndexedAt)", {
+          file: fileMeta.path,
+          fileMtime: fileMeta.mtime,
+          lastIndexedMs,
+        });
         return {
           symbolsIndexed: 0,
           edgesCreated: 0,
@@ -105,6 +118,10 @@ export async function processFileFromRustResult(params: {
       existingFile &&
       existingFile.contentHash === contentHash
     ) {
+      logger.debug("Skipping file (content hash unchanged)", {
+        file: fileMeta.path,
+        contentHash,
+      });
       return {
         symbolsIndexed: 0,
         edgesCreated: 0,
@@ -143,7 +160,28 @@ export async function processFileFromRustResult(params: {
     const extWithDot = `.${ext}`;
     const adapter = getAdapterForExtension(extWithDot);
     const filePath = join(repoRoot, fileMeta.path);
-    const content = await readFileAsync(filePath, "utf-8");
+    let content: string;
+    try {
+      content = await readFileAsync(filePath, "utf-8");
+    } catch (readError: unknown) {
+      const code = (readError as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "EPERM") {
+        logger.warn(
+          `File disappeared before Rust post-processing: ${fileMeta.path}`,
+          {
+            code,
+          },
+        );
+        return {
+          symbolsIndexed: 0,
+          edgesCreated: 0,
+          changed: false,
+          configEdges: [],
+          pass2HintPaths: [],
+        };
+      }
+      throw readError;
+    }
 
     let pass2HintPaths: string[] = [];
 
@@ -175,7 +213,8 @@ export async function processFileFromRustResult(params: {
         const importerSymbolIds = new Set<string>();
         for (const edges of incomingByToSymbol.values()) {
           for (const edge of edges) {
-            if (edge.edgeType !== "import" && edge.edgeType !== "call") continue;
+            if (edge.edgeType !== "import" && edge.edgeType !== "call")
+              continue;
             importerSymbolIds.add(edge.fromSymbolId);
           }
         }
@@ -289,25 +328,31 @@ export async function processFileFromRustResult(params: {
       const symbolId = detail.symbolId;
 
       const existingSymbol = existingSymbolsById.get(symbolId);
-      const nativeSummary = typeof detail.nativeSummary === "string"
-        ? detail.nativeSummary.trim()
-        : "";
-      const nativeInvariantsJson = typeof detail.nativeInvariantsJson === "string"
-        ? detail.nativeInvariantsJson.trim()
-        : "";
-      const nativeSideEffectsJson = typeof detail.nativeSideEffectsJson === "string"
-        ? detail.nativeSideEffectsJson.trim()
-        : "";
-      const nativeRoleTagsJson = typeof detail.nativeRoleTagsJson === "string"
-        ? detail.nativeRoleTagsJson.trim()
-        : "";
-      const nativeSearchText = typeof detail.nativeSearchText === "string"
-        ? detail.nativeSearchText.trim()
-        : "";
+      const nativeSummary =
+        typeof detail.nativeSummary === "string"
+          ? detail.nativeSummary.trim()
+          : "";
+      const nativeInvariantsJson =
+        typeof detail.nativeInvariantsJson === "string"
+          ? detail.nativeInvariantsJson.trim()
+          : "";
+      const nativeSideEffectsJson =
+        typeof detail.nativeSideEffectsJson === "string"
+          ? detail.nativeSideEffectsJson.trim()
+          : "";
+      const nativeRoleTagsJson =
+        typeof detail.nativeRoleTagsJson === "string"
+          ? detail.nativeRoleTagsJson.trim()
+          : "";
+      const nativeSearchText =
+        typeof detail.nativeSearchText === "string"
+          ? detail.nativeSearchText.trim()
+          : "";
 
       // Prefer existing values for stable IDs, then Rust-native metadata, then TS fallback.
       let summary =
-        existingSymbol?.summary ?? (nativeSummary.length > 0 ? nativeSummary : null);
+        existingSymbol?.summary ??
+        (nativeSummary.length > 0 ? nativeSummary : null);
       if (summary === null) {
         summary = generateSummary(extracted as any, content);
       }
@@ -481,7 +526,10 @@ export async function processFileFromRustResult(params: {
 
       if (existingFile) {
         await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
-        await kuzuDb.deleteSymbolReferencesByFileId(txConn, existingFile.fileId);
+        await kuzuDb.deleteSymbolReferencesByFileId(
+          txConn,
+          existingFile.fileId,
+        );
       }
 
       await kuzuDb.insertSymbolReferences(txConn, symbolReferences);
@@ -495,7 +543,13 @@ export async function processFileFromRustResult(params: {
 
     prefetchFileExports(repoId, fileMeta.path);
 
-    return { symbolsIndexed, edgesCreated, changed: true, configEdges: [], pass2HintPaths };
+    return {
+      symbolsIndexed,
+      edgesCreated,
+      changed: true,
+      configEdges: [],
+      pass2HintPaths,
+    };
   } catch (error) {
     logger.error(`Error processing Rust result for ${fileMeta.path}: ${error}`);
     return {

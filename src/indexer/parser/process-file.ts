@@ -30,7 +30,11 @@ import type { FileMetadata } from "../fileScanner.js";
 import { generateAstFingerprint, generateSymbolId } from "../fingerprints.js";
 import type { IndexProgress } from "../indexer.js";
 import { resolveSymbolEnrichment } from "../symbol-enrichment.js";
-import { extractInvariants, extractSideEffects, generateSummary } from "../summaries.js";
+import {
+  extractInvariants,
+  extractSideEffects,
+  generateSummary,
+} from "../summaries.js";
 import type { ParserWorkerPool } from "../workerPool.js";
 import type { SymbolWithNodeId } from "../worker.js";
 import type { ExtractedCall } from "../treesitter/extractCalls.js";
@@ -90,6 +94,11 @@ export async function processFile(params: ProcessFileParams): Promise<{
     if (mode === "incremental" && existingFile?.lastIndexedAt) {
       const lastIndexedMs = new Date(existingFile.lastIndexedAt).getTime();
       if (fileMeta.mtime <= lastIndexedMs) {
+        logger.debug("Skipping file (mtime not newer than lastIndexedAt)", {
+          file: fileMeta.path,
+          fileMtime: fileMeta.mtime,
+          lastIndexedMs,
+        });
         return {
           symbolsIndexed: 0,
           edgesCreated: 0,
@@ -101,7 +110,25 @@ export async function processFile(params: ProcessFileParams): Promise<{
     }
 
     const filePath = join(repoRoot, fileMeta.path);
-    const content = await readFileAsync(filePath, "utf-8");
+    let content: string;
+    try {
+      content = await readFileAsync(filePath, "utf-8");
+    } catch (readError: unknown) {
+      const code = (readError as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "EPERM") {
+        logger.warn(`File disappeared before indexing: ${fileMeta.path}`, {
+          code,
+        });
+        return {
+          symbolsIndexed: 0,
+          edgesCreated: 0,
+          changed: false,
+          configEdges: [],
+          pass2HintPaths: [],
+        };
+      }
+      throw readError;
+    }
     const contentHash = hashContent(content);
     const ext = fileMeta.path.split(".").pop() || "";
     const extWithDot = `.${ext}`;
@@ -113,6 +140,10 @@ export async function processFile(params: ProcessFileParams): Promise<{
       existingFile &&
       existingFile.contentHash === contentHash
     ) {
+      logger.debug("Skipping file (content hash unchanged)", {
+        file: fileMeta.path,
+        contentHash,
+      });
       return {
         symbolsIndexed: 0,
         edgesCreated: 0,
@@ -301,7 +332,8 @@ export async function processFile(params: ProcessFileParams): Promise<{
         const importerSymbolIds = new Set<string>();
         for (const edges of incomingByToSymbol.values()) {
           for (const edge of edges) {
-            if (edge.edgeType !== "import" && edge.edgeType !== "call") continue;
+            if (edge.edgeType !== "import" && edge.edgeType !== "call")
+              continue;
             importerSymbolIds.add(edge.fromSymbolId);
           }
         }
@@ -386,7 +418,9 @@ export async function processFile(params: ProcessFileParams): Promise<{
             return nameNode?.text === extractedSymbol.name;
           });
 
-        astFingerprint = astNode ? generateAstFingerprint(astNode) : astFingerprint;
+        astFingerprint = astNode
+          ? generateAstFingerprint(astNode)
+          : astFingerprint;
       }
 
       const symbolId = generateSymbolId(
@@ -669,7 +703,10 @@ export async function processFile(params: ProcessFileParams): Promise<{
 
       if (existingFile) {
         await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
-        await kuzuDb.deleteSymbolReferencesByFileId(txConn, existingFile.fileId);
+        await kuzuDb.deleteSymbolReferencesByFileId(
+          txConn,
+          existingFile.fileId,
+        );
       }
 
       await kuzuDb.insertSymbolReferences(txConn, symbolReferences);
@@ -683,7 +720,13 @@ export async function processFile(params: ProcessFileParams): Promise<{
 
     prefetchFileExports(repoId, fileMeta.path);
 
-    return { symbolsIndexed, edgesCreated, changed: true, configEdges, pass2HintPaths };
+    return {
+      symbolsIndexed,
+      edgesCreated,
+      changed: true,
+      configEdges,
+      pass2HintPaths,
+    };
   } catch (error) {
     logger.error(`Error processing file ${fileMeta.path}:`, { error });
     return {

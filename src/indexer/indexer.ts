@@ -19,7 +19,10 @@ import {
   resolveParserWorkerPoolSize,
 } from "./parser.js";
 import { scanRepoForIndex } from "./scanner.js";
-import { finalizeIndexing, type SummaryBatchResult } from "./metrics-updater.js";
+import {
+  finalizeIndexing,
+  type SummaryBatchResult,
+} from "./metrics-updater.js";
 import { computeAndStoreClustersAndProcesses } from "./cluster-orchestrator.js";
 import { watchRepositoryWithIndexer } from "./watcher.js";
 import type { RepoConfig } from "../config/types.js";
@@ -81,12 +84,22 @@ export interface WatcherHealth {
   lastSuccessfulReindexAt: string | null;
 }
 
-export { resolveParserWorkerPoolSize, type ResolveParserWorkerPoolSizeParams } from "./parser.js";
+export {
+  resolveParserWorkerPoolSize,
+  type ResolveParserWorkerPoolSizeParams,
+} from "./parser.js";
 export type { ProcessFileParams } from "./parser.js";
 
 function computeFileId(repoId: string, relPath: string): string {
   return `${repoId}:${normalizePath(relPath)}`;
 }
+
+/**
+ * Per-repo mutex to prevent concurrent `indexRepo` invocations.
+ * When the watcher fires rapid events (e.g. bulk deletes), multiple
+ * `indexRepo("incremental")` calls can race and corrupt KuzuDB state.
+ */
+const indexLocks = new Map<string, Promise<IndexResult>>();
 
 function fileIdForPath(
   repoId: string,
@@ -128,6 +141,38 @@ async function createVersionAndSnapshot(params: {
 }
 
 export async function indexRepo(
+  repoId: string,
+  mode: "full" | "incremental",
+  onProgress?: (progress: IndexProgress) => void,
+): Promise<IndexResult> {
+  // Serialize concurrent indexRepo calls for the same repo to prevent
+  // KuzuDB write conflicts and race conditions during rapid watcher events.
+  const existing = indexLocks.get(repoId);
+  if (existing) {
+    logger.debug("indexRepo already running, waiting for lock", {
+      repoId,
+      mode,
+    });
+    try {
+      await existing;
+    } catch {
+      // Previous run failed â€” proceed with our own run.
+    }
+  }
+
+  const resultPromise = indexRepoImpl(repoId, mode, onProgress);
+  indexLocks.set(repoId, resultPromise);
+  try {
+    return await resultPromise;
+  } finally {
+    // Only clear if we're still the active lock holder.
+    if (indexLocks.get(repoId) === resultPromise) {
+      indexLocks.delete(repoId);
+    }
+  }
+}
+
+async function indexRepoImpl(
   repoId: string,
   mode: "full" | "incremental",
   onProgress?: (progress: IndexProgress) => void,
@@ -184,7 +229,7 @@ export async function indexRepo(
     const pendingCallEdges: PendingCallEdge[] = [];
     const createdCallEdges = new Set<string>();
 
-    // Skip TS call resolver when Rust engine is active — it starts a full
+    // Skip TS call resolver when Rust engine is active ï¿½ it starts a full
     // TypeScript compiler program which is expensive and unused in that path.
     logger.debug("Initializing TS call resolver", { repoId, useRustEngine });
     const tsResolver: TsCallResolver | null = useRustEngine
@@ -201,7 +246,10 @@ export async function indexRepo(
     const globalNameToSymbolIds = new Map<string, string[]>();
     logger.debug("Loading existing symbols", { repoId });
     const repoSymbols = await kuzuDb.getSymbolsByRepoLite(conn, repoId);
-    logger.debug("Loaded existing symbols", { repoId, count: repoSymbols.length });
+    logger.debug("Loaded existing symbols", {
+      repoId,
+      count: repoSymbols.length,
+    });
     for (const symbol of repoSymbols) {
       const byName = allSymbolsByName.get(symbol.name) ?? [];
       byName.push(symbol);
@@ -321,7 +369,9 @@ export async function indexRepo(
             filesProcessed++;
             if (result.changed) {
               changedFiles++;
-              changedFileIds.add(fileIdForPath(repoId, file.path, existingByPath));
+              changedFileIds.add(
+                fileIdForPath(repoId, file.path, existingByPath),
+              );
               if (skipCallResolution) {
                 changedPass2FilePaths.add(file.path);
                 for (const hinted of result.pass2HintPaths) {
@@ -334,11 +384,15 @@ export async function indexRepo(
             allConfigEdges.push(...result.configEdges);
           } catch (error) {
             filesProcessed++;
-            logger.error(`Error processing Rust result for ${file.path}: ${error}`);
+            logger.error(
+              `Error processing Rust result for ${file.path}: ${error}`,
+            );
           }
         }
       } else {
-        logger.warn("Rust engine returned null, falling back to TypeScript engine");
+        logger.warn(
+          "Rust engine returned null, falling back to TypeScript engine",
+        );
       }
     }
 
@@ -380,7 +434,9 @@ export async function indexRepo(
             filesProcessed++;
             if (result.changed) {
               changedFiles++;
-              changedFileIds.add(fileIdForPath(repoId, file.path, existingByPath));
+              changedFileIds.add(
+                fileIdForPath(repoId, file.path, existingByPath),
+              );
               if (skipCallResolution) {
                 changedPass2FilePaths.add(file.path);
                 for (const hinted of result.pass2HintPaths) {
@@ -549,11 +605,19 @@ export async function indexRepo(
     if (changedFiles === 0 && mode === "incremental") {
       versionId = latestVersion ? latestVersion.versionId : `v${Date.now()}`;
       if (!latestVersion) {
-        await createVersionAndSnapshot({ repoId, versionId, reason: versionReason });
+        await createVersionAndSnapshot({
+          repoId,
+          versionId,
+          reason: versionReason,
+        });
       }
     } else {
       versionId = `v${Date.now()}`;
-      await createVersionAndSnapshot({ repoId, versionId, reason: versionReason });
+      await createVersionAndSnapshot({
+        repoId,
+        versionId,
+        reason: versionReason,
+      });
     }
 
     const durationMs = Date.now() - startTime;
@@ -581,10 +645,13 @@ export async function indexRepo(
         clustersComputed = result.clustersComputed;
         processesTraced = result.processesTraced;
       } catch (error) {
-        logger.warn("Cluster/process computation failed; continuing without it", {
-          repoId,
-          error,
-        });
+        logger.warn(
+          "Cluster/process computation failed; continuing without it",
+          {
+            repoId,
+            error,
+          },
+        );
       }
     }
 
@@ -614,6 +681,8 @@ export {
   _clearWatcherHealthForTesting,
 } from "./watcher.js";
 
-export async function watchRepository(repoId: string): Promise<IndexWatchHandle> {
+export async function watchRepository(
+  repoId: string,
+): Promise<IndexWatchHandle> {
   return watchRepositoryWithIndexer(repoId, indexRepo);
 }

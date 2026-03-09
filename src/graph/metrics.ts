@@ -334,7 +334,11 @@ export function computeCanonicalTest(
       visited.add(neighbor);
       const neighborPath = getRelPath(neighbor);
       if (neighborPath && isTestFile(neighborPath)) {
-        candidates.push({ symbolId: neighbor, file: neighborPath, distance: depth + 1 });
+        candidates.push({
+          symbolId: neighbor,
+          file: neighborPath,
+          distance: depth + 1,
+        });
       }
       queue.push([neighbor, depth + 1]);
     }
@@ -347,7 +351,11 @@ export function computeCanonicalTest(
       visited.add(neighbor);
       const neighborPath = getRelPath(neighbor);
       if (neighborPath && isTestFile(neighborPath)) {
-        candidates.push({ symbolId: neighbor, file: neighborPath, distance: depth + 1 });
+        candidates.push({
+          symbolId: neighbor,
+          file: neighborPath,
+          distance: depth + 1,
+        });
       }
       queue.push([neighbor, depth + 1]);
     }
@@ -398,7 +406,10 @@ function batchComputeCanonicalTests(
     testFile: string;
   }
 
-  const nearest = new Map<string, { file: string; symbolId: string; distance: number }>();
+  const nearest = new Map<
+    string,
+    { file: string; symbolId: string; distance: number }
+  >();
   const queue: QueueItem[] = [];
   let queueHead = 0;
 
@@ -407,7 +418,12 @@ function batchComputeCanonicalTests(
     if (relPath && isTestFile(relPath)) {
       if (!nearest.has(symId)) {
         nearest.set(symId, { file: relPath, symbolId: symId, distance: 0 });
-        queue.push({ symbolId: symId, distance: 0, testSymbolId: symId, testFile: relPath });
+        queue.push({
+          symbolId: symId,
+          distance: 0,
+          testSymbolId: symId,
+          testFile: relPath,
+        });
       }
     }
   }
@@ -422,7 +438,12 @@ function batchComputeCanonicalTests(
   }
 
   while (queueHead < queue.length) {
-    const { symbolId: current, distance, testSymbolId, testFile } = queue[queueHead++];
+    const {
+      symbolId: current,
+      distance,
+      testSymbolId,
+      testFile,
+    } = queue[queueHead++];
 
     if (distance >= MAX_BFS_DEPTH) {
       continue;
@@ -432,8 +453,17 @@ function batchComputeCanonicalTests(
     for (const edge of graph.adjacencyOut.get(current) ?? []) {
       const neighbor = edge.toSymbolId;
       if (!nearest.has(neighbor)) {
-        nearest.set(neighbor, { file: testFile, symbolId: testSymbolId, distance: distance + 1 });
-        queue.push({ symbolId: neighbor, distance: distance + 1, testSymbolId, testFile });
+        nearest.set(neighbor, {
+          file: testFile,
+          symbolId: testSymbolId,
+          distance: distance + 1,
+        });
+        queue.push({
+          symbolId: neighbor,
+          distance: distance + 1,
+          testSymbolId,
+          testFile,
+        });
       }
     }
 
@@ -441,8 +471,17 @@ function batchComputeCanonicalTests(
     for (const edge of graph.adjacencyIn.get(current) ?? []) {
       const neighbor = edge.fromSymbolId;
       if (!nearest.has(neighbor)) {
-        nearest.set(neighbor, { file: testFile, symbolId: testSymbolId, distance: distance + 1 });
-        queue.push({ symbolId: neighbor, distance: distance + 1, testSymbolId, testFile });
+        nearest.set(neighbor, {
+          file: testFile,
+          symbolId: testSymbolId,
+          distance: distance + 1,
+        });
+        queue.push({
+          symbolId: neighbor,
+          distance: distance + 1,
+          testSymbolId,
+          testFile,
+        });
       }
     }
   }
@@ -596,13 +635,17 @@ export async function updateMetricsForRepo(
 
   const now = monotonicIsoNow();
 
+  // Build all metrics rows, then batch-write in chunks of 200 to reduce
+  // per-row transaction overhead while keeping individual transactions small.
+  const BATCH_SIZE = 200;
+  const rows: MetricsRow[] = [];
   for (const symbol of symbols) {
     const metric = fanMetrics.get(symbol.symbolId) ?? { fanIn: 0, fanOut: 0 };
     const relPath = fileById.get(symbol.fileId);
     const churn = relPath ? (churnByFile.get(relPath) ?? 0) : 0;
     const refs = Array.from(testRefs.get(symbol.symbolId) ?? []);
     const canonicalTest = batchCanonical.get(symbol.symbolId) ?? null;
-    await kuzuDb.upsertMetrics(conn, {
+    rows.push({
       symbolId: symbol.symbolId,
       fanIn: metric.fanIn,
       fanOut: metric.fanOut,
@@ -611,6 +654,11 @@ export async function updateMetricsForRepo(
       canonicalTestJson: canonicalTest ? JSON.stringify(canonicalTest) : null,
       updatedAt: now,
     });
+  }
+
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const chunk = rows.slice(i, i + BATCH_SIZE);
+    await kuzuDb.upsertMetricsBatch(conn, chunk);
   }
 }
 

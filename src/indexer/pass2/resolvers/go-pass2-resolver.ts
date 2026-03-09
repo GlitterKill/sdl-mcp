@@ -95,7 +95,12 @@ function parseSignatureParams(
 function toFullKey(
   kind: SymbolKind,
   name: string,
-  range: { startLine: number; startCol: number; endLine: number; endCol: number },
+  range: {
+    startLine: number;
+    startCol: number;
+    endLine: number;
+    endCol: number;
+  },
 ): string {
   return `${kind}:${name}:${range.startLine}:${range.startCol}:${range.endLine}:${range.endCol}`;
 }
@@ -280,7 +285,10 @@ async function buildGoPackageIndex(
   const goFileIds = new Set(goFiles.map((file) => file.fileId));
   const fileById = new Map(goFiles.map((file) => [file.fileId, file]));
   const packageByFilePath = new Map<string, string>();
-  const symbolsByPackage = new Map<string, Array<SymbolRow & { relPath: string }>>();
+  const symbolsByPackage = new Map<
+    string,
+    Array<SymbolRow & { relPath: string }>
+  >();
 
   const repoSymbols = await kuzuDb.getSymbolsByRepo(conn, repoId);
   for (const symbol of repoSymbols) {
@@ -330,7 +338,9 @@ function inferGoReceiverTypes(tree: Tree): Map<string, string> {
       );
       const left = expressionLists[0];
       const right = expressionLists[1];
-      const variableName = left?.children.find((child) => child.type === "identifier")?.text;
+      const variableName = left?.children.find(
+        (child) => child.type === "identifier",
+      )?.text;
       const rightText = right?.text ?? "";
       const match =
         rightText.match(/^&?([A-Za-z_][A-Za-z0-9_]*)\s*\{/) ??
@@ -341,14 +351,18 @@ function inferGoReceiverTypes(tree: Tree): Map<string, string> {
     }
 
     if (node.type === "var_spec") {
-      const identifierNode = node.children.find((child) => child.type === "identifier");
+      const identifierNode = node.children.find(
+        (child) => child.type === "identifier",
+      );
       const typeNode = node.children.find(
         (child) =>
-          child.type === "type_identifier" ||
-          child.type === "pointer_type",
+          child.type === "type_identifier" || child.type === "pointer_type",
       );
       if (identifierNode && typeNode) {
-        receiverTypes.set(identifierNode.text, typeNode.text.replace(/^\*/, ""));
+        receiverTypes.set(
+          identifierNode.text,
+          typeNode.text.replace(/^\*/, ""),
+        );
       }
     }
 
@@ -556,7 +570,20 @@ async function resolveGoCallEdgesPass2(params: {
 
   const conn = await getKuzuConn();
   const filePath = join(repoRoot, fileMeta.path);
-  const content = await readFileAsync(filePath, "utf-8");
+  let content: string;
+  try {
+    content = await readFileAsync(filePath, "utf-8");
+  } catch (readError: unknown) {
+    const code = (readError as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "EPERM") {
+      logger.warn(
+        `File disappeared before Go pass2 resolution: ${fileMeta.path}`,
+        { code },
+      );
+      return 0;
+    }
+    throw readError;
+  }
   const adapter = getAdapterForExtension(".go");
   if (!adapter) {
     return 0;
@@ -580,12 +607,19 @@ async function resolveGoCallEdgesPass2(params: {
   ) as ExtractedCall[];
   const imports = adapter.extractImports(tree, content, filePath);
 
-  const fileRecord = await kuzuDb.getFileByRepoPath(conn, repoId, fileMeta.path);
+  const fileRecord = await kuzuDb.getFileByRepoPath(
+    conn,
+    repoId,
+    fileMeta.path,
+  );
   if (!fileRecord) {
     return 0;
   }
 
-  const existingSymbols = await kuzuDb.getSymbolsByFile(conn, fileRecord.fileId);
+  const existingSymbols = await kuzuDb.getSymbolsByFile(
+    conn,
+    fileRecord.fileId,
+  );
   if (existingSymbols.length === 0) {
     return 0;
   }
@@ -600,7 +634,9 @@ async function resolveGoCallEdgesPass2(params: {
     return 0;
   }
 
-  const symbolIdsToRefresh = filteredSymbolDetails.map((detail) => detail.symbolId);
+  const symbolIdsToRefresh = filteredSymbolDetails.map(
+    (detail) => detail.symbolId,
+  );
   await clearOutgoingCallEdges(conn, symbolIdsToRefresh, createdCallEdges);
 
   const nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
@@ -620,7 +656,7 @@ async function resolveGoCallEdgesPass2(params: {
     extractedSymbols.find((symbol) => symbol.kind === "module")?.name ??
     packageIndex.packageByFilePath.get(fileMeta.path);
   const samePackageSymbols = packageName
-    ? packageIndex.symbolsByPackage.get(packageName) ?? []
+    ? (packageIndex.symbolsByPackage.get(packageName) ?? [])
     : [];
   const samePackageNameToSymbolIds = buildSamePackageFunctionIndex(
     samePackageSymbols,
@@ -712,7 +748,9 @@ export class GoPass2Resolver implements Pass2Resolver {
   readonly id = "pass2-go";
 
   supports(target: Pass2Target): boolean {
-    return target.language === "go" && GO_PASS2_EXTENSIONS.has(target.extension);
+    return (
+      target.language === "go" && GO_PASS2_EXTENSIONS.has(target.extension)
+    );
   }
 
   async resolve(
