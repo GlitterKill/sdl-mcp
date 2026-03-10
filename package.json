@@ -110,7 +110,7 @@
   },
   "optionalDependencies": {
     "chokidar": "^3.5.3",
-    "kuzu": "^0.11.3",
+    "kuzu": "npm:@ladybugdb/core@0.15.1",
     "onnxruntime-node": "^1.22.0",
     "sdl-mcp-native": "0.8.3"
   },

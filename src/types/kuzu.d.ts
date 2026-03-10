@@ -8,6 +8,8 @@ declare module "kuzu" {
       maxDbSize?: number,
       autoCheckpoint?: boolean,
       checkpointThreshold?: number,
+      throwOnWalReplayFailure?: boolean,
+      enableChecksums?: boolean,
     );
     close(): Promise<void>;
   }
@@ -28,7 +30,7 @@ declare module "kuzu" {
         numPipelinesFinished: number,
         numPipelines: number,
       ) => void,
-    ): Promise<QueryResult | QueryResult[]>;
+    ): Promise<QueryResult>;
     query(
       statement: string,
       progressCallback?: (
@@ -36,7 +38,7 @@ declare module "kuzu" {
         numPipelinesFinished: number,
         numPipelines: number,
       ) => void,
-    ): Promise<QueryResult | QueryResult[]>;
+    ): Promise<QueryResult>;
     close(): Promise<void>;
   }
 
