@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - 2026-03-10
+
+### Added
+
+- Ladybug package-contract, query-coverage, and MCP language regression coverage to lock the migration behavior in place across DB, indexing, and code-access paths
+- Actionable rebuild guidance when older graph databases cannot be opened after the backend migration
+
+### Changed
+
+- The embedded graph backend is now consistently named Ladybug across DB modules, tests, scripts, configs, and documentation while continuing to load `@ladybugdb/core` through the existing `kuzu` compatibility seam
+- Default graph database paths and examples now use the `.lbug` extension, and the benchmark/migration tooling was refreshed to match the Ladybug naming
+- README, configuration, troubleshooting, and release-test docs were updated to reflect the Ladybug-backed storage model and current release workflow
+
+### Fixed
+
+- Post-refactor DB issues across slice building, metrics, versioning, sync, and MCP tool flows after the Ladybug rename
+- Kotlin grammar loading and TSX/JSX component export handling in indexing and code-access paths, with matching regression tests
+- CI and release follow-up issues uncovered during the migration, including lockfile and publish-path stability fixes
+
+### Upgrade Notes
+
+- Existing `.kuzu` graph directories should be recreated or migrated to the Ladybug-backed `.lbug` path before relying on older persisted data
+
 ## [0.8.3] - 2026-03-09
 
 ### Added
@@ -558,6 +581,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.8.4]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.4
+[0.8.3]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.3
 [0.8.2]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.2
 [0.8.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.0
 [0.7.2]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.7.2

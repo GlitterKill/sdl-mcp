@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "Symbol Delta Ledger MCP Server - Cards-first code context for polyglot repositories",
   "type": "module",
   "main": "dist/main.js",
@@ -112,7 +112,7 @@
     "chokidar": "^3.5.3",
     "kuzu": "npm:@ladybugdb/core@0.15.1",
     "onnxruntime-node": "^1.22.0",
-    "sdl-mcp-native": "0.8.3"
+    "sdl-mcp-native": "0.8.4"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",
