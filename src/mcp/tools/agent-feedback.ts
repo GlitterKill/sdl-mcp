@@ -6,7 +6,7 @@ import {
   AgentFeedbackQueryRequestSchema,
   AgentFeedbackQueryResponse,
 } from "../tools.js";
-import { getLadybugConn } from "../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { DatabaseError } from "../errors.js";
 
@@ -44,17 +44,19 @@ export async function handleAgentFeedback(
   const now = new Date().toISOString();
   const feedbackId = generateFeedbackId();
 
-  await ladybugDb.upsertAgentFeedback(conn, {
-    feedbackId,
-    repoId,
-    versionId,
-    sliceHandle,
-    usefulSymbolsJson: JSON.stringify(usefulSymbols),
-    missingSymbolsJson: JSON.stringify(missingSymbols),
-    taskTagsJson: taskTags ? JSON.stringify(taskTags) : null,
-    taskType: taskType ?? null,
-    taskText: taskText ?? null,
-    createdAt: now,
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.upsertAgentFeedback(wConn, {
+      feedbackId,
+      repoId,
+      versionId,
+      sliceHandle,
+      usefulSymbolsJson: JSON.stringify(usefulSymbols),
+      missingSymbolsJson: JSON.stringify(missingSymbols),
+      taskTagsJson: taskTags ? JSON.stringify(taskTags) : null,
+      taskType: taskType ?? null,
+      taskText: taskText ?? null,
+      createdAt: now,
+    });
   });
 
   return {
@@ -80,7 +82,12 @@ export async function handleAgentFeedbackQuery(
   }
 
   const feedbackRows = versionId
-    ? await ladybugDb.getAgentFeedbackByVersion(conn, repoId, versionId, limit + 1)
+    ? await ladybugDb.getAgentFeedbackByVersion(
+        conn,
+        repoId,
+        versionId,
+        limit + 1,
+      )
     : await ladybugDb.getAgentFeedbackByRepo(conn, repoId, limit + 1);
 
   const hasMore = feedbackRows.length > limit;
@@ -92,7 +99,9 @@ export async function handleAgentFeedbackQuery(
     sliceHandle: row.sliceHandle,
     usefulSymbols: JSON.parse(row.usefulSymbolsJson) as string[],
     missingSymbols: JSON.parse(row.missingSymbolsJson) as string[],
-    taskTags: row.taskTagsJson ? (JSON.parse(row.taskTagsJson) as string[]) : null,
+    taskTags: row.taskTagsJson
+      ? (JSON.parse(row.taskTagsJson) as string[])
+      : null,
     taskType: row.taskType,
     taskText: row.taskText,
     createdAt: row.createdAt,
@@ -105,7 +114,9 @@ export async function handleAgentFeedbackQuery(
     .slice(0, 20)
     .map(([symbolId, count]) => ({ symbolId, count }));
 
-  const topMissingSymbols = Array.from(aggregated.symbolNegativeCounts.entries())
+  const topMissingSymbols = Array.from(
+    aggregated.symbolNegativeCounts.entries(),
+  )
     .sort((a, b) => b[1] - a[1])
     .slice(0, 20)
     .map(([symbolId, count]) => ({ symbolId, count }));
@@ -121,4 +132,3 @@ export async function handleAgentFeedbackQuery(
     hasMore,
   };
 }
-

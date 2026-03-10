@@ -1,7 +1,7 @@
 import type { RepoId, SymbolId } from "../db/schema.js";
 import * as crypto from "crypto";
 
-import { getLadybugConn } from "../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 import { getCurrentTimestamp } from "../util/time.js";
@@ -148,15 +148,16 @@ async function recordAuditEvent(event: {
   detailsJson: string;
 }): Promise<void> {
   try {
-    const conn = await getLadybugConn();
-    await ladybugDb.insertAuditEvent(conn, {
-      eventId: generateAuditEventId(),
-      timestamp: getCurrentTimestamp(),
-      tool: event.tool,
-      decision: event.decision,
-      repoId: event.repoId ?? null,
-      symbolId: event.symbolId ?? null,
-      detailsJson: event.detailsJson,
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.insertAuditEvent(wConn, {
+        eventId: generateAuditEventId(),
+        timestamp: getCurrentTimestamp(),
+        tool: event.tool,
+        decision: event.decision,
+        repoId: event.repoId ?? null,
+        symbolId: event.symbolId ?? null,
+        detailsJson: event.detailsJson,
+      });
     });
   } catch (err) {
     logger.error(`Failed to log audit event: ${String(err)}`);

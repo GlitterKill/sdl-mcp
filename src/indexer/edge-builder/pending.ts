@@ -1,4 +1,4 @@
-import { getLadybugConn } from "../../db/ladybug.js";
+import { withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 
 import { resolveSymbolIdFromIndex } from "./symbol-index.js";
@@ -10,7 +10,6 @@ export async function resolvePendingCallEdges(
   created: Set<string>,
   repoId: string,
 ): Promise<void> {
-  const conn = await getLadybugConn();
   const now = new Date().toISOString();
   const edgesToInsert: ladybugDb.EdgeRow[] = [];
 
@@ -48,5 +47,7 @@ export async function resolvePendingCallEdges(
     created.add(edgeKey);
   }
 
-  await ladybugDb.insertEdges(conn, edgesToInsert);
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.insertEdges(wConn, edgesToInsert);
+  });
 }

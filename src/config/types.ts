@@ -247,6 +247,16 @@ export const GraphDatabaseConfigSchema = z.object({
 
 export type GraphDatabaseConfig = z.infer<typeof GraphDatabaseConfigSchema>;
 
+export const ConcurrencyConfigSchema = z.object({
+  maxSessions: z.number().int().min(1).max(16).default(8),
+  maxToolConcurrency: z.number().int().min(1).max(32).default(8),
+  readPoolSize: z.number().int().min(1).max(8).default(4),
+  writeQueueTimeoutMs: z.number().int().min(1000).max(120000).default(30000),
+  toolQueueTimeoutMs: z.number().int().min(5000).max(120000).default(30000),
+});
+
+export type ConcurrencyConfig = z.infer<typeof ConcurrencyConfigSchema>;
+
 export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
   /**
@@ -267,6 +277,7 @@ export const AppConfigSchema = z.object({
   prefetch: PrefetchConfigSchema.optional(),
   tracing: TracingConfigSchema.optional(),
   parallelScorer: ParallelScorerConfigSchema.optional(),
+  concurrency: ConcurrencyConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

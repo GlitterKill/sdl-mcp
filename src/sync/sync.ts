@@ -5,7 +5,7 @@ import { promisify } from "util";
 import { gzip, gunzip, gunzipSync } from "zlib";
 import { IndexError } from "../domain/errors.js";
 
-import { getLadybugConn } from "../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { resolveSymbolEnrichment } from "../indexer/symbol-enrichment.js";
 import { hashContent } from "../util/hashing.js";
@@ -74,7 +74,8 @@ export async function exportArtifact(
   }
 
   // Fetch symbol versions in chunks
-  const symbolVersions: import("../db/ladybug-queries.js").SymbolVersionRow[] = [];
+  const symbolVersions: import("../db/ladybug-queries.js").SymbolVersionRow[] =
+    [];
   const VERSION_CHUNK_SIZE = 200;
   for (let i = 0; i < symbolIds.length; i += VERSION_CHUNK_SIZE) {
     const chunkIds = symbolIds.slice(i, i + VERSION_CHUNK_SIZE);
@@ -188,16 +189,18 @@ export async function exportArtifact(
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(artifact, null, 2), "utf-8");
 
-  await ladybugDb.upsertSyncArtifact(conn, {
-    artifactId,
-    repoId: options.repoId,
-    versionId,
-    commitSha: artifact.commit_sha,
-    branch: artifact.branch,
-    artifactHash,
-    compressedData: artifact.compressed_data,
-    createdAt: artifact.created_at,
-    sizeBytes: artifact.size_bytes,
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.upsertSyncArtifact(wConn, {
+      artifactId,
+      repoId: options.repoId,
+      versionId,
+      commitSha: artifact.commit_sha,
+      branch: artifact.branch,
+      artifactHash,
+      compressedData: artifact.compressed_data,
+      createdAt: artifact.created_at,
+      sizeBytes: artifact.size_bytes,
+    });
   });
 
   const durationMs = Date.now() - startTime;
@@ -219,7 +222,6 @@ export async function importArtifact(
   options: SyncImportOptions,
 ): Promise<SyncImportResult> {
   const startTime = Date.now();
-  const conn = await getLadybugConn();
 
   const artifactContent = await readFile(options.artifactPath, "utf-8");
   const artifact: SyncArtifact = JSON.parse(artifactContent);
@@ -246,121 +248,123 @@ export async function importArtifact(
     }
   }
 
-  const existingRepo = await ladybugDb.getRepo(conn, artifact.repo_id);
-  if (!existingRepo) {
-    await ladybugDb.upsertRepo(conn, {
-      repoId: artifact.repo_id,
-      rootPath: "",
-      configJson: "{}",
+  await withWriteConn(async (wConn) => {
+    const existingRepo = await ladybugDb.getRepo(wConn, artifact.repo_id);
+    if (!existingRepo) {
+      await ladybugDb.upsertRepo(wConn, {
+        repoId: artifact.repo_id,
+        rootPath: "",
+        configJson: "{}",
+        createdAt: getCurrentTimestamp(),
+      });
+    }
+
+    for (const file of state.files) {
+      await ladybugDb.upsertFile(wConn, {
+        fileId: file.file_id,
+        repoId: artifact.repo_id,
+        relPath: file.rel_path,
+        contentHash: file.content_hash,
+        language: file.language,
+        byteSize: file.byte_size,
+        lastIndexedAt: getCurrentTimestamp(),
+      });
+    }
+
+    for (const symbol of state.symbols) {
+      const { roleTagsJson, searchText } = resolveSymbolEnrichment({
+        kind: symbol.kind,
+        name: symbol.name,
+        relPath: relPathByFileId.get(symbol.file_id) ?? "",
+        summary: symbol.summary,
+        signature: parseSignatureJson(symbol.signature_json),
+        nativeRoleTagsJson: symbol.role_tags_json,
+        nativeSearchText: symbol.search_text,
+      });
+
+      await ladybugDb.upsertSymbol(wConn, {
+        symbolId: symbol.symbol_id,
+        repoId: artifact.repo_id,
+        fileId: symbol.file_id,
+        kind: symbol.kind,
+        name: symbol.name,
+        exported: Boolean(symbol.exported),
+        visibility: symbol.visibility,
+        language: symbol.language,
+        rangeStartLine: symbol.range_start_line,
+        rangeStartCol: symbol.range_start_col,
+        rangeEndLine: symbol.range_end_line,
+        rangeEndCol: symbol.range_end_col,
+        astFingerprint: symbol.ast_fingerprint,
+        signatureJson: symbol.signature_json,
+        summary: symbol.summary,
+        invariantsJson: symbol.invariants_json,
+        sideEffectsJson: symbol.side_effects_json,
+        roleTagsJson,
+        searchText,
+        updatedAt: symbol.updated_at,
+      });
+    }
+
+    await ladybugDb.createVersion(wConn, {
+      versionId: state.version_id,
+      repoId: state.repo_id,
       createdAt: getCurrentTimestamp(),
+      reason: "Imported from sync artifact",
+      prevVersionHash: state.prev_version_hash,
+      versionHash: state.version_hash,
     });
-  }
 
-  for (const file of state.files) {
-    await ladybugDb.upsertFile(conn, {
-      fileId: file.file_id,
+    for (const sv of state.symbol_versions) {
+      await ladybugDb.snapshotSymbolVersion(wConn, {
+        versionId: sv.version_id,
+        symbolId: sv.symbol_id,
+        astFingerprint: sv.ast_fingerprint,
+        signatureJson: sv.signature_json,
+        summary: sv.summary,
+        invariantsJson: sv.invariants_json,
+        sideEffectsJson: sv.side_effects_json,
+      });
+    }
+
+    await ladybugDb.insertEdges(
+      wConn,
+      state.edges.map((e) => ({
+        repoId: e.repo_id,
+        fromSymbolId: e.from_symbol_id,
+        toSymbolId: e.to_symbol_id,
+        edgeType: e.type,
+        weight: e.weight,
+        confidence: e.confidence,
+        resolution: e.resolution,
+        provenance: e.provenance,
+        createdAt: e.created_at,
+      })),
+    );
+
+    for (const metric of state.metrics) {
+      await ladybugDb.upsertMetrics(wConn, {
+        symbolId: metric.symbol_id,
+        fanIn: metric.fan_in,
+        fanOut: metric.fan_out,
+        churn30d: metric.churn_30d,
+        testRefsJson: metric.test_refs_json,
+        canonicalTestJson: metric.canonical_test_json,
+        updatedAt: metric.updated_at,
+      });
+    }
+
+    await ladybugDb.upsertSyncArtifact(wConn, {
+      artifactId: artifact.artifact_id,
       repoId: artifact.repo_id,
-      relPath: file.rel_path,
-      contentHash: file.content_hash,
-      language: file.language,
-      byteSize: file.byte_size,
-      lastIndexedAt: getCurrentTimestamp(),
+      versionId: artifact.version_id,
+      commitSha: artifact.commit_sha,
+      branch: artifact.branch,
+      artifactHash: artifact.artifact_hash,
+      compressedData: artifact.compressed_data,
+      createdAt: artifact.created_at,
+      sizeBytes: artifact.size_bytes,
     });
-  }
-
-  for (const symbol of state.symbols) {
-    const { roleTagsJson, searchText } = resolveSymbolEnrichment({
-      kind: symbol.kind,
-      name: symbol.name,
-      relPath: relPathByFileId.get(symbol.file_id) ?? "",
-      summary: symbol.summary,
-      signature: parseSignatureJson(symbol.signature_json),
-      nativeRoleTagsJson: symbol.role_tags_json,
-      nativeSearchText: symbol.search_text,
-    });
-
-    await ladybugDb.upsertSymbol(conn, {
-      symbolId: symbol.symbol_id,
-      repoId: artifact.repo_id,
-      fileId: symbol.file_id,
-      kind: symbol.kind,
-      name: symbol.name,
-      exported: Boolean(symbol.exported),
-      visibility: symbol.visibility,
-      language: symbol.language,
-      rangeStartLine: symbol.range_start_line,
-      rangeStartCol: symbol.range_start_col,
-      rangeEndLine: symbol.range_end_line,
-      rangeEndCol: symbol.range_end_col,
-      astFingerprint: symbol.ast_fingerprint,
-      signatureJson: symbol.signature_json,
-      summary: symbol.summary,
-      invariantsJson: symbol.invariants_json,
-      sideEffectsJson: symbol.side_effects_json,
-      roleTagsJson,
-      searchText,
-      updatedAt: symbol.updated_at,
-    });
-  }
-
-  await ladybugDb.createVersion(conn, {
-    versionId: state.version_id,
-    repoId: state.repo_id,
-    createdAt: getCurrentTimestamp(),
-    reason: "Imported from sync artifact",
-    prevVersionHash: state.prev_version_hash,
-    versionHash: state.version_hash,
-  });
-
-  for (const sv of state.symbol_versions) {
-    await ladybugDb.snapshotSymbolVersion(conn, {
-      versionId: sv.version_id,
-      symbolId: sv.symbol_id,
-      astFingerprint: sv.ast_fingerprint,
-      signatureJson: sv.signature_json,
-      summary: sv.summary,
-      invariantsJson: sv.invariants_json,
-      sideEffectsJson: sv.side_effects_json,
-    });
-  }
-
-  await ladybugDb.insertEdges(
-    conn,
-    state.edges.map((e) => ({
-      repoId: e.repo_id,
-      fromSymbolId: e.from_symbol_id,
-      toSymbolId: e.to_symbol_id,
-      edgeType: e.type,
-      weight: e.weight,
-      confidence: e.confidence,
-      resolution: e.resolution,
-      provenance: e.provenance,
-      createdAt: e.created_at,
-    })),
-  );
-
-  for (const metric of state.metrics) {
-    await ladybugDb.upsertMetrics(conn, {
-      symbolId: metric.symbol_id,
-      fanIn: metric.fan_in,
-      fanOut: metric.fan_out,
-      churn30d: metric.churn_30d,
-      testRefsJson: metric.test_refs_json,
-      canonicalTestJson: metric.canonical_test_json,
-      updatedAt: metric.updated_at,
-    });
-  }
-
-  await ladybugDb.upsertSyncArtifact(conn, {
-    artifactId: artifact.artifact_id,
-    repoId: artifact.repo_id,
-    versionId: artifact.version_id,
-    commitSha: artifact.commit_sha,
-    branch: artifact.branch,
-    artifactHash: artifact.artifact_hash,
-    compressedData: artifact.compressed_data,
-    createdAt: artifact.created_at,
-    sizeBytes: artifact.size_bytes,
   });
 
   const durationMs = Date.now() - startTime;

@@ -7,7 +7,7 @@ import {
   IndexResult,
 } from "../../indexer/indexer.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
-import { getLadybugConn } from "../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getCurrentTimestamp } from "../../util/time.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
@@ -42,32 +42,42 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     }
 
     // Keep the DB's repo config in sync with the active config file.
-    await ladybugDb.upsertRepo(conn, {
-      repoId: repo.repoId,
-      rootPath: repo.rootPath,
-      configJson: JSON.stringify(repo),
-      createdAt: existingRepo?.createdAt ?? getCurrentTimestamp(),
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.upsertRepo(wConn, {
+        repoId: repo.repoId,
+        rootPath: repo.rootPath,
+        configJson: JSON.stringify(repo),
+        createdAt: existingRepo?.createdAt ?? getCurrentTimestamp(),
+      });
     });
 
     const mode = options.force || !existingRepo ? "full" : "incremental";
-    console.log(`\nIndexing ${repo.repoId} (${repo.rootPath}) [mode=${mode}]...`);
+    console.log(
+      `\nIndexing ${repo.repoId} (${repo.rootPath}) [mode=${mode}]...`,
+    );
 
     try {
       let lastProgressLine = "";
-      const stats: IndexResult = await indexRepo(repo.repoId, mode, (progress) => {
-        if (progress.stage !== "pass1" && progress.stage !== "pass2") {
-          return;
-        }
-        const line = `  ${progress.stage}: ${progress.current}/${progress.total}${progress.currentFile ? ` ${progress.currentFile}` : ""}`;
-        if (line !== lastProgressLine) {
-          console.log(line);
-          lastProgressLine = line;
-        }
-      });
+      const stats: IndexResult = await indexRepo(
+        repo.repoId,
+        mode,
+        (progress) => {
+          if (progress.stage !== "pass1" && progress.stage !== "pass2") {
+            return;
+          }
+          const line = `  ${progress.stage}: ${progress.current}/${progress.total}${progress.currentFile ? ` ${progress.currentFile}` : ""}`;
+          if (line !== lastProgressLine) {
+            console.log(line);
+            lastProgressLine = line;
+          }
+        },
+      );
       const totalSymbols = await ladybugDb.getSymbolCount(conn, repo.repoId);
       const totalEdges = await ladybugDb.getEdgeCount(conn, repo.repoId);
       console.log(`  Files: ${stats.filesProcessed}`);
-      console.log(`  Symbols: ${stats.symbolsIndexed} new (${totalSymbols} total)`);
+      console.log(
+        `  Symbols: ${stats.symbolsIndexed} new (${totalSymbols} total)`,
+      );
       console.log(`  Edges: ${stats.edgesCreated} new (${totalEdges} total)`);
       console.log(`  Duration: ${stats.durationMs}ms`);
       if (stats.summaryStats) {
@@ -95,7 +105,10 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     const results = await Promise.allSettled(
       reposToIndex.map(async (repo) => {
         try {
-          return { repoId: repo.repoId, handle: await watchRepository(repo.repoId) };
+          return {
+            repoId: repo.repoId,
+            handle: await watchRepository(repo.repoId),
+          };
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           throw new Error(`[${repo.repoId}] ${msg}`);

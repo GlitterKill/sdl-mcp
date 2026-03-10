@@ -4,7 +4,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { promisify } from "util";
 import fg from "fast-glob";
-import { getLadybugConn } from "../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import type { EdgeRow, MetricsRow, SymbolRow } from "../db/ladybug-queries.js";
 import type { RepoConfig } from "../config/types.js";
@@ -656,10 +656,12 @@ export async function updateMetricsForRepo(
     });
   }
 
-  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-    const chunk = rows.slice(i, i + BATCH_SIZE);
-    await ladybugDb.upsertMetricsBatch(conn, chunk);
-  }
+  await withWriteConn(async (wConn) => {
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const chunk = rows.slice(i, i + BATCH_SIZE);
+      await ladybugDb.upsertMetricsBatch(wConn, chunk);
+    }
+  });
 }
 
 export interface Graph {

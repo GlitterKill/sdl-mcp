@@ -1,14 +1,18 @@
 import { ServeOptions } from "../types.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { MCPServer } from "../../server.js";
-import { registerTools } from "../../mcp/tools/index.js";
+import { MCPServer, createMCPServer } from "../../server.js";
 import { watchRepository, IndexWatchHandle } from "../../indexer/indexer.js";
 import { setupStdioTransport } from "../transport/stdio.js";
 import { setupHttpTransport } from "../transport/http.js";
 import { configureLogger } from "../logging.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
-import { closeLadybugDb, getLadybugConn } from "../../db/ladybug.js";
+import {
+  closeLadybugDb,
+  configurePool,
+  getLadybugConn,
+  withWriteConn,
+} from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getCurrentTimestamp } from "../../util/time.js";
 import {
@@ -28,6 +32,8 @@ import {
 import { ShutdownManager } from "../../util/shutdown.js";
 import { findExistingProcess, writePidfile } from "../../util/pidfile.js";
 import { enableFileLogging, getLogFilePath } from "../../util/logger.js";
+import { configureToolDispatchLimiter } from "../../mcp/dispatch-limiter.js";
+import { SessionManager } from "../../mcp/session-manager.js";
 
 // Enable file logging by default so crash evidence is always persisted.
 if (!getLogFilePath()) {
@@ -50,6 +56,29 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
 
   configureLogger(options.logLevel ?? "info", options.logFormat ?? "pretty");
 
+  // Wire concurrency configuration from config file
+  const concurrency = config.concurrency;
+  if (concurrency) {
+    if (
+      concurrency.readPoolSize != null ||
+      concurrency.writeQueueTimeoutMs != null
+    ) {
+      configurePool({
+        readPoolSize: concurrency.readPoolSize,
+        writeQueueTimeoutMs: concurrency.writeQueueTimeoutMs,
+      });
+    }
+    if (
+      concurrency.maxToolConcurrency != null ||
+      concurrency.toolQueueTimeoutMs != null
+    ) {
+      configureToolDispatchLimiter({
+        maxConcurrency: concurrency.maxToolConcurrency,
+        queueTimeoutMs: concurrency.toolQueueTimeoutMs,
+      });
+    }
+  }
+
   const graphDbPath = await initGraphDb(config, configPath);
   console.error(`Graph database initialized at ${graphDbPath}`);
 
@@ -70,11 +99,13 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     const existingRepo = await ladybugDb.getRepo(conn, repo.repoId);
     if (!existingRepo) {
       console.error(`Registering repository in database: ${repo.repoId}`);
-      await ladybugDb.upsertRepo(conn, {
-        repoId: repo.repoId,
-        rootPath: repo.rootPath,
-        configJson: JSON.stringify(repo),
-        createdAt: getCurrentTimestamp(),
+      await withWriteConn(async (wConn) => {
+        await ladybugDb.upsertRepo(wConn, {
+          repoId: repo.repoId,
+          rootPath: repo.rootPath,
+          configJson: JSON.stringify(repo),
+          createdAt: getCurrentTimestamp(),
+        });
       });
     }
   }
@@ -121,7 +152,6 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     console.error("File watching disabled by --no-watch");
   }
 
-  const server = new MCPServer();
   configureDefaultLiveIndexCoordinator({
     enabled: config.liveIndex?.enabled ?? true,
     debounceMs: config.liveIndex?.debounceMs,
@@ -139,7 +169,16 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   if (config.liveIndex?.enabled ?? true) {
     idleMonitor.start();
   }
-  registerTools(server, { liveIndex });
+
+  // For stdio: create a single MCPServer (only one client possible).
+  // For HTTP: the transport creates per-session servers via createMCPServer().
+  let stdioServer: MCPServer | undefined;
+  if (options.transport === "stdio") {
+    stdioServer = createMCPServer({ liveIndex });
+  }
+
+  // Create session manager for HTTP transport
+  const sessionManager = new SessionManager(concurrency?.maxSessions ?? 8);
 
   // Determine transport type and write PID file for process discovery.
   const transport: "stdio" | "http" =
@@ -161,7 +200,9 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   shutdownMgr.addCleanup("idleMonitor", () => {
     idleMonitor.stop();
   });
-  shutdownMgr.addCleanup("server", () => server.stop());
+  if (stdioServer) {
+    shutdownMgr.addCleanup("server", () => stdioServer!.stop());
+  }
   shutdownMgr.addCleanup("db", () => closeLadybugDb());
   shutdownMgr.addCleanup("watchers", async () => {
     for (const watcher of watchers) {
@@ -185,16 +226,23 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   try {
     if (options.transport === "stdio") {
       console.error("Starting MCP server on stdio transport...");
-      await setupStdioTransport(server);
+      await setupStdioTransport(stdioServer!);
+      // Stdio transport blocks until the client disconnects
+      await new Promise(() => {});
     } else {
       const host = options.host ?? "localhost";
       console.error(`Starting MCP server on http://${host}:${httpPort}...`);
-      await setupHttpTransport(server, host, httpPort, graphDbPath, {
+      const httpHandle = await setupHttpTransport(host, httpPort, graphDbPath, {
         liveIndex,
+        sessionManager,
       });
-    }
 
-    await new Promise(() => {});
+      // Register HTTP server with shutdown manager for graceful close
+      shutdownMgr.addCleanup("httpServer", () => httpHandle.close());
+
+      // Block until the server closes
+      await httpHandle.serverClosed;
+    }
   } catch (error) {
     console.error(
       `Fatal error: ${error instanceof Error ? error.message : String(error)}`,

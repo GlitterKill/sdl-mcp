@@ -9,12 +9,15 @@ import {
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { errorToMcpResponse } from "./mcp/errors.js";
+import { getToolDispatchLimiter } from "./mcp/dispatch-limiter.js";
 import { logToolCall } from "./mcp/telemetry.js";
 import {
   shouldAttachUsage,
   computeTokenUsage,
   stripRawContext,
 } from "./mcp/token-usage.js";
+import { registerTools } from "./mcp/tools/index.js";
+import type { LiveIndexCoordinator } from "./live-index/types.js";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../package.json");
@@ -86,7 +89,10 @@ export class MCPServer {
           if (!tool) {
             return {
               content: [
-                { type: "text", text: `Tool '${request.params.name}' not found` },
+                {
+                  type: "text",
+                  text: `Tool '${request.params.name}' not found`,
+                },
               ],
               isError: true,
             };
@@ -102,7 +108,9 @@ export class MCPServer {
           // Centralized input validation: parse against the registered Zod schema
           // before dispatching to the handler. This ensures all tools receive
           // validated, coerced arguments regardless of individual handler logic.
-          const parseResult = tool.inputSchema.safeParse(request.params.arguments);
+          const parseResult = tool.inputSchema.safeParse(
+            request.params.arguments,
+          );
           if (!parseResult.success) {
             const validationError = {
               error: {
@@ -139,7 +147,9 @@ export class MCPServer {
 
           try {
             // Pass the parsed (validated + coerced) data to the handler
-            const result = await tool.handler(parseResult.data, toolContext);
+            const result = await getToolDispatchLimiter().run(() =>
+              tool.handler(parseResult.data, toolContext),
+            );
 
             // Inject _tokenUsage and strip _rawContext before serialization
             let finalResult = result;
@@ -244,5 +254,25 @@ function extractStringField(args: unknown, field: string): string | undefined {
 function convertSchema(schema: z.ZodType): Record<string, unknown> {
   // zodToJsonSchema has deep type instantiation issues with strict Zod types;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return zodToJsonSchema(schema as any, { target: "openApi3" }) as Record<string, unknown>;
+  return zodToJsonSchema(schema as any, { target: "openApi3" }) as Record<
+    string,
+    unknown
+  >;
+}
+
+/**
+ * Services that can be injected into an MCPServer instance.
+ */
+export interface MCPServerServices {
+  liveIndex?: LiveIndexCoordinator;
+}
+
+/**
+ * Factory function to create a fully-configured MCPServer with all tools registered.
+ * Used by the HTTP transport to create per-session server instances.
+ */
+export function createMCPServer(services: MCPServerServices = {}): MCPServer {
+  const server = new MCPServer();
+  registerTools(server, { liveIndex: services.liveIndex });
+  return server;
 }

@@ -2,7 +2,7 @@ import { join } from "path";
 
 import type { SyntaxNode, Tree } from "tree-sitter";
 
-import { getLadybugConn } from "../../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../../db/ladybug.js";
 import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../../db/schema.js";
@@ -637,7 +637,9 @@ async function resolveGoCallEdgesPass2(params: {
   const symbolIdsToRefresh = filteredSymbolDetails.map(
     (detail) => detail.symbolId,
   );
-  await clearOutgoingCallEdges(conn, symbolIdsToRefresh, createdCallEdges);
+  await withWriteConn(async (wConn) => {
+    await clearOutgoingCallEdges(wConn, symbolIdsToRefresh, createdCallEdges);
+  });
 
   const nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
   const localNameToSymbolIds = createLocalNameIndex(filteredSymbolDetails);
@@ -740,7 +742,9 @@ async function resolveGoCallEdgesPass2(params: {
     }
   }
 
-  await ladybugDb.insertEdges(conn, edgesToInsert);
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.insertEdges(wConn, edgesToInsert);
+  });
   return createdEdges;
 }
 

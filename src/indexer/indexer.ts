@@ -27,7 +27,7 @@ import { computeAndStoreClustersAndProcesses } from "./cluster-orchestrator.js";
 import { watchRepositoryWithIndexer } from "./watcher.js";
 import type { RepoConfig } from "../config/types.js";
 import { loadConfig } from "../config/loadConfig.js";
-import { getLadybugConn } from "../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import type { SymbolKind } from "../db/schema.js";
 import { logger } from "../util/logger.js";
@@ -115,29 +115,34 @@ async function createVersionAndSnapshot(params: {
   reason: string;
 }): Promise<void> {
   const { repoId, versionId, reason } = params;
-  const conn = await getLadybugConn();
 
-  await ladybugDb.createVersion(conn, {
-    versionId,
-    repoId,
-    createdAt: new Date().toISOString(),
-    reason,
-    prevVersionHash: null,
-    versionHash: null,
-  });
+  // Read symbols using read connection
+  const readConn = await getLadybugConn();
+  const symbols = await ladybugDb.getSymbolsByRepoForSnapshot(readConn, repoId);
 
-  const symbols = await ladybugDb.getSymbolsByRepoForSnapshot(conn, repoId);
-  for (const symbol of symbols) {
-    await ladybugDb.snapshotSymbolVersion(conn, {
+  // Write version + snapshots using serialized write connection
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.createVersion(wConn, {
       versionId,
-      symbolId: symbol.symbolId,
-      astFingerprint: symbol.astFingerprint,
-      signatureJson: symbol.signatureJson,
-      summary: symbol.summary,
-      invariantsJson: symbol.invariantsJson,
-      sideEffectsJson: symbol.sideEffectsJson,
+      repoId,
+      createdAt: new Date().toISOString(),
+      reason,
+      prevVersionHash: null,
+      versionHash: null,
     });
-  }
+
+    for (const symbol of symbols) {
+      await ladybugDb.snapshotSymbolVersion(wConn, {
+        versionId,
+        symbolId: symbol.symbolId,
+        astFingerprint: symbol.astFingerprint,
+        signatureJson: symbol.signatureJson,
+        summary: symbol.summary,
+        invariantsJson: symbol.invariantsJson,
+        sideEffectsJson: symbol.sideEffectsJson,
+      });
+    }
+  });
 }
 
 export async function indexRepo(
@@ -448,9 +453,7 @@ async function indexRepoImpl(
             allConfigEdges.push(...result.configEdges);
           } catch (error) {
             filesProcessed++;
-            logger.error(
-              `Error in TS fallback for ${file.path}: ${error}`,
-            );
+            logger.error(`Error in TS fallback for ${file.path}: ${error}`);
           }
         }
       } else {
@@ -659,7 +662,9 @@ async function indexRepoImpl(
         createdAt: now,
       });
     }
-    await ladybugDb.insertEdges(conn, configEdgesToInsert);
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.insertEdges(wConn, configEdgesToInsert);
+    });
     configEdgesCreated += configEdgesToInsert.length;
 
     const versionReason = mode === "full" ? "Full index" : "Incremental index";

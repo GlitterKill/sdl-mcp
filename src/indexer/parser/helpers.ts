@@ -1,6 +1,6 @@
 import type { Connection } from "kuzu";
 
-import { getLadybugConn } from "../../db/ladybug.js";
+import { withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { SymbolReferenceRow } from "../../db/ladybug-queries.js";
 import type { ConfigEdge } from "../configEdges.js";
@@ -42,8 +42,13 @@ export function extractSymbolReferences(
   if (references.length === 0) return Promise.resolve();
 
   return (async () => {
-    const activeConn = conn ?? (await getLadybugConn());
-    await ladybugDb.insertSymbolReferences(activeConn, references);
+    if (conn) {
+      await ladybugDb.insertSymbolReferences(conn, references);
+    } else {
+      await withWriteConn(async (wConn) => {
+        await ladybugDb.insertSymbolReferences(wConn, references);
+      });
+    }
   })();
 }
 

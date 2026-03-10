@@ -1,9 +1,12 @@
 import { readFileAsync } from "../util/asyncFs.js";
-import { getLadybugConn } from "../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import type { RepoConfig } from "../config/types.js";
 import { getAbsolutePathFromRepoRoot, normalizePath } from "../util/paths.js";
-import { buildDependencyFrontier, type DependencyFrontier } from "./dependency-frontier.js";
+import {
+  buildDependencyFrontier,
+  type DependencyFrontier,
+} from "./dependency-frontier.js";
 import { parseDraftFile, type DraftParseResult } from "./draft-parser.js";
 import { IndexError } from "../domain/errors.js";
 
@@ -38,7 +41,11 @@ export async function patchSavedFile(
 
   const repoConfig = JSON.parse(repo.configJson) as RepoConfig;
   const relPath = normalizePath(request.filePath);
-  const existingFile = await ladybugDb.getFileByRepoPath(conn, request.repoId, relPath);
+  const existingFile = await ladybugDb.getFileByRepoPath(
+    conn,
+    request.repoId,
+    relPath,
+  );
 
   const parseResult =
     request.parseResult ??
@@ -48,7 +55,10 @@ export async function patchSavedFile(
       filePath: relPath,
       content:
         request.content ??
-        (await readFileAsync(getAbsolutePathFromRepoRoot(repo.rootPath, relPath), "utf-8")),
+        (await readFileAsync(
+          getAbsolutePathFromRepoRoot(repo.rootPath, relPath),
+          "utf-8",
+        )),
       languages: repoConfig.languages,
       language: request.language,
       version: request.version ?? 0,
@@ -70,29 +80,37 @@ export async function patchSavedFile(
     lastIndexedAt: now,
   };
 
-  await ladybugDb.withTransaction(conn, async (txConn) => {
-    await ladybugDb.upsertFile(txConn, durableFile);
-    if (existingFile) {
-      await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
-      await ladybugDb.deleteSymbolReferencesByFileId(txConn, existingFile.fileId);
-    } else {
-      await ladybugDb.deleteSymbolReferencesByFileId(txConn, durableFile.fileId);
-    }
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.withTransaction(wConn, async (txConn) => {
+      await ladybugDb.upsertFile(txConn, durableFile);
+      if (existingFile) {
+        await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+        await ladybugDb.deleteSymbolReferencesByFileId(
+          txConn,
+          existingFile.fileId,
+        );
+      } else {
+        await ladybugDb.deleteSymbolReferencesByFileId(
+          txConn,
+          durableFile.fileId,
+        );
+      }
 
-    await ladybugDb.insertSymbolReferences(txConn, parseResult.references);
-    for (const symbol of parseResult.symbols) {
-      await ladybugDb.upsertSymbol(txConn, {
-        ...symbol,
-        updatedAt: now,
-      });
-    }
-    await ladybugDb.insertEdges(
-      txConn,
-      parseResult.edges.map((edge) => ({
-        ...edge,
-        createdAt: now,
-      })),
-    );
+      await ladybugDb.insertSymbolReferences(txConn, parseResult.references);
+      for (const symbol of parseResult.symbols) {
+        await ladybugDb.upsertSymbol(txConn, {
+          ...symbol,
+          updatedAt: now,
+        });
+      }
+      await ladybugDb.insertEdges(
+        txConn,
+        parseResult.edges.map((edge) => ({
+          ...edge,
+          createdAt: now,
+        })),
+      );
+    });
   });
 
   return {

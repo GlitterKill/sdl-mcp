@@ -165,7 +165,7 @@ describe("LadybugDB Connection Manager", { skip: !ladybugAvailable }, () => {
       }
     });
 
-    it("should return singleton Connection instance", async () => {
+    it("should return valid connections from the read pool", async () => {
       const testPath = getTestDbPath("conn-singleton");
       cleanupTestDb("conn-singleton");
 
@@ -174,7 +174,10 @@ describe("LadybugDB Connection Manager", { skip: !ladybugAvailable }, () => {
         const conn1 = await getLadybugConn();
         const conn2 = await getLadybugConn();
 
-        assert.strictEqual(conn1, conn2, "Should return the same connection");
+        // Read pool uses round-robin, so consecutive calls may return
+        // different connection instances. Both must be valid.
+        assert.ok(conn1, "First connection should be valid");
+        assert.ok(conn2, "Second connection should be valid");
       } finally {
         await closeLadybugDb();
         cleanupTestDb("conn-singleton");

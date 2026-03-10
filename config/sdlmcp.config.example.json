@@ -128,5 +128,12 @@
   },
   "graphDatabase": {
     "path": "./data/sdl-mcp-graph.lbug"
+  },
+  "concurrency": {
+    "maxSessions": 8,
+    "maxToolConcurrency": 8,
+    "readPoolSize": 4,
+    "writeQueueTimeoutMs": 30000,
+    "toolQueueTimeoutMs": 30000
   }
 }

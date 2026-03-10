@@ -23,7 +23,7 @@ import {
 import { resolveCliConfigPath } from "../../config/configPath.js";
 import { defaultGraphDbPath } from "../../db/graph-db-path.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
-import { getLadybugConn } from "../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { indexRepo } from "../../indexer/indexer.js";
 import { logSetupPipelineEvent } from "../../mcp/telemetry.js";
@@ -246,11 +246,16 @@ function parseGitignorePatterns(repoRoot: string): string[] {
   const lines = readFileSync(gitignorePath, "utf-8")
     .split(/\r?\n/g)
     .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("#") && !line.startsWith("!"));
+    .filter(
+      (line) =>
+        line.length > 0 && !line.startsWith("#") && !line.startsWith("!"),
+    );
 
   const patterns: string[] = [];
   for (const line of lines) {
-    const normalized = normalizePath(line).replace(/^\.\//, "").replace(/^\/+/, "");
+    const normalized = normalizePath(line)
+      .replace(/^\.\//, "")
+      .replace(/^\/+/, "");
     if (!normalized) {
       continue;
     }
@@ -262,8 +267,14 @@ function parseGitignorePatterns(repoRoot: string): string[] {
       continue;
     }
 
-    if (normalized.includes("*") || normalized.includes("?") || normalized.includes("[")) {
-      patterns.push(normalized.startsWith("**/") ? normalized : `**/${normalized}`);
+    if (
+      normalized.includes("*") ||
+      normalized.includes("?") ||
+      normalized.includes("[")
+    ) {
+      patterns.push(
+        normalized.startsWith("**/") ? normalized : `**/${normalized}`,
+      );
       continue;
     }
 
@@ -285,7 +296,11 @@ export function mergeIgnorePatterns(repoRoot: string): string[] {
 }
 
 async function loadClientTemplate(client: ClientType): Promise<unknown> {
-  const templatePath = resolve(__dirname, "../../../templates", `${client}.json`);
+  const templatePath = resolve(
+    __dirname,
+    "../../../templates",
+    `${client}.json`,
+  );
   const content = readFileSync(templatePath, "utf-8");
   return JSON.parse(content);
 }
@@ -430,7 +445,9 @@ export async function initCommand(options: InitOptions): Promise<void> {
 
   if (existsSync(configPath) && !options.force && !options.dryRun) {
     console.error(`Configuration file already exists: ${configPath}`);
-    console.error("To reinitialize, remove the existing file first or use --force.");
+    console.error(
+      "To reinitialize, remove the existing file first or use --force.",
+    );
     process.exit(1);
   }
 
@@ -573,7 +590,9 @@ export async function initCommand(options: InitOptions): Promise<void> {
       const clientConfigPath = resolve(`${options.client}-mcp-config.json`);
       writeFileSync(clientConfigPath, clientConfig);
       createdPaths.push(clientConfigPath);
-      console.log(`${options.client} config created: ${normalizePath(clientConfigPath)}`);
+      console.log(
+        `${options.client} config created: ${normalizePath(clientConfigPath)}`,
+      );
     }
 
     await emitClientConfigBlocks(configPath);
@@ -585,11 +604,13 @@ export async function initCommand(options: InitOptions): Promise<void> {
 
       const existingRepo = await ladybugDb.getRepo(conn, repoId);
       if (!existingRepo) {
-        await ladybugDb.upsertRepo(conn, {
-          repoId,
-          rootPath: normalizedRepoPath,
-          configJson: JSON.stringify(config.repos[0]),
-          createdAt: new Date().toISOString(),
+        await withWriteConn(async (wConn) => {
+          await ladybugDb.upsertRepo(wConn, {
+            repoId,
+            rootPath: normalizedRepoPath,
+            configJson: JSON.stringify(config.repos[0]),
+            createdAt: new Date().toISOString(),
+          });
         });
       }
 
@@ -598,8 +619,12 @@ export async function initCommand(options: InitOptions): Promise<void> {
         if (progress.stage !== "pass1" && progress.stage !== "pass2") {
           return;
         }
-        const fileLabel = progress.currentFile ? ` ${progress.currentFile}` : "";
-        console.log(`  ${progress.stage}: ${progress.current}/${progress.total}${fileLabel}`);
+        const fileLabel = progress.currentFile
+          ? ` ${progress.currentFile}`
+          : "";
+        console.log(
+          `  ${progress.stage}: ${progress.current}/${progress.total}${fileLabel}`,
+        );
       });
 
       console.log(`Indexed files: ${indexResult.filesProcessed}`);
@@ -631,7 +656,9 @@ export async function initCommand(options: InitOptions): Promise<void> {
       configPath: normalizePath(configPath),
     });
   } catch (error) {
-    console.error(`Init failed: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `Init failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
     rollback();
     process.exit(1);
   }

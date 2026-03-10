@@ -1,13 +1,11 @@
 import type { Connection } from "kuzu";
 
-import { logger } from "../util/logger.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import { withWriteConn } from "../db/ladybug.js";
+import { logger } from "../util/logger.js";
 import { computeClustersTS } from "../graph/cluster.js";
 import { traceProcessesTS } from "../graph/process.js";
-import {
-  computeClustersRust,
-  traceProcessesRust,
-} from "./rustIndexer.js";
+import { computeClustersRust, traceProcessesRust } from "./rustIndexer.js";
 
 const DEFAULT_MIN_CLUSTER_SIZE = 3;
 const DEFAULT_MAX_PROCESS_DEPTH = 20;
@@ -71,10 +69,11 @@ export async function computeAndStoreClustersAndProcesses(params: {
       symbolIds.map((symbolId) => ({ symbolId })),
       clusterEdges,
       minClusterSize,
-    ) ??
-    (await computeClustersTS(repoId, { minClusterSize }));
+    ) ?? (await computeClustersTS(repoId, { minClusterSize }));
 
-  await ladybugDb.deleteClustersByRepo(conn, repoId);
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.deleteClustersByRepo(wConn, repoId);
+  });
 
   // Build lookup maps for label generation
   const symbolById = new Map<string, { name: string; fileId: string }>();
@@ -99,33 +98,40 @@ export async function computeAndStoreClustersAndProcesses(params: {
 
   const sortedClusterIds = Array.from(clustersById.keys()).sort();
   let clusterIndex = 0;
-  for (const clusterId of sortedClusterIds) {
-    const members = clustersById.get(clusterId) ?? [];
-    members.sort((a, b) => a.symbolId.localeCompare(b.symbolId));
+  await withWriteConn(async (wConn) => {
+    for (const clusterId of sortedClusterIds) {
+      const members = clustersById.get(clusterId) ?? [];
+      members.sort((a, b) => a.symbolId.localeCompare(b.symbolId));
 
-    const label = generateClusterLabel(members, symbolById, filesById, clusterIndex);
+      const label = generateClusterLabel(
+        members,
+        symbolById,
+        filesById,
+        clusterIndex,
+      );
 
-    await ladybugDb.upsertCluster(conn, {
-      clusterId,
-      repoId,
-      label,
-      symbolCount: members.length,
-      cohesionScore: 0.0,
-      versionId,
-      createdAt: now,
-    });
-
-    await ladybugDb.upsertClusterMembersBatch(
-      conn,
-      members.map((member) => ({
-        symbolId: member.symbolId,
+      await ladybugDb.upsertCluster(wConn, {
         clusterId,
-        membershipScore: member.membershipScore,
-      })),
-    );
+        repoId,
+        label,
+        symbolCount: members.length,
+        cohesionScore: 0.0,
+        versionId,
+        createdAt: now,
+      });
 
-    clusterIndex++;
-  }
+      await ladybugDb.upsertClusterMembersBatch(
+        wConn,
+        members.map((member) => ({
+          symbolId: member.symbolId,
+          clusterId,
+          membershipScore: member.membershipScore,
+        })),
+      );
+
+      clusterIndex++;
+    }
+  });
 
   const processesStartMs = Date.now();
   const processes =
@@ -134,40 +140,46 @@ export async function computeAndStoreClustersAndProcesses(params: {
       callEdges,
       maxProcessDepth,
       entryPatterns,
-    ) ?? (await traceProcessesTS(repoId, entryPatterns, { maxDepth: maxProcessDepth }));
+    ) ??
+    (await traceProcessesTS(repoId, entryPatterns, {
+      maxDepth: maxProcessDepth,
+    }));
 
-  await ladybugDb.deleteProcessesByRepo(conn, repoId);
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.deleteProcessesByRepo(wConn, repoId);
 
-  for (const proc of processes) {
-    const lastOrder = proc.steps.length > 0 ? proc.steps[proc.steps.length - 1].stepOrder : 0;
+    for (const proc of processes) {
+      const lastOrder =
+        proc.steps.length > 0 ? proc.steps[proc.steps.length - 1].stepOrder : 0;
 
-    await ladybugDb.upsertProcess(conn, {
-      processId: proc.processId,
-      repoId,
-      entrySymbolId: proc.entrySymbolId,
-      label: symbolById.get(proc.entrySymbolId)?.name
-        ? `Process: ${symbolById.get(proc.entrySymbolId)!.name}`
-        : `Process ${clusterIndex + 1}`,
-      depth: proc.depth,
-      versionId,
-      createdAt: now,
-    });
-
-    await ladybugDb.upsertProcessStepsBatch(
-      conn,
-      proc.steps.map((step) => ({
+      await ladybugDb.upsertProcess(wConn, {
         processId: proc.processId,
-        symbolId: step.symbolId,
-        stepOrder: step.stepOrder,
-        role:
-          step.stepOrder === 0
-            ? "entry"
-            : step.stepOrder === lastOrder
-              ? "exit"
-              : "intermediate",
-      })),
-    );
-  }
+        repoId,
+        entrySymbolId: proc.entrySymbolId,
+        label: symbolById.get(proc.entrySymbolId)?.name
+          ? `Process: ${symbolById.get(proc.entrySymbolId)!.name}`
+          : `Process ${clusterIndex + 1}`,
+        depth: proc.depth,
+        versionId,
+        createdAt: now,
+      });
+
+      await ladybugDb.upsertProcessStepsBatch(
+        wConn,
+        proc.steps.map((step) => ({
+          processId: proc.processId,
+          symbolId: step.symbolId,
+          stepOrder: step.stepOrder,
+          role:
+            step.stepOrder === 0
+              ? "entry"
+              : step.stepOrder === lastOrder
+                ? "exit"
+                : "intermediate",
+        })),
+      );
+    }
+  });
 
   logger.info("Cluster/process computation completed", {
     repoId,
@@ -232,4 +244,3 @@ function generateClusterLabel(
 
   return `Cluster ${fallbackIndex + 1}`;
 }
-

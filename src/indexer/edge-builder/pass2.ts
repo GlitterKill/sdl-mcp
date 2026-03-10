@@ -1,7 +1,7 @@
 import { join } from "path";
 
 import type { SymbolKind } from "../../db/schema.js";
-import { getLadybugConn } from "../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { readFileAsync } from "../../util/asyncFs.js";
 import { logger } from "../../util/logger.js";
@@ -90,7 +90,10 @@ async function resolvePass2Targets(params: {
     fileIds.add(symbol.fileId);
   }
 
-  const importerFiles = await ladybugDb.getFilesByIds(conn, Array.from(fileIds));
+  const importerFiles = await ladybugDb.getFilesByIds(
+    conn,
+    Array.from(fileIds),
+  );
   for (const symbol of importerSymbols.values()) {
     const file = importerFiles.get(symbol.fileId);
     if (!file) continue;
@@ -384,11 +387,6 @@ async function resolveTsCallEdgesPass2(params: {
     const symbolIdsToRefresh = filteredSymbolDetails.map(
       (detail) => detail.symbolId,
     );
-    await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
-      conn,
-      symbolIdsToRefresh,
-      "call",
-    );
     for (const symbolId of symbolIdsToRefresh) {
       for (const edgeKey of Array.from(createdCallEdges)) {
         if (edgeKey.startsWith(`${symbolId}->`)) {
@@ -562,7 +560,14 @@ async function resolveTsCallEdgesPass2(params: {
       }
     }
 
-    await ladybugDb.insertEdges(conn, edgesToInsert);
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+        wConn,
+        symbolIdsToRefresh,
+        "call",
+      );
+      await ladybugDb.insertEdges(wConn, edgesToInsert);
+    });
     return createdEdges;
   } catch (error) {
     logger.warn(

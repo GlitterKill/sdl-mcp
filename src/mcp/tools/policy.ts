@@ -4,7 +4,7 @@ import {
   PolicySetRequestSchema,
   PolicySetResponse,
 } from "../tools.js";
-import { getLadybugConn } from "../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
@@ -101,11 +101,13 @@ export async function handlePolicySet(
   });
   configJson.policy = mergedOverrides;
 
-  await ladybugDb.upsertRepo(conn, {
-    repoId,
-    rootPath: repo.rootPath,
-    configJson: JSON.stringify(configJson),
-    createdAt: repo.createdAt,
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.upsertRepo(wConn, {
+      repoId,
+      rootPath: repo.rootPath,
+      configJson: JSON.stringify(configJson),
+      createdAt: repo.createdAt,
+    });
   });
 
   return {

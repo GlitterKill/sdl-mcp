@@ -10,7 +10,7 @@ import {
   RepoOverviewRequestSchema,
   RepoOverviewResponse,
 } from "../tools.js";
-import { getLadybugConn } from "../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import {
   getWatcherHealth,
@@ -127,11 +127,13 @@ export async function handleRepoRegister(
   const conn = await getLadybugConn();
   const existingRepo = await ladybugDb.getRepo(conn, repoId);
 
-  await ladybugDb.upsertRepo(conn, {
-    repoId,
-    rootPath: normalizedRoot,
-    configJson: JSON.stringify(config),
-    createdAt: existingRepo?.createdAt ?? new Date().toISOString(),
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.upsertRepo(wConn, {
+      repoId,
+      rootPath: normalizedRoot,
+      configJson: JSON.stringify(config),
+      createdAt: existingRepo?.createdAt ?? new Date().toISOString(),
+    });
   });
 
   return {

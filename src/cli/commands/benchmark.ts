@@ -7,7 +7,7 @@ import type { CLIOptions } from "../types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
-import { getLadybugConn } from "../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { RepoConfig } from "../../config/types.js";
 import { indexRepo } from "../../indexer/indexer.js";
@@ -295,8 +295,8 @@ async function collectBenchmarkMetrics(
     );
   });
 
-  const srcSymbols = sortedSymbols.filter(
-    (symbol) => (filesById.get(symbol.fileId) ?? "").startsWith("src/"),
+  const srcSymbols = sortedSymbols.filter((symbol) =>
+    (filesById.get(symbol.fileId) ?? "").startsWith("src/"),
   );
   const samplingPool = srcSymbols.length > 0 ? srcSymbols : sortedSymbols;
   const sampleSize = Math.min(20, samplingPool.length);
@@ -323,7 +323,10 @@ async function collectBenchmarkMetrics(
       if (symbol.kind === "function" || symbol.kind === "method") {
         const skelStart = performance.now();
         try {
-          const skeleton = await generateSymbolSkeleton(repoId, symbol.symbolId);
+          const skeleton = await generateSymbolSkeleton(
+            repoId,
+            symbol.symbolId,
+          );
           skeletonTimeMs += performance.now() - skelStart;
           if (skeleton?.skeleton) {
             totalSkeletonTokens += estimateTokens(skeleton.skeleton);
@@ -484,7 +487,9 @@ export async function benchmarkCICommand(
     console.warn(
       `[WARN] Configured repository path does not exist: ${configuredRepoPath}`,
     );
-    console.warn(`[WARN] Falling back to current working directory: ${repoPath}`);
+    console.warn(
+      `[WARN] Falling back to current working directory: ${repoPath}`,
+    );
   }
 
   await initGraphDb(config, configPath);
@@ -499,11 +504,13 @@ export async function benchmarkCICommand(
   }
 
   const persistedRepo = await ladybugDb.getRepo(conn, repoId);
-  await ladybugDb.upsertRepo(conn, {
-    repoId,
-    rootPath: repoPath,
-    configJson: repoRuntimeConfigJson,
-    createdAt: persistedRepo?.createdAt ?? new Date().toISOString(),
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.upsertRepo(wConn, {
+      repoId,
+      rootPath: repoPath,
+      configJson: repoRuntimeConfigJson,
+      createdAt: persistedRepo?.createdAt ?? new Date().toISOString(),
+    });
   });
 
   const thresholdPath =
@@ -648,9 +655,7 @@ export async function benchmarkCICommand(
       ) as { minimumF1?: Record<string, number> };
       edgeAccuracyThresholds = parsed.minimumF1 ?? {};
     } catch (error) {
-      console.warn(
-        `\n⚠ Could not parse edge-accuracy baseline file: ${error}`,
-      );
+      console.warn(`\n⚠ Could not parse edge-accuracy baseline file: ${error}`);
     }
   } else {
     console.warn(

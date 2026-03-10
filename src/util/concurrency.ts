@@ -33,6 +33,7 @@ export class ConcurrencyLimiter {
     resolve: (value: unknown) => void;
     reject: (reason?: unknown) => void;
     task: () => Promise<unknown>;
+    taskTimeoutMs?: number;
   }>;
   private drainResolvers: Array<() => void> = [];
 
@@ -72,6 +73,8 @@ export class ConcurrencyLimiter {
           }
           return task();
         },
+        // Preserve the execution timeout for when the task is dequeued (H8)
+        taskTimeoutMs: timeoutMs,
       };
 
       if (timeout) {
@@ -96,23 +99,54 @@ export class ConcurrencyLimiter {
   ): Promise<T> {
     this.activeCount++;
 
-    try {
-      if (timeoutMs) {
-        return await Promise.race([
-          task(),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error(`Task timeout after ${timeoutMs}ms`)),
-              timeoutMs,
-            ),
-          ),
-        ]);
-      }
-      return await task();
-    } finally {
+    // releaseSlot is called exactly once, after the underlying task
+    // settles OR if no task was started. This keeps the slot occupied
+    // until the real work finishes, even if a timeout fires first.
+    const releaseSlot = (): void => {
       this.activeCount--;
       this.processQueue();
       this.notifyDrainIfIdle();
+    };
+
+    if (timeoutMs) {
+      const taskPromise = task();
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      let timedOut = false;
+
+      try {
+        const result = await Promise.race([
+          taskPromise,
+          new Promise<never>((_, reject) => {
+            timeoutHandle = setTimeout(() => {
+              timedOut = true;
+              reject(new Error(`Task timeout after ${timeoutMs}ms`));
+            }, timeoutMs);
+          }),
+        ]);
+
+        // Task won the race — clear timeout, release slot immediately
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        releaseSlot();
+        return result;
+      } catch (err) {
+        if (timedOut) {
+          // Timeout won the race. The underlying task is still running.
+          // Keep the slot occupied until it settles, then release.
+          taskPromise.catch(() => {}).finally(releaseSlot);
+        } else {
+          // Task itself threw — release slot now
+          if (timeoutHandle) clearTimeout(timeoutHandle);
+          releaseSlot();
+        }
+        throw err;
+      }
+    }
+
+    // No timeout — simple path
+    try {
+      return await task();
+    } finally {
+      releaseSlot();
     }
   }
 
@@ -120,7 +154,8 @@ export class ConcurrencyLimiter {
     while (this.queue.length > 0 && this.activeCount < this.maxConcurrency) {
       const item = this.queue.shift();
       if (item) {
-        this.executeTask(item.task)
+        // Pass the preserved execution timeout through to executeTask (H8)
+        this.executeTask(item.task, item.taskTimeoutMs)
           .then((result) => item.resolve(result))
           .catch((error) => item.reject(error));
       }
@@ -152,6 +187,9 @@ export class ConcurrencyLimiter {
     }
 
     this.queue.length = 0;
+    // Defensively notify drain waiters in case queue was the only
+    // thing keeping the limiter "busy" (M9).
+    this.notifyDrainIfIdle();
   }
 
   private notifyDrainIfIdle(): void {

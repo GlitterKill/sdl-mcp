@@ -1,4 +1,4 @@
-import { getLadybugConn } from "../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { hashContent } from "../util/hashing.js";
 import { ensureLocalEmbeddingRuntime } from "./embeddings-local.js";
@@ -150,7 +150,8 @@ export async function refreshSymbolEmbeddings(params: {
 }): Promise<{ embedded: number; skipped: number }> {
   const provider = getEmbeddingProvider(params.provider);
   const conn = await getLadybugConn();
-  const symbols = params.symbols ?? (await ladybugDb.getSymbolsByRepo(conn, params.repoId));
+  const symbols =
+    params.symbols ?? (await ladybugDb.getSymbolsByRepo(conn, params.repoId));
   let embedded = 0;
   let skipped = 0;
 
@@ -168,14 +169,16 @@ export async function refreshSymbolEmbeddings(params: {
 
     const text = `${symbol.name}\n${symbol.kind}\n${symbol.summary ?? ""}`;
     const [vector] = await provider.embed([text]);
-    await ladybugDb.upsertSymbolEmbedding(conn, {
-      symbolId: symbol.symbolId,
-      model: params.model,
-      embeddingVector: toFloat16Blob(vector),
-      version: "v1",
-      cardHash,
-      createdAt: existing?.createdAt ?? new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.upsertSymbolEmbedding(wConn, {
+        symbolId: symbol.symbolId,
+        model: params.model,
+        embeddingVector: toFloat16Blob(vector),
+        version: "v1",
+        cardHash,
+        createdAt: existing?.createdAt ?? new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
     });
     embedded += 1;
   }

@@ -1,7 +1,7 @@
 import { join } from "path";
 
 import type { RepoConfig } from "../../config/types.js";
-import { getLadybugConn } from "../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { EdgeRow, SymbolRow } from "../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../db/schema.js";
@@ -146,15 +146,17 @@ export async function processFile(params: ProcessFileParams): Promise<{
       logger.debug(
         `Language ${ext} not in enabled languages, skipping ${fileMeta.path}`,
       );
-      await persistSkippedFile({
-        conn,
-        existingFileId: existingFile?.fileId,
-        fileId,
-        repoId,
-        relPath,
-        contentHash,
-        language: ext,
-        byteSize: fileMeta.size,
+      await withWriteConn(async (wConn) => {
+        await persistSkippedFile({
+          conn: wConn,
+          existingFileId: existingFile?.fileId,
+          fileId,
+          repoId,
+          relPath,
+          contentHash,
+          language: ext,
+          byteSize: fileMeta.size,
+        });
       });
       return createEmptyProcessFileResult(true);
     }
@@ -165,15 +167,17 @@ export async function processFile(params: ProcessFileParams): Promise<{
       logger.debug(
         `No adapter found for ${extWithDot}, skipping ${fileMeta.path}`,
       );
-      await persistSkippedFile({
-        conn,
-        existingFileId: existingFile?.fileId,
-        fileId,
-        repoId,
-        relPath,
-        contentHash,
-        language: ext,
-        byteSize: fileMeta.size,
+      await withWriteConn(async (wConn) => {
+        await persistSkippedFile({
+          conn: wConn,
+          existingFileId: existingFile?.fileId,
+          fileId,
+          repoId,
+          relPath,
+          contentHash,
+          language: ext,
+          byteSize: fileMeta.size,
+        });
       });
       return createEmptyProcessFileResult(true);
     }
@@ -206,15 +210,17 @@ export async function processFile(params: ProcessFileParams): Promise<{
       if (parseError || !workerPool) {
         tree = adapter.parse(content, filePath);
         if (!tree) {
-          await persistSkippedFile({
-            conn,
-            existingFileId: existingFile?.fileId,
-            fileId,
-            repoId,
-            relPath,
-            contentHash,
-            language: adapter.languageId,
-            byteSize: fileMeta.size,
+          await withWriteConn(async (wConn) => {
+            await persistSkippedFile({
+              conn: wConn,
+              existingFileId: existingFile?.fileId,
+              fileId,
+              repoId,
+              relPath,
+              contentHash,
+              language: adapter.languageId,
+              byteSize: fileMeta.size,
+            });
           });
           return createEmptyProcessFileResult(true);
         }
@@ -641,32 +647,34 @@ export async function processFile(params: ProcessFileParams): Promise<{
       });
     }
 
-    await ladybugDb.withTransaction(conn, async (txConn) => {
-      await ladybugDb.upsertFile(txConn, {
-        fileId,
-        repoId,
-        relPath,
-        contentHash,
-        language: ext,
-        byteSize: fileMeta.size,
-        lastIndexedAt: new Date().toISOString(),
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.withTransaction(wConn, async (txConn) => {
+        await ladybugDb.upsertFile(txConn, {
+          fileId,
+          repoId,
+          relPath,
+          contentHash,
+          language: ext,
+          byteSize: fileMeta.size,
+          lastIndexedAt: new Date().toISOString(),
+        });
+
+        if (existingFile) {
+          await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+          await ladybugDb.deleteSymbolReferencesByFileId(
+            txConn,
+            existingFile.fileId,
+          );
+        }
+
+        await ladybugDb.insertSymbolReferences(txConn, symbolReferences);
+
+        for (const symbol of symbolsToUpsert) {
+          await ladybugDb.upsertSymbol(txConn, symbol);
+        }
+
+        await ladybugDb.insertEdges(txConn, edgesToInsert);
       });
-
-      if (existingFile) {
-        await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
-        await ladybugDb.deleteSymbolReferencesByFileId(
-          txConn,
-          existingFile.fileId,
-        );
-      }
-
-      await ladybugDb.insertSymbolReferences(txConn, symbolReferences);
-
-      for (const symbol of symbolsToUpsert) {
-        await ladybugDb.upsertSymbol(txConn, symbol);
-      }
-
-      await ladybugDb.insertEdges(txConn, edgesToInsert);
     });
 
     prefetchFileExports(repoId, fileMeta.path);

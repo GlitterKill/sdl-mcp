@@ -1,6 +1,6 @@
 import { hashContent } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
-import { getLadybugConn } from "../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import type { AppConfig } from "../config/types.js";
 
@@ -44,11 +44,7 @@ export class AnthropicSummaryProvider implements SummaryProvider {
   private readonly model: string;
   private readonly baseUrl: string;
 
-  constructor(options: {
-    apiKey: string;
-    model?: string;
-    baseUrl?: string;
-  }) {
+  constructor(options: { apiKey: string; model?: string; baseUrl?: string }) {
     this.apiKey = options.apiKey;
     this.model = options.model ?? "claude-haiku-4-5-20251001";
     this.baseUrl = options.baseUrl ?? "https://api.anthropic.com";
@@ -123,11 +119,7 @@ export class OpenAICompatibleSummaryProvider implements SummaryProvider {
   private readonly model: string;
   private readonly baseUrl: string;
 
-  constructor(options: {
-    apiKey: string;
-    model?: string;
-    baseUrl?: string;
-  }) {
+  constructor(options: { apiKey: string; model?: string; baseUrl?: string }) {
     this.apiKey = options.apiKey;
     this.model = options.model ?? "gpt-4o-mini";
     this.baseUrl = (options.baseUrl ?? "http://localhost:11434").replace(
@@ -307,16 +299,19 @@ export async function generateSummaryWithGuardrails(input: {
 
   // Persist to cache when symbolId is available
   if (input.symbolId) {
+    const symbolId = input.symbolId;
     const now = new Date().toISOString();
-    await ladybugDb.upsertSummaryCache(conn, {
-      symbolId: input.symbolId,
-      summary,
-      provider: summaryProvider.name,
-      model: input.summaryModel ?? summaryProvider.name,
-      cardHash,
-      costUsd,
-      createdAt: now,
-      updatedAt: now,
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.upsertSummaryCache(wConn, {
+        symbolId,
+        summary,
+        provider: summaryProvider.name,
+        model: input.summaryModel ?? summaryProvider.name,
+        cardHash,
+        costUsd,
+        createdAt: now,
+        updatedAt: now,
+      });
     });
   }
 
@@ -397,7 +392,7 @@ export async function generateSummariesForRepo(
   }
 
   // Split into batches
-  const batches: typeof needsSummary[] = [];
+  const batches: (typeof needsSummary)[] = [];
   for (let i = 0; i < needsSummary.length; i += batchSize) {
     batches.push(needsSummary.slice(i, i + batchSize));
   }
@@ -442,7 +437,13 @@ export async function generateSummariesForRepo(
         });
 
         // Update the symbol row with the new summary
-        await ladybugDb.updateSymbolSummary(conn, sym.symbolId, genResult.summary);
+        await withWriteConn(async (wConn) => {
+          await ladybugDb.updateSymbolSummary(
+            wConn,
+            sym.symbolId,
+            genResult.summary,
+          );
+        });
 
         batchGenerated += 1;
         batchCost += genResult.costUsd;
@@ -454,7 +455,11 @@ export async function generateSummariesForRepo(
       }
     }
 
-    return { generated: batchGenerated, failed: batchFailed, costUsd: batchCost };
+    return {
+      generated: batchGenerated,
+      failed: batchFailed,
+      costUsd: batchCost,
+    };
   };
 
   // Run batches with maxConcurrency slots

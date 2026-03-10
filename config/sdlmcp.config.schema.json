@@ -687,6 +687,54 @@
           "default": null
         }
       }
+    },
+    "concurrency": {
+      "type": "object",
+      "description": "Concurrency settings for multi-agent access",
+      "properties": {
+        "maxSessions": {
+          "type": "integer",
+          "description": "Maximum number of concurrent MCP sessions",
+          "minimum": 1,
+          "maximum": 16,
+          "default": 8
+        },
+        "maxToolConcurrency": {
+          "type": "integer",
+          "description": "Maximum concurrent tool handler executions across all sessions",
+          "minimum": 1,
+          "maximum": 32,
+          "default": 8
+        },
+        "readPoolSize": {
+          "type": "integer",
+          "description": "Number of read-only database connections in the pool",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 4
+        },
+        "writeQueueTimeoutMs": {
+          "type": "integer",
+          "description": "Timeout for queued write operations in milliseconds",
+          "minimum": 1000,
+          "maximum": 120000,
+          "default": 30000
+        },
+        "toolQueueTimeoutMs": {
+          "type": "integer",
+          "description": "Timeout for queued tool dispatch operations in milliseconds",
+          "minimum": 5000,
+          "maximum": 120000,
+          "default": 30000
+        }
+      },
+      "default": {
+        "maxSessions": 8,
+        "maxToolConcurrency": 8,
+        "readPoolSize": 4,
+        "writeQueueTimeoutMs": 30000,
+        "toolQueueTimeoutMs": 30000
+      }
     }
   }
 }

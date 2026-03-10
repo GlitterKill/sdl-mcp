@@ -377,6 +377,8 @@ export class AnnIndexManager {
   };
 
   private config: AnnConfig;
+  private buildPromise: Promise<{ indexed: number; skipped: number }> | null =
+    null;
 
   constructor(config: AnnConfig = DEFAULT_ANN_CONFIG) {
     this.config = config;
@@ -399,6 +401,20 @@ export class AnnIndexManager {
     model: string;
     embeddingRows?: ladybugDb.SymbolEmbeddingRow[];
   }): Promise<{ indexed: number; skipped: number }> {
+    if (this.buildPromise) return this.buildPromise;
+    this.buildPromise = this._buildIndexInternal(params);
+    try {
+      return await this.buildPromise;
+    } finally {
+      this.buildPromise = null;
+    }
+  }
+
+  private async _buildIndexInternal(params: {
+    repoId: string;
+    model: string;
+    embeddingRows?: ladybugDb.SymbolEmbeddingRow[];
+  }): Promise<{ indexed: number; skipped: number }> {
     if (!this.config.enabled) {
       return { indexed: 0, skipped: 0 };
     }
@@ -412,7 +428,10 @@ export class AnnIndexManager {
       if (params.embeddingRows) {
         embeddingRows = params.embeddingRows;
       } else {
-        const embeddingMap = await ladybugDb.getSymbolEmbeddings(conn, symbolIds);
+        const embeddingMap = await ladybugDb.getSymbolEmbeddings(
+          conn,
+          symbolIds,
+        );
         embeddingRows = Array.from(embeddingMap.values()).filter(
           (r) => r.model === params.model,
         );
@@ -603,7 +622,10 @@ export function exactCosineSearch(params: {
 
   return (async () => {
     const conn = await getLadybugConn();
-    const embeddingMap = await ladybugDb.getSymbolEmbeddings(conn, params.symbolIds);
+    const embeddingMap = await ladybugDb.getSymbolEmbeddings(
+      conn,
+      params.symbolIds,
+    );
 
     const results: SearchResult[] = [];
     for (const symbolId of params.symbolIds) {

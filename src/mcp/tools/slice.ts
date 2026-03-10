@@ -25,7 +25,7 @@ import {
 } from "../../graph/slice/result.js";
 import * as crypto from "crypto";
 import { computeDelta } from "../../delta/diff.js";
-import { getLadybugConn } from "../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { SymbolKind, Visibility } from "../../db/schema.js";
 import {
@@ -49,7 +49,11 @@ import {
 } from "../../config/constants.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyConfigSchema } from "../../config/types.js";
-import { createPolicyDenial, DatabaseError, ValidationError } from "../errors.js";
+import {
+  createPolicyDenial,
+  DatabaseError,
+  ValidationError,
+} from "../errors.js";
 import { pickDepLabel } from "../../util/depLabels.js";
 import {
   withSpan,
@@ -58,8 +62,6 @@ import {
   type SpanAttributes,
 } from "../../util/tracing.js";
 import { attachRawContext } from "../token-usage.js";
-
-const policyEngine = new PolicyEngine();
 
 const VISIBILITY_VALUES: readonly Visibility[] = [
   "public",
@@ -745,7 +747,8 @@ export async function handleSliceBuild(
 }
 
 function safeParseArgs(args: unknown): { repoId?: string } | null {
-  if (typeof args !== "object" || args === null || Array.isArray(args)) return null;
+  if (typeof args !== "object" || args === null || Array.isArray(args))
+    return null;
   const a = args as Record<string, unknown>;
   return typeof a.repoId === "string" ? { repoId: a.repoId } : null;
 }
@@ -806,6 +809,7 @@ async function handleSliceBuildInternal(
       maxEstimatedTokens:
         config.slice?.defaultMaxTokens ?? DEFAULT_MAX_TOKENS_SLICE,
     };
+    const policyEngine = new PolicyEngine();
     policyEngine.updateConfig({
       maxWindowLines: mergedPolicy.maxWindowLines,
       maxWindowTokens: mergedPolicy.maxWindowTokens,
@@ -926,7 +930,9 @@ async function handleSliceBuildInternal(
       spilloverRef: null,
     };
 
-    await ladybugDb.upsertSliceHandle(conn, handleRow);
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.upsertSliceHandle(wConn, handleRow);
+    });
 
     // For a fresh build, staleSymbols is always empty since we just built
     // from the current version. Assign explicitly to signal feature is active.
@@ -1025,7 +1031,10 @@ export async function handleSliceRefresh(
     throw error;
   }
 
-  const latestVersion = await ladybugDb.getLatestVersion(conn, handleRow.repoId);
+  const latestVersion = await ladybugDb.getLatestVersion(
+    conn,
+    handleRow.repoId,
+  );
   if (!latestVersion) {
     throw new Error(`No version found for repo ${handleRow.repoId}`);
   }
@@ -1040,7 +1049,9 @@ export async function handleSliceRefresh(
       minVersion: handleRow.maxVersion,
       maxVersion: latestVersion.versionId,
     };
-    await ladybugDb.upsertSliceHandle(conn, newHandleRow);
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.upsertSliceHandle(wConn, newHandleRow);
+    });
 
     return {
       sliceHandle,
@@ -1067,7 +1078,9 @@ export async function handleSliceRefresh(
     minVersion: knownVersion,
     maxVersion: latestVersion.versionId,
   };
-  await ladybugDb.upsertSliceHandle(conn, newHandleRow);
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.upsertSliceHandle(wConn, newHandleRow);
+  });
 
   const response = {
     sliceHandle,
@@ -1082,7 +1095,9 @@ export async function handleSliceRefresh(
     const changedIds = delta.changedSymbols.map((c) => c.symbolId);
     const symbolMap = await ladybugDb.getSymbolsByIds(conn, changedIds);
     attachRawContext(response, {
-      fileIds: [...new Set(Array.from(symbolMap.values()).map((s) => s.fileId))],
+      fileIds: [
+        ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
+      ],
     });
   }
 
@@ -1096,9 +1111,10 @@ export async function handleSliceRefresh(
  * @returns Number of deleted handles
  */
 export async function cleanupExpiredSliceHandles(): Promise<number> {
-  const conn = await getLadybugConn();
   const now = new Date().toISOString();
-  return ladybugDb.deleteExpiredSliceHandles(conn, now);
+  return withWriteConn(async (wConn) => {
+    return ladybugDb.deleteExpiredSliceHandles(wConn, now);
+  });
 }
 
 /**
@@ -1154,7 +1170,9 @@ export async function handleSliceSpilloverGet(
 
   const startIndex = cursor ? parseInt(cursor, 10) : 0;
   if (Number.isNaN(startIndex) || startIndex < 0) {
-    throw new Error(`Invalid cursor value: ${cursor} must be a non-negative integer`);
+    throw new Error(
+      `Invalid cursor value: ${cursor} must be a non-negative integer`,
+    );
   }
   const size = pageSize ?? SPILLOVER_DEFAULT_PAGE_SIZE;
   const endIndex = startIndex + size;
@@ -1163,10 +1181,15 @@ export async function handleSliceSpilloverGet(
 
   const symbolIds = pageSymbols.map((item) => item.symbolId);
   const symbolsById = await ladybugDb.getSymbolsByIds(conn, symbolIds);
-  const pageFileIds = [...new Set(Array.from(symbolsById.values()).map((s) => s.fileId))];
+  const pageFileIds = [
+    ...new Set(Array.from(symbolsById.values()).map((s) => s.fileId)),
+  ];
   const filesById = await ladybugDb.getFilesByIds(conn, pageFileIds);
   const metricsById = await ladybugDb.getMetricsBySymbolIds(conn, symbolIds);
-  const edgesFromBySymbol = await ladybugDb.getEdgesFromSymbols(conn, symbolIds);
+  const edgesFromBySymbol = await ladybugDb.getEdgesFromSymbols(
+    conn,
+    symbolIds,
+  );
 
   const allTargetIds = new Set<string>();
   for (const edges of edgesFromBySymbol.values()) {
