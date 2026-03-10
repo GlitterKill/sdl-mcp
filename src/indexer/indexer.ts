@@ -335,11 +335,26 @@ async function indexRepoImpl(
           resultByPath.set(result.relPath, result);
         }
 
+        const tsFallbackFiles: typeof rustFiles = [];
+
         for (const file of rustFiles) {
           updatePass1Progress(file.path);
           const rustResult = resultByPath.get(file.path);
           if (!rustResult) {
             filesProcessed++;
+            continue;
+          }
+
+          // Fall back to TS engine for languages the Rust engine doesn't support
+          if (
+            rustResult.parseError &&
+            rustResult.symbols.length === 0 &&
+            rustResult.parseError.includes("Unsupported language")
+          ) {
+            logger.info(
+              `Rust engine does not support language for ${file.path}, falling back to TypeScript engine`,
+            );
+            tsFallbackFiles.push(file);
             continue;
           }
 
@@ -386,6 +401,55 @@ async function indexRepoImpl(
             filesProcessed++;
             logger.error(
               `Error processing Rust result for ${file.path}: ${error}`,
+            );
+          }
+        }
+
+        // Process files that the Rust engine couldn't handle via the TS engine
+        for (const file of tsFallbackFiles) {
+          updatePass1Progress(file.path);
+          const skipCallResolution = pass2ResolverRegistry.supports(
+            toPass2Target(file),
+          );
+          try {
+            const result = await processFile({
+              repoId,
+              repoRoot: repoRow.rootPath,
+              fileMeta: file,
+              languages: config.languages,
+              mode,
+              existingFile: existingByPath.get(file.path),
+              symbolIndex,
+              pendingCallEdges,
+              createdCallEdges,
+              tsResolver,
+              config,
+              allSymbolsByName,
+              workerPool: null,
+              skipCallResolution,
+              globalNameToSymbolIds,
+              supportsPass2FilePath,
+            });
+            filesProcessed++;
+            if (result.changed) {
+              changedFiles++;
+              changedFileIds.add(
+                fileIdForPath(repoId, file.path, existingByPath),
+              );
+              if (skipCallResolution) {
+                changedPass2FilePaths.add(file.path);
+                for (const hinted of result.pass2HintPaths) {
+                  changedPass2FilePaths.add(hinted);
+                }
+              }
+            }
+            totalSymbolsIndexed += result.symbolsIndexed;
+            totalEdgesCreated += result.edgesCreated;
+            allConfigEdges.push(...result.configEdges);
+          } catch (error) {
+            filesProcessed++;
+            logger.error(
+              `Error in TS fallback for ${file.path}: ${error}`,
             );
           }
         }

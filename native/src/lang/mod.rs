@@ -29,9 +29,7 @@ pub fn get_language(lang_id: &str) -> Option<Language> {
 pub fn create_parser(lang_id: &str) -> Option<Parser> {
     let language = get_language(lang_id)?;
     let mut parser = Parser::new();
-    parser
-        .set_language(&language)
-        .expect("Failed to set parser language");
+    parser.set_language(&language).ok()?;
     Some(parser)
 }
 
