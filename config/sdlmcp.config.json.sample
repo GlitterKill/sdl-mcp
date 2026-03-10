@@ -31,7 +31,7 @@
     }
   ],
   "graphDatabase": {
-    "path": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\data\\sdl-mcp-graph.kuzu"
+    "path": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\data\\sdl-mcp-graph.lbug"
   },
   "policy": {
     "maxWindowLines": 180,

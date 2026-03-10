@@ -107,7 +107,7 @@
     }
   ],
   "graphDatabase": {
-    "path": "./data/sdl-mcp-graph.kuzu"
+    "path": "./data/sdl-mcp-graph.lbug"
   },
   "policy": {
     "maxWindowLines": 180,
