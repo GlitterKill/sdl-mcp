@@ -41,7 +41,7 @@ const DOCTOR_CHECKS = [
     name: "Call resolution capabilities",
     check: checkCallResolutionCapabilities,
   },
-  { name: "Graph database (KuzuDB)", check: checkKuzuDb },
+  { name: "Graph database (Ladybug)", check: checkKuzuDb },
 ];
 
 interface DoctorResult {
@@ -311,7 +311,18 @@ async function checkRepoPaths(
   const configPath = options.config ?? activateCliConfigPath();
 
   if (!existsSync(configPath)) {
-    return { status: "warn", message: "Config not found (skip repo checks)" };
+    return {
+      status: "warn",
+      message: "Config not found (skip graph database check)",
+    };
+  }
+
+  if (!isKuzuAvailable()) {
+    return {
+      status: "warn",
+      message:
+        "Graph database module not installed. Ladybug-backed 'kuzu' alias should be installed automatically (via @ladybugdb/core). Try: npm install",
+    };
   }
 
   try {
@@ -531,13 +542,17 @@ async function checkKuzuDb(
 ): Promise<Omit<DoctorResult, "name">> {
   const configPath = options.config ?? activateCliConfigPath();
   if (!existsSync(configPath)) {
-    return { status: "warn", message: "Config not found (skip KuzuDB check)" };
+    return {
+      status: "warn",
+      message: "Config not found (skip graph database check)",
+    };
   }
 
   if (!isKuzuAvailable()) {
     return {
       status: "warn",
-      message: "KuzuDB module not installed. Install with: npm install kuzu",
+      message:
+        "Graph database driver not installed. SDL-MCP expects the 'kuzu' alias backed by @ladybugdb/core. Try: npm install",
     };
   }
 
@@ -558,7 +573,7 @@ async function checkKuzuDb(
     if (!existsSync(kuzuDbPath)) {
       return {
         status: "warn",
-        message: `KuzuDB file not found: ${kuzuDbPath}`,
+        message: `Graph database not found: ${kuzuDbPath}`,
       };
     }
 
@@ -617,12 +632,12 @@ async function checkKuzuDb(
 
     return {
       status: "pass",
-      message: `KuzuDB OK: ${kuzuDbPath}${pathInfo} (symbols: ${symbolCount}, edges: ${edgeCount})`,
+      message: `Ladybug OK: ${kuzuDbPath}${pathInfo} (symbols: ${symbolCount}, edges: ${edgeCount})`,
     };
   } catch (error) {
     return {
       status: "warn",
-      message: `Cannot verify KuzuDB: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Cannot verify graph database: ${error instanceof Error ? error.message : String(error)}`,
     };
   } finally {
     await closeKuzuDb();
