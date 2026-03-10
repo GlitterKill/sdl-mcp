@@ -32,6 +32,15 @@ const EIGHT_GB = 8 * ONE_GB;
 const DEFAULT_BUFFER_MANAGER_RATIO = 0.5;
 const DEFAULT_CHECKPOINT_THRESHOLD_BYTES = 128 * 1024 * 1024;
 
+function formatReindexGuidanceError(dbPath: string, msg: string): string {
+  return (
+    `Database at '${dbPath}' is not compatible with the current graph engine (Ladybug). ` +
+    `Delete the existing database directory and re-run indexing: rm -rf '${dbPath}' && sdl-mcp index. ` +
+    "Migrating older graph databases in-place is not supported. " +
+    `Original error: ${msg}`
+  );
+}
+
 // Connection Pool
 // NOTE: Kuzu write transactions are sensitive to concurrent execution across
 // connections. Use a single shared connection to avoid write-write conflicts
@@ -58,7 +67,7 @@ async function loadKuzu(): Promise<KuzuModule> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new DatabaseError(
-      `KuzuDB not available: ${msg}. Install with: npm install kuzu`,
+      `Graph database driver not available: ${msg}. The 'kuzu' package should be installed automatically as an optional dependency of sdl-mcp (backed by @ladybugdb/core). Try: npm install`,
     );
   }
 }
@@ -144,9 +153,7 @@ export async function getKuzuDb(dbPath?: string): Promise<KuzuDatabase> {
       return dbInstance;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      throw new DatabaseError(
-        `Failed to open KuzuDB at ${normalizedPath}: ${msg}`,
-      );
+      throw new DatabaseError(formatReindexGuidanceError(normalizedPath, msg));
     }
   };
 
@@ -266,10 +273,10 @@ export async function initKuzuDb(dbPath: string): Promise<void> {
     }
   }
 
-  await getKuzuDb(normalizedPath);
-  const conn = await getKuzuConn();
-
   try {
+    await getKuzuDb(normalizedPath);
+    const conn = await getKuzuConn();
+
     await createSchema(conn);
     const schemaVersion = await getSchemaVersion(conn);
     if (schemaVersion !== KUZU_SCHEMA_VERSION) {
@@ -281,7 +288,7 @@ export async function initKuzuDb(dbPath: string): Promise<void> {
     logger.info("KuzuDB schema initialized", { path: normalizedPath });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new DatabaseError(`Failed to initialize KuzuDB schema: ${msg}`);
+    throw new DatabaseError(formatReindexGuidanceError(normalizedPath, msg));
   }
 }
 

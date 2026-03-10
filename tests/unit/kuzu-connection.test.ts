@@ -86,6 +86,19 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
   });
 
   describe("getKuzuDb", () => {
+    it("should create database successfully through Ladybug alias", async () => {
+      const testPath = getTestDbPath("alias-db-create");
+      cleanupTestDb("alias-db-create");
+
+      try {
+        const db = await getKuzuDb(testPath);
+        assert.ok(db, "Database should be created through alias");
+      } finally {
+        await closeKuzuDb();
+        cleanupTestDb("alias-db-create");
+      }
+    });
+
     it("should return singleton Database instance", async () => {
       const testPath = getTestDbPath("singleton");
       cleanupTestDb("singleton");
@@ -138,6 +151,20 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
   });
 
   describe("getKuzuConn", () => {
+    it("should create connection successfully through Ladybug alias", async () => {
+      const testPath = getTestDbPath("alias-conn-create");
+      cleanupTestDb("alias-conn-create");
+
+      try {
+        await getKuzuDb(testPath);
+        const conn = await getKuzuConn();
+        assert.ok(conn, "Connection should be created through alias");
+      } finally {
+        await closeKuzuDb();
+        cleanupTestDb("alias-conn-create");
+      }
+    });
+
     it("should return singleton Connection instance", async () => {
       const testPath = getTestDbPath("conn-singleton");
       cleanupTestDb("conn-singleton");
@@ -151,6 +178,31 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
       } finally {
         await closeKuzuDb();
         cleanupTestDb("conn-singleton");
+      }
+    });
+
+    it("should not throw when setMaxNumThreadForExec is missing", async () => {
+      const testPath = getTestDbPath("conn-no-thread-setter");
+      cleanupTestDb("conn-no-thread-setter");
+
+      const kuzu = await import("kuzu");
+      const connectionPrototype = kuzu.Connection.prototype as {
+        setMaxNumThreadForExec?: (n: number) => void | Promise<void>;
+      };
+      const originalThreadSetter = connectionPrototype.setMaxNumThreadForExec;
+
+      try {
+        delete connectionPrototype.setMaxNumThreadForExec;
+        await getKuzuDb(testPath);
+        await assert.doesNotReject(async () => {
+          await getKuzuConn();
+        });
+      } finally {
+        if (originalThreadSetter) {
+          connectionPrototype.setMaxNumThreadForExec = originalThreadSetter;
+        }
+        await closeKuzuDb();
+        cleanupTestDb("conn-no-thread-setter");
       }
     });
   });
@@ -209,6 +261,10 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
     it("should return boolean", () => {
       const result = isKuzuAvailable();
       assert.strictEqual(typeof result, "boolean");
+    });
+
+    it("should return true when Ladybug alias is installed", () => {
+      assert.strictEqual(isKuzuAvailable(), true);
     });
   });
 
