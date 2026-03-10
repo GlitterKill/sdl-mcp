@@ -184,7 +184,7 @@ describe("release regression guards", () => {
 
     assert.match(
       source,
-      /const filePath = join\(repoRoot, fileMeta\.path\);\s*const content = await readFileAsync\(filePath, "utf-8"\);/,
+      /const filePath = join\(repoRoot, fileMeta\.path\);\s*let content:\s*string;\s*try\s*\{\s*content = await readFileAsync\(filePath, "utf-8"\);/s,
       "Rust pass-1 should read file content for metadata generation in all files",
     );
 
@@ -203,7 +203,7 @@ describe("release regression guards", () => {
 
     assert.match(
       rustSource,
-      /const nativeRoleTagsJson = typeof detail\.nativeRoleTagsJson === "string"\s*\?\s*detail\.nativeRoleTagsJson\.trim\(\)\s*:\s*"";/,
+      /const\s+nativeRoleTagsJson\s*=\s*typeof detail\.nativeRoleTagsJson === "string"\s*\?\s*detail\.nativeRoleTagsJson\.trim\(\)\s*:\s*"";\s*const\s+nativeSearchText\s*=\s*typeof detail\.nativeSearchText === "string"\s*\?\s*detail\.nativeSearchText\.trim\(\)\s*:\s*"";/s,
       "Rust path should tolerate older native addons that omit enrichment fields",
     );
 
