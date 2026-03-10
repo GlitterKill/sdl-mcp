@@ -63,7 +63,7 @@ This catches most setup issues quickly.
 
 ### After Upgrading SDL-MCP
 
-If you see errors that say a database is "not compatible with the current graph engine," delete the existing `.kuzu` database directory and re-run indexing. Migrating older graph databases in-place is not supported.
+If you see errors that say a database is "not compatible with the current graph engine," delete the existing `.lbug` database directory and re-run indexing. Migrating older graph databases in-place is not supported.
 
 ### Watcher Failure Modes
 

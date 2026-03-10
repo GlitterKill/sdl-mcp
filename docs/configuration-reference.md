@@ -40,7 +40,7 @@ Only two fields are required — everything else has sensible defaults:
 }
 ```
 
-Ladybug storage is file-based. If `graphDatabase.path` is omitted, SDL-MCP defaults to `<configDir>/sdl-mcp-graph.kuzu`.
+Ladybug storage is file-based. If `graphDatabase.path` is omitted, SDL-MCP defaults to `<configDir>/sdl-mcp-graph.lbug`.
 
 ---
 
@@ -100,14 +100,14 @@ Below is every option with inline commentary. JSON does not support comments, so
   // ──────────────────────────────────────────────────────────
 
   // Optional override for the Ladybug database file.
-  // If omitted, SDL-MCP defaults to <configDir>/sdl-mcp-graph.kuzu.
+  // If omitted, SDL-MCP defaults to <configDir>/sdl-mcp-graph.lbug.
   // Supports ${VAR_NAME} environment variable expansion.
   "graphDatabase": {
-    "path": "./data/sdl-mcp-graph.kuzu",
+    "path": "./data/sdl-mcp-graph.lbug",
   },
 
   // Deprecated legacy database file path (v0.7.x). Only used by the one-time
-  // SQLite→Kuzu migration script in v0.8.
+  // SQLite→Ladybug migration script in v0.8.
   // "dbPath": "./data/sdlmcp.sqlite",
 
   // ──────────────────────────────────────────────────────────
@@ -398,15 +398,15 @@ Controls where SDL-MCP stores the Ladybug graph database (file path). Supports `
 
 | Field                | Type      | Default                          | Description                       |
 | -------------------- | --------- | -------------------------------- | --------------------------------- |
-| `graphDatabase.path` | `string?` | `<configDir>/sdl-mcp-graph.kuzu` | Path to the Ladybug database file |
+| `graphDatabase.path` | `string?` | `<configDir>/sdl-mcp-graph.lbug` | Path to the Ladybug database file |
 
-> **When to change:** Move to a fast SSD path if indexing is slow. Use `${SDL_GRAPH_DB_PATH}` for an explicit file path, or `${SDL_GRAPH_DB_DIR}` to point at a containing directory and let SDL-MCP place `sdl-mcp-graph.kuzu` inside it.
+> **When to change:** Move to a fast SSD path if indexing is slow. Use `${SDL_GRAPH_DB_PATH}` for an explicit file path, or `${SDL_GRAPH_DB_DIR}` to point at a containing directory and let SDL-MCP place `sdl-mcp-graph.lbug` inside it.
 
 ---
 
 ### `dbPath` (deprecated)
 
-Legacy v0.7.x SQLite database file path, only used by the one-time SQLite→Kuzu migration script.
+Legacy v0.7.x SQLite database file path, only used by the one-time SQLite→Ladybug migration script.
 
 | Field    | Type      | Default | Description                              |
 | -------- | --------- | ------- | ---------------------------------------- |
@@ -634,7 +634,7 @@ Worker-thread acceleration for beam search scoring in `sdl.slice.build`.
 | `SDL_CONFIG` / `SDL_CONFIG_PATH` | Path to config file                                                            |
 | `SDL_CONFIG_HOME`                | Directory for default global config resolution                                 |
 | `SDL_GRAPH_DB_PATH`              | Override graph DB file path (takes precedence over config)                     |
-| `SDL_GRAPH_DB_DIR`               | Legacy directory-style override; SDL-MCP stores `sdl-mcp-graph.kuzu` inside it |
+| `SDL_GRAPH_DB_DIR`               | Legacy directory-style override; SDL-MCP stores `sdl-mcp-graph.lbug` inside it |
 | `SDL_DB_PATH`                    | Legacy alias for graph DB path override (v0.7.x)                               |
 | `SDL_LOG_LEVEL`                  | Log level: `debug`, `info`, `warn`, `error`                                    |
 | `SDL_LOG_FORMAT`                 | Log format: `json`, `text`                                                     |
@@ -733,7 +733,7 @@ Full semantic search with local Ollama for summaries.
       "languages": ["ts"]
     }
   ],
-  "graphDatabase": { "path": "./data/sdl-mcp-graph.kuzu" }
+  "graphDatabase": { "path": "./data/sdl-mcp-graph.lbug" }
 }
 ```
 

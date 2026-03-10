@@ -131,7 +131,7 @@ export const PluginConfigSchema = z.object({
 ```json
 {
   "repos": [...],
-  "graphDatabase": { "path": "./data/sdl-mcp-graph.kuzu" },
+  "graphDatabase": { "path": "./data/sdl-mcp-graph.lbug" },
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,

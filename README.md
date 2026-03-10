@@ -71,7 +71,7 @@ Response: "# What is SDL-MCP?
 
   **12 languages supported:** TypeScript, JavaScript, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, and Shell.
 
-  Indexing happens once and is persisted in a **KuzuDB embedded graph database**. Incremental re-indexing picks up only
+  Indexing happens once and is persisted in a **LadybugDB embedded graph database**. Incremental re-indexing picks up only
   what changed.
 
   ### 2. The Iris Gate Ladder (4 Rungs)

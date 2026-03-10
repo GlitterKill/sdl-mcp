@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tree-sitter runtime packages were upgraded from `0.21.1` to `0.25.0`, with matching native grammar rebuilds and workflow updates to keep CI and release publishing aligned
 - Shared protocol/domain contracts now live in `src/domain/types.ts`, separating canonical types from MCP transport wiring
-- The Kuzu persistence layer was refactored from a monolithic query file into domain-specific modules plus `kuzu-core.ts` for clearer ownership and safer DB access patterns
+- The Kuzu persistence layer was refactored from a monolithic query file into domain-specific modules plus `ladybug-core.ts` for clearer ownership and safer DB access patterns
 - Release and CI workflows now use npm trusted publishing (OIDC), `npm ci --ignore-scripts --legacy-peer-deps`, and more stable sync-memory/runtime-budget validation steps
 
 ### Fixed
@@ -55,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Live editor-buffer indexing transport and MCP tools (`sdl.buffer.push`, `sdl.buffer.status`, `sdl.buffer.checkpoint`) with HTTP endpoints for buffer push, live status, and explicit checkpointing
 - In-memory draft overlay, draft-aware symbol/search/slice reads, file-scoped save patching, background reconciliation, idle checkpoint compaction, and live-index runtime health coverage in `doctor`
 - `liveIndex` configuration block with defaults for enablement, debounce, idle checkpointing, draft capacity, and reconciliation tuning
-- KuzuDB (`kuzu`) embedded graph backend as the sole persisted graph store, with directory-based initialization, idempotent schema bootstrap, and async query coverage across repo/file/symbol/version/slice flows
+- LadybugDB (`kuzu`) embedded graph backend as the sole persisted graph store, with directory-based initialization, idempotent schema bootstrap, and async query coverage across repo/file/symbol/version/slice flows
 - One-time SQLite-to-Kuzu migration support plus Kuzu-aware setup/health surfaces (`graphDatabase.path`, updated `init`/`doctor`, `spike:kuzu`, and refreshed release-test guidance)
 - Symbol graph enrichment via clusters (community detection) and processes (call-chain traces), surfaced in symbol cards, slices, `sdl.context.summary`, `sdl.repo.overview`, and blast-radius analysis
 - Rust + TypeScript cluster/process support with new parity, unit, and integration coverage, including `tests/integration/kuzu-e2e.test.ts`
@@ -84,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
-- Updated the README, configuration reference, MCP tools reference, and release test checklist for KuzuDB storage, `graphDatabase.path`, and cluster/process metadata
+- Updated the README, configuration reference, MCP tools reference, and release test checklist for LadybugDB storage, `graphDatabase.path`, and cluster/process metadata
 
 ### Upgrade Notes
 

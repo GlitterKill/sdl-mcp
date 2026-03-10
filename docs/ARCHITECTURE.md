@@ -24,7 +24,7 @@ SDL-MCP is a high-performance codebase indexing and context retrieval server. Th
 ## Technical Stack
 
 - **Runtime:** Node.js (v20+) / TypeScript (v5.9+)
-- **Core Database:** **KuzuDB** (In-process Graph Database)
+- **Core Database:** **LadybugDB** (In-process Graph Database)
   - Stores the "Symbol Graph": nodes (Symbols, Files, Repos) and edges (Calls, Imports).
 - **Indexing Engines:**
   - **Native Engine (Rust):** High-performance multi-threaded pass-1 extraction (via `napi-rs`).
@@ -46,7 +46,7 @@ When a repository is indexed (via `sdl-mcp index` or `sdl.index.refresh`):
    - Metadata (name, kind, visibility, range).
    - AST Fingerprints (used for content-addressed identity).
    - Local dependency hints (imports and raw call identifiers).
-3. **Draft Overlay:** If the Live Editor is active, buffer updates are stored in an **Overlay Store** before being committed to the durable KuzuDB.
+3. **Draft Overlay:** If the Live Editor is active, buffer updates are stored in an **Overlay Store** before being committed to the durable LadybugDB.
 
 ### 2. Graph Enrichment (The "Pass-2")
 Once raw symbols are in the graph, the Pass-2 resolver builds the global dependency web:
@@ -70,7 +70,7 @@ When an agent requests context:
 graph TD
     A[Repository Files] --> B[Indexer Engine (Rust/TS)]
     B --> C[Pass-1: Raw Symbols]
-    C --> D[KuzuDB Graph]
+    C --> D[LadybugDB Graph]
     E[Editor Buffers] --> F[Live Overlay Store]
     F -.-> D
     D --> G[Pass-2: Call Resolver]

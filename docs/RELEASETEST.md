@@ -28,7 +28,7 @@ cd F:\Claude\projects\sdl-mcp\sdl-mcp
 npm run build:all
 
 # Clean graph database (fresh start)
-Remove-Item -Force .\\data\\sdl-mcp-graph.kuzu -ErrorAction SilentlyContinue
+Remove-Item -Force .\\data\\sdl-mcp-graph.lbug -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force .\\.sdl-sync -ErrorAction SilentlyContinue
 ```
 
@@ -96,7 +96,7 @@ node dist/cli/index.js serve --stdio
 **Expected:** Server starts and shows startup logs on stderr.
 
 - [ ] "Loading configuration..." appears
-- [ ] "Initializing KuzuDB..." appears
+- [ ] "Initializing LadybugDB..." appears
 - [ ] "Registering MCP tools..." appears
 - [ ] "SDL-MCP server running..." appears
 - [ ] No stdout output (stdout reserved for JSON-RPC)

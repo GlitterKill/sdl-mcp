@@ -176,7 +176,7 @@ EOF
       "languages": ["ts", "py", "go", "java"]
     }
   ],
-  "graphDatabase": { "path": "/tmp/test-polyglot/sdl-mcp-graph.kuzu" },
+  "graphDatabase": { "path": "/tmp/test-polyglot/sdl-mcp-graph.lbug" },
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,
