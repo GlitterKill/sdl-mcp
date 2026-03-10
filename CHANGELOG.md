@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - 2026-03-10
+
+### Added
+
+- Multi-session HTTP MCP session management and streamable transport handling so concurrent clients can share one server process with isolated session state
+- Configurable MCP dispatch limiting plus new session-manager, dispatch-limiter, and Ladybug connection-pool regression coverage
+
+### Changed
+
+- Ladybug reads and writes now run through pooled and serialized access paths across CLI, MCP, indexing, sync, and live-index flows to reduce write conflicts under concurrent load
+- The config schema and example config now expose concurrency controls for MCP dispatch and graph database access
+- Benchmark and release lockfile coverage were refreshed to keep CI and publish-path validation stable after the concurrency changes
+
+### Fixed
+
+- TypeScript indexer fallback logic now recovers more reliably when native language support is unavailable
+- CI regression guards around Ladybug E2E coverage and release lockfile checks were tightened after recent infrastructure changes
+
 ## [0.8.4] - 2026-03-10
 
 ### Added
@@ -581,6 +599,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.8.5]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.5
 [0.8.4]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.4
 [0.8.3]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.3
 [0.8.2]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.2
