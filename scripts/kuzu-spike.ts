@@ -1,8 +1,8 @@
 #!/usr/bin/env tsx
 /**
- * KuzuDB Windows Feasibility Spike (T0.1)
+ * Ladybug Windows Feasibility Spike (T0.1)
  *
- * Validates KuzuDB npm package on Windows/Node 22 for SDL-MCP graph storage.
+ * Validates the Ladybug-backed kuzu npm package on Windows/Node 22 for SDL-MCP graph storage.
  *
  * Tests:
  * - On-disk database creation
@@ -67,7 +67,7 @@ function recordResult(
 
 async function runSpike(): Promise<void> {
   console.log("=".repeat(60));
-  console.log("KuzuDB Windows Feasibility Spike");
+  console.log("Ladybug Windows Feasibility Spike");
   console.log("=".repeat(60));
   console.log(`Platform: ${process.platform}`);
   console.log(`Node: ${process.version}`);
@@ -128,7 +128,9 @@ async function runSpike(): Promise<void> {
           err.message.includes("Cannot find module"))
       ) {
         console.log("\n[FAIL] Native binding error detected!");
-        console.log("Recommendation: Evaluate @kuzu/kuzu-wasm as alternative");
+        console.log(
+          "Recommendation: Verify @ladybugdb/core-backed kuzu package availability",
+        );
         console.log("Error details:", err.message);
       }
       throw err;
@@ -443,7 +445,9 @@ async function runSpike(): Promise<void> {
       (err.message.includes("DLL") || err.message.includes("binding"))
     ) {
       console.log("\n[ANALYSIS] Native binding failure on Windows");
-      console.log("Recommendation: Evaluate @kuzu/kuzu-wasm package");
+      console.log(
+        "Recommendation: Verify @ladybugdb/core-backed kuzu package availability",
+      );
       console.log(
         "Alternative: Use WASM build for cross-platform compatibility",
       );

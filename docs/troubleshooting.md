@@ -61,6 +61,10 @@ This catches most setup issues quickly.
 - Or call `sdl.index.refresh` with `incremental`
 - Enable watcher mode if desired (`index --watch`)
 
+### After Upgrading SDL-MCP
+
+If you see errors that say a database is "not compatible with the current graph engine," delete the existing `.kuzu` database directory and re-run indexing. Migrating older graph databases in-place is not supported.
+
 ### Watcher Failure Modes
 
 If file watching is enabled by default and becomes unstable, use:

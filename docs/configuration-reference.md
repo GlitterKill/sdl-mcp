@@ -21,11 +21,11 @@ SDL-MCP is configured via a single JSON file. This reference covers every option
 
 ## Config File Location
 
-| Method | Details |
-|--------|---------|
-| **Default** | User-global `sdlmcp.config.json` (resolved from `SDL_CONFIG_HOME` or OS config dir) |
-| **CLI flag** | `--config <PATH>` on any command |
-| **Environment** | `SDL_CONFIG` or `SDL_CONFIG_PATH` |
+| Method          | Details                                                                             |
+| --------------- | ----------------------------------------------------------------------------------- |
+| **Default**     | User-global `sdlmcp.config.json` (resolved from `SDL_CONFIG_HOME` or OS config dir) |
+| **CLI flag**    | `--config <PATH>` on any command                                                    |
+| **Environment** | `SDL_CONFIG` or `SDL_CONFIG_PATH`                                                   |
 
 The `sdl-mcp init` command creates this file interactively. You can also copy `config/sdlmcp.config.example.json` and edit it.
 
@@ -40,7 +40,7 @@ Only two fields are required — everything else has sensible defaults:
 }
 ```
 
-KuzuDB storage is file-based. If `graphDatabase.path` is omitted, SDL-MCP defaults to `<configDir>/sdl-mcp-graph.kuzu`.
+Ladybug storage is file-based. If `graphDatabase.path` is omitted, SDL-MCP defaults to `<configDir>/sdl-mcp-graph.kuzu`.
 
 ---
 
@@ -69,7 +69,7 @@ Below is every option with inline commentary. JSON does not support comments, so
         "**/.next/**",
         "**/build/**",
         "**/.git/**",
-        "**/coverage/**"
+        "**/coverage/**",
       ],
 
       // File extensions to index. Only include languages present in your repo for faster indexing.
@@ -91,19 +91,19 @@ Below is every option with inline commentary. JSON does not support comments, so
 
       // Glob patterns to find workspace package.json files in monorepos.
       // Example: ["packages/*/package.json", "apps/*/package.json"]
-      "workspaceGlobs": null
-    }
+      "workspaceGlobs": null,
+    },
   ],
 
   // ──────────────────────────────────────────────────────────
-  // GRAPH DATABASE — KuzuDB single-file storage
+  // GRAPH DATABASE — Ladybug single-file storage
   // ──────────────────────────────────────────────────────────
 
-  // Optional override for the KuzuDB database file.
+  // Optional override for the Ladybug database file.
   // If omitted, SDL-MCP defaults to <configDir>/sdl-mcp-graph.kuzu.
   // Supports ${VAR_NAME} environment variable expansion.
   "graphDatabase": {
-    "path": "./data/sdl-mcp-graph.kuzu"
+    "path": "./data/sdl-mcp-graph.kuzu",
   },
 
   // Deprecated legacy database file path (v0.7.x). Only used by the one-time
@@ -125,7 +125,7 @@ Below is every option with inline commentary. JSON does not support comments, so
     "requireIdentifiers": true,
 
     // Allow break-glass override to bypass policy denials (logged in audit trail).
-    "allowBreakGlass": true
+    "allowBreakGlass": true,
   },
 
   // ──────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ Below is every option with inline commentary. JSON does not support comments, so
     "patterns": [
       // Example: redact internal API tokens
       // { "name": "internal-token", "pattern": "INTERNAL_[A-Z0-9]{32}", "flags": "g" }
-    ]
+    ],
   },
 
   // ──────────────────────────────────────────────────────────
@@ -170,7 +170,7 @@ Below is every option with inline commentary. JSON does not support comments, so
     // Debounce delay (ms) before processing file-change events (50-5000).
     // Lower = faster incremental updates but more reindex calls during rapid edits.
     // Higher = fewer redundant calls but slower responsiveness.
-    "watchDebounceMs": 300
+    "watchDebounceMs": 300,
   },
 
   // ──────────────────────────────────────────────────────────
@@ -186,10 +186,10 @@ Below is every option with inline commentary. JSON does not support comments, so
 
     // Edge weights for BFS/beam search traversal. Higher = stronger pull.
     "edgeWeights": {
-      "call": 1.0,    // Function/method calls — strongest signal
-      "import": 0.6,  // Module imports — moderate signal
-      "config": 0.8   // Configuration references — strong signal
-    }
+      "call": 1.0, // Function/method calls — strongest signal
+      "import": 0.6, // Module imports — moderate signal
+      "config": 0.8, // Configuration references — strong signal
+    },
   },
 
   // ──────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ Below is every option with inline commentary. JSON does not support comments, so
 
     // Scope: "changedFiles" (only files modified since last index) or "workspace" (all files).
     // "workspace" is more thorough but much slower on large repos.
-    "scope": "changedFiles"
+    "scope": "changedFiles",
   },
 
   // ──────────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ Below is every option with inline commentary. JSON does not support comments, so
     "graphSliceMaxEntries": 1000,
 
     // Total byte cap for graph slice cache (~50MB default).
-    "graphSliceMaxSizeBytes": 52428800
+    "graphSliceMaxSizeBytes": 52428800,
   },
 
   // ──────────────────────────────────────────────────────────
@@ -244,7 +244,7 @@ Below is every option with inline commentary. JSON does not support comments, so
     "enabled": true,
 
     // Require plugin API version compatibility. Disable for development/testing only.
-    "strictVersioning": true
+    "strictVersioning": true,
   },
 
   // ──────────────────────────────────────────────────────────
@@ -308,8 +308,8 @@ Below is every option with inline commentary. JSON does not support comments, so
       "efSearch": 50,
 
       // Maximum elements in the ANN index (1000-1000000).
-      "maxElements": 200000
-    }
+      "maxElements": 200000,
+    },
   },
 
   // ──────────────────────────────────────────────────────────
@@ -324,7 +324,7 @@ Below is every option with inline commentary. JSON does not support comments, so
     "maxBudgetPercent": 20,
 
     // Number of top symbols warmed on server startup.
-    "warmTopN": 50
+    "warmTopN": 50,
   },
 
   // ──────────────────────────────────────────────────────────
@@ -345,7 +345,7 @@ Below is every option with inline commentary. JSON does not support comments, so
     "otlpEndpoint": null,
 
     // Sampling rate for traces (0.0 to 1.0). 1.0 = trace everything.
-    "sampleRate": 1.0
+    "sampleRate": 1.0,
   },
 
   // ──────────────────────────────────────────────────────────
@@ -361,8 +361,8 @@ Below is every option with inline commentary. JSON does not support comments, so
 
     // Minimum candidate count to trigger parallel scoring (1-100).
     // Below this threshold, single-threaded scoring is used.
-    "minBatchSize": null
-  }
+    "minBatchSize": null,
+  },
 }
 ```
 
@@ -374,17 +374,17 @@ Below is every option with inline commentary. JSON does not support comments, so
 
 Each entry registers a codebase for indexing. You can index multiple repos in one config.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `repoId` | `string` | — | **Required.** Unique identifier used in all tool calls |
-| `rootPath` | `string` | — | **Required.** Absolute or relative path to repo root |
-| `ignore` | `string[]` | `["**/node_modules/**", "**/dist/**", "**/.next/**", "**/build/**"]` | Glob patterns to exclude |
-| `languages` | `string[]` | All 14 languages | File extensions to index |
-| `maxFileBytes` | `integer` | `2000000` (2MB) | Max file size; larger files skipped |
-| `includeNodeModulesTypes` | `boolean` | `true` | Index `@types/*` for TS call resolution |
-| `packageJsonPath` | `string` | Auto-detected | Override package.json location |
-| `tsconfigPath` | `string` | Auto-detected | Override tsconfig.json location |
-| `workspaceGlobs` | `string[]` | — | Glob patterns for monorepo workspace package.json files |
+| Field                     | Type       | Default                                                              | Description                                             |
+| ------------------------- | ---------- | -------------------------------------------------------------------- | ------------------------------------------------------- |
+| `repoId`                  | `string`   | —                                                                    | **Required.** Unique identifier used in all tool calls  |
+| `rootPath`                | `string`   | —                                                                    | **Required.** Absolute or relative path to repo root    |
+| `ignore`                  | `string[]` | `["**/node_modules/**", "**/dist/**", "**/.next/**", "**/build/**"]` | Glob patterns to exclude                                |
+| `languages`               | `string[]` | All 14 languages                                                     | File extensions to index                                |
+| `maxFileBytes`            | `integer`  | `2000000` (2MB)                                                      | Max file size; larger files skipped                     |
+| `includeNodeModulesTypes` | `boolean`  | `true`                                                               | Index `@types/*` for TS call resolution                 |
+| `packageJsonPath`         | `string`   | Auto-detected                                                        | Override package.json location                          |
+| `tsconfigPath`            | `string`   | Auto-detected                                                        | Override tsconfig.json location                         |
+| `workspaceGlobs`          | `string[]` | —                                                                    | Glob patterns for monorepo workspace package.json files |
 
 **Supported languages:** `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh`
 
@@ -394,11 +394,11 @@ Each entry registers a codebase for indexing. You can index multiple repos in on
 
 ### `graphDatabase` (optional)
 
-Controls where SDL-MCP stores the KuzuDB graph database (file path). Supports `${ENV_VAR}` expansion.
+Controls where SDL-MCP stores the Ladybug graph database (file path). Supports `${ENV_VAR}` expansion.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `graphDatabase.path` | `string?` | `<configDir>/sdl-mcp-graph.kuzu` | Path to the KuzuDB database file |
+| Field                | Type      | Default                          | Description                       |
+| -------------------- | --------- | -------------------------------- | --------------------------------- |
+| `graphDatabase.path` | `string?` | `<configDir>/sdl-mcp-graph.kuzu` | Path to the Ladybug database file |
 
 > **When to change:** Move to a fast SSD path if indexing is slow. Use `${SDL_GRAPH_DB_PATH}` for an explicit file path, or `${SDL_GRAPH_DB_DIR}` to point at a containing directory and let SDL-MCP place `sdl-mcp-graph.kuzu` inside it.
 
@@ -408,9 +408,9 @@ Controls where SDL-MCP stores the KuzuDB graph database (file path). Supports `$
 
 Legacy v0.7.x SQLite database file path, only used by the one-time SQLite→Kuzu migration script.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `dbPath` | `string?` | — | Legacy SQLite file path (migration only) |
+| Field    | Type      | Default | Description                              |
+| -------- | --------- | ------- | ---------------------------------------- |
+| `dbPath` | `string?` | —       | Legacy SQLite file path (migration only) |
 
 ---
 
@@ -418,13 +418,13 @@ Legacy v0.7.x SQLite database file path, only used by the one-time SQLite→Kuzu
 
 Controls the proof-of-need gating system for raw code access via `sdl.code.needWindow`.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `maxWindowLines` | `integer` | `180` | Max lines per code window (min: 1) |
-| `maxWindowTokens` | `integer` | `1400` | Max tokens per code window (min: 1) |
-| `requireIdentifiers` | `boolean` | `true` | Require `identifiersToFind` in needWindow calls |
-| `allowBreakGlass` | `boolean` | `true` | Allow emergency override of policy denials |
-| `defaultMinCallConfidence` | `number?` | — | Optional server-side default for `symbol.getCard` / `slice.build` call-edge filtering |
+| Field                      | Type      | Default | Description                                                                           |
+| -------------------------- | --------- | ------- | ------------------------------------------------------------------------------------- |
+| `maxWindowLines`           | `integer` | `180`   | Max lines per code window (min: 1)                                                    |
+| `maxWindowTokens`          | `integer` | `1400`  | Max tokens per code window (min: 1)                                                   |
+| `requireIdentifiers`       | `boolean` | `true`  | Require `identifiersToFind` in needWindow calls                                       |
+| `allowBreakGlass`          | `boolean` | `true`  | Allow emergency override of policy denials                                            |
+| `defaultMinCallConfidence` | `number?` | —       | Optional server-side default for `symbol.getCard` / `slice.build` call-edge filtering |
 
 Requests exceeding `maxWindowLines` or `maxWindowTokens` are silently clamped (not rejected). Policy can also be changed at runtime via `sdl.policy.set`.
 
@@ -438,19 +438,19 @@ Requests exceeding `maxWindowLines` or `maxWindowTokens` are silently clamped (n
 
 Controls sensitive-data masking in all returned code content.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | `boolean` | `true` | Enable redaction |
-| `includeDefaults` | `boolean` | `true` | Use built-in patterns (AWS keys, GitHub tokens, private keys, etc.) |
-| `patterns` | `object[]` | `[]` | Custom regex patterns |
+| Field             | Type       | Default | Description                                                         |
+| ----------------- | ---------- | ------- | ------------------------------------------------------------------- |
+| `enabled`         | `boolean`  | `true`  | Enable redaction                                                    |
+| `includeDefaults` | `boolean`  | `true`  | Use built-in patterns (AWS keys, GitHub tokens, private keys, etc.) |
+| `patterns`        | `object[]` | `[]`    | Custom regex patterns                                               |
 
 Each custom pattern:
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | `string` | No | Label for documentation/logging |
-| `pattern` | `string` | Yes | Regex pattern to match |
-| `flags` | `string` | No | Regex flags (e.g., `"gi"`) |
+| Field     | Type     | Required | Description                     |
+| --------- | -------- | -------- | ------------------------------- |
+| `name`    | `string` | No       | Label for documentation/logging |
+| `pattern` | `string` | Yes      | Regex pattern to match          |
+| `flags`   | `string` | No       | Regex flags (e.g., `"gi"`)      |
 
 > **When to change:** Add custom patterns for internal tokens, connection strings, or proprietary secrets not covered by defaults. Disable only for fully private/air-gapped environments.
 
@@ -460,16 +460,17 @@ Each custom pattern:
 
 Controls how and when code is indexed.
 
-| Field | Type | Default | Range | Description |
-|-------|------|---------|-------|-------------|
-| `concurrency` | `integer` | `8` | 1-10 | Concurrent indexing workers |
-| `enableFileWatching` | `boolean` | `true` | — | Auto-reindex on file changes |
-| `maxWatchedFiles` | `integer` | `25000` | min: 1 | Cap on tracked files to prevent memory overload |
-| `workerPoolSize` | `integer` | Auto | 1-16 | Override worker pool thread count |
-| `engine` | `string` | `"typescript"` | `"typescript"` \| `"rust"` | Indexer implementation |
-| `watchDebounceMs` | `integer` | `300` | 50-5000 | Debounce delay for file watch events (ms) |
+| Field                | Type      | Default        | Range                      | Description                                     |
+| -------------------- | --------- | -------------- | -------------------------- | ----------------------------------------------- |
+| `concurrency`        | `integer` | `8`            | 1-10                       | Concurrent indexing workers                     |
+| `enableFileWatching` | `boolean` | `true`         | —                          | Auto-reindex on file changes                    |
+| `maxWatchedFiles`    | `integer` | `25000`        | min: 1                     | Cap on tracked files to prevent memory overload |
+| `workerPoolSize`     | `integer` | Auto           | 1-16                       | Override worker pool thread count               |
+| `engine`             | `string`  | `"typescript"` | `"typescript"` \| `"rust"` | Indexer implementation                          |
+| `watchDebounceMs`    | `integer` | `300`          | 50-5000                    | Debounce delay for file watch events (ms)       |
 
 > **When to change:**
+>
 > - **CI/batch mode:** Set `enableFileWatching: false`, `concurrency: 2`
 > - **Large repos (>25k files):** Increase `maxWatchedFiles` or disable watching
 > - **Slow machine:** Lower `concurrency` to 2-4
@@ -482,13 +483,13 @@ Controls how and when code is indexed.
 
 Default budget and traversal weights for graph slices (`sdl.slice.build`).
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `defaultMaxCards` | `integer` | `60` | Default max symbol cards per slice (min: 1) |
-| `defaultMaxTokens` | `integer` | `12000` | Default max estimated tokens per slice (min: 1) |
-| `edgeWeights.call` | `number` | `1.0` | Weight for function/method call edges (min: 0) |
-| `edgeWeights.import` | `number` | `0.6` | Weight for module import edges (min: 0) |
-| `edgeWeights.config` | `number` | `0.8` | Weight for configuration reference edges (min: 0) |
+| Field                | Type      | Default | Description                                       |
+| -------------------- | --------- | ------- | ------------------------------------------------- |
+| `defaultMaxCards`    | `integer` | `60`    | Default max symbol cards per slice (min: 1)       |
+| `defaultMaxTokens`   | `integer` | `12000` | Default max estimated tokens per slice (min: 1)   |
+| `edgeWeights.call`   | `number`  | `1.0`   | Weight for function/method call edges (min: 0)    |
+| `edgeWeights.import` | `number`  | `0.6`   | Weight for module import edges (min: 0)           |
+| `edgeWeights.config` | `number`  | `0.8`   | Weight for configuration reference edges (min: 0) |
 
 Per-call `budget` parameters in `sdl.slice.build` override these defaults.
 
@@ -500,13 +501,13 @@ Per-call `budget` parameters in `sdl.slice.build` override these defaults.
 
 TypeScript/JavaScript diagnostics integration for delta packs and blast radius.
 
-| Field | Type | Default | Range | Description |
-|-------|------|---------|-------|-------------|
-| `enabled` | `boolean` | `true` | — | Enable diagnostics |
-| `mode` | `string` | `"tsLS"` | `"tsLS"` \| `"tsc"` | Engine: Language Service (faster) or compiler |
-| `maxErrors` | `integer` | `50` | min: 1 | Max errors before truncation |
-| `timeoutMs` | `integer` | `2000` | min: 100 | Per-operation timeout (ms) |
-| `scope` | `string` | `"changedFiles"` | `"changedFiles"` \| `"workspace"` | Which files to check |
+| Field       | Type      | Default          | Range                             | Description                                   |
+| ----------- | --------- | ---------------- | --------------------------------- | --------------------------------------------- |
+| `enabled`   | `boolean` | `true`           | —                                 | Enable diagnostics                            |
+| `mode`      | `string`  | `"tsLS"`         | `"tsLS"` \| `"tsc"`               | Engine: Language Service (faster) or compiler |
+| `maxErrors` | `integer` | `50`             | min: 1                            | Max errors before truncation                  |
+| `timeoutMs` | `integer` | `2000`           | min: 100                          | Per-operation timeout (ms)                    |
+| `scope`     | `string`  | `"changedFiles"` | `"changedFiles"` \| `"workspace"` | Which files to check                          |
 
 > **When to change:** Disable for non-TypeScript repos. Use `scope: "workspace"` for thorough CI checks (much slower). Increase `timeoutMs` for very large files.
 
@@ -516,13 +517,13 @@ TypeScript/JavaScript diagnostics integration for delta packs and blast radius.
 
 In-memory LRU caches for frequently accessed symbol cards and graph slices.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | `boolean` | `true` | Toggle all caching |
-| `symbolCardMaxEntries` | `integer` | `2000` | Max cached symbol cards (min: 1) |
-| `symbolCardMaxSizeBytes` | `integer` | `104857600` (100MB) | Byte cap for card cache (min: 1024) |
-| `graphSliceMaxEntries` | `integer` | `1000` | Max cached graph slices (min: 1) |
-| `graphSliceMaxSizeBytes` | `integer` | `52428800` (50MB) | Byte cap for slice cache (min: 1024) |
+| Field                    | Type      | Default             | Description                          |
+| ------------------------ | --------- | ------------------- | ------------------------------------ |
+| `enabled`                | `boolean` | `true`              | Toggle all caching                   |
+| `symbolCardMaxEntries`   | `integer` | `2000`              | Max cached symbol cards (min: 1)     |
+| `symbolCardMaxSizeBytes` | `integer` | `104857600` (100MB) | Byte cap for card cache (min: 1024)  |
+| `graphSliceMaxEntries`   | `integer` | `1000`              | Max cached graph slices (min: 1)     |
+| `graphSliceMaxSizeBytes` | `integer` | `52428800` (50MB)   | Byte cap for slice cache (min: 1024) |
 
 > **When to change:** Increase entries for large repos with many symbols. Decrease byte caps on memory-constrained systems. Disable only for debugging stale-cache issues.
 
@@ -532,11 +533,11 @@ In-memory LRU caches for frequently accessed symbol cards and graph slices.
 
 Adapter plugin loading for extending indexer language support.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `paths` | `string[]` | `[]` | Paths to plugin entrypoints (files or directories) |
-| `enabled` | `boolean` | `true` | Toggle plugin loading |
-| `strictVersioning` | `boolean` | `true` | Require API version compatibility |
+| Field              | Type       | Default | Description                                        |
+| ------------------ | ---------- | ------- | -------------------------------------------------- |
+| `paths`            | `string[]` | `[]`    | Paths to plugin entrypoints (files or directories) |
+| `enabled`          | `boolean`  | `true`  | Toggle plugin loading                              |
+| `strictVersioning` | `boolean`  | `true`  | Require API version compatibility                  |
 
 > **When to change:** Add paths when using third-party language adapters. Set `strictVersioning: false` only during plugin development.
 
@@ -546,32 +547,33 @@ Adapter plugin loading for extending indexer language support.
 
 Controls semantic search reranking, embedding generation, and LLM-powered symbol summaries.
 
-| Field | Type | Default | Range | Description |
-|-------|------|---------|-------|-------------|
-| `enabled` | `boolean` | `true` | — | Enable semantic reranking in symbol search |
-| `alpha` | `number` | `0.6` | 0.0-1.0 | Lexical/semantic blend (0=pure lexical, 1=pure semantic) |
-| `provider` | `string` | `"mock"` | `"api"` \| `"local"` \| `"mock"` | Embedding provider |
-| `model` | `string` | `"all-MiniLM-L6-v2"` | — | Embedding model identifier |
-| `generateSummaries` | `boolean` | `false` | — | Generate LLM summaries during indexing |
-| `summaryModel` | `string` | `"claude-haiku-4-5-20251001"` | — | LLM model for summaries |
-| `summaryApiKey` | `string?` | `null` | — | API key (falls back to `ANTHROPIC_API_KEY` env var) |
-| `summaryApiBaseUrl` | `string?` | `null` | — | Base URL for OpenAI-compatible endpoints |
-| `summaryMaxConcurrency` | `integer` | `5` | 1-20 | Max concurrent LLM requests |
-| `summaryBatchSize` | `integer` | `20` | 1-50 | Symbols per LLM batch request |
+| Field                   | Type      | Default                       | Range                            | Description                                              |
+| ----------------------- | --------- | ----------------------------- | -------------------------------- | -------------------------------------------------------- |
+| `enabled`               | `boolean` | `true`                        | —                                | Enable semantic reranking in symbol search               |
+| `alpha`                 | `number`  | `0.6`                         | 0.0-1.0                          | Lexical/semantic blend (0=pure lexical, 1=pure semantic) |
+| `provider`              | `string`  | `"mock"`                      | `"api"` \| `"local"` \| `"mock"` | Embedding provider                                       |
+| `model`                 | `string`  | `"all-MiniLM-L6-v2"`          | —                                | Embedding model identifier                               |
+| `generateSummaries`     | `boolean` | `false`                       | —                                | Generate LLM summaries during indexing                   |
+| `summaryModel`          | `string`  | `"claude-haiku-4-5-20251001"` | —                                | LLM model for summaries                                  |
+| `summaryApiKey`         | `string?` | `null`                        | —                                | API key (falls back to `ANTHROPIC_API_KEY` env var)      |
+| `summaryApiBaseUrl`     | `string?` | `null`                        | —                                | Base URL for OpenAI-compatible endpoints                 |
+| `summaryMaxConcurrency` | `integer` | `5`                           | 1-20                             | Max concurrent LLM requests                              |
+| `summaryBatchSize`      | `integer` | `20`                          | 1-50                             | Symbols per LLM batch request                            |
 
 #### `semantic.ann` (nested, optional)
 
 HNSW approximate nearest neighbor index for faster semantic retrieval on large repos.
 
-| Field | Type | Default | Range | Description |
-|-------|------|---------|-------|-------------|
-| `enabled` | `boolean` | `false` | — | Enable HNSW ANN index |
-| `m` | `integer` | `16` | 4-64 | Bi-directional links per node |
-| `efConstruction` | `integer` | `200` | 16-500 | Candidate list size during build |
-| `efSearch` | `integer` | `50` | 8-256 | Candidate list size during search |
-| `maxElements` | `integer` | `200000` | 1000-1000000 | Max elements in index |
+| Field            | Type      | Default  | Range        | Description                       |
+| ---------------- | --------- | -------- | ------------ | --------------------------------- |
+| `enabled`        | `boolean` | `false`  | —            | Enable HNSW ANN index             |
+| `m`              | `integer` | `16`     | 4-64         | Bi-directional links per node     |
+| `efConstruction` | `integer` | `200`    | 16-500       | Candidate list size during build  |
+| `efSearch`       | `integer` | `50`     | 8-256        | Candidate list size during search |
+| `maxElements`    | `integer` | `200000` | 1000-1000000 | Max elements in index             |
 
 > **When to change:**
+>
 > - **Use semantic search in production:** Set `provider: "api"` or `provider: "local"` (with `onnxruntime-node` installed). The `"mock"` provider returns deterministic results for testing only.
 > - **Generate summaries:** Set `generateSummaries: true` and provide an API key. Use `summaryApiBaseUrl` for local LLMs (e.g., Ollama at `http://localhost:11434/v1`).
 > - **Large repos (>10k symbols):** Enable `ann` for faster semantic search.
@@ -583,11 +585,11 @@ HNSW approximate nearest neighbor index for faster semantic retrieval on large r
 
 Predictive background warming of likely-needed results during `sdl-mcp serve`.
 
-| Field | Type | Default | Range | Description |
-|-------|------|---------|-------|-------------|
-| `enabled` | `boolean` | `true` | — | Toggle prefetch queue |
-| `maxBudgetPercent` | `integer` | `20` | 1-100 | Resource cap as % of configured budget |
-| `warmTopN` | `integer` | `50` | min: 1 | Symbols warmed on startup |
+| Field              | Type      | Default | Range  | Description                            |
+| ------------------ | --------- | ------- | ------ | -------------------------------------- |
+| `enabled`          | `boolean` | `true`  | —      | Toggle prefetch queue                  |
+| `maxBudgetPercent` | `integer` | `20`    | 1-100  | Resource cap as % of configured budget |
+| `warmTopN`         | `integer` | `50`    | min: 1 | Symbols warmed on startup              |
 
 Prefetch metrics are exposed in `sdl.repo.status` under `prefetchStats` (queue depth, hit/waste rates, latency reduction).
 
@@ -599,13 +601,13 @@ Prefetch metrics are exposed in `sdl.repo.status` under `prefetchStats` (queue d
 
 OpenTelemetry observability for tool calls, indexing, and internal operations.
 
-| Field | Type | Default | Range | Description |
-|-------|------|---------|-------|-------------|
-| `enabled` | `boolean` | `false` | — | Enable tracing |
-| `serviceName` | `string` | `"sdl-mcp"` | — | Service name for trace spans |
-| `exporterType` | `string` | `"console"` | `"console"` \| `"otlp"` \| `"memory"` | Trace exporter |
-| `otlpEndpoint` | `string?` | — | — | OTLP collector URL (required for `"otlp"`) |
-| `sampleRate` | `number` | `1.0` | 0.0-1.0 | Sampling rate (1.0 = trace everything) |
+| Field          | Type      | Default     | Range                                 | Description                                |
+| -------------- | --------- | ----------- | ------------------------------------- | ------------------------------------------ |
+| `enabled`      | `boolean` | `false`     | —                                     | Enable tracing                             |
+| `serviceName`  | `string`  | `"sdl-mcp"` | —                                     | Service name for trace spans               |
+| `exporterType` | `string`  | `"console"` | `"console"` \| `"otlp"` \| `"memory"` | Trace exporter                             |
+| `otlpEndpoint` | `string?` | —           | —                                     | OTLP collector URL (required for `"otlp"`) |
+| `sampleRate`   | `number`  | `1.0`       | 0.0-1.0                               | Sampling rate (1.0 = trace everything)     |
 
 > **When to change:** Enable for production monitoring or debugging performance issues. Use `exporterType: "otlp"` with a Jaeger/Zipkin collector. Lower `sampleRate` under heavy load.
 
@@ -615,11 +617,11 @@ OpenTelemetry observability for tool calls, indexing, and internal operations.
 
 Worker-thread acceleration for beam search scoring in `sdl.slice.build`.
 
-| Field | Type | Default | Range | Description |
-|-------|------|---------|-------|-------------|
-| `enabled` | `boolean` | `false` | — | Enable parallel scoring |
-| `poolSize` | `integer?` | Auto | 1-8 | Worker thread count |
-| `minBatchSize` | `integer?` | Auto | 1-100 | Min candidates to trigger parallelism |
+| Field          | Type       | Default | Range | Description                           |
+| -------------- | ---------- | ------- | ----- | ------------------------------------- |
+| `enabled`      | `boolean`  | `false` | —     | Enable parallel scoring               |
+| `poolSize`     | `integer?` | Auto    | 1-8   | Worker thread count                   |
+| `minBatchSize` | `integer?` | Auto    | 1-100 | Min candidates to trigger parallelism |
 
 > **When to change:** Enable on multi-core machines where slice building is a bottleneck. Most useful for repos with >5k symbols and large slices.
 
@@ -627,16 +629,16 @@ Worker-thread acceleration for beam search scoring in `sdl.slice.build`.
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `SDL_CONFIG` / `SDL_CONFIG_PATH` | Path to config file |
-| `SDL_CONFIG_HOME` | Directory for default global config resolution |
-| `SDL_GRAPH_DB_PATH` | Override graph DB file path (takes precedence over config) |
-| `SDL_GRAPH_DB_DIR` | Legacy directory-style override; SDL-MCP stores `sdl-mcp-graph.kuzu` inside it |
-| `SDL_DB_PATH` | Legacy alias for graph DB path override (v0.7.x) |
-| `SDL_LOG_LEVEL` | Log level: `debug`, `info`, `warn`, `error` |
-| `SDL_LOG_FORMAT` | Log format: `json`, `text` |
-| `ANTHROPIC_API_KEY` | Fallback API key for `semantic.generateSummaries` |
+| Variable                         | Description                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------ |
+| `SDL_CONFIG` / `SDL_CONFIG_PATH` | Path to config file                                                            |
+| `SDL_CONFIG_HOME`                | Directory for default global config resolution                                 |
+| `SDL_GRAPH_DB_PATH`              | Override graph DB file path (takes precedence over config)                     |
+| `SDL_GRAPH_DB_DIR`               | Legacy directory-style override; SDL-MCP stores `sdl-mcp-graph.kuzu` inside it |
+| `SDL_DB_PATH`                    | Legacy alias for graph DB path override (v0.7.x)                               |
+| `SDL_LOG_LEVEL`                  | Log level: `debug`, `info`, `warn`, `error`                                    |
+| `SDL_LOG_FORMAT`                 | Log format: `json`, `text`                                                     |
+| `ANTHROPIC_API_KEY`              | Fallback API key for `semantic.generateSummaries`                              |
 
 SDL-MCP expands `${VAR_NAME}` references inside JSON config values at load time.
 
