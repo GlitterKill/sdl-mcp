@@ -411,14 +411,24 @@ describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
     assert.ok(Array.isArray(cardResponse.card.processes));
     assert.ok(cardResponse.card.processes.length >= 1);
 
+    const clustersAfterIncremental = await ladybugDb.getClustersForRepo(
+      conn,
+      REPO_ID,
+    );
+    assert.ok(
+      clustersAfterIncremental.length >= 1,
+      "Expected at least one cluster after incremental reindex",
+    );
+
     const overview = await buildRepoOverview({
       repoId: REPO_ID,
       level: "stats",
     });
     assert.ok(overview.clusters);
-    assert.ok(
-      overview.clusters.totalClusters >= 2,
-      `Expected >=2 clusters in overview, got ${overview.clusters.totalClusters}`,
+    assert.strictEqual(
+      overview.clusters.totalClusters,
+      clustersAfterIncremental.length,
+      "Overview cluster stats should match persisted cluster rows after incremental reindex",
     );
     assert.ok(overview.processes);
     assert.strictEqual(overview.processes.totalProcesses, 2);

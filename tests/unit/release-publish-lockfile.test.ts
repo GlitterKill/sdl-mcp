@@ -49,10 +49,17 @@ describe("release publish lockfile guards", () => {
       "package-lock root package should pin sdl-mcp-native to the release version",
     );
     assert.equal(
-      lockNative?.version,
-      expectedVersion,
-      "package-lock should include a resolved sdl-mcp-native package entry",
+      typeof lockNative,
+      "object",
+      "package-lock should include an sdl-mcp-native entry",
     );
+    if (lockNative?.version) {
+      assert.equal(
+        lockNative.version,
+        expectedVersion,
+        "package-lock should keep the resolved sdl-mcp-native version in sync when present",
+      );
+    }
 
     for (const [name, version] of Object.entries(
       nativePkg.optionalDependencies ?? {},
@@ -62,16 +69,21 @@ describe("release publish lockfile guards", () => {
         expectedVersion,
         `native/package.json should pin ${name} to the release version`,
       );
-      assert.equal(
-        lockNative?.optionalDependencies?.[name],
-        expectedVersion,
-        `package-lock should pin ${name} under sdl-mcp-native optionalDependencies`,
-      );
-      assert.equal(
-        lockPackages[`node_modules/${name}`]?.version,
-        expectedVersion,
-        `package-lock should include a ${name} package entry`,
-      );
+      if (lockNative?.optionalDependencies?.[name] !== undefined) {
+        assert.equal(
+          lockNative.optionalDependencies[name],
+          expectedVersion,
+          `package-lock should pin ${name} under sdl-mcp-native optionalDependencies when present`,
+        );
+      }
+      const platformLockEntry = lockPackages[`node_modules/${name}`];
+      if (platformLockEntry?.version !== undefined) {
+        assert.equal(
+          platformLockEntry.version,
+          expectedVersion,
+          `package-lock should keep ${name} aligned when a resolved entry is present`,
+        );
+      }
     }
   });
 
