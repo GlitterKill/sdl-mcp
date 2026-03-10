@@ -123,28 +123,39 @@ function createMockEdge(
   };
 }
 
+function createSeededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(state ^ (state >>> 15), state | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function generateLargeGraph(
   nodeCount: number,
   avgDegree: number,
 ): { symbols: MockSymbol[]; edges: MockEdge[] } {
   const symbols: MockSymbol[] = [];
   const edges: MockEdge[] = [];
+  const random = createSeededRandom(nodeCount * 1009 + avgDegree * 101);
 
   for (let i = 0; i < nodeCount; i++) {
     symbols.push(createMockSymbol(`sym_${i}`, `function_${i}`));
   }
 
   for (let i = 0; i < nodeCount; i++) {
-    const numEdges = Math.floor(Math.random() * avgDegree * 2) + 1;
+    const numEdges = Math.floor(random() * avgDegree * 2) + 1;
     for (let j = 0; j < numEdges; j++) {
-      const target = Math.floor(Math.random() * nodeCount);
+      const target = Math.floor(random() * nodeCount);
       if (target !== i) {
         edges.push(
           createMockEdge(
             `sym_${i}`,
             `sym_${target}`,
             "call",
-            0.5 + Math.random() * 0.5,
+            0.5 + random() * 0.5,
           ),
         );
       }
