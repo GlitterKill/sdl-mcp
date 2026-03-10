@@ -4,8 +4,8 @@ import {
   PolicySetRequestSchema,
   PolicySetResponse,
 } from "../tools.js";
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { DatabaseError } from "../errors.js";
@@ -24,8 +24,8 @@ export async function handlePolicyGet(
   const request = PolicyGetRequestSchema.parse(args);
   const { repoId } = request;
 
-  const conn = await getKuzuConn();
-  const repo = await kuzuDb.getRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
     throw new DatabaseError(`Repository ${repoId} not found`);
   }
@@ -71,8 +71,8 @@ export async function handlePolicySet(
   const request = PolicySetRequestSchema.parse(args);
   const { repoId, policyPatch } = request;
 
-  const conn = await getKuzuConn();
-  const repo = await kuzuDb.getRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
     throw new DatabaseError(`Repository ${repoId} not found`);
   }
@@ -101,7 +101,7 @@ export async function handlePolicySet(
   });
   configJson.policy = mergedOverrides;
 
-  await kuzuDb.upsertRepo(conn, {
+  await ladybugDb.upsertRepo(conn, {
     repoId,
     rootPath: repo.rootPath,
     configJson: JSON.stringify(configJson),

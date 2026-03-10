@@ -3,7 +3,7 @@ import { basename, dirname, extname, resolve } from "path";
 
 import type { AppConfig } from "../config/types.js";
 
-export const DEFAULT_GRAPH_DB_FILENAME = "sdl-mcp-graph.kuzu";
+export const DEFAULT_GRAPH_DB_FILENAME = "sdl-mcp-graph.lbug";
 const LEGACY_GRAPH_DB_DIRNAME = "sdl-mcp-graph";
 
 type GraphDbPathHint = "auto" | "file" | "directory";

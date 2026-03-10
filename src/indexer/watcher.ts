@@ -15,8 +15,8 @@ import {
   WATCHER_DEFAULT_MAX_WATCHED_FILES,
 } from "../config/constants.js";
 import { loadConfig } from "../config/loadConfig.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { normalizePath } from "../util/paths.js";
 import { patchSavedFile } from "../live-index/file-patcher.js";
 
@@ -150,8 +150,8 @@ export async function watchRepositoryWithIndexer(
   repoId: string,
   indexRepo: IndexRepoFn,
 ): Promise<IndexWatchHandle> {
-  const conn = await getKuzuConn();
-  const repoRow = await kuzuDb.getRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const repoRow = await ladybugDb.getRepo(conn, repoId);
   if (!repoRow) {
     throw new Error(`Repository ${repoId} not found`);
   }
@@ -163,7 +163,7 @@ export async function watchRepositoryWithIndexer(
   const appConfig = loadConfig();
   const maxWatchedFiles =
     appConfig.indexing?.maxWatchedFiles ?? WATCHER_DEFAULT_MAX_WATCHED_FILES;
-  const estimatedFileCount = await kuzuDb.getFileCount(conn, repoId);
+  const estimatedFileCount = await ladybugDb.getFileCount(conn, repoId);
   if (estimatedFileCount > maxWatchedFiles) {
     throw new Error(
       `Watcher cap exceeded for ${repoId}: ${estimatedFileCount} files > maxWatchedFiles ${maxWatchedFiles}`,

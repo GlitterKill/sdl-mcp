@@ -3,9 +3,9 @@ import { computeDelta } from "../../delta/diff.js";
 import { runGovernorLoop } from "../../delta/blastRadius.js";
 import { truncateArray } from "../../util/truncation.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { getKuzuConn } from "../../db/kuzu.js";
-import { getSliceHandle, updateSliceHandleSpillover } from "../../db/kuzu-queries.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import { getSliceHandle, updateSliceHandleSpillover } from "../../db/ladybug-queries.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import {
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
@@ -83,7 +83,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       toVersionId: validated.toVersion,
     };
 
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
     const governorResult = await runGovernorLoop(conn, changedSymbolIds, governorOptions);
 
     delta.blastRadius = governorResult.blastRadius;
@@ -147,7 +147,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
         current: item.fanInTrend!.current,
       }));
 
-    const symbolMap = await kuzuDb.getSymbolsByIds(conn, changedSymbolIds);
+    const symbolMap = await ladybugDb.getSymbolsByIds(conn, changedSymbolIds);
     const fileIds = [
       ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
     ];

@@ -14,8 +14,8 @@ import {
   MAX_FILE_BYTES,
   MAX_TREESITTER_PARSE_BYTES,
 } from "../config/constants.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 import { getParser as getGrammarParser } from "../indexer/treesitter/grammarLoader.js";
 
@@ -670,17 +670,17 @@ export async function generateSymbolSkeleton(
   symbolId: SymbolId,
   options: SkeletonOptions = {},
 ): Promise<SkeletonResult | null> {
-  const conn = await getKuzuConn();
-  const symbol = await kuzuDb.getSymbol(conn, symbolId);
+  const conn = await getLadybugConn();
+  const symbol = await ladybugDb.getSymbol(conn, symbolId);
   if (!symbol) return null;
 
   if (symbol.repoId !== repoId) return null;
 
-  const files = await kuzuDb.getFilesByIds(conn, [symbol.fileId]);
+  const files = await ladybugDb.getFilesByIds(conn, [symbol.fileId]);
   const file = files.get(symbol.fileId);
   if (!file) return null;
 
-  const repo = await kuzuDb.getRepo(conn, repoId);
+  const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) return null;
 
   const filePath = getAbsolutePathFromRepoRoot(repo.rootPath, file.relPath);
@@ -776,8 +776,8 @@ export async function generateFileSkeleton(
   exportedOnly: boolean = false,
   options: SkeletonOptions = {},
 ): Promise<SkeletonResult | null> {
-  const conn = await getKuzuConn();
-  const repo = await kuzuDb.getRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) return null;
 
   const absPath = getAbsolutePathFromRepoRoot(repo.rootPath, filePath);
@@ -1103,17 +1103,17 @@ export async function generateSkeletonIR(
   symbolId: SymbolId,
   options: SkeletonOptions = {},
 ): Promise<SkeletonIRResult | null> {
-  const conn = await getKuzuConn();
-  const symbol = await kuzuDb.getSymbol(conn, symbolId);
+  const conn = await getLadybugConn();
+  const symbol = await ladybugDb.getSymbol(conn, symbolId);
   if (!symbol) return null;
 
   if (symbol.repoId !== repoId) return null;
 
-  const files = await kuzuDb.getFilesByIds(conn, [symbol.fileId]);
+  const files = await ladybugDb.getFilesByIds(conn, [symbol.fileId]);
   const file = files.get(symbol.fileId);
   if (!file) return null;
 
-  const repo = await kuzuDb.getRepo(conn, repoId);
+  const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) return null;
 
   const filePath = getAbsolutePathFromRepoRoot(repo.rootPath, file.relPath);

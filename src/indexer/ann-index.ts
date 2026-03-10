@@ -1,6 +1,6 @@
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
-import type { SymbolEmbeddingRow } from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
+import type { SymbolEmbeddingRow } from "../db/ladybug-queries.js";
 import { hashContent } from "../util/hashing.js";
 
 export const EMBEDDING_DIMENSION = 64;
@@ -72,7 +72,7 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / denom;
 }
 
-function computeVersionHash(rows: kuzuDb.SymbolEmbeddingRow[]): string {
+function computeVersionHash(rows: ladybugDb.SymbolEmbeddingRow[]): string {
   const payload = rows
     .map((r) => `${r.symbolId}:${r.model}:${r.version}:${r.cardHash}`)
     .sort()
@@ -397,22 +397,22 @@ export class AnnIndexManager {
   async buildIndex(params: {
     repoId: string;
     model: string;
-    embeddingRows?: kuzuDb.SymbolEmbeddingRow[];
+    embeddingRows?: ladybugDb.SymbolEmbeddingRow[];
   }): Promise<{ indexed: number; skipped: number }> {
     if (!this.config.enabled) {
       return { indexed: 0, skipped: 0 };
     }
 
     try {
-      const conn = await getKuzuConn();
-      const allSymbols = await kuzuDb.getSymbolsByRepo(conn, params.repoId);
+      const conn = await getLadybugConn();
+      const allSymbols = await ladybugDb.getSymbolsByRepo(conn, params.repoId);
       const symbolIds = allSymbols.map((s) => s.symbolId);
 
-      let embeddingRows: kuzuDb.SymbolEmbeddingRow[];
+      let embeddingRows: ladybugDb.SymbolEmbeddingRow[];
       if (params.embeddingRows) {
         embeddingRows = params.embeddingRows;
       } else {
-        const embeddingMap = await kuzuDb.getSymbolEmbeddings(conn, symbolIds);
+        const embeddingMap = await ladybugDb.getSymbolEmbeddings(conn, symbolIds);
         embeddingRows = Array.from(embeddingMap.values()).filter(
           (r) => r.model === params.model,
         );
@@ -528,8 +528,8 @@ export class AnnIndexManager {
     k: number,
   ): Promise<SearchResult[]> {
     const normalizedQuery = normalizeVector(query);
-    const conn = await getKuzuConn();
-    const embeddingMap = await kuzuDb.getSymbolEmbeddings(conn, symbolIds);
+    const conn = await getLadybugConn();
+    const embeddingMap = await ladybugDb.getSymbolEmbeddings(conn, symbolIds);
 
     const results: SearchResult[] = [];
     for (const symbolId of symbolIds) {
@@ -602,8 +602,8 @@ export function exactCosineSearch(params: {
   const normalizedQuery = normalizeVector(params.query);
 
   return (async () => {
-    const conn = await getKuzuConn();
-    const embeddingMap = await kuzuDb.getSymbolEmbeddings(conn, params.symbolIds);
+    const conn = await getLadybugConn();
+    const embeddingMap = await ladybugDb.getSymbolEmbeddings(conn, params.symbolIds);
 
     const results: SearchResult[] = [];
     for (const symbolId of params.symbolIds) {

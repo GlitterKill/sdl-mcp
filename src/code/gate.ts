@@ -2,8 +2,8 @@ import * as score from "../graph/score.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { extractCodeWindow, identifiersExistInWindow } from "./windows.js";
 import { logger } from "../util/logger.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import type {
   CodeWindowRequest,
   CodeWindowResponse,
@@ -37,9 +37,9 @@ export interface DenialGuidance {
   nextBestAction: NextBestActionCallable;
 }
 
-async function getSymbolFromKuzu(symbolId: string): Promise<SymbolRow | null> {
-  const conn = await getKuzuConn();
-  const symbol = await kuzuDb.getSymbol(conn, symbolId);
+async function getSymbolFromLadybug(symbolId: string): Promise<SymbolRow | null> {
+  const conn = await getLadybugConn();
+  const symbol = await ladybugDb.getSymbol(conn, symbolId);
   if (!symbol) return null;
 
   return {
@@ -80,7 +80,7 @@ export async function evaluateRequest(
     };
   }
 
-  const symbol = context.symbol || (await getSymbolFromKuzu(request.symbolId));
+  const symbol = context.symbol || (await getSymbolFromLadybug(request.symbolId));
   if (!symbol) {
     return {
       approved: false,

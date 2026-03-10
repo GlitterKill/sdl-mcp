@@ -7,8 +7,8 @@ import {
   IndexResult,
 } from "../../indexer/indexer.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getCurrentTimestamp } from "../../util/time.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 
@@ -17,7 +17,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
   const config = loadConfig(configPath);
 
   await initGraphDb(config, configPath);
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
   const reposToIndex = options.repoId
     ? config.repos.filter((r) => r.repoId === options.repoId)
@@ -36,13 +36,13 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
 
   for (const repo of reposToIndex) {
     // Register repo in database if it doesn't exist
-    const existingRepo = await kuzuDb.getRepo(conn, repo.repoId);
+    const existingRepo = await ladybugDb.getRepo(conn, repo.repoId);
     if (!existingRepo) {
       console.log(`Registering repository: ${repo.repoId}`);
     }
 
     // Keep the DB's repo config in sync with the active config file.
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: repo.repoId,
       rootPath: repo.rootPath,
       configJson: JSON.stringify(repo),
@@ -64,8 +64,8 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
           lastProgressLine = line;
         }
       });
-      const totalSymbols = await kuzuDb.getSymbolCount(conn, repo.repoId);
-      const totalEdges = await kuzuDb.getEdgeCount(conn, repo.repoId);
+      const totalSymbols = await ladybugDb.getSymbolCount(conn, repo.repoId);
+      const totalEdges = await ladybugDb.getEdgeCount(conn, repo.repoId);
       console.log(`  Files: ${stats.filesProcessed}`);
       console.log(`  Symbols: ${stats.symbolsIndexed} new (${totalSymbols} total)`);
       console.log(`  Edges: ${stats.edgesCreated} new (${totalEdges} total)`);

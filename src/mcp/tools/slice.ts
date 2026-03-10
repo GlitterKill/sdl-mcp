@@ -25,8 +25,8 @@ import {
 } from "../../graph/slice/result.js";
 import * as crypto from "crypto";
 import { computeDelta } from "../../delta/diff.js";
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { SymbolKind, Visibility } from "../../db/schema.js";
 import {
   PolicyEngine,
@@ -790,9 +790,9 @@ async function handleSliceBuildInternal(
         consumePrefetchedKey(repoId, `slice:${symbolId}`);
       }
     }
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
 
-    const repo = await kuzuDb.getRepo(conn, repoId);
+    const repo = await ladybugDb.getRepo(conn, repoId);
     if (!repo) {
       throw new DatabaseError(`Repository not found: ${repoId}`);
     }
@@ -843,7 +843,7 @@ async function handleSliceBuildInternal(
       });
     }
 
-    const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+    const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
     if (!latestVersion) {
       throw new ValidationError(
         `No version found for repo ${repoId}. Please run indexing first.`,
@@ -915,7 +915,7 @@ async function handleSliceBuildInternal(
       sliceHash,
     );
 
-    const handleRow: kuzuDb.SliceHandleRow = {
+    const handleRow: ladybugDb.SliceHandleRow = {
       handle,
       repoId,
       createdAt: new Date().toISOString(),
@@ -926,14 +926,14 @@ async function handleSliceBuildInternal(
       spilloverRef: null,
     };
 
-    await kuzuDb.upsertSliceHandle(conn, handleRow);
+    await ladybugDb.upsertSliceHandle(conn, handleRow);
 
     // For a fresh build, staleSymbols is always empty since we just built
     // from the current version. Assign explicitly to signal feature is active.
     slice.staleSymbols = [];
 
     const cardSymbolIds = slice.cards.map((c) => c.symbolId);
-    const symbolMap = await kuzuDb.getSymbolsByIds(conn, cardSymbolIds);
+    const symbolMap = await ladybugDb.getSymbolsByIds(conn, cardSymbolIds);
     const fileIds = [
       ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
     ];
@@ -997,8 +997,8 @@ export async function handleSliceRefresh(
   const request = SliceRefreshRequestSchema.parse(args);
   const { sliceHandle, knownVersion } = request;
 
-  const conn = await getKuzuConn();
-  const handleRow = await kuzuDb.getSliceHandle(conn, sliceHandle);
+  const conn = await getLadybugConn();
+  const handleRow = await ladybugDb.getSliceHandle(conn, sliceHandle);
   if (handleRow) {
     recordToolTrace({
       repoId: handleRow.repoId,
@@ -1025,14 +1025,14 @@ export async function handleSliceRefresh(
     throw error;
   }
 
-  const latestVersion = await kuzuDb.getLatestVersion(conn, handleRow.repoId);
+  const latestVersion = await ladybugDb.getLatestVersion(conn, handleRow.repoId);
   if (!latestVersion) {
     throw new Error(`No version found for repo ${handleRow.repoId}`);
   }
 
   if (knownVersion === latestVersion.versionId) {
     const lease = createLease(latestVersion.versionId);
-    const newHandleRow: kuzuDb.SliceHandleRow = {
+    const newHandleRow: ladybugDb.SliceHandleRow = {
       ...handleRow,
       handle: sliceHandle,
       createdAt: new Date().toISOString(),
@@ -1040,7 +1040,7 @@ export async function handleSliceRefresh(
       minVersion: handleRow.maxVersion,
       maxVersion: latestVersion.versionId,
     };
-    await kuzuDb.upsertSliceHandle(conn, newHandleRow);
+    await ladybugDb.upsertSliceHandle(conn, newHandleRow);
 
     return {
       sliceHandle,
@@ -1059,7 +1059,7 @@ export async function handleSliceRefresh(
   );
 
   const lease = createLease(latestVersion.versionId);
-  const newHandleRow: kuzuDb.SliceHandleRow = {
+  const newHandleRow: ladybugDb.SliceHandleRow = {
     ...handleRow,
     handle: sliceHandle,
     createdAt: new Date().toISOString(),
@@ -1067,7 +1067,7 @@ export async function handleSliceRefresh(
     minVersion: knownVersion,
     maxVersion: latestVersion.versionId,
   };
-  await kuzuDb.upsertSliceHandle(conn, newHandleRow);
+  await ladybugDb.upsertSliceHandle(conn, newHandleRow);
 
   const response = {
     sliceHandle,
@@ -1080,7 +1080,7 @@ export async function handleSliceRefresh(
 
   if (delta && delta.changedSymbols.length > 0) {
     const changedIds = delta.changedSymbols.map((c) => c.symbolId);
-    const symbolMap = await kuzuDb.getSymbolsByIds(conn, changedIds);
+    const symbolMap = await ladybugDb.getSymbolsByIds(conn, changedIds);
     attachRawContext(response, {
       fileIds: [...new Set(Array.from(symbolMap.values()).map((s) => s.fileId))],
     });
@@ -1096,9 +1096,9 @@ export async function handleSliceRefresh(
  * @returns Number of deleted handles
  */
 export async function cleanupExpiredSliceHandles(): Promise<number> {
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
   const now = new Date().toISOString();
-  return kuzuDb.deleteExpiredSliceHandles(conn, now);
+  return ladybugDb.deleteExpiredSliceHandles(conn, now);
 }
 
 /**
@@ -1116,8 +1116,8 @@ export async function handleSliceSpilloverGet(
   const request = SliceSpilloverGetRequestSchema.parse(args);
   const { spilloverHandle, cursor, pageSize } = request;
 
-  const conn = await getKuzuConn();
-  const handleRow = await kuzuDb.getSliceHandle(conn, spilloverHandle);
+  const conn = await getLadybugConn();
+  const handleRow = await ladybugDb.getSliceHandle(conn, spilloverHandle);
   if (!handleRow) {
     throw new Error(`Spillover handle not found: ${spilloverHandle}`);
   }
@@ -1162,11 +1162,11 @@ export async function handleSliceSpilloverGet(
   const pageSymbols = droppedSymbols.slice(startIndex, endIndex);
 
   const symbolIds = pageSymbols.map((item) => item.symbolId);
-  const symbolsById = await kuzuDb.getSymbolsByIds(conn, symbolIds);
+  const symbolsById = await ladybugDb.getSymbolsByIds(conn, symbolIds);
   const pageFileIds = [...new Set(Array.from(symbolsById.values()).map((s) => s.fileId))];
-  const filesById = await kuzuDb.getFilesByIds(conn, pageFileIds);
-  const metricsById = await kuzuDb.getMetricsBySymbolIds(conn, symbolIds);
-  const edgesFromBySymbol = await kuzuDb.getEdgesFromSymbols(conn, symbolIds);
+  const filesById = await ladybugDb.getFilesByIds(conn, pageFileIds);
+  const metricsById = await ladybugDb.getMetricsBySymbolIds(conn, symbolIds);
+  const edgesFromBySymbol = await ladybugDb.getEdgesFromSymbols(conn, symbolIds);
 
   const allTargetIds = new Set<string>();
   for (const edges of edgesFromBySymbol.values()) {
@@ -1176,7 +1176,7 @@ export async function handleSliceSpilloverGet(
   }
   const targetSymbolsById =
     allTargetIds.size > 0
-      ? await kuzuDb.getSymbolsByIdsLite(conn, Array.from(allTargetIds))
+      ? await ladybugDb.getSymbolsByIdsLite(conn, Array.from(allTargetIds))
       : new Map<string, { symbolId: string; name: string; kind: string }>();
 
   const spilloverFileIds: string[] = [];

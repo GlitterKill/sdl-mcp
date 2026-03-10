@@ -1,6 +1,6 @@
 import type { Connection } from "kuzu";
 
-import * as kuzuDb from "../db/kuzu-queries.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 
 export interface DependencyFrontier {
   touchedSymbolIds: string[];
@@ -24,7 +24,7 @@ export async function buildDependencyFrontier(params: {
   const importedFilePaths = new Set<string>();
 
   if (touchedSymbolIds.length > 0) {
-    const inboundBySymbol = await kuzuDb.getEdgesToSymbols(conn, touchedSymbolIds);
+    const inboundBySymbol = await ladybugDb.getEdgesToSymbols(conn, touchedSymbolIds);
     for (const edges of inboundBySymbol.values()) {
       for (const edge of edges) {
         if (touchedSet.has(edge.fromSymbolId)) {
@@ -36,7 +36,7 @@ export async function buildDependencyFrontier(params: {
   }
 
   if (dependentSymbolIds.size > 0) {
-    const dependentSymbols = await kuzuDb.getSymbolsByIds(
+    const dependentSymbols = await ladybugDb.getSymbolsByIds(
       conn,
       Array.from(dependentSymbolIds),
     );
@@ -44,7 +44,7 @@ export async function buildDependencyFrontier(params: {
     for (const symbol of dependentSymbols.values()) {
       fileIds.add(symbol.fileId);
     }
-    const filesById = await kuzuDb.getFilesByIds(conn, Array.from(fileIds));
+    const filesById = await ladybugDb.getFilesByIds(conn, Array.from(fileIds));
     for (const file of filesById.values()) {
       if (file.relPath !== currentFilePath) {
         dependentFilePaths.add(file.relPath);
@@ -56,12 +56,12 @@ export async function buildDependencyFrontier(params: {
     .filter((edge) => edge.edgeType === "import" && !edge.toSymbolId.startsWith("unresolved:"))
     .map((edge) => edge.toSymbolId);
   if (importedTargetIds.length > 0) {
-    const importedSymbols = await kuzuDb.getSymbolsByIds(conn, importedTargetIds);
+    const importedSymbols = await ladybugDb.getSymbolsByIds(conn, importedTargetIds);
     const fileIds = new Set<string>();
     for (const symbol of importedSymbols.values()) {
       fileIds.add(symbol.fileId);
     }
-    const filesById = await kuzuDb.getFilesByIds(conn, Array.from(fileIds));
+    const filesById = await ladybugDb.getFilesByIds(conn, Array.from(fileIds));
     for (const file of filesById.values()) {
       if (file.relPath !== currentFilePath) {
         importedFilePaths.add(file.relPath);

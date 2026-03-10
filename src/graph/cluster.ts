@@ -1,5 +1,5 @@
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { hashContent } from "../util/hashing.js";
 
 import type { ClusterAssignment } from "./cluster-types.js";
@@ -94,9 +94,9 @@ export async function computeClustersTS(
   options: { minClusterSize?: number } = {},
 ): Promise<ClusterAssignment[]> {
   const minClusterSize = options.minClusterSize ?? 3;
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
-  const symbols = await kuzuDb.getSymbolsByRepo(conn, repoId);
+  const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
   if (symbols.length === 0) return [];
 
   const symbolIds = symbols.map((s) => s.symbolId).sort();
@@ -104,7 +104,7 @@ export async function computeClustersTS(
   const indexById = new Map<string, number>();
   symbolIds.forEach((id, idx) => indexById.set(id, idx));
 
-  const edgesByFrom = await kuzuDb.getEdgesFromSymbolsLite(conn, symbolIds);
+  const edgesByFrom = await ladybugDb.getEdgesFromSymbolsLite(conn, symbolIds);
 
   const edgePairs: Array<[number, number]> = [];
   for (const [from, edges] of edgesByFrom) {

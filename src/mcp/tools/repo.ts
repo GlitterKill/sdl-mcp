@@ -10,8 +10,8 @@ import {
   RepoOverviewRequestSchema,
   RepoOverviewResponse,
 } from "../tools.js";
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import {
   getWatcherHealth,
   indexRepo,
@@ -124,10 +124,10 @@ export async function handleRepoRegister(
     workspaceGlobs,
   };
 
-  const conn = await getKuzuConn();
-  const existingRepo = await kuzuDb.getRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const existingRepo = await ladybugDb.getRepo(conn, repoId);
 
-  await kuzuDb.upsertRepo(conn, {
+  await ladybugDb.upsertRepo(conn, {
     repoId,
     rootPath: normalizedRoot,
     configJson: JSON.stringify(config),
@@ -237,15 +237,15 @@ export async function handleRepoStatus(
       tool: "repo.status",
     });
 
-    const conn = await getKuzuConn();
-    const repo = await kuzuDb.getRepo(conn, repoId);
+    const conn = await getLadybugConn();
+    const repo = await ladybugDb.getRepo(conn, repoId);
     if (!repo) {
       throw new DatabaseError(`Repository ${repoId} not found`);
     }
 
-    const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
-    const files = await kuzuDb.getFilesByRepo(conn, repoId);
-    const symbolsIndexed = await kuzuDb.getSymbolCount(conn, repoId);
+    const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
+    const files = await ladybugDb.getFilesByRepo(conn, repoId);
+    const symbolsIndexed = await ladybugDb.getSymbolCount(conn, repoId);
     const health = await getRepoHealthSnapshot(repoId);
     const watcherHealth = getWatcherHealth(repoId);
     const prefetchStats = getPrefetchStats(repoId);
@@ -348,8 +348,8 @@ export async function handleIndexRefresh(
   });
 
   const executeRefresh = async () => {
-    const conn = await getKuzuConn();
-    const repo = await kuzuDb.getRepo(conn, repoId);
+    const conn = await getLadybugConn();
+    const repo = await ladybugDb.getRepo(conn, repoId);
     if (!repo) {
       throw new DatabaseError(`Repository ${repoId} not found`);
     }
@@ -429,8 +429,8 @@ export async function handleRepoOverview(
   const request = RepoOverviewRequestSchema.parse(args);
   const { repoId } = request;
 
-  const conn = await getKuzuConn();
-  const repo = await kuzuDb.getRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
     throw new DatabaseError(`Repository ${repoId} not found`);
   }

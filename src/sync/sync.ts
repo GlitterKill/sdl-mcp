@@ -5,8 +5,8 @@ import { promisify } from "util";
 import { gzip, gunzip, gunzipSync } from "zlib";
 import { IndexError } from "../domain/errors.js";
 
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { resolveSymbolEnrichment } from "../indexer/symbol-enrichment.js";
 import { hashContent } from "../util/hashing.js";
 import { getCurrentTimestamp } from "../util/time.js";
@@ -27,58 +27,58 @@ export async function exportArtifact(
   options: SyncExportOptions,
 ): Promise<SyncExportResult> {
   const startTime = Date.now();
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
-  const repo = await kuzuDb.getRepo(conn, options.repoId);
+  const repo = await ladybugDb.getRepo(conn, options.repoId);
   if (!repo) {
     throw new IndexError(`Repository not found: ${options.repoId}`);
   }
 
   const versionId =
     options.versionId ??
-    (await kuzuDb.getLatestVersion(conn, options.repoId))?.versionId;
+    (await ladybugDb.getLatestVersion(conn, options.repoId))?.versionId;
   if (!versionId) {
     throw new IndexError(
       `No version found for repository: ${options.repoId}. Please index the repository first.`,
     );
   }
 
-  const version = await kuzuDb.getVersion(conn, versionId);
+  const version = await ladybugDb.getVersion(conn, versionId);
   if (!version) {
     throw new IndexError(`Version not found: ${versionId}`);
   }
 
   const commitSha = options.commitSha ?? (await getGitCommitSha(repo.rootPath));
 
-  const files = await kuzuDb.getFilesByRepo(conn, options.repoId);
-  const symbolIds = await kuzuDb.getSymbolIdsByRepo(conn, options.repoId);
+  const files = await ladybugDb.getFilesByRepo(conn, options.repoId);
+  const symbolIds = await ladybugDb.getSymbolIdsByRepo(conn, options.repoId);
 
   // Fetch full symbols in chunks
-  const symbols: import("../db/kuzu-queries.js").SymbolRow[] = [];
+  const symbols: import("../db/ladybug-queries.js").SymbolRow[] = [];
   const SYMBOL_CHUNK_SIZE = 200;
   for (let i = 0; i < symbolIds.length; i += SYMBOL_CHUNK_SIZE) {
     const chunkIds = symbolIds.slice(i, i + SYMBOL_CHUNK_SIZE);
-    const chunkMap = await kuzuDb.getSymbolsByIds(conn, chunkIds);
+    const chunkMap = await ladybugDb.getSymbolsByIds(conn, chunkIds);
     symbols.push(...chunkMap.values());
   }
 
-  // Fetch edges in chunks to avoid KuzuDB buffer pool exhaustion on large repos
-  const edges: import("../db/kuzu-queries.js").EdgeRow[] = [];
+  // Fetch edges in chunks to avoid LadybugDB buffer pool exhaustion on large repos
+  const edges: import("../db/ladybug-queries.js").EdgeRow[] = [];
   const EDGE_CHUNK_SIZE = 200;
   for (let i = 0; i < symbolIds.length; i += EDGE_CHUNK_SIZE) {
     const chunkIds = symbolIds.slice(i, i + EDGE_CHUNK_SIZE);
-    const chunkMap = await kuzuDb.getEdgesFromSymbols(conn, chunkIds);
+    const chunkMap = await ladybugDb.getEdgesFromSymbols(conn, chunkIds);
     for (const idEdges of chunkMap.values()) {
       edges.push(...idEdges);
     }
   }
 
   // Fetch symbol versions in chunks
-  const symbolVersions: import("../db/kuzu-queries.js").SymbolVersionRow[] = [];
+  const symbolVersions: import("../db/ladybug-queries.js").SymbolVersionRow[] = [];
   const VERSION_CHUNK_SIZE = 200;
   for (let i = 0; i < symbolIds.length; i += VERSION_CHUNK_SIZE) {
     const chunkIds = symbolIds.slice(i, i + VERSION_CHUNK_SIZE);
-    const chunkVersions = await kuzuDb.getSymbolVersionsByIds(
+    const chunkVersions = await ladybugDb.getSymbolVersionsByIds(
       conn,
       versionId,
       chunkIds,
@@ -89,7 +89,7 @@ export async function exportArtifact(
   const metricsMap = new Map();
   const METRICS_CHUNK_SIZE = 200;
   for (let i = 0; i < symbolIds.length; i += METRICS_CHUNK_SIZE) {
-    const chunkMap = await kuzuDb.getMetricsBySymbolIds(
+    const chunkMap = await ladybugDb.getMetricsBySymbolIds(
       conn,
       symbolIds.slice(i, i + METRICS_CHUNK_SIZE),
     );
@@ -188,7 +188,7 @@ export async function exportArtifact(
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(artifact, null, 2), "utf-8");
 
-  await kuzuDb.upsertSyncArtifact(conn, {
+  await ladybugDb.upsertSyncArtifact(conn, {
     artifactId,
     repoId: options.repoId,
     versionId,
@@ -219,7 +219,7 @@ export async function importArtifact(
   options: SyncImportOptions,
 ): Promise<SyncImportResult> {
   const startTime = Date.now();
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
   const artifactContent = await readFile(options.artifactPath, "utf-8");
   const artifact: SyncArtifact = JSON.parse(artifactContent);
@@ -246,9 +246,9 @@ export async function importArtifact(
     }
   }
 
-  const existingRepo = await kuzuDb.getRepo(conn, artifact.repo_id);
+  const existingRepo = await ladybugDb.getRepo(conn, artifact.repo_id);
   if (!existingRepo) {
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: artifact.repo_id,
       rootPath: "",
       configJson: "{}",
@@ -257,7 +257,7 @@ export async function importArtifact(
   }
 
   for (const file of state.files) {
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: file.file_id,
       repoId: artifact.repo_id,
       relPath: file.rel_path,
@@ -279,7 +279,7 @@ export async function importArtifact(
       nativeSearchText: symbol.search_text,
     });
 
-    await kuzuDb.upsertSymbol(conn, {
+    await ladybugDb.upsertSymbol(conn, {
       symbolId: symbol.symbol_id,
       repoId: artifact.repo_id,
       fileId: symbol.file_id,
@@ -303,7 +303,7 @@ export async function importArtifact(
     });
   }
 
-  await kuzuDb.createVersion(conn, {
+  await ladybugDb.createVersion(conn, {
     versionId: state.version_id,
     repoId: state.repo_id,
     createdAt: getCurrentTimestamp(),
@@ -313,7 +313,7 @@ export async function importArtifact(
   });
 
   for (const sv of state.symbol_versions) {
-    await kuzuDb.snapshotSymbolVersion(conn, {
+    await ladybugDb.snapshotSymbolVersion(conn, {
       versionId: sv.version_id,
       symbolId: sv.symbol_id,
       astFingerprint: sv.ast_fingerprint,
@@ -324,7 +324,7 @@ export async function importArtifact(
     });
   }
 
-  await kuzuDb.insertEdges(
+  await ladybugDb.insertEdges(
     conn,
     state.edges.map((e) => ({
       repoId: e.repo_id,
@@ -340,7 +340,7 @@ export async function importArtifact(
   );
 
   for (const metric of state.metrics) {
-    await kuzuDb.upsertMetrics(conn, {
+    await ladybugDb.upsertMetrics(conn, {
       symbolId: metric.symbol_id,
       fanIn: metric.fan_in,
       fanOut: metric.fan_out,
@@ -351,7 +351,7 @@ export async function importArtifact(
     });
   }
 
-  await kuzuDb.upsertSyncArtifact(conn, {
+  await ladybugDb.upsertSyncArtifact(conn, {
     artifactId: artifact.artifact_id,
     repoId: artifact.repo_id,
     versionId: artifact.version_id,

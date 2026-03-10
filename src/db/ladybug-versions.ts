@@ -1,9 +1,15 @@
 /**
- * kuzu-versions.ts — Version and Snapshot Operations
- * Extracted from kuzu-queries.ts as part of the god-object split.
+ * ladybug-versions.ts - Version and Snapshot Operations
+ * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber, assertSafeInt } from "./kuzu-core.js";
+import {
+  exec,
+  queryAll,
+  querySingle,
+  toNumber,
+  assertSafeInt,
+} from "./ladybug-core.js";
 import { DEFAULT_BATCH_QUERY_LIMIT } from "../config/constants.js";
 
 export interface VersionRow {
@@ -313,4 +319,3 @@ export async function batchGetFanInAtVersion(
 
   return result;
 }
-

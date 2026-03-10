@@ -4,9 +4,9 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { promisify } from "util";
 import fg from "fast-glob";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
-import type { EdgeRow, MetricsRow, SymbolRow } from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
+import type { EdgeRow, MetricsRow, SymbolRow } from "../db/ladybug-queries.js";
 import type { RepoConfig } from "../config/types.js";
 import type { CanonicalTest, StalenessTiers } from "../domain/types.js";
 import { normalizePath } from "../util/paths.js";
@@ -554,19 +554,19 @@ export async function updateMetricsForRepo(
   repoId: string,
   changedFileIds?: Set<string>,
 ): Promise<void> {
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
   const [edges, repo] = await Promise.all([
-    kuzuDb.getEdgesByRepo(conn, repoId),
-    kuzuDb.getRepo(conn, repoId),
+    ladybugDb.getEdgesByRepo(conn, repoId),
+    ladybugDb.getRepo(conn, repoId),
   ]);
   if (!repo) {
     return;
   }
   const config: RepoConfig = JSON.parse(repo.configJson);
   const [files, allSymbols] = await Promise.all([
-    kuzuDb.getFilesByRepo(conn, repoId),
-    kuzuDb.getSymbolsByRepo(conn, repoId),
+    ladybugDb.getFilesByRepo(conn, repoId),
+    ladybugDb.getSymbolsByRepo(conn, repoId),
   ]);
   const fileById = new Map(files.map((file) => [file.fileId, file.relPath]));
   const symbolIds = new Set(allSymbols.map((symbol) => symbol.symbolId));
@@ -658,7 +658,7 @@ export async function updateMetricsForRepo(
 
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const chunk = rows.slice(i, i + BATCH_SIZE);
-    await kuzuDb.upsertMetricsBatch(conn, chunk);
+    await ladybugDb.upsertMetricsBatch(conn, chunk);
   }
 }
 

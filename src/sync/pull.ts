@@ -7,8 +7,8 @@ import { listArtifacts, getArtifactMetadata, importArtifact } from "./sync.js";
 import { indexRepo, type IndexResult } from "../indexer/indexer.js";
 import { join } from "path";
 import { sleep } from "../util/time.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { IndexError } from "../domain/errors.js";
 
 const DEFAULT_MAX_RETRIES = 3;
@@ -24,8 +24,8 @@ export async function pullLatestState(
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const startTime = Date.now();
-      const conn = await getKuzuConn();
-      const repo = await kuzuDb.getRepo(conn, options.repoId);
+      const conn = await getLadybugConn();
+      const repo = await ladybugDb.getRepo(conn, options.repoId);
       if (!repo) {
         throw new IndexError(`Repository not found: ${options.repoId}`);
       }

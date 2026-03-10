@@ -33,7 +33,7 @@ export interface PidfileData {
 
 /**
  * Resolve the pidfile path given a graph database path.
- * The pidfile lives in the same directory as the KuzuDB database file.
+ * The pidfile lives in the same directory as the LadybugDB database file.
  */
 export function resolvePidfilePath(graphDbPath: string): string {
   return resolve(dirname(graphDbPath), PIDFILE_NAME);

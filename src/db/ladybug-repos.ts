@@ -1,9 +1,9 @@
 /**
- * kuzu-repos.ts — Repository and File Operations
- * Extracted from kuzu-queries.ts as part of the god-object split.
+ * ladybug-repos.ts — Repository and File Operations
+ * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber, assertSafeInt } from "./kuzu-core.js";
+import { exec, queryAll, querySingle, toNumber, assertSafeInt } from "./ladybug-core.js";
 import { normalizePath } from "../util/paths.js";
 import { DEFAULT_QUERY_LIMIT } from "../config/constants.js";
 

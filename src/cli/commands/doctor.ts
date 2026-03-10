@@ -8,19 +8,19 @@ import {
 } from "../../db/graph-db-path.js";
 import {
   CALL_EDGE_METADATA_FIELDS,
-  KUZU_SCHEMA_VERSION,
+  LADYBUG_SCHEMA_VERSION,
   supportsCallResolutionMetadata,
-} from "../../db/kuzu-schema.js";
+} from "../../db/ladybug-schema.js";
 import { getAllWatcherHealth } from "../../indexer/indexer.js";
 import { createDefaultPass2ResolverRegistry } from "../../indexer/pass2/registry.js";
 import {
-  closeKuzuDb,
-  getKuzuConn,
-  getKuzuDbPath,
-  initKuzuDb,
-  isKuzuAvailable,
-} from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+  closeLadybugDb,
+  getLadybugConn,
+  getLadybugDbPath,
+  initLadybugDb,
+  isLadybugAvailable,
+} from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import {
   getGrammarLoadError,
@@ -41,7 +41,7 @@ const DOCTOR_CHECKS = [
     name: "Call resolution capabilities",
     check: checkCallResolutionCapabilities,
   },
-  { name: "Graph database (Ladybug)", check: checkKuzuDb },
+  { name: "Graph database (Ladybug)", check: checkLadybugDb },
 ];
 
 interface DoctorResult {
@@ -255,16 +255,16 @@ async function checkStaleIndex(
   try {
     const { loadConfig } = await import("../../config/loadConfig.js");
     const config = loadConfig(configPath);
-    const kuzuDbPath = resolveDoctorGraphDbPath(config, configPath);
+    const ladybugDbPath = resolveDoctorGraphDbPath(config, configPath);
 
-    await initKuzuDb(kuzuDbPath);
-    const conn = await getKuzuConn();
+    await initLadybugDb(ladybugDbPath);
+    const conn = await getLadybugConn();
 
     const staleRepos: string[] = [];
     const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
 
     for (const repo of config.repos) {
-      const files = await kuzuDb.getFilesByRepo(conn, repo.repoId);
+      const files = await ladybugDb.getFilesByRepo(conn, repo.repoId);
 
       const lastIndexed = files
         .map((f) => f.lastIndexedAt)
@@ -301,7 +301,7 @@ async function checkStaleIndex(
       message: `Cannot check index staleness: ${error instanceof Error ? error.message : String(error)}`,
     };
   } finally {
-    await closeKuzuDb();
+    await closeLadybugDb();
   }
 }
 
@@ -317,7 +317,7 @@ async function checkRepoPaths(
     };
   }
 
-  if (!isKuzuAvailable()) {
+  if (!isLadybugAvailable()) {
     return {
       status: "warn",
       message:
@@ -524,7 +524,7 @@ async function checkCallResolutionCapabilities(
     minCallConfidenceMode = "request-only (config not found)";
   }
 
-  const metadataAvailable = supportsCallResolutionMetadata(KUZU_SCHEMA_VERSION);
+  const metadataAvailable = supportsCallResolutionMetadata(LADYBUG_SCHEMA_VERSION);
   const metadataFields = CALL_EDGE_METADATA_FIELDS.join(", ");
 
   return {
@@ -532,12 +532,12 @@ async function checkCallResolutionCapabilities(
     message:
       `pass2 resolvers: ${resolverIds.join(", ")}; ` +
       `call-edge metadata: ${metadataAvailable ? "enabled" : "disabled"} ` +
-      `(schema v${KUZU_SCHEMA_VERSION}: ${metadataFields}); ` +
+      `(schema v${LADYBUG_SCHEMA_VERSION}: ${metadataFields}); ` +
       `minCallConfidence: ${minCallConfidenceMode}`,
   };
 }
 
-async function checkKuzuDb(
+async function checkLadybugDb(
   options: DoctorOptions,
 ): Promise<Omit<DoctorResult, "name">> {
   const configPath = options.config ?? activateCliConfigPath();
@@ -548,7 +548,7 @@ async function checkKuzuDb(
     };
   }
 
-  if (!isKuzuAvailable()) {
+  if (!isLadybugAvailable()) {
     return {
       status: "warn",
       message:
@@ -568,12 +568,12 @@ async function checkKuzuDb(
       };
     }
 
-    const kuzuDbPath = resolveDoctorGraphDbPath(config, configPath);
+    const ladybugDbPath = resolveDoctorGraphDbPath(config, configPath);
 
-    if (!existsSync(kuzuDbPath)) {
+    if (!existsSync(ladybugDbPath)) {
       return {
         status: "warn",
-        message: `Graph database not found: ${kuzuDbPath}`,
+        message: `Graph database not found: ${ladybugDbPath}`,
       };
     }
 
@@ -594,8 +594,8 @@ async function checkKuzuDb(
       (result as { close?: () => void }).close?.();
     };
 
-    await initKuzuDb(kuzuDbPath);
-    const conn = await getKuzuConn();
+    await initLadybugDb(ladybugDbPath);
+    const conn = await getLadybugConn();
 
     const symbolCountResult = await conn.query(
       "MATCH (s:Symbol) RETURN count(s) AS symbolCount",
@@ -627,12 +627,12 @@ async function checkKuzuDb(
       closeQueryResults(dependsOnCountResult);
     }
 
-    const currentPath = getKuzuDbPath();
+    const currentPath = getLadybugDbPath();
     const pathInfo = currentPath ? ` (active: ${currentPath})` : "";
 
     return {
       status: "pass",
-      message: `Ladybug OK: ${kuzuDbPath}${pathInfo} (symbols: ${symbolCount}, edges: ${edgeCount})`,
+      message: `Ladybug OK: ${ladybugDbPath}${pathInfo} (symbols: ${symbolCount}, edges: ${edgeCount})`,
     };
   } catch (error) {
     return {
@@ -640,7 +640,7 @@ async function checkKuzuDb(
       message: `Cannot verify graph database: ${error instanceof Error ? error.message : String(error)}`,
     };
   } finally {
-    await closeKuzuDb();
+    await closeLadybugDb();
   }
 }
 function displayResults(results: DoctorResult[]): void {

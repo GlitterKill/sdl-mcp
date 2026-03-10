@@ -13,8 +13,8 @@ import {
   MAX_TREESITTER_PARSE_BYTES,
 } from "../config/constants.js";
 import { logger } from "../util/logger.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { getParser as getGrammarParser } from "../indexer/treesitter/grammarLoader.js";
 
 const tsParser = new Parser();
@@ -310,18 +310,18 @@ export async function extractHotPath(
   identifiersToFind: string[],
   options: HotPathOptions = {},
 ): Promise<HotPathResult | null> {
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
-  const symbol = await kuzuDb.getSymbol(conn, symbolId);
+  const symbol = await ladybugDb.getSymbol(conn, symbolId);
   if (!symbol) return null;
 
   if (symbol.repoId !== repoId) return null;
 
-  const files = await kuzuDb.getFilesByIds(conn, [symbol.fileId]);
+  const files = await ladybugDb.getFilesByIds(conn, [symbol.fileId]);
   const file = files.get(symbol.fileId);
   if (!file) return null;
 
-  const repo = await kuzuDb.getRepo(conn, repoId);
+  const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) return null;
 
   const filePath = getAbsolutePathFromRepoRoot(repo.rootPath, file.relPath);

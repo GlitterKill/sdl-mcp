@@ -9,7 +9,7 @@ import {
   getProcessStepsAfterSymbol,
   getProcessesForSymbol,
   getSymbolsByIds,
-} from "../db/kuzu-queries.js";
+} from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 import { DatabaseError } from "../domain/errors.js";
 import type {

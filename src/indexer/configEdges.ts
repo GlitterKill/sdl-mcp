@@ -1,8 +1,8 @@
 import type { RepoConfig } from "../config/types.js";
 import type {
-  SymbolRow as KuzuSymbolRow,
+  SymbolRow as LadybugSymbolRow,
   SymbolLiteRow,
-} from "../db/kuzu-queries.js";
+} from "../db/ladybug-queries.js";
 import { normalizePath } from "../util/paths.js";
 import type Parser from "tree-sitter";
 import { logger } from "../util/logger.js";
@@ -19,7 +19,7 @@ export interface PerTreeConfigEdgeContext {
   repoRoot: string;
   config: RepoConfig;
   tree: Parser.Tree;
-  fileSymbols: KuzuSymbolRow[];
+  fileSymbols: LadybugSymbolRow[];
   allSymbolsByName: Map<string, SymbolLiteRow[]>;
 }
 
@@ -128,7 +128,7 @@ function extractHandlerName(node: Parser.SyntaxNode | null | undefined): string 
 
 function resolveHandlerSymbol(
   handlerName: string,
-  fileSymbols: KuzuSymbolRow[],
+  fileSymbols: LadybugSymbolRow[],
   nameToSymbols: Map<string, SymbolLiteRow[]>,
 ): { symbolId: string; name: string; exported: boolean } | null {
   const localMatches = fileSymbols.filter(
@@ -147,10 +147,10 @@ function resolveHandlerSymbol(
 }
 
 function findEnclosingSymbol(
-  symbols: KuzuSymbolRow[],
+  symbols: LadybugSymbolRow[],
   position: { line: number; col: number },
-): KuzuSymbolRow | null {
-  let best: { symbol: KuzuSymbolRow; size: number } | null = null;
+): LadybugSymbolRow | null {
+  let best: { symbol: LadybugSymbolRow; size: number } | null = null;
   for (const symbol of symbols) {
     if (position.line < symbol.rangeStartLine) continue;
     if (position.line > symbol.rangeEndLine) continue;

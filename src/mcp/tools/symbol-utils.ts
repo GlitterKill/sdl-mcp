@@ -1,5 +1,5 @@
 import type { SymbolRow as LegacySymbolRow } from "../../db/schema.js";
-import type { SymbolRow } from "../../db/kuzu-queries.js";
+import type { SymbolRow } from "../../db/ladybug-queries.js";
 
 export function toLegacySymbolRow(symbol: SymbolRow): LegacySymbolRow {
   return {

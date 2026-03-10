@@ -9,8 +9,8 @@ import type {
   StalenessTiers,
 } from "../domain/types.js";
 import { logger } from "../util/logger.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import {
   STABILITY_SCORE_INTERFACE,
   STABILITY_SCORE_BEHAVIOR,
@@ -20,8 +20,8 @@ import {
 async function getSymbolVersions(
   conn: Connection,
   versionId: string,
-): Promise<kuzuDb.SymbolVersionRow[]> {
-  return kuzuDb.getSymbolVersionsAtVersion(conn, versionId);
+): Promise<ladybugDb.SymbolVersionRow[]> {
+  return ladybugDb.getSymbolVersionsAtVersion(conn, versionId);
 }
 
 export async function computeDelta(
@@ -29,7 +29,7 @@ export async function computeDelta(
   fromVersion: VersionId,
   toVersion: VersionId,
 ): Promise<DeltaPack> {
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
   const fromVersions = await getSymbolVersions(conn, fromVersion);
   const toVersions = await getSymbolVersions(conn, toVersion);
 
@@ -45,10 +45,10 @@ export async function computeDelta(
     );
   }
 
-  const fromMap = new Map<string, kuzuDb.SymbolVersionRow>(
+  const fromMap = new Map<string, ladybugDb.SymbolVersionRow>(
     fromVersions.map((v) => [v.symbolId, v]),
   );
-  const toMap = new Map<string, kuzuDb.SymbolVersionRow>(
+  const toMap = new Map<string, ladybugDb.SymbolVersionRow>(
     toVersions.map((v) => [v.symbolId, v]),
   );
 
@@ -216,8 +216,8 @@ export function diffArray(
 
 export function computeStalenessTiers(
   change: DeltaSymbolChange,
-  fromRow: kuzuDb.SymbolVersionRow | null,
-  toRow: kuzuDb.SymbolVersionRow | null,
+  fromRow: ladybugDb.SymbolVersionRow | null,
+  toRow: ladybugDb.SymbolVersionRow | null,
 ): StalenessTiers {
   // `signatureDiff` and `sideEffectDiff` only exist on the "modified" variant of
   // the DeltaSymbolChange discriminated union. For "added"/"removed" changes the
@@ -259,7 +259,7 @@ export async function computeDeltaWithTiers(
   fromVersion: VersionId,
   toVersion: VersionId,
 ): Promise<DeltaPack & { changedSymbols: DeltaSymbolChangeWithTiers[] }> {
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
   const fromVersions = await getSymbolVersions(conn, fromVersion);
   const toVersions = await getSymbolVersions(conn, toVersion);
 
@@ -275,10 +275,10 @@ export async function computeDeltaWithTiers(
     );
   }
 
-  const fromMap = new Map<string, kuzuDb.SymbolVersionRow>(
+  const fromMap = new Map<string, ladybugDb.SymbolVersionRow>(
     fromVersions.map((v) => [v.symbolId, v]),
   );
-  const toMap = new Map<string, kuzuDb.SymbolVersionRow>(
+  const toMap = new Map<string, ladybugDb.SymbolVersionRow>(
     toVersions.map((v) => [v.symbolId, v]),
   );
 

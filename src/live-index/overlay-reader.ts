@@ -6,8 +6,8 @@ import type {
   EdgeForSlice,
   SymbolRow,
   FileRow,
-} from "../db/kuzu-queries.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+} from "../db/ladybug-queries.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import {
   getDefaultOverlayStore,
 } from "./coordinator.js";
@@ -126,7 +126,7 @@ export async function getShadowedDurableSymbol(
   symbolId: string,
   snapshot: OverlaySnapshot,
 ): Promise<SymbolRow | null> {
-  const durableSymbol = await kuzuDb.getSymbol(conn, symbolId);
+  const durableSymbol = await ladybugDb.getSymbol(conn, symbolId);
   if (!durableSymbol || durableSymbol.repoId !== repoId) {
     return null;
   }
@@ -145,9 +145,9 @@ export async function searchSymbolsWithOverlay(
   limit: number,
 ): Promise<Array<OverlaySearchResult>> {
   const snapshot = getOverlaySnapshot(repoId);
-  const durableRows = (await kuzuDb.searchSymbolsLite(conn, repoId, query, limit * 2))
+  const durableRows = (await ladybugDb.searchSymbolsLite(conn, repoId, query, limit * 2))
     .filter((row) => !snapshot.touchedFileIds.has(row.fileId));
-  const durableFileMap = await kuzuDb.getFilesByIds(
+  const durableFileMap = await ladybugDb.getFilesByIds(
     conn,
     Array.from(new Set(durableRows.map((row) => row.fileId))),
   );
@@ -208,7 +208,7 @@ export async function getTargetNamesWithOverlay(
     missing.push(targetId);
   }
 
-  const durable = await kuzuDb.getSymbolsByIdsLite(conn, missing);
+  const durable = await ladybugDb.getSymbolsByIdsLite(conn, missing);
   for (const [symbolId, symbol] of durable) {
     result.set(symbolId, { name: symbol.name });
   }

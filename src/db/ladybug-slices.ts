@@ -1,9 +1,9 @@
 /**
- * kuzu-slices.ts — Slice Handle Operations
- * Extracted from kuzu-queries.ts as part of the god-object split.
+ * ladybug-slices.ts - Slice Handle Operations
+ * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle } from "./kuzu-core.js";
+import { exec, queryAll, querySingle } from "./ladybug-core.js";
 
 export interface SliceHandleRow {
   handle: string;
@@ -137,4 +137,3 @@ export async function getCardHash(
   );
   return row ?? null;
 }
-

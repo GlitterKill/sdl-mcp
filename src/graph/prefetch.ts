@@ -1,6 +1,6 @@
 import { cpus, loadavg, platform } from "os";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 import {
   predictNextToolFromRecent,
@@ -207,9 +207,9 @@ export function prefetchSliceFrontier(
     type: "slice-frontier",
     priority: 60,
     run: async () => {
-      const conn = await getKuzuConn();
+      const conn = await getLadybugConn();
       for (const symbolId of seeds) {
-        const edges = (await kuzuDb.getEdgesFrom(conn, symbolId)).slice(0, 5);
+        const edges = (await ladybugDb.getEdgesFrom(conn, symbolId)).slice(0, 5);
         for (const edge of edges) {
           markPrefetched(repoId, `card:${edge.toSymbolId}`);
         }
@@ -244,10 +244,10 @@ export function prefetchFileExports(repoId: string, filePath: string): void {
     type: "file-open",
     priority: 40,
     run: async () => {
-      const conn = await getKuzuConn();
-      const file = await kuzuDb.getFileByRepoPath(conn, repoId, filePath);
+      const conn = await getLadybugConn();
+      const file = await ladybugDb.getFileByRepoPath(conn, repoId, filePath);
       if (!file) return;
-      const symbols = (await kuzuDb.getSymbolsByFile(conn, file.fileId)).filter(
+      const symbols = (await ladybugDb.getSymbolsByFile(conn, file.fileId)).filter(
         (symbol) => symbol.exported,
       );
       for (const symbol of symbols) {
@@ -285,8 +285,8 @@ export function warmPrefetchOnServeStart(repoId: string, topN = 50): void {
     type: "startup-warm",
     priority: 30,
     run: async () => {
-      const conn = await getKuzuConn();
-      const top = await kuzuDb.getTopSymbolsByFanIn(conn, repoId, topN);
+      const conn = await getLadybugConn();
+      const top = await ladybugDb.getTopSymbolsByFanIn(conn, repoId, topN);
       for (const symbol of top) {
         markPrefetched(repoId, `card:${symbol.symbolId}`);
       }

@@ -1,7 +1,7 @@
 import { hashContent } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import type { AppConfig } from "../config/types.js";
 
 export interface GeneratedSummaryResult {
@@ -263,7 +263,7 @@ export async function generateSummaryWithGuardrails(input: {
   summaryApiKey?: string;
   summaryApiBaseUrl?: string;
 }): Promise<GeneratedSummaryResult> {
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
   const summaryProvider = createSummaryProvider(input.provider, {
     summaryModel: input.summaryModel,
     summaryApiKey: input.summaryApiKey,
@@ -277,7 +277,7 @@ export async function generateSummaryWithGuardrails(input: {
 
   // Check summary cache when symbolId is available
   if (input.symbolId) {
-    const cached = await kuzuDb.getSummaryCache(conn, input.symbolId);
+    const cached = await ladybugDb.getSummaryCache(conn, input.symbolId);
     if (cached != null && cached.cardHash === cardHash) {
       const divergenceScore = tokenDistance(
         cached.summary,
@@ -308,7 +308,7 @@ export async function generateSummaryWithGuardrails(input: {
   // Persist to cache when symbolId is available
   if (input.symbolId) {
     const now = new Date().toISOString();
-    await kuzuDb.upsertSummaryCache(conn, {
+    await ladybugDb.upsertSummaryCache(conn, {
       symbolId: input.symbolId,
       summary,
       provider: summaryProvider.name,
@@ -356,7 +356,7 @@ export async function generateSummariesForRepo(
   repoId: string,
   config: AppConfig,
 ): Promise<SummaryBatchResult> {
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
   const semantic = config.semantic;
   if (!semantic) {
     return { generated: 0, skipped: 0, failed: 0, totalCostUsd: 0 };
@@ -370,7 +370,7 @@ export async function generateSummariesForRepo(
   const summaryApiBaseUrl = semantic.summaryApiBaseUrl;
 
   // Fetch all symbols for the repo
-  const symbols = await kuzuDb.getSymbolsByRepo(conn, repoId);
+  const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
 
   // Determine which symbols need a new summary by checking the cache
   const needsSummary: typeof symbols = [];
@@ -378,7 +378,7 @@ export async function generateSummariesForRepo(
     const cardHash = hashContent(
       [sym.name, sym.kind ?? "", sym.signatureJson ?? ""].join("|"),
     );
-    const cached = await kuzuDb.getSummaryCache(conn, sym.symbolId);
+    const cached = await ladybugDb.getSummaryCache(conn, sym.symbolId);
     if (cached != null && cached.cardHash === cardHash) {
       continue;
     }
@@ -442,7 +442,7 @@ export async function generateSummariesForRepo(
         });
 
         // Update the symbol row with the new summary
-        await kuzuDb.updateSymbolSummary(conn, sym.symbolId, genResult.summary);
+        await ladybugDb.updateSymbolSummary(conn, sym.symbolId, genResult.summary);
 
         batchGenerated += 1;
         batchCost += genResult.costUsd;

@@ -1,5 +1,5 @@
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
 import { resolveImportCandidatePaths } from "../import-resolution/registry.js";
 
@@ -23,7 +23,7 @@ export async function resolveImportTargets(
     ? [...imports, ...extractCommonJsRequireImports(sourceContent)]
     : imports;
 
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
   for (const imp of allImports) {
     const resolvedPaths = await resolveImportCandidatePaths({
@@ -60,7 +60,7 @@ export async function resolveImportTargets(
 
     const targetFiles = (
       await Promise.all(
-        resolvedPaths.map((relPath) => kuzuDb.getFileByRepoPath(conn, repoId, relPath)),
+        resolvedPaths.map((relPath) => ladybugDb.getFileByRepoPath(conn, repoId, relPath)),
       )
     ).flatMap((targetFile) => (targetFile ? [targetFile] : []));
 
@@ -106,7 +106,7 @@ export async function resolveImportTargets(
     const targetSymbols = (
       await Promise.all(
         sameLanguageFiles.map((targetFile) =>
-          kuzuDb.getSymbolsByFile(conn, targetFile.fileId),
+          ladybugDb.getSymbolsByFile(conn, targetFile.fileId),
         ),
       )
     )

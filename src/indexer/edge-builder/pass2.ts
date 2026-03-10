@@ -1,8 +1,8 @@
 import { join } from "path";
 
 import type { SymbolKind } from "../../db/schema.js";
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import { readFileAsync } from "../../util/asyncFs.js";
 import { logger } from "../../util/logger.js";
 import { getAdapterForExtension } from "../adapter/registry.js";
@@ -41,16 +41,16 @@ async function resolvePass2Targets(params: {
     return [];
   }
 
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
   const pass2FilesByPath = new Map(pass2Files.map((file) => [file.path, file]));
   const targetPaths = new Set<string>(changedPass2FilePaths);
   const changedSymbolIds = new Set<string>();
 
   for (const changedPath of changedPass2FilePaths) {
-    const file = await kuzuDb.getFileByRepoPath(conn, repoId, changedPath);
+    const file = await ladybugDb.getFileByRepoPath(conn, repoId, changedPath);
     if (!file) continue;
-    const symbolIds = await kuzuDb.getSymbolIdsByFile(conn, file.fileId);
+    const symbolIds = await ladybugDb.getSymbolIdsByFile(conn, file.fileId);
     for (const symbolId of symbolIds) {
       changedSymbolIds.add(symbolId);
     }
@@ -62,7 +62,7 @@ async function resolvePass2Targets(params: {
       .filter((file): file is FileMetadata => Boolean(file));
   }
 
-  const incomingByToSymbol = await kuzuDb.getEdgesToSymbols(
+  const incomingByToSymbol = await ladybugDb.getEdgesToSymbols(
     conn,
     Array.from(changedSymbolIds),
   );
@@ -81,7 +81,7 @@ async function resolvePass2Targets(params: {
       .filter((file): file is FileMetadata => Boolean(file));
   }
 
-  const importerSymbols = await kuzuDb.getSymbolsByIds(
+  const importerSymbols = await ladybugDb.getSymbolsByIds(
     conn,
     Array.from(importerSymbolIds),
   );
@@ -90,7 +90,7 @@ async function resolvePass2Targets(params: {
     fileIds.add(symbol.fileId);
   }
 
-  const importerFiles = await kuzuDb.getFilesByIds(conn, Array.from(fileIds));
+  const importerFiles = await ladybugDb.getFilesByIds(conn, Array.from(fileIds));
   for (const symbol of importerSymbols.values()) {
     const file = importerFiles.get(symbol.fileId);
     if (!file) continue;
@@ -130,7 +130,7 @@ async function resolveTsCallEdgesPass2(params: {
   }
 
   try {
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
     const filePath = join(repoRoot, fileMeta.path);
     let content: string;
     try {
@@ -179,7 +179,7 @@ async function resolveTsCallEdgesPass2(params: {
       symbolsWithNodeIds as any,
     );
 
-    const fileRecord = await kuzuDb.getFileByRepoPath(
+    const fileRecord = await ladybugDb.getFileByRepoPath(
       conn,
       repoId,
       fileMeta.path,
@@ -187,7 +187,7 @@ async function resolveTsCallEdgesPass2(params: {
     if (!fileRecord) {
       return 0;
     }
-    const existingSymbols = await kuzuDb.getSymbolsByFile(
+    const existingSymbols = await ladybugDb.getSymbolsByFile(
       conn,
       fileRecord.fileId,
     );
@@ -236,14 +236,14 @@ async function resolveTsCallEdgesPass2(params: {
       `${kind}:${name}`;
 
     const symbolIdByFullKey = new Map<string, string>();
-    const symbolsByStartKey = new Map<string, kuzuDb.SymbolRow[]>();
-    const symbolsByStartLineKey = new Map<string, kuzuDb.SymbolRow[]>();
-    const symbolsByNameKindKey = new Map<string, kuzuDb.SymbolRow[]>();
+    const symbolsByStartKey = new Map<string, ladybugDb.SymbolRow[]>();
+    const symbolsByStartLineKey = new Map<string, ladybugDb.SymbolRow[]>();
+    const symbolsByNameKindKey = new Map<string, ladybugDb.SymbolRow[]>();
 
     const pushSymbol = (
-      map: Map<string, kuzuDb.SymbolRow[]>,
+      map: Map<string, ladybugDb.SymbolRow[]>,
       key: string,
-      symbol: kuzuDb.SymbolRow,
+      symbol: ladybugDb.SymbolRow,
     ): void => {
       const existing = map.get(key) ?? [];
       existing.push(symbol);
@@ -384,7 +384,7 @@ async function resolveTsCallEdgesPass2(params: {
     const symbolIdsToRefresh = filteredSymbolDetails.map(
       (detail) => detail.symbolId,
     );
-    await kuzuDb.deleteOutgoingEdgesByTypeForSymbols(
+    await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
       conn,
       symbolIdsToRefresh,
       "call",
@@ -417,7 +417,7 @@ async function resolveTsCallEdgesPass2(params: {
       content,
     );
 
-    const edgesToInsert: kuzuDb.EdgeRow[] = [];
+    const edgesToInsert: ladybugDb.EdgeRow[] = [];
     const now = new Date().toISOString();
 
     let createdEdges = 0;
@@ -562,7 +562,7 @@ async function resolveTsCallEdgesPass2(params: {
       }
     }
 
-    await kuzuDb.insertEdges(conn, edgesToInsert);
+    await ladybugDb.insertEdges(conn, edgesToInsert);
     return createdEdges;
   } catch (error) {
     logger.warn(

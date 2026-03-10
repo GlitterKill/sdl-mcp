@@ -1,9 +1,9 @@
 /**
- * kuzu-symbols.ts — Symbol Operations
- * Extracted from kuzu-queries.ts as part of the god-object split.
+ * ladybug-symbols.ts — Symbol Operations
+ * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber, toBoolean, assertSafeInt } from "./kuzu-core.js";
+import { exec, queryAll, querySingle, toNumber, toBoolean, assertSafeInt } from "./ladybug-core.js";
 
 export interface SymbolRow {
   symbolId: string;

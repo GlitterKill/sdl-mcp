@@ -1,10 +1,10 @@
 /**
- * KuzuDB Schema Definition for SDL-MCP v0.8
+ * LadybugDB Schema Definition for SDL-MCP v0.8
  *
  * Defines complete Cypher schema for the graph database.
- * Schema is auto-created via initKuzuDb() and is idempotent.
+ * Schema is auto-created via initLadybugDb() and is idempotent.
  *
- * Note: KuzuDB doesn't support NOT NULL constraints - all properties
+ * Note: LadybugDB doesn't support NOT NULL constraints - all properties
  * are nullable by default except PRIMARY KEY.
  *
  * Node tables: Repo, File, Symbol, Version, SymbolVersion, Metrics,
@@ -267,11 +267,7 @@ const REL_TABLES: string[] = [
 
 async function execDdl(conn: Connection, ddl: string): Promise<void> {
   const result = await conn.query(ddl);
-  if (Array.isArray(result)) {
-    for (const r of result) r.close();
-  } else {
-    result.close();
-  }
+  result.close();
 }
 
 export async function createSchema(conn: Connection): Promise<void> {
@@ -288,35 +284,32 @@ export async function createSchema(conn: Connection): Promise<void> {
   await execDdl(
     conn,
     `MERGE (sv:SchemaVersion {id: 'current'})
-     ON CREATE SET sv.schemaVersion = ${KUZU_SCHEMA_VERSION}, sv.createdAt = '${now}', sv.updatedAt = '${now}'`,
+     ON CREATE SET sv.schemaVersion = ${LADYBUG_SCHEMA_VERSION}, sv.createdAt = '${now}', sv.updatedAt = '${now}'`,
   );
 }
 
-export async function getSchemaVersion(conn: Connection): Promise<number | null> {
+export async function getSchemaVersion(
+  conn: Connection,
+): Promise<number | null> {
   const result = await conn.query(
     `MATCH (sv:SchemaVersion {id: 'current'})
      RETURN sv.schemaVersion AS schemaVersion`,
   );
-  const queryResult = Array.isArray(result) ? result[result.length - 1] : result;
   try {
-    const rows = (await queryResult.getAll()) as Array<{ schemaVersion?: unknown }>;
+    const rows = (await result.getAll()) as Array<{
+      schemaVersion?: unknown;
+    }>;
     const value = rows[0]?.schemaVersion;
     if (typeof value === "number") return value;
     if (typeof value === "bigint") return Number(value);
     if (typeof value === "string") return Number(value);
     return null;
   } finally {
-    if (Array.isArray(result)) {
-      for (const entry of result) {
-        entry.close();
-      }
-    } else {
-      result.close();
-    }
+    result.close();
   }
 }
 
-export const KUZU_SCHEMA_VERSION = 3;
+export const LADYBUG_SCHEMA_VERSION = 3;
 
 export function supportsCallResolutionMetadata(
   schemaVersion: number | null | undefined,

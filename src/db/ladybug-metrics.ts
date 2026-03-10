@@ -1,6 +1,6 @@
 /**
- * kuzu-metrics.ts � Metrics Operations
- * Extracted from kuzu-queries.ts as part of the god-object split.
+ * ladybug-metrics.ts - Metrics Operations
+ * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
 import {
@@ -10,12 +10,12 @@ import {
   toNumber,
   assertSafeInt,
   withTransaction,
-} from "./kuzu-core.js";
+} from "./ladybug-core.js";
 import type {
   MetricsRow,
   TopSymbolByFanInRow,
   FanInOut,
-} from "./kuzu-repos.js";
+} from "./ladybug-repos.js";
 
 export async function upsertMetrics(
   conn: Connection,
@@ -259,7 +259,7 @@ export async function batchComputeFanInOut(
     result.set(symbolId, { fanIn: 0, fanOut: 0 });
   }
 
-  // NOTE: Kuzu can produce incorrect counts for large UNWIND lists, especially
+  // NOTE: Ladybug can produce incorrect counts for large UNWIND lists, especially
   // when the input list contains many missing symbols. Prefer WHERE ... IN and
   // fill missing IDs in JS.
   const fanInRows = await queryAll<{ symbolId: string; fanIn: unknown }>(

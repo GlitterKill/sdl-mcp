@@ -25,8 +25,8 @@ import type {
   SymbolMetrics,
   SymbolSignature,
 } from "../types.js";
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import { symbolCardCache } from "../../graph/cache.js";
 import { consumePrefetchedKey, prefetchCardsForSymbols, prefetchSliceFrontier } from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
@@ -86,7 +86,7 @@ export async function handleSymbolSearch(
     tool: "symbol.search",
   });
 
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
   const rows = await searchSymbolsWithOverlay(
     conn,
     request.repoId,
@@ -123,24 +123,24 @@ export async function handleSymbolSearch(
 }
 
 async function buildOverlayCardForSymbol(
-  conn: Awaited<ReturnType<typeof getKuzuConn>>,
+  conn: Awaited<ReturnType<typeof getLadybugConn>>,
   repoId: string,
   symbolId: string,
   ifNoneMatch: string | undefined,
   effectiveMinCallConfidence: number | undefined,
   includeResolutionMetadata: boolean | undefined,
 ) {
-  const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+  const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
   const overlaySnapshot = getOverlaySnapshot(repoId);
   const overlay = getOverlaySymbol(overlaySnapshot, symbolId);
   if (!overlay) {
     return null;
   }
 
-  const metrics = await kuzuDb.getMetrics(conn, symbolId);
+  const metrics = await ladybugDb.getMetrics(conn, symbolId);
   const [clusterRow, processesRows] = await Promise.all([
-    kuzuDb.getClusterForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get cluster for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return null; }),
-    kuzuDb.getProcessesForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get processes for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return []; }),
+    ladybugDb.getClusterForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get cluster for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return null; }),
+    ladybugDb.getProcessesForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get processes for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return []; }),
   ]);
 
   const signature = parseJson<SymbolSignature>(overlay.symbol.signatureJson);
@@ -296,7 +296,7 @@ async function buildCardForSymbol(
     effectiveMinCallConfidence === undefined &&
     !options.includeResolutionMetadata;
 
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
   const overlaySnapshot = getOverlaySnapshot(repoId);
   const overlayCard = await buildOverlayCardForSymbol(
     conn,
@@ -309,7 +309,7 @@ async function buildCardForSymbol(
   if (overlayCard) {
     return overlayCard;
   }
-  const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+  const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
 
   if (useCache && latestVersion) {
     const cachedCard = symbolCardCache.get(repoId, symbolId, latestVersion.versionId);
@@ -384,18 +384,18 @@ async function buildCardForSymbol(
     );
   }
 
-  const fileRow = (await kuzuDb.getFilesByIds(conn, [symbol.fileId])).get(symbol.fileId);
+  const fileRow = (await ladybugDb.getFilesByIds(conn, [symbol.fileId])).get(symbol.fileId);
   if (!fileRow) {
     throw new DatabaseError(`File not found: ${symbol.fileId}`);
   }
 
   const [edgesFrom, metrics, clusterRow, processesRows] = await Promise.all([
-    kuzuDb.getEdgesFrom(conn, symbolId, {
+    ladybugDb.getEdgesFrom(conn, symbolId, {
       minCallConfidence: effectiveMinCallConfidence,
     }),
-    kuzuDb.getMetrics(conn, symbolId),
-    kuzuDb.getClusterForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get cluster for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return null; }),
-    kuzuDb.getProcessesForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get processes for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return []; }),
+    ladybugDb.getMetrics(conn, symbolId),
+    ladybugDb.getClusterForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get cluster for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return null; }),
+    ladybugDb.getProcessesForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get processes for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return []; }),
   ]);
 
   const signature = parseJson<SymbolSignature>(symbol.signatureJson);
@@ -583,8 +583,8 @@ export async function handleSymbolGetCard(
   prefetchSliceFrontier(repoId, [symbolId]);
 
   const response = { card: result };
-  const conn = await getKuzuConn();
-  const symbol = await kuzuDb.getSymbol(conn, symbolId);
+  const conn = await getLadybugConn();
+  const symbol = await ladybugDb.getSymbol(conn, symbolId);
   if (symbol) {
     attachRawContext(response, { fileIds: [symbol.fileId] });
   }
@@ -616,8 +616,8 @@ export async function handleSymbolGetCards(
     ),
   );
 
-  const conn = await getKuzuConn();
-  const symbolMap = await kuzuDb.getSymbolsByIds(conn, symbolIds);
+  const conn = await getLadybugConn();
+  const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
   const fileIds = [
     ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
   ];

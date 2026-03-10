@@ -1,6 +1,6 @@
 import type { SymbolKind } from "../db/schema.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import {
   estimateTokens,
   tokenize,
@@ -173,15 +173,15 @@ export function buildContextSummary(input: {
 }
 
 async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
-  const conn = await getKuzuConn();
-  const results = await kuzuDb.searchSymbolsLite(
+  const conn = await getLadybugConn();
+  const results = await ladybugDb.searchSymbolsLite(
     conn,
     repoId,
     query,
     SUMMARY_MAX_RESULTS,
   );
   if (results.length === 0) {
-    const tokenResults: kuzuDb.SearchSymbolLiteRow[] = [];
+    const tokenResults: ladybugDb.SearchSymbolLiteRow[] = [];
     const seen = new Set<string>();
     const tokens = tokenize(query).filter((token) => token.length >= 2);
     const perTokenLimit = Math.max(
@@ -189,7 +189,7 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
       Math.floor(SUMMARY_MAX_RESULTS / Math.max(1, tokens.length)),
     );
     for (const token of tokens) {
-      const partial = await kuzuDb.searchSymbolsLite(
+      const partial = await ladybugDb.searchSymbolsLite(
         conn,
         repoId,
         token,
@@ -205,17 +205,17 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
   }
   const symbolIds = results.map((row) => row.symbolId);
   const symbolIdSet = new Set(symbolIds);
-  const symbolsMap = await kuzuDb.getSymbolsByIds(conn, symbolIds);
+  const symbolsMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
 
   const fileIds = new Set<string>();
   for (const symbol of symbolsMap.values()) {
     fileIds.add(symbol.fileId);
   }
-  const filesMap = await kuzuDb.getFilesByIds(conn, [...fileIds]);
-  const metricsMap = await kuzuDb.getMetricsBySymbolIds(conn, symbolIds);
-  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, symbolIds);
-  const clustersMap = await kuzuDb.getClustersForSymbols(conn, symbolIds);
-  const processesMap = await kuzuDb.getProcessesForSymbols(conn, symbolIds);
+  const filesMap = await ladybugDb.getFilesByIds(conn, [...fileIds]);
+  const metricsMap = await ladybugDb.getMetricsBySymbolIds(conn, symbolIds);
+  const edgesMap = await ladybugDb.getEdgesFromSymbolsForSlice(conn, symbolIds);
+  const clustersMap = await ladybugDb.getClustersForSymbols(conn, symbolIds);
+  const processesMap = await ladybugDb.getProcessesForSymbols(conn, symbolIds);
 
   const keySymbols: ContextSummarySymbol[] = [];
   const fileCounts = new Map<string, number>();
@@ -321,8 +321,8 @@ export async function generateContextSummary(args: {
     throw new Error("query must be a non-empty string");
   }
 
-  const conn = await getKuzuConn();
-  const latestVersion = await kuzuDb.getLatestVersion(conn, args.repoId);
+  const conn = await getLadybugConn();
+  const latestVersion = await ladybugDb.getLatestVersion(conn, args.repoId);
   const indexVersion = latestVersion?.versionId ?? "0";
   const scope = args.scope ?? detectSummaryScope(query);
   const cacheKey = `${args.repoId}:${indexVersion}:${query.toLowerCase()}`;

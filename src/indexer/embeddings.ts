@@ -1,12 +1,12 @@
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { hashContent } from "../util/hashing.js";
 import { ensureLocalEmbeddingRuntime } from "./embeddings-local.js";
 
 export const EMBEDDING_DIMENSION = 64;
 
 export interface EmbeddingScoredSymbol {
-  symbol: kuzuDb.SymbolRow;
+  symbol: ladybugDb.SymbolRow;
   lexicalScore: number;
   semanticScore: number;
   finalScore: number;
@@ -115,7 +115,7 @@ function fromFloat16Blob(blob: string): number[] {
   return normalizeVector(vector);
 }
 
-function buildCardHash(symbol: kuzuDb.SymbolRow): string {
+function buildCardHash(symbol: ladybugDb.SymbolRow): string {
   return hashContent(
     [
       symbol.symbolId,
@@ -146,17 +146,17 @@ export async function refreshSymbolEmbeddings(params: {
   repoId: string;
   provider: "api" | "local" | "mock";
   model: string;
-  symbols?: kuzuDb.SymbolRow[];
+  symbols?: ladybugDb.SymbolRow[];
 }): Promise<{ embedded: number; skipped: number }> {
   const provider = getEmbeddingProvider(params.provider);
-  const conn = await getKuzuConn();
-  const symbols = params.symbols ?? (await kuzuDb.getSymbolsByRepo(conn, params.repoId));
+  const conn = await getLadybugConn();
+  const symbols = params.symbols ?? (await ladybugDb.getSymbolsByRepo(conn, params.repoId));
   let embedded = 0;
   let skipped = 0;
 
   for (const symbol of symbols) {
     const cardHash = buildCardHash(symbol);
-    const existing = await kuzuDb.getSymbolEmbedding(conn, symbol.symbolId);
+    const existing = await ladybugDb.getSymbolEmbedding(conn, symbol.symbolId);
     if (
       existing &&
       existing.model === params.model &&
@@ -168,7 +168,7 @@ export async function refreshSymbolEmbeddings(params: {
 
     const text = `${symbol.name}\n${symbol.kind}\n${symbol.summary ?? ""}`;
     const [vector] = await provider.embed([text]);
-    await kuzuDb.upsertSymbolEmbedding(conn, {
+    await ladybugDb.upsertSymbolEmbedding(conn, {
       symbolId: symbol.symbolId,
       model: params.model,
       embeddingVector: toFloat16Blob(vector),
@@ -185,7 +185,7 @@ export async function refreshSymbolEmbeddings(params: {
 
 export async function rerankByEmbeddings(params: {
   query: string;
-  symbols: Array<{ symbol: kuzuDb.SymbolRow; lexicalScore: number }>;
+  symbols: Array<{ symbol: ladybugDb.SymbolRow; lexicalScore: number }>;
   provider: "api" | "local" | "mock";
   alpha: number;
   model: string;
@@ -198,8 +198,8 @@ export async function rerankByEmbeddings(params: {
   const provider = getEmbeddingProvider(params.provider);
   const queryEmbedding = (await provider.embed([params.query]))[0];
 
-  const conn = await getKuzuConn();
-  const embeddingMap = await kuzuDb.getSymbolEmbeddings(
+  const conn = await getLadybugConn();
+  const embeddingMap = await ladybugDb.getSymbolEmbeddings(
     conn,
     params.symbols.map((item) => item.symbol.symbolId),
   );
@@ -215,7 +215,7 @@ export async function rerankByEmbeddings(params: {
       model: params.model,
       symbols: missing,
     });
-    const refreshed = await kuzuDb.getSymbolEmbeddings(
+    const refreshed = await ladybugDb.getSymbolEmbeddings(
       conn,
       missing.map((symbol) => symbol.symbolId),
     );

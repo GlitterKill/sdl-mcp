@@ -1,5 +1,5 @@
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 
 export interface CardResource {
   uri: string;
@@ -20,9 +20,9 @@ export interface ResourceList {
 }
 
 export async function listCardResources(repoId: string): Promise<CardResource[]> {
-  const conn = await getKuzuConn();
-  const symbols = await kuzuDb.getSymbolsByRepo(conn, repoId);
-  const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+  const conn = await getLadybugConn();
+  const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+  const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
 
   if (!latestVersion) {
     return [];
@@ -39,8 +39,8 @@ export async function listCardResources(repoId: string): Promise<CardResource[]>
 export async function listSliceResources(
   repoId: string,
 ): Promise<SliceResource[]> {
-  const conn = await getKuzuConn();
-  const versions = await kuzuDb.getVersionsByRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const versions = await ladybugDb.getVersionsByRepo(conn, repoId);
 
   return versions.slice(0, 50).map((version) => ({
     uri: `slice://${repoId}/${version.versionId}`,
@@ -62,8 +62,8 @@ export async function listAllResources(repoId?: string): Promise<ResourceList> {
     };
   }
 
-  const conn = await getKuzuConn();
-  const repos = await kuzuDb.listRepos(conn);
+  const conn = await getLadybugConn();
+  const repos = await ladybugDb.listRepos(conn);
   const allResources: Array<CardResource | SliceResource> = [];
 
   for (const repo of repos) {
@@ -84,21 +84,21 @@ export async function readCardResource(uri: string): Promise<string | null> {
 
   const [, , symbolId, versionId] = match;
 
-  const conn = await getKuzuConn();
-  const symbol = await kuzuDb.getSymbol(conn, symbolId);
+  const conn = await getLadybugConn();
+  const symbol = await ladybugDb.getSymbol(conn, symbolId);
   if (!symbol) {
     return null;
   }
 
-  const file = (await kuzuDb.getFilesByIds(conn, [symbol.fileId])).get(
+  const file = (await ladybugDb.getFilesByIds(conn, [symbol.fileId])).get(
     symbol.fileId,
   );
   if (!file) {
     return null;
   }
 
-  const edgesFrom = await kuzuDb.getEdgesFrom(conn, symbolId);
-  const metrics = await kuzuDb.getMetrics(conn, symbolId);
+  const edgesFrom = await ladybugDb.getEdgesFrom(conn, symbolId);
+  const metrics = await ladybugDb.getMetrics(conn, symbolId);
 
   const signature = symbol.signatureJson
     ? (JSON.parse(symbol.signatureJson) as unknown)

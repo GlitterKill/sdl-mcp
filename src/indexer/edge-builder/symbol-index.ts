@@ -1,6 +1,6 @@
 import type { SymbolKind } from "../../db/schema.js";
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import { normalizePath } from "../../util/paths.js";
 
 import type { SymbolIndex } from "./types.js";
@@ -48,8 +48,8 @@ export async function resolveSymbolIdFromIndex(
   // ML-D.1: Language-aware symbol resolution
   // If callerLanguage is provided, check if the target file is the same language
   if (callerLanguage) {
-    const conn = await getKuzuConn();
-    const targetFile = await kuzuDb.getFileByRepoPath(conn, repoId, filePath);
+    const conn = await getLadybugConn();
+    const targetFile = await ladybugDb.getFileByRepoPath(conn, repoId, filePath);
     if (targetFile && targetFile.language !== callerLanguage) {
       // Cross-language call - return null to mark as unresolved
       return null;

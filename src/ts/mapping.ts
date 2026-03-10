@@ -2,8 +2,8 @@ import type { RepoId } from "../db/schema.js";
 import { RepoConfigSchema } from "../config/types.js";
 import type { Diagnostic, DiagnosticSummary } from "./diagnostics.js";
 import { diagnosticsManager } from "./diagnostics.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { normalizePath, getRelativePath } from "../util/paths.js";
 
 export interface DiagnosticSuspect {
@@ -30,8 +30,8 @@ export async function mapDiagnosticsToSymbols(
 ): Promise<DiagnosticSuspect[]> {
   const { repoId, diagnostics, maxSuspects = 50 } = options;
 
-  const conn = await getKuzuConn();
-  const repo = await kuzuDb.getRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
     throw new Error(`Repository not found: ${repoId}`);
   }
@@ -44,7 +44,7 @@ export async function mapDiagnosticsToSymbols(
     const relativePath = normalizePath(
       getRelativePath(repo.rootPath, diagnostic.filePath),
     );
-    const fileRecord = await kuzuDb.getFileByRepoPath(
+    const fileRecord = await ladybugDb.getFileByRepoPath(
       conn,
       repoId,
       relativePath,
@@ -54,7 +54,7 @@ export async function mapDiagnosticsToSymbols(
       continue;
     }
 
-    const symbols = await kuzuDb.findSymbolsInRange(
+    const symbols = await ladybugDb.findSymbolsInRange(
       conn,
       repoId,
       fileRecord.fileId,
@@ -96,8 +96,8 @@ export async function getDiagnosticsWithSuspects(
   repoId: RepoId,
   changedFiles?: string[],
 ): Promise<DiagnosticsWithSuspects> {
-  const conn = await getKuzuConn();
-  const repo = await kuzuDb.getRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
     throw new Error(`Repository not found: ${repoId}`);
   }

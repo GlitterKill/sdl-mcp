@@ -1,7 +1,7 @@
 import type { HealthComponents } from "./types.js";
 import { RepoConfigSchema } from "../config/types.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { scanRepository } from "../indexer/fileScanner.js";
 import { DatabaseError } from "../domain/errors.js";
 
@@ -128,8 +128,8 @@ export interface RepoHealthSnapshot extends HealthScoreResult {
 export async function getRepoHealthSnapshot(
   repoId: string,
 ): Promise<RepoHealthSnapshot> {
-  const conn = await getKuzuConn();
-  const repo = await kuzuDb.getRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
     throw new Error(`Repository ${repoId} not found`);
   }
@@ -144,9 +144,9 @@ export async function getRepoHealthSnapshot(
   }
   const repoConfig = RepoConfigSchema.parse(parsed);
   const eligibleFiles = await scanRepository(repo.rootPath, repoConfig);
-  const files = await kuzuDb.getFilesByRepo(conn, repoId);
-  const indexedSymbols = await kuzuDb.getSymbolCount(conn, repoId);
-  const callCounts = await kuzuDb.getCallEdgeResolutionCounts(conn, repoId);
+  const files = await ladybugDb.getFilesByRepo(conn, repoId);
+  const indexedSymbols = await ladybugDb.getSymbolCount(conn, repoId);
+  const callCounts = await ladybugDb.getCallEdgeResolutionCounts(conn, repoId);
 
   const lastIndexedFile = files
     .filter((f) => f.lastIndexedAt !== null)

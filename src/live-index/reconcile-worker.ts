@@ -1,6 +1,6 @@
 import { logger } from "../util/logger.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { computeAndStoreClustersAndProcesses } from "../indexer/cluster-orchestrator.js";
 import { createDebouncedJobScheduler } from "./debounce.js";
 import type { DependencyFrontier } from "./dependency-frontier.js";
@@ -18,8 +18,8 @@ export class ReconcileWorker {
   private readonly clusterScheduler = createDebouncedJobScheduler({
     delayMs: 5000,
     run: async (repoId) => {
-      const conn = await getKuzuConn();
-      const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+      const conn = await getLadybugConn();
+      const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
       await computeAndStoreClustersAndProcesses({
         conn,
         repoId,

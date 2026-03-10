@@ -1,4 +1,4 @@
-import type { SearchSymbolLiteRow } from "../db/kuzu-queries.js";
+import type { SearchSymbolLiteRow } from "../db/ladybug-queries.js";
 
 export interface OverlaySearchResult extends SearchSymbolLiteRow {
   filePath: string;

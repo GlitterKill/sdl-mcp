@@ -461,7 +461,7 @@ function mapNativeSymbol(sym: NativeParsedSymbol): RustExtractedSymbol {
         }
       : undefined,
     summary: sym.summary,
-    // Downstream kuzu persistence still expects JSON strings for these arrays;
+    // Downstream Ladybug persistence still expects JSON strings for these arrays;
     // re-serialise here rather than changing every write path.
     invariantsJson:
       sym.invariants.length > 0 ? JSON.stringify(sym.invariants) : "[]",

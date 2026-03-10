@@ -1,8 +1,8 @@
 import type { Connection } from "kuzu";
 
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
-import type { SymbolReferenceRow } from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
+import type { SymbolReferenceRow } from "../../db/ladybug-queries.js";
 import type { ConfigEdge } from "../configEdges.js";
 
 interface PersistSkippedFileParams {
@@ -42,8 +42,8 @@ export function extractSymbolReferences(
   if (references.length === 0) return Promise.resolve();
 
   return (async () => {
-    const activeConn = conn ?? (await getKuzuConn());
-    await kuzuDb.insertSymbolReferences(activeConn, references);
+    const activeConn = conn ?? (await getLadybugConn());
+    await ladybugDb.insertSymbolReferences(activeConn, references);
   })();
 }
 
@@ -78,11 +78,11 @@ export async function persistSkippedFile({
   language,
   byteSize,
 }: PersistSkippedFileParams): Promise<void> {
-  await kuzuDb.withTransaction(conn, async (txConn) => {
+  await ladybugDb.withTransaction(conn, async (txConn) => {
     if (existingFileId) {
-      await kuzuDb.deleteSymbolsByFileId(txConn, existingFileId);
+      await ladybugDb.deleteSymbolsByFileId(txConn, existingFileId);
     }
-    await kuzuDb.upsertFile(txConn, {
+    await ladybugDb.upsertFile(txConn, {
       fileId,
       repoId,
       relPath,

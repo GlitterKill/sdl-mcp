@@ -12,7 +12,7 @@
 
 /**
  * Timeout for database busy state in milliseconds.
- * KuzuDB may block if the database is locked; this sets how long
+ * LadybugDB may block if the database is locked; this sets how long
  * to wait before giving up.
  */
 export const DB_BUSY_TIMEOUT_MS = 5000;
@@ -439,7 +439,7 @@ export const PIDFILE_NAME = "sdl-mcp.pid";
 /**
  * Maximum time in milliseconds to wait for graceful shutdown before
  * forcing process exit. Prevents the server from hanging indefinitely
- * if a cleanup step (e.g. KuzuDB close) blocks.
+ * if a cleanup step (e.g. LadybugDB close) blocks.
  */
 export const SHUTDOWN_FORCE_EXIT_TIMEOUT_MS = 5000;
 

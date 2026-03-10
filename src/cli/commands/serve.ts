@@ -8,8 +8,8 @@ import { setupHttpTransport } from "../transport/http.js";
 import { configureLogger } from "../logging.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
-import { closeKuzuDb, getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getCurrentTimestamp } from "../../util/time.js";
 import {
   configurePrefetch,
@@ -65,12 +65,12 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   }
 
   // Auto-register repositories if missing in database
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
   for (const repo of config.repos) {
-    const existingRepo = await kuzuDb.getRepo(conn, repo.repoId);
+    const existingRepo = await ladybugDb.getRepo(conn, repo.repoId);
     if (!existingRepo) {
       console.error(`Registering repository in database: ${repo.repoId}`);
-      await kuzuDb.upsertRepo(conn, {
+      await ladybugDb.upsertRepo(conn, {
         repoId: repo.repoId,
         rootPath: repo.rootPath,
         configJson: JSON.stringify(repo),
@@ -162,7 +162,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     idleMonitor.stop();
   });
   shutdownMgr.addCleanup("server", () => server.stop());
-  shutdownMgr.addCleanup("db", () => closeKuzuDb());
+  shutdownMgr.addCleanup("db", () => closeLadybugDb());
   shutdownMgr.addCleanup("watchers", async () => {
     for (const watcher of watchers) {
       await watcher.close();

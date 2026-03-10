@@ -30,8 +30,8 @@ import {
 import { loadConfig } from "../config/loadConfig.js";
 import { DatabaseError, ValidationError } from "../domain/errors.js";
 import { pickDepLabel } from "../util/depLabels.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import {
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
@@ -54,7 +54,7 @@ import {
 
 import {
   resolveStartNodes,
-  resolveStartNodesKuzu,
+  resolveStartNodesLadybug,
   type StartNodeSource,
   type ResolvedStartNode,
   type StartNodeLimits,
@@ -64,7 +64,7 @@ import {
 } from "./slice/start-node-resolver.js";
 
 import {
-  beamSearchKuzu,
+  beamSearchLadybug,
   normalizeEdgeConfidence,
   applyEdgeConfidenceWeight,
   getAdaptiveMinConfidence,
@@ -124,7 +124,7 @@ interface SliceBuildRequest {
   repoId: RepoId;
   versionId: VersionId;
   /**
-   * Optional Kuzu connection override (primarily for tests).
+   * Optional Ladybug connection override (primarily for tests).
    * Not exposed via MCP tool schemas.
    */
   conn?: Connection;
@@ -181,15 +181,24 @@ export async function buildSlice(
   const minConfidence = request.minConfidence ?? 0.5;
   const minCallConfidence = request.minCallConfidence;
 
-  const conn = request.conn ?? (await getKuzuConn());
+  const conn = request.conn ?? (await getLadybugConn());
   const overlaySnapshot = getOverlaySnapshot(request.repoId);
 
-  const startNodes = await resolveStartNodesKuzu(conn, request.repoId, request);
+  const startNodes = await resolveStartNodesLadybug(
+    conn,
+    request.repoId,
+    request,
+  );
   const startSymbols = startNodes.map((node) => node.symbolId);
 
-  let clusterContext: { entryClusterIds: string[]; relatedClusterIds: string[] } | undefined;
+  let clusterContext:
+    | { entryClusterIds: string[]; relatedClusterIds: string[] }
+    | undefined;
   try {
-    const clustersBySymbolId = await kuzuDb.getClustersForSymbols(conn, startSymbols);
+    const clustersBySymbolId = await ladybugDb.getClustersForSymbols(
+      conn,
+      startSymbols,
+    );
     const entryClusterIds = new Set<string>();
     for (const row of clustersBySymbolId.values()) {
       entryClusterIds.add(row.clusterId);
@@ -199,7 +208,7 @@ export async function buildSlice(
       const relatedClusterIds = new Set<string>();
       const relatedLists = await Promise.all(
         Array.from(entryClusterIds).map((clusterId) =>
-          kuzuDb.getRelatedClusters(conn, clusterId, 20),
+          ladybugDb.getRelatedClusters(conn, clusterId, 20),
         ),
       );
       for (const related of relatedLists) {
@@ -214,12 +223,14 @@ export async function buildSlice(
       };
     }
   } catch (error) {
-    logger.debug("Cluster context resolution failed (graceful degradation)", { error: String(error) });
+    logger.debug("Cluster context resolution failed (graceful degradation)", {
+      error: String(error),
+    });
   }
 
   const beamRequest = clusterContext ? { ...request, clusterContext } : request;
   const { sliceCards, frontier, wasTruncated, droppedCandidates } =
-    await beamSearchKuzu(
+    await beamSearchLadybug(
       conn,
       request.repoId,
       startNodes,
@@ -309,7 +320,6 @@ export async function buildSlice(
   return slice;
 }
 
-
 function resolveEffectiveDetailLevel(
   request: SliceBuildRequest,
   budget: Required<SliceBudget>,
@@ -356,7 +366,7 @@ function buildDetailLevelMetadata(
 }
 
 function buildCallResolution(
-  outgoingEdges: kuzuDb.EdgeForSlice[],
+  outgoingEdges: ladybugDb.EdgeForSlice[],
   calledSymbolsMap: Map<string, { name: string }>,
   minCallConfidence: number | undefined,
 ): CallResolution | undefined {
@@ -455,7 +465,10 @@ async function loadSymbolCards(
 
   uncachedSymbolIds.sort();
 
-  const durableSymbolsMap = await kuzuDb.getSymbolsByIds(conn, uncachedSymbolIds);
+  const durableSymbolsMap = await ladybugDb.getSymbolsByIds(
+    conn,
+    uncachedSymbolIds,
+  );
   const symbolsMap = mergeSymbolRowsWithOverlay(
     snapshot,
     uncachedSymbolIds,
@@ -467,16 +480,19 @@ async function loadSymbolCards(
     if (symbol.repoId !== repoId) continue;
     fileIds.add(symbol.fileId);
   }
-  const filesMap = await kuzuDb.getFilesByIds(conn, [...fileIds]);
+  const filesMap = await ladybugDb.getFilesByIds(conn, [...fileIds]);
   for (const [fileId, file] of snapshot.filesById) {
     if (fileIds.has(fileId)) {
       filesMap.set(fileId, file);
     }
   }
 
-  const metricsMap = await kuzuDb.getMetricsBySymbolIds(conn, uncachedSymbolIds);
+  const metricsMap = await ladybugDb.getMetricsBySymbolIds(
+    conn,
+    uncachedSymbolIds,
+  );
 
-  const durableEdgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(
+  const durableEdgesMap = await ladybugDb.getEdgesFromSymbolsForSlice(
     conn,
     uncachedSymbolIds,
     { minCallConfidence },
@@ -499,16 +515,12 @@ async function loadSymbolCards(
       }
     }
   }
-  const importedSymbolsMap = await getTargetNamesWithOverlay(
-    conn,
-    snapshot,
-    [...importedSymbolIds],
-  );
-  const calledSymbolsMap = await getTargetNamesWithOverlay(
-    conn,
-    snapshot,
-    [...calledSymbolIds],
-  );
+  const importedSymbolsMap = await getTargetNamesWithOverlay(conn, snapshot, [
+    ...importedSymbolIds,
+  ]);
+  const calledSymbolsMap = await getTargetNamesWithOverlay(conn, snapshot, [
+    ...calledSymbolIds,
+  ]);
 
   const includeDeps =
     CARD_DETAIL_LEVEL_RANK[effectiveLevel] >= CARD_DETAIL_LEVEL_RANK.deps;
@@ -516,13 +528,13 @@ async function loadSymbolCards(
     CARD_DETAIL_LEVEL_RANK[effectiveLevel] >= CARD_DETAIL_LEVEL_RANK.signature;
   const includeFullDetails = effectiveLevel === "full";
 
-  const clustersBySymbolId = await kuzuDb.getClustersForSymbols(
+  const clustersBySymbolId = await ladybugDb.getClustersForSymbols(
     conn,
     uncachedSymbolIds,
   );
   const processesBySymbolId = includeDeps
-    ? await kuzuDb.getProcessesForSymbols(conn, uncachedSymbolIds)
-    : new Map<string, kuzuDb.ProcessForSymbolRow[]>();
+    ? await ladybugDb.getProcessesForSymbols(conn, uncachedSymbolIds)
+    : new Map<string, ladybugDb.ProcessForSymbolRow[]>();
 
   for (const symbolId of uncachedSymbolIds) {
     const symbolRow = symbolsMap.get(symbolId);
@@ -530,7 +542,7 @@ async function loadSymbolCards(
 
     const clusterRow = clustersBySymbolId.get(symbolId);
     const processRows = includeDeps
-      ? processesBySymbolId.get(symbolId) ?? []
+      ? (processesBySymbolId.get(symbolId) ?? [])
       : [];
 
     const file = filesMap.get(symbolRow.fileId);
@@ -544,10 +556,7 @@ async function loadSymbolCards(
       for (const edge of outgoingEdges) {
         if (edge.edgeType === "import") {
           const importedSymbol = importedSymbolsMap.get(edge.toSymbolId);
-          const depLabel = pickDepLabel(
-            edge.toSymbolId,
-            importedSymbol?.name,
-          );
+          const depLabel = pickDepLabel(edge.toSymbolId, importedSymbol?.name);
           if (depLabel) {
             importDeps.push(depLabel);
           }
@@ -574,7 +583,10 @@ async function loadSymbolCards(
       try {
         signature = JSON.parse(symbolRow.signatureJson);
       } catch (error) {
-        logger.warn("Failed to parse signatureJson", { symbolId, error: error instanceof Error ? error.message : String(error) });
+        logger.warn("Failed to parse signatureJson", {
+          symbolId,
+          error: error instanceof Error ? error.message : String(error),
+        });
         signature = { name: symbolRow.name };
       }
     } else if (includeSignature) {
@@ -587,7 +599,10 @@ async function loadSymbolCards(
         const parsed = JSON.parse(symbolRow.invariantsJson);
         invariants = parsed.slice(0, SYMBOL_CARD_MAX_INVARIANTS);
       } catch (error) {
-        logger.warn("Failed to parse invariantsJson", { symbolId, error: error instanceof Error ? error.message : String(error) });
+        logger.warn("Failed to parse invariantsJson", {
+          symbolId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 
@@ -597,7 +612,10 @@ async function loadSymbolCards(
         const parsed = JSON.parse(symbolRow.sideEffectsJson);
         sideEffects = parsed.slice(0, SYMBOL_CARD_MAX_SIDE_EFFECTS);
       } catch (error) {
-        logger.warn("Failed to parse sideEffectsJson", { symbolId, error: error instanceof Error ? error.message : String(error) });
+        logger.warn("Failed to parse sideEffectsJson", {
+          symbolId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 
@@ -608,7 +626,10 @@ async function loadSymbolCards(
         try {
           testRefs = JSON.parse(metrics.testRefsJson);
         } catch (error) {
-          logger.warn("Failed to parse testRefsJson", { symbolId, error: error instanceof Error ? error.message : String(error) });
+          logger.warn("Failed to parse testRefsJson", {
+            symbolId,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
 
@@ -641,7 +662,8 @@ async function loadSymbolCards(
       kind: symbolRow.kind as SymbolCard["kind"],
       name: symbolRow.name,
       exported: symbolRow.exported,
-      visibility: (symbolRow.visibility as SymbolCard["visibility"]) ?? undefined,
+      visibility:
+        (symbolRow.visibility as SymbolCard["visibility"]) ?? undefined,
       signature: includeSignature ? signature : undefined,
       summary: symbolRow.summary
         ? symbolRow.summary.slice(0, summaryMaxLength)
@@ -671,7 +693,11 @@ async function loadSymbolCards(
             }))
           : undefined,
       callResolution: includeResolutionMetadata
-        ? buildCallResolution(outgoingEdges, calledSymbolsMap, minCallConfidence)
+        ? buildCallResolution(
+            outgoingEdges,
+            calledSymbolsMap,
+            minCallConfidence,
+          )
         : undefined,
       deps,
       metrics: includeFullDetails ? metricsData : undefined,
@@ -717,7 +743,7 @@ type SliceEdgeProjection = {
 async function buildSliceDepsBySymbol(
   conn: Connection,
   symbolIds: SymbolId[],
-  prefetchedEdgesMap?: Map<SymbolId, kuzuDb.EdgeForSlice[]>,
+  prefetchedEdgesMap?: Map<SymbolId, ladybugDb.EdgeForSlice[]>,
   minCallConfidence?: number,
 ): Promise<Map<SymbolId, SliceSymbolDeps>> {
   const depMap = new Map<SymbolId, SliceSymbolDeps>();
@@ -725,7 +751,7 @@ async function buildSliceDepsBySymbol(
     return depMap;
   }
 
-  const edgesMap = new Map<SymbolId, kuzuDb.EdgeForSlice[]>();
+  const edgesMap = new Map<SymbolId, ladybugDb.EdgeForSlice[]>();
   if (prefetchedEdgesMap) {
     for (const [symbolId, edges] of prefetchedEdgesMap) {
       edgesMap.set(symbolId, edges);
@@ -736,7 +762,7 @@ async function buildSliceDepsBySymbol(
     (symbolId) => !edgesMap.has(symbolId),
   );
   if (missingSymbolIds.length > 0) {
-    const missingEdgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(
+    const missingEdgesMap = await ladybugDb.getEdgesFromSymbolsForSlice(
       conn,
       missingSymbolIds,
       { minCallConfidence },
@@ -772,7 +798,6 @@ async function buildSliceDepsBySymbol(
   return depMap;
 }
 
-
 async function loadEdgesBetweenSymbols(
   conn: Connection,
   symbolIds: SymbolId[],
@@ -807,9 +832,13 @@ async function loadEdgesBetweenSymbols(
     unknown: 0,
   };
 
-  const durableEdgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, symbolIds, {
-    minCallConfidence,
-  });
+  const durableEdgesMap = await ladybugDb.getEdgesFromSymbolsForSlice(
+    conn,
+    symbolIds,
+    {
+      minCallConfidence,
+    },
+  );
   const snapshot = overlaySnapshot ?? getOverlaySnapshot(repoId);
   const edgesMap = mergeEdgeMapWithOverlay(
     snapshot,

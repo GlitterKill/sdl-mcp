@@ -1,7 +1,7 @@
 import type { Connection } from "kuzu";
 
 import { logger } from "../util/logger.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { computeClustersTS } from "../graph/cluster.js";
 import { traceProcessesTS } from "../graph/process.js";
 import {
@@ -45,14 +45,14 @@ export async function computeAndStoreClustersAndProcesses(params: {
   const startMs = Date.now();
   const now = new Date().toISOString();
 
-  const symbols = await kuzuDb.getSymbolsByRepo(conn, repoId);
+  const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
   if (symbols.length === 0) {
     return { clustersComputed: 0, processesTraced: 0 };
   }
 
   const symbolIds = symbols.map((s) => s.symbolId).sort();
 
-  const edgesByFrom = await kuzuDb.getEdgesFromSymbolsLite(conn, symbolIds);
+  const edgesByFrom = await ladybugDb.getEdgesFromSymbolsLite(conn, symbolIds);
   const clusterEdges: Array<{ fromSymbolId: string; toSymbolId: string }> = [];
   const callEdges: Array<{ callerId: string; calleeId: string }> = [];
 
@@ -74,7 +74,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
     ) ??
     (await computeClustersTS(repoId, { minClusterSize }));
 
-  await kuzuDb.deleteClustersByRepo(conn, repoId);
+  await ladybugDb.deleteClustersByRepo(conn, repoId);
 
   // Build lookup maps for label generation
   const symbolById = new Map<string, { name: string; fileId: string }>();
@@ -82,7 +82,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
     symbolById.set(s.symbolId, { name: s.name, fileId: s.fileId });
   }
   const allFileIds = [...new Set(symbols.map((s) => s.fileId))];
-  const filesById = await kuzuDb.getFilesByIds(conn, allFileIds);
+  const filesById = await ladybugDb.getFilesByIds(conn, allFileIds);
 
   const clustersById = new Map<
     string,
@@ -105,7 +105,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
 
     const label = generateClusterLabel(members, symbolById, filesById, clusterIndex);
 
-    await kuzuDb.upsertCluster(conn, {
+    await ladybugDb.upsertCluster(conn, {
       clusterId,
       repoId,
       label,
@@ -115,7 +115,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
       createdAt: now,
     });
 
-    await kuzuDb.upsertClusterMembersBatch(
+    await ladybugDb.upsertClusterMembersBatch(
       conn,
       members.map((member) => ({
         symbolId: member.symbolId,
@@ -136,12 +136,12 @@ export async function computeAndStoreClustersAndProcesses(params: {
       entryPatterns,
     ) ?? (await traceProcessesTS(repoId, entryPatterns, { maxDepth: maxProcessDepth }));
 
-  await kuzuDb.deleteProcessesByRepo(conn, repoId);
+  await ladybugDb.deleteProcessesByRepo(conn, repoId);
 
   for (const proc of processes) {
     const lastOrder = proc.steps.length > 0 ? proc.steps[proc.steps.length - 1].stepOrder : 0;
 
-    await kuzuDb.upsertProcess(conn, {
+    await ladybugDb.upsertProcess(conn, {
       processId: proc.processId,
       repoId,
       entrySymbolId: proc.entrySymbolId,
@@ -153,7 +153,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
       createdAt: now,
     });
 
-    await kuzuDb.upsertProcessStepsBatch(
+    await ladybugDb.upsertProcessStepsBatch(
       conn,
       proc.steps.map((step) => ({
         processId: proc.processId,

@@ -1,9 +1,9 @@
 /**
- * kuzu-processes.ts — Process Operations
- * Extracted from kuzu-queries.ts as part of the god-object split.
+ * ladybug-processes.ts - Process Operations
+ * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber } from "./kuzu-core.js";
+import { exec, queryAll, querySingle, toNumber } from "./ladybug-core.js";
 
 export interface ProcessRow {
   processId: string;
@@ -30,7 +30,10 @@ export interface ProcessForSymbolRow {
   role: string | null;
 }
 
-export async function upsertProcess(conn: Connection, row: ProcessRow): Promise<void> {
+export async function upsertProcess(
+  conn: Connection,
+  row: ProcessRow,
+): Promise<void> {
   await exec(
     conn,
     `MATCH (r:Repo {repoId: $repoId})
@@ -76,7 +79,12 @@ export async function upsertProcessStep(
 
 export async function upsertProcessStepsBatch(
   conn: Connection,
-  steps: Array<{ processId: string; symbolId: string; stepOrder: number; role: string }>,
+  steps: Array<{
+    processId: string;
+    symbolId: string;
+    stepOrder: number;
+    role: string;
+  }>,
 ): Promise<void> {
   if (steps.length === 0) return;
   for (const step of steps) {
@@ -306,4 +314,3 @@ export async function deleteProcessesByRepo(
     { repoId },
   );
 }
-

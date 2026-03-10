@@ -1,8 +1,8 @@
 import type { RepoId, SymbolId } from "../db/schema.js";
 import * as crypto from "crypto";
 
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 import { getCurrentTimestamp } from "../util/time.js";
 import type { PolicyRequestContext } from "../policy/types.js";
@@ -148,8 +148,8 @@ async function recordAuditEvent(event: {
   detailsJson: string;
 }): Promise<void> {
   try {
-    const conn = await getKuzuConn();
-    await kuzuDb.insertAuditEvent(conn, {
+    const conn = await getLadybugConn();
+    await ladybugDb.insertAuditEvent(conn, {
       eventId: generateAuditEventId(),
       timestamp: getCurrentTimestamp(),
       tool: event.tool,
@@ -225,8 +225,8 @@ export async function getAuditTrail(
   repoId?: RepoId,
   limit?: number,
 ): Promise<AuditEvent[]> {
-  const conn = await getKuzuConn();
-  const events = await kuzuDb.getAuditEvents(conn, {
+  const conn = await getLadybugConn();
+  const events = await ladybugDb.getAuditEvents(conn, {
     repoId,
     limit: limit ?? DB_QUERY_LIMIT_MAX,
   });

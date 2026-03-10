@@ -1,5 +1,5 @@
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { createDebouncedJobScheduler } from "./debounce.js";
 import { parseDraftFile } from "./draft-parser.js";
 import { CheckpointService } from "./checkpoint-service.js";
@@ -267,8 +267,8 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   }
 
   private async loadRepoRoot(repoId: string): Promise<string> {
-    const conn = await getKuzuConn();
-    const repo = await kuzuDb.getRepo(conn, repoId);
+    const conn = await getLadybugConn();
+    const repo = await ladybugDb.getRepo(conn, repoId);
     if (!repo) {
       throw new IndexError(`Repository ${repoId} not found`);
     }

@@ -1,9 +1,9 @@
 import { join } from "path";
 
 import type { RepoConfig } from "../../config/types.js";
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
-import type { EdgeRow, SymbolRow } from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
+import type { EdgeRow, SymbolRow } from "../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../db/schema.js";
 import { prefetchFileExports } from "../../graph/prefetch.js";
 import { readFileAsync } from "../../util/asyncFs.js";
@@ -57,7 +57,7 @@ export async function processFileFromRustResult(params: {
   createdCallEdges: Set<string>;
   tsResolver: TsCallResolver | null;
   config: RepoConfig;
-  allSymbolsByName: Map<string, kuzuDb.SymbolLiteRow[]>;
+  allSymbolsByName: Map<string, ladybugDb.SymbolLiteRow[]>;
   skipCallResolution: boolean;
   globalNameToSymbolIds?: Map<string, string[]>;
   supportsPass2FilePath?: (relPath: string) => boolean;
@@ -131,14 +131,14 @@ export async function processFileFromRustResult(params: {
       };
     }
 
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
 
     if (!languages.includes(ext)) {
-      await kuzuDb.withTransaction(conn, async (txConn) => {
+      await ladybugDb.withTransaction(conn, async (txConn) => {
         if (existingFile) {
-          await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+          await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
         }
-        await kuzuDb.upsertFile(txConn, {
+        await ladybugDb.upsertFile(txConn, {
           fileId,
           repoId,
           relPath,
@@ -189,7 +189,7 @@ export async function processFileFromRustResult(params: {
     let existingSymbols: SymbolRow[] = [];
     const existingSymbolsById = new Map<string, SymbolRow>();
     if (existingFile) {
-      existingSymbols = await kuzuDb.getSymbolsByFile(
+      existingSymbols = await ladybugDb.getSymbolsByFile(
         conn,
         existingFile.fileId,
       );
@@ -205,7 +205,7 @@ export async function processFileFromRustResult(params: {
       existingSymbols.length > 0
     ) {
       try {
-        const incomingByToSymbol = await kuzuDb.getEdgesToSymbols(
+        const incomingByToSymbol = await ladybugDb.getEdgesToSymbols(
           conn,
           existingSymbols.map((s) => s.symbolId),
         );
@@ -220,7 +220,7 @@ export async function processFileFromRustResult(params: {
         }
 
         if (importerSymbolIds.size > 0) {
-          const importerSymbols = await kuzuDb.getSymbolsByIds(
+          const importerSymbols = await ladybugDb.getSymbolsByIds(
             conn,
             Array.from(importerSymbolIds),
           );
@@ -230,7 +230,7 @@ export async function processFileFromRustResult(params: {
             fileIds.add(symbol.fileId);
           }
 
-          const importerFiles = await kuzuDb.getFilesByIds(
+          const importerFiles = await ladybugDb.getFilesByIds(
             conn,
             Array.from(fileIds),
           );
@@ -513,8 +513,8 @@ export async function processFileFromRustResult(params: {
       }
     }
 
-    await kuzuDb.withTransaction(conn, async (txConn) => {
-      await kuzuDb.upsertFile(txConn, {
+    await ladybugDb.withTransaction(conn, async (txConn) => {
+      await ladybugDb.upsertFile(txConn, {
         fileId,
         repoId,
         relPath,
@@ -525,20 +525,20 @@ export async function processFileFromRustResult(params: {
       });
 
       if (existingFile) {
-        await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
-        await kuzuDb.deleteSymbolReferencesByFileId(
+        await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+        await ladybugDb.deleteSymbolReferencesByFileId(
           txConn,
           existingFile.fileId,
         );
       }
 
-      await kuzuDb.insertSymbolReferences(txConn, symbolReferences);
+      await ladybugDb.insertSymbolReferences(txConn, symbolReferences);
 
       for (const symbol of symbolsToUpsert) {
-        await kuzuDb.upsertSymbol(txConn, symbol);
+        await ladybugDb.upsertSymbol(txConn, symbol);
       }
 
-      await kuzuDb.insertEdges(txConn, edgesToInsert);
+      await ladybugDb.insertEdges(txConn, edgesToInsert);
     });
 
     prefetchFileExports(repoId, fileMeta.path);

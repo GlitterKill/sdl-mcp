@@ -5,10 +5,10 @@ import { fileURLToPath } from "url";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import type { Connection } from "kuzu";
 import { MCPServer } from "../../server.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import { computeDelta } from "../../delta/diff.js";
 import { runGovernorLoop } from "../../delta/blastRadius.js";
-import { getKuzuConn, initKuzuDb } from "../../db/kuzu.js";
+import { getLadybugConn, initLadybugDb } from "../../db/ladybug.js";
 import { indexRepo } from "../../indexer/indexer.js";
 import {
   BufferCheckpointRequestSchema,
@@ -188,14 +188,14 @@ async function buildNodes(
   conn: Connection,
   symbolIds: string[],
 ): Promise<GraphNode[]> {
-  const symbolMap = await kuzuDb.getSymbolsByIds(conn, symbolIds);
-  const metricsMap = await kuzuDb.getMetricsBySymbolIds(conn, symbolIds);
+  const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
+  const metricsMap = await ladybugDb.getMetricsBySymbolIds(conn, symbolIds);
 
   const fileIds = new Set<string>();
   for (const symbol of symbolMap.values()) {
     fileIds.add(symbol.fileId);
   }
-  const fileMap = await kuzuDb.getFilesByIds(conn, Array.from(fileIds));
+  const fileMap = await ladybugDb.getFilesByIds(conn, Array.from(fileIds));
 
   const nodes: GraphNode[] = [];
   for (const symbolId of symbolIds) {
@@ -224,7 +224,7 @@ async function buildLinksForNodes(
   ids: Set<string>,
 ): Promise<GraphLink[]> {
   const idList = Array.from(ids);
-  const edgeMap = await kuzuDb.getEdgesFromSymbolsForSlice(conn, idList);
+  const edgeMap = await ladybugDb.getEdgesFromSymbolsForSlice(conn, idList);
 
   const links: GraphLink[] = [];
   for (const fromSymbolId of idList) {
@@ -285,10 +285,10 @@ async function buildNeighborhood(
   const ids = new Set<string>();
   ids.add(symbolId);
 
-  for (const edge of await kuzuDb.getEdgesFrom(conn, symbolId)) {
+  for (const edge of await ladybugDb.getEdgesFrom(conn, symbolId)) {
     ids.add(edge.toSymbolId);
   }
-  const edgesTo = await kuzuDb.getEdgesToSymbols(conn, [symbolId]);
+  const edgesTo = await ladybugDb.getEdgesToSymbols(conn, [symbolId]);
   for (const edge of edgesTo.get(symbolId) ?? []) {
     ids.add(edge.fromSymbolId);
   }
@@ -311,7 +311,7 @@ async function buildRepoPreview(
   nodes: GraphNode[];
   links: GraphLink[];
 }> {
-  const top = await kuzuDb.getTopSymbolsByFanIn(conn, repoId, maxNodes);
+  const top = await ladybugDb.getTopSymbolsByFanIn(conn, repoId, maxNodes);
   const symbolIds = top.map((row) => row.symbolId);
   const ids = new Set(symbolIds);
   const nodes = await buildNodes(conn, symbolIds);
@@ -438,7 +438,7 @@ async function handleRestRequest(
       repoId,
       Math.min(500, Math.max(10, maxNodes)),
     );
-    const handleRow = await kuzuDb.getSliceHandle(conn, handle);
+    const handleRow = await ladybugDb.getSliceHandle(conn, handle);
     json(res, 200, {
       repoId,
       handle,
@@ -539,17 +539,17 @@ async function handleRestRequest(
   const repoStatusMatch = pathname.match(/^\/api\/repo\/([^/]+)\/status$/);
   if (req.method === "GET" && repoStatusMatch) {
     const [, repoId] = repoStatusMatch;
-    const repo = await kuzuDb.getRepo(conn, repoId);
+    const repo = await ladybugDb.getRepo(conn, repoId);
     if (!repo) {
       json(res, 404, { error: `Repository not found: ${repoId}` });
       return true;
     }
-    const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+    const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
     json(res, 200, {
       repoId,
       latestVersionId: latestVersion?.versionId ?? null,
-      symbolCount: await kuzuDb.getSymbolCount(conn, repoId),
-      fileCount: await kuzuDb.getFileCount(conn, repoId),
+      symbolCount: await ladybugDb.getSymbolCount(conn, repoId),
+      fileCount: await ladybugDb.getFileCount(conn, repoId),
     });
     return true;
   }
@@ -581,8 +581,8 @@ export async function setupHttpTransport(
   const sessions = new Map<string, SSEServerTransport>();
   let activeSseTransport: SSEServerTransport | null = null;
 
-  await initKuzuDb(graphDbPath);
-  const conn = await getKuzuConn();
+  await initLadybugDb(graphDbPath);
+  const conn = await getLadybugConn();
 
   const checkHealth = async (): Promise<boolean> => {
     try {

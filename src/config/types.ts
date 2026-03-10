@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 import {
   MAX_FILE_BYTES,
   DEFAULT_MAX_WINDOW_LINES,
@@ -251,7 +251,7 @@ export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
   /**
    * Deprecated legacy SQLite path (v0.7.x). Only used by the one-time
-   * SQLite→Kuzu migration script in v0.8.
+   * SQLite→Ladybug migration script in v0.8.
    */
   dbPath: z.string().min(1).optional(),
   graphDatabase: GraphDatabaseConfigSchema.optional(),

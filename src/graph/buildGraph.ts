@@ -1,4 +1,4 @@
-import type { Connection, PreparedStatement, QueryResult } from "kuzu";
+import type { Connection } from "kuzu";
 import type {
   EdgeRow,
   EdgeType,
@@ -6,6 +6,12 @@ import type {
   SymbolId,
   SymbolRow,
 } from "../db/schema.js";
+import {
+  assertSafeInt,
+  queryAll,
+  querySingle,
+  toNumber,
+} from "../db/ladybug-core.js";
 import { logger } from "../util/logger.js";
 
 export const LAZY_GRAPH_LOADING_DEFAULT_HOPS = 4;
@@ -71,7 +77,7 @@ export interface NeighborhoodSubgraph {
 /**
  * Legacy in-memory graph shape used by older slice/metrics code and unit tests.
  *
- * New KuzuDB-backed graph operations should prefer `NeighborhoodSubgraph` or
+ * New LadybugDB-backed graph operations should prefer `NeighborhoodSubgraph` or
  * direct Cypher traversal helpers instead of materializing full-repo maps.
  */
 export interface Graph {
@@ -80,100 +86,6 @@ export interface Graph {
   edges: EdgeRow[];
   adjacencyIn: Map<SymbolId, EdgeRow[]>;
   adjacencyOut: Map<SymbolId, EdgeRow[]>;
-}
-
-const MAX_PREPARED_STATEMENT_CACHE_SIZE = 100;
-const preparedStatementCacheByConn = new WeakMap<
-  Connection,
-  Map<string, PreparedStatement>
->();
-
-function assertSafeInt(value: number, name: string): void {
-  if (!Number.isSafeInteger(value)) {
-    throw new Error(`${name} must be a safe integer, got: ${String(value)}`);
-  }
-}
-
-function toNumber(value: unknown): number {
-  if (typeof value === "number") return value;
-  if (typeof value === "bigint") return Number(value);
-  if (typeof value === "string") return Number(value);
-  return 0;
-}
-
-function coerceQueryResult(result: QueryResult | QueryResult[]): QueryResult {
-  if (!Array.isArray(result)) return result;
-  for (let i = 0; i < result.length - 1; i++) {
-    result[i]?.close();
-  }
-  return result[result.length - 1];
-}
-
-async function getPreparedStatement(
-  conn: Connection,
-  statement: string,
-): Promise<PreparedStatement> {
-  let cache = preparedStatementCacheByConn.get(conn);
-  if (!cache) {
-    cache = new Map<string, PreparedStatement>();
-    preparedStatementCacheByConn.set(conn, cache);
-  }
-
-  const cached = cache.get(statement);
-  if (cached) {
-    cache.delete(statement);
-    cache.set(statement, cached);
-    return cached;
-  }
-
-  const prepared = await conn.prepare(statement);
-  cache.set(statement, prepared);
-
-  if (cache.size > MAX_PREPARED_STATEMENT_CACHE_SIZE) {
-    const oldestKey = cache.keys().next().value;
-    if (oldestKey !== undefined) {
-      cache.delete(oldestKey);
-    }
-  }
-
-  return prepared;
-}
-
-async function execute(
-  conn: Connection,
-  statement: string,
-  params: Record<string, unknown> = {},
-): Promise<QueryResult> {
-  const prepared = await getPreparedStatement(conn, statement);
-  // Kuzu accepts string | number | boolean | null | bigint — callers pass
-  // Record<string, unknown> for convenience; the cast is safe.
-  const result = await conn.execute(
-    prepared,
-    params as Parameters<Connection["execute"]>[1],
-  );
-  return coerceQueryResult(result);
-}
-
-async function queryAll<T>(
-  conn: Connection,
-  statement: string,
-  params: Record<string, unknown> = {},
-): Promise<T[]> {
-  const result = await execute(conn, statement, params);
-  try {
-    return (await result.getAll()) as T[];
-  } finally {
-    result.close();
-  }
-}
-
-async function querySingle<T>(
-  conn: Connection,
-  statement: string,
-  params: Record<string, unknown> = {},
-): Promise<T | null> {
-  const rows = await queryAll<T>(conn, statement, params);
-  return rows.length > 0 ? rows[0] : null;
 }
 
 export async function getNeighbors(

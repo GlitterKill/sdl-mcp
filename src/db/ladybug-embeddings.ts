@@ -1,9 +1,16 @@
 /**
- * kuzu-embeddings.ts — Symbol Embeddings, Summary Cache, Sync Artifacts, and Symbol References
- * Extracted from kuzu-queries.ts as part of the god-object split.
+ * ladybug-embeddings.ts - Symbol Embeddings, Summary Cache, Sync Artifacts, and Symbol References
+ * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber, withTransaction, assertSafeInt } from "./kuzu-core.js";
+import {
+  exec,
+  queryAll,
+  querySingle,
+  toNumber,
+  withTransaction,
+  assertSafeInt,
+} from "./ladybug-core.js";
 
 export interface SymbolEmbeddingRow {
   symbolId: string;
@@ -394,4 +401,3 @@ export async function deleteSymbolReferencesByFileId(
     { fileId },
   );
 }
-

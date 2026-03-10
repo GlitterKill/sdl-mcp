@@ -1,5 +1,5 @@
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 
 import { resolveSymbolIdFromIndex } from "./symbol-index.js";
 import type { PendingCallEdge, SymbolIndex } from "./types.js";
@@ -10,9 +10,9 @@ export async function resolvePendingCallEdges(
   created: Set<string>,
   repoId: string,
 ): Promise<void> {
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
   const now = new Date().toISOString();
-  const edgesToInsert: kuzuDb.EdgeRow[] = [];
+  const edgesToInsert: ladybugDb.EdgeRow[] = [];
 
   for (const edge of pending) {
     const toSymbolId = await resolveSymbolIdFromIndex(
@@ -48,5 +48,5 @@ export async function resolvePendingCallEdges(
     created.add(edgeKey);
   }
 
-  await kuzuDb.insertEdges(conn, edgesToInsert);
+  await ladybugDb.insertEdges(conn, edgesToInsert);
 }

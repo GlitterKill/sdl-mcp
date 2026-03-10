@@ -1,9 +1,9 @@
 /**
- * kuzu-clusters.ts — Cluster Operations
- * Extracted from kuzu-queries.ts as part of the god-object split.
+ * ladybug-clusters.ts - Cluster Operations
+ * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber } from "./kuzu-core.js";
+import { exec, queryAll, querySingle, toNumber } from "./ladybug-core.js";
 
 export interface ClusterRow {
   clusterId: string;
@@ -27,7 +27,10 @@ export interface ClusterForSymbolRow {
   membershipScore: number;
 }
 
-export async function upsertCluster(conn: Connection, row: ClusterRow): Promise<void> {
+export async function upsertCluster(
+  conn: Connection,
+  row: ClusterRow,
+): Promise<void> {
   await exec(
     conn,
     `MATCH (r:Repo {repoId: $repoId})
@@ -71,7 +74,11 @@ export async function upsertClusterMember(
 
 export async function upsertClusterMembersBatch(
   conn: Connection,
-  members: Array<{ symbolId: string; clusterId: string; membershipScore: number }>,
+  members: Array<{
+    symbolId: string;
+    clusterId: string;
+    membershipScore: number;
+  }>,
 ): Promise<void> {
   if (members.length === 0) return;
   for (const member of members) {
@@ -279,13 +286,16 @@ export async function getRelatedClusters(
     edgeCounts.set(row.clusterId, (edgeCounts.get(row.clusterId) ?? 0) + 1);
   }
 
-  const results = Array.from(edgeCounts.entries()).map(([clusterId, edgeCount]) => ({
-    clusterId,
-    edgeCount,
-  }));
+  const results = Array.from(edgeCounts.entries()).map(
+    ([clusterId, edgeCount]) => ({
+      clusterId,
+      edgeCount,
+    }),
+  );
 
   results.sort(
-    (a, b) => b.edgeCount - a.edgeCount || a.clusterId.localeCompare(b.clusterId),
+    (a, b) =>
+      b.edgeCount - a.edgeCount || a.clusterId.localeCompare(b.clusterId),
   );
 
   return results.slice(0, Math.max(1, limit));
@@ -317,4 +327,3 @@ export async function deleteClustersByRepo(
     { repoId },
   );
 }
-

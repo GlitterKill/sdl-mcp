@@ -3,9 +3,9 @@ import type {
   FileRow,
   SymbolReferenceRow,
   SymbolRow,
-} from "../db/kuzu-queries.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+} from "../db/ladybug-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { getAdapterForExtension } from "../indexer/adapter/registry.js";
 import { logger } from "../util/logger.js";
 import {
@@ -96,10 +96,10 @@ export async function parseDraftFile(
   };
 
   let durableSymbolsByMatchKey = new Map<DurableSymbolMatchKey, SymbolRow>();
-  const conn = await getKuzuConn();
-  const durableFile = await kuzuDb.getFileByRepoPath(conn, input.repoId, relPath);
+  const conn = await getLadybugConn();
+  const durableFile = await ladybugDb.getFileByRepoPath(conn, input.repoId, relPath);
   if (durableFile) {
-    const durableSymbols = await kuzuDb.getSymbolsByFile(conn, durableFile.fileId);
+    const durableSymbols = await ladybugDb.getSymbolsByFile(conn, durableFile.fileId);
     durableSymbolsByMatchKey = new Map(
       durableSymbols.map((symbol) => [
         buildDurableSymbolMatchKey({

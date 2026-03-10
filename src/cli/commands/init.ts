@@ -23,8 +23,8 @@ import {
 import { resolveCliConfigPath } from "../../config/configPath.js";
 import { defaultGraphDbPath } from "../../db/graph-db-path.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import { indexRepo } from "../../indexer/indexer.js";
 import { logSetupPipelineEvent } from "../../mcp/telemetry.js";
 import { normalizePath } from "../../util/paths.js";
@@ -435,10 +435,10 @@ export async function initCommand(options: InitOptions): Promise<void> {
   }
 
   const dbPath = resolve(dirname(configPath), "sdlmcp.sqlite");
-  const kuzuDbPath = defaultGraphDbPath(configPath);
+  const ladybugDbPath = defaultGraphDbPath(configPath);
   const configDir = dirname(configPath);
   const dbDir = dirname(dbPath);
-  const kuzuDbDir = dirname(kuzuDbPath);
+  const ladybugDbDir = dirname(ladybugDbPath);
 
   const repoId = detectRepoId(repoRoot);
   const ignorePatterns = mergeIgnorePatterns(repoRoot);
@@ -469,7 +469,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
     ],
     dbPath,
     graphDatabase: {
-      path: kuzuDbPath,
+      path: ladybugDbPath,
     },
     policy: {
       maxWindowLines: DEFAULT_MAX_WINDOW_LINES,
@@ -546,9 +546,9 @@ export async function initCommand(options: InitOptions): Promise<void> {
       mkdirSync(dbDir, { recursive: true });
       createdDirs.push(dbDir);
     }
-    if (!existsSync(kuzuDbDir)) {
-      mkdirSync(kuzuDbDir, { recursive: true });
-      createdDirs.push(kuzuDbDir);
+    if (!existsSync(ladybugDbDir)) {
+      mkdirSync(ladybugDbDir, { recursive: true });
+      createdDirs.push(ladybugDbDir);
     }
 
     writeFileSync(configPath, JSON.stringify(config, null, 2));
@@ -556,7 +556,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
 
     console.log(`Configuration created: ${normalizePath(configPath)}`);
     console.log(`Database path: ${normalizePath(dbPath)}`);
-    console.log(`Graph database path: ${normalizePath(kuzuDbPath)}`);
+    console.log(`Graph database path: ${normalizePath(ladybugDbPath)}`);
     console.log(`Repository: ${normalizedRepoPath} (id: ${repoId})`);
     console.log(`Languages: ${languages.join(", ")}`);
 
@@ -581,11 +581,11 @@ export async function initCommand(options: InitOptions): Promise<void> {
     if (autoIndex) {
       const setupStartedAt = Date.now();
       await initGraphDb(config, configPath);
-      const conn = await getKuzuConn();
+      const conn = await getLadybugConn();
 
-      const existingRepo = await kuzuDb.getRepo(conn, repoId);
+      const existingRepo = await ladybugDb.getRepo(conn, repoId);
       if (!existingRepo) {
-        await kuzuDb.upsertRepo(conn, {
+        await ladybugDb.upsertRepo(conn, {
           repoId,
           rootPath: normalizedRepoPath,
           configJson: JSON.stringify(config.repos[0]),

@@ -27,8 +27,8 @@ import { computeAndStoreClustersAndProcesses } from "./cluster-orchestrator.js";
 import { watchRepositoryWithIndexer } from "./watcher.js";
 import type { RepoConfig } from "../config/types.js";
 import { loadConfig } from "../config/loadConfig.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import type { SymbolKind } from "../db/schema.js";
 import { logger } from "../util/logger.js";
 import { normalizePath } from "../util/paths.js";
@@ -97,14 +97,14 @@ function computeFileId(repoId: string, relPath: string): string {
 /**
  * Per-repo mutex to prevent concurrent `indexRepo` invocations.
  * When the watcher fires rapid events (e.g. bulk deletes), multiple
- * `indexRepo("incremental")` calls can race and corrupt KuzuDB state.
+ * `indexRepo("incremental")` calls can race and corrupt LadybugDB state.
  */
 const indexLocks = new Map<string, Promise<IndexResult>>();
 
 function fileIdForPath(
   repoId: string,
   relPath: string,
-  existingByPath: Map<string, kuzuDb.FileRow>,
+  existingByPath: Map<string, ladybugDb.FileRow>,
 ): string {
   return existingByPath.get(relPath)?.fileId ?? computeFileId(repoId, relPath);
 }
@@ -115,9 +115,9 @@ async function createVersionAndSnapshot(params: {
   reason: string;
 }): Promise<void> {
   const { repoId, versionId, reason } = params;
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
-  await kuzuDb.createVersion(conn, {
+  await ladybugDb.createVersion(conn, {
     versionId,
     repoId,
     createdAt: new Date().toISOString(),
@@ -126,9 +126,9 @@ async function createVersionAndSnapshot(params: {
     versionHash: null,
   });
 
-  const symbols = await kuzuDb.getSymbolsByRepoForSnapshot(conn, repoId);
+  const symbols = await ladybugDb.getSymbolsByRepoForSnapshot(conn, repoId);
   for (const symbol of symbols) {
-    await kuzuDb.snapshotSymbolVersion(conn, {
+    await ladybugDb.snapshotSymbolVersion(conn, {
       versionId,
       symbolId: symbol.symbolId,
       astFingerprint: symbol.astFingerprint,
@@ -146,7 +146,7 @@ export async function indexRepo(
   onProgress?: (progress: IndexProgress) => void,
 ): Promise<IndexResult> {
   // Serialize concurrent indexRepo calls for the same repo to prevent
-  // KuzuDB write conflicts and race conditions during rapid watcher events.
+  // LadybugDB write conflicts and race conditions during rapid watcher events.
   const existing = indexLocks.get(repoId);
   if (existing) {
     logger.debug("indexRepo already running, waiting for lock", {
@@ -178,9 +178,9 @@ async function indexRepoImpl(
   onProgress?: (progress: IndexProgress) => void,
 ): Promise<IndexResult> {
   const startTime = Date.now();
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
-  const repoRow = await kuzuDb.getRepo(conn, repoId);
+  const repoRow = await ladybugDb.getRepo(conn, repoId);
   if (!repoRow) {
     throw new Error(`Repository ${repoId} not found`);
   }
@@ -242,10 +242,10 @@ async function indexRepoImpl(
       enabled: Boolean(tsResolver),
     });
 
-    const allSymbolsByName = new Map<string, kuzuDb.SymbolLiteRow[]>();
+    const allSymbolsByName = new Map<string, ladybugDb.SymbolLiteRow[]>();
     const globalNameToSymbolIds = new Map<string, string[]>();
     logger.debug("Loading existing symbols", { repoId });
-    const repoSymbols = await kuzuDb.getSymbolsByRepoLite(conn, repoId);
+    const repoSymbols = await ladybugDb.getSymbolsByRepoLite(conn, repoId);
     logger.debug("Loaded existing symbols", {
       repoId,
       count: repoSymbols.length,
@@ -463,11 +463,11 @@ async function indexRepoImpl(
 
     // Refresh symbol index from DB after pass 1
     const refreshedSymbolIndex: SymbolIndex = new Map();
-    const allFilesAfterPass1 = await kuzuDb.getFilesByRepo(conn, repoId);
+    const allFilesAfterPass1 = await ladybugDb.getFilesByRepo(conn, repoId);
     const filePathById = new Map(
       allFilesAfterPass1.map((file) => [file.fileId, file.relPath]),
     );
-    const symbolsAfterPass1 = await kuzuDb.getSymbolsByRepo(conn, repoId);
+    const symbolsAfterPass1 = await ladybugDb.getSymbolsByRepo(conn, repoId);
     for (const symbol of symbolsAfterPass1) {
       const filePath = filePathById.get(symbol.fileId);
       if (!filePath) continue;
@@ -581,7 +581,7 @@ async function indexRepoImpl(
         : 0.8;
 
     const now = new Date().toISOString();
-    const configEdgesToInsert: kuzuDb.EdgeRow[] = [];
+    const configEdgesToInsert: ladybugDb.EdgeRow[] = [];
     for (const edge of allConfigEdges) {
       configEdgesToInsert.push({
         repoId,
@@ -595,13 +595,13 @@ async function indexRepoImpl(
         createdAt: now,
       });
     }
-    await kuzuDb.insertEdges(conn, configEdgesToInsert);
+    await ladybugDb.insertEdges(conn, configEdgesToInsert);
     configEdgesCreated += configEdgesToInsert.length;
 
     const versionReason = mode === "full" ? "Full index" : "Incremental index";
 
     let versionId: string;
-    const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+    const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
     if (changedFiles === 0 && mode === "incremental") {
       versionId = latestVersion ? latestVersion.versionId : `v${Date.now()}`;
       if (!latestVersion) {

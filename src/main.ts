@@ -3,7 +3,7 @@ import { ConfigError, DatabaseError } from "./domain/errors.js";
 import { loadConfig } from "./config/loadConfig.js";
 import { activateCliConfigPath } from "./config/configPath.js";
 import { initGraphDb } from "./db/initGraphDb.js";
-import { closeKuzuDb } from "./db/kuzu.js";
+import { closeLadybugDb } from "./db/ladybug.js";
 import { CLEANUP_INTERVAL_MS } from "./config/constants.js";
 import {
   configureDefaultLiveIndexCoordinator,
@@ -136,7 +136,7 @@ async function main(): Promise<void> {
       idleMonitor.stop();
     });
     shutdownMgr.addCleanup("server", () => server.stop());
-    shutdownMgr.addCleanup("db", () => closeKuzuDb());
+    shutdownMgr.addCleanup("db", () => closeLadybugDb());
     shutdownMgr.addCleanup("watchers", async () => {
       for (const watcher of watchers) {
         try {

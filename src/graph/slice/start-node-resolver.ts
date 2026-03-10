@@ -16,7 +16,7 @@
 import type { Connection } from "kuzu";
 
 import type { RepoId, SymbolId } from "../../db/schema.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import { tokenize } from "../../util/tokenize.js";
 import {
   TASK_TEXT_START_NODE_MAX,
@@ -359,7 +359,7 @@ export function resolveStartNodes(
     .map(([symbolId, source]) => ({ symbolId, source }));
 }
 
-export async function resolveStartNodesKuzu(
+export async function resolveStartNodesLadybug(
   conn: Connection,
   repoId: RepoId,
   request: SliceBuildRequestBase,
@@ -382,7 +382,7 @@ export async function resolveStartNodesKuzu(
   const entrySymbols =
     request.entrySymbols?.filter((id) => id && id.length > 0) ?? [];
   if (entrySymbols.length > 0) {
-    const existing = await kuzuDb.getSymbolsByIds(conn, entrySymbols);
+    const existing = await ladybugDb.getSymbolsByIds(conn, entrySymbols);
     for (const symbolId of entrySymbols) {
       const row = existing.get(symbolId);
       if (!row || row.repoId !== repoId) continue;
@@ -406,7 +406,7 @@ export async function resolveStartNodesKuzu(
 
   for (const symbolId of explicitEntrySymbols) {
     if (startNodes.size >= limits.maxTotalStartNodes) break;
-    const firstHopSymbols = await collectEntryFirstHopSymbolsKuzu(
+    const firstHopSymbols = await collectEntryFirstHopSymbolsLadybug(
       conn,
       repoId,
       symbolId,
@@ -421,7 +421,7 @@ export async function resolveStartNodesKuzu(
 
   for (const symbolId of explicitEntrySymbols) {
     if (startNodes.size >= limits.maxTotalStartNodes) break;
-    const siblingSymbols = await collectEntrySiblingSymbolsKuzu(
+    const siblingSymbols = await collectEntrySiblingSymbolsLadybug(
       conn,
       repoId,
       symbolId,
@@ -434,7 +434,7 @@ export async function resolveStartNodesKuzu(
   }
 
   if (request.stackTrace) {
-    const stackSymbols = await extractSymbolsFromStackTraceKuzu(
+    const stackSymbols = await extractSymbolsFromStackTraceLadybug(
       conn,
       repoId,
       request.stackTrace,
@@ -446,7 +446,7 @@ export async function resolveStartNodesKuzu(
   }
 
   if (request.failingTestPath) {
-    const fileSymbols = await getSymbolsByPathKuzu(
+    const fileSymbols = await getSymbolsByPathLadybug(
       conn,
       repoId,
       request.failingTestPath,
@@ -462,7 +462,7 @@ export async function resolveStartNodesKuzu(
 
     for (const filePath of request.editedFiles) {
       if (startNodes.size >= limits.maxTotalStartNodes) break;
-      const fileSymbols = await getSymbolsByPathKuzu(conn, repoId, filePath);
+      const fileSymbols = await getSymbolsByPathLadybug(conn, repoId, filePath);
       for (const symbolId of fileSymbols) {
         if (startNodes.size >= limits.maxTotalStartNodes) break;
         addStartNode(symbolId, "editedFile");
@@ -471,7 +471,7 @@ export async function resolveStartNodesKuzu(
     }
 
     if (allEditedFileSymbolIds.length > 0) {
-      const callerIds = await kuzuDb.getCallersOfSymbols(
+      const callerIds = await ladybugDb.getCallersOfSymbols(
         conn,
         repoId,
         allEditedFileSymbolIds,
@@ -503,7 +503,7 @@ export async function resolveStartNodesKuzu(
         ),
       );
 
-      const results = await kuzuDb.searchSymbolsLite(
+      const results = await ladybugDb.searchSymbolsLite(
         conn,
         repoId,
         token,
@@ -538,14 +538,14 @@ export async function resolveStartNodesKuzu(
     .slice(0, limits.maxTotalStartNodes);
 }
 
-async function collectEntryFirstHopSymbolsKuzu(
+async function collectEntryFirstHopSymbolsLadybug(
   conn: Connection,
   repoId: RepoId,
   entrySymbolId: SymbolId,
   maxPerSymbol: number,
   minCallConfidence?: number,
 ): Promise<SymbolId[]> {
-  const edgesMap = await kuzuDb.getEdgesFromSymbolsForSlice(
+  const edgesMap = await ladybugDb.getEdgesFromSymbolsForSlice(
     conn,
     [entrySymbolId],
     { minCallConfidence },
@@ -563,7 +563,7 @@ async function collectEntryFirstHopSymbolsKuzu(
     ),
   );
 
-  const targets = await kuzuDb.getSymbolsByIds(conn, targetIds);
+  const targets = await ladybugDb.getSymbolsByIds(conn, targetIds);
 
   for (const edge of outgoing) {
     if (edge.edgeType !== "call" && edge.edgeType !== "import") continue;
@@ -592,17 +592,17 @@ async function collectEntryFirstHopSymbolsKuzu(
     .map(([symbolId]) => symbolId);
 }
 
-async function collectEntrySiblingSymbolsKuzu(
+async function collectEntrySiblingSymbolsLadybug(
   conn: Connection,
   repoId: RepoId,
   entrySymbolId: SymbolId,
   maxPerSymbol: number,
 ): Promise<SymbolId[]> {
-  const entrySymbol = await kuzuDb.getSymbol(conn, entrySymbolId);
+  const entrySymbol = await ladybugDb.getSymbol(conn, entrySymbolId);
   if (!entrySymbol) return [];
   if (entrySymbol.repoId !== repoId) return [];
 
-  const symbolsInFile = await kuzuDb.getSymbolsByFile(conn, entrySymbol.fileId);
+  const symbolsInFile = await ladybugDb.getSymbolsByFile(conn, entrySymbol.fileId);
   if (symbolsInFile.length <= 1) return [];
 
   const entryName = entrySymbol.name.toLowerCase();
@@ -632,7 +632,7 @@ async function collectEntrySiblingSymbolsKuzu(
     .map((item) => item.symbolId);
 }
 
-async function extractSymbolsFromStackTraceKuzu(
+async function extractSymbolsFromStackTraceLadybug(
   conn: Connection,
   repoId: RepoId,
   stackTrace: string,
@@ -640,7 +640,7 @@ async function extractSymbolsFromStackTraceKuzu(
   const symbols = new Set<SymbolId>();
   const lines = stackTrace.split("\n");
 
-  const filesByRepo = await kuzuDb.getFilesByRepoLite(conn, repoId);
+  const filesByRepo = await ladybugDb.getFilesByRepoLite(conn, repoId);
   const filePaths = new Map<string, string>();
 
   for (const file of filesByRepo) {
@@ -650,7 +650,7 @@ async function extractSymbolsFromStackTraceKuzu(
   for (const [path, fileId] of filePaths.entries()) {
     for (const line of lines) {
       if (line.includes(path)) {
-        const symbolIds = await kuzuDb.getSymbolIdsByFile(conn, fileId);
+        const symbolIds = await ladybugDb.getSymbolIdsByFile(conn, fileId);
         for (const symbolId of symbolIds) {
           symbols.add(symbolId);
         }
@@ -662,14 +662,14 @@ async function extractSymbolsFromStackTraceKuzu(
   return Array.from(symbols);
 }
 
-async function getSymbolsByPathKuzu(
+async function getSymbolsByPathLadybug(
   conn: Connection,
   repoId: RepoId,
   filePath: string,
 ): Promise<SymbolId[]> {
-  const file = await kuzuDb.getFileByRepoPath(conn, repoId, filePath);
+  const file = await ladybugDb.getFileByRepoPath(conn, repoId, filePath);
   if (!file) return [];
-  return kuzuDb.getSymbolIdsByFile(conn, file.fileId);
+  return ladybugDb.getSymbolIdsByFile(conn, file.fileId);
 }
 
 export function collectTaskTextSeedTokens(taskText: string): string[] {

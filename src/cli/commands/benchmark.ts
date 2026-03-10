@@ -7,13 +7,13 @@ import type { CLIOptions } from "../types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { RepoConfig } from "../../config/types.js";
 import { indexRepo } from "../../indexer/indexer.js";
 import { buildSlice } from "../../graph/slice.js";
 import { generateSymbolSkeleton } from "../../code/skeleton.js";
-import type { SymbolRow } from "../../db/kuzu-queries.js";
+import type { SymbolRow } from "../../db/ladybug-queries.js";
 import { generateContextSummary } from "../../mcp/summary.js";
 import { getRepoHealthSnapshot } from "../../mcp/health.js";
 import {
@@ -193,9 +193,9 @@ async function buildCardFromSymbol(
 ): Promise<{ card: unknown; tokens: number } | null> {
   if (!fileRelPath) return null;
 
-  const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
-  const edgesFrom = await kuzuDb.getEdgesFrom(conn, symbol.symbolId);
-  const metrics = await kuzuDb.getMetrics(conn, symbol.symbolId);
+  const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
+  const edgesFrom = await ladybugDb.getEdgesFrom(conn, symbol.symbolId);
+  const metrics = await ladybugDb.getMetrics(conn, symbol.symbolId);
 
   const signature = symbol.signatureJson
     ? JSON.parse(symbol.signatureJson)
@@ -274,9 +274,9 @@ async function collectBenchmarkMetrics(
   }
 
   const [allSymbols, edges, files] = await Promise.all([
-    kuzuDb.getSymbolsByRepo(conn, repoId),
-    kuzuDb.getEdgesByRepo(conn, repoId),
-    kuzuDb.getFilesByRepo(conn, repoId),
+    ladybugDb.getSymbolsByRepo(conn, repoId),
+    ladybugDb.getEdgesByRepo(conn, repoId),
+    ladybugDb.getFilesByRepo(conn, repoId),
   ]);
 
   const filesById = new Map(files.map((file) => [file.fileId, file.relPath]));
@@ -367,7 +367,7 @@ async function collectBenchmarkMetrics(
       seedCandidates[0] ??
       sortedSymbols[0];
 
-    const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+    const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
     const versionId = latestVersion?.versionId ?? "current";
 
     try {
@@ -488,7 +488,7 @@ export async function benchmarkCICommand(
   }
 
   await initGraphDb(config, configPath);
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
   const { runtimeConfigJson: repoRuntimeConfigJson, addedScopePatterns } =
     buildBenchmarkRuntimeRepoConfig(repoConfig);
@@ -498,8 +498,8 @@ export async function benchmarkCICommand(
     );
   }
 
-  const persistedRepo = await kuzuDb.getRepo(conn, repoId);
-  await kuzuDb.upsertRepo(conn, {
+  const persistedRepo = await ladybugDb.getRepo(conn, repoId);
+  await ladybugDb.upsertRepo(conn, {
     repoId,
     rootPath: repoPath,
     configJson: repoRuntimeConfigJson,

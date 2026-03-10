@@ -9,22 +9,22 @@ import { normalizeGraphDbPath } from "./graph-db-path.js";
 import {
   createSchema,
   getSchemaVersion,
-  KUZU_SCHEMA_VERSION,
-} from "./kuzu-schema.js";
+  LADYBUG_SCHEMA_VERSION,
+} from "./ladybug-schema.js";
 
-// Local interface for optional thread-count method on KuzuDB connections
-interface KuzuConnectionWithThreads {
+// Local interface for optional thread-count method on LadybugDB connections
+interface LadybugConnectionWithThreads {
   setMaxNumThreadForExec(n: number): Promise<void>;
 }
 
-type KuzuModule = typeof import("kuzu");
-type KuzuDatabase = import("kuzu").Database;
-type KuzuConnection = import("kuzu").Connection;
+type LadybugModule = typeof import("kuzu");
+type LadybugDatabase = import("kuzu").Database;
+type LadybugConnection = import("kuzu").Connection;
 
 const require = createRequire(import.meta.url);
 
-let kuzuModule: KuzuModule | null = null;
-let dbInstance: KuzuDatabase | null = null;
+let ladybugModule: LadybugModule | null = null;
+let dbInstance: LadybugDatabase | null = null;
 let currentDbPath: string | null = null;
 
 const ONE_GB = 1024 * 1024 * 1024;
@@ -42,28 +42,28 @@ function formatReindexGuidanceError(dbPath: string, msg: string): string {
 }
 
 // Connection Pool
-// NOTE: Kuzu write transactions are sensitive to concurrent execution across
+// NOTE: Ladybug write transactions are sensitive to concurrent execution across
 // connections. Use a single shared connection to avoid write-write conflicts
 // during indexing and tool execution.
 const MAX_POOL_SIZE = 1;
-const connectionPool: KuzuConnection[] = [];
+const connectionPool: LadybugConnection[] = [];
 let connectionIndex = 0;
 
 // Initialization mutex: prevents concurrent callers from double-initializing
 // the DB instance or connection pool across async boundaries.
-let dbInitPromise: Promise<KuzuDatabase> | null = null;
+let dbInitPromise: Promise<LadybugDatabase> | null = null;
 let poolInitPromise: Promise<void> | null = null;
 
-async function loadKuzu(): Promise<KuzuModule> {
-  if (kuzuModule) {
-    return kuzuModule;
+async function loadLadybug(): Promise<LadybugModule> {
+  if (ladybugModule) {
+    return ladybugModule;
   }
 
   try {
     const imported = await import("kuzu");
-    const kuzu = (imported.default ?? imported) as unknown as KuzuModule;
-    kuzuModule = kuzu;
-    return kuzuModule;
+    const ladybug = (imported.default ?? imported) as unknown as LadybugModule;
+    ladybugModule = ladybug;
+    return ladybugModule;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new DatabaseError(
@@ -72,9 +72,10 @@ async function loadKuzu(): Promise<KuzuModule> {
   }
 }
 
-export function resolveKuzuBufferManagerSizeBytes(
+export function resolveLadybugBufferManagerSizeBytes(
   totalMemoryBytes = totalmem(),
-  envValue = process.env.SDL_KUZU_BUFFER_POOL_BYTES,
+  envValue = process.env.SDL_LADYBUG_BUFFER_POOL_BYTES ??
+    process.env.SDL_KUZU_BUFFER_POOL_BYTES,
 ): number {
   const parsedEnvValue = envValue ? Number(envValue) : Number.NaN;
   if (Number.isFinite(parsedEnvValue) && parsedEnvValue >= ONE_GB) {
@@ -85,14 +86,14 @@ export function resolveKuzuBufferManagerSizeBytes(
   return Math.min(Math.max(autoSized, ONE_GB), EIGHT_GB);
 }
 
-export async function getKuzuDb(dbPath?: string): Promise<KuzuDatabase> {
+export async function getLadybugDb(dbPath?: string): Promise<LadybugDatabase> {
   const resolvedPath = dbPath
     ? normalizePath(normalizeGraphDbPath(dbPath))
     : currentDbPath;
 
   if (!resolvedPath) {
     throw new DatabaseError(
-      "KuzuDB not initialized. Call initKuzuDb(dbPath) first.",
+      "LadybugDB not initialized. Call initLadybugDb(dbPath) first.",
     );
   }
 
@@ -110,12 +111,12 @@ export async function getKuzuDb(dbPath?: string): Promise<KuzuDatabase> {
     }
   }
 
-  const initFn = async (): Promise<KuzuDatabase> => {
-    const modules = await loadKuzu();
+  const initFn = async (): Promise<LadybugDatabase> => {
+    const modules = await loadLadybug();
 
     if (dbInstance) {
-      logger.warn("KuzuDB path changed, closing existing connection");
-      await closeKuzuDb();
+      logger.warn("LadybugDB path changed, closing existing connection");
+      await closeLadybugDb();
     }
 
     const normalizedPath = normalizePath(resolvedPath);
@@ -124,17 +125,17 @@ export async function getKuzuDb(dbPath?: string): Promise<KuzuDatabase> {
     if (parentDir && parentDir !== "." && !existsSync(parentDir)) {
       try {
         mkdirSync(parentDir, { recursive: true });
-        logger.debug("Created KuzuDB parent directory", { path: parentDir });
+        logger.debug("Created LadybugDB parent directory", { path: parentDir });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         throw new DatabaseError(
-          `Failed to create KuzuDB parent directory at ${parentDir}: ${msg}`,
+          `Failed to create LadybugDB parent directory at ${parentDir}: ${msg}`,
         );
       }
     }
 
     try {
-      const bufferManagerSize = resolveKuzuBufferManagerSizeBytes();
+      const bufferManagerSize = resolveLadybugBufferManagerSizeBytes();
       dbInstance = new modules.Database(
         normalizedPath,
         bufferManagerSize,
@@ -145,7 +146,7 @@ export async function getKuzuDb(dbPath?: string): Promise<KuzuDatabase> {
         DEFAULT_CHECKPOINT_THRESHOLD_BYTES,
       );
       currentDbPath = normalizedPath;
-      logger.info("KuzuDB database opened", {
+      logger.info("LadybugDB database opened", {
         path: normalizedPath,
         bufferManagerSizeBytes: bufferManagerSize,
         checkpointThresholdBytes: DEFAULT_CHECKPOINT_THRESHOLD_BYTES,
@@ -165,22 +166,18 @@ export async function getKuzuDb(dbPath?: string): Promise<KuzuDatabase> {
   }
 }
 
-async function isConnectionHealthy(conn: KuzuConnection): Promise<boolean> {
+async function isConnectionHealthy(conn: LadybugConnection): Promise<boolean> {
   try {
     const result = await conn.query("RETURN 1");
-    if (Array.isArray(result)) {
-      for (const r of result) r.close();
-    } else {
-      result.close();
-    }
+    result.close();
     return true;
   } catch {
     return false;
   }
 }
 
-export async function getKuzuConn(): Promise<KuzuConnection> {
-  const db = await getKuzuDb();
+export async function getLadybugConn(): Promise<LadybugConnection> {
+  const db = await getLadybugDb();
 
   // Fast path: pool already initialized.
   if (connectionPool.length > 0) {
@@ -191,22 +188,24 @@ export async function getKuzuConn(): Promise<KuzuConnection> {
   } else {
     // We are the first caller — initialize the pool.
     const initPool = async (): Promise<void> => {
-      const modules = await loadKuzu();
+      const modules = await loadLadybug();
       logger.debug(
-        `Initializing KuzuDB connection pool with ${MAX_POOL_SIZE} connections`,
+        `Initializing LadybugDB connection pool with ${MAX_POOL_SIZE} connections`,
       );
       for (let i = 0; i < MAX_POOL_SIZE; i++) {
         try {
           const conn = new modules.Connection(db);
           if ("setMaxNumThreadForExec" in conn) {
             await (
-              conn as unknown as KuzuConnectionWithThreads
+              conn as unknown as LadybugConnectionWithThreads
             ).setMaxNumThreadForExec(1);
           }
           connectionPool.push(conn);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          throw new DatabaseError(`Failed to create KuzuDB connection: ${msg}`);
+          throw new DatabaseError(
+            `Failed to create LadybugDB connection: ${msg}`,
+          );
         }
       }
     };
@@ -224,12 +223,14 @@ export async function getKuzuConn(): Promise<KuzuConnection> {
   connectionIndex = (connectionIndex + 1) % connectionPool.length;
 
   if (!(await isConnectionHealthy(conn))) {
-    logger.warn(`KuzuDB connection ${connectionIndex} unhealthy, recreating`);
+    logger.warn(
+      `LadybugDB connection ${connectionIndex} unhealthy, recreating`,
+    );
     try {
       await conn.close();
     } catch (closeError) {
       logger.debug(
-        "Failed to close unhealthy KuzuDB connection before recreation",
+        "Failed to close unhealthy LadybugDB connection before recreation",
         {
           error:
             closeError instanceof Error
@@ -239,11 +240,11 @@ export async function getKuzuConn(): Promise<KuzuConnection> {
       );
     }
 
-    const modules = await loadKuzu();
+    const modules = await loadLadybug();
     const newConn = new modules.Connection(db);
     if ("setMaxNumThreadForExec" in newConn) {
       await (
-        newConn as unknown as KuzuConnectionWithThreads
+        newConn as unknown as LadybugConnectionWithThreads
       ).setMaxNumThreadForExec(1);
     }
     connectionPool[
@@ -255,49 +256,49 @@ export async function getKuzuConn(): Promise<KuzuConnection> {
   return conn;
 }
 
-export async function initKuzuDb(dbPath: string): Promise<void> {
+export async function initLadybugDb(dbPath: string): Promise<void> {
   const normalizedPath = normalizePath(normalizeGraphDbPath(dbPath));
 
-  logger.info("Initializing KuzuDB", { path: normalizedPath });
+  logger.info("Initializing LadybugDB", { path: normalizedPath });
 
   const parentDir = dirname(normalizedPath);
   if (parentDir && parentDir !== "." && !existsSync(parentDir)) {
     try {
       mkdirSync(parentDir, { recursive: true });
-      logger.debug("Created KuzuDB parent directory", { path: parentDir });
+      logger.debug("Created LadybugDB parent directory", { path: parentDir });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new DatabaseError(
-        `Failed to create KuzuDB parent directory at ${parentDir}: ${msg}`,
+        `Failed to create LadybugDB parent directory at ${parentDir}: ${msg}`,
       );
     }
   }
 
   try {
-    await getKuzuDb(normalizedPath);
-    const conn = await getKuzuConn();
+    await getLadybugDb(normalizedPath);
+    const conn = await getLadybugConn();
 
     await createSchema(conn);
     const schemaVersion = await getSchemaVersion(conn);
-    if (schemaVersion !== KUZU_SCHEMA_VERSION) {
+    if (schemaVersion !== LADYBUG_SCHEMA_VERSION) {
       throw new DatabaseError(
-        `KuzuDB schema version mismatch: expected ${KUZU_SCHEMA_VERSION}, found ${schemaVersion ?? "unknown"}. Rebuild or reindex the graph database with this version of SDL-MCP.`,
+        `LadybugDB schema version mismatch: expected ${LADYBUG_SCHEMA_VERSION}, found ${schemaVersion ?? "unknown"}. Rebuild or reindex the graph database with this version of SDL-MCP.`,
       );
     }
 
-    logger.info("KuzuDB schema initialized", { path: normalizedPath });
+    logger.info("LadybugDB schema initialized", { path: normalizedPath });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new DatabaseError(formatReindexGuidanceError(normalizedPath, msg));
   }
 }
 
-export async function closeKuzuDb(): Promise<void> {
+export async function closeLadybugDb(): Promise<void> {
   for (const conn of connectionPool) {
     try {
       await conn.close();
     } catch (err) {
-      logger.warn("Error closing KuzuDB connection", {
+      logger.warn("Error closing LadybugDB connection", {
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -309,7 +310,7 @@ export async function closeKuzuDb(): Promise<void> {
     try {
       await dbInstance.close();
     } catch (err) {
-      logger.warn("Error closing KuzuDB database", {
+      logger.warn("Error closing LadybugDB database", {
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -317,10 +318,10 @@ export async function closeKuzuDb(): Promise<void> {
   }
 
   currentDbPath = null;
-  logger.debug("KuzuDB closed");
+  logger.debug("LadybugDB closed");
 }
 
-export function isKuzuAvailable(): boolean {
+export function isLadybugAvailable(): boolean {
   try {
     require.resolve("kuzu");
     return true;
@@ -329,6 +330,6 @@ export function isKuzuAvailable(): boolean {
   }
 }
 
-export function getKuzuDbPath(): string | null {
+export function getLadybugDbPath(): string | null {
   return currentDbPath;
 }

@@ -1,9 +1,9 @@
 /**
- * kuzu-config.ts — Tool Policy and Tsconfig Hash Operations
- * Extracted from kuzu-queries.ts as part of the god-object split.
+ * ladybug-config.ts - Tool Policy and Tsconfig Hash Operations
+ * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, querySingle } from "./kuzu-core.js";
+import { exec, querySingle } from "./ladybug-core.js";
 
 export interface ToolPolicyHashRow {
   policyHash: string;
@@ -80,4 +80,3 @@ export async function getTsconfigHash(
   );
   return row ?? null;
 }
-

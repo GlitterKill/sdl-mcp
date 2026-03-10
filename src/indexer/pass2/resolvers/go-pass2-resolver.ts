@@ -2,9 +2,9 @@ import { join } from "path";
 
 import type { SyntaxNode, Tree } from "tree-sitter";
 
-import { getKuzuConn } from "../../../db/kuzu.js";
-import * as kuzuDb from "../../../db/kuzu-queries.js";
-import type { SymbolRow } from "../../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../../db/ladybug.js";
+import * as ladybugDb from "../../../db/ladybug-queries.js";
+import type { SymbolRow } from "../../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../../db/schema.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
 import { logger } from "../../../util/logger.js";
@@ -237,7 +237,7 @@ async function clearOutgoingCallEdges(
     return;
   }
 
-  await kuzuDb.deleteOutgoingEdgesByTypeForSymbols(conn, symbolIds, "call");
+  await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(conn, symbolIds, "call");
   for (const symbolId of symbolIds) {
     for (const edgeKey of Array.from(createdCallEdges)) {
       if (edgeKey.startsWith(`${symbolId}->`)) {
@@ -279,8 +279,8 @@ async function buildGoPackageIndex(
     return cached as GoPackageIndex;
   }
 
-  const conn = await getKuzuConn();
-  const repoFiles = await kuzuDb.getFilesByRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
   const goFiles = repoFiles.filter((file) => file.language === "go");
   const goFileIds = new Set(goFiles.map((file) => file.fileId));
   const fileById = new Map(goFiles.map((file) => [file.fileId, file]));
@@ -290,7 +290,7 @@ async function buildGoPackageIndex(
     Array<SymbolRow & { relPath: string }>
   >();
 
-  const repoSymbols = await kuzuDb.getSymbolsByRepo(conn, repoId);
+  const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
   for (const symbol of repoSymbols) {
     if (!goFileIds.has(symbol.fileId)) {
       continue;
@@ -568,7 +568,7 @@ async function resolveGoCallEdgesPass2(params: {
     cache,
   } = params;
 
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
   const filePath = join(repoRoot, fileMeta.path);
   let content: string;
   try {
@@ -607,7 +607,7 @@ async function resolveGoCallEdgesPass2(params: {
   ) as ExtractedCall[];
   const imports = adapter.extractImports(tree, content, filePath);
 
-  const fileRecord = await kuzuDb.getFileByRepoPath(
+  const fileRecord = await ladybugDb.getFileByRepoPath(
     conn,
     repoId,
     fileMeta.path,
@@ -616,7 +616,7 @@ async function resolveGoCallEdgesPass2(params: {
     return 0;
   }
 
-  const existingSymbols = await kuzuDb.getSymbolsByFile(
+  const existingSymbols = await ladybugDb.getSymbolsByFile(
     conn,
     fileRecord.fileId,
   );
@@ -669,7 +669,7 @@ async function resolveGoCallEdgesPass2(params: {
   );
 
   const now = new Date().toISOString();
-  const edgesToInsert: kuzuDb.EdgeRow[] = [];
+  const edgesToInsert: ladybugDb.EdgeRow[] = [];
   let createdEdges = 0;
 
   for (const detail of filteredSymbolDetails) {
@@ -740,7 +740,7 @@ async function resolveGoCallEdgesPass2(params: {
     }
   }
 
-  await kuzuDb.insertEdges(conn, edgesToInsert);
+  await ladybugDb.insertEdges(conn, edgesToInsert);
   return createdEdges;
 }
 

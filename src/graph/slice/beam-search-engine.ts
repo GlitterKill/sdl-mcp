@@ -23,7 +23,7 @@ import type {
   SymbolRow,
 } from "../../db/schema.js";
 import type { SliceBudget } from "../../domain/types.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import {
   SLICE_SCORE_THRESHOLD,
   MAX_FRONTIER,
@@ -52,7 +52,7 @@ import type {
   ScoreWorkerOutput,
 } from "./beam-score-worker.js";
 
-function toLegacySymbolRow(symbol: kuzuDb.SymbolRow): SymbolRow {
+function toLegacySymbolRow(symbol: ladybugDb.SymbolRow): SymbolRow {
   return {
     symbol_id: symbol.symbolId,
     repo_id: symbol.repoId,
@@ -75,7 +75,7 @@ function toLegacySymbolRow(symbol: kuzuDb.SymbolRow): SymbolRow {
   };
 }
 
-function toLegacyFileRow(file: kuzuDb.FileRow): FileRow {
+function toLegacyFileRow(file: ladybugDb.FileRow): FileRow {
   return {
     file_id: 0,
     repo_id: file.repoId,
@@ -88,7 +88,7 @@ function toLegacyFileRow(file: kuzuDb.FileRow): FileRow {
   };
 }
 
-function toLegacyMetricsRow(metrics: kuzuDb.MetricsRow): MetricsRow {
+function toLegacyMetricsRow(metrics: ladybugDb.MetricsRow): MetricsRow {
   return {
     symbol_id: metrics.symbolId,
     fan_in: metrics.fanIn,
@@ -107,7 +107,7 @@ function normalizeEdgeType(value: string): EdgeType | null {
   return null;
 }
 
-function estimateCardTokensKuzu(
+function estimateCardTokensLadybug(
   symbol: { name: string; signatureJson: string | null; summary: string | null },
   outgoingEdgeCount: number,
 ): number {
@@ -433,7 +433,7 @@ export function beamSearch(
   };
 }
 
-export async function beamSearchKuzu(
+export async function beamSearchLadybug(
   conn: Connection,
   repoId: RepoId,
   startNodes: ResolvedStartNode[],
@@ -465,10 +465,10 @@ export async function beamSearchKuzu(
       .map((n) => n.symbolId),
   );
 
-  const symbolCache = new Map<SymbolId, kuzuDb.SymbolRow>();
-  const fileCache = new Map<string, kuzuDb.FileRow>();
-  const metricsCache = new Map<SymbolId, kuzuDb.MetricsRow | null>();
-  const outgoingEdgesCache = new Map<SymbolId, kuzuDb.EdgeForSlice[]>();
+  const symbolCache = new Map<SymbolId, ladybugDb.SymbolRow>();
+  const fileCache = new Map<string, ladybugDb.FileRow>();
+  const metricsCache = new Map<SymbolId, ladybugDb.MetricsRow | null>();
+  const outgoingEdgesCache = new Map<SymbolId, ladybugDb.EdgeForSlice[]>();
 
   const entryClusterIds = new Set<string>(request.clusterContext?.entryClusterIds ?? []);
   const relatedClusterIds = new Set<string>(request.clusterContext?.relatedClusterIds ?? []);
@@ -482,17 +482,17 @@ export async function beamSearchKuzu(
     const missing = symbolIds.filter((id) => !clusterCache.has(id));
     if (missing.length === 0) return;
 
-    const map = await kuzuDb.getClustersForSymbols(conn, missing);
+    const map = await ladybugDb.getClustersForSymbols(conn, missing);
     for (const symbolId of missing) {
       clusterCache.set(symbolId, map.get(symbolId)?.clusterId ?? null);
     }
   };
 
-  const getSymbol = async (symbolId: SymbolId): Promise<kuzuDb.SymbolRow | null> => {
+  const getSymbol = async (symbolId: SymbolId): Promise<ladybugDb.SymbolRow | null> => {
     const cached = symbolCache.get(symbolId);
     if (cached) return cached;
 
-    const map = await kuzuDb.getSymbolsByIds(conn, [symbolId]);
+    const map = await ladybugDb.getSymbolsByIds(conn, [symbolId]);
     const symbol = map.get(symbolId) ?? null;
     if (!symbol || symbol.repoId !== repoId) {
       return null;
@@ -506,7 +506,7 @@ export async function beamSearchKuzu(
     const missing = symbolIds.filter((id) => !metricsCache.has(id));
     if (missing.length === 0) return;
 
-    const map = await kuzuDb.getMetricsBySymbolIds(conn, missing);
+    const map = await ladybugDb.getMetricsBySymbolIds(conn, missing);
     for (const id of missing) {
       metricsCache.set(id, map.get(id) ?? null);
     }
@@ -514,11 +514,11 @@ export async function beamSearchKuzu(
 
   const getOutgoingEdges = async (
     symbolId: SymbolId,
-  ): Promise<kuzuDb.EdgeForSlice[]> => {
+  ): Promise<ladybugDb.EdgeForSlice[]> => {
     const cached = outgoingEdgesCache.get(symbolId);
     if (cached) return cached;
 
-    const map = await kuzuDb.getEdgesFromSymbolsForSlice(conn, [symbolId], {
+    const map = await ladybugDb.getEdgesFromSymbolsForSlice(conn, [symbolId], {
       minCallConfidence: request.minCallConfidence,
     });
     const edges = map.get(symbolId) ?? [];
@@ -535,7 +535,7 @@ export async function beamSearchKuzu(
 
   const startNodeIds = Array.from(new Set(startNodes.map((n) => n.symbolId)));
   if (startNodeIds.length > 0) {
-    const startSymbols = await kuzuDb.getSymbolsByIds(conn, startNodeIds);
+    const startSymbols = await ladybugDb.getSymbolsByIds(conn, startNodeIds);
     for (const [symbolId, symbol] of startSymbols) {
       if (symbol.repoId === repoId) {
         symbolCache.set(symbolId, symbol);
@@ -619,7 +619,7 @@ export async function beamSearchKuzu(
     }
 
     const outgoing = await getOutgoingEdges(current.symbolId);
-    const cardTokens = estimateCardTokensKuzu(currentSymbol, outgoing.length);
+    const cardTokens = estimateCardTokensLadybug(currentSymbol, outgoing.length);
     totalTokens += cardTokens;
 
     if (totalTokens > budget.maxEstimatedTokens) {
@@ -672,7 +672,7 @@ export async function beamSearchKuzu(
     if (edgeByTarget.size === 0) continue;
 
     const neighborIds = Array.from(edgeByTarget.keys());
-    const neighborSymbolsMap = await kuzuDb.getSymbolsByIds(conn, neighborIds);
+    const neighborSymbolsMap = await ladybugDb.getSymbolsByIds(conn, neighborIds);
 
     const validNeighborIds: SymbolId[] = [];
     const fileIds = new Set<string>();
@@ -691,7 +691,7 @@ export async function beamSearchKuzu(
 
     const missingFileIds = Array.from(fileIds).filter((id) => !fileCache.has(id));
     if (missingFileIds.length > 0) {
-      const filesMap = await kuzuDb.getFilesByIds(conn, missingFileIds);
+      const filesMap = await ladybugDb.getFilesByIds(conn, missingFileIds);
       for (const [fileId, file] of filesMap) {
         fileCache.set(fileId, file);
       }

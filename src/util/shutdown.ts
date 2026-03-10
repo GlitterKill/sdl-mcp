@@ -11,7 +11,7 @@
  * Usage:
  *   const mgr = new ShutdownManager({ forceTimeoutMs: 5000 });
  *   mgr.addCleanup("server", () => server.stop());
- *   mgr.addCleanup("db", () => closeKuzuDb());
+ *   mgr.addCleanup("db", () => closeLadybugDb());
  *   mgr.registerSignals();         // SIGINT, SIGTERM, SIGHUP
  *   mgr.monitorStdin();            // stdin pipe close (stdio transport)
  *   mgr.setPidfilePath(path);      // auto-remove on shutdown
@@ -89,7 +89,7 @@ export class ShutdownManager {
    * Monitor stdin for end/close events. When the MCP client disconnects
    * (or the spawning terminal closes), stdin will emit these events.
    * This is critical for stdio transport because without an active I/O
-   * handle Node.js may silently exit, leaving KuzuDB in a dirty state.
+   * handle Node.js may silently exit, leaving LadybugDB in a dirty state.
    */
   monitorStdin(): void {
     process.stdin.once("end", () => void this.shutdown("stdin-end"));

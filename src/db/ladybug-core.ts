@@ -1,9 +1,9 @@
 /**
- * kuzu-core.ts — Shared KuzuDB helper functions
+ * ladybug-core.ts — Shared LadybugDB helper functions
  *
  * This module contains the low-level query execution wrappers, type converters,
  * and transaction management utilities used by all domain-specific DB modules.
- * It is the foundation of the kuzu-queries.ts split.
+ * It is the foundation of the ladybug-queries.ts split.
  */
 import type { Connection, PreparedStatement, QueryResult } from "kuzu";
 import { logger } from "../util/logger.js";
@@ -56,19 +56,6 @@ export function toBoolean(value: unknown): boolean {
   return false;
 }
 
-function coerceQueryResult(result: QueryResult | QueryResult[]): QueryResult {
-  if (!Array.isArray(result)) return result;
-  if (result.length === 0) {
-    throw new DatabaseError("Empty query result array from KuzuDB");
-  }
-  // Kuzu can return multiple results for multi-statement queries; we only use
-  // single statements in this module. Close any earlier results defensively.
-  for (let i = 0; i < result.length - 1; i++) {
-    result[i]?.close();
-  }
-  return result[result.length - 1];
-}
-
 export async function getPreparedStatement(
   conn: Connection,
   statement: string,
@@ -106,13 +93,13 @@ async function execute(
   params: Record<string, unknown> = {},
 ): Promise<QueryResult> {
   const prepared = await getPreparedStatement(conn, statement);
-  // Kuzu accepts string | number | boolean | null | bigint — callers pass
+  // Ladybug accepts string | number | boolean | null | bigint — callers pass
   // Record<string, unknown> for convenience; the cast is safe.
   const result = await conn.execute(
     prepared,
     params as Parameters<Connection["execute"]>[1],
   );
-  return coerceQueryResult(result);
+  return result;
 }
 
 export async function queryAll<T>(

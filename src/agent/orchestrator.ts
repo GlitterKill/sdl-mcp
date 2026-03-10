@@ -6,8 +6,8 @@ import type {
 import { Planner } from "./planner.js";
 import { Executor } from "./executor.js";
 import { PolicyEngine } from "../policy/engine.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { ValidationError } from "../domain/errors.js";
 
 export class Orchestrator {
@@ -175,8 +175,8 @@ export class Orchestrator {
     }
 
     try {
-      const conn = await getKuzuConn();
-      const clustersBySymbol = await kuzuDb.getClustersForSymbols(conn, symbolIds);
+      const conn = await getLadybugConn();
+      const clustersBySymbol = await ladybugDb.getClustersForSymbols(conn, symbolIds);
       const clusterIds = new Set<string>();
       for (const row of clustersBySymbol.values()) {
         clusterIds.add(row.clusterId);
@@ -186,7 +186,7 @@ export class Orchestrator {
       }
 
       const memberLists = await Promise.all(
-        Array.from(clusterIds).map((clusterId) => kuzuDb.getClusterMembers(conn, clusterId)),
+        Array.from(clusterIds).map((clusterId) => ladybugDb.getClusterMembers(conn, clusterId)),
       );
 
       const already = new Set(context);

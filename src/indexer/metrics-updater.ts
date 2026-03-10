@@ -1,8 +1,8 @@
 import type { AppConfig } from "../config/types.js";
 import * as crypto from "crypto";
 
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { updateMetricsForRepo } from "../graph/metrics.js";
 import { logger } from "../util/logger.js";
 import { refreshSymbolEmbeddings } from "./embeddings.js";
@@ -61,8 +61,8 @@ export async function finalizeIndexing({
 
   if (callResolutionTelemetry.pass2EligibleFileCount > 0) {
     try {
-      const conn = await getKuzuConn();
-      await kuzuDb.insertAuditEvent(conn, {
+      const conn = await getLadybugConn();
+      await ladybugDb.insertAuditEvent(conn, {
         eventId: `audit_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`,
         timestamp: new Date().toISOString(),
         tool: "index.callResolution",

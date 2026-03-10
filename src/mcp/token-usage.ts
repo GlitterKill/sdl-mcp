@@ -1,6 +1,6 @@
 import { estimateTokens } from "../util/tokenize.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 
 export interface TokenUsageMetadata {
   sdlTokens: number;
@@ -58,8 +58,8 @@ export async function computeTokenUsage(
   if (hint.rawTokens !== undefined) {
     rawEquivalent = hint.rawTokens;
   } else if (hint.fileIds && hint.fileIds.length > 0) {
-    const conn = await getKuzuConn();
-    const files = await kuzuDb.getFilesByIds(conn, hint.fileIds);
+    const conn = await getLadybugConn();
+    const files = await ladybugDb.getFilesByIds(conn, hint.fileIds);
     for (const file of files.values()) {
       rawEquivalent += Math.ceil(file.byteSize / BYTES_PER_TOKEN);
     }

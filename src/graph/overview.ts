@@ -23,8 +23,8 @@ import type {
   SymbolCountsByKind,
 } from "../domain/types.js";
 import { SYMBOL_TOKEN_MAX } from "../config/constants.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 
 // ============================================================================
 // Constants
@@ -159,7 +159,7 @@ function estimateDirectorySummaryTokens(summary: DirectorySummary): number {
 export async function buildRepoOverview(
   request: RepoOverviewRequest,
 ): Promise<RepoOverview> {
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
   const {
     repoId,
     level,
@@ -170,18 +170,18 @@ export async function buildRepoOverview(
   } = request;
 
   // Get current version
-  const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+  const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
   const versionId = latestVersion?.versionId ?? "0";
 
   // Fetch core rows once
   const [files, symbols, edgeCount, edgeCountsByType, clusterStats, processStats] =
     await Promise.all([
-    kuzuDb.getFilesByRepo(conn, repoId),
-    kuzuDb.getSymbolsByRepo(conn, repoId),
-    kuzuDb.getEdgeCount(conn, repoId),
-    kuzuDb.getEdgeCountsByType(conn, repoId),
-    kuzuDb.getClusterOverviewStats(conn, repoId),
-    kuzuDb.getProcessOverviewStats(conn, repoId),
+    ladybugDb.getFilesByRepo(conn, repoId),
+    ladybugDb.getSymbolsByRepo(conn, repoId),
+    ladybugDb.getEdgeCount(conn, repoId),
+    ladybugDb.getEdgeCountsByType(conn, repoId),
+    ladybugDb.getClusterOverviewStats(conn, repoId),
+    ladybugDb.getProcessOverviewStats(conn, repoId),
   ]);
 
   // Always build stats
@@ -264,8 +264,8 @@ export async function buildRepoOverview(
  * Builds high-level repository statistics.
  */
 function buildRepoStats(
-  files: kuzuDb.FileRow[],
-  symbols: kuzuDb.SymbolRow[],
+  files: ladybugDb.FileRow[],
+  symbols: ladybugDb.SymbolRow[],
   edgeCount: number,
   edgesByType: Record<string, number>,
 ): RepoStats {
@@ -304,13 +304,13 @@ function buildRepoStats(
  */
 async function buildDirectorySummaries(
   repoId: RepoId,
-  files: kuzuDb.FileRow[],
-  symbols: kuzuDb.SymbolRow[],
+  files: ladybugDb.FileRow[],
+  symbols: ladybugDb.SymbolRow[],
   maxDirectories: number,
   maxExportsPerDirectory: number,
   directoryFilter?: string[],
 ): Promise<DirectorySummary[]> {
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
   const fileById = new Map(files.map((f) => [f.fileId, f]));
   const symbolById = new Map(symbols.map((s) => [s.symbolId, s]));
@@ -368,12 +368,12 @@ async function buildDirectorySummaries(
     aggregates.set(dir, agg);
   }
 
-  const topByFanIn = await kuzuDb.getTopSymbolsByFanIn(
+  const topByFanIn = await ladybugDb.getTopSymbolsByFanIn(
     conn,
     repoId,
     DEFAULT_MAX_HOTSPOT_SYMBOLS * 2,
   );
-  const topByChurn = await kuzuDb.getTopSymbolsByChurn(
+  const topByChurn = await ladybugDb.getTopSymbolsByChurn(
     conn,
     repoId,
     DEFAULT_MAX_HOTSPOT_SYMBOLS * 2,
@@ -473,17 +473,17 @@ async function buildDirectorySummaries(
  */
 async function buildCodebaseHotspots(
   repoId: RepoId,
-  files: kuzuDb.FileRow[],
-  symbols: kuzuDb.SymbolRow[],
+  files: ladybugDb.FileRow[],
+  symbols: ladybugDb.SymbolRow[],
 ): Promise<CodebaseHotspots> {
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
   const symbolById = new Map(symbols.map((s) => [s.symbolId, s]));
   const fileById = new Map(files.map((f) => [f.fileId, f]));
 
   const [topByFanIn, topByChurn] = await Promise.all([
-    kuzuDb.getTopSymbolsByFanIn(conn, repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS),
-    kuzuDb.getTopSymbolsByChurn(conn, repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS),
+    ladybugDb.getTopSymbolsByFanIn(conn, repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS),
+    ladybugDb.getTopSymbolsByChurn(conn, repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS),
   ]);
 
   const mostDepended: CompactSymbolRef[] = [];
@@ -516,7 +516,7 @@ async function buildCodebaseHotspots(
     .slice(0, DEFAULT_MAX_HOTSPOT_SYMBOLS);
 
   // Most connected files by estimated edge endpoints (fanIn+fanOut per symbol)
-  const metricsMap = await kuzuDb.getMetricsBySymbolIds(
+  const metricsMap = await ladybugDb.getMetricsBySymbolIds(
     conn,
     symbols.map((s) => s.symbolId),
   );
@@ -576,7 +576,7 @@ function identifyArchitecturalLayers(directories: DirectorySummary[]): string[] 
 /**
  * Finds entry point files.
  */
-function findEntryPoints(files: kuzuDb.FileRow[]): string[] {
+function findEntryPoints(files: ladybugDb.FileRow[]): string[] {
   const entryPatterns = [
     "main.ts",
     "index.ts",

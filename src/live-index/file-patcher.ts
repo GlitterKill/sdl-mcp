@@ -1,6 +1,6 @@
 import { readFileAsync } from "../util/asyncFs.js";
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import type { RepoConfig } from "../config/types.js";
 import { getAbsolutePathFromRepoRoot, normalizePath } from "../util/paths.js";
 import { buildDependencyFrontier, type DependencyFrontier } from "./dependency-frontier.js";
@@ -30,15 +30,15 @@ export interface SavedFilePatchResult {
 export async function patchSavedFile(
   request: SavedFilePatchRequest,
 ): Promise<SavedFilePatchResult> {
-  const conn = await getKuzuConn();
-  const repo = await kuzuDb.getRepo(conn, request.repoId);
+  const conn = await getLadybugConn();
+  const repo = await ladybugDb.getRepo(conn, request.repoId);
   if (!repo) {
     throw new IndexError(`Repository ${request.repoId} not found`);
   }
 
   const repoConfig = JSON.parse(repo.configJson) as RepoConfig;
   const relPath = normalizePath(request.filePath);
-  const existingFile = await kuzuDb.getFileByRepoPath(conn, request.repoId, relPath);
+  const existingFile = await ladybugDb.getFileByRepoPath(conn, request.repoId, relPath);
 
   const parseResult =
     request.parseResult ??
@@ -70,23 +70,23 @@ export async function patchSavedFile(
     lastIndexedAt: now,
   };
 
-  await kuzuDb.withTransaction(conn, async (txConn) => {
-    await kuzuDb.upsertFile(txConn, durableFile);
+  await ladybugDb.withTransaction(conn, async (txConn) => {
+    await ladybugDb.upsertFile(txConn, durableFile);
     if (existingFile) {
-      await kuzuDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
-      await kuzuDb.deleteSymbolReferencesByFileId(txConn, existingFile.fileId);
+      await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+      await ladybugDb.deleteSymbolReferencesByFileId(txConn, existingFile.fileId);
     } else {
-      await kuzuDb.deleteSymbolReferencesByFileId(txConn, durableFile.fileId);
+      await ladybugDb.deleteSymbolReferencesByFileId(txConn, durableFile.fileId);
     }
 
-    await kuzuDb.insertSymbolReferences(txConn, parseResult.references);
+    await ladybugDb.insertSymbolReferences(txConn, parseResult.references);
     for (const symbol of parseResult.symbols) {
-      await kuzuDb.upsertSymbol(txConn, {
+      await ladybugDb.upsertSymbol(txConn, {
         ...symbol,
         updatedAt: now,
       });
     }
-    await kuzuDb.insertEdges(
+    await ladybugDb.insertEdges(
       txConn,
       parseResult.edges.map((edge) => ({
         ...edge,

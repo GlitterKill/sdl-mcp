@@ -1,6 +1,6 @@
 import type { SymbolId, VersionId } from "../db/schema.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
-import { getKuzuConn } from "../db/kuzu.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
 import { hashContent } from "../util/hashing.js";
 import { getCurrentTimestamp } from "../util/time.js";
 import { logger } from "../util/logger.js";
@@ -13,11 +13,11 @@ export async function createVersion(
   const timestamp = Date.now();
   const versionId: VersionId = `${repoId}-v${timestamp}`;
 
-  const conn = await getKuzuConn();
-  const latestVersion = await kuzuDb.getLatestVersion(conn, repoId);
+  const conn = await getLadybugConn();
+  const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
   const prevVersionHash = latestVersion?.versionHash ?? null;
 
-  const version: kuzuDb.VersionRow = {
+  const version: ladybugDb.VersionRow = {
     versionId,
     repoId,
     createdAt: getCurrentTimestamp(),
@@ -26,13 +26,13 @@ export async function createVersion(
     versionHash: null,
   };
 
-  await kuzuDb.createVersion(conn, version);
+  await ladybugDb.createVersion(conn, version);
   return versionId;
 }
 
 export function computeVersionHash(
   prevVersionHash: string | null,
-  symbolVersions: Array<Pick<kuzuDb.SymbolVersionRow, "symbolId" | "astFingerprint">>,
+  symbolVersions: Array<Pick<ladybugDb.SymbolVersionRow, "symbolId" | "astFingerprint">>,
 ): string {
   const sortedVersions = [...symbolVersions].sort((a, b) =>
     a.symbolId.localeCompare(b.symbolId),
@@ -45,16 +45,16 @@ export function computeVersionHash(
 
 export async function finalizeVersionHash(
   versionId: VersionId,
-  symbolVersions: Array<Pick<kuzuDb.SymbolVersionRow, "symbolId" | "astFingerprint">>,
+  symbolVersions: Array<Pick<ladybugDb.SymbolVersionRow, "symbolId" | "astFingerprint">>,
 ): Promise<void> {
-  const conn = await getKuzuConn();
-  const version = await kuzuDb.getVersion(conn, versionId);
+  const conn = await getLadybugConn();
+  const version = await ladybugDb.getVersion(conn, versionId);
   if (!version) {
     throw new IndexError(`Version ${versionId} not found`);
   }
 
   const versionHash = computeVersionHash(version.prevVersionHash, symbolVersions);
-  await kuzuDb.updateVersionHashes(
+  await ladybugDb.updateVersionHashes(
     conn,
     versionId,
     version.prevVersionHash,
@@ -64,36 +64,36 @@ export async function finalizeVersionHash(
 
 export async function getVersion(
   versionId: VersionId,
-): Promise<kuzuDb.VersionRow | null> {
-  const conn = await getKuzuConn();
-  return kuzuDb.getVersion(conn, versionId);
+): Promise<ladybugDb.VersionRow | null> {
+  const conn = await getLadybugConn();
+  return ladybugDb.getVersion(conn, versionId);
 }
 
 export async function getLatestVersion(
   repoId: string,
-): Promise<kuzuDb.VersionRow | null> {
-  const conn = await getKuzuConn();
-  return kuzuDb.getLatestVersion(conn, repoId);
+): Promise<ladybugDb.VersionRow | null> {
+  const conn = await getLadybugConn();
+  return ladybugDb.getLatestVersion(conn, repoId);
 }
 
 export async function listVersions(
   repoId: string,
   limit?: number,
-): Promise<kuzuDb.VersionRow[]> {
-  const conn = await getKuzuConn();
-  return kuzuDb.getVersionsByRepo(conn, repoId, limit ?? 50);
+): Promise<ladybugDb.VersionRow[]> {
+  const conn = await getLadybugConn();
+  return ladybugDb.getVersionsByRepo(conn, repoId, limit ?? 50);
 }
 
 export async function snapshotSymbols(
   versionId: VersionId,
   symbolIds: SymbolId[],
 ): Promise<void> {
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
   try {
-    const symbolMap = await kuzuDb.getSymbolsByIds(conn, symbolIds);
+    const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
     const snapshots: Array<
-      Pick<kuzuDb.SymbolVersionRow, "symbolId" | "astFingerprint">
+      Pick<ladybugDb.SymbolVersionRow, "symbolId" | "astFingerprint">
     > = [];
 
     for (const symbolId of symbolIds) {
@@ -106,7 +106,7 @@ export async function snapshotSymbols(
         continue;
       }
 
-      await kuzuDb.snapshotSymbolVersion(conn, {
+      await ladybugDb.snapshotSymbolVersion(conn, {
         versionId,
         symbolId,
         astFingerprint: symbol.astFingerprint,

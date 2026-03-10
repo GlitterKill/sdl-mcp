@@ -1,5 +1,5 @@
-import { getKuzuConn } from "../db/kuzu.js";
-import * as kuzuDb from "../db/kuzu-queries.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { hashContent } from "../util/hashing.js";
 import { safeCompileRegex } from "../util/safeRegex.js";
 
@@ -25,8 +25,8 @@ export async function traceProcessesTS(
   const patterns = compileEntryPatterns(entryPatterns);
   if (patterns.length === 0) return [];
 
-  const conn = await getKuzuConn();
-  const symbols = await kuzuDb.getSymbolsByRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
   if (symbols.length === 0) return [];
 
   const entrySymbolIds = symbols
@@ -38,7 +38,7 @@ export async function traceProcessesTS(
   if (entrySymbolIds.length === 0) return [];
 
   const allSymbolIds = symbols.map((s) => s.symbolId).sort();
-  const edgesByFrom = await kuzuDb.getEdgesFromSymbolsLite(conn, allSymbolIds);
+  const edgesByFrom = await ladybugDb.getEdgesFromSymbolsLite(conn, allSymbolIds);
 
   const adjacency = new Map<string, string[]>();
   for (const id of allSymbolIds) adjacency.set(id, []);

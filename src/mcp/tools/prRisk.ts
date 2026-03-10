@@ -5,7 +5,7 @@ import { PolicyEngine } from "../../policy/engine.js";
 import { logger } from "../../util/logger.js";
 import { PRRiskAnalysisRequestSchema } from "../tools.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
-import { getKuzuConn } from "../../db/kuzu.js";
+import { getLadybugConn } from "../../db/ladybug.js";
 import type { BlastRadiusItem } from "../types.js";
 
 type ComputedDeltaWithTiers = Awaited<ReturnType<typeof computeDeltaWithTiers>>;
@@ -43,7 +43,7 @@ export async function handlePRRiskAnalysis(args: unknown) {
 
   const changedSymbolIds = delta.changedSymbols.map((c: ChangedSymbol) => c.symbolId);
 
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
   const blastRadiusItems = await computeBlastRadius(conn, changedSymbolIds, {
     maxHops: 3,
     maxResults: 50,

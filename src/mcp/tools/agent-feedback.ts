@@ -6,8 +6,8 @@ import {
   AgentFeedbackQueryRequestSchema,
   AgentFeedbackQueryResponse,
 } from "../tools.js";
-import { getKuzuConn } from "../../db/kuzu.js";
-import * as kuzuDb from "../../db/kuzu-queries.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import { DatabaseError } from "../errors.js";
 
 function generateFeedbackId(): string {
@@ -29,14 +29,14 @@ export async function handleAgentFeedback(
     taskText,
   } = request;
 
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
-  const repo = await kuzuDb.getRepo(conn, repoId);
+  const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
     throw new DatabaseError(`Repository ${repoId} not found`);
   }
 
-  const version = await kuzuDb.getVersion(conn, versionId);
+  const version = await ladybugDb.getVersion(conn, versionId);
   if (!version) {
     throw new DatabaseError(`Version ${versionId} not found`);
   }
@@ -44,7 +44,7 @@ export async function handleAgentFeedback(
   const now = new Date().toISOString();
   const feedbackId = generateFeedbackId();
 
-  await kuzuDb.upsertAgentFeedback(conn, {
+  await ladybugDb.upsertAgentFeedback(conn, {
     feedbackId,
     repoId,
     versionId,
@@ -72,16 +72,16 @@ export async function handleAgentFeedbackQuery(
   const request = AgentFeedbackQueryRequestSchema.parse(args);
   const { repoId, versionId, limit = 50, since } = request;
 
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
-  const repo = await kuzuDb.getRepo(conn, repoId);
+  const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
     throw new DatabaseError(`Repository ${repoId} not found`);
   }
 
   const feedbackRows = versionId
-    ? await kuzuDb.getAgentFeedbackByVersion(conn, repoId, versionId, limit + 1)
-    : await kuzuDb.getAgentFeedbackByRepo(conn, repoId, limit + 1);
+    ? await ladybugDb.getAgentFeedbackByVersion(conn, repoId, versionId, limit + 1)
+    : await ladybugDb.getAgentFeedbackByRepo(conn, repoId, limit + 1);
 
   const hasMore = feedbackRows.length > limit;
   const rows = hasMore ? feedbackRows.slice(0, limit) : feedbackRows;
@@ -98,7 +98,7 @@ export async function handleAgentFeedbackQuery(
     createdAt: row.createdAt,
   }));
 
-  const aggregated = await kuzuDb.getAggregatedFeedback(conn, repoId, since);
+  const aggregated = await ladybugDb.getAggregatedFeedback(conn, repoId, since);
 
   const topUsefulSymbols = Array.from(aggregated.symbolPositiveCounts.entries())
     .sort((a, b) => b[1] - a[1])

@@ -1,11 +1,11 @@
 /**
- * kuzu-edges.ts — Edge (Dependency) Operations
- * Extracted from kuzu-queries.ts as part of the god-object split.
+ * ladybug-edges.ts — Edge (Dependency) Operations
+ * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber, withTransaction, isJoinHintSyntaxUnsupported } from "./kuzu-core.js";
+import { exec, queryAll, querySingle, toNumber, withTransaction, isJoinHintSyntaxUnsupported } from "./ladybug-core.js";
 
-// Module-level flag for join hint support detection (mirrors kuzu-queries.ts behavior)
+// Module-level flag for join hint support detection (mirrors ladybug-queries.ts behavior)
 let joinHintSupported: boolean | null = null;
 
 export interface EdgeRow {

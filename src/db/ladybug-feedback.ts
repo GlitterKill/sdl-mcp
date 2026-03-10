@@ -1,9 +1,9 @@
 /**
- * kuzu-feedback.ts — Audit and Agent Feedback Operations
- * Extracted from kuzu-queries.ts as part of the god-object split.
+ * ladybug-feedback.ts - Audit and Agent Feedback Operations
+ * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, assertSafeInt } from "./kuzu-core.js";
+import { exec, queryAll, querySingle, assertSafeInt } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
 
 export interface AuditRow {
@@ -228,7 +228,12 @@ export async function getAggregatedFeedback(
     params.sinceTimestamp = sinceTimestamp;
   }
 
-  const rows = await queryAll<Pick<AgentFeedbackRow, "usefulSymbolsJson" | "missingSymbolsJson" | "taskTagsJson" | "taskType">>(
+  const rows = await queryAll<
+    Pick<
+      AgentFeedbackRow,
+      "usefulSymbolsJson" | "missingSymbolsJson" | "taskTagsJson" | "taskType"
+    >
+  >(
     conn,
     `MATCH (f:AgentFeedback)
      WHERE ${conditions.join(" AND ")}
@@ -251,7 +256,9 @@ export async function getAggregatedFeedback(
     try {
       usefulSymbols = JSON.parse(row.usefulSymbolsJson) as string[];
       missingSymbols = JSON.parse(row.missingSymbolsJson) as string[];
-      taskTags = row.taskTagsJson ? (JSON.parse(row.taskTagsJson) as string[]) : [];
+      taskTags = row.taskTagsJson
+        ? (JSON.parse(row.taskTagsJson) as string[])
+        : [];
     } catch (error) {
       logger.warn("Failed to parse feedback JSON", { error: String(error) });
       continue;
@@ -272,7 +279,10 @@ export async function getAggregatedFeedback(
     }
 
     if (row.taskType) {
-      taskTypeCounts.set(row.taskType, (taskTypeCounts.get(row.taskType) ?? 0) + 1);
+      taskTypeCounts.set(
+        row.taskType,
+        (taskTypeCounts.get(row.taskType) ?? 0) + 1,
+      );
     }
 
     for (const tag of taskTags) {
@@ -287,4 +297,3 @@ export async function getAggregatedFeedback(
     taskTypeCounts,
   };
 }
-
