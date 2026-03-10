@@ -115,3 +115,6 @@ docs/plans/2026-03-09-ladybug-migration.md
 .kuzu-spike-db/metadata.kz
 .kuzu-spike-db/n-0.hindex
 .kuzu-spike-db/n-0.hindex.ovf
+docs/plans/2026-03-10-context-mode-integration-plan.md
+.gitignore
+docs/plans/2026-03-10-mcp-sandbox-execution-plan.md
