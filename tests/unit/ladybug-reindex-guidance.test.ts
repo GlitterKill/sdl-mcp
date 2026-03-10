@@ -4,35 +4,35 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-let initKuzuDb: (dbPath: string) => Promise<void>;
-let closeKuzuDb: () => Promise<void>;
-let kuzuAvailable = false;
+let initLadybugDb: (dbPath: string) => Promise<void>;
+let closeLadybugDb: () => Promise<void>;
+let ladybugAvailable = false;
 
-await import("../../dist/db/kuzu.js")
+await import("../../dist/db/ladybug.js")
   .then((kuzu) => {
-    initKuzuDb = kuzu.initKuzuDb;
-    closeKuzuDb = kuzu.closeKuzuDb;
-    kuzuAvailable = true;
+    initLadybugDb = kuzu.initLadybugDb;
+    closeLadybugDb = kuzu.closeLadybugDb;
+    ladybugAvailable = true;
   })
   .catch(() => {
-    initKuzuDb = async () => {
+    initLadybugDb = async () => {
       throw new Error("Module not built");
     };
-    closeKuzuDb = async () => {};
+    closeLadybugDb = async () => {};
   });
 
 function containsAny(text: string, words: string[]): boolean {
   return words.some((word) => text.includes(word));
 }
 
-describe("Ladybug reindex guidance", { skip: !kuzuAvailable }, () => {
+describe("Ladybug reindex guidance", { skip: !ladybugAvailable }, () => {
   const testRoot = join(
     tmpdir(),
     `sdl-mcp-ladybug-guidance-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   );
 
   afterEach(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(testRoot)) {
       rmSync(testRoot, { recursive: true, force: true });
     }
@@ -40,14 +40,14 @@ describe("Ladybug reindex guidance", { skip: !kuzuAvailable }, () => {
 
   it("adds actionable delete/reindex guidance for incompatible graph data", async () => {
     mkdirSync(testRoot, { recursive: true });
-    const fakeDbPath = join(testRoot, "fake-old-db.kuzu");
+    const fakeDbPath = join(testRoot, "fake-old-db.lbug");
 
     // Force open/init failure by placing a non-database file at the DB path.
     writeFileSync(fakeDbPath, "not-a-valid-ladybug-database", "utf8");
 
     await assert.rejects(
       async () => {
-        await initKuzuDb(fakeDbPath);
+        await initLadybugDb(fakeDbPath);
       },
       (error: unknown) => {
         const message =
@@ -57,7 +57,7 @@ describe("Ladybug reindex guidance", { skip: !kuzuAvailable }, () => {
 
         assert.ok(
           message.includes("database at '") &&
-            message.includes("fake-old-db.kuzu"),
+            message.includes("fake-old-db.lbug"),
           "error should include the database path context",
         );
         assert.ok(

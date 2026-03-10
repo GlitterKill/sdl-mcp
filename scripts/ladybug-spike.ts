@@ -75,7 +75,7 @@ async function runSpike(): Promise<void> {
   console.log("=".repeat(60));
   console.log();
 
-  const dbPath = join(__dirname, "..", ".kuzu-spike-db");
+  const dbPath = join(__dirname, "..", ".lbug-spike-db");
   let db: unknown = null;
   let conn: unknown = null;
 

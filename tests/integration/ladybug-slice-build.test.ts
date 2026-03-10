@@ -10,10 +10,10 @@ const TEST_DB_PATH = join(
   __dirname,
   "..",
   "..",
-  ".kuzu-slice-build-test-db.kuzu",
+  ".lbug-slice-build-test-db.lbug",
 );
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (
     q: string,
     params?: Record<string, unknown>,
@@ -26,13 +26,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -43,12 +43,12 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
 async function cleanupTestDb(
-  db: KuzuDatabase,
-  conn: KuzuConnection,
+  db: LadybugDatabase,
+  conn: LadybugConnection,
 ): Promise<void> {
   try {
     await conn.close();
@@ -63,37 +63,37 @@ async function cleanupTestDb(
   } catch {}
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
-  const { createSchema } = await import("../../dist/db/kuzu-schema.js");
+async function setupSchema(conn: LadybugConnection): Promise<void> {
+  const { createSchema } = await import("../../dist/db/ladybug-schema.js");
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
 describe("Kuzu Slice Build (integration)", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
   let slice: typeof import("../../dist/graph/slice.js");
-  let queries: typeof import("../../dist/db/kuzu-queries.js");
-  let kuzuAvailable = true;
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
+  let ladybugAvailable = true;
 
   beforeEach(async () => {
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
       slice = await import("../../dist/graph/slice.js");
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
     } catch {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
     }
   });
 
   afterEach(async () => {
-    if (!kuzuAvailable) return;
+    if (!ladybugAvailable) return;
     await cleanupTestDb(db, conn);
   });
 
   it(
     "builds a slice from explicit entry symbols",
-    { skip: !kuzuAvailable },
+    { skip: !ladybugAvailable },
     async () => {
       const kConn = conn as unknown as import("kuzu").Connection;
       const now = "2026-03-04T00:00:00.000Z";

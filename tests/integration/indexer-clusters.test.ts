@@ -5,8 +5,8 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,7 +15,7 @@ const __dirname = dirname(__filename);
 const REPO_ID = "test-indexer-clusters-repo";
 
 describe("Indexer cluster/process integration", () => {
-  const graphDbPath = join(__dirname, ".kuzu-indexer-clusters-test-db");
+  const graphDbPath = join(__dirname, ".lbug-indexer-clusters-test-db");
   const configPath = join(graphDbPath, "test-config.json");
   let repoDir: string | null = null;
   const prevSDL_CONFIG = process.env.SDL_CONFIG;
@@ -66,12 +66,12 @@ describe("Indexer cluster/process integration", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
 
     const now = new Date().toISOString();
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: REPO_ID,
       rootPath: repoDir,
       configJson: JSON.stringify({
@@ -90,7 +90,7 @@ describe("Indexer cluster/process integration", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (prevSDL_CONFIG === undefined) {
       delete process.env.SDL_CONFIG;
     } else {
@@ -123,8 +123,8 @@ describe("Indexer cluster/process integration", () => {
     assert.ok(result.clustersComputed >= 1);
     assert.ok(result.processesTraced >= 1);
 
-    const conn = await getKuzuConn();
-    const symbols = await kuzuDb.getSymbolsByRepo(conn, REPO_ID);
+    const conn = await getLadybugConn();
+    const symbols = await ladybugDb.getSymbolsByRepo(conn, REPO_ID);
     assert.ok(symbols.length >= 3);
 
     const main = symbols.find((s) => s.name === "main" && s.kind === "function");
@@ -132,16 +132,16 @@ describe("Indexer cluster/process integration", () => {
     const bar = symbols.find((s) => s.name === "bar" && s.kind === "function");
     assert.ok(main && foo && bar);
 
-    const cluster = await kuzuDb.getClusterForSymbol(conn, main.symbolId);
+    const cluster = await ladybugDb.getClusterForSymbol(conn, main.symbolId);
     assert.ok(cluster);
 
-    const members = await kuzuDb.getClusterMembers(conn, cluster.clusterId);
+    const members = await ladybugDb.getClusterMembers(conn, cluster.clusterId);
     assert.ok(members.length >= 3);
 
-    const procsForMain = await kuzuDb.getProcessesForSymbol(conn, main.symbolId);
+    const procsForMain = await ladybugDb.getProcessesForSymbol(conn, main.symbolId);
     assert.ok(procsForMain.length >= 1);
 
-    const flow = await kuzuDb.getProcessFlow(conn, procsForMain[0]!.processId);
+    const flow = await ladybugDb.getProcessFlow(conn, procsForMain[0]!.processId);
     const symbolNameById = new Map(symbols.map((s) => [s.symbolId, s.name] as const));
     const flowNames = flow.map((step) => symbolNameById.get(step.symbolId));
     assert.deepStrictEqual(flowNames.slice(0, 3), ["main", "foo", "bar"]);

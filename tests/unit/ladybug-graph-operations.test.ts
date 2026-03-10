@@ -1,5 +1,5 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
-import { queryAll as coreQueryAll } from "../../src/db/kuzu-core.js";
+import { queryAll as coreQueryAll } from "../../src/db/ladybug-core.js";
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { join, dirname } from "path";
@@ -11,10 +11,10 @@ const TEST_DB_PATH = join(
   __dirname,
   "..",
   "..",
-  ".kuzu-graph-ops-test-db.kuzu",
+  ".lbug-graph-ops-test-db.lbug",
 );
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (q: string) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
@@ -23,13 +23,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -40,12 +40,12 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
 async function cleanupTestDb(
-  db: KuzuDatabase,
-  conn: KuzuConnection,
+  db: LadybugDatabase,
+  conn: LadybugConnection,
 ): Promise<void> {
   try {
     await conn.close();
@@ -60,37 +60,37 @@ async function cleanupTestDb(
   } catch {}
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
-  const { createSchema } = await import("../../dist/db/kuzu-schema.js");
+async function setupSchema(conn: LadybugConnection): Promise<void> {
+  const { createSchema } = await import("../../dist/db/ladybug-schema.js");
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
 describe("KuzuDB Graph Operations", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
   let graphOps: typeof import("../../dist/graph/buildGraph.js");
-  let queries: typeof import("../../dist/db/kuzu-queries.js");
-  let kuzuAvailable = true;
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
+  let ladybugAvailable = true;
 
   beforeEach(async () => {
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
       graphOps = await import("../../dist/graph/buildGraph.js");
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
     } catch {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
     }
   });
 
   afterEach(async () => {
-    if (!kuzuAvailable) return;
+    if (!ladybugAvailable) return;
     await cleanupTestDb(db, conn);
   });
 
   it(
     "getNeighbors respects direction + edgeType",
-    { skip: !kuzuAvailable },
+    { skip: !ladybugAvailable },
     async () => {
       const kConn = conn as unknown as import("kuzu").Connection;
 
@@ -157,7 +157,7 @@ describe("KuzuDB Graph Operations", () => {
 
   it(
     "getPath uses shortest path traversal",
-    { skip: !kuzuAvailable },
+    { skip: !ladybugAvailable },
     async () => {
       const kConn = conn as unknown as import("kuzu").Connection;
 
@@ -209,7 +209,7 @@ describe("KuzuDB Graph Operations", () => {
 
   it(
     "loadNeighborhood returns reachable symbolIds + filtered edges",
-    { skip: !kuzuAvailable },
+    { skip: !ladybugAvailable },
     async () => {
       const kConn = conn as unknown as import("kuzu").Connection;
 

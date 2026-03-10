@@ -3,8 +3,8 @@ import { resolveCliConfigPath } from "../src/config/configPath.js";
 import { loadConfig } from "../src/config/loadConfig.js";
 import type { RepoConfig, AppConfig } from "../src/config/types.js";
 import { initGraphDb } from "../src/db/initGraphDb.js";
-import { getKuzuConn } from "../src/db/kuzu.js";
-import * as kuzuDb from "../src/db/kuzu-queries.js";
+import { getLadybugConn } from "../src/db/ladybug.js";
+import * as ladybugDb from "../src/db/ladybug-queries.js";
 import { getCurrentTimestamp } from "../src/util/time.js";
 
 interface CliArgs {
@@ -52,11 +52,11 @@ async function registerRepoIfNotExists(
   repoId: string,
   repoConfig: RepoConfig,
 ): Promise<void> {
-  const conn = await getKuzuConn();
-  const existingRepo = await kuzuDb.getRepo(conn, repoId);
+  const conn = await getLadybugConn();
+  const existingRepo = await ladybugDb.getRepo(conn, repoId);
 
   if (!existingRepo) {
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: repoConfig.rootPath,
       configJson: JSON.stringify(repoConfig),

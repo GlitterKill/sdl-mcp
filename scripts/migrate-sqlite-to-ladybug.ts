@@ -5,21 +5,25 @@ import { DatabaseSync } from "node:sqlite";
 
 import { resolveCliConfigPath } from "../src/config/configPath.js";
 import { loadConfig } from "../src/config/loadConfig.js";
-import { initKuzuDb, closeKuzuDb, getKuzuConn } from "../src/db/kuzu.js";
-import * as kuzuDb from "../src/db/kuzu-queries.js";
+import {
+  initLadybugDb,
+  closeLadybugDb,
+  getLadybugConn,
+} from "../src/db/ladybug.js";
+import * as ladybugDb from "../src/db/ladybug-queries.js";
 import { normalizePath } from "../src/util/paths.js";
 
-export interface SqliteToKuzuMigrationOptions {
+export interface SqliteToLadybugMigrationOptions {
   configPath?: string;
   sqlitePath?: string;
-  kuzuPath?: string;
+  ladybugPath?: string;
   quiet?: boolean;
 }
 
 interface CliArgs {
   config?: string;
   sqlite?: string;
-  kuzu?: string;
+  ladybug?: string;
   quiet: boolean;
 }
 
@@ -47,10 +51,10 @@ function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
-    if (arg === "--kuzu") {
+    if (arg === "--ladybug") {
       const next = argv[i + 1];
       if (next && !next.startsWith("--")) {
-        args.kuzu = next;
+        args.ladybug = next;
         i++;
       }
       continue;
@@ -85,7 +89,7 @@ function sqliteCount(db: DatabaseSync, table: string): number {
   return Number(row?.count ?? 0);
 }
 
-async function kuzuCount(
+async function ladybugCount(
   conn: import("kuzu").Connection,
   statement: string,
   params: Record<string, unknown> = {},
@@ -104,8 +108,8 @@ async function kuzuCount(
   }
 }
 
-export async function migrateSqliteToKuzu(
-  options: SqliteToKuzuMigrationOptions = {},
+export async function migrateSqliteToLadybug(
+  options: SqliteToLadybugMigrationOptions = {},
 ): Promise<void> {
   const resolvedConfigPath = options.configPath
     ? resolveCliConfigPath(options.configPath, "read")
@@ -117,21 +121,21 @@ export async function migrateSqliteToKuzu(
     options.sqlitePath ?? config?.dbPath ?? "./data/sdlmcp.sqlite",
   );
 
-  const kuzuPath = resolve(
-    options.kuzuPath ??
+  const ladybugPath = resolve(
+    options.ladybugPath ??
       config?.graphDatabase?.path ??
       (resolvedConfigPath
         ? resolve(dirname(resolvedConfigPath), "sdl-mcp-graph")
-        : "./data/sdlmcp.kuzu"),
+        : "./data/sdlmcp.lbug"),
   );
 
   if (!existsSync(sqlitePath)) {
     throw new Error(`SQLite DB not found: ${normalizePath(sqlitePath)}`);
   }
 
-  await closeKuzuDb();
-  await initKuzuDb(kuzuPath);
-  const conn = await getKuzuConn();
+  await closeLadybugDb();
+  await initLadybugDb(ladybugPath);
+  const conn = await getLadybugConn();
 
   const sqlite = new DatabaseSync(sqlitePath);
   const tables = getSqliteTables(sqlite);
@@ -140,14 +144,14 @@ export async function migrateSqliteToKuzu(
 
   try {
     log(`SQLite: ${normalizePath(sqlitePath)}`, { quiet });
-    log(`Kuzu:   ${normalizePath(kuzuPath)}`, { quiet });
+    log(`Ladybug: ${normalizePath(ladybugPath)}`, { quiet });
 
     if (tables.has("repos")) {
       log(`\nMigrating repos (${sqliteCount(sqlite, "repos")})...`, { quiet });
       const stmt = sqlite.prepare("SELECT * FROM repos");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.upsertRepo(conn, {
+        await ladybugDb.upsertRepo(conn, {
           repoId: String(row.repo_id),
           rootPath: String(row.root_path),
           configJson: String(row.config_json),
@@ -164,7 +168,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM files");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.upsertFile(conn, {
+        await ladybugDb.upsertFile(conn, {
           fileId: String(row.file_id),
           repoId: String(row.repo_id),
           relPath: String(row.rel_path),
@@ -188,7 +192,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM symbols");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.upsertSymbol(conn, {
+        await ladybugDb.upsertSymbol(conn, {
           symbolId: String(row.symbol_id),
           repoId: String(row.repo_id),
           fileId: String(row.file_id),
@@ -221,13 +225,13 @@ export async function migrateSqliteToKuzu(
     if (tables.has("edges")) {
       log(`\nMigrating edges (${sqliteCount(sqlite, "edges")})...`, { quiet });
       const stmt = sqlite.prepare("SELECT * FROM edges");
-      const batch: kuzuDb.EdgeRow[] = [];
+      const batch: ladybugDb.EdgeRow[] = [];
       const BATCH_SIZE = 1000;
       let migrated = 0;
 
       const flush = async (): Promise<void> => {
         if (batch.length === 0) return;
-        await kuzuDb.insertEdges(conn, batch.splice(0, batch.length));
+        await ladybugDb.insertEdges(conn, batch.splice(0, batch.length));
       };
 
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
@@ -265,7 +269,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM versions");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.createVersion(conn, {
+        await ladybugDb.createVersion(conn, {
           versionId: String(row.version_id),
           repoId: String(row.repo_id),
           createdAt: String(row.created_at),
@@ -289,7 +293,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM symbol_versions");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.snapshotSymbolVersion(conn, {
+        await ladybugDb.snapshotSymbolVersion(conn, {
           versionId: String(row.version_id),
           symbolId: String(row.symbol_id),
           astFingerprint: String(row.ast_fingerprint),
@@ -316,7 +320,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM metrics");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.upsertMetrics(conn, {
+        await ladybugDb.upsertMetrics(conn, {
           symbolId: String(row.symbol_id),
           fanIn: Number(row.fan_in ?? 0),
           fanOut: Number(row.fan_out ?? 0),
@@ -341,7 +345,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM slice_handles");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.upsertSliceHandle(conn, {
+        await ladybugDb.upsertSliceHandle(conn, {
           handle: String(row.handle),
           repoId: String(row.repo_id),
           createdAt: String(row.created_at),
@@ -366,7 +370,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM card_hashes");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.upsertCardHash(conn, {
+        await ladybugDb.upsertCardHash(conn, {
           cardHash: String(row.card_hash),
           cardBlob: String(row.card_blob),
           createdAt: String(row.created_at),
@@ -385,7 +389,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM tool_policy_hashes");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.upsertToolPolicyHash(conn, {
+        await ladybugDb.upsertToolPolicyHash(conn, {
           policyHash: String(row.policy_hash),
           policyBlob: String(row.policy_blob),
           createdAt: String(row.created_at),
@@ -405,7 +409,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM tsconfig_hashes");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.upsertTsconfigHash(conn, {
+        await ladybugDb.upsertTsconfigHash(conn, {
           tsconfigHash: String(row.tsconfig_hash),
           tsconfigBlob: String(row.tsconfig_blob),
           createdAt: String(row.created_at),
@@ -422,7 +426,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM audit");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.insertAuditEvent(conn, {
+        await ladybugDb.insertAuditEvent(conn, {
           eventId: String(row.event_id),
           timestamp: String(row.timestamp),
           tool: String(row.tool),
@@ -445,7 +449,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM agent_feedback");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.upsertAgentFeedback(conn, {
+        await ladybugDb.upsertAgentFeedback(conn, {
           feedbackId: String(row.feedback_id),
           repoId: String(row.repo_id),
           versionId: String(row.version_id),
@@ -478,7 +482,7 @@ export async function migrateSqliteToKuzu(
             : row.embedding_vector
               ? String(row.embedding_vector)
               : "";
-        await kuzuDb.upsertSymbolEmbedding(conn, {
+        await ladybugDb.upsertSymbolEmbedding(conn, {
           symbolId: String(row.symbol_id),
           model: String(row.model),
           embeddingVector: vector,
@@ -502,7 +506,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM symbol_summary_cache");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.upsertSummaryCache(conn, {
+        await ladybugDb.upsertSummaryCache(conn, {
           symbolId: String(row.symbol_id),
           summary: String(row.summary),
           provider: String(row.provider),
@@ -527,7 +531,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM sync_artifacts");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.upsertSyncArtifact(conn, {
+        await ladybugDb.upsertSyncArtifact(conn, {
           artifactId: String(row.artifact_id),
           repoId: String(row.repo_id),
           versionId: String(row.version_id),
@@ -553,7 +557,7 @@ export async function migrateSqliteToKuzu(
       const stmt = sqlite.prepare("SELECT * FROM symbol_references");
       let migrated = 0;
       for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-        await kuzuDb.insertSymbolReference(conn, {
+        await ladybugDb.insertSymbolReference(conn, {
           refId: String(row.ref_id),
           repoId: String(row.repo_id),
           symbolName: String(row.symbol_name),
@@ -584,32 +588,39 @@ export async function migrateSqliteToKuzu(
         metrics: tables.has("metrics") ? sqliteCount(sqlite, "metrics") : 0,
       };
 
-      const kuzuCounts = {
-        repos: await kuzuCount(conn, "MATCH (r:Repo) RETURN COUNT(r) AS count"),
-        files: await kuzuCount(conn, "MATCH (f:File) RETURN COUNT(f) AS count"),
-        symbols: await kuzuCount(
+      const ladybugCounts = {
+        repos: await ladybugCount(
+          conn,
+          "MATCH (r:Repo) RETURN COUNT(r) AS count",
+        ),
+        files: await ladybugCount(
+          conn,
+          "MATCH (f:File) RETURN COUNT(f) AS count",
+        ),
+        symbols: await ladybugCount(
           conn,
           "MATCH (s:Symbol) RETURN COUNT(s) AS count",
         ),
-        edges: await kuzuCount(
+        edges: await ladybugCount(
           conn,
           "MATCH ()-[d:DEPENDS_ON]->() RETURN COUNT(d) AS count",
         ),
-        versions: await kuzuCount(
+        versions: await ladybugCount(
           conn,
           "MATCH (v:Version) RETURN COUNT(v) AS count",
         ),
-        metrics: await kuzuCount(
+        metrics: await ladybugCount(
           conn,
           "MATCH (m:Metrics) RETURN COUNT(m) AS count",
         ),
       };
 
       for (const [key, sqliteValue] of Object.entries(sqliteCounts)) {
-        const kuzuValue = (kuzuCounts as Record<string, number>)[key] ?? 0;
-        if (sqliteValue !== kuzuValue) {
+        const ladybugValue =
+          (ladybugCounts as Record<string, number>)[key] ?? 0;
+        if (sqliteValue !== ladybugValue) {
           throw new Error(
-            `Count mismatch for ${key}: sqlite=${sqliteValue} kuzu=${kuzuValue}`,
+            `Count mismatch for ${key}: sqlite=${sqliteValue} ladybug=${ladybugValue}`,
           );
         }
       }
@@ -618,16 +629,16 @@ export async function migrateSqliteToKuzu(
     }
   } finally {
     sqlite.close();
-    await closeKuzuDb();
+    await closeLadybugDb();
   }
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
-  await migrateSqliteToKuzu({
+  await migrateSqliteToLadybug({
     configPath: args.config,
     sqlitePath: args.sqlite,
-    kuzuPath: args.kuzu,
+    ladybugPath: args.ladybug,
     quiet: args.quiet,
   });
 }

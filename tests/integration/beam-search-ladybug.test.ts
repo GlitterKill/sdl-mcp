@@ -10,10 +10,10 @@ const TEST_DB_PATH = join(
   __dirname,
   "..",
   "..",
-  ".kuzu-beam-search-test-db.kuzu",
+  ".lbug-beam-search-test-db.lbug",
 );
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (
     q: string,
     params?: Record<string, unknown>,
@@ -26,13 +26,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -41,14 +41,14 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
   return {
-    db: db as unknown as KuzuDatabase,
-    conn: conn as unknown as KuzuConnection,
+    db: db as unknown as LadybugDatabase,
+    conn: conn as unknown as LadybugConnection,
   };
 }
 
 async function cleanupTestDb(
-  db: KuzuDatabase,
-  conn: KuzuConnection,
+  db: LadybugDatabase,
+  conn: LadybugConnection,
 ): Promise<void> {
   try {
     await conn.close();
@@ -63,37 +63,37 @@ async function cleanupTestDb(
   } catch {}
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
-  const { createSchema } = await import("../../dist/db/kuzu-schema.js");
+async function setupSchema(conn: LadybugConnection): Promise<void> {
+  const { createSchema } = await import("../../dist/db/ladybug-schema.js");
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
-describe("beamSearchKuzu (integration)", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
+describe("beamSearchLadybug (integration)", () => {
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
   let beamSearch: typeof import("../../dist/graph/slice/beam-search-engine.js");
-  let queries: typeof import("../../dist/db/kuzu-queries.js");
-  let kuzuAvailable = true;
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
+  let ladybugAvailable = true;
 
   beforeEach(async () => {
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
       beamSearch = await import("../../dist/graph/slice/beam-search-engine.js");
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
     } catch {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
     }
   });
 
   afterEach(async () => {
-    if (!kuzuAvailable) return;
+    if (!ladybugAvailable) return;
     await cleanupTestDb(db, conn);
   });
 
   it(
     "basic traversal: follows call edges through a 3-symbol chain",
-    { skip: !kuzuAvailable },
+    { skip: !ladybugAvailable },
     async () => {
       const kConn = conn as unknown as import("kuzu").Connection;
       const now = "2026-03-07T00:00:00.000Z";
@@ -169,7 +169,7 @@ describe("beamSearchKuzu (integration)", () => {
       const request = { entrySymbols: ["symA"] };
       const edgeWeights = { call: 1.0, import: 0.6, config: 0.8 };
 
-      const result = await beamSearch.beamSearchKuzu(
+      const result = await beamSearch.beamSearchLadybug(
         kConn,
         repoId,
         startNodes,
@@ -187,7 +187,7 @@ describe("beamSearchKuzu (integration)", () => {
 
   it(
     "budget enforcement: wasTruncated when maxCards exceeded",
-    { skip: !kuzuAvailable },
+    { skip: !ladybugAvailable },
     async () => {
       const kConn = conn as unknown as import("kuzu").Connection;
       const now = "2026-03-07T00:00:00.000Z";
@@ -256,7 +256,7 @@ describe("beamSearchKuzu (integration)", () => {
       const request = { entrySymbols: ["b1"] };
       const edgeWeights = { call: 1.0, import: 0.6, config: 0.8 };
 
-      const result = await beamSearch.beamSearchKuzu(
+      const result = await beamSearch.beamSearchLadybug(
         kConn,
         repoId,
         startNodes,
@@ -280,7 +280,7 @@ describe("beamSearchKuzu (integration)", () => {
 
   it(
     "confidence filtering: low-confidence edges are dropped",
-    { skip: !kuzuAvailable },
+    { skip: !ladybugAvailable },
     async () => {
       const kConn = conn as unknown as import("kuzu").Connection;
       const now = "2026-03-07T00:00:00.000Z";
@@ -357,7 +357,7 @@ describe("beamSearchKuzu (integration)", () => {
       const request = { entrySymbols: ["c1"] };
       const edgeWeights = { call: 1.0, import: 0.6, config: 0.8 };
 
-      const result = await beamSearch.beamSearchKuzu(
+      const result = await beamSearch.beamSearchLadybug(
         kConn,
         repoId,
         startNodes,
@@ -387,7 +387,7 @@ describe("beamSearchKuzu (integration)", () => {
 
   it(
     "empty start nodes: returns empty sliceCards",
-    { skip: !kuzuAvailable },
+    { skip: !ladybugAvailable },
     async () => {
       const kConn = conn as unknown as import("kuzu").Connection;
       const now = "2026-03-07T00:00:00.000Z";
@@ -406,7 +406,7 @@ describe("beamSearchKuzu (integration)", () => {
       const request = {};
       const edgeWeights = { call: 1.0, import: 0.6, config: 0.8 };
 
-      const result = await beamSearch.beamSearchKuzu(
+      const result = await beamSearch.beamSearchLadybug(
         kConn,
         repoId,
         startNodes,
@@ -426,7 +426,7 @@ describe("beamSearchKuzu (integration)", () => {
 
   it(
     "repository isolation: symbols from other repos are not included",
-    { skip: !kuzuAvailable },
+    { skip: !ladybugAvailable },
     async () => {
       const kConn = conn as unknown as import("kuzu").Connection;
       const now = "2026-03-07T00:00:00.000Z";
@@ -559,7 +559,7 @@ describe("beamSearchKuzu (integration)", () => {
       const request = { entrySymbols: ["isoA1"] };
       const edgeWeights = { call: 1.0, import: 0.6, config: 0.8 };
 
-      const result = await beamSearch.beamSearchKuzu(
+      const result = await beamSearch.beamSearchLadybug(
         kConn,
         repoA,
         startNodes,

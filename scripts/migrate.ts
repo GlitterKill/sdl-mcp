@@ -1,8 +1,8 @@
 import { resolveCliConfigPath } from "../src/config/configPath.js";
 import { loadConfig } from "../src/config/loadConfig.js";
 import { initGraphDb } from "../src/db/initGraphDb.js";
-import { getKuzuConn } from "../src/db/kuzu.js";
-import * as kuzuDb from "../src/db/kuzu-queries.js";
+import { getLadybugConn } from "../src/db/ladybug.js";
+import * as ladybugDb from "../src/db/ladybug-queries.js";
 
 interface CliArgs {
   status: boolean;
@@ -39,16 +39,16 @@ async function main(): Promise<void> {
   console.log(`Graph database: ${graphDbPath}`);
 
   if (args.status) {
-    const conn = await getKuzuConn();
-    const repos = await kuzuDb.listRepos(conn, 1000);
+    const conn = await getLadybugConn();
+    const repos = await ladybugDb.listRepos(conn, 1000);
     console.log(`Repos: ${repos.length}`);
 
     const repoId = repos[0]?.repoId;
     if (repoId) {
       const [files, symbols, edges] = await Promise.all([
-        kuzuDb.getFileCount(conn, repoId),
-        kuzuDb.getSymbolCount(conn, repoId),
-        kuzuDb.getEdgeCount(conn, repoId),
+        ladybugDb.getFileCount(conn, repoId),
+        ladybugDb.getSymbolCount(conn, repoId),
+        ladybugDb.getEdgeCount(conn, repoId),
       ]);
 
       console.log(

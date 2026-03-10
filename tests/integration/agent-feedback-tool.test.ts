@@ -4,8 +4,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, rmSync, mkdirSync } from "node:fs";
 
-import { initKuzuDb, closeKuzuDb, getKuzuConn } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import { initLadybugDb, closeLadybugDb, getLadybugConn } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import {
   handleAgentFeedback,
   handleAgentFeedbackQuery,
@@ -28,13 +28,13 @@ describe("Agent Feedback Tool", () => {
     }
     mkdirSync(testDir, { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
 
     const now = new Date().toISOString();
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: "/fake/repo",
       configJson: JSON.stringify({
@@ -51,7 +51,7 @@ describe("Agent Feedback Tool", () => {
       createdAt: now,
     });
 
-    await kuzuDb.createVersion(conn, {
+    await ladybugDb.createVersion(conn, {
       versionId,
       repoId,
       createdAt: now,
@@ -60,7 +60,7 @@ describe("Agent Feedback Tool", () => {
       versionHash: null,
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file1",
       repoId,
       relPath: "src/index.ts",
@@ -71,7 +71,7 @@ describe("Agent Feedback Tool", () => {
     });
 
     for (let i = 1; i <= 10; i++) {
-      await kuzuDb.upsertSymbol(conn, {
+      await ladybugDb.upsertSymbol(conn, {
         symbolId: `sym${i}`,
         repoId,
         fileId: "file1",
@@ -95,7 +95,7 @@ describe("Agent Feedback Tool", () => {
   });
 
   afterEach(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
     }
@@ -121,8 +121,8 @@ describe("Agent Feedback Tool", () => {
       assert.ok(typeof response.feedbackId === "string");
       assert.ok(response.feedbackId.length > 0);
 
-      const conn = await getKuzuConn();
-      const row = await kuzuDb.getAgentFeedback(conn, response.feedbackId);
+      const conn = await getLadybugConn();
+      const row = await ladybugDb.getAgentFeedback(conn, response.feedbackId);
       assert.ok(row);
       assert.strictEqual(row.repoId, repoId);
       assert.strictEqual(row.versionId, versionId);

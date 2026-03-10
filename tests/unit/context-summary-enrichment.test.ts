@@ -4,8 +4,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import {
   generateContextSummary,
   renderContextSummary,
@@ -19,7 +19,7 @@ const __dirname = dirname(__filename);
 describe("context summary enrichment", () => {
   const graphDbPath = join(
     __dirname,
-    ".kuzu-context-summary-enrichment-test-db",
+    ".lbug-context-summary-enrichment-test-db",
   );
   const symbolMain = `${REPO_ID}-main`;
 
@@ -29,13 +29,13 @@ describe("context summary enrichment", () => {
     }
     mkdirSync(graphDbPath, { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
 
     const now = new Date().toISOString();
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: REPO_ID,
       rootPath: "/tmp/test-context-summary-enrichment",
       configJson: JSON.stringify({
@@ -52,7 +52,7 @@ describe("context summary enrichment", () => {
       createdAt: now,
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId: REPO_ID,
       relPath: "src/main.ts",
@@ -62,7 +62,7 @@ describe("context summary enrichment", () => {
       lastIndexedAt: now,
     });
 
-    await kuzuDb.upsertSymbol(conn, {
+    await ladybugDb.upsertSymbol(conn, {
       symbolId: symbolMain,
       repoId: REPO_ID,
       fileId: "file-1",
@@ -84,7 +84,7 @@ describe("context summary enrichment", () => {
     });
 
     const clusterId = `${REPO_ID}-cluster-1`;
-    await kuzuDb.upsertCluster(conn, {
+    await ladybugDb.upsertCluster(conn, {
       clusterId,
       repoId: REPO_ID,
       label: "Cluster 1",
@@ -93,14 +93,14 @@ describe("context summary enrichment", () => {
       versionId: null,
       createdAt: now,
     });
-    await kuzuDb.upsertClusterMember(conn, {
+    await ladybugDb.upsertClusterMember(conn, {
       symbolId: symbolMain,
       clusterId,
       membershipScore: 1.0,
     });
 
     const processId = `${REPO_ID}-process-1`;
-    await kuzuDb.upsertProcess(conn, {
+    await ladybugDb.upsertProcess(conn, {
       processId,
       repoId: REPO_ID,
       entrySymbolId: symbolMain,
@@ -109,7 +109,7 @@ describe("context summary enrichment", () => {
       versionId: null,
       createdAt: now,
     });
-    await kuzuDb.upsertProcessStep(conn, {
+    await ladybugDb.upsertProcessStep(conn, {
       processId,
       symbolId: symbolMain,
       stepOrder: 0,
@@ -118,7 +118,7 @@ describe("context summary enrichment", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(graphDbPath)) {
       rmSync(graphDbPath, { recursive: true, force: true });
     }

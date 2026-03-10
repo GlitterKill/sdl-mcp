@@ -47,18 +47,18 @@ describe("CLI doctor command - KuzuDB", () => {
 
   it("reports KuzuDB status when configured", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const kuzuPath = join(tempDir, "sdl-mcp-graph.kuzu");
+    const ladybugPath = join(tempDir, "sdl-mcp-graph.lbug");
 
     const config = {
       repos: [{ repoId: "test", rootPath: tempDir }],
       dbPath: join(tempDir, "sdlmcp.sqlite"),
-      graphDatabase: { path: kuzuPath },
+      graphDatabase: { path: ladybugPath },
     };
     writeFileSync(configPath, JSON.stringify(config));
 
-    const { initKuzuDb, closeKuzuDb } = await import("../../src/db/kuzu.js");
+    const { initLadybugDb, closeLadybugDb } = await import("../../src/db/ladybug.js");
     const { doctorCommand } = await import("../../src/cli/commands/doctor.js");
-    await initKuzuDb(kuzuPath);
+    await initLadybugDb(ladybugPath);
 
     let output = "";
     const originalLog = console.log;
@@ -71,7 +71,7 @@ describe("CLI doctor command - KuzuDB", () => {
     } catch (e) {
       // May throw on failed checks
     } finally {
-      await closeKuzuDb();
+      await closeLadybugDb();
       console.log = originalLog;
     }
 
@@ -87,7 +87,7 @@ describe("CLI doctor command - KuzuDB", () => {
     const config = {
       repos: [{ repoId: "test", rootPath: tempDir }],
       dbPath: join(tempDir, "sdlmcp.sqlite"),
-      graphDatabase: { path: join(tempDir, "nonexistent-kuzudb.kuzu") },
+      graphDatabase: { path: join(tempDir, "nonexistent-kuzudb.lbug") },
     };
     writeFileSync(configPath, JSON.stringify(config));
 

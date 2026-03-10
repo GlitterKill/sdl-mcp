@@ -4,8 +4,8 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { handleBufferPush } from "../../src/mcp/tools/buffer.js";
 import {
   resetDefaultLiveIndexCoordinator,
@@ -15,7 +15,7 @@ import {
 describe("doctor command - live index runtime health", () => {
   let tempDir = "";
   let configPath = "";
-  let kuzuPath = "";
+  let ladybugPath = "";
   let originalExit: typeof process.exit;
   let originalSDLConfig: string | undefined;
   let originalSDLConfigPath: string | undefined;
@@ -27,12 +27,12 @@ describe("doctor command - live index runtime health", () => {
     writeFileSync(join(tempDir, "src", "example.ts"), "export const value = 1;\n");
 
     configPath = join(tempDir, "sdlmcp.config.json");
-    kuzuPath = join(tempDir, "graph.kuzu");
+    ladybugPath = join(tempDir, "graph.lbug");
     writeFileSync(
       configPath,
       JSON.stringify({
         repos: [{ repoId: "doctor-live-repo", rootPath: tempDir }],
-        graphDatabase: { path: kuzuPath },
+        graphDatabase: { path: ladybugPath },
         policy: {},
         liveIndex: {
           enabled: true,
@@ -57,10 +57,10 @@ describe("doctor command - live index runtime health", () => {
 
     await waitForDefaultLiveIndexIdle();
     resetDefaultLiveIndexCoordinator();
-    await closeKuzuDb();
-    await initKuzuDb(kuzuPath);
-    const conn = await getKuzuConn();
-    await kuzuDb.upsertRepo(conn, {
+    await closeLadybugDb();
+    await initLadybugDb(ladybugPath);
+    const conn = await getLadybugConn();
+    await ladybugDb.upsertRepo(conn, {
       repoId: "doctor-live-repo",
       rootPath: tempDir,
       configJson: JSON.stringify({
@@ -79,7 +79,7 @@ describe("doctor command - live index runtime health", () => {
     process.exit = originalExit;
     await waitForDefaultLiveIndexIdle();
     resetDefaultLiveIndexCoordinator();
-    await closeKuzuDb();
+    await closeLadybugDb();
 
     if (originalSDLConfig === undefined) delete process.env.SDL_CONFIG;
     else process.env.SDL_CONFIG = originalSDLConfig;

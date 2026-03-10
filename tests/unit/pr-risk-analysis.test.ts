@@ -4,15 +4,15 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { handlePRRiskAnalysis } from "../../dist/mcp/tools/prRisk.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("PR Risk Analysis Tool", () => {
-  const kuzuDbPath = join(__dirname, ".kuzu-pr-risk-test-db");
+  const kuzuDbPath = join(__dirname, ".lbug-pr-risk-test-db");
   const repoId = "test-repo";
 
   beforeEach(async () => {
@@ -21,14 +21,14 @@ describe("PR Risk Analysis Tool", () => {
     }
     mkdirSync(kuzuDbPath, { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(kuzuDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(kuzuDbPath);
+    const conn = await getLadybugConn();
 
     const now = new Date().toISOString();
     const symId = "sym1";
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: "/fake/repo",
       configJson: JSON.stringify({
@@ -45,7 +45,7 @@ describe("PR Risk Analysis Tool", () => {
       createdAt: now,
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId,
       relPath: "src/index.ts",
@@ -55,7 +55,7 @@ describe("PR Risk Analysis Tool", () => {
       lastIndexedAt: now,
     });
 
-    await kuzuDb.upsertSymbol(conn, {
+    await ladybugDb.upsertSymbol(conn, {
       symbolId: symId,
       repoId,
       fileId: "file-1",
@@ -76,7 +76,7 @@ describe("PR Risk Analysis Tool", () => {
       updatedAt: now,
     });
 
-    await kuzuDb.createVersion(conn, {
+    await ladybugDb.createVersion(conn, {
       versionId: "v1",
       repoId,
       createdAt: now,
@@ -85,7 +85,7 @@ describe("PR Risk Analysis Tool", () => {
       versionHash: null,
     });
 
-    await kuzuDb.createVersion(conn, {
+    await ladybugDb.createVersion(conn, {
       versionId: "v2",
       repoId,
       createdAt: now,
@@ -94,7 +94,7 @@ describe("PR Risk Analysis Tool", () => {
       versionHash: null,
     });
 
-    await kuzuDb.snapshotSymbolVersion(conn, {
+    await ladybugDb.snapshotSymbolVersion(conn, {
       versionId: "v1",
       symbolId: symId,
       astFingerprint: "fp1",
@@ -104,7 +104,7 @@ describe("PR Risk Analysis Tool", () => {
       sideEffectsJson: "[]",
     });
 
-    await kuzuDb.snapshotSymbolVersion(conn, {
+    await ladybugDb.snapshotSymbolVersion(conn, {
       versionId: "v2",
       symbolId: symId,
       astFingerprint: "fp2",
@@ -116,7 +116,7 @@ describe("PR Risk Analysis Tool", () => {
   });
 
   afterEach(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(kuzuDbPath)) {
       rmSync(kuzuDbPath, { recursive: true, force: true });
     }

@@ -36,9 +36,9 @@ describe("CLI init command - KuzuDB", () => {
     }
   });
 
-  it("writes a .kuzu graph database path alongside the legacy sqlite path", async () => {
+  it("writes a .lbug graph database path alongside the legacy sqlite path", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const expectedKuzuPath = join(tempDir, "sdl-mcp-graph.kuzu");
+    const expectedKuzuPath = join(tempDir, "sdl-mcp-graph.lbug");
 
     const { initCommand } = await import("../../src/cli/commands/init.js");
 
@@ -91,14 +91,14 @@ describe("CLI init command - KuzuDB", () => {
     assert.ok(configContent.graphDatabase, "Config should have graphDatabase");
     assert.ok(configContent.graphDatabase.path, "graphDatabase should have path");
     assert.ok(
-      configContent.graphDatabase.path.endsWith("sdl-mcp-graph.kuzu"),
-      "graphDatabase.path should end with sdl-mcp-graph.kuzu",
+      configContent.graphDatabase.path.endsWith("sdl-mcp-graph.lbug"),
+      "graphDatabase.path should end with sdl-mcp-graph.lbug",
     );
   });
 
   it("dry-run mode does not create the KuzuDB file path", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const expectedKuzuPath = join(tempDir, "sdl-mcp-graph.kuzu");
+    const expectedKuzuPath = join(tempDir, "sdl-mcp-graph.lbug");
 
     const { initCommand } = await import("../../src/cli/commands/init.js");
 

@@ -5,9 +5,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildSlice } from "../../src/graph/slice.js";
-import { createSchema } from "../../src/db/kuzu-schema.js";
+import { createSchema } from "../../src/db/ladybug-schema.js";
 import { SliceBuildRequestSchema } from "../../src/mcp/tools.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -15,20 +15,20 @@ const TEST_DB_PATH = join(
   __dirname,
   "..",
   "..",
-  ".kuzu-mcp-slice-confidence-test-db.kuzu",
+  ".lbug-mcp-slice-confidence-test-db.lbug",
 );
 
-interface KuzuConnection {
+interface LadybugConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
   conn: import("kuzu").Connection;
-  db: KuzuDatabase;
+  db: LadybugDatabase;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -39,12 +39,12 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
   await createSchema(conn);
-  return { conn, db: db as unknown as KuzuDatabase };
+  return { conn, db: db as unknown as LadybugDatabase };
 }
 
 async function cleanupTestDb(
-  db: KuzuDatabase,
-  conn: KuzuConnection,
+  db: LadybugDatabase,
+  conn: LadybugConnection,
 ): Promise<void> {
   try {
     await conn.close();
@@ -61,14 +61,14 @@ async function cleanupTestDb(
 
 describe("slice confidence-aware filtering", () => {
   let conn: import("kuzu").Connection;
-  let db: KuzuDatabase;
+  let db: LadybugDatabase;
 
   beforeEach(async () => {
     ({ conn, db } = await createTestDb());
   });
 
   afterEach(async () => {
-    await cleanupTestDb(db, conn as unknown as KuzuConnection);
+    await cleanupTestDb(db, conn as unknown as LadybugConnection);
   });
 
   it("accepts minCallConfidence and includeResolutionMetadata in slice.build requests", () => {
@@ -90,14 +90,14 @@ describe("slice confidence-aware filtering", () => {
   it("filters low-confidence call edges while preserving imports and metadata", async () => {
     const now = "2026-03-05T12:00:00.000Z";
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: "repo",
       rootPath: "C:/repo",
       configJson: JSON.stringify({ policy: {} }),
       createdAt: now,
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId: "repo",
       relPath: "src/app.ts",
@@ -115,7 +115,7 @@ describe("slice confidence-aware filtering", () => {
     ];
 
     for (const symbol of symbols) {
-      await kuzuDb.upsertSymbol(conn, {
+      await ladybugDb.upsertSymbol(conn, {
         symbolId: symbol.symbolId,
         repoId: "repo",
         fileId: "file-1",
@@ -137,7 +137,7 @@ describe("slice confidence-aware filtering", () => {
       });
     }
 
-    await kuzuDb.insertEdges(conn, [
+    await ladybugDb.insertEdges(conn, [
       {
         repoId: "repo",
         fromSymbolId: "sym-entry",

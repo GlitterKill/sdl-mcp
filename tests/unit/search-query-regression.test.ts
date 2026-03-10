@@ -12,8 +12,8 @@ function runSearchScript(mode: "full" | "lite") {
   const script = `
     import { join } from "node:path";
     import { existsSync, mkdirSync, rmSync } from "node:fs";
-    import { initKuzuDb, closeKuzuDb, getKuzuConn } from "./dist/db/kuzu.js";
-    import * as kuzuDb from "./dist/db/kuzu-queries.js";
+    import { initLadybugDb, closeLadybugDb, getLadybugConn } from "./dist/db/ladybug.js";
+    import * as ladybugDb from "./dist/db/ladybug-queries.js";
 
     const testDir = join(process.cwd(), "tmp-search-regression-${mode}");
     const graphDbPath = join(testDir, "graph");
@@ -23,12 +23,12 @@ function runSearchScript(mode: "full" | "lite") {
     if (existsSync(testDir)) rmSync(testDir, { recursive: true, force: true });
     mkdirSync(testDir, { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
 
-    await kuzuDb.upsertRepo(conn, { repoId, rootPath: "/fake/repo", configJson: "{}", createdAt: now });
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertRepo(conn, { repoId, rootPath: "/fake/repo", configJson: "{}", createdAt: now });
+    await ladybugDb.upsertFile(conn, {
       fileId: "file1",
       repoId,
       relPath: "src/api.ts",
@@ -38,7 +38,7 @@ function runSearchScript(mode: "full" | "lite") {
       lastIndexedAt: now,
       directory: "src",
     });
-    await kuzuDb.upsertSymbol(conn, {
+    await ladybugDb.upsertSymbol(conn, {
       symbolId: "sym-api",
       repoId,
       fileId: "file1",
@@ -61,11 +61,11 @@ function runSearchScript(mode: "full" | "lite") {
 
     const rows = ${
       mode === "full"
-        ? 'await kuzuDb.searchSymbols(conn, repoId, "api", 10);'
-        : 'await kuzuDb.searchSymbolsLite(conn, repoId, "api", 10);'
+        ? 'await ladybugDb.searchSymbols(conn, repoId, "api", 10);'
+        : 'await ladybugDb.searchSymbolsLite(conn, repoId, "api", 10);'
     }
     console.log(rows.length);
-    await closeKuzuDb();
+    await closeLadybugDb();
   `;
 
   return spawnSync(process.execPath, ["--input-type=module", "-e", script], {

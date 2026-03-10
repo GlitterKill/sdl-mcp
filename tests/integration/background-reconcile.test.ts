@@ -10,15 +10,15 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { indexRepo } from "../../src/indexer/indexer.js";
 import { ReconcileQueue } from "../../src/live-index/reconcile-queue.js";
 import { ReconcileWorker } from "../../src/live-index/reconcile-worker.js";
 
 describe("background reconcile worker", () => {
   const repoId = "background-reconcile-repo";
-  const dbPath = join(tmpdir(), ".kuzu-background-reconcile-test-db.kuzu");
+  const dbPath = join(tmpdir(), ".lbug-background-reconcile-test-db.lbug");
   const configPath = join(tmpdir(), `sdl-background-reconcile-${Date.now()}.json`);
   let repoDir = "";
   const prevConfig = process.env.SDL_CONFIG;
@@ -53,11 +53,11 @@ describe("background reconcile worker", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    await closeKuzuDb();
-    await initKuzuDb(dbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(dbPath);
+    const conn = await getLadybugConn();
     const now = "2026-03-07T12:00:00.000Z";
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: repoDir,
       configJson: JSON.stringify({
@@ -74,7 +74,7 @@ describe("background reconcile worker", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
     if (existsSync(configPath)) rmSync(configPath, { force: true });
     if (repoDir && existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
@@ -85,8 +85,8 @@ describe("background reconcile worker", () => {
   });
 
   it("patches queued dependent files from disk in the background", async () => {
-    const conn = await getKuzuConn();
-    const beforeFile = await kuzuDb.getFileByRepoPath(conn, repoId, "src/consumer.ts");
+    const conn = await getLadybugConn();
+    const beforeFile = await ladybugDb.getFileByRepoPath(conn, repoId, "src/consumer.ts");
     assert.ok(beforeFile);
 
     writeFileSync(
@@ -118,7 +118,7 @@ describe("background reconcile worker", () => {
     );
     await worker.waitForIdle();
 
-    const afterFile = await kuzuDb.getFileByRepoPath(conn, repoId, "src/consumer.ts");
+    const afterFile = await ladybugDb.getFileByRepoPath(conn, repoId, "src/consumer.ts");
     assert.ok(afterFile);
     assert.notStrictEqual(afterFile?.contentHash, beforeFile?.contentHash);
   });

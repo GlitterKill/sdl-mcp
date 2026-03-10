@@ -12,8 +12,8 @@ function runFeedbackQueryScript(queryMode: "repo" | "version") {
   const script = `
     import { join } from "node:path";
     import { existsSync, mkdirSync, rmSync } from "node:fs";
-    import { initKuzuDb, closeKuzuDb, getKuzuConn } from "./dist/db/kuzu.js";
-    import * as kuzuDb from "./dist/db/kuzu-queries.js";
+    import { initLadybugDb, closeLadybugDb, getLadybugConn } from "./dist/db/ladybug.js";
+    import * as ladybugDb from "./dist/db/ladybug-queries.js";
 
     const testDir = join(process.cwd(), "tmp-agent-feedback-regression-${queryMode}");
     const graphDbPath = join(testDir, "graph");
@@ -23,13 +23,13 @@ function runFeedbackQueryScript(queryMode: "repo" | "version") {
     if (existsSync(testDir)) rmSync(testDir, { recursive: true, force: true });
     mkdirSync(testDir, { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
     const now = new Date().toISOString();
 
-    await kuzuDb.upsertRepo(conn, { repoId, rootPath: "/fake/repo", configJson: "{}", createdAt: now });
-    await kuzuDb.createVersion(conn, {
+    await ladybugDb.upsertRepo(conn, { repoId, rootPath: "/fake/repo", configJson: "{}", createdAt: now });
+    await ladybugDb.createVersion(conn, {
       versionId,
       repoId,
       createdAt: now,
@@ -37,7 +37,7 @@ function runFeedbackQueryScript(queryMode: "repo" | "version") {
       prevVersionHash: null,
       versionHash: null,
     });
-    await kuzuDb.upsertAgentFeedback(conn, {
+    await ladybugDb.upsertAgentFeedback(conn, {
       feedbackId: "fb1",
       repoId,
       versionId,
@@ -52,11 +52,11 @@ function runFeedbackQueryScript(queryMode: "repo" | "version") {
 
     const rows = ${
       queryMode === "repo"
-        ? "await kuzuDb.getAgentFeedbackByRepo(conn, repoId, 10);"
-        : "await kuzuDb.getAgentFeedbackByVersion(conn, repoId, versionId, 10);"
+        ? "await ladybugDb.getAgentFeedbackByRepo(conn, repoId, 10);"
+        : "await ladybugDb.getAgentFeedbackByVersion(conn, repoId, versionId, 10);"
     }
     console.log(rows.length);
-    await closeKuzuDb();
+    await closeLadybugDb();
   `;
 
   return spawnSync(process.execPath, ["--input-type=module", "-e", script], {

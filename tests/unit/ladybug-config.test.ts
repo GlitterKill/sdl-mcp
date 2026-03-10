@@ -22,13 +22,13 @@ describe("GraphDatabaseConfigSchema", () => {
     });
 
     it("should accept a valid string path", () => {
-      const result = GraphDatabaseConfigSchema.parse({ path: "./data/graph.kuzu" });
-      assert.deepStrictEqual(result, { path: "./data/graph.kuzu" });
+      const result = GraphDatabaseConfigSchema.parse({ path: "./data/graph.lbug" });
+      assert.deepStrictEqual(result, { path: "./data/graph.lbug" });
     });
 
     it("should accept an absolute path", () => {
-      const result = GraphDatabaseConfigSchema.parse({ path: "/var/lib/sdlmcp/graph.kuzu" });
-      assert.deepStrictEqual(result, { path: "/var/lib/sdlmcp/graph.kuzu" });
+      const result = GraphDatabaseConfigSchema.parse({ path: "/var/lib/sdlmcp/graph.lbug" });
+      assert.deepStrictEqual(result, { path: "/var/lib/sdlmcp/graph.lbug" });
     });
 
     it("should accept empty string path (nullish allows it)", () => {
@@ -69,9 +69,9 @@ describe("AppConfigSchema with graphDatabase", () => {
   it("should accept config with graphDatabase.path as string", () => {
     const result = AppConfigSchema.parse({
       ...minimalConfig,
-      graphDatabase: { path: "./custom.kuzu" },
+      graphDatabase: { path: "./custom.lbug" },
     });
-    assert.deepStrictEqual(result.graphDatabase, { path: "./custom.kuzu" });
+    assert.deepStrictEqual(result.graphDatabase, { path: "./custom.lbug" });
   });
 
   it("should accept config with empty graphDatabase object", () => {

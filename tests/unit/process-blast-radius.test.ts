@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 
 import { computeBlastRadius } from "../../dist/delta/blastRadius.js";
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 
 const REPO_ID = "test-process-blast-radius-repo";
 
@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("process-aware blast radius", () => {
-  const graphDbPath = join(__dirname, ".kuzu-process-blast-radius-test-db");
+  const graphDbPath = join(__dirname, ".lbug-process-blast-radius-test-db");
 
   const changed = `${REPO_ID}-changed`;
   const caller = `${REPO_ID}-caller`;
@@ -31,13 +31,13 @@ describe("process-aware blast radius", () => {
     }
     mkdirSync(graphDbPath, { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
 
     const now = new Date().toISOString();
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: REPO_ID,
       rootPath: "/tmp/test-process-blast-radius",
       configJson: JSON.stringify({
@@ -54,7 +54,7 @@ describe("process-aware blast radius", () => {
       createdAt: now,
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId: REPO_ID,
       relPath: "src/app.ts",
@@ -73,7 +73,7 @@ describe("process-aware blast radius", () => {
       [otherChanged, "otherChanged"],
       [otherCaller, "otherCaller"],
     ] as const) {
-      await kuzuDb.upsertSymbol(conn, {
+      await ladybugDb.upsertSymbol(conn, {
         symbolId,
         repoId: REPO_ID,
         fileId: "file-1",
@@ -96,7 +96,7 @@ describe("process-aware blast radius", () => {
     }
 
     // Graph dependents (incoming to changed)
-    await kuzuDb.insertEdge(conn, {
+    await ladybugDb.insertEdge(conn, {
       repoId: REPO_ID,
       fromSymbolId: caller,
       toSymbolId: changed,
@@ -109,7 +109,7 @@ describe("process-aware blast radius", () => {
     });
 
     // Create an overlap: mid is also an incoming dependent of changed
-    await kuzuDb.insertEdge(conn, {
+    await ladybugDb.insertEdge(conn, {
       repoId: REPO_ID,
       fromSymbolId: mid,
       toSymbolId: changed,
@@ -122,7 +122,7 @@ describe("process-aware blast radius", () => {
     });
 
     // A separate graph-only change with no process data
-    await kuzuDb.insertEdge(conn, {
+    await ladybugDb.insertEdge(conn, {
       repoId: REPO_ID,
       fromSymbolId: otherCaller,
       toSymbolId: otherChanged,
@@ -136,7 +136,7 @@ describe("process-aware blast radius", () => {
 
     // Seed a process that includes changed -> mid -> exit -> later
     const processId = `${REPO_ID}-process-1`;
-    await kuzuDb.upsertProcess(conn, {
+    await ladybugDb.upsertProcess(conn, {
       processId,
       repoId: REPO_ID,
       entrySymbolId: changed,
@@ -146,25 +146,25 @@ describe("process-aware blast radius", () => {
       createdAt: now,
     });
 
-    await kuzuDb.upsertProcessStep(conn, {
+    await ladybugDb.upsertProcessStep(conn, {
       processId,
       symbolId: changed,
       stepOrder: 0,
       role: "entry",
     });
-    await kuzuDb.upsertProcessStep(conn, {
+    await ladybugDb.upsertProcessStep(conn, {
       processId,
       symbolId: mid,
       stepOrder: 1,
       role: "intermediate",
     });
-    await kuzuDb.upsertProcessStep(conn, {
+    await ladybugDb.upsertProcessStep(conn, {
       processId,
       symbolId: exit,
       stepOrder: 2,
       role: "intermediate",
     });
-    await kuzuDb.upsertProcessStep(conn, {
+    await ladybugDb.upsertProcessStep(conn, {
       processId,
       symbolId: later,
       stepOrder: 3,
@@ -173,14 +173,14 @@ describe("process-aware blast radius", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(graphDbPath)) {
       rmSync(graphDbPath, { recursive: true, force: true });
     }
   });
 
   it("includes downstream process steps with signal=process and ranks by step distance", async () => {
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
     const result = await computeBlastRadius(conn, [changed], {
       repoId: REPO_ID,
       maxHops: 1,
@@ -207,7 +207,7 @@ describe("process-aware blast radius", () => {
   });
 
   it("degrades gracefully when no process data exists", async () => {
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
     const result = await computeBlastRadius(conn, [otherChanged], {
       repoId: REPO_ID,
       maxHops: 1,

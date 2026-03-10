@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 // @ts-expect-error — node:sqlite types not available in this TS target
 import { DatabaseSync } from "node:sqlite";
 
-import { migrateSqliteToKuzu } from "../../scripts/migrate-sqlite-to-kuzu.js";
+import { migrateSqliteToLadybug } from "../../scripts/migrate-sqlite-to-ladybug.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -15,29 +15,29 @@ const SQLITE_DB_PATH = join(
   __dirname,
   "..",
   "..",
-  ".sqlite-to-kuzu-migration-test.sqlite",
+  ".sqlite-to-ladybug-migration-test.sqlite",
 );
-const KUZU_DB_PATH = join(
+const LADYBUG_DB_PATH = join(
   __dirname,
   "..",
   "..",
-  ".kuzu-migration-test-db.kuzu",
+  ".lbug-migration-test-db.lbug",
 );
 
 function cleanup(): void {
   if (existsSync(SQLITE_DB_PATH)) {
     rmSync(SQLITE_DB_PATH, { force: true });
   }
-  if (existsSync(KUZU_DB_PATH)) {
-    rmSync(KUZU_DB_PATH, { recursive: true, force: true });
+  if (existsSync(LADYBUG_DB_PATH)) {
+    rmSync(LADYBUG_DB_PATH, { recursive: true, force: true });
   }
 }
 
-describe("SQLite → Kuzu migration (integration)", () => {
+describe("SQLite → Ladybug migration (integration)", () => {
   beforeEach(() => {
     cleanup();
     mkdirSync(dirname(SQLITE_DB_PATH), { recursive: true });
-    mkdirSync(dirname(KUZU_DB_PATH), { recursive: true });
+    mkdirSync(dirname(LADYBUG_DB_PATH), { recursive: true });
   });
 
   afterEach(() => {
@@ -164,14 +164,14 @@ describe("SQLite → Kuzu migration (integration)", () => {
 
     sqlite.close();
 
-    await migrateSqliteToKuzu({
+    await migrateSqliteToLadybug({
       sqlitePath: SQLITE_DB_PATH,
-      kuzuPath: KUZU_DB_PATH,
+      ladybugPath: LADYBUG_DB_PATH,
       quiet: true,
     });
 
     const kuzu = await import("kuzu");
-    const db = new kuzu.Database(KUZU_DB_PATH);
+    const db = new kuzu.Database(LADYBUG_DB_PATH);
     const conn = new kuzu.Connection(db);
 
     try {

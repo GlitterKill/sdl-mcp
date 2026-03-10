@@ -6,9 +6,9 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-search-test-db.kuzu");
+const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-search-test-db.lbug");
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (q: string) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
@@ -17,13 +17,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -34,10 +34,10 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<void> {
+async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -51,16 +51,16 @@ async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<vo
   } catch {}
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
-  const { createSchema } = await import("../../dist/db/kuzu-schema.js");
+async function setupSchema(conn: LadybugConnection): Promise<void> {
+  const { createSchema } = await import("../../dist/db/ladybug-schema.js");
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
 describe("KuzuDB Search Queries", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
-  let queries: typeof import("../../dist/db/kuzu-queries.js");
-  let kuzuAvailable = true;
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
+  let ladybugAvailable = true;
 
   const repoId = "search-repo";
 
@@ -68,7 +68,7 @@ describe("KuzuDB Search Queries", () => {
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
 
       await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {
         repoId,
@@ -201,16 +201,16 @@ describe("KuzuDB Search Queries", () => {
         updatedAt: "2026-03-04T00:00:00Z",
       });
     } catch {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
     }
   });
 
   afterEach(async () => {
-    if (!kuzuAvailable) return;
+    if (!ladybugAvailable) return;
     await cleanupTestDb(db, conn);
   });
 
-  it("exact match ranks first and kind priority applies", { skip: !kuzuAvailable }, async () => {
+  it("exact match ranks first and kind priority applies", { skip: !ladybugAvailable }, async () => {
     const results = await queries.searchSymbols(
       conn as unknown as import("kuzu").Connection,
       repoId,
@@ -224,7 +224,7 @@ describe("KuzuDB Search Queries", () => {
     assert.strictEqual(results[1]!.name, "Foo");
   });
 
-  it("case-insensitive exact match ranks ahead of partial matches", { skip: !kuzuAvailable }, async () => {
+  it("case-insensitive exact match ranks ahead of partial matches", { skip: !ladybugAvailable }, async () => {
     const results = await queries.searchSymbolsLite(
       conn as unknown as import("kuzu").Connection,
       repoId,
@@ -236,7 +236,7 @@ describe("KuzuDB Search Queries", () => {
     assert.strictEqual(results[0]!.name, "Foo");
   });
 
-  it("deprioritizes adapter files", { skip: !kuzuAvailable }, async () => {
+  it("deprioritizes adapter files", { skip: !ladybugAvailable }, async () => {
     const results = await queries.searchSymbolsLite(
       conn as unknown as import("kuzu").Connection,
       repoId,
@@ -251,7 +251,7 @@ describe("KuzuDB Search Queries", () => {
     assert.ok(firstCoreIdx < firstAdapterIdx);
   });
 
-  it("respects limit", { skip: !kuzuAvailable }, async () => {
+  it("respects limit", { skip: !ladybugAvailable }, async () => {
     const results = await queries.searchSymbolsLite(
       conn as unknown as import("kuzu").Connection,
       repoId,

@@ -10,8 +10,8 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { indexRepo } from "../../src/indexer/indexer.js";
 import {
   routeLiveIndexApiRequest,
@@ -26,7 +26,7 @@ import {
 
 describe("explicit checkpoint API", () => {
   const repoId = "explicit-checkpoint-repo";
-  const dbPath = join(tmpdir(), ".kuzu-explicit-checkpoint-test-db.kuzu");
+  const dbPath = join(tmpdir(), ".lbug-explicit-checkpoint-test-db.lbug");
   const configPath = join(tmpdir(), `sdl-explicit-checkpoint-${Date.now()}.json`);
   let repoDir = "";
   const prevConfig = process.env.SDL_CONFIG;
@@ -53,10 +53,10 @@ describe("explicit checkpoint API", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    await closeKuzuDb();
-    await initKuzuDb(dbPath);
-    const conn = await getKuzuConn();
-    await kuzuDb.upsertRepo(conn, {
+    await closeLadybugDb();
+    await initLadybugDb(dbPath);
+    const conn = await getLadybugConn();
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: repoDir,
       configJson: JSON.stringify({
@@ -78,7 +78,7 @@ describe("explicit checkpoint API", () => {
 
   after(async () => {
     resetDefaultLiveIndexCoordinator();
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
     if (existsSync(configPath)) rmSync(configPath, { force: true });
     if (repoDir && existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
@@ -134,10 +134,10 @@ describe("explicit checkpoint API", () => {
       null,
     );
 
-    const conn = await getKuzuConn();
-    const file = await kuzuDb.getFileByRepoPath(conn, repoId, "src/example.ts");
+    const conn = await getLadybugConn();
+    const file = await ladybugDb.getFileByRepoPath(conn, repoId, "src/example.ts");
     assert.ok(file);
-    const symbols = await kuzuDb.getSymbolsByFile(conn, file!.fileId);
+    const symbols = await ladybugDb.getSymbolsByFile(conn, file!.fileId);
     assert.deepStrictEqual(symbols.map((symbol) => symbol.name), ["renamed"]);
   });
 });

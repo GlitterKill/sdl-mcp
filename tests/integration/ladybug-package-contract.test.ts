@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DB_DIR = join(__dirname, "..", "..", ".ladybug-contract-test-db");
-const TEST_DB_PATH = join(TEST_DB_DIR, "contract.kuzu");
+const TEST_DB_PATH = join(TEST_DB_DIR, "contract.lbug");
 
 // Test vendor package contract directly - no SDL-MCP helpers
 describe("Ladybug package contract", () => {

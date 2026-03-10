@@ -11,7 +11,7 @@ const runnerPath = resolve(repoRoot, "tests", "runner.test.ts");
 // node:sqlite is only available in Node >= 22; skip tests that require it
 const nodeMajor = parseInt(process.versions.node.split(".")[0], 10);
 const SKIP_PATTERNS = [
-  ...(nodeMajor < 22 ? ["sqlite-to-kuzu-migration"] : []),
+  ...(nodeMajor < 22 ? ["sqlite-to-ladybug-migration"] : []),
 ];
 
 const testFiles = await fg("tests/**/*.test.ts", {

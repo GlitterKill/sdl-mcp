@@ -4,8 +4,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { traceProcessesTS } from "../../dist/graph/process.js";
 import {
   isRustEngineAvailable,
@@ -18,7 +18,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("native process parity", () => {
-  const graphDbPath = join(__dirname, ".kuzu-native-process-parity-test-db");
+  const graphDbPath = join(__dirname, ".lbug-native-process-parity-test-db");
 
   let entryId: string;
   let midId: string;
@@ -30,13 +30,13 @@ describe("native process parity", () => {
     }
     mkdirSync(graphDbPath, { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
 
     const now = new Date().toISOString();
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: REPO_ID,
       rootPath: "/tmp/test-native-process-parity",
       configJson: JSON.stringify({
@@ -53,7 +53,7 @@ describe("native process parity", () => {
       createdAt: now,
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId: REPO_ID,
       relPath: "src/test.ts",
@@ -67,7 +67,7 @@ describe("native process parity", () => {
     midId = `mid-${REPO_ID}`;
     exitId = `exit-${REPO_ID}`;
 
-    await kuzuDb.upsertSymbol(conn, {
+    await ladybugDb.upsertSymbol(conn, {
       symbolId: entryId,
       repoId: REPO_ID,
       fileId: "file-1",
@@ -88,7 +88,7 @@ describe("native process parity", () => {
       updatedAt: now,
     });
 
-    await kuzuDb.upsertSymbol(conn, {
+    await ladybugDb.upsertSymbol(conn, {
       symbolId: midId,
       repoId: REPO_ID,
       fileId: "file-1",
@@ -109,7 +109,7 @@ describe("native process parity", () => {
       updatedAt: now,
     });
 
-    await kuzuDb.upsertSymbol(conn, {
+    await ladybugDb.upsertSymbol(conn, {
       symbolId: exitId,
       repoId: REPO_ID,
       fileId: "file-1",
@@ -130,7 +130,7 @@ describe("native process parity", () => {
       updatedAt: now,
     });
 
-    await kuzuDb.insertEdge(conn, {
+    await ladybugDb.insertEdge(conn, {
       repoId: REPO_ID,
       fromSymbolId: entryId,
       toSymbolId: midId,
@@ -142,7 +142,7 @@ describe("native process parity", () => {
       createdAt: now,
     });
 
-    await kuzuDb.insertEdge(conn, {
+    await ladybugDb.insertEdge(conn, {
       repoId: REPO_ID,
       fromSymbolId: midId,
       toSymbolId: exitId,
@@ -156,7 +156,7 @@ describe("native process parity", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     try {
       rmSync(graphDbPath, { recursive: true, force: true });
     } catch {

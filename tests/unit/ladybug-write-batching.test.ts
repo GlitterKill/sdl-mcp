@@ -1,12 +1,12 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 
-import type { EdgeRow, SymbolReferenceRow } from "../../src/db/kuzu-queries.js";
+import type { EdgeRow, SymbolReferenceRow } from "../../src/db/ladybug-queries.js";
 import {
   insertEdges,
   insertSymbolReferences,
   withTransaction,
-} from "../../src/db/kuzu-queries.js";
+} from "../../src/db/ladybug-queries.js";
 
 class FakeQueryResult {
   close(): void {}

@@ -10,15 +10,15 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { indexRepo } from "../../src/indexer/indexer.js";
 import { ReconcileQueue } from "../../src/live-index/reconcile-queue.js";
 import { ReconcileWorker } from "../../src/live-index/reconcile-worker.js";
 
 describe("reconcile derived-data refresh", () => {
   const repoId = "reconcile-derived-data-repo";
-  const dbPath = join(tmpdir(), ".kuzu-reconcile-derived-data-test-db.kuzu");
+  const dbPath = join(tmpdir(), ".lbug-reconcile-derived-data-test-db.lbug");
   const configPath = join(tmpdir(), `sdl-reconcile-derived-data-${Date.now()}.json`);
   let repoDir = "";
   const prevConfig = process.env.SDL_CONFIG;
@@ -53,11 +53,11 @@ describe("reconcile derived-data refresh", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    await closeKuzuDb();
-    await initKuzuDb(dbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(dbPath);
+    const conn = await getLadybugConn();
     const now = "2026-03-07T12:00:00.000Z";
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: repoDir,
       configJson: JSON.stringify({
@@ -74,7 +74,7 @@ describe("reconcile derived-data refresh", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
     if (existsSync(configPath)) rmSync(configPath, { force: true });
     if (repoDir && existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
@@ -85,9 +85,9 @@ describe("reconcile derived-data refresh", () => {
   });
 
   it("recomputes clusters and processes when reconciliation invalidations request it", async () => {
-    const conn = await getKuzuConn();
-    await kuzuDb.deleteClustersByRepo(conn, repoId);
-    await kuzuDb.deleteProcessesByRepo(conn, repoId);
+    const conn = await getLadybugConn();
+    await ladybugDb.deleteClustersByRepo(conn, repoId);
+    await ladybugDb.deleteProcessesByRepo(conn, repoId);
 
     const queue = new ReconcileQueue();
     const worker = new ReconcileWorker(queue);
@@ -104,8 +104,8 @@ describe("reconcile derived-data refresh", () => {
     );
     await worker.waitForIdle();
 
-    const clusters = await kuzuDb.getClustersForRepo(conn, repoId);
-    const processStats = await kuzuDb.getProcessOverviewStats(conn, repoId);
+    const clusters = await ladybugDb.getClustersForRepo(conn, repoId);
+    const processStats = await ladybugDb.getProcessOverviewStats(conn, repoId);
     assert.ok(clusters.length >= 0);
     assert.ok(processStats.totalProcesses >= 1);
   });

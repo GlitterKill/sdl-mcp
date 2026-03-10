@@ -10,20 +10,20 @@ const TEST_DB_PATH = join(
   __dirname,
   "..",
   "..",
-  ".kuzu-search-text-test-db.kuzu",
+  ".lbug-search-text-test-db.lbug",
 );
 
-interface KuzuConnection {
+interface LadybugConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -34,10 +34,10 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<void> {
+async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -52,15 +52,15 @@ async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<vo
 }
 
 describe("KuzuDB search text queries", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
-  let schema: typeof import("../../src/db/kuzu-schema.js");
-  let queries: typeof import("../../src/db/kuzu-queries.js");
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
+  let schema: typeof import("../../src/db/ladybug-schema.js");
+  let queries: typeof import("../../src/db/ladybug-queries.js");
 
   beforeEach(async () => {
     ({ db, conn } = await createTestDb());
-    schema = await import("../../src/db/kuzu-schema.js");
-    queries = await import("../../src/db/kuzu-queries.js");
+    schema = await import("../../src/db/ladybug-schema.js");
+    queries = await import("../../src/db/ladybug-queries.js");
     await schema.createSchema(conn as unknown as import("kuzu").Connection);
 
     await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {

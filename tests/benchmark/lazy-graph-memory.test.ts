@@ -6,9 +6,9 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-lazy-graph-memory-test-db.kuzu");
+const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-lazy-graph-memory-test-db.lbug");
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (q: string) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
@@ -17,13 +17,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -34,10 +34,10 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<void> {
+async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -51,8 +51,8 @@ async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<vo
   } catch {}
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
-  const { createSchema } = await import("../../dist/db/kuzu-schema.js");
+async function setupSchema(conn: LadybugConnection): Promise<void> {
+  const { createSchema } = await import("../../dist/db/ladybug-schema.js");
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
@@ -70,36 +70,36 @@ function forceGC(): void {
 }
 
 describe("Lazy Graph Memory Benchmark (Kuzu)", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
   let graphOps: typeof import("../../dist/graph/buildGraph.js");
-  let queries: typeof import("../../dist/db/kuzu-queries.js");
-  let kuzuAvailable = true;
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
+  let ladybugAvailable = true;
   let setupError: unknown = null;
 
   beforeEach(async () => {
-    kuzuAvailable = true;
+    ladybugAvailable = true;
     setupError = null;
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
       graphOps = await import("../../dist/graph/buildGraph.js");
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
       graphOps.resetLoadStats();
       forceGC();
     } catch (error) {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
       setupError = error;
     }
   });
 
   afterEach(async () => {
-    if (!kuzuAvailable) return;
+    if (!ladybugAvailable) return;
     await cleanupTestDb(db, conn);
   });
 
   it("measures memory usage for neighborhood loads", async (t) => {
-    if (!kuzuAvailable) {
+    if (!ladybugAvailable) {
       const reason =
         setupError instanceof Error ? setupError.message : "Kuzu setup unavailable";
       t.skip(reason);
@@ -115,7 +115,7 @@ describe("Lazy Graph Memory Benchmark (Kuzu)", () => {
       createdAt: "2026-03-04T00:00:00.000Z",
     });
 
-    const edges: Array<import("../../dist/db/kuzu-queries.js").EdgeRow> = [];
+    const edges: Array<import("../../dist/db/ladybug-queries.js").EdgeRow> = [];
     for (let i = 0; i < 5000; i++) {
       edges.push({
         repoId: "bench-repo",

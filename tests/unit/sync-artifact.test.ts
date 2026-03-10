@@ -9,14 +9,14 @@ import {
   exportArtifact,
   importArtifact,
 } from "../../dist/sync/sync.js";
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("Sync Artifact Model", () => {
-  const graphDbPath = join(__dirname, ".kuzu-sync-artifact-test-db");
+  const graphDbPath = join(__dirname, ".lbug-sync-artifact-test-db");
   const syncDir = join(__dirname, ".tmp-sync-artifacts");
   const repoId = "test-repo-sync";
 
@@ -28,13 +28,13 @@ describe("Sync Artifact Model", () => {
       rmSync(syncDir, { recursive: true, force: true });
     }
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
 
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
     const now = new Date().toISOString();
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: "/fake/repo",
       configJson: JSON.stringify({
@@ -51,7 +51,7 @@ describe("Sync Artifact Model", () => {
       createdAt: now,
     });
 
-    await kuzuDb.createVersion(conn, {
+    await ladybugDb.createVersion(conn, {
       versionId: "v-test",
       repoId,
       createdAt: now,
@@ -60,7 +60,7 @@ describe("Sync Artifact Model", () => {
       versionHash: null,
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId,
       relPath: "test.ts",
@@ -72,7 +72,7 @@ describe("Sync Artifact Model", () => {
   });
 
   afterEach(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(graphDbPath)) {
       rmSync(graphDbPath, { recursive: true, force: true });
     }
@@ -116,10 +116,10 @@ describe("Sync Artifact Model", () => {
   });
 
   it("round-trips enrichment metadata through sync artifacts", async () => {
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
     const now = new Date().toISOString();
 
-    await kuzuDb.upsertSymbol(conn, {
+    await ladybugDb.upsertSymbol(conn, {
       symbolId: "sym-1",
       repoId,
       fileId: "file-1",
@@ -170,9 +170,9 @@ describe("Sync Artifact Model", () => {
     );
     assert.match(state.symbols[0]?.search_text ?? "", /\bhandler\b/);
 
-    await closeKuzuDb();
+    await closeLadybugDb();
     rmSync(graphDbPath, { recursive: true, force: true });
-    await initKuzuDb(graphDbPath);
+    await initLadybugDb(graphDbPath);
 
     const importResult = await importArtifact({
       artifactPath: exportResult.artifactPath,
@@ -182,8 +182,8 @@ describe("Sync Artifact Model", () => {
 
     assert.strictEqual(importResult.symbolsRestored, 1);
 
-    const restoredConn = await getKuzuConn();
-    const restoredSymbols = await kuzuDb.getSymbolsByRepo(restoredConn, repoId);
+    const restoredConn = await getLadybugConn();
+    const restoredSymbols = await ladybugDb.getSymbolsByRepo(restoredConn, repoId);
 
     assert.strictEqual(restoredSymbols.length, 1);
     assert.strictEqual(
@@ -194,10 +194,10 @@ describe("Sync Artifact Model", () => {
   });
 
   it("rebuilds enrichment metadata when importing legacy artifacts", async () => {
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
     const now = new Date().toISOString();
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId,
       relPath: "src/main.tsx",
@@ -207,7 +207,7 @@ describe("Sync Artifact Model", () => {
       lastIndexedAt: now,
     });
 
-    await kuzuDb.upsertSymbol(conn, {
+    await ladybugDb.upsertSymbol(conn, {
       symbolId: "sym-legacy",
       repoId,
       fileId: "file-1",
@@ -262,9 +262,9 @@ describe("Sync Artifact Model", () => {
     artifact.artifact_hash = hashContent(rewrittenStateJson);
     fs.writeFileSync(exportResult.artifactPath, JSON.stringify(artifact, null, 2), "utf-8");
 
-    await closeKuzuDb();
+    await closeLadybugDb();
     rmSync(graphDbPath, { recursive: true, force: true });
-    await initKuzuDb(graphDbPath);
+    await initLadybugDb(graphDbPath);
 
     await importArtifact({
       artifactPath: exportResult.artifactPath,
@@ -272,8 +272,8 @@ describe("Sync Artifact Model", () => {
       verifyIntegrity: true,
     });
 
-    const restoredConn = await getKuzuConn();
-    const restoredSymbols = await kuzuDb.getSymbolsByRepo(restoredConn, repoId);
+    const restoredConn = await getLadybugConn();
+    const restoredSymbols = await ladybugDb.getSymbolsByRepo(restoredConn, repoId);
 
     assert.strictEqual(restoredSymbols[0]?.roleTagsJson, JSON.stringify(["entrypoint"]));
     assert.match(restoredSymbols[0]?.searchText ?? "", /\brender\b/);

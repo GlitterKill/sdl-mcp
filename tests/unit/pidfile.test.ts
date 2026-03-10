@@ -27,7 +27,7 @@ describe("pidfile", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "sdl-pidfile-"));
-    fakeDbPath = join(tempDir, "sdl-mcp-graph.kuzu");
+    fakeDbPath = join(tempDir, "sdl-mcp-graph.lbug");
     // Create a placeholder so dirname works
     writeFileSync(fakeDbPath, "");
   });

@@ -10,8 +10,8 @@ import {
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { indexRepo } from "../../src/indexer/indexer.js";
 
 const REPO_ID = "test-go-pass2-repo";
@@ -23,7 +23,7 @@ function writeRepoFile(repoRoot: string, relPath: string, content: string): void
 }
 
 describe("Go pass2 indexing", () => {
-  const graphDbPath = join(tmpdir(), ".kuzu-go-pass2-test-db.kuzu");
+  const graphDbPath = join(tmpdir(), ".lbug-go-pass2-test-db.lbug");
   const configPath = join(tmpdir(), "sdl-go-pass2-config.json");
   const prevSDL_CONFIG = process.env.SDL_CONFIG;
   const prevSDL_CONFIG_PATH = process.env.SDL_CONFIG_PATH;
@@ -95,11 +95,11 @@ describe("Go pass2 indexing", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
     const now = new Date().toISOString();
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: REPO_ID,
       rootPath: repoDir,
       configJson: JSON.stringify({
@@ -118,7 +118,7 @@ describe("Go pass2 indexing", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (prevSDL_CONFIG === undefined) {
       delete process.env.SDL_CONFIG;
     } else {
@@ -147,8 +147,8 @@ describe("Go pass2 indexing", () => {
     const result = await indexRepo(REPO_ID, "full");
     assert.ok(result.versionId.length > 0);
 
-    const conn = await getKuzuConn();
-    const symbols = await kuzuDb.getSymbolsByRepo(conn, REPO_ID);
+    const conn = await getLadybugConn();
+    const symbols = await ladybugDb.getSymbolsByRepo(conn, REPO_ID);
 
     const run = symbols.find((symbol) => symbol.name === "Run" && symbol.kind === "function");
     const helper = symbols.find((symbol) => symbol.name === "Helper" && symbol.kind === "function");
@@ -160,7 +160,7 @@ describe("Go pass2 indexing", () => {
     assert.ok(handle);
     assert.ok(processFn);
 
-    const edges = await kuzuDb.getEdgesFrom(conn, run.symbolId);
+    const edges = await ladybugDb.getEdgesFrom(conn, run.symbolId);
     const byTarget = new Map(
       edges
         .filter((edge) => edge.edgeType === "call")

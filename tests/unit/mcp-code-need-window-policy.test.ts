@@ -4,8 +4,8 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { handleCodeNeedWindow } from "../../src/mcp/tools/code.js";
 import { PolicyEngine } from "../../src/policy/engine.js";
 
@@ -32,7 +32,7 @@ describe("code.needWindow policy remediation", () => {
     );
 
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const kuzuPath = join(tempDir, "graph.kuzu");
+    const ladybugPath = join(tempDir, "graph.lbug");
     writeFileSync(
       configPath,
       JSON.stringify({
@@ -45,7 +45,7 @@ describe("code.needWindow policy remediation", () => {
             maxFileBytes: 2_000_000,
           },
         ],
-        graphDatabase: { path: kuzuPath },
+        graphDatabase: { path: ladybugPath },
         policy: {
           maxWindowLines: 180,
           maxWindowTokens: 1400,
@@ -60,12 +60,12 @@ describe("code.needWindow policy remediation", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    await initKuzuDb(kuzuPath);
+    await initLadybugDb(ladybugPath);
 
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
     const now = "2026-03-07T12:00:00.000Z";
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: "repo-test",
       rootPath: tempDir,
       configJson: JSON.stringify({
@@ -78,7 +78,7 @@ describe("code.needWindow policy remediation", () => {
       createdAt: now,
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-demo",
       repoId: "repo-test",
       relPath: "src/example.ts",
@@ -88,7 +88,7 @@ describe("code.needWindow policy remediation", () => {
       lastIndexedAt: now,
     });
 
-    await kuzuDb.upsertSymbol(conn, {
+    await ladybugDb.upsertSymbol(conn, {
       symbolId: "sym-demo",
       repoId: "repo-test",
       fileId: "file-demo",
@@ -111,7 +111,7 @@ describe("code.needWindow policy remediation", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
 
     if (originalSDLConfig === undefined) {
       delete process.env.SDL_CONFIG;

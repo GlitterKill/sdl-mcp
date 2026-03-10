@@ -16,11 +16,11 @@
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import fg from "fast-glob";
-import { initKuzuDb, getKuzuConn } from "../src/db/kuzu.js";
+import { initLadybugDb, getLadybugConn } from "../src/db/ladybug.js";
 import { resolveGraphDbPath } from "../src/db/graph-db-path.js";
 import type { Connection } from "kuzu";
 import { loadConfig } from "../src/config/loadConfig.js";
-import * as db from "../src/db/kuzu-queries.js";
+import * as db from "../src/db/ladybug-queries.js";
 import { indexRepo } from "../src/indexer/indexer.js";
 import { buildSlice } from "../src/graph/slice.js";
 import { generateSymbolSkeleton } from "../src/code/skeleton.js";
@@ -28,7 +28,7 @@ import { handleSymbolGetCard } from "../src/mcp/tools/symbol.js";
 import { estimateTokens, tokenize } from "../src/util/tokenize.js";
 import { hashCard } from "../src/util/hashing.js";
 import { normalizePath, getRelativePath } from "../src/util/paths.js";
-import type { SymbolRow } from "../src/db/kuzu-queries.js";
+import type { SymbolRow } from "../src/db/ladybug-queries.js";
 import type { CardWithETag, GraphSlice, SymbolCard } from "../src/mcp/types.js";
 
 // ============================================================================
@@ -2236,8 +2236,8 @@ async function runBenchmark(): Promise<void> {
     ? resolve(configPath)
     : resolve(process.cwd(), "config/sdlmcp.config.json");
   const graphDbPath = resolveGraphDbPath(config, resolvedConfigPath);
-  await initKuzuDb(graphDbPath);
-  const conn = await getKuzuConn();
+  await initLadybugDb(graphDbPath);
+  const conn = await getLadybugConn();
 
   const repoConfig = repoOverride
     ? config.repos.find((repo) => repo.repoId === repoOverride)

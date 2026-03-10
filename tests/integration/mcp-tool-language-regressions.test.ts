@@ -11,8 +11,8 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { indexRepo } from "../../src/indexer/indexer.js";
 import { handleSymbolSearch } from "../../src/mcp/tools/symbol.js";
 
@@ -24,7 +24,7 @@ import { handleSymbolSearch } from "../../src/mcp/tools/symbol.js";
  */
 describe("MCP Tool Language Regressions", () => {
   const repoId = "lang-regression-repo";
-  const dbPath = join(tmpdir(), ".kuzu-lang-regression-test.kuzu");
+  const dbPath = join(tmpdir(), ".lbug-lang-regression-test.lbug");
   const configPath = join(tmpdir(), `sdl-lang-regression-${Date.now()}.json`);
   let repoDir = "";
   const prevConfig = process.env.SDL_CONFIG;
@@ -91,10 +91,10 @@ describe("MCP Tool Language Regressions", () => {
     delete process.env.SDL_CONFIG_PATH;
 
     // Init KuzuDB and seed the repo record
-    await closeKuzuDb();
-    await initKuzuDb(dbPath);
-    const conn = await getKuzuConn();
-    await kuzuDb.upsertRepo(conn, {
+    await closeLadybugDb();
+    await initLadybugDb(dbPath);
+    const conn = await getLadybugConn();
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: repoDir,
       configJson: JSON.stringify({
@@ -114,7 +114,7 @@ describe("MCP Tool Language Regressions", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
     if (existsSync(configPath)) rmSync(configPath, { force: true });
     if (repoDir && existsSync(repoDir))

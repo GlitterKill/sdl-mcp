@@ -6,9 +6,9 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-edge-test-db.kuzu");
+const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-edge-test-db.lbug");
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (q: string) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
@@ -17,13 +17,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -34,10 +34,10 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<void> {
+async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -51,21 +51,21 @@ async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<vo
   } catch {}
 }
 
-async function exec(conn: KuzuConnection, q: string): Promise<void> {
+async function exec(conn: LadybugConnection, q: string): Promise<void> {
   const result = await conn.query(q);
   result.close();
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
-  const { createSchema } = await import("../../dist/db/kuzu-schema.js");
+async function setupSchema(conn: LadybugConnection): Promise<void> {
+  const { createSchema } = await import("../../dist/db/ladybug-schema.js");
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
 describe("KuzuDB Edge Queries", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
-  let queries: typeof import("../../dist/db/kuzu-queries.js");
-  let kuzuAvailable = true;
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
+  let ladybugAvailable = true;
 
   const repoId = "edge-repo";
   const fileId = "edge-file";
@@ -74,7 +74,7 @@ describe("KuzuDB Edge Queries", () => {
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
 
       await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {
         repoId,
@@ -103,16 +103,16 @@ describe("KuzuDB Edge Queries", () => {
         "MATCH (f:File {fileId: 'edge-file'}), (s:Symbol {symbolId: 'edge-from'}) CREATE (s)-[:SYMBOL_IN_FILE]->(f)",
       );
     } catch {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
     }
   });
 
   afterEach(async () => {
-    if (!kuzuAvailable) return;
+    if (!ladybugAvailable) return;
     await cleanupTestDb(db, conn);
   });
 
-  it("insertEdge deduplicates by from+to+type", { skip: !kuzuAvailable }, async () => {
+  it("insertEdge deduplicates by from+to+type", { skip: !ladybugAvailable }, async () => {
     const edge = {
       repoId,
       fromSymbolId: "edge-from",
@@ -137,8 +137,8 @@ describe("KuzuDB Edge Queries", () => {
     assert.strictEqual(edges[0]!.edgeType, "call");
   });
 
-  it("insertEdges handles 1000+ edges", { skip: !kuzuAvailable }, async () => {
-    const edges: Array<import("../../dist/db/kuzu-queries.js").EdgeRow> = [];
+  it("insertEdges handles 1000+ edges", { skip: !ladybugAvailable }, async () => {
+    const edges: Array<import("../../dist/db/ladybug-queries.js").EdgeRow> = [];
     for (let i = 0; i < 1000; i++) {
       edges.push({
         repoId,
@@ -161,7 +161,7 @@ describe("KuzuDB Edge Queries", () => {
     assert.ok(count >= 1000);
   });
 
-  it("getEdgesFromSymbols / projections", { skip: !kuzuAvailable }, async () => {
+  it("getEdgesFromSymbols / projections", { skip: !ladybugAvailable }, async () => {
     await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
       repoId,
       fromSymbolId: "edge-from",
@@ -210,7 +210,7 @@ describe("KuzuDB Edge Queries", () => {
     ]);
   });
 
-  it("getEdgesToSymbols groups incoming edges", { skip: !kuzuAvailable }, async () => {
+  it("getEdgesToSymbols groups incoming edges", { skip: !ladybugAvailable }, async () => {
     await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
       repoId,
       fromSymbolId: "edge-from",
@@ -232,7 +232,7 @@ describe("KuzuDB Edge Queries", () => {
     assert.strictEqual(incoming.get("missing-to")!.length, 0);
   });
 
-  it("persists resolver metadata on call edges", { skip: !kuzuAvailable }, async () => {
+  it("persists resolver metadata on call edges", { skip: !ladybugAvailable }, async () => {
     await queries.insertEdge(
       conn as unknown as import("kuzu").Connection,
       {
@@ -267,7 +267,7 @@ describe("KuzuDB Edge Queries", () => {
     assert.strictEqual(row.resolutionPhase, "pass2");
   });
 
-  it("deleteEdgesByFileId removes edges for symbols in file", { skip: !kuzuAvailable }, async () => {
+  it("deleteEdgesByFileId removes edges for symbols in file", { skip: !ladybugAvailable }, async () => {
     await exec(conn, "CREATE (:Symbol {symbolId: 'edge-in-file'})");
     await exec(
       conn,
@@ -302,7 +302,7 @@ describe("KuzuDB Edge Queries", () => {
     assert.strictEqual(remaining.length, 0);
   });
 
-  it("getEdgeCountsByType returns counts", { skip: !kuzuAvailable }, async () => {
+  it("getEdgeCountsByType returns counts", { skip: !ladybugAvailable }, async () => {
     await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
       repoId,
       fromSymbolId: "edge-from",

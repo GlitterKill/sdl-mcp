@@ -6,9 +6,9 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-version-test-db.kuzu");
+const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-version-test-db.lbug");
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (q: string) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
@@ -17,13 +17,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -34,10 +34,10 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<void> {
+async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -51,16 +51,16 @@ async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<vo
   } catch {}
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
-  const { createSchema } = await import("../../dist/db/kuzu-schema.js");
+async function setupSchema(conn: LadybugConnection): Promise<void> {
+  const { createSchema } = await import("../../dist/db/ladybug-schema.js");
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
 describe("KuzuDB Version & Snapshot Queries", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
-  let queries: typeof import("../../dist/db/kuzu-queries.js");
-  let kuzuAvailable = true;
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
+  let ladybugAvailable = true;
 
   const repoId = "ver-repo";
   const fileId = "ver-file";
@@ -69,7 +69,7 @@ describe("KuzuDB Version & Snapshot Queries", () => {
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
 
       await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {
         repoId,
@@ -87,16 +87,16 @@ describe("KuzuDB Version & Snapshot Queries", () => {
         lastIndexedAt: null,
       });
     } catch {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
     }
   });
 
   afterEach(async () => {
-    if (!kuzuAvailable) return;
+    if (!ladybugAvailable) return;
     await cleanupTestDb(db, conn);
   });
 
-  it("createVersion/getLatestVersion/getVersionsByRepo", { skip: !kuzuAvailable }, async () => {
+  it("createVersion/getLatestVersion/getVersionsByRepo", { skip: !ladybugAvailable }, async () => {
     await queries.createVersion(conn as unknown as import("kuzu").Connection, {
       versionId: "v1",
       repoId,
@@ -132,7 +132,7 @@ describe("KuzuDB Version & Snapshot Queries", () => {
     );
   });
 
-  it("snapshotSymbolVersion/getSymbolVersionsAtVersion", { skip: !kuzuAvailable }, async () => {
+  it("snapshotSymbolVersion/getSymbolVersionsAtVersion", { skip: !ladybugAvailable }, async () => {
     await queries.snapshotSymbolVersion(conn as unknown as import("kuzu").Connection, {
       versionId: "v1",
       symbolId: "sym-1",
@@ -152,7 +152,7 @@ describe("KuzuDB Version & Snapshot Queries", () => {
     assert.strictEqual(rows[0]!.id, "v1:sym-1");
   });
 
-  it("getFanInAtVersion counts only callers present at version", { skip: !kuzuAvailable }, async () => {
+  it("getFanInAtVersion counts only callers present at version", { skip: !ladybugAvailable }, async () => {
     await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
       symbolId: "caller-1",
       repoId,
@@ -265,7 +265,7 @@ describe("KuzuDB Version & Snapshot Queries", () => {
     assert.strictEqual(fanIn, 1);
   });
 
-  it("getFanInAtVersion falls back to current metrics when missing snapshot", { skip: !kuzuAvailable }, async () => {
+  it("getFanInAtVersion falls back to current metrics when missing snapshot", { skip: !ladybugAvailable }, async () => {
     await queries.upsertMetrics(conn as unknown as import("kuzu").Connection, {
       symbolId: "callee",
       fanIn: 2,

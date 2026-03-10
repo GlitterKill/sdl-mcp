@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 
 import { buildRepoOverview } from "../../dist/graph/overview.js";
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 
 const REPO_ID = "test-overview-cluster-stats-repo";
 
@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("repo overview cluster/process stats", () => {
-  const graphDbPath = join(__dirname, ".kuzu-overview-cluster-stats-test-db");
+  const graphDbPath = join(__dirname, ".lbug-overview-cluster-stats-test-db");
   const symbolA = `${REPO_ID}-a`;
   const symbolB = `${REPO_ID}-b`;
 
@@ -24,13 +24,13 @@ describe("repo overview cluster/process stats", () => {
     }
     mkdirSync(graphDbPath, { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
 
     const now = new Date().toISOString();
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: REPO_ID,
       rootPath: "/tmp/test-overview-cluster-stats",
       configJson: JSON.stringify({
@@ -47,7 +47,7 @@ describe("repo overview cluster/process stats", () => {
       createdAt: now,
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId: REPO_ID,
       relPath: "src/app.ts",
@@ -61,7 +61,7 @@ describe("repo overview cluster/process stats", () => {
       [symbolA, "a"],
       [symbolB, "b"],
     ] as const) {
-      await kuzuDb.upsertSymbol(conn, {
+      await ladybugDb.upsertSymbol(conn, {
         symbolId,
         repoId: REPO_ID,
         fileId: "file-1",
@@ -85,7 +85,7 @@ describe("repo overview cluster/process stats", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(graphDbPath)) {
       rmSync(graphDbPath, { recursive: true, force: true });
     }
@@ -101,11 +101,11 @@ describe("repo overview cluster/process stats", () => {
   });
 
   it("includes aggregate cluster/process stats when data exists", async () => {
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
     const now = new Date().toISOString();
 
     const clusterId = `${REPO_ID}-cluster-1`;
-    await kuzuDb.upsertCluster(conn, {
+    await ladybugDb.upsertCluster(conn, {
       clusterId,
       repoId: REPO_ID,
       label: "cluster 1",
@@ -115,7 +115,7 @@ describe("repo overview cluster/process stats", () => {
       createdAt: now,
     });
     for (const symbolId of [symbolA, symbolB]) {
-      await kuzuDb.upsertClusterMember(conn, {
+      await ladybugDb.upsertClusterMember(conn, {
         symbolId,
         clusterId,
         membershipScore: 1.0,
@@ -123,7 +123,7 @@ describe("repo overview cluster/process stats", () => {
     }
 
     const processId = `${REPO_ID}-process-1`;
-    await kuzuDb.upsertProcess(conn, {
+    await ladybugDb.upsertProcess(conn, {
       processId,
       repoId: REPO_ID,
       entrySymbolId: symbolA,
@@ -132,13 +132,13 @@ describe("repo overview cluster/process stats", () => {
       versionId: null,
       createdAt: now,
     });
-    await kuzuDb.upsertProcessStep(conn, {
+    await ladybugDb.upsertProcessStep(conn, {
       processId,
       symbolId: symbolA,
       stepOrder: 0,
       role: "entry",
     });
-    await kuzuDb.upsertProcessStep(conn, {
+    await ladybugDb.upsertProcessStep(conn, {
       processId,
       symbolId: symbolB,
       stepOrder: 1,

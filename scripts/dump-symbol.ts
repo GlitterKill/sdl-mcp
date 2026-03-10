@@ -6,8 +6,8 @@ import { resolveCliConfigPath } from "../src/config/configPath.js";
 import { loadConfig } from "../src/config/loadConfig.js";
 import type { SymbolCard } from "../src/mcp/types.js";
 import { initGraphDb } from "../src/db/initGraphDb.js";
-import { getKuzuConn } from "../src/db/kuzu.js";
-import * as kuzuDb from "../src/db/kuzu-queries.js";
+import { getLadybugConn } from "../src/db/ladybug.js";
+import * as ladybugDb from "../src/db/ladybug-queries.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   const configPath = resolveCliConfigPath(undefined, "read");
   const config = loadConfig(configPath);
   await initGraphDb(config, configPath);
-  const conn = await getKuzuConn();
+  const conn = await getLadybugConn();
 
   let card: SymbolCard | null = null;
   const isSymbolId = /[-_]/.test(query);
@@ -70,8 +70,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const edgesFrom = await kuzuDb.getEdgesFrom(conn, card.symbolId);
-  const edgesToMap = await kuzuDb.getEdgesToSymbols(conn, [card.symbolId]);
+  const edgesFrom = await ladybugDb.getEdgesFrom(conn, card.symbolId);
+  const edgesToMap = await ladybugDb.getEdgesToSymbols(conn, [card.symbolId]);
   const edgesTo = edgesToMap.get(card.symbolId) ?? [];
 
   const edgesSummary = {

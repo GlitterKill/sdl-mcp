@@ -38,7 +38,7 @@ describe("resolveGraphDbPath", () => {
     }
   });
 
-  it("uses a .kuzu file by default", () => {
+  it("uses a .lbug file by default", () => {
     const configPath = resolve("C:/tmp/sdlmcp.config.json");
     const resolved = resolveGraphDbPath(
       {
@@ -62,7 +62,7 @@ describe("resolveGraphDbPath", () => {
       configPath,
     );
 
-    assert.strictEqual(resolved, resolve("C:/tmp/sdl-mcp-graph.kuzu"));
+    assert.strictEqual(resolved, resolve("C:/tmp/sdl-mcp-graph.lbug"));
   });
 
   it("maps a legacy directory-style graph path to a Kuzu file inside that directory", () => {
@@ -92,11 +92,11 @@ describe("resolveGraphDbPath", () => {
 
     assert.strictEqual(
       resolved,
-      resolve(join("data", "sdl-mcp-graph", "sdl-mcp-graph.kuzu")),
+      resolve(join("data", "sdl-mcp-graph", "sdl-mcp-graph.lbug")),
     );
   });
 
-  it("preserves an explicit .kuzu file path", () => {
+  it("preserves an explicit .lbug file path", () => {
     const configPath = resolve("C:/tmp/sdlmcp.config.json");
     const resolved = resolveGraphDbPath(
       {
@@ -110,7 +110,7 @@ describe("resolveGraphDbPath", () => {
             includeNodeModulesTypes: false,
           },
         ],
-        graphDatabase: { path: "./data/custom-graph.kuzu" },
+        graphDatabase: { path: "./data/custom-graph.lbug" },
         policy: {
           maxWindowLines: 180,
           maxWindowTokens: 1400,
@@ -121,6 +121,6 @@ describe("resolveGraphDbPath", () => {
       configPath,
     );
 
-    assert.strictEqual(resolved, resolve(join("data", "custom-graph.kuzu")));
+    assert.strictEqual(resolved, resolve(join("data", "custom-graph.lbug")));
   });
 });

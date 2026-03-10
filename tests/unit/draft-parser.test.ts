@@ -4,21 +4,21 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseDraftFile } from "../../src/live-index/draft-parser.js";
-import { closeKuzuDb, initKuzuDb } from "../../src/db/kuzu.js";
+import { closeLadybugDb, initLadybugDb } from "../../src/db/ladybug.js";
 
 describe("parseDraftFile", () => {
-  const testDbPath = join(tmpdir(), ".kuzu-draft-parser-unit-test-db.kuzu");
+  const testDbPath = join(tmpdir(), ".lbug-draft-parser-unit-test-db.lbug");
 
   before(async () => {
     if (existsSync(testDbPath)) {
       rmSync(testDbPath, { recursive: true, force: true });
     }
-    await closeKuzuDb();
-    await initKuzuDb(testDbPath);
+    await closeLadybugDb();
+    await initLadybugDb(testDbPath);
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(testDbPath)) {
       rmSync(testDbPath, { recursive: true, force: true });
     }

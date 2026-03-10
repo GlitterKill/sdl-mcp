@@ -56,7 +56,7 @@ const initResult = spawnSync(
   [
     "--input-type=module",
     "-e",
-    "import { initKuzuDb } from './dist/db/kuzu.js'; await initKuzuDb(process.env.SDL_GRAPH_DB_PATH);",
+    "import { initLadybugDb } from './dist/db/ladybug.js'; await initLadybugDb(process.env.SDL_GRAPH_DB_PATH);",
   ],
   {
     cwd: repoRoot,

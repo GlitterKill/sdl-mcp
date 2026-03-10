@@ -10,8 +10,8 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { buildSlice } from "../../src/graph/slice.js";
 import { indexRepo } from "../../src/indexer/indexer.js";
 import {
@@ -29,20 +29,20 @@ import {
 const REPO_ID = "draft-live-read-repo";
 
 function findSymbolByName(
-  symbols: kuzuDb.SymbolRow[],
+  symbols: ladybugDb.SymbolRow[],
   name: string,
-): kuzuDb.SymbolRow {
+): ladybugDb.SymbolRow {
   const symbol = symbols.find((row) => row.name === name);
   assert.ok(symbol, `Expected symbol ${name} to exist`);
   return symbol!;
 }
 
 describe("draft live reads", () => {
-  const graphDbPath = join(tmpdir(), ".kuzu-draft-live-read-test-db.kuzu");
+  const graphDbPath = join(tmpdir(), ".lbug-draft-live-read-test-db.lbug");
   const configPath = join(tmpdir(), `sdl-draft-live-read-${Date.now()}.json`);
   let repoDir = "";
-  let durableAlpha: kuzuDb.SymbolRow;
-  let durableBeta: kuzuDb.SymbolRow;
+  let durableAlpha: ladybugDb.SymbolRow;
+  let durableBeta: ladybugDb.SymbolRow;
   let latestVersionId = "";
   const previousSDL_CONFIG = process.env.SDL_CONFIG;
   const previousSDL_CONFIG_PATH = process.env.SDL_CONFIG_PATH;
@@ -85,11 +85,11 @@ describe("draft live reads", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
     const now = "2026-03-07T12:00:00.000Z";
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: REPO_ID,
       rootPath: repoDir,
       configJson: JSON.stringify({
@@ -109,7 +109,7 @@ describe("draft live reads", () => {
     const result = await indexRepo(REPO_ID, "full");
     latestVersionId = result.versionId;
 
-    const symbols = await kuzuDb.getSymbolsByRepo(conn, REPO_ID);
+    const symbols = await ladybugDb.getSymbolsByRepo(conn, REPO_ID);
     durableAlpha = findSymbolByName(symbols, "alpha");
     durableBeta = findSymbolByName(symbols, "beta");
   });
@@ -120,7 +120,7 @@ describe("draft live reads", () => {
 
   after(async () => {
     resetDefaultLiveIndexCoordinator();
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(graphDbPath)) {
       rmSync(graphDbPath, { recursive: true, force: true });
     }

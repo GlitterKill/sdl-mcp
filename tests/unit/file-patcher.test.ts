@@ -4,14 +4,14 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { indexRepo } from "../../src/indexer/indexer.js";
 import { patchSavedFile } from "../../src/live-index/file-patcher.js";
 
 describe("patchSavedFile", () => {
   const repoId = "file-patcher-repo";
-  const dbPath = join(tmpdir(), ".kuzu-file-patcher-test-db.kuzu");
+  const dbPath = join(tmpdir(), ".lbug-file-patcher-test-db.lbug");
   const configPath = join(tmpdir(), `sdl-file-patcher-${Date.now()}.json`);
   let repoDir = "";
   const prevConfig = process.env.SDL_CONFIG;
@@ -48,11 +48,11 @@ describe("patchSavedFile", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    await closeKuzuDb();
-    await initKuzuDb(dbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(dbPath);
+    const conn = await getLadybugConn();
     const now = "2026-03-07T12:00:00.000Z";
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: repoDir,
       configJson: JSON.stringify({
@@ -69,7 +69,7 @@ describe("patchSavedFile", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
     if (existsSync(configPath)) rmSync(configPath, { force: true });
     if (repoDir && existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
@@ -99,10 +99,10 @@ describe("patchSavedFile", () => {
     assert.strictEqual(result.symbolsUpserted, 2);
     assert.ok(result.edgesUpserted >= 1);
 
-    const conn = await getKuzuConn();
-    const file = await kuzuDb.getFileByRepoPath(conn, repoId, "src/example.ts");
+    const conn = await getLadybugConn();
+    const file = await ladybugDb.getFileByRepoPath(conn, repoId, "src/example.ts");
     assert.ok(file);
-    const symbols = await kuzuDb.getSymbolsByFile(conn, file!.fileId);
+    const symbols = await ladybugDb.getSymbolsByFile(conn, file!.fileId);
     const names = symbols.map((symbol) => symbol.name).sort();
     assert.deepStrictEqual(names, ["alpha", "gamma"]);
 
@@ -111,7 +111,7 @@ describe("patchSavedFile", () => {
     assert.ok(alpha);
     assert.ok(gamma);
 
-    const outgoing = await kuzuDb.getEdgesFrom(conn, alpha!.symbolId);
+    const outgoing = await ladybugDb.getEdgesFrom(conn, alpha!.symbolId);
     assert.ok(outgoing.some((edge) => edge.toSymbolId === gamma!.symbolId));
   });
 });

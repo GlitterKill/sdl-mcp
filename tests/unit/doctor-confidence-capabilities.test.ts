@@ -43,20 +43,20 @@ describe("doctor command - call resolution capabilities", () => {
 
   async function runDoctorWithConfig(policy: Record<string, unknown>): Promise<string> {
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const kuzuPath = join(tempDir, "sdl-mcp-graph.kuzu");
+    const ladybugPath = join(tempDir, "sdl-mcp-graph.lbug");
 
     writeFileSync(
       configPath,
       JSON.stringify({
         repos: [{ repoId: "test", rootPath: tempDir }],
-        graphDatabase: { path: kuzuPath },
+        graphDatabase: { path: ladybugPath },
         policy,
       }),
     );
 
-    const { initKuzuDb, closeKuzuDb } = await import("../../src/db/kuzu.js");
+    const { initLadybugDb, closeLadybugDb } = await import("../../src/db/ladybug.js");
     const { doctorCommand } = await import("../../src/cli/commands/doctor.js");
-    await initKuzuDb(kuzuPath);
+    await initLadybugDb(ladybugPath);
 
     let output = "";
     const originalLog = console.log;
@@ -68,7 +68,7 @@ describe("doctor command - call resolution capabilities", () => {
       await doctorCommand({ config: configPath });
     } finally {
       console.log = originalLog;
-      await closeKuzuDb();
+      await closeLadybugDb();
     }
 
     return output;

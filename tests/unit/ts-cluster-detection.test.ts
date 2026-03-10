@@ -4,8 +4,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { computeClustersTS } from "../../dist/graph/cluster.js";
 
 const REPO_ID = "test-ts-cluster-repo";
@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("computeClustersTS", () => {
-  const graphDbPath = join(__dirname, ".kuzu-ts-cluster-test-db");
+  const graphDbPath = join(__dirname, ".lbug-ts-cluster-test-db");
 
   before(async () => {
     if (existsSync(graphDbPath)) {
@@ -22,13 +22,13 @@ describe("computeClustersTS", () => {
     }
     mkdirSync(graphDbPath, { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
 
     const now = new Date().toISOString();
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: REPO_ID,
       rootPath: "/tmp/test-ts-cluster",
       configJson: JSON.stringify({
@@ -45,7 +45,7 @@ describe("computeClustersTS", () => {
       createdAt: now,
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId: REPO_ID,
       relPath: "src/test.ts",
@@ -57,7 +57,7 @@ describe("computeClustersTS", () => {
 
     const symbolIds = ["A", "B", "C", "X", "Y", "Z"].map((id) => `${id}-${REPO_ID}`);
     for (const symbolId of symbolIds) {
-      await kuzuDb.upsertSymbol(conn, {
+      await ladybugDb.upsertSymbol(conn, {
         symbolId,
         repoId: REPO_ID,
         fileId: "file-1",
@@ -88,7 +88,7 @@ describe("computeClustersTS", () => {
     ];
 
     for (const e of edgeRows) {
-      await kuzuDb.insertEdge(conn, {
+      await ladybugDb.insertEdge(conn, {
         repoId: REPO_ID,
         fromSymbolId: e.fromSymbolId,
         toSymbolId: e.toSymbolId,
@@ -103,7 +103,7 @@ describe("computeClustersTS", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     try {
       rmSync(graphDbPath, { recursive: true, force: true });
     } catch {

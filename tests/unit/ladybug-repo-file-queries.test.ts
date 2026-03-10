@@ -6,9 +6,9 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-repo-file-test-db.kuzu");
+const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-repo-file-test-db.lbug");
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (q: string) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
@@ -18,13 +18,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -35,10 +35,10 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<void> {
+async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -52,38 +52,38 @@ async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<vo
   } catch {}
 }
 
-async function exec(conn: KuzuConnection, q: string): Promise<void> {
+async function exec(conn: LadybugConnection, q: string): Promise<void> {
   const result = await conn.query(q);
   result.close();
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
-  const { createSchema } = await import("../../dist/db/kuzu-schema.js");
+async function setupSchema(conn: LadybugConnection): Promise<void> {
+  const { createSchema } = await import("../../dist/db/ladybug-schema.js");
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
 describe("KuzuDB Repo & File Queries", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
-  let queries: typeof import("../../dist/db/kuzu-queries.js");
-  let kuzuAvailable = true;
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
+  let ladybugAvailable = true;
 
   beforeEach(async () => {
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
     } catch {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
     }
   });
 
   afterEach(async () => {
-    if (!kuzuAvailable) return;
+    if (!ladybugAvailable) return;
     await cleanupTestDb(db, conn);
   });
 
-  it("upsertRepo/getRepo round-trip with path normalization", { skip: !kuzuAvailable }, async () => {
+  it("upsertRepo/getRepo round-trip with path normalization", { skip: !ladybugAvailable }, async () => {
     const repoId = "repo-1";
     await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {
       repoId,
@@ -101,7 +101,7 @@ describe("KuzuDB Repo & File Queries", () => {
     assert.ok(!repo.rootPath.includes("\\"), "rootPath should be normalized");
   });
 
-  it("upsertFile/getFilesByRepo/getFileByRepoPath", { skip: !kuzuAvailable }, async () => {
+  it("upsertFile/getFilesByRepo/getFileByRepoPath", { skip: !ladybugAvailable }, async () => {
     const repoId = "repo-2";
     await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {
       repoId,
@@ -137,7 +137,7 @@ describe("KuzuDB Repo & File Queries", () => {
     assert.strictEqual(fileByPath.fileId, "file-1");
   });
 
-  it("getFilesByDirectory and getFileCount", { skip: !kuzuAvailable }, async () => {
+  it("getFilesByDirectory and getFileCount", { skip: !ladybugAvailable }, async () => {
     const repoId = "repo-3";
     await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {
       repoId,
@@ -189,7 +189,7 @@ describe("KuzuDB Repo & File Queries", () => {
     assert.strictEqual(srcFiles[0]?.fileId, "file-a");
   });
 
-  it("deleteFilesByIds cascades to symbols/edges/metrics", { skip: !kuzuAvailable }, async () => {
+  it("deleteFilesByIds cascades to symbols/edges/metrics", { skip: !ladybugAvailable }, async () => {
     const repoId = "repo-4";
     await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {
       repoId,
@@ -275,7 +275,7 @@ describe("KuzuDB Repo & File Queries", () => {
     }
   });
 
-  it("deleteRepo cascades to files", { skip: !kuzuAvailable }, async () => {
+  it("deleteRepo cascades to files", { skip: !ladybugAvailable }, async () => {
     const repoId = "repo-5";
     await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {
       repoId,

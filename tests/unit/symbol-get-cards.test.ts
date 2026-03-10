@@ -6,8 +6,8 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 
 import { handleSymbolGetCards } from "../../dist/mcp/tools/symbol.js";
 import { SymbolGetCardsRequestSchema } from "../../src/mcp/tools.js";
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 
 /**
  * Tests for handleSymbolGetCards — the batch symbol card API.
@@ -26,7 +26,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("handleSymbolGetCards", () => {
-  const graphDbPath = join(__dirname, ".kuzu-get-cards-test-db");
+  const graphDbPath = join(__dirname, ".lbug-get-cards-test-db");
 
   let symbolIdA: string;
   let symbolIdB: string;
@@ -37,13 +37,13 @@ describe("handleSymbolGetCards", () => {
     }
     mkdirSync(graphDbPath, { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
 
     const now = new Date().toISOString();
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: REPO_ID,
       rootPath: "/tmp/test-get-cards",
       configJson: JSON.stringify({
@@ -60,7 +60,7 @@ describe("handleSymbolGetCards", () => {
       createdAt: now,
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId: REPO_ID,
       relPath: "src/test.ts",
@@ -73,7 +73,7 @@ describe("handleSymbolGetCards", () => {
     symbolIdA = `sym-cards-a-${REPO_ID}`;
     symbolIdB = `sym-cards-b-${REPO_ID}`;
 
-    await kuzuDb.upsertSymbol(conn, {
+    await ladybugDb.upsertSymbol(conn, {
       symbolId: symbolIdA,
       repoId: REPO_ID,
       fileId: "file-1",
@@ -94,7 +94,7 @@ describe("handleSymbolGetCards", () => {
       updatedAt: now,
     });
 
-    await kuzuDb.upsertSymbol(conn, {
+    await ladybugDb.upsertSymbol(conn, {
       symbolId: symbolIdB,
       repoId: REPO_ID,
       fileId: "file-1",
@@ -117,7 +117,7 @@ describe("handleSymbolGetCards", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(graphDbPath)) {
       rmSync(graphDbPath, { recursive: true, force: true });
     }

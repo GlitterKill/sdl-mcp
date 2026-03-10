@@ -16,10 +16,10 @@ const TEST_DB_PATH = join(
   __dirname,
   "..",
   "..",
-  ".kuzu-delete-symbols-batch-test-db.kuzu",
+  ".lbug-delete-symbols-batch-test-db.lbug",
 );
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (q: string) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
@@ -28,13 +28,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -45,12 +45,12 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
 async function cleanupTestDb(
-  db: KuzuDatabase,
-  conn: KuzuConnection,
+  db: LadybugDatabase,
+  conn: LadybugConnection,
 ): Promise<void> {
   try {
     await conn.close();
@@ -65,12 +65,12 @@ async function cleanupTestDb(
   } catch {}
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
-  const { createSchema } = await import("../../dist/db/kuzu-schema.js");
+async function setupSchema(conn: LadybugConnection): Promise<void> {
+  const { createSchema } = await import("../../dist/db/ladybug-schema.js");
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
-type Queries = typeof import("../../dist/db/kuzu-queries.js");
+type Queries = typeof import("../../dist/db/ladybug-queries.js");
 
 function makeSymbol(
   symbolId: string,
@@ -101,10 +101,10 @@ function makeSymbol(
 }
 
 describe("deleteSymbolsByFileId — batch refactor", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
   let queries: Queries;
-  let kuzuAvailable = true;
+  let ladybugAvailable = true;
 
   const repoId = "batch-del-repo";
   const fileId = "batch-del-file";
@@ -113,7 +113,7 @@ describe("deleteSymbolsByFileId — batch refactor", () => {
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
 
       // Set up repo and file
       await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {
@@ -133,7 +133,7 @@ describe("deleteSymbolsByFileId — batch refactor", () => {
         lastIndexedAt: null,
       });
     } catch (err) {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
     }
   });
 
@@ -143,7 +143,7 @@ describe("deleteSymbolsByFileId — batch refactor", () => {
 
   it(
     "deletes all symbols for a file in batch (multiple symbols)",
-    { skip: !kuzuAvailable },
+    { skip: !ladybugAvailable },
     async () => {
       const conn_ = conn as unknown as import("kuzu").Connection;
 
@@ -184,7 +184,7 @@ describe("deleteSymbolsByFileId — batch refactor", () => {
 
   it(
     "does not error when file has no symbols (empty IN clause guard)",
-    { skip: !kuzuAvailable },
+    { skip: !ladybugAvailable },
     async () => {
       const conn_ = conn as unknown as import("kuzu").Connection;
 
@@ -206,7 +206,7 @@ describe("deleteSymbolsByFileId — batch refactor", () => {
 
   it(
     "only deletes symbols belonging to the specified file",
-    { skip: !kuzuAvailable },
+    { skip: !ladybugAvailable },
     async () => {
       const conn_ = conn as unknown as import("kuzu").Connection;
 

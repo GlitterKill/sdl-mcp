@@ -16,7 +16,7 @@ import {
   exec,
   withTransaction,
   getPreparedStatement,
-} from "../../src/db/kuzu-core.js";
+} from "../../src/db/ladybug-core.js";
 
 describe("toNumber", () => {
   it("returns number as-is", () => {
@@ -198,13 +198,12 @@ describe("query helpers", () => {
     assert.deepEqual(calls[0]?.params, { value: 1 });
   });
 
-  it("queryAll/querySingle coerce array results and close all QueryResults", async () => {
-    const first = makeQueryResult([{ ignored: true }]);
-    const second = makeQueryResult([{ id: "row-1" }, { id: "row-2" }]);
+  it("queryAll/querySingle return rows and close the QueryResult", async () => {
+    const qr = makeQueryResult([{ id: "row-1" }, { id: "row-2" }]);
 
     const conn = {
       prepare: async (_statement: string) => "prepared",
-      execute: async () => [first.result, second.result],
+      execute: async () => qr.result,
     };
 
     const rows = await queryAll<{ id: string }>(
@@ -212,14 +211,20 @@ describe("query helpers", () => {
       "RETURN 1",
     );
     assert.deepEqual(rows, [{ id: "row-1" }, { id: "row-2" }]);
-    assert.equal(first.getClosedCount(), 1);
-    assert.equal(second.getClosedCount(), 1);
+    assert.equal(qr.getClosedCount(), 1);
+
+    const qr2 = makeQueryResult([{ id: "row-1" }, { id: "row-2" }]);
+    const conn2 = {
+      prepare: async (_statement: string) => "prepared",
+      execute: async () => qr2.result,
+    };
 
     const single = await querySingle<{ id: string }>(
-      conn as unknown as import("kuzu").Connection,
+      conn2 as unknown as import("kuzu").Connection,
       "RETURN 1",
     );
     assert.deepEqual(single, { id: "row-1" });
+    assert.equal(qr2.getClosedCount(), 1);
   });
 
   it("exec and withTransaction close results and manage begin/commit/rollback", async () => {

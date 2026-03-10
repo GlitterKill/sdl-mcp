@@ -4,25 +4,25 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { buildDependencyFrontier } from "../../src/live-index/dependency-frontier.js";
 
 describe("buildDependencyFrontier", () => {
-  const dbPath = join(tmpdir(), ".kuzu-dependency-frontier-test-db.kuzu");
+  const dbPath = join(tmpdir(), ".lbug-dependency-frontier-test-db.lbug");
   const repoId = "dependency-frontier-repo";
 
   before(async () => {
     if (existsSync(dbPath)) {
       rmSync(dbPath, { recursive: true, force: true });
     }
-    await closeKuzuDb();
-    await initKuzuDb(dbPath);
+    await closeLadybugDb();
+    await initLadybugDb(dbPath);
 
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
     const now = "2026-03-07T12:00:00.000Z";
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: "C:/repo",
       configJson: JSON.stringify({ repoId, rootPath: "C:/repo", languages: ["ts"] }),
@@ -34,7 +34,7 @@ describe("buildDependencyFrontier", () => {
       { fileId: "file-b", relPath: "src/b.ts" },
       { fileId: "file-c", relPath: "src/c.ts" },
     ]) {
-      await kuzuDb.upsertFile(conn, {
+      await ladybugDb.upsertFile(conn, {
         fileId: file.fileId,
         repoId,
         relPath: file.relPath,
@@ -50,7 +50,7 @@ describe("buildDependencyFrontier", () => {
       { symbolId: "sym-b", fileId: "file-b", name: "beta" },
       { symbolId: "sym-c", fileId: "file-c", name: "gamma" },
     ]) {
-      await kuzuDb.upsertSymbol(conn, {
+      await ladybugDb.upsertSymbol(conn, {
         symbolId: symbol.symbolId,
         repoId,
         fileId: symbol.fileId,
@@ -72,7 +72,7 @@ describe("buildDependencyFrontier", () => {
       });
     }
 
-    await kuzuDb.insertEdges(conn, [
+    await ladybugDb.insertEdges(conn, [
       {
         repoId,
         fromSymbolId: "sym-b",
@@ -99,14 +99,14 @@ describe("buildDependencyFrontier", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(dbPath)) {
       rmSync(dbPath, { recursive: true, force: true });
     }
   });
 
   it("captures inbound dependents and imported target files", async () => {
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
     const frontier = await buildDependencyFrontier({
       conn,
       touchedSymbolIds: ["sym-a"],

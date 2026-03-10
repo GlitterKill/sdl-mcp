@@ -5,8 +5,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { clearAllCaches } from "../../src/graph/cache.js";
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { SymbolGetCardRequestSchema } from "../../src/mcp/tools.js";
 import { handleSymbolGetCard } from "../../src/mcp/tools/symbol.js";
 
@@ -16,7 +16,7 @@ const TEST_DB_PATH = join(
   __dirname,
   "..",
   "..",
-  ".kuzu-mcp-symbol-card-confidence-test-db.kuzu",
+  ".lbug-mcp-symbol-card-confidence-test-db.lbug",
 );
 
 describe("symbol card confidence-aware filtering", () => {
@@ -27,19 +27,19 @@ describe("symbol card confidence-aware filtering", () => {
     }
     mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(TEST_DB_PATH);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(TEST_DB_PATH);
+    const conn = await getLadybugConn();
     const now = "2026-03-05T13:00:00.000Z";
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: "repo",
       rootPath: "C:/repo",
       configJson: JSON.stringify({ policy: {} }),
       createdAt: now,
     });
 
-    await kuzuDb.createVersion(conn, {
+    await ladybugDb.createVersion(conn, {
       versionId: "v1",
       repoId: "repo",
       createdAt: now,
@@ -48,7 +48,7 @@ describe("symbol card confidence-aware filtering", () => {
       versionHash: "hash-v1",
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId: "repo",
       relPath: "src/service.ts",
@@ -65,7 +65,7 @@ describe("symbol card confidence-aware filtering", () => {
     ];
 
     for (const symbol of symbols) {
-      await kuzuDb.upsertSymbol(conn, {
+      await ladybugDb.upsertSymbol(conn, {
         symbolId: symbol.symbolId,
         repoId: "repo",
         fileId: "file-1",
@@ -87,7 +87,7 @@ describe("symbol card confidence-aware filtering", () => {
       });
     }
 
-    await kuzuDb.insertEdges(conn, [
+    await ladybugDb.insertEdges(conn, [
       {
         repoId: "repo",
         fromSymbolId: "sym-entry",
@@ -119,7 +119,7 @@ describe("symbol card confidence-aware filtering", () => {
 
   afterEach(async () => {
     clearAllCaches();
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(TEST_DB_PATH)) {
       rmSync(TEST_DB_PATH, { recursive: true, force: true });
     }

@@ -4,8 +4,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { buildSlice } from "../../dist/graph/slice.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,7 +14,7 @@ const __dirname = dirname(__filename);
 const REPO_ID = "test-cluster-slice-cohesion-repo";
 
 describe("cluster-aware slice cohesion (integration)", () => {
-  const graphDbPath = join(__dirname, ".kuzu-cluster-slice-cohesion-test-db");
+  const graphDbPath = join(__dirname, ".lbug-cluster-slice-cohesion-test-db");
 
   const symbolA1 = `${REPO_ID}-a1`;
   const symbolA2 = `${REPO_ID}-a2`;
@@ -29,13 +29,13 @@ describe("cluster-aware slice cohesion (integration)", () => {
     }
     mkdirSync(graphDbPath, { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
 
     const now = new Date().toISOString();
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: REPO_ID,
       rootPath: "/tmp/test-cluster-slice-cohesion",
       configJson: JSON.stringify({
@@ -52,7 +52,7 @@ describe("cluster-aware slice cohesion (integration)", () => {
       createdAt: now,
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId: REPO_ID,
       relPath: "src/app.ts",
@@ -70,7 +70,7 @@ describe("cluster-aware slice cohesion (integration)", () => {
       [symbolA5, "a5"],
       [symbolB1, "b1"],
     ] as const) {
-      await kuzuDb.upsertSymbol(conn, {
+      await ladybugDb.upsertSymbol(conn, {
         symbolId,
         repoId: REPO_ID,
         fileId: "file-1",
@@ -95,7 +95,7 @@ describe("cluster-aware slice cohesion (integration)", () => {
     // Entry symbol imports its same-cluster neighbors. These edges would normally
     // fall below SLICE_SCORE_THRESHOLD due to import weighting unless boosted.
     for (const toSymbolId of [symbolA2, symbolA3, symbolA4, symbolA5]) {
-      await kuzuDb.insertEdge(conn, {
+      await ladybugDb.insertEdge(conn, {
         repoId: REPO_ID,
         fromSymbolId: symbolA1,
         toSymbolId,
@@ -109,7 +109,7 @@ describe("cluster-aware slice cohesion (integration)", () => {
     }
 
     // Cross-cluster call edge to establish a related cluster.
-    await kuzuDb.insertEdge(conn, {
+    await ladybugDb.insertEdge(conn, {
       repoId: REPO_ID,
       fromSymbolId: symbolA1,
       toSymbolId: symbolB1,
@@ -125,7 +125,7 @@ describe("cluster-aware slice cohesion (integration)", () => {
     const clusterA = `${REPO_ID}-cluster-a`;
     const clusterB = `${REPO_ID}-cluster-b`;
 
-    await kuzuDb.upsertCluster(conn, {
+    await ladybugDb.upsertCluster(conn, {
       clusterId: clusterA,
       repoId: REPO_ID,
       label: "cluster a",
@@ -134,7 +134,7 @@ describe("cluster-aware slice cohesion (integration)", () => {
       versionId: null,
       createdAt: now,
     });
-    await kuzuDb.upsertCluster(conn, {
+    await ladybugDb.upsertCluster(conn, {
       clusterId: clusterB,
       repoId: REPO_ID,
       label: "cluster b",
@@ -145,13 +145,13 @@ describe("cluster-aware slice cohesion (integration)", () => {
     });
 
     for (const symbolId of [symbolA1, symbolA2, symbolA3, symbolA4, symbolA5]) {
-      await kuzuDb.upsertClusterMember(conn, {
+      await ladybugDb.upsertClusterMember(conn, {
         symbolId,
         clusterId: clusterA,
         membershipScore: 1.0,
       });
     }
-    await kuzuDb.upsertClusterMember(conn, {
+    await ladybugDb.upsertClusterMember(conn, {
       symbolId: symbolB1,
       clusterId: clusterB,
       membershipScore: 1.0,
@@ -159,14 +159,14 @@ describe("cluster-aware slice cohesion (integration)", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(graphDbPath)) {
       rmSync(graphDbPath, { recursive: true, force: true });
     }
   });
 
   it("boosts same-cluster symbols into the slice frontier", async () => {
-    const conn = await getKuzuConn();
+    const conn = await getLadybugConn();
     const slice = await buildSlice({
       repoId: REPO_ID,
       versionId: "v1",

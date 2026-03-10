@@ -4,8 +4,8 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { handleSymbolGetCard } from "../../dist/mcp/tools/symbol.js";
 import { handleSliceBuild } from "../../dist/mcp/tools/slice.js";
 
@@ -15,7 +15,7 @@ const TEST_DB_PATH = join(
   __dirname,
   "..",
   "..",
-  ".kuzu-mcp-confidence-filtering-test-db.kuzu",
+  ".lbug-mcp-confidence-filtering-test-db.lbug",
 );
 
 describe("MCP confidence-aware filtering", () => {
@@ -27,19 +27,19 @@ describe("MCP confidence-aware filtering", () => {
     }
     mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
 
-    await closeKuzuDb();
-    await initKuzuDb(TEST_DB_PATH);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(TEST_DB_PATH);
+    const conn = await getLadybugConn();
     const now = "2026-03-05T14:00:00.000Z";
 
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: "C:/repo",
       configJson: JSON.stringify({ policy: {} }),
       createdAt: now,
     });
 
-    await kuzuDb.createVersion(conn, {
+    await ladybugDb.createVersion(conn, {
       versionId: "v1",
       repoId,
       createdAt: now,
@@ -48,7 +48,7 @@ describe("MCP confidence-aware filtering", () => {
       versionHash: "v1-hash",
     });
 
-    await kuzuDb.upsertFile(conn, {
+    await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId,
       relPath: "src/app.ts",
@@ -65,7 +65,7 @@ describe("MCP confidence-aware filtering", () => {
     ];
 
     for (const symbol of symbols) {
-      await kuzuDb.upsertSymbol(conn, {
+      await ladybugDb.upsertSymbol(conn, {
         symbolId: symbol.symbolId,
         repoId,
         fileId: "file-1",
@@ -87,7 +87,7 @@ describe("MCP confidence-aware filtering", () => {
       });
     }
 
-    await kuzuDb.insertEdges(conn, [
+    await ladybugDb.insertEdges(conn, [
       {
         repoId,
         fromSymbolId: "sym-entry",
@@ -118,7 +118,7 @@ describe("MCP confidence-aware filtering", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(TEST_DB_PATH)) {
       rmSync(TEST_DB_PATH, { recursive: true, force: true });
     }

@@ -18,9 +18,9 @@ import { computeBlastRadius } from "../../dist/delta/blastRadius.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-fan-in-trend-test-db.kuzu");
+const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-fan-in-trend-test-db.lbug");
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (q: string) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
@@ -29,13 +29,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -46,10 +46,10 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<void> {
+async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -63,16 +63,16 @@ async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<vo
   } catch {}
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
-  const { createSchema } = await import("../../dist/db/kuzu-schema.js");
+async function setupSchema(conn: LadybugConnection): Promise<void> {
+  const { createSchema } = await import("../../dist/db/ladybug-schema.js");
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
 describe("Fan-in trend integration tests (Kuzu)", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
-  let queries: typeof import("../../dist/db/kuzu-queries.js");
-  let kuzuAvailable = true;
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
+  let ladybugAvailable = true;
 
   const repoId = "test-fan-in-trend";
   const fileId = "file-1";
@@ -174,19 +174,19 @@ describe("Fan-in trend integration tests (Kuzu)", () => {
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
       await upsertBaseRepo();
     } catch {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
     }
   });
 
   afterEach(async () => {
-    if (!kuzuAvailable) return;
+    if (!ladybugAvailable) return;
     await cleanupTestDb(db, conn);
   });
 
-  it("Test 1: symbol gains 5 new callers → amplifier detected", { skip: !kuzuAvailable }, async () => {
+  it("Test 1: symbol gains 5 new callers → amplifier detected", { skip: !ladybugAvailable }, async () => {
     const fooId = "sym-foo";
     await upsertSymbol(fooId, "foo");
 
@@ -250,7 +250,7 @@ describe("Fan-in trend integration tests (Kuzu)", () => {
     assert.equal(fanInTrend.isAmplifier, true);
   });
 
-  it("Test 2: 10 existing callers + 1 new caller → not an amplifier", { skip: !kuzuAvailable }, async () => {
+  it("Test 2: 10 existing callers + 1 new caller → not an amplifier", { skip: !ladybugAvailable }, async () => {
     const barId = "sym-bar";
     await upsertSymbol(barId, "bar");
 
@@ -323,7 +323,7 @@ describe("Fan-in trend integration tests (Kuzu)", () => {
     assert.equal(fanInTrend.isAmplifier, false);
   });
 
-  it("Test 3: computeBlastRadius attaches fanInTrend only with version IDs", { skip: !kuzuAvailable }, async () => {
+  it("Test 3: computeBlastRadius attaches fanInTrend only with version IDs", { skip: !ladybugAvailable }, async () => {
     const changedId = "sym-changed";
     const depId = "sym-dep";
     await upsertSymbol(changedId, "changedFn");

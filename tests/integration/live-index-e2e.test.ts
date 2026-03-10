@@ -10,7 +10,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeKuzuDb, initKuzuDb } from "../../src/db/kuzu.js";
+import { closeLadybugDb, initLadybugDb } from "../../src/db/ladybug.js";
 import { indexRepo } from "../../src/indexer/indexer.js";
 import { handleBufferPush, handleBufferStatus } from "../../src/mcp/tools/buffer.js";
 import { handleSymbolSearch } from "../../src/mcp/tools/symbol.js";
@@ -19,12 +19,12 @@ import {
   resetDefaultLiveIndexCoordinator,
   waitForDefaultLiveIndexIdle,
 } from "../../src/live-index/coordinator.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
-import { getKuzuConn } from "../../src/db/kuzu.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
+import { getLadybugConn } from "../../src/db/ladybug.js";
 
 describe("live index end-to-end flow", () => {
   const repoId = "live-index-e2e-repo";
-  const dbPath = join(tmpdir(), ".kuzu-live-index-e2e-test-db.kuzu");
+  const dbPath = join(tmpdir(), ".lbug-live-index-e2e-test-db.lbug");
   const configPath = join(tmpdir(), `sdl-live-index-e2e-${Date.now()}.json`);
   let repoDir = "";
   const prevConfig = process.env.SDL_CONFIG;
@@ -67,10 +67,10 @@ describe("live index end-to-end flow", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    await closeKuzuDb();
-    await initKuzuDb(dbPath);
-    const conn = await getKuzuConn();
-    await kuzuDb.upsertRepo(conn, {
+    await closeLadybugDb();
+    await initLadybugDb(dbPath);
+    const conn = await getLadybugConn();
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: repoDir,
       configJson: JSON.stringify({
@@ -92,7 +92,7 @@ describe("live index end-to-end flow", () => {
 
   after(async () => {
     resetDefaultLiveIndexCoordinator();
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
     if (existsSync(configPath)) rmSync(configPath, { force: true });
     if (repoDir && existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });

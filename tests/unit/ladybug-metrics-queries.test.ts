@@ -6,9 +6,9 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-metrics-test-db.kuzu");
+const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-metrics-test-db.lbug");
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (q: string) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
@@ -17,13 +17,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -34,10 +34,10 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<void> {
+async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -51,12 +51,12 @@ async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<vo
   } catch {}
 }
 
-async function exec(conn: KuzuConnection, q: string): Promise<void> {
+async function exec(conn: LadybugConnection, q: string): Promise<void> {
   const result = await conn.query(q);
   result.close();
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
+async function setupSchema(conn: LadybugConnection): Promise<void> {
   await exec(conn, `
     CREATE NODE TABLE IF NOT EXISTS Repo (
       repoId STRING PRIMARY KEY,
@@ -127,10 +127,10 @@ async function setupSchema(conn: KuzuConnection): Promise<void> {
 }
 
 describe("KuzuDB Metrics Queries", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
-  let kuzuAvailable = true;
-  let queries: typeof import("../../dist/db/kuzu-queries.js");
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
+  let ladybugAvailable = true;
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
 
   beforeEach(async () => {
     try {
@@ -138,9 +138,9 @@ describe("KuzuDB Metrics Queries", () => {
       db = testDb.db;
       conn = testDb.conn;
       await setupSchema(conn);
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
     } catch (err) {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
       console.log("KuzuDB not available, skipping tests:", err);
     }
   });
@@ -151,7 +151,7 @@ describe("KuzuDB Metrics Queries", () => {
     }
   });
 
-  describe("upsertMetrics", { skip: !kuzuAvailable }, () => {
+  describe("upsertMetrics", { skip: !ladybugAvailable }, () => {
     it("should insert new metrics", async () => {
       const metrics = {
         symbolId: "sym-1",
@@ -242,7 +242,7 @@ describe("KuzuDB Metrics Queries", () => {
     });
   });
 
-  describe("getMetrics", { skip: !kuzuAvailable }, () => {
+  describe("getMetrics", { skip: !ladybugAvailable }, () => {
     it("should return null for non-existent symbol", async () => {
       const result = await queries.getMetrics(
         conn as unknown as import("kuzu").Connection,
@@ -275,7 +275,7 @@ describe("KuzuDB Metrics Queries", () => {
     });
   });
 
-  describe("getMetricsBySymbolIds", { skip: !kuzuAvailable }, () => {
+  describe("getMetricsBySymbolIds", { skip: !ladybugAvailable }, () => {
     it("should return empty map for empty input", async () => {
       const result = await queries.getMetricsBySymbolIds(
         conn as unknown as import("kuzu").Connection,
@@ -364,7 +364,7 @@ describe("KuzuDB Metrics Queries", () => {
     });
   });
 
-  describe("getTopSymbolsByFanIn", { skip: !kuzuAvailable }, () => {
+  describe("getTopSymbolsByFanIn", { skip: !ladybugAvailable }, () => {
     beforeEach(async () => {
       await exec(conn, `
         CREATE (r:Repo {repoId: 'top-test-repo', rootPath: '/test', configJson: '{}', createdAt: '2024-01-01'})
@@ -488,7 +488,7 @@ describe("KuzuDB Metrics Queries", () => {
     });
   });
 
-  describe("computeFanInOut", { skip: !kuzuAvailable }, () => {
+  describe("computeFanInOut", { skip: !ladybugAvailable }, () => {
     beforeEach(async () => {
       await exec(conn, `
         CREATE (s1:Symbol {symbolId: 'fan-sym-1', kind: 'function', name: 'func1', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 2, rangeEndCol: 0, astFingerprint: '', signatureJson: '{}', summary: '', invariantsJson: 'null', sideEffectsJson: 'null', updatedAt: '2024-01-01'})
@@ -549,7 +549,7 @@ describe("KuzuDB Metrics Queries", () => {
     });
   });
 
-  describe("batchComputeFanInOut", { skip: !kuzuAvailable }, () => {
+  describe("batchComputeFanInOut", { skip: !ladybugAvailable }, () => {
     beforeEach(async () => {
       for (let i = 1; i <= 10; i++) {
         await exec(conn, `

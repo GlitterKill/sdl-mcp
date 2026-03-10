@@ -10,8 +10,8 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../src/db/kuzu.js";
-import * as kuzuDb from "../../src/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { indexRepo } from "../../src/indexer/indexer.js";
 import { handleBufferPush } from "../../src/mcp/tools/buffer.js";
 import {
@@ -21,7 +21,7 @@ import {
 
 describe("saved file graph patch", () => {
   const repoId = "saved-file-graph-patch-repo";
-  const dbPath = join(tmpdir(), ".kuzu-saved-file-graph-patch-test-db.kuzu");
+  const dbPath = join(tmpdir(), ".lbug-saved-file-graph-patch-test-db.lbug");
   const configPath = join(tmpdir(), `sdl-saved-file-patch-${Date.now()}.json`);
   let repoDir = "";
   const prevConfig = process.env.SDL_CONFIG;
@@ -56,11 +56,11 @@ describe("saved file graph patch", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    await closeKuzuDb();
-    await initKuzuDb(dbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(dbPath);
+    const conn = await getLadybugConn();
     const now = "2026-03-07T12:00:00.000Z";
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId,
       rootPath: repoDir,
       configJson: JSON.stringify({
@@ -82,7 +82,7 @@ describe("saved file graph patch", () => {
 
   after(async () => {
     resetDefaultLiveIndexCoordinator();
-    await closeKuzuDb();
+    await closeLadybugDb();
     if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
     if (existsSync(configPath)) rmSync(configPath, { force: true });
     if (repoDir && existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
@@ -92,7 +92,7 @@ describe("saved file graph patch", () => {
     else process.env.SDL_CONFIG_PATH = prevConfigPath;
   });
 
-  it("updates durable kuzu state on save without repo-wide reindex", async () => {
+  it("updates durable ladybug state on save without repo-wide reindex", async () => {
     await handleBufferPush({
       repoId,
       eventType: "save",
@@ -113,10 +113,10 @@ describe("saved file graph patch", () => {
     });
     await waitForDefaultLiveIndexIdle();
 
-    const conn = await getKuzuConn();
-    const file = await kuzuDb.getFileByRepoPath(conn, repoId, "src/example.ts");
+    const conn = await getLadybugConn();
+    const file = await ladybugDb.getFileByRepoPath(conn, repoId, "src/example.ts");
     assert.ok(file);
-    const symbols = await kuzuDb.getSymbolsByFile(conn, file!.fileId);
+    const symbols = await ladybugDb.getSymbolsByFile(conn, file!.fileId);
     const names = symbols.map((symbol) => symbol.name).sort();
     assert.deepStrictEqual(names, ["alpha", "gamma"]);
   });

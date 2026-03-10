@@ -6,9 +6,9 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-slice-handle-test-db.kuzu");
+const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-slice-handle-test-db.lbug");
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (q: string) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
@@ -17,13 +17,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -34,10 +34,10 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<void> {
+async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -51,33 +51,33 @@ async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<vo
   } catch {}
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
-  const { createSchema } = await import("../../dist/db/kuzu-schema.js");
+async function setupSchema(conn: LadybugConnection): Promise<void> {
+  const { createSchema } = await import("../../dist/db/ladybug-schema.js");
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
 describe("KuzuDB Slice Handle & Cache Queries", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
-  let queries: typeof import("../../dist/db/kuzu-queries.js");
-  let kuzuAvailable = true;
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
+  let ladybugAvailable = true;
 
   beforeEach(async () => {
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
     } catch {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
     }
   });
 
   afterEach(async () => {
-    if (!kuzuAvailable) return;
+    if (!ladybugAvailable) return;
     await cleanupTestDb(db, conn);
   });
 
-  it("upsertSliceHandle/getSliceHandle round-trip", { skip: !kuzuAvailable }, async () => {
+  it("upsertSliceHandle/getSliceHandle round-trip", { skip: !ladybugAvailable }, async () => {
     await queries.upsertSliceHandle(conn as unknown as import("kuzu").Connection, {
       handle: "h1",
       repoId: "repo",
@@ -95,7 +95,7 @@ describe("KuzuDB Slice Handle & Cache Queries", () => {
     assert.strictEqual(row.repoId, "repo");
   });
 
-  it("deleteExpiredSliceHandles removes expired handles", { skip: !kuzuAvailable }, async () => {
+  it("deleteExpiredSliceHandles removes expired handles", { skip: !ladybugAvailable }, async () => {
     await queries.upsertSliceHandle(conn as unknown as import("kuzu").Connection, {
       handle: "expired",
       repoId: "repo",
@@ -129,7 +129,7 @@ describe("KuzuDB Slice Handle & Cache Queries", () => {
     assert.ok(liveRow);
   });
 
-  it("upsertCardHash/getCardHash", { skip: !kuzuAvailable }, async () => {
+  it("upsertCardHash/getCardHash", { skip: !ladybugAvailable }, async () => {
     await queries.upsertCardHash(conn as unknown as import("kuzu").Connection, {
       cardHash: "ch1",
       cardBlob: "blob",

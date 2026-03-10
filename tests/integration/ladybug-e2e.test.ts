@@ -14,9 +14,9 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { closeKuzuDb, getKuzuConn, initKuzuDb } from "../../dist/db/kuzu.js";
-import * as kuzuDb from "../../dist/db/kuzu-queries.js";
-import type { SymbolRow } from "../../dist/db/kuzu-queries.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import type { SymbolRow } from "../../dist/db/ladybug-queries.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
 import { buildSlice } from "../../dist/graph/slice.js";
 import { buildRepoOverview } from "../../dist/graph/overview.js";
@@ -61,7 +61,7 @@ function findSymbol(
 
 describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
   const fixtureRoot = join(__dirname, "..", "fixtures", "clustered-repo");
-  const graphDbPath = join(__dirname, ".kuzu-e2e-test-db");
+  const graphDbPath = join(__dirname, ".lbug-e2e-test-db");
   const configPath = join(graphDbPath, "test-config.json");
   let repoDir: string | null = null;
   const prevSDL_CONFIG = process.env.SDL_CONFIG;
@@ -97,12 +97,12 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    await closeKuzuDb();
-    await initKuzuDb(graphDbPath);
-    const conn = await getKuzuConn();
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
 
     const now = new Date().toISOString();
-    await kuzuDb.upsertRepo(conn, {
+    await ladybugDb.upsertRepo(conn, {
       repoId: REPO_ID,
       rootPath: repoDir,
       configJson: JSON.stringify({
@@ -121,7 +121,7 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
   });
 
   after(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
 
     if (prevSDL_CONFIG === undefined) {
       delete process.env.SDL_CONFIG;
@@ -155,15 +155,15 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     const full = await indexRepo(REPO_ID, "full");
     assert.ok(full.versionId.length > 0);
 
-    const conn = await getKuzuConn();
-    const clusters = await kuzuDb.getClustersForRepo(conn, REPO_ID);
+    const conn = await getLadybugConn();
+    const clusters = await ladybugDb.getClustersForRepo(conn, REPO_ID);
     assert.ok(clusters.length >= 2, `Expected >=2 clusters, got ${clusters.length}`);
 
-    const procStats = await kuzuDb.getProcessOverviewStats(conn, REPO_ID);
+    const procStats = await ladybugDb.getProcessOverviewStats(conn, REPO_ID);
     assert.strictEqual(procStats.totalProcesses, 2);
     assert.strictEqual(procStats.entryPoints, 2);
 
-    const symbols = await kuzuDb.getSymbolsByRepo(conn, REPO_ID);
+    const symbols = await ladybugDb.getSymbolsByRepo(conn, REPO_ID);
 
     const login = findSymbol(symbols, "login");
     const session = findSymbol(symbols, "session");
@@ -176,34 +176,34 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     const dataHandler = findSymbol(symbols, "datahandler");
     const middleware = findSymbol(symbols, "middleware");
 
-    const authCluster = await kuzuDb.getClusterForSymbol(conn, login.symbolId);
-    const dataCluster = await kuzuDb.getClusterForSymbol(conn, query.symbolId);
-    const apiCluster = await kuzuDb.getClusterForSymbol(conn, routesApi.symbolId);
+    const authCluster = await ladybugDb.getClusterForSymbol(conn, login.symbolId);
+    const dataCluster = await ladybugDb.getClusterForSymbol(conn, query.symbolId);
+    const apiCluster = await ladybugDb.getClusterForSymbol(conn, routesApi.symbolId);
 
     assert.ok(authCluster);
     assert.ok(dataCluster);
     assert.ok(apiCluster);
 
     const authMembers = [
-      await kuzuDb.getClusterForSymbol(conn, session.symbolId),
-      await kuzuDb.getClusterForSymbol(conn, token.symbolId),
+      await ladybugDb.getClusterForSymbol(conn, session.symbolId),
+      await ladybugDb.getClusterForSymbol(conn, token.symbolId),
     ];
     assert.ok(authMembers[0] && authMembers[1]);
     assert.strictEqual(authMembers[0].clusterId, authCluster.clusterId);
     assert.strictEqual(authMembers[1].clusterId, authCluster.clusterId);
 
     const dataMembers = [
-      await kuzuDb.getClusterForSymbol(conn, transform.symbolId),
-      await kuzuDb.getClusterForSymbol(conn, cache.symbolId),
+      await ladybugDb.getClusterForSymbol(conn, transform.symbolId),
+      await ladybugDb.getClusterForSymbol(conn, cache.symbolId),
     ];
     assert.ok(dataMembers[0] && dataMembers[1]);
     assert.strictEqual(dataMembers[0].clusterId, dataCluster.clusterId);
     assert.strictEqual(dataMembers[1].clusterId, dataCluster.clusterId);
 
     const apiMembers = [
-      await kuzuDb.getClusterForSymbol(conn, loginHandler.symbolId),
-      await kuzuDb.getClusterForSymbol(conn, dataHandler.symbolId),
-      await kuzuDb.getClusterForSymbol(conn, middleware.symbolId),
+      await ladybugDb.getClusterForSymbol(conn, loginHandler.symbolId),
+      await ladybugDb.getClusterForSymbol(conn, dataHandler.symbolId),
+      await ladybugDb.getClusterForSymbol(conn, middleware.symbolId),
     ];
     assert.ok(apiMembers[0] && apiMembers[1] && apiMembers[2]);
     assert.strictEqual(apiMembers[0].clusterId, apiCluster.clusterId);
@@ -217,12 +217,12 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     const distinctClusterIds = new Set([authCluster.clusterId, dataCluster.clusterId, apiCluster.clusterId]);
     assert.ok(distinctClusterIds.size >= 2, `Expected >=2 distinct clusters, got ${distinctClusterIds.size}`);
 
-    const loginProcesses = await kuzuDb.getProcessesForSymbol(conn, loginHandler.symbolId);
+    const loginProcesses = await ladybugDb.getProcessesForSymbol(conn, loginHandler.symbolId);
     assert.ok(loginProcesses.length >= 1);
     assert.strictEqual(loginProcesses[0]!.stepOrder, 0);
     assert.strictEqual(loginProcesses[0]!.role, "entry");
 
-    const loginFlow = await kuzuDb.getProcessFlow(conn, loginProcesses[0]!.processId);
+    const loginFlow = await ladybugDb.getProcessFlow(conn, loginProcesses[0]!.processId);
     const nameById = new Map(symbols.map((s) => [s.symbolId, s.name] as const));
     const loginNames = loginFlow.map((step) => nameById.get(step.symbolId));
     for (const expected of ["loginhandler", "login", "session", "token"]) {
@@ -232,12 +232,12 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
       );
     }
 
-    const dataProcesses = await kuzuDb.getProcessesForSymbol(conn, dataHandler.symbolId);
+    const dataProcesses = await ladybugDb.getProcessesForSymbol(conn, dataHandler.symbolId);
     assert.ok(dataProcesses.length >= 1);
     assert.strictEqual(dataProcesses[0]!.stepOrder, 0);
     assert.strictEqual(dataProcesses[0]!.role, "entry");
 
-    const dataFlow = await kuzuDb.getProcessFlow(conn, dataProcesses[0]!.processId);
+    const dataFlow = await ladybugDb.getProcessFlow(conn, dataProcesses[0]!.processId);
     const dataNames = dataFlow.map((step) => nameById.get(step.symbolId));
     for (const expected of ["datahandler", "query", "transform", "cache"]) {
       assert.ok(
@@ -246,7 +246,7 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
       );
     }
 
-    const chainEdges = await kuzuDb.getEdgesFromSymbolsLite(conn, [
+    const chainEdges = await ladybugDb.getEdgesFromSymbolsLite(conn, [
       loginHandler.symbolId,
       login.symbolId,
       session.symbolId,
@@ -339,7 +339,7 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     assert.ok(blastItems.length > 0);
 
     const blastSymbolIds = Array.from(new Set(blastItems.map((i) => i.symbolId)));
-    const blastSymbols = await kuzuDb.getSymbolsByIds(conn, blastSymbolIds);
+    const blastSymbols = await ladybugDb.getSymbolsByIds(conn, blastSymbolIds);
     const blastNameById = new Map(
       Array.from(blastSymbols.values()).map((s) => [s.symbolId, s.name] as const),
     );

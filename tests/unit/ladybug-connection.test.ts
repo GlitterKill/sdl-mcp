@@ -7,40 +7,40 @@ import { fileURLToPath } from "url";
 const testDir = dirname(fileURLToPath(import.meta.url));
 const testDbBase = join(testDir, "..", "..", ".test-kuzu-db");
 
-let getKuzuDb: (dbPath?: string) => Promise<unknown>;
-let getKuzuConn: () => Promise<unknown>;
-let closeKuzuDb: () => Promise<void>;
-let initKuzuDb: (dbPath: string) => Promise<void>;
-let isKuzuAvailable: () => boolean;
-let getKuzuDbPath: () => string | null;
+let getLadybugDb: (dbPath?: string) => Promise<unknown>;
+let getLadybugConn: () => Promise<unknown>;
+let closeLadybugDb: () => Promise<void>;
+let initLadybugDb: (dbPath: string) => Promise<void>;
+let isLadybugAvailable: () => boolean;
+let getLadybugDbPath: () => string | null;
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class
 let DatabaseErrorClass: new (message: string) => Error;
 let normalizePath: (p: string) => string;
-let kuzuAvailable = false;
+let ladybugAvailable = false;
 
-await import("../../dist/db/kuzu.js")
+await import("../../dist/db/ladybug.js")
   .then((kuzu) => {
-    getKuzuDb = kuzu.getKuzuDb;
-    getKuzuConn = kuzu.getKuzuConn;
-    closeKuzuDb = kuzu.closeKuzuDb;
-    initKuzuDb = kuzu.initKuzuDb;
-    isKuzuAvailable = kuzu.isKuzuAvailable;
-    getKuzuDbPath = kuzu.getKuzuDbPath;
-    kuzuAvailable = true;
+    getLadybugDb = kuzu.getLadybugDb;
+    getLadybugConn = kuzu.getLadybugConn;
+    closeLadybugDb = kuzu.closeLadybugDb;
+    initLadybugDb = kuzu.initLadybugDb;
+    isLadybugAvailable = kuzu.isLadybugAvailable;
+    getLadybugDbPath = kuzu.getLadybugDbPath;
+    ladybugAvailable = true;
   })
   .catch(() => {
-    getKuzuDb = async () => {
+    getLadybugDb = async () => {
       throw new Error("Module not built");
     };
-    getKuzuConn = async () => {
+    getLadybugConn = async () => {
       throw new Error("Module not built");
     };
-    closeKuzuDb = async () => {};
-    initKuzuDb = async () => {
+    closeLadybugDb = async () => {};
+    initLadybugDb = async () => {
       throw new Error("Module not built");
     };
-    isKuzuAvailable = () => false;
-    getKuzuDbPath = () => null;
+    isLadybugAvailable = () => false;
+    getLadybugDbPath = () => null;
   });
 
 await import("../../dist/mcp/errors.js")
@@ -76,25 +76,25 @@ function cleanupTestDb(name: string): void {
   }
 }
 
-describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
+describe("KuzuDB Connection Manager", { skip: !ladybugAvailable }, () => {
   beforeEach(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
   });
 
   afterEach(async () => {
-    await closeKuzuDb();
+    await closeLadybugDb();
   });
 
-  describe("getKuzuDb", () => {
+  describe("getLadybugDb", () => {
     it("should create database successfully through Ladybug alias", async () => {
       const testPath = getTestDbPath("alias-db-create");
       cleanupTestDb("alias-db-create");
 
       try {
-        const db = await getKuzuDb(testPath);
+        const db = await getLadybugDb(testPath);
         assert.ok(db, "Database should be created through alias");
       } finally {
-        await closeKuzuDb();
+        await closeLadybugDb();
         cleanupTestDb("alias-db-create");
       }
     });
@@ -104,12 +104,12 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
       cleanupTestDb("singleton");
 
       try {
-        const db1 = await getKuzuDb(testPath);
-        const db2 = await getKuzuDb(testPath);
+        const db1 = await getLadybugDb(testPath);
+        const db2 = await getLadybugDb(testPath);
 
         assert.strictEqual(db1, db2, "Should return the same instance");
       } finally {
-        await closeKuzuDb();
+        await closeLadybugDb();
         cleanupTestDb("singleton");
       }
     });
@@ -124,43 +124,43 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
           "Parent directory should not exist initially",
         );
 
-        await getKuzuDb(testPath);
+        await getLadybugDb(testPath);
 
         assert.ok(existsSync(testPath), "Parent directory should be created");
       } finally {
-        await closeKuzuDb();
+        await closeLadybugDb();
         cleanupTestDb("create-dir");
       }
     });
 
     it("should normalize Windows paths to forward slashes", async () => {
       const testPath = getTestDbPath("windows-path") + "\\subdir";
-      const expected = normalizePath(join(testPath, "sdl-mcp-graph.kuzu"));
+      const expected = normalizePath(join(testPath, "sdl-mcp-graph.lbug"));
       cleanupTestDb("windows-path");
 
       try {
-        await getKuzuDb(testPath);
+        await getLadybugDb(testPath);
 
-        const actualPath = getKuzuDbPath();
+        const actualPath = getLadybugDbPath();
         assert.strictEqual(actualPath, expected);
       } finally {
-        await closeKuzuDb();
+        await closeLadybugDb();
         cleanupTestDb("windows-path");
       }
     });
   });
 
-  describe("getKuzuConn", () => {
+  describe("getLadybugConn", () => {
     it("should create connection successfully through Ladybug alias", async () => {
       const testPath = getTestDbPath("alias-conn-create");
       cleanupTestDb("alias-conn-create");
 
       try {
-        await getKuzuDb(testPath);
-        const conn = await getKuzuConn();
+        await getLadybugDb(testPath);
+        const conn = await getLadybugConn();
         assert.ok(conn, "Connection should be created through alias");
       } finally {
-        await closeKuzuDb();
+        await closeLadybugDb();
         cleanupTestDb("alias-conn-create");
       }
     });
@@ -170,13 +170,13 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
       cleanupTestDb("conn-singleton");
 
       try {
-        await getKuzuDb(testPath);
-        const conn1 = await getKuzuConn();
-        const conn2 = await getKuzuConn();
+        await getLadybugDb(testPath);
+        const conn1 = await getLadybugConn();
+        const conn2 = await getLadybugConn();
 
         assert.strictEqual(conn1, conn2, "Should return the same connection");
       } finally {
-        await closeKuzuDb();
+        await closeLadybugDb();
         cleanupTestDb("conn-singleton");
       }
     });
@@ -193,85 +193,85 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
 
       try {
         delete connectionPrototype.setMaxNumThreadForExec;
-        await getKuzuDb(testPath);
+        await getLadybugDb(testPath);
         await assert.doesNotReject(async () => {
-          await getKuzuConn();
+          await getLadybugConn();
         });
       } finally {
         if (originalThreadSetter) {
           connectionPrototype.setMaxNumThreadForExec = originalThreadSetter;
         }
-        await closeKuzuDb();
+        await closeLadybugDb();
         cleanupTestDb("conn-no-thread-setter");
       }
     });
   });
 
-  describe("closeKuzuDb", () => {
+  describe("closeLadybugDb", () => {
     it("should close database and reset state", async () => {
       const testPath = getTestDbPath("close-test");
       cleanupTestDb("close-test");
 
       try {
-        await getKuzuDb(testPath);
-        assert.ok(getKuzuDbPath() !== null, "Path should be set");
+        await getLadybugDb(testPath);
+        assert.ok(getLadybugDbPath() !== null, "Path should be set");
 
-        await closeKuzuDb();
+        await closeLadybugDb();
 
         assert.strictEqual(
-          getKuzuDbPath(),
+          getLadybugDbPath(),
           null,
           "Path should be null after close",
         );
       } finally {
-        await closeKuzuDb();
+        await closeLadybugDb();
         cleanupTestDb("close-test");
       }
     });
 
     it("should be safe to call multiple times", async () => {
-      await closeKuzuDb();
-      await closeKuzuDb();
-      await closeKuzuDb();
+      await closeLadybugDb();
+      await closeLadybugDb();
+      await closeLadybugDb();
     });
   });
 
-  describe("initKuzuDb", () => {
+  describe("initLadybugDb", () => {
     it("should initialize database with schema", async () => {
       const testPath = getTestDbPath("init-schema");
       cleanupTestDb("init-schema");
 
       try {
-        await initKuzuDb(testPath);
+        await initLadybugDb(testPath);
 
-        const actualPath = getKuzuDbPath();
+        const actualPath = getLadybugDbPath();
         assert.ok(actualPath, "Database path should be set");
         assert.ok(existsSync(actualPath), "Database file should exist");
 
-        const conn = await getKuzuConn();
+        const conn = await getLadybugConn();
         assert.ok(conn, "Connection should be available after init");
       } finally {
-        await closeKuzuDb();
+        await closeLadybugDb();
         cleanupTestDb("init-schema");
       }
     });
   });
 
-  describe("isKuzuAvailable", () => {
+  describe("isLadybugAvailable", () => {
     it("should return boolean", () => {
-      const result = isKuzuAvailable();
+      const result = isLadybugAvailable();
       assert.strictEqual(typeof result, "boolean");
     });
 
     it("should return true when Ladybug alias is installed", () => {
-      assert.strictEqual(isKuzuAvailable(), true);
+      assert.strictEqual(isLadybugAvailable(), true);
     });
   });
 
-  describe("getKuzuDbPath", () => {
+  describe("getLadybugDbPath", () => {
     it("should return null when not initialized", async () => {
-      await closeKuzuDb();
-      assert.strictEqual(getKuzuDbPath(), null);
+      await closeLadybugDb();
+      assert.strictEqual(getLadybugDbPath(), null);
     });
   });
 
@@ -281,16 +281,16 @@ describe("KuzuDB Connection Manager", { skip: !kuzuAvailable }, () => {
       cleanupTestDb("path-norm");
 
       try {
-        await getKuzuDb(testPath);
+        await getLadybugDb(testPath);
 
-        const storedPath = getKuzuDbPath();
+        const storedPath = getLadybugDbPath();
         assert.ok(storedPath?.includes("/"), "Path should use forward slashes");
         assert.ok(
           !storedPath?.includes("\\"),
           "Path should not contain backslashes",
         );
       } finally {
-        await closeKuzuDb();
+        await closeLadybugDb();
         cleanupTestDb("path-norm");
       }
     });

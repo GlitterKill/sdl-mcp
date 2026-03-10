@@ -6,9 +6,9 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".kuzu-symbol-test-db.kuzu");
+const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-symbol-test-db.lbug");
 
-interface KuzuConnection {
+interface LadybugConnection {
   query: (q: string) => Promise<{
     hasNext: () => boolean;
     getNext: () => Promise<Record<string, unknown>>;
@@ -17,13 +17,13 @@ interface KuzuConnection {
   close: () => Promise<void>;
 }
 
-interface KuzuDatabase {
+interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
 async function createTestDb(): Promise<{
-  db: KuzuDatabase;
-  conn: KuzuConnection;
+  db: LadybugDatabase;
+  conn: LadybugConnection;
 }> {
   if (existsSync(TEST_DB_PATH)) {
     rmSync(TEST_DB_PATH, { recursive: true, force: true });
@@ -34,10 +34,10 @@ async function createTestDb(): Promise<{
   const db = new kuzu.Database(TEST_DB_PATH);
   const conn = new kuzu.Connection(db);
 
-  return { db, conn: conn as unknown as KuzuConnection };
+  return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<void> {
+async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -51,21 +51,21 @@ async function cleanupTestDb(db: KuzuDatabase, conn: KuzuConnection): Promise<vo
   } catch {}
 }
 
-async function exec(conn: KuzuConnection, q: string): Promise<void> {
+async function exec(conn: LadybugConnection, q: string): Promise<void> {
   const result = await conn.query(q);
   result.close();
 }
 
-async function setupSchema(conn: KuzuConnection): Promise<void> {
-  const { createSchema } = await import("../../dist/db/kuzu-schema.js");
+async function setupSchema(conn: LadybugConnection): Promise<void> {
+  const { createSchema } = await import("../../dist/db/ladybug-schema.js");
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
 describe("KuzuDB Symbol Queries", () => {
-  let db: KuzuDatabase;
-  let conn: KuzuConnection;
-  let queries: typeof import("../../dist/db/kuzu-queries.js");
-  let kuzuAvailable = true;
+  let db: LadybugDatabase;
+  let conn: LadybugConnection;
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
+  let ladybugAvailable = true;
 
   const repoId = "sym-repo";
   const fileId = "sym-file";
@@ -74,7 +74,7 @@ describe("KuzuDB Symbol Queries", () => {
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
-      queries = await import("../../dist/db/kuzu-queries.js");
+      queries = await import("../../dist/db/ladybug-queries.js");
 
       await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {
         repoId,
@@ -92,16 +92,16 @@ describe("KuzuDB Symbol Queries", () => {
         lastIndexedAt: null,
       });
     } catch {
-      kuzuAvailable = false;
+      ladybugAvailable = false;
     }
   });
 
   afterEach(async () => {
-    if (!kuzuAvailable) return;
+    if (!ladybugAvailable) return;
     await cleanupTestDb(db, conn);
   });
 
-  it("upsertSymbol/getSymbol round-trip with JSON fields", { skip: !kuzuAvailable }, async () => {
+  it("upsertSymbol/getSymbol round-trip with JSON fields", { skip: !ladybugAvailable }, async () => {
     const symbolId = "sym-1";
     const signatureJson = JSON.stringify({ name: "fn", args: ["a", "b"] });
 
@@ -138,7 +138,7 @@ describe("KuzuDB Symbol Queries", () => {
     assert.strictEqual(symbol.exported, true);
   });
 
-  it("getSymbolsByFile/getSymbolsByRepo", { skip: !kuzuAvailable }, async () => {
+  it("getSymbolsByFile/getSymbolsByRepo", { skip: !ladybugAvailable }, async () => {
     await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
       symbolId: "sym-a",
       repoId,
@@ -175,7 +175,7 @@ describe("KuzuDB Symbol Queries", () => {
     assert.strictEqual(byRepo[0]!.symbolId, "sym-a");
   });
 
-  it("getSymbolsByIds handles 500+ IDs", { skip: !kuzuAvailable }, async () => {
+  it("getSymbolsByIds handles 500+ IDs", { skip: !ladybugAvailable }, async () => {
     await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
       symbolId: "sym-batch-1",
       repoId,
@@ -211,7 +211,7 @@ describe("KuzuDB Symbol Queries", () => {
     assert.ok(result.has("sym-batch-1"));
   });
 
-  it("findSymbolsInRange orders contained symbols first", { skip: !kuzuAvailable }, async () => {
+  it("findSymbolsInRange orders contained symbols first", { skip: !ladybugAvailable }, async () => {
     await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
       symbolId: "sym-range-outer",
       repoId,
@@ -265,7 +265,7 @@ describe("KuzuDB Symbol Queries", () => {
     assert.strictEqual(found[0]!.symbolId, "sym-range-inner");
   });
 
-  it("deleteSymbolsByFileId removes symbols but preserves file", { skip: !kuzuAvailable }, async () => {
+  it("deleteSymbolsByFileId removes symbols but preserves file", { skip: !ladybugAvailable }, async () => {
     await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
       symbolId: "sym-del",
       repoId,
@@ -306,7 +306,7 @@ describe("KuzuDB Symbol Queries", () => {
     assert.ok(fileAfter);
   });
 
-  it("getSymbolsByRepoForSnapshot returns projection", { skip: !kuzuAvailable }, async () => {
+  it("getSymbolsByRepoForSnapshot returns projection", { skip: !ladybugAvailable }, async () => {
     await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
       symbolId: "sym-snap",
       repoId,
@@ -343,7 +343,7 @@ describe("KuzuDB Symbol Queries", () => {
     ]);
   });
 
-  it("getSymbolCount counts symbols in repo", { skip: !kuzuAvailable }, async () => {
+  it("getSymbolCount counts symbols in repo", { skip: !ladybugAvailable }, async () => {
     await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
       symbolId: "sym-count",
       repoId,
