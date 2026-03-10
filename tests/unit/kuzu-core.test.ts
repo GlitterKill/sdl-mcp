@@ -6,7 +6,17 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { toNumber, toBoolean, assertSafeInt, isJoinHintSyntaxUnsupported } from "../../src/db/kuzu-core.js";
+import {
+  toNumber,
+  toBoolean,
+  assertSafeInt,
+  isJoinHintSyntaxUnsupported,
+  queryAll,
+  querySingle,
+  exec,
+  withTransaction,
+  getPreparedStatement,
+} from "../../src/db/kuzu-core.js";
 
 describe("toNumber", () => {
   it("returns number as-is", () => {
@@ -77,42 +87,43 @@ describe("assertSafeInt", () => {
   });
 
   it("throws DatabaseError for values outside safe integer range", () => {
-    assert.throws(
-      () => assertSafeInt(Number.MAX_SAFE_INTEGER + 1, "value"),
-      { name: "DatabaseError" }
-    );
+    assert.throws(() => assertSafeInt(Number.MAX_SAFE_INTEGER + 1, "value"), {
+      name: "DatabaseError",
+    });
   });
 
   it("throws DatabaseError for Infinity", () => {
-    assert.throws(
-      () => assertSafeInt(Infinity, "value"),
-      { name: "DatabaseError" }
-    );
+    assert.throws(() => assertSafeInt(Infinity, "value"), {
+      name: "DatabaseError",
+    });
   });
 
   it("throws DatabaseError for NaN", () => {
-    assert.throws(
-      () => assertSafeInt(NaN, "value"),
-      { name: "DatabaseError" }
-    );
+    assert.throws(() => assertSafeInt(NaN, "value"), { name: "DatabaseError" });
   });
 
   it("throws DatabaseError for floats", () => {
-    assert.throws(
-      () => assertSafeInt(1.5, "value"),
-      { name: "DatabaseError" }
-    );
+    assert.throws(() => assertSafeInt(1.5, "value"), { name: "DatabaseError" });
   });
 });
 
 describe("isJoinHintSyntaxUnsupported", () => {
   it("returns true for HINT-related error messages", () => {
-    assert.equal(isJoinHintSyntaxUnsupported(new Error("extraneous input 'HINT'")), true);
-    assert.equal(isJoinHintSyntaxUnsupported(new Error('extraneous input "HINT"')), true);
+    assert.equal(
+      isJoinHintSyntaxUnsupported(new Error("extraneous input 'HINT'")),
+      true,
+    );
+    assert.equal(
+      isJoinHintSyntaxUnsupported(new Error('extraneous input "HINT"')),
+      true,
+    );
   });
 
   it("returns false for unrelated errors", () => {
-    assert.equal(isJoinHintSyntaxUnsupported(new Error("connection failed")), false);
+    assert.equal(
+      isJoinHintSyntaxUnsupported(new Error("connection failed")),
+      false,
+    );
     assert.equal(isJoinHintSyntaxUnsupported(new Error("syntax error")), false);
   });
 
@@ -120,5 +131,135 @@ describe("isJoinHintSyntaxUnsupported", () => {
     assert.equal(isJoinHintSyntaxUnsupported("extraneous input 'HINT'"), true);
     assert.equal(isJoinHintSyntaxUnsupported("some other error"), false);
     assert.equal(isJoinHintSyntaxUnsupported(null), false);
+  });
+});
+
+describe("query helpers", () => {
+  function makeQueryResult<T>(rows: T[]) {
+    let index = 0;
+    let closed = 0;
+    return {
+      result: {
+        hasNext: () => index < rows.length,
+        getNext: async () => rows[index++] as Record<string, unknown>,
+        getAll: async () => rows,
+        close: () => {
+          closed += 1;
+        },
+      },
+      getClosedCount: () => closed,
+    };
+  }
+
+  it("prepare + execute round-trip caches statements and binds params", async () => {
+    const calls: Array<{ prepared: string; params: Record<string, unknown> }> =
+      [];
+    const preparedByStatement = new Map<string, string>();
+    const conn = {
+      prepare: async (statement: string) => {
+        const prepared = `prepared:${statement}`;
+        preparedByStatement.set(statement, prepared);
+        return prepared;
+      },
+      execute: async (prepared: unknown, params: unknown) => {
+        calls.push({
+          prepared: String(prepared),
+          params: params as Record<string, unknown>,
+        });
+        const qr = makeQueryResult([{ value: 1 }]);
+        return qr.result;
+      },
+    };
+
+    const statement = "RETURN $value AS value";
+    const prepared1 = await getPreparedStatement(
+      conn as unknown as import("kuzu").Connection,
+      statement,
+    );
+    const prepared2 = await getPreparedStatement(
+      conn as unknown as import("kuzu").Connection,
+      statement,
+    );
+
+    assert.equal(prepared1, prepared2);
+
+    const rows = await queryAll<{ value: number }>(
+      conn as unknown as import("kuzu").Connection,
+      statement,
+      { value: 1 },
+    );
+
+    assert.deepEqual(rows, [{ value: 1 }]);
+    assert.equal(calls.length, 1);
+    assert.equal(
+      calls[0]?.prepared,
+      String(preparedByStatement.get(statement)),
+    );
+    assert.deepEqual(calls[0]?.params, { value: 1 });
+  });
+
+  it("queryAll/querySingle coerce array results and close all QueryResults", async () => {
+    const first = makeQueryResult([{ ignored: true }]);
+    const second = makeQueryResult([{ id: "row-1" }, { id: "row-2" }]);
+
+    const conn = {
+      prepare: async (_statement: string) => "prepared",
+      execute: async () => [first.result, second.result],
+    };
+
+    const rows = await queryAll<{ id: string }>(
+      conn as unknown as import("kuzu").Connection,
+      "RETURN 1",
+    );
+    assert.deepEqual(rows, [{ id: "row-1" }, { id: "row-2" }]);
+    assert.equal(first.getClosedCount(), 1);
+    assert.equal(second.getClosedCount(), 1);
+
+    const single = await querySingle<{ id: string }>(
+      conn as unknown as import("kuzu").Connection,
+      "RETURN 1",
+    );
+    assert.deepEqual(single, { id: "row-1" });
+  });
+
+  it("exec and withTransaction close results and manage begin/commit/rollback", async () => {
+    const statements: string[] = [];
+    const conn = {
+      prepare: async (statement: string) => statement,
+      execute: async (prepared: unknown) => {
+        statements.push(String(prepared));
+        const qr = makeQueryResult<Record<string, unknown>>([]);
+        return qr.result;
+      },
+    };
+
+    await exec(conn as unknown as import("kuzu").Connection, "RETURN 1");
+
+    await withTransaction(
+      conn as unknown as import("kuzu").Connection,
+      async () => {
+        await exec(conn as unknown as import("kuzu").Connection, "RETURN 2");
+        return null;
+      },
+    );
+
+    await assert.rejects(
+      withTransaction(
+        conn as unknown as import("kuzu").Connection,
+        async () => {
+          throw new Error("boom");
+        },
+      ),
+      /boom/,
+    );
+
+    assert.deepEqual(statements, [
+      "RETURN 1",
+      "BEGIN TRANSACTION",
+      "RETURN 2",
+      "COMMIT",
+      "BEGIN TRANSACTION",
+      "ROLLBACK",
+    ]);
   });
 });
