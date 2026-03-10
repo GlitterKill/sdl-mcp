@@ -18,6 +18,7 @@
  */
 
 import type { Connection } from "kuzu";
+import { exec } from "./ladybug-core.js";
 
 const NODE_TABLES: string[] = [
   `CREATE NODE TABLE IF NOT EXISTS Repo (
@@ -281,10 +282,11 @@ export async function createSchema(conn: Connection): Promise<void> {
 
   // Insert or verify schema version
   const now = new Date().toISOString();
-  await execDdl(
+  await exec(
     conn,
     `MERGE (sv:SchemaVersion {id: 'current'})
-     ON CREATE SET sv.schemaVersion = ${LADYBUG_SCHEMA_VERSION}, sv.createdAt = '${now}', sv.updatedAt = '${now}'`,
+     ON CREATE SET sv.schemaVersion = $schemaVersion, sv.createdAt = $createdAt, sv.updatedAt = $updatedAt`,
+    { schemaVersion: LADYBUG_SCHEMA_VERSION, createdAt: now, updatedAt: now },
   );
 }
 

@@ -4,14 +4,14 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 
-describe("CLI doctor command - KuzuDB", () => {
+describe("CLI doctor command - LadybugDB", () => {
   let tempDir: string;
   let originalExit: typeof process.exit;
   let originalSDLConfig: string | undefined;
   let originalSDLConfigPath: string | undefined;
 
   beforeEach(() => {
-    tempDir = join(tmpdir(), `sdl-mcp-doctor-kuzu-test-${Date.now()}`);
+    tempDir = join(tmpdir(), `sdl-mcp-doctor-ladybug-test-${Date.now()}`);
     mkdirSync(tempDir, { recursive: true });
 
     originalSDLConfig = process.env.SDL_CONFIG;
@@ -45,7 +45,7 @@ describe("CLI doctor command - KuzuDB", () => {
     }
   });
 
-  it("reports KuzuDB status when configured", async () => {
+  it("reports LadybugDB status when configured", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
     const ladybugPath = join(tempDir, "sdl-mcp-graph.lbug");
 
@@ -56,7 +56,8 @@ describe("CLI doctor command - KuzuDB", () => {
     };
     writeFileSync(configPath, JSON.stringify(config));
 
-    const { initLadybugDb, closeLadybugDb } = await import("../../src/db/ladybug.js");
+    const { initLadybugDb, closeLadybugDb } =
+      await import("../../src/db/ladybug.js");
     const { doctorCommand } = await import("../../src/cli/commands/doctor.js");
     await initLadybugDb(ladybugPath);
 
@@ -76,18 +77,18 @@ describe("CLI doctor command - KuzuDB", () => {
     }
 
     assert.ok(
-      output.includes("Graph database") || output.includes("KuzuDB"),
-      "Output should mention graph database or KuzuDB"
+      output.includes("Graph database") || output.includes("LadybugDB"),
+      "Output should mention graph database or LadybugDB",
     );
   });
 
-  it("warns when KuzuDB file does not exist", async () => {
+  it("warns when LadybugDB file does not exist", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
 
     const config = {
       repos: [{ repoId: "test", rootPath: tempDir }],
       dbPath: join(tempDir, "sdlmcp.sqlite"),
-      graphDatabase: { path: join(tempDir, "nonexistent-kuzudb.lbug") },
+      graphDatabase: { path: join(tempDir, "nonexistent-ladybugdb.lbug") },
     };
     writeFileSync(configPath, JSON.stringify(config));
 
@@ -109,7 +110,7 @@ describe("CLI doctor command - KuzuDB", () => {
 
     assert.ok(
       output.includes("not found") || output.includes("warn"),
-      "Output should indicate KuzuDB file not found"
+      "Output should indicate LadybugDB file not found",
     );
   });
 
@@ -139,8 +140,8 @@ describe("CLI doctor command - KuzuDB", () => {
     }
 
     assert.ok(
-      output.includes("Graph database") || output.includes("KuzuDB"),
-      "Output should mention graph database"
+      output.includes("Graph database") || output.includes("LadybugDB"),
+      "Output should mention graph database",
     );
   });
 });

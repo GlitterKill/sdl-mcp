@@ -7,13 +7,13 @@
         "maxMs": 8000,
         "trend": "lower-is-better",
         "allowableIncreasePercent": 30,
-        "_comment": "Raised for KuzuDB graph backend: Windows CI runners see ~4500-6000ms per file."
+        "_comment": "Raised for LadybugDB graph backend: Windows CI runners see ~4500-6000ms per file."
       },
       "indexTimePerSymbol": {
         "maxMs": 500,
         "trend": "lower-is-better",
         "allowableIncreasePercent": 30,
-        "_comment": "Raised for KuzuDB graph backend: Windows graph operations cost more."
+        "_comment": "Raised for LadybugDB graph backend: Windows graph operations cost more."
       }
     },
     "quality": {

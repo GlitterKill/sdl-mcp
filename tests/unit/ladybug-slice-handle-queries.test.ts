@@ -6,7 +6,12 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-slice-handle-test-db.lbug");
+const TEST_DB_PATH = join(
+  __dirname,
+  "..",
+  "..",
+  ".lbug-slice-handle-test-db.lbug",
+);
 
 interface LadybugConnection {
   query: (q: string) => Promise<{
@@ -37,7 +42,10 @@ async function createTestDb(): Promise<{
   return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
+async function cleanupTestDb(
+  db: LadybugDatabase,
+  conn: LadybugConnection,
+): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -56,7 +64,7 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
-describe("KuzuDB Slice Handle & Cache Queries", () => {
+describe("LadybugDB Slice Handle & Cache Queries", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
   let queries: typeof import("../../dist/db/ladybug-queries.js");
@@ -77,57 +85,83 @@ describe("KuzuDB Slice Handle & Cache Queries", () => {
     await cleanupTestDb(db, conn);
   });
 
-  it("upsertSliceHandle/getSliceHandle round-trip", { skip: !ladybugAvailable }, async () => {
-    await queries.upsertSliceHandle(conn as unknown as import("kuzu").Connection, {
-      handle: "h1",
-      repoId: "repo",
-      createdAt: "2026-03-04T00:00:00Z",
-      expiresAt: "2026-03-05T00:00:00Z",
-      minVersion: null,
-      maxVersion: null,
-      sliceHash: "hash",
-      spilloverRef: null,
-    });
+  it(
+    "upsertSliceHandle/getSliceHandle round-trip",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.upsertSliceHandle(
+        conn as unknown as import("kuzu").Connection,
+        {
+          handle: "h1",
+          repoId: "repo",
+          createdAt: "2026-03-04T00:00:00Z",
+          expiresAt: "2026-03-05T00:00:00Z",
+          minVersion: null,
+          maxVersion: null,
+          sliceHash: "hash",
+          spilloverRef: null,
+        },
+      );
 
-    const row = await queries.getSliceHandle(conn as unknown as import("kuzu").Connection, "h1");
-    assert.ok(row);
-    assert.strictEqual(row.handle, "h1");
-    assert.strictEqual(row.repoId, "repo");
-  });
+      const row = await queries.getSliceHandle(
+        conn as unknown as import("kuzu").Connection,
+        "h1",
+      );
+      assert.ok(row);
+      assert.strictEqual(row.handle, "h1");
+      assert.strictEqual(row.repoId, "repo");
+    },
+  );
 
-  it("deleteExpiredSliceHandles removes expired handles", { skip: !ladybugAvailable }, async () => {
-    await queries.upsertSliceHandle(conn as unknown as import("kuzu").Connection, {
-      handle: "expired",
-      repoId: "repo",
-      createdAt: "2026-03-04T00:00:00Z",
-      expiresAt: "2026-03-04T00:00:00Z",
-      minVersion: null,
-      maxVersion: null,
-      sliceHash: "hash",
-      spilloverRef: null,
-    });
-    await queries.upsertSliceHandle(conn as unknown as import("kuzu").Connection, {
-      handle: "live",
-      repoId: "repo",
-      createdAt: "2026-03-04T00:00:00Z",
-      expiresAt: "2026-03-06T00:00:00Z",
-      minVersion: null,
-      maxVersion: null,
-      sliceHash: "hash",
-      spilloverRef: null,
-    });
+  it(
+    "deleteExpiredSliceHandles removes expired handles",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.upsertSliceHandle(
+        conn as unknown as import("kuzu").Connection,
+        {
+          handle: "expired",
+          repoId: "repo",
+          createdAt: "2026-03-04T00:00:00Z",
+          expiresAt: "2026-03-04T00:00:00Z",
+          minVersion: null,
+          maxVersion: null,
+          sliceHash: "hash",
+          spilloverRef: null,
+        },
+      );
+      await queries.upsertSliceHandle(
+        conn as unknown as import("kuzu").Connection,
+        {
+          handle: "live",
+          repoId: "repo",
+          createdAt: "2026-03-04T00:00:00Z",
+          expiresAt: "2026-03-06T00:00:00Z",
+          minVersion: null,
+          maxVersion: null,
+          sliceHash: "hash",
+          spilloverRef: null,
+        },
+      );
 
-    const deleted = await queries.deleteExpiredSliceHandles(
-      conn as unknown as import("kuzu").Connection,
-      "2026-03-05T00:00:00Z",
-    );
-    assert.strictEqual(deleted, 1);
+      const deleted = await queries.deleteExpiredSliceHandles(
+        conn as unknown as import("kuzu").Connection,
+        "2026-03-05T00:00:00Z",
+      );
+      assert.strictEqual(deleted, 1);
 
-    const expiredRow = await queries.getSliceHandle(conn as unknown as import("kuzu").Connection, "expired");
-    assert.strictEqual(expiredRow, null);
-    const liveRow = await queries.getSliceHandle(conn as unknown as import("kuzu").Connection, "live");
-    assert.ok(liveRow);
-  });
+      const expiredRow = await queries.getSliceHandle(
+        conn as unknown as import("kuzu").Connection,
+        "expired",
+      );
+      assert.strictEqual(expiredRow, null);
+      const liveRow = await queries.getSliceHandle(
+        conn as unknown as import("kuzu").Connection,
+        "live",
+      );
+      assert.ok(liveRow);
+    },
+  );
 
   it("upsertCardHash/getCardHash", { skip: !ladybugAvailable }, async () => {
     await queries.upsertCardHash(conn as unknown as import("kuzu").Connection, {
@@ -136,7 +170,10 @@ describe("KuzuDB Slice Handle & Cache Queries", () => {
       createdAt: "2026-03-04T00:00:00Z",
     });
 
-    const row = await queries.getCardHash(conn as unknown as import("kuzu").Connection, "ch1");
+    const row = await queries.getCardHash(
+      conn as unknown as import("kuzu").Connection,
+      "ch1",
+    );
     assert.ok(row);
     assert.strictEqual(row.cardBlob, "blob");
   });

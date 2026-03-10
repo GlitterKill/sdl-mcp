@@ -11,7 +11,11 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../../src/db/ladybug.js";
 import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { indexRepo } from "../../src/indexer/indexer.js";
 import { handleSymbolSearch } from "../../src/mcp/tools/symbol.js";
@@ -90,7 +94,7 @@ describe("MCP Tool Language Regressions", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    // Init KuzuDB and seed the repo record
+    // Init LadybugDB and seed the repo record
     await closeLadybugDb();
     await initLadybugDb(dbPath);
     const conn = await getLadybugConn();
@@ -131,11 +135,11 @@ describe("MCP Tool Language Regressions", () => {
       query: "SdlSmokeTsxCard",
       limit: 10,
     });
-    const found = result.results.some((r: any) => r.name === "SdlSmokeTsxCard");
+    const found = result.results.some((r) => r.name === "SdlSmokeTsxCard");
     assert.ok(
       found,
       `SdlSmokeTsxCard not found via handleSymbolSearch. ` +
-        `Got: ${result.results.map((r: any) => r.name).join(", ") || "(none)"}`,
+        `Got: ${result.results.map((r) => r.name).join(", ") || "(none)"}`,
     );
   });
 
@@ -145,11 +149,11 @@ describe("MCP Tool Language Regressions", () => {
       query: "SdlSmokeJsxApp",
       limit: 10,
     });
-    const found = result.results.some((r: any) => r.name === "SdlSmokeJsxApp");
+    const found = result.results.some((r) => r.name === "SdlSmokeJsxApp");
     assert.ok(
       found,
       `SdlSmokeJsxApp not found via handleSymbolSearch. ` +
-        `Got: ${result.results.map((r: any) => r.name).join(", ") || "(none)"}`,
+        `Got: ${result.results.map((r) => r.name).join(", ") || "(none)"}`,
     );
   });
 
@@ -173,11 +177,11 @@ describe("MCP Tool Language Regressions", () => {
       query: "User",
       limit: 20,
     });
-    const found = result.results.some((r: any) => r.name === "User");
+    const found = result.results.some((r) => r.name === "User");
     assert.ok(
       found,
       `Kotlin symbol 'User' not found via handleSymbolSearch. ` +
-        `Got: ${result.results.map((r: any) => r.name).join(", ") || "(none)"}. ` +
+        `Got: ${result.results.map((r) => r.name).join(", ") || "(none)"}. ` +
         `This means Kotlin indexing is broken despite grammar loading successfully.`,
     );
   });

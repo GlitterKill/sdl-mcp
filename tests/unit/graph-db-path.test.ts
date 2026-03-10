@@ -65,7 +65,7 @@ describe("resolveGraphDbPath", () => {
     assert.strictEqual(resolved, resolve("C:/tmp/sdl-mcp-graph.lbug"));
   });
 
-  it("maps a legacy directory-style graph path to a Kuzu file inside that directory", () => {
+  it("maps a legacy directory-style graph path to a LadybugDB file inside that directory", () => {
     const configPath = resolve("C:/tmp/sdlmcp.config.json");
     const resolved = resolveGraphDbPath(
       {

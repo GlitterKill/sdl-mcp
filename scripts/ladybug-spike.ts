@@ -16,7 +16,7 @@
  * - 3-hop BFS on 10K nodes completes in < 500ms
  *
  * Usage:
- *   tsx scripts/kuzu-spike.ts
+ *   tsx scripts/ladybug-spike.ts
  */
 
 import { existsSync, rmSync, mkdirSync } from "fs";

@@ -14,7 +14,11 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import type { SymbolRow } from "../../dist/db/ladybug-queries.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
@@ -27,7 +31,7 @@ import { handleSymbolGetCard } from "../../dist/mcp/tools/symbol.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const REPO_ID = "test-kuzu-e2e-repo";
+const REPO_ID = "test-ladybug-e2e-repo";
 
 /** Reliable recursive directory copy (cpSync is experimental before Node 22). */
 function copyDirSync(src: string, dest: string): void {
@@ -51,15 +55,16 @@ function findSymbol(
   const match = symbols.find((s) => s.name === name && s.kind === kind);
   if (!match) {
     const byName = symbols.filter((s) => s.name === name);
-    const hint = byName.length > 0
-      ? ` (found with kinds: ${byName.map((s) => s.kind).join(", ")})`
-      : ` (not found at all among ${symbols.length} symbols)`;
+    const hint =
+      byName.length > 0
+        ? ` (found with kinds: ${byName.map((s) => s.kind).join(", ")})`
+        : ` (not found at all among ${symbols.length} symbols)`;
     assert.fail(`Expected symbol ${kind}:${name} to exist${hint}`);
   }
   return match;
 }
 
-describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
+describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
   const fixtureRoot = join(__dirname, "..", "fixtures", "clustered-repo");
   const graphDbPath = join(__dirname, ".lbug-e2e-test-db");
   const configPath = join(graphDbPath, "test-config.json");
@@ -77,7 +82,7 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     }
     mkdirSync(graphDbPath, { recursive: true });
 
-    repoDir = mkdtempSync(join(tmpdir(), "sdl-mcp-kuzu-e2e-repo-"));
+    repoDir = mkdtempSync(join(tmpdir(), "sdl-mcp-ladybug-e2e-repo-"));
     copyDirSync(fixtureRoot, repoDir);
 
     writeFileSync(
@@ -157,7 +162,10 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
 
     const conn = await getLadybugConn();
     const clusters = await ladybugDb.getClustersForRepo(conn, REPO_ID);
-    assert.ok(clusters.length >= 2, `Expected >=2 clusters, got ${clusters.length}`);
+    assert.ok(
+      clusters.length >= 2,
+      `Expected >=2 clusters, got ${clusters.length}`,
+    );
 
     const procStats = await ladybugDb.getProcessOverviewStats(conn, REPO_ID);
     assert.strictEqual(procStats.totalProcesses, 2);
@@ -176,9 +184,18 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     const dataHandler = findSymbol(symbols, "datahandler");
     const middleware = findSymbol(symbols, "middleware");
 
-    const authCluster = await ladybugDb.getClusterForSymbol(conn, login.symbolId);
-    const dataCluster = await ladybugDb.getClusterForSymbol(conn, query.symbolId);
-    const apiCluster = await ladybugDb.getClusterForSymbol(conn, routesApi.symbolId);
+    const authCluster = await ladybugDb.getClusterForSymbol(
+      conn,
+      login.symbolId,
+    );
+    const dataCluster = await ladybugDb.getClusterForSymbol(
+      conn,
+      query.symbolId,
+    );
+    const apiCluster = await ladybugDb.getClusterForSymbol(
+      conn,
+      routesApi.symbolId,
+    );
 
     assert.ok(authCluster);
     assert.ok(dataCluster);
@@ -214,15 +231,28 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     // API cluster may merge with either one depending on edge resolution, so we only
     // require at least 2 distinct clusters across all three groups.
     assert.notStrictEqual(authCluster.clusterId, dataCluster.clusterId);
-    const distinctClusterIds = new Set([authCluster.clusterId, dataCluster.clusterId, apiCluster.clusterId]);
-    assert.ok(distinctClusterIds.size >= 2, `Expected >=2 distinct clusters, got ${distinctClusterIds.size}`);
+    const distinctClusterIds = new Set([
+      authCluster.clusterId,
+      dataCluster.clusterId,
+      apiCluster.clusterId,
+    ]);
+    assert.ok(
+      distinctClusterIds.size >= 2,
+      `Expected >=2 distinct clusters, got ${distinctClusterIds.size}`,
+    );
 
-    const loginProcesses = await ladybugDb.getProcessesForSymbol(conn, loginHandler.symbolId);
+    const loginProcesses = await ladybugDb.getProcessesForSymbol(
+      conn,
+      loginHandler.symbolId,
+    );
     assert.ok(loginProcesses.length >= 1);
     assert.strictEqual(loginProcesses[0]!.stepOrder, 0);
     assert.strictEqual(loginProcesses[0]!.role, "entry");
 
-    const loginFlow = await ladybugDb.getProcessFlow(conn, loginProcesses[0]!.processId);
+    const loginFlow = await ladybugDb.getProcessFlow(
+      conn,
+      loginProcesses[0]!.processId,
+    );
     const nameById = new Map(symbols.map((s) => [s.symbolId, s.name] as const));
     const loginNames = loginFlow.map((step) => nameById.get(step.symbolId));
     for (const expected of ["loginhandler", "login", "session", "token"]) {
@@ -232,12 +262,18 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
       );
     }
 
-    const dataProcesses = await ladybugDb.getProcessesForSymbol(conn, dataHandler.symbolId);
+    const dataProcesses = await ladybugDb.getProcessesForSymbol(
+      conn,
+      dataHandler.symbolId,
+    );
     assert.ok(dataProcesses.length >= 1);
     assert.strictEqual(dataProcesses[0]!.stepOrder, 0);
     assert.strictEqual(dataProcesses[0]!.role, "entry");
 
-    const dataFlow = await ladybugDb.getProcessFlow(conn, dataProcesses[0]!.processId);
+    const dataFlow = await ladybugDb.getProcessFlow(
+      conn,
+      dataProcesses[0]!.processId,
+    );
     const dataNames = dataFlow.map((step) => nameById.get(step.symbolId));
     for (const expected of ["datahandler", "query", "transform", "cache"]) {
       assert.ok(
@@ -284,10 +320,14 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     assert.ok(slice.cards.some((c) => c.symbolId === loginHandler.symbolId));
     assert.ok(slice.cards.some((c) => c.symbolId === dataHandler.symbolId));
 
-    const entryClusterId = slice.cards.find((c) => c.symbolId === routesApi.symbolId)?.cluster?.clusterId;
+    const entryClusterId = slice.cards.find(
+      (c) => c.symbolId === routesApi.symbolId,
+    )?.cluster?.clusterId;
     assert.strictEqual(entryClusterId, apiCluster.clusterId);
 
-    const sameClusterCount = slice.cards.filter((c) => c.cluster?.clusterId === entryClusterId).length;
+    const sameClusterCount = slice.cards.filter(
+      (c) => c.cluster?.clusterId === entryClusterId,
+    ).length;
     assert.ok(
       sameClusterCount >= 2,
       `Expected >=2 same-cluster symbols in slice, got ${sameClusterCount}`,
@@ -300,7 +340,7 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     writeFileSync(
       loginPath,
       [
-        "import { session } from \"./session\";",
+        'import { session } from "./session";',
         "",
         "export function login(user: string): string {",
         "  const normalizedUser = user;",
@@ -312,7 +352,7 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
         "}",
         "",
         "export function loginAuditEntry(): string {",
-        "  return loginAudit(\"audit\");",
+        '  return loginAudit("audit");',
         "}",
         "",
       ].join("\n"),
@@ -338,10 +378,14 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     const blastItems = governor.blastRadius;
     assert.ok(blastItems.length > 0);
 
-    const blastSymbolIds = Array.from(new Set(blastItems.map((i) => i.symbolId)));
+    const blastSymbolIds = Array.from(
+      new Set(blastItems.map((i) => i.symbolId)),
+    );
     const blastSymbols = await ladybugDb.getSymbolsByIds(conn, blastSymbolIds);
     const blastNameById = new Map(
-      Array.from(blastSymbols.values()).map((s) => [s.symbolId, s.name] as const),
+      Array.from(blastSymbols.values()).map(
+        (s) => [s.symbolId, s.name] as const,
+      ),
     );
 
     const byName = new Map<string, { symbolId: string; signal: string }>();
@@ -356,7 +400,10 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     assert.strictEqual(byName.get("session")?.signal, "process");
     assert.strictEqual(byName.get("token")?.signal, "process");
 
-    const cardResponse = await handleSymbolGetCard({ repoId: REPO_ID, symbolId: loginHandler.symbolId });
+    const cardResponse = await handleSymbolGetCard({
+      repoId: REPO_ID,
+      symbolId: loginHandler.symbolId,
+    });
     if ("notModified" in cardResponse) {
       throw new Error("Expected full card response, got notModified");
     }
@@ -364,9 +411,15 @@ describe("Kuzu E2E (clusters + processes + slices + delta)", () => {
     assert.ok(Array.isArray(cardResponse.card.processes));
     assert.ok(cardResponse.card.processes.length >= 1);
 
-    const overview = await buildRepoOverview({ repoId: REPO_ID, level: "stats" });
+    const overview = await buildRepoOverview({
+      repoId: REPO_ID,
+      level: "stats",
+    });
     assert.ok(overview.clusters);
-    assert.ok(overview.clusters.totalClusters >= 2, `Expected >=2 clusters in overview, got ${overview.clusters.totalClusters}`);
+    assert.ok(
+      overview.clusters.totalClusters >= 2,
+      `Expected >=2 clusters in overview, got ${overview.clusters.totalClusters}`,
+    );
     assert.ok(overview.processes);
     assert.strictEqual(overview.processes.totalProcesses, 2);
   });

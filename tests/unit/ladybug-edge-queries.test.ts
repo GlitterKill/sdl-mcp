@@ -37,7 +37,10 @@ async function createTestDb(): Promise<{
   return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
+async function cleanupTestDb(
+  db: LadybugDatabase,
+  conn: LadybugConnection,
+): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -61,7 +64,7 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
-describe("KuzuDB Edge Queries", () => {
+describe("LadybugDB Edge Queries", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
   let queries: typeof import("../../dist/db/ladybug-queries.js");
@@ -112,225 +115,263 @@ describe("KuzuDB Edge Queries", () => {
     await cleanupTestDb(db, conn);
   });
 
-  it("insertEdge deduplicates by from+to+type", { skip: !ladybugAvailable }, async () => {
-    const edge = {
-      repoId,
-      fromSymbolId: "edge-from",
-      toSymbolId: "edge-to",
-      edgeType: "call",
-      weight: 1,
-      confidence: 1,
-      resolution: "exact",
-      provenance: null,
-      createdAt: "2026-03-04T00:00:00Z",
-    };
-
-    await queries.insertEdge(conn as unknown as import("kuzu").Connection, edge);
-    await queries.insertEdge(conn as unknown as import("kuzu").Connection, edge);
-
-    const edges = await queries.getEdgesFrom(
-      conn as unknown as import("kuzu").Connection,
-      "edge-from",
-    );
-    assert.strictEqual(edges.length, 1);
-    assert.strictEqual(edges[0]!.toSymbolId, "edge-to");
-    assert.strictEqual(edges[0]!.edgeType, "call");
-  });
-
-  it("insertEdges handles 1000+ edges", { skip: !ladybugAvailable }, async () => {
-    const edges: Array<import("../../dist/db/ladybug-queries.js").EdgeRow> = [];
-    for (let i = 0; i < 1000; i++) {
-      edges.push({
-        repoId,
-        fromSymbolId: "edge-from",
-        toSymbolId: `edge-to-${i}`,
-        edgeType: "import",
-        weight: 0.5,
-        confidence: 0.9,
-        resolution: "exact",
-        provenance: null,
-        createdAt: "2026-03-04T00:00:00Z",
-      });
-    }
-
-    await queries.insertEdges(conn as unknown as import("kuzu").Connection, edges);
-    const count = await queries.getEdgeCount(
-      conn as unknown as import("kuzu").Connection,
-      repoId,
-    );
-    assert.ok(count >= 1000);
-  });
-
-  it("getEdgesFromSymbols / projections", { skip: !ladybugAvailable }, async () => {
-    await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
-      repoId,
-      fromSymbolId: "edge-from",
-      toSymbolId: "edge-to",
-      edgeType: "call",
-      weight: 1,
-      confidence: 1,
-      resolution: "exact",
-      provenance: null,
-      createdAt: "2026-03-04T00:00:00Z",
-    });
-
-    const map = await queries.getEdgesFromSymbols(
-      conn as unknown as import("kuzu").Connection,
-      ["edge-from", "missing-from"],
-    );
-    assert.strictEqual(map.size, 2);
-    assert.strictEqual(map.get("edge-from")!.length, 1);
-    assert.strictEqual(map.get("missing-from")!.length, 0);
-
-    const sliceMap = await queries.getEdgesFromSymbolsForSlice(
-      conn as unknown as import("kuzu").Connection,
-      ["edge-from"],
-    );
-    const item = sliceMap.get("edge-from")![0]!;
-    assert.deepStrictEqual(Object.keys(item).sort(), [
-      "confidence",
-      "edgeType",
-      "fromSymbolId",
-      "resolution",
-      "resolutionPhase",
-      "resolverId",
-      "toSymbolId",
-      "weight",
-    ]);
-
-    const liteMap = await queries.getEdgesFromSymbolsLite(
-      conn as unknown as import("kuzu").Connection,
-      ["edge-from"],
-    );
-    const liteItem = liteMap.get("edge-from")![0]!;
-    assert.deepStrictEqual(Object.keys(liteItem).sort(), [
-      "edgeType",
-      "fromSymbolId",
-      "toSymbolId",
-    ]);
-  });
-
-  it("getEdgesToSymbols groups incoming edges", { skip: !ladybugAvailable }, async () => {
-    await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
-      repoId,
-      fromSymbolId: "edge-from",
-      toSymbolId: "edge-to",
-      edgeType: "call",
-      weight: 1,
-      confidence: 1,
-      resolution: "exact",
-      provenance: null,
-      createdAt: "2026-03-04T00:00:00Z",
-    });
-
-    const incoming = await queries.getEdgesToSymbols(
-      conn as unknown as import("kuzu").Connection,
-      ["edge-to", "missing-to"],
-    );
-    assert.strictEqual(incoming.size, 2);
-    assert.strictEqual(incoming.get("edge-to")!.length, 1);
-    assert.strictEqual(incoming.get("missing-to")!.length, 0);
-  });
-
-  it("persists resolver metadata on call edges", { skip: !ladybugAvailable }, async () => {
-    await queries.insertEdge(
-      conn as unknown as import("kuzu").Connection,
-      {
+  it(
+    "insertEdge deduplicates by from+to+type",
+    { skip: !ladybugAvailable },
+    async () => {
+      const edge = {
         repoId,
         fromSymbolId: "edge-from",
         toSymbolId: "edge-to",
         edgeType: "call",
         weight: 1,
-        confidence: 0.98,
-        resolution: "compiler-semantic",
-        resolverId: "pass2-ts",
-        resolutionPhase: "pass2",
-        provenance: "ts-call:testFn",
+        confidence: 1,
+        resolution: "exact",
+        provenance: null,
         createdAt: "2026-03-04T00:00:00Z",
-      } as any,
-    );
+      };
 
-    const result = await conn.query(
-      `MATCH (:Symbol {symbolId: 'edge-from'})-[d:DEPENDS_ON {edgeType: 'call'}]->(:Symbol {symbolId: 'edge-to'})
+      await queries.insertEdge(
+        conn as unknown as import("kuzu").Connection,
+        edge,
+      );
+      await queries.insertEdge(
+        conn as unknown as import("kuzu").Connection,
+        edge,
+      );
+
+      const edges = await queries.getEdgesFrom(
+        conn as unknown as import("kuzu").Connection,
+        "edge-from",
+      );
+      assert.strictEqual(edges.length, 1);
+      assert.strictEqual(edges[0]!.toSymbolId, "edge-to");
+      assert.strictEqual(edges[0]!.edgeType, "call");
+    },
+  );
+
+  it(
+    "insertEdges handles 1000+ edges",
+    { skip: !ladybugAvailable },
+    async () => {
+      const edges: Array<import("../../dist/db/ladybug-queries.js").EdgeRow> =
+        [];
+      for (let i = 0; i < 1000; i++) {
+        edges.push({
+          repoId,
+          fromSymbolId: "edge-from",
+          toSymbolId: `edge-to-${i}`,
+          edgeType: "import",
+          weight: 0.5,
+          confidence: 0.9,
+          resolution: "exact",
+          provenance: null,
+          createdAt: "2026-03-04T00:00:00Z",
+        });
+      }
+
+      await queries.insertEdges(
+        conn as unknown as import("kuzu").Connection,
+        edges,
+      );
+      const count = await queries.getEdgeCount(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+      );
+      assert.ok(count >= 1000);
+    },
+  );
+
+  it(
+    "getEdgesFromSymbols / projections",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-to",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        provenance: null,
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+
+      const map = await queries.getEdgesFromSymbols(
+        conn as unknown as import("kuzu").Connection,
+        ["edge-from", "missing-from"],
+      );
+      assert.strictEqual(map.size, 2);
+      assert.strictEqual(map.get("edge-from")!.length, 1);
+      assert.strictEqual(map.get("missing-from")!.length, 0);
+
+      const sliceMap = await queries.getEdgesFromSymbolsForSlice(
+        conn as unknown as import("kuzu").Connection,
+        ["edge-from"],
+      );
+      const item = sliceMap.get("edge-from")![0]!;
+      assert.deepStrictEqual(Object.keys(item).sort(), [
+        "confidence",
+        "edgeType",
+        "fromSymbolId",
+        "resolution",
+        "resolutionPhase",
+        "resolverId",
+        "toSymbolId",
+        "weight",
+      ]);
+
+      const liteMap = await queries.getEdgesFromSymbolsLite(
+        conn as unknown as import("kuzu").Connection,
+        ["edge-from"],
+      );
+      const liteItem = liteMap.get("edge-from")![0]!;
+      assert.deepStrictEqual(Object.keys(liteItem).sort(), [
+        "edgeType",
+        "fromSymbolId",
+        "toSymbolId",
+      ]);
+    },
+  );
+
+  it(
+    "getEdgesToSymbols groups incoming edges",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-to",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        provenance: null,
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+
+      const incoming = await queries.getEdgesToSymbols(
+        conn as unknown as import("kuzu").Connection,
+        ["edge-to", "missing-to"],
+      );
+      assert.strictEqual(incoming.size, 2);
+      assert.strictEqual(incoming.get("edge-to")!.length, 1);
+      assert.strictEqual(incoming.get("missing-to")!.length, 0);
+    },
+  );
+
+  it(
+    "persists resolver metadata on call edges",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.insertEdge(
+        conn as unknown as import("kuzu").Connection,
+        {
+          repoId,
+          fromSymbolId: "edge-from",
+          toSymbolId: "edge-to",
+          edgeType: "call",
+          weight: 1,
+          confidence: 0.98,
+          resolution: "compiler-semantic",
+          resolverId: "pass2-ts",
+          resolutionPhase: "pass2",
+          provenance: "ts-call:testFn",
+          createdAt: "2026-03-04T00:00:00Z",
+        } as any,
+      );
+
+      const result = await conn.query(
+        `MATCH (:Symbol {symbolId: 'edge-from'})-[d:DEPENDS_ON {edgeType: 'call'}]->(:Symbol {symbolId: 'edge-to'})
        RETURN d.confidence AS confidence,
               d.resolution AS resolution,
               d.resolverId AS resolverId,
               d.resolutionPhase AS resolutionPhase`,
-    );
-    assert.strictEqual(result.hasNext(), true);
-    const row = await result.getNext();
-    result.close();
+      );
+      assert.strictEqual(result.hasNext(), true);
+      const row = await result.getNext();
+      result.close();
 
-    assert.strictEqual(row.confidence, 0.98);
-    assert.strictEqual(row.resolution, "compiler-semantic");
-    assert.strictEqual(row.resolverId, "pass2-ts");
-    assert.strictEqual(row.resolutionPhase, "pass2");
-  });
+      assert.strictEqual(row.confidence, 0.98);
+      assert.strictEqual(row.resolution, "compiler-semantic");
+      assert.strictEqual(row.resolverId, "pass2-ts");
+      assert.strictEqual(row.resolutionPhase, "pass2");
+    },
+  );
 
-  it("deleteEdgesByFileId removes edges for symbols in file", { skip: !ladybugAvailable }, async () => {
-    await exec(conn, "CREATE (:Symbol {symbolId: 'edge-in-file'})");
-    await exec(
-      conn,
-      "MATCH (f:File {fileId: 'edge-file'}), (s:Symbol {symbolId: 'edge-in-file'}) CREATE (s)-[:SYMBOL_IN_FILE]->(f)",
-    );
-    await exec(
-      conn,
-      "MATCH (r:Repo {repoId: 'edge-repo'}), (s:Symbol {symbolId: 'edge-in-file'}) CREATE (s)-[:SYMBOL_IN_REPO]->(r)",
-    );
+  it(
+    "deleteEdgesByFileId removes edges for symbols in file",
+    { skip: !ladybugAvailable },
+    async () => {
+      await exec(conn, "CREATE (:Symbol {symbolId: 'edge-in-file'})");
+      await exec(
+        conn,
+        "MATCH (f:File {fileId: 'edge-file'}), (s:Symbol {symbolId: 'edge-in-file'}) CREATE (s)-[:SYMBOL_IN_FILE]->(f)",
+      );
+      await exec(
+        conn,
+        "MATCH (r:Repo {repoId: 'edge-repo'}), (s:Symbol {symbolId: 'edge-in-file'}) CREATE (s)-[:SYMBOL_IN_REPO]->(r)",
+      );
 
-    await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
-      repoId,
-      fromSymbolId: "edge-in-file",
-      toSymbolId: "edge-to",
-      edgeType: "config",
-      weight: 1,
-      confidence: 1,
-      resolution: "exact",
-      provenance: null,
-      createdAt: "2026-03-04T00:00:00Z",
-    });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-in-file",
+        toSymbolId: "edge-to",
+        edgeType: "config",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        provenance: null,
+        createdAt: "2026-03-04T00:00:00Z",
+      });
 
-    await queries.deleteEdgesByFileId(
-      conn as unknown as import("kuzu").Connection,
-      fileId,
-    );
+      await queries.deleteEdgesByFileId(
+        conn as unknown as import("kuzu").Connection,
+        fileId,
+      );
 
-    const remaining = await queries.getEdgesFrom(
-      conn as unknown as import("kuzu").Connection,
-      "edge-in-file",
-    );
-    assert.strictEqual(remaining.length, 0);
-  });
+      const remaining = await queries.getEdgesFrom(
+        conn as unknown as import("kuzu").Connection,
+        "edge-in-file",
+      );
+      assert.strictEqual(remaining.length, 0);
+    },
+  );
 
-  it("getEdgeCountsByType returns counts", { skip: !ladybugAvailable }, async () => {
-    await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
-      repoId,
-      fromSymbolId: "edge-from",
-      toSymbolId: "edge-to",
-      edgeType: "call",
-      weight: 1,
-      confidence: 1,
-      resolution: "exact",
-      provenance: null,
-      createdAt: "2026-03-04T00:00:00Z",
-    });
-    await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
-      repoId,
-      fromSymbolId: "edge-from",
-      toSymbolId: "edge-to-2",
-      edgeType: "import",
-      weight: 1,
-      confidence: 1,
-      resolution: "exact",
-      provenance: null,
-      createdAt: "2026-03-04T00:00:00Z",
-    });
+  it(
+    "getEdgeCountsByType returns counts",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-to",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        provenance: null,
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-to-2",
+        edgeType: "import",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        provenance: null,
+        createdAt: "2026-03-04T00:00:00Z",
+      });
 
-    const counts = await queries.getEdgeCountsByType(
-      conn as unknown as import("kuzu").Connection,
-      repoId,
-    );
-    assert.strictEqual(counts.call, 1);
-    assert.strictEqual(counts.import, 1);
-  });
+      const counts = await queries.getEdgeCountsByType(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+      );
+      assert.strictEqual(counts.call, 1);
+      assert.strictEqual(counts.import, 1);
+    },
+  );
 });

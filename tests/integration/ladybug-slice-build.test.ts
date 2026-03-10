@@ -68,7 +68,7 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
-describe("Kuzu Slice Build (integration)", () => {
+describe("LadybugDB Slice Build (integration)", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
   let slice: typeof import("../../dist/graph/slice.js");

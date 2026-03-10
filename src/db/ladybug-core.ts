@@ -17,8 +17,6 @@ const preparedStatementCacheByConn = new WeakMap<
 >();
 const transactionDepthByConn = new WeakMap<Connection, number>();
 
-const joinHintSupported: boolean | null = null;
-
 export function isJoinHintSyntaxUnsupported(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return (
@@ -168,6 +166,3 @@ export async function withTransaction<T>(
     }
   }
 }
-
-// Re-export joinHintSupported for use by domain modules
-export { joinHintSupported };

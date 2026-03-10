@@ -37,7 +37,10 @@ async function createTestDb(): Promise<{
   return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
+async function cleanupTestDb(
+  db: LadybugDatabase,
+  conn: LadybugConnection,
+): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -56,7 +59,7 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
-describe("KuzuDB Search Queries", () => {
+describe("LadybugDB Search Queries", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
   let queries: typeof import("../../dist/db/ladybug-queries.js");
@@ -210,31 +213,39 @@ describe("KuzuDB Search Queries", () => {
     await cleanupTestDb(db, conn);
   });
 
-  it("exact match ranks first and kind priority applies", { skip: !ladybugAvailable }, async () => {
-    const results = await queries.searchSymbols(
-      conn as unknown as import("kuzu").Connection,
-      repoId,
-      "Foo",
-      10,
-    );
+  it(
+    "exact match ranks first and kind priority applies",
+    { skip: !ladybugAvailable },
+    async () => {
+      const results = await queries.searchSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "Foo",
+        10,
+      );
 
-    assert.ok(results.length >= 2);
-    assert.strictEqual(results[0]!.name, "Foo");
-    assert.strictEqual(results[0]!.kind, "class");
-    assert.strictEqual(results[1]!.name, "Foo");
-  });
+      assert.ok(results.length >= 2);
+      assert.strictEqual(results[0]!.name, "Foo");
+      assert.strictEqual(results[0]!.kind, "class");
+      assert.strictEqual(results[1]!.name, "Foo");
+    },
+  );
 
-  it("case-insensitive exact match ranks ahead of partial matches", { skip: !ladybugAvailable }, async () => {
-    const results = await queries.searchSymbolsLite(
-      conn as unknown as import("kuzu").Connection,
-      repoId,
-      "foo",
-      10,
-    );
+  it(
+    "case-insensitive exact match ranks ahead of partial matches",
+    { skip: !ladybugAvailable },
+    async () => {
+      const results = await queries.searchSymbolsLite(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "foo",
+        10,
+      );
 
-    assert.ok(results.length >= 2);
-    assert.strictEqual(results[0]!.name, "Foo");
-  });
+      assert.ok(results.length >= 2);
+      assert.strictEqual(results[0]!.name, "Foo");
+    },
+  );
 
   it("deprioritizes adapter files", { skip: !ladybugAvailable }, async () => {
     const results = await queries.searchSymbolsLite(
@@ -244,7 +255,9 @@ describe("KuzuDB Search Queries", () => {
       10,
     );
 
-    const firstAdapterIdx = results.findIndex((r) => r.fileId === "file-adapter");
+    const firstAdapterIdx = results.findIndex(
+      (r) => r.fileId === "file-adapter",
+    );
     const firstCoreIdx = results.findIndex((r) => r.fileId === "file-core");
     assert.ok(firstCoreIdx !== -1);
     assert.ok(firstAdapterIdx !== -1);

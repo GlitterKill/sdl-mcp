@@ -7,13 +7,13 @@
         "maxMs": 2500,
         "trend": "lower-is-better",
         "allowableIncreasePercent": 30,
-        "_comment": "Raised for KuzuDB graph backend: graph writes are inherently slower than SQLite inserts. CI runners see ~1500-1700ms per file."
+        "_comment": "Raised for LadybugDB graph backend: graph writes are inherently slower than SQLite inserts. CI runners see ~1500-1700ms per file."
       },
       "indexTimePerSymbol": {
         "maxMs": 150,
         "trend": "lower-is-better",
         "allowableIncreasePercent": 30,
-        "_comment": "Raised for KuzuDB graph backend: per-symbol graph operations cost more than SQLite row inserts."
+        "_comment": "Raised for LadybugDB graph backend: per-symbol graph operations cost more than SQLite row inserts."
       }
     },
     "quality": {

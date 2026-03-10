@@ -1,4 +1,4 @@
-﻿import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import { existsSync, rmSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
@@ -37,7 +37,10 @@ async function createTestDb(): Promise<{
   return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
+async function cleanupTestDb(
+  db: LadybugDatabase,
+  conn: LadybugConnection,
+): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -57,15 +60,20 @@ async function exec(conn: LadybugConnection, q: string): Promise<void> {
 }
 
 async function setupSchema(conn: LadybugConnection): Promise<void> {
-  await exec(conn, `
+  await exec(
+    conn,
+    `
     CREATE NODE TABLE IF NOT EXISTS Repo (
       repoId STRING PRIMARY KEY,
       rootPath STRING,
       configJson STRING,
       createdAt STRING
     )
-  `);
-  await exec(conn, `
+  `,
+  );
+  await exec(
+    conn,
+    `
     CREATE NODE TABLE IF NOT EXISTS File (
       fileId STRING PRIMARY KEY,
       relPath STRING,
@@ -75,8 +83,11 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
       lastIndexedAt STRING,
       directory STRING
     )
-  `);
-  await exec(conn, `
+  `,
+  );
+  await exec(
+    conn,
+    `
     CREATE NODE TABLE IF NOT EXISTS Symbol (
       symbolId STRING PRIMARY KEY,
       kind STRING,
@@ -95,8 +106,11 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
       sideEffectsJson STRING,
       updatedAt STRING
     )
-  `);
-  await exec(conn, `
+  `,
+  );
+  await exec(
+    conn,
+    `
     CREATE NODE TABLE IF NOT EXISTS Metrics (
       symbolId STRING PRIMARY KEY,
       fanIn INT64 DEFAULT 0,
@@ -106,14 +120,19 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
       canonicalTestJson STRING,
       updatedAt STRING
     )
-  `);
-  await exec(conn,
+  `,
+  );
+  await exec(
+    conn,
     `CREATE REL TABLE IF NOT EXISTS SYMBOL_IN_REPO (FROM Symbol TO Repo)`,
   );
-  await exec(conn,
+  await exec(
+    conn,
     `CREATE REL TABLE IF NOT EXISTS SYMBOL_IN_FILE (FROM Symbol TO File)`,
   );
-  await exec(conn, `
+  await exec(
+    conn,
+    `
     CREATE REL TABLE IF NOT EXISTS DEPENDS_ON (
       FROM Symbol TO Symbol,
       edgeType STRING DEFAULT 'call',
@@ -123,10 +142,11 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
       provenance STRING,
       createdAt STRING
     )
-  `);
+  `,
+  );
 }
 
-describe("KuzuDB Metrics Queries", () => {
+describe("LadybugDB Metrics Queries", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
   let ladybugAvailable = true;
@@ -141,7 +161,7 @@ describe("KuzuDB Metrics Queries", () => {
       queries = await import("../../dist/db/ladybug-queries.js");
     } catch (err) {
       ladybugAvailable = false;
-      console.log("KuzuDB not available, skipping tests:", err);
+      console.log("LadybugDB not available, skipping tests:", err);
     }
   });
 
@@ -366,25 +386,40 @@ describe("KuzuDB Metrics Queries", () => {
 
   describe("getTopSymbolsByFanIn", { skip: !ladybugAvailable }, () => {
     beforeEach(async () => {
-      await exec(conn, `
+      await exec(
+        conn,
+        `
         CREATE (r:Repo {repoId: 'top-test-repo', rootPath: '/test', configJson: '{}', createdAt: '2024-01-01'})
-      `);
-      await exec(conn, `
+      `,
+      );
+      await exec(
+        conn,
+        `
         CREATE (f:File {fileId: 'file-1', relPath: 'src/test.ts', contentHash: 'abc', language: 'typescript', byteSize: 100, lastIndexedAt: '2024-01-01', directory: 'src'})
-      `);
+      `,
+      );
 
       for (let i = 1; i <= 5; i++) {
-        await exec(conn, `
+        await exec(
+          conn,
+          `
           CREATE (s:Symbol {symbolId: 'top-sym-${i}', kind: 'function', name: 'func${i}', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: ${i}, rangeStartCol: 0, rangeEndLine: ${i + 1}, rangeEndCol: 0, astFingerprint: '', signatureJson: '{}', summary: '', invariantsJson: 'null', sideEffectsJson: 'null', updatedAt: '2024-01-01'})
-        `);
-        await exec(conn, `
+        `,
+        );
+        await exec(
+          conn,
+          `
           MATCH (s:Symbol {symbolId: 'top-sym-${i}'}), (r:Repo {repoId: 'top-test-repo'})
           CREATE (s)-[:SYMBOL_IN_REPO]->(r)
-        `);
-        await exec(conn, `
+        `,
+        );
+        await exec(
+          conn,
+          `
           MATCH (s:Symbol {symbolId: 'top-sym-${i}'}), (f:File {fileId: 'file-1'})
           CREATE (s)-[:SYMBOL_IN_FILE]->(f)
-        `);
+        `,
+        );
       }
 
       await queries.upsertMetrics(
@@ -490,28 +525,46 @@ describe("KuzuDB Metrics Queries", () => {
 
   describe("computeFanInOut", { skip: !ladybugAvailable }, () => {
     beforeEach(async () => {
-      await exec(conn, `
+      await exec(
+        conn,
+        `
         CREATE (s1:Symbol {symbolId: 'fan-sym-1', kind: 'function', name: 'func1', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 2, rangeEndCol: 0, astFingerprint: '', signatureJson: '{}', summary: '', invariantsJson: 'null', sideEffectsJson: 'null', updatedAt: '2024-01-01'})
-      `);
-      await exec(conn, `
+      `,
+      );
+      await exec(
+        conn,
+        `
         CREATE (s2:Symbol {symbolId: 'fan-sym-2', kind: 'function', name: 'func2', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 2, rangeEndCol: 0, astFingerprint: '', signatureJson: '{}', summary: '', invariantsJson: 'null', sideEffectsJson: 'null', updatedAt: '2024-01-01'})
-      `);
-      await exec(conn, `
+      `,
+      );
+      await exec(
+        conn,
+        `
         CREATE (s3:Symbol {symbolId: 'fan-sym-3', kind: 'function', name: 'func3', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 2, rangeEndCol: 0, astFingerprint: '', signatureJson: '{}', summary: '', invariantsJson: 'null', sideEffectsJson: 'null', updatedAt: '2024-01-01'})
-      `);
+      `,
+      );
 
-      await exec(conn, `
+      await exec(
+        conn,
+        `
         MATCH (a:Symbol {symbolId: 'fan-sym-1'}), (b:Symbol {symbolId: 'fan-sym-2'})
         CREATE (a)-[:DEPENDS_ON {edgeType: 'call', weight: 1.0, confidence: 1.0}]->(b)
-      `);
-      await exec(conn, `
+      `,
+      );
+      await exec(
+        conn,
+        `
         MATCH (a:Symbol {symbolId: 'fan-sym-3'}), (b:Symbol {symbolId: 'fan-sym-2'})
         CREATE (a)-[:DEPENDS_ON {edgeType: 'call', weight: 1.0, confidence: 1.0}]->(b)
-      `);
-      await exec(conn, `
+      `,
+      );
+      await exec(
+        conn,
+        `
         MATCH (a:Symbol {symbolId: 'fan-sym-2'}), (b:Symbol {symbolId: 'fan-sym-3'})
         CREATE (a)-[:DEPENDS_ON {edgeType: 'call', weight: 1.0, confidence: 1.0}]->(b)
-      `);
+      `,
+      );
     });
 
     it("should compute fanIn (incoming DEPENDS_ON edges)", async () => {
@@ -552,16 +605,22 @@ describe("KuzuDB Metrics Queries", () => {
   describe("batchComputeFanInOut", { skip: !ladybugAvailable }, () => {
     beforeEach(async () => {
       for (let i = 1; i <= 10; i++) {
-        await exec(conn, `
+        await exec(
+          conn,
+          `
           CREATE (s:Symbol {symbolId: 'batch-fan-sym-${i}', kind: 'function', name: 'func${i}', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: ${i}, rangeStartCol: 0, rangeEndLine: ${i + 1}, rangeEndCol: 0, astFingerprint: '', signatureJson: '{}', summary: '', invariantsJson: 'null', sideEffectsJson: 'null', updatedAt: '2024-01-01'})
-        `);
+        `,
+        );
       }
 
       for (let i = 2; i <= 10; i++) {
-        await exec(conn, `
+        await exec(
+          conn,
+          `
           MATCH (a:Symbol {symbolId: 'batch-fan-sym-1'}), (b:Symbol {symbolId: 'batch-fan-sym-${i}'})
           CREATE (a)-[:DEPENDS_ON {edgeType: 'call', weight: 1.0, confidence: 1.0}]->(b)
-        `);
+        `,
+        );
       }
     });
 

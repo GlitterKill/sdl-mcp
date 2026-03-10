@@ -6,7 +6,12 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-lazy-graph-memory-test-db.lbug");
+const TEST_DB_PATH = join(
+  __dirname,
+  "..",
+  "..",
+  ".lbug-lazy-graph-memory-test-db.lbug",
+);
 
 interface LadybugConnection {
   query: (q: string) => Promise<{
@@ -37,7 +42,10 @@ async function createTestDb(): Promise<{
   return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
+async function cleanupTestDb(
+  db: LadybugDatabase,
+  conn: LadybugConnection,
+): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -69,7 +77,7 @@ function forceGC(): void {
   }
 }
 
-describe("Lazy Graph Memory Benchmark (Kuzu)", () => {
+describe("Lazy Graph Memory Benchmark (LadybugDB)", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
   let graphOps: typeof import("../../dist/graph/buildGraph.js");
@@ -101,7 +109,9 @@ describe("Lazy Graph Memory Benchmark (Kuzu)", () => {
   it("measures memory usage for neighborhood loads", async (t) => {
     if (!ladybugAvailable) {
       const reason =
-        setupError instanceof Error ? setupError.message : "Kuzu setup unavailable";
+        setupError instanceof Error
+          ? setupError.message
+          : "LadybugDB setup unavailable";
       t.skip(reason);
       return;
     }

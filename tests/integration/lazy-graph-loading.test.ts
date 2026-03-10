@@ -6,7 +6,12 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-lazy-graph-loading-test-db.lbug");
+const TEST_DB_PATH = join(
+  __dirname,
+  "..",
+  "..",
+  ".lbug-lazy-graph-loading-test-db.lbug",
+);
 
 interface LadybugConnection {
   query: (q: string) => Promise<{
@@ -37,7 +42,10 @@ async function createTestDb(): Promise<{
   return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
+async function cleanupTestDb(
+  db: LadybugDatabase,
+  conn: LadybugConnection,
+): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -56,7 +64,7 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
-describe("Lazy Graph Loading (Kuzu)", () => {
+describe("Lazy Graph Loading (LadybugDB)", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
   let graphOps: typeof import("../../dist/graph/buildGraph.js");
@@ -79,22 +87,82 @@ describe("Lazy Graph Loading (Kuzu)", () => {
     await cleanupTestDb(db, conn);
   });
 
-  it("records load stats and enforces maxSymbols", { skip: !ladybugAvailable }, async () => {
-    const kConn = conn as unknown as import("kuzu").Connection;
+  it(
+    "records load stats and enforces maxSymbols",
+    { skip: !ladybugAvailable },
+    async () => {
+      const kConn = conn as unknown as import("kuzu").Connection;
 
-    await queries.upsertRepo(kConn, {
-      repoId: "repo",
-      rootPath: "C:/repo",
-      configJson: "{}",
-      createdAt: "2026-03-04T00:00:00.000Z",
-    });
-
-    const edges: Array<import("../../dist/db/ladybug-queries.js").EdgeRow> = [];
-    for (let i = 0; i < 20; i++) {
-      edges.push({
+      await queries.upsertRepo(kConn, {
         repoId: "repo",
-        fromSymbolId: "entry",
-        toSymbolId: `n${i}`,
+        rootPath: "C:/repo",
+        configJson: "{}",
+        createdAt: "2026-03-04T00:00:00.000Z",
+      });
+
+      const edges: Array<import("../../dist/db/ladybug-queries.js").EdgeRow> =
+        [];
+      for (let i = 0; i < 20; i++) {
+        edges.push({
+          repoId: "repo",
+          fromSymbolId: "entry",
+          toSymbolId: `n${i}`,
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "static",
+          createdAt: "2026-03-04T00:00:00.000Z",
+        });
+      }
+      await queries.insertEdges(kConn, edges);
+
+      graphOps.resetLoadStats();
+
+      const subgraph = await graphOps.loadNeighborhood(
+        kConn,
+        "repo",
+        ["entry"],
+        {
+          maxHops: 1,
+          direction: "out",
+          maxSymbols: 5,
+        },
+      );
+
+      const stats = graphOps.getLastLoadStats();
+      assert.ok(stats);
+      assert.strictEqual(stats.mode, "lazy");
+      assert.strictEqual(stats.hopBudget, 1);
+      assert.strictEqual(stats.entrySymbolCount, 1);
+
+      assert.ok(subgraph.symbolIds.size <= 5);
+      assert.ok(subgraph.symbolIds.has("entry"));
+      assert.ok(
+        subgraph.edges.every((e) => subgraph.symbolIds.has(e.fromSymbolId)),
+      );
+      assert.ok(
+        subgraph.edges.every((e) => subgraph.symbolIds.has(e.toSymbolId)),
+      );
+    },
+  );
+
+  it(
+    "resetLoadStats clears last stats",
+    { skip: !ladybugAvailable },
+    async () => {
+      const kConn = conn as unknown as import("kuzu").Connection;
+
+      await queries.upsertRepo(kConn, {
+        repoId: "repo",
+        rootPath: "C:/repo",
+        configJson: "{}",
+        createdAt: "2026-03-04T00:00:00.000Z",
+      });
+      await queries.insertEdge(kConn, {
+        repoId: "repo",
+        fromSymbolId: "a",
+        toSymbolId: "b",
         edgeType: "call",
         weight: 1,
         confidence: 1,
@@ -102,58 +170,16 @@ describe("Lazy Graph Loading (Kuzu)", () => {
         provenance: "static",
         createdAt: "2026-03-04T00:00:00.000Z",
       });
-    }
-    await queries.insertEdges(kConn, edges);
 
-    graphOps.resetLoadStats();
+      await graphOps.loadNeighborhood(kConn, "repo", ["a"], {
+        maxHops: 1,
+        direction: "out",
+        maxSymbols: 10,
+      });
 
-    const subgraph = await graphOps.loadNeighborhood(kConn, "repo", ["entry"], {
-      maxHops: 1,
-      direction: "out",
-      maxSymbols: 5,
-    });
-
-    const stats = graphOps.getLastLoadStats();
-    assert.ok(stats);
-    assert.strictEqual(stats.mode, "lazy");
-    assert.strictEqual(stats.hopBudget, 1);
-    assert.strictEqual(stats.entrySymbolCount, 1);
-
-    assert.ok(subgraph.symbolIds.size <= 5);
-    assert.ok(subgraph.symbolIds.has("entry"));
-    assert.ok(subgraph.edges.every((e) => subgraph.symbolIds.has(e.fromSymbolId)));
-    assert.ok(subgraph.edges.every((e) => subgraph.symbolIds.has(e.toSymbolId)));
-  });
-
-  it("resetLoadStats clears last stats", { skip: !ladybugAvailable }, async () => {
-    const kConn = conn as unknown as import("kuzu").Connection;
-
-    await queries.upsertRepo(kConn, {
-      repoId: "repo",
-      rootPath: "C:/repo",
-      configJson: "{}",
-      createdAt: "2026-03-04T00:00:00.000Z",
-    });
-    await queries.insertEdge(kConn, {
-      repoId: "repo",
-      fromSymbolId: "a",
-      toSymbolId: "b",
-      edgeType: "call",
-      weight: 1,
-      confidence: 1,
-      resolution: "exact",
-      provenance: "static",
-      createdAt: "2026-03-04T00:00:00.000Z",
-    });
-
-    await graphOps.loadNeighborhood(kConn, "repo", ["a"], {
-      maxHops: 1,
-      direction: "out",
-      maxSymbols: 10,
-    });
-
-    assert.ok(graphOps.getLastLoadStats());
-    graphOps.resetLoadStats();
-    assert.strictEqual(graphOps.getLastLoadStats(), null);
-  });
+      assert.ok(graphOps.getLastLoadStats());
+      graphOps.resetLoadStats();
+      assert.strictEqual(graphOps.getLastLoadStats(), null);
+    },
+  );
 });

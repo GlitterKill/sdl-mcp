@@ -4,13 +4,17 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../../src/db/ladybug.js";
 import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { handleCodeNeedWindow } from "../../src/mcp/tools/code.js";
 import { PolicyEngine } from "../../src/policy/engine.js";
 
 describe("code.needWindow policy remediation", () => {
-  // DB is set up once per suite to avoid Windows heap-corruption on multiple Kuzu close/reopen cycles.
+  // DB is set up once per suite to avoid Windows heap-corruption on multiple LadybugDB close/reopen cycles.
   let tempDir = "";
   let originalSDLConfig: string | undefined;
   let originalSDLConfigPath: string | undefined;
@@ -132,12 +136,14 @@ describe("code.needWindow policy remediation", () => {
   // Only mock/restore PolicyEngine between each test — no DB churn.
   beforeEach(() => {
     originalEvaluate = PolicyEngine.prototype.evaluate;
-    originalGenerateNextBestAction = PolicyEngine.prototype.generateNextBestAction;
+    originalGenerateNextBestAction =
+      PolicyEngine.prototype.generateNextBestAction;
   });
 
   afterEach(() => {
     PolicyEngine.prototype.evaluate = originalEvaluate;
-    PolicyEngine.prototype.generateNextBestAction = originalGenerateNextBestAction;
+    PolicyEngine.prototype.generateNextBestAction =
+      originalGenerateNextBestAction;
   });
 
   it("returns the policy-layer nextBestAction when the gate approves but policy denies", async () => {
@@ -220,7 +226,11 @@ describe("code.needWindow policy remediation", () => {
     if (response.approved) throw new Error("Expected denial");
     assert.deepStrictEqual(response.nextBestAction, {
       tool: "sdl.code.getSkeleton",
-      args: { repoId: "repo-test", symbolId: "sym-demo", identifiersToFind: ["importantFlag"] },
+      args: {
+        repoId: "repo-test",
+        symbolId: "sym-demo",
+        identifiersToFind: ["importantFlag"],
+      },
       rationale: "Too broad",
     });
   });
@@ -330,7 +340,10 @@ describe("code.needWindow policy remediation", () => {
       return {
         nextBestAction: "provideIdentifiersToFind",
         requiredFieldsForNext: {
-          provideIdentifiersToFind: { minCount: 1, examples: ["importantFlag"] },
+          provideIdentifiersToFind: {
+            minCount: 1,
+            examples: ["importantFlag"],
+          },
         },
       };
     };
@@ -347,7 +360,11 @@ describe("code.needWindow policy remediation", () => {
     if (response.approved) throw new Error("Expected denial");
     assert.deepStrictEqual(response.nextBestAction, {
       tool: "sdl.code.getHotPath",
-      args: { repoId: "repo-test", symbolId: "sym-demo", identifiersToFind: ["importantFlag"] },
+      args: {
+        repoId: "repo-test",
+        symbolId: "sym-demo",
+        identifiersToFind: ["importantFlag"],
+      },
       rationale: "Must specify identifiers",
     });
   });
@@ -365,7 +382,10 @@ describe("code.needWindow policy remediation", () => {
       return {
         nextBestAction: "narrowScope",
         requiredFieldsForNext: {
-          narrowScope: { field: "expectedLines", reason: "Reduce to target function" },
+          narrowScope: {
+            field: "expectedLines",
+            reason: "Reduce to target function",
+          },
         },
       };
     };
@@ -382,7 +402,11 @@ describe("code.needWindow policy remediation", () => {
     if (response.approved) throw new Error("Expected denial");
     assert.deepStrictEqual(response.nextBestAction, {
       tool: "sdl.code.getHotPath",
-      args: { repoId: "repo-test", symbolId: "sym-demo", identifiersToFind: ["importantFlag"] },
+      args: {
+        repoId: "repo-test",
+        symbolId: "sym-demo",
+        identifiersToFind: ["importantFlag"],
+      },
       rationale: "Reduce to target function",
     });
   });

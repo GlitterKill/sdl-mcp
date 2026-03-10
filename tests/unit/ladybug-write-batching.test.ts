@@ -1,7 +1,10 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 
-import type { EdgeRow, SymbolReferenceRow } from "../../src/db/ladybug-queries.js";
+import type {
+  EdgeRow,
+  SymbolReferenceRow,
+} from "../../src/db/ladybug-queries.js";
 import {
   insertEdges,
   insertSymbolReferences,
@@ -40,7 +43,7 @@ function countStatements(statements: string[], statement: string): number {
   return statements.filter((entry) => entry === statement).length;
 }
 
-describe("Kuzu write batching", () => {
+describe("LadybugDB write batching", () => {
   it("does not open nested transactions on the same connection", async () => {
     const statements: string[] = [];
     const conn = createFakeConnection(statements);

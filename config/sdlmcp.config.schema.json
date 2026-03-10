@@ -3,20 +3,14 @@
   "title": "SDL-MCP Configuration",
   "description": "Configuration schema for SDL-MCP (Symbol Delta Ledger MCP Server)",
   "type": "object",
-  "required": [
-    "repos",
-    "policy"
-  ],
+  "required": ["repos", "policy"],
   "properties": {
     "repos": {
       "type": "array",
       "description": "List of repositories to index",
       "items": {
         "type": "object",
-        "required": [
-          "repoId",
-          "rootPath"
-        ],
+        "required": ["repoId", "rootPath"],
         "properties": {
           "repoId": {
             "type": "string",
@@ -111,7 +105,7 @@
     },
     "dbPath": {
       "type": "string",
-      "description": "Deprecated legacy SQLite database path (v0.7.x). Only used by the one-time SQLite→Kuzu migration script in v0.8.",
+      "description": "Deprecated legacy SQLite database path (v0.7.x). Only used by the one-time SQLite→LadybugDB migration script in v0.8.",
       "minLength": 1
     },
     "policy": {
@@ -173,9 +167,7 @@
           "description": "Custom redaction patterns",
           "items": {
             "type": "object",
-            "required": [
-              "pattern"
-            ],
+            "required": ["pattern"],
             "properties": {
               "name": {
                 "type": "string",
@@ -232,10 +224,7 @@
         "engine": {
           "type": "string",
           "description": "Pass-1 indexing engine implementation",
-          "enum": [
-            "typescript",
-            "rust"
-          ],
+          "enum": ["typescript", "rust"],
           "default": "rust"
         },
         "watchDebounceMs": {
@@ -376,10 +365,7 @@
         "mode": {
           "type": "string",
           "description": "Diagnostics mode",
-          "enum": [
-            "tsLS",
-            "tsc"
-          ],
+          "enum": ["tsLS", "tsc"],
           "default": "tsLS"
         },
         "maxErrors": {
@@ -397,10 +383,7 @@
         "scope": {
           "type": "string",
           "description": "Diagnostics scope",
-          "enum": [
-            "changedFiles",
-            "workspace"
-          ],
+          "enum": ["changedFiles", "workspace"],
           "default": "changedFiles"
         }
       },
@@ -500,11 +483,7 @@
         },
         "provider": {
           "type": "string",
-          "enum": [
-            "api",
-            "local",
-            "mock"
-          ],
+          "enum": ["api", "local", "mock"],
           "default": "mock"
         },
         "model": {
@@ -650,11 +629,7 @@
         "exporterType": {
           "type": "string",
           "description": "Exporter type for traces",
-          "enum": [
-            "console",
-            "otlp",
-            "memory"
-          ],
+          "enum": ["console", "otlp", "memory"],
           "default": "console"
         },
         "otlpEndpoint": {
@@ -704,14 +679,11 @@
     },
     "graphDatabase": {
       "type": "object",
-      "description": "KuzuDB graph database configuration for advanced graph queries",
+      "description": "LadybugDB graph database configuration for advanced graph queries",
       "properties": {
         "path": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "Path to the KuzuDB database file",
+          "type": ["string", "null"],
+          "description": "Path to the LadybugDB database file",
           "default": null
         }
       }

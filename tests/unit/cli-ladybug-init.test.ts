@@ -4,13 +4,13 @@ import { existsSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 
-describe("CLI init command - KuzuDB", () => {
+describe("CLI init command - LadybugDB", () => {
   let tempDir: string;
   let originalSDLConfig: string | undefined;
   let originalSDLConfigPath: string | undefined;
 
   beforeEach(() => {
-    tempDir = join(tmpdir(), `sdl-mcp-init-kuzu-test-${Date.now()}`);
+    tempDir = join(tmpdir(), `sdl-mcp-init-ladybug-test-${Date.now()}`);
     mkdirSync(tempDir, { recursive: true });
     originalSDLConfig = process.env.SDL_CONFIG;
     originalSDLConfigPath = process.env.SDL_CONFIG_PATH;
@@ -38,7 +38,7 @@ describe("CLI init command - KuzuDB", () => {
 
   it("writes a .lbug graph database path alongside the legacy sqlite path", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const expectedKuzuPath = join(tempDir, "sdl-mcp-graph.lbug");
+    const expectedLadybugPath = join(tempDir, "sdl-mcp-graph.lbug");
 
     const { initCommand } = await import("../../src/cli/commands/init.js");
 
@@ -52,22 +52,20 @@ describe("CLI init command - KuzuDB", () => {
 
     assert.ok(existsSync(configPath), "Config file should exist");
     assert.ok(
-      existsSync(dirname(expectedKuzuPath)),
-      "KuzuDB parent directory should exist",
+      existsSync(dirname(expectedLadybugPath)),
+      "LadybugDB parent directory should exist",
     );
     assert.ok(
-      !existsSync(expectedKuzuPath),
-      "KuzuDB file should not be created before initialization",
+      !existsSync(expectedLadybugPath),
+      "LadybugDB file should not be created before initialization",
     );
 
-    const configContent = JSON.parse(
-      readFileSync(configPath, "utf-8"),
-    );
+    const configContent = JSON.parse(readFileSync(configPath, "utf-8"));
     assert.ok(configContent.graphDatabase, "Config should have graphDatabase");
     assert.strictEqual(
       configContent.graphDatabase.path,
-      expectedKuzuPath,
-      "graphDatabase.path should point to the KuzuDB file",
+      expectedLadybugPath,
+      "graphDatabase.path should point to the LadybugDB file",
     );
   });
 
@@ -84,21 +82,22 @@ describe("CLI init command - KuzuDB", () => {
       force: true,
     });
 
-    const configContent = JSON.parse(
-      readFileSync(configPath, "utf-8"),
-    );
+    const configContent = JSON.parse(readFileSync(configPath, "utf-8"));
 
     assert.ok(configContent.graphDatabase, "Config should have graphDatabase");
-    assert.ok(configContent.graphDatabase.path, "graphDatabase should have path");
+    assert.ok(
+      configContent.graphDatabase.path,
+      "graphDatabase should have path",
+    );
     assert.ok(
       configContent.graphDatabase.path.endsWith("sdl-mcp-graph.lbug"),
       "graphDatabase.path should end with sdl-mcp-graph.lbug",
     );
   });
 
-  it("dry-run mode does not create the KuzuDB file path", async () => {
+  it("dry-run mode does not create the LadybugDB file path", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const expectedKuzuPath = join(tempDir, "sdl-mcp-graph.lbug");
+    const expectedLadybugPath = join(tempDir, "sdl-mcp-graph.lbug");
 
     const { initCommand } = await import("../../src/cli/commands/init.js");
 
@@ -110,7 +109,13 @@ describe("CLI init command - KuzuDB", () => {
       dryRun: true,
     });
 
-    assert.ok(!existsSync(configPath), "Config file should not exist in dry-run");
-    assert.ok(!existsSync(expectedKuzuPath), "KuzuDB file should not exist in dry-run");
+    assert.ok(
+      !existsSync(configPath),
+      "Config file should not exist in dry-run",
+    );
+    assert.ok(
+      !existsSync(expectedLadybugPath),
+      "LadybugDB file should not exist in dry-run",
+    );
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Tests for KuzuDB Schema Definition (T1.2)
+ * Tests for LadybugDB Schema Definition (T1.2)
  *
  * Tests:
  * - Schema creation
@@ -70,12 +70,13 @@ async function exec(conn: LadybugConnection, q: string): Promise<void> {
   result.close();
 }
 
-describe("KuzuDB Schema", () => {
+describe("LadybugDB Schema", () => {
   describe("createSchema", () => {
     it("should create schema without errors", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
       } finally {
         await cleanupTestDb(db, conn);
@@ -85,7 +86,8 @@ describe("KuzuDB Schema", () => {
     it("should be idempotent - safe to call multiple times", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
         await createSchema(conn as unknown as import("kuzu").Connection);
         await createSchema(conn as unknown as import("kuzu").Connection);
@@ -105,7 +107,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query Repo", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -128,7 +131,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query File", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -151,7 +155,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query Symbol", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -174,7 +179,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query Version", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -197,7 +203,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query SymbolVersion", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -220,7 +227,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query Metrics", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -243,7 +251,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query Cluster", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -266,7 +275,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query Process", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -289,7 +299,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query SliceHandle", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -312,7 +323,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query CardHash", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -334,7 +346,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query Audit", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -357,7 +370,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query AgentFeedback", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -380,7 +394,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query SymbolEmbedding", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -403,7 +418,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query SummaryCache", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -426,7 +442,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query SyncArtifact", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -449,7 +466,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query SymbolReference", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -474,7 +492,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query FILE_IN_REPO", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -504,7 +523,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query SYMBOL_IN_FILE", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -534,7 +554,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query DEPENDS_ON with properties", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -565,7 +586,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query VERSION_OF_REPO", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -595,7 +617,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query BELONGS_TO_CLUSTER", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -625,7 +648,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query PARTICIPATES_IN", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -655,7 +679,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query CLUSTER_IN_REPO", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(
@@ -685,7 +710,8 @@ describe("KuzuDB Schema", () => {
     it("should insert and query PROCESS_IN_REPO", async () => {
       const { db, conn } = await createTestDb();
       try {
-        const { createSchema } = await import("../../dist/db/ladybug-schema.js");
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
         await createSchema(conn as unknown as import("kuzu").Connection);
 
         await exec(

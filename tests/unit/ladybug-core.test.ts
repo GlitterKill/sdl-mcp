@@ -1,5 +1,5 @@
 /**
- * Tests for src/db/kuzu-core.ts — shared KuzuDB helper functions
+ * Tests for src/db/ladybug-core.ts — shared LadybugDB helper functions
  * These are unit tests for the pure utility functions (toNumber, toBoolean, assertSafeInt).
  * The async DB functions (exec, queryAll, querySingle, withTransaction) are tested
  * indirectly through the existing integration tests.

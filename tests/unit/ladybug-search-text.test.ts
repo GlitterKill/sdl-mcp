@@ -37,7 +37,10 @@ async function createTestDb(): Promise<{
   return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
+async function cleanupTestDb(
+  db: LadybugDatabase,
+  conn: LadybugConnection,
+): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -51,7 +54,7 @@ async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Prom
   } catch {}
 }
 
-describe("KuzuDB search text queries", () => {
+describe("LadybugDB search text queries", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
   let schema: typeof import("../../src/db/ladybug-schema.js");

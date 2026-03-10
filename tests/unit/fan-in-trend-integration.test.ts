@@ -1,5 +1,5 @@
 /**
- * Integration tests for fan-in trend computation against KuzuDB.
+ * Integration tests for fan-in trend computation against LadybugDB.
  *
  * Covers:
  * - getFanInAtVersion counting only snapshotted callers at a version
@@ -18,7 +18,12 @@ import { computeBlastRadius } from "../../dist/delta/blastRadius.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-fan-in-trend-test-db.lbug");
+const TEST_DB_PATH = join(
+  __dirname,
+  "..",
+  "..",
+  ".lbug-fan-in-trend-test-db.lbug",
+);
 
 interface LadybugConnection {
   query: (q: string) => Promise<{
@@ -49,7 +54,10 @@ async function createTestDb(): Promise<{
   return { db, conn: conn as unknown as LadybugConnection };
 }
 
-async function cleanupTestDb(db: LadybugDatabase, conn: LadybugConnection): Promise<void> {
+async function cleanupTestDb(
+  db: LadybugDatabase,
+  conn: LadybugConnection,
+): Promise<void> {
   try {
     await conn.close();
   } catch {}
@@ -68,7 +76,7 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
-describe("Fan-in trend integration tests (Kuzu)", () => {
+describe("Fan-in trend integration tests (LadybugDB)", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
   let queries: typeof import("../../dist/db/ladybug-queries.js");
@@ -99,7 +107,10 @@ describe("Fan-in trend integration tests (Kuzu)", () => {
     });
   };
 
-  const upsertSymbol = async (symbolId: string, name: string): Promise<void> => {
+  const upsertSymbol = async (
+    symbolId: string,
+    name: string,
+  ): Promise<void> => {
     await queries.upsertSymbol(kConn(), {
       symbolId,
       repoId,
@@ -122,7 +133,10 @@ describe("Fan-in trend integration tests (Kuzu)", () => {
     });
   };
 
-  const snapshot = async (versionId: string, symbolIds: string[]): Promise<void> => {
+  const snapshot = async (
+    versionId: string,
+    symbolIds: string[],
+  ): Promise<void> => {
     for (const symbolId of symbolIds) {
       await queries.snapshotSymbolVersion(kConn(), {
         versionId,
@@ -140,12 +154,15 @@ describe("Fan-in trend integration tests (Kuzu)", () => {
     symbolId: string,
     fromVersionId: string,
     toVersionId: string,
-  ): Promise<{
-    previous: number;
-    current: number;
-    growthRate: number;
-    isAmplifier: boolean;
-  } | undefined> => {
+  ): Promise<
+    | {
+        previous: number;
+        current: number;
+        growthRate: number;
+        isAmplifier: boolean;
+      }
+    | undefined
+  > => {
     const previous = await queries.getFanInAtVersion(
       kConn(),
       repoId,
@@ -186,92 +203,134 @@ describe("Fan-in trend integration tests (Kuzu)", () => {
     await cleanupTestDb(db, conn);
   });
 
-  it("Test 1: symbol gains 5 new callers → amplifier detected", { skip: !ladybugAvailable }, async () => {
-    const fooId = "sym-foo";
-    await upsertSymbol(fooId, "foo");
+  it(
+    "Test 1: symbol gains 5 new callers → amplifier detected",
+    { skip: !ladybugAvailable },
+    async () => {
+      const fooId = "sym-foo";
+      await upsertSymbol(fooId, "foo");
 
-    await queries.upsertMetrics(kConn(), {
-      symbolId: fooId,
-      fanIn: 0,
-      fanOut: 0,
-      churn30d: 0,
-      testRefsJson: "[]",
-      canonicalTestJson: null,
-      updatedAt: NOW,
-    });
-
-    await queries.createVersion(kConn(), {
-      versionId: "v1",
-      repoId,
-      createdAt: NOW,
-      reason: "v1",
-      prevVersionHash: null,
-      versionHash: null,
-    });
-    await snapshot("v1", [fooId]);
-
-    const callerIds: string[] = [];
-    for (let i = 0; i < 5; i++) {
-      const callerId = `sym-caller-${i}`;
-      callerIds.push(callerId);
-      await upsertSymbol(callerId, `caller${i}`);
-      await queries.insertEdge(kConn(), {
-        repoId,
-        fromSymbolId: callerId,
-        toSymbolId: fooId,
-        edgeType: "call",
-        weight: 1,
-        confidence: 1,
-        resolution: "exact",
-        provenance: "static",
-        createdAt: NOW,
+      await queries.upsertMetrics(kConn(), {
+        symbolId: fooId,
+        fanIn: 0,
+        fanOut: 0,
+        churn30d: 0,
+        testRefsJson: "[]",
+        canonicalTestJson: null,
+        updatedAt: NOW,
       });
-    }
 
-    await queries.createVersion(kConn(), {
-      versionId: "v2",
-      repoId,
-      createdAt: NOW,
-      reason: "v2",
-      prevVersionHash: null,
-      versionHash: null,
-    });
-    await snapshot("v2", [fooId, ...callerIds]);
+      await queries.createVersion(kConn(), {
+        versionId: "v1",
+        repoId,
+        createdAt: NOW,
+        reason: "v1",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      await snapshot("v1", [fooId]);
 
-    const fanInV1 = await queries.getFanInAtVersion(kConn(), repoId, fooId, "v1");
-    const fanInV2 = await queries.getFanInAtVersion(kConn(), repoId, fooId, "v2");
-    assert.equal(fanInV1, 0);
-    assert.equal(fanInV2, 5);
+      const callerIds: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const callerId = `sym-caller-${i}`;
+        callerIds.push(callerId);
+        await upsertSymbol(callerId, `caller${i}`);
+        await queries.insertEdge(kConn(), {
+          repoId,
+          fromSymbolId: callerId,
+          toSymbolId: fooId,
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "static",
+          createdAt: NOW,
+        });
+      }
 
-    const fanInTrend = await computeFanInTrendForSymbol(fooId, "v1", "v2");
-    assert.ok(fanInTrend);
-    assert.equal(fanInTrend.previous, 0);
-    assert.equal(fanInTrend.current, 5);
-    assert.equal(fanInTrend.isAmplifier, true);
-  });
+      await queries.createVersion(kConn(), {
+        versionId: "v2",
+        repoId,
+        createdAt: NOW,
+        reason: "v2",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      await snapshot("v2", [fooId, ...callerIds]);
 
-  it("Test 2: 10 existing callers + 1 new caller → not an amplifier", { skip: !ladybugAvailable }, async () => {
-    const barId = "sym-bar";
-    await upsertSymbol(barId, "bar");
+      const fanInV1 = await queries.getFanInAtVersion(
+        kConn(),
+        repoId,
+        fooId,
+        "v1",
+      );
+      const fanInV2 = await queries.getFanInAtVersion(
+        kConn(),
+        repoId,
+        fooId,
+        "v2",
+      );
+      assert.equal(fanInV1, 0);
+      assert.equal(fanInV2, 5);
 
-    await queries.upsertMetrics(kConn(), {
-      symbolId: barId,
-      fanIn: 10,
-      fanOut: 0,
-      churn30d: 0,
-      testRefsJson: "[]",
-      canonicalTestJson: null,
-      updatedAt: NOW,
-    });
+      const fanInTrend = await computeFanInTrendForSymbol(fooId, "v1", "v2");
+      assert.ok(fanInTrend);
+      assert.equal(fanInTrend.previous, 0);
+      assert.equal(fanInTrend.current, 5);
+      assert.equal(fanInTrend.isAmplifier, true);
+    },
+  );
 
-    const originalCallers: string[] = [];
-    for (let i = 0; i < 10; i++) {
-      const callerId = `sym-orig-${i}`;
-      originalCallers.push(callerId);
-      await upsertSymbol(callerId, `orig${i}`);
+  it(
+    "Test 2: 10 existing callers + 1 new caller → not an amplifier",
+    { skip: !ladybugAvailable },
+    async () => {
+      const barId = "sym-bar";
+      await upsertSymbol(barId, "bar");
+
+      await queries.upsertMetrics(kConn(), {
+        symbolId: barId,
+        fanIn: 10,
+        fanOut: 0,
+        churn30d: 0,
+        testRefsJson: "[]",
+        canonicalTestJson: null,
+        updatedAt: NOW,
+      });
+
+      const originalCallers: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const callerId = `sym-orig-${i}`;
+        originalCallers.push(callerId);
+        await upsertSymbol(callerId, `orig${i}`);
+        await queries.insertEdge(kConn(), {
+          repoId,
+          fromSymbolId: callerId,
+          toSymbolId: barId,
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "static",
+          createdAt: NOW,
+        });
+      }
+
+      await queries.createVersion(kConn(), {
+        versionId: "v1",
+        repoId,
+        createdAt: NOW,
+        reason: "v1",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      await snapshot("v1", [barId, ...originalCallers]);
+
+      const newCaller = "sym-new";
+      await upsertSymbol(newCaller, "newCaller");
       await queries.insertEdge(kConn(), {
         repoId,
-        fromSymbolId: callerId,
+        fromSymbolId: newCaller,
         toSymbolId: barId,
         edgeType: "call",
         weight: 1,
@@ -280,105 +339,38 @@ describe("Fan-in trend integration tests (Kuzu)", () => {
         provenance: "static",
         createdAt: NOW,
       });
-    }
 
-    await queries.createVersion(kConn(), {
-      versionId: "v1",
-      repoId,
-      createdAt: NOW,
-      reason: "v1",
-      prevVersionHash: null,
-      versionHash: null,
-    });
-    await snapshot("v1", [barId, ...originalCallers]);
+      await queries.createVersion(kConn(), {
+        versionId: "v2",
+        repoId,
+        createdAt: NOW,
+        reason: "v2",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      await snapshot("v2", [barId, ...originalCallers, newCaller]);
 
-    const newCaller = "sym-new";
-    await upsertSymbol(newCaller, "newCaller");
-    await queries.insertEdge(kConn(), {
-      repoId,
-      fromSymbolId: newCaller,
-      toSymbolId: barId,
-      edgeType: "call",
-      weight: 1,
-      confidence: 1,
-      resolution: "exact",
-      provenance: "static",
-      createdAt: NOW,
-    });
+      const fanInTrend = await computeFanInTrendForSymbol(barId, "v1", "v2");
+      assert.ok(fanInTrend);
+      assert.equal(fanInTrend.previous, 10);
+      assert.equal(fanInTrend.current, 11);
+      assert.equal(fanInTrend.isAmplifier, false);
+    },
+  );
 
-    await queries.createVersion(kConn(), {
-      versionId: "v2",
-      repoId,
-      createdAt: NOW,
-      reason: "v2",
-      prevVersionHash: null,
-      versionHash: null,
-    });
-    await snapshot("v2", [barId, ...originalCallers, newCaller]);
+  it(
+    "Test 3: computeBlastRadius attaches fanInTrend only with version IDs",
+    { skip: !ladybugAvailable },
+    async () => {
+      const changedId = "sym-changed";
+      const depId = "sym-dep";
+      await upsertSymbol(changedId, "changedFn");
+      await upsertSymbol(depId, "depFn");
 
-    const fanInTrend = await computeFanInTrendForSymbol(barId, "v1", "v2");
-    assert.ok(fanInTrend);
-    assert.equal(fanInTrend.previous, 10);
-    assert.equal(fanInTrend.current, 11);
-    assert.equal(fanInTrend.isAmplifier, false);
-  });
-
-  it("Test 3: computeBlastRadius attaches fanInTrend only with version IDs", { skip: !ladybugAvailable }, async () => {
-    const changedId = "sym-changed";
-    const depId = "sym-dep";
-    await upsertSymbol(changedId, "changedFn");
-    await upsertSymbol(depId, "depFn");
-
-    await queries.insertEdge(kConn(), {
-      repoId,
-      fromSymbolId: depId,
-      toSymbolId: changedId,
-      edgeType: "call",
-      weight: 1,
-      confidence: 1,
-      resolution: "exact",
-      provenance: "static",
-      createdAt: NOW,
-    });
-
-    const withoutVersions = await computeBlastRadius(kConn(), [changedId], {
-      repoId,
-      maxHops: 2,
-      maxResults: 20,
-    });
-    assert.ok(Array.isArray(withoutVersions));
-    for (const item of withoutVersions) {
-      assert.equal(item.fanInTrend, undefined);
-    }
-
-    // Make depId an amplifier between v1 and v2.
-    await queries.createVersion(kConn(), {
-      versionId: "v1",
-      repoId,
-      createdAt: NOW,
-      reason: "v1",
-      prevVersionHash: null,
-      versionHash: null,
-    });
-    await queries.createVersion(kConn(), {
-      versionId: "v2",
-      repoId,
-      createdAt: NOW,
-      reason: "v2",
-      prevVersionHash: null,
-      versionHash: null,
-    });
-    await snapshot("v1", [changedId, depId]);
-
-    const depCallers: string[] = [];
-    for (let i = 0; i < 5; i++) {
-      const callerId = `sym-dep-caller-${i}`;
-      depCallers.push(callerId);
-      await upsertSymbol(callerId, `depCaller${i}`);
       await queries.insertEdge(kConn(), {
         repoId,
-        fromSymbolId: callerId,
-        toSymbolId: depId,
+        fromSymbolId: depId,
+        toSymbolId: changedId,
         edgeType: "call",
         weight: 1,
         confidence: 1,
@@ -386,20 +378,67 @@ describe("Fan-in trend integration tests (Kuzu)", () => {
         provenance: "static",
         createdAt: NOW,
       });
-    }
-    await snapshot("v2", [changedId, depId, ...depCallers]);
 
-    const withVersions = await computeBlastRadius(kConn(), [changedId], {
-      repoId,
-      maxHops: 2,
-      maxResults: 20,
-      fromVersionId: "v1",
-      toVersionId: "v2",
-    });
+      const withoutVersions = await computeBlastRadius(kConn(), [changedId], {
+        repoId,
+        maxHops: 2,
+        maxResults: 20,
+      });
+      assert.ok(Array.isArray(withoutVersions));
+      for (const item of withoutVersions) {
+        assert.equal(item.fanInTrend, undefined);
+      }
 
-    const depItem = withVersions.find((item) => item.symbolId === depId);
-    assert.ok(depItem);
-    assert.ok(depItem.fanInTrend);
-    assert.equal(depItem.fanInTrend.isAmplifier, true);
-  });
+      // Make depId an amplifier between v1 and v2.
+      await queries.createVersion(kConn(), {
+        versionId: "v1",
+        repoId,
+        createdAt: NOW,
+        reason: "v1",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      await queries.createVersion(kConn(), {
+        versionId: "v2",
+        repoId,
+        createdAt: NOW,
+        reason: "v2",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      await snapshot("v1", [changedId, depId]);
+
+      const depCallers: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const callerId = `sym-dep-caller-${i}`;
+        depCallers.push(callerId);
+        await upsertSymbol(callerId, `depCaller${i}`);
+        await queries.insertEdge(kConn(), {
+          repoId,
+          fromSymbolId: callerId,
+          toSymbolId: depId,
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "static",
+          createdAt: NOW,
+        });
+      }
+      await snapshot("v2", [changedId, depId, ...depCallers]);
+
+      const withVersions = await computeBlastRadius(kConn(), [changedId], {
+        repoId,
+        maxHops: 2,
+        maxResults: 20,
+        fromVersionId: "v1",
+        toVersionId: "v2",
+      });
+
+      const depItem = withVersions.find((item) => item.symbolId === depId);
+      assert.ok(depItem);
+      assert.ok(depItem.fanInTrend);
+      assert.equal(depItem.fanInTrend.isAmplifier, true);
+    },
+  );
 });

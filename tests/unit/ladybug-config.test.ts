@@ -1,5 +1,5 @@
 /**
- * Tests for KuzuDB config schema validation
+ * Tests for LadybugDB config schema validation
  */
 
 import { describe, it } from "node:test";
@@ -22,12 +22,16 @@ describe("GraphDatabaseConfigSchema", () => {
     });
 
     it("should accept a valid string path", () => {
-      const result = GraphDatabaseConfigSchema.parse({ path: "./data/graph.lbug" });
+      const result = GraphDatabaseConfigSchema.parse({
+        path: "./data/graph.lbug",
+      });
       assert.deepStrictEqual(result, { path: "./data/graph.lbug" });
     });
 
     it("should accept an absolute path", () => {
-      const result = GraphDatabaseConfigSchema.parse({ path: "/var/lib/sdlmcp/graph.lbug" });
+      const result = GraphDatabaseConfigSchema.parse({
+        path: "/var/lib/sdlmcp/graph.lbug",
+      });
       assert.deepStrictEqual(result, { path: "/var/lib/sdlmcp/graph.lbug" });
     });
 

@@ -65,7 +65,7 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
-describe("KuzuDB Graph Operations", () => {
+describe("LadybugDB Graph Operations", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
   let graphOps: typeof import("../../dist/graph/buildGraph.js");

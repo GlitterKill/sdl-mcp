@@ -7,11 +7,7 @@
 # SDL-MCP
 
 ![npm version](https://img.shields.io/npm/v/sdl-mcp.svg) ![npm downloads](https://img.shields.io/npm/dm/sdl-mcp.svg) ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/GlitterKill/sdl-mcp/ci.yml?label=CI%20Builds)
- ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/GlitterKill/sdl-mcp/publish-native.yml?label=Rust%20Indexer%20Builds) ![GitHub commit activity](https://img.shields.io/github/commit-activity/w/GlitterKill/sdl-mcp) 
-
-
-
-
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/GlitterKill/sdl-mcp/publish-native.yml?label=Rust%20Indexer%20Builds) ![GitHub commit activity](https://img.shields.io/github/commit-activity/w/GlitterKill/sdl-mcp)
 
 <div align="right">
 <details>
@@ -33,143 +29,143 @@
 ## Claude Opus 4.6 High Overview
 
 Question: "Review the code for SDL-MCP and explain to potential new users what this MCP server does and the benefits of
-  using it."
+using it."
 
 Response: "# What is SDL-MCP?
 
-  **SDL-MCP** (Symbol Delta Ledger - Model Context Protocol) is an MCP server that gives AI coding agents a structured,
-  token-efficient way to understand your codebase. Instead of feeding entire files into the context window, SDL-MCP
-  indexes your repository into a **searchable knowledge graph** of symbols and their relationships, then serves exactly
-  the right amount of context through a controlled escalation path.
+**SDL-MCP** (Symbol Delta Ledger - Model Context Protocol) is an MCP server that gives AI coding agents a structured,
+token-efficient way to understand your codebase. Instead of feeding entire files into the context window, SDL-MCP
+indexes your repository into a **searchable knowledge graph** of symbols and their relationships, then serves exactly
+the right amount of context through a controlled escalation path.
 
-  It ships as an npm package (`npm install -g sdl-mcp`) with a CLI for setup and a server that any MCP-compatible client
-   (Claude Code, Claude Desktop, etc.) can connect to.
+It ships as an npm package (`npm install -g sdl-mcp`) with a CLI for setup and a server that any MCP-compatible client
+(Claude Code, Claude Desktop, etc.) can connect to.
 
-  ---
+---
 
-  ## The Problem It Solves
+## The Problem It Solves
 
-  When AI assistants work with code, they typically read whole files — often many of them — to gather enough context.
-  This has three costs:
+When AI assistants work with code, they typically read whole files — often many of them — to gather enough context.
+This has three costs:
 
-  1. **Context windows fill up fast.** A modest codebase can exceed token limits quickly.
-  2. **Irrelevant code dilutes focus.** Tokens are spent on code unrelated to the task.
-  3. **No incremental understanding.** Every interaction starts fresh with no memory of what was already analyzed.
+1. **Context windows fill up fast.** A modest codebase can exceed token limits quickly.
+2. **Irrelevant code dilutes focus.** Tokens are spent on code unrelated to the task.
+3. **No incremental understanding.** Every interaction starts fresh with no memory of what was already analyzed.
 
-  SDL-MCP addresses all three by maintaining a **persistent, indexed graph** of your codebase and controlling context
-  retrieval through the **Iris Gate Ladder**.
+SDL-MCP addresses all three by maintaining a **persistent, indexed graph** of your codebase and controlling context
+retrieval through the **Iris Gate Ladder**.
 
-  ---
+---
 
-  ## How It Works
+## How It Works
 
-  ### 1. Repository Indexing
+### 1. Repository Indexing
 
-  SDL-MCP parses your codebase using either a **native Rust indexer** (default, fast, multi-threaded) or a **tree-sitter
-   TypeScript fallback**, and extracts every function, class, interface, type, and variable into **Symbol Cards** —
-  compact metadata records containing signatures, summaries, dependency edges, and metrics like fan-in/out.
+SDL-MCP parses your codebase using either a **native Rust indexer** (default, fast, multi-threaded) or a **tree-sitter
+TypeScript fallback**, and extracts every function, class, interface, type, and variable into **Symbol Cards** —
+compact metadata records containing signatures, summaries, dependency edges, and metrics like fan-in/out.
 
-  **12 languages supported:** TypeScript, JavaScript, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, and Shell.
+**12 languages supported:** TypeScript, JavaScript, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, and Shell.
 
-  Indexing happens once and is persisted in a **LadybugDB embedded graph database**. Incremental re-indexing picks up only
-  what changed.
+Indexing happens once and is persisted in a **LadybugDB embedded graph database**. Incremental re-indexing picks up only
+what changed.
 
-  ### 2. The Iris Gate Ladder (4 Rungs)
+### 2. The Iris Gate Ladder (4 Rungs)
 
-  Context is served in escalating detail — agents start small and only request more when needed:
+Context is served in escalating detail — agents start small and only request more when needed:
 
-  | Rung | Tool | ~Tokens | What It Provides |
-  | :--- | :--- | :--- | :--- |
-  | **1. Symbol Cards** | `sdl.symbol.getCard` | 50–150 | Name, signature, summary, dependencies, metrics |
-  | **2. Skeleton IR** | `sdl.code.getSkeleton` | 200–400 | Signatures + control flow, bodies elided |
-  | **3. Hot-Path Excerpt** | `sdl.code.getHotPath` | 400–800 | Lines matching specific identifiers + context |
-  | **4. Raw Code Window** | `sdl.code.needWindow` | 1,000–4,000 | Full source code (policy-gated, requires
-  justification) |
+| Rung                    | Tool                   | ~Tokens     | What It Provides                                |
+| :---------------------- | :--------------------- | :---------- | :---------------------------------------------- |
+| **1. Symbol Cards**     | `sdl.symbol.getCard`   | 50–150      | Name, signature, summary, dependencies, metrics |
+| **2. Skeleton IR**      | `sdl.code.getSkeleton` | 200–400     | Signatures + control flow, bodies elided        |
+| **3. Hot-Path Excerpt** | `sdl.code.getHotPath`  | 400–800     | Lines matching specific identifiers + context   |
+| **4. Raw Code Window**  | `sdl.code.needWindow`  | 1,000–4,000 | Full source code (policy-gated, requires        |
+| justification)          |
 
-  > [!TIP]
-  > Most questions are answered at rungs 1–2 without ever reading raw code.
+> [!TIP]
+> Most questions are answered at rungs 1–2 without ever reading raw code.
 
-  ### 3. Graph Slices
+### 3. Graph Slices
 
-  When the agent needs broader context for a task, `sdl.slice.build` performs a **BFS/beam search** from entry symbols
-  across weighted dependency edges (call > config > import), bounded by a token budget. The result is the 20–30 most
-  relevant symbols for the task — not an arbitrary directory listing.
+When the agent needs broader context for a task, `sdl.slice.build` performs a **BFS/beam search** from entry symbols
+across weighted dependency edges (call > config > import), bounded by a token budget. The result is the 20–30 most
+relevant symbols for the task — not an arbitrary directory listing.
 
-  ### 4. Delta Packs & Blast Radius
+### 4. Delta Packs & Blast Radius
 
-  When code changes, SDL-MCP computes **semantic diffs at the symbol level** — not line-level diffs, but changes to
-  signatures, invariants, and side effects. It also computes a **blast radius**: which other symbols are affected,
-  ranked by proximity, fan-in, and test coverage.
+When code changes, SDL-MCP computes **semantic diffs at the symbol level** — not line-level diffs, but changes to
+signatures, invariants, and side effects. It also computes a **blast radius**: which other symbols are affected,
+ranked by proximity, fan-in, and test coverage.
 
-  ### 5. Proof-of-Need Gating
+### 5. Proof-of-Need Gating
 
-  Raw code access (rung 4) requires the agent to justify _why_ it needs the code, _what identifiers_ it expects to find,
-   and _how many lines_. Requests are audited. This enforces disciplined token usage.
+Raw code access (rung 4) requires the agent to justify _why_ it needs the code, _what identifiers_ it expects to find,
+and _how many lines_. Requests are audited. This enforces disciplined token usage.
 
-  ---
+---
 
-  ## Key Benefits
+## Key Benefits
 
-  ### Token Efficiency
+### Token Efficiency
 
-  - **10–50x fewer tokens** per coding task compared to reading raw files
-  - **2,782x compression ratio** for a repository overview vs. a full card dump
+- **10–50x fewer tokens** per coding task compared to reading raw files
+- **2,782x compression ratio** for a repository overview vs. a full card dump
 
-  ### Better Relevance
+### Better Relevance
 
-  - Graph-based slicing finds related code that directory-based approaches miss
-  - Confidence-scored call resolution filters noise from low-confidence edges
+- Graph-based slicing finds related code that directory-based approaches miss
+- Confidence-scored call resolution filters noise from low-confidence edges
 
-  ### Incremental Understanding
+### Incremental Understanding
 
-  - Delta packs mean the agent doesn't re-read unchanged code
-  - Slice handles with leases and refresh support avoid rebuilding context from scratch
+- Delta packs mean the agent doesn't re-read unchanged code
+- Slice handles with leases and refresh support avoid rebuilding context from scratch
 
-  ### Governance & Auditability
+### Governance & Auditability
 
-  - Configurable policies control what agents can access
-  - Every raw code request is logged with justification
-  - Blast radius analysis shows ripple effects before changes land
+- Configurable policies control what agents can access
+- Every raw code request is logged with justification
+- Blast radius analysis shows ripple effects before changes land
 
-  ### Multi-Language
+### Multi-Language
 
-  - 12 language adapters with a generalized pass-2 resolver for cross-file semantic resolution
+- 12 language adapters with a generalized pass-2 resolver for cross-file semantic resolution
 
-  ---
+---
 
-  ## Feature Summary
+## Feature Summary
 
-  | Category | Features |
-  | :--- | :--- |
-  | **Indexing** | Native Rust + tree-sitter fallback, incremental indexing, live editor-buffer overlay, file watching |
-  | **Context** | Symbol cards, skeleton IR, hot-path excerpts, gated raw windows |
-  | **Graph** | Slices with handles/leases/refresh/spillover, cluster detection, call-chain tracing |
-  | **Change Tracking** | Delta packs, blast radius analysis, PR risk scoring |
-  | **Intelligence** | Semantic search reranking, LLM-generated summaries, predictive prefetch |
-  | **Governance** | Policy engine, proof-of-need gating, audit logging |
-  | **Agent Support** | `sdl.agent.orchestrate` autopilot, `sdl.context.summary` for copy/paste context |
-  | **Tools** | 17+ MCP tools, 10 CLI commands, HTTP API with graph explorer UI |
-  | **Integrations** | VSCode extension, Claude Code/Desktop, any MCP client |
+| Category            | Features                                                                                            |
+| :------------------ | :-------------------------------------------------------------------------------------------------- |
+| **Indexing**        | Native Rust + tree-sitter fallback, incremental indexing, live editor-buffer overlay, file watching |
+| **Context**         | Symbol cards, skeleton IR, hot-path excerpts, gated raw windows                                     |
+| **Graph**           | Slices with handles/leases/refresh/spillover, cluster detection, call-chain tracing                 |
+| **Change Tracking** | Delta packs, blast radius analysis, PR risk scoring                                                 |
+| **Intelligence**    | Semantic search reranking, LLM-generated summaries, predictive prefetch                             |
+| **Governance**      | Policy engine, proof-of-need gating, audit logging                                                  |
+| **Agent Support**   | `sdl.agent.orchestrate` autopilot, `sdl.context.summary` for copy/paste context                     |
+| **Tools**           | 17+ MCP tools, 10 CLI commands, HTTP API with graph explorer UI                                     |
+| **Integrations**    | VSCode extension, Claude Code/Desktop, any MCP client                                               |
 
-  ---
+---
 
-  ## Getting Started
+## Getting Started
 
-  ```bash
-  # Install globally
-  npm install -g sdl-mcp
+```bash
+# Install globally
+npm install -g sdl-mcp
 
-  # Initialize config + index your repo
-  sdl-mcp init -y --auto-index
+# Initialize config + index your repo
+sdl-mcp init -y --auto-index
 
-  # Start the MCP server
-  sdl-mcp serve --stdio
+# Start the MCP server
+sdl-mcp serve --stdio
 
-  Then point your MCP client at the server — the agent gains access to all SDL-MCP tools and can navigate your codebase
-  through the Iris Gate Ladder instead of bulk file reads.
+Then point your MCP client at the server — the agent gains access to all SDL-MCP tools and can navigate your codebase
+through the Iris Gate Ladder instead of bulk file reads.
 
-  [!NOTE]
-  See the full ./docs/getting-started.md and ./docs/mcp-tools-reference.md for detailed setup and usage instructions.
+[!NOTE]
+See the full ./docs/getting-started.md and ./docs/mcp-tools-reference.md for detailed setup and usage instructions.
 
 ```
 
@@ -177,7 +173,7 @@ Response: "# What is SDL-MCP?
 
 - Multi-language repository indexing with tree-sitter adapters
 - Native Rust pass-1 indexing engine by default (`indexing.engine: "rust"`, with TypeScript fallback)
-- Live editor-buffer indexing with draft-aware symbol/search/slice reads, save-time Kuzu patching, background reconciliation, and automatic checkpoint compaction (`liveIndex.*`)
+- Live editor-buffer indexing with draft-aware symbol/search/slice reads, save-time LadybugDB patching, background reconciliation, and automatic checkpoint compaction (`liveIndex.*`)
 - Symbol cards with signatures, deps, metrics, and versioning
 - Graph slices with handles, leases, refresh, and spillover
 - Graph enrichment: clusters (community detection) + processes (call-chain traces) surfaced in cards/slices/overview/blast radius
@@ -266,6 +262,6 @@ Phase A benchmark lockfile:
 This project is **source-available**.
 
 - **Free Use (Community License):** You may use, run, and modify this software for any purpose, including **internal business use**, under the terms in [`LICENSE`](./LICENSE).
-- **Commercial Distribution / Embedding:** You must obtain a **commercial license** *before* you **sell, license, sublicense, bundle, embed, or distribute** this software (or a modified version) **as part of a for-sale or monetized product or offering**. See [`COMMERCIAL_LICENSE.md`](./COMMERCIAL_LICENSE.md).
+- **Commercial Distribution / Embedding:** You must obtain a **commercial license** _before_ you **sell, license, sublicense, bundle, embed, or distribute** this software (or a modified version) **as part of a for-sale or monetized product or offering**. See [`COMMERCIAL_LICENSE.md`](./COMMERCIAL_LICENSE.md).
 
 If you're unsure whether your use is "Commercial Distribution / Embedding", contact **gmullins.gkc@gmail.com**.

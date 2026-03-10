@@ -76,7 +76,7 @@ function cleanupTestDb(name: string): void {
   }
 }
 
-describe("KuzuDB Connection Manager", { skip: !ladybugAvailable }, () => {
+describe("LadybugDB Connection Manager", { skip: !ladybugAvailable }, () => {
   beforeEach(async () => {
     await closeLadybugDb();
   });

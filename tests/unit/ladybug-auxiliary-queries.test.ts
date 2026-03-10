@@ -64,7 +64,7 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
-describe("KuzuDB Auxiliary Queries", () => {
+describe("LadybugDB Auxiliary Queries", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
   let queries: typeof import("../../dist/db/ladybug-queries.js");

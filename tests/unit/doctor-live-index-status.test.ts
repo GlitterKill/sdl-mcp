@@ -4,7 +4,11 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../../src/db/ladybug.js";
 import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { handleBufferPush } from "../../src/mcp/tools/buffer.js";
 import {
@@ -24,7 +28,10 @@ describe("doctor command - live index runtime health", () => {
     tempDir = join(tmpdir(), `sdl-mcp-doctor-live-index-${Date.now()}`);
     mkdirSync(tempDir, { recursive: true });
     mkdirSync(join(tempDir, "src"), { recursive: true });
-    writeFileSync(join(tempDir, "src", "example.ts"), "export const value = 1;\n");
+    writeFileSync(
+      join(tempDir, "src", "example.ts"),
+      "export const value = 1;\n",
+    );
 
     configPath = join(tempDir, "sdlmcp.config.json");
     ladybugPath = join(tempDir, "graph.lbug");
@@ -104,7 +111,7 @@ describe("doctor command - live index runtime health", () => {
     });
 
     // Wait for debounced parse to complete so overlay state is stable
-    // and KuzuDB is not accessed concurrently during doctorCommand
+    // and LadybugDB is not accessed concurrently during doctorCommand
     await waitForDefaultLiveIndexIdle();
 
     const { doctorCommand } = await import("../../src/cli/commands/doctor.js");
