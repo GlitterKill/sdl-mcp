@@ -155,10 +155,8 @@ export async function runMixedReadWrite(
 
       const roundMetrics = collector.getAllToolMetrics();
       for (const [name, metrics] of Object.entries(roundMetrics)) {
-        if (
-          !allToolMetrics[name] ||
-          metrics.count > allToolMetrics[name].count
-        ) {
+        // Keep the round with the worst P95 — that's the regression signal
+        if (!allToolMetrics[name] || metrics.p95 > allToolMetrics[name].p95) {
           allToolMetrics[name] = metrics;
         }
       }

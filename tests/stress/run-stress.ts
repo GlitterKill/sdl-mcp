@@ -133,7 +133,6 @@ async function main(): Promise<void> {
     ...DEFAULT_CONFIG,
     port: cliArgs.port,
     fixturePath,
-    graphDbPath: "", // Will be set by ServerHarness
     concurrencyLevels: levels,
     scenarioTimeoutMs: cliArgs.timeout,
     verbose: cliArgs.verbose,

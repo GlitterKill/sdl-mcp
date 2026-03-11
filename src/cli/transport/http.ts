@@ -722,6 +722,8 @@ async function handleRestRequest(
 // ---------------------------------------------------------------------------
 
 export interface HttpServerHandle {
+  /** The port the server is actually listening on (resolves port 0 → OS-assigned). */
+  port: number;
   /** Resolves when the server closes. */
   serverClosed: Promise<void>;
   /** Gracefully close the HTTP server and stop the idle reaper. */
@@ -1094,20 +1096,31 @@ export async function setupHttpTransport(
     },
   );
 
-  httpServer.listen(port, host, () => {
-    console.error(`HTTP server listening on http://${host}:${port}`);
-    console.error(`  - Streamable HTTP: http://${host}:${port}/mcp`);
-    console.error(`  - SSE endpoint:    http://${host}:${port}/sse`);
-    console.error(`  - Sessions:        http://${host}:${port}/api/sessions`);
-    console.error(`  - Health check:    http://${host}:${port}/health`);
-    console.error(`  - Graph UI:        http://${host}:${port}/ui/graph`);
-    if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") {
+  const boundPort = await new Promise<number>((resolve_, reject_) => {
+    httpServer.once("error", reject_);
+    httpServer.listen(port, host, () => {
+      httpServer.removeListener("error", reject_);
+      const addr = httpServer.address();
+      const actualPort = addr && typeof addr === "object" ? addr.port : port;
+      console.error(`HTTP server listening on http://${host}:${actualPort}`);
+      console.error(`  - Streamable HTTP: http://${host}:${actualPort}/mcp`);
+      console.error(`  - SSE endpoint:    http://${host}:${actualPort}/sse`);
       console.error(
-        `\n  WARNING: Server is listening on ${host} over plaintext HTTP.` +
-          `\n  Traffic (including code content) is NOT encrypted.` +
-          `\n  Use localhost or add a TLS reverse proxy for production use.\n`,
+        `  - Sessions:        http://${host}:${actualPort}/api/sessions`,
       );
-    }
+      console.error(`  - Health check:    http://${host}:${actualPort}/health`);
+      console.error(
+        `  - Graph UI:        http://${host}:${actualPort}/ui/graph`,
+      );
+      if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") {
+        console.error(
+          `\n  WARNING: Server is listening on ${host} over plaintext HTTP.` +
+            `\n  Traffic (including code content) is NOT encrypted.` +
+            `\n  Use localhost or add a TLS reverse proxy for production use.\n`,
+        );
+      }
+      resolve_(actualPort);
+    });
   });
 
   const serverClosed = new Promise<void>((resolve_) => {
@@ -1115,6 +1128,7 @@ export async function setupHttpTransport(
   });
 
   return {
+    port: boundPort,
     serverClosed,
     close: async () => {
       sessionManager.stopIdleReaper();

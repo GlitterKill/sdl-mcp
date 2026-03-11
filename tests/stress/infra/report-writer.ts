@@ -3,12 +3,8 @@
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import type {
-  StressReport,
-  ScenarioResult,
-  AggregateMetrics,
-} from "./types.js";
+import { join } from "node:path";
+import type { StressReport, ScenarioResult } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // ANSI color helpers

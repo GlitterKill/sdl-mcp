@@ -7,10 +7,7 @@ import { setupHttpTransport } from "../transport/http.js";
 import { configureLogger } from "../logging.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
-import {
-  closeLadybugDb,
-  configurePool,
-} from "../../db/ladybug.js";
+import { closeLadybugDb, configurePool } from "../../db/ladybug.js";
 import {
   configurePrefetch,
   warmPrefetchOnServeStart,
@@ -165,21 +162,24 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   const sessionManager = new SessionManager(concurrency?.maxSessions ?? 8);
 
   // Determine transport type and write PID file for process discovery.
+  // For HTTP transport, the pidfile is written after the server starts so we
+  // can record the actual bound port (e.g. when port 0 is requested).
   const transport: "stdio" | "http" =
     options.transport === "stdio" ? "stdio" : "http";
   const httpPort = options.port ?? 3000;
-  const pidfilePath = writePidfile(
-    graphDbPath,
-    transport,
-    transport === "http" ? httpPort : undefined,
-  );
-  console.error(`PID file written: ${pidfilePath}`);
+  let pidfilePath: string | undefined;
+  if (transport === "stdio") {
+    pidfilePath = writePidfile(graphDbPath, transport);
+    console.error(`PID file written: ${pidfilePath}`);
+  }
 
   // Set up centralized shutdown manager.
   const shutdownMgr = new ShutdownManager({
     log: (msg) => console.error(`[sdl-mcp] ${msg}`),
   });
-  shutdownMgr.setPidfilePath(pidfilePath);
+  if (pidfilePath) {
+    shutdownMgr.setPidfilePath(pidfilePath);
+  }
 
   shutdownMgr.addCleanup("idleMonitor", () => {
     idleMonitor.stop();
@@ -220,6 +220,11 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
         liveIndex,
         sessionManager,
       });
+
+      // Now that we know the actual bound port, write the pidfile.
+      pidfilePath = writePidfile(graphDbPath, transport, httpHandle.port);
+      console.error(`PID file written: ${pidfilePath}`);
+      shutdownMgr.setPidfilePath(pidfilePath);
 
       // Register HTTP server with shutdown manager for graceful close
       shutdownMgr.addCleanup("httpServer", () => httpHandle.close());

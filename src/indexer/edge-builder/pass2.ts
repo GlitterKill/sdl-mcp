@@ -179,7 +179,7 @@ async function resolveTsCallEdgesPass2(params: {
       tree,
       content,
       filePath,
-      symbolsWithNodeIds as any,
+      symbolsWithNodeIds,
     );
 
     const fileRecord = await ladybugDb.getFileByRepoPath(

@@ -168,6 +168,8 @@ export async function runSingleClientBaseline(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     stressLog("error", `Baseline scenario failed: ${msg}`);
+    // Record the orchestrator-level error so `passed` reflects it
+    collector.recordToolCall("baseline-0", "scenario", 0, false, 0, msg);
   } finally {
     if (client) await disconnectAll([client]);
   }

@@ -356,7 +356,7 @@ export async function processFileFromRustResult(params: {
         existingSymbol?.summary ??
         (nativeSummary.length > 0 ? nativeSummary : null);
       if (summary === null) {
-        summary = generateSummary(extracted as any, content);
+        summary = generateSummary(extracted, content);
       }
 
       let invariantsJson =
@@ -365,7 +365,7 @@ export async function processFileFromRustResult(params: {
           ? nativeInvariantsJson
           : null);
       if (invariantsJson === null) {
-        const invariants = extractInvariants(extracted as any, content);
+        const invariants = extractInvariants(extracted, content);
         invariantsJson =
           invariants.length > 0 ? JSON.stringify(invariants) : null;
       }
@@ -376,7 +376,7 @@ export async function processFileFromRustResult(params: {
           ? nativeSideEffectsJson
           : null);
       if (sideEffectsJson === null) {
-        const sideEffects = extractSideEffects(extracted as any, content);
+        const sideEffects = extractSideEffects(extracted, content);
         sideEffectsJson =
           sideEffects.length > 0 ? JSON.stringify(sideEffects) : null;
       }

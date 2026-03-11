@@ -249,7 +249,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
           tree,
           content,
           filePath,
-          symbolsWithNodeIds as any,
+          symbolsWithNodeIds,
         );
       }
     } catch (error) {

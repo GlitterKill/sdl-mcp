@@ -98,23 +98,9 @@ export class ServerHarness {
       { sessionManager: this.sessionManager },
     );
 
-    // Read back the actual port (supports port 0 → OS-assigned)
-    // setupHttpTransport uses httpServer.listen() which is callback-based.
-    // We need to wait briefly for the listen callback to fire.
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
-    // The port is embedded in the handle's serverClosed promise scope.
-    // For port 0, we need to infer it from the config or use a known port.
-    // Since we can't easily access httpServer.address() from outside,
-    // we use a non-zero port for stress tests.
-    this.actualPort = this.config.port || 0;
-
-    // If port 0 was requested, we need a workaround — use health check to find port
-    // For simplicity, stress tests should always specify a non-zero port
-    if (this.actualPort === 0) {
-      // Try ports starting from 19876
-      this.actualPort = 19876;
-    }
+    // setupHttpTransport now waits for listen and exposes the actual bound port
+    // (supports port 0 → OS-assigned).
+    this.actualPort = this.handle.port;
 
     stressLog("info", `Server harness started on port ${this.actualPort}`);
     return this.actualPort;

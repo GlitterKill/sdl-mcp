@@ -11,8 +11,6 @@ export interface StressTestConfig {
   host: string;
   /** HTTP server port (0 = OS-assigned) */
   port: number;
-  /** Path to the LadybugDB graph database directory */
-  graphDbPath: string;
   /** Absolute path to the fixture repo root */
   fixturePath: string;
   /** Concurrency levels to escalate through */
@@ -25,10 +23,7 @@ export interface StressTestConfig {
   verbose: boolean;
 }
 
-export const DEFAULT_CONFIG: Omit<
-  StressTestConfig,
-  "graphDbPath" | "fixturePath"
-> = {
+export const DEFAULT_CONFIG: Omit<StressTestConfig, "fixturePath"> = {
   host: "127.0.0.1",
   port: 0,
   concurrencyLevels: [3, 4, 5, 6],

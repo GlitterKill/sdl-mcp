@@ -120,8 +120,9 @@ export async function runDispatchPressure(
       warnings.push(`${failed}/${totalCalls} calls failed`);
     }
 
-    // Check: queuing should have been observed
+    // Check: queuing should have been observed — this is the core assertion
     if (peakQueued === 0) {
+      passed = false;
       warnings.push(
         "Dispatch limiter queuing was not observed (peakQueued=0). Limiter may not be active.",
       );

@@ -17,6 +17,7 @@ import type {
   SliceLease,
   SliceEtag,
   DeltaPackWithGovernance,
+  SymbolSignature,
 } from "../types.js";
 import { buildSlice } from "../../graph/slice.js";
 import {
@@ -1234,10 +1235,13 @@ export async function handleSliceSpilloverGet(
         }
       }
 
-      let signature: unknown = { name: symbolRow.name };
+      let signature: SymbolSignature = { name: symbolRow.name };
       if (symbolRow.signatureJson) {
         try {
-          signature = JSON.parse(symbolRow.signatureJson);
+          const parsed: unknown = JSON.parse(symbolRow.signatureJson);
+          if (parsed && typeof parsed === "object" && "name" in parsed) {
+            signature = parsed as SymbolSignature;
+          }
         } catch (error) {
           logger.warn("Failed to parse signatureJson JSON", {
             symbolId: item.symbolId,
@@ -1306,7 +1310,7 @@ export async function handleSliceSpilloverGet(
         name: symbolRow.name,
         exported: symbolRow.exported,
         visibility: normalizeVisibility(symbolRow.visibility),
-        signature: signature as any,
+        signature,
         summary: symbolRow.summary ?? undefined,
         invariants,
         sideEffects,
