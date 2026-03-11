@@ -41,8 +41,10 @@ export async function runDispatchPressure(
 
   collector.recordMemorySnapshot();
 
-  // Sample dispatch stats periodically during execution
+  // Sample dispatch stats at high frequency to catch brief queuing windows.
+  // Tool calls complete in ~20ms, so 100ms sampling misses the queue entirely.
   let peakQueued = 0;
+  let peakActive = 0;
   let sampleCount = 0;
   const samplerInterval = setInterval(() => {
     try {
@@ -51,11 +53,14 @@ export async function runDispatchPressure(
       if (stats.queued > peakQueued) {
         peakQueued = stats.queued;
       }
+      if (stats.active > peakActive) {
+        peakActive = stats.active;
+      }
       sampleCount++;
     } catch {
       // Ignore sampling errors
     }
-  }, 100);
+  }, 5);
 
   const clients = await createStressClients(
     serverPort,
@@ -93,7 +98,9 @@ export async function runDispatchPressure(
     const failed = results.filter((r) => r.status === "rejected").length;
 
     log(`  Completed: ${succeeded}/${totalCalls} succeeded, ${failed} failed`);
-    log(`  Peak queued: ${peakQueued} (sampled ${sampleCount} times)`);
+    log(
+      `  Peak active: ${peakActive}, peak queued: ${peakQueued} (sampled ${sampleCount} times)`,
+    );
 
     // Check: all calls should complete
     if (failed > 0) {

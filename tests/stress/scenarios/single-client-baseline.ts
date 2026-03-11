@@ -50,8 +50,8 @@ export async function runSingleClientBaseline(
     const status = await client.callToolParsed("sdl.repo.status", {
       repoId: "stress-fixtures",
     });
-    const symbolCount = status?.symbolCount as number | undefined;
-    const fileCount = status?.fileCount as number | undefined;
+    const symbolCount = status?.symbolsIndexed as number | undefined;
+    const fileCount = status?.filesIndexed as number | undefined;
     log(`  symbolCount=${symbolCount}, fileCount=${fileCount}`);
 
     if ((symbolCount ?? 0) < 50) {
@@ -150,7 +150,8 @@ export async function runSingleClientBaseline(
     const policy = await client.callToolParsed("sdl.policy.get", {
       repoId: "stress-fixtures",
     });
-    log(`  Policy: maxWindowLines=${policy?.maxWindowLines}`);
+    const policyObj = policy?.policy as { maxWindowLines?: number } | undefined;
+    log(`  Policy: maxWindowLines=${policyObj?.maxWindowLines}`);
 
     // 11. Repo overview
     log("Step 11: sdl.repo.overview (stats)");
@@ -158,7 +159,10 @@ export async function runSingleClientBaseline(
       repoId: "stress-fixtures",
       level: "stats",
     });
-    log(`  Overview symbolCount=${overview?.symbolCount}`);
+    const overviewStats = overview?.stats as
+      | { symbolCount?: number }
+      | undefined;
+    log(`  Overview symbolCount=${overviewStats?.symbolCount}`);
 
     collector.recordMemorySnapshot();
   } catch (err) {
