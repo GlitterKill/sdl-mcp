@@ -105,20 +105,20 @@
   },
   "overrides": {
     "@hono/node-server": "1.19.11",
-    "hono": "4.12.5",
-    "tar": "7.5.10"
+    "hono": "4.12.7",
+    "tar": "7.5.11"
   },
   "optionalDependencies": {
     "chokidar": "^3.5.3",
     "kuzu": "npm:@ladybugdb/core@0.15.1",
-    "onnxruntime-node": "^1.22.0",
+    "onnxruntime-node": "^1.24.3",
     "sdl-mcp-native": "0.8.6"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",
     "@opentelemetry/sdk-trace-web": "^1.30.0",
     "@stryker-mutator/core": "^9.6.0",
-    "@types/node": "^20.0.0",
+    "@types/node": "^20.19.37",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^8.0.0",
