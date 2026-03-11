@@ -11,6 +11,7 @@ export enum ErrorCode {
   INDEX_ERROR = "INDEX_ERROR",
   VALIDATION_ERROR = "VALIDATION_ERROR",
   POLICY_ERROR = "POLICY_ERROR",
+  RUNTIME_ERROR = "RUNTIME_ERROR",
 }
 
 export class ConfigError extends Error {
@@ -50,5 +51,57 @@ export class PolicyError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "PolicyError";
+  }
+}
+
+// ============================================================================
+// Runtime Execution Errors
+// ============================================================================
+
+export class RuntimePolicyDeniedError extends Error {
+  readonly code = ErrorCode.RUNTIME_ERROR;
+  constructor(message: string) {
+    super(message);
+    this.name = "RuntimePolicyDeniedError";
+  }
+}
+
+export class RuntimeNotFoundError extends Error {
+  readonly code = ErrorCode.RUNTIME_ERROR;
+  constructor(message: string) {
+    super(message);
+    this.name = "RuntimeNotFoundError";
+  }
+}
+
+export class RuntimeTimeoutError extends Error {
+  readonly code = ErrorCode.RUNTIME_ERROR;
+  constructor(message: string) {
+    super(message);
+    this.name = "RuntimeTimeoutError";
+  }
+}
+
+export class RuntimeOutputLimitError extends Error {
+  readonly code = ErrorCode.RUNTIME_ERROR;
+  constructor(message: string) {
+    super(message);
+    this.name = "RuntimeOutputLimitError";
+  }
+}
+
+export class ArtifactNotFoundError extends Error {
+  readonly code = ErrorCode.RUNTIME_ERROR;
+  constructor(message: string) {
+    super(message);
+    this.name = "ArtifactNotFoundError";
+  }
+}
+
+export class ArtifactCleanupError extends Error {
+  readonly code = ErrorCode.RUNTIME_ERROR;
+  constructor(message: string) {
+    super(message);
+    this.name = "ArtifactCleanupError";
   }
 }

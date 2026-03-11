@@ -593,3 +593,137 @@ export const REGEX_CACHE_MAX_SIZE = 500;
  * Evicts the oldest entries to make room for new patterns.
  */
 export const REGEX_CACHE_EVICT_COUNT = 100;
+
+// ============================================================================
+// Runtime Execution Constants
+// ============================================================================
+
+/**
+ * Default maximum execution duration in milliseconds (30 seconds).
+ */
+export const RUNTIME_DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * Minimum allowed execution timeout in milliseconds.
+ */
+export const RUNTIME_MIN_TIMEOUT_MS = 100;
+
+/**
+ * Maximum allowed execution timeout in milliseconds (5 minutes).
+ */
+export const RUNTIME_MAX_TIMEOUT_MS = 300_000;
+
+/**
+ * Default maximum stdout bytes captured (1 MB).
+ */
+export const RUNTIME_DEFAULT_MAX_STDOUT_BYTES = 1_048_576;
+
+/**
+ * Default maximum stderr bytes captured (256 KB).
+ */
+export const RUNTIME_DEFAULT_MAX_STDERR_BYTES = 262_144;
+
+/**
+ * Default maximum artifact size on disk (10 MB).
+ */
+export const RUNTIME_DEFAULT_MAX_ARTIFACT_BYTES = 10_485_760;
+
+/**
+ * Default artifact time-to-live in hours.
+ */
+export const RUNTIME_DEFAULT_ARTIFACT_TTL_HOURS = 24;
+
+/**
+ * Default maximum concurrent runtime jobs.
+ */
+export const RUNTIME_DEFAULT_MAX_CONCURRENT_JOBS = 2;
+
+/**
+ * Maximum allowed concurrent runtime jobs.
+ */
+export const RUNTIME_MAX_CONCURRENT_JOBS = 8;
+
+/**
+ * Maximum number of arguments allowed per execution.
+ */
+export const RUNTIME_MAX_ARG_COUNT = 100;
+
+/**
+ * Maximum code string length for code-mode execution (1 MB).
+ */
+export const RUNTIME_MAX_CODE_LENGTH = 1_048_576;
+
+/**
+ * Maximum number of query terms for keyword excerpt matching.
+ */
+export const RUNTIME_MAX_QUERY_TERMS = 10;
+
+/**
+ * Default number of head lines in stdout summary.
+ */
+export const RUNTIME_EXCERPT_HEAD_LINES = 20;
+
+/**
+ * Default number of tail lines in stdout summary.
+ */
+export const RUNTIME_EXCERPT_TAIL_LINES = 20;
+
+/**
+ * Default number of stderr tail lines in summary.
+ */
+export const RUNTIME_EXCERPT_STDERR_TAIL_LINES = 20;
+
+/**
+ * Maximum keyword-matched excerpt windows returned.
+ */
+export const RUNTIME_MAX_KEYWORD_EXCERPTS = 10;
+
+/**
+ * Context lines around each keyword match.
+ */
+export const RUNTIME_KEYWORD_CONTEXT_LINES = 3;
+
+/**
+ * Grace period in milliseconds before escalating SIGTERM to SIGKILL on Unix.
+ */
+export const RUNTIME_SIGKILL_GRACE_MS = 5000;
+
+/**
+ * Default maximum response lines for runtime output.
+ */
+export const RUNTIME_DEFAULT_MAX_RESPONSE_LINES = 100;
+
+/**
+ * Minimum bytes for runtime config byte limits.
+ */
+export const RUNTIME_MIN_BYTES = 1024;
+
+/**
+ * Priority for runtime-enabled policy rule.
+ */
+export const POLICY_PRIORITY_RUNTIME_ENABLED = 100;
+
+/**
+ * Priority for runtime-allowed policy rule.
+ */
+export const POLICY_PRIORITY_RUNTIME_ALLOWED = 95;
+
+/**
+ * Priority for runtime cwd-scope policy rule.
+ */
+export const POLICY_PRIORITY_RUNTIME_CWD_SCOPE = 90;
+
+/**
+ * Priority for runtime env-allowlist policy rule.
+ */
+export const POLICY_PRIORITY_RUNTIME_ENV_ALLOWLIST = 85;
+
+/**
+ * Priority for runtime timeout-cap policy rule.
+ */
+export const POLICY_PRIORITY_RUNTIME_TIMEOUT_CAP = 80;
+
+/**
+ * Priority for runtime concurrency-cap policy rule.
+ */
+export const POLICY_PRIORITY_RUNTIME_CONCURRENCY_CAP = 70;

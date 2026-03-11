@@ -4,6 +4,12 @@ import {
   PAGE_SIZE_MAX,
   DEFAULT_MAX_WINDOW_LINES,
   DEFAULT_MAX_WINDOW_TOKENS,
+  RUNTIME_MIN_TIMEOUT_MS,
+  RUNTIME_MAX_TIMEOUT_MS,
+  RUNTIME_MAX_ARG_COUNT,
+  RUNTIME_MAX_CODE_LENGTH,
+  RUNTIME_MAX_QUERY_TERMS,
+  RUNTIME_DEFAULT_MAX_RESPONSE_LINES,
 } from "../config/constants.js";
 
 const RangeSchema = z.object({
@@ -1676,4 +1682,99 @@ export type AgentFeedbackQueryRequest = z.infer<
 >;
 export type AgentFeedbackQueryResponse = z.infer<
   typeof AgentFeedbackQueryResponseSchema
+>;
+
+// ============================================================================
+// Runtime Execution Schemas
+// ============================================================================
+
+export const RuntimeExecuteRequestSchema = z.object({
+  repoId: z.string().min(1),
+  runtime: z.enum(["node", "python", "shell"]),
+  executable: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "Override executable; defaults to runtime's default (node, python3, bash/cmd)",
+    ),
+  args: z
+    .array(z.string())
+    .max(RUNTIME_MAX_ARG_COUNT)
+    .default([])
+    .describe("Arguments to pass to the executable"),
+  code: z
+    .string()
+    .max(RUNTIME_MAX_CODE_LENGTH)
+    .optional()
+    .describe(
+      "Code mode: write to temp file and execute. Mutually exclusive with args-only mode.",
+    ),
+  relativeCwd: z
+    .string()
+    .default(".")
+    .describe("Working directory relative to repo root. Must not escape repo."),
+  timeoutMs: z
+    .number()
+    .int()
+    .min(RUNTIME_MIN_TIMEOUT_MS)
+    .max(RUNTIME_MAX_TIMEOUT_MS)
+    .optional()
+    .describe("Execution timeout in ms. Defaults to config maxDurationMs."),
+  queryTerms: z
+    .array(z.string())
+    .max(RUNTIME_MAX_QUERY_TERMS)
+    .optional()
+    .describe(
+      "Keywords for excerpt matching — up to 10 terms scanned against output",
+    ),
+  maxResponseLines: z
+    .number()
+    .int()
+    .min(10)
+    .max(1000)
+    .default(RUNTIME_DEFAULT_MAX_RESPONSE_LINES)
+    .describe("Max lines in stdout/stderr summaries"),
+  persistOutput: z
+    .boolean()
+    .default(true)
+    .describe("Whether to persist full output as a gzip artifact"),
+});
+
+export const RuntimeExecuteExcerptSchema = z.object({
+  lineStart: z.number().int(),
+  lineEnd: z.number().int(),
+  content: z.string(),
+  source: z.enum(["stdout", "stderr"]),
+});
+
+export const RuntimeExecuteResponseSchema = z.object({
+  status: z.enum(["success", "failure", "timeout", "cancelled", "denied"]),
+  exitCode: z.number().int().nullable(),
+  signal: z.string().nullable(),
+  durationMs: z.number().int(),
+  stdoutSummary: z.string().describe("Head + tail, truncated"),
+  stderrSummary: z.string().describe("Tail, truncated"),
+  artifactHandle: z.string().nullable(),
+  excerpts: z
+    .array(RuntimeExecuteExcerptSchema)
+    .optional()
+    .describe("Keyword-matched line windows from queryTerms"),
+  truncation: z.object({
+    stdoutTruncated: z.boolean(),
+    stderrTruncated: z.boolean(),
+    totalStdoutBytes: z.number().int(),
+    totalStderrBytes: z.number().int(),
+  }),
+  policyDecision: z
+    .object({
+      auditHash: z.string(),
+      deniedReasons: z.array(z.string()).optional(),
+    })
+    .optional(),
+});
+
+export type RuntimeExecuteRequest = z.infer<typeof RuntimeExecuteRequestSchema>;
+export type RuntimeExecuteResponse = z.infer<
+  typeof RuntimeExecuteResponseSchema
 >;

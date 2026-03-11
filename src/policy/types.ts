@@ -13,7 +13,8 @@ export type PolicyRequestType =
   | "hotPath"
   | "symbolCard"
   | "graphSlice"
-  | "delta";
+  | "delta"
+  | "runtimeExecute";
 
 export interface PolicyRequestContext {
   requestType: PolicyRequestType;
@@ -108,3 +109,35 @@ export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
     maxEstimatedTokens: 12000,
   },
 };
+
+// ============================================================================
+// Runtime Execution Policy Types
+// ============================================================================
+
+/**
+ * Policy context for runtime execution requests.
+ * Separate from the code-access PolicyRequestContext to avoid overloading
+ * downgrade semantics that don't apply to execution.
+ */
+export interface RuntimePolicyRequestContext {
+  requestType: "runtimeExecute";
+  repoId: string;
+  runtime: string;
+  executable: string;
+  args: string[];
+  relativeCwd: string;
+  timeoutMs: number;
+  envKeys: string[];
+}
+
+/**
+ * Policy decision for runtime execution.
+ * Uses approve/deny only — no downgrade targets (nothing to downgrade to).
+ * Reuses the shared PolicyEvidence and audit hash infrastructure.
+ */
+export interface RuntimePolicyDecision {
+  decision: "approve" | "deny";
+  evidenceUsed: PolicyEvidence[];
+  auditHash: string;
+  deniedReasons?: string[];
+}

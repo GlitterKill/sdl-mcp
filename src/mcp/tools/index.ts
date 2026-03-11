@@ -64,11 +64,13 @@ import { handleContextSummary } from "./summary.js";
 import {
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
+  RuntimeExecuteRequestSchema,
 } from "../tools.js";
 import {
   handleAgentFeedback,
   handleAgentFeedbackQuery,
 } from "./agent-feedback.js";
+import { handleRuntimeExecute } from "./runtime.js";
 import type { LiveIndexCoordinator } from "../../live-index/types.js";
 
 type ToolServices = {
@@ -251,5 +253,13 @@ export function registerTools(
     "Query feedback records and aggregated statistics for offline tuning pipelines",
     AgentFeedbackQueryRequestSchema,
     handleAgentFeedbackQuery,
+  );
+
+  server.registerTool(
+    "sdl.runtime.execute",
+    "Execute a command in a repo-scoped subprocess with structured output, " +
+      "artifact persistence, and deterministic excerpts. Requires runtime.enabled = true in config.",
+    RuntimeExecuteRequestSchema,
+    handleRuntimeExecute,
   );
 }

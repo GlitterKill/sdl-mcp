@@ -15,6 +15,16 @@ import {
   DEFAULT_GRAPH_SLICE_CACHE_MAX_ENTRIES,
   DEFAULT_GRAPH_SLICE_CACHE_MAX_SIZE_BYTES,
   WATCHER_DEFAULT_MAX_WATCHED_FILES,
+  RUNTIME_DEFAULT_TIMEOUT_MS,
+  RUNTIME_MIN_TIMEOUT_MS,
+  RUNTIME_MAX_TIMEOUT_MS,
+  RUNTIME_DEFAULT_MAX_STDOUT_BYTES,
+  RUNTIME_DEFAULT_MAX_STDERR_BYTES,
+  RUNTIME_DEFAULT_MAX_ARTIFACT_BYTES,
+  RUNTIME_DEFAULT_ARTIFACT_TTL_HOURS,
+  RUNTIME_DEFAULT_MAX_CONCURRENT_JOBS,
+  RUNTIME_MAX_CONCURRENT_JOBS,
+  RUNTIME_MIN_BYTES,
 } from "./constants.js";
 
 export const LanguageSchema = z.enum([
@@ -257,6 +267,48 @@ export const ConcurrencyConfigSchema = z.object({
 
 export type ConcurrencyConfig = z.infer<typeof ConcurrencyConfigSchema>;
 
+export const RuntimeConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  allowedRuntimes: z.array(z.string()).default(["node", "python"]),
+  allowedExecutables: z.array(z.string()).default([]),
+  maxDurationMs: z
+    .number()
+    .int()
+    .min(RUNTIME_MIN_TIMEOUT_MS)
+    .max(RUNTIME_MAX_TIMEOUT_MS)
+    .default(RUNTIME_DEFAULT_TIMEOUT_MS),
+  maxStdoutBytes: z
+    .number()
+    .int()
+    .min(RUNTIME_MIN_BYTES)
+    .default(RUNTIME_DEFAULT_MAX_STDOUT_BYTES),
+  maxStderrBytes: z
+    .number()
+    .int()
+    .min(RUNTIME_MIN_BYTES)
+    .default(RUNTIME_DEFAULT_MAX_STDERR_BYTES),
+  maxArtifactBytes: z
+    .number()
+    .int()
+    .min(RUNTIME_MIN_BYTES)
+    .default(RUNTIME_DEFAULT_MAX_ARTIFACT_BYTES),
+  artifactTtlHours: z
+    .number()
+    .int()
+    .min(1)
+    .default(RUNTIME_DEFAULT_ARTIFACT_TTL_HOURS),
+  maxConcurrentJobs: z
+    .number()
+    .int()
+    .min(1)
+    .max(RUNTIME_MAX_CONCURRENT_JOBS)
+    .default(RUNTIME_DEFAULT_MAX_CONCURRENT_JOBS),
+  envAllowlist: z.array(z.string()).default([]),
+  artifactBaseDir: z.string().nullish(),
+});
+
+export type RuntimeConfig = z.infer<typeof RuntimeConfigSchema>;
+
 export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
   /**
@@ -278,6 +330,7 @@ export const AppConfigSchema = z.object({
   tracing: TracingConfigSchema.optional(),
   parallelScorer: ParallelScorerConfigSchema.optional(),
   concurrency: ConcurrencyConfigSchema.optional(),
+  runtime: RuntimeConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

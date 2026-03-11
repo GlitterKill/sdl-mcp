@@ -5,8 +5,12 @@ import type {
   PolicyRule,
   PolicyConfig,
   PolicyEvidence,
+  RuntimePolicyRequestContext,
+  RuntimePolicyDecision,
 } from "./types.js";
 import { DEFAULT_POLICY_CONFIG } from "./types.js";
+import type { RuntimeConfig } from "../config/types.js";
+import type { ConcurrencyTracker } from "../runtime/types.js";
 import { logger } from "../util/logger.js";
 import type { NextBestAction, RequiredFieldsForNext } from "../domain/types.js";
 import {
@@ -41,6 +45,8 @@ export type {
   PolicyRule,
   PolicyConfig,
   PolicyEvidence,
+  RuntimePolicyRequestContext,
+  RuntimePolicyDecision,
 };
 
 export function generateAuditHash(
@@ -560,6 +566,196 @@ export class PolicyEngine {
     return {
       nextBestAction,
       requiredFieldsForNext,
+    };
+  }
+
+  /**
+   * Evaluate runtime execution policy.
+   * Uses a separate rule chain from code-access policy — no downgrade targets.
+   */
+  evaluateRuntimePolicy(
+    context: RuntimePolicyRequestContext,
+    runtimeConfig: RuntimeConfig,
+    concurrencyTracker?: ConcurrencyTracker,
+  ): RuntimePolicyDecision {
+    const evidence: PolicyEvidence[] = [];
+    const deniedReasons: string[] = [];
+
+    // Rule 1: runtime-enabled (priority 100)
+    if (!runtimeConfig.enabled) {
+      evidence.push({
+        type: "runtime-disabled",
+        value: null,
+        reason:
+          "Runtime execution is disabled in configuration (runtime.enabled = false)",
+      });
+      deniedReasons.push(
+        "Runtime execution is disabled in configuration (runtime.enabled = false)",
+      );
+    } else {
+      evidence.push({
+        type: "runtime-enabled-check",
+        value: null,
+        reason: "Runtime execution is enabled",
+      });
+    }
+
+    // Rule 2: runtime-allowed (priority 95)
+    if (deniedReasons.length === 0) {
+      const allowedRuntimes = runtimeConfig.allowedRuntimes;
+      if (!allowedRuntimes.includes(context.runtime)) {
+        evidence.push({
+          type: "runtime-not-allowed",
+          value: { runtime: context.runtime, allowed: allowedRuntimes },
+          reason: `Runtime "${context.runtime}" is not in the allowed runtimes list: [${allowedRuntimes.join(", ")}]`,
+        });
+        deniedReasons.push(
+          `Runtime "${context.runtime}" is not in the allowed runtimes list: [${allowedRuntimes.join(", ")}]`,
+        );
+      } else {
+        evidence.push({
+          type: "runtime-allowed-check",
+          value: { runtime: context.runtime },
+          reason: `Runtime "${context.runtime}" is allowed`,
+        });
+      }
+
+      // Check executable allowlist (if configured)
+      if (runtimeConfig.allowedExecutables.length > 0) {
+        if (!runtimeConfig.allowedExecutables.includes(context.executable)) {
+          evidence.push({
+            type: "executable-not-allowed",
+            value: {
+              executable: context.executable,
+              allowed: runtimeConfig.allowedExecutables,
+            },
+            reason: `Executable "${context.executable}" is not in the allowed executables list`,
+          });
+          deniedReasons.push(
+            `Executable "${context.executable}" is not in the allowed executables list`,
+          );
+        } else {
+          evidence.push({
+            type: "executable-allowed-check",
+            value: { executable: context.executable },
+            reason: `Executable "${context.executable}" is allowed`,
+          });
+        }
+      }
+    }
+
+    // Rule 3: cwd-scope (priority 90)
+    // Note: actual path resolution + symlink checking is done by the executor.
+    // This rule validates the relative cwd doesn't contain obvious escapes.
+    if (deniedReasons.length === 0) {
+      const cwd = context.relativeCwd;
+      const hasTraversal =
+        cwd.includes("..") || cwd.startsWith("/") || /^[A-Za-z]:/.test(cwd);
+      if (hasTraversal) {
+        evidence.push({
+          type: "cwd-escape-attempt",
+          value: { relativeCwd: cwd },
+          reason: `Relative CWD "${cwd}" contains path traversal or absolute path components`,
+        });
+        deniedReasons.push(
+          `Relative CWD "${cwd}" contains path traversal or absolute path components`,
+        );
+      } else {
+        evidence.push({
+          type: "cwd-scope-check",
+          value: { relativeCwd: cwd },
+          reason: "CWD is within repo scope",
+        });
+      }
+    }
+
+    // Rule 4: env-allowlist (priority 85)
+    if (deniedReasons.length === 0 && context.envKeys.length > 0) {
+      const configAllowlist = new Set(runtimeConfig.envAllowlist);
+      const disallowed = context.envKeys.filter((k) => !configAllowlist.has(k));
+      if (disallowed.length > 0) {
+        evidence.push({
+          type: "env-keys-not-allowed",
+          value: { disallowed, allowed: runtimeConfig.envAllowlist },
+          reason: `Environment variables not in allowlist: [${disallowed.join(", ")}]`,
+        });
+        deniedReasons.push(
+          `Environment variables not in allowlist: [${disallowed.join(", ")}]`,
+        );
+      } else {
+        evidence.push({
+          type: "env-allowlist-check",
+          value: { envKeys: context.envKeys },
+          reason: "All requested env keys are in allowlist",
+        });
+      }
+    }
+
+    // Rule 5: timeout-cap (priority 80)
+    if (deniedReasons.length === 0) {
+      if (context.timeoutMs > runtimeConfig.maxDurationMs) {
+        evidence.push({
+          type: "timeout-exceeded",
+          value: {
+            requested: context.timeoutMs,
+            limit: runtimeConfig.maxDurationMs,
+          },
+          reason: `Requested timeout (${context.timeoutMs}ms) exceeds maximum (${runtimeConfig.maxDurationMs}ms)`,
+        });
+        deniedReasons.push(
+          `Requested timeout (${context.timeoutMs}ms) exceeds maximum (${runtimeConfig.maxDurationMs}ms)`,
+        );
+      } else {
+        evidence.push({
+          type: "timeout-cap-check",
+          value: {
+            timeoutMs: context.timeoutMs,
+            maxDurationMs: runtimeConfig.maxDurationMs,
+          },
+          reason: "Timeout within limits",
+        });
+      }
+    }
+
+    // Rule 6: concurrency-cap (priority 70)
+    if (deniedReasons.length === 0 && concurrencyTracker) {
+      if (concurrencyTracker.activeCount >= runtimeConfig.maxConcurrentJobs) {
+        evidence.push({
+          type: "concurrency-limit-reached",
+          value: {
+            active: concurrencyTracker.activeCount,
+            limit: runtimeConfig.maxConcurrentJobs,
+          },
+          reason: `Concurrency limit reached (${concurrencyTracker.activeCount}/${runtimeConfig.maxConcurrentJobs} active jobs)`,
+        });
+        deniedReasons.push(
+          `Concurrency limit reached (${concurrencyTracker.activeCount}/${runtimeConfig.maxConcurrentJobs} active jobs)`,
+        );
+      } else {
+        evidence.push({
+          type: "concurrency-cap-check",
+          value: {
+            active: concurrencyTracker.activeCount,
+            limit: runtimeConfig.maxConcurrentJobs,
+          },
+          reason: "Within concurrency limits",
+        });
+      }
+    }
+
+    const decision: "approve" | "deny" =
+      deniedReasons.length > 0 ? "deny" : "approve";
+
+    const auditHash = generateAuditHash(decision, evidence, {
+      requestType: "runtimeExecute",
+      repoId: context.repoId,
+    } as PolicyRequestContext);
+
+    return {
+      decision,
+      evidenceUsed: evidence,
+      auditHash,
+      deniedReasons: deniedReasons.length > 0 ? deniedReasons : undefined,
     };
   }
 

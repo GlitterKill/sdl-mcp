@@ -362,3 +362,58 @@ export function logPrefetchTelemetry(event: PrefetchTelemetryEvent): void {
     queueDepth: event.queueDepth,
   });
 }
+
+// ============================================================================
+// Runtime Execution Telemetry
+// ============================================================================
+
+export interface RuntimeExecutionEvent {
+  repoId: RepoId;
+  runtime: string;
+  executable: string;
+  exitCode: number | null;
+  durationMs: number;
+  stdoutBytes: number;
+  stderrBytes: number;
+  timedOut: boolean;
+  policyDecision: string;
+  auditHash: string;
+  artifactHandle: string | null;
+}
+
+/**
+ * Log a runtime execution event to the audit trail.
+ * Never logs: raw stdout/stderr, env values, full args, code content.
+ */
+export function logRuntimeExecution(event: RuntimeExecutionEvent): void {
+  const decision = event.exitCode === 0 ? "success" : "error";
+
+  void recordAuditEvent({
+    tool: "runtime.execute",
+    decision,
+    repoId: event.repoId,
+    detailsJson: JSON.stringify({
+      runtime: event.runtime,
+      executable: event.executable,
+      exitCode: event.exitCode,
+      durationMs: event.durationMs,
+      stdoutBytes: event.stdoutBytes,
+      stderrBytes: event.stderrBytes,
+      timedOut: event.timedOut,
+      policyDecision: event.policyDecision,
+      auditHash: event.auditHash,
+      artifactHandle: event.artifactHandle,
+    }),
+  });
+
+  logger.info("Runtime execution", {
+    eventType: "runtime_execution",
+    timestamp: getCurrentTimestamp(),
+    repoId: event.repoId,
+    runtime: event.runtime,
+    exitCode: event.exitCode,
+    durationMs: event.durationMs,
+    timedOut: event.timedOut,
+    policyDecision: event.policyDecision,
+  });
+}

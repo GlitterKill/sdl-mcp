@@ -42,6 +42,7 @@ const DOCTOR_CHECKS = [
     check: checkCallResolutionCapabilities,
   },
   { name: "Graph database (Ladybug)", check: checkLadybugDb },
+  { name: "Runtime execution", check: checkRuntimeExecution },
 ];
 
 interface DoctorResult {
@@ -524,7 +525,9 @@ async function checkCallResolutionCapabilities(
     minCallConfidenceMode = "request-only (config not found)";
   }
 
-  const metadataAvailable = supportsCallResolutionMetadata(LADYBUG_SCHEMA_VERSION);
+  const metadataAvailable = supportsCallResolutionMetadata(
+    LADYBUG_SCHEMA_VERSION,
+  );
   const metadataFields = CALL_EDGE_METADATA_FIELDS.join(", ");
 
   return {
@@ -643,6 +646,71 @@ async function checkLadybugDb(
     await closeLadybugDb();
   }
 }
+async function checkRuntimeExecution(
+  options: DoctorOptions,
+): Promise<Omit<DoctorResult, "name">> {
+  const configPath = options.config ?? activateCliConfigPath();
+  if (!existsSync(configPath)) {
+    return {
+      status: "warn",
+      message: "Config not found (skip runtime execution check)",
+    };
+  }
+
+  try {
+    const { loadConfig } = await import("../../config/loadConfig.js");
+    const config = loadConfig(configPath);
+    const runtimeConfig = config.runtime;
+
+    if (!runtimeConfig || !runtimeConfig.enabled) {
+      return {
+        status: "warn",
+        message:
+          "Runtime execution disabled (runtime.enabled = false or not configured)",
+      };
+    }
+
+    const { detectAllRuntimes } = await import("../../runtime/runtimes.js");
+    const detections = await detectAllRuntimes();
+
+    const results: string[] = [];
+    const allowedRuntimes = runtimeConfig.allowedRuntimes ?? ["node", "python"];
+
+    for (const [name, detection] of detections) {
+      const isAllowed = allowedRuntimes.includes(name);
+      if (detection.available) {
+        results.push(
+          `${name}: ${detection.version ?? "available"}${isAllowed ? "" : " (not in allowedRuntimes)"}`,
+        );
+      } else if (isAllowed) {
+        results.push(`${name}: NOT FOUND (allowed but missing)`);
+      }
+    }
+
+    const allowedAvailable = allowedRuntimes.filter((r) => {
+      const d = detections.get(r);
+      return d?.available;
+    });
+
+    if (allowedAvailable.length === 0) {
+      return {
+        status: "fail",
+        message: `No allowed runtimes detected. Allowed: [${allowedRuntimes.join(", ")}]\n  ${results.join("\n  ")}`,
+      };
+    }
+
+    return {
+      status: "pass",
+      message: `Runtimes: ${results.join("; ")}; maxDuration=${runtimeConfig.maxDurationMs}ms; maxConcurrent=${runtimeConfig.maxConcurrentJobs}`,
+    };
+  } catch (error) {
+    return {
+      status: "warn",
+      message: `Cannot check runtime execution: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
 function displayResults(results: DoctorResult[]): void {
   for (const result of results) {
     const icon =
