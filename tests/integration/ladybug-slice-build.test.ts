@@ -1,17 +1,10 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
-import { existsSync, mkdirSync, rmSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
+import { existsSync, mkdtempSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
-  ".lbug-slice-build-test-db.lbug",
-);
+let testDbDir = "";
 
 interface LadybugConnection {
   query: (
@@ -34,13 +27,11 @@ async function createTestDb(): Promise<{
   db: LadybugDatabase;
   conn: LadybugConnection;
 }> {
-  if (existsSync(TEST_DB_PATH)) {
-    rmSync(TEST_DB_PATH, { recursive: true, force: true });
-  }
-  mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
+  testDbDir = mkdtempSync(join(tmpdir(), "sdl-slice-build-db-"));
+  const testDbPath = join(testDbDir, "sdl-mcp-graph.lbug");
 
   const kuzu = await import("kuzu");
-  const db = new kuzu.Database(TEST_DB_PATH);
+  const db = new kuzu.Database(testDbPath);
   const conn = new kuzu.Connection(db);
 
   return { db, conn: conn as unknown as LadybugConnection };
@@ -57,10 +48,11 @@ async function cleanupTestDb(
     await db.close();
   } catch {}
   try {
-    if (existsSync(TEST_DB_PATH)) {
-      rmSync(TEST_DB_PATH, { recursive: true, force: true });
+    if (testDbDir && existsSync(testDbDir)) {
+      rmSync(testDbDir, { recursive: true, force: true });
     }
   } catch {}
+  testDbDir = "";
 }
 
 async function setupSchema(conn: LadybugConnection): Promise<void> {
@@ -74,15 +66,19 @@ describe("LadybugDB Slice Build (integration)", () => {
   let slice: typeof import("../../dist/graph/slice.js");
   let queries: typeof import("../../dist/db/ladybug-queries.js");
   let ladybugAvailable = true;
+  let setupError: unknown = null;
 
   beforeEach(async () => {
+    ladybugAvailable = true;
+    setupError = null;
     try {
       ({ db, conn } = await createTestDb());
       await setupSchema(conn);
       slice = await import("../../dist/graph/slice.js");
       queries = await import("../../dist/db/ladybug-queries.js");
-    } catch {
+    } catch (error) {
       ladybugAvailable = false;
+      setupError = error;
     }
   });
 
@@ -93,8 +89,16 @@ describe("LadybugDB Slice Build (integration)", () => {
 
   it(
     "builds a slice from explicit entry symbols",
-    { skip: !ladybugAvailable },
-    async () => {
+    async (t) => {
+      if (!ladybugAvailable) {
+        const reason =
+          setupError instanceof Error
+            ? setupError.message
+            : "LadybugDB setup unavailable";
+        t.skip(reason);
+        return;
+      }
+
       const kConn = conn as unknown as import("kuzu").Connection;
       const now = "2026-03-04T00:00:00.000Z";
 

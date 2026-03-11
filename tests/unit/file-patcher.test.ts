@@ -11,16 +11,16 @@ import { patchSavedFile } from "../../src/live-index/file-patcher.js";
 
 describe("patchSavedFile", () => {
   const repoId = "file-patcher-repo";
-  const dbPath = join(tmpdir(), ".lbug-file-patcher-test-db.lbug");
   const configPath = join(tmpdir(), `sdl-file-patcher-${Date.now()}.json`);
+  let dbDir = "";
+  let dbPath = "";
   let repoDir = "";
   const prevConfig = process.env.SDL_CONFIG;
   const prevConfigPath = process.env.SDL_CONFIG_PATH;
 
   before(async () => {
-    if (existsSync(dbPath)) {
-      rmSync(dbPath, { recursive: true, force: true });
-    }
+    dbDir = mkdtempSync(join(tmpdir(), "sdl-file-patcher-db-"));
+    dbPath = join(dbDir, "sdl-mcp-graph.lbug");
     repoDir = mkdtempSync(join(tmpdir(), "sdl-file-patcher-repo-"));
     mkdirSync(join(repoDir, "src"), { recursive: true });
     writeFileSync(
@@ -70,7 +70,8 @@ describe("patchSavedFile", () => {
 
   after(async () => {
     await closeLadybugDb();
-    if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
+    if (dbDir && existsSync(dbDir))
+      rmSync(dbDir, { recursive: true, force: true });
     if (existsSync(configPath)) rmSync(configPath, { force: true });
     if (repoDir && existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
     if (prevConfig === undefined) delete process.env.SDL_CONFIG;
