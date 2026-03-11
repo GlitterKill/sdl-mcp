@@ -10,11 +10,7 @@ import { initGraphDb } from "../../db/initGraphDb.js";
 import {
   closeLadybugDb,
   configurePool,
-  getLadybugConn,
-  withWriteConn,
 } from "../../db/ladybug.js";
-import * as ladybugDb from "../../db/ladybug-queries.js";
-import { getCurrentTimestamp } from "../../util/time.js";
 import {
   configurePrefetch,
   warmPrefetchOnServeStart,
@@ -30,10 +26,15 @@ import {
   IdleMonitor,
 } from "../../live-index/idle-monitor.js";
 import { ShutdownManager } from "../../util/shutdown.js";
-import { findExistingProcess, writePidfile } from "../../util/pidfile.js";
+import {
+  findExistingProcess,
+  formatExistingProcessMessage,
+  writePidfile,
+} from "../../util/pidfile.js";
 import { enableFileLogging, getLogFilePath } from "../../util/logger.js";
 import { configureToolDispatchLimiter } from "../../mcp/dispatch-limiter.js";
 import { SessionManager } from "../../mcp/session-manager.js";
+import { ensureConfiguredReposRegistered } from "../../startup/bootstrap.js";
 
 // Enable file logging by default so crash evidence is always persisted.
 if (!getLogFilePath()) {
@@ -85,30 +86,13 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   // Check for an existing live server process (stale PIDs are auto-cleaned).
   const existing = findExistingProcess(graphDbPath);
   if (existing) {
-    console.error(
-      `Found existing SDL-MCP server (PID ${existing.pid}, ` +
-        `transport: ${existing.transport}, started: ${existing.startedAt}). ` +
-        `Kill it first or use a different SDL_GRAPH_DB_PATH.`,
-    );
+    console.error(formatExistingProcessMessage(graphDbPath, existing));
     process.exit(1);
   }
 
-  // Auto-register repositories if missing in database
-  const conn = await getLadybugConn();
-  for (const repo of config.repos) {
-    const existingRepo = await ladybugDb.getRepo(conn, repo.repoId);
-    if (!existingRepo) {
-      console.error(`Registering repository in database: ${repo.repoId}`);
-      await withWriteConn(async (wConn) => {
-        await ladybugDb.upsertRepo(wConn, {
-          repoId: repo.repoId,
-          rootPath: repo.rootPath,
-          configJson: JSON.stringify(repo),
-          createdAt: getCurrentTimestamp(),
-        });
-      });
-    }
-  }
+  await ensureConfiguredReposRegistered(config, (message) => {
+    console.error(message);
+  });
 
   configurePrefetch({
     enabled: config.prefetch?.enabled ?? true,
@@ -201,7 +185,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     idleMonitor.stop();
   });
   if (stdioServer) {
-    shutdownMgr.addCleanup("server", () => stdioServer!.stop());
+    shutdownMgr.addCleanup("server", () => stdioServer.stop());
   }
   shutdownMgr.addCleanup("db", () => closeLadybugDb());
   shutdownMgr.addCleanup("watchers", async () => {

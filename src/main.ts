@@ -16,8 +16,13 @@ import {
   IdleMonitor,
 } from "./live-index/idle-monitor.js";
 import { ShutdownManager } from "./util/shutdown.js";
-import { findExistingProcess, writePidfile } from "./util/pidfile.js";
+import {
+  findExistingProcess,
+  formatExistingProcessMessage,
+  writePidfile,
+} from "./util/pidfile.js";
 import { enableFileLogging, getLogFilePath } from "./util/logger.js";
+import { ensureConfiguredReposRegistered } from "./startup/bootstrap.js";
 
 // Enable file logging by default for the direct MCP entry point so crash
 // evidence is always persisted. The SDL_LOG_FILE env var auto-enables in
@@ -55,13 +60,11 @@ async function main(): Promise<void> {
     // Check for an existing live server process (stale PIDs are auto-cleaned).
     const existing = findExistingProcess(graphDbPath);
     if (existing) {
-      log(
-        `Found existing SDL-MCP server (PID ${existing.pid}, ` +
-          `transport: ${existing.transport}, started: ${existing.startedAt}). ` +
-          `Kill it first or use a different SDL_GRAPH_DB_PATH.`,
-      );
+      log(formatExistingProcessMessage(graphDbPath, existing));
       process.exit(1);
     }
+
+    await ensureConfiguredReposRegistered(config, log);
 
     // Write PID file for process discovery / reuse.
     const pidfilePath = writePidfile(graphDbPath, "stdio");

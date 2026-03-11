@@ -21,6 +21,10 @@ import {
 } from "../../src/util/pidfile.js";
 import { PIDFILE_NAME } from "../../src/config/constants.js";
 
+function escapeForRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 describe("pidfile", () => {
   let tempDir: string;
   let fakeDbPath: string;
@@ -159,6 +163,27 @@ describe("pidfile", () => {
         () => writePidfile(fakeDbPath, "stdio"),
         /Another SDL-MCP server/,
       );
+    });
+
+    it("explains that conflicts are scoped to the database directory", () => {
+      const alivePid = process.ppid;
+      const pidPath = resolvePidfilePath(fakeDbPath);
+      writeFileSync(
+        pidPath,
+        JSON.stringify({
+          pid: alivePid,
+          transport: "stdio",
+          startedAt: new Date().toISOString(),
+        }),
+      );
+
+      assert.throws(() => writePidfile(fakeDbPath, "stdio"), (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /different directory/i);
+        assert.match(error.message, /PID file/i);
+        assert.match(error.message, new RegExp(escapeForRegex(pidPath)));
+        return true;
+      });
     });
 
     it("replaces stale pidfile from dead process", () => {

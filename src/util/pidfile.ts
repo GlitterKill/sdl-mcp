@@ -31,6 +31,14 @@ export interface PidfileData {
   startedAt: string;
 }
 
+function formatPidfileDirectoryGuidance(graphDbPath: string): string {
+  const pidfilePath = resolvePidfilePath(graphDbPath);
+  return (
+    `Kill it first or use an SDL_GRAPH_DB_PATH in a different directory ` +
+    `so it gets a separate PID file (${pidfilePath}).`
+  );
+}
+
 /**
  * Resolve the pidfile path given a graph database path.
  * The pidfile lives in the same directory as the LadybugDB database file.
@@ -105,6 +113,17 @@ export function findExistingProcess(graphDbPath: string): PidfileData | null {
   return null;
 }
 
+export function formatExistingProcessMessage(
+  graphDbPath: string,
+  existing: PidfileData,
+): string {
+  return (
+    `Found existing SDL-MCP server (PID ${existing.pid}, ` +
+    `transport: ${existing.transport}, started: ${existing.startedAt}). ` +
+    formatPidfileDirectoryGuidance(graphDbPath)
+  );
+}
+
 /**
  * Write a PID file for the current process.
  *
@@ -128,8 +147,8 @@ export function writePidfile(
   ) {
     throw new Error(
       `Another SDL-MCP server (PID ${existing.pid}) is already running ` +
-        `for this database directory. Kill it first or use a different ` +
-        `SDL_GRAPH_DB_PATH.`,
+        `for this database directory. ` +
+        formatPidfileDirectoryGuidance(graphDbPath),
     );
   }
 
