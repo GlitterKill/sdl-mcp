@@ -5,6 +5,7 @@ import type { RuntimePolicyRequestContext } from "../../dist/policy/types.js";
 import { RuntimeConfigSchema } from "../../dist/config/types.js";
 import type { RuntimeConfig } from "../../dist/config/types.js";
 import { createConcurrencyTracker } from "../../dist/runtime/executor.js";
+import { getRuntime } from "../../dist/runtime/runtimes.js";
 
 function makeRuntimeConfig(
   overrides: Partial<RuntimeConfig> = {},
@@ -93,6 +94,41 @@ describe("PolicyEngine - Runtime Execution Policy", () => {
   it("should allow any executable when allowedExecutables is empty", () => {
     const config = makeRuntimeConfig({ allowedExecutables: [] });
     const context = makeContext({ executable: "node" });
+
+    const decision = engine.evaluateRuntimePolicy(context, config);
+
+    assert.strictEqual(decision.decision, "approve");
+  });
+
+  it("should deny when executable override is not compatible with the selected runtime", () => {
+    const config = makeRuntimeConfig({ allowedExecutables: [] });
+    const context = makeContext({ executable: "powershell" });
+
+    const decision = engine.evaluateRuntimePolicy(context, config);
+
+    assert.strictEqual(decision.decision, "deny");
+    assert.ok(decision.deniedReasons);
+    assert.ok(
+      decision.deniedReasons.some((r) =>
+        r.includes("not compatible with runtime"),
+      ),
+    );
+  });
+
+  it("should allow the resolved default executable when it is explicitly allowlisted", () => {
+    const defaultShellExecutable =
+      getRuntime("shell")?.buildCommand([], {}).executable;
+    assert.ok(defaultShellExecutable, "Expected shell runtime default");
+
+    const config = makeRuntimeConfig({
+      allowedRuntimes: ["shell"],
+      allowedExecutables: [defaultShellExecutable],
+    });
+    const context = makeContext({
+      runtime: "shell",
+      executable: defaultShellExecutable,
+      args: ["echo", "hello"],
+    });
 
     const decision = engine.evaluateRuntimePolicy(context, config);
 

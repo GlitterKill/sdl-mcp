@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, it } from "node:test";
 import assert from "node:assert";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync, rmSync, mkdirSync } from "node:fs";
+import { existsSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import {
   initLadybugDb,
   closeLadybugDb,
@@ -27,7 +27,41 @@ const __dirname = dirname(__filename);
 describe("sdl.runtime.execute - MCP Tool Handler", () => {
   const testDir = join(__dirname, "test-mcp-runtime-tool");
   const graphDbPath = join(testDir, "graph");
+  const configPath = join(testDir, "sdlmcp.config.json");
   const repoId = "test-runtime-repo";
+  const originalConfigPath = process.env.SDL_CONFIG;
+
+  function writeConfig(runtime: Record<string, unknown>): void {
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          repos: [
+            {
+              repoId,
+              rootPath: testDir,
+            },
+          ],
+          policy: {
+            maxWindowLines: 180,
+            maxWindowTokens: 1400,
+            requireIdentifiers: true,
+            allowBreakGlass: true,
+            defaultDenyRaw: true,
+            budgetCaps: {
+              maxCards: 60,
+              maxEstimatedTokens: 12000,
+            },
+          },
+          runtime,
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    process.env.SDL_CONFIG = configPath;
+  }
 
   beforeEach(async () => {
     if (existsSync(testDir)) {
@@ -61,6 +95,11 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
 
   afterEach(async () => {
     await closeLadybugDb();
+    if (originalConfigPath) {
+      process.env.SDL_CONFIG = originalConfigPath;
+    } else {
+      delete process.env.SDL_CONFIG;
+    }
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
     }
@@ -127,5 +166,72 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
         return true;
       },
     );
+  });
+
+  it("should deny executable overrides that do not belong to the selected runtime", async () => {
+    writeConfig({
+      enabled: true,
+      allowedRuntimes: ["node", "python", "shell"],
+      allowedExecutables: [],
+      maxDurationMs: 5000,
+      maxStdoutBytes: 1_048_576,
+      maxStderrBytes: 262_144,
+      maxArtifactBytes: 10_485_760,
+      artifactTtlHours: 24,
+      maxConcurrentJobs: 2,
+      envAllowlist: [],
+    });
+
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+
+    const result = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      executable: "powershell",
+      args: ["-NoProfile", "-Command", "Write-Output should-not-run"],
+      persistOutput: false,
+    });
+
+    assert.strictEqual(result.status, "denied");
+    assert.ok(result.policyDecision?.deniedReasons);
+    assert.ok(
+      result.policyDecision.deniedReasons.some((reason: string) =>
+        reason.includes("not compatible with runtime"),
+      ),
+    );
+  });
+
+  it("should allow the resolved default executable when it is explicitly allowlisted", async () => {
+    writeConfig({
+      enabled: true,
+      allowedRuntimes: ["shell"],
+      allowedExecutables: ["cmd.exe"],
+      maxDurationMs: 5000,
+      maxStdoutBytes: 1_048_576,
+      maxStderrBytes: 262_144,
+      maxArtifactBytes: 10_485_760,
+      artifactTtlHours: 24,
+      maxConcurrentJobs: 2,
+      envAllowlist: [],
+    });
+
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+
+    const result = await handleRuntimeExecute({
+      repoId,
+      runtime: "shell",
+      args: ["echo", "hello-runtime"],
+      persistOutput: false,
+    });
+
+    assert.notStrictEqual(
+      result.status,
+      "denied",
+      "Expected shell request to pass allowlist with default cmd.exe",
+    );
+    assert.strictEqual(result.status, "success");
+    assert.ok(result.stdoutSummary.includes("hello-runtime"));
   });
 });

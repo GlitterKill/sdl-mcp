@@ -11,6 +11,10 @@ import type {
 import { DEFAULT_POLICY_CONFIG } from "./types.js";
 import type { RuntimeConfig } from "../config/types.js";
 import type { ConcurrencyTracker } from "../runtime/types.js";
+import {
+  isExecutableCompatibleWithRuntime,
+  normalizeExecutableName,
+} from "../runtime/runtimes.js";
 import { logger } from "../util/logger.js";
 import type { NextBestAction, RequiredFieldsForNext } from "../domain/types.js";
 import {
@@ -620,9 +624,42 @@ export class PolicyEngine {
         });
       }
 
+      if (!isExecutableCompatibleWithRuntime(context.runtime, context.executable)) {
+        evidence.push({
+          type: "runtime-executable-mismatch",
+          value: {
+            runtime: context.runtime,
+            executable: context.executable,
+          },
+          reason: `Executable "${context.executable}" is not compatible with runtime "${context.runtime}"`,
+        });
+        deniedReasons.push(
+          `Executable "${context.executable}" is not compatible with runtime "${context.runtime}"`,
+        );
+      } else {
+        evidence.push({
+          type: "runtime-executable-check",
+          value: {
+            runtime: context.runtime,
+            executable: context.executable,
+          },
+          reason: `Executable "${context.executable}" is compatible with runtime "${context.runtime}"`,
+        });
+      }
+
       // Check executable allowlist (if configured)
-      if (runtimeConfig.allowedExecutables.length > 0) {
-        if (!runtimeConfig.allowedExecutables.includes(context.executable)) {
+      if (
+        deniedReasons.length === 0 &&
+        runtimeConfig.allowedExecutables.length > 0
+      ) {
+        const requestedExecutable = normalizeExecutableName(context.executable);
+        const allowedExecutables = new Set(
+          runtimeConfig.allowedExecutables.map((executable) =>
+            normalizeExecutableName(executable),
+          ),
+        );
+
+        if (!allowedExecutables.has(requestedExecutable)) {
           evidence.push({
             type: "executable-not-allowed",
             value: {

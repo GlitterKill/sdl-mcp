@@ -172,12 +172,14 @@ export async function handleRuntimeExecute(
     runtimeConfig.maxConcurrentJobs,
   );
   const timeoutMs = request.timeoutMs ?? runtimeConfig.maxDurationMs;
+  const executable =
+    request.executable ?? runtimeDescriptor.buildCommand([], {}).executable;
 
   const policyContext: RuntimePolicyRequestContext = {
     requestType: "runtimeExecute",
     repoId: request.repoId,
     runtime: request.runtime,
-    executable: request.executable ?? request.runtime,
+    executable,
     args: request.args,
     relativeCwd: request.relativeCwd,
     timeoutMs,
@@ -270,7 +272,7 @@ export async function handleRuntimeExecute(
     // 7. Build command
     const cmd = runtimeDescriptor.buildCommand(request.args, {
       codePath,
-      executable: request.executable,
+      executable,
     });
 
     // 8. Build env

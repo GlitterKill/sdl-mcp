@@ -6,6 +6,7 @@
  */
 
 import { execSync } from "child_process";
+import { basename } from "path";
 import type { RuntimeDescriptor, RuntimeDetectionResult } from "./types.js";
 
 // ============================================================================
@@ -13,6 +14,21 @@ import type { RuntimeDescriptor, RuntimeDetectionResult } from "./types.js";
 // ============================================================================
 
 const detectionCache = new Map<string, RuntimeDetectionResult>();
+const RUNTIME_EXECUTABLE_ALIASES = new Map<string, Set<string>>([
+  ["node", new Set(["node", "node.exe", "bun", "bun.exe"])],
+  [
+    "python",
+    new Set([
+      "python",
+      "python.exe",
+      "python3",
+      "python3.exe",
+      "py",
+      "py.exe",
+    ]),
+  ],
+  ["shell", new Set(["bash", "bash.exe", "sh", "sh.exe", "cmd", "cmd.exe"])],
+]);
 
 function getCached(name: string): RuntimeDetectionResult | undefined {
   return detectionCache.get(name);
@@ -34,6 +50,22 @@ export function clearDetectionCache(): void {
 // ============================================================================
 
 const IS_WINDOWS = process.platform === "win32";
+
+export function normalizeExecutableName(executable: string): string {
+  const trimmed = executable.trim().replace(/^["']|["']$/g, "");
+  return basename(trimmed.replace(/\\/g, "/")).toLowerCase();
+}
+
+export function isExecutableCompatibleWithRuntime(
+  runtime: string,
+  executable: string,
+): boolean {
+  const aliases = RUNTIME_EXECUTABLE_ALIASES.get(runtime);
+  if (!aliases) {
+    return false;
+  }
+  return aliases.has(normalizeExecutableName(executable));
+}
 
 /**
  * Resolve an executable to its absolute path using `where` (Windows) or `which` (Unix).
