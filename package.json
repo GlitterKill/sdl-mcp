@@ -64,6 +64,7 @@
     "check:config-sync": "tsx scripts/check-config-sync.ts",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck",
     "spike:ladybug": "tsx scripts/ladybug-spike.ts",
+    "test:stress": "node --import tsx --max-old-space-size=4096 tests/stress/run-stress.ts",
     "test:mutation": "stryker run stryker.conf.cjs",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit"
   },

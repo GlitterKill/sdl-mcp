@@ -1,0 +1,206 @@
+/**
+ * Metrics Collector — records, aggregates, and analyzes tool call performance data.
+ */
+
+import type {
+  ToolCallRecord,
+  AggregateMetrics,
+  MemorySnapshot,
+  PoolSnapshot,
+  DispatchSnapshot,
+  SessionSnapshot,
+} from "./types.js";
+
+export class MetricsCollector {
+  private records: ToolCallRecord[] = [];
+  private memorySnapshots: MemorySnapshot[] = [];
+  private poolSnapshots: PoolSnapshot[] = [];
+  private dispatchSnapshots: DispatchSnapshot[] = [];
+  private sessionSnapshots: SessionSnapshot[] = [];
+
+  // ---------------------------------------------------------------------------
+  // Recording
+  // ---------------------------------------------------------------------------
+
+  recordToolCall(
+    clientId: string,
+    toolName: string,
+    durationMs: number,
+    success: boolean,
+    responseSize: number,
+    error?: string,
+  ): void {
+    this.records.push({
+      clientId,
+      toolName,
+      durationMs,
+      success,
+      responseSize,
+      error,
+      timestamp: Date.now(),
+    });
+  }
+
+  recordMemorySnapshot(): MemorySnapshot {
+    const mem = process.memoryUsage();
+    const snapshot: MemorySnapshot = {
+      rss: mem.rss,
+      heapUsed: mem.heapUsed,
+      heapTotal: mem.heapTotal,
+      timestamp: Date.now(),
+    };
+    this.memorySnapshots.push(snapshot);
+    return snapshot;
+  }
+
+  recordPoolStats(stats: {
+    readPoolSize: number;
+    readPoolInitialized: number;
+    writeQueued: number;
+    writeActive: number;
+  }): void {
+    this.poolSnapshots.push({ ...stats, timestamp: Date.now() });
+  }
+
+  recordDispatchStats(stats: { active: number; queued: number }): void {
+    this.dispatchSnapshots.push({ ...stats, timestamp: Date.now() });
+  }
+
+  recordSessionStats(stats: {
+    activeSessions: number;
+    maxSessions: number;
+  }): void {
+    this.sessionSnapshots.push({ ...stats, timestamp: Date.now() });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Aggregation
+  // ---------------------------------------------------------------------------
+
+  getAggregateMetrics(toolName?: string): AggregateMetrics {
+    const filtered = toolName
+      ? this.records.filter((r) => r.toolName === toolName)
+      : this.records;
+
+    if (filtered.length === 0) {
+      return {
+        count: 0,
+        p50: 0,
+        p95: 0,
+        p99: 0,
+        max: 0,
+        avg: 0,
+        errorCount: 0,
+        errorRate: 0,
+        throughputPerSec: 0,
+      };
+    }
+
+    const durations = filtered.map((r) => r.durationMs).sort((a, b) => a - b);
+    const errorCount = filtered.filter((r) => !r.success).length;
+    const totalMs =
+      filtered.length > 1
+        ? filtered[filtered.length - 1].timestamp - filtered[0].timestamp
+        : 1000;
+
+    return {
+      count: filtered.length,
+      p50: percentile(durations, 0.5),
+      p95: percentile(durations, 0.95),
+      p99: percentile(durations, 0.99),
+      max: durations[durations.length - 1],
+      avg: Math.round(durations.reduce((a, b) => a + b, 0) / durations.length),
+      errorCount,
+      errorRate: errorCount / filtered.length,
+      throughputPerSec:
+        Math.round((filtered.length / (totalMs / 1000)) * 100) / 100,
+    };
+  }
+
+  getToolNames(): string[] {
+    return [...new Set(this.records.map((r) => r.toolName))];
+  }
+
+  getAllToolMetrics(): Record<string, AggregateMetrics> {
+    const result: Record<string, AggregateMetrics> = {};
+    for (const name of this.getToolNames()) {
+      result[name] = this.getAggregateMetrics(name);
+    }
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Error Access
+  // ---------------------------------------------------------------------------
+
+  getErrors(): Array<{
+    clientId: string;
+    toolName: string;
+    message: string;
+    timestamp: number;
+  }> {
+    return this.records
+      .filter((r) => !r.success && r.error)
+      .map((r) => ({
+        clientId: r.clientId,
+        toolName: r.toolName,
+        message: r.error!,
+        timestamp: r.timestamp,
+      }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Memory Analysis
+  // ---------------------------------------------------------------------------
+
+  getMemoryPeakMB(): number {
+    if (this.memorySnapshots.length === 0) return 0;
+    const peakRss = Math.max(...this.memorySnapshots.map((s) => s.rss));
+    return Math.round((peakRss / (1024 * 1024)) * 10) / 10;
+  }
+
+  detectMemoryLeak(thresholdMB: number): { leaked: boolean; growthMB: number } {
+    if (this.memorySnapshots.length < 2) {
+      return { leaked: false, growthMB: 0 };
+    }
+    const first = this.memorySnapshots[0].rss;
+    const last = this.memorySnapshots[this.memorySnapshots.length - 1].rss;
+    const growthMB = Math.round(((last - first) / (1024 * 1024)) * 10) / 10;
+    return { leaked: growthMB > thresholdMB, growthMB };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dispatch Analysis
+  // ---------------------------------------------------------------------------
+
+  getPeakDispatchQueued(): number {
+    if (this.dispatchSnapshots.length === 0) return 0;
+    return Math.max(...this.dispatchSnapshots.map((s) => s.queued));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle
+  // ---------------------------------------------------------------------------
+
+  reset(): void {
+    this.records = [];
+    this.memorySnapshots = [];
+    this.poolSnapshots = [];
+    this.dispatchSnapshots = [];
+    this.sessionSnapshots = [];
+  }
+
+  getRecordCount(): number {
+    return this.records.length;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.ceil(p * sorted.length) - 1;
+  return sorted[Math.max(0, Math.min(idx, sorted.length - 1))];
+}

@@ -1,0 +1,6 @@
+{
+  "name": "stress-test-fixtures",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Polyglot fixture repo for SDL-MCP stress tests"
+}
