@@ -18,6 +18,7 @@ import {
   MCPServer,
   type MCPServerServices,
 } from "../../server.js";
+import { logger } from "../../util/logger.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { computeDelta } from "../../delta/diff.js";
 import { runGovernorLoop } from "../../delta/blastRadius.js";
@@ -208,11 +209,12 @@ export async function routeLiveIndexApiRequest(
   const liveIndex = services.liveIndex ?? getDefaultLiveIndexCoordinator();
   const bufferMatch = request.pathname.match(/^\/api\/repo\/([^/]+)\/buffer$/);
   if (method === "POST" && bufferMatch) {
+    const [, rawRepoId] = bufferMatch;
+    const repoId = decodeURIComponent(rawRepoId);
     try {
-      const [, repoId] = bufferMatch;
       const parsed = BufferPushRequestSchema.parse({
         ...(request.body as Record<string, unknown> | undefined),
-        repoId: decodeURIComponent(repoId),
+        repoId,
       });
       const result = await liveIndex.pushBufferUpdate(parsed);
       return {
@@ -220,10 +222,15 @@ export async function routeLiveIndexApiRequest(
         payload: result,
       };
     } catch (error) {
+      logger.warn("Rejected live index buffer request", {
+        repoId,
+        pathname: request.pathname,
+        error,
+      });
       return {
         status: 400,
         payload: {
-          error: error instanceof Error ? error.message : String(error),
+          error: "Unable to process buffer update request.",
         },
       };
     }
@@ -233,11 +240,12 @@ export async function routeLiveIndexApiRequest(
     /^\/api\/repo\/([^/]+)\/checkpoint$/,
   );
   if (method === "POST" && checkpointMatch) {
+    const [, rawRepoId] = checkpointMatch;
+    const repoId = decodeURIComponent(rawRepoId);
     try {
-      const [, repoId] = checkpointMatch;
       const parsed = BufferCheckpointRequestSchema.parse({
         ...(request.body as Record<string, unknown> | undefined),
-        repoId: decodeURIComponent(repoId),
+        repoId,
       });
       const result = await liveIndex.checkpointRepo(parsed);
       return {
@@ -245,10 +253,15 @@ export async function routeLiveIndexApiRequest(
         payload: result,
       };
     } catch (error) {
+      logger.warn("Rejected live index checkpoint request", {
+        repoId,
+        pathname: request.pathname,
+        error,
+      });
       return {
         status: 400,
         payload: {
-          error: error instanceof Error ? error.message : String(error),
+          error: "Unable to process checkpoint request.",
         },
       };
     }

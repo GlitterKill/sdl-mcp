@@ -1239,8 +1239,15 @@ export async function handleSliceSpilloverGet(
       if (symbolRow.signatureJson) {
         try {
           const parsed: unknown = JSON.parse(symbolRow.signatureJson);
-          if (parsed && typeof parsed === "object" && "name" in parsed) {
-            signature = parsed as SymbolSignature;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            const candidate = parsed as Partial<SymbolSignature>;
+            signature = {
+              ...candidate,
+              name:
+                typeof candidate.name === "string"
+                  ? candidate.name
+                  : symbolRow.name,
+            };
           }
         } catch (error) {
           logger.warn("Failed to parse signatureJson JSON", {

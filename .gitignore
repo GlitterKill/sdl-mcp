@@ -120,3 +120,6 @@ docs/plans/2026-03-10-context-mode-integration-plan.md
 .gitignore
 docs/plans/2026-03-10-mcp-sandbox-execution-plan.md
 docs/plans/Stress_Test_Suite_Plan.md
+.lbug-lazy-graph-memory-test-db.lbug
+.lbug-lazy-graph-memory-test-db.lbug.shadow
+.lbug-lazy-graph-memory-test-db.lbug.wal

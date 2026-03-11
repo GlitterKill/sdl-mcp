@@ -95,7 +95,38 @@ describe("live index HTTP routing", () => {
 
     assert.ok(response);
     assert.strictEqual(response?.status, 400);
-    assert.match(String((response?.payload as { error?: string }).error), /eventType/i);
+    assert.deepStrictEqual(response?.payload, {
+      error: "Unable to process buffer update request.",
+    });
+  });
+
+  it("returns a generic checkpoint error message", async () => {
+    const response = await routeLiveIndexApiRequest(
+      {
+        method: "POST",
+        pathname: "/api/repo/demo-repo/checkpoint",
+        body: { reason: "manual" },
+      } satisfies LiveIndexApiRequest,
+      {
+        liveIndex: {
+          async pushBufferUpdate() {
+            throw new Error("not used");
+          },
+          async checkpointRepo() {
+            throw new Error("checkpoint exploded");
+          },
+          async getLiveStatus() {
+            throw new Error("not used");
+          },
+        },
+      },
+    );
+
+    assert.ok(response);
+    assert.strictEqual(response?.status, 400);
+    assert.deepStrictEqual(response?.payload, {
+      error: "Unable to process checkpoint request.",
+    });
   });
 
   it("returns live status for a repository", async () => {
