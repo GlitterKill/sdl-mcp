@@ -20,6 +20,9 @@ native/*.node
 *.sqlite-shm
 *.sqlite-wal
 *.db
+*.lbug
+*.lbug.wal
+*.lbug.shadow
 
 # Environment
 .env
@@ -48,6 +51,8 @@ test-red-output*.txt
 test_results.txt
 tests/results/
 tests/stress/results/
+tests/**/.lbug-*-db/
+tests/integration/test-*/
 coverage/
 .nyc_output/
 
