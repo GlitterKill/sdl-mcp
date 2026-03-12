@@ -4,6 +4,7 @@ import { existsAsync } from "../../util/asyncFs.js";
 import { normalizePath } from "../../util/paths.js";
 
 import { GoImportResolutionAdapter } from "./go-adapter.js";
+import { CSharpImportResolutionAdapter } from "./csharp-adapter.js";
 import { JavaKotlinImportResolutionAdapter } from "./java-kotlin-adapter.js";
 import { PhpImportResolutionAdapter } from "./php-adapter.js";
 import { PythonImportResolutionAdapter } from "./python-adapter.js";
@@ -15,6 +16,7 @@ import type {
 
 const IMPORT_RESOLUTION_ADAPTERS: ImportResolutionAdapter[] = [
   new GoImportResolutionAdapter(),
+  new CSharpImportResolutionAdapter(),
   new JavaKotlinImportResolutionAdapter(),
   new RustImportResolutionAdapter(),
   new PythonImportResolutionAdapter(),

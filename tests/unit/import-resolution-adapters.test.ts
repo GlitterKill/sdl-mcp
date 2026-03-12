@@ -129,6 +129,44 @@ describe("import-resolution adapters", () => {
     assert.deepStrictEqual(paths, ["mypackage/core/engine.py"]);
   });
 
+  it("resolves C# namespace imports to matching source files", async () => {
+    const repoRoot = createTempRepo("sdl-csharp-imports-");
+    writeRepoFile(
+      repoRoot,
+      "MyApp/Services/UserService.cs",
+      "namespace MyApp.Services;\n",
+    );
+
+    const paths = await resolveImportCandidatePaths({
+      language: "csharp",
+      repoRoot,
+      importerRelPath: "MyApp/Controllers/UserController.cs",
+      specifier: "MyApp.Services.UserService",
+      extensions: [".cs"],
+    });
+
+    assert.deepStrictEqual(paths, ["MyApp/Services/UserService.cs"]);
+  });
+
+  it("resolves C# namespace imports via type-name fallback search", async () => {
+    const repoRoot = createTempRepo("sdl-csharp-imports-");
+    writeRepoFile(
+      repoRoot,
+      "src/Generated/UserService.cs",
+      "namespace Acme.Generated;\n",
+    );
+
+    const paths = await resolveImportCandidatePaths({
+      language: "csharp",
+      repoRoot,
+      importerRelPath: "src/App/Controllers/UserController.cs",
+      specifier: "Acme.Services.UserService",
+      extensions: [".cs"],
+    });
+
+    assert.deepStrictEqual(paths, ["src/Generated/UserService.cs"]);
+  });
+
   it("resolves PHP namespace imports via composer PSR-4", async () => {
     const repoRoot = createTempRepo("sdl-php-imports-");
     writeRepoFile(
