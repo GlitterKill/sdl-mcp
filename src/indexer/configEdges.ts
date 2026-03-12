@@ -17,15 +17,30 @@ export interface ConfigEdge {
 export interface PerTreeConfigEdgeContext {
   repoId: string;
   repoRoot: string;
+  relPath: string;
   config: RepoConfig;
   tree: Parser.Tree;
   fileSymbols: LadybugSymbolRow[];
   allSymbolsByName: Map<string, SymbolLiteRow[]>;
 }
 
+const EXPRESS_CONFIG_EXTENSIONS = new Set([
+  ".js",
+  ".jsx",
+  ".ts",
+  ".tsx",
+  ".mjs",
+  ".cjs",
+]);
+
 export function extractConfigEdgesFromTree(
   context: PerTreeConfigEdgeContext,
 ): ConfigEdge[] {
+  const ext = context.relPath.slice(context.relPath.lastIndexOf(".")).toLowerCase();
+  if (!EXPRESS_CONFIG_EXTENSIONS.has(ext)) {
+    return [];
+  }
+
   try {
     return extractExpressEdgesFromTree(context);
   } catch (error) {
@@ -176,4 +191,3 @@ function findEnclosingSymbol(
 export function normalizeConfigEdgeRelPath(relPath: string): string {
   return normalizePath(relPath);
 }
-

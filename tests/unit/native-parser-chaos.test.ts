@@ -77,4 +77,37 @@ describe("Native parser chaos", () => {
     });
     assert.strictEqual(result, null);
   });
+
+  it("marks languages without native extraction support as unsupported", () => {
+    const cases = [
+      ["src/foo.c", "c"],
+      ["src/foo.h", "c"],
+      ["src/foo.cpp", "cpp"],
+      ["src/foo.hpp", "cpp"],
+      ["src/foo.py", "py"],
+      ["src/foo.go", "go"],
+      ["src/Foo.java", "java"],
+      ["src/Foo.cs", "cs"],
+      ["src/foo.php", "php"],
+      ["src/lib.rs", "rs"],
+      ["src/App.kt", "kt"],
+      ["src/script.sh", "sh"],
+      ["src/script.bash", "sh"],
+      ["src/script.zsh", "sh"],
+    ] as const;
+
+    for (const [filePath, language] of cases) {
+      const result = run(okAddon, {
+        TEST_FILE_PATH: filePath,
+      });
+      assert.ok(Array.isArray(result));
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0]?.relPath, filePath);
+      assert.strictEqual(result[0]?.symbols.length, 0);
+      assert.strictEqual(
+        result[0]?.parseError,
+        `Unsupported language: ${language}`,
+      );
+    }
+  });
 });

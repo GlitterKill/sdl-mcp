@@ -1,11 +1,12 @@
 import { parseFilesRust } from "../../../src/indexer/rustIndexer.js";
 
+const filePath = process.env.TEST_FILE_PATH ?? "src/foo.ts";
+
 const result = parseFilesRust(
   "chaos-test-repo",
   process.cwd(),
-  [{ path: "src/foo.ts", size: 1, mtime: 0 }],
+  [{ path: filePath, size: 1, mtime: 0 }],
   0,
 );
 
 process.stdout.write(JSON.stringify(result));
-

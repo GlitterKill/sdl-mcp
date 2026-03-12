@@ -640,6 +640,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
       configEdges = extractConfigEdgesFromTree({
         repoId,
         repoRoot,
+        relPath,
         config,
         tree,
         fileSymbols,

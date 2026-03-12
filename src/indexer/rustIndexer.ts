@@ -250,6 +250,11 @@ export interface RustParseResult {
   parseError: string | null;
 }
 
+// Native extraction currently mirrors the shared JS/TS extractor logic.
+// Languages with dedicated TS adapters must stay on the TS path until their
+// native extractors reach parity, otherwise they can silently index as empty.
+const NATIVE_EXTRACTION_LANGUAGES = new Set(["ts", "tsx", "js", "jsx"]);
+
 /**
  * Map file extension to language identifier.
  */
@@ -282,6 +287,24 @@ function extensionToLanguage(ext: string): string {
   return map[ext] ?? "";
 }
 
+function supportsNativeExtractionLanguage(language: string): boolean {
+  return NATIVE_EXTRACTION_LANGUAGES.has(language);
+}
+
+function buildUnsupportedLanguageResult(
+  relPath: string,
+  language: string,
+): RustParseResult {
+  return {
+    relPath,
+    contentHash: "",
+    symbols: [],
+    imports: [],
+    calls: [],
+    parseError: `Unsupported language: ${language || "unknown"}`,
+  };
+}
+
 /**
  * Maximum number of files to send to the native addon in a single batch.
  * Bounds peak memory usage in Rust (all file contents + parse results are
@@ -311,29 +334,45 @@ export function parseFilesRust(
   const addon = loadNativeAddon();
   if (!addon) return null;
 
-  // Convert FileMetadata to NativeFileInput
-  const inputs: NativeFileInput[] = files.map((file) => {
+  const results = new Array<RustParseResult | null>(files.length).fill(null);
+  const nativeEntries: Array<{ index: number; input: NativeFileInput }> = [];
+
+  // Convert FileMetadata to NativeFileInput for languages with native
+  // extraction parity. Other languages stay on the TS fallback path.
+  files.forEach((file, index) => {
     const ext = file.path.split(".").pop()?.toLowerCase() ?? "";
-    return {
-      relPath: file.path,
-      absolutePath: join(repoRoot, file.path).replace(/\\/g, "/"),
-      repoId,
-      language: extensionToLanguage(ext),
-    };
+    const language = extensionToLanguage(ext);
+
+    if (!supportsNativeExtractionLanguage(language)) {
+      results[index] = buildUnsupportedLanguageResult(file.path, language || ext);
+      return;
+    }
+
+    nativeEntries.push({
+      index,
+      input: {
+        relPath: file.path,
+        absolutePath: join(repoRoot, file.path).replace(/\\/g, "/"),
+        repoId,
+        language,
+      },
+    });
   });
 
-  // Process in batches to bound memory usage and limit crash blast radius
-  const allResults: RustParseResult[] = [];
+  if (nativeEntries.length === 0) {
+    return results.filter((result): result is RustParseResult => result !== null);
+  }
 
-  for (let offset = 0; offset < inputs.length; offset += NATIVE_BATCH_SIZE) {
-    const batch = inputs.slice(offset, offset + NATIVE_BATCH_SIZE);
+  for (let offset = 0; offset < nativeEntries.length; offset += NATIVE_BATCH_SIZE) {
+    const batchEntries = nativeEntries.slice(offset, offset + NATIVE_BATCH_SIZE);
+    const batch = batchEntries.map((entry) => entry.input);
 
-    if (inputs.length > NATIVE_BATCH_SIZE) {
+    if (nativeEntries.length > NATIVE_BATCH_SIZE) {
       logger.debug("Processing native parse batch", {
         batch: Math.floor(offset / NATIVE_BATCH_SIZE) + 1,
-        totalBatches: Math.ceil(inputs.length / NATIVE_BATCH_SIZE),
+        totalBatches: Math.ceil(nativeEntries.length / NATIVE_BATCH_SIZE),
         batchSize: batch.length,
-        totalFiles: inputs.length,
+        totalFiles: nativeEntries.length,
       });
     }
 
@@ -367,7 +406,9 @@ export function parseFilesRust(
     // Convert NativeParsedFile to RustParseResult
     try {
       const mapped = nativeResults.map(mapNativeResult);
-      allResults.push(...mapped);
+      mapped.forEach((result, batchIndex) => {
+        results[batchEntries[batchIndex]!.index] = result;
+      });
     } catch (error) {
       logger.error(
         "Failed to map native Rust indexer results; disabling native addon",
@@ -381,7 +422,7 @@ export function parseFilesRust(
     }
   }
 
-  return allResults;
+  return results.filter((result): result is RustParseResult => result !== null);
 }
 
 /**
