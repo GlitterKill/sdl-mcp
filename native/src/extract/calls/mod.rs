@@ -2,6 +2,7 @@ use tree_sitter::Node;
 
 use crate::types::{NativeParsedCall, NativeParsedSymbol};
 
+mod c_lang;
 pub mod common;
 mod go;
 mod java;
@@ -15,6 +16,7 @@ pub fn extract_calls(
     language: &str,
 ) -> Vec<NativeParsedCall> {
     match language {
+        "c" => c_lang::extract_calls_c(root, source, symbols),
         "go" => go::extract_calls_go(root, source, symbols),
         "java" => java::extract_calls_java(root, source, symbols),
         "py" => python::extract_calls_python(root, source, symbols),
