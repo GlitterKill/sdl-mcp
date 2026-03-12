@@ -128,3 +128,7 @@ docs/plans/Stress_Test_Suite_Plan.md
 .lbug-lazy-graph-memory-test-db.lbug
 .lbug-lazy-graph-memory-test-db.lbug.shadow
 .lbug-lazy-graph-memory-test-db.lbug.wal
+docs/superpowers/plans/2026-03-12-rust-indexer-multi-language.md
+target/rust-analyzer/flycheck0/stdout
+.gitignore
+target/rust-analyzer/flycheck0/stderr
