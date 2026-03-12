@@ -4,6 +4,7 @@ use crate::types::{NativeParsedCall, NativeParsedSymbol};
 
 pub mod common;
 mod go;
+mod java;
 mod python;
 mod typescript;
 
@@ -15,6 +16,7 @@ pub fn extract_calls(
 ) -> Vec<NativeParsedCall> {
     match language {
         "go" => go::extract_calls_go(root, source, symbols),
+        "java" => java::extract_calls_java(root, source, symbols),
         "py" => python::extract_calls_python(root, source, symbols),
         "ts" | "tsx" | "js" | "jsx" => typescript::extract_calls_ts(root, source, symbols),
         _ => vec![],
