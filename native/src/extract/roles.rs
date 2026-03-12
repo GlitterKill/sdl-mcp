@@ -5,6 +5,7 @@ use crate::types::NativeParsedSymbol;
 pub fn extract_role_tags(symbol: &NativeParsedSymbol, rel_path: &str) -> Vec<String> {
     let name = symbol.name.to_lowercase();
     let path = rel_path.replace('\\', "/").to_lowercase();
+    let file_name = path.rsplit('/').next().unwrap_or("");
     let name_tokens = split_identifier_like_text(&symbol.name)
         .into_iter()
         .map(|part| part.to_lowercase())
@@ -27,7 +28,9 @@ pub fn extract_role_tags(symbol: &NativeParsedSymbol, rel_path: &str) -> Vec<Str
         tags.push("service".to_string());
     }
 
-    if name_tokens.iter().any(|token| token == "repo" || token == "repository")
+    if name_tokens
+        .iter()
+        .any(|token| token == "repo" || token == "repository")
         || path_tokens
             .iter()
             .any(|token| token == "repo" || token == "repository")
@@ -47,6 +50,8 @@ pub fn extract_role_tags(symbol: &NativeParsedSymbol, rel_path: &str) -> Vec<Str
         || path.contains("/tests/")
         || path.contains(".test.")
         || path.contains(".spec.")
+        || (file_name.starts_with("test_") && file_name.ends_with(".py"))
+        || file_name.ends_with("_test.py")
     {
         tags.push("test".to_string());
     }
@@ -76,6 +81,12 @@ pub fn extract_role_tags(symbol: &NativeParsedSymbol, rel_path: &str) -> Vec<Str
 
     if has_tagged_file_suffix(&path, "main")
         || has_tagged_file_suffix(&path, "index")
+        || has_tagged_file_suffix(&path, "app")
+        || has_tagged_file_suffix(&path, "manage")
+        || has_tagged_file_suffix(&path, "application")
+        || has_tagged_file_suffix(&path, "lib")
+        || path.ends_with("/__main__.py")
+        || path.contains("/bin/")
         || path.contains("/cli/")
     {
         tags.push("entrypoint".to_string());
@@ -126,7 +137,8 @@ fn split_path_tokens(rel_path: &str) -> Vec<String> {
 
 fn has_tagged_file_suffix(path: &str, basename: &str) -> bool {
     [
-        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".rs",
+        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".rs", ".py", ".go", ".java",
+        ".cs", ".cpp", ".cc", ".c", ".h", ".php", ".kt", ".kts", ".sh", ".bash",
     ]
     .iter()
     .any(|extension| path.ends_with(&format!("/{basename}{extension}")))

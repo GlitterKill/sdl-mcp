@@ -14,10 +14,7 @@ use crate::types::NativeParsedSymbol;
 /// - Database query (db.query, pool.execute, etc.)
 /// - Global state mutation (globalThis, window, document, localStorage)
 /// - Environment access (process.env, process.cwd, import.meta.env)
-pub fn extract_side_effects(
-    symbol: &NativeParsedSymbol,
-    file_content: &str,
-) -> Vec<String> {
+pub fn extract_side_effects(symbol: &NativeParsedSymbol, file_content: &str) -> Vec<String> {
     let mut effects = Vec::new();
     let lines = get_symbol_lines(symbol, file_content);
 
@@ -29,6 +26,10 @@ pub fn extract_side_effects(
             Regex::new(r"http\.get\s*\(").unwrap(),
             Regex::new(r"http\.post\s*\(").unwrap(),
             Regex::new(r"XMLHttpRequest").unwrap(),
+            Regex::new(r"requests\.(?:get|post|put|delete|patch)\s*\(").unwrap(),
+            Regex::new(r"http\.(?:Get|Post|NewRequest)\s*\(").unwrap(),
+            Regex::new(r"reqwest::(?:get|Client)").unwrap(),
+            Regex::new(r"HttpClient|HttpURLConnection|URL\s*\(").unwrap(),
         ]
     });
 
@@ -45,6 +46,12 @@ pub fn extract_side_effects(
             Regex::new(r"fs\.writeFileSync").unwrap(),
             Regex::new(r"readFileSync").unwrap(),
             Regex::new(r"writeFileSync").unwrap(),
+            Regex::new(r"open\s*\(").unwrap(),
+            Regex::new(r"os\.(?:path|listdir|makedirs|remove)").unwrap(),
+            Regex::new(r"os\.(?:Open|Create|ReadFile)\s*\(").unwrap(),
+            Regex::new(r"std::fs::(?:read|write|create|remove|rename)").unwrap(),
+            Regex::new(r"new\s+File(?:Input|Output)Stream\s*\(").unwrap(),
+            Regex::new(r"Files\.(?:read|write)").unwrap(),
         ]
     });
 
@@ -58,6 +65,9 @@ pub fn extract_side_effects(
             Regex::new(r"connection\.execute").unwrap(),
             Regex::new(r"client\.query").unwrap(),
             Regex::new(r"\.query\s*\(").unwrap(),
+            Regex::new(r"sqlite3\.connect\s*\(").unwrap(),
+            Regex::new(r"sql\.Open\s*\(").unwrap(),
+            Regex::new(r"DriverManager\.getConnection\s*\(").unwrap(),
         ]
     });
 
@@ -77,6 +87,19 @@ pub fn extract_side_effects(
             Regex::new(r"process\.env").unwrap(),
             Regex::new(r"process\.cwd").unwrap(),
             Regex::new(r"import\.meta\.env").unwrap(),
+            Regex::new(r"os\.environ").unwrap(),
+            Regex::new(r"os\.Getenv\s*\(").unwrap(),
+            Regex::new(r"std::env::(?:var|vars|args)").unwrap(),
+            Regex::new(r"System\.getenv\s*\(").unwrap(),
+        ]
+    });
+
+    static PROCESS_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+        vec![
+            Regex::new(r"subprocess\.(?:run|call|Popen)\s*\(").unwrap(),
+            Regex::new(r"exec\.Command\s*\(").unwrap(),
+            Regex::new(r"std::process::Command").unwrap(),
+            Regex::new(r"Runtime\.getRuntime\(\)\.exec\s*\(").unwrap(),
         ]
     });
 
@@ -126,6 +149,14 @@ pub fn extract_side_effects(
         for pattern in ENV_PATTERNS.iter() {
             if pattern.is_match(line) {
                 effects.push("Environment access".to_string());
+                break;
+            }
+        }
+
+        // Process spawning
+        for pattern in PROCESS_PATTERNS.iter() {
+            if pattern.is_match(line) {
+                effects.push("Process spawning".to_string());
                 break;
             }
         }

@@ -165,7 +165,7 @@ fn parse_single_file(input: &NativeFileInput) -> NativeParsedFile {
     );
 
     for symbol in &mut symbols {
-        symbol.summary = extract::summary::generate_summary(symbol, &content);
+        symbol.summary = extract::summary::generate_summary(symbol, &content, &input.language);
 
         let invariants = extract::invariants::extract_invariants(symbol, &content);
         symbol.invariants = invariants;

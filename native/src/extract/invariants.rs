@@ -14,10 +14,7 @@ use crate::types::NativeParsedSymbol;
 /// - `assert()` calls
 /// - Guard clauses: `if (!x) throw/return`
 /// - Null/undefined checks: `if (x === null || x === undefined) throw`
-pub fn extract_invariants(
-    symbol: &NativeParsedSymbol,
-    file_content: &str,
-) -> Vec<String> {
+pub fn extract_invariants(symbol: &NativeParsedSymbol, file_content: &str) -> Vec<String> {
     let mut invariants = Vec::new();
 
     // Extract JSDoc invariants
@@ -27,12 +24,27 @@ pub fn extract_invariants(
     // Extract code-level invariants
     let lines = get_symbol_lines(symbol, file_content);
 
-    static RE_ASSERT: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"assert\(([^)]+)\)").unwrap());
+    static RE_ASSERT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"assert\(([^)]+)\)").unwrap());
+    static RE_ASSERT_NO_PARENS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\bassert\s+(.+)").unwrap());
     static RE_GUARD: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"if\s*\(!([^)]+)\)\s*(?:\{|throw|return)").unwrap());
     static RE_THROW_GUARD: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"if\s*\(([^)]+)\)\s*(?:\{|throw|return)").unwrap());
+    static RE_PY_RAISE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"raise\s+\w+(?:Error|Exception)\s*\(").unwrap());
+    static RE_PY_IF_NOT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"if\s+not\s+([^:]+)").unwrap());
+    static RE_GO_ERR_GUARD: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"if\s+err\s*!=\s*nil").unwrap());
+    static RE_PANIC: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"panic\s*\(").unwrap());
+    static RE_RUST_ASSERT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"assert(?:_eq|_ne)?!\s*\(").unwrap());
+    static RE_RUST_UNWRAP_EXPECT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\.(?:unwrap|expect)\s*\(").unwrap());
+    static RE_RUST_TRY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\?(?:\s|;)").unwrap());
+    static RE_JAVA_NONNULL: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"Objects\.requireNonNull\s*\(").unwrap());
 
     for line in &lines {
         // assert() calls
@@ -40,6 +52,10 @@ pub fn extract_invariants(
             if let Some(caps) = RE_ASSERT.captures(line) {
                 invariants.push(format!("Asserts: {}", &caps[1]));
             }
+        }
+
+        if let Some(caps) = RE_ASSERT_NO_PARENS.captures(line) {
+            invariants.push(format!("Asserts: {}", caps[1].trim()));
         }
 
         // Guard clauses: if (!x) throw/return
@@ -50,9 +66,7 @@ pub fn extract_invariants(
         }
 
         // if (condition) throw new / return false
-        if line.contains("if (")
-            && (line.contains("throw new") || line.contains("return false"))
-        {
+        if line.contains("if (") && (line.contains("throw new") || line.contains("return false")) {
             if let Some(caps) = RE_THROW_GUARD.captures(line) {
                 let condition = caps[1].trim();
                 if condition.contains('!')
@@ -63,6 +77,38 @@ pub fn extract_invariants(
                 }
             }
         }
+
+        if RE_PY_RAISE.is_match(line) {
+            invariants.push("Raises explicit error".to_string());
+        }
+
+        if let Some(caps) = RE_PY_IF_NOT.captures(line) {
+            invariants.push(format!("Requires: {}", caps[1].trim()));
+        }
+
+        if RE_GO_ERR_GUARD.is_match(line) {
+            invariants.push("Requires: err == nil".to_string());
+        }
+
+        if RE_PANIC.is_match(line) {
+            invariants.push("Panics on violated assumption".to_string());
+        }
+
+        if RE_RUST_ASSERT.is_match(line) {
+            invariants.push("Asserts: rust assertion macro".to_string());
+        }
+
+        if RE_RUST_UNWRAP_EXPECT.is_match(line) {
+            invariants.push("Requires: result is Ok/Some".to_string());
+        }
+
+        if RE_RUST_TRY.is_match(line) {
+            invariants.push("Propagates errors via ? operator".to_string());
+        }
+
+        if RE_JAVA_NONNULL.is_match(line) {
+            invariants.push("Requires: non-null argument".to_string());
+        }
     }
 
     // Deduplicate while preserving order
@@ -71,10 +117,7 @@ pub fn extract_invariants(
     invariants
 }
 
-fn extract_jsdoc_invariants(
-    symbol: &NativeParsedSymbol,
-    file_content: &str,
-) -> Vec<String> {
+fn extract_jsdoc_invariants(symbol: &NativeParsedSymbol, file_content: &str) -> Vec<String> {
     let mut invariants = Vec::new();
     let lines: Vec<&str> = file_content.lines().collect();
     let start_line = symbol.range.start_line as usize;
@@ -126,8 +169,7 @@ fn extract_jsdoc_invariants(
 
     static RE_PARAM: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"@param\s+(\{[^}]+\})?\s*(\w+)\s+(.+)").unwrap());
-    static RE_THROWS: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"@throws\s+(.+)").unwrap());
+    static RE_THROWS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"@throws\s+(.+)").unwrap());
 
     for line in jsdoc_text.lines() {
         let trimmed = line.trim();
