@@ -6,6 +6,7 @@ import { normalizePath } from "../../util/paths.js";
 import { GoImportResolutionAdapter } from "./go-adapter.js";
 import { JavaKotlinImportResolutionAdapter } from "./java-kotlin-adapter.js";
 import { PhpImportResolutionAdapter } from "./php-adapter.js";
+import { PythonImportResolutionAdapter } from "./python-adapter.js";
 import { RustImportResolutionAdapter } from "./rust-adapter.js";
 import type {
   ImportResolutionAdapter,
@@ -16,6 +17,7 @@ const IMPORT_RESOLUTION_ADAPTERS: ImportResolutionAdapter[] = [
   new GoImportResolutionAdapter(),
   new JavaKotlinImportResolutionAdapter(),
   new RustImportResolutionAdapter(),
+  new PythonImportResolutionAdapter(),
   new PhpImportResolutionAdapter(),
 ];
 
@@ -31,7 +33,9 @@ async function resolveRelativeImportCandidatePaths(
 
   const importerDir = dirname(params.importerRelPath);
   const baseRelPath = normalizePath(join(importerDir, params.specifier));
-  const hasExtension = params.extensions.some((ext) => baseRelPath.endsWith(ext));
+  const hasExtension = params.extensions.some((ext) =>
+    baseRelPath.endsWith(ext),
+  );
   const candidates: string[] = [];
 
   if (hasExtension) {

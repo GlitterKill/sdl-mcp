@@ -61,13 +61,19 @@ describe("import-resolution adapters", () => {
       extensions: [".java"],
     });
 
-    assert.deepStrictEqual(paths, ["src/main/java/com/example/service/Helper.java"]);
+    assert.deepStrictEqual(paths, [
+      "src/main/java/com/example/service/Helper.java",
+    ]);
   });
 
   it("resolves Rust crate imports to module files", async () => {
     const repoRoot = createTempRepo("sdl-rust-imports-");
     writeRepoFile(repoRoot, "src/lib.rs", "pub mod services;");
-    writeRepoFile(repoRoot, "src/services/email.rs", "pub struct EmailService;");
+    writeRepoFile(
+      repoRoot,
+      "src/services/email.rs",
+      "pub struct EmailService;",
+    );
 
     const paths = await resolveImportCandidatePaths({
       language: "rust",
@@ -78,6 +84,49 @@ describe("import-resolution adapters", () => {
     });
 
     assert.deepStrictEqual(paths, ["src/services/email.rs"]);
+  });
+
+  it("resolves Python relative imports with dot prefixes", async () => {
+    const repoRoot = createTempRepo("sdl-python-imports-");
+    writeRepoFile(
+      repoRoot,
+      "pkg/api/handler.py",
+      "from ..utils import helpers\n",
+    );
+    writeRepoFile(
+      repoRoot,
+      "pkg/utils/helpers.py",
+      "def helper():\n  return True\n",
+    );
+
+    const paths = await resolveImportCandidatePaths({
+      language: "python",
+      repoRoot,
+      importerRelPath: "pkg/api/handler.py",
+      specifier: "..utils.helpers",
+      extensions: [".py"],
+    });
+
+    assert.deepStrictEqual(paths, ["pkg/utils/helpers.py"]);
+  });
+
+  it("resolves Python absolute imports to package modules", async () => {
+    const repoRoot = createTempRepo("sdl-python-imports-");
+    writeRepoFile(
+      repoRoot,
+      "mypackage/core/engine.py",
+      "def run():\n  return 1\n",
+    );
+
+    const paths = await resolveImportCandidatePaths({
+      language: "python",
+      repoRoot,
+      importerRelPath: "mypackage/app/main.py",
+      specifier: "mypackage.core.engine",
+      extensions: [".py"],
+    });
+
+    assert.deepStrictEqual(paths, ["mypackage/core/engine.py"]);
   });
 
   it("resolves PHP namespace imports via composer PSR-4", async () => {
