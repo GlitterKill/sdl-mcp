@@ -1,26 +1,20 @@
 use tree_sitter::Node;
 
-use crate::extract::fingerprint::generate_ast_fingerprint;
-use crate::extract::symbol_id::generate_symbol_id;
-use crate::types::{NativeParsedSymbol, NativeRange};
+use crate::types::NativeParsedSymbol;
 
-/// Extract all symbols from a parsed AST tree.
-///
-/// Mirrors TypeScript `extractSymbols` in `treesitter/extractSymbols.ts`.
-pub fn extract_symbols(
+use super::common::{extract_range, find_child_by_kind, make_symbol, node_text, ParamInfo};
+
+pub fn extract_symbols_ts(
     root: Node<'_>,
     source: &[u8],
     repo_id: &str,
     rel_path: &str,
-    _language: &str,
 ) -> Vec<NativeParsedSymbol> {
     let mut symbols = Vec::new();
     traverse_ast(root, source, repo_id, rel_path, &mut symbols);
     symbols
 }
 
-/// Iterative AST traversal using an explicit stack to avoid stack overflow
-/// on deeply-nested ASTs (e.g. LLVM C++ files with 2000+ nesting depth).
 fn traverse_ast(
     root: Node<'_>,
     source: &[u8],
@@ -67,9 +61,6 @@ fn traverse_ast(
                     }
                 }
             }
-            // `ambient_statement` (e.g. `declare module "foo" { ... }`) is handled
-            // implicitly: its `module` child is pushed to the stack and matched
-            // by the `"module"` arm below. No special handling needed here.
             "module" => {
                 if let Some(sym) = process_module(node, source, repo_id, rel_path) {
                     symbols.push(sym);
@@ -81,7 +72,6 @@ fn traverse_ast(
             _ => {}
         }
 
-        // Push children in reverse order so left-most child is processed first
         let child_count = node.child_count();
         for i in (0..child_count).rev() {
             if let Some(child) = node.child(i) {
@@ -238,52 +228,6 @@ fn extract_visibility(node: Node<'_>, source: &[u8]) -> String {
     String::new()
 }
 
-fn extract_range(node: Node<'_>) -> NativeRange {
-    let start = node.start_position();
-    let end = node.end_position();
-    NativeRange {
-        start_line: (start.row + 1) as u32,
-        start_col: start.column as u32,
-        end_line: (end.row + 1) as u32,
-        end_col: end.column as u32,
-    }
-}
-
-fn make_symbol(
-    name: &str,
-    kind: &str,
-    node: Node<'_>,
-    source: &[u8],
-    repo_id: &str,
-    rel_path: &str,
-    params: &[ParamInfo],
-    returns: Option<&str>,
-    generics: &[String],
-    visibility: &str,
-    _decorators: &[String],
-) -> NativeParsedSymbol {
-    let fingerprint = generate_ast_fingerprint(node, source);
-    let symbol_id = generate_symbol_id(repo_id, rel_path, kind, name, &fingerprint);
-
-    let signature = build_signature(params, returns, generics);
-
-    NativeParsedSymbol {
-        symbol_id,
-        ast_fingerprint: fingerprint,
-        kind: kind.to_string(),
-        name: name.to_string(),
-        exported: is_exported(node),
-        visibility: visibility.to_string(),
-        range: extract_range(node),
-        signature,
-        summary: String::new(), // Filled by summary module later
-        invariants: vec![],
-        side_effects: vec![],
-        role_tags: vec![],
-        search_text: String::new(),
-    }
-}
-
 fn process_function_declaration(
     node: Node<'_>,
     source: &[u8],
@@ -292,7 +236,6 @@ fn process_function_declaration(
 ) -> Option<NativeParsedSymbol> {
     let name = extract_identifier(node, source)?;
 
-    // Check for function_signature child
     let mut cursor = node.walk();
     let sig_node = node
         .children(&mut cursor)
@@ -312,7 +255,8 @@ fn process_function_declaration(
         )
     };
 
-    Some(make_symbol(
+    let decorators = extract_decorators(node, source);
+    let mut symbol = make_symbol(
         &name,
         "function",
         node,
@@ -323,8 +267,10 @@ fn process_function_declaration(
         returns.as_deref(),
         &generics,
         "",
-        &extract_decorators(node, source),
-    ))
+        &decorators,
+    );
+    symbol.exported = is_exported(node);
+    Some(symbol)
 }
 
 fn process_method_definition(
@@ -347,7 +293,7 @@ fn process_method_definition(
         "method"
     };
 
-    Some(make_symbol(
+    let mut symbol = make_symbol(
         &name,
         kind,
         node,
@@ -359,7 +305,9 @@ fn process_method_definition(
         &generics,
         &visibility,
         &decorators,
-    ))
+    );
+    symbol.exported = is_exported(node);
+    Some(symbol)
 }
 
 fn process_class_declaration(
@@ -370,8 +318,9 @@ fn process_class_declaration(
 ) -> Option<NativeParsedSymbol> {
     let name = extract_identifier(node, source)?;
     let generics = extract_generics(node, source);
+    let decorators = extract_decorators(node, source);
 
-    Some(make_symbol(
+    let mut symbol = make_symbol(
         &name,
         "class",
         node,
@@ -382,8 +331,10 @@ fn process_class_declaration(
         None,
         &generics,
         "",
-        &extract_decorators(node, source),
-    ))
+        &decorators,
+    );
+    symbol.exported = is_exported(node);
+    Some(symbol)
 }
 
 fn process_interface_declaration(
@@ -395,7 +346,7 @@ fn process_interface_declaration(
     let name = extract_identifier(node, source)?;
     let generics = extract_generics(node, source);
 
-    Some(make_symbol(
+    let mut symbol = make_symbol(
         &name,
         "interface",
         node,
@@ -407,7 +358,9 @@ fn process_interface_declaration(
         &generics,
         "",
         &[],
-    ))
+    );
+    symbol.exported = is_exported(node);
+    Some(symbol)
 }
 
 fn process_type_alias_declaration(
@@ -419,7 +372,7 @@ fn process_type_alias_declaration(
     let name = extract_identifier(node, source)?;
     let generics = extract_generics(node, source);
 
-    Some(make_symbol(
+    let mut symbol = make_symbol(
         &name,
         "type",
         node,
@@ -431,7 +384,9 @@ fn process_type_alias_declaration(
         &generics,
         "",
         &[],
-    ))
+    );
+    symbol.exported = is_exported(node);
+    Some(symbol)
 }
 
 fn process_variable_declaration(
@@ -441,7 +396,6 @@ fn process_variable_declaration(
     rel_path: &str,
     parent_node: Node<'_>,
 ) -> Vec<NativeParsedSymbol> {
-    // Check for destructuring patterns
     if let Some(left) = declarator.child_by_field_name("name") {
         if left.kind() == "object_pattern" || left.kind() == "array_pattern" {
             let mut results = Vec::new();
@@ -455,7 +409,6 @@ fn process_variable_declaration(
                         extract_identifier(child, source)
                     }
                     _ => {
-                        // Check for name field
                         if let Some(name_node) = child.child_by_field_name("name") {
                             extract_identifier(name_node, source)
                         } else {
@@ -465,25 +418,22 @@ fn process_variable_declaration(
                 };
 
                 if let Some(name) = pattern_name {
-                    let fingerprint = generate_ast_fingerprint(child, source);
-                    let symbol_id =
-                        generate_symbol_id(repo_id, rel_path, "variable", &name, &fingerprint);
-
-                    results.push(NativeParsedSymbol {
-                        symbol_id,
-                        ast_fingerprint: fingerprint,
-                        kind: "variable".to_string(),
-                        name,
-                        exported: is_exported(parent_node),
-                        visibility: String::new(),
-                        range: extract_range(child),
-                        signature: None,
-                        summary: String::new(),
-                        invariants: vec![],
-                        side_effects: vec![],
-                        role_tags: vec![],
-                        search_text: String::new(),
-                    });
+                    let mut symbol = make_symbol(
+                        &name,
+                        "variable",
+                        child,
+                        source,
+                        repo_id,
+                        rel_path,
+                        &[],
+                        None,
+                        &[],
+                        "",
+                        &[],
+                    );
+                    symbol.exported = is_exported(parent_node);
+                    symbol.range = extract_range(child);
+                    results.push(symbol);
                 }
             }
             return results;
@@ -495,7 +445,7 @@ fn process_variable_declaration(
         None => return vec![],
     };
 
-    vec![make_symbol(
+    let mut symbol = make_symbol(
         &name,
         "variable",
         declarator,
@@ -507,7 +457,9 @@ fn process_variable_declaration(
         &[],
         "",
         &[],
-    )]
+    );
+    symbol.exported = is_exported(parent_node);
+    vec![symbol]
 }
 
 fn process_module(
@@ -517,7 +469,7 @@ fn process_module(
     rel_path: &str,
 ) -> Option<NativeParsedSymbol> {
     let name = extract_identifier(node, source)?;
-    Some(make_symbol(
+    let mut symbol = make_symbol(
         &name,
         "module",
         node,
@@ -529,7 +481,9 @@ fn process_module(
         &[],
         "",
         &[],
-    ))
+    );
+    symbol.exported = is_exported(node);
+    Some(symbol)
 }
 
 fn process_assignment_expression(
@@ -539,7 +493,6 @@ fn process_assignment_expression(
     rel_path: &str,
     symbols: &mut Vec<NativeParsedSymbol>,
 ) {
-    // Check if second child is "="
     let child_count = node.child_count();
     if child_count < 3 {
         return;
@@ -564,7 +517,7 @@ fn process_assignment_expression(
     let params = extract_parameters(right, source);
     let returns = extract_return_type(right, source);
 
-    let mut sym = make_symbol(
+    let mut symbol = make_symbol(
         &left_name,
         "function",
         right,
@@ -577,65 +530,7 @@ fn process_assignment_expression(
         "",
         &[],
     );
-    sym.name = left_name;
-    symbols.push(sym);
-}
-
-// --- Helper types and functions ---
-
-struct ParamInfo {
-    name: String,
-    type_annotation: Option<String>,
-}
-
-fn node_text<'a>(node: Node<'a>, source: &'a [u8]) -> &'a str {
-    node.utf8_text(source).unwrap_or("")
-}
-
-fn find_child_by_kind(parent: Node<'_>, kind: &str, source: &[u8]) -> Option<String> {
-    let mut cursor = parent.walk();
-    for child in parent.children(&mut cursor) {
-        if child.kind() == kind {
-            return Some(node_text(child, source).to_string());
-        }
-    }
-    None
-}
-
-/// Convert AST-extracted param/return/generic data into a typed
-/// [`NativeSymbolSignature`], or `None` when the symbol carries no
-/// signature information (e.g. a plain variable declaration).
-///
-/// Returning `None` instead of a zero-field struct keeps the napi
-/// payload small and lets consumers use a simple `if let Some(sig)` guard.
-fn build_signature(
-    params: &[ParamInfo],
-    returns: Option<&str>,
-    generics: &[String],
-) -> Option<crate::types::NativeSymbolSignature> {
-    if params.is_empty() && returns.is_none() && generics.is_empty() {
-        return None;
-    }
-
-    let native_params: Vec<crate::types::NativeSymbolSignatureParam> = params
-        .iter()
-        .map(|p| crate::types::NativeSymbolSignatureParam {
-            name: p.name.clone(),
-            type_name: p.type_annotation.clone(),
-        })
-        .collect();
-
-    Some(crate::types::NativeSymbolSignature {
-        params: if native_params.is_empty() {
-            None
-        } else {
-            Some(native_params)
-        },
-        returns: returns.map(|s| s.to_string()),
-        generics: if generics.is_empty() {
-            None
-        } else {
-            Some(generics.to_vec())
-        },
-    })
+    symbol.name = left_name;
+    symbol.exported = is_exported(right);
+    symbols.push(symbol);
 }
