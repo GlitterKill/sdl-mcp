@@ -7,6 +7,7 @@ pub mod common;
 mod go;
 mod java;
 mod python;
+mod shell;
 mod typescript;
 
 pub fn extract_imports(root: Node<'_>, source: &[u8], language: &str) -> Vec<NativeParsedImport> {
@@ -15,6 +16,7 @@ pub fn extract_imports(root: Node<'_>, source: &[u8], language: &str) -> Vec<Nat
         "go" => go::extract_imports_go(root, source),
         "java" => java::extract_imports_java(root, source),
         "py" => python::extract_imports_python(root, source),
+        "sh" => shell::extract_imports_shell(root, source),
         "ts" | "tsx" | "js" | "jsx" => typescript::extract_imports_ts(root, source),
         _ => vec![],
     }
