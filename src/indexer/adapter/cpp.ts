@@ -1,6 +1,10 @@
 import Parser from "tree-sitter";
 import type { Tree } from "tree-sitter";
-import type { LanguageAdapter } from "./LanguageAdapter.js";
+import type {
+  AdapterResolvedCall,
+  CallResolutionContext,
+  LanguageAdapter,
+} from "./LanguageAdapter.js";
 import {
   getParser,
   clearCache as clearGrammarCache,
@@ -43,7 +47,10 @@ class CppAdapter implements LanguageAdapter {
 
       return tree;
     } catch (error) {
-      logger.warn("Failed to parse C/C++ file", { filePath, error: error instanceof Error ? error.message : String(error) });
+      logger.warn("Failed to parse C/C++ file", {
+        filePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }
@@ -590,6 +597,72 @@ class CppAdapter implements LanguageAdapter {
     traverseAST(tree.rootNode);
 
     return calls;
+  }
+
+  resolveCall(context: CallResolutionContext): AdapterResolvedCall | null {
+    const identifier = context.call.calleeIdentifier
+      .replace(/^new\s+/, "")
+      .trim();
+    if (!identifier) {
+      return null;
+    }
+
+    if (identifier.includes("::")) {
+      const parts = identifier.split("::");
+      const prefix = parts[0];
+      const member = parts[parts.length - 1];
+
+      const namespace = context.namespaceImports.get(prefix);
+      if (namespace && namespace.has(member)) {
+        return {
+          symbolId: namespace.get(member) ?? null,
+          isResolved: true,
+          strategy: "exact",
+          confidence: 0.9,
+        };
+      }
+    }
+
+    const normalized = identifier.replace(/->/g, ".");
+    if (normalized.includes(".")) {
+      const parts = normalized.split(".");
+      const prefix = parts[0];
+      const member = parts[parts.length - 1];
+
+      const namespace = context.namespaceImports.get(prefix);
+      if (namespace && namespace.has(member)) {
+        return {
+          symbolId: namespace.get(member) ?? null,
+          isResolved: true,
+          strategy: "exact",
+          confidence: 0.9,
+        };
+      }
+
+      if (prefix === "this") {
+        const local = context.nameToSymbolIds.get(member);
+        if (local && local.length === 1) {
+          return {
+            symbolId: local[0],
+            isResolved: true,
+            strategy: "heuristic",
+            confidence: 0.78,
+          };
+        }
+      }
+    }
+
+    const imported = context.importedNameToSymbolIds.get(identifier);
+    if (imported && imported.length === 1) {
+      return {
+        symbolId: imported[0],
+        isResolved: true,
+        strategy: "exact",
+        confidence: 0.88,
+      };
+    }
+
+    return null;
   }
 }
 
