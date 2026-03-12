@@ -250,10 +250,24 @@ export interface RustParseResult {
   parseError: string | null;
 }
 
-// Native extraction currently mirrors the shared JS/TS extractor logic.
-// Languages with dedicated TS adapters must stay on the TS path until their
-// native extractors reach parity, otherwise they can silently index as empty.
-const NATIVE_EXTRACTION_LANGUAGES = new Set(["ts", "tsx", "js", "jsx"]);
+// Native extraction supports all languages with dedicated Rust extractors.
+// Kotlin is excluded: no tree-sitter-kotlin Rust crate exists (stays on TS path).
+const NATIVE_EXTRACTION_LANGUAGES = new Set([
+  "ts",
+  "tsx",
+  "js",
+  "jsx", // Tier 0 (original)
+  "py",
+  "go",
+  "java", // Tier 1
+  "rs",
+  "cs",
+  "cpp",
+  "c", // Tier 2
+  "php",
+  "sh", // Tier 3
+  // "kt" — deferred: no tree-sitter-kotlin Rust crate
+]);
 
 /**
  * Map file extension to language identifier.
@@ -344,7 +358,10 @@ export function parseFilesRust(
     const language = extensionToLanguage(ext);
 
     if (!supportsNativeExtractionLanguage(language)) {
-      results[index] = buildUnsupportedLanguageResult(file.path, language || ext);
+      results[index] = buildUnsupportedLanguageResult(
+        file.path,
+        language || ext,
+      );
       return;
     }
 
@@ -360,11 +377,20 @@ export function parseFilesRust(
   });
 
   if (nativeEntries.length === 0) {
-    return results.filter((result): result is RustParseResult => result !== null);
+    return results.filter(
+      (result): result is RustParseResult => result !== null,
+    );
   }
 
-  for (let offset = 0; offset < nativeEntries.length; offset += NATIVE_BATCH_SIZE) {
-    const batchEntries = nativeEntries.slice(offset, offset + NATIVE_BATCH_SIZE);
+  for (
+    let offset = 0;
+    offset < nativeEntries.length;
+    offset += NATIVE_BATCH_SIZE
+  ) {
+    const batchEntries = nativeEntries.slice(
+      offset,
+      offset + NATIVE_BATCH_SIZE,
+    );
     const batch = batchEntries.map((entry) => entry.input);
 
     if (nativeEntries.length > NATIVE_BATCH_SIZE) {
