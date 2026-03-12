@@ -484,20 +484,29 @@
         "provider": {
           "type": "string",
           "enum": ["api", "local", "mock"],
-          "default": "mock"
+          "default": "local"
         },
         "model": {
           "type": "string",
+          "enum": ["all-MiniLM-L6-v2", "nomic-embed-code-v1"],
           "default": "all-MiniLM-L6-v2"
+        },
+        "modelCacheDir": {
+          "type": "string",
+          "description": "Override directory for downloaded model files (nomic-embed-code-v1). Defaults to platform-specific cache."
         },
         "generateSummaries": {
           "type": "boolean",
           "default": false
         },
+        "summaryProvider": {
+          "type": "string",
+          "enum": ["api", "local", "mock"],
+          "description": "Summary LLM backend, independent from the embedding provider. 'api' = Anthropic, 'local' = OpenAI-compatible (Ollama), 'mock' = deterministic. Defaults to the embedding 'provider' value."
+        },
         "summaryModel": {
           "type": "string",
-          "description": "Model name to use for LLM-generated summaries (Anthropic or OpenAI-compatible)",
-          "default": "claude-haiku-4-5-20251001"
+          "description": "Model name for summary generation. Defaults per-provider: 'api' uses 'claude-haiku-4-5-20251001', 'local' uses 'gpt-4o-mini'."
         },
         "summaryApiKey": {
           "type": "string",
@@ -528,7 +537,7 @@
             "enabled": {
               "type": "boolean",
               "description": "Enable HNSW ANN index for faster semantic retrieval",
-              "default": false
+              "default": true
             },
             "m": {
               "type": "integer",
@@ -560,7 +569,7 @@
             }
           },
           "default": {
-            "enabled": false,
+            "enabled": true,
             "m": 16,
             "efConstruction": 200,
             "efSearch": 50,
@@ -571,14 +580,14 @@
       "default": {
         "enabled": true,
         "alpha": 0.6,
-        "provider": "mock",
+        "provider": "local",
         "model": "all-MiniLM-L6-v2",
         "generateSummaries": false,
         "summaryModel": "claude-haiku-4-5-20251001",
         "summaryMaxConcurrency": 5,
         "summaryBatchSize": 20,
         "ann": {
-          "enabled": false,
+          "enabled": true,
           "m": 16,
           "efConstruction": 200,
           "efSearch": 50,

@@ -200,7 +200,7 @@ export const PluginConfigSchema = z.object({
 export type PluginConfig = z.infer<typeof PluginConfigSchema>;
 
 export const AnnConfigSchema = z.object({
-  enabled: z.boolean().default(false),
+  enabled: z.boolean().default(true),
   m: z.number().int().min(4).max(64).default(16),
   efConstruction: z.number().int().min(16).max(500).default(200),
   efSearch: z.number().int().min(8).max(256).default(50),
@@ -209,13 +209,25 @@ export const AnnConfigSchema = z.object({
 
 export type AnnConfig = z.infer<typeof AnnConfigSchema>;
 
+export const SUPPORTED_EMBEDDING_MODELS = [
+  "all-MiniLM-L6-v2",
+  "nomic-embed-code-v1",
+] as const;
+
 export const SemanticConfigSchema = z.object({
   enabled: z.boolean().default(true),
   alpha: z.number().min(0).max(1).default(0.6),
-  provider: z.enum(["api", "local", "mock"]).default("mock"),
-  model: z.string().default("all-MiniLM-L6-v2"),
+  provider: z.enum(["api", "local", "mock"]).default("local"),
+  model: z.enum(SUPPORTED_EMBEDDING_MODELS).default("all-MiniLM-L6-v2"),
+  modelCacheDir: z.string().nullish(),
   generateSummaries: z.boolean().default(false),
-  summaryModel: z.string().default("claude-haiku-4-5-20251001"),
+  /** Summary LLM backend — independent from embedding provider.
+   *  "api" = Anthropic, "local" = OpenAI-compatible (Ollama), "mock" = deterministic.
+   *  Defaults to the embedding `provider` value for backward compatibility. */
+  summaryProvider: z.enum(["api", "local", "mock"]).nullish(),
+  /** Model name for summary generation. Defaults per-provider:
+   *  "api" → "claude-haiku-4-5-20251001", "local" → "gpt-4o-mini" (OpenAI-compatible). */
+  summaryModel: z.string().nullish(),
   summaryApiKey: z.string().nullish(),
   summaryApiBaseUrl: z.string().nullish(),
   summaryMaxConcurrency: z.number().int().min(1).max(20).default(5),

@@ -94,6 +94,20 @@ export async function getSymbolEmbeddings(
   return result;
 }
 
+export async function countSymbolEmbeddings(
+  conn: Connection,
+  repoId: string,
+): Promise<number> {
+  const row = await querySingle<{ cnt: unknown }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     MATCH (e:SymbolEmbedding {symbolId: s.symbolId})
+     RETURN count(e) AS cnt`,
+    { repoId },
+  );
+  return row ? toNumber(row.cnt) : 0;
+}
+
 export async function deleteSymbolEmbeddings(
   conn: Connection,
   symbolIds: string[],
@@ -158,6 +172,53 @@ export async function getSummaryCache(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+export async function getSummaryCaches(
+  conn: Connection,
+  symbolIds: string[],
+): Promise<Map<string, SummaryCacheRow>> {
+  const result = new Map<string, SummaryCacheRow>();
+  if (symbolIds.length === 0) return result;
+
+  const rows = await queryAll<{
+    symbolId: string;
+    summary: string;
+    provider: string;
+    model: string;
+    cardHash: string;
+    costUsd: unknown;
+    createdAt: string;
+    updatedAt: string;
+  }>(
+    conn,
+    `MATCH (c:SummaryCache)
+     WHERE c.symbolId IN $symbolIds
+     RETURN c.symbolId AS symbolId,
+            c.summary AS summary,
+            c.provider AS provider,
+            c.model AS model,
+            c.cardHash AS cardHash,
+            c.costUsd AS costUsd,
+            c.createdAt AS createdAt,
+            c.updatedAt AS updatedAt`,
+    { symbolIds },
+  );
+
+  for (const row of rows) {
+    result.set(row.symbolId, {
+      symbolId: row.symbolId,
+      summary: row.summary,
+      provider: row.provider,
+      model: row.model,
+      cardHash: row.cardHash,
+      costUsd: toNumber(row.costUsd),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    });
+  }
+
+  return result;
 }
 
 export async function upsertSummaryCache(

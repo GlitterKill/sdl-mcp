@@ -1,0 +1,2 @@
+# Git LFS tracking for large model files
+models/**/*.onnx filter=lfs diff=lfs merge=lfs -text

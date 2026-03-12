@@ -42,6 +42,7 @@ const DOCTOR_CHECKS = [
     check: checkCallResolutionCapabilities,
   },
   { name: "Graph database (Ladybug)", check: checkLadybugDb },
+  { name: "Semantic embedding models", check: checkSemanticModels },
   { name: "Runtime execution", check: checkRuntimeExecution },
 ];
 
@@ -646,6 +647,92 @@ async function checkLadybugDb(
     await closeLadybugDb();
   }
 }
+async function checkSemanticModels(
+  options: DoctorOptions,
+): Promise<Omit<DoctorResult, "name">> {
+  const configPath = options.config ?? activateCliConfigPath();
+
+  // Check onnxruntime-node availability
+  let onnxAvailable = false;
+  let onnxVersion = "";
+  try {
+    const ort = await import("onnxruntime-node");
+    onnxAvailable = true;
+    onnxVersion = (ort as Record<string, unknown>).version
+      ? String((ort as Record<string, unknown>).version)
+      : "available";
+  } catch {
+    // Not installed or not loadable
+  }
+
+  // Check tokenizers availability
+  let tokenizersAvailable = false;
+  try {
+    await import("tokenizers");
+    tokenizersAvailable = true;
+  } catch {
+    // Not installed or not loadable
+  }
+
+  // Check model files
+  const { getModelInfo, isModelAvailable } =
+    await import("../../indexer/model-registry.js");
+
+  let activeModel = "all-MiniLM-L6-v2";
+  let annEnabled = true;
+  if (existsSync(configPath)) {
+    try {
+      const { loadConfig } = await import("../../config/loadConfig.js");
+      const config = loadConfig(configPath);
+      activeModel = config.semantic?.model ?? "all-MiniLM-L6-v2";
+      annEnabled = config.semantic?.ann?.enabled ?? true;
+    } catch {
+      // Use defaults
+    }
+  }
+
+  const modelInfo = getModelInfo(activeModel);
+  const modelPresent = isModelAvailable(activeModel);
+
+  const details: string[] = [];
+  details.push(
+    `onnxruntime-node: ${onnxAvailable ? onnxVersion : "NOT FOUND"}`,
+  );
+  details.push(
+    `tokenizers: ${tokenizersAvailable ? "available" : "NOT FOUND"}`,
+  );
+  details.push(
+    `model: ${activeModel} (${modelInfo.dimension}d, ${modelPresent ? "files present" : "files missing"})`,
+  );
+  details.push(`ANN index: ${annEnabled ? "enabled" : "disabled"}`);
+
+  if (!onnxAvailable || !tokenizersAvailable) {
+    return {
+      status: "warn",
+      message:
+        `Semantic embedding runtime incomplete:\n  ${details.join("\n  ")}\n\n` +
+        `  Remediation:\n` +
+        `    npm install onnxruntime-node tokenizers\n` +
+        `  Embeddings will fall back to deterministic mock vectors.`,
+    };
+  }
+
+  if (!modelPresent && modelInfo.bundled) {
+    return {
+      status: "warn",
+      message:
+        `Model files not found:\n  ${details.join("\n  ")}\n\n` +
+        `  Remediation:\n` +
+        `    node scripts/download-models.mjs`,
+    };
+  }
+
+  return {
+    status: "pass",
+    message: details.join("; "),
+  };
+}
+
 async function checkRuntimeExecution(
   options: DoctorOptions,
 ): Promise<Omit<DoctorResult, "name">> {

@@ -122,7 +122,7 @@ export class OpenAICompatibleSummaryProvider implements SummaryProvider {
   constructor(options: { apiKey: string; model?: string; baseUrl?: string }) {
     this.apiKey = options.apiKey;
     this.model = options.model ?? "gpt-4o-mini";
-    this.baseUrl = (options.baseUrl ?? "http://localhost:11434").replace(
+    this.baseUrl = (options.baseUrl ?? "http://localhost:11434/v1").replace(
       /\/+$/,
       "",
     );
@@ -198,25 +198,29 @@ export function createSummaryProvider(
     summaryApiKey?: string;
     summaryApiBaseUrl?: string;
   },
-): SummaryProvider {
+): SummaryProvider | null {
   if (provider === "api") {
     const apiKey =
       options?.summaryApiKey ?? process.env["ANTHROPIC_API_KEY"] ?? "";
     if (!apiKey) {
       logger.warn(
-        "No API key found for summary provider 'api'. Set ANTHROPIC_API_KEY or summaryApiKey config. Falling back to mock provider.",
+        "No API key found for summary provider 'api'. Set ANTHROPIC_API_KEY or summaryApiKey config. " +
+          "Skipping summary generation to preserve existing summaries.",
       );
-      return new MockSummaryProvider();
+      return null;
     }
     return new AnthropicSummaryProvider({
       apiKey,
       model: options?.summaryModel,
+      baseUrl: options?.summaryApiBaseUrl ?? undefined,
     });
   }
 
   if (provider === "local") {
-    const apiKey =
-      options?.summaryApiKey ?? process.env["ANTHROPIC_API_KEY"] ?? "ollama";
+    // Do NOT fall back to ANTHROPIC_API_KEY here — the local provider talks to
+    // an OpenAI-compatible endpoint (e.g., Ollama) and sending the Anthropic
+    // credential to an arbitrary summaryApiBaseUrl would be a security leak.
+    const apiKey = options?.summaryApiKey ?? "ollama";
     return new OpenAICompatibleSummaryProvider({
       apiKey,
       model: options?.summaryModel,
@@ -249,6 +253,7 @@ export async function generateSummaryWithGuardrails(input: {
   symbolId?: string;
   kind?: string;
   signature?: string;
+  astFingerprint?: string;
   heuristicSummary?: string;
   provider: string;
   summaryModel?: string;
@@ -262,9 +267,40 @@ export async function generateSummaryWithGuardrails(input: {
     summaryApiBaseUrl: input.summaryApiBaseUrl,
   });
 
-  // Compute card hash for cache keying
+  // If provider creation returned null (e.g., misconfigured local provider),
+  // preserve existing summaries by returning cached value or empty result.
+  if (summaryProvider == null) {
+    if (input.symbolId) {
+      const cached = await ladybugDb.getSummaryCache(conn, input.symbolId);
+      if (cached != null) {
+        return {
+          summary: cached.summary,
+          provider: cached.provider,
+          costUsd: 0,
+          divergenceScore: tokenDistance(
+            cached.summary,
+            input.heuristicSummary ?? "",
+          ),
+        };
+      }
+    }
+    return { summary: "", provider: "skipped", costUsd: 0, divergenceScore: 0 };
+  }
+
+  // Compute card hash for cache keying — includes astFingerprint so
+  // body-only changes (no signature change) still invalidate the cache.
+  // Also includes the resolved provider name and model so that switching
+  // providers or models invalidates the cache and triggers regeneration.
+  const resolvedModel = input.summaryModel ?? summaryProvider.name;
   const cardHash = hashContent(
-    [input.symbolName, input.kind ?? "", input.signature ?? ""].join("|"),
+    [
+      input.symbolName,
+      input.kind ?? "",
+      input.signature ?? "",
+      input.astFingerprint ?? "",
+      summaryProvider.name,
+      resolvedModel,
+    ].join("|"),
   );
 
   // Check summary cache when symbolId is available
@@ -359,22 +395,91 @@ export async function generateSummariesForRepo(
 
   const batchSize = semantic.summaryBatchSize ?? 20;
   const maxConcurrency = semantic.summaryMaxConcurrency ?? 5;
-  const provider = semantic.provider ?? "mock";
+  // Use dedicated summaryProvider when set; fall back to the embedding
+  // provider for backward compatibility.
+  const provider = semantic.summaryProvider ?? semantic.provider ?? "mock";
   const summaryModel = semantic.summaryModel;
   const summaryApiKey = semantic.summaryApiKey;
   const summaryApiBaseUrl = semantic.summaryApiBaseUrl;
 
+  // Resolve the actual provider to determine its name for cache hashing.
+  // This must match what generateSummaryWithGuardrails computes internally.
+  const resolvedSummaryProvider = createSummaryProvider(provider, {
+    summaryModel: summaryModel ?? undefined,
+    summaryApiKey: summaryApiKey ?? undefined,
+    summaryApiBaseUrl: summaryApiBaseUrl ?? undefined,
+  });
+
+  // If provider creation returned null (e.g., misconfigured local provider),
+  // skip summary generation entirely to preserve existing summaries.
+  if (resolvedSummaryProvider == null) {
+    logger.warn(
+      `Summary provider "${provider}" could not be created — skipping summary generation for repo ${repoId}. ` +
+        "Existing summaries are preserved.",
+    );
+    const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+    return {
+      generated: 0,
+      skipped: symbols.length,
+      failed: 0,
+      totalCostUsd: 0,
+    };
+  }
+
+  const resolvedProviderName = resolvedSummaryProvider.name;
+  const resolvedModelName = summaryModel ?? resolvedProviderName;
+
   // Fetch all symbols for the repo
   const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
 
-  // Determine which symbols need a new summary by checking the cache
+  // Determine which symbols need a new summary by checking the cache (bulk)
+  const cachedSummaries = await ladybugDb.getSummaryCaches(
+    conn,
+    symbols.map((s) => s.symbolId),
+  );
   const needsSummary: typeof symbols = [];
   for (const sym of symbols) {
+    // Hash must match what generateSummaryWithGuardrails stores: it uses
+    // parsed signature text (not raw signatureJson), so we must parse here too.
+    const parsedSig = sym.signatureJson
+      ? (() => {
+          try {
+            const parsed = JSON.parse(sym.signatureJson) as
+              | { text?: string }
+              | string;
+            return typeof parsed === "string"
+              ? parsed
+              : (parsed?.text ?? sym.signatureJson);
+          } catch {
+            return sym.signatureJson;
+          }
+        })()
+      : "";
     const cardHash = hashContent(
-      [sym.name, sym.kind ?? "", sym.signatureJson ?? ""].join("|"),
+      [
+        sym.name,
+        sym.kind ?? "",
+        parsedSig,
+        sym.astFingerprint ?? "",
+        resolvedProviderName,
+        resolvedModelName,
+      ].join("|"),
     );
-    const cached = await ladybugDb.getSummaryCache(conn, sym.symbolId);
+    const cached = cachedSummaries.get(sym.symbolId);
+    // Skip only if cache is fresh (hash includes provider+model, so switching
+    // providers or models automatically invalidates)
     if (cached != null && cached.cardHash === cardHash) {
+      // Backfill: if cache write succeeded but symbol row update didn't
+      // (e.g., process crash between the two writes), repair the symbol row.
+      if (sym.summary !== cached.summary) {
+        await withWriteConn(async (wConn) => {
+          await ladybugDb.updateSymbolSummary(
+            wConn,
+            sym.symbolId,
+            cached.summary,
+          );
+        });
+      }
       continue;
     }
     needsSummary.push(sym);
@@ -429,9 +534,10 @@ export async function generateSummariesForRepo(
           symbolId: sym.symbolId,
           kind: sym.kind,
           signature: signatureText,
+          astFingerprint: sym.astFingerprint ?? undefined,
           heuristicSummary: sym.summary ?? undefined,
           provider,
-          summaryModel,
+          summaryModel: summaryModel ?? undefined,
           summaryApiKey: summaryApiKey ?? undefined,
           summaryApiBaseUrl: summaryApiBaseUrl ?? undefined,
         });

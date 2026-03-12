@@ -79,9 +79,10 @@ describe("IndexingConfigSchema defaults", () => {
   });
 
   // Table-driven: all known boolean fields in IndexingConfigSchema
-  const booleanFieldDefaults: Array<{ field: keyof typeof IndexingConfigSchema.shape; expected: boolean }> = [
-    { field: "enableFileWatching", expected: true },
-  ];
+  const booleanFieldDefaults: Array<{
+    field: keyof typeof IndexingConfigSchema.shape;
+    expected: boolean;
+  }> = [{ field: "enableFileWatching", expected: true }];
 
   for (const { field, expected } of booleanFieldDefaults) {
     it(`IndexingConfigSchema.${field} defaults to ${expected}`, () => {
@@ -100,7 +101,10 @@ describe("IndexingConfigSchema defaults", () => {
 // ---------------------------------------------------------------------------
 
 describe("PolicyConfigSchema defaults", () => {
-  const booleanDefaults: Array<{ field: keyof typeof PolicyConfigSchema.shape; expected: boolean }> = [
+  const booleanDefaults: Array<{
+    field: keyof typeof PolicyConfigSchema.shape;
+    expected: boolean;
+  }> = [
     { field: "requireIdentifiers", expected: true },
     { field: "allowBreakGlass", expected: true },
   ];
@@ -122,7 +126,10 @@ describe("PolicyConfigSchema defaults", () => {
 // ---------------------------------------------------------------------------
 
 describe("RedactionConfigSchema defaults", () => {
-  const booleanDefaults: Array<{ field: keyof typeof RedactionConfigSchema.shape; expected: boolean }> = [
+  const booleanDefaults: Array<{
+    field: keyof typeof RedactionConfigSchema.shape;
+    expected: boolean;
+  }> = [
     { field: "enabled", expected: true },
     { field: "includeDefaults", expected: true },
   ];
@@ -176,7 +183,10 @@ describe("CacheConfigSchema defaults", () => {
 // ---------------------------------------------------------------------------
 
 describe("PluginConfigSchema defaults", () => {
-  const booleanDefaults: Array<{ field: keyof typeof PluginConfigSchema.shape; expected: boolean }> = [
+  const booleanDefaults: Array<{
+    field: keyof typeof PluginConfigSchema.shape;
+    expected: boolean;
+  }> = [
     { field: "enabled", expected: true },
     { field: "strictVersioning", expected: true },
   ];
@@ -198,9 +208,9 @@ describe("PluginConfigSchema defaults", () => {
 // ---------------------------------------------------------------------------
 
 describe("AnnConfigSchema defaults", () => {
-  it("AnnConfigSchema.enabled defaults to false", () => {
+  it("AnnConfigSchema.enabled defaults to true", () => {
     const result = AnnConfigSchema.parse({});
-    assert.strictEqual(result.enabled, false);
+    assert.strictEqual(result.enabled, true);
   });
 });
 
@@ -209,7 +219,10 @@ describe("AnnConfigSchema defaults", () => {
 // ---------------------------------------------------------------------------
 
 describe("SemanticConfigSchema defaults", () => {
-  const booleanDefaults: Array<{ field: keyof typeof SemanticConfigSchema.shape; expected: boolean }> = [
+  const booleanDefaults: Array<{
+    field: keyof typeof SemanticConfigSchema.shape;
+    expected: boolean;
+  }> = [
     { field: "enabled", expected: true },
     { field: "generateSummaries", expected: false },
   ];

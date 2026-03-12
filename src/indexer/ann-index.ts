@@ -3,6 +3,7 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import type { SymbolEmbeddingRow } from "../db/ladybug-queries.js";
 import { hashContent } from "../util/hashing.js";
 
+/** @deprecated Use provider.getDimension() instead. Kept for backward compat. */
 export const EMBEDDING_DIMENSION = 64;
 
 export interface AnnConfig {
@@ -14,7 +15,7 @@ export interface AnnConfig {
 }
 
 export const DEFAULT_ANN_CONFIG: AnnConfig = {
-  enabled: false,
+  enabled: true,
   m: 16,
   efConstruction: 200,
   efSearch: 50,
@@ -107,7 +108,7 @@ export class HnswIndex {
   private config: AnnConfig;
   private versionHash: string | null = null;
   private model: string | null = null;
-  private dimension = EMBEDDING_DIMENSION;
+  private dimension = 0; // Set from first inserted vector or config
 
   constructor(config: AnnConfig = DEFAULT_ANN_CONFIG) {
     this.config = config;
@@ -198,6 +199,11 @@ export class HnswIndex {
   insert(symbolId: string, vector: number[], rng?: SimplePseudoRandom): void {
     if (this.symbolToId.has(symbolId)) {
       return;
+    }
+
+    // Auto-detect dimension from first vector
+    if (this.dimension === 0 && vector.length > 0) {
+      this.dimension = vector.length;
     }
 
     const id = this.nextId++;

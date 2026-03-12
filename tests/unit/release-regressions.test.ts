@@ -258,6 +258,82 @@ describe("release regression guards", () => {
     );
   });
 
+  it("uses a published optional tokenizers version compatible with clean installs", () => {
+    const source = readSource("package.json");
+
+    assert.match(
+      source,
+      /"tokenizers":\s*"\^0\.13\.3"/,
+      "package.json should pin optional tokenizers to a published npm range",
+    );
+
+    assert.doesNotMatch(
+      source,
+      /"tokenizers":\s*"\^0\.22\.0"/,
+      "package.json should not reference an unpublished tokenizers range",
+    );
+  });
+
+  it("downloads nomic model to the runtime cache location, not bundled models dir", () => {
+    const source = readSource("scripts/download-models.mjs");
+
+    assert.match(
+      source,
+      /function getModelCacheDir\(\)/,
+      "download-models should resolve the platform cache directory",
+    );
+
+    assert.match(
+      source,
+      /"nomic-embed-code-v1":\s*\{[\s\S]*dir:\s*join\(getModelCacheDir\(\),\s*"nomic-embed-code-v1"\)/,
+      "nomic downloads should target the runtime cache path used by model resolution",
+    );
+
+    assert.doesNotMatch(
+      source,
+      /"nomic-embed-code-v1":\s*\{[\s\S]*dir:\s*join\(ROOT,\s*"models",\s*"nomic-embed-code-v1"\)/,
+      "nomic downloads should not be written to the bundled models directory",
+    );
+  });
+
+  it("rebuilds kuzu during test setup when npm ci used --ignore-scripts", () => {
+    const source = readSource("scripts/run-tests.mjs");
+
+    assert.match(
+      source,
+      /const kuzuEntryPath = resolve\(repoRoot, "node_modules", "kuzu", "index\.mjs"\);/,
+      "test runner should check for kuzu ESM entrypoint before initializing LadybugDB",
+    );
+
+    assert.match(
+      source,
+      /if \(!existsSync\(kuzuEntryPath\)\) \{[\s\S]*npm", "rebuild", "kuzu"[\s\S]*\}/,
+      "test runner should rebuild kuzu when postinstall artifacts are missing",
+    );
+  });
+
+  it("rebuilds tree-sitter packages when native bindings are missing", () => {
+    const source = readSource("scripts/run-tests.mjs");
+
+    assert.match(
+      source,
+      /await import\('tree-sitter'\)/,
+      "test runner should probe tree-sitter loadability before running tests",
+    );
+
+    assert.match(
+      source,
+      /name === "tree-sitter" \|\| name\.startsWith\("tree-sitter-"\)/,
+      "test runner should discover tree-sitter packages from dependencies",
+    );
+
+    assert.match(
+      source,
+      /npm", "rebuild", \.\.\.treeSitterPackages/,
+      "test runner should rebuild all tree-sitter packages when probe fails",
+    );
+  });
+
   it("policy get/set merges with app policy without clobbering overrides", () => {
     const source = readSource("src/mcp/tools/policy.ts");
 

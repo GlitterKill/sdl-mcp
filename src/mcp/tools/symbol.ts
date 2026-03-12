@@ -28,13 +28,20 @@ import type {
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { symbolCardCache } from "../../graph/cache.js";
-import { consumePrefetchedKey, prefetchCardsForSymbols, prefetchSliceFrontier } from "../../graph/prefetch.js";
+import {
+  consumePrefetchedKey,
+  prefetchCardsForSymbols,
+  prefetchSliceFrontier,
+} from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { pickDepLabel } from "../../util/depLabels.js";
 import { hashCard } from "../../util/hashing.js";
 import { DatabaseError, createPolicyDenial } from "../errors.js";
-import { PolicyEngine, type PolicyRequestContext } from "../../policy/engine.js";
+import {
+  PolicyEngine,
+  type PolicyRequestContext,
+} from "../../policy/engine.js";
 import { logPolicyDecision, logSemanticSearchTelemetry } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
 import { uniqueLimit } from "../../graph/slice/slice-serializer.js";
@@ -47,7 +54,7 @@ import {
   searchSymbolsWithOverlay,
 } from "../../live-index/overlay-reader.js";
 import { logger } from "../../util/logger.js";
-
+import { rerankByEmbeddings } from "../../indexer/embeddings.js";
 
 function parseJson<T>(raw: string | null): T | undefined {
   if (!raw) return undefined;
@@ -79,6 +86,9 @@ export async function handleSymbolSearch(
   const startedAt = Date.now();
   const request = SymbolSearchRequestSchema.parse(args);
   const limit = request.limit ?? SYMBOL_SEARCH_DEFAULT_LIMIT;
+  const config = loadConfig();
+  const semanticConfig = config.semantic;
+  const semanticRequested = request.semantic === true;
 
   recordToolTrace({
     repoId: request.repoId,
@@ -94,25 +104,122 @@ export async function handleSymbolSearch(
     limit,
   );
 
-  const results = rows.map((row) => ({
+  let results = rows.map((row) => ({
     symbolId: row.symbolId,
     name: row.name,
     file: row.filePath,
     kind: row.kind as SymbolKind,
   }));
 
+  // Semantic reranking: when requested, enabled in config, and embeddings exist
+  let semanticEnabled = false;
+  if (
+    semanticRequested &&
+    semanticConfig?.enabled === true &&
+    rows.length > 0
+  ) {
+    try {
+      const overlaySnapshot = getOverlaySnapshot(request.repoId);
+      const symbolIds = rows.map((row) => row.symbolId);
+      const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
+
+      // Separate into rerank-able (found in durable DB from untouched files)
+      // and non-rerank-able (overlay-only OR from overlay-touched files with stale durable data)
+      const lexicalCandidates: {
+        symbol: ladybugDb.SymbolRow;
+        lexicalScore: number;
+      }[] = [];
+      const nonRerankableResults: typeof results = [];
+      const rerankableSymbolIds = new Set<string>();
+
+      rows.forEach((row, index) => {
+        const symbol = symbolMap.get(row.symbolId);
+        const isOverlayBacked = overlaySnapshot.touchedFileIds.has(
+          row.fileId,
+        );
+        if (symbol && !isOverlayBacked) {
+          rerankableSymbolIds.add(row.symbolId);
+          lexicalCandidates.push({
+            symbol,
+            lexicalScore: 1.0 - index / rows.length,
+          });
+        } else {
+          // Overlay-backed or overlay-only symbols: preserve in original lexical order
+          nonRerankableResults.push({
+            symbolId: row.symbolId,
+            name: row.name,
+            file: row.filePath,
+            kind: row.kind as SymbolKind,
+          });
+        }
+      });
+
+      if (lexicalCandidates.length > 0) {
+        const alpha = semanticConfig?.alpha ?? 0.6;
+        const provider = semanticConfig?.provider ?? "local";
+        const model = semanticConfig?.model ?? "all-MiniLM-L6-v2";
+
+        const reranked = await rerankByEmbeddings({
+          query: request.query,
+          symbols: lexicalCandidates,
+          provider,
+          alpha,
+          model,
+        });
+
+        // Rebuild: reranked symbols first, then non-rerank-able in original order
+        const filePathMap = new Map(
+          rows.map((row) => [row.symbolId, row.filePath]),
+        );
+        const rerankedResults = reranked.map((item) => ({
+          symbolId: item.symbol.symbolId,
+          name: item.symbol.name,
+          file: filePathMap.get(item.symbol.symbolId) ?? "",
+          kind: item.symbol.kind as SymbolKind,
+        }));
+        const nonRerankableById = new Map(
+          nonRerankableResults.map((row) => [row.symbolId, row]),
+        );
+        const mergedResults: typeof results = [];
+        let rerankedIndex = 0;
+        for (const row of rows) {
+          if (rerankableSymbolIds.has(row.symbolId)) {
+            const rerankedRow = rerankedResults[rerankedIndex];
+            rerankedIndex += 1;
+            if (rerankedRow) {
+              mergedResults.push(rerankedRow);
+            }
+            continue;
+          }
+          const nonRerankableRow = nonRerankableById.get(row.symbolId);
+          if (nonRerankableRow) {
+            mergedResults.push(nonRerankableRow);
+          }
+        }
+
+        results = mergedResults.slice(0, limit);
+        semanticEnabled = true;
+      }
+    } catch (error) {
+      // Graceful degradation: if semantic reranking fails, return lexical results
+      logger.warn(
+        `Semantic reranking failed, returning lexical results: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   // Prefetch cards for top search results (anticipating getCard calls)
-  const topSymbolIds = rows.slice(0, 5).map((row) => row.symbolId);
+  const topSymbolIds = results.slice(0, 5).map((r) => r.symbolId);
   if (topSymbolIds.length > 0) {
     prefetchCardsForSymbols(request.repoId, topSymbolIds);
   }
 
   logSemanticSearchTelemetry({
     repoId: request.repoId,
-    semanticEnabled: false,
+    semanticEnabled,
     latencyMs: Date.now() - startedAt,
     candidateCount: rows.length,
-    alpha: loadConfig().semantic?.alpha ?? 0.6,
+    alpha: semanticConfig?.alpha ?? 0.6,
   });
 
   const response = { results };
@@ -139,8 +246,20 @@ async function buildOverlayCardForSymbol(
 
   const metrics = await ladybugDb.getMetrics(conn, symbolId);
   const [clusterRow, processesRows] = await Promise.all([
-    ladybugDb.getClusterForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get cluster for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return null; }),
-    ladybugDb.getProcessesForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get processes for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return []; }),
+    ladybugDb.getClusterForSymbol(conn, symbolId).catch((err) => {
+      logger.warn("Failed to get cluster for symbol", {
+        symbolId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }),
+    ladybugDb.getProcessesForSymbol(conn, symbolId).catch((err) => {
+      logger.warn("Failed to get processes for symbol", {
+        symbolId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }),
   ]);
 
   const signature = parseJson<SymbolSignature>(overlay.symbol.signatureJson);
@@ -153,9 +272,11 @@ async function buildOverlayCardForSymbol(
   const importTargetIds = overlay.outgoingEdges
     .filter((edge) => edge.edgeType === "import")
     .map((edge) => edge.toSymbolId);
-  const targetNamesById = await getTargetNamesWithOverlay(conn, overlaySnapshot, [
-    ...new Set([...callTargetIds, ...importTargetIds]),
-  ]);
+  const targetNamesById = await getTargetNamesWithOverlay(
+    conn,
+    overlaySnapshot,
+    [...new Set([...callTargetIds, ...importTargetIds])],
+  );
 
   const deps: SymbolDeps = {
     imports: uniqueLimit(
@@ -184,8 +305,10 @@ async function buildOverlayCardForSymbol(
           .map((edge) => ({
             symbolId: edge.toSymbolId,
             label:
-              pickDepLabel(edge.toSymbolId, targetNamesById.get(edge.toSymbolId)?.name) ??
-              edge.toSymbolId,
+              pickDepLabel(
+                edge.toSymbolId,
+                targetNamesById.get(edge.toSymbolId)?.name,
+              ) ?? edge.toSymbolId,
             confidence: edge.confidence,
             resolutionReason: edge.resolution,
             resolverId: edge.resolverId,
@@ -207,7 +330,8 @@ async function buildOverlayCardForSymbol(
     kind: overlay.symbol.kind as SymbolCard["kind"],
     name: overlay.symbol.name,
     exported: overlay.symbol.exported,
-    visibility: (overlay.symbol.visibility ?? undefined) as SymbolCard["visibility"],
+    visibility: (overlay.symbol.visibility ??
+      undefined) as SymbolCard["visibility"],
     signature,
     summary: overlay.symbol.summary
       ? overlay.symbol.summary.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS)
@@ -231,7 +355,9 @@ async function buildOverlayCardForSymbol(
             processId: row.processId,
             label: row.label,
             role:
-              row.role === "entry" || row.role === "exit" || row.role === "intermediate"
+              row.role === "entry" ||
+              row.role === "exit" ||
+              row.role === "intermediate"
                 ? row.role
                 : "intermediate",
             depth: row.depth,
@@ -312,7 +438,11 @@ async function buildCardForSymbol(
   const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
 
   if (useCache && latestVersion) {
-    const cachedCard = symbolCardCache.get(repoId, symbolId, latestVersion.versionId);
+    const cachedCard = symbolCardCache.get(
+      repoId,
+      symbolId,
+      latestVersion.versionId,
+    );
     if (cachedCard && cachedCard.detailLevel !== "compact") {
       const normalizedCachedCard: SymbolCard = {
         ...cachedCard,
@@ -384,7 +514,9 @@ async function buildCardForSymbol(
     );
   }
 
-  const fileRow = (await ladybugDb.getFilesByIds(conn, [symbol.fileId])).get(symbol.fileId);
+  const fileRow = (await ladybugDb.getFilesByIds(conn, [symbol.fileId])).get(
+    symbol.fileId,
+  );
   if (!fileRow) {
     throw new DatabaseError(`File not found: ${symbol.fileId}`);
   }
@@ -394,8 +526,20 @@ async function buildCardForSymbol(
       minCallConfidence: effectiveMinCallConfidence,
     }),
     ladybugDb.getMetrics(conn, symbolId),
-    ladybugDb.getClusterForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get cluster for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return null; }),
-    ladybugDb.getProcessesForSymbol(conn, symbolId).catch((err) => { logger.warn("Failed to get processes for symbol", { symbolId, error: err instanceof Error ? err.message : String(err) }); return []; }),
+    ladybugDb.getClusterForSymbol(conn, symbolId).catch((err) => {
+      logger.warn("Failed to get cluster for symbol", {
+        symbolId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }),
+    ladybugDb.getProcessesForSymbol(conn, symbolId).catch((err) => {
+      logger.warn("Failed to get processes for symbol", {
+        symbolId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }),
   ]);
 
   const signature = parseJson<SymbolSignature>(symbol.signatureJson);
@@ -439,24 +583,26 @@ async function buildCardForSymbol(
     ),
   };
 
-  const callResolution: CallResolution | undefined = options.includeResolutionMetadata
-    ? {
-        minCallConfidence: effectiveMinCallConfidence,
-        calls: edgesFrom
-          .filter((edge) => edge.edgeType === "call")
-          .map((edge) => ({
-            symbolId: edge.toSymbolId,
-            label: pickDepLabel(
-              edge.toSymbolId,
-              targetNamesById.get(edge.toSymbolId)?.name,
-            ) ?? edge.toSymbolId,
-            confidence: edge.confidence,
-            resolutionReason: edge.resolution,
-            resolverId: edge.resolverId,
-            resolutionPhase: edge.resolutionPhase,
-          })),
-      }
-    : undefined;
+  const callResolution: CallResolution | undefined =
+    options.includeResolutionMetadata
+      ? {
+          minCallConfidence: effectiveMinCallConfidence,
+          calls: edgesFrom
+            .filter((edge) => edge.edgeType === "call")
+            .map((edge) => ({
+              symbolId: edge.toSymbolId,
+              label:
+                pickDepLabel(
+                  edge.toSymbolId,
+                  targetNamesById.get(edge.toSymbolId)?.name,
+                ) ?? edge.toSymbolId,
+              confidence: edge.confidence,
+              resolutionReason: edge.resolution,
+              resolverId: edge.resolverId,
+              resolutionPhase: edge.resolutionPhase,
+            })),
+        }
+      : undefined;
 
   const cardMetrics: SymbolMetrics | undefined = metrics
     ? {
@@ -470,7 +616,7 @@ async function buildCardForSymbol(
             )
           : undefined,
         canonicalTest: metrics.canonicalTestJson
-          ? (parseJson(metrics.canonicalTestJson))
+          ? parseJson(metrics.canonicalTestJson)
           : undefined,
       }
     : undefined;
@@ -506,17 +652,17 @@ async function buildCardForSymbol(
       : undefined,
     processes:
       processesRows && processesRows.length > 0
-        ? processesRows
-            .slice(0, SYMBOL_CARD_MAX_PROCESSES)
-            .map((row) => ({
-              processId: row.processId,
-              label: row.label,
-              role:
-                row.role === "entry" || row.role === "exit" || row.role === "intermediate"
-                  ? row.role
-                  : "intermediate",
-              depth: row.depth,
-            }))
+        ? processesRows.slice(0, SYMBOL_CARD_MAX_PROCESSES).map((row) => ({
+            processId: row.processId,
+            label: row.label,
+            role:
+              row.role === "entry" ||
+              row.role === "exit" ||
+              row.role === "intermediate"
+                ? row.role
+                : "intermediate",
+            depth: row.depth,
+          }))
         : undefined,
     callResolution:
       callResolution && callResolution.calls.length > 0
@@ -545,7 +691,12 @@ async function buildCardForSymbol(
   if (useCache && latestVersion) {
     const cacheCard: SymbolCard = { ...card, detailLevel: "full" };
     delete cacheCard.etag;
-    await symbolCardCache.set(repoId, symbolId, latestVersion.versionId, cacheCard);
+    await symbolCardCache.set(
+      repoId,
+      symbolId,
+      latestVersion.versionId,
+      cacheCard,
+    );
   }
 
   return cardWithETag;
@@ -600,8 +751,7 @@ export async function handleSymbolGetCards(
     knownEtags,
     minCallConfidence,
     includeResolutionMetadata,
-  } =
-    SymbolGetCardsRequestSchema.parse(args);
+  } = SymbolGetCardsRequestSchema.parse(args);
 
   for (const symbolId of symbolIds) {
     consumePrefetchedKey(repoId, `card:${symbolId}`);
@@ -612,7 +762,7 @@ export async function handleSymbolGetCards(
       buildCardForSymbol(repoId, id, knownEtags?.[id], {
         minCallConfidence,
         includeResolutionMetadata,
-      })
+      }),
     ),
   );
 
