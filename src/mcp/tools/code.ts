@@ -30,6 +30,7 @@ import type {
   Range,
   RequiredFieldsForNext,
 } from "../types.js";
+import { NotFoundError, ValidationError, IndexError } from "../errors.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { buildSlice } from "../../graph/slice.js";
@@ -64,9 +65,7 @@ function buildPolicyNextBestAction(params: {
   } = params;
 
   const rationale =
-    deniedReasons?.join("; ") ??
-    fallback?.rationale ??
-    "Policy denied request";
+    deniedReasons?.join("; ") ?? fallback?.rationale ?? "Policy denied request";
 
   switch (policyNextBestAction) {
     case "requestSkeleton":
@@ -76,7 +75,8 @@ function buildPolicyNextBestAction(params: {
           repoId:
             requiredFieldsForNext?.requestSkeleton?.repoId ?? request.repoId,
           symbolId:
-            requiredFieldsForNext?.requestSkeleton?.symbolId ?? request.symbolId,
+            requiredFieldsForNext?.requestSkeleton?.symbolId ??
+            request.symbolId,
           ...(request.identifiersToFind.length > 0
             ? { identifiersToFind: request.identifiersToFind }
             : {}),
@@ -157,8 +157,7 @@ function buildPolicyNextBestAction(params: {
             symbolId: request.symbolId,
             identifiersToFind: request.identifiersToFind,
           },
-          rationale:
-            requiredFieldsForNext?.narrowScope?.reason ?? rationale,
+          rationale: requiredFieldsForNext?.narrowScope?.reason ?? rationale,
         };
       }
       return {
@@ -210,11 +209,11 @@ export async function handleCodeNeedWindow(
 
   const symbol = await ladybugDb.getSymbol(conn, request.symbolId);
   if (!symbol) {
-    throw new Error(`Symbol not found: ${request.symbolId}`);
+    throw new NotFoundError(`Symbol not found: ${request.symbolId}`);
   }
 
   if (symbol.repoId !== request.repoId) {
-    throw new Error(
+    throw new ValidationError(
       `Symbol ${request.symbolId} belongs to repo "${symbol.repoId}", not "${request.repoId}"`,
     );
   }
@@ -222,12 +221,12 @@ export async function handleCodeNeedWindow(
   const files = await ladybugDb.getFilesByIds(conn, [symbol.fileId]);
   const file = files.get(symbol.fileId);
   if (!file) {
-    throw new Error(`File not found: ${symbol.fileId}`);
+    throw new NotFoundError(`File not found for symbol: ${request.symbolId}`);
   }
 
   const repo = await ladybugDb.getRepo(conn, request.repoId);
   if (!repo) {
-    throw new Error(`Repository not found: ${request.repoId}`);
+    throw new NotFoundError(`Repository not found: ${request.repoId}`);
   }
 
   const legacySymbol = toLegacySymbolRow(symbol);
@@ -247,7 +246,8 @@ export async function handleCodeNeedWindow(
   });
   const sliceBudgetDefaults = {
     maxCards: appConfig.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS,
-    maxEstimatedTokens: appConfig.slice?.defaultMaxTokens ?? DEFAULT_MAX_TOKENS_SLICE,
+    maxEstimatedTokens:
+      appConfig.slice?.defaultMaxTokens ?? DEFAULT_MAX_TOKENS_SLICE,
   };
   const policyEngine = new PolicyEngine({
     maxWindowLines: validatedPolicy.maxWindowLines,
@@ -263,7 +263,10 @@ export async function handleCodeNeedWindow(
   };
 
   if (request.sliceContext) {
-    const latestVersion = await ladybugDb.getLatestVersion(conn, request.repoId);
+    const latestVersion = await ladybugDb.getLatestVersion(
+      conn,
+      request.repoId,
+    );
     if (latestVersion) {
       const slice = await buildSlice({
         repoId: request.repoId,
@@ -346,7 +349,7 @@ export async function handleCodeNeedWindow(
     );
 
     if (!skeletonResult) {
-      throw new Error(
+      throw new IndexError(
         `Failed to generate skeleton for symbol: ${request.symbolId}`,
       );
     }
@@ -400,7 +403,7 @@ export async function handleCodeNeedWindow(
     );
 
     if (!hotpathResult) {
-      throw new Error(
+      throw new IndexError(
         `Failed to extract hot-path for symbol: ${request.symbolId}`,
       );
     }
@@ -448,7 +451,10 @@ export async function handleCodeNeedWindow(
     const filePath = getAbsolutePathFromRepoRoot(repo.rootPath, file.relPath);
     const isSensitive = shouldRedactFile(filePath);
 
-    const maxLines = Math.min(request.expectedLines, validatedPolicy.maxWindowLines);
+    const maxLines = Math.min(
+      request.expectedLines,
+      validatedPolicy.maxWindowLines,
+    );
     const maxTokens = request.maxTokens
       ? Math.min(request.maxTokens, validatedPolicy.maxWindowTokens)
       : validatedPolicy.maxWindowTokens;
@@ -569,14 +575,18 @@ export async function handleGetSkeleton(
   }
 
   if (request.symbolId) {
-    const result = await generateSymbolSkeleton(request.repoId, request.symbolId, {
-      maxLines: request.maxLines,
-      maxTokens: request.maxTokens,
-      includeIdentifiers: request.identifiersToFind,
-    });
+    const result = await generateSymbolSkeleton(
+      request.repoId,
+      request.symbolId,
+      {
+        maxLines: request.maxLines,
+        maxTokens: request.maxTokens,
+        includeIdentifiers: request.identifiersToFind,
+      },
+    );
 
     if (!result) {
-      throw new Error(
+      throw new IndexError(
         `Failed to generate skeleton for symbol: ${request.symbolId}`,
       );
     }
@@ -584,7 +594,9 @@ export async function handleGetSkeleton(
     const conn = await getLadybugConn();
     const symbol = await ladybugDb.getSymbol(conn, request.symbolId);
     const file = symbol
-      ? (await ladybugDb.getFilesByIds(conn, [symbol.fileId])).get(symbol.fileId) ?? null
+      ? ((await ladybugDb.getFilesByIds(conn, [symbol.fileId])).get(
+          symbol.fileId,
+        ) ?? null)
       : null;
 
     const skeletonTruncation = result.truncated
@@ -626,7 +638,9 @@ export async function handleGetSkeleton(
     );
 
     if (!result) {
-      throw new Error(`Failed to generate skeleton for file: ${request.file}`);
+      throw new IndexError(
+        `Failed to generate skeleton for file: ${request.file}`,
+      );
     }
 
     const skeletonTruncation = result.truncated
@@ -652,14 +666,18 @@ export async function handleGetSkeleton(
     };
 
     const conn = await getLadybugConn();
-    const fileRow = await ladybugDb.getFileByRepoPath(conn, request.repoId, request.file);
+    const fileRow = await ladybugDb.getFileByRepoPath(
+      conn,
+      request.repoId,
+      request.file,
+    );
     if (fileRow) {
       attachRawContext(response, { fileIds: [fileRow.fileId] });
     }
     return response;
   }
 
-  throw new Error("Either symbolId or file must be provided");
+  throw new ValidationError("Either symbolId or file must be provided");
 }
 
 /**
@@ -696,7 +714,7 @@ export async function handleGetHotPath(
   );
 
   if (!result) {
-    throw new Error(
+    throw new IndexError(
       `Failed to extract hot-path for symbol: ${request.symbolId}`,
     );
   }
@@ -704,7 +722,9 @@ export async function handleGetHotPath(
   const conn = await getLadybugConn();
   const symbol = await ladybugDb.getSymbol(conn, request.symbolId);
   const fileData = symbol
-    ? (await ladybugDb.getFilesByIds(conn, [symbol.fileId])).get(symbol.fileId) ?? null
+    ? ((await ladybugDb.getFilesByIds(conn, [symbol.fileId])).get(
+        symbol.fileId,
+      ) ?? null)
     : null;
 
   const response = {

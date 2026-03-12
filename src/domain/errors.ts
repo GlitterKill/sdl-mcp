@@ -54,6 +54,16 @@ export class PolicyError extends Error {
   }
 }
 
+export class NotFoundError extends Error {
+  // Keep the existing validation-facing code so MCP clients do not need a
+  // separate not-found branch during the typed error migration.
+  readonly code = ErrorCode.VALIDATION_ERROR;
+  constructor(message: string) {
+    super(message);
+    this.name = "NotFoundError";
+  }
+}
+
 // ============================================================================
 // Runtime Execution Errors
 // ============================================================================

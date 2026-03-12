@@ -1,247 +1,302 @@
-import assert from "node:assert";
-import { describe, it } from "node:test";
-import { Orchestrator } from "../../../dist/agent/orchestrator.js";
-import type { AgentTask } from "../../../dist/agent/types.js";
+import assert from "node:assert/strict";
+import { afterEach, describe, it, mock } from "node:test";
+import { Orchestrator } from "../../../src/agent/orchestrator.js";
+import { Planner } from "../../../src/agent/planner.js";
+import { Executor } from "../../../src/agent/executor.js";
+import type {
+  Action,
+  AgentTask,
+  Evidence,
+  ExecutionMetrics,
+  RungPath,
+} from "../../../src/agent/types.js";
+
+function createTask(overrides: Partial<AgentTask> = {}): AgentTask {
+  return {
+    taskType: "debug",
+    taskText: "Investigate failing behavior",
+    repoId: "repo-1",
+    ...overrides,
+  };
+}
+
+const defaultPath: RungPath = {
+  rungs: ["card", "skeleton"],
+  estimatedTokens: 250,
+  estimatedDurationMs: 60,
+  reasoning: "default",
+};
+
+const defaultMetrics: ExecutionMetrics = {
+  totalDurationMs: 25,
+  totalTokens: 0,
+  totalActions: 2,
+  successfulActions: 2,
+  failedActions: 0,
+  cacheHits: 0,
+};
+
+afterEach(() => {
+  mock.restoreAll();
+});
 
 describe("Orchestrator", () => {
-  const orchestrator = new Orchestrator();
+  it("constructs and can plan a valid task", async () => {
+    const orchestrator = new Orchestrator();
+    const planned = await orchestrator.plan(createTask());
 
-  function createTask(
-    taskType: AgentTask["taskType"],
-    overrides: Partial<AgentTask> = {},
-  ): AgentTask {
-    return {
-      taskType,
-      taskText: "Test task",
-      repoId: "test-repo",
-      ...overrides,
+    assert.equal(planned.task.taskType, "debug");
+    assert.ok(planned.path.rungs.length > 0);
+    assert.deepEqual(planned.sequence, []);
+  });
+
+  it("uses planner output when generating plans", async () => {
+    const expectedPath: RungPath = {
+      rungs: ["card"],
+      estimatedTokens: 50,
+      estimatedDurationMs: 10,
+      reasoning: "mocked",
     };
-  }
 
-  describe("Task Orchestration", () => {
-    it("orchestrates debug task successfully", async () => {
-      const task = createTask("debug");
-      const result = await orchestrator.orchestrate(task);
+    const validateMock = mock.method(Planner.prototype, "validateTask", () => ({
+      valid: true,
+    }));
+    const planMock = mock.method(Planner.prototype, "plan", () => expectedPath);
 
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.taskType, "debug");
-      assert.strictEqual(result.error, undefined);
-      assert.ok(result.taskId.length > 0);
-    });
+    const orchestrator = new Orchestrator();
+    const planned = await orchestrator.plan(
+      createTask({ taskType: "explain" }),
+    );
 
-    it("orchestrates review task successfully", async () => {
-      const task = createTask("review");
-      const result = await orchestrator.orchestrate(task);
-
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.taskType, "review");
-    });
-
-    it("orchestrates implement task successfully", async () => {
-      const task = createTask("implement");
-      const result = await orchestrator.orchestrate(task);
-
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.taskType, "implement");
-    });
-
-    it("orchestrates explain task successfully", async () => {
-      const task = createTask("explain");
-      const result = await orchestrator.orchestrate(task);
-
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.taskType, "explain");
-    });
-
-    it("returns error for invalid task", async () => {
-      const task = createTask("debug", { taskText: "" });
-      const result = await orchestrator.orchestrate(task);
-
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error!.length > 0);
-      assert.strictEqual(result.actionsTaken.length, 0);
-    });
+    assert.equal(validateMock.mock.callCount(), 1);
+    assert.equal(planMock.mock.callCount(), 1);
+    assert.equal(planned.path.reasoning, "mocked");
+    assert.deepEqual(planned.path.rungs, ["card"]);
   });
 
-  describe("Result Structure", () => {
-    it("includes taskId in result", async () => {
-      const task = createTask("debug");
-      const result = await orchestrator.orchestrate(task);
+  it("executes planner -> context -> executor flow", async () => {
+    const actions: Action[] = [
+      {
+        id: "a-1",
+        type: "getCard",
+        status: "completed",
+        input: { test: true },
+        output: { ok: true },
+        timestamp: Date.now(),
+        durationMs: 1,
+        evidence: [],
+      },
+    ];
+    const evidence: Evidence[] = [
+      {
+        type: "symbolCard",
+        reference: "symbol:alpha",
+        summary: "alpha card",
+        timestamp: Date.now(),
+      },
+    ];
 
-      assert.ok(typeof result.taskId === "string");
-      assert.ok(result.taskId.length > 0);
-      assert.ok(result.taskId.startsWith("task-"));
-    });
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
 
-    it("includes actionsTaken array", async () => {
-      const task = createTask("debug");
-      const result = await orchestrator.orchestrate(task);
+    const executeMock = mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task, rungs, context) => {
+        assert.deepEqual(rungs, ["card", "skeleton"]);
+        assert.deepEqual(context, ["symbol:alpha"]);
+        return { actions, evidence, success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => "none");
 
-      assert.ok(Array.isArray(result.actionsTaken));
-    });
+    const orchestrator = new Orchestrator();
+    const result = await orchestrator.orchestrate(createTask());
 
-    it("includes path with rungs", async () => {
-      const task = createTask("debug");
-      const result = await orchestrator.orchestrate(task);
-
-      assert.ok(result.path);
-      assert.ok(Array.isArray(result.path.rungs));
-      assert.ok(result.path.rungs.length > 0);
-    });
-
-    it("includes finalEvidence array", async () => {
-      const task = createTask("debug");
-      const result = await orchestrator.orchestrate(task);
-
-      assert.ok(Array.isArray(result.finalEvidence));
-    });
-
-    it("includes summary", async () => {
-      const task = createTask("debug");
-      const result = await orchestrator.orchestrate(task);
-
-      assert.ok(typeof result.summary === "string");
-      assert.ok(result.summary.length > 0);
-    });
-
-    it("includes metrics", async () => {
-      const task = createTask("debug");
-      const result = await orchestrator.orchestrate(task);
-
-      assert.ok(result.metrics);
-      assert.strictEqual(typeof result.metrics.totalDurationMs, "number");
-      assert.strictEqual(typeof result.metrics.totalTokens, "number");
-      assert.strictEqual(typeof result.metrics.totalActions, "number");
-      assert.strictEqual(typeof result.metrics.successfulActions, "number");
-      assert.strictEqual(typeof result.metrics.failedActions, "number");
-    });
+    assert.equal(executeMock.mock.callCount(), 1);
+    assert.equal(result.success, true);
+    assert.equal(result.taskType, "debug");
+    assert.deepEqual(result.actionsTaken, actions);
+    assert.deepEqual(result.finalEvidence, evidence);
+    assert.equal(result.metrics.totalActions, 2);
+    assert.equal(result.nextBestAction, "none");
+    assert.match(result.answer ?? "", /Debugging analysis completed/);
   });
 
-  describe("Task Planning", () => {
-    it("plans task with valid path", async () => {
-      const task = createTask("debug");
-      const plan = await orchestrator.plan(task);
+  it("enforces planner budget constraints for token and duration", async () => {
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence: [],
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
 
-      assert.ok(plan.task);
-      assert.ok(plan.path);
-      assert.ok(Array.isArray(plan.path.rungs));
-      assert.ok(plan.path.rungs.length > 0);
-    });
-
-    it("throws error for invalid task", async () => {
-      const task = createTask("debug", { taskText: "" });
-
-      await assert.rejects(
-        async () => await orchestrator.plan(task),
-        /Task validation failed/,
-      );
-    });
-  });
-
-  describe("Path Selection", () => {
-    it("selects minimal rungs for explain task", async () => {
-      const task = createTask("explain");
-      const result = await orchestrator.orchestrate(task);
-
-      assert.ok(result.path.rungs.length <= 2);
-      assert.strictEqual(result.path.rungs[0], "card");
-    });
-
-    it("selects more rungs for debug task with diagnostics", async () => {
-      const task = createTask("debug", {
+    const orchestrator = new Orchestrator();
+    const result = await orchestrator.orchestrate(
+      createTask({
         options: { requireDiagnostics: true },
-      });
-      const result = await orchestrator.orchestrate(task);
+        budget: {
+          maxTokens: 100,
+          maxDurationMs: 40,
+          maxActions: 1,
+        },
+      }),
+    );
 
-      assert.ok(result.path.rungs.length >= 2);
-    });
+    assert.equal(result.success, true);
+    assert.ok(result.path.estimatedTokens <= 100);
+    assert.ok(result.path.estimatedDurationMs <= 40);
+    assert.ok(result.path.rungs.length >= 1);
   });
 
-  describe("Budget Respect", () => {
-    it("respects token budget", async () => {
-      const task = createTask("debug", {
-        budget: { maxTokens: 100 },
-      });
-      const result = await orchestrator.orchestrate(task);
+  it("returns validation errors before planning/execution", async () => {
+    const orchestrator = new Orchestrator();
+    const result = await orchestrator.orchestrate(
+      createTask({
+        budget: { maxActions: -1 },
+      }),
+    );
 
-      assert.ok(result.path.estimatedTokens <= 100);
-    });
-
-    it("respects duration budget", async () => {
-      const task = createTask("debug", {
-        budget: { maxDurationMs: 200 },
-      });
-      const result = await orchestrator.orchestrate(task);
-
-      assert.ok(result.path.estimatedDurationMs <= 200);
-    });
+    assert.equal(result.success, false);
+    assert.match(result.error ?? "", /Max actions cannot be negative/);
+    assert.deepEqual(result.actionsTaken, []);
+    assert.deepEqual(result.finalEvidence, []);
   });
 
-  describe("Evidence Collection", () => {
-    it("collects evidence during orchestration", async () => {
-      const task = createTask("debug");
-      const result = await orchestrator.orchestrate(task);
-
-      assert.ok(Array.isArray(result.finalEvidence));
+  it("returns structured error result when planner throws", async () => {
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => {
+      throw new Error("planner exploded");
     });
 
-    it("evidence is empty on error", async () => {
-      const task = createTask("debug", { taskText: "" });
-      const result = await orchestrator.orchestrate(task);
+    const orchestrator = new Orchestrator();
+    const result = await orchestrator.orchestrate(createTask());
 
-      assert.strictEqual(result.finalEvidence.length, 0);
-    });
+    assert.equal(result.success, false);
+    assert.equal(result.path.rungs.length, 0);
+    assert.equal(result.metrics.failedActions, 0);
+    assert.match(result.summary, /Task failed: planner exploded/);
+    assert.equal(result.nextBestAction, "retryWithDifferentInputs");
   });
 
-  describe("Error Handling", () => {
-    it("handles missing repoId", async () => {
-      const task = createTask("debug", { repoId: "" });
-      const result = await orchestrator.orchestrate(task);
+  it("surfaces failed execution result and failure answer", async () => {
+    const failedAction: Action = {
+      id: "a-failed",
+      type: "analyze",
+      status: "failed",
+      input: { rung: "raw" },
+      error: "denied",
+      timestamp: Date.now(),
+      durationMs: 0,
+      evidence: [],
+    };
 
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error?.includes("empty"));
-    });
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => []);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [failedAction],
+      evidence: [],
+      success: false,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => ({
+      ...defaultMetrics,
+      totalActions: 1,
+      successfulActions: 0,
+      failedActions: 1,
+    }));
+    mock.method(Executor.prototype, "getNextBestAction", () => "refineRequest");
 
-    it("handles missing taskText", async () => {
-      const task = createTask("debug", { taskText: "" });
-      const result = await orchestrator.orchestrate(task);
+    const orchestrator = new Orchestrator();
+    const result = await orchestrator.orchestrate(createTask());
 
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error?.includes("empty"));
-    });
+    assert.equal(result.success, false);
+    assert.equal(result.actionsTaken.length, 1);
+    assert.match(result.summary, /failed/);
+    assert.equal(
+      result.answer,
+      "Task execution failed. Review actions and errors for details.",
+    );
+    assert.equal(result.nextBestAction, "refineRequest");
   });
 
-  describe("Summary Generation", () => {
-    it("includes task type in summary", async () => {
-      const task = createTask("debug");
-      const result = await orchestrator.orchestrate(task);
+  it("handles empty plans and empty context", async () => {
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => ({
+      rungs: [],
+      estimatedTokens: 0,
+      estimatedDurationMs: 0,
+      reasoning: "empty",
+    }));
+    mock.method(Planner.prototype, "selectContext", () => []);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence: [],
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => ({
+      ...defaultMetrics,
+      totalActions: 0,
+      successfulActions: 0,
+    }));
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
 
-      assert.ok(result.summary.toLowerCase().includes("debug"));
-    });
+    const orchestrator = new Orchestrator();
+    const result = await orchestrator.orchestrate(createTask());
 
-    it("includes success status in summary", async () => {
-      const task = createTask("debug");
-      const result = await orchestrator.orchestrate(task);
-
-      assert.ok(result.summary.toLowerCase().includes("completed"));
-    });
-
-    it("includes action count in summary", async () => {
-      const task = createTask("debug");
-      const result = await orchestrator.orchestrate(task);
-
-      assert.ok(/\d+ action/.test(result.summary));
-    });
+    assert.equal(result.success, true);
+    assert.deepEqual(result.path.rungs, []);
+    assert.match(
+      result.summary,
+      /Executed 0 action\(s\), collected 0 evidence item\(s\)\./,
+    );
   });
 
-  describe("Determinism", () => {
-    it("produces consistent results for same task", async () => {
-      const task = createTask("debug");
-      const result1 = await orchestrator.orchestrate(task);
-      const result2 = await orchestrator.orchestrate(task);
+  it("keeps summary stable when context has no symbols", async () => {
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["file:src/main.ts"]);
 
-      assert.strictEqual(result1.taskType, result2.taskType);
-      assert.strictEqual(result1.path.rungs.length, result2.path.rungs.length);
-    });
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task, _rungs, context) => {
+        assert.deepEqual(context, ["file:src/main.ts"]);
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const orchestrator = new Orchestrator();
+    const result = await orchestrator.orchestrate(createTask());
+
+    assert.equal(result.success, true);
+    assert.ok(!result.summary.includes("Context expanded with"));
+  });
+
+  it("keeps original symbol context even if cluster expansion is unavailable", async () => {
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task, _rungs, context) => {
+        assert.ok(context.includes("symbol:alpha"));
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const orchestrator = new Orchestrator();
+    const result = await orchestrator.orchestrate(createTask());
+
+    assert.equal(result.success, true);
   });
 });

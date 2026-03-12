@@ -8,6 +8,7 @@ export {
   IndexError,
   ValidationError,
   PolicyError,
+  NotFoundError,
 } from "../domain/errors.js";
 
 import { ErrorCode } from "../domain/errors.js";

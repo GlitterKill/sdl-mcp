@@ -69,13 +69,47 @@ class LRUCache<T> {
   }
 
   private estimateSize(value: unknown): number {
-    try {
-      const jsonString = JSON.stringify(value);
-      const stringBytes = Buffer.byteLength(jsonString, "utf8");
-      const objectOverhead = 64;
-      return stringBytes + objectOverhead;
-    } catch {
-      return 1024;
+    return this.estimateSizeWalk(value, 0);
+  }
+
+  /**
+   * Recursive size estimator that avoids JSON.stringify overhead.
+   * Walks the object tree with a depth limit to prevent runaway traversal.
+   */
+  private estimateSizeWalk(value: unknown, depth: number): number {
+    // Depth guard: at depth 6+, use a flat estimate per remaining key
+    if (depth > 5) return 128;
+
+    if (value === null || value === undefined) return 8;
+
+    switch (typeof value) {
+      case "string":
+        // 2 bytes per char is a reasonable UTF-8 upper bound
+        return 16 + (value as string).length * 2;
+      case "number":
+      case "boolean":
+        return 16;
+      case "object": {
+        const OBJECT_OVERHEAD = 64;
+        if (Array.isArray(value)) {
+          let total = OBJECT_OVERHEAD;
+          for (const item of value) {
+            total += this.estimateSizeWalk(item, depth + 1);
+          }
+          return total;
+        }
+        let total = OBJECT_OVERHEAD;
+        for (const key of Object.keys(value as Record<string, unknown>)) {
+          total += 16 + key.length * 2; // key overhead
+          total += this.estimateSizeWalk(
+            (value as Record<string, unknown>)[key],
+            depth + 1,
+          );
+        }
+        return total;
+      }
+      default:
+        return 64;
     }
   }
 
@@ -109,8 +143,7 @@ class LRUCache<T> {
   private evictIfNeeded(): void {
     while (
       this.cache.size > this.config.maxEntries ||
-      (this.stats.currentSize > this.config.maxSizeBytes &&
-        this.cache.size > 1)
+      (this.stats.currentSize > this.config.maxSizeBytes && this.cache.size > 1)
     ) {
       if (this.cache.size === 0) break;
       this.evictLRU();
@@ -237,7 +270,6 @@ export function makeSymbolCardCacheKey(
 ): string {
   return `${repoId}:${symbolId}:${versionId}`;
 }
-
 
 /**
  * Cache statistics retrieval

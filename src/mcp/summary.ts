@@ -1,10 +1,8 @@
 import type { SymbolKind } from "../db/schema.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
-import {
-  estimateTokens,
-  tokenize,
-} from "../util/tokenize.js";
+import { ValidationError } from "../domain/errors.js";
+import { estimateTokens, tokenize } from "../util/tokenize.js";
 import { SYMBOL_CARD_MAX_PROCESSES } from "../config/constants.js";
 import type {
   ContextSummary,
@@ -29,7 +27,10 @@ type SummarySeed = {
 
 const summarySeedCache = new Map<string, SummarySeed>();
 
-function toSignature(signatureJson: string | null, fallbackName: string): string {
+function toSignature(
+  signatureJson: string | null,
+  fallbackName: string,
+): string {
   if (!signatureJson) {
     return `${fallbackName}()`;
   }
@@ -40,9 +41,7 @@ function toSignature(signatureJson: string | null, fallbackName: string): string
       returns?: string;
     };
     const name = parsed.name ?? fallbackName;
-    const params = (parsed.params ?? [])
-      .map((p) => p.name ?? "arg")
-      .join(", ");
+    const params = (parsed.params ?? []).map((p) => p.name ?? "arg").join(", ");
     const returns = parsed.returns ? `: ${parsed.returns}` : "";
     return `${name}(${params})${returns}`;
   } catch {
@@ -293,7 +292,9 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
 
   const filesTouched = [...fileCounts.entries()]
     .map(([file, symbolCount]) => ({ file, symbolCount }))
-    .sort((a, b) => b.symbolCount - a.symbolCount || a.file.localeCompare(b.file));
+    .sort(
+      (a, b) => b.symbolCount - a.symbolCount || a.file.localeCompare(b.file),
+    );
 
   riskAreas.sort(
     (a, b) =>
@@ -318,7 +319,7 @@ export async function generateContextSummary(args: {
 }): Promise<ContextSummary> {
   const query = args.query.trim();
   if (!query) {
-    throw new Error("query must be a non-empty string");
+    throw new ValidationError("query must be a non-empty string");
   }
 
   const conn = await getLadybugConn();

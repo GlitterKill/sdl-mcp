@@ -1,4 +1,5 @@
 import { logger } from "../util/logger.js";
+import { ValidationError } from "../domain/errors.js";
 
 /**
  * Metadata tracked per active MCP session.
@@ -24,7 +25,7 @@ export class SessionManager {
 
   constructor(maxSessions = 8) {
     if (maxSessions < 1 || maxSessions > 16) {
-      throw new Error(
+      throw new ValidationError(
         `maxSessions must be between 1 and 16, got ${maxSessions}`,
       );
     }
@@ -70,7 +71,7 @@ export class SessionManager {
     }
 
     if (!this.canAcceptSession() && this.pendingReservations === 0) {
-      throw new Error(
+      throw new ValidationError(
         `Maximum session limit (${this.maxSessions}) reached. Cannot accept new session.`,
       );
     }

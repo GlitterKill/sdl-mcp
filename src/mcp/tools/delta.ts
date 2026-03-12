@@ -4,7 +4,10 @@ import { runGovernorLoop } from "../../delta/blastRadius.js";
 import { truncateArray } from "../../util/truncation.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { getLadybugConn } from "../../db/ladybug.js";
-import { getSliceHandle, updateSliceHandleSpillover } from "../../db/ladybug-queries.js";
+import {
+  getSliceHandle,
+  updateSliceHandleSpillover,
+} from "../../db/ladybug-queries.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import {
   DEFAULT_MAX_CARDS,
@@ -22,6 +25,7 @@ import {
   type SpanAttributes,
 } from "../../util/tracing.js";
 import { attachRawContext } from "../token-usage.js";
+import { IndexError } from "../errors.js";
 
 /**
  * Handles delta pack requests.
@@ -54,7 +58,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
         error instanceof Error
           ? error.message
           : "Failed to compute delta pack.";
-      throw new Error(`Delta pack error: ${message}`, { cause: error });
+      throw new IndexError(`Delta pack error: ${message}`);
     }
 
     const changedSymbolIds = delta.changedSymbols.map(
@@ -84,7 +88,11 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     };
 
     const conn = await getLadybugConn();
-    const governorResult = await runGovernorLoop(conn, changedSymbolIds, governorOptions);
+    const governorResult = await runGovernorLoop(
+      conn,
+      changedSymbolIds,
+      governorOptions,
+    );
 
     delta.blastRadius = governorResult.blastRadius;
     delta.trimmedSet = governorResult.trimmedSet;
@@ -92,7 +100,10 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     if (governorResult.spilloverHandle) {
       delta.spilloverHandle = governorResult.spilloverHandle;
 
-      const handleRow = await getSliceHandle(conn, governorResult.spilloverHandle);
+      const handleRow = await getSliceHandle(
+        conn,
+        governorResult.spilloverHandle,
+      );
       if (handleRow) {
         await updateSliceHandleSpillover(
           conn,

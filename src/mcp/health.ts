@@ -3,7 +3,7 @@ import { RepoConfigSchema } from "../config/types.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { scanRepository } from "../indexer/fileScanner.js";
-import { DatabaseError } from "../domain/errors.js";
+import { DatabaseError, NotFoundError } from "../domain/errors.js";
 
 const DEFAULT_MIN_INDEXED_FILES = 1;
 const DEFAULT_MIN_INDEXED_SYMBOLS = 1;
@@ -131,7 +131,7 @@ export async function getRepoHealthSnapshot(
   const conn = await getLadybugConn();
   const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
-    throw new Error(`Repository ${repoId} not found`);
+    throw new NotFoundError(`Repository ${repoId} not found`);
   }
 
   let parsed: unknown;

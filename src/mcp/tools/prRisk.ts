@@ -7,6 +7,7 @@ import { PRRiskAnalysisRequestSchema } from "../tools.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import type { BlastRadiusItem } from "../types.js";
+import { IndexError } from "../errors.js";
 
 type ComputedDeltaWithTiers = Awaited<ReturnType<typeof computeDeltaWithTiers>>;
 type ChangedSymbol = ComputedDeltaWithTiers["changedSymbols"][number];
@@ -38,10 +39,12 @@ export async function handlePRRiskAnalysis(args: unknown) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to compute delta pack.";
-    throw new Error(`Delta pack error: ${message}`, { cause: error });
+    throw new IndexError(`Delta pack error: ${message}`);
   }
 
-  const changedSymbolIds = delta.changedSymbols.map((c: ChangedSymbol) => c.symbolId);
+  const changedSymbolIds = delta.changedSymbols.map(
+    (c: ChangedSymbol) => c.symbolId,
+  );
 
   const conn = await getLadybugConn();
   const blastRadiusItems = await computeBlastRadius(conn, changedSymbolIds, {
@@ -56,7 +59,9 @@ export async function handlePRRiskAnalysis(args: unknown) {
 
   const riskScore = computeOverallRiskScore(delta, blastRadiusItems);
 
-  const impactedSymbols = blastRadiusItems.map((item: BlastRadiusItem) => item.symbolId);
+  const impactedSymbols = blastRadiusItems.map(
+    (item: BlastRadiusItem) => item.symbolId,
+  );
 
   const evidence = collectEvidence(delta, blastRadiusItems);
 
@@ -132,14 +137,17 @@ function generateFindings(
   }
 
   const interfaceBreakingChanges = delta.changedSymbols.filter(
-    (c: ChangedSymbol) => !c.tiers?.interfaceStable && c.changeType === "modified",
+    (c: ChangedSymbol) =>
+      !c.tiers?.interfaceStable && c.changeType === "modified",
   );
   if (interfaceBreakingChanges.length > 0) {
     findings.push({
       type: "interface-breaking-changes",
       severity: "high" as const,
       message: `${interfaceBreakingChanges.length} symbol(s) with interface-breaking changes`,
-      affectedSymbols: interfaceBreakingChanges.map((c: ChangedSymbol) => c.symbolId),
+      affectedSymbols: interfaceBreakingChanges.map(
+        (c: ChangedSymbol) => c.symbolId,
+      ),
       metadata: {
         breakingChangeCount: interfaceBreakingChanges.length,
       },
@@ -147,7 +155,8 @@ function generateFindings(
   }
 
   const sideEffectChanges = delta.changedSymbols.filter(
-    (c: ChangedSymbol) => !c.tiers?.sideEffectsStable && c.changeType === "modified",
+    (c: ChangedSymbol) =>
+      !c.tiers?.sideEffectsStable && c.changeType === "modified",
   );
   if (sideEffectChanges.length > 0) {
     findings.push({
@@ -205,7 +214,10 @@ function generateFindings(
   });
 }
 
-function computeOverallRiskScore(delta: ComputedDeltaWithTiers, blastRadiusItems: BlastRadiusItem[]): number {
+function computeOverallRiskScore(
+  delta: ComputedDeltaWithTiers,
+  blastRadiusItems: BlastRadiusItem[],
+): number {
   let totalRisk = 0;
   let weightSum = 0;
 
@@ -280,8 +292,9 @@ function collectEvidence(
     description: "Delta analysis summary",
     data: {
       totalChanges: delta.changedSymbols.length,
-      added: delta.changedSymbols.filter((c: ChangedSymbol) => c.changeType === "added")
-        .length,
+      added: delta.changedSymbols.filter(
+        (c: ChangedSymbol) => c.changeType === "added",
+      ).length,
       removed: delta.changedSymbols.filter(
         (c: ChangedSymbol) => c.changeType === "removed",
       ).length,
@@ -310,7 +323,8 @@ function collectEvidence(
   }
 
   const interfaceBreaks = delta.changedSymbols.filter(
-    (c: ChangedSymbol) => !c.tiers?.interfaceStable && c.changeType === "modified",
+    (c: ChangedSymbol) =>
+      !c.tiers?.interfaceStable && c.changeType === "modified",
   );
   if (interfaceBreaks.length > 0) {
     evidence.push({
@@ -320,7 +334,8 @@ function collectEvidence(
         count: interfaceBreaks.length,
         symbols: interfaceBreaks.map((c: ChangedSymbol) => ({
           symbolId: c.symbolId,
-          signatureDiff: c.changeType === "modified" ? c.signatureDiff : undefined,
+          signatureDiff:
+            c.changeType === "modified" ? c.signatureDiff : undefined,
         })),
       },
     });
@@ -331,16 +346,20 @@ function collectEvidence(
     description: "Impact radius analysis",
     data: {
       totalImpacted: blastRadiusItems.length,
-      directDependents: blastRadiusItems.filter((i: BlastRadiusItem) => i.signal === "directDependent")
-        .length,
-      transitiveDependents: blastRadiusItems.filter((i: BlastRadiusItem) => i.signal !== "directDependent")
-        .length,
-      topImpacted: blastRadiusItems.slice(0, 10).map((item: BlastRadiusItem) => ({
-        symbolId: item.symbolId,
-        distance: item.distance,
-        rank: item.rank,
-        reason: item.reason,
-      })),
+      directDependents: blastRadiusItems.filter(
+        (i: BlastRadiusItem) => i.signal === "directDependent",
+      ).length,
+      transitiveDependents: blastRadiusItems.filter(
+        (i: BlastRadiusItem) => i.signal !== "directDependent",
+      ).length,
+      topImpacted: blastRadiusItems
+        .slice(0, 10)
+        .map((item: BlastRadiusItem) => ({
+          symbolId: item.symbolId,
+          distance: item.distance,
+          rank: item.rank,
+          reason: item.reason,
+        })),
     },
   });
 
@@ -365,19 +384,24 @@ function generateRecommendedTests(
     tests.push({
       type: "unit-tests",
       description: "Run unit tests for modified symbols",
-      targetSymbols: modifiedSymbols.slice(0, 20).map((c: ChangedSymbol) => c.symbolId),
+      targetSymbols: modifiedSymbols
+        .slice(0, 20)
+        .map((c: ChangedSymbol) => c.symbolId),
       priority: "high" as const,
     });
   }
 
   const interfaceBreakingSymbols = delta.changedSymbols.filter(
-    (c: ChangedSymbol) => !c.tiers?.interfaceStable && c.changeType === "modified",
+    (c: ChangedSymbol) =>
+      !c.tiers?.interfaceStable && c.changeType === "modified",
   );
   if (interfaceBreakingSymbols.length > 0) {
     tests.push({
       type: "integration-tests",
       description: "Run integration tests for symbols with interface changes",
-      targetSymbols: interfaceBreakingSymbols.map((c: ChangedSymbol) => c.symbolId),
+      targetSymbols: interfaceBreakingSymbols.map(
+        (c: ChangedSymbol) => c.symbolId,
+      ),
       priority: "high" as const,
     });
   }
