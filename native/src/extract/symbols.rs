@@ -19,74 +19,75 @@ pub fn extract_symbols(
     symbols
 }
 
+/// Iterative AST traversal using an explicit stack to avoid stack overflow
+/// on deeply-nested ASTs (e.g. LLVM C++ files with 2000+ nesting depth).
 fn traverse_ast(
-    node: Node<'_>,
+    root: Node<'_>,
     source: &[u8],
     repo_id: &str,
     rel_path: &str,
     symbols: &mut Vec<NativeParsedSymbol>,
 ) {
-    match node.kind() {
-        "function_declaration" | "generator_function_declaration" => {
-            if let Some(sym) = process_function_declaration(node, source, repo_id, rel_path) {
-                symbols.push(sym);
-            }
-        }
-        "method_definition" => {
-            if let Some(sym) = process_method_definition(node, source, repo_id, rel_path) {
-                symbols.push(sym);
-            }
-        }
-        "class_declaration" => {
-            if let Some(sym) = process_class_declaration(node, source, repo_id, rel_path) {
-                symbols.push(sym);
-            }
-        }
-        "interface_declaration" => {
-            if let Some(sym) = process_interface_declaration(node, source, repo_id, rel_path) {
-                symbols.push(sym);
-            }
-        }
-        "type_alias_declaration" => {
-            if let Some(sym) = process_type_alias_declaration(node, source, repo_id, rel_path) {
-                symbols.push(sym);
-            }
-        }
-        "lexical_declaration" | "variable_declaration" => {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() == "variable_declarator" {
-                    let var_symbols =
-                        process_variable_declaration(child, source, repo_id, rel_path, node);
-                    symbols.extend(var_symbols);
+    let mut stack = vec![root];
+
+    while let Some(node) = stack.pop() {
+        match node.kind() {
+            "function_declaration" | "generator_function_declaration" => {
+                if let Some(sym) = process_function_declaration(node, source, repo_id, rel_path) {
+                    symbols.push(sym);
                 }
             }
-        }
-        "ambient_statement" => {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() == "module" {
-                    if let Some(sym) = process_module(child, source, repo_id, rel_path) {
-                        symbols.push(sym);
+            "method_definition" => {
+                if let Some(sym) = process_method_definition(node, source, repo_id, rel_path) {
+                    symbols.push(sym);
+                }
+            }
+            "class_declaration" => {
+                if let Some(sym) = process_class_declaration(node, source, repo_id, rel_path) {
+                    symbols.push(sym);
+                }
+            }
+            "interface_declaration" => {
+                if let Some(sym) = process_interface_declaration(node, source, repo_id, rel_path) {
+                    symbols.push(sym);
+                }
+            }
+            "type_alias_declaration" => {
+                if let Some(sym) = process_type_alias_declaration(node, source, repo_id, rel_path) {
+                    symbols.push(sym);
+                }
+            }
+            "lexical_declaration" | "variable_declaration" => {
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "variable_declarator" {
+                        let var_symbols =
+                            process_variable_declaration(child, source, repo_id, rel_path, node);
+                        symbols.extend(var_symbols);
                     }
                 }
             }
+            // `ambient_statement` (e.g. `declare module "foo" { ... }`) is handled
+            // implicitly: its `module` child is pushed to the stack and matched
+            // by the `"module"` arm below. No special handling needed here.
+            "module" => {
+                if let Some(sym) = process_module(node, source, repo_id, rel_path) {
+                    symbols.push(sym);
+                }
+            }
+            "assignment_expression" => {
+                process_assignment_expression(node, source, repo_id, rel_path, symbols);
+            }
+            _ => {}
         }
-        "module" => {
-            if let Some(sym) = process_module(node, source, repo_id, rel_path) {
-                symbols.push(sym);
+
+        // Push children in reverse order so left-most child is processed first
+        let child_count = node.child_count();
+        for i in (0..child_count).rev() {
+            if let Some(child) = node.child(i) {
+                stack.push(child);
             }
         }
-        "assignment_expression" => {
-            process_assignment_expression(node, source, repo_id, rel_path, symbols);
-        }
-        _ => {}
-    }
-
-    // Recurse into children
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        traverse_ast(child, source, repo_id, rel_path, symbols);
     }
 }
 
@@ -119,8 +120,7 @@ fn extract_generics(node: Node<'_>, source: &[u8]) -> Vec<String> {
         if child.kind() == "type_parameters" {
             let mut inner_cursor = child.walk();
             for param_child in child.children(&mut inner_cursor) {
-                if param_child.kind() == "type_identifier"
-                    || param_child.kind() == "type_parameter"
+                if param_child.kind() == "type_identifier" || param_child.kind() == "type_parameter"
                 {
                     generics.push(node_text(param_child, source).to_string());
                 }
@@ -276,7 +276,7 @@ fn make_symbol(
         visibility: visibility.to_string(),
         range: extract_range(node),
         signature,
-        summary: String::new(),    // Filled by summary module later
+        summary: String::new(), // Filled by summary module later
         invariants: vec![],
         side_effects: vec![],
         role_tags: vec![],
@@ -518,7 +518,17 @@ fn process_module(
 ) -> Option<NativeParsedSymbol> {
     let name = extract_identifier(node, source)?;
     Some(make_symbol(
-        &name, "module", node, source, repo_id, rel_path, &[], None, &[], "", &[],
+        &name,
+        "module",
+        node,
+        source,
+        repo_id,
+        rel_path,
+        &[],
+        None,
+        &[],
+        "",
+        &[],
     ))
 }
 
@@ -616,8 +626,16 @@ fn build_signature(
         .collect();
 
     Some(crate::types::NativeSymbolSignature {
-        params: if native_params.is_empty() { None } else { Some(native_params) },
+        params: if native_params.is_empty() {
+            None
+        } else {
+            Some(native_params)
+        },
         returns: returns.map(|s| s.to_string()),
-        generics: if generics.is_empty() { None } else { Some(generics.to_vec()) },
+        generics: if generics.is_empty() {
+            None
+        } else {
+            Some(generics.to_vec())
+        },
     })
 }

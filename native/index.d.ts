@@ -51,6 +51,35 @@ export interface NativeRange {
   endLine: number
   endCol: number
 }
+/**
+ * A single parameter in a function/method signature.
+ *
+ * Typed fields replace the previous JSON-encoded `signature_json: String` so
+ * that callers receive structured data rather than opaque text that must be
+ * re-parsed on the TypeScript side.
+ */
+export interface NativeSymbolSignatureParam {
+  /** Parameter name as it appears in source. */
+  name: string
+  /** Declared type annotation, if present (e.g. `"string"`, `"Request | null"`). */
+  typeName?: string
+}
+/**
+ * Structured representation of a function or method signature.
+ *
+ * `None` fields are omitted rather than serialised as empty arrays/strings,
+ * keeping the napi payload compact. The struct is `None` on the parent symbol
+ * when there are no params, no return type, and no generics (e.g. plain
+ * variables or class declarations).
+ */
+export interface NativeSymbolSignature {
+  /** Parameter list. `None` when the symbol has no parameters. */
+  params?: Array<NativeSymbolSignatureParam>
+  /** Return type annotation, if present (e.g. `"Promise<User>"`). */
+  returns?: string
+  /** Generic type parameters (e.g. `["T", "U extends Serializable"]`). */
+  generics?: Array<string>
+}
 /** Extracted symbol from AST analysis. */
 export interface NativeParsedSymbol {
   /** Stable symbol ID: sha256("{repoId}:{relPath}:{kind}:{name}:{astFingerprint}"). */
@@ -70,16 +99,16 @@ export interface NativeParsedSymbol {
   visibility: string
   /** Source range. */
   range: NativeRange
-  /** JSON-encoded signature object. */
-  signatureJson: string
+  /** Parsed signature object. */
+  signature?: NativeSymbolSignature
   /** One-line summary from JSDoc or auto-generated. */
   summary: string
-  /** JSON-encoded invariants array. */
-  invariantsJson: string
-  /** JSON-encoded side-effects array. */
-  sideEffectsJson: string
-  /** JSON-encoded role tags inferred from name/path heuristics. */
-  roleTagsJson: string
+  /** Invariants array. */
+  invariants: Array<string>
+  /** Side-effects array. */
+  sideEffects: Array<string>
+  /** Role tags inferred from name/path heuristics. */
+  roleTags: Array<string>
   /** Search-oriented text including identifier splits, summary, tags, and path hints. */
   searchText: string
 }

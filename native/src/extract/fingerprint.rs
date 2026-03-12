@@ -107,25 +107,33 @@ fn compute_subtree_hash(node: Node<'_>) -> String {
     hash_content(&parts.join(","))
 }
 
-/// Recursively collect node types, skipping comments and literals.
+/// Iteratively collect node types, skipping comments and literals.
+/// Uses an explicit stack to avoid stack overflow on deeply-nested ASTs.
 /// Exact match to TypeScript `collectNormalizedParts`.
-fn collect_normalized_parts(node: Node<'_>, parts: &mut Vec<String>) {
-    let kind = node.kind();
+fn collect_normalized_parts(root: Node<'_>, parts: &mut Vec<String>) {
+    let mut stack = vec![root];
 
-    let is_literal = kind.contains("string")
-        || kind.contains("number")
-        || kind == "true"
-        || kind == "false"
-        || kind == "null"
-        || kind == "undefined";
+    while let Some(node) = stack.pop() {
+        let kind = node.kind();
 
-    if !is_literal {
-        parts.push(kind.to_string());
+        let is_literal = kind.contains("string")
+            || kind.contains("number")
+            || kind == "true"
+            || kind == "false"
+            || kind == "null"
+            || kind == "undefined";
 
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() != "comment" {
-                collect_normalized_parts(child, parts);
+        if !is_literal {
+            parts.push(kind.to_string());
+
+            // Push children in reverse order so left-most child is processed first
+            let child_count = node.child_count();
+            for i in (0..child_count).rev() {
+                if let Some(child) = node.child(i) {
+                    if child.kind() != "comment" {
+                        stack.push(child);
+                    }
+                }
             }
         }
     }

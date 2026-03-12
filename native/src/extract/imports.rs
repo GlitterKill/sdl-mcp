@@ -39,31 +39,36 @@ const BUILTIN_MODULES: &[&str] = &[
 /// Instead of tree-sitter queries (which require language-specific Query objects),
 /// we walk the AST directly looking for import_statement and export_statement nodes
 /// with source specifiers.
-pub fn extract_imports(
-    root: Node<'_>,
-    source: &[u8],
-    _language: &str,
-) -> Vec<NativeParsedImport> {
+pub fn extract_imports(root: Node<'_>, source: &[u8], _language: &str) -> Vec<NativeParsedImport> {
     let mut imports = Vec::new();
     walk_for_imports(root, source, &mut imports);
     imports
 }
 
-fn walk_for_imports(node: Node<'_>, source: &[u8], imports: &mut Vec<NativeParsedImport>) {
-    match node.kind() {
-        "import_statement" | "export_statement" => {
-            // Find the source string (module specifier)
-            if let Some(specifier) = extract_source_specifier(node, source) {
-                let import = parse_import_node(node, &specifier, source);
-                imports.push(import);
+/// Iterative AST walk using an explicit stack to avoid stack overflow
+/// on deeply-nested ASTs (e.g. LLVM C++ files with 2000+ nesting depth).
+fn walk_for_imports(root: Node<'_>, source: &[u8], imports: &mut Vec<NativeParsedImport>) {
+    let mut stack = vec![root];
+
+    while let Some(node) = stack.pop() {
+        match node.kind() {
+            "import_statement" | "export_statement" => {
+                // Find the source string (module specifier)
+                if let Some(specifier) = extract_source_specifier(node, source) {
+                    let import = parse_import_node(node, &specifier, source);
+                    imports.push(import);
+                }
+            }
+            _ => {}
+        }
+
+        // Push children in reverse order so left-most child is processed first
+        let child_count = node.child_count();
+        for i in (0..child_count).rev() {
+            if let Some(child) = node.child(i) {
+                stack.push(child);
             }
         }
-        _ => {}
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_for_imports(child, source, imports);
     }
 }
 
@@ -111,11 +116,7 @@ fn extract_string_value(string_node: Node<'_>, source: &[u8]) -> Option<String> 
 }
 
 /// Parse an import/export statement node into a NativeParsedImport.
-fn parse_import_node(
-    node: Node<'_>,
-    specifier: &str,
-    source: &[u8],
-) -> NativeParsedImport {
+fn parse_import_node(node: Node<'_>, specifier: &str, source: &[u8]) -> NativeParsedImport {
     let is_re_export = node.kind() == "export_statement";
     let is_relative = specifier.starts_with("./") || specifier.starts_with("../");
     let is_external = !is_relative && !BUILTIN_MODULES.contains(&specifier);
@@ -176,8 +177,7 @@ fn parse_import_node(
                                 && prev_kind != "export_clause"
                                 && prev_kind != "from"
                             {
-                                result.default_import =
-                                    Some(node_text(child, source).to_string());
+                                result.default_import = Some(node_text(child, source).to_string());
                             }
                         }
                     } else {
@@ -193,14 +193,17 @@ fn parse_import_node(
     if node.kind() == "import_statement" {
         let has_source = {
             let mut c = node.walk();
-            let result = node.children(&mut c)
+            let result = node
+                .children(&mut c)
                 .any(|child| child.kind() == "from" || child.kind() == "source");
             result
         };
 
         if !has_source {
             let mut c = node.walk();
-            let identifier = node.children(&mut c).find(|child| child.kind() == "identifier");
+            let identifier = node
+                .children(&mut c)
+                .find(|child| child.kind() == "identifier");
             if let Some(id) = identifier {
                 if result.named_imports.is_empty() && result.namespace_import.is_none() {
                     result.default_import = Some(node_text(id, source).to_string());

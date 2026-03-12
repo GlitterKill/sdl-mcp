@@ -22,56 +22,69 @@ pub fn extract_calls(
     symbols: &[NativeParsedSymbol],
     _language: &str,
 ) -> Vec<NativeParsedCall> {
-    let symbol_map: HashMap<&str, &NativeParsedSymbol> = symbols
-        .iter()
-        .map(|s| (s.name.as_str(), s))
-        .collect();
+    let symbol_map: HashMap<&str, &NativeParsedSymbol> =
+        symbols.iter().map(|s| (s.name.as_str(), s)).collect();
 
     let mut calls = Vec::new();
     let mut seen_nodes: HashSet<usize> = HashSet::new();
 
-    walk_for_calls(root, source, symbols, &symbol_map, &mut calls, &mut seen_nodes);
+    walk_for_calls(
+        root,
+        source,
+        symbols,
+        &symbol_map,
+        &mut calls,
+        &mut seen_nodes,
+    );
 
     calls
 }
 
+/// Iterative AST walk using an explicit stack to avoid stack overflow
+/// on deeply-nested ASTs (e.g. LLVM C++ files with 2000+ nesting depth).
 fn walk_for_calls(
-    node: Node<'_>,
+    root: Node<'_>,
     source: &[u8],
     symbols: &[NativeParsedSymbol],
     symbol_map: &HashMap<&str, &NativeParsedSymbol>,
     calls: &mut Vec<NativeParsedCall>,
     seen: &mut HashSet<usize>,
 ) {
-    match node.kind() {
-        "call_expression" => {
-            if !seen.contains(&node.id()) {
-                seen.insert(node.id());
-                process_call_expression(node, source, symbols, symbol_map, calls);
-            }
-        }
-        "new_expression" => {
-            if !seen.contains(&node.id()) {
-                seen.insert(node.id());
-                process_new_expression(node, source, symbols, symbol_map, calls);
-            }
-        }
-        "await_expression" => {
-            // Ensure call inside await is captured
-            if let Some(child) = node.child(1).or_else(|| node.child(0)) {
-                if child.kind() == "call_expression" && !seen.contains(&child.id()) {
-                    seen.insert(child.id());
-                    process_call_expression(child, source, symbols, symbol_map, calls);
+    let mut stack = vec![root];
+
+    while let Some(node) = stack.pop() {
+        match node.kind() {
+            "call_expression" => {
+                if !seen.contains(&node.id()) {
+                    seen.insert(node.id());
+                    process_call_expression(node, source, symbols, symbol_map, calls);
                 }
             }
+            "new_expression" => {
+                if !seen.contains(&node.id()) {
+                    seen.insert(node.id());
+                    process_new_expression(node, source, symbols, symbol_map, calls);
+                }
+            }
+            "await_expression" => {
+                // Ensure call inside await is captured
+                if let Some(child) = node.child(1).or_else(|| node.child(0)) {
+                    if child.kind() == "call_expression" && !seen.contains(&child.id()) {
+                        seen.insert(child.id());
+                        process_call_expression(child, source, symbols, symbol_map, calls);
+                    }
+                }
+            }
+            _ => {}
         }
-        _ => {}
-    }
 
-    // Recurse into children
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_for_calls(child, source, symbols, symbol_map, calls, seen);
+        // Push children in reverse order so left-most child is processed first
+        let child_count = node.child_count();
+        for i in (0..child_count).rev() {
+            if let Some(child) = node.child(i) {
+                stack.push(child);
+            }
+        }
     }
 }
 
@@ -233,11 +246,7 @@ fn process_new_expression(
 
 /// Find the enclosing symbol for a node.
 /// Walks up the AST to find the nearest function/class/method declaration.
-fn find_enclosing_symbol(
-    node: Node<'_>,
-    symbols: &[NativeParsedSymbol],
-    _source: &[u8],
-) -> String {
+fn find_enclosing_symbol(node: Node<'_>, symbols: &[NativeParsedSymbol], _source: &[u8]) -> String {
     let node_start_line = node.start_position().row + 1;
     let node_end_line = node.end_position().row + 1;
 
@@ -249,9 +258,7 @@ fn find_enclosing_symbol(
         let sym_start = sym.range.start_line;
         let sym_end = sym.range.end_line;
 
-        if sym_start <= node_start_line as u32
-            && sym_end >= node_end_line as u32
-        {
+        if sym_start <= node_start_line as u32 && sym_end >= node_end_line as u32 {
             let size = sym_end - sym_start;
             if size < best_size {
                 best = Some(sym);
@@ -260,7 +267,8 @@ fn find_enclosing_symbol(
         }
     }
 
-    best.map(|s| s.name.clone()).unwrap_or_else(|| "<module>".to_string())
+    best.map(|s| s.name.clone())
+        .unwrap_or_else(|| "<module>".to_string())
 }
 
 fn node_text<'a>(node: Node<'a>, source: &'a [u8]) -> &'a str {

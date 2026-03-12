@@ -283,7 +283,18 @@ function extensionToLanguage(ext: string): string {
 }
 
 /**
+ * Maximum number of files to send to the native addon in a single batch.
+ * Bounds peak memory usage in Rust (all file contents + parse results are
+ * held in memory simultaneously per batch). Smaller batches also reduce the
+ * probability of hitting a pathological file that crashes the native addon.
+ */
+const NATIVE_BATCH_SIZE = 1000;
+
+/**
  * Parse a batch of files using the native Rust engine.
+ *
+ * Files are processed in chunks of NATIVE_BATCH_SIZE to bound memory usage
+ * and limit blast radius from crashes in the native addon.
  *
  * @param repoId - Repository identifier
  * @param repoRoot - Absolute path to repo root
@@ -311,43 +322,66 @@ export function parseFilesRust(
     };
   });
 
-  // Call native addon
-  let nativeResults: NativeParsedFile[];
-  try {
-    nativeResults = addon.parseFiles(inputs, threadCount);
-  } catch (error) {
-    logger.error(
-      "Native Rust indexer parseFiles failed; disabling native addon",
-      {
-        error,
-      },
-    );
-    nativeAddon = null;
-    return null;
+  // Process in batches to bound memory usage and limit crash blast radius
+  const allResults: RustParseResult[] = [];
+
+  for (let offset = 0; offset < inputs.length; offset += NATIVE_BATCH_SIZE) {
+    const batch = inputs.slice(offset, offset + NATIVE_BATCH_SIZE);
+
+    if (inputs.length > NATIVE_BATCH_SIZE) {
+      logger.debug("Processing native parse batch", {
+        batch: Math.floor(offset / NATIVE_BATCH_SIZE) + 1,
+        totalBatches: Math.ceil(inputs.length / NATIVE_BATCH_SIZE),
+        batchSize: batch.length,
+        totalFiles: inputs.length,
+      });
+    }
+
+    // Call native addon for this batch
+    let nativeResults: NativeParsedFile[];
+    try {
+      nativeResults = addon.parseFiles(batch, threadCount);
+    } catch (error) {
+      logger.error(
+        "Native Rust indexer parseFiles failed; disabling native addon",
+        {
+          error,
+          batchOffset: offset,
+          batchSize: batch.length,
+        },
+      );
+      nativeAddon = null;
+      return null;
+    }
+
+    if (nativeResults.length !== batch.length) {
+      logger.error("Native Rust indexer returned unexpected result count", {
+        expected: batch.length,
+        actual: nativeResults.length,
+        batchOffset: offset,
+      });
+      nativeAddon = null;
+      return null;
+    }
+
+    // Convert NativeParsedFile to RustParseResult
+    try {
+      const mapped = nativeResults.map(mapNativeResult);
+      allResults.push(...mapped);
+    } catch (error) {
+      logger.error(
+        "Failed to map native Rust indexer results; disabling native addon",
+        {
+          error,
+          batchOffset: offset,
+        },
+      );
+      nativeAddon = null;
+      return null;
+    }
   }
 
-  if (nativeResults.length !== inputs.length) {
-    logger.error("Native Rust indexer returned unexpected result count", {
-      expected: inputs.length,
-      actual: nativeResults.length,
-    });
-    nativeAddon = null;
-    return null;
-  }
-
-  // Convert NativeParsedFile to RustParseResult
-  try {
-    return nativeResults.map(mapNativeResult);
-  } catch (error) {
-    logger.error(
-      "Failed to map native Rust indexer results; disabling native addon",
-      {
-        error,
-      },
-    );
-    nativeAddon = null;
-    return null;
-  }
+  return allResults;
 }
 
 /**
@@ -447,12 +481,13 @@ function mapNativeSymbol(sym: NativeParsedSymbol): RustExtractedSymbol {
       endLine: sym.range.endLine,
       endCol: sym.range.endCol,
     },
-    // Rust now returns a typed NativeSymbolSignature instead of a JSON string.
-    // Guard on `params` presence because a signature with no params (and no
-    // return/generics) is represented as `undefined` on the Rust side.
-    signature: sym.signature?.params
+    // Rust returns a typed NativeSymbolSignature. When all fields are empty
+    // (no params, no return type, no generics) the Rust side returns `undefined`.
+    // Guard on the object itself so signatures with returns/generics but zero
+    // params are not silently discarded.
+    signature: sym.signature
       ? {
-          params: sym.signature.params.map((p) => ({
+          params: (sym.signature.params ?? []).map((p) => ({
             name: p.name,
             type: p.typeName,
           })),

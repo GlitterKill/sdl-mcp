@@ -334,9 +334,10 @@ function processVariableDeclaration(
         child.type === "identifier" ||
         child.type === "shorthand_property_identifier_pattern"
       ) {
-        const patternName = child.type === "shorthand_property_identifier_pattern"
-          ? child.text
-          : extractIdentifier(child);
+        const patternName =
+          child.type === "shorthand_property_identifier_pattern"
+            ? child.text
+            : extractIdentifier(child);
         if (patternName) {
           patterns.push({
             name: patternName,
@@ -370,13 +371,15 @@ function processVariableDeclaration(
     return [];
   }
 
-  return [{
-    name,
-    kind: "variable",
-    exported: isExported(node),
-    visibility: undefined,
-    range: extractRange(node),
-  }];
+  return [
+    {
+      name,
+      kind: "variable",
+      exported: isExported(node),
+      visibility: undefined,
+      range: extractRange(node),
+    },
+  ];
 }
 
 function processModule(node: Parser.SyntaxNode): ExtractedSymbol | null {
@@ -453,15 +456,9 @@ function traverseAST(
       }
       break;
 
-    case "ambient_statement":
-      for (const child of node.children) {
-        if (child.type === "module") {
-          const moduleSymbol = processModule(child);
-          if (moduleSymbol) symbols.push(moduleSymbol);
-        }
-      }
-      break;
-
+    // `ambient_statement` (e.g. `declare module "foo" { ... }`) is handled
+    // implicitly: its `module` child is visited by the traversal loop below
+    // and matched by the `"module"` case. No special handling needed here.
     case "module":
       const moduleSymbol = processModule(node);
       if (moduleSymbol) symbols.push(moduleSymbol);
