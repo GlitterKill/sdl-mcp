@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "fs";
+import { createReadStream, statSync } from "fs";
 import { randomUUID } from "crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { join } from "path";
@@ -487,13 +487,46 @@ function serveUiAsset(pathname: string, res: ServerResponse): boolean {
   }
 
   const fullPath = join(UI_DIR, asset.file);
-  if (!existsSync(fullPath)) {
-    json(res, 404, { error: `UI asset not found: ${asset.file}` });
+  try {
+    if (!statSync(fullPath).isFile()) {
+      json(res, 500, { error: `Failed to read UI asset: ${asset.file}` });
+      return true;
+    }
+  } catch (error) {
+    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    const status = code === "ENOENT" ? 404 : 500;
+    const message =
+      status === 404
+        ? `UI asset not found: ${asset.file}`
+        : `Failed to read UI asset: ${asset.file}`;
+    json(res, status, { error: message });
     return true;
   }
 
-  res.writeHead(200, { "Content-Type": asset.type });
-  res.end(readFileSync(fullPath));
+  const stream = createReadStream(fullPath);
+  stream.once("error", (error) => {
+    logger.warn("Failed to serve UI asset", {
+      asset: asset.file,
+      error,
+    });
+
+    if (!res.headersSent) {
+      const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+      const status = code === "ENOENT" ? 404 : 500;
+      const message =
+        status === 404
+          ? `UI asset not found: ${asset.file}`
+          : `Failed to read UI asset: ${asset.file}`;
+      json(res, status, { error: message });
+      return;
+    }
+
+    res.destroy(error instanceof Error ? error : undefined);
+  });
+  stream.once("open", () => {
+    res.writeHead(200, { "Content-Type": asset.type });
+    stream.pipe(res);
+  });
   return true;
 }
 
