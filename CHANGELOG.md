@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.7] - 2026-03-13
+
+### Added
+
+- Multi-language Rust native extraction now covers Python, Go, Java, C, Shell, Rust, C#, C++, and PHP symbol, import, and call extraction, plus richer doc-comment, invariant, side-effect, and role detection
+- Pass2 and indexer resolution coverage now includes C#, C++, C, Shell, Python, Kotlin, Rust, and PHP adapters, with matching resolve-call harness and stress tooling updates
+- Local semantic embedding runtime support and the new `sdl.runtime` tool broaden the runtime surface for higher-output tasks and semantic workflows
+- Stress-test coverage expanded for multiple concurrent clients and the growing multi-language resolver pipeline
+
+### Changed
+
+- Native extraction internals were restructured into language-dispatched modules and enabled across all supported languages
+- Slice responses now use a refactored wire format with typed MCP errors, alongside general code, CI, and test hardening across the release train
+
+### Fixed
+
+- Native fallback and config-edge traversal regressions, including deeper and larger-file parsing hardening in the Rust extraction path
+- Runtime tool policy handling, spillover signature regressions, and UI asset stream failure handling
+
 ## [0.8.6] - 2026-03-11
 
 ### Added
