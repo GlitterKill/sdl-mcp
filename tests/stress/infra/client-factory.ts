@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 import type { MetricsCollector } from "./metrics-collector.js";
+import { validateToolResult, extractSampleValues } from "./result-validator.js";
 import { stressLog } from "./types.js";
 
 export class StressClient {
@@ -132,6 +133,10 @@ export class StressClient {
 
   /**
    * Call a tool and return the parsed JSON from the first text content block.
+   *
+   * Automatically runs result validators from `result-validator.ts` and
+   * records checks + sample values in the MetricsCollector.  This makes
+   * every scenario a release smoke-test for tool correctness.
    */
   async callToolParsed(
     name: string,
@@ -141,10 +146,21 @@ export class StressClient {
     const content = (
       response as { content?: Array<{ type: string; text: string }> }
     )?.content;
-    if (content?.[0]?.text) {
-      return JSON.parse(content[0].text) as Record<string, unknown>;
+    const parsed: Record<string, unknown> = content?.[0]?.text
+      ? (JSON.parse(content[0].text) as Record<string, unknown>)
+      : ((response ?? {}) as Record<string, unknown>);
+
+    // Run result validators — fires for every known tool, no-op for unknown
+    const checks = validateToolResult(name, args, parsed);
+    if (checks.length > 0) {
+      this.collector.recordResultChecks(checks);
     }
-    return (response ?? {}) as Record<string, unknown>;
+    const samples = extractSampleValues(name, parsed);
+    if (Object.keys(samples).length > 0) {
+      this.collector.recordSampleValues(name, samples);
+    }
+
+    return parsed;
   }
 
   isConnected(): boolean {

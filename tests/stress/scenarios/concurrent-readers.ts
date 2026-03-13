@@ -11,8 +11,13 @@ import type {
   ScenarioContext,
   ScenarioResult,
   AggregateMetrics,
+  ToolResultStats,
 } from "../infra/types.js";
-import { stressLog, DEFAULT_THRESHOLDS } from "../infra/types.js";
+import {
+  stressLog,
+  DEFAULT_THRESHOLDS,
+  mergeResultStats,
+} from "../infra/types.js";
 
 const SEARCH_QUERIES = [
   "User",
@@ -86,6 +91,7 @@ export async function runConcurrentReaders(
   let totalDuration = 0;
   let peakMemory = 0;
   let anyFailed = false;
+  const allResultStats: ToolResultStats[] = [];
 
   for (const clientCount of config.concurrencyLevels) {
     log(`--- Round: ${clientCount} concurrent readers ---`);
@@ -161,6 +167,8 @@ export async function runConcurrentReaders(
         }
       }
 
+      allResultStats.push(collector.getResultStats());
+
       log(
         `  Round ${clientCount}: ${collector.getRecordCount()} calls, ${roundErrors.length} errors, ${roundDuration}ms`,
       );
@@ -178,5 +186,6 @@ export async function runConcurrentReaders(
     errors: allErrors,
     memoryPeakMB: peakMemory,
     warnings: allWarnings,
+    toolResultStats: mergeResultStats(allResultStats),
   };
 }

@@ -95,6 +95,39 @@ function writeScenarioSection(scenario: ScenarioResult): void {
     w();
   }
 
+  // Result validation stats (smoke-test signal)
+  if (scenario.toolResultStats) {
+    const stats = scenario.toolResultStats;
+    const allPassed = stats.checksFailed === 0;
+    const statusStr = allPassed
+      ? `${GREEN}${stats.checksPassed}/${stats.checksRun} passed${RESET}`
+      : `${RED}${stats.checksFailed}/${stats.checksRun} FAILED${RESET}`;
+    w(`  ${BOLD}Result Validation:${RESET} ${statusStr}`);
+
+    // Show failures (critical — these indicate broken tools)
+    if (stats.failures.length > 0) {
+      w(`  ${RED}Failed checks:${RESET}`);
+      for (const f of stats.failures.slice(0, 10)) {
+        w(
+          `    ${RED}✗${RESET} ${f.tool} → ${f.check}: ${DIM}${f.actual ?? "?"}${RESET}`,
+        );
+      }
+      if (stats.failures.length > 10) {
+        w(`    ${DIM}... and ${stats.failures.length - 10} more${RESET}`);
+      }
+    }
+
+    // Show sample values — quick human-readable "is this real data?"
+    const entries = Object.entries(stats.sampleValues);
+    if (entries.length > 0) {
+      w(`  ${BOLD}Sample Values:${RESET}`);
+      for (const [key, val] of entries) {
+        w(`    ${DIM}${key}${RESET} = ${val}`);
+      }
+    }
+    w();
+  }
+
   // Warnings
   for (const warning of scenario.warnings) {
     w(`  ${warn(warning)}`);

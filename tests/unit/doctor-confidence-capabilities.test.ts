@@ -41,7 +41,9 @@ describe("doctor command - call resolution capabilities", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  async function runDoctorWithConfig(policy: Record<string, unknown>): Promise<string> {
+  async function runDoctorWithConfig(
+    policy: Record<string, unknown>,
+  ): Promise<string> {
     const configPath = join(tempDir, "sdlmcp.config.json");
     const ladybugPath = join(tempDir, "sdl-mcp-graph.lbug");
 
@@ -54,7 +56,8 @@ describe("doctor command - call resolution capabilities", () => {
       }),
     );
 
-    const { initLadybugDb, closeLadybugDb } = await import("../../src/db/ladybug.js");
+    const { initLadybugDb, closeLadybugDb } =
+      await import("../../src/db/ladybug.js");
     const { doctorCommand } = await import("../../src/cli/commands/doctor.js");
     await initLadybugDb(ladybugPath);
 
@@ -80,8 +83,16 @@ describe("doctor command - call resolution capabilities", () => {
     assert.match(output, /Call resolution capabilities/i);
     assert.match(output, /pass2-ts/i);
     assert.match(output, /pass2-go/i);
+    assert.match(output, /pass2-java/i);
+    assert.match(output, /pass2-php/i);
+    assert.match(output, /pass2-python/i);
+    assert.match(output, /pass2-kotlin/i);
+    assert.match(output, /pass2-rust/i);
     assert.match(output, /schema v3/i);
-    assert.match(output, /confidence, resolution, resolverId, resolutionPhase/i);
+    assert.match(
+      output,
+      /confidence, resolution, resolverId, resolutionPhase/i,
+    );
     assert.match(output, /request-only/i);
   });
 

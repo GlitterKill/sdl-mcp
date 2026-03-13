@@ -1,0 +1,189 @@
+import { after, before, describe, it } from "node:test";
+import assert from "node:assert/strict";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../../src/db/ladybug.js";
+import * as ladybugDb from "../../src/db/ladybug-queries.js";
+import { indexRepo } from "../../src/indexer/indexer.js";
+
+const REPO_ID = "test-php-pass2-repo";
+
+function writeRepoFile(
+  repoRoot: string,
+  relPath: string,
+  content: string,
+): void {
+  const fullPath = join(repoRoot, relPath);
+  mkdirSync(dirname(fullPath), { recursive: true });
+  writeFileSync(fullPath, content, "utf8");
+}
+
+describe("PHP pass2 indexing", () => {
+  const graphDbPath = join(tmpdir(), ".lbug-php-pass2-test-db.lbug");
+  const configPath = join(tmpdir(), "sdl-php-pass2-config.json");
+  const prevSDL_CONFIG = process.env.SDL_CONFIG;
+  const prevSDL_CONFIG_PATH = process.env.SDL_CONFIG_PATH;
+  let repoDir: string | null = null;
+
+  before(async () => {
+    if (existsSync(graphDbPath)) {
+      rmSync(graphDbPath, { recursive: true, force: true });
+    }
+
+    repoDir = mkdtempSync(join(tmpdir(), "sdl-mcp-php-pass2-repo-"));
+    writeRepoFile(
+      repoDir,
+      "src/Utils.php",
+      [
+        "<?php",
+        "namespace App;",
+        'class Utils { public static function helper(): string { return ""; } }',
+        "",
+      ].join("\n"),
+    );
+    writeRepoFile(
+      repoDir,
+      "src/Service.php",
+      [
+        "<?php",
+        "namespace App;",
+        "use App\\Utils;",
+        "class Service { public function run(): void { Utils::helper(); } }",
+        "",
+      ].join("\n"),
+    );
+    writeRepoFile(
+      repoDir,
+      "index.php",
+      [
+        "<?php",
+        "use App\\Service;",
+        "function main(): void {",
+        "    $svc = new Service();",
+        "    $svc->run();",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          repos: [],
+          policy: {},
+          indexing: { engine: "typescript", enableFileWatching: false },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    process.env.SDL_CONFIG = configPath;
+    delete process.env.SDL_CONFIG_PATH;
+
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
+    const now = new Date().toISOString();
+    await ladybugDb.upsertRepo(conn, {
+      repoId: REPO_ID,
+      rootPath: repoDir,
+      configJson: JSON.stringify({
+        repoId: REPO_ID,
+        rootPath: repoDir,
+        ignore: [],
+        languages: ["php"],
+        maxFileBytes: 2_000_000,
+        includeNodeModulesTypes: false,
+        packageJsonPath: null,
+        tsconfigPath: null,
+        workspaceGlobs: null,
+      }),
+      createdAt: now,
+    });
+  });
+
+  after(async () => {
+    await closeLadybugDb();
+    if (prevSDL_CONFIG === undefined) {
+      delete process.env.SDL_CONFIG;
+    } else {
+      process.env.SDL_CONFIG = prevSDL_CONFIG;
+    }
+    if (prevSDL_CONFIG_PATH === undefined) {
+      delete process.env.SDL_CONFIG_PATH;
+    } else {
+      process.env.SDL_CONFIG_PATH = prevSDL_CONFIG_PATH;
+    }
+    try {
+      rmSync(graphDbPath, { recursive: true, force: true });
+    } catch {}
+    try {
+      rmSync(configPath, { recursive: true, force: true });
+    } catch {}
+    if (repoDir) {
+      try {
+        rmSync(repoDir, { recursive: true, force: true });
+      } catch {}
+      repoDir = null;
+    }
+  });
+
+  it("creates pass2 php call edges with resolver metadata", async () => {
+    const result = await indexRepo(REPO_ID, "full");
+    assert.ok(result.versionId.length > 0);
+
+    const conn = await getLadybugConn();
+    const symbols = await ladybugDb.getSymbolsByRepo(conn, REPO_ID);
+
+    const run = symbols.find(
+      (symbol) => symbol.name === "run" && symbol.kind === "method",
+    );
+    const helper = symbols.find(
+      (symbol) => symbol.name === "helper" && symbol.kind === "method",
+    );
+    const main = symbols.find(
+      (symbol) => symbol.name === "main" && symbol.kind === "function",
+    );
+    const serviceClass = symbols.find(
+      (symbol) => symbol.name === "App\\Service" && symbol.kind === "class",
+    );
+
+    assert.ok(run);
+    assert.ok(helper);
+    assert.ok(main);
+    assert.ok(serviceClass);
+
+    const runEdges = await ladybugDb.getEdgesFrom(conn, run.symbolId);
+    const helperCall = runEdges.find(
+      (edge) => edge.edgeType === "call" && edge.toSymbolId === helper.symbolId,
+    );
+    assert.ok(helperCall);
+    assert.equal(helperCall.resolverId, "pass2-php");
+    assert.equal(helperCall.resolutionPhase, "pass2");
+    assert.equal(helperCall.resolution, "use-import");
+
+    const mainEdges = await ladybugDb.getEdgesFrom(conn, main.symbolId);
+    const runCall = mainEdges.find(
+      (edge) => edge.edgeType === "call" && edge.toSymbolId === run.symbolId,
+    );
+    assert.ok(runCall);
+    assert.equal(runCall.resolverId, "pass2-php");
+    assert.equal(runCall.resolutionPhase, "pass2");
+    assert.equal(runCall.resolution, "receiver-imported-instance");
+  });
+});

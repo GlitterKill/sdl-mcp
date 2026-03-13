@@ -187,5 +187,6 @@ export async function runSingleClientBaseline(
     errors,
     memoryPeakMB: collector.getMemoryPeakMB(),
     warnings,
+    toolResultStats: collector.getResultStats(),
   };
 }

@@ -32,6 +32,28 @@ export async function runSessionSaturation(
 
   collector.recordMemorySnapshot();
 
+  // Setup: register and index fixture repo (this scenario uses its own server)
+  log("Setup: Registering and indexing fixture repo");
+  const setupCollector = new MetricsCollector();
+  const setupClient = await createStressClient(
+    serverPort,
+    "sat-setup",
+    setupCollector,
+    config.verbose,
+  );
+  try {
+    await setupClient.callToolParsed("sdl.repo.register", {
+      repoId: "stress-fixtures",
+      rootPath: config.fixturePath,
+    });
+    await setupClient.callToolParsed("sdl.index.refresh", {
+      repoId: "stress-fixtures",
+      mode: "full",
+    });
+  } finally {
+    await disconnectAll([setupClient]);
+  }
+
   const connectedClients: import("../infra/client-factory.js").StressClient[] =
     [];
 
@@ -211,5 +233,6 @@ export async function runSessionSaturation(
     errors: collector.getErrors(),
     memoryPeakMB: collector.getMemoryPeakMB(),
     warnings,
+    toolResultStats: collector.getResultStats(),
   };
 }

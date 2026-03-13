@@ -71,7 +71,7 @@ describe("pass2 resolver registry", () => {
     );
   });
 
-  it("uses the default registry for current ts and js pass2 targets", () => {
+  it("uses the default registry for ts, go, php, python, java, kotlin, and rust pass2 targets", () => {
     const registry = createDefaultPass2ResolverRegistry();
 
     assert.equal(
@@ -95,8 +95,32 @@ describe("pass2 resolver registry", () => {
       true,
     );
     assert.equal(
+      registry.supports(toPass2Target({ path: "src/index.php" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "templates/view.phtml" })),
+      true,
+    );
+    assert.equal(
       registry.supports(toPass2Target({ path: "src/script.py" })),
-      false,
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/Main.java" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/Main.kt" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "scripts/build.kts" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/lib.rs" })),
+      true,
     );
   });
 });

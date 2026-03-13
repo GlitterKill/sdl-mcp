@@ -11,8 +11,13 @@ import type {
   ScenarioContext,
   ScenarioResult,
   AggregateMetrics,
+  ToolResultStats,
 } from "../infra/types.js";
-import { stressLog, DEFAULT_THRESHOLDS } from "../infra/types.js";
+import {
+  stressLog,
+  DEFAULT_THRESHOLDS,
+  mergeResultStats,
+} from "../infra/types.js";
 
 const WRITER_ITERATIONS = 3;
 const READER_ITERATIONS = 5;
@@ -96,6 +101,7 @@ export async function runMixedReadWrite(
   let totalDuration = 0;
   let peakMemory = 0;
   let anyFailed = false;
+  const allResultStats: ToolResultStats[] = [];
 
   for (const clientCount of config.concurrencyLevels) {
     log(
@@ -190,6 +196,8 @@ export async function runMixedReadWrite(
         }
       }
 
+      allResultStats.push(collector.getResultStats());
+
       log(
         `  Round ${clientCount}: ${collector.getRecordCount()} calls, ${roundErrors.length} errors, ${roundDuration}ms`,
       );
@@ -207,5 +215,6 @@ export async function runMixedReadWrite(
     errors: allErrors,
     memoryPeakMB: peakMemory,
     warnings: allWarnings,
+    toolResultStats: mergeResultStats(allResultStats),
   };
 }

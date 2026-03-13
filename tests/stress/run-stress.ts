@@ -10,7 +10,8 @@
  * 5. Run mixed read/write (3→4→5→6)
  * 6. Restart server with maxSessions: 4 → run session saturation
  * 7. Restart server with maxToolConcurrency: 4 → run dispatch pressure
- * 8. Generate report
+ * 8. Restart server (default config) → run semantic tools
+ * 9. Generate report
  *
  * Usage:
  *   node --import tsx tests/stress/run-stress.ts
@@ -30,6 +31,7 @@ import { runConcurrentReaders } from "./scenarios/concurrent-readers.js";
 import { runMixedReadWrite } from "./scenarios/mixed-read-write.js";
 import { runSessionSaturation } from "./scenarios/session-saturation.js";
 import { runDispatchPressure } from "./scenarios/dispatch-pressure.js";
+import { runSemanticTools } from "./scenarios/semantic-tools.js";
 import type {
   StressTestConfig,
   ScenarioResult,
@@ -289,26 +291,77 @@ async function main(): Promise<void> {
   }
 
   // -----------------------------------------------------------------------
+  // Scenario 6: Semantic Tools (default server config)
+  // -----------------------------------------------------------------------
+  if (shouldRun("semantic-tools")) {
+    stressLog("info", "=== Scenario 6: Semantic Tools ===");
+    const harness = new ServerHarness(config);
+    try {
+      const port = await harness.start({
+        maxSessions: 8,
+        maxToolConcurrency: 8,
+      });
+      const result = await withTimeout(
+        runSemanticTools(makeCtx(port)),
+        cliArgs.timeout * config.concurrencyLevels.length,
+        "semantic-tools",
+      );
+      scenarios.push(result);
+    } catch (err) {
+      scenarios.push(errorResult("semantic-tools", err));
+    } finally {
+      await harness.stop();
+    }
+  }
+
+  // -----------------------------------------------------------------------
   // Generate Report
   // -----------------------------------------------------------------------
   const require = createRequire(import.meta.url);
   const pkg = require(join(projectRoot, "package.json")) as { version: string };
 
+  // Check if any scenario has result validation failures
+  const totalResultChecksFailed = scenarios.reduce(
+    (sum, s) => sum + (s.toolResultStats?.checksFailed ?? 0),
+    0,
+  );
+  const totalResultChecksRun = scenarios.reduce(
+    (sum, s) => sum + (s.toolResultStats?.checksRun ?? 0),
+    0,
+  );
+
   const report: StressReport = {
     timestamp: new Date().toISOString(),
     version: pkg.version,
     scenarios,
-    overallPassed: scenarios.every((s) => s.passed),
+    overallPassed:
+      scenarios.every((s) => s.passed) && totalResultChecksFailed === 0,
     thresholds: DEFAULT_THRESHOLDS,
     durationMs: Date.now() - suiteStart,
   };
 
   writeConsoleReport(report);
 
+  // Log result-validation summary
+  if (totalResultChecksRun > 0) {
+    const pct =
+      totalResultChecksRun > 0
+        ? (
+            ((totalResultChecksRun - totalResultChecksFailed) /
+              totalResultChecksRun) *
+            100
+          ).toFixed(1)
+        : "0";
+    stressLog("info", `Result validation: ${pct}% passed`, {
+      checksRun: totalResultChecksRun,
+      checksFailed: totalResultChecksFailed,
+    });
+  }
+
   const jsonPath = writeJsonReport(report, resultsDir);
   stressLog("info", `JSON report saved to: ${jsonPath}`);
 
-  // Exit with failure code if any scenario failed
+  // Exit with failure code if any scenario failed or result checks failed
   if (!report.overallPassed) {
     process.exit(1);
   }

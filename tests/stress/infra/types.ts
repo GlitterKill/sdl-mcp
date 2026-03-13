@@ -94,6 +94,65 @@ export interface SessionSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Tool Result Validation
+// ---------------------------------------------------------------------------
+
+/**
+ * A single semantic check on a tool response.
+ *
+ * Each check validates one aspect of the response content, e.g.
+ * "search returned > 0 results" or "card contains a valid symbolId".
+ */
+export interface ToolResultCheck {
+  tool: string;
+  check: string;
+  passed: boolean;
+  /** The actual value observed (e.g. "12", "missing", "empty") */
+  actual?: string;
+}
+
+/**
+ * Aggregated result-validation statistics for a scenario.
+ *
+ * These are the "smoke-test" stats that tell you whether each tool is
+ * returning structurally/semantically valid responses — not just "200 OK."
+ */
+export interface ToolResultStats {
+  checksRun: number;
+  checksPassed: number;
+  checksFailed: number;
+  failures: ToolResultCheck[];
+  /**
+   * Per-tool sample values surfaced in the report, e.g.
+   *   "sdl.symbol.search:resultCount" → "15"
+   *   "sdl.symbol.getCard:hasSignature" → "true"
+   */
+  sampleValues: Record<string, string>;
+}
+
+/**
+ * Merge multiple ToolResultStats (e.g. from successive concurrency rounds)
+ * into a single aggregate.
+ */
+export function mergeResultStats(parts: ToolResultStats[]): ToolResultStats {
+  const merged: ToolResultStats = {
+    checksRun: 0,
+    checksPassed: 0,
+    checksFailed: 0,
+    failures: [],
+    sampleValues: {},
+  };
+  for (const p of parts) {
+    merged.checksRun += p.checksRun;
+    merged.checksPassed += p.checksPassed;
+    merged.checksFailed += p.checksFailed;
+    merged.failures.push(...p.failures);
+    Object.assign(merged.sampleValues, p.sampleValues);
+  }
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
 // Scenario Results
 // ---------------------------------------------------------------------------
 
@@ -111,6 +170,8 @@ export interface ScenarioResult {
   }>;
   memoryPeakMB: number;
   warnings: string[];
+  /** Semantic validation of tool response content — release smoke-test signal */
+  toolResultStats?: ToolResultStats;
 }
 
 // ---------------------------------------------------------------------------

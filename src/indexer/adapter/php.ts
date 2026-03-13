@@ -738,12 +738,12 @@ function extractCalls(
       (variable_name) @var_callee)
 
     (member_call_expression
-      (name) @attr
-      (variable_name) @recv)
+      object: (variable_name) @recv
+      name: (name) @attr)
 
     (member_call_expression
-      (name) @var_attr
-      (variable_name) @recv)
+      object: (variable_name) @recv
+      name: (variable_name) @var_attr)
 
     (scoped_call_expression
       (name) @scope

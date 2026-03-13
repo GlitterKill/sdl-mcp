@@ -7,7 +7,11 @@
  */
 
 import { MetricsCollector } from "../infra/metrics-collector.js";
-import { createStressClients, disconnectAll } from "../infra/client-factory.js";
+import {
+  createStressClient,
+  createStressClients,
+  disconnectAll,
+} from "../infra/client-factory.js";
 import type { ScenarioContext, ScenarioResult } from "../infra/types.js";
 import { stressLog } from "../infra/types.js";
 
@@ -40,6 +44,28 @@ export async function runDispatchPressure(
   let passed = true;
 
   collector.recordMemorySnapshot();
+
+  // Setup: register and index fixture repo (this scenario uses its own server)
+  log("Setup: Registering and indexing fixture repo");
+  const setupCollector = new MetricsCollector();
+  const setupClient = await createStressClient(
+    serverPort,
+    "dp-setup",
+    setupCollector,
+    config.verbose,
+  );
+  try {
+    await setupClient.callToolParsed("sdl.repo.register", {
+      repoId: "stress-fixtures",
+      rootPath: config.fixturePath,
+    });
+    await setupClient.callToolParsed("sdl.index.refresh", {
+      repoId: "stress-fixtures",
+      mode: "full",
+    });
+  } finally {
+    await disconnectAll([setupClient]);
+  }
 
   // Sample dispatch stats at high frequency to catch brief queuing windows.
   // Tool calls complete in ~20ms, so 100ms sampling misses the queue entirely.
@@ -154,5 +180,6 @@ export async function runDispatchPressure(
     errors: collector.getErrors(),
     memoryPeakMB: collector.getMemoryPeakMB(),
     warnings,
+    toolResultStats: collector.getResultStats(),
   };
 }

@@ -4,6 +4,8 @@
 
 import type {
   ToolCallRecord,
+  ToolResultCheck,
+  ToolResultStats,
   AggregateMetrics,
   MemorySnapshot,
   PoolSnapshot,
@@ -17,6 +19,8 @@ export class MetricsCollector {
   private poolSnapshots: PoolSnapshot[] = [];
   private dispatchSnapshots: DispatchSnapshot[] = [];
   private sessionSnapshots: SessionSnapshot[] = [];
+  private resultChecks: ToolResultCheck[] = [];
+  private sampleValues: Map<string, string> = new Map();
 
   // ---------------------------------------------------------------------------
   // Recording
@@ -150,6 +154,32 @@ export class MetricsCollector {
   }
 
   // ---------------------------------------------------------------------------
+  // Result Validation
+  // ---------------------------------------------------------------------------
+
+  recordResultChecks(checks: ToolResultCheck[]): void {
+    this.resultChecks.push(...checks);
+  }
+
+  recordSampleValues(toolName: string, values: Record<string, string>): void {
+    for (const [key, value] of Object.entries(values)) {
+      this.sampleValues.set(`${toolName}:${key}`, value);
+    }
+  }
+
+  getResultStats(): ToolResultStats {
+    const passed = this.resultChecks.filter((c) => c.passed).length;
+    const failed = this.resultChecks.filter((c) => !c.passed).length;
+    return {
+      checksRun: this.resultChecks.length,
+      checksPassed: passed,
+      checksFailed: failed,
+      failures: this.resultChecks.filter((c) => !c.passed),
+      sampleValues: Object.fromEntries(this.sampleValues),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Memory Analysis
   // ---------------------------------------------------------------------------
 
@@ -188,6 +218,8 @@ export class MetricsCollector {
     this.poolSnapshots = [];
     this.dispatchSnapshots = [];
     this.sessionSnapshots = [];
+    this.resultChecks = [];
+    this.sampleValues = new Map();
   }
 
   getRecordCount(): number {
