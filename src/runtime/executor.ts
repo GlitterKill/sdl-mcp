@@ -102,9 +102,10 @@ export async function resolveAndValidateCwd(
   repoRoot: string,
   relativeCwd: string,
 ): Promise<string> {
-  const resolved = join(repoRoot, relativeCwd);
+  const canonicalRepoRoot = await realpath(repoRoot);
+  const resolved = join(canonicalRepoRoot, relativeCwd);
   const resolvedRealpath = await realpath(resolved);
-  validatePathWithinRoot(repoRoot, resolvedRealpath);
+  validatePathWithinRoot(canonicalRepoRoot, resolvedRealpath);
   return resolvedRealpath;
 }
 

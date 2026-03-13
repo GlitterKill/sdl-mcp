@@ -9,6 +9,7 @@ import {
   getLadybugConn,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { getRuntime } from "../../dist/runtime/runtimes.js";
 
 /**
  * Integration tests for the sdl.runtime.execute MCP tool handler.
@@ -203,10 +204,13 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
   });
 
   it("should allow the resolved default executable when it is explicitly allowlisted", async () => {
+    const defaultShellExecutable = getRuntime("shell")?.buildCommand([], {}).executable;
+    assert.ok(defaultShellExecutable, "Expected shell runtime default");
+
     writeConfig({
       enabled: true,
       allowedRuntimes: ["shell"],
-      allowedExecutables: ["cmd.exe"],
+      allowedExecutables: [defaultShellExecutable],
       maxDurationMs: 5000,
       maxStdoutBytes: 1_048_576,
       maxStderrBytes: 262_144,
@@ -229,7 +233,7 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     assert.notStrictEqual(
       result.status,
       "denied",
-      "Expected shell request to pass allowlist with default cmd.exe",
+      `Expected shell request to pass allowlist with default ${defaultShellExecutable}`,
     );
     assert.strictEqual(result.status, "success");
     assert.ok(result.stdoutSummary.includes("hello-runtime"));

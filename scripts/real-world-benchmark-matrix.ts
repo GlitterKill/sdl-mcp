@@ -3,6 +3,7 @@
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";
+import { buildMatrixRunEnv } from "../src/benchmark/matrix-runner.js";
 
 interface MatrixRun {
   id: string;
@@ -188,7 +189,10 @@ function main(): void {
     );
 
     try {
-      execSync(cmd, { stdio: "inherit" });
+      execSync(cmd, {
+        stdio: "inherit",
+        env: buildMatrixRunEnv(process.env, outDir, run.repoId),
+      });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`[matrix] run=${run.id} FAILED: ${msg}`);

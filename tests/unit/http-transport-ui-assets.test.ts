@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { setupHttpTransport } from "../../src/cli/transport/http.js";
@@ -41,6 +42,24 @@ async function captureUncaughtException(
   }
 }
 
+async function rmWithRetry(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code?: unknown }).code ?? "")
+          : "";
+      if (!["ENOTEMPTY", "EPERM", "EBUSY"].includes(code) || attempt === 4) {
+        throw error;
+      }
+      await delay(50 * (attempt + 1));
+    }
+  }
+}
+
 test("GET /ui/graph returns 500 instead of crashing when the asset stream cannot open", async () => {
   const graphHtmlPath = fileURLToPath(
     new URL("../../src/ui/graph.html", import.meta.url),
@@ -71,8 +90,8 @@ test("GET /ui/graph returns 500 instead of crashing when the asset stream cannot
     assert.match(String(payload.error ?? ""), /ui asset/i);
   } finally {
     await server?.close();
-    await rm(graphHtmlPath, { recursive: true, force: true });
+    await rmWithRetry(graphHtmlPath);
     await rename(backupPath, join(graphUiDir, "graph.html"));
-    await rm(tempDir, { recursive: true, force: true });
+    await rmWithRetry(tempDir);
   }
 });

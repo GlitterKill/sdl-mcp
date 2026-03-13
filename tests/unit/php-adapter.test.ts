@@ -530,7 +530,28 @@ describe("PHP Adapter", () => {
       const symbols = adapter.extractSymbols(tree, content, "test.php");
       const calls = adapter.extractCalls(tree, content, "test.php", symbols);
 
-      assert.strictEqual(calls.length, 11, "Should extract 11 calls");
+      assert.strictEqual(calls.length, 16, "Should extract 16 calls");
+      assert.deepStrictEqual(
+        calls.map((call) => call.calleeIdentifier),
+        [
+          "Validator::validate",
+          "$callback",
+          "$obj.$method",
+          "\\App\\Config::get",
+          "$this.getUserById",
+          "$this.transformUser",
+          "$user.$method",
+          "mail",
+          "error_log",
+          "$fn",
+          "Cache::get",
+          "Database::connect",
+          "Cache::set",
+          "$this.getHandler",
+          "$handler",
+          "ucfirst",
+        ],
+      );
     });
   });
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, mkdir } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -116,6 +116,23 @@ describe("runtime executor", () => {
     assert.equal(valid, inside);
 
     await assert.rejects(() => resolveAndValidateCwd(root, ".."));
+  });
+
+  it("accepts a cwd resolved from a symlinked repo root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sdl-runtime-root-"));
+    const alias = join(await mkdtemp(join(tmpdir(), "sdl-runtime-alias-")), "repo-link");
+    const inside = join(root, "inside");
+
+    await mkdir(inside, { recursive: true });
+    await symlink(root, alias, process.platform === "win32" ? "junction" : "dir");
+
+    try {
+      const valid = await resolveAndValidateCwd(alias, "inside");
+      assert.equal(valid, inside);
+    } finally {
+      await rm(alias, { force: true, recursive: true });
+      await rm(root, { force: true, recursive: true });
+    }
   });
 
   it("killProcessTree is safe as best-effort cleanup", () => {

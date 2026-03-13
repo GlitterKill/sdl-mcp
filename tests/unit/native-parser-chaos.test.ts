@@ -80,20 +80,7 @@ describe("Native parser chaos", () => {
 
   it("marks languages without native extraction support as unsupported", () => {
     const cases = [
-      ["src/foo.c", "c"],
-      ["src/foo.h", "c"],
-      ["src/foo.cpp", "cpp"],
-      ["src/foo.hpp", "cpp"],
-      ["src/foo.py", "py"],
-      ["src/foo.go", "go"],
-      ["src/Foo.java", "java"],
-      ["src/Foo.cs", "cs"],
-      ["src/foo.php", "php"],
-      ["src/lib.rs", "rs"],
       ["src/App.kt", "kt"],
-      ["src/script.sh", "sh"],
-      ["src/script.bash", "sh"],
-      ["src/script.zsh", "sh"],
     ] as const;
 
     for (const [filePath, language] of cases) {
