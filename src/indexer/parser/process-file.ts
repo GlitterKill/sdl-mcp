@@ -655,7 +655,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
           repoId,
           relPath,
           contentHash,
-          language: ext,
+          language: adapter?.languageId ?? ext,
           byteSize: fileMeta.size,
           lastIndexedAt: new Date().toISOString(),
         });

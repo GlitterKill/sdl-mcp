@@ -167,6 +167,115 @@ describe("import-resolution adapters", () => {
     assert.deepStrictEqual(paths, ["src/Generated/UserService.cs"]);
   });
 
+  it("resolves C local include to relative path", async () => {
+    const repoRoot = createTempRepo("sdl-c-includes-");
+    writeRepoFile(
+      repoRoot,
+      "src/utils.h",
+      "#ifndef UTILS_H\n#define UTILS_H\nint helper(void);\n#endif\n",
+    );
+
+    const paths = await resolveImportCandidatePaths({
+      language: "c",
+      repoRoot,
+      importerRelPath: "src/main.c",
+      specifier: "utils.h",
+      extensions: [".c", ".h"],
+    });
+
+    assert.deepStrictEqual(paths, ["src/utils.h"]);
+  });
+
+  it("resolves C include with subdirectory path", async () => {
+    const repoRoot = createTempRepo("sdl-c-includes-");
+    writeRepoFile(repoRoot, "include/mylib/core.h", "");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "c",
+      repoRoot,
+      importerRelPath: "src/main.c",
+      specifier: "mylib/core.h",
+      extensions: [".c", ".h"],
+    });
+
+    assert.deepStrictEqual(paths, ["include/mylib/core.h"]);
+  });
+
+  it("resolves C++ local include identically to C", async () => {
+    const repoRoot = createTempRepo("sdl-cpp-includes-");
+    writeRepoFile(repoRoot, "src/widget.hpp", "class Widget {};");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "cpp",
+      repoRoot,
+      importerRelPath: "src/main.cpp",
+      specifier: "widget.hpp",
+      extensions: [".cpp", ".hpp", ".cc", ".cxx", ".hxx", ".h"],
+    });
+
+    assert.deepStrictEqual(paths, ["src/widget.hpp"]);
+  });
+
+  it("resolves include relative to repo root when not near importer", async () => {
+    const repoRoot = createTempRepo("sdl-c-includes-");
+    writeRepoFile(repoRoot, "lib/helpers.h", "void help(void);");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "c",
+      repoRoot,
+      importerRelPath: "src/app/main.c",
+      specifier: "lib/helpers.h",
+      extensions: [".c", ".h"],
+    });
+
+    assert.deepStrictEqual(paths, ["lib/helpers.h"]);
+  });
+
+  it("resolves Shell source path relative to importer", async () => {
+    const repoRoot = createTempRepo("sdl-shell-imports-");
+    writeRepoFile(repoRoot, "lib/utils.sh", 'log_info() { echo "$1"; }');
+
+    const paths = await resolveImportCandidatePaths({
+      language: "shell",
+      repoRoot,
+      importerRelPath: "scripts/deploy.sh",
+      specifier: "../lib/utils.sh",
+      extensions: [".sh", ".bash"],
+    });
+
+    assert.deepStrictEqual(paths, ["lib/utils.sh"]);
+  });
+
+  it("resolves Shell source path relative to repo root", async () => {
+    const repoRoot = createTempRepo("sdl-shell-imports-");
+    writeRepoFile(repoRoot, "lib/common.sh", "setup() { true; }");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "shell",
+      repoRoot,
+      importerRelPath: "scripts/deploy.sh",
+      specifier: "lib/common.sh",
+      extensions: [".sh", ".bash"],
+    });
+
+    assert.deepStrictEqual(paths, ["lib/common.sh"]);
+  });
+
+  it("resolves Shell source with extension fallback", async () => {
+    const repoRoot = createTempRepo("sdl-shell-imports-");
+    writeRepoFile(repoRoot, "lib/helpers.sh", "helper() { true; }");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "shell",
+      repoRoot,
+      importerRelPath: "scripts/main.sh",
+      specifier: "lib/helpers",
+      extensions: [".sh", ".bash"],
+    });
+
+    assert.deepStrictEqual(paths, ["lib/helpers.sh"]);
+  });
+
   it("resolves PHP namespace imports via composer PSR-4", async () => {
     const repoRoot = createTempRepo("sdl-php-imports-");
     writeRepoFile(

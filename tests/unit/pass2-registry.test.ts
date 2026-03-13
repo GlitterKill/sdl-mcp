@@ -71,7 +71,7 @@ describe("pass2 resolver registry", () => {
     );
   });
 
-  it("uses the default registry for ts, go, php, python, java, kotlin, and rust pass2 targets", () => {
+  it("uses the default registry for ts, go, php, python, java, kotlin, rust, csharp, cpp, c, and shell pass2 targets", () => {
     const registry = createDefaultPass2ResolverRegistry();
 
     assert.equal(
@@ -120,6 +120,49 @@ describe("pass2 resolver registry", () => {
     );
     assert.equal(
       registry.supports(toPass2Target({ path: "src/lib.rs" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/Program.cs" })),
+      true,
+    );
+    // C++ extensions
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/main.cpp" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/widget.hpp" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/main.cc" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/util.cxx" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/types.hxx" })),
+      true,
+    );
+    // C extensions
+    assert.equal(
+      registry.supports(toPass2Target({ path: "src/main.c" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "include/utils.h" })),
+      true,
+    );
+    // Shell extensions
+    assert.equal(
+      registry.supports(toPass2Target({ path: "scripts/deploy.sh" })),
+      true,
+    );
+    assert.equal(
+      registry.supports(toPass2Target({ path: "scripts/build.bash" })),
       true,
     );
   });

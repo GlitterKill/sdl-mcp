@@ -86,8 +86,12 @@ describe("doctor command - call resolution capabilities", () => {
     assert.match(output, /pass2-java/i);
     assert.match(output, /pass2-php/i);
     assert.match(output, /pass2-python/i);
+    assert.match(output, /pass2-csharp/i);
     assert.match(output, /pass2-kotlin/i);
     assert.match(output, /pass2-rust/i);
+    assert.match(output, /pass2-cpp/i);
+    assert.match(output, /pass2-c/i);
+    assert.match(output, /pass2-shell/i);
     assert.match(output, /schema v3/i);
     assert.match(
       output,
