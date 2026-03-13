@@ -1,5 +1,6 @@
-import type { LanguageAdapter } from "../LanguageAdapter.js";
 import { z } from "zod";
+
+import type { LanguageAdapter } from "../LanguageAdapter.js";
 
 const PLUGIN_API_VERSION = "1.0.0";
 

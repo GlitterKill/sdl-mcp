@@ -433,7 +433,7 @@ export function parseFilesRust(
     try {
       const mapped = nativeResults.map(mapNativeResult);
       mapped.forEach((result, batchIndex) => {
-        results[batchEntries[batchIndex]!.index] = result;
+        results[batchEntries[batchIndex].index] = result;
       });
     } catch (error) {
       logger.error(

@@ -404,9 +404,9 @@ async function indexRepoImpl(
             allConfigEdges.push(...result.configEdges);
           } catch (error) {
             filesProcessed++;
-            logger.error(
-              `Error processing Rust result for ${file.path}: ${error}`,
-            );
+            logger.error(`Error processing Rust result for ${file.path}`, {
+              error,
+            });
           }
         }
 
@@ -453,7 +453,7 @@ async function indexRepoImpl(
             allConfigEdges.push(...result.configEdges);
           } catch (error) {
             filesProcessed++;
-            logger.error(`Error in TS fallback for ${file.path}: ${error}`);
+            logger.error(`Error in TS fallback for ${file.path}`, { error });
           }
         }
       } else {
@@ -516,7 +516,7 @@ async function indexRepoImpl(
             allConfigEdges.push(...result.configEdges);
           } catch (error) {
             filesProcessed++;
-            logger.error(`Error processing file ${file.path}: ${error}`);
+            logger.error(`Error processing file ${file.path}`, { error });
           }
         }
       };

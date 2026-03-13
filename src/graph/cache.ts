@@ -85,7 +85,7 @@ class LRUCache<T> {
     switch (typeof value) {
       case "string":
         // 2 bytes per char is a reasonable UTF-8 upper bound
-        return 16 + (value as string).length * 2;
+        return 16 + value.length * 2;
       case "number":
       case "boolean":
         return 16;

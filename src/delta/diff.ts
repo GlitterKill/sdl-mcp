@@ -128,7 +128,7 @@ export function diffSignature(
       beforeObj = JSON.parse(before);
     } catch (e) {
       logger.warn(
-        `Failed to parse JSON in diffSignature (before): ${(e as Error).message}`,
+        `Failed to parse JSON in diffSignature (before): ${e instanceof Error ? e.message : String(e)}`,
       );
     }
   }
@@ -139,7 +139,7 @@ export function diffSignature(
       afterObj = JSON.parse(after);
     } catch (e) {
       logger.warn(
-        `Failed to parse JSON in diffSignature (after): ${(e as Error).message}`,
+        `Failed to parse JSON in diffSignature (after): ${e instanceof Error ? e.message : String(e)}`,
       );
     }
   }
@@ -171,7 +171,7 @@ export function diffArray(
       beforeArr = JSON.parse(before) as string[];
     } catch (e) {
       logger.warn(
-        `Failed to parse JSON in diffArray (before): ${(e as Error).message}`,
+        `Failed to parse JSON in diffArray (before): ${e instanceof Error ? e.message : String(e)}`,
       );
       beforeArr = [];
     }
@@ -183,7 +183,7 @@ export function diffArray(
       afterArr = JSON.parse(after) as string[];
     } catch (e) {
       logger.warn(
-        `Failed to parse JSON in diffArray (after): ${(e as Error).message}`,
+        `Failed to parse JSON in diffArray (after): ${e instanceof Error ? e.message : String(e)}`,
       );
       afterArr = [];
     }
@@ -222,8 +222,14 @@ export function computeStalenessTiers(
   // `signatureDiff` and `sideEffectDiff` only exist on the "modified" variant of
   // the DeltaSymbolChange discriminated union. For "added"/"removed" changes the
   // interface/side-effects are inherently unstable (one side is missing entirely).
-  const interfaceStable = change.changeType === "modified" ? change.signatureDiff === undefined : false;
-  const sideEffectsStable = change.changeType === "modified" ? change.sideEffectDiff === undefined : false;
+  const interfaceStable =
+    change.changeType === "modified"
+      ? change.signatureDiff === undefined
+      : false;
+  const sideEffectsStable =
+    change.changeType === "modified"
+      ? change.sideEffectDiff === undefined
+      : false;
 
   let behaviorStable = false;
 

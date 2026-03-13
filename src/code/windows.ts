@@ -1,14 +1,18 @@
 import { readFile, stat } from "fs/promises";
-import { REGEX_CACHE_MAX_SIZE, REGEX_CACHE_EVICT_COUNT } from "../config/constants.js";
 import { join } from "path";
+
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { CodeWindowResponse, Range } from "../domain/types.js";
-import { normalizePath } from "../util/paths.js";
-import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
-import { MAX_FILE_BYTES } from "../config/constants.js";
-import { logger } from "../util/logger.js";
+import {
+  MAX_FILE_BYTES,
+  REGEX_CACHE_MAX_SIZE,
+  REGEX_CACHE_EVICT_COUNT,
+} from "../config/constants.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import { logger } from "../util/logger.js";
+import { normalizePath } from "../util/paths.js";
+import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
 
 export async function extractCodeWindow(
   repoId: RepoId,
@@ -102,7 +106,10 @@ export function identifiersExistInWindow(
     );
     identifierRegexCache.set(cacheKey, regex);
     if (identifierRegexCache.size > REGEX_CACHE_MAX_SIZE) {
-      const keysToDelete = Array.from(identifierRegexCache.keys()).slice(0, REGEX_CACHE_EVICT_COUNT);
+      const keysToDelete = Array.from(identifierRegexCache.keys()).slice(
+        0,
+        REGEX_CACHE_EVICT_COUNT,
+      );
       for (const key of keysToDelete) {
         identifierRegexCache.delete(key);
       }
@@ -143,7 +150,12 @@ export async function extractWindow(
     if (fileStat.size > MAX_FILE_BYTES) {
       return {
         code: "",
-        actualRange: { startLine: range.startLine, startCol: 0, endLine: range.startLine, endCol: 0 },
+        actualRange: {
+          startLine: range.startLine,
+          startCol: 0,
+          endLine: range.startLine,
+          endCol: 0,
+        },
         estimatedTokens: 0,
         originalLines: 0,
         originalTokens: 0,
@@ -158,7 +170,12 @@ export async function extractWindow(
     });
     return {
       code: "",
-      actualRange: { startLine: range.startLine, startCol: 0, endLine: range.startLine, endCol: 0 },
+      actualRange: {
+        startLine: range.startLine,
+        startCol: 0,
+        endLine: range.startLine,
+        endCol: 0,
+      },
       estimatedTokens: 0,
       originalLines: 0,
       originalTokens: 0,

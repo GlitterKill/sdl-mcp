@@ -493,7 +493,10 @@ function serveUiAsset(pathname: string, res: ServerResponse): boolean {
       return true;
     }
   } catch (error) {
-    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    const code =
+      error instanceof Error
+        ? (error as NodeJS.ErrnoException).code
+        : undefined;
     const status = code === "ENOENT" ? 404 : 500;
     const message =
       status === 404
@@ -511,7 +514,10 @@ function serveUiAsset(pathname: string, res: ServerResponse): boolean {
     });
 
     if (!res.headersSent) {
-      const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+      const code =
+        error instanceof Error
+          ? (error as NodeJS.ErrnoException).code
+          : undefined;
       const status = code === "ENOENT" ? 404 : 500;
       const message =
         status === 404
@@ -813,7 +819,12 @@ export async function setupHttpTransport(
 
     const server = mcpServers.get(sessionId);
     if (server) {
-      void server.stop().catch(() => {});
+      void server.stop().catch((err) => {
+        logger.debug("Failed to stop MCP server for session", {
+          sessionId,
+          error: err,
+        });
+      });
       mcpServers.delete(sessionId);
     }
 
@@ -981,7 +992,11 @@ export async function setupHttpTransport(
                     cleanupSession(registeredSessionId);
                   } else {
                     // MCPServer was created but never connected — stop it directly
-                    void mcpServer.stop().catch(() => {});
+                    void mcpServer.stop().catch((err) => {
+                      logger.debug("Failed to stop unconnected MCP server", {
+                        error: err,
+                      });
+                    });
                   }
                   throw initError;
                 } finally {

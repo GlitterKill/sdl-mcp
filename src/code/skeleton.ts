@@ -1,11 +1,11 @@
-import { readFile, stat } from "fs/promises";
 import { createHash } from "crypto";
-import type { RepoId, SymbolId } from "../db/schema.js";
-import type { Range, SkeletonOp, SkeletonIR } from "../domain/types.js";
-import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
-import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
+import { readFile, stat } from "fs/promises";
+
 import Parser from "tree-sitter";
 import TypeScript from "tree-sitter-typescript";
+
+import type { RepoId, SymbolId } from "../db/schema.js";
+import type { Range, SkeletonOp, SkeletonIR } from "../domain/types.js";
 import {
   DEFAULT_MAX_LINES_SKELETON,
   DEFAULT_MAX_TOKENS_SKELETON,
@@ -16,8 +16,10 @@ import {
 } from "../config/constants.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
-import { logger } from "../util/logger.js";
 import { getParser as getGrammarParser } from "../indexer/treesitter/grammarLoader.js";
+import { logger } from "../util/logger.js";
+import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
+import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
 
 const tsParser = new Parser();
 const tsxParser = new Parser();

@@ -1,6 +1,6 @@
-import type { AppConfig } from "../config/types.js";
 import * as crypto from "crypto";
 
+import type { AppConfig } from "../config/types.js";
 import { withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { updateMetricsForRepo } from "../graph/metrics.js";

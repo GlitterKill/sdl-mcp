@@ -1,6 +1,6 @@
-import type { RepoId, SymbolId } from "../db/schema.js";
 import * as crypto from "crypto";
 
+import type { RepoId, SymbolId } from "../db/schema.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";

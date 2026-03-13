@@ -1,6 +1,7 @@
-import * as ts from "typescript";
 import * as fs from "fs";
 import * as path from "path";
+
+import * as ts from "typescript";
 import type { RepoConfig } from "../config/types.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { TS_DIAGNOSTICS_MAX_ERRORS } from "../config/constants.js";

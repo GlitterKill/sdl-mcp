@@ -1,15 +1,16 @@
+import { join } from "path";
+
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
+import { IndexError } from "../domain/errors.js";
+import { indexRepo, type IndexResult } from "../indexer/indexer.js";
+import { sleep } from "../util/time.js";
 import type {
   SyncPullOptions,
   SyncPullResult,
   SyncArtifactMetadata,
 } from "./types.js";
 import { listArtifacts, getArtifactMetadata, importArtifact } from "./sync.js";
-import { indexRepo, type IndexResult } from "../indexer/indexer.js";
-import { join } from "path";
-import { sleep } from "../util/time.js";
-import { getLadybugConn } from "../db/ladybug.js";
-import * as ladybugDb from "../db/ladybug-queries.js";
-import { IndexError } from "../domain/errors.js";
 
 const DEFAULT_MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
@@ -55,7 +56,9 @@ export async function pullLatestState(
         const metadata = getArtifactMetadata(artifactPath);
 
         if (!metadata) {
-          throw new IndexError(`Failed to read artifact metadata: ${artifactPath}`);
+          throw new IndexError(
+            `Failed to read artifact metadata: ${artifactPath}`,
+          );
         }
 
         const importResult = await importArtifact({
@@ -98,7 +101,8 @@ export async function pullLatestState(
         `No sync artifact found and fallback to full index disabled`,
       );
     } catch (error) {
-      lastError = error instanceof Error ? error : new IndexError(String(error));
+      lastError =
+        error instanceof Error ? error : new IndexError(String(error));
       retryCount = attempt;
 
       if (attempt < maxRetries) {

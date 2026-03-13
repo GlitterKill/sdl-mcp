@@ -108,7 +108,11 @@ function normalizeEdgeType(value: string): EdgeType | null {
 }
 
 function estimateCardTokensLadybug(
-  symbol: { name: string; signatureJson: string | null; summary: string | null },
+  symbol: {
+    name: string;
+    signatureJson: string | null;
+    summary: string | null;
+  },
   outgoingEdgeCount: number,
 ): number {
   let tokens = SYMBOL_TOKEN_BASE;
@@ -237,9 +241,7 @@ export function beamSearch(
 
   // Collect forced symbolIds: editedFile nodes bypass score threshold pruning
   const forcedSymbolIds = new Set<SymbolId>(
-    startNodes
-      .filter((n) => n.source === "editedFile")
-      .map((n) => n.symbolId),
+    startNodes.filter((n) => n.source === "editedFile").map((n) => n.symbolId),
   );
 
   for (const { symbolId, source } of startNodes) {
@@ -359,12 +361,8 @@ export function beamSearch(
         edgeConfidence,
       );
       const neighborScore = -(
-        scoreSymbolWithMetrics(
-          neighborSymbol,
-          context,
-          null,
-          undefined,
-        ) * edgeWeight
+        scoreSymbolWithMetrics(neighborSymbol, context, null, undefined) *
+        edgeWeight
       );
 
       if (-neighborScore < SLICE_SCORE_THRESHOLD) {
@@ -460,9 +458,7 @@ export async function beamSearchLadybug(
 
   // Collect forced symbolIds: editedFile nodes bypass score threshold pruning
   const forcedSymbolIds = new Set<SymbolId>(
-    startNodes
-      .filter((n) => n.source === "editedFile")
-      .map((n) => n.symbolId),
+    startNodes.filter((n) => n.source === "editedFile").map((n) => n.symbolId),
   );
 
   const symbolCache = new Map<SymbolId, ladybugDb.SymbolRow>();
@@ -470,8 +466,12 @@ export async function beamSearchLadybug(
   const metricsCache = new Map<SymbolId, ladybugDb.MetricsRow | null>();
   const outgoingEdgesCache = new Map<SymbolId, ladybugDb.EdgeForSlice[]>();
 
-  const entryClusterIds = new Set<string>(request.clusterContext?.entryClusterIds ?? []);
-  const relatedClusterIds = new Set<string>(request.clusterContext?.relatedClusterIds ?? []);
+  const entryClusterIds = new Set<string>(
+    request.clusterContext?.entryClusterIds ?? [],
+  );
+  const relatedClusterIds = new Set<string>(
+    request.clusterContext?.relatedClusterIds ?? [],
+  );
   const clusterCohesionEnabled =
     entryClusterIds.size > 0 || relatedClusterIds.size > 0;
   const clusterCache = new Map<SymbolId, string | null>();
@@ -488,7 +488,9 @@ export async function beamSearchLadybug(
     }
   };
 
-  const getSymbol = async (symbolId: SymbolId): Promise<ladybugDb.SymbolRow | null> => {
+  const getSymbol = async (
+    symbolId: SymbolId,
+  ): Promise<ladybugDb.SymbolRow | null> => {
     const cached = symbolCache.get(symbolId);
     if (cached) return cached;
 
@@ -619,7 +621,10 @@ export async function beamSearchLadybug(
     }
 
     const outgoing = await getOutgoingEdges(current.symbolId);
-    const cardTokens = estimateCardTokensLadybug(currentSymbol, outgoing.length);
+    const cardTokens = estimateCardTokensLadybug(
+      currentSymbol,
+      outgoing.length,
+    );
     totalTokens += cardTokens;
 
     if (totalTokens > budget.maxEstimatedTokens) {
@@ -630,7 +635,10 @@ export async function beamSearchLadybug(
       break;
     }
 
-    const edgeByTarget = new Map<SymbolId, { edgeType: EdgeType; confidence: number | undefined }>();
+    const edgeByTarget = new Map<
+      SymbolId,
+      { edgeType: EdgeType; confidence: number | undefined }
+    >();
     const edgeTypePriority: Record<EdgeType, number> = {
       call: 0,
       import: 1,
@@ -672,7 +680,10 @@ export async function beamSearchLadybug(
     if (edgeByTarget.size === 0) continue;
 
     const neighborIds = Array.from(edgeByTarget.keys());
-    const neighborSymbolsMap = await ladybugDb.getSymbolsByIds(conn, neighborIds);
+    const neighborSymbolsMap = await ladybugDb.getSymbolsByIds(
+      conn,
+      neighborIds,
+    );
 
     const validNeighborIds: SymbolId[] = [];
     const fileIds = new Set<string>();
@@ -689,7 +700,9 @@ export async function beamSearchLadybug(
     await getClusters(validNeighborIds);
     await getMetrics(validNeighborIds);
 
-    const missingFileIds = Array.from(fileIds).filter((id) => !fileCache.has(id));
+    const missingFileIds = Array.from(fileIds).filter(
+      (id) => !fileCache.has(id),
+    );
     if (missingFileIds.length > 0) {
       const filesMap = await ladybugDb.getFilesByIds(conn, missingFileIds);
       for (const [fileId, file] of filesMap) {
@@ -720,10 +733,10 @@ export async function beamSearchLadybug(
       const metrics = metricsCache.get(neighborId) ?? null;
       const file = fileCache.get(neighborSymbol.fileId);
       const baseScore = scoreSymbolWithMetrics(
-          toLegacySymbolRow(neighborSymbol),
-          context,
-          metrics ? toLegacyMetricsRow(metrics) : null,
-          file ? toLegacyFileRow(file) : undefined,
+        toLegacySymbolRow(neighborSymbol),
+        context,
+        metrics ? toLegacyMetricsRow(metrics) : null,
+        file ? toLegacyFileRow(file) : undefined,
       );
       const cohesionBoost = clusterCohesionEnabled
         ? calculateClusterCohesion({
@@ -1135,7 +1148,9 @@ export function getScorerPool(
 
 export function resetScorerPool(): void {
   if (globalScorerPool) {
-    globalScorerPool.shutdown().catch(() => {});
+    globalScorerPool.shutdown().catch((err) => {
+      logger.debug("Failed to shutdown scorer pool", { error: err });
+    });
     globalScorerPool = null;
   }
 }
@@ -1179,9 +1194,7 @@ export async function beamSearchAsync(
 
   // Collect forced symbolIds: editedFile nodes bypass score threshold pruning
   const forcedSymbolIds = new Set<SymbolId>(
-    startNodes
-      .filter((n) => n.source === "editedFile")
-      .map((n) => n.symbolId),
+    startNodes.filter((n) => n.source === "editedFile").map((n) => n.symbolId),
   );
 
   for (const { symbolId, source } of startNodes) {

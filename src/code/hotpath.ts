@@ -1,10 +1,10 @@
 import { readFile, stat } from "fs/promises";
-import type { RepoId, SymbolId } from "../db/schema.js";
-import type { Range } from "../domain/types.js";
-import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
-import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
+
 import Parser from "tree-sitter";
 import TypeScript from "tree-sitter-typescript";
+
+import type { RepoId, SymbolId } from "../db/schema.js";
+import type { Range } from "../domain/types.js";
 import {
   DEFAULT_CONTEXT_LINES,
   DEFAULT_MAX_LINES_HOTPATH,
@@ -13,6 +13,8 @@ import {
   MAX_TREESITTER_PARSE_BYTES,
 } from "../config/constants.js";
 import { logger } from "../util/logger.js";
+import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
+import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { getParser as getGrammarParser } from "../indexer/treesitter/grammarLoader.js";
