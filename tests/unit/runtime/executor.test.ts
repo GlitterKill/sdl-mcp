@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -112,10 +112,14 @@ describe("runtime executor", () => {
     const inside = join(root, "inside");
     await mkdir(inside, { recursive: true });
 
-    const valid = await resolveAndValidateCwd(root, "inside");
-    assert.equal(valid, inside);
+    try {
+      const valid = await resolveAndValidateCwd(root, "inside");
+      assert.equal(valid, await realpath(inside));
 
-    await assert.rejects(() => resolveAndValidateCwd(root, ".."));
+      await assert.rejects(() => resolveAndValidateCwd(root, ".."));
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
   });
 
   it("accepts a cwd resolved from a symlinked repo root", async () => {
@@ -128,7 +132,7 @@ describe("runtime executor", () => {
 
     try {
       const valid = await resolveAndValidateCwd(alias, "inside");
-      assert.equal(valid, inside);
+      assert.equal(valid, await realpath(inside));
     } finally {
       await rm(alias, { force: true, recursive: true });
       await rm(root, { force: true, recursive: true });

@@ -42,8 +42,13 @@ async function captureUncaughtException(
   }
 }
 
-async function rmWithRetry(path: string): Promise<void> {
-  for (let attempt = 0; attempt < 5; attempt++) {
+async function rmWithRetry(
+  path: string,
+  options: { required?: boolean } = {},
+): Promise<void> {
+  const { required = true } = options;
+
+  for (let attempt = 0; attempt < 10; attempt++) {
     try {
       await rm(path, { recursive: true, force: true });
       return;
@@ -52,10 +57,17 @@ async function rmWithRetry(path: string): Promise<void> {
         typeof error === "object" && error !== null && "code" in error
           ? String((error as { code?: unknown }).code ?? "")
           : "";
-      if (!["ENOTEMPTY", "EPERM", "EBUSY"].includes(code) || attempt === 4) {
+      const retryable = ["ENOTEMPTY", "EPERM", "EBUSY"].includes(code);
+      if (!retryable) {
         throw error;
       }
-      await delay(50 * (attempt + 1));
+      if (attempt === 9) {
+        if (required) {
+          throw error;
+        }
+        return;
+      }
+      await delay(100 * (attempt + 1));
     }
   }
 }
@@ -92,6 +104,7 @@ test("GET /ui/graph returns 500 instead of crashing when the asset stream cannot
     await server?.close();
     await rmWithRetry(graphHtmlPath);
     await rename(backupPath, join(graphUiDir, "graph.html"));
-    await rmWithRetry(tempDir);
+    await delay(100);
+    await rmWithRetry(tempDir, { required: false });
   }
 });
