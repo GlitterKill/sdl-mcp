@@ -19,12 +19,46 @@
 
 This page defines practical workflows for coding agents using SDL-MCP.
 
+## Complete Tool Reference
+
+SDL-MCP exposes 25 MCP tools across 11 categories. Every workflow on this page uses tools from this table.
+
+| Category | Tool | Purpose |
+|:---------|:-----|:--------|
+| **Repository** | `sdl.repo.register` | Register a new repository for indexing |
+| | `sdl.repo.status` | Get repo status, health metrics, watcher state, prefetch stats |
+| | `sdl.index.refresh` | Trigger full or incremental re-indexing |
+| | `sdl.repo.overview` | Token-efficient codebase overview (stats, directories, hotspots, clusters, processes) |
+| **Live Buffers** | `sdl.buffer.push` | Push editor buffer content for draft-aware indexing |
+| | `sdl.buffer.checkpoint` | Trigger a checkpoint to persist draft changes |
+| | `sdl.buffer.status` | Check live buffer state (pending, dirty, queue depth) |
+| **Symbols** | `sdl.symbol.search` | Search symbols by name or summary; supports semantic reranking |
+| | `sdl.symbol.getCard` | Get a single symbol card with ETag caching |
+| | `sdl.symbol.getCards` | Batch fetch up to 100 cards in one round trip |
+| **Slices** | `sdl.slice.build` | Build graph slice from entry symbols or auto-discover from task text |
+| | `sdl.slice.refresh` | Refresh an existing slice handle; returns incremental delta only |
+| | `sdl.slice.spillover.get` | Paginated fetch for overflow symbols beyond budget |
+| **Code Access** | `sdl.code.getSkeleton` | Deterministic skeleton IR (signatures + control flow, elided bodies) |
+| | `sdl.code.getHotPath` | Hot-path excerpt: only lines matching specified identifiers |
+| | `sdl.code.needWindow` | Full raw code window (gated — requires proof-of-need justification) |
+| **Deltas** | `sdl.delta.get` | Delta pack between two versions with blast radius and fan-in trends |
+| **Policy** | `sdl.policy.get` | Read current policy settings |
+| | `sdl.policy.set` | Update policy (merge patch) |
+| **Risk** | `sdl.pr.risk.analyze` | Analyze PR risk, blast radius, and recommend test targets |
+| **Agent** | `sdl.agent.orchestrate` | Autonomous task execution with budget-controlled rung path planning |
+| | `sdl.agent.feedback` | Record which symbols were useful/missing after a task |
+| | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics |
+| **Context** | `sdl.context.summary` | Generate token-bounded summary for non-MCP contexts (clipboard, markdown, JSON) |
+| **Runtime** | `sdl.runtime.execute` | Sandboxed subprocess execution (Node/Python/Shell) with structured output |
+
+---
+
 ## Paste-Ready AGENTS.md Block
 
-Copy this block into `AGENTS.md` for token-efficient SDL-MCP usage on the current codebase/tooling.  Replace [repoid] with your repo's ID.
+Copy this block into `AGENTS.md` for token-efficient SDL-MCP usage on the current codebase/tooling. Replace `[repoid]` with your repo's ID.
 
 ```md
-## SDL-MCP Token-Efficient Protocol (v0.6)
+## SDL-MCP Token-Efficient Protocol (v0.8)
 
 - Repository ID: `[repoid]`
 - MCP Server: `sdl-mcp`
@@ -44,6 +78,7 @@ Use this order unless task constraints force escalation:
 
 1. `sdl.repo.overview` (start with `level: "stats"`; use `directories`/`full` only when needed).
 2. `sdl.symbol.search` with a tight `limit` (`5-20` to start; default is `50`, max is `1000`).
+   - Add `semantic: true` to enable embedding-based reranking for fuzzy or conceptual queries.
 3. `sdl.symbol.getCard` for single lookups; send `ifNoneMatch` to get `notModified` responses. Use `sdl.symbol.getCards` (batch, up to 100 IDs) when fetching multiple symbols at once — one round trip instead of many.
 4. `sdl.slice.build` with explicit budget and compact output:
    - Keep `wireFormat: "compact"` (default) and `wireFormatVersion: 2` (default).
@@ -52,6 +87,7 @@ Use this order unless task constraints force escalation:
    - Always provide `entrySymbols` when available.
    - Provide `knownCardEtags` to avoid resending unchanged cards (`cardRefs` are returned instead).
    - Leave `cardDetail` unset for mixed compact/full behavior. Use `"full"` only when you truly need full cards for all slice symbols.
+   - **Auto-discovery mode**: pass `taskText` (and optionally `stackTrace`, `failingTestPath`, or `editedFiles`) instead of `entrySymbols` to let SDL-MCP find relevant symbols automatically.
 5. `sdl.slice.refresh` if you already have a `sliceHandle`; prefer refresh over rebuilding.
 6. `sdl.slice.spillover.get` only when necessary; keep `pageSize` small (default `20`, max `100`).
 7. `sdl.code.getSkeleton` before `hotPath` or raw windows. In file mode, prefer `exportedOnly: true` when possible.
@@ -63,9 +99,13 @@ Use this order unless task constraints force escalation:
 
 ### 2) Task-specific workflows
 
-- Debug: `search -> card -> slice.build -> hotPath -> needWindow (only if still ambiguous)`.
-- Feature implementation: `repo.overview -> search -> card -> slice.build`.
-- PR review: `delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols`.
+- **Debug**: `search -> card -> slice.build -> hotPath -> needWindow (only if still ambiguous)`.
+- **Debug (auto-discovery)**: `slice.build` with `taskText` describing the bug + `stackTrace` if available → SDL-MCP finds symbols automatically.
+- **Feature implementation**: `repo.overview -> search -> card -> slice.build`.
+- **PR review**: `delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols`.
+- **Live editing**: `buffer.push` as files change → `buffer.checkpoint` to persist → search/card/slice now reflect draft state.
+- **Context export**: `context.summary` with `format: "clipboard"` to produce a summary for non-MCP tools.
+- **Test execution**: `runtime.execute` with `runtime: "node"` or `"shell"` to run tests and capture structured output.
 
 ### 3) Token controls by tool
 
@@ -73,19 +113,39 @@ Use this order unless task constraints force escalation:
   - `level: "stats"` is cheapest.
   - `level: "full"` auto-enables hotspots unless overridden.
   - Use `directories`, `maxDirectories`, and `maxExportsPerDirectory` to bound payload.
+- `sdl.symbol.search`:
+  - Keep `limit` low (5–20) to start. Increase only if no results match.
+  - `semantic: true` adds ~50ms latency but dramatically improves relevance for conceptual queries.
 - `sdl.slice.build`:
   - Keep `minConfidence` near `0.5` for recall-oriented work and raise it for precision-focused runs.
-  - Slice cards now filter `deps.calls`/`deps.imports` to only in-slice symbols and include per-dependency confidence scores.
+  - Slice cards filter `deps.calls`/`deps.imports` to only in-slice symbols and include per-dependency confidence scores.
+  - Use `wireFormatVersion: 3` for grouped edge encoding when slices exceed 50 cards.
 - `sdl.delta.get`:
   - Pass `budget` for large version diffs to constrain blast-radius work.
 - `sdl.pr.risk.analyze`:
   - Raise `riskThreshold` (for example `80`) to focus on highest-risk changes.
+- `sdl.context.summary`:
+  - Set `budget` to cap output tokens. Use `scope: "task"` for multi-symbol summaries, `scope: "symbol"` for single-symbol.
+- `sdl.runtime.execute`:
+  - Set `timeoutMs` and `maxResponseLines` to bound output. Use `queryTerms` to extract relevant excerpts from long output.
 
-### 4) Autopilot (`sdl.agent.orchestrate`) guidance
+### 4) Live buffer workflow
+
+When working in an editor with live buffer support:
+
+1. Editor pushes `sdl.buffer.push` on each `change`/`save`/`close` event with the file's current content and a monotonically increasing `version` number.
+2. Call `sdl.buffer.status` to check how many buffers are pending/dirty.
+3. Call `sdl.buffer.checkpoint` to persist draft symbols into the overlay.
+4. All subsequent `search`, `getCard`, `slice.build`, and `getSkeleton` calls now reflect the draft state — no re-index needed.
+
+Stale buffer pushes (version ≤ current) are rejected automatically.
+
+### 5) Autopilot (`sdl.agent.orchestrate`) guidance
 
 - Always provide a budget (`maxTokens`, `maxActions`, optionally `maxDurationMs`).
 - Always scope with `focusSymbols` and/or `focusPaths`.
 - Avoid `requireDiagnostics` unless needed; it can add a raw rung.
+- Task types: `"debug"`, `"review"`, `"implement"`, `"explain"`.
 - Planner token estimates are approximately:
   - `card`: `50`
   - `skeleton`: `200`
@@ -93,17 +153,46 @@ Use this order unless task constraints force escalation:
   - `raw`: `2000`
 - When over budget, planner trims rungs from the end while keeping at least one rung.
 
-### 5) Do not
+### 6) Runtime execution (`sdl.runtime.execute`)
 
-- Do not jump directly to raw file reads if SDL tools can answer the question.
-- Do not call `sdl.code.needWindow` before trying `sdl.code.getSkeleton`/`sdl.code.getHotPath`.
-- Do not use broad `sdl.symbol.search` limits by default.
-- Do not rebuild slices repeatedly when `sdl.slice.refresh` can provide incremental deltas.
-- Do not call `sdl.symbol.getCard` N times when `sdl.symbol.getCards` can fetch all N in one call.
+Run commands in a repo-scoped subprocess. Requires `runtime.enabled: true` in config.
 
-### 6) After completing a task
+```json
+{
+  "repoId": "[repoid]",
+  "runtime": "node",
+  "args": ["--test", "tests/auth.test.ts"],
+  "timeoutMs": 30000,
+  "queryTerms": ["FAIL", "Error"],
+  "maxResponseLines": 100
+}
+```
 
-Call `sdl.agent.feedback` with the `sliceHandle` you used, at least one `usefulSymbols` ID, and optionally any `missingSymbols`. This trains the slice ranker over time and improves context quality for the repo.
+- **Runtimes**: `"node"`, `"python"`, `"shell"`.
+- Use `code` to run inline code or `args` to invoke a file.
+- `queryTerms` extracts only matching lines from output (like a built-in grep).
+- `persistOutput: true` saves full output to an artifact handle for later retrieval.
+
+### 7) Context export (`sdl.context.summary`)
+
+Generate a token-bounded summary for contexts that don't support MCP tool calls (e.g., pasting into a chat, a PR description, or a ticket).
+
+```json
+{
+  "repoId": "[repoid]",
+  "query": "authentication flow",
+  "budget": 2000,
+  "format": "clipboard",
+  "scope": "task"
+}
+```
+
+- **Formats**: `"markdown"` (default), `"json"` (structured), `"clipboard"` (paste-ready).
+- **Scopes**: `"symbol"` (single symbol), `"file"` (all exports in a file), `"task"` (multi-symbol via search).
+
+### 8) Feedback loop
+
+After completing a task, record what worked:
 
 ```json
 {
@@ -112,7 +201,58 @@ Call `sdl.agent.feedback` with the `sliceHandle` you used, at least one `usefulS
   "sliceHandle": "<from sdl.slice.build>",
   "usefulSymbols": ["<id1>", "<id2>"],
   "missingSymbols": ["<id3>"],
-  "taskType": "debug"
+  "taskType": "debug",
+  "taskText": "Fix auth token expiry bug"
 }
 ```
 
+This trains the slice ranker over time and improves context quality for the repo.
+
+To review recorded feedback later (e.g., for tuning or reporting):
+
+```json
+sdl.agent.feedback.query({
+  "repoId": "[repoid]",
+  "limit": 50,
+  "since": "2026-03-01T00:00:00Z"
+})
+```
+
+Returns aggregated stats on which symbols are most frequently useful/missing.
+
+### 9) Policy management
+
+Read current gating thresholds:
+
+```json
+sdl.policy.get({ "repoId": "[repoid]" })
+```
+
+Adjust policy for the session (merge patch — only supplied fields change):
+
+```json
+sdl.policy.set({
+  "repoId": "[repoid]",
+  "policyPatch": {
+    "maxWindowLines": 250,
+    "allowBreakGlass": false
+  }
+})
+```
+
+Common adjustments:
+- Raise `maxWindowLines`/`maxWindowTokens` for large functions.
+- Set `allowBreakGlass: false` to enforce strict proof-of-need gating.
+- Set `requireIdentifiers: false` to allow unscoped code window requests (not recommended).
+
+### 10) Do not
+
+- Do not jump directly to raw file reads if SDL tools can answer the question.
+- Do not call `sdl.code.needWindow` before trying `sdl.code.getSkeleton`/`sdl.code.getHotPath`.
+- Do not use broad `sdl.symbol.search` limits by default.
+- Do not rebuild slices repeatedly when `sdl.slice.refresh` can provide incremental deltas.
+- Do not call `sdl.symbol.getCard` N times when `sdl.symbol.getCards` can fetch all N in one call.
+- Do not skip `sdl.agent.feedback` after completing a task — it improves future context quality.
+- Do not call `sdl.runtime.execute` without setting `timeoutMs` — long-running processes will hang.
+- Do not ignore `nextBestAction` in denied `code.needWindow` responses — it tells you what to try instead.
+```
