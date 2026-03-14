@@ -5,6 +5,7 @@ import type {
   SummaryOptions,
   HealthOptions,
   ServeOptions,
+  ToolDispatchOptions,
 } from "./types.js";
 
 export type ParsedOptionValues = Record<string, unknown>;
@@ -580,3 +581,50 @@ export function parseBenchmarkOptions(
 
   return options;
 }
+
+export function parseToolDispatchOptions(
+  args: string[],
+  global: CLIOptions,
+  values: ParsedOptionValues,
+): ToolDispatchOptions {
+  const options: ToolDispatchOptions = {
+    ...global,
+    rawArgs: [],
+  };
+
+  // Check for --list
+  if (values.list === true || args.includes("--list")) {
+    options.list = true;
+    return options;
+  }
+
+  // First positional is the action name
+  const remainingArgs: string[] = [];
+  let actionFound = false;
+
+  for (const arg of args) {
+    if (!actionFound && !arg.startsWith("-")) {
+      options.action = arg;
+      actionFound = true;
+    } else {
+      remainingArgs.push(arg);
+    }
+  }
+
+  // Check for --help after action
+  if (values.help === true || remainingArgs.includes("--help") || remainingArgs.includes("-h")) {
+    options.showHelp = true;
+    // Filter out --help from remaining args
+    options.rawArgs = remainingArgs.filter((a) => a !== "--help" && a !== "-h");
+  } else {
+    options.rawArgs = remainingArgs;
+  }
+
+  // Output format
+  if (typeof values["output-format"] === "string") {
+    options.outputFormat = values["output-format"];
+  }
+
+  return options;
+}
+

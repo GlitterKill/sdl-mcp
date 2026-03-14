@@ -17,6 +17,7 @@ import { pullCommand } from "./commands/pull.js";
 import { benchmarkCICommand } from "./commands/benchmark.js";
 import { summaryCommand } from "./commands/summary.js";
 import { healthCommand } from "./commands/health.js";
+import { toolDispatchCommand } from "./commands/tool-dispatch.js";
 import {
   parseInitOptions,
   parseIndexOptions,
@@ -27,6 +28,7 @@ import {
   parseBenchmarkOptions,
   parseSummaryOptions,
   parseHealthOptions,
+  parseToolDispatchOptions,
 } from "./argParsing.js";
 
 async function main(): Promise<void> {
@@ -211,6 +213,18 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "tool": {
+      const toolIndex = process.argv.indexOf("tool");
+      const toolArgs = toolIndex !== -1 ? process.argv.slice(toolIndex + 1) : [];
+      const options = parseToolDispatchOptions(
+        toolArgs,
+        global,
+        values as Record<string, unknown>,
+      );
+      await toolDispatchCommand(options);
+      break;
+    }
+
     default:
       console.error(`Unknown command: ${command}`);
       console.error("");
@@ -232,6 +246,7 @@ Commands:
   version           Show version information
   index             Index repositories (optional: --watch, --repo-id, --force)
   serve             Start MCP server (default: stdio, optional: --http, --port, --host)
+  tool              Access all MCP tool actions directly (run 'sdl-mcp tool --list' for more info)
   export            Export indexed state as sync artifact
   import            Import indexed state from sync artifact
   pull              Pull latest state from artifact or fallback to full index
@@ -317,13 +332,12 @@ Global Options:
 
  Examples:
    sdl-mcp init
-   sdl-mcp init -y --auto-index
    sdl-mcp doctor
    sdl-mcp index --watch
    sdl-mcp serve --stdio
-   sdl-mcp serve --http --port 3000
+   sdl-mcp tool --list
+   sdl-mcp tool symbol.search --query "auth" --repo-id my-repo
    sdl-mcp export
-   sdl-mcp export --list
    sdl-mcp import --artifact-path .sdl-sync/repo-xxx.sdl-artifact.json
    sdl-mcp pull
    sdl-mcp benchmark:ci

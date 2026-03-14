@@ -64,3 +64,16 @@ export interface BenchmarkOptions extends CLIOptions {
   updateBaseline?: boolean;
   skipIndexing?: boolean;
 }
+
+export interface ToolDispatchOptions extends CLIOptions {
+  /** The action name, e.g. "symbol.search" */
+  action?: string;
+  /** Whether to show the action list */
+  list?: boolean;
+  /** Whether to show action-specific help */
+  showHelp?: boolean;
+  /** Output format override */
+  outputFormat?: string;
+  /** Raw remaining args to pass to the action-specific parser */
+  rawArgs: string[];
+}
