@@ -1,4 +1,5 @@
 import type { MCPServer } from "../../server.js";
+import { registerGatewayTools } from "../../gateway/index.js";
 import {
   RepoRegisterRequestSchema,
   RepoStatusRequestSchema,
@@ -80,7 +81,17 @@ type ToolServices = {
 export function registerTools(
   server: MCPServer,
   services: ToolServices = {},
+  gatewayConfig?: { enabled?: boolean; emitLegacyTools?: boolean },
 ): void {
+  if (gatewayConfig?.enabled) {
+    server.gatewayMode = true;
+    registerGatewayTools(server, services, {
+      enabled: true,
+      emitLegacyTools: gatewayConfig.emitLegacyTools ?? true,
+    });
+    return;
+  }
+
   server.registerTool(
     "sdl.repo.register",
     "Register a new repository for indexing",

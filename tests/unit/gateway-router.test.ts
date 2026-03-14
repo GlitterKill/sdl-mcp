@@ -1,0 +1,127 @@
+import { describe, it } from "node:test";
+import assert from "node:assert";
+import { createActionMap, routeGatewayCall } from "../../src/gateway/router.js";
+
+describe("Gateway router", () => {
+  describe("createActionMap", () => {
+    it("contains all 25 actions", () => {
+      const map = createActionMap();
+      const actions = Object.keys(map);
+      assert.strictEqual(actions.length, 25);
+    });
+
+    it("each entry has schema and handler", () => {
+      const map = createActionMap();
+      for (const [action, entry] of Object.entries(map)) {
+        assert.ok(entry.schema, `${action} missing schema`);
+        assert.ok(
+          typeof entry.handler === "function",
+          `${action} missing handler`,
+        );
+      }
+    });
+
+    it("contains known actions", () => {
+      const map = createActionMap();
+      const expected = [
+        "symbol.search",
+        "symbol.getCard",
+        "symbol.getCards",
+        "slice.build",
+        "slice.refresh",
+        "slice.spillover.get",
+        "delta.get",
+        "context.summary",
+        "pr.risk.analyze",
+        "code.needWindow",
+        "code.getSkeleton",
+        "code.getHotPath",
+        "repo.register",
+        "repo.status",
+        "repo.overview",
+        "index.refresh",
+        "policy.get",
+        "policy.set",
+        "agent.orchestrate",
+        "agent.feedback",
+        "agent.feedback.query",
+        "buffer.push",
+        "buffer.checkpoint",
+        "buffer.status",
+        "runtime.execute",
+      ];
+      for (const name of expected) {
+        assert.ok(name in map, `Missing action: ${name}`);
+      }
+    });
+  });
+
+  describe("routeGatewayCall", () => {
+    it("throws for unknown action", async () => {
+      const map = createActionMap();
+      await assert.rejects(
+        () =>
+          routeGatewayCall(
+            { action: "unknown.action", repoId: "test" },
+            map,
+          ),
+        /Unknown gateway action/,
+      );
+    });
+
+    it("merges repoId into action params", async () => {
+      // Create a mock action map with a test handler
+      let receivedArgs: unknown = null;
+      const mockMap = {
+        "test.action": {
+          schema: {
+            parse(args: unknown) {
+              return args;
+            },
+          },
+          handler: async (args: unknown) => {
+            receivedArgs = args;
+            return { ok: true };
+          },
+        },
+      };
+
+      await routeGatewayCall(
+        { action: "test.action", repoId: "my-repo", extra: "data" },
+        mockMap as any,
+      );
+
+      assert.deepStrictEqual(receivedArgs, {
+        repoId: "my-repo",
+        extra: "data",
+      });
+    });
+
+    it("strips action field from handler params", async () => {
+      let receivedArgs: unknown = null;
+      const mockMap = {
+        "test.strip": {
+          schema: {
+            parse(args: unknown) {
+              return args;
+            },
+          },
+          handler: async (args: unknown) => {
+            receivedArgs = args;
+            return {};
+          },
+        },
+      };
+
+      await routeGatewayCall(
+        { action: "test.strip", repoId: "r", foo: "bar" },
+        mockMap as any,
+      );
+
+      const received = receivedArgs as Record<string, unknown>;
+      assert.strictEqual(received.action, undefined);
+      assert.strictEqual(received.repoId, "r");
+      assert.strictEqual(received.foo, "bar");
+    });
+  });
+});

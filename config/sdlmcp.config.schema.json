@@ -744,6 +744,26 @@
         "writeQueueTimeoutMs": 30000,
         "toolQueueTimeoutMs": 30000
       }
+    },
+    "gateway": {
+      "type": "object",
+      "description": "Tool gateway configuration — collapse 25+ tools into 4 namespace-scoped gateway tools to reduce system-prompt token overhead",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable gateway mode (4 tools instead of 25+)",
+          "default": true
+        },
+        "emitLegacyTools": {
+          "type": "boolean",
+          "description": "When gateway is enabled, also register the 25 legacy tool names for backward compatibility",
+          "default": true
+        }
+      },
+      "default": {
+        "enabled": true,
+        "emitLegacyTools": true
+      }
     }
   }
 }

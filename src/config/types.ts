@@ -321,6 +321,13 @@ export const RuntimeConfigSchema = z.object({
 
 export type RuntimeConfig = z.infer<typeof RuntimeConfigSchema>;
 
+export const GatewayConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  emitLegacyTools: z.boolean().default(true),
+});
+
+export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
+
 export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
   /**
@@ -343,6 +350,7 @@ export const AppConfigSchema = z.object({
   parallelScorer: ParallelScorerConfigSchema.optional(),
   concurrency: ConcurrencyConfigSchema.optional(),
   runtime: RuntimeConfigSchema.optional(),
+  gateway: GatewayConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

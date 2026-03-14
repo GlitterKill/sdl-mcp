@@ -11,6 +11,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { errorToMcpResponse } from "./mcp/errors.js";
 import { getToolDispatchLimiter } from "./mcp/dispatch-limiter.js";
 import { logToolCall } from "./mcp/telemetry.js";
+import { buildCompactJsonSchema } from "./gateway/compact-schema.js";
 import {
   shouldAttachUsage,
   computeTokenUsage,
@@ -37,11 +38,13 @@ interface ToolDefinition {
   description?: string;
   inputSchema: z.ZodType;
   handler: ToolHandler;
+  wireSchema?: Record<string, unknown>;
 }
 
 export class MCPServer {
   private server: Server;
   private tools: Map<string, ToolDefinition> = new Map();
+  private _gatewayMode = false;
 
   constructor() {
     this.server = new Server(
@@ -51,12 +54,20 @@ export class MCPServer {
       },
       {
         capabilities: {
-          tools: {},
+          tools: { listChanged: true },
         },
       },
     );
 
     this.setupHandlers();
+  }
+
+  get gatewayMode(): boolean {
+    return this._gatewayMode;
+  }
+
+  set gatewayMode(value: boolean) {
+    this._gatewayMode = value;
   }
 
   private setupHandlers(): void {
@@ -66,7 +77,7 @@ export class MCPServer {
           tools: Array.from(this.tools.values()).map((tool) => ({
             name: tool.name,
             description: tool.description,
-            inputSchema: convertSchema(tool.inputSchema),
+            inputSchema: tool.wireSchema ?? convertSchema(tool.inputSchema, this._gatewayMode),
           })),
         };
       } catch (error) {
@@ -219,13 +230,9 @@ export class MCPServer {
     description: string,
     inputSchema: z.ZodType,
     handler: ToolHandler,
+    wireSchema?: Record<string, unknown>,
   ): void {
-    this.tools.set(name, {
-      name,
-      description,
-      inputSchema,
-      handler,
-    });
+    this.tools.set(name, { name, description, inputSchema, handler, wireSchema });
   }
 
   async start(): Promise<void> {
@@ -240,6 +247,36 @@ export class MCPServer {
   getServer(): Server {
     return this.server;
   }
+
+  /**
+   * Clear all registered tools and notify connected clients.
+   * Used when toggling gateway mode at runtime.
+   */
+  clearTools(): void {
+    this.tools.clear();
+  }
+
+  /**
+   * Notify connected clients that the tool list has changed.
+   * Clients that support listChanged will re-fetch tools/list.
+   */
+  async notifyToolListChanged(): Promise<void> {
+    try {
+      // The MCP SDK Server class provides sendToolListChanged()
+      // which sends notifications/tools/list_changed
+      const server = this.server as unknown as {
+        sendToolListChanged?: () => Promise<void>;
+      };
+      if (typeof server.sendToolListChanged === "function") {
+        await server.sendToolListChanged();
+      }
+    } catch (_err) {
+      // Swallow errors if no client is connected or notification fails
+      process.stderr.write(
+        `[sdl-mcp] Failed to send tool list changed notification\n`,
+      );
+    }
+  }
 }
 
 function extractStringField(args: unknown, field: string): string | undefined {
@@ -251,7 +288,13 @@ function extractStringField(args: unknown, field: string): string | undefined {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function convertSchema(schema: z.ZodType): Record<string, unknown> {
+function convertSchema(
+  schema: z.ZodType,
+  compact = false,
+): Record<string, unknown> {
+  if (compact) {
+    return buildCompactJsonSchema(schema);
+  }
   // zodToJsonSchema has deep type instantiation issues with strict Zod types;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return zodToJsonSchema(schema as any, { target: "openApi3" }) as Record<
@@ -265,6 +308,7 @@ function convertSchema(schema: z.ZodType): Record<string, unknown> {
  */
 export interface MCPServerServices {
   liveIndex?: LiveIndexCoordinator;
+  gatewayConfig?: { enabled?: boolean; emitLegacyTools?: boolean };
 }
 
 /**
@@ -273,6 +317,10 @@ export interface MCPServerServices {
  */
 export function createMCPServer(services: MCPServerServices = {}): MCPServer {
   const server = new MCPServer();
-  registerTools(server, { liveIndex: services.liveIndex });
+  registerTools(
+    server,
+    { liveIndex: services.liveIndex },
+    services.gatewayConfig,
+  );
   return server;
 }
