@@ -488,12 +488,12 @@
         },
         "model": {
           "type": "string",
-          "enum": ["all-MiniLM-L6-v2", "nomic-embed-code-v1"],
+          "enum": ["all-MiniLM-L6-v2", "nomic-embed-text-v1.5"],
           "default": "all-MiniLM-L6-v2"
         },
         "modelCacheDir": {
           "type": "string",
-          "description": "Override directory for downloaded model files (nomic-embed-code-v1). Defaults to platform-specific cache."
+          "description": "Override directory for downloaded model files (nomic-embed-text-v1.5). Defaults to platform-specific cache."
         },
         "generateSummaries": {
           "type": "boolean",

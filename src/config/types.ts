@@ -211,7 +211,7 @@ export type AnnConfig = z.infer<typeof AnnConfigSchema>;
 
 export const SUPPORTED_EMBEDDING_MODELS = [
   "all-MiniLM-L6-v2",
-  "nomic-embed-code-v1",
+  "nomic-embed-text-v1.5",
 ] as const;
 
 export const SemanticConfigSchema = z.object({

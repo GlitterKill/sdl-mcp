@@ -192,16 +192,16 @@ The summary system interacts with the embedding pipeline to create three distinc
  Low      all-MiniLM-L6-v2         None (raw text)       Free
           384-dim, ~22 MB                                 (bundled)
 
- Medium   nomic-embed-code-v1      None (code-formatted)  Free
-          768-dim, ~274 MB                                (download)
+ Medium   nomic-embed-text-v1.5    None (raw text)         Free
+          768-dim, ~138 MB                                (download)
 
- High     all-MiniLM-L6-v2         LLM-generated          API tokens
-          384-dim + summaries      (1-3 sentences)        (~$2/1M tok)
+ High     either model             LLM-generated          API cost
+          + summaries              (1-3 sentences)        (~$2/1M tok)
 ```
 
 - **Low** — default. Embeds raw symbol text (name + kind + signature) with a general-purpose model. No API calls.
-- **Medium** — uses a code-trained embedding model for better semantic matching. Still no LLM calls.
-- **High** — generates a natural-language summary per symbol via an LLM, then embeds that summary with MiniLM. Produces the highest-quality semantic search results because the model distills code meaning into plain English that general-purpose embeddings handle well.
+- **Medium** — swaps in a higher-quality text model with longer context (8192 tokens). Still no LLM calls.
+- **High** — adds LLM-generated summaries to either embedding model. Both are text models that benefit from summaries. Produces the best results because the LLM distills code meaning into plain English that embedding models handle well.
 
 #### Three Providers
 

@@ -39,23 +39,23 @@ const MODEL_REGISTRY: Record<string, ModelInfo> = {
     description:
       "General-purpose sentence embedding model (384-dim, ~22MB INT8 quantized)",
   },
-  "nomic-embed-code-v1": {
-    name: "nomic-embed-code-v1",
+  "nomic-embed-text-v1.5": {
+    name: "nomic-embed-text-v1.5",
     dimension: 768,
     maxSequenceLength: 8192,
     bundled: false,
-    modelFile: "model.onnx",
+    modelFile: "model_quantized.onnx",
     tokenizerFile: "tokenizer.json",
     configFile: "config.json",
     description:
-      "Code-trained embedding model — understands code natively (768-dim, ~274MB)",
+      "High-quality text embedding model with Matryoshka support (768-dim, ~138MB quantized, ungated)",
     downloadUrls: {
       model:
-        "https://huggingface.co/nomic-ai/nomic-embed-code-v1/resolve/main/onnx/model.onnx",
+        "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/onnx/model_quantized.onnx",
       tokenizer:
-        "https://huggingface.co/nomic-ai/nomic-embed-code-v1/resolve/main/tokenizer.json",
+        "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/tokenizer.json",
       config:
-        "https://huggingface.co/nomic-ai/nomic-embed-code-v1/resolve/main/config.json",
+        "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/config.json",
     },
   },
 };

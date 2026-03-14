@@ -21,8 +21,8 @@ test("getModelInfo returns MiniLM metadata", () => {
 });
 
 test("getModelInfo returns nomic metadata", () => {
-  const info = getModelInfo("nomic-embed-code-v1");
-  assert.strictEqual(info.name, "nomic-embed-code-v1");
+  const info = getModelInfo("nomic-embed-text-v1.5");
+  assert.strictEqual(info.name, "nomic-embed-text-v1.5");
   assert.strictEqual(info.dimension, 768);
   assert.strictEqual(info.maxSequenceLength, 8192);
   assert.strictEqual(info.bundled, false);
@@ -47,13 +47,13 @@ test("getModelInfo throws for unknown model", () => {
 test("listModels returns both registered models", () => {
   const models = listModels();
   assert.ok(models.includes("all-MiniLM-L6-v2"));
-  assert.ok(models.includes("nomic-embed-code-v1"));
+  assert.ok(models.includes("nomic-embed-text-v1.5"));
   assert.strictEqual(models.length, 2);
 });
 
 test("isKnownModel returns true for registered models", () => {
   assert.strictEqual(isKnownModel("all-MiniLM-L6-v2"), true);
-  assert.strictEqual(isKnownModel("nomic-embed-code-v1"), true);
+  assert.strictEqual(isKnownModel("nomic-embed-text-v1.5"), true);
 });
 
 test("isKnownModel returns false for unknown models", () => {
@@ -95,10 +95,10 @@ test("resolveModelDir for bundled model points to models/ directory", () => {
 });
 
 test("resolveModelDir for non-bundled model uses cache directory", () => {
-  const dir = resolveModelDir("nomic-embed-code-v1");
+  const dir = resolveModelDir("nomic-embed-text-v1.5");
   // Non-bundled models resolve to cache dir, not models/ in package
   assert.ok(
-    dir.endsWith("nomic-embed-code-v1"),
+    dir.endsWith("nomic-embed-text-v1.5"),
     `Dir should end with model name: ${dir}`,
   );
   // Should NOT be in the bundled models/ directory
@@ -116,13 +116,13 @@ test("isModelAvailable returns boolean without throwing", () => {
 });
 
 test("isModelAvailable returns boolean for nomic model", () => {
-  const result = isModelAvailable("nomic-embed-code-v1");
+  const result = isModelAvailable("nomic-embed-text-v1.5");
   assert.strictEqual(typeof result, "boolean");
 });
 
 test("MiniLM and nomic have different dimensions", () => {
   const miniLM = getModelInfo("all-MiniLM-L6-v2");
-  const nomic = getModelInfo("nomic-embed-code-v1");
+  const nomic = getModelInfo("nomic-embed-text-v1.5");
   assert.notStrictEqual(miniLM.dimension, nomic.dimension);
   assert.strictEqual(miniLM.dimension, 384);
   assert.strictEqual(nomic.dimension, 768);

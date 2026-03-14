@@ -324,7 +324,7 @@ SDL-MCP ships with two embedding models, each suited to different workflows:
   │  Size:          ~22 MB (INT8 quantized ONNX)                   │
   │  Bundled:       YES (included in npm package)                  │
   │  Training:      General sentence embeddings                    │
-  │  Best for:      Summary-based search (needs LLM summaries)    │
+  │  Best for:      Quick setup, small codebases, free tier       │
   │                                                                │
   │  Text input:  "validateToken (function): Validates JWT         │
   │                signature and checks expiration claim"          │
@@ -332,19 +332,18 @@ SDL-MCP ships with two embedding models, each suited to different workflows:
   └────────────────────────────────────────────────────────────────┘
 
   ┌────────────────────────────────────────────────────────────────┐
-  │                    nomic-embed-code-v1                          │
+  │                    nomic-embed-text-v1.5                        │
   │────────────────────────────────────────────────────────────────│
   │  Dimensions:    768                                            │
   │  Max tokens:    8,192                                          │
-  │  Size:          ~274 MB (downloaded on first use)              │
+  │  Size:          ~138 MB (downloaded on first use)              │
   │  Bundled:       NO (fetched from HuggingFace)                  │
-  │  Training:      Code-specific (understands programming)        │
-  │  Best for:      Direct code understanding (skips summaries)   │
+  │  Training:      High-quality text embeddings (Matryoshka)      │
+  │  Best for:      Better semantic matching, longer context       │
   │                                                                │
-  │  Text input:  "// function validateToken                       │
-  │                function validateToken(token: string,           │
-  │                  opts?: ValidateOpts): Promise<DecodedToken>"  │
-  │  ▲ Uses pseudo-code format, no LLM summary needed             │
+  │  Text input:  "validateToken (function): Validates JWT         │
+  │                signature and checks expiration claim"          │
+  │  ▲ Uses same text format as MiniLM, benefits from summaries   │
   └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -352,11 +351,11 @@ SDL-MCP ships with two embedding models, each suited to different workflows:
 
 | If you... | Use |
 |:----------|:----|
-| Want zero external API calls | `nomic-embed-code-v1` |
-| Have LLM summaries enabled | `all-MiniLM-L6-v2` (summaries make it very effective) |
-| Have a large codebase (>10k symbols) | `all-MiniLM-L6-v2` (smaller vectors = faster) |
-| Want the best code understanding | `nomic-embed-code-v1` (trained on code) |
-| Want instant setup, no downloads | `all-MiniLM-L6-v2` (bundled in npm) |
+| Want zero setup, no downloads | `all-MiniLM-L6-v2` (bundled in npm) |
+| Want better quality, longer context | `nomic-embed-text-v1.5` (768-dim, 8192 tokens) |
+| Have LLM summaries enabled | Either model benefits from summaries |
+| Have a large codebase (>10k symbols) | `all-MiniLM-L6-v2` (smaller vectors = faster ANN) |
+| Want the best overall quality | `nomic-embed-text-v1.5` + LLM summaries |
 
 ### Three Embedding Providers
 
@@ -522,9 +521,9 @@ Every generated summary records its estimated API cost:
   Incremental re-index: only changed symbols → cents
 ```
 
-### When Summaries Are Skipped
+### Summary Compatibility
 
-The `nomic-embed-code-v1` model understands code natively, so LLM summaries are **skipped** when that model is selected — even if `generateSummaries: true`. The MiniLM model benefits significantly from summaries because it was trained on natural language, not code.
+Both supported embedding models (`all-MiniLM-L6-v2` and `nomic-embed-text-v1.5`) are text-based models that benefit from LLM summaries. When `generateSummaries: true` is set, summaries are generated and embedded for all models, producing higher-quality semantic search results.
 
 ---
 
@@ -540,7 +539,7 @@ The `nomic-embed-code-v1` model understands code natively, so LLM summaries are 
 
     // ── Embedding Configuration ──
     "provider": "local",          // "local" (ONNX), "api", or "mock"
-    "model": "all-MiniLM-L6-v2", // or "nomic-embed-code-v1"
+    "model": "all-MiniLM-L6-v2", // or "nomic-embed-text-v1.5"
     "modelCacheDir": null,        // Custom model cache directory
     "alpha": 0.6,                 // Lexical/semantic blend (0=pure semantic, 1=pure lexical)
 
@@ -573,7 +572,7 @@ The `nomic-embed-code-v1` model understands code natively, so LLM summaries are 
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "nomic-embed-code-v1",
+    "model": "nomic-embed-text-v1.5",
     "generateSummaries": false
   }
 }
@@ -585,7 +584,7 @@ The `nomic-embed-code-v1` model understands code natively, so LLM summaries are 
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "all-MiniLM-L6-v2",
+    "model": "nomic-embed-text-v1.5",
     "generateSummaries": true,
     "summaryProvider": "api",
     "summaryModel": "claude-haiku-4-5-20251001"

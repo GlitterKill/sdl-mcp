@@ -4,7 +4,7 @@
  *
  * Usage:
  *   node scripts/download-models.mjs                     # Download all-MiniLM-L6-v2
- *   node scripts/download-models.mjs nomic-embed-code-v1 # Download nomic model
+ *   node scripts/download-models.mjs nomic-embed-text-v1.5 # Download nomic text model
  */
 import { existsSync, mkdirSync, createWriteStream } from "fs";
 import { join, dirname } from "path";
@@ -44,20 +44,20 @@ const MODELS = {
       },
     ],
   },
-  "nomic-embed-code-v1": {
-    dir: join(getModelCacheDir(), "nomic-embed-code-v1"),
+  "nomic-embed-text-v1.5": {
+    dir: join(getModelCacheDir(), "nomic-embed-text-v1.5"),
     files: [
       {
-        name: "model.onnx",
-        url: "https://huggingface.co/nomic-ai/nomic-embed-code-v1/resolve/main/onnx/model.onnx",
+        name: "model_quantized.onnx",
+        url: "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/onnx/model_quantized.onnx",
       },
       {
         name: "tokenizer.json",
-        url: "https://huggingface.co/nomic-ai/nomic-embed-code-v1/resolve/main/tokenizer.json",
+        url: "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/tokenizer.json",
       },
       {
         name: "config.json",
-        url: "https://huggingface.co/nomic-ai/nomic-embed-code-v1/resolve/main/config.json",
+        url: "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/config.json",
       },
     ],
   },

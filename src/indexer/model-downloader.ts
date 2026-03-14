@@ -1,5 +1,5 @@
 /**
- * model-downloader.ts — On-demand model download for non-bundled models (e.g., nomic-embed-code-v1).
+ * model-downloader.ts — On-demand model download for non-bundled models (e.g., nomic-embed-text-v1.5).
  * Downloads model files from HuggingFace and caches them in the platform-specific cache directory.
  */
 import { existsSync, mkdirSync, createWriteStream, statSync } from "fs";
@@ -40,7 +40,7 @@ export async function ensureModelAvailable(name: string): Promise<string> {
   }
 
   logger.info(
-    `Downloading model "${name}" (~${info.dimension === 768 ? "274MB" : "22MB"})...`,
+    `Downloading model "${name}" (~${info.dimension === 768 ? "138MB" : "22MB"})...`,
   );
   mkdirSync(modelDir, { recursive: true });
 

@@ -2,7 +2,7 @@
  * embeddings-local.ts — ONNX inference engine for local embedding generation.
  *
  * Creates ONNX sessions backed by real sentence-transformer models (all-MiniLM-L6-v2 or
- * nomic-embed-code-v1). Handles tokenization, batched inference, mean pooling, and
+ * nomic-embed-text-v1.5). Handles tokenization, batched inference, mean pooling, and
  * L2-normalization.
  *
  * Falls back gracefully when onnxruntime-node or tokenizers packages are unavailable.

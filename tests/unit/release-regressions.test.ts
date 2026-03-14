@@ -285,13 +285,13 @@ describe("release regression guards", () => {
 
     assert.match(
       source,
-      /"nomic-embed-code-v1":\s*\{[\s\S]*dir:\s*join\(getModelCacheDir\(\),\s*"nomic-embed-code-v1"\)/,
+      /"nomic-embed-text-v1\.5":\s*\{[\s\S]*dir:\s*join\(getModelCacheDir\(\),\s*"nomic-embed-text-v1\.5"\)/,
       "nomic downloads should target the runtime cache path used by model resolution",
     );
 
     assert.doesNotMatch(
       source,
-      /"nomic-embed-code-v1":\s*\{[\s\S]*dir:\s*join\(ROOT,\s*"models",\s*"nomic-embed-code-v1"\)/,
+      /"nomic-embed-text-v1\.5":\s*\{[\s\S]*dir:\s*join\(ROOT,\s*"models",\s*"nomic-embed-text-v1\.5"\)/,
       "nomic downloads should not be written to the bundled models directory",
     );
   });

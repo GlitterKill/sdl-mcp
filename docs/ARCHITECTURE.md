@@ -529,9 +529,11 @@ Three subsystems that enhance code intelligence beyond structural analysis:
 11 language-specific resolvers that trace import chains and resolve raw call identifiers to symbolIds with confidence scores (0.0-1.0). See [Semantic Engine deep dive](./feature-deep-dives/semantic-engine.md).
 
 ### Embedding Search
-Alpha-blended lexical + embedding similarity reranking using ONNX models. Two models available:
-- **all-MiniLM-L6-v2** (384-dim, ~22 MB, bundled) — general-purpose, best with LLM summaries
-- **nomic-embed-code-v1** (768-dim, ~274 MB, downloaded) — code-trained, works without summaries
+Alpha-blended lexical + embedding similarity reranking using ONNX models. Two text models available — quality ladder: MiniLM alone < Nomic alone < either + LLM summaries:
+- **all-MiniLM-L6-v2** (384-dim, ~22 MB, bundled) — general-purpose baseline, zero-setup
+- **nomic-embed-text-v1.5** (768-dim, ~138 MB, downloaded) — higher-quality embeddings, longer context (8192 tokens)
+
+Both are text models that benefit from LLM summaries when enabled.
 
 ### LLM Summaries
 1-3 sentence semantic descriptions generated per symbol. Three providers (Anthropic API, OpenAI-compatible/Ollama, mock). Cached with content-addressed hashing. See [Indexing Languages deep dive](./feature-deep-dives/indexing-languages.md#llm-generated-summaries).

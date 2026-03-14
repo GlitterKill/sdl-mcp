@@ -139,16 +139,16 @@ LLM summaries produce 1–3 sentence natural-language descriptions for every sym
 The summary system has **three quality tiers**. Each tier builds on the previous one:
 
 ```
-Tier     Embedding Model            Summaries    Search Quality   Cost
-─────    ─────────────────────────  ───────────  ───────────────  ────────
-Low      all-MiniLM-L6-v2 (384d)   None         Baseline         Free
-Medium   nomic-embed-code-v1 (768d) None         Better           Free
-High     any embedding model        LLM-gen'd    Best             API cost
+Tier     Embedding Model              Summaries    Search Quality   Cost
+─────    ───────────────────────────  ───────────  ───────────────  ────────
+Low      all-MiniLM-L6-v2 (384d)     None         Baseline         Free
+Medium   nomic-embed-text-v1.5 (768d) None         Better           Free
+High     either model                 LLM-gen'd    Best             API cost
 ```
 
 - **Low** (default) — embeds raw symbol text (name + kind + signature) with a general-purpose model. No API calls needed.
-- **Medium** — swaps in a code-trained embedding model for better semantic matching. Still fully offline.
-- **High** — generates a natural-language summary per symbol via an LLM, then embeds that summary. This produces the best search results because the LLM distills code meaning into plain English that embedding models handle well.
+- **Medium** — swaps in a higher-quality text embedding model with longer context (8192 tokens) for better semantic matching. Still fully offline (~138 MB download).
+- **High** — adds LLM-generated natural-language summaries to either embedding model. Both models are text-based and benefit equally from summaries. This produces the best search results because the LLM distills code meaning into plain English that embedding models handle well.
 
 To reach the **High** tier, you enable `generateSummaries` and configure one of the three summary providers below.
 
@@ -379,20 +379,20 @@ Requires: `ANTHROPIC_API_KEY` environment variable.
 ```
 Requires: Ollama running with `qwen2.5-coder` pulled.
 
-**Code-trained embeddings + Anthropic summaries (highest quality):**
+**Nomic embeddings + Anthropic summaries (highest quality):**
 ```json
 {
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "nomic-embed-code-v1",
+    "model": "nomic-embed-text-v1.5",
     "generateSummaries": true,
     "summaryProvider": "api",
     "summaryModel": "claude-haiku-4-5-20251001"
   }
 }
 ```
-Requires: `ANTHROPIC_API_KEY` environment variable. Downloads ~274 MB embedding model on first run.
+Requires: `ANTHROPIC_API_KEY` environment variable. Downloads ~138 MB embedding model on first run.
 
 For the full configuration reference, see [Configuration Reference](./configuration-reference.md). For a deeper look at how summaries interact with embeddings and pass-2 resolution, see [Semantic Engine](./feature-deep-dives/semantic-engine.md).
 

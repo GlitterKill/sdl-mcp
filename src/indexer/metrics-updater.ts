@@ -40,11 +40,11 @@ export async function finalizeIndexing({
 
   if (appConfig.semantic?.enabled) {
     const model = appConfig.semantic.model ?? "all-MiniLM-L6-v2";
-    const isCodeModel = model === "nomic-embed-code-v1";
 
-    // 1. Summaries first (if opted-in AND using MiniLM) — so MiniLM can embed them.
-    //    nomic-embed-code doesn't need summaries — it understands code natively.
-    if (appConfig.semantic.generateSummaries && !isCodeModel) {
+    // 1. Summaries first (if opted-in) — all text-based models benefit from
+    //    LLM summaries when available. Summaries are generated before embeddings
+    //    so the embedding step can incorporate them.
+    if (appConfig.semantic.generateSummaries) {
       try {
         summaryStats = await generateSummariesForRepo(repoId, appConfig);
         logger.info(
@@ -53,14 +53,10 @@ export async function finalizeIndexing({
       } catch (error) {
         logger.warn(`Summary generation skipped: ${String(error)}`);
       }
-    } else if (appConfig.semantic.generateSummaries && isCodeModel) {
-      logger.info(
-        `nomic-embed-code-v1 selected — skipping LLM summary generation (model understands code natively)`,
-      );
     }
 
-    // 2. Embeddings second — uses summaries when available (MiniLM high-tier),
-    //    or raw symbol text (MiniLM low-tier and nomic medium-tier).
+    // 2. Embeddings second — uses summaries when available (High tier),
+    //    or raw symbol text (Low/Medium tier).
     try {
       const embResult = await refreshSymbolEmbeddings({
         repoId,
