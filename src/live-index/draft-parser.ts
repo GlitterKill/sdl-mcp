@@ -13,10 +13,20 @@ import {
   resolveCallTarget,
   resolveImportTargets,
 } from "../indexer/edge-builder.js";
-import { generateAstFingerprint, generateSymbolId } from "../indexer/fingerprints.js";
-import { buildSymbolReferences, isTestFile } from "../indexer/parser/helpers.js";
+import {
+  generateAstFingerprint,
+  generateSymbolId,
+} from "../indexer/fingerprints.js";
+import {
+  buildSymbolReferences,
+  isTestFile,
+} from "../indexer/parser/helpers.js";
 import { resolveSymbolEnrichment } from "../indexer/symbol-enrichment.js";
-import { extractInvariants, extractSideEffects, generateSummary } from "../indexer/summaries.js";
+import {
+  extractInvariants,
+  extractSideEffects,
+  generateSummary,
+} from "../indexer/summaries.js";
 import type { SymbolWithNodeId } from "../indexer/worker.js";
 import { hashContent } from "../util/hashing.js";
 import { getAbsolutePathFromRepoRoot, normalizePath } from "../util/paths.js";
@@ -80,7 +90,9 @@ export async function parseDraftFile(
 ): Promise<DraftParseResult> {
   const relPath = normalizePath(input.filePath);
   const fileId = `${input.repoId}:${relPath}`;
-  const ext = relPath.includes(".") ? relPath.slice(relPath.lastIndexOf(".") + 1) : "";
+  const ext = relPath.includes(".")
+    ? relPath.slice(relPath.lastIndexOf(".") + 1)
+    : "";
   const extWithDot = ext ? `.${ext}` : "";
   const adapter = getAdapterForExtension(extWithDot);
   const timestamp = new Date().toISOString();
@@ -97,9 +109,16 @@ export async function parseDraftFile(
 
   let durableSymbolsByMatchKey = new Map<DurableSymbolMatchKey, SymbolRow>();
   const conn = await getLadybugConn();
-  const durableFile = await ladybugDb.getFileByRepoPath(conn, input.repoId, relPath);
+  const durableFile = await ladybugDb.getFileByRepoPath(
+    conn,
+    input.repoId,
+    relPath,
+  );
   if (durableFile) {
-    const durableSymbols = await ladybugDb.getSymbolsByFile(conn, durableFile.fileId);
+    const durableSymbols = await ladybugDb.getSymbolsByFile(
+      conn,
+      durableFile.fileId,
+    );
     durableSymbolsByMatchKey = new Map(
       durableSymbols.map((symbol) => [
         buildDurableSymbolMatchKey({
@@ -140,22 +159,31 @@ export async function parseDraftFile(
   try {
     let extractedSymbols: ReturnType<typeof adapter.extractSymbols> = [];
     try {
-      extractedSymbols = adapter.extractSymbols(tree, input.content, absolutePath);
+      extractedSymbols = adapter.extractSymbols(
+        tree,
+        input.content,
+        absolutePath,
+      );
     } catch (error) {
-      logger.warn("Draft symbol extraction failed", { file: absolutePath, error: String(error) });
+      logger.warn("Draft symbol extraction failed", {
+        file: absolutePath,
+        error: String(error),
+      });
       extractedSymbols = [];
     }
 
-    const symbolsWithNodeIds: SymbolWithNodeId[] = extractedSymbols.map((symbol) => ({
-      nodeId: symbol.nodeId,
-      kind: symbol.kind,
-      name: symbol.name,
-      exported: symbol.exported,
-      range: symbol.range,
-      signature: symbol.signature,
-      visibility: symbol.visibility,
-      astFingerprint: "",
-    }));
+    const symbolsWithNodeIds: SymbolWithNodeId[] = extractedSymbols.map(
+      (symbol) => ({
+        nodeId: symbol.nodeId,
+        kind: symbol.kind,
+        name: symbol.name,
+        exported: symbol.exported,
+        range: symbol.range,
+        signature: symbol.signature,
+        visibility: symbol.visibility,
+        astFingerprint: "",
+      }),
+    );
     const imports = adapter.extractImports(tree, input.content, absolutePath);
     const calls = adapter.extractCalls(
       tree,
@@ -184,8 +212,13 @@ export async function parseDraftFile(
     const symbolDetails = symbolsWithNodeIds.map((extractedSymbol) => {
       let astFingerprint = extractedSymbol.astFingerprint ?? "";
       const matchingNode = getKindNodeTypes(extractedSymbol.kind)
-        .flatMap((kindNodeType) => tree.rootNode.descendantsOfType(kindNodeType))
-        .find((node) => node.childForFieldName("name")?.text === extractedSymbol.name);
+        .flatMap((kindNodeType) =>
+          tree.rootNode.descendantsOfType(kindNodeType),
+        )
+        .find(
+          (node) =>
+            node.childForFieldName("name")?.text === extractedSymbol.name,
+        );
       if (matchingNode) {
         astFingerprint = generateAstFingerprint(matchingNode);
       }
@@ -252,22 +285,30 @@ export async function parseDraftFile(
           ? JSON.stringify(extractedSymbol.signature)
           : null,
         summary,
-        invariantsJson: invariants.length > 0 ? JSON.stringify(invariants) : null,
-        sideEffectsJson: sideEffects.length > 0 ? JSON.stringify(sideEffects) : null,
+        invariantsJson:
+          invariants.length > 0 ? JSON.stringify(invariants) : null,
+        sideEffectsJson:
+          sideEffects.length > 0 ? JSON.stringify(sideEffects) : null,
         roleTagsJson,
         searchText,
         updatedAt: timestamp,
       };
     });
 
-    const exportSymbols = symbolsWithNodeIds.filter((symbol) => symbol.exported);
+    const exportSymbols = symbolsWithNodeIds.filter(
+      (symbol) => symbol.exported,
+    );
     const edgeSourceSymbols =
       exportSymbols.length > 0 ? exportSymbols : symbolsWithNodeIds;
 
     const edges: EdgeRow[] = [];
 
     for (const detail of symbolDetails) {
-      if (edgeSourceSymbols.some((symbol) => symbol.nodeId === detail.extractedSymbol.nodeId)) {
+      if (
+        edgeSourceSymbols.some(
+          (symbol) => symbol.nodeId === detail.extractedSymbol.nodeId,
+        )
+      ) {
         for (const target of importResolution.targets) {
           edges.push({
             repoId: input.repoId,
@@ -343,6 +384,11 @@ export async function parseDraftFile(
         : [],
     };
   } finally {
-    // tree.delete() is not available in tree-sitter 0.21.x
+    if (
+      tree &&
+      typeof (tree as unknown as { delete?: () => void }).delete === "function"
+    ) {
+      (tree as unknown as { delete: () => void }).delete();
+    }
   }
 }

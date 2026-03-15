@@ -135,9 +135,7 @@ export async function handleSymbolSearch(
 
       rows.forEach((row, index) => {
         const symbol = symbolMap.get(row.symbolId);
-        const isOverlayBacked = overlaySnapshot.touchedFileIds.has(
-          row.fileId,
-        );
+        const isOverlayBacked = overlaySnapshot.touchedFileIds.has(row.fileId);
         if (symbol && !isOverlayBacked) {
           rerankableSymbolIds.add(row.symbolId);
           lexicalCandidates.push({
@@ -758,14 +756,21 @@ export async function handleSymbolGetCards(
     consumePrefetchedKey(repoId, `card:${symbolId}`);
   }
 
-  const cards = await Promise.all(
-    symbolIds.map((id) =>
-      buildCardForSymbol(repoId, id, knownEtags?.[id], {
-        minCallConfidence,
-        includeResolutionMetadata,
-      }),
-    ),
-  );
+  // Cap parallelism to avoid overwhelming DB with concurrent queries
+  const BATCH_SIZE = 10;
+  const cards: Awaited<ReturnType<typeof buildCardForSymbol>>[] = [];
+  for (let i = 0; i < symbolIds.length; i += BATCH_SIZE) {
+    const batch = symbolIds.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map((id) =>
+        buildCardForSymbol(repoId, id, knownEtags?.[id], {
+          minCallConfidence,
+          includeResolutionMetadata,
+        }),
+      ),
+    );
+    cards.push(...batchResults);
+  }
 
   const conn = await getLadybugConn();
   const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);

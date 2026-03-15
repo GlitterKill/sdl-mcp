@@ -3,7 +3,13 @@
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber } from "./ladybug-core.js";
+import {
+  exec,
+  queryAll,
+  querySingle,
+  toNumber,
+  withTransaction,
+} from "./ladybug-core.js";
 
 export interface ClusterRow {
   clusterId: string;
@@ -81,20 +87,22 @@ export async function upsertClusterMembersBatch(
   }>,
 ): Promise<void> {
   if (members.length === 0) return;
-  for (const member of members) {
-    await exec(
-      conn,
-      `MATCH (s:Symbol {symbolId: $symbolId})
-       MATCH (c:Cluster {clusterId: $clusterId})
-       MERGE (s)-[m:BELONGS_TO_CLUSTER]->(c)
-       SET m.membershipScore = $membershipScore`,
-      {
-        symbolId: member.symbolId,
-        clusterId: member.clusterId,
-        membershipScore: member.membershipScore,
-      },
-    );
-  }
+  await withTransaction(conn, async (txConn) => {
+    for (const member of members) {
+      await exec(
+        txConn,
+        `MATCH (s:Symbol {symbolId: $symbolId})
+         MATCH (c:Cluster {clusterId: $clusterId})
+         MERGE (s)-[m:BELONGS_TO_CLUSTER]->(c)
+         SET m.membershipScore = $membershipScore`,
+        {
+          symbolId: member.symbolId,
+          clusterId: member.clusterId,
+          membershipScore: member.membershipScore,
+        },
+      );
+    }
+  });
 }
 
 export async function getClusterForSymbol(
@@ -122,7 +130,7 @@ export async function getClusterForSymbol(
     clusterId: row.clusterId,
     label: row.label,
     symbolCount: toNumber(row.symbolCount),
-    membershipScore: Number(row.membershipScore ?? 0),
+    membershipScore: toNumber(row.membershipScore ?? 0),
   };
 }
 
@@ -158,7 +166,7 @@ export async function getClustersForSymbols(
       clusterId: row.clusterId,
       label: row.label,
       symbolCount: toNumber(row.symbolCount),
-      membershipScore: Number(row.membershipScore ?? 0),
+      membershipScore: toNumber(row.membershipScore ?? 0),
     });
   }
 
@@ -194,7 +202,7 @@ export async function getClustersForRepo(
     repoId,
     label: row.label,
     symbolCount: toNumber(row.symbolCount),
-    cohesionScore: Number(row.cohesionScore ?? 0),
+    cohesionScore: toNumber(row.cohesionScore ?? 0),
     versionId: row.versionId,
     createdAt: row.createdAt,
   }));
@@ -276,7 +284,7 @@ export async function getClusterMembers(
 
   return rows.map((row) => ({
     symbolId: row.symbolId,
-    membershipScore: Number(row.membershipScore ?? 0),
+    membershipScore: toNumber(row.membershipScore ?? 0),
   }));
 }
 

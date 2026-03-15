@@ -189,6 +189,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
     let tree: ReturnType<typeof adapter.parse> = null;
 
     try {
+      // eslint-disable-line no-useless-catch -- tree.delete() in outer finally
       if (workerPool) {
         try {
           const result = await workerPool.parse(filePath, content, extWithDot);
@@ -255,6 +256,14 @@ export async function processFile(params: ProcessFileParams): Promise<{
     } catch (error) {
       logger.error(`Fatal parse error for ${fileMeta.path}: ${error}`);
       return createEmptyProcessFileResult(false);
+    } finally {
+      if (
+        tree &&
+        typeof (tree as unknown as { delete?: () => void }).delete ===
+          "function"
+      ) {
+        (tree as unknown as { delete: () => void }).delete();
+      }
     }
 
     const symbolsIndexed = symbolsWithNodeIds.length;
@@ -415,7 +424,8 @@ export async function processFile(params: ProcessFileParams): Promise<{
     const callsByCallerNodeId = new Map<string | null, typeof calls>();
     for (const call of calls) {
       const arr = callsByCallerNodeId.get(call.callerNodeId);
-      if (arr) arr.push(call); else callsByCallerNodeId.set(call.callerNodeId, [call]);
+      if (arr) arr.push(call);
+      else callsByCallerNodeId.set(call.callerNodeId, [call]);
     }
     const now = new Date().toISOString();
 
@@ -508,9 +518,9 @@ export async function processFile(params: ProcessFileParams): Promise<{
       }
 
       if (!skipCallResolution) {
-        const matchingCalls = callsByCallerNodeId.get(extractedSymbol.nodeId) ?? [];
+        const matchingCalls =
+          callsByCallerNodeId.get(extractedSymbol.nodeId) ?? [];
         for (const call of matchingCalls) {
-
           const resolved = resolveCallTarget(
             call,
             nodeIdToSymbolId,

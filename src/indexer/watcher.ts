@@ -255,7 +255,10 @@ export async function watchRepositoryWithIndexer(
           WATCHER_REINDEX_RETRY_BASE_MS * 2 ** attempt,
         );
         setTimeout(() => {
-          void reindexWithRetry(filePath, attempt + 1);
+          void reindexWithRetry(filePath, attempt + 1).catch((err: unknown) => {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            recordWatcherError(`[sdl-mcp] reindexWithRetry failed: ${errMsg}`);
+          });
         }, delay);
       }
     }
@@ -275,7 +278,10 @@ export async function watchRepositoryWithIndexer(
       setTimeout(() => {
         pending.delete(filePath);
         updateQueueDepth();
-        void reindexWithRetry(filePath);
+        void reindexWithRetry(filePath).catch((err: unknown) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          recordWatcherError(`[sdl-mcp] reindexWithRetry failed: ${errMsg}`);
+        });
       }, debounceMs),
     );
     updateQueueDepth();
@@ -405,7 +411,10 @@ export async function watchRepositoryWithIndexer(
     if (stale) {
       const staleMsg = `[sdl-mcp] Watcher stale detected for ${repoId}: pending=${health.pendingChanges}, queueDepth=${health.queueDepth}`;
       recordWatcherError(staleMsg);
-      void restartWatcher("stale-index-detected");
+      void restartWatcher("stale-index-detected").catch((err: unknown) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        recordWatcherError(`[sdl-mcp] restartWatcher failed: ${errMsg}`);
+      });
     }
   }, staleCheckIntervalMs);
 

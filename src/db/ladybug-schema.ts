@@ -271,6 +271,17 @@ async function execDdl(conn: Connection, ddl: string): Promise<void> {
   result.close();
 }
 
+const INDEXES: string[] = [
+  // Secondary indexes for common query patterns
+  `CREATE INDEX IF NOT EXISTS idx_symbol_name ON Symbol(name)`,
+  `CREATE INDEX IF NOT EXISTS idx_file_relPath ON File(relPath)`,
+  `CREATE INDEX IF NOT EXISTS idx_file_directory ON File(directory)`,
+  `CREATE INDEX IF NOT EXISTS idx_cluster_repoId ON Cluster(repoId)`,
+  `CREATE INDEX IF NOT EXISTS idx_process_repoId ON Process(repoId)`,
+  `CREATE INDEX IF NOT EXISTS idx_symbol_reference_fileId ON SymbolReference(fileId)`,
+  `CREATE INDEX IF NOT EXISTS idx_symbol_reference_symbolName ON SymbolReference(symbolName)`,
+];
+
 export async function createSchema(conn: Connection): Promise<void> {
   for (const ddl of NODE_TABLES) {
     await execDdl(conn, ddl);
@@ -278,6 +289,14 @@ export async function createSchema(conn: Connection): Promise<void> {
 
   for (const ddl of REL_TABLES) {
     await execDdl(conn, ddl);
+  }
+
+  for (const ddl of INDEXES) {
+    try {
+      await execDdl(conn, ddl);
+    } catch {
+      // Index creation may not be supported on all Kùzu versions; skip gracefully
+    }
   }
 
   // Insert or verify schema version

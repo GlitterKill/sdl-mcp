@@ -10,6 +10,8 @@ import {
   RUNTIME_MAX_CODE_LENGTH,
   RUNTIME_MAX_QUERY_TERMS,
   RUNTIME_DEFAULT_MAX_RESPONSE_LINES,
+  MAX_REPO_ID_LENGTH,
+  MAX_SYMBOL_ID_LENGTH,
 } from "../config/constants.js";
 
 const RangeSchema = z.object({
@@ -526,16 +528,16 @@ const DeltaPackSchema = z.object({
 });
 
 const CodeWindowRequestSchema = z.object({
-  repoId: z.string().min(1),
-  symbolId: z.string(),
-  reason: z.string(),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  symbolId: z.string().max(MAX_SYMBOL_ID_LENGTH),
+  reason: z.string().max(10000),
   expectedLines: z.number().int().min(1),
   identifiersToFind: z.array(z.string()).max(50),
   granularity: z.enum(["symbol", "block", "fileWindow"]).optional(),
   maxTokens: z.number().int().min(1).optional(),
   sliceContext: z
     .object({
-      taskText: z.string().min(1),
+      taskText: z.string().min(1).max(2000),
       stackTrace: z.string().optional(),
       failingTestPath: z.string().optional(),
       editedFiles: z.array(z.string()).max(100).optional(),
@@ -546,7 +548,7 @@ const CodeWindowRequestSchema = z.object({
 });
 
 export const RepoRegisterRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   rootPath: z.string().min(1),
   ignore: z.array(z.string()).optional(),
   languages: z.array(z.string()).optional(),
@@ -559,7 +561,7 @@ export const RepoRegisterResponseSchema = z.object({
 });
 
 export const RepoStatusRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
 });
 
 export const RepoStatusResponseSchema = z.object({
@@ -641,7 +643,7 @@ export const RepoStatusResponseSchema = z.object({
 });
 
 export const IndexRefreshRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   mode: z.enum(["full", "incremental"]),
   reason: z.string().optional(),
 });
@@ -666,7 +668,7 @@ const BufferCursorSchema = z.object({
 });
 
 export const BufferPushRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   eventType: z.enum(["open", "change", "save", "close", "checkpoint"]),
   filePath: z
     .string()
@@ -693,7 +695,7 @@ export const BufferPushResponseSchema = z.object({
 });
 
 export const BufferCheckpointRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   reason: z.string().optional(),
 });
 
@@ -708,7 +710,7 @@ export const BufferCheckpointResponseSchema = z.object({
 });
 
 export const BufferStatusRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
 });
 
 export const BufferStatusResponseSchema = z.object({
@@ -751,8 +753,8 @@ const SymbolSearchResultSchema = z.object({
 });
 
 export const SymbolSearchRequestSchema = z.object({
-  repoId: z.string().min(1),
-  query: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  query: z.string().min(1).max(1000),
   limit: z.number().int().min(1).max(SYMBOL_SEARCH_MAX_RESULTS).optional(),
   semantic: z.boolean().optional(),
 });
@@ -781,15 +783,15 @@ const NotModifiedResponseSchema = z.object({
 });
 
 export const SymbolGetCardRequestSchema = z.object({
-  repoId: z.string().min(1),
-  symbolId: z.string(),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  symbolId: z.string().max(MAX_SYMBOL_ID_LENGTH),
   ifNoneMatch: z.string().optional(),
   minCallConfidence: z.number().min(0).max(1).optional(),
   includeResolutionMetadata: z.boolean().optional(),
 });
 
 export const SymbolGetCardsRequestSchema = z.object({
-  repoId: z.string().describe("Repository ID"),
+  repoId: z.string().max(MAX_REPO_ID_LENGTH).describe("Repository ID"),
   symbolIds: z
     .array(z.string())
     .min(1)
@@ -829,10 +831,11 @@ export const SymbolGetCardResponseSchema = z.union([
 ]);
 
 export const SliceBuildRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   taskText: z
     .string()
     .min(1)
+    .max(2000)
     .optional()
     .describe(
       "Natural language task description. Can be used alone (without entrySymbols) " +
@@ -927,7 +930,7 @@ export const SliceBuildResponseSchema = z.union([
 ]);
 
 export const DeltaGetRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   fromVersion: z.string(),
   toVersion: z.string(),
   budget: SliceBudgetSchema.optional(),
@@ -959,16 +962,16 @@ export const SliceSpilloverGetResponseSchema = z.object({
 });
 
 export const CodeNeedWindowRequestSchema = z.object({
-  repoId: z.string().min(1),
-  symbolId: z.string(),
-  reason: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  symbolId: z.string().max(MAX_SYMBOL_ID_LENGTH),
+  reason: z.string().min(1).max(10000),
   expectedLines: z.number().int().min(1),
   identifiersToFind: z.array(z.string()).max(50),
   granularity: z.enum(["symbol", "block", "fileWindow"]).optional(),
   maxTokens: z.number().int().min(1).optional(),
   sliceContext: z
     .object({
-      taskText: z.string().min(1),
+      taskText: z.string().min(1).max(2000),
       stackTrace: z.string().optional(),
       failingTestPath: z.string().optional(),
       editedFiles: z.array(z.string()).max(100).optional(),
@@ -1024,9 +1027,14 @@ export const CodeNeedWindowResponseSchema = z.discriminatedUnion("approved", [
 
 export const GetSkeletonRequestSchema = z
   .object({
-    repoId: z.string().min(1),
-    symbolId: z.string().optional(),
-    file: z.string().optional(),
+    repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+    symbolId: z.string().max(MAX_SYMBOL_ID_LENGTH).optional(),
+    file: z
+      .string()
+      .refine((p) => !p.includes(".."), {
+        message: "Path traversal (..) is not allowed",
+      })
+      .optional(),
     exportedOnly: z.boolean().optional(),
     maxLines: z.number().int().min(1).optional(),
     maxTokens: z.number().int().min(1).optional(),
@@ -1058,8 +1066,8 @@ export const GetSkeletonResponseSchema = z.object({
 });
 
 export const GetHotPathRequestSchema = z.object({
-  repoId: z.string().min(1),
-  symbolId: z.string(),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  symbolId: z.string().max(MAX_SYMBOL_ID_LENGTH),
   identifiersToFind: z.array(z.string()).min(1).max(50),
   maxLines: z.number().int().min(1).optional(),
   maxTokens: z.number().int().min(1).optional(),
@@ -1084,7 +1092,7 @@ const PolicyConfigSchema = z.object({
 });
 
 export const PolicyGetRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
 });
 
 export const PolicyGetResponseSchema = z.object({
@@ -1092,7 +1100,7 @@ export const PolicyGetResponseSchema = z.object({
 });
 
 export const PolicySetRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   policyPatch: PolicyConfigSchema.partial(),
 });
 
@@ -1186,7 +1194,7 @@ const TokenMetricsSchema = z.object({
 });
 
 export const RepoOverviewRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   level: z.enum(["stats", "directories", "full"]),
   includeHotspots: z.boolean().optional(),
   directories: z.array(z.string()).optional(),
@@ -1310,8 +1318,8 @@ const ContextSummarySchema = z.object({
 });
 
 export const ContextSummaryRequestSchema = z.object({
-  repoId: z.string().min(1),
-  query: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  query: z.string().min(1).max(1000),
   budget: z.number().int().min(1).optional(),
   format: ContextSummaryFormatSchema.optional(),
   scope: ContextSummaryScopeSchema.optional(),
@@ -1441,7 +1449,7 @@ const PolicyDecisionSummarySchema = z.object({
 });
 
 export const PRRiskAnalysisRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   fromVersion: z.string(),
   toVersion: z.string(),
   riskThreshold: z.number().int().min(0).max(100).optional(),
@@ -1459,11 +1467,14 @@ export type PRRiskAnalysisResponse = z.infer<
 >;
 
 export const AgentOrchestrateRequestSchema = z.object({
-  repoId: z.string().describe("Repository ID to work with"),
+  repoId: z
+    .string()
+    .max(MAX_REPO_ID_LENGTH)
+    .describe("Repository ID to work with"),
   taskType: z
     .enum(["debug", "review", "implement", "explain"])
     .describe("Type of task to perform"),
-  taskText: z.string().describe("Task description or prompt"),
+  taskText: z.string().max(2000).describe("Task description or prompt"),
   budget: z
     .object({
       maxTokens: z.number().optional().describe("Maximum tokens to consume"),
@@ -1576,7 +1587,11 @@ export type AgentOrchestrateResponse = z.infer<
 // ============================================================================
 
 export const AgentFeedbackRequestSchema = z.object({
-  repoId: z.string().min(1).describe("Repository identifier"),
+  repoId: z
+    .string()
+    .min(1)
+    .max(MAX_REPO_ID_LENGTH)
+    .describe("Repository identifier"),
   versionId: z
     .string()
     .min(1)
@@ -1603,6 +1618,7 @@ export const AgentFeedbackRequestSchema = z.object({
     .describe("Type of task performed"),
   taskText: z
     .string()
+    .max(2000)
     .optional()
     .describe("Optional task description for context"),
 });
@@ -1619,7 +1635,11 @@ export const AgentFeedbackResponseSchema = z.object({
 });
 
 export const AgentFeedbackQueryRequestSchema = z.object({
-  repoId: z.string().min(1).describe("Repository identifier"),
+  repoId: z
+    .string()
+    .min(1)
+    .max(MAX_REPO_ID_LENGTH)
+    .describe("Repository identifier"),
   versionId: z
     .string()
     .optional()
@@ -1689,7 +1709,7 @@ export type AgentFeedbackQueryResponse = z.infer<
 // ============================================================================
 
 export const RuntimeExecuteRequestSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   runtime: z.enum(["node", "python", "shell"]),
   executable: z
     .string()

@@ -23,7 +23,10 @@ import {
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { logCodeWindowDecision, logPolicyDecision } from "../telemetry.js";
-import { safeJsonParseOrThrow, ConfigObjectSchema } from "../../util/safeJson.js";
+import {
+  safeJsonParseOrThrow,
+  ConfigObjectSchema,
+} from "../../util/safeJson.js";
 import { attachRawContext } from "../token-usage.js";
 import type {
   NextBestAction,
@@ -239,7 +242,11 @@ export async function handleCodeNeedWindow(
     endCol: symbol.rangeEndCol,
   };
 
-  const repoConfig = safeJsonParseOrThrow(repo.configJson, ConfigObjectSchema, `configJson for repository ${request.repoId}`);
+  const repoConfig = safeJsonParseOrThrow(
+    repo.configJson,
+    ConfigObjectSchema,
+    `configJson for repository ${request.repoId}`,
+  );
   const appConfig = loadConfig();
   const validatedPolicy = PolicyConfigSchema.parse({
     ...appConfig.policy,
@@ -575,13 +582,29 @@ export async function handleGetSkeleton(
     consumePrefetchedKey(request.repoId, `card:${request.symbolId}`);
   }
 
+  // Enforce policy limits as caps on maxLines/maxTokens
+  const appConfig = loadConfig();
+  const policyConfig = PolicyConfigSchema.safeParse(appConfig.policy ?? {});
+  const policyMaxLines = policyConfig.success
+    ? policyConfig.data.maxWindowLines
+    : undefined;
+  const policyMaxTokens = policyConfig.success
+    ? policyConfig.data.maxWindowTokens
+    : undefined;
+  const effectiveMaxLines =
+    Math.min(request.maxLines ?? Infinity, policyMaxLines ?? Infinity) ||
+    undefined;
+  const effectiveMaxTokens =
+    Math.min(request.maxTokens ?? Infinity, policyMaxTokens ?? Infinity) ||
+    undefined;
+
   if (request.symbolId) {
     const result = await generateSymbolSkeleton(
       request.repoId,
       request.symbolId,
       {
-        maxLines: request.maxLines,
-        maxTokens: request.maxTokens,
+        maxLines: effectiveMaxLines,
+        maxTokens: effectiveMaxTokens,
         includeIdentifiers: request.identifiersToFind,
       },
     );
@@ -632,8 +655,8 @@ export async function handleGetSkeleton(
       request.file,
       request.exportedOnly ?? false,
       {
-        maxLines: request.maxLines,
-        maxTokens: request.maxTokens,
+        maxLines: effectiveMaxLines,
+        maxTokens: effectiveMaxTokens,
         includeIdentifiers: request.identifiersToFind,
       },
     );
@@ -703,13 +726,31 @@ export async function handleGetHotPath(
   });
   consumePrefetchedKey(request.repoId, `card:${request.symbolId}`);
 
+  // Enforce policy limits as caps on maxLines/maxTokens
+  const hotPathAppConfig = loadConfig();
+  const hotPathPolicyConfig = PolicyConfigSchema.safeParse(
+    hotPathAppConfig.policy ?? {},
+  );
+  const hotPathPolicyMaxLines = hotPathPolicyConfig.success
+    ? hotPathPolicyConfig.data.maxWindowLines
+    : undefined;
+  const hotPathPolicyMaxTokens = hotPathPolicyConfig.success
+    ? hotPathPolicyConfig.data.maxWindowTokens
+    : undefined;
+
   const result = await extractHotPath(
     request.repoId,
     request.symbolId,
     request.identifiersToFind,
     {
-      maxLines: request.maxLines ?? DEFAULT_MAX_LINES_HOTPATH,
-      maxTokens: request.maxTokens ?? DEFAULT_MAX_TOKENS_HOTPATH,
+      maxLines: Math.min(
+        request.maxLines ?? DEFAULT_MAX_LINES_HOTPATH,
+        hotPathPolicyMaxLines ?? Infinity,
+      ),
+      maxTokens: Math.min(
+        request.maxTokens ?? DEFAULT_MAX_TOKENS_HOTPATH,
+        hotPathPolicyMaxTokens ?? Infinity,
+      ),
       contextLines: request.contextLines ?? DEFAULT_CONTEXT_LINES,
     },
   );

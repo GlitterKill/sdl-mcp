@@ -1,9 +1,16 @@
 /**
- * ladybug-repos.ts — Repository and File Operations
+ * ladybug-repos.ts ï¿½ Repository and File Operations
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber, assertSafeInt } from "./ladybug-core.js";
+import {
+  exec,
+  queryAll,
+  querySingle,
+  toNumber,
+  assertSafeInt,
+  withTransaction,
+} from "./ladybug-core.js";
 import { normalizePath } from "../util/paths.js";
 import { DEFAULT_QUERY_LIMIT } from "../config/constants.js";
 
@@ -53,7 +60,10 @@ function computeDirectory(relPath: string): string {
   return lastSlash === -1 ? "" : normalized.slice(0, lastSlash);
 }
 
-export async function upsertRepo(conn: Connection, repo: RepoRow): Promise<void> {
+export async function upsertRepo(
+  conn: Connection,
+  repo: RepoRow,
+): Promise<void> {
   await exec(
     conn,
     `MERGE (r:Repo {repoId: $repoId})
@@ -103,23 +113,28 @@ export async function listRepos(
   return rows.slice(0, limit);
 }
 
-export async function deleteRepo(conn: Connection, repoId: string): Promise<void> {
-  const fileRows = await queryAll<{ fileId: string }>(
-    conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
-     RETURN f.fileId AS fileId`,
-    { repoId },
-  );
+export async function deleteRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<void> {
+  await withTransaction(conn, async (txConn) => {
+    const fileRows = await queryAll<{ fileId: string }>(
+      txConn,
+      `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
+       RETURN f.fileId AS fileId`,
+      { repoId },
+    );
 
-  const fileIds = fileRows.map((r) => r.fileId);
-  await deleteFilesByIds(conn, fileIds);
+    const fileIds = fileRows.map((r) => r.fileId);
+    await deleteFilesByIds(txConn, fileIds);
 
-  await exec(
-    conn,
-    `MATCH (r:Repo {repoId: $repoId})
-     DELETE r`,
-    { repoId },
-  );
+    await exec(
+      txConn,
+      `MATCH (r:Repo {repoId: $repoId})
+       DELETE r`,
+      { repoId },
+    );
+  });
 }
 
 export async function upsertFile(
@@ -215,6 +230,15 @@ export async function deleteFilesByIds(
 
   const uniqueFileIds = [...new Set(fileIds)];
 
+  await withTransaction(conn, async (txConn) => {
+    await _deleteFilesByIdsInner(txConn, uniqueFileIds);
+  });
+}
+
+async function _deleteFilesByIdsInner(
+  conn: Connection,
+  uniqueFileIds: string[],
+): Promise<void> {
   // Step 1: Collect all symbolIds for all fileIds in one query
   const symbolRows = await queryAll<{ symbolId: string }>(
     conn,
@@ -419,4 +443,3 @@ export async function getFilesByRepoLite(
 
   return rows;
 }
-

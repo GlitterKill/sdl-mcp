@@ -31,7 +31,8 @@ const DEFAULT_SLICE_CACHE_MAX = 100;
 let sliceCacheTtlMs = DEFAULT_SLICE_CACHE_TTL_MS;
 let sliceCacheMax = DEFAULT_SLICE_CACHE_MAX;
 const sliceCache = new Map<string, SliceCacheEntry>();
-const accessOrder: string[] = [];
+/** LRU tracking via Map insertion order — delete+re-set promotes to end. */
+const accessOrderMap = new Map<string, true>();
 
 export function configureSliceCache(options: {
   maxEntries?: number;
@@ -104,11 +105,8 @@ export function getSliceCacheKey(request: SliceBuildRequest): string {
 }
 
 function promoteAccessOrder(key: string): void {
-  const index = accessOrder.indexOf(key);
-  if (index !== -1) {
-    accessOrder.splice(index, 1);
-  }
-  accessOrder.push(key);
+  accessOrderMap.delete(key);
+  accessOrderMap.set(key, true);
 }
 
 export function getCachedSlice(key: string): GraphSlice | null {
@@ -133,10 +131,7 @@ export function getCachedSlice(key: string): GraphSlice | null {
 }
 
 function removeFromAccessOrder(key: string): void {
-  const index = accessOrder.indexOf(key);
-  if (index !== -1) {
-    accessOrder.splice(index, 1);
-  }
+  accessOrderMap.delete(key);
 }
 
 export function setCachedSlice(key: string, slice: GraphSlice): void {
@@ -146,8 +141,9 @@ export function setCachedSlice(key: string, slice: GraphSlice): void {
     cacheStats.currentSize--;
   }
   if (sliceCache.size >= sliceCacheMax) {
-    const lruKey = accessOrder.shift();
+    const lruKey = accessOrderMap.keys().next().value;
     if (lruKey) {
+      accessOrderMap.delete(lruKey);
       sliceCache.delete(lruKey);
       cacheStats.evictions++;
       cacheStats.currentSize--;
@@ -159,7 +155,7 @@ export function setCachedSlice(key: string, slice: GraphSlice): void {
     expiresAt: now + sliceCacheTtlMs,
     createdAt: now,
   });
-  accessOrder.push(key);
+  accessOrderMap.set(key, true);
   cacheStats.currentSize++;
 }
 
@@ -179,7 +175,7 @@ export function invalidateVersion(versionId: VersionId): void {
 
 export function clearSliceCache(): void {
   sliceCache.clear();
-  accessOrder.length = 0;
+  accessOrderMap.clear();
   cacheStats = {
     hits: 0,
     misses: 0,

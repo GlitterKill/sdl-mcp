@@ -13,10 +13,22 @@ export {
 
 import { ErrorCode } from "../domain/errors.js";
 
-export interface PolicyDenialError extends Error {
-  code: ErrorCode;
-  nextBestAction?: NextBestAction;
-  requiredFieldsForNext?: RequiredFieldsForNext;
+export class PolicyDenialError extends Error {
+  readonly code = ErrorCode.POLICY_ERROR;
+  readonly nextBestAction?: NextBestAction;
+  readonly requiredFieldsForNext?: RequiredFieldsForNext;
+
+  constructor(
+    message: string,
+    nextBestAction?: NextBestAction,
+    requiredFieldsForNext?: RequiredFieldsForNext,
+  ) {
+    super(message);
+    this.name = "PolicyDenialError";
+    this.nextBestAction = nextBestAction;
+    this.requiredFieldsForNext = requiredFieldsForNext;
+    Object.setPrototypeOf(this, PolicyDenialError.prototype);
+  }
 }
 
 export function createPolicyDenial(
@@ -24,12 +36,7 @@ export function createPolicyDenial(
   nextBestAction?: NextBestAction,
   requiredFieldsForNext?: RequiredFieldsForNext,
 ): PolicyDenialError {
-  const error = new Error(message) as PolicyDenialError;
-  error.name = "PolicyError";
-  error.code = ErrorCode.POLICY_ERROR;
-  error.nextBestAction = nextBestAction;
-  error.requiredFieldsForNext = requiredFieldsForNext;
-  return error;
+  return new PolicyDenialError(message, nextBestAction, requiredFieldsForNext);
 }
 
 export interface McpErrorDetail {

@@ -67,6 +67,7 @@ export async function deleteExpiredSliceHandles(
   conn: Connection,
   beforeTimestamp: string,
 ): Promise<number> {
+  // Count first, then delete in a single statement (no N+1 loop)
   const rows = await queryAll<{ handle: string }>(
     conn,
     `MATCH (h:SliceHandle)
@@ -75,12 +76,13 @@ export async function deleteExpiredSliceHandles(
     { beforeTimestamp },
   );
 
-  for (const row of rows) {
+  if (rows.length > 0) {
     await exec(
       conn,
-      `MATCH (h:SliceHandle {handle: $handle})
+      `MATCH (h:SliceHandle)
+       WHERE h.expiresAt < $beforeTimestamp
        DELETE h`,
-      { handle: row.handle },
+      { beforeTimestamp },
     );
   }
 

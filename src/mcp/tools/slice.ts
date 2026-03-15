@@ -47,12 +47,17 @@ import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import {
   createPolicyDenial,
-  DatabaseError,
   NotFoundError,
   ValidationError,
 } from "../errors.js";
 import { pickDepLabel } from "../../util/depLabels.js";
-import { safeJsonParseOptional, safeJsonParseOrThrow, StringArraySchema, SignatureSchema, ConfigObjectSchema } from "../../util/safeJson.js";
+import {
+  safeJsonParseOptional,
+  safeJsonParseOrThrow,
+  StringArraySchema,
+  SignatureSchema,
+  ConfigObjectSchema,
+} from "../../util/safeJson.js";
 import { z } from "zod";
 import {
   withSpan,
@@ -186,7 +191,7 @@ export async function handleSliceBuild(
   } catch (error) {
     const parsed = safeParseArgs(args);
 
-    if (error instanceof DatabaseError) {
+    if (error instanceof NotFoundError) {
       return sliceErrorToResponse({
         type: "invalid_repo",
         repoId: parsed?.repoId ?? "unknown",
@@ -269,9 +274,13 @@ async function handleSliceBuildInternal(
 
     const repo = await ladybugDb.getRepo(conn, repoId);
     if (!repo) {
-      throw new DatabaseError(`Repository not found: ${repoId}`);
+      throw new NotFoundError(`Repository not found: ${repoId}`);
     }
-    const repoConfig = safeJsonParseOrThrow(repo.configJson, ConfigObjectSchema, `configJson for repository ${repoId}`);
+    const repoConfig = safeJsonParseOrThrow(
+      repo.configJson,
+      ConfigObjectSchema,
+      `configJson for repository ${repoId}`,
+    );
     const mergedPolicy = PolicyConfigSchema.parse({
       ...config.policy,
       ...(repoConfig.policy ?? {}),
@@ -635,7 +644,13 @@ export async function handleSliceSpilloverGet(
 
   droppedSymbols = safeJsonParseOrThrow(
     handleRow.spilloverRef,
-    z.array(z.object({ symbolId: z.string(), reason: z.string(), priority: z.enum(["must", "should", "optional"]) })),
+    z.array(
+      z.object({
+        symbolId: z.string(),
+        reason: z.string(),
+        priority: z.enum(["must", "should", "optional"]),
+      }),
+    ),
     `spillover data for handle: ${spilloverHandle}`,
   );
 
@@ -707,7 +722,10 @@ export async function handleSliceSpilloverGet(
 
       let signature: SymbolSignature = { name: symbolRow.name };
       if (symbolRow.signatureJson) {
-        const parsed = safeJsonParseOptional(symbolRow.signatureJson, SignatureSchema);
+        const parsed = safeJsonParseOptional(
+          symbolRow.signatureJson,
+          SignatureSchema,
+        );
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
           const candidate = parsed as Partial<SymbolSignature>;
           signature = {
@@ -720,13 +738,22 @@ export async function handleSliceSpilloverGet(
         }
       }
 
-      const invariants = safeJsonParseOptional(symbolRow.invariantsJson, StringArraySchema);
+      const invariants = safeJsonParseOptional(
+        symbolRow.invariantsJson,
+        StringArraySchema,
+      );
 
-      const sideEffects = safeJsonParseOptional(symbolRow.sideEffectsJson, StringArraySchema);
+      const sideEffects = safeJsonParseOptional(
+        symbolRow.sideEffectsJson,
+        StringArraySchema,
+      );
 
       let metricsData;
       if (metrics) {
-        const testRefs = safeJsonParseOptional(metrics.testRefsJson, StringArraySchema);
+        const testRefs = safeJsonParseOptional(
+          metrics.testRefsJson,
+          StringArraySchema,
+        );
 
         metricsData = {
           fanIn: metrics.fanIn,

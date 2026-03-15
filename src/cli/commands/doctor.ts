@@ -588,48 +588,19 @@ async function checkLadybugDb(
       return 0;
     };
 
-    const closeQueryResults = (result: unknown): void => {
-      if (Array.isArray(result)) {
-        for (const r of result) {
-          (r as { close?: () => void }).close?.();
-        }
-        return;
-      }
-      (result as { close?: () => void }).close?.();
-    };
-
     await initLadybugDb(ladybugDbPath);
     const conn = await getLadybugConn();
 
-    const symbolCountResult = await conn.query(
-      "MATCH (s:Symbol) RETURN count(s) AS symbolCount",
-    );
-    let symbolCount = 0;
-    try {
-      const qr = Array.isArray(symbolCountResult)
-        ? symbolCountResult[symbolCountResult.length - 1]
-        : symbolCountResult;
-      const row = await qr.getNext();
-      symbolCount = toNumber(
-        (row as { symbolCount?: unknown }).symbolCount ?? 0,
-      );
-    } finally {
-      closeQueryResults(symbolCountResult);
-    }
+    const symbolCountRow = await ladybugDb.querySingle<{
+      symbolCount: unknown;
+    }>(conn, "MATCH (s:Symbol) RETURN count(s) AS symbolCount");
+    const symbolCount = toNumber(symbolCountRow?.symbolCount ?? 0);
 
-    const dependsOnCountResult = await conn.query(
+    const edgeCountRow = await ladybugDb.querySingle<{ edgeCount: unknown }>(
+      conn,
       "MATCH ()-[d:DEPENDS_ON]->() RETURN count(d) AS edgeCount",
     );
-    let edgeCount = 0;
-    try {
-      const qr = Array.isArray(dependsOnCountResult)
-        ? dependsOnCountResult[dependsOnCountResult.length - 1]
-        : dependsOnCountResult;
-      const row = await qr.getNext();
-      edgeCount = toNumber((row as { edgeCount?: unknown }).edgeCount ?? 0);
-    } finally {
-      closeQueryResults(dependsOnCountResult);
-    }
+    const edgeCount = toNumber(edgeCountRow?.edgeCount ?? 0);
 
     const currentPath = getLadybugDbPath();
     const pathInfo = currentPath ? ` (active: ${currentPath})` : "";

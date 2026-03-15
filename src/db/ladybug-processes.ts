@@ -3,7 +3,13 @@
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber } from "./ladybug-core.js";
+import {
+  exec,
+  queryAll,
+  querySingle,
+  toNumber,
+  withTransaction,
+} from "./ladybug-core.js";
 
 export interface ProcessRow {
   processId: string;
@@ -87,22 +93,24 @@ export async function upsertProcessStepsBatch(
   }>,
 ): Promise<void> {
   if (steps.length === 0) return;
-  for (const step of steps) {
-    await exec(
-      conn,
-      `MATCH (s:Symbol {symbolId: $symbolId})
-       MATCH (p:Process {processId: $processId})
-       MERGE (s)-[r:PARTICIPATES_IN]->(p)
-       SET r.stepOrder = $stepOrder,
-           r.role = $role`,
-      {
-        processId: step.processId,
-        symbolId: step.symbolId,
-        stepOrder: step.stepOrder,
-        role: step.role,
-      },
-    );
-  }
+  await withTransaction(conn, async (txConn) => {
+    for (const step of steps) {
+      await exec(
+        txConn,
+        `MATCH (s:Symbol {symbolId: $symbolId})
+         MATCH (p:Process {processId: $processId})
+         MERGE (s)-[r:PARTICIPATES_IN]->(p)
+         SET r.stepOrder = $stepOrder,
+             r.role = $role`,
+        {
+          processId: step.processId,
+          symbolId: step.symbolId,
+          stepOrder: step.stepOrder,
+          role: step.role,
+        },
+      );
+    }
+  });
 }
 
 export async function getProcessesForSymbol(

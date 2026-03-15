@@ -610,16 +610,14 @@ export async function beamSearchLadybug(
     }
     if (clusterIds.length > 0) {
       prefetchPromises.push(
-        ladybugDb
-          .getClustersForSymbols(conn, clusterIds)
-          .then((clusterMap) => {
-            for (const symbolId of clusterIds) {
-              clusterCache.set(
-                symbolId,
-                clusterMap.get(symbolId)?.clusterId ?? null,
-              );
-            }
-          }),
+        ladybugDb.getClustersForSymbols(conn, clusterIds).then((clusterMap) => {
+          for (const symbolId of clusterIds) {
+            clusterCache.set(
+              symbolId,
+              clusterMap.get(symbolId)?.clusterId ?? null,
+            );
+          }
+        }),
       );
     }
     if (prefetchPromises.length > 0) {
@@ -1056,13 +1054,7 @@ export function estimateCardTokens(symbolId: SymbolId, graph: Graph): number {
   return Math.ceil(tokens);
 }
 
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .split(/\s+/)
-    .filter((t) => t.length > 0);
-}
+import { tokenize } from "../../util/tokenize.js";
 
 export interface ParallelScorerConfig {
   enabled: boolean;

@@ -180,7 +180,9 @@ export function logToolCall(event: ToolCallEvent): void {
       response: event.response,
       durationMs: event.durationMs,
     }),
-  });
+  }).catch((err) =>
+    logger.warn(`Audit write failed for ${event.tool}: ${String(err)}`),
+  );
 
   logger.info(`Tool call logged: ${event.tool}`, {
     decision,
@@ -199,7 +201,9 @@ export function logCodeWindowDecision(event: CodeWindowDecisionEvent): void {
       approved: event.approved,
       reason: event.reason,
     }),
-  });
+  }).catch((err) =>
+    logger.warn(`Audit write failed for code.needWindow: ${String(err)}`),
+  );
 
   logger.info(`Code window decision: ${decision}`, {
     symbolId: event.symbolId,
@@ -216,7 +220,9 @@ export function logIndexEvent(event: IndexEvent): void {
       versionId: event.versionId,
       ...event.stats,
     }),
-  });
+  }).catch((err) =>
+    logger.warn(`Audit write failed for index.refresh: ${String(err)}`),
+  );
 
   logger.info(`Index event logged: ${event.repoId}`, {
     versionId: event.versionId,
@@ -271,7 +277,11 @@ export function logPolicyDecision(event: PolicyDecisionEvent): void {
       downgradeTarget,
       context: rest.context,
     }),
-  });
+  }).catch((err) =>
+    logger.warn(
+      `Audit write failed for policy.${rest.requestType}: ${String(err)}`,
+    ),
+  );
 
   logger.info(`Policy decision: ${decision}`, {
     requestType: rest.requestType,
@@ -288,7 +298,9 @@ export function logSetupPipelineEvent(event: SetupPipelineEvent): void {
     decision: "success",
     repoId: event.repoId,
     detailsJson: JSON.stringify(event),
-  });
+  }).catch((err) =>
+    logger.warn(`Audit write failed for phaseA.setup: ${String(err)}`),
+  );
 }
 
 export function logSummaryGenerationEvent(event: SummaryGenerationEvent): void {
@@ -297,7 +309,9 @@ export function logSummaryGenerationEvent(event: SummaryGenerationEvent): void {
     decision: "success",
     repoId: event.repoId,
     detailsJson: JSON.stringify(event),
-  });
+  }).catch((err) =>
+    logger.warn(`Audit write failed for phaseA.summary: ${String(err)}`),
+  );
 }
 
 export function logWatcherHealthTelemetry(
@@ -308,7 +322,9 @@ export function logWatcherHealthTelemetry(
     decision: event.stale || event.errors > 0 ? "warn" : "success",
     repoId: event.repoId,
     detailsJson: JSON.stringify(event),
-  });
+  }).catch((err) =>
+    logger.warn(`Audit write failed for phaseA.watcher: ${String(err)}`),
+  );
 }
 
 export function logEdgeResolutionTelemetry(
@@ -406,7 +422,9 @@ export function logRuntimeExecution(event: RuntimeExecutionEvent): void {
       auditHash: event.auditHash,
       artifactHandle: event.artifactHandle,
     }),
-  });
+  }).catch((err) =>
+    logger.warn(`Audit write failed for runtime.execute: ${String(err)}`),
+  );
 
   logger.info("Runtime execution", {
     eventType: "runtime_execution",

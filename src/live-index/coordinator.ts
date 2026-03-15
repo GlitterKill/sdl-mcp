@@ -31,6 +31,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   private readonly reconcileQueue = new ReconcileQueue();
   private readonly reconcileWorker = new ReconcileWorker(this.reconcileQueue);
   private readonly parseScheduler;
+  private readonly repoRootCache = new Map<string, string>();
 
   constructor(options: InMemoryLiveIndexCoordinatorOptions = {}) {
     this.enabled = options.enabled ?? true;
@@ -41,7 +42,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
         const parsedAt = new Date().toISOString();
         try {
           const repoRoot = await this.loadRepoRoot(payload.repoId);
-          
+
           let derivedLanguage = "";
           if (payload.filePath.endsWith(".d.ts")) {
             derivedLanguage = "typescript";
@@ -52,9 +53,12 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
             } else {
               // Handle extensionless files
               if (payload.content.startsWith("#!")) {
-                if (payload.content.includes("node")) derivedLanguage = "javascript";
-                else if (payload.content.includes("python")) derivedLanguage = "python";
-                else if (payload.content.includes("sh")) derivedLanguage = "bash";
+                if (payload.content.includes("node"))
+                  derivedLanguage = "javascript";
+                else if (payload.content.includes("python"))
+                  derivedLanguage = "python";
+                else if (payload.content.includes("sh"))
+                  derivedLanguage = "bash";
               }
             }
           }
@@ -88,7 +92,9 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     });
   }
 
-  async pushBufferUpdate(input: BufferUpdateInput): Promise<BufferUpdateResult> {
+  async pushBufferUpdate(
+    input: BufferUpdateInput,
+  ): Promise<BufferUpdateResult> {
     if (!this.enabled) {
       return {
         accepted: false,
@@ -174,7 +180,11 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
           input.timestamp,
         );
       }
-      this.overlayStore.markSaved(input.repoId, input.filePath, input.timestamp);
+      this.overlayStore.markSaved(
+        input.repoId,
+        input.filePath,
+        input.timestamp,
+      );
       if (patched) {
         await this.checkpointService.checkpointRepo(
           {
@@ -264,14 +274,19 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     this.overlayStore.clearAll();
     this.checkpointService.clear();
     this.reconcileQueue.clear();
+    this.repoRootCache.clear();
   }
 
   private async loadRepoRoot(repoId: string): Promise<string> {
+    const cached = this.repoRootCache.get(repoId);
+    if (cached) return cached;
+
     const conn = await getLadybugConn();
     const repo = await ladybugDb.getRepo(conn, repoId);
     if (!repo) {
       throw new IndexError(`Repository ${repoId} not found`);
     }
+    this.repoRootCache.set(repoId, repo.rootPath);
     return repo.rootPath;
   }
 }

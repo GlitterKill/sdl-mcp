@@ -102,7 +102,7 @@ export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   maxWindowLines: 180,
   maxWindowTokens: 1400,
   requireIdentifiers: true,
-  allowBreakGlass: true,
+  allowBreakGlass: false,
   defaultMinCallConfidence: undefined,
   defaultDenyRaw: true,
   budgetCaps: {
