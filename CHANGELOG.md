@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.8] - 2026-03-15
+
+### Added
+
+- CLI tool access for direct MCP action invocation, including argument parsing, dispatch, structured output, and gateway-focused test coverage
+- Tool gateway routing plus compact and thin schemas to reduce MCP token overhead, alongside measurement tooling and config-schema support
+- Graph slice orchestration with beam-search start-node resolution, graph snapshot caching, serialization, and supporting metrics/repository integration
+
+### Changed
+
+- Local semantic embedding support now defaults to the `nomic-embed-text-v1.5` provider, with downloader, registry, and runtime docs aligned to the new model
+- README and deep-dive documentation were expanded across CLI access, graph slicing, governance policy, runtime execution, indexing languages, and semantic workflows
+- MCP, DB, live-index, policy, and code-window paths received a broader hardening pass before release, including stricter error handling and safer gating behavior
+
+### Fixed
+
+- HTTP auth token handling across the CLI transport path and stress harness client scenarios
+- Stress-test reliability around Ladybug initialization and concurrent client execution
+- Release-train regressions across slice, symbol, and code tools, plus telemetry, watcher/live-index parsing, and database query safety paths
+
 ## [0.8.7] - 2026-03-13
 
 ### Added
