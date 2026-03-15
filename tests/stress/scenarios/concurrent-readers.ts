@@ -79,7 +79,7 @@ async function runReaderWorkflow(
 export async function runConcurrentReaders(
   ctx: ScenarioContext,
 ): Promise<ScenarioResult> {
-  const { config, serverPort, log, baselineMetrics } = ctx;
+  const { config, serverPort, authToken, log, baselineMetrics } = ctx;
   const allWarnings: string[] = [];
   const allErrors: Array<{
     clientId: string;
@@ -104,6 +104,8 @@ export async function runConcurrentReaders(
       clientCount,
       collector,
       config.verbose,
+      0,
+      authToken,
     );
 
     try {

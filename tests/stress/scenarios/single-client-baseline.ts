@@ -13,7 +13,7 @@ import { stressLog } from "../infra/types.js";
 export async function runSingleClientBaseline(
   ctx: ScenarioContext,
 ): Promise<ScenarioResult> {
-  const { config, serverPort, log } = ctx;
+  const { config, serverPort, authToken, log } = ctx;
   const collector = new MetricsCollector();
   const warnings: string[] = [];
   const start = Date.now();
@@ -28,6 +28,7 @@ export async function runSingleClientBaseline(
       "baseline-0",
       collector,
       config.verbose,
+      authToken,
     );
 
     // 1. Register the fixture repo

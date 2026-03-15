@@ -167,7 +167,7 @@ async function runSemanticWorkflow(
 export async function runSemanticTools(
   ctx: ScenarioContext,
 ): Promise<ScenarioResult> {
-  const { config, serverPort, log, baselineMetrics } = ctx;
+  const { config, serverPort, authToken, log, baselineMetrics } = ctx;
   const allWarnings: string[] = [];
   const allErrors: Array<{
     clientId: string;
@@ -189,6 +189,7 @@ export async function runSemanticTools(
     "setup-0",
     setupCollector,
     config.verbose,
+    authToken,
   );
   try {
     await setupClient.callToolParsed("sdl.repo.register", {
@@ -215,6 +216,8 @@ export async function runSemanticTools(
       clientCount,
       collector,
       config.verbose,
+      0,
+      authToken,
     );
 
     try {

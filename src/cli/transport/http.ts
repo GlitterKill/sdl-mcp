@@ -100,10 +100,7 @@ function isAuthorized(
     // Short-circuit on length mismatch. Token length (64 hex chars) is not
     // secret, and timingSafeEqual requires equal-length buffers.
     if (provided.length !== expectedToken.length) return false;
-    return timingSafeEqual(
-      Buffer.from(provided),
-      Buffer.from(expectedToken),
-    );
+    return timingSafeEqual(Buffer.from(provided), Buffer.from(expectedToken));
   }
   return false;
 }
@@ -811,6 +808,8 @@ async function handleRestRequest(
 export interface HttpServerHandle {
   /** The port the server is actually listening on (resolves port 0 → OS-assigned). */
   port: number;
+  /** The bearer token required for /mcp and /api/* endpoints. */
+  authToken: string;
   /** Resolves when the server closes. */
   serverClosed: Promise<void>;
   /** Gracefully close the HTTP server and stop the idle reaper. */
@@ -826,7 +825,9 @@ export async function setupHttpTransport(
   // Generate auth token for this server instance (H3).
   // Non-browser clients (curl, scripts) must include this token.
   const authToken = generateAuthToken();
-  console.error(`[sdl-mcp] HTTP auth token: ${authToken.slice(0, 8)}…(truncated)`);
+  console.error(
+    `[sdl-mcp] HTTP auth token: ${authToken.slice(0, 8)}…(truncated)`,
+  );
   console.error(
     "[sdl-mcp] Include header: Authorization: Bearer <token> for /mcp and /api/* endpoints",
   );
@@ -1254,6 +1255,7 @@ export async function setupHttpTransport(
 
   return {
     port: boundPort,
+    authToken,
     serverClosed,
     close: async () => {
       sessionManager.stopIdleReaper();

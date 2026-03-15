@@ -159,9 +159,10 @@ async function main(): Promise<void> {
     !cliArgs.scenario || cliArgs.scenario === name;
 
   // Helper: create scenario context
-  const makeCtx = (serverPort: number): ScenarioContext => ({
+  const makeCtx = (serverPort: number, authToken: string): ScenarioContext => ({
     config,
     serverPort,
+    authToken,
     baselineMetrics,
     log: (msg: string) => {
       if (config.verbose) stressLog("info", msg);
@@ -190,12 +191,14 @@ async function main(): Promise<void> {
       return;
     }
 
+    const token = harness.getAuthToken();
+
     try {
       // Scenario 1: Baseline
       if (shouldRun("single-client-baseline") || !cliArgs.scenario) {
         stressLog("info", "=== Scenario 1: Single Client Baseline ===");
         const result = await withTimeout(
-          runSingleClientBaseline(makeCtx(port)),
+          runSingleClientBaseline(makeCtx(port, token)),
           cliArgs.timeout,
           "single-client-baseline",
         );
@@ -214,7 +217,7 @@ async function main(): Promise<void> {
       if (shouldRun("concurrent-readers")) {
         stressLog("info", "=== Scenario 2: Concurrent Readers ===");
         const result = await withTimeout(
-          runConcurrentReaders(makeCtx(port)),
+          runConcurrentReaders(makeCtx(port, token)),
           cliArgs.timeout * config.concurrencyLevels.length,
           "concurrent-readers",
         );
@@ -225,7 +228,7 @@ async function main(): Promise<void> {
       if (shouldRun("mixed-read-write")) {
         stressLog("info", "=== Scenario 3: Mixed Read-Write ===");
         const result = await withTimeout(
-          runMixedReadWrite(makeCtx(port)),
+          runMixedReadWrite(makeCtx(port, token)),
           cliArgs.timeout * config.concurrencyLevels.length,
           "mixed-read-write",
         );
@@ -251,7 +254,7 @@ async function main(): Promise<void> {
         maxToolConcurrency: 8,
       });
       const result = await withTimeout(
-        runSessionSaturation(makeCtx(port)),
+        runSessionSaturation(makeCtx(port, harness.getAuthToken())),
         cliArgs.timeout,
         "session-saturation",
       );
@@ -278,7 +281,7 @@ async function main(): Promise<void> {
         maxToolConcurrency: 4,
       });
       const result = await withTimeout(
-        runDispatchPressure(makeCtx(port)),
+        runDispatchPressure(makeCtx(port, harness.getAuthToken())),
         cliArgs.timeout,
         "dispatch-pressure",
       );
@@ -302,7 +305,7 @@ async function main(): Promise<void> {
         maxToolConcurrency: 8,
       });
       const result = await withTimeout(
-        runSemanticTools(makeCtx(port)),
+        runSemanticTools(makeCtx(port, harness.getAuthToken())),
         cliArgs.timeout * config.concurrencyLevels.length,
         "semantic-tools",
       );

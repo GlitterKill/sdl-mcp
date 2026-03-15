@@ -22,6 +22,7 @@ export class StressClient {
     clientId: string,
     collector: MetricsCollector,
     verbose: boolean = false,
+    authToken?: string,
   ) {
     this.clientId = clientId;
     this.collector = collector;
@@ -29,6 +30,13 @@ export class StressClient {
 
     this.transport = new StreamableHTTPClientTransport(
       new URL(`http://127.0.0.1:${port}/mcp`),
+      authToken
+        ? {
+            requestInit: {
+              headers: { Authorization: `Bearer ${authToken}` },
+            },
+          }
+        : undefined,
     );
 
     this.client = new Client({
@@ -176,8 +184,15 @@ export async function createStressClient(
   clientId: string,
   collector: MetricsCollector,
   verbose: boolean = false,
+  authToken?: string,
 ): Promise<StressClient> {
-  const client = new StressClient(port, clientId, collector, verbose);
+  const client = new StressClient(
+    port,
+    clientId,
+    collector,
+    verbose,
+    authToken,
+  );
   await client.connect();
   return client;
 }
@@ -191,10 +206,17 @@ export async function createStressClients(
   collector: MetricsCollector,
   verbose: boolean = false,
   startIndex: number = 0,
+  authToken?: string,
 ): Promise<StressClient[]> {
   const clients = await Promise.all(
     Array.from({ length: count }, (_, i) =>
-      createStressClient(port, `stress-${startIndex + i}`, collector, verbose),
+      createStressClient(
+        port,
+        `stress-${startIndex + i}`,
+        collector,
+        verbose,
+        authToken,
+      ),
     ),
   );
   return clients;

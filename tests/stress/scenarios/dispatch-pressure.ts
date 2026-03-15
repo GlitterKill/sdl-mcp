@@ -37,7 +37,7 @@ const SEARCH_QUERIES = [
 export async function runDispatchPressure(
   ctx: ScenarioContext,
 ): Promise<ScenarioResult> {
-  const { config, serverPort, log } = ctx;
+  const { config, serverPort, authToken, log } = ctx;
   const collector = new MetricsCollector();
   const warnings: string[] = [];
   const start = Date.now();
@@ -53,6 +53,7 @@ export async function runDispatchPressure(
     "dp-setup",
     setupCollector,
     config.verbose,
+    authToken,
   );
   try {
     await setupClient.callToolParsed("sdl.repo.register", {
@@ -93,6 +94,8 @@ export async function runDispatchPressure(
     CLIENTS,
     collector,
     config.verbose,
+    0,
+    authToken,
   );
 
   try {

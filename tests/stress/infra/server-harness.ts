@@ -36,6 +36,7 @@ export class ServerHarness {
   private tempDir: string | null = null;
   private sessionManager: SessionManager | null = null;
   private actualPort: number = 0;
+  private _authToken: string = "";
 
   constructor(config: StressTestConfig) {
     this.config = config;
@@ -101,6 +102,7 @@ export class ServerHarness {
     // setupHttpTransport now waits for listen and exposes the actual bound port
     // (supports port 0 → OS-assigned).
     this.actualPort = this.handle.port;
+    this._authToken = this.handle.authToken;
 
     stressLog("info", `Server harness started on port ${this.actualPort}`);
     return this.actualPort;
@@ -137,12 +139,17 @@ export class ServerHarness {
 
     this.sessionManager = null;
     this.actualPort = 0;
+    this._authToken = "";
 
     stressLog("info", "Server harness stopped");
   }
 
   getPort(): number {
     return this.actualPort;
+  }
+
+  getAuthToken(): string {
+    return this._authToken;
   }
 
   getPoolStats(): {

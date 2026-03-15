@@ -89,7 +89,7 @@ async function readerWorkflow(
 export async function runMixedReadWrite(
   ctx: ScenarioContext,
 ): Promise<ScenarioResult> {
-  const { config, serverPort, log, baselineMetrics } = ctx;
+  const { config, serverPort, authToken, log, baselineMetrics } = ctx;
   const allWarnings: string[] = [];
   const allErrors: Array<{
     clientId: string;
@@ -116,6 +116,8 @@ export async function runMixedReadWrite(
       clientCount,
       collector,
       config.verbose,
+      0,
+      authToken,
     );
 
     try {

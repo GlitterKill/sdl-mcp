@@ -210,6 +210,8 @@ export type ScenarioFn = (ctx: ScenarioContext) => Promise<ScenarioResult>;
 export interface ScenarioContext {
   config: StressTestConfig;
   serverPort: number;
+  /** Bearer token for HTTP transport auth. */
+  authToken: string;
   /** Baseline metrics from single-client scenario (undefined for the baseline itself) */
   baselineMetrics?: Record<string, AggregateMetrics>;
   log: (msg: string) => void;

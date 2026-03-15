@@ -24,7 +24,7 @@ const MAX_SESSIONS_FOR_TEST = 4;
 export async function runSessionSaturation(
   ctx: ScenarioContext,
 ): Promise<ScenarioResult> {
-  const { config, serverPort, log } = ctx;
+  const { config, serverPort, authToken, log } = ctx;
   const collector = new MetricsCollector();
   const warnings: string[] = [];
   const start = Date.now();
@@ -40,6 +40,7 @@ export async function runSessionSaturation(
     "sat-setup",
     setupCollector,
     config.verbose,
+    authToken,
   );
   try {
     await setupClient.callToolParsed("sdl.repo.register", {
@@ -69,6 +70,7 @@ export async function runSessionSaturation(
           `sat-${i}`,
           collector,
           config.verbose,
+          authToken,
         );
         connectedClients.push(client);
         log(`  Client sat-${i} connected`);
@@ -93,6 +95,11 @@ export async function runSessionSaturation(
     try {
       const transport = new StreamableHTTPClientTransport(
         new URL(`http://127.0.0.1:${serverPort}/mcp`),
+        {
+          requestInit: {
+            headers: { Authorization: `Bearer ${authToken}` },
+          },
+        },
       );
       const client5 = new Client({
         name: "stress-client-sat-overflow",
@@ -151,6 +158,7 @@ export async function runSessionSaturation(
         "sat-recovery",
         collector,
         config.verbose,
+        authToken,
       );
       connectedClients.push(recoveredClient);
       recoveryOk = true;
@@ -172,6 +180,7 @@ export async function runSessionSaturation(
     try {
       const response = await fetch(
         `http://127.0.0.1:${serverPort}/api/sessions`,
+        { headers: { Authorization: `Bearer ${authToken}` } },
       );
       const stats = (await response.json()) as {
         activeSessions?: number;
