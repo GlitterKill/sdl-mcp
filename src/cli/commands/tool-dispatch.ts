@@ -177,21 +177,19 @@ export async function toolDispatchCommand(
 
   // No action provided
   if (!action) {
-    console.error("Error: no action specified\n");
-    printActionList();
-    process.exit(1);
+    throw new Error("no action specified. Run: sdl-mcp tool --list");
   }
 
   // Look up action definition
   const definition = ACTION_MAP.get(action);
   if (!definition) {
     const suggestion = suggestAction(action);
-    process.stderr.write(`Error: unknown action "${action}"\n`);
+    const parts = [`unknown action "${action}"`];
     if (suggestion) {
-      process.stderr.write(`Did you mean: ${suggestion}?\n`);
+      parts.push(`Did you mean: ${suggestion}?`);
     }
-    process.stderr.write(`Run: sdl-mcp tool --list\n`);
-    process.exit(1);
+    parts.push("Run: sdl-mcp tool --list");
+    throw new Error(parts.join(". "));
   }
 
   // --help for specific action
@@ -200,14 +198,14 @@ export async function toolDispatchCommand(
     return;
   }
 
-  // Parse action-specific args
+  // Parse action-specific args (strict: true catches typos like --repoid)
   const actionParseOpts = buildParseArgsOptions(definition);
-  let actionValues: Record<string, unknown> = {};
+  let actionValues: Record<string, unknown>;
 
   try {
     const { values: parsed } = parseArgs({
       args: rawArgs,
-      strict: false,
+      strict: true,
       options: {
         ...actionParseOpts,
         "output-format": { type: "string" },
@@ -216,35 +214,31 @@ export async function toolDispatchCommand(
     });
     actionValues = parsed as Record<string, unknown>;
   } catch (err) {
-    process.stderr.write(`${formatError(err)}\n`);
-    process.stderr.write(`Run: sdl-mcp tool ${action} --help\n`);
-    process.exit(1);
+    throw new Error(
+      `${formatError(err)}. Run: sdl-mcp tool ${action} --help`,
+    );
   }
 
   // Read stdin JSON if piped
   const stdinArgs = await readStdinJson();
 
-  // Build handler args
-  let handlerArgs: Record<string, unknown>;
-  try {
-    handlerArgs = parseToolArgs(definition, actionValues, stdinArgs);
-  } catch (err) {
-    process.stderr.write(`${formatError(err)}\n`);
-    process.exit(1);
-  }
-
-  // Initialize config + DB
+  // Initialize config (needed for repoId auto-resolution before arg validation)
   const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
-  await initGraphDb(config, configPath);
 
-  // Auto-resolve repoId if not specified
-  if (handlerArgs.repoId === undefined) {
+  // Auto-resolve repoId if not specified in flags or stdin
+  if (!actionValues["repo-id"] && (!stdinArgs || !stdinArgs.repoId)) {
     const resolved = resolveRepoId(undefined, config.repos);
     if (resolved) {
-      handlerArgs.repoId = resolved;
+      actionValues["repo-id"] = resolved;
     }
   }
+
+  // Build handler args (validates required fields — repoId is resolved above)
+  const handlerArgs = parseToolArgs(definition, actionValues, stdinArgs);
+
+  // Initialize DB
+  await initGraphDb(config, configPath);
 
   // Build action map (gateway router — no MCP server needed)
   // liveIndex is undefined in CLI mode; buffer.* actions will error gracefully
@@ -253,22 +247,16 @@ export async function toolDispatchCommand(
   // Look up handler
   const entry = actionHandlerMap[action];
   if (!entry) {
-    process.stderr.write(`Error: action "${action}" not found in handler map\n`);
-    process.exit(1);
+    throw new Error(`action "${action}" not found in handler map`);
   }
 
   // Validate with Zod schema and call handler
-  try {
-    const parsed = entry.schema.parse(handlerArgs);
-    const result = await entry.handler(parsed);
+  const parsed = entry.schema.parse(handlerArgs);
+  const result = await entry.handler(parsed);
 
-    // Output
-    const outputFormat = detectOutputFormat(
-      (actionValues["output-format"] as string) ?? options.outputFormat,
-    );
-    formatOutput(result, outputFormat);
-  } catch (err) {
-    process.stderr.write(`${formatError(err)}\n`);
-    process.exit(1);
-  }
+  // Output
+  const outputFormat = detectOutputFormat(
+    (actionValues["output-format"] as string) ?? options.outputFormat,
+  );
+  formatOutput(result, outputFormat);
 }

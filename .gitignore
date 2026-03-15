@@ -133,3 +133,4 @@ target/rust-analyzer/flycheck0/stdout
 .gitignore
 target/rust-analyzer/flycheck0/stderr
 docs/superpowers/specs/2026-03-13-agent-memory-system-design.md
+tests.tap

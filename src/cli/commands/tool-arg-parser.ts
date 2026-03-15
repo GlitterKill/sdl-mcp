@@ -133,22 +133,7 @@ export function parseToolArgs(
   return result;
 }
 
-/**
- * Get all flag names registered for an action definition.
- * Returns both long (--flag) and short (-f) variants.
- */
-export function getActionFlagNames(
-  definition: ActionDefinition,
-): string[] {
-  const flags: string[] = [];
-  for (const arg of definition.args) {
-    flags.push(arg.flag);
-    if (arg.short) {
-      flags.push(arg.short);
-    }
-  }
-  return flags;
-}
+
 
 /**
  * Build a parseArgs options spec from an action definition.
@@ -156,8 +141,8 @@ export function getActionFlagNames(
  */
 export function buildParseArgsOptions(
   definition: ActionDefinition,
-): Record<string, { type: "string" | "boolean"; short?: string }> {
-  const options: Record<string, { type: "string" | "boolean"; short?: string }> = {};
+): Record<string, { type: "string" | "boolean"; short?: string; multiple?: boolean }> {
+  const options: Record<string, { type: "string" | "boolean"; short?: string; multiple?: boolean }> = {};
 
   for (const arg of definition.args) {
     const key = stripDashes(arg.flag);
@@ -171,7 +156,7 @@ export function buildParseArgsOptions(
     if (arg.type === "string[]") {
       entry.multiple = true;
     }
-    options[key] = entry as any;
+    options[key] = entry;
   }
 
   return options;

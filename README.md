@@ -277,6 +277,44 @@ Run tests, linters, and scripts through SDL-MCP's governance layer instead of un
 
 [Runtime Execution Deep Dive →](./docs/feature-deep-dives/runtime-execution.md)
 
+---
+
+### CLI Tool Access — No MCP Server Required
+
+Access all 25 tool actions directly from the command line with `sdl-mcp tool`. No MCP server, transport, or SDK — just your terminal.
+
+```bash
+# Search for symbols
+sdl-mcp tool symbol.search --query "handleAuth" --output-format pretty
+
+# Build a task-scoped slice
+sdl-mcp tool slice.build --task-text "debug auth flow" --max-cards 50
+
+# Pipe JSON args, chain commands
+echo '{"repoId":"my-repo"}' | sdl-mcp tool symbol.search --query "auth"
+```
+
+Features include typed argument coercion (string, number, boolean, string[], json), budget flag merging, stdin JSON piping with CLI-flags-win precedence, auto-resolved `repoId` from cwd, four output formats (json, json-compact, pretty, table), typo suggestions, and per-action `--help`. The CLI dispatches through the same gateway router and Zod schemas as the MCP server — identical code paths, identical validation.
+
+[CLI Tool Access Deep Dive →](./docs/feature-deep-dives/cli-tool-access.md)
+
+---
+
+### Tool Gateway — 81% Token Reduction
+
+The tool gateway consolidates all 25 MCP tools into **4 namespace-scoped tools** (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`), reducing `tools/list` overhead from **~3,742 tokens to ~713 tokens** — an **81% reduction**.
+
+```
+  Before:  25 tools × full JSON Schema = ~3,742 tokens at conversation start
+  After:    4 tools × thin schema       = ~713 tokens at conversation start
+                                          ─────────────
+                                          ~3,029 tokens saved per conversation
+```
+
+Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "symbol.search", repoId: "x", query: "auth" }`) and routes to the same handlers with double Zod validation. Thin wire schemas in `tools/list` keep the registration compact while full validation happens server-side. Legacy flat tool names are optionally emitted alongside for backward compatibility.
+
+[Tool Gateway Deep Dive →](./docs/feature-deep-dives/tool-gateway.md)
+
 <br/>
 
 ---
@@ -351,6 +389,7 @@ Run tests, linters, and scripts through SDL-MCP's governance layer instead of un
 | `sdl-mcp doctor` | Validate runtime, config, DB, grammars, repo access |
 | `sdl-mcp index` | Index repositories (with optional `--watch` mode) |
 | `sdl-mcp serve` | Start MCP server (`--stdio` or `--http`) |
+| `sdl-mcp tool` | Access all 25 MCP tool actions directly ([docs](./docs/feature-deep-dives/cli-tool-access.md)) |
 | `sdl-mcp summary` | Generate copy/paste context summaries from the CLI |
 | `sdl-mcp health` | Compute composite health score with badge/JSON output |
 | `sdl-mcp export` | Export sync artifact |
@@ -432,6 +471,8 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 | [Agent Orchestration](./docs/feature-deep-dives/agent-orchestration.md) | Autopilot mode, feedback loops, portable context summaries |
 | [Indexing & Languages](./docs/feature-deep-dives/indexing-languages.md) | Rust/TS engines, two-pass architecture, 12-language support |
 | [Runtime Execution](./docs/feature-deep-dives/runtime-execution.md) | Sandboxed subprocess execution with governance |
+| [CLI Tool Access](./docs/feature-deep-dives/cli-tool-access.md) | Direct CLI access to all 25 actions, output formats, stdin piping, scripting |
+| [Tool Gateway](./docs/feature-deep-dives/tool-gateway.md) | 25→4 tool consolidation, 81% token reduction, thin schemas, migration guide |
 | [Semantic Engine](./docs/feature-deep-dives/semantic-engine.md) | Pass-2 call resolution, embedding search, LLM summaries, confidence scoring |
 | [Semantic Embeddings Setup](./docs/feature-deep-dives/semantic-embeddings-setup.md) | Dependencies, model installation, provider configuration, tier-by-tier setup |
 

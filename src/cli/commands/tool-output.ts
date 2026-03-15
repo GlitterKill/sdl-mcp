@@ -236,7 +236,10 @@ function formatTable(rows: Record<string, unknown>[]): string {
       if (v === undefined || v === null) s = "";
       else if (typeof v === "object") s = JSON.stringify(v);
       else s = String(v);
-      return s.slice(0, widths[i]).padEnd(widths[i]);
+      const truncated = s.length > widths[i] && widths[i] > 3
+        ? s.slice(0, widths[i] - 1) + "…"
+        : s.slice(0, widths[i]);
+      return truncated.padEnd(widths[i]);
     });
     lines.push(cells.join("  "));
   }
