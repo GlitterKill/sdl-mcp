@@ -352,8 +352,8 @@ export function estimateTokens(code: string): number {
  * interpolation expression ARE counted.
  *
  * Block comment state (`inBlockComment`) is accepted and returned so the
- * caller can track multi-line /​* ... *​/ spans across consecutive lines.
- * (Line-level single-line /​* ... *​/ is also handled within a single call.)
+ * caller can track multi-line block-comment spans across consecutive lines.
+ * (Line-level single-line block comments are also handled within a single call.)
  */
 function countBracesOutsideStrings(
   line: string,

@@ -292,6 +292,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          FAILED=0
 
           for dir in native/npm/*/; do
             pkg_name=$(node -e "console.log(require('./${dir}package.json').name)")
@@ -308,8 +309,24 @@ jobs:
               continue
             fi
 
-            npm publish "${dir}" --access public --tag "${NPM_DIST_TAG}" --provenance
+            if npm publish "${dir}" --access public --tag "${NPM_DIST_TAG}" --provenance 2>&1; then
+              echo "OK ${pkg_name}@${VERSION} published"
+            else
+              # Tolerate "already published" errors (race with publish-native workflow)
+              recheck=$(npm view "${pkg_name}@${VERSION}" version 2>/dev/null || true)
+              if [[ "${recheck}" == "${VERSION}" ]]; then
+                echo "SKIP ${pkg_name}@${VERSION} already published (confirmed after retry)"
+              else
+                echo "FAIL ${pkg_name}@${VERSION} publish failed"
+                FAILED=1
+              fi
+            fi
           done
+
+          if [[ "${FAILED}" -eq 1 ]]; then
+            echo "ERROR: Some platform packages failed to publish"
+            exit 1
+          fi
 
       - name: Publish native umbrella package
         shell: bash
@@ -328,7 +345,17 @@ jobs:
             exit 0
           fi
 
-          npm publish native/ --access public --tag "${NPM_DIST_TAG}" --ignore-scripts --provenance
+          if npm publish native/ --access public --tag "${NPM_DIST_TAG}" --ignore-scripts --provenance 2>&1; then
+            echo "OK sdl-mcp-native@${VERSION} published"
+          else
+            recheck=$(npm view "sdl-mcp-native@${VERSION}" version 2>/dev/null || true)
+            if [[ "${recheck}" == "${VERSION}" ]]; then
+              echo "SKIP sdl-mcp-native@${VERSION} already published (confirmed after retry)"
+            else
+              echo "FAIL sdl-mcp-native@${VERSION} publish failed"
+              exit 1
+            fi
+          fi
 
       - name: Build runtime package
         run: npm run build:all
@@ -350,4 +377,14 @@ jobs:
             exit 0
           fi
 
-          npm publish . --access public --tag "${NPM_DIST_TAG}" --provenance
+          if npm publish . --access public --tag "${NPM_DIST_TAG}" --provenance 2>&1; then
+            echo "OK sdl-mcp@${VERSION} published"
+          else
+            recheck=$(npm view "sdl-mcp@${VERSION}" version 2>/dev/null || true)
+            if [[ "${recheck}" == "${VERSION}" ]]; then
+              echo "SKIP sdl-mcp@${VERSION} already published (confirmed after retry)"
+            else
+              echo "FAIL sdl-mcp@${VERSION} publish failed"
+              exit 1
+            fi
+          fi
