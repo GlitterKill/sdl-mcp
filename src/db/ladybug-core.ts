@@ -33,6 +33,14 @@ export function assertSafeInt(value: number, name: string): void {
   }
 }
 
+/**
+ * Coerce a value to a number.
+ *
+ * Returns 0 for null/undefined — this is intentional for metric fields
+ * (fanIn, churn30d, byteSize) where "not set" is semantically equivalent
+ * to zero. Callers that need to distinguish missing from zero should
+ * check for null/undefined before calling this function.
+ */
 export function toNumber(value: unknown): number {
   if (typeof value === "number") return value;
   if (typeof value === "bigint") {
@@ -160,11 +168,34 @@ export async function exec(
  * Two concurrent `withTransaction` calls on the same connection will race
  * on depth tracking and produce corrupt transaction state.
  */
+// Track in-flight transaction ownership to detect concurrent misuse (H1).
+// NOTE: This guard is safe because the check-and-set sequence between
+// `transactionLockByConn.get()` and `.set()` is synchronous (no await
+// in between), so JavaScript's single-threaded event loop guarantees
+// atomicity. It will NOT detect two callers that enter withTransaction()
+// in the same microtask before either reaches the first await — but that
+// scenario is impossible given the synchronous check-set path.
+const transactionLockByConn = new WeakMap<Connection, boolean>();
+
 export async function withTransaction<T>(
   conn: Connection,
   fn: (conn: Connection) => Promise<T>,
 ): Promise<T> {
   const depth = transactionDepthByConn.get(conn) ?? 0;
+
+  // At depth 0, ensure no other caller is concurrently entering a
+  // transaction on this same connection. Nested calls (depth > 0) from
+  // within the same async chain are safe.
+  if (depth === 0 && transactionLockByConn.get(conn)) {
+    throw new DatabaseError(
+      "Concurrent withTransaction() detected on the same connection. " +
+        "Callers must serialize access (e.g., via the write limiter).",
+    );
+  }
+
+  if (depth === 0) {
+    transactionLockByConn.set(conn, true);
+  }
   transactionDepthByConn.set(conn, depth + 1);
 
   if (depth === 0) {
@@ -192,6 +223,7 @@ export async function withTransaction<T>(
       transactionDepthByConn.set(conn, nextDepth);
     } else {
       transactionDepthByConn.delete(conn);
+      transactionLockByConn.delete(conn);
     }
   }
 }

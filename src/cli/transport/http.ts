@@ -1,5 +1,5 @@
 import { createReadStream, statSync } from "fs";
-import { randomUUID } from "crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { join } from "path";
 import { fileURLToPath } from "url";
@@ -77,6 +77,37 @@ type HttpTransportServices = {
 const LOCALHOST_ORIGIN_RE =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
+/**
+ * Generate a cryptographically random bearer token for HTTP transport auth.
+ * Any local process must present this token to access /mcp and /api/* endpoints.
+ */
+function generateAuthToken(): string {
+  return randomBytes(32).toString("hex");
+}
+
+/**
+ * Validate the Authorization header against the expected bearer token.
+ * Returns true if the token matches or if no token is configured (opt-out).
+ */
+function isAuthorized(
+  req: IncomingMessage,
+  expectedToken: string | null,
+): boolean {
+  if (!expectedToken) return true; // Auth disabled
+  const authHeader = req.headers.authorization ?? "";
+  if (authHeader.startsWith("Bearer ")) {
+    const provided = authHeader.slice(7);
+    // Short-circuit on length mismatch. Token length (64 hex chars) is not
+    // secret, and timingSafeEqual requires equal-length buffers.
+    if (provided.length !== expectedToken.length) return false;
+    return timingSafeEqual(
+      Buffer.from(provided),
+      Buffer.from(expectedToken),
+    );
+  }
+  return false;
+}
+
 function setCorsHeaders(req: IncomingMessage, res: ServerResponse): void {
   const origin = req.headers.origin ?? "";
   // Always set Vary: Origin so caches correctly differentiate responses
@@ -90,6 +121,10 @@ function setCorsHeaders(req: IncomingMessage, res: ServerResponse): void {
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization, Mcp-Session-Id",
   );
+  // Allow credentials only because the origin check above restricts to
+  // localhost. If the origin check is ever relaxed to non-localhost origins,
+  // this header MUST be removed or scoped accordingly.
+  res.setHeader("Access-Control-Allow-Credentials", "true");
 }
 
 function json(res: ServerResponse, status: number, payload: unknown): void {
@@ -788,6 +823,14 @@ export async function setupHttpTransport(
   graphDbPath: string,
   services: HttpTransportServices & MCPServerServices = {},
 ): Promise<HttpServerHandle> {
+  // Generate auth token for this server instance (H3).
+  // Non-browser clients (curl, scripts) must include this token.
+  const authToken = generateAuthToken();
+  console.error(`[sdl-mcp] HTTP auth token: ${authToken.slice(0, 8)}…(truncated)`);
+  console.error(
+    "[sdl-mcp] Include header: Authorization: Bearer <token> for /mcp and /api/* endpoints",
+  );
+
   // Unified transport map: sessionId -> Transport (SSE or StreamableHTTP)
   const transports = new Map<string, Transport>();
   // Per-session MCP servers for lifecycle cleanup
@@ -866,6 +909,27 @@ export async function setupHttpTransport(
       void (async () => {
         const url = new URL(req.url ?? "/", `http://${host}:${port}`);
         const pathname = url.pathname;
+
+        // ---------------------------------------------------------------
+        // Auth check for /mcp and /api/* endpoints (H3)
+        // Skip for health, UI, and OPTIONS preflight.
+        // ---------------------------------------------------------------
+        if (
+          req.method !== "OPTIONS" &&
+          (pathname === "/mcp" ||
+            pathname === "/sse" ||
+            pathname === "/message" ||
+            pathname.startsWith("/api/")) &&
+          !isAuthorized(req, authToken)
+        ) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: "Unauthorized: Bearer token required",
+            }),
+          );
+          return;
+        }
 
         // ---------------------------------------------------------------
         // CORS preflight for /mcp endpoint

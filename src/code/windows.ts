@@ -86,6 +86,18 @@ export async function extractCodeWindow(
   };
 }
 
+// Validate cache eviction constants (M4)
+if (REGEX_CACHE_EVICT_COUNT < 1) {
+  throw new Error(
+    `REGEX_CACHE_EVICT_COUNT must be >= 1, got ${REGEX_CACHE_EVICT_COUNT}`,
+  );
+}
+if (REGEX_CACHE_MAX_SIZE < REGEX_CACHE_EVICT_COUNT) {
+  throw new Error(
+    `REGEX_CACHE_MAX_SIZE (${REGEX_CACHE_MAX_SIZE}) must be >= REGEX_CACHE_EVICT_COUNT (${REGEX_CACHE_EVICT_COUNT})`,
+  );
+}
+
 const identifierRegexCache = new Map<string, RegExp>();
 
 export function identifiersExistInWindow(
@@ -331,6 +343,128 @@ export function estimateTokens(code: string): number {
   return estimateTokenCount(code);
 }
 
+/**
+ * Count braces in a line while skipping those inside string literals,
+ * template literal bodies, block comments, and line comments.
+ *
+ * Template literal interpolations (${...}) are handled: braces that form
+ * the interpolation syntax are not counted, but real braces inside the
+ * interpolation expression ARE counted.
+ *
+ * Block comment state (`inBlockComment`) is accepted and returned so the
+ * caller can track multi-line /​* ... *​/ spans across consecutive lines.
+ * (Line-level single-line /​* ... *​/ is also handled within a single call.)
+ */
+function countBracesOutsideStrings(
+  line: string,
+  inBlockComment = false,
+): { open: number; close: number; inBlockComment: boolean } {
+  let open = 0;
+  let close = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let inTemplate = false;
+  let inLineComment = false;
+  // Depth of nested ${...} interpolations inside template literals.
+  // 0 = not in any interpolation. Each ${ pushes +1, matching } pops -1.
+  let interpDepth = 0;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    const next = line[i + 1];
+
+    if (inLineComment) break; // rest of line is comment
+
+    // ---- Block comment state ----
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i++; // skip the /
+      }
+      continue;
+    }
+
+    // ---- Escape sequences inside strings ----
+    if ((inSingle || inDouble || inTemplate) && ch === "\\") {
+      i++; // skip escaped character
+      continue;
+    }
+
+    // ---- Template literal interpolation: ${...} enters code mode ----
+    if (inTemplate && ch === "$" && next === "{") {
+      interpDepth++;
+      inTemplate = false;
+      i++; // skip the { (it is interpolation syntax, not a real brace)
+      continue;
+    }
+
+    // ---- String state transitions ----
+    if (!inDouble && !inTemplate && ch === "'" && !inSingle) {
+      inSingle = true;
+      continue;
+    }
+    if (inSingle && ch === "'") {
+      inSingle = false;
+      continue;
+    }
+    if (!inSingle && !inTemplate && ch === '"' && !inDouble) {
+      inDouble = true;
+      continue;
+    }
+    if (inDouble && ch === '"') {
+      inDouble = false;
+      continue;
+    }
+    if (!inSingle && !inDouble && ch === "`" && !inTemplate) {
+      inTemplate = true;
+      continue;
+    }
+    if (inTemplate && ch === "`") {
+      inTemplate = false;
+      continue;
+    }
+
+    // Skip content inside string bodies
+    if (inSingle || inDouble || inTemplate) continue;
+
+    // ---- Line comment detection ----
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      continue;
+    }
+
+    // ---- Block comment detection ----
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i++; // skip the *
+      continue;
+    }
+
+    // ---- Brace counting (code mode) ----
+    if (ch === "{") {
+      if (interpDepth > 0) {
+        // Nested brace inside a template interpolation — track depth
+        // so we know which } closes the interpolation vs. an inner block.
+        interpDepth++;
+      }
+      open++;
+    } else if (ch === "}") {
+      if (interpDepth > 0) {
+        interpDepth--;
+        if (interpDepth === 0) {
+          // This } closes the ${...} interpolation — return to template mode.
+          // Do not count it as a real brace.
+          inTemplate = true;
+          continue;
+        }
+      }
+      close++;
+    }
+  }
+
+  return { open, close, inBlockComment };
+}
+
 export function expandToBlock(lines: string[], range: Range): Range {
   let startLine = range.startLine;
   let endLine = range.endLine;
@@ -354,15 +488,24 @@ export function expandToBlock(lines: string[], range: Range): Range {
   let braceCount = 0;
   let inBlock = false;
 
+  // Backward scan: walk upward looking for the opening brace of the
+  // enclosing block. braceCount tracks net balance: each `{` increments
+  // (we found a block opener) and each `}` decrements (we entered a
+  // nested block going upward). When braceCount returns to 0 after
+  // having been positive, we've found the balanced block boundary.
+  // Note: inBlockComment state is not chained across lines during backward
+  // traversal because we'd need to scan from file start to know the true
+  // state. Single-line /* ... */ within each line IS still handled.
   for (let i = startLine - 1; i >= 0; i--) {
     const line = lines[i].trim();
+    const { open, close } = countBracesOutsideStrings(lines[i]);
 
-    if (line.includes("{")) {
-      braceCount++;
+    if (open > 0) {
+      braceCount += open;
       inBlock = true;
     }
-    if (line.includes("}")) {
-      braceCount--;
+    if (close > 0) {
+      braceCount -= close;
     }
 
     if (braceCount === 0 && inBlock) {
@@ -379,15 +522,20 @@ export function expandToBlock(lines: string[], range: Range): Range {
   braceCount = 0;
   inBlock = false;
 
+  // Forward scan chains inBlockComment state across lines so multi-line
+  // /* ... */ comments are correctly skipped.
+  let fwdBlockComment = false;
   for (let i = endLine - 1; i < lines.length; i++) {
-    const line = lines[i].trim();
+    const result = countBracesOutsideStrings(lines[i], fwdBlockComment);
+    fwdBlockComment = result.inBlockComment;
+    const { open, close } = result;
 
-    if (line.includes("{")) {
-      braceCount++;
+    if (open > 0) {
+      braceCount += open;
       inBlock = true;
     }
-    if (line.includes("}")) {
-      braceCount--;
+    if (close > 0) {
+      braceCount -= close;
     }
 
     if (braceCount === 0 && inBlock) {

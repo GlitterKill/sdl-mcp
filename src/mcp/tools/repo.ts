@@ -137,9 +137,7 @@ export async function handleRepoRegister(
     });
   });
 
-  if (existingRepo) {
-    invalidateGraphSnapshot(repoId);
-  }
+  invalidateGraphSnapshot(repoId);
 
   return {
     ok: true,

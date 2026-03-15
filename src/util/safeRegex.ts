@@ -88,6 +88,31 @@ export function safeCompileRegex(
  * @returns RegExp object anchored with ^ and $
  */
 export function globToSafeRegex(glob: string): RegExp {
+  // Guard against excessively complex globs BEFORE doing any transformation
+  // so we short-circuit early and avoid unnecessary work (H2).
+  const doubleStarCount = (glob.match(/\*\*/g) || []).length;
+  if (doubleStarCount > 5 || glob.length > 500) {
+    logger.warn(`Overly complex glob pattern rejected: ${glob}`);
+    // Fall back to exact literal match of the glob string.
+    // Escape all regex metacharacters individually for clarity.
+    const litEscaped = glob
+      .replace(/\\/g, "\\\\") // backslash
+      .replace(/\./g, "\\.") // dot
+      .replace(/\+/g, "\\+") // plus
+      .replace(/\?/g, "\\?") // question mark
+      .replace(/\*/g, "\\*") // star
+      .replace(/\^/g, "\\^") // caret
+      .replace(/\$/g, "\\$") // dollar
+      .replace(/\|/g, "\\|") // pipe
+      .replace(/\(/g, "\\(") // left paren
+      .replace(/\)/g, "\\)") // right paren
+      .replace(/\[/g, "\\[") // left bracket
+      .replace(/\]/g, "\\]") // right bracket
+      .replace(/\{/g, "\\{") // left brace
+      .replace(/\}/g, "\\}"); // right brace
+    return new RegExp(`^${litEscaped}$`);
+  }
+
   // First, handle glob wildcards with placeholders to protect them
   // **/ must be handled before ** to avoid double-replacement
   let pattern = glob.replace(/\*\*\//g, "GLOB_DOUBLESTAR_SLASH");

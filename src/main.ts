@@ -107,12 +107,8 @@ async function main(): Promise<void> {
     const { cleanupExpiredSliceHandles } = await import("./mcp/tools/slice.js");
     const cleanupInterval = setInterval(() => {
       try {
-        const maybePromise = cleanupExpiredSliceHandles() as unknown as
-          | number
-          | Promise<number>;
-
-        void Promise.resolve(maybePromise)
-          .then((deleted) => {
+        void Promise.resolve(cleanupExpiredSliceHandles())
+          .then((deleted: number) => {
             if (deleted > 0) {
               log(`Cleaned up ${deleted} expired slice handle(s)`);
             }

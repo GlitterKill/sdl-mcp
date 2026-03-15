@@ -745,6 +745,74 @@
         "toolQueueTimeoutMs": 30000
       }
     },
+    "runtime": {
+      "type": "object",
+      "description": "Runtime execution tool configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable the runtime execution tool",
+          "default": false
+        },
+        "allowedRuntimes": {
+          "type": "array",
+          "description": "List of allowed runtime environments",
+          "items": { "type": "string" },
+          "default": ["node", "python"]
+        },
+        "allowedExecutables": {
+          "type": "array",
+          "description": "List of allowed executable paths or patterns",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "maxDurationMs": {
+          "type": "integer",
+          "description": "Maximum execution duration in milliseconds",
+          "minimum": 1000,
+          "maximum": 600000,
+          "default": 30000
+        },
+        "maxStdoutBytes": {
+          "type": "integer",
+          "description": "Maximum stdout capture size in bytes",
+          "minimum": 1024,
+          "default": 1048576
+        },
+        "maxStderrBytes": {
+          "type": "integer",
+          "description": "Maximum stderr capture size in bytes",
+          "minimum": 1024,
+          "default": 524288
+        },
+        "maxArtifactBytes": {
+          "type": "integer",
+          "description": "Maximum artifact file size in bytes",
+          "minimum": 1024,
+          "default": 10485760
+        },
+        "artifactTtlHours": {
+          "type": "integer",
+          "description": "Time-to-live for stored artifacts in hours",
+          "minimum": 1,
+          "default": 24
+        },
+        "maxConcurrentJobs": {
+          "type": "integer",
+          "description": "Maximum concurrent runtime executions",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 2
+        }
+      },
+      "default": {
+        "enabled": false,
+        "allowedRuntimes": ["node", "python"],
+        "allowedExecutables": [],
+        "maxDurationMs": 30000,
+        "maxConcurrentJobs": 2
+      }
+    },
     "gateway": {
       "type": "object",
       "description": "Tool gateway configuration — collapse 25+ tools into 4 namespace-scoped gateway tools to reduce system-prompt token overhead",

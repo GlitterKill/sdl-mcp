@@ -117,16 +117,18 @@ export async function computeDelta(
 export function diffSignature(
   before: string | null,
   after: string | null,
-): { before?: string; after?: string } | undefined {
+): { before?: string; after?: string; parseWarning?: boolean } | undefined {
   if (before === after) {
     return undefined;
   }
 
   let beforeObj = null;
+  let parseWarning = false;
   if (before !== null) {
     try {
       beforeObj = JSON.parse(before);
     } catch (e) {
+      parseWarning = true;
       logger.warn(
         `Failed to parse JSON in diffSignature (before): ${e instanceof Error ? e.message : String(e)}`,
       );
@@ -138,6 +140,7 @@ export function diffSignature(
     try {
       afterObj = JSON.parse(after);
     } catch (e) {
+      parseWarning = true;
       logger.warn(
         `Failed to parse JSON in diffSignature (after): ${e instanceof Error ? e.message : String(e)}`,
       );
@@ -147,29 +150,32 @@ export function diffSignature(
   const beforeStr = JSON.stringify(beforeObj);
   const afterStr = JSON.stringify(afterObj);
 
-  if (beforeStr === afterStr) {
+  if (beforeStr === afterStr && !parseWarning) {
     return undefined;
   }
 
   return {
     before: before ?? undefined,
     after: after ?? undefined,
+    ...(parseWarning ? { parseWarning: true } : {}),
   };
 }
 
 export function diffArray(
   before: string | null,
   after: string | null,
-): { added: string[]; removed: string[] } | undefined {
+): { added: string[]; removed: string[]; parseWarning?: boolean } | undefined {
   if (before === after) {
     return undefined;
   }
 
   let beforeArr: string[] = [];
+  let parseWarning = false;
   if (before !== null) {
     try {
       beforeArr = JSON.parse(before) as string[];
     } catch (e) {
+      parseWarning = true;
       logger.warn(
         `Failed to parse JSON in diffArray (before): ${e instanceof Error ? e.message : String(e)}`,
       );
@@ -182,6 +188,7 @@ export function diffArray(
     try {
       afterArr = JSON.parse(after) as string[];
     } catch (e) {
+      parseWarning = true;
       logger.warn(
         `Failed to parse JSON in diffArray (after): ${e instanceof Error ? e.message : String(e)}`,
       );
@@ -211,7 +218,7 @@ export function diffArray(
     return undefined;
   }
 
-  return { added, removed };
+  return { added, removed, ...(parseWarning ? { parseWarning: true } : {}) };
 }
 
 export function computeStalenessTiers(

@@ -52,7 +52,10 @@ const DEFAULT_PATTERNS: RedactionPattern[] = [
   },
   {
     name: "env-variable",
-    pattern: /\b[A-Z_]{2,}\s*[=:]\s*["']?[a-zA-Z0-9_\-]{16,}["']?\b/gi,
+    // Only match known secret-related env var prefixes to avoid false positives
+    // on legitimate constant assignments like MAX_BUFFER_SIZE = "...".
+    pattern:
+      /\b(?:SECRET|TOKEN|APIKEY|API_KEY|AUTH|CREDENTIAL|PRIVATE|PASSWORD)[A-Z_]*\s*[=:]\s*["']?[a-zA-Z0-9_\-\/+=]{16,}["']?\b/gi,
   },
 ];
 

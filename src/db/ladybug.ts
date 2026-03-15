@@ -77,6 +77,20 @@ export function configurePool(opts: {
   writeQueueTimeoutMs?: number;
 }): void {
   if (readPool.length > 0 || poolInitPromise !== null) {
+    // No-op if the requested settings match the current values (M6).
+    // Note: readPoolSize / writeQueueTimeoutMs hold their defaults (4 / 10000)
+    // until configurePool() is called. If the pool was initialized via
+    // initLadybugDb() without a prior configurePool() call, and a subsequent
+    // configurePool({ readPoolSize: 4 }) arrives, this will silently no-op
+    // because the defaults happen to match — which is the intended behavior.
+    const sameReadSize =
+      opts.readPoolSize === undefined || opts.readPoolSize === readPoolSize;
+    const sameTimeout =
+      opts.writeQueueTimeoutMs === undefined ||
+      opts.writeQueueTimeoutMs === writeQueueTimeoutMs;
+    if (sameReadSize && sameTimeout) {
+      return; // Already initialized with same settings
+    }
     throw new DatabaseError(
       "configurePool() must be called before pool initialization (before initLadybugDb or first getLadybugConn call)",
     );
@@ -398,15 +412,24 @@ export async function withWriteConn<T>(
   }
 
   return writeLimiter.run(async () => {
+    // Capture writeConn into a local before any await to guard against
+    // concurrent shutdown nullifying the module-level reference (M1).
+    const conn = writeConn;
+    if (!conn) {
+      throw new DatabaseError(
+        "Write connection was closed during queue wait. Server may be shutting down.",
+      );
+    }
+
     try {
-      return await fn(writeConn!);
+      return await fn(conn);
     } catch (err) {
       // On connection-level failure, attempt to recycle the write connection
       // and re-throw so the caller can decide whether to retry.
       try {
         const db = await getLadybugDb();
-        const healthy = await getHealthyConnection(writeConn!, db, "write");
-        if (healthy !== writeConn) {
+        const healthy = await getHealthyConnection(conn, db, "write");
+        if (healthy !== conn) {
           writeConn = healthy;
         }
       } catch {
@@ -416,24 +439,6 @@ export async function withWriteConn<T>(
       throw err;
     }
   });
-}
-
-/**
- * Get pool statistics for monitoring.
- */
-export function getPoolStats(): {
-  readPoolSize: number;
-  readPoolInitialized: number;
-  writeQueued: number;
-  writeActive: number;
-} {
-  const limiterStats = writeLimiter?.getStats() ?? { active: 0, queued: 0 };
-  return {
-    readPoolSize,
-    readPoolInitialized: readPool.length,
-    writeQueued: limiterStats.queued,
-    writeActive: limiterStats.active,
-  };
 }
 
 export async function initLadybugDb(dbPath: string): Promise<void> {
