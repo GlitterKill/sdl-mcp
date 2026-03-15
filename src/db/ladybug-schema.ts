@@ -285,7 +285,8 @@ export async function createSchema(conn: Connection): Promise<void> {
   await exec(
     conn,
     `MERGE (sv:SchemaVersion {id: 'current'})
-     ON CREATE SET sv.schemaVersion = $schemaVersion, sv.createdAt = $createdAt, sv.updatedAt = $updatedAt`,
+     ON CREATE SET sv.schemaVersion = $schemaVersion, sv.createdAt = $createdAt, sv.updatedAt = $updatedAt
+     ON MATCH SET sv.schemaVersion = $schemaVersion, sv.updatedAt = $updatedAt`,
     { schemaVersion: LADYBUG_SCHEMA_VERSION, createdAt: now, updatedAt: now },
   );
 }

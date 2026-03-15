@@ -131,6 +131,11 @@ export class ParserWorkerPool {
 
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    // Reject all pending queue items so callers don't hang
+    for (const item of this.queue) {
+      item.reject(new Error("Worker pool shut down"));
+    }
+    this.queue.length = 0;
     await Promise.all(this.workers.map((w) => w.worker.terminate()));
   }
 

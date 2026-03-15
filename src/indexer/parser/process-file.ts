@@ -411,6 +411,13 @@ export async function processFile(params: ProcessFileParams): Promise<{
     const symbolReferences = isTestFile(relPath, languages)
       ? buildSymbolReferences(content, repoId, fileId)
       : [];
+    // Group calls by callerNodeId for O(1) lookup instead of O(n*m) scan
+    const callsByCallerNodeId = new Map<string | null, typeof calls>();
+    for (const call of calls) {
+      const arr = callsByCallerNodeId.get(call.callerNodeId);
+      if (arr) arr.push(call); else callsByCallerNodeId.set(call.callerNodeId, [call]);
+    }
+    const now = new Date().toISOString();
 
     for (const detail of symbolDetails) {
       const extractedSymbol = detail.extractedSymbol;
@@ -493,7 +500,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
             confidence: 1.0,
             resolution: "exact",
             provenance: `import:${target.provenance}`,
-            createdAt: new Date().toISOString(),
+            createdAt: now,
           };
           edgesToInsert.push(edge);
           edgesCreated++;
@@ -501,10 +508,8 @@ export async function processFile(params: ProcessFileParams): Promise<{
       }
 
       if (!skipCallResolution) {
-        for (const call of calls) {
-          if (call.callerNodeId !== extractedSymbol.nodeId) {
-            continue;
-          }
+        const matchingCalls = callsByCallerNodeId.get(extractedSymbol.nodeId) ?? [];
+        for (const call of matchingCalls) {
 
           const resolved = resolveCallTarget(
             call,
@@ -537,7 +542,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
               resolverId: "pass1-generic",
               resolutionPhase: "pass1",
               provenance: `call:${call.calleeIdentifier}`,
-              createdAt: new Date().toISOString(),
+              createdAt: now,
             };
             edgesToInsert.push(edge);
             createdCallEdges?.add(edgeKey);
@@ -563,7 +568,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
               resolverId: "pass1-generic",
               resolutionPhase: "pass1",
               provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
-              createdAt: new Date().toISOString(),
+              createdAt: now,
             };
             edgesToInsert.push(edge);
             createdCallEdges?.add(edgeKey);

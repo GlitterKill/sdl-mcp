@@ -376,7 +376,7 @@ export async function importArtifact(
     symbolsRestored: state.symbols.length,
     edgesRestored: state.edges.length,
     durationMs,
-    verified: !options.verifyIntegrity || true,
+    verified: !!options.verifyIntegrity,
   };
 }
 

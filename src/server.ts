@@ -217,7 +217,7 @@ export class MCPServer {
             `[sdl-mcp] CallTool outer error: ${outerError}\n`,
           );
           return {
-            content: [{ type: "text", text: `Internal error: ${outerError}` }],
+            content: [{ type: "text", text: JSON.stringify(errorToMcpResponse(outerError), null, 2) }],
             isError: true,
           };
         }

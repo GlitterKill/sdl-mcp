@@ -5,7 +5,7 @@ import {
 } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
 
-const fingerprintCollisionLog = new Map<string, Parser.SyntaxNode>();
+const fingerprintCollisionLog = new Map<string, { type: string; name: string; row: number; col: number }>();
 
 /**
  * Generates a stable AST fingerprint for a function/class node.
@@ -69,14 +69,13 @@ export function generateAstFingerprint(node: Parser.SyntaxNode): string {
 
   const fingerprint = hashContent(parts.join("|"));
 
-  const existingNode = fingerprintCollisionLog.get(fingerprint);
-  if (existingNode && existingNode !== node) {
-    const existingName =
-      existingNode.childForFieldName("name")?.text || "<unknown>";
-    const newName = nameNode?.text || "<unknown>";
-    logger.debug("Fingerprint collision detected", { fingerprint, existing: `${existingNode.type}:${existingName}@${existingNode.startPosition.row}:${existingNode.startPosition.column}`, new_entry: `${node.type}:${newName}@${node.startPosition.row}:${node.startPosition.column}` });
+  const newName = nameNode?.text || "<unknown>";
+  const newMeta = { type: node.type, name: newName, row: node.startPosition.row, col: node.startPosition.column };
+  const existingMeta = fingerprintCollisionLog.get(fingerprint);
+  if (existingMeta && (existingMeta.row !== newMeta.row || existingMeta.col !== newMeta.col)) {
+    logger.debug("Fingerprint collision detected", { fingerprint, existing: `${existingMeta.type}:${existingMeta.name}@${existingMeta.row}:${existingMeta.col}`, new_entry: `${newMeta.type}:${newMeta.name}@${newMeta.row}:${newMeta.col}` });
   } else {
-    fingerprintCollisionLog.set(fingerprint, node);
+    fingerprintCollisionLog.set(fingerprint, newMeta);
   }
 
   return fingerprint;
@@ -109,6 +108,11 @@ function collectNormalizedParts(
       }
     }
   }
+}
+
+/** Clear the collision log to free memory between indexing runs. */
+export function clearFingerprintCollisionLog(): void {
+  fingerprintCollisionLog.clear();
 }
 
 export { generateSymbolId as hashSymbolId };

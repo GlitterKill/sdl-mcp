@@ -418,12 +418,18 @@ async function resolveTsCallEdgesPass2(params: {
     const edgesToInsert: ladybugDb.EdgeRow[] = [];
     const now = new Date().toISOString();
 
+    // Group calls by callerNodeId for O(1) lookup instead of O(n*m) scan
+    const callsByCallerNodeId = new Map<string | null, typeof calls>();
+    for (const call of calls) {
+      const existing = callsByCallerNodeId.get(call.callerNodeId) ?? [];
+      existing.push(call);
+      callsByCallerNodeId.set(call.callerNodeId, existing);
+    }
+
     let createdEdges = 0;
     for (const detail of filteredSymbolDetails) {
-      for (const call of calls) {
-        if (call.callerNodeId !== detail.extractedSymbol.nodeId) {
-          continue;
-        }
+      const matchingCalls = callsByCallerNodeId.get(detail.extractedSymbol.nodeId) ?? [];
+      for (const call of matchingCalls) {
         if (telemetry) telemetry.adapterCalls.total++;
         const resolved = resolveCallTarget(
           call,

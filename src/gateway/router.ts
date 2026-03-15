@@ -216,6 +216,9 @@ export async function routeGatewayCall(
   actionMap: Record<string, ActionEntry>,
   ctx?: ToolContext,
 ): Promise<unknown> {
+  if (!rawArgs || typeof rawArgs !== "object") {
+    throw new Error("Gateway args must be a non-null object");
+  }
   const args = rawArgs as Record<string, unknown>;
   const action = args.action as string;
   const repoId = args.repoId as string | undefined;

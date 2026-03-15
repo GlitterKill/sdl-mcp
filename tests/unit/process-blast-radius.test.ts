@@ -191,8 +191,9 @@ describe("process-aware blast radius", () => {
 
     assert.strictEqual(byId.get(caller)?.signal, "directDependent");
 
-    // Dedup: graph (directDependent) wins over process for the same symbol
-    assert.strictEqual(byId.get(mid)?.signal, "directDependent");
+    // Dedup: higher-ranked entry wins — process (rank ~0.95) beats graph (rank ~0)
+    // when maxHops=1 makes normalizedDistance=0
+    assert.strictEqual(byId.get(mid)?.signal, "process");
 
     const exitItem = byId.get(exit);
     const laterItem = byId.get(later);

@@ -57,10 +57,14 @@ export function extractCalls(
   const calls: ExtractedCall[] = [];
   const seenCallNodes = new Set<number>(); // Track processed nodes to avoid duplicates
 
-  // Build symbol lookup map
+  // Build symbol lookup map — keep first symbol for each name to avoid
+  // silently losing earlier declarations when names collide (overloads,
+  // same-named functions in different scopes).
   const symbolMap = new Map<string, ExtractedSymbol>();
   for (const symbol of extractedSymbols) {
-    symbolMap.set(symbol.name, symbol);
+    if (!symbolMap.has(symbol.name)) {
+      symbolMap.set(symbol.name, symbol);
+    }
   }
 
   // --- Standard call queries ---
@@ -273,9 +277,9 @@ export function extractCalls(
     }
 
     const range = {
-      startLine: callNode.node.startPosition.row,
+      startLine: callNode.node.startPosition.row + 1, // 1-based to match extractSymbols
       startCol: callNode.node.startPosition.column,
-      endLine: callNode.node.endPosition.row,
+      endLine: callNode.node.endPosition.row + 1, // 1-based to match extractSymbols
       endCol: callNode.node.endPosition.column,
     };
 
@@ -337,9 +341,9 @@ export function extractCalls(
     }
 
     const range = {
-      startLine: callNode.node.startPosition.row,
+      startLine: callNode.node.startPosition.row + 1, // 1-based to match extractSymbols
       startCol: callNode.node.startPosition.column,
-      endLine: callNode.node.endPosition.row,
+      endLine: callNode.node.endPosition.row + 1, // 1-based to match extractSymbols
       endCol: callNode.node.endPosition.column,
     };
 
@@ -399,9 +403,9 @@ export function extractCalls(
     }
 
     const range = {
-      startLine: callNode.node.startPosition.row,
+      startLine: callNode.node.startPosition.row + 1, // 1-based to match extractSymbols
       startCol: callNode.node.startPosition.column,
-      endLine: callNode.node.endPosition.row,
+      endLine: callNode.node.endPosition.row + 1, // 1-based to match extractSymbols
       endCol: callNode.node.endPosition.column,
     };
 
@@ -454,9 +458,9 @@ export function extractCalls(
     }
 
     const range = {
-      startLine: callNode.node.startPosition.row,
+      startLine: callNode.node.startPosition.row + 1, // 1-based to match extractSymbols
       startCol: callNode.node.startPosition.column,
-      endLine: callNode.node.endPosition.row,
+      endLine: callNode.node.endPosition.row + 1, // 1-based to match extractSymbols
       endCol: callNode.node.endPosition.column,
     };
 

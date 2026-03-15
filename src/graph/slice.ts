@@ -351,12 +351,10 @@ export async function buildSlice(
       score: item.score,
       why: item.why,
     }));
-    const totalEdges = edges.length;
-    const maxEdges = Math.max(0, totalEdges);
     slice.truncation = {
       truncated: true,
       droppedCards: droppedCandidates,
-      droppedEdges: maxEdges,
+      droppedEdges: Math.max(0, droppedCandidates),
       howToResume: {
         type: "token",
         value: estimatedTokens,

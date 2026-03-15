@@ -35,8 +35,25 @@ export function assertSafeInt(value: number, name: string): void {
 
 export function toNumber(value: unknown): number {
   if (typeof value === "number") return value;
-  if (typeof value === "bigint") return Number(value);
-  if (typeof value === "string") return Number(value);
+  if (typeof value === "bigint") {
+    const n = Number(value);
+    if (n > Number.MAX_SAFE_INTEGER || n < -Number.MAX_SAFE_INTEGER) {
+      logger.warn("toNumber: bigint exceeds safe integer range", {
+        value: String(value).slice(0, 50),
+      });
+    }
+    return n;
+  }
+  if (typeof value === "string") {
+    const n = Number(value);
+    if (Number.isNaN(n)) {
+      logger.warn("toNumber: non-numeric string coerced to 0", {
+        value: value.slice(0, 50),
+      });
+      return 0;
+    }
+    return n;
+  }
   if (value != null) {
     logger.warn("toNumber: unexpected non-numeric value coerced to 0", {
       type: typeof value,

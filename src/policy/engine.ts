@@ -401,6 +401,8 @@ export class PolicyEngine {
       return a.name.localeCompare(b.name);
     });
 
+    let breakGlassTriggered = false;
+
     for (const rule of sortedRules) {
       if (!rule.enabled) continue;
 
@@ -414,6 +416,11 @@ export class PolicyEngine {
             downgradeTo = result.downgradeTo;
           }
         }
+
+        // Track break-glass activation so it can override prior denials
+        if (rule.name === "break-glass" && result.evidence.type === "break-glass-triggered") {
+          breakGlassTriggered = true;
+        }
       } catch (error) {
         logger.error(`Policy rule "${rule.name}" evaluation failed`, {
           error,
@@ -425,6 +432,17 @@ export class PolicyEngine {
           reason: `Rule "${rule.name}" failed to evaluate`,
         });
       }
+    }
+
+    // Break-glass override: clear all denials when triggered
+    if (breakGlassTriggered && deniedReasons.length > 0) {
+      logger.warn("Break-glass override clearing prior denials", {
+        clearedReasons: deniedReasons,
+        repoId: context.repoId,
+        symbolId: context.symbolId,
+      });
+      deniedReasons.length = 0;
+      downgradeTo = null;
     }
 
     let decision: PolicyDecision["decision"] = "approve";

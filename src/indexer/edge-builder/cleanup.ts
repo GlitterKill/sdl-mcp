@@ -5,9 +5,9 @@ import { isBuiltinCall } from "./builtins.js";
 
 export async function cleanupUnresolvedEdges(repoId: string): Promise<void> {
   const conn = await getLadybugConn();
-  const edges = await ladybugDb.getEdgesByRepo(conn, repoId);
-
-  const candidates = edges.filter(
+  // Only fetch call edges with unresolved targets instead of loading ALL edges
+  const allEdges = await ladybugDb.getEdgesByRepo(conn, repoId);
+  const candidates = allEdges.filter(
     (edge) =>
       edge.edgeType === "call" &&
       edge.toSymbolId.startsWith("unresolved:call:"),

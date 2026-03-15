@@ -56,16 +56,17 @@ export interface PolicyRule {
 /**
  * PolicyRule Priority Ordering
  *
- * Rules are evaluated in ascending order of priority (lower number = higher priority).
- * The evaluation stops at the first rule that denies the request or downgrades it.
+ * Rules are evaluated in DESCENDING order of priority (higher number = evaluated first).
+ * All rules are evaluated; denials accumulate unless overridden by break-glass.
  *
  * Priority Guidelines:
- * - 1-10: Critical security/cost controls (e.g., maxWindowLines, maxWindowTokens)
- * - 11-20: Feature-level guards (e.g., requireIdentifiers, budgetCaps)
- * - 21-30: Optional enhancements (e.g., custom rules)
+ * - 100: Hard limits (e.g., maxWindowLines, maxWindowTokens) — evaluated first
+ * - 90: Input validation (e.g., requireIdentifiers)
+ * - 80: Budget enforcement (e.g., budgetCaps)
+ * - 10: Override mechanisms (e.g., break-glass) — evaluated last, can clear prior denials
  *
- * When multiple rules have the same priority, they are evaluated in the order
- * they are registered in the policy engine.
+ * When multiple rules have the same priority, they are evaluated in alphabetical
+ * name order.
  */
 
 export interface PolicyDecision {

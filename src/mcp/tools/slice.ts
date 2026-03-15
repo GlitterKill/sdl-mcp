@@ -269,7 +269,12 @@ async function handleSliceBuildInternal(
     if (!repo) {
       throw new DatabaseError(`Repository not found: ${repoId}`);
     }
-    const repoConfig = JSON.parse(repo.configJson);
+    let repoConfig: Record<string, unknown>;
+    try {
+      repoConfig = JSON.parse(repo.configJson);
+    } catch {
+      throw new DatabaseError(`Corrupt configJson for repository ${repoId}`);
+    }
     const mergedPolicy = PolicyConfigSchema.parse({
       ...config.policy,
       ...(repoConfig.policy ?? {}),

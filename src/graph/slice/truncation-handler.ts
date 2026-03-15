@@ -77,7 +77,7 @@ export interface TruncationInfo {
 export function buildTruncationInfo(
   wasTruncated: boolean,
   droppedCandidates: number,
-  totalEdges: number,
+  _totalEdges: number,
   estimatedTokens: number,
 ): TruncationInfo | undefined {
   if (!wasTruncated) {
@@ -87,7 +87,7 @@ export function buildTruncationInfo(
   return {
     truncated: true,
     droppedCards: droppedCandidates,
-    droppedEdges: Math.max(0, totalEdges),
+    droppedEdges: Math.max(0, droppedCandidates),
     howToResume: {
       type: "token",
       value: estimatedTokens,

@@ -30,6 +30,8 @@ const DEFAULT_LOG_DIR = join(homedir(), ".sdl-mcp", "logs");
 
 let logFilePath: string | null = null;
 let logFileEnabled = false;
+let logFileBytesSinceRotationCheck = 0;
+const LOG_ROTATION_CHECK_INTERVAL_BYTES = 64 * 1024; // check every ~64KB of writes
 
 function ensureLogDir(dir: string): void {
   try {
@@ -63,8 +65,13 @@ function rotateLogFile(filePath: string): void {
 function writeToLogFile(msg: string): void {
   if (!logFileEnabled || !logFilePath) return;
   try {
-    rotateLogFile(logFilePath);
-    appendFileSync(logFilePath, msg + "\n", "utf-8");
+    const line = msg + "\n";
+    logFileBytesSinceRotationCheck += line.length;
+    if (logFileBytesSinceRotationCheck >= LOG_ROTATION_CHECK_INTERVAL_BYTES) {
+      rotateLogFile(logFilePath);
+      logFileBytesSinceRotationCheck = 0;
+    }
+    appendFileSync(logFilePath, line, "utf-8");
   } catch {
     // File write failed — degrade silently. Don't crash the server
     // because of a logging failure.

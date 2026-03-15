@@ -206,11 +206,11 @@ export async function computeBlastRadius(
   }));
 
   const mergedBySymbol = new Map<SymbolId, BlastRadiusItem>();
-  for (const item of processDependents) {
-    mergedBySymbol.set(item.symbolId, item);
-  }
-  for (const item of graphDependents) {
-    mergedBySymbol.set(item.symbolId, item);
+  for (const item of [...processDependents, ...graphDependents]) {
+    const existing = mergedBySymbol.get(item.symbolId);
+    if (!existing || item.rank > existing.rank) {
+      mergedBySymbol.set(item.symbolId, item);
+    }
   }
 
   const mergedDependents = Array.from(mergedBySymbol.values());
@@ -378,11 +378,16 @@ export async function runGovernorLoop(
 
 async function runDiagnosticsWithTimeout(
   repoId: RepoId,
-  _timeoutMs: number,
+  timeoutMs: number,
 ): Promise<{ suspects: DiagnosticSuspect[] }> {
   const { getDiagnosticsWithSuspects } = await import("../ts/mapping.js");
-  const { suspects } = await getDiagnosticsWithSuspects(repoId);
-  return { suspects };
+  const result = await Promise.race([
+    getDiagnosticsWithSuspects(repoId),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Diagnostics timeout")), timeoutMs),
+    ),
+  ]);
+  return { suspects: result.suspects };
 }
 
 function applyBudgetedSelection(
@@ -394,12 +399,19 @@ function applyBudgetedSelection(
   const maxTokens = budget.maxEstimatedTokens ?? DEFAULT_MAX_TOKENS_SLICE;
 
   if (maxCards <= 0 || maxTokens <= 0) {
+    const effectiveMaxCards = maxCards <= 0 ? DEFAULT_MAX_CARDS : maxCards;
+    const effectiveMaxTokens = maxTokens <= 0 ? DEFAULT_MAX_TOKENS_SLICE : maxTokens;
     logger.warn("Invalid budget values detected, using defaults", {
       providedMaxCards: budget.maxCards,
       providedMaxTokens: budget.maxEstimatedTokens,
-      usingMaxCards: maxCards,
-      usingMaxTokens: maxTokens,
+      usingMaxCards: effectiveMaxCards,
+      usingMaxTokens: effectiveMaxTokens,
     });
+    return applyBudgetedSelection(
+      blastRadius,
+      { maxCards: effectiveMaxCards, maxEstimatedTokens: effectiveMaxTokens },
+      symbolsById,
+    );
   }
 
   const prioritized = prioritizeBlastRadius(blastRadius);

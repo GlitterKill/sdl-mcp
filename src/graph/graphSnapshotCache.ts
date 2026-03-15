@@ -135,11 +135,12 @@ export function getGraphSnapshotStats(): {
     repoId: string;
     symbolCount: number;
     edgeCount: number;
+    clusterCount: number;
     ageMs: number;
   }>;
 } {
   const now = Date.now();
-  const entries = [];
+  const entries: Array<{ repoId: string; symbolCount: number; edgeCount: number; clusterCount: number; ageMs: number }> = [];
   for (const [repoId, entry] of snapshotsByRepo) {
     entries.push({
       repoId,

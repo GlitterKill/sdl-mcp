@@ -1,5 +1,5 @@
 /**
- * ladybug-symbols.ts — Symbol Operations
+ * ladybug-symbols.ts ï¿½ Symbol Operations
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
@@ -636,63 +636,74 @@ export async function deleteSymbolsByFileId(
     { fileId },
   );
 
-  for (const { symbolId } of symbolRows) {
-    await exec(
-      conn,
-      `MATCH (s:Symbol {symbolId: $symbolId})-[d:DEPENDS_ON]->(:Symbol)
-       DELETE d`,
-      { symbolId },
-    );
+  if (symbolRows.length === 0) return;
 
-    await exec(
-      conn,
-      `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol {symbolId: $symbolId})
-       DELETE d`,
-      { symbolId },
-    );
+  const symbolIds = symbolRows.map((r) => r.symbolId);
 
-    await exec(
-      conn,
-      `MATCH (s:Symbol {symbolId: $symbolId})-[r:SYMBOL_IN_REPO]->(:Repo)
-       DELETE r`,
-      { symbolId },
-    );
+  // Batch delete all relationships and nodes for the collected symbols
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
+     WHERE s.symbolId IN $symbolIds
+     DELETE d`,
+    { symbolIds },
+  );
 
-    await exec(
-      conn,
-      `MATCH (s:Symbol {symbolId: $symbolId})-[r:SYMBOL_IN_FILE]->(:File {fileId: $fileId})
-       DELETE r`,
-      { symbolId, fileId },
-    );
+  await exec(
+    conn,
+    `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
+     WHERE s.symbolId IN $symbolIds
+     DELETE d`,
+    { symbolIds },
+  );
 
-    await exec(
-      conn,
-      `MATCH (s:Symbol {symbolId: $symbolId})-[r:BELONGS_TO_CLUSTER]->(:Cluster)
-       DELETE r`,
-      { symbolId },
-    );
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo)
+     WHERE s.symbolId IN $symbolIds
+     DELETE r`,
+    { symbolIds },
+  );
 
-    await exec(
-      conn,
-      `MATCH (s:Symbol {symbolId: $symbolId})-[r:PARTICIPATES_IN]->(:Process)
-       DELETE r`,
-      { symbolId },
-    );
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[r:SYMBOL_IN_FILE]->(:File {fileId: $fileId})
+     WHERE s.symbolId IN $symbolIds
+     DELETE r`,
+    { symbolIds, fileId },
+  );
 
-    await exec(
-      conn,
-      `MATCH (m:Metrics {symbolId: $symbolId})
-       DELETE m`,
-      { symbolId },
-    );
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
+     WHERE s.symbolId IN $symbolIds
+     DELETE r`,
+    { symbolIds },
+  );
 
-    await exec(
-      conn,
-      `MATCH (s:Symbol {symbolId: $symbolId})
-       DELETE s`,
-      { symbolId },
-    );
-  }
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[r:PARTICIPATES_IN]->(:Process)
+     WHERE s.symbolId IN $symbolIds
+     DELETE r`,
+    { symbolIds },
+  );
+
+  await exec(
+    conn,
+    `MATCH (m:Metrics)
+     WHERE m.symbolId IN $symbolIds
+     DELETE m`,
+    { symbolIds },
+  );
+
+  await exec(
+    conn,
+    `MATCH (s:Symbol)
+     WHERE s.symbolId IN $symbolIds
+     DELETE s`,
+    { symbolIds },
+  );
 }
 
 export async function searchSymbols(

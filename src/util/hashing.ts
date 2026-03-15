@@ -49,8 +49,11 @@ function normalizeObject(obj: unknown): NormalizedValue {
     }
     if (obj instanceof Map) {
       const entries: Record<string, NormalizedValue> = {};
-      for (const [key, value] of obj) {
-        entries[String(key)] = normalizeObject(value);
+      const sortedMapKeys = [...obj.keys()].sort((a, b) =>
+        String(a).localeCompare(String(b)),
+      );
+      for (const key of sortedMapKeys) {
+        entries[String(key)] = normalizeObject(obj.get(key));
       }
       return entries;
     }

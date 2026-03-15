@@ -364,7 +364,8 @@ describe("Policy Engine - Break Glass Rule", () => {
 
     const decision = engine.evaluate(context);
 
-    assert.strictEqual(decision.decision, "downgrade-to-hotpath");
+    // Break-glass overrides prior denials and approves the request
+    assert.strictEqual(decision.decision, "approve");
     assert.ok(
       decision.evidenceUsed.some((e) => e.type === "break-glass-triggered"),
     );

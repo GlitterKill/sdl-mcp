@@ -1,5 +1,5 @@
 import type { RepoConfig } from "../config/types.js";
-import { getLadybugConn } from "../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 
 import { scanRepository, type FileMetadata } from "./fileScanner.js";
@@ -38,7 +38,9 @@ export async function scanRepoForIndex(params: {
   }
 
   if (removedFileIds.length > 0) {
-    await ladybugDb.deleteFilesByIds(conn, removedFileIds);
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.deleteFilesByIds(wConn, removedFileIds);
+    });
   }
 
   return { files, existingByPath, removedFiles };

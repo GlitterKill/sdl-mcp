@@ -44,6 +44,7 @@ import {
 import { createTsCallResolver } from "./ts/tsParser.js";
 import { ParserWorkerPool } from "./workerPool.js";
 import { invalidateGraphSnapshot } from "../graph/graphSnapshotCache.js";
+import { clearFingerprintCollisionLog } from "./fingerprints.js";
 
 export interface IndexProgress {
   stage: "scanning" | "parsing" | "pass1" | "pass2" | "finalizing";
@@ -153,8 +154,12 @@ export async function indexRepo(
 ): Promise<IndexResult> {
   // Serialize concurrent indexRepo calls for the same repo to prevent
   // LadybugDB write conflicts and race conditions during rapid watcher events.
-  const existing = indexLocks.get(repoId);
-  if (existing) {
+  // Loop-and-recheck: after awaiting a lock, another caller may have set a new
+  // one before we proceed. Re-check until no lock exists.
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const existing = indexLocks.get(repoId);
+    if (!existing) break;
     logger.debug("indexRepo already running, waiting for lock", {
       repoId,
       mode,
@@ -739,6 +744,7 @@ async function indexRepoImpl(
     };
 
     invalidateGraphSnapshot(repoId);
+    clearFingerprintCollisionLog();
     return result;
   } finally {
     if (workerPool) {
