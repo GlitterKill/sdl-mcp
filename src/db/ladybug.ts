@@ -544,6 +544,26 @@ export async function closeLadybugDb(): Promise<void> {
   logger.debug("LadybugDB closed");
 }
 
+/**
+ * Return current connection pool statistics (read pool size, initialized
+ * connections, and write-limiter queue depth).  Safe to call before or
+ * after initialization.
+ */
+export function getPoolStats(): {
+  readPoolSize: number;
+  readPoolInitialized: number;
+  writeQueued: number;
+  writeActive: number;
+} {
+  const writeStats = writeLimiter?.getStats() ?? { active: 0, queued: 0 };
+  return {
+    readPoolSize,
+    readPoolInitialized: readPool.length,
+    writeQueued: writeStats.queued,
+    writeActive: writeStats.active,
+  };
+}
+
 export function isLadybugAvailable(): boolean {
   try {
     require.resolve("kuzu");
