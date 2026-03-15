@@ -9,6 +9,7 @@ import {
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { DatabaseError } from "../errors.js";
+import { safeJsonParse, StringArraySchema } from "../../util/safeJson.js";
 
 function generateFeedbackId(): string {
   return `fb_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
@@ -97,10 +98,10 @@ export async function handleAgentFeedbackQuery(
     feedbackId: row.feedbackId,
     versionId: row.versionId,
     sliceHandle: row.sliceHandle,
-    usefulSymbols: JSON.parse(row.usefulSymbolsJson) as string[],
-    missingSymbols: JSON.parse(row.missingSymbolsJson) as string[],
+    usefulSymbols: safeJsonParse(row.usefulSymbolsJson, StringArraySchema, []),
+    missingSymbols: safeJsonParse(row.missingSymbolsJson, StringArraySchema, []),
     taskTags: row.taskTagsJson
-      ? (JSON.parse(row.taskTagsJson) as string[])
+      ? safeJsonParse(row.taskTagsJson, StringArraySchema, [])
       : null,
     taskType: row.taskType,
     taskText: row.taskText,

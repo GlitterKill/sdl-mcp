@@ -9,6 +9,8 @@ import type { PolicyRequestContext } from "../policy/types.js";
 import type { NextBestAction, RequiredFieldsForNext } from "./types.js";
 import type { DecisionEvidence } from "./types.js";
 import { DB_QUERY_LIMIT_MAX } from "../config/constants.js";
+import { safeJsonParse } from "../util/safeJson.js";
+import { z } from "zod";
 
 export type ToolRequest = Record<string, unknown>;
 export type ToolResponse = {
@@ -239,7 +241,7 @@ export async function getAuditTrail(
     decision: event.decision,
     repoId: event.repoId,
     symbolId: event.symbolId,
-    details: JSON.parse(event.detailsJson),
+    details: safeJsonParse(event.detailsJson, z.record(z.unknown()), {}),
   }));
 }
 

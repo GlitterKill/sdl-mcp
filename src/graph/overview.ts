@@ -25,6 +25,7 @@ import type {
 import { SYMBOL_TOKEN_MAX } from "../config/constants.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import { safeJsonParseOptional, SignatureSchema } from "../util/safeJson.js";
 
 // ============================================================================
 // Constants
@@ -108,21 +109,17 @@ function toCompactRef(row: {
 }): CompactSymbolRef {
   let signature: string | undefined;
   if (row.signatureJson) {
-    try {
-      const sig = JSON.parse(row.signatureJson) as {
-        name?: string;
-        params?: Array<{ name: string; type?: string }>;
-        returns?: string;
-      };
-      if (sig.name) {
-        const params = sig.params
-          ? `(${sig.params.map((p) => p.name).join(", ")})`
-          : "()";
-        const ret = sig.returns ? `: ${sig.returns}` : "";
-        signature = `${sig.name}${params}${ret}`;
-      }
-    } catch {
-      // Ignore parse errors
+    const sig = safeJsonParseOptional(row.signatureJson, SignatureSchema) as {
+      name?: string;
+      params?: Array<{ name: string; type?: string }>;
+      returns?: string;
+    } | undefined;
+    if (sig?.name) {
+      const params = sig.params
+        ? `(${sig.params.map((p) => p.name).join(", ")})`
+        : "()";
+      const ret = sig.returns ? `: ${sig.returns}` : "";
+      signature = `${sig.name}${params}${ret}`;
     }
   }
 

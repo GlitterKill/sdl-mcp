@@ -171,74 +171,71 @@ export async function loadAndCacheGraphSnapshot(
 
   try {
     // Check symbol count first to avoid loading huge repos
+    const symbolCount = await ladybugDb.getSymbolCount(conn, repoId);
+    if (symbolCount > maxSnapshotSymbols) {
+      logger.debug("Repo too large for graph snapshot cache", {
+        repoId,
+        symbolCount,
+        maxSnapshotSymbols,
+      });
+      return null;
+    }
+
     const allSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
-  if (allSymbols.length > maxSnapshotSymbols) {
-    logger.debug("Repo too large for graph snapshot cache", {
-      repoId,
-      symbolCount: allSymbols.length,
-      maxSnapshotSymbols,
-    });
-    return null;
-  }
+    if (allSymbols.length === 0) {
+      return null;
+    }
 
-  if (allSymbols.length === 0) {
-    return null;
-  }
+    // Load edges, metrics, files, and clusters in parallel (independent queries)
+    const [allEdges, allMetrics, allFiles, clusterMembers] = await Promise.all([
+      ladybugDb.getEdgesByRepo(conn, repoId),
+      ladybugDb.getMetricsByRepo(conn, repoId),
+      ladybugDb.getFilesByRepo(conn, repoId),
+      ladybugDb.getClusterMembersForRepo(conn, repoId).catch((error) => {
+        logger.debug("Optional clusters load failed for snapshot", { error: String(error) });
+        return [] as Awaited<ReturnType<typeof ladybugDb.getClusterMembersForRepo>>;
+      }),
+    ]);
 
-  // Load edges
-  const allEdges = await ladybugDb.getEdgesByRepo(conn, repoId);
+    const metrics = new Map<SymbolId, MetricsRow>();
 
-  // Load metrics
-  const allMetrics = (await ladybugDb.getMetricsByRepo(
-    conn,
-    repoId,
-  )) as Map<string, any>; // Cast for property access
+    for (const [symbolId, m] of allMetrics.entries()) {
+      metrics.set(symbolId, {
+        symbol_id: symbolId,
+        fan_in: m.fanIn,
+        fan_out: m.fanOut,
+        churn_30d: m.churn30d,
+        test_refs_json: m.testRefsJson,
+        canonical_test_json: m.canonicalTestJson,
+        updated_at: m.updatedAt,
+      } as MetricsRow);
+    }
 
-  const metrics = new Map<SymbolId, MetricsRow>();
+    // Build file maps
+    const files = new Map<number, FileRow>();
+    const fileIdMap = new Map<string, number>();
+    let nextFileId = 1;
 
-  for (const [symbolId, m] of allMetrics.entries()) {
-    metrics.set(symbolId, {
-      symbol_id: symbolId,
-      fan_in: m.fanIn,
-      fan_out: m.fanOut,
-      churn_30d: m.churn30d,
-      test_refs_json: m.testRefsJson,
-      canonical_test_json: m.canonicalTestJson,
-      updated_at: m.updatedAt,
-    } as MetricsRow);
-  }
+    for (const f of allFiles) {
+      const numericId = nextFileId++;
+      fileIdMap.set(f.fileId, numericId);
+      files.set(numericId, {
+        file_id: numericId,
+        repo_id: repoId,
+        rel_path: f.relPath,
+        content_hash: f.contentHash,
+        language: f.language,
+        byte_size: f.byteSize,
+        last_indexed_at: f.lastIndexedAt,
+        directory: f.directory,
+      } as FileRow);
+    }
 
-  // Load files
-  const allFiles = await ladybugDb.getFilesByRepo(conn, repoId);
-  const files = new Map<number, FileRow>();
-  const fileIdMap = new Map<string, number>();
-  let nextFileId = 1;
-
-  for (const f of allFiles) {
-    const numericId = nextFileId++;
-    fileIdMap.set(f.fileId, numericId);
-    files.set(numericId, {
-      file_id: numericId,
-      repo_id: repoId,
-      rel_path: f.relPath,
-      content_hash: f.contentHash,
-      language: f.language,
-      byte_size: f.byteSize,
-      last_indexed_at: f.lastIndexedAt,
-      directory: f.directory,
-    } as FileRow);
-  }
-
-  // Load clusters
-  const clusters = new Map<SymbolId, string>();
-  try {
-    const allClusterMembers = await ladybugDb.getClusterMembersForRepo(conn, repoId);
-    for (const m of allClusterMembers) {
+    // Build cluster map
+    const clusters = new Map<SymbolId, string>();
+    for (const m of clusterMembers) {
       clusters.set(m.symbolId, m.clusterId);
     }
-  } catch (error) {
-    logger.debug("Optional clusters load failed for snapshot", { error: String(error) });
-  }
 
   // Build symbol map (converting ladybugDb.SymbolRow → legacy SymbolRow)
   const symbols = new Map<SymbolId, SymbolRow>();

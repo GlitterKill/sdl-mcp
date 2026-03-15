@@ -3,7 +3,8 @@ import { RepoConfigSchema } from "../config/types.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { scanRepository } from "../indexer/fileScanner.js";
-import { DatabaseError, NotFoundError } from "../domain/errors.js";
+import { NotFoundError } from "../domain/errors.js";
+import { safeJsonParseOrThrow, ConfigObjectSchema } from "../util/safeJson.js";
 
 const DEFAULT_MIN_INDEXED_FILES = 1;
 const DEFAULT_MIN_INDEXED_SYMBOLS = 1;
@@ -134,14 +135,7 @@ export async function getRepoHealthSnapshot(
     throw new NotFoundError(`Repository ${repoId} not found`);
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(repo.configJson);
-  } catch {
-    throw new DatabaseError(
-      `Repository ${repoId} has corrupt configJson in database`,
-    );
-  }
+  const parsed = safeJsonParseOrThrow(repo.configJson, ConfigObjectSchema, `configJson for repository ${repoId}`);
   const repoConfig = RepoConfigSchema.parse(parsed);
   const eligibleFiles = await scanRepository(repo.rootPath, repoConfig);
   const files = await ladybugDb.getFilesByRepo(conn, repoId);

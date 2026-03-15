@@ -104,6 +104,7 @@ import {
   type OverlaySnapshot,
 } from "../live-index/overlay-reader.js";
 import { logger } from "../util/logger.js";
+import { safeJsonParse, safeJsonParseOptional, StringArraySchema, SignatureSchema } from "../util/safeJson.js";
 
 export {
   type StartNodeSource,
@@ -629,62 +630,31 @@ async function loadSymbolCards(
 
     let signature;
     if (includeSignature && symbolRow.signatureJson) {
-      try {
-        signature = JSON.parse(symbolRow.signatureJson);
-      } catch (error) {
-        logger.warn("Failed to parse signatureJson", {
-          symbolId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        signature = { name: symbolRow.name };
-      }
+      signature = safeJsonParse(symbolRow.signatureJson, SignatureSchema, { name: symbolRow.name }) as SymbolCard["signature"];
     } else if (includeSignature) {
       signature = { name: symbolRow.name };
     }
 
     let invariants: string[] | undefined;
     if (includeFullDetails && symbolRow.invariantsJson) {
-      try {
-        const parsed = JSON.parse(symbolRow.invariantsJson);
+      const parsed = safeJsonParseOptional(symbolRow.invariantsJson, StringArraySchema);
+      if (parsed) {
         invariants = parsed.slice(0, SYMBOL_CARD_MAX_INVARIANTS);
-      } catch (error) {
-        logger.warn("Failed to parse invariantsJson", {
-          symbolId,
-          error: error instanceof Error ? error.message : String(error),
-        });
       }
     }
 
     let sideEffects: string[] | undefined;
     if (includeFullDetails && symbolRow.sideEffectsJson) {
-      try {
-        const parsed = JSON.parse(symbolRow.sideEffectsJson);
+      const parsed = safeJsonParseOptional(symbolRow.sideEffectsJson, StringArraySchema);
+      if (parsed) {
         sideEffects = parsed.slice(0, SYMBOL_CARD_MAX_SIDE_EFFECTS);
-      } catch (error) {
-        logger.warn("Failed to parse sideEffectsJson", {
-          symbolId,
-          error: error instanceof Error ? error.message : String(error),
-        });
       }
     }
 
     let metricsData;
     if (includeFullDetails && metrics) {
-      let testRefs: string[] | undefined;
-      if (metrics.testRefsJson) {
-        try {
-          testRefs = JSON.parse(metrics.testRefsJson);
-        } catch (error) {
-          logger.warn("Failed to parse testRefsJson", {
-            symbolId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-
-      if (testRefs) {
-        testRefs = uniqueLimit(testRefs, SYMBOL_CARD_MAX_TEST_REFS);
-      }
+      const rawTestRefs = safeJsonParseOptional(metrics.testRefsJson, StringArraySchema);
+      const testRefs = rawTestRefs ? uniqueLimit(rawTestRefs, SYMBOL_CARD_MAX_TEST_REFS) : undefined;
 
       metricsData = {
         fanIn: metrics.fanIn,

@@ -52,6 +52,8 @@ import {
   ValidationError,
 } from "../errors.js";
 import { pickDepLabel } from "../../util/depLabels.js";
+import { safeJsonParseOptional, safeJsonParseOrThrow, StringArraySchema, SignatureSchema, ConfigObjectSchema } from "../../util/safeJson.js";
+import { z } from "zod";
 import {
   withSpan,
   SPAN_NAMES,
@@ -269,12 +271,7 @@ async function handleSliceBuildInternal(
     if (!repo) {
       throw new DatabaseError(`Repository not found: ${repoId}`);
     }
-    let repoConfig: Record<string, unknown>;
-    try {
-      repoConfig = JSON.parse(repo.configJson);
-    } catch {
-      throw new DatabaseError(`Corrupt configJson for repository ${repoId}`);
-    }
+    const repoConfig = safeJsonParseOrThrow(repo.configJson, ConfigObjectSchema, `configJson for repository ${repoId}`);
     const mergedPolicy = PolicyConfigSchema.parse({
       ...config.policy,
       ...(repoConfig.policy ?? {}),
@@ -636,13 +633,11 @@ export async function handleSliceSpilloverGet(
     priority: "must" | "should" | "optional";
   }>;
 
-  try {
-    droppedSymbols = JSON.parse(handleRow.spilloverRef);
-  } catch {
-    throw new DatabaseError(
-      `Corrupt spillover data for handle: ${spilloverHandle}`,
-    );
-  }
+  droppedSymbols = safeJsonParseOrThrow(
+    handleRow.spilloverRef,
+    z.array(z.object({ symbolId: z.string(), reason: z.string(), priority: z.enum(["must", "should", "optional"]) })),
+    `spillover data for handle: ${spilloverHandle}`,
+  );
 
   const startIndex = cursor ? parseInt(cursor, 10) : 0;
   if (Number.isNaN(startIndex) || startIndex < 0) {
@@ -712,63 +707,26 @@ export async function handleSliceSpilloverGet(
 
       let signature: SymbolSignature = { name: symbolRow.name };
       if (symbolRow.signatureJson) {
-        try {
-          const parsed: unknown = JSON.parse(symbolRow.signatureJson);
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            const candidate = parsed as Partial<SymbolSignature>;
-            signature = {
-              ...candidate,
-              name:
-                typeof candidate.name === "string"
-                  ? candidate.name
-                  : symbolRow.name,
-            };
-          }
-        } catch (error) {
-          logger.warn("Failed to parse signatureJson JSON", {
-            symbolId: item.symbolId,
-            error: String(error),
-          });
+        const parsed = safeJsonParseOptional(symbolRow.signatureJson, SignatureSchema);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const candidate = parsed as Partial<SymbolSignature>;
+          signature = {
+            ...candidate,
+            name:
+              typeof candidate.name === "string"
+                ? candidate.name
+                : symbolRow.name,
+          };
         }
       }
 
-      let invariants: string[] | undefined;
-      if (symbolRow.invariantsJson) {
-        try {
-          invariants = JSON.parse(symbolRow.invariantsJson);
-        } catch (error) {
-          logger.warn("Failed to parse invariantsJson JSON", {
-            symbolId: item.symbolId,
-            error: String(error),
-          });
-        }
-      }
+      const invariants = safeJsonParseOptional(symbolRow.invariantsJson, StringArraySchema);
 
-      let sideEffects: string[] | undefined;
-      if (symbolRow.sideEffectsJson) {
-        try {
-          sideEffects = JSON.parse(symbolRow.sideEffectsJson);
-        } catch (error) {
-          logger.warn("Failed to parse sideEffectsJson JSON", {
-            symbolId: item.symbolId,
-            error: String(error),
-          });
-        }
-      }
+      const sideEffects = safeJsonParseOptional(symbolRow.sideEffectsJson, StringArraySchema);
 
       let metricsData;
       if (metrics) {
-        let testRefs: string[] | undefined;
-        if (metrics.testRefsJson) {
-          try {
-            testRefs = JSON.parse(metrics.testRefsJson);
-          } catch (error) {
-            logger.warn("Failed to parse testRefsJson JSON", {
-              symbolId: item.symbolId,
-              error: String(error),
-            });
-          }
-        }
+        const testRefs = safeJsonParseOptional(metrics.testRefsJson, StringArraySchema);
 
         metricsData = {
           fanIn: metrics.fanIn,

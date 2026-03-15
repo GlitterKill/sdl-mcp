@@ -55,6 +55,7 @@ import {
 } from "../../live-index/overlay-reader.js";
 import { logger } from "../../util/logger.js";
 import { rerankByEmbeddings } from "../../indexer/embeddings.js";
+import { safeJsonParse, StringArraySchema } from "../../util/safeJson.js";
 
 function parseJson<T>(raw: string | null): T | undefined {
   if (!raw) return undefined;
@@ -375,7 +376,7 @@ async function buildOverlayCardForSymbol(
           churn30d: metrics.churn30d,
           testRefs: metrics.testRefsJson
             ? uniqueLimit(
-                JSON.parse(metrics.testRefsJson) as string[],
+                safeJsonParse(metrics.testRefsJson, StringArraySchema, []),
                 SYMBOL_CARD_MAX_TEST_REFS,
               )
             : undefined,
@@ -611,7 +612,7 @@ async function buildCardForSymbol(
         churn30d: metrics.churn30d,
         testRefs: metrics.testRefsJson
           ? uniqueLimit(
-              JSON.parse(metrics.testRefsJson) as string[],
+              safeJsonParse(metrics.testRefsJson, StringArraySchema, []),
               SYMBOL_CARD_MAX_TEST_REFS,
             )
           : undefined,

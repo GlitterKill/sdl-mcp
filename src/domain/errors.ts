@@ -69,7 +69,7 @@ export class NotFoundError extends Error {
 // ============================================================================
 
 export class RuntimePolicyDeniedError extends Error {
-  readonly code = ErrorCode.RUNTIME_ERROR;
+  readonly code = ErrorCode.POLICY_ERROR;
   constructor(message: string) {
     super(message);
     this.name = "RuntimePolicyDeniedError";

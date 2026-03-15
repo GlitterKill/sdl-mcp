@@ -16,6 +16,10 @@ import { logger } from "../util/logger.js";
 const IS_WINDOWS = process.platform === "win32";
 
 export function killProcessTree(pid: number): void {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    logger.warn("killProcessTree: invalid PID, skipping", { pid });
+    return;
+  }
   if (IS_WINDOWS) {
     try {
       execSync(`taskkill /T /F /PID ${pid}`, {

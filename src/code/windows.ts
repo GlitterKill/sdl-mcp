@@ -96,7 +96,11 @@ export function identifiersExistInWindow(
 
   const cacheKey = identifiers.slice().sort().join("|");
   let regex = identifierRegexCache.get(cacheKey);
-  if (!regex) {
+  if (regex) {
+    // Refresh LRU position
+    identifierRegexCache.delete(cacheKey);
+    identifierRegexCache.set(cacheKey, regex);
+  } else {
     const escapedIdentifiers = identifiers.map((id) =>
       id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
     );

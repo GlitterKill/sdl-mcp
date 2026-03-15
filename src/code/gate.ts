@@ -1,7 +1,7 @@
 import * as score from "../graph/score.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { extractCodeWindow, identifiersExistInWindow } from "./windows.js";
-import { logger } from "../util/logger.js";
+import { safeJsonParseOptional, SignatureSchema } from "../util/safeJson.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import type {
@@ -205,22 +205,12 @@ export async function evaluateRequest(
  */
 function extractSignatureIdentifiers(symbol: SymbolRow): string[] {
   if (symbol.signature_json) {
-    try {
-      const signature = JSON.parse(symbol.signature_json) as {
-        params?: Array<{ name: string; type?: string }>;
-        returns?: string;
-      };
-      if (signature.params && Array.isArray(signature.params) && signature.params.length > 0) {
-        return signature.params.map((p) => p.name).slice(0, 3);
-      }
-    } catch (error) {
-      logger.warn(
-        "Failed to parse signature_json for identifier suggestions",
-        {
-          symbolId: symbol.symbol_id,
-          error: String(error),
-        },
-      );
+    const signature = safeJsonParseOptional(symbol.signature_json, SignatureSchema) as {
+      params?: Array<{ name: string; type?: string }>;
+      returns?: string;
+    } | undefined;
+    if (signature?.params && Array.isArray(signature.params) && signature.params.length > 0) {
+      return signature.params.map((p) => p.name).slice(0, 3);
     }
   }
   return [symbol.name];

@@ -9,6 +9,7 @@ import * as ladybugDb from "../../db/ladybug-queries.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { DatabaseError } from "../errors.js";
+import { safeJsonParseOrThrow, ConfigObjectSchema } from "../../util/safeJson.js";
 
 /**
  * Handles policy retrieval requests.
@@ -31,18 +32,7 @@ export async function handlePolicyGet(
   }
 
   const appConfig = loadConfig();
-  let configJson: Record<string, unknown>;
-  try {
-    const parsed = JSON.parse(repo.configJson);
-    configJson =
-      parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {};
-  } catch {
-    throw new DatabaseError(
-      `Repository ${repoId} has corrupt configJson in database`,
-    );
-  }
+  const configJson = safeJsonParseOrThrow(repo.configJson, ConfigObjectSchema, `configJson for repository ${repoId}`);
   const repoPolicy =
     configJson.policy && typeof configJson.policy === "object"
       ? configJson.policy
@@ -78,18 +68,7 @@ export async function handlePolicySet(
   }
 
   const appConfig = loadConfig();
-  let configJson: Record<string, unknown>;
-  try {
-    const parsed = JSON.parse(repo.configJson);
-    configJson =
-      parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {};
-  } catch {
-    throw new DatabaseError(
-      `Repository ${repoId} has corrupt configJson in database`,
-    );
-  }
+  const configJson = safeJsonParseOrThrow(repo.configJson, ConfigObjectSchema, `configJson for repository ${repoId}`);
   const existingPolicyOverrides =
     configJson.policy && typeof configJson.policy === "object"
       ? configJson.policy

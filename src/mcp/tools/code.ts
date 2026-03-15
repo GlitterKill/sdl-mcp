@@ -23,6 +23,7 @@ import {
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { logCodeWindowDecision, logPolicyDecision } from "../telemetry.js";
+import { safeJsonParseOrThrow, ConfigObjectSchema } from "../../util/safeJson.js";
 import { attachRawContext } from "../token-usage.js";
 import type {
   NextBestAction,
@@ -31,7 +32,6 @@ import type {
   RequiredFieldsForNext,
 } from "../types.js";
 import { NotFoundError, ValidationError, IndexError } from "../errors.js";
-import { DatabaseError } from "../../domain/errors.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { buildSlice } from "../../graph/slice.js";
@@ -239,12 +239,7 @@ export async function handleCodeNeedWindow(
     endCol: symbol.rangeEndCol,
   };
 
-  let repoConfig: Record<string, unknown>;
-  try {
-    repoConfig = JSON.parse(repo.configJson);
-  } catch {
-    throw new DatabaseError(`Corrupt configJson for repository ${request.repoId}`);
-  }
+  const repoConfig = safeJsonParseOrThrow(repo.configJson, ConfigObjectSchema, `configJson for repository ${request.repoId}`);
   const appConfig = loadConfig();
   const validatedPolicy = PolicyConfigSchema.parse({
     ...appConfig.policy,

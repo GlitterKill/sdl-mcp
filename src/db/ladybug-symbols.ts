@@ -4,6 +4,9 @@
  */
 import type { Connection } from "kuzu";
 import { exec, queryAll, querySingle, toNumber, toBoolean, assertSafeInt } from "./ladybug-core.js";
+import { logger } from "../util/logger.js";
+
+const MAX_BATCH_WARNING_THRESHOLD = 5000;
 
 export interface SymbolRow {
   symbolId: string;
@@ -430,6 +433,13 @@ export async function getSymbolsByIds(
 ): Promise<Map<string, SymbolRow>> {
   if (symbolIds.length === 0) return new Map();
 
+  if (symbolIds.length > MAX_BATCH_WARNING_THRESHOLD) {
+    logger.warn("getSymbolsByIds: large batch size", {
+      count: symbolIds.length,
+      threshold: MAX_BATCH_WARNING_THRESHOLD,
+    });
+  }
+
   const rows = await queryAll<{
     symbolId: string;
     repoId: string;
@@ -520,6 +530,13 @@ export async function getSymbolsByIdsLite(
 ): Promise<Map<string, SymbolBasicInfo>> {
   const result = new Map<string, SymbolBasicInfo>();
   if (symbolIds.length === 0) return result;
+
+  if (symbolIds.length > MAX_BATCH_WARNING_THRESHOLD) {
+    logger.warn("getSymbolsByIdsLite: large batch size", {
+      count: symbolIds.length,
+      threshold: MAX_BATCH_WARNING_THRESHOLD,
+    });
+  }
 
   const rows = await queryAll<{
     symbolId: string;

@@ -4,7 +4,7 @@
  */
 import type { Connection } from "kuzu";
 import { exec, queryAll, querySingle, assertSafeInt } from "./ladybug-core.js";
-import { logger } from "../util/logger.js";
+import { safeJsonParse, StringArraySchema } from "../util/safeJson.js";
 
 export interface AuditRow {
   eventId: string;
@@ -250,19 +250,9 @@ export async function getAggregatedFeedback(
   const taskTypeCounts = new Map<string, number>();
 
   for (const row of rows) {
-    let usefulSymbols: string[];
-    let missingSymbols: string[];
-    let taskTags: string[];
-    try {
-      usefulSymbols = JSON.parse(row.usefulSymbolsJson) as string[];
-      missingSymbols = JSON.parse(row.missingSymbolsJson) as string[];
-      taskTags = row.taskTagsJson
-        ? (JSON.parse(row.taskTagsJson) as string[])
-        : [];
-    } catch (error) {
-      logger.warn("Failed to parse feedback JSON", { error: String(error) });
-      continue;
-    }
+    const usefulSymbols = safeJsonParse(row.usefulSymbolsJson, StringArraySchema, []);
+    const missingSymbols = safeJsonParse(row.missingSymbolsJson, StringArraySchema, []);
+    const taskTags = safeJsonParse(row.taskTagsJson, StringArraySchema, []);
 
     for (const symbolId of usefulSymbols) {
       symbolPositiveCounts.set(

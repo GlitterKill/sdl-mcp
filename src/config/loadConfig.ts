@@ -2,25 +2,25 @@ import { readFileSync } from "fs";
 import { AppConfig, AppConfigSchema } from "./types.js";
 import { resolveCliConfigPath } from "./configPath.js";
 
-function expandEnvVars(obj: unknown): unknown {
+function expandEnvVars(obj: unknown, configPath: string): unknown {
   if (typeof obj === "string") {
     return obj.replace(/\$\{([^}]+)\}/g, (_, varName) => {
       const value = process.env[varName];
       if (value === undefined) {
-        throw new Error(`Environment variable "${varName}" is not set`);
+        throw new Error(`Environment variable "${varName}" is not set (in config: ${configPath})`);
       }
       return value;
     });
   }
 
   if (Array.isArray(obj)) {
-    return obj.map((item) => expandEnvVars(item));
+    return obj.map((item) => expandEnvVars(item, configPath));
   }
 
   if (obj !== null && typeof obj === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-      result[key] = expandEnvVars(value);
+      result[key] = expandEnvVars(value, configPath);
     }
     return result;
   }
@@ -45,7 +45,7 @@ export function loadConfig(configPath?: string): AppConfig {
       throw err;
     }
 
-    const expandedConfig = expandEnvVars(parsedConfig);
+    const expandedConfig = expandEnvVars(parsedConfig, filePath);
 
     const result = AppConfigSchema.safeParse(expandedConfig);
 

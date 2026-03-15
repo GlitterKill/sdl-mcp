@@ -54,7 +54,9 @@ export function toNumber(value: unknown): number {
     }
     return n;
   }
-  if (value != null) {
+  if (value == null) {
+    logger.debug("toNumber: null/undefined coerced to 0");
+  } else {
     logger.warn("toNumber: unexpected non-numeric value coerced to 0", {
       type: typeof value,
       value: String(value).slice(0, 50),
@@ -92,6 +94,8 @@ export async function getPreparedStatement(
   const prepared = await conn.prepare(statement);
   cache.set(statement, prepared);
 
+  // Evict oldest entry to stay within cache size limit.
+  // kuzu PreparedStatement is a lightweight handle (no close() needed).
   if (cache.size > MAX_PREPARED_STATEMENT_CACHE_SIZE) {
     const oldestKey = cache.keys().next().value;
     if (oldestKey !== undefined) {
@@ -148,6 +152,14 @@ export async function exec(
   result.close();
 }
 
+/**
+ * Execute `fn` inside a transaction. Supports nesting via depth tracking.
+ *
+ * **Concurrency contract**: callers MUST serialize concurrent calls on the
+ * same `conn` (e.g., by obtaining the connection through a write limiter).
+ * Two concurrent `withTransaction` calls on the same connection will race
+ * on depth tracking and produce corrupt transaction state.
+ */
 export async function withTransaction<T>(
   conn: Connection,
   fn: (conn: Connection) => Promise<T>,

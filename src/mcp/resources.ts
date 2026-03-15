@@ -1,5 +1,6 @@
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import { safeJsonParse, safeJsonParseOptional, StringArraySchema, SignatureSchema } from "../util/safeJson.js";
 
 export interface CardResource {
   uri: string;
@@ -100,17 +101,11 @@ export async function readCardResource(uri: string): Promise<string | null> {
   const edgesFrom = await ladybugDb.getEdgesFrom(conn, symbolId);
   const metrics = await ladybugDb.getMetrics(conn, symbolId);
 
-  const signature = symbol.signatureJson
-    ? (JSON.parse(symbol.signatureJson) as unknown)
-    : { name: symbol.name };
+  const signature = safeJsonParse(symbol.signatureJson, SignatureSchema, { name: symbol.name });
 
-  const invariants = symbol.invariantsJson
-    ? (JSON.parse(symbol.invariantsJson) as unknown)
-    : undefined;
+  const invariants = safeJsonParseOptional(symbol.invariantsJson, StringArraySchema);
 
-  const sideEffects = symbol.sideEffectsJson
-    ? (JSON.parse(symbol.sideEffectsJson) as unknown)
-    : undefined;
+  const sideEffects = safeJsonParseOptional(symbol.sideEffectsJson, StringArraySchema);
 
   const deps = {
     imports: edgesFrom
@@ -126,9 +121,7 @@ export async function readCardResource(uri: string): Promise<string | null> {
         fanIn: metrics.fanIn,
         fanOut: metrics.fanOut,
         churn30d: metrics.churn30d,
-        testRefs: metrics.testRefsJson
-          ? (JSON.parse(metrics.testRefsJson) as unknown)
-          : undefined,
+        testRefs: safeJsonParseOptional(metrics.testRefsJson, StringArraySchema),
       }
     : undefined;
 

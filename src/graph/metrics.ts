@@ -11,6 +11,7 @@ import type { RepoConfig } from "../config/types.js";
 import type { CanonicalTest, StalenessTiers } from "../domain/types.js";
 import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
+import { safeJsonParse, ConfigObjectSchema } from "../util/safeJson.js";
 
 const execAsync = promisify(exec);
 
@@ -563,7 +564,7 @@ export async function updateMetricsForRepo(
   if (!repo) {
     return;
   }
-  const config: RepoConfig = JSON.parse(repo.configJson);
+  const config = safeJsonParse(repo.configJson, ConfigObjectSchema, {}) as RepoConfig;
   const [files, allSymbols] = await Promise.all([
     ladybugDb.getFilesByRepo(conn, repoId),
     ladybugDb.getSymbolsByRepo(conn, repoId),
