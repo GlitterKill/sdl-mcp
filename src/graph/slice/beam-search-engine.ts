@@ -266,6 +266,16 @@ export function beamSearch(
     entrySymbols: request.entrySymbols,
   };
 
+  const entryClusterIds = new Set<string>(
+    request.clusterContext?.entryClusterIds ?? [],
+  );
+  const relatedClusterIds = new Set<string>(
+    request.clusterContext?.relatedClusterIds ?? [],
+  );
+  const clusterCohesionEnabled =
+    (entryClusterIds.size > 0 || relatedClusterIds.size > 0) &&
+    !!graph.clusters;
+
   let belowThresholdCount = 0;
   let wasTruncated = false;
   let totalTokens = 0;
@@ -360,10 +370,28 @@ export function beamSearch(
         edgeWeights[edge.type] ?? 0.5,
         edgeConfidence,
       );
-      const neighborScore = -(
-        scoreSymbolWithMetrics(neighborSymbol, context, null, undefined) *
-        edgeWeight
+
+      const metrics = graph.metrics?.get(neighborId) ?? null;
+      const file = neighborSymbol.file_id
+        ? graph.files?.get(neighborSymbol.file_id)
+        : undefined;
+
+      let clusterBoost = 0;
+      if (clusterCohesionEnabled) {
+        clusterBoost = calculateClusterCohesion({
+          symbolClusterId: graph.clusters?.get(neighborId),
+          entryClusterIds,
+          relatedClusterIds,
+        });
+      }
+
+      const rawScore = scoreSymbolWithMetrics(
+        neighborSymbol,
+        context,
+        metrics,
+        file,
       );
+      const neighborScore = -(rawScore * edgeWeight + clusterBoost);
 
       if (-neighborScore < SLICE_SCORE_THRESHOLD) {
         droppedCandidates++;
@@ -431,6 +459,18 @@ export function beamSearch(
   };
 }
 
+/**
+ * Default number of frontier items to prefetch per batch.
+ * Larger values amortize DB round-trip overhead but consume more memory.
+ */
+export const PREFETCH_LOOKAHEAD = 16;
+
+/**
+ * How many iterations between prefetch sweeps within the beam search loop.
+ * A prefetch runs immediately when the batch is exhausted.
+ */
+export const PREFETCH_INTERVAL = 8;
+
 export async function beamSearchLadybug(
   conn: Connection,
   repoId: RepoId,
@@ -475,6 +515,117 @@ export async function beamSearchLadybug(
   const clusterCohesionEnabled =
     entryClusterIds.size > 0 || relatedClusterIds.size > 0;
   const clusterCache = new Map<SymbolId, string | null>();
+
+  // ---------------------------------------------------------------------------
+  // Batch prefetch: peek at the top N frontier items and warm all caches in
+  // parallel. This replaces sequential per-iteration DB round-trips with a
+  // single batched fetch, eliminating the await waterfall.
+  // ---------------------------------------------------------------------------
+  const prefetchFrontierBatch = async (): Promise<void> => {
+    const peekItems = frontier.peekTopN(PREFETCH_LOOKAHEAD);
+    const idsToFetch = peekItems
+      .map((item) => item.symbolId)
+      .filter((id) => !symbolCache.has(id));
+
+    if (idsToFetch.length === 0) return;
+
+    // Step 1: Batch-fetch symbols + edges for all frontier candidates in parallel
+    const [symbolsMap, edgesMap] = await Promise.all([
+      ladybugDb.getSymbolsByIds(conn, idsToFetch),
+      ladybugDb.getEdgesFromSymbolsForSlice(conn, idsToFetch, {
+        minCallConfidence: request.minCallConfidence,
+      }),
+    ]);
+
+    // Populate symbol + edge caches
+    for (const [symbolId, symbol] of symbolsMap) {
+      if (symbol.repoId === repoId) {
+        symbolCache.set(symbolId, symbol);
+      }
+    }
+    for (const [symbolId, edges] of edgesMap) {
+      const sorted = [...edges].sort((a, b) => {
+        const toDiff = a.toSymbolId.localeCompare(b.toSymbolId);
+        if (toDiff !== 0) return toDiff;
+        return a.edgeType.localeCompare(b.edgeType);
+      });
+      outgoingEdgesCache.set(symbolId, sorted);
+    }
+
+    // Step 2: Collect all neighbor symbol IDs from prefetched edges
+    const neighborIds = new Set<SymbolId>();
+    for (const edges of edgesMap.values()) {
+      for (const edge of edges) {
+        if (
+          !symbolCache.has(edge.toSymbolId) &&
+          !visited.has(edge.toSymbolId) &&
+          !sliceCards.has(edge.toSymbolId)
+        ) {
+          neighborIds.add(edge.toSymbolId);
+        }
+      }
+    }
+
+    if (neighborIds.size === 0) return;
+
+    const neighborIdList = Array.from(neighborIds);
+
+    // Step 3: Batch-fetch neighbor symbols, metrics, clusters, and files in parallel
+    const [neighborSymbols, neighborMetrics] = await Promise.all([
+      ladybugDb.getSymbolsByIds(conn, neighborIdList),
+      ladybugDb.getMetricsBySymbolIds(conn, neighborIdList),
+    ]);
+
+    // Populate neighbor caches
+    const fileIds = new Set<string>();
+    for (const [symbolId, symbol] of neighborSymbols) {
+      if (symbol.repoId === repoId) {
+        symbolCache.set(symbolId, symbol);
+        fileIds.add(symbol.fileId);
+      }
+    }
+    for (const id of neighborIdList) {
+      if (!metricsCache.has(id)) {
+        metricsCache.set(id, neighborMetrics.get(id) ?? null);
+      }
+    }
+
+    // Fetch missing files + clusters in parallel
+    const missingFileIds = Array.from(fileIds).filter(
+      (id) => !fileCache.has(id),
+    );
+    const clusterIds = clusterCohesionEnabled
+      ? neighborIdList.filter((id) => !clusterCache.has(id))
+      : [];
+
+    const prefetchPromises: Promise<void>[] = [];
+    if (missingFileIds.length > 0) {
+      prefetchPromises.push(
+        ladybugDb.getFilesByIds(conn, missingFileIds).then((filesMap) => {
+          for (const [fileId, file] of filesMap) {
+            fileCache.set(fileId, file);
+          }
+        }),
+      );
+    }
+    if (clusterIds.length > 0) {
+      prefetchPromises.push(
+        ladybugDb
+          .getClustersForSymbols(conn, clusterIds)
+          .then((clusterMap) => {
+            for (const symbolId of clusterIds) {
+              clusterCache.set(
+                symbolId,
+                clusterMap.get(symbolId)?.clusterId ?? null,
+              );
+            }
+          }),
+      );
+    }
+    if (prefetchPromises.length > 0) {
+      await Promise.all(prefetchPromises);
+    }
+  };
 
   const getClusters = async (symbolIds: SymbolId[]): Promise<void> => {
     if (!clusterCohesionEnabled) return;
@@ -574,7 +725,18 @@ export async function beamSearchLadybug(
   let totalTokens = 0;
   let effectiveMinConfidence = minConfidence;
 
+  // Initial prefetch: warm caches for all frontier items before the main loop
+  await prefetchFrontierBatch();
+  let iterationsSincePrefetch = 0;
+
   while (!frontier.isEmpty() && sliceCards.size < effectiveCardCap) {
+    // Periodically re-prefetch when the previous batch is likely exhausted
+    iterationsSincePrefetch++;
+    if (iterationsSincePrefetch >= PREFETCH_INTERVAL) {
+      await prefetchFrontierBatch();
+      iterationsSincePrefetch = 0;
+    }
+
     effectiveMinConfidence = getAdaptiveMinConfidence(
       minConfidence,
       totalTokens,

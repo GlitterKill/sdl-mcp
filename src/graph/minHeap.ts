@@ -97,6 +97,35 @@ export class MinHeap<
   }
 
   /**
+   * Peek at the top N items without removing them.
+   * Returns items sorted from lowest to highest score.
+   * Time complexity: O(n log n) where n = min(count, heap size)
+   *
+   * @param count - Maximum number of items to return
+   * @returns Array of up to `count` items with lowest scores
+   */
+  peekTopN(count: number): T[] {
+    if (this.heap.length === 0 || count <= 0) {
+      return [];
+    }
+    const n = Math.min(count, this.heap.length);
+    // For small peeks, extract-and-reinsert is efficient
+    const result: T[] = [];
+    const extracted: T[] = [];
+    for (let i = 0; i < n; i++) {
+      const item = this.extractMin();
+      if (!item) break;
+      result.push(item);
+      extracted.push(item);
+    }
+    // Re-insert extracted items to restore the heap
+    for (const item of extracted) {
+      this.insert(item);
+    }
+    return result;
+  }
+
+  /**
    * Clear all items from the heap.
    */
   clear(): void {

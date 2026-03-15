@@ -190,6 +190,47 @@ export async function getTopSymbolsByFanIn(
   }));
 }
 
+export async function getMetricsByRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<Map<string, MetricsRow>> {
+  const rows = await queryAll<{
+    symbolId: string;
+    fanIn: unknown;
+    fanOut: unknown;
+    churn30d: unknown;
+    testRefsJson: string | null;
+    canonicalTestJson: string | null;
+    updatedAt: string;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     MATCH (m:Metrics {symbolId: s.symbolId})
+     RETURN m.symbolId AS symbolId,
+            m.fanIn AS fanIn,
+            m.fanOut AS fanOut,
+            m.churn30d AS churn30d,
+            m.testRefsJson AS testRefsJson,
+            m.canonicalTestJson AS canonicalTestJson,
+            m.updatedAt AS updatedAt`,
+    { repoId },
+  );
+
+  const result = new Map<string, MetricsRow>();
+  for (const row of rows) {
+    result.set(row.symbolId, {
+      symbolId: row.symbolId,
+      fanIn: toNumber(row.fanIn),
+      fanOut: toNumber(row.fanOut),
+      churn30d: toNumber(row.churn30d),
+      testRefsJson: row.testRefsJson,
+      canonicalTestJson: row.canonicalTestJson,
+      updatedAt: row.updatedAt,
+    });
+  }
+  return result;
+}
+
 export async function getTopSymbolsByChurn(
   conn: Connection,
   repoId: string,

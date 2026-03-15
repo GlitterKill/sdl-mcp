@@ -200,6 +200,19 @@ export async function getClustersForRepo(
   }));
 }
 
+export async function getClusterMembersForRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<Array<{ symbolId: string; clusterId: string }>> {
+  const rows = await queryAll<{ symbolId: string; clusterId: string }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:BELONGS_TO_CLUSTER]->(c:Cluster)
+     RETURN s.symbolId AS symbolId, c.clusterId AS clusterId`,
+    { repoId },
+  );
+  return rows;
+}
+
 export async function getClusterOverviewStats(
   conn: Connection,
   repoId: string,

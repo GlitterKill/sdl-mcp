@@ -43,6 +43,7 @@ import {
 } from "./pass2/registry.js";
 import { createTsCallResolver } from "./ts/tsParser.js";
 import { ParserWorkerPool } from "./workerPool.js";
+import { invalidateGraphSnapshot } from "../graph/graphSnapshotCache.js";
 
 export interface IndexProgress {
   stage: "scanning" | "parsing" | "pass1" | "pass2" | "finalizing";
@@ -724,7 +725,7 @@ async function indexRepoImpl(
       }
     }
 
-    return {
+    const result = {
       versionId,
       filesProcessed,
       changedFiles,
@@ -736,6 +737,9 @@ async function indexRepoImpl(
       durationMs,
       summaryStats,
     };
+
+    invalidateGraphSnapshot(repoId);
+    return result;
   } finally {
     if (workerPool) {
       await workerPool.shutdown();

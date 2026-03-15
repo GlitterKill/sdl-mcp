@@ -1,0 +1,504 @@
+﻿diff --git a/src/db/ladybug-clusters.ts b/src/db/ladybug-clusters.ts
+index 7d12737..2452c47 100644
+--- a/src/db/ladybug-clusters.ts
++++ b/src/db/ladybug-clusters.ts
+@@ -200,6 +200,19 @@ export async function getClustersForRepo(
+   }));
+ }
+ 
++export async function getClusterMembersForRepo(
++  conn: Connection,
++  repoId: string,
++): Promise<Array<{ symbolId: string; clusterId: string }>> {
++  const rows = await queryAll<{ symbolId: string; clusterId: string }>(
++    conn,
++    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:BELONGS_TO_CLUSTER]->(c:Cluster)
++     RETURN s.symbolId AS symbolId, c.clusterId AS clusterId`,
++    { repoId },
++  );
++  return rows;
++}
++
+ export async function getClusterOverviewStats(
+   conn: Connection,
+   repoId: string,
+diff --git a/src/db/ladybug-metrics.ts b/src/db/ladybug-metrics.ts
+index f78369d..ac2b762 100644
+--- a/src/db/ladybug-metrics.ts
++++ b/src/db/ladybug-metrics.ts
+@@ -190,6 +190,47 @@ export async function getTopSymbolsByFanIn(
+   }));
+ }
+ 
++export async function getMetricsByRepo(
++  conn: Connection,
++  repoId: string,
++): Promise<Map<string, MetricsRow>> {
++  const rows = await queryAll<{
++    symbolId: string;
++    fanIn: unknown;
++    fanOut: unknown;
++    churn30d: unknown;
++    testRefsJson: string | null;
++    canonicalTestJson: string | null;
++    updatedAt: string;
++  }>(
++    conn,
++    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
++     MATCH (m:Metrics {symbolId: s.symbolId})
++     RETURN m.symbolId AS symbolId,
++            m.fanIn AS fanIn,
++            m.fanOut AS fanOut,
++            m.churn30d AS churn30d,
++            m.testRefsJson AS testRefsJson,
++            m.canonicalTestJson AS canonicalTestJson,
++            m.updatedAt AS updatedAt`,
++    { repoId },
++  );
++
++  const result = new Map<string, MetricsRow>();
++  for (const row of rows) {
++    result.set(row.symbolId, {
++      symbolId: row.symbolId,
++      fanIn: toNumber(row.fanIn),
++      fanOut: toNumber(row.fanOut),
++      churn30d: toNumber(row.churn30d),
++      testRefsJson: row.testRefsJson,
++      canonicalTestJson: row.canonicalTestJson,
++      updatedAt: row.updatedAt,
++    });
++  }
++  return result;
++}
++
+ export async function getTopSymbolsByChurn(
+   conn: Connection,
+   repoId: string,
+diff --git a/src/graph/buildGraph.ts b/src/graph/buildGraph.ts
+index 5d9847a..386084a 100644
+--- a/src/graph/buildGraph.ts
++++ b/src/graph/buildGraph.ts
+@@ -2,6 +2,8 @@ import type { Connection } from "kuzu";
+ import type {
+   EdgeRow,
+   EdgeType,
++  FileRow,
++  MetricsRow,
+   RepoId,
+   SymbolId,
+   SymbolRow,
+@@ -86,6 +88,9 @@ export interface Graph {
+   edges: EdgeRow[];
+   adjacencyIn: Map<SymbolId, EdgeRow[]>;
+   adjacencyOut: Map<SymbolId, EdgeRow[]>;
++  metrics?: Map<SymbolId, MetricsRow>;
++  files?: Map<number, FileRow>;
++  clusters?: Map<SymbolId, string>;
+ }
+ 
+ export async function getNeighbors(
+diff --git a/src/graph/minHeap.ts b/src/graph/minHeap.ts
+index 22863e0..6c23109 100644
+--- a/src/graph/minHeap.ts
++++ b/src/graph/minHeap.ts
+@@ -96,6 +96,35 @@ export class MinHeap<
+     return [...this.heap];
+   }
+ 
++  /**
++   * Peek at the top N items without removing them.
++   * Returns items sorted from lowest to highest score.
++   * Time complexity: O(n log n) where n = min(count, heap size)
++   *
++   * @param count - Maximum number of items to return
++   * @returns Array of up to `count` items with lowest scores
++   */
++  peekTopN(count: number): T[] {
++    if (this.heap.length === 0 || count <= 0) {
++      return [];
++    }
++    const n = Math.min(count, this.heap.length);
++    // For small peeks, extract-and-reinsert is efficient
++    const result: T[] = [];
++    const extracted: T[] = [];
++    for (let i = 0; i < n; i++) {
++      const item = this.extractMin();
++      if (!item) break;
++      result.push(item);
++      extracted.push(item);
++    }
++    // Re-insert extracted items to restore the heap
++    for (const item of extracted) {
++      this.insert(item);
++    }
++    return result;
++  }
++
+   /**
+    * Clear all items from the heap.
+    */
+diff --git a/src/graph/slice.ts b/src/graph/slice.ts
+index 64b92b2..cd25d67 100644
+--- a/src/graph/slice.ts
++++ b/src/graph/slice.ts
+@@ -64,6 +64,7 @@ import {
+ } from "./slice/start-node-resolver.js";
+ 
+ import {
++  beamSearch,
+   beamSearchLadybug,
+   normalizeEdgeConfidence,
+   applyEdgeConfidenceWeight,
+@@ -71,6 +72,11 @@ import {
+   type FrontierItem,
+ } from "./slice/beam-search-engine.js";
+ 
++import {
++  getGraphSnapshot,
++  loadAndCacheGraphSnapshot,
++} from "./graphSnapshotCache.js";
++
+ import {
+   buildPayloadCardsAndRefs,
+   toSliceSymbolCard,
+@@ -184,6 +190,11 @@ export async function buildSlice(
+   const conn = request.conn ?? (await getLadybugConn());
+   const overlaySnapshot = getOverlaySnapshot(request.repoId);
+ 
++  // -----------------------------------------------------------------------
++  // Try in-memory graph snapshot path first (zero DB calls during traversal)
++  // -----------------------------------------------------------------------
++  const cachedGraph = getGraphSnapshot(request.repoId);
++
+   const startNodes = await resolveStartNodesLadybug(
+     conn,
+     request.repoId,
+@@ -229,8 +240,34 @@ export async function buildSlice(
+   }
+ 
+   const beamRequest = clusterContext ? { ...request, clusterContext } : request;
+-  const { sliceCards, frontier, wasTruncated, droppedCandidates } =
+-    await beamSearchLadybug(
++
++  let sliceCards: Set<string>;
++  let frontier: FrontierItem[];
++  let wasTruncated: boolean;
++  let droppedCandidates: number;
++
++  if (cachedGraph) {
++    // Fast path: in-memory beam search ΓÇö no DB calls during traversal
++    logger.debug("Using in-memory graph snapshot for slice build", {
++      repoId: request.repoId,
++      graphSymbols: cachedGraph.symbols.size,
++      graphEdges: cachedGraph.edges.length,
++    });
++    const result = beamSearch(
++      cachedGraph,
++      startNodes,
++      budget,
++      beamRequest,
++      edgeWeights,
++      minConfidence,
++    );
++    sliceCards = result.sliceCards;
++    frontier = result.frontier;
++    wasTruncated = result.wasTruncated;
++    droppedCandidates = result.droppedCandidates;
++  } else {
++    // DB-backed path with batch prefetching
++    const result = await beamSearchLadybug(
+       conn,
+       request.repoId,
+       startNodes,
+@@ -239,6 +276,20 @@ export async function buildSlice(
+       edgeWeights,
+       minConfidence,
+     );
++    sliceCards = result.sliceCards;
++    frontier = result.frontier;
++    wasTruncated = result.wasTruncated;
++    droppedCandidates = result.droppedCandidates;
++
++    // Opportunistically load and cache the graph snapshot for future calls.
++    // Run in background ΓÇö don't block the current response.
++    void loadAndCacheGraphSnapshot(conn, request.repoId).catch((err) => {
++      logger.debug("Background graph snapshot load failed", {
++        repoId: request.repoId,
++        error: err instanceof Error ? err.message : String(err),
++      });
++    });
++  }
+ 
+   const cardCount = sliceCards.size;
+   const requestedLevel = normalizeCardDetailLevel(request.cardDetail);
+diff --git a/src/graph/slice/beam-search-engine.ts b/src/graph/slice/beam-search-engine.ts
+index bddee04..8fb58b1 100644
+--- a/src/graph/slice/beam-search-engine.ts
++++ b/src/graph/slice/beam-search-engine.ts
+@@ -266,6 +266,16 @@ export function beamSearch(
+     entrySymbols: request.entrySymbols,
+   };
+ 
++  const entryClusterIds = new Set<string>(
++    request.clusterContext?.entryClusterIds ?? [],
++  );
++  const relatedClusterIds = new Set<string>(
++    request.clusterContext?.relatedClusterIds ?? [],
++  );
++  const clusterCohesionEnabled =
++    (entryClusterIds.size > 0 || relatedClusterIds.size > 0) &&
++    !!graph.clusters;
++
+   let belowThresholdCount = 0;
+   let wasTruncated = false;
+   let totalTokens = 0;
+@@ -360,10 +370,28 @@ export function beamSearch(
+         edgeWeights[edge.type] ?? 0.5,
+         edgeConfidence,
+       );
+-      const neighborScore = -(
+-        scoreSymbolWithMetrics(neighborSymbol, context, null, undefined) *
+-        edgeWeight
++
++      const metrics = graph.metrics?.get(neighborId) ?? null;
++      const file = neighborSymbol.file_id
++        ? graph.files?.get(neighborSymbol.file_id)
++        : undefined;
++
++      let clusterBoost = 0;
++      if (clusterCohesionEnabled) {
++        clusterBoost = calculateClusterCohesion({
++          symbolClusterId: graph.clusters?.get(neighborId),
++          entryClusterIds,
++          relatedClusterIds,
++        });
++      }
++
++      const rawScore = scoreSymbolWithMetrics(
++        neighborSymbol,
++        context,
++        metrics,
++        file,
+       );
++      const neighborScore = -(rawScore * edgeWeight + clusterBoost);
+ 
+       if (-neighborScore < SLICE_SCORE_THRESHOLD) {
+         droppedCandidates++;
+@@ -431,6 +459,18 @@ export function beamSearch(
+   };
+ }
+ 
++/**
++ * Default number of frontier items to prefetch per batch.
++ * Larger values amortize DB round-trip overhead but consume more memory.
++ */
++export const PREFETCH_LOOKAHEAD = 16;
++
++/**
++ * How many iterations between prefetch sweeps within the beam search loop.
++ * A prefetch runs immediately when the batch is exhausted.
++ */
++export const PREFETCH_INTERVAL = 8;
++
+ export async function beamSearchLadybug(
+   conn: Connection,
+   repoId: RepoId,
+@@ -476,6 +516,117 @@ export async function beamSearchLadybug(
+     entryClusterIds.size > 0 || relatedClusterIds.size > 0;
+   const clusterCache = new Map<SymbolId, string | null>();
+ 
++  // ---------------------------------------------------------------------------
++  // Batch prefetch: peek at the top N frontier items and warm all caches in
++  // parallel. This replaces sequential per-iteration DB round-trips with a
++  // single batched fetch, eliminating the await waterfall.
++  // ---------------------------------------------------------------------------
++  const prefetchFrontierBatch = async (): Promise<void> => {
++    const peekItems = frontier.peekTopN(PREFETCH_LOOKAHEAD);
++    const idsToFetch = peekItems
++      .map((item) => item.symbolId)
++      .filter((id) => !symbolCache.has(id));
++
++    if (idsToFetch.length === 0) return;
++
++    // Step 1: Batch-fetch symbols + edges for all frontier candidates in parallel
++    const [symbolsMap, edgesMap] = await Promise.all([
++      ladybugDb.getSymbolsByIds(conn, idsToFetch),
++      ladybugDb.getEdgesFromSymbolsForSlice(conn, idsToFetch, {
++        minCallConfidence: request.minCallConfidence,
++      }),
++    ]);
++
++    // Populate symbol + edge caches
++    for (const [symbolId, symbol] of symbolsMap) {
++      if (symbol.repoId === repoId) {
++        symbolCache.set(symbolId, symbol);
++      }
++    }
++    for (const [symbolId, edges] of edgesMap) {
++      const sorted = [...edges].sort((a, b) => {
++        const toDiff = a.toSymbolId.localeCompare(b.toSymbolId);
++        if (toDiff !== 0) return toDiff;
++        return a.edgeType.localeCompare(b.edgeType);
++      });
++      outgoingEdgesCache.set(symbolId, sorted);
++    }
++
++    // Step 2: Collect all neighbor symbol IDs from prefetched edges
++    const neighborIds = new Set<SymbolId>();
++    for (const edges of edgesMap.values()) {
++      for (const edge of edges) {
++        if (
++          !symbolCache.has(edge.toSymbolId) &&
++          !visited.has(edge.toSymbolId) &&
++          !sliceCards.has(edge.toSymbolId)
++        ) {
++          neighborIds.add(edge.toSymbolId);
++        }
++      }
++    }
++
++    if (neighborIds.size === 0) return;
++
++    const neighborIdList = Array.from(neighborIds);
++
++    // Step 3: Batch-fetch neighbor symbols, metrics, clusters, and files in parallel
++    const [neighborSymbols, neighborMetrics] = await Promise.all([
++      ladybugDb.getSymbolsByIds(conn, neighborIdList),
++      ladybugDb.getMetricsBySymbolIds(conn, neighborIdList),
++    ]);
++
++    // Populate neighbor caches
++    const fileIds = new Set<string>();
++    for (const [symbolId, symbol] of neighborSymbols) {
++      if (symbol.repoId === repoId) {
++        symbolCache.set(symbolId, symbol);
++        fileIds.add(symbol.fileId);
++      }
++    }
++    for (const id of neighborIdList) {
++      if (!metricsCache.has(id)) {
++        metricsCache.set(id, neighborMetrics.get(id) ?? null);
++      }
++    }
++
++    // Fetch missing files + clusters in parallel
++    const missingFileIds = Array.from(fileIds).filter(
++      (id) => !fileCache.has(id),
++    );
++    const clusterIds = clusterCohesionEnabled
++      ? neighborIdList.filter((id) => !clusterCache.has(id))
++      : [];
++
++    const prefetchPromises: Promise<void>[] = [];
++    if (missingFileIds.length > 0) {
++      prefetchPromises.push(
++        ladybugDb.getFilesByIds(conn, missingFileIds).then((filesMap) => {
++          for (const [fileId, file] of filesMap) {
++            fileCache.set(fileId, file);
++          }
++        }),
++      );
++    }
++    if (clusterIds.length > 0) {
++      prefetchPromises.push(
++        ladybugDb
++          .getClustersForSymbols(conn, clusterIds)
++          .then((clusterMap) => {
++            for (const symbolId of clusterIds) {
++              clusterCache.set(
++                symbolId,
++                clusterMap.get(symbolId)?.clusterId ?? null,
++              );
++            }
++          }),
++      );
++    }
++    if (prefetchPromises.length > 0) {
++      await Promise.all(prefetchPromises);
++    }
++  };
++
+   const getClusters = async (symbolIds: SymbolId[]): Promise<void> => {
+     if (!clusterCohesionEnabled) return;
+ 
+@@ -574,7 +725,18 @@ export async function beamSearchLadybug(
+   let totalTokens = 0;
+   let effectiveMinConfidence = minConfidence;
+ 
++  // Initial prefetch: warm caches for all frontier items before the main loop
++  await prefetchFrontierBatch();
++  let iterationsSincePrefetch = 0;
++
+   while (!frontier.isEmpty() && sliceCards.size < effectiveCardCap) {
++    // Periodically re-prefetch when the previous batch is likely exhausted
++    iterationsSincePrefetch++;
++    if (iterationsSincePrefetch >= PREFETCH_INTERVAL) {
++      await prefetchFrontierBatch();
++      iterationsSincePrefetch = 0;
++    }
++
+     effectiveMinConfidence = getAdaptiveMinConfidence(
+       minConfidence,
+       totalTokens,
+diff --git a/src/indexer/indexer.ts b/src/indexer/indexer.ts
+index a6bb623..9a153d3 100644
+--- a/src/indexer/indexer.ts
++++ b/src/indexer/indexer.ts
+@@ -43,6 +43,7 @@ import {
+ } from "./pass2/registry.js";
+ import { createTsCallResolver } from "./ts/tsParser.js";
+ import { ParserWorkerPool } from "./workerPool.js";
++import { invalidateGraphSnapshot } from "../graph/graphSnapshotCache.js";
+ 
+ export interface IndexProgress {
+   stage: "scanning" | "parsing" | "pass1" | "pass2" | "finalizing";
+@@ -724,7 +725,7 @@ async function indexRepoImpl(
+       }
+     }
+ 
+-    return {
++    const result = {
+       versionId,
+       filesProcessed,
+       changedFiles,
+@@ -736,6 +737,9 @@ async function indexRepoImpl(
+       durationMs,
+       summaryStats,
+     };
++
++    invalidateGraphSnapshot(repoId);
++    return result;
+   } finally {
+     if (workerPool) {
+       await workerPool.shutdown();
+diff --git a/src/mcp/tools/repo.ts b/src/mcp/tools/repo.ts
+index 36139c1..e6d6d95 100644
+--- a/src/mcp/tools/repo.ts
++++ b/src/mcp/tools/repo.ts
+@@ -33,6 +33,7 @@ import {
+ } from "../telemetry.js";
+ import { getPrefetchStats } from "../../graph/prefetch.js";
+ import { recordToolTrace } from "../../graph/prefetch-model.js";
++import { invalidateGraphSnapshot } from "../../graph/graphSnapshotCache.js";
+ import {
+   withSpan,
+   SPAN_NAMES,
+@@ -136,6 +137,10 @@ export async function handleRepoRegister(
+     });
+   });
+ 
++  if (existingRepo) {
++    invalidateGraphSnapshot(repoId);
++  }
++
+   return {
+     ok: true,
+     repoId,
+@@ -384,6 +389,7 @@ export async function handleIndexRefresh(
+ 
+     clearSliceCache();
+     symbolCardCache.clear();
++    invalidateGraphSnapshot(repoId);
+ 
+     return {
+       ok: true,

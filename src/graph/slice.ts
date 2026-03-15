@@ -64,12 +64,18 @@ import {
 } from "./slice/start-node-resolver.js";
 
 import {
+  beamSearch,
   beamSearchLadybug,
   normalizeEdgeConfidence,
   applyEdgeConfidenceWeight,
   getAdaptiveMinConfidence,
   type FrontierItem,
 } from "./slice/beam-search-engine.js";
+
+import {
+  getGraphSnapshot,
+  loadAndCacheGraphSnapshot,
+} from "./graphSnapshotCache.js";
 
 import {
   buildPayloadCardsAndRefs,
@@ -184,6 +190,11 @@ export async function buildSlice(
   const conn = request.conn ?? (await getLadybugConn());
   const overlaySnapshot = getOverlaySnapshot(request.repoId);
 
+  // -----------------------------------------------------------------------
+  // Try in-memory graph snapshot path first (zero DB calls during traversal)
+  // -----------------------------------------------------------------------
+  const cachedGraph = getGraphSnapshot(request.repoId);
+
   const startNodes = await resolveStartNodesLadybug(
     conn,
     request.repoId,
@@ -229,8 +240,34 @@ export async function buildSlice(
   }
 
   const beamRequest = clusterContext ? { ...request, clusterContext } : request;
-  const { sliceCards, frontier, wasTruncated, droppedCandidates } =
-    await beamSearchLadybug(
+
+  let sliceCards: Set<string>;
+  let frontier: FrontierItem[];
+  let wasTruncated: boolean;
+  let droppedCandidates: number;
+
+  if (cachedGraph) {
+    // Fast path: in-memory beam search — no DB calls during traversal
+    logger.debug("Using in-memory graph snapshot for slice build", {
+      repoId: request.repoId,
+      graphSymbols: cachedGraph.symbols.size,
+      graphEdges: cachedGraph.edges.length,
+    });
+    const result = beamSearch(
+      cachedGraph,
+      startNodes,
+      budget,
+      beamRequest,
+      edgeWeights,
+      minConfidence,
+    );
+    sliceCards = result.sliceCards;
+    frontier = result.frontier;
+    wasTruncated = result.wasTruncated;
+    droppedCandidates = result.droppedCandidates;
+  } else {
+    // DB-backed path with batch prefetching
+    const result = await beamSearchLadybug(
       conn,
       request.repoId,
       startNodes,
@@ -239,6 +276,20 @@ export async function buildSlice(
       edgeWeights,
       minConfidence,
     );
+    sliceCards = result.sliceCards;
+    frontier = result.frontier;
+    wasTruncated = result.wasTruncated;
+    droppedCandidates = result.droppedCandidates;
+
+    // Opportunistically load and cache the graph snapshot for future calls.
+    // Run in background — don't block the current response.
+    void loadAndCacheGraphSnapshot(conn, request.repoId).catch((err) => {
+      logger.debug("Background graph snapshot load failed", {
+        repoId: request.repoId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
 
   const cardCount = sliceCards.size;
   const requestedLevel = normalizeCardDetailLevel(request.cardDetail);

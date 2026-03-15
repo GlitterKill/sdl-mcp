@@ -2,6 +2,8 @@ import type { Connection } from "kuzu";
 import type {
   EdgeRow,
   EdgeType,
+  FileRow,
+  MetricsRow,
   RepoId,
   SymbolId,
   SymbolRow,
@@ -86,6 +88,9 @@ export interface Graph {
   edges: EdgeRow[];
   adjacencyIn: Map<SymbolId, EdgeRow[]>;
   adjacencyOut: Map<SymbolId, EdgeRow[]>;
+  metrics?: Map<SymbolId, MetricsRow>;
+  files?: Map<number, FileRow>;
+  clusters?: Map<SymbolId, string>;
 }
 
 export async function getNeighbors(

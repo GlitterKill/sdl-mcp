@@ -33,6 +33,7 @@ import {
 } from "../telemetry.js";
 import { getPrefetchStats } from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
+import { invalidateGraphSnapshot } from "../../graph/graphSnapshotCache.js";
 import {
   withSpan,
   SPAN_NAMES,
@@ -135,6 +136,10 @@ export async function handleRepoRegister(
       createdAt: existingRepo?.createdAt ?? new Date().toISOString(),
     });
   });
+
+  if (existingRepo) {
+    invalidateGraphSnapshot(repoId);
+  }
 
   return {
     ok: true,
@@ -384,6 +389,7 @@ export async function handleIndexRefresh(
 
     clearSliceCache();
     symbolCardCache.clear();
+    invalidateGraphSnapshot(repoId);
 
     return {
       ok: true,
