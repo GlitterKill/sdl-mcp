@@ -2,8 +2,17 @@ import type { Connection } from "kuzu";
 
 import { withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
-import type { SymbolReferenceRow } from "../../db/ladybug-queries.js";
+import type { EdgeRow, SymbolReferenceRow } from "../../db/ladybug-queries.js";
 import type { ConfigEdge } from "../configEdges.js";
+import {
+  findEnclosingSymbolByRange,
+  resolveSymbolIdFromIndex,
+} from "../edge-builder.js";
+import type {
+  PendingCallEdge,
+  SymbolIndex,
+  TsCallResolver,
+} from "../edge-builder.js";
 
 interface PersistSkippedFileParams {
   conn: Connection;
@@ -113,4 +122,108 @@ export function createEmptyProcessFileResult(changed: boolean): {
     configEdges: [],
     pass2HintPaths: [],
   };
+}
+
+export interface ResolveTsCallEdgesParams {
+  tsResolver: TsCallResolver;
+  filePath: string;
+  symbolDetails: Array<{
+    extractedSymbol: {
+      nodeId: string;
+      kind: string;
+      range: {
+        startLine: number;
+        startCol: number;
+        endLine: number;
+        endCol: number;
+      };
+    };
+  }>;
+  nodeIdToSymbolId: Map<string, string>;
+  symbolIndex: SymbolIndex;
+  repoId: string;
+  languageId: string;
+  createdCallEdges: Set<string>;
+  pendingCallEdges: PendingCallEdge[];
+  edgesToInsert: EdgeRow[];
+}
+
+/**
+ * Resolve TypeScript-specific call edges using the TS compiler API resolver.
+ * Creates resolved edges or defers unresolved ones to pendingCallEdges.
+ * Mutates createdCallEdges, pendingCallEdges, and edgesToInsert in place.
+ * Returns the number of edges created.
+ */
+export async function resolveTsCallEdges(
+  params: ResolveTsCallEdgesParams,
+): Promise<number> {
+  const {
+    tsResolver,
+    filePath,
+    symbolDetails,
+    nodeIdToSymbolId,
+    symbolIndex,
+    repoId,
+    languageId,
+    createdCallEdges,
+    pendingCallEdges,
+    edgesToInsert,
+  } = params;
+
+  let edgesCreated = 0;
+  const tsCalls = tsResolver.getResolvedCalls(filePath);
+
+  for (const tsCall of tsCalls) {
+    const callerNodeId = findEnclosingSymbolByRange(
+      tsCall.caller,
+      symbolDetails,
+    );
+    if (!callerNodeId) continue;
+
+    const fromSymbolId = nodeIdToSymbolId.get(callerNodeId);
+    if (!fromSymbolId) continue;
+
+    const toSymbolId = await resolveSymbolIdFromIndex(
+      symbolIndex,
+      repoId,
+      tsCall.callee.filePath,
+      tsCall.callee.name,
+      tsCall.callee.kind,
+      languageId,
+    );
+
+    if (toSymbolId) {
+      const edgeKey = `${fromSymbolId}->${toSymbolId}`;
+      if (createdCallEdges.has(edgeKey)) continue;
+
+      edgesToInsert.push({
+        repoId,
+        fromSymbolId,
+        toSymbolId,
+        edgeType: "call",
+        weight: 1.0,
+        confidence: tsCall.confidence ?? 1.0,
+        resolution: "exact",
+        resolverId: "pass1-generic",
+        resolutionPhase: "pass1",
+        provenance: `ts-call:${tsCall.callee.name}`,
+        createdAt: new Date().toISOString(),
+      });
+      createdCallEdges.add(edgeKey);
+      edgesCreated++;
+    } else {
+      pendingCallEdges.push({
+        fromSymbolId,
+        toFile: tsCall.callee.filePath,
+        toName: tsCall.callee.name,
+        toKind: tsCall.callee.kind,
+        confidence: tsCall.confidence ?? 1.0,
+        strategy: "exact",
+        provenance: `ts-call:${tsCall.callee.name}`,
+        callerLanguage: languageId,
+      });
+    }
+  }
+
+  return edgesCreated;
 }

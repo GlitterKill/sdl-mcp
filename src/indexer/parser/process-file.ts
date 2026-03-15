@@ -17,12 +17,10 @@ import type {
 } from "../edge-builder.js";
 import {
   addToSymbolIndex,
-  findEnclosingSymbolByRange,
   isTsCallResolutionFile,
   isBuiltinCall,
   resolveCallTarget,
   resolveImportTargets,
-  resolveSymbolIdFromIndex,
 } from "../edge-builder.js";
 import { getAdapterForExtension } from "../adapter/registry.js";
 import { extractConfigEdgesFromTree, type ConfigEdge } from "../configEdges.js";
@@ -44,6 +42,7 @@ import {
   createEmptyProcessFileResult,
   isTestFile,
   persistSkippedFile,
+  resolveTsCallEdges,
 } from "./helpers.js";
 
 export interface ProcessFileParams {
@@ -595,58 +594,18 @@ export async function processFile(params: ProcessFileParams): Promise<{
       pendingCallEdges &&
       createdCallEdges
     ) {
-      const tsCalls = tsResolver.getResolvedCalls(fileMeta.path);
-      for (const tsCall of tsCalls) {
-        const callerNodeId = findEnclosingSymbolByRange(
-          tsCall.caller,
-          symbolDetails,
-        );
-        if (!callerNodeId) continue;
-
-        const fromSymbolId = nodeIdToSymbolId.get(callerNodeId);
-        if (!fromSymbolId) continue;
-
-        const toSymbolId = await resolveSymbolIdFromIndex(
-          symbolIndex,
-          repoId,
-          tsCall.callee.filePath,
-          tsCall.callee.name,
-          tsCall.callee.kind,
-          adapter.languageId,
-        );
-
-        if (toSymbolId) {
-          const edgeKey = `${fromSymbolId}->${toSymbolId}`;
-          if (createdCallEdges.has(edgeKey)) continue;
-
-          edgesToInsert.push({
-            repoId,
-            fromSymbolId,
-            toSymbolId,
-            edgeType: "call",
-            weight: 1.0,
-            confidence: tsCall.confidence ?? 1.0,
-            resolution: "exact",
-            resolverId: "pass1-generic",
-            resolutionPhase: "pass1",
-            provenance: `ts-call:${tsCall.callee.name}`,
-            createdAt: new Date().toISOString(),
-          });
-          createdCallEdges.add(edgeKey);
-          edgesCreated++;
-        } else {
-          pendingCallEdges.push({
-            fromSymbolId,
-            toFile: tsCall.callee.filePath,
-            toName: tsCall.callee.name,
-            toKind: tsCall.callee.kind,
-            confidence: tsCall.confidence ?? 1.0,
-            strategy: "exact",
-            provenance: `ts-call:${tsCall.callee.name}`,
-            callerLanguage: adapter.languageId,
-          });
-        }
-      }
+      edgesCreated += await resolveTsCallEdges({
+        tsResolver,
+        filePath: fileMeta.path,
+        symbolDetails,
+        nodeIdToSymbolId,
+        symbolIndex,
+        repoId,
+        languageId: adapter.languageId,
+        createdCallEdges,
+        pendingCallEdges,
+        edgesToInsert,
+      });
     }
 
     let configEdges: ConfigEdge[] = [];

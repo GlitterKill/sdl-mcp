@@ -334,6 +334,7 @@ describe("Policy Engine - Break Glass Rule", () => {
 
   beforeEach(() => {
     engine = new PolicyEngine();
+    engine.updateConfig({ allowBreakGlass: true });
   });
 
   it("should not trigger break glass with AUDIT keyword alone", () => {
