@@ -636,13 +636,11 @@ export async function handleSliceSpilloverGet(
     };
   }
 
-  let droppedSymbols: Array<{
+  const droppedSymbols: Array<{
     symbolId: string;
     reason: string;
     priority: "must" | "should" | "optional";
-  }>;
-
-  droppedSymbols = safeJsonParseOrThrow(
+  }> = safeJsonParseOrThrow(
     handleRow.spilloverRef,
     z.array(
       z.object({
