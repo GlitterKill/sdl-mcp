@@ -17,7 +17,6 @@ on:
         type: boolean
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -173,18 +172,6 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: npm
 
-      - name: Ensure npm supports trusted publishing
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm --version
-          NPM_MAJOR="$(npm --version | cut -d. -f1)"
-          if [[ "${NPM_MAJOR}" -lt 11 ]]; then
-            npm install -g npm@latest
-          fi
-          echo "Node $(node --version)"
-          echo "npm $(npm --version)"
-
       - name: Refresh package-lock for release publish
         run: npm install --package-lock-only --ignore-scripts --legacy-peer-deps
 
@@ -290,6 +277,8 @@ jobs:
 
       - name: Publish platform native packages
         shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           FAILED=0
@@ -309,7 +298,7 @@ jobs:
               continue
             fi
 
-            if npm publish "${dir}" --access public --tag "${NPM_DIST_TAG}" --provenance 2>&1; then
+            if npm publish "${dir}" --access public --tag "${NPM_DIST_TAG}" 2>&1; then
               echo "OK ${pkg_name}@${VERSION} published"
             else
               # Tolerate "already published" errors (race with publish-native workflow)
@@ -330,6 +319,8 @@ jobs:
 
       - name: Publish native umbrella package
         shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           echo "Publishing sdl-mcp-native@${VERSION} (${NPM_DIST_TAG})"
@@ -345,7 +336,7 @@ jobs:
             exit 0
           fi
 
-          if npm publish native/ --access public --tag "${NPM_DIST_TAG}" --ignore-scripts --provenance 2>&1; then
+          if npm publish native/ --access public --tag "${NPM_DIST_TAG}" --ignore-scripts 2>&1; then
             echo "OK sdl-mcp-native@${VERSION} published"
           else
             recheck=$(npm view "sdl-mcp-native@${VERSION}" version 2>/dev/null || true)
@@ -362,6 +353,8 @@ jobs:
 
       - name: Publish main package
         shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           echo "Publishing sdl-mcp@${VERSION} (${NPM_DIST_TAG})"
@@ -377,7 +370,7 @@ jobs:
             exit 0
           fi
 
-          if npm publish . --access public --tag "${NPM_DIST_TAG}" --provenance 2>&1; then
+          if npm publish . --access public --tag "${NPM_DIST_TAG}" 2>&1; then
             echo "OK sdl-mcp@${VERSION} published"
           else
             recheck=$(npm view "sdl-mcp@${VERSION}" version 2>/dev/null || true)
