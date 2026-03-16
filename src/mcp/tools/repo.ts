@@ -93,8 +93,8 @@ export async function handleRepoRegister(
   const normalizedRoot = normalizePath(rootPath);
   const resolvedRoot = normalizePath(resolve(normalizedRoot));
 
-  // Reject relative paths that don't resolve to themselves (traversal)
-  if (resolvedRoot !== normalizedRoot && normalizedRoot.startsWith("..")) {
+  // Reject any path that doesn't resolve to itself (contains traversal sequences)
+  if (resolvedRoot !== normalizedRoot) {
     throw new ValidationError(`Root path contains path traversal: ${rootPath}`);
   }
 

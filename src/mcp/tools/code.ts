@@ -591,12 +591,10 @@ export async function handleGetSkeleton(
   const policyMaxTokens = policyConfig.success
     ? policyConfig.data.maxWindowTokens
     : undefined;
-  const effectiveMaxLines =
-    Math.min(request.maxLines ?? Infinity, policyMaxLines ?? Infinity) ||
-    undefined;
-  const effectiveMaxTokens =
-    Math.min(request.maxTokens ?? Infinity, policyMaxTokens ?? Infinity) ||
-    undefined;
+  const rawMaxLines = Math.min(request.maxLines ?? Infinity, policyMaxLines ?? Infinity);
+  const effectiveMaxLines = Number.isFinite(rawMaxLines) ? rawMaxLines : undefined;
+  const rawMaxTokens = Math.min(request.maxTokens ?? Infinity, policyMaxTokens ?? Infinity);
+  const effectiveMaxTokens = Number.isFinite(rawMaxTokens) ? rawMaxTokens : undefined;
 
   if (request.symbolId) {
     const result = await generateSymbolSkeleton(

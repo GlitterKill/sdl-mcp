@@ -1,5 +1,4 @@
 import { readFile, stat } from "fs/promises";
-import { join } from "path";
 
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { CodeWindowResponse, Range } from "../domain/types.js";
@@ -11,7 +10,7 @@ import {
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
-import { normalizePath } from "../util/paths.js";
+import { normalizePath, getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
 
 export async function extractCodeWindow(
@@ -31,7 +30,7 @@ export async function extractCodeWindow(
   const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) return null;
 
-  const filePath = join(repo.rootPath, file.relPath);
+  const filePath = getAbsolutePathFromRepoRoot(repo.rootPath, file.relPath);
 
   let fileContent: string;
   try {
@@ -138,8 +137,8 @@ export function identifiersExistInWindow(
 
   if (!matches) return false;
 
-  const found = new Set(matches.map((m) => m.toLowerCase()));
-  return identifiers.every((id) => found.has(id.toLowerCase()));
+  const found = new Set(matches);
+  return identifiers.every((id) => found.has(id));
 }
 
 export interface ExtractWindowResult {

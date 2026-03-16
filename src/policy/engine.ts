@@ -30,10 +30,10 @@ import {
  * Rules are evaluated in descending priority order until one denies or all pass.
  *
  * Priority tiers:
- * - 100: Hard limits (window size) - must be checked first
+ * - 110: Override mechanisms (break-glass) - short-circuits all other rules
+ * - 100: Hard limits (window size)
  * - 90: Input validation (required fields)
  * - 80: Budget enforcement (token/request caps)
- * - 10: Override mechanisms (break-glass)
  */
 const RULE_PRIORITY = {
   WINDOW_SIZE_LIMIT: POLICY_PRIORITY_WINDOW_SIZE_LIMIT,
@@ -410,16 +410,18 @@ export class PolicyEngine {
         const result = rule.evaluate(context);
         evidence.push(result.evidence);
 
-        if (!result.passed) {
+        // Break-glass runs first (highest priority) and short-circuits all subsequent rules
+        if (rule.name === "break-glass" && result.evidence.type === "break-glass-triggered") {
+          breakGlassTriggered = true;
+          continue;
+        }
+
+        // Skip denial tracking when break-glass is active
+        if (!result.passed && !breakGlassTriggered) {
           deniedReasons.push(result.evidence.reason);
           if (result.downgradeTo && !downgradeTo) {
             downgradeTo = result.downgradeTo;
           }
-        }
-
-        // Track break-glass activation so it can override prior denials
-        if (rule.name === "break-glass" && result.evidence.type === "break-glass-triggered") {
-          breakGlassTriggered = true;
         }
       } catch (error) {
         logger.error(`Policy rule "${rule.name}" evaluation failed`, {
@@ -432,17 +434,6 @@ export class PolicyEngine {
           reason: `Rule "${rule.name}" failed to evaluate`,
         });
       }
-    }
-
-    // Break-glass override: clear all denials when triggered
-    if (breakGlassTriggered && deniedReasons.length > 0) {
-      logger.warn("Break-glass override clearing prior denials", {
-        clearedReasons: deniedReasons,
-        repoId: context.repoId,
-        symbolId: context.symbolId,
-      });
-      deniedReasons.length = 0;
-      downgradeTo = null;
     }
 
     let decision: PolicyDecision["decision"] = "approve";

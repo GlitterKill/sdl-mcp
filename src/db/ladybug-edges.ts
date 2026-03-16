@@ -1,11 +1,13 @@
 /**
- * ladybug-edges.ts — Edge (Dependency) Operations
+ * ladybug-edges.ts ï¿½ Edge (Dependency) Operations
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
 import { exec, queryAll, querySingle, toNumber, withTransaction, isJoinHintSyntaxUnsupported } from "./ladybug-core.js";
 
-// Module-level flag for join hint support detection (mirrors ladybug-queries.ts behavior)
+// Module-level flag for join hint support detection.
+// Used by getEdgesToSymbols and getCallersOfSymbols to avoid
+// re-probing on every call after the first success/failure.
 let joinHintSupported: boolean | null = null;
 
 export interface EdgeRow {

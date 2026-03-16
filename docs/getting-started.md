@@ -73,19 +73,141 @@ What this does:
 2. `serve --stdio` exposes MCP tools for coding agents.
 3. `serve --no-watch` is the fallback mode when file watching is unreliable in your environment.
 
-## Optional: Graph Explorer Over HTTP
+## Optional: Streamable HTTP Transport (Multi-Agent)
 
-Use HTTP transport if you want the built-in graph UI and REST endpoints.
+By default, `sdl-mcp serve --stdio` runs a single MCP session over standard I/O — one agent, one connection. **Streamable HTTP** mode exposes the same MCP tools over HTTP, enabling multiple agents to connect concurrently with full session isolation.
+
+### When to Use HTTP vs Stdio
+
+| | Stdio | Streamable HTTP |
+|:--|:------|:----------------|
+| **Connections** | 1 agent | Up to 8 concurrent agents (configurable) |
+| **Setup** | Zero config — agent spawns the process | Start server first, then point agents at the URL |
+| **Session isolation** | N/A (single session) | Each connection gets its own MCP session |
+| **Reconnect support** | None (process dies = session lost) | Built-in event store for resumable sessions |
+| **Graph UI + REST API** | Not available | Available at `/ui/graph` and `/api/*` |
+| **Best for** | Single-agent workflows, simple setups | Multi-agent teams, shared dev servers, CI pipelines |
+
+### Starting the HTTP Server
 
 ```bash
-sdl-mcp serve --http --host localhost --port 3000
+# Basic (localhost:3000)
+sdl-mcp serve --http
+
+# Custom host and port
+sdl-mcp serve --http --host 0.0.0.0 --port 8080
+
+# With explicit config
+sdl-mcp serve --http --port 3000 --config "C:\sdl\global\sdlmcp.config.json"
+
+# Disable file watcher (if your environment has issues with it)
+sdl-mcp serve --http --port 3000 --no-watch
 ```
 
-Then open:
+On startup, the server prints a **bearer token** to stderr:
 
-- `http://localhost:3000/ui/graph`
-- `http://localhost:3000/api/graph/<repoId>/symbol/<symbolId>/neighborhood`
-- `http://localhost:3000/api/repo/<repoId>/status`
+```
+[sdl-mcp] HTTP server listening on http://localhost:3000
+[sdl-mcp] Auth token: a1b2c3d4...  (64 characters)
+```
+
+Copy this token — agents must include it as `Authorization: Bearer <token>` in every request.
+
+### Endpoints
+
+| Endpoint | Method | Purpose |
+|:---------|:-------|:--------|
+| `/mcp` | POST | Streamable HTTP MCP calls (primary) |
+| `/mcp` | GET | Server-sent events for push notifications |
+| `/mcp` | DELETE | Terminate an MCP session |
+| `/sse` | GET | Legacy SSE transport (deprecated) |
+| `/message` | POST | Legacy SSE message endpoint (deprecated) |
+| `/health` | GET | Health check (no auth required) |
+| `/ui/graph` | GET | Interactive graph explorer |
+| `/api/*` | GET | REST API for graph queries |
+
+### Session Management
+
+Each HTTP connection creates an isolated MCP session. Configure limits in your `sdlmcp.config.json`:
+
+```json
+{
+  "concurrency": {
+    "maxSessions": 8
+  }
+}
+```
+
+Sessions are automatically reaped after 5 minutes of idle time. The server supports up to 8 concurrent sessions by default — each session has its own tool dispatch context, so agents don't interfere with each other.
+
+### Agent Configs for HTTP Transport
+
+**Claude Code** (`.claude/settings.json` or project MCP config):
+
+```json
+"sdl-mcp": {
+  "type": "streamableHttp",
+  "url": "http://localhost:3000/mcp",
+  "headers": {
+    "Authorization": "Bearer <token-from-server-startup>"
+  }
+}
+```
+
+**Cursor / Generic MCP client:**
+
+```json
+{
+  "mcpServers": {
+    "sdl-mcp": {
+      "transport": "streamable-http",
+      "url": "http://localhost:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer <token-from-server-startup>"
+      }
+    }
+  }
+}
+```
+
+**Legacy SSE transport** (for older MCP clients that don't support streamable HTTP):
+
+```json
+{
+  "mcpServers": {
+    "sdl-mcp": {
+      "transport": "sse",
+      "url": "http://localhost:3000/sse",
+      "headers": {
+        "Authorization": "Bearer <token-from-server-startup>"
+      }
+    }
+  }
+}
+```
+
+### Multi-Agent Example
+
+A typical multi-agent setup: start one SDL-MCP server and connect multiple coding agents.
+
+```bash
+# Terminal 1: Start the shared server
+sdl-mcp serve --http --port 3000
+
+# Terminal 2: Agent A connects (e.g., Claude Code with HTTP config above)
+# Terminal 3: Agent B connects (e.g., Cursor with HTTP config above)
+# Terminal 4: Agent C connects (e.g., CI pipeline calling MCP tools via curl)
+```
+
+Each agent gets its own session. If Agent A is building slices for the auth module while Agent B explores the database layer, their operations are fully isolated.
+
+### Graph Explorer
+
+The HTTP server includes a built-in graph visualization UI:
+
+- `http://localhost:3000/ui/graph` — interactive symbol graph explorer
+- `http://localhost:3000/api/graph/<repoId>/symbol/<symbolId>/neighborhood` — symbol neighborhood API
+- `http://localhost:3000/api/repo/<repoId>/status` — repository status API
 
 ## Optional: Switch to TypeScript Indexer
 
@@ -489,7 +611,10 @@ SDL-MCP resolves config path in this order:
 }
 ```
 
-## Sample Agent CLI Configs 
+## Sample Agent CLI Configs (Stdio)
+
+These configs use stdio transport — the agent spawns the SDL-MCP process directly. For HTTP transport configs (multi-agent), see [Streamable HTTP Transport](#optional-streamable-http-transport-multi-agent) above.
+
 Codex CLI .toml
 ```toml
 [mcp_servers.sdl-mcp]

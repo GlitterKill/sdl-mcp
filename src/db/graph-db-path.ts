@@ -38,6 +38,8 @@ function inferGraphDbPathHint(
     return "directory";
   }
 
+  // Default: treat ambiguous paths (no extension, not existing) as directories.
+  // The DB filename (sdl-mcp-graph.lbug) will be appended automatically.
   return "directory";
 }
 

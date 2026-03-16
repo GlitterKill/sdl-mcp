@@ -407,9 +407,11 @@ export const POLICY_PRIORITY_IDENTIFIERS_REQUIRED = 90;
 export const POLICY_PRIORITY_BUDGET_CAPS = 80;
 
 /**
- * Priority weight for break-glass override policy (lowest).
+ * Priority weight for break-glass override policy (highest).
+ * Break-glass must be evaluated first so it can short-circuit
+ * other rules rather than retroactively clearing their denials.
  */
-export const POLICY_PRIORITY_BREAK_GLASS = 10;
+export const POLICY_PRIORITY_BREAK_GLASS = 110;
 
 /**
  * Priority weight for default deny raw code policy.

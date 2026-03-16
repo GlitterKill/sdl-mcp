@@ -117,7 +117,9 @@ export function redactSecrets(
   let redacted = code;
 
   for (const { name, pattern } of patternsToUse) {
-    redacted = redacted.replace(pattern, `[REDACTED:${name}]`);
+    // Create a fresh regex to avoid shared lastIndex state from global-flag patterns
+    const freshPattern = new RegExp(pattern.source, pattern.flags);
+    redacted = redacted.replace(freshPattern, `[REDACTED:${name}]`);
   }
 
   return redacted;

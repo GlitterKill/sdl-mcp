@@ -109,7 +109,7 @@ function generateSliceHash(slice: GraphSlice): string {
   const canonical = JSON.stringify({
     repoId: slice.repoId,
     versionId: slice.versionId,
-    startSymbols: slice.startSymbols.sort(),
+    startSymbols: [...slice.startSymbols].sort(),
     budget: slice.budget,
     cardCount: slice.cards.length,
   });

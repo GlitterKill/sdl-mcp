@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, statSync } from "fs";
 import { AppConfig, AppConfigSchema } from "./types.js";
 import { resolveCliConfigPath } from "./configPath.js";
 
@@ -28,8 +28,24 @@ function expandEnvVars(obj: unknown, configPath: string): unknown {
   return obj;
 }
 
+let cachedConfig: AppConfig | null = null;
+let cachedConfigPath: string | null = null;
+let cachedConfigMtimeMs: number | null = null;
+
 export function loadConfig(configPath?: string): AppConfig {
   const filePath = resolveCliConfigPath(configPath, "read");
+
+  // Return cached config if file hasn't changed
+  if (cachedConfig && cachedConfigPath === filePath) {
+    try {
+      const currentMtime = statSync(filePath).mtimeMs;
+      if (currentMtime === cachedConfigMtimeMs) {
+        return cachedConfig;
+      }
+    } catch {
+      // If stat fails, fall through to re-read
+    }
+  }
 
   try {
     const rawContent = readFileSync(filePath, "utf-8");
@@ -59,6 +75,15 @@ export function loadConfig(configPath?: string): AppConfig {
       throw new Error(`Config validation failed:\n${errors}`);
     }
 
+    // Cache the result
+    cachedConfig = result.data;
+    cachedConfigPath = filePath;
+    try {
+      cachedConfigMtimeMs = statSync(filePath).mtimeMs;
+    } catch {
+      cachedConfigMtimeMs = null;
+    }
+
     return result.data;
   } catch (err) {
     if (err instanceof Error && "code" in err && err.code === "ENOENT") {
@@ -66,4 +91,11 @@ export function loadConfig(configPath?: string): AppConfig {
     }
     throw err;
   }
+}
+
+/** Invalidate the cached config, forcing the next loadConfig() call to re-read from disk. */
+export function invalidateConfigCache(): void {
+  cachedConfig = null;
+  cachedConfigPath = null;
+  cachedConfigMtimeMs = null;
 }

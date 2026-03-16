@@ -50,7 +50,7 @@ function typeToDir(type: string): string {
     case "task_context":
       return "task_context";
     default:
-      return type;
+      throw new Error(`Unknown memory type: ${type}`);
   }
 }
 
