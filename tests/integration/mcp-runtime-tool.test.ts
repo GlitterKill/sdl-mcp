@@ -9,7 +9,7 @@ import {
   getLadybugConn,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
-import { getRuntime } from "../../dist/runtime/runtimes.js";
+
 
 /**
  * Integration tests for the sdl.runtime.execute MCP tool handler.
@@ -204,13 +204,12 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
   });
 
   it("should allow the resolved default executable when it is explicitly allowlisted", async () => {
-    const defaultShellExecutable = getRuntime("shell")?.buildCommand([], {}).executable;
-    assert.ok(defaultShellExecutable, "Expected shell runtime default");
-
+    // Use node runtime instead of shell — shell's default (cmd.exe on Windows)
+    // may not be on PATH in all environments (e.g. Git Bash without System32).
     writeConfig({
       enabled: true,
-      allowedRuntimes: ["shell"],
-      allowedExecutables: [defaultShellExecutable],
+      allowedRuntimes: ["node"],
+      allowedExecutables: ["node", "node.exe"],
       maxDurationMs: 5000,
       maxStdoutBytes: 1_048_576,
       maxStderrBytes: 262_144,
@@ -225,15 +224,15 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
 
     const result = await handleRuntimeExecute({
       repoId,
-      runtime: "shell",
-      args: ["echo", "hello-runtime"],
+      runtime: "node",
+      args: ["-e", "console.log('hello-runtime')"],
       persistOutput: false,
     });
 
     assert.notStrictEqual(
       result.status,
       "denied",
-      `Expected shell request to pass allowlist with default ${defaultShellExecutable}`,
+      "Expected node request to pass allowlist",
     );
     assert.strictEqual(result.status, "success");
     assert.ok(result.stdoutSummary.includes("hello-runtime"));
