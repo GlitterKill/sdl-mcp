@@ -66,12 +66,22 @@ import {
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
   RuntimeExecuteRequestSchema,
+  MemoryStoreRequestSchema,
+  MemoryQueryRequestSchema,
+  MemoryRemoveRequestSchema,
+  MemorySurfaceRequestSchema,
 } from "../tools.js";
 import {
   handleAgentFeedback,
   handleAgentFeedbackQuery,
 } from "./agent-feedback.js";
 import { handleRuntimeExecute } from "./runtime.js";
+import {
+  handleMemoryStore,
+  handleMemoryQuery,
+  handleMemoryRemove,
+  handleMemorySurface,
+} from "./memory.js";
 import type { LiveIndexCoordinator } from "../../live-index/types.js";
 
 type ToolServices = {
@@ -272,5 +282,33 @@ export function registerTools(
       "artifact persistence, and deterministic excerpts. Requires runtime.enabled = true in config.",
     RuntimeExecuteRequestSchema,
     handleRuntimeExecute,
+  );
+
+  server.registerTool(
+    "sdl.memory.store",
+    "Store or update an agent memory (decision, bugfix, or task context) with optional symbol and file links",
+    MemoryStoreRequestSchema,
+    handleMemoryStore,
+  );
+
+  server.registerTool(
+    "sdl.memory.query",
+    "Search and filter agent memories by text, type, tags, or linked symbols",
+    MemoryQueryRequestSchema,
+    handleMemoryQuery,
+  );
+
+  server.registerTool(
+    "sdl.memory.remove",
+    "Soft-delete a memory from the graph and optionally from disk",
+    MemoryRemoveRequestSchema,
+    handleMemoryRemove,
+  );
+
+  server.registerTool(
+    "sdl.memory.surface",
+    "Auto-surface relevant memories for a task context based on symbol overlap and recency",
+    MemorySurfaceRequestSchema,
+    handleMemorySurface,
   );
 }

@@ -1,6 +1,6 @@
 /**
  * Gateway tool registration — registers 4 namespace-scoped gateway tools
- * and optionally keeps 25 legacy tool aliases for backward compatibility.
+ * and optionally keeps 29 legacy tool aliases for backward compatibility.
  */
 import type { MCPServer, ToolContext } from "../server.js";
 import type { LiveIndexCoordinator } from "../live-index/types.js";
@@ -32,7 +32,7 @@ export type ToolServices = {
 
 /**
  * Register gateway tools (4 namespace-scoped tools) on the server.
- * When emitLegacyTools is true, also registers the 25 original tool names.
+ * When emitLegacyTools is true, also registers the 29 original tool names.
  *
  * Each gateway tool gets:
  * - Full Zod schema (for runtime validation in the router)

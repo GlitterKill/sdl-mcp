@@ -63,3 +63,6 @@ export * from "./ladybug-clusters.js";
 
 // Process operations
 export * from "./ladybug-processes.js";
+
+// Memory operations
+export * from "./ladybug-memory.js";

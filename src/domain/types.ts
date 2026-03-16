@@ -49,10 +49,10 @@ export interface CallResolution {
 }
 
 export interface CanonicalTest {
-  file: string;        // relative path to the test file
+  file: string; // relative path to the test file
   symbolId?: SymbolId; // specific test function symbolId, if resolvable
-  distance: number;    // BFS hops from source symbol to this test node
-  proximity: number;   // 0–1 score: 1.0 = direct test, lower = indirect
+  distance: number; // BFS hops from source symbol to this test node
+  proximity: number; // 0–1 score: 1.0 = direct test, lower = indirect
 }
 
 export interface SymbolMetrics {
@@ -243,7 +243,8 @@ export interface GraphSlice {
   truncation?: SliceTruncation;
   confidenceDistribution?: ConfidenceDistribution;
   detailLevelMetadata?: DetailLevelMetadata;
-  staleSymbols?: SymbolId[];  // symbolIds that changed since this slice was issued
+  staleSymbols?: SymbolId[]; // symbolIds that changed since this slice was issued
+  memories?: SurfacedMemory[];
 }
 
 /**
@@ -273,8 +274,8 @@ export interface BlastRadiusItem {
   fanInTrend?: {
     previous: number;
     current: number;
-    growthRate: number;      // (current - previous) / max(previous, 1)
-    isAmplifier: boolean;    // growthRate > FAN_IN_AMPLIFIER_THRESHOLD
+    growthRate: number; // (current - previous) / max(previous, 1)
+    isAmplifier: boolean; // growthRate > FAN_IN_AMPLIFIER_THRESHOLD
   };
 }
 
@@ -713,7 +714,11 @@ export interface RepoOverview {
     totalProcesses: number;
     averageDepth: number;
     entryPoints: number;
-    longestProcesses: Array<{ processId: string; label: string; depth: number }>;
+    longestProcesses: Array<{
+      processId: string;
+      label: string;
+      depth: number;
+    }>;
   };
 
   /** Token efficiency metrics */
@@ -817,4 +822,21 @@ export interface WatcherHealth {
   stale: boolean;
   lastEventAt: string | null;
   lastSuccessfulReindexAt: string | null;
+}
+
+// ============================================================================
+// Agent Memory Types
+// ============================================================================
+
+export type MemoryType = "decision" | "bugfix" | "task_context";
+
+export interface SurfacedMemory {
+  memoryId: string;
+  type: MemoryType;
+  title: string;
+  content: string;
+  confidence: number;
+  stale: boolean;
+  linkedSymbols: string[];
+  tags: string[];
 }

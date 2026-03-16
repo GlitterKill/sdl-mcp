@@ -1,5 +1,5 @@
 /**
- * Legacy tool aliases — registers the original 25 flat tool names
+ * Legacy tool aliases — registers the original 29 flat tool names
  * for backward compatibility when gateway mode is active.
  */
 import type { MCPServer } from "../server.js";
@@ -30,6 +30,10 @@ import {
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
   RuntimeExecuteRequestSchema,
+  MemoryStoreRequestSchema,
+  MemoryQueryRequestSchema,
+  MemoryRemoveRequestSchema,
+  MemorySurfaceRequestSchema,
 } from "../mcp/tools.js";
 import {
   handleRepoRegister,
@@ -67,6 +71,12 @@ import {
   handleAgentFeedbackQuery,
 } from "../mcp/tools/agent-feedback.js";
 import { handleRuntimeExecute } from "../mcp/tools/runtime.js";
+import {
+  handleMemoryStore,
+  handleMemoryQuery,
+  handleMemoryRemove,
+  handleMemorySurface,
+} from "../mcp/tools/memory.js";
 
 type ToolServices = {
   liveIndex?: LiveIndexCoordinator;
@@ -233,5 +243,38 @@ export function registerLegacyTools(
     dep("sdl.agent", "Execute a command in a repo-scoped subprocess"),
     RuntimeExecuteRequestSchema,
     handleRuntimeExecute,
+  );
+  server.registerTool(
+    "sdl.memory.store",
+    dep(
+      "sdl.agent",
+      "Store or update an agent memory with optional symbol and file links",
+    ),
+    MemoryStoreRequestSchema,
+    handleMemoryStore,
+  );
+  server.registerTool(
+    "sdl.memory.query",
+    dep(
+      "sdl.agent",
+      "Search and filter agent memories by text, type, tags, or linked symbols",
+    ),
+    MemoryQueryRequestSchema,
+    handleMemoryQuery,
+  );
+  server.registerTool(
+    "sdl.memory.remove",
+    dep(
+      "sdl.agent",
+      "Soft-delete a memory from the graph and optionally from disk",
+    ),
+    MemoryRemoveRequestSchema,
+    handleMemoryRemove,
+  );
+  server.registerTool(
+    "sdl.memory.surface",
+    dep("sdl.agent", "Auto-surface relevant memories for a task context"),
+    MemorySurfaceRequestSchema,
+    handleMemorySurface,
   );
 }

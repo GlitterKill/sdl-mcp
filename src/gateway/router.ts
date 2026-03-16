@@ -35,6 +35,10 @@ import {
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
   RuntimeExecuteRequestSchema,
+  MemoryStoreRequestSchema,
+  MemoryQueryRequestSchema,
+  MemoryRemoveRequestSchema,
+  MemorySurfaceRequestSchema,
 } from "../mcp/tools.js";
 import {
   handleSymbolSearch,
@@ -72,12 +76,15 @@ import {
   handleAgentFeedbackQuery,
 } from "../mcp/tools/agent-feedback.js";
 import { handleRuntimeExecute } from "../mcp/tools/runtime.js";
+import {
+  handleMemoryStore,
+  handleMemoryQuery,
+  handleMemoryRemove,
+  handleMemorySurface,
+} from "../mcp/tools/memory.js";
 import type { z } from "zod";
 
-type ActionHandler = (
-  args: unknown,
-  context?: ToolContext,
-) => Promise<unknown>;
+type ActionHandler = (args: unknown, context?: ToolContext) => Promise<unknown>;
 
 interface ActionEntry {
   schema: z.ZodType;
@@ -199,6 +206,22 @@ export function createActionMap(
     "runtime.execute": {
       schema: RuntimeExecuteRequestSchema,
       handler: handleRuntimeExecute,
+    },
+    "memory.store": {
+      schema: MemoryStoreRequestSchema,
+      handler: handleMemoryStore,
+    },
+    "memory.query": {
+      schema: MemoryQueryRequestSchema,
+      handler: handleMemoryQuery,
+    },
+    "memory.remove": {
+      schema: MemoryRemoveRequestSchema,
+      handler: handleMemoryRemove,
+    },
+    "memory.surface": {
+      schema: MemorySurfaceRequestSchema,
+      handler: handleMemorySurface,
     },
   };
 }

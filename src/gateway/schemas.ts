@@ -63,10 +63,14 @@ const SliceBuildAction = z.object({
   editedFiles: z.array(z.string()).max(100).optional(),
   entrySymbols: z.array(z.string()).max(100).optional(),
   knownCardEtags: z.record(z.string()).optional(),
-  cardDetail: z.enum(["minimal", "signature", "deps", "compact", "full"]).optional(),
+  cardDetail: z
+    .enum(["minimal", "signature", "deps", "compact", "full"])
+    .optional(),
   adaptiveDetail: z.boolean().optional(),
   wireFormat: z.enum(["standard", "compact"]).optional(),
-  wireFormatVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+  wireFormatVersion: z
+    .union([z.literal(1), z.literal(2), z.literal(3)])
+    .optional(),
   budget: SliceBudgetFields.optional(),
   minConfidence: z.number().min(0).max(1).optional(),
   minCallConfidence: z.number().min(0).max(1).optional(),
@@ -108,21 +112,23 @@ const PRRiskAnalyzeAction = z.object({
   riskThreshold: z.number().int().min(0).max(100).optional(),
 });
 
-export const QueryGatewaySchema = z.object({
-  repoId: z.string().min(1),
-}).and(
-  z.discriminatedUnion("action", [
-    SymbolSearchAction,
-    SymbolGetCardAction,
-    SymbolGetCardsAction,
-    SliceBuildAction,
-    SliceRefreshAction,
-    SliceSpilloverGetAction,
-    DeltaGetAction,
-    ContextSummaryAction,
-    PRRiskAnalyzeAction,
-  ]),
-);
+export const QueryGatewaySchema = z
+  .object({
+    repoId: z.string().min(1),
+  })
+  .and(
+    z.discriminatedUnion("action", [
+      SymbolSearchAction,
+      SymbolGetCardAction,
+      SymbolGetCardsAction,
+      SliceBuildAction,
+      SliceRefreshAction,
+      SliceSpilloverGetAction,
+      DeltaGetAction,
+      ContextSummaryAction,
+      PRRiskAnalyzeAction,
+    ]),
+  );
 
 // ============================================================================
 // sdl.code — Gated raw code access
@@ -136,14 +142,16 @@ const CodeNeedWindowAction = z.object({
   identifiersToFind: z.array(z.string()).max(50),
   granularity: z.enum(["symbol", "block", "fileWindow"]).optional(),
   maxTokens: z.number().int().min(1).optional(),
-  sliceContext: z.object({
-    taskText: z.string().min(1),
-    stackTrace: z.string().optional(),
-    failingTestPath: z.string().optional(),
-    editedFiles: z.array(z.string()).max(100).optional(),
-    entrySymbols: z.array(z.string()).max(100).optional(),
-    budget: SliceBudgetFields.optional(),
-  }).optional(),
+  sliceContext: z
+    .object({
+      taskText: z.string().min(1),
+      stackTrace: z.string().optional(),
+      failingTestPath: z.string().optional(),
+      editedFiles: z.array(z.string()).max(100).optional(),
+      entrySymbols: z.array(z.string()).max(100).optional(),
+      budget: SliceBudgetFields.optional(),
+    })
+    .optional(),
 });
 
 const GetSkeletonAction = z.object({
@@ -165,15 +173,17 @@ const GetHotPathAction = z.object({
   contextLines: z.number().int().min(0).optional(),
 });
 
-export const CodeGatewaySchema = z.object({
-  repoId: z.string().min(1),
-}).and(
-  z.discriminatedUnion("action", [
-    CodeNeedWindowAction,
-    GetSkeletonAction,
-    GetHotPathAction,
-  ]),
-);
+export const CodeGatewaySchema = z
+  .object({
+    repoId: z.string().min(1),
+  })
+  .and(
+    z.discriminatedUnion("action", [
+      CodeNeedWindowAction,
+      GetSkeletonAction,
+      GetHotPathAction,
+    ]),
+  );
 
 // ============================================================================
 // sdl.repo — Repository lifecycle
@@ -213,25 +223,37 @@ const PolicyGetAction = z.object({
 const PolicySetAction = z.object({
   action: z.literal("policy.set"),
   policyPatch: z.object({
-    maxWindowLines: z.number().int().min(1).default(DEFAULT_MAX_WINDOW_LINES).optional(),
-    maxWindowTokens: z.number().int().min(1).default(DEFAULT_MAX_WINDOW_TOKENS).optional(),
+    maxWindowLines: z
+      .number()
+      .int()
+      .min(1)
+      .default(DEFAULT_MAX_WINDOW_LINES)
+      .optional(),
+    maxWindowTokens: z
+      .number()
+      .int()
+      .min(1)
+      .default(DEFAULT_MAX_WINDOW_TOKENS)
+      .optional(),
     requireIdentifiers: z.boolean().optional(),
     allowBreakGlass: z.boolean().optional(),
   }),
 });
 
-export const RepoGatewaySchema = z.object({
-  repoId: z.string().min(1),
-}).and(
-  z.discriminatedUnion("action", [
-    RepoRegisterAction,
-    RepoStatusAction,
-    RepoOverviewAction,
-    IndexRefreshAction,
-    PolicyGetAction,
-    PolicySetAction,
-  ]),
-);
+export const RepoGatewaySchema = z
+  .object({
+    repoId: z.string().min(1),
+  })
+  .and(
+    z.discriminatedUnion("action", [
+      RepoRegisterAction,
+      RepoStatusAction,
+      RepoOverviewAction,
+      IndexRefreshAction,
+      PolicyGetAction,
+      PolicySetAction,
+    ]),
+  );
 
 // ============================================================================
 // sdl.agent — Agentic + live-edit operations
@@ -241,17 +263,21 @@ const AgentOrchestrateAction = z.object({
   action: z.literal("agent.orchestrate"),
   taskType: z.enum(["debug", "review", "implement", "explain"]),
   taskText: z.string(),
-  budget: z.object({
-    maxTokens: z.number().optional(),
-    maxActions: z.number().optional(),
-    maxDurationMs: z.number().optional(),
-  }).optional(),
-  options: z.object({
-    focusSymbols: z.array(z.string()).optional(),
-    focusPaths: z.array(z.string()).optional(),
-    includeTests: z.boolean().optional(),
-    requireDiagnostics: z.boolean().optional(),
-  }).optional(),
+  budget: z
+    .object({
+      maxTokens: z.number().optional(),
+      maxActions: z.number().optional(),
+      maxDurationMs: z.number().optional(),
+    })
+    .optional(),
+  options: z
+    .object({
+      focusSymbols: z.array(z.string()).optional(),
+      focusPaths: z.array(z.string()).optional(),
+      includeTests: z.boolean().optional(),
+      requireDiagnostics: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 const AgentFeedbackAction = z.object({
@@ -275,24 +301,33 @@ const AgentFeedbackQueryAction = z.object({
 const BufferPushAction = z.object({
   action: z.literal("buffer.push"),
   eventType: z.enum(["open", "change", "save", "close", "checkpoint"]),
-  filePath: z.string().min(1).refine((p) => !p.includes(".."), {
-    message: "filePath must not contain path traversal sequences",
-  }),
+  filePath: z
+    .string()
+    .min(1)
+    .refine((p) => !p.includes(".."), {
+      message: "filePath must not contain path traversal sequences",
+    }),
   content: z.string().max(5_242_880),
   language: z.string().optional(),
   version: z.number().int().min(0),
   dirty: z.boolean(),
   timestamp: z.string(),
-  cursor: z.object({
-    line: z.number().int().min(0),
-    col: z.number().int().min(0),
-  }).optional(),
-  selections: z.array(z.object({
-    startLine: z.number().int().min(0),
-    startCol: z.number().int().min(0),
-    endLine: z.number().int().min(0),
-    endCol: z.number().int().min(0),
-  })).optional(),
+  cursor: z
+    .object({
+      line: z.number().int().min(0),
+      col: z.number().int().min(0),
+    })
+    .optional(),
+  selections: z
+    .array(
+      z.object({
+        startLine: z.number().int().min(0),
+        startCol: z.number().int().min(0),
+        endLine: z.number().int().min(0),
+        endCol: z.number().int().min(0),
+      }),
+    )
+    .optional(),
 });
 
 const BufferCheckpointAction = z.object({
@@ -311,50 +346,128 @@ const RuntimeExecuteAction = z.object({
   args: z.array(z.string()).max(RUNTIME_MAX_ARG_COUNT).default([]),
   code: z.string().max(RUNTIME_MAX_CODE_LENGTH).optional(),
   relativeCwd: z.string().default("."),
-  timeoutMs: z.number().int().min(RUNTIME_MIN_TIMEOUT_MS).max(RUNTIME_MAX_TIMEOUT_MS).optional(),
+  timeoutMs: z
+    .number()
+    .int()
+    .min(RUNTIME_MIN_TIMEOUT_MS)
+    .max(RUNTIME_MAX_TIMEOUT_MS)
+    .optional(),
   queryTerms: z.array(z.string()).max(RUNTIME_MAX_QUERY_TERMS).optional(),
-  maxResponseLines: z.number().int().min(10).max(1000).default(RUNTIME_DEFAULT_MAX_RESPONSE_LINES),
+  maxResponseLines: z
+    .number()
+    .int()
+    .min(10)
+    .max(1000)
+    .default(RUNTIME_DEFAULT_MAX_RESPONSE_LINES),
   persistOutput: z.boolean().default(true),
 });
 
-export const AgentGatewaySchema = z.object({
-  repoId: z.string().min(1),
-}).and(
-  z.discriminatedUnion("action", [
-    AgentOrchestrateAction,
-    AgentFeedbackAction,
-    AgentFeedbackQueryAction,
-    BufferPushAction,
-    BufferCheckpointAction,
-    BufferStatusAction,
-    RuntimeExecuteAction,
-  ]),
-);
+const MemoryTypeGateway = z.enum(["decision", "bugfix", "task_context"]);
+
+const MemoryStoreAction = z.object({
+  action: z.literal("memory.store"),
+  type: MemoryTypeGateway,
+  title: z.string().min(1).max(120),
+  content: z.string().min(1).max(50000),
+  tags: z.array(z.string()).max(20).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  symbolIds: z.array(z.string()).max(100).optional(),
+  fileRelPaths: z.array(z.string()).max(100).optional(),
+  memoryId: z.string().optional(),
+});
+
+const MemoryQueryAction = z.object({
+  action: z.literal("memory.query"),
+  query: z.string().max(1000).optional(),
+  types: z.array(MemoryTypeGateway).optional(),
+  tags: z.array(z.string()).max(20).optional(),
+  symbolIds: z.array(z.string()).max(100).optional(),
+  staleOnly: z.boolean().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  sortBy: z.enum(["recency", "confidence"]).optional(),
+});
+
+const MemoryRemoveAction = z.object({
+  action: z.literal("memory.remove"),
+  memoryId: z.string().min(1),
+  deleteFile: z.boolean().optional(),
+});
+
+const MemorySurfaceAction = z.object({
+  action: z.literal("memory.surface"),
+  symbolIds: z.array(z.string()).max(500).optional(),
+  taskType: MemoryTypeGateway.optional(),
+  limit: z.number().int().min(1).max(50).optional(),
+});
+
+export const AgentGatewaySchema = z
+  .object({
+    repoId: z.string().min(1),
+  })
+  .and(
+    z.discriminatedUnion("action", [
+      AgentOrchestrateAction,
+      AgentFeedbackAction,
+      AgentFeedbackQueryAction,
+      BufferPushAction,
+      BufferCheckpointAction,
+      BufferStatusAction,
+      RuntimeExecuteAction,
+      MemoryStoreAction,
+      MemoryQueryAction,
+      MemoryRemoveAction,
+      MemorySurfaceAction,
+    ]),
+  );
 
 // ============================================================================
 // Constants — all valid action names for enumeration tests
 // ============================================================================
 
 export const QUERY_ACTIONS = [
-  "symbol.search", "symbol.getCard", "symbol.getCards",
-  "slice.build", "slice.refresh", "slice.spillover.get",
-  "delta.get", "context.summary", "pr.risk.analyze",
+  "symbol.search",
+  "symbol.getCard",
+  "symbol.getCards",
+  "slice.build",
+  "slice.refresh",
+  "slice.spillover.get",
+  "delta.get",
+  "context.summary",
+  "pr.risk.analyze",
 ] as const;
 
 export const CODE_ACTIONS = [
-  "code.needWindow", "code.getSkeleton", "code.getHotPath",
+  "code.needWindow",
+  "code.getSkeleton",
+  "code.getHotPath",
 ] as const;
 
 export const REPO_ACTIONS = [
-  "repo.register", "repo.status", "repo.overview",
-  "index.refresh", "policy.get", "policy.set",
+  "repo.register",
+  "repo.status",
+  "repo.overview",
+  "index.refresh",
+  "policy.get",
+  "policy.set",
 ] as const;
 
 export const AGENT_ACTIONS = [
-  "agent.orchestrate", "agent.feedback", "agent.feedback.query",
-  "buffer.push", "buffer.checkpoint", "buffer.status", "runtime.execute",
+  "agent.orchestrate",
+  "agent.feedback",
+  "agent.feedback.query",
+  "buffer.push",
+  "buffer.checkpoint",
+  "buffer.status",
+  "runtime.execute",
+  "memory.store",
+  "memory.query",
+  "memory.remove",
+  "memory.surface",
 ] as const;
 
 export const ALL_ACTIONS = [
-  ...QUERY_ACTIONS, ...CODE_ACTIONS, ...REPO_ACTIONS, ...AGENT_ACTIONS,
+  ...QUERY_ACTIONS,
+  ...CODE_ACTIONS,
+  ...REPO_ACTIONS,
+  ...AGENT_ACTIONS,
 ] as const;

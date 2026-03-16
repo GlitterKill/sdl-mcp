@@ -10,11 +10,12 @@
  * Node tables: Repo, File, Symbol, Version, SymbolVersion, Metrics,
  *              Cluster, Process, SliceHandle, CardHash, Audit,
  *              AgentFeedback, SymbolEmbedding, SummaryCache, SyncArtifact,
- *              SymbolReference, SchemaVersion
+ *              SymbolReference, Memory, SchemaVersion
  *
  * Rel tables: FILE_IN_REPO, SYMBOL_IN_FILE, SYMBOL_IN_REPO, DEPENDS_ON,
  *             VERSION_OF_REPO, BELONGS_TO_CLUSTER, PARTICIPATES_IN,
- *             CLUSTER_IN_REPO, PROCESS_IN_REPO
+ *             CLUSTER_IN_REPO, PROCESS_IN_REPO, HAS_MEMORY, MEMORY_OF,
+ *             MEMORY_OF_FILE
  */
 
 import type { Connection } from "kuzu";
@@ -202,6 +203,25 @@ const NODE_TABLES: string[] = [
     createdAt STRING
   )`,
 
+  `CREATE NODE TABLE IF NOT EXISTS Memory (
+    memoryId STRING PRIMARY KEY,
+    repoId STRING,
+    type STRING,
+    title STRING,
+    content STRING,
+    contentHash STRING,
+    searchText STRING,
+    tagsJson STRING DEFAULT '[]',
+    confidence DOUBLE DEFAULT 0.8,
+    createdAt STRING,
+    updatedAt STRING,
+    createdByVersion STRING,
+    stale BOOLEAN DEFAULT false,
+    staleVersion STRING,
+    sourceFile STRING,
+    deleted BOOLEAN DEFAULT false
+  )`,
+
   `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (
     id STRING PRIMARY KEY,
     schemaVersion INT64,
@@ -264,6 +284,18 @@ const REL_TABLES: string[] = [
   `CREATE REL TABLE IF NOT EXISTS PROCESS_IN_REPO (
     FROM Process TO Repo
   )`,
+
+  `CREATE REL TABLE IF NOT EXISTS HAS_MEMORY (
+    FROM Repo TO Memory
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS MEMORY_OF (
+    FROM Memory TO Symbol
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS MEMORY_OF_FILE (
+    FROM Memory TO File
+  )`,
 ];
 
 async function execDdl(conn: Connection, ddl: string): Promise<void> {
@@ -280,6 +312,9 @@ const INDEXES: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_process_repoId ON Process(repoId)`,
   `CREATE INDEX IF NOT EXISTS idx_symbol_reference_fileId ON SymbolReference(fileId)`,
   `CREATE INDEX IF NOT EXISTS idx_symbol_reference_symbolName ON SymbolReference(symbolName)`,
+  `CREATE INDEX IF NOT EXISTS idx_memory_repoId ON Memory(repoId)`,
+  `CREATE INDEX IF NOT EXISTS idx_memory_type ON Memory(type)`,
+  `CREATE INDEX IF NOT EXISTS idx_memory_contentHash ON Memory(contentHash)`,
 ];
 
 export async function createSchema(conn: Connection): Promise<void> {
@@ -331,7 +366,7 @@ export async function getSchemaVersion(
   }
 }
 
-export const LADYBUG_SCHEMA_VERSION = 3;
+export const LADYBUG_SCHEMA_VERSION = 4;
 
 export function supportsCallResolutionMetadata(
   schemaVersion: number | null | undefined,

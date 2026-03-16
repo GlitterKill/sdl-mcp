@@ -197,6 +197,19 @@ const SliceTruncationSchema = z.object({
     .nullable(),
 });
 
+const MemoryTypeSchema = z.enum(["decision", "bugfix", "task_context"]);
+
+const SurfacedMemorySchema = z.object({
+  memoryId: z.string(),
+  type: MemoryTypeSchema,
+  title: z.string(),
+  content: z.string(),
+  confidence: z.number(),
+  stale: z.boolean(),
+  linkedSymbols: z.array(z.string()),
+  tags: z.array(z.string()),
+});
+
 const SliceBuildWireFormatSchema = z.enum(["standard", "compact"]);
 const SliceBuildWireFormatVersionSchema = z.union([
   z.literal(1),
@@ -223,6 +236,7 @@ const GraphSliceSchema = z.object({
       unknown: z.number().int().min(0),
     })
     .optional(),
+  memories: z.array(SurfacedMemorySchema).optional(),
 });
 
 const CompactRangeSchema = z.tuple([
@@ -855,6 +869,8 @@ export const SliceBuildRequestSchema = z.object({
   minConfidence: z.number().min(0).max(1).default(0.5),
   minCallConfidence: z.number().min(0).max(1).optional(),
   includeResolutionMetadata: z.boolean().optional(),
+  includeMemories: z.boolean().optional(),
+  memoryLimit: z.number().int().min(0).max(20).optional(),
 });
 
 const SliceLeaseSchema = z.object({
@@ -1798,3 +1814,75 @@ export type RuntimeExecuteRequest = z.infer<typeof RuntimeExecuteRequestSchema>;
 export type RuntimeExecuteResponse = z.infer<
   typeof RuntimeExecuteResponseSchema
 >;
+
+// ============================================================================
+// Memory Schemas
+// ============================================================================
+
+export const MemoryStoreRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  type: MemoryTypeSchema,
+  title: z.string().min(1).max(120),
+  content: z.string().min(1).max(50000),
+  tags: z.array(z.string()).max(20).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  symbolIds: z.array(z.string()).max(100).optional(),
+  fileRelPaths: z.array(z.string()).max(100).optional(),
+  memoryId: z.string().optional(),
+});
+
+export const MemoryStoreResponseSchema = z.object({
+  ok: z.boolean(),
+  memoryId: z.string(),
+  created: z.boolean(),
+  deduplicated: z.boolean(),
+});
+
+export const MemoryQueryRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  query: z.string().max(1000).optional(),
+  types: z.array(MemoryTypeSchema).optional(),
+  tags: z.array(z.string()).max(20).optional(),
+  symbolIds: z.array(z.string()).max(100).optional(),
+  staleOnly: z.boolean().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  sortBy: z.enum(["recency", "confidence"]).optional(),
+});
+
+export const MemoryQueryResponseSchema = z.object({
+  repoId: z.string(),
+  memories: z.array(SurfacedMemorySchema),
+  total: z.number().int().min(0),
+});
+
+export const MemoryRemoveRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  memoryId: z.string().min(1),
+  deleteFile: z.boolean().optional(),
+});
+
+export const MemoryRemoveResponseSchema = z.object({
+  ok: z.boolean(),
+  memoryId: z.string(),
+});
+
+export const MemorySurfaceRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  symbolIds: z.array(z.string()).max(500).optional(),
+  taskType: MemoryTypeSchema.optional(),
+  limit: z.number().int().min(1).max(50).optional(),
+});
+
+export const MemorySurfaceResponseSchema = z.object({
+  repoId: z.string(),
+  memories: z.array(SurfacedMemorySchema),
+});
+
+export type MemoryStoreRequest = z.infer<typeof MemoryStoreRequestSchema>;
+export type MemoryStoreResponse = z.infer<typeof MemoryStoreResponseSchema>;
+export type MemoryQueryRequest = z.infer<typeof MemoryQueryRequestSchema>;
+export type MemoryQueryResponse = z.infer<typeof MemoryQueryResponseSchema>;
+export type MemoryRemoveRequest = z.infer<typeof MemoryRemoveRequestSchema>;
+export type MemoryRemoveResponse = z.infer<typeof MemoryRemoveResponseSchema>;
+export type MemorySurfaceRequest = z.infer<typeof MemorySurfaceRequestSchema>;
+export type MemorySurfaceResponse = z.infer<typeof MemorySurfaceResponseSchema>;

@@ -4,10 +4,10 @@ import { createActionMap, routeGatewayCall } from "../../src/gateway/router.js";
 
 describe("Gateway router", () => {
   describe("createActionMap", () => {
-    it("contains all 25 actions", () => {
+    it("contains all 29 actions", () => {
       const map = createActionMap();
       const actions = Object.keys(map);
-      assert.strictEqual(actions.length, 25);
+      assert.strictEqual(actions.length, 29);
     });
 
     it("each entry has schema and handler", () => {
@@ -49,6 +49,10 @@ describe("Gateway router", () => {
         "buffer.checkpoint",
         "buffer.status",
         "runtime.execute",
+        "memory.store",
+        "memory.query",
+        "memory.remove",
+        "memory.surface",
       ];
       for (const name of expected) {
         assert.ok(name in map, `Missing action: ${name}`);
@@ -61,10 +65,7 @@ describe("Gateway router", () => {
       const map = createActionMap();
       await assert.rejects(
         () =>
-          routeGatewayCall(
-            { action: "unknown.action", repoId: "test" },
-            map,
-          ),
+          routeGatewayCall({ action: "unknown.action", repoId: "test" }, map),
         /Unknown gateway action/,
       );
     });

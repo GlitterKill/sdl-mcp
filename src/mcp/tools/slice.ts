@@ -249,6 +249,8 @@ async function handleSliceBuildInternal(
     minConfidence,
     minCallConfidence,
     includeResolutionMetadata,
+    includeMemories,
+    memoryLimit,
   } = request;
 
   recordToolTrace({
@@ -418,6 +420,81 @@ async function handleSliceBuildInternal(
     // For a fresh build, staleSymbols is always empty since we just built
     // from the current version. Assign explicitly to signal feature is active.
     slice.staleSymbols = [];
+
+    // Surface relevant memories if enabled (default: true)
+    if (includeMemories !== false) {
+      try {
+        const sliceSymbolIds = slice.cards.map((c) => c.symbolId);
+        const effectiveMemoryLimit = memoryLimit ?? 5;
+
+        // Collect memories from symbol edges and repo-level
+        const symbolMemories =
+          sliceSymbolIds.length > 0
+            ? await ladybugDb.getMemoriesForSymbols(conn, sliceSymbolIds, 100)
+            : [];
+        const repoMemories = await ladybugDb.getRepoMemories(conn, repoId, 100);
+
+        // Deduplicate, track linked symbols
+        const memMap = new Map<
+          string,
+          { row: ladybugDb.MemoryRow; linked: Set<string> }
+        >();
+        for (const row of symbolMemories) {
+          const entry = memMap.get(row.memoryId);
+          if (entry) {
+            entry.linked.add(row.linkedSymbolId);
+          } else {
+            memMap.set(row.memoryId, {
+              row,
+              linked: new Set([row.linkedSymbolId]),
+            });
+          }
+        }
+        for (const row of repoMemories) {
+          if (!memMap.has(row.memoryId)) {
+            memMap.set(row.memoryId, { row, linked: new Set() });
+          }
+        }
+
+        // Rank by confidence * recency * overlap
+        const nowMs = Date.now();
+        const queryCount = sliceSymbolIds.length;
+        const ranked = Array.from(memMap.values())
+          .map((entry) => {
+            const days =
+              (nowMs - new Date(entry.row.createdAt).getTime()) /
+              (1000 * 60 * 60 * 24);
+            const recency = 1.0 / (1 + days / 30);
+            const overlap =
+              queryCount > 0 ? entry.linked.size / queryCount : 1.0;
+            return {
+              ...entry,
+              score: entry.row.confidence * recency * overlap,
+            };
+          })
+          .sort((a, b) => b.score - a.score)
+          .slice(0, effectiveMemoryLimit);
+
+        if (ranked.length > 0) {
+          slice.memories = ranked.map((e) => ({
+            memoryId: e.row.memoryId,
+            type: e.row.type as "decision" | "bugfix" | "task_context",
+            title: e.row.title,
+            content: e.row.content,
+            confidence: e.row.confidence,
+            stale: e.row.stale,
+            linkedSymbols: sliceSymbolIds.filter((sid) => e.linked.has(sid)),
+            tags: JSON.parse(e.row.tagsJson || "[]") as string[],
+          }));
+        }
+      } catch (err) {
+        // Memory surfacing is non-critical — don't fail the slice build
+        logger.warn("Memory surfacing failed; continuing without memories", {
+          repoId,
+          error: err,
+        });
+      }
+    }
 
     const cardSymbolIds = slice.cards.map((c) => c.symbolId);
     const symbolMap = await ladybugDb.getSymbolsByIds(conn, cardSymbolIds);
