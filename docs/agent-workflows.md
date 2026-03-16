@@ -21,7 +21,7 @@ This page defines practical workflows for coding agents using SDL-MCP.
 
 ## Complete Tool Reference
 
-SDL-MCP exposes 25 MCP tools across 11 categories. Every workflow on this page uses tools from this table.
+SDL-MCP exposes 29 MCP tools across 12 categories. Every workflow on this page uses tools from this table.
 
 | Category | Tool | Purpose |
 |:---------|:-----|:--------|
@@ -50,6 +50,10 @@ SDL-MCP exposes 25 MCP tools across 11 categories. Every workflow on this page u
 | | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics |
 | **Context** | `sdl.context.summary` | Generate token-bounded summary for non-MCP contexts (clipboard, markdown, JSON) |
 | **Runtime** | `sdl.runtime.execute` | Sandboxed subprocess execution (Node/Python/Shell) with structured output |
+| **Memory** | `sdl.memory.store` | Store or update a development memory with symbol/file links |
+| | `sdl.memory.query` | Search memories by text, type, tags, or linked symbols |
+| | `sdl.memory.remove` | Soft-delete a memory from graph and optionally from disk |
+| | `sdl.memory.surface` | Auto-surface relevant memories ranked by confidence, recency, and symbol overlap |
 
 ---
 
@@ -245,7 +249,30 @@ Common adjustments:
 - Set `allowBreakGlass: false` to enforce strict proof-of-need gating.
 - Set `requireIdentifiers: false` to allow unscoped code window requests (not recommended).
 
-### 10) Do not
+### 10) Development memories
+
+Store cross-session knowledge and retrieve it automatically:
+
+- **After a debugging session**: store a `bugfix` memory linked to the relevant symbols.
+  ```
+  sdl.memory.store({ repoId, type: "bugfix", title: "Race condition in authenticate()",
+    content: "...", symbolIds: ["sym_abc"], tags: ["auth", "concurrency"] })
+  ```
+- **After an architectural decision**: store a `decision` memory.
+  ```
+  sdl.memory.store({ repoId, type: "decision", title: "Use mutex for session store",
+    content: "...", symbolIds: ["sym_sessionStore"], confidence: 0.95 })
+  ```
+- **Automatic surfacing**: `sdl.slice.build` includes relevant memories by default.
+  Set `includeMemories: false` to disable, or `memoryLimit: N` to control count.
+- **Review stale memories**: after refactors, query `sdl.memory.query({ repoId, staleOnly: true })`
+  and update or remove outdated knowledge.
+- **Surface for current task**: `sdl.memory.surface({ repoId, symbolIds: [...], limit: 5 })`
+  returns the most relevant memories ranked by confidence × recency × symbol overlap.
+- **Team sharing**: memories are saved to `.sdl-memory/` files that can be committed to Git.
+  On the next `sdl.index.refresh`, other team members' files are imported into the graph.
+
+### 11) Do not
 
 - Do not jump directly to raw file reads if SDL tools can answer the question.
 - Do not call `sdl.code.needWindow` before trying `sdl.code.getSkeleton`/`sdl.code.getHotPath`.
@@ -255,4 +282,6 @@ Common adjustments:
 - Do not skip `sdl.agent.feedback` after completing a task — it improves future context quality.
 - Do not call `sdl.runtime.execute` without setting `timeoutMs` — long-running processes will hang.
 - Do not ignore `nextBestAction` in denied `code.needWindow` responses — it tells you what to try instead.
+- Do not ignore stale memories surfaced in slices — review and update or remove them.
+- Do not store trivial or ephemeral notes as memories — they add noise to future surfacing.
 ```

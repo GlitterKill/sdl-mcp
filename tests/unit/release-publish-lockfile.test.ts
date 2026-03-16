@@ -77,8 +77,7 @@ describe("release publish lockfile guards", () => {
 
   it("refreshes the lockfile before npm ci in the release publish job", () => {
     const workflow = readSource(".github/workflows/release-publish.yml");
-    const publishJob =
-      workflow.match(/publish:\s*[\s\S]*$/)?.[0] ?? "";
+    const publishJob = workflow.match(/publish:\s*[\s\S]*$/)?.[0] ?? "";
 
     assert.ok(
       publishJob,
@@ -91,10 +90,9 @@ describe("release publish lockfile guards", () => {
     );
   });
 
-  it("bootstraps the publish job on Node 20 before upgrading npm for trusted publishing", () => {
+  it("bootstraps the publish job on Node 20 with registry URL for trusted publishing", () => {
     const workflow = readSource(".github/workflows/release-publish.yml");
-    const publishJob =
-      workflow.match(/publish:\s*[\s\S]*$/)?.[0] ?? "";
+    const publishJob = workflow.match(/publish:\s*[\s\S]*$/)?.[0] ?? "";
 
     assert.ok(
       publishJob,
@@ -102,8 +100,8 @@ describe("release publish lockfile guards", () => {
     );
     assert.match(
       publishJob,
-      /name:\s*Setup Node\.js[\s\S]*node-version:\s*20\.x[\s\S]*name:\s*Ensure npm supports trusted publishing[\s\S]*npm install -g npm@latest/s,
-      "publish job should use the Node 20 bootstrap path and upgrade npm in-place for trusted publishing",
+      /name:\s*Setup Node\.js[\s\S]*node-version:\s*20\.x[\s\S]*registry-url:\s*https:\/\/registry\.npmjs\.org/s,
+      "publish job should use the Node 20 bootstrap path with npm registry URL for trusted publishing",
     );
   });
 });

@@ -66,8 +66,8 @@ function findSymbol(
 
 describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
   const fixtureRoot = join(__dirname, "..", "fixtures", "clustered-repo");
-  const graphDbPath = join(__dirname, ".lbug-e2e-test-db");
-  const configPath = join(graphDbPath, "test-config.json");
+  let graphDbPath = "";
+  let configPath = "";
   let repoDir: string | null = null;
   const prevSDL_CONFIG = process.env.SDL_CONFIG;
   const prevSDL_CONFIG_PATH = process.env.SDL_CONFIG_PATH;
@@ -77,10 +77,8 @@ describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
       throw new Error(`Fixture not found: ${fixtureRoot}`);
     }
 
-    if (existsSync(graphDbPath)) {
-      rmSync(graphDbPath, { recursive: true, force: true });
-    }
-    mkdirSync(graphDbPath, { recursive: true });
+    graphDbPath = mkdtempSync(join(tmpdir(), "sdl-mcp-e2e-test-db-"));
+    configPath = join(graphDbPath, "test-config.json");
 
     repoDir = mkdtempSync(join(tmpdir(), "sdl-mcp-ladybug-e2e-repo-"));
     copyDirSync(fixtureRoot, repoDir);

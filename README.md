@@ -56,7 +56,7 @@ SDL-MCP fixes this. It indexes your codebase into a searchable **symbol graph** 
           ┌──────────┼──────────┐
           │          │          │
           ▼          ▼          ▼
-      25 MCP      10 CLI    HTTP API
+      29 MCP      10 CLI    HTTP API
        Tools     Commands   + Graph UI
           │
           ▼
@@ -279,9 +279,36 @@ Run tests, linters, and scripts through SDL-MCP's governance layer instead of un
 
 ---
 
+### Development Memories — Cross-Session Knowledge Persistence
+
+Agents forget everything between sessions. SDL-MCP fixes this with a **graph-backed memory system** that lets agents store decisions, bugfix context, and task notes linked directly to the symbols and files they relate to. Memories are stored both in the graph database (for fast querying) and as checked-in markdown files (for version control and team sharing).
+
+```
+  Agent Session 1                              Agent Session 2
+  ─────────────                                ─────────────
+  "Fixed race condition in                     sdl.memory.surface
+   authenticate() — added mutex"                    │
+        │                                      ┌────┴─────┐
+        ▼                                      │ Relevant  │
+   sdl.memory.store                            │ memories  │
+        │                                      │ surfaced  │
+        ├──▶ Graph DB (Memory node)            └────┬─────┘
+        │     ├── MEMORY_OF ──▶ authenticate()      │
+        │     └── HAS_MEMORY ◀── Repo               ▼
+        │                                      "Previous fix: race condition
+        └──▶ .sdl-memory/bugfixes/a1b2c3.md     in authenticate() — mutex added"
+             (YAML frontmatter + markdown)
+```
+
+Memories are **automatically surfaced** inside graph slices — when an agent builds a slice touching symbols with linked memories, those memories appear alongside the cards. During re-indexing, memories linked to changed symbols are **flagged as stale**, prompting agents to review and update them. Four MCP tools (`store`, `query`, `remove`, `surface`) provide full CRUD plus intelligent ranking by confidence, recency, and symbol overlap.
+
+[Development Memories Deep Dive →](./docs/feature-deep-dives/development-memories.md)
+
+---
+
 ### CLI Tool Access — No MCP Server Required
 
-Access all 25 tool actions directly from the command line with `sdl-mcp tool`. No MCP server, transport, or SDK — just your terminal.
+Access all 29 tool actions directly from the command line with `sdl-mcp tool`. No MCP server, transport, or SDK — just your terminal.
 
 ```bash
 # Search for symbols
@@ -302,10 +329,10 @@ Features include typed argument coercion (string, number, boolean, string[], jso
 
 ### Tool Gateway — 81% Token Reduction
 
-The tool gateway consolidates all 25 MCP tools into **4 namespace-scoped tools** (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`), reducing `tools/list` overhead from **~3,742 tokens to ~713 tokens** — an **81% reduction**.
+The tool gateway consolidates all 29 MCP tools into **4 namespace-scoped tools** (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`), reducing `tools/list` overhead from **~3,742 tokens to ~713 tokens** — an **81% reduction**.
 
 ```
-  Before:  25 tools × full JSON Schema = ~3,742 tokens at conversation start
+  Before:  29 tools × full JSON Schema = ~3,742 tokens at conversation start
   After:    4 tools × thin schema       = ~713 tokens at conversation start
                                           ─────────────
                                           ~3,029 tokens saved per conversation
@@ -321,7 +348,7 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 
 <br/>
 
-## All 25 MCP Tools at a Glance
+## All 29 MCP Tools at a Glance
 
 <table>
 <tr><th>Category</th><th>Tool</th><th>One-Line Description</th></tr>
@@ -371,6 +398,12 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 
 <tr><td><strong>Runtime</strong></td>
     <td><code>sdl.runtime.execute</code></td><td>Sandboxed subprocess execution (Node/Python/Shell)</td></tr>
+
+<tr><td rowspan="4"><strong>Memory</strong></td>
+    <td><code>sdl.memory.store</code></td><td>Store or update a development memory with symbol/file links</td></tr>
+<tr><td><code>sdl.memory.query</code></td><td>Search memories by text, type, tags, or linked symbols</td></tr>
+<tr><td><code>sdl.memory.remove</code></td><td>Soft-delete a memory from graph and optionally from disk</td></tr>
+<tr><td><code>sdl.memory.surface</code></td><td>Auto-surface relevant memories for a task context</td></tr>
 </table>
 
 [Complete MCP Tools Reference (detailed parameters & responses) →](./docs/mcp-tools-detailed.md)
@@ -451,7 +484,7 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 | Document | Description |
 |:---------|:------------|
 | [Getting Started](./docs/getting-started.md) | Installation, 5-minute setup, MCP client config |
-| [MCP Tools Reference](./docs/mcp-tools-detailed.md) | Detailed docs for all 25 tools (parameters, responses, examples) |
+| [MCP Tools Reference](./docs/mcp-tools-detailed.md) | Detailed docs for all 29 tools (parameters, responses, examples) |
 | [CLI Reference](./docs/cli-reference.md) | All CLI commands and options |
 | [Configuration Reference](./docs/configuration-reference.md) | Every config option with defaults and guidance |
 | [Agent Workflows](./docs/agent-workflows.md) | Workflow instructions for CLAUDE.md / AGENTS.md |
@@ -471,10 +504,11 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 | [Agent Orchestration](./docs/feature-deep-dives/agent-orchestration.md) | Autopilot mode, feedback loops, portable context summaries |
 | [Indexing & Languages](./docs/feature-deep-dives/indexing-languages.md) | Rust/TS engines, two-pass architecture, 12-language support |
 | [Runtime Execution](./docs/feature-deep-dives/runtime-execution.md) | Sandboxed subprocess execution with governance |
-| [CLI Tool Access](./docs/feature-deep-dives/cli-tool-access.md) | Direct CLI access to all 25 actions, output formats, stdin piping, scripting |
-| [Tool Gateway](./docs/feature-deep-dives/tool-gateway.md) | 25→4 tool consolidation, 81% token reduction, thin schemas, migration guide |
+| [CLI Tool Access](./docs/feature-deep-dives/cli-tool-access.md) | Direct CLI access to all 29 actions, output formats, stdin piping, scripting |
+| [Tool Gateway](./docs/feature-deep-dives/tool-gateway.md) | 29→4 tool consolidation, 81% token reduction, thin schemas, migration guide |
 | [Semantic Engine](./docs/feature-deep-dives/semantic-engine.md) | Pass-2 call resolution, embedding search, LLM summaries, confidence scoring |
 | [Semantic Embeddings Setup](./docs/feature-deep-dives/semantic-embeddings-setup.md) | Dependencies, model installation, provider configuration, tier-by-tier setup |
+| [Development Memories](./docs/feature-deep-dives/development-memories.md) | Graph-backed cross-session memory, file sync, staleness detection, auto-surfacing |
 
 <br/>
 

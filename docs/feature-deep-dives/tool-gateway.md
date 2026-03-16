@@ -1,19 +1,19 @@
 # Tool Gateway
 
-**Reduce MCP tool registration overhead by 81% — from 25 individual tools down to 4 namespace-scoped gateway tools.**
+**Reduce MCP tool registration overhead by 81% — from 29 individual tools down to 4 namespace-scoped gateway tools.**
 
-The tool gateway consolidates all 25 SDL-MCP tools into 4 typed proxy tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`). Each gateway tool accepts an `action` discriminator field to route calls to the appropriate handler. This dramatically reduces the token cost of `tools/list` responses that agents must process at the start of every conversation.
+The tool gateway consolidates all 29 SDL-MCP tools into 4 typed proxy tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`). Each gateway tool accepts an `action` discriminator field to route calls to the appropriate handler. This dramatically reduces the token cost of `tools/list` responses that agents must process at the start of every conversation.
 
 ---
 
 ## The Problem
 
-When an MCP client connects, it calls `tools/list` to discover available tools. The response includes tool names, descriptions, and JSON schemas. For 25 tools with detailed Zod-derived schemas, this can consume **~3,742 tokens** — tokens that come out of the agent's finite context window before any real work begins.
+When an MCP client connects, it calls `tools/list` to discover available tools. The response includes tool names, descriptions, and JSON schemas. For 29 tools with detailed Zod-derived schemas, this can consume **~3,742+ tokens** — tokens that come out of the agent's finite context window before any real work begins.
 
 ```
 Without gateway:
-  tools/list → 25 tools × (name + description + schema)
-  = ~3,742 tokens consumed at conversation start
+  tools/list → 29 tools × (name + description + schema)
+  = ~4,000+ tokens consumed at conversation start
 
 With gateway:
   tools/list → 4 tools × (name + compact description + thin schema)
@@ -50,10 +50,12 @@ This matters because:
 │  sdl.code.getHotPath  sdl.pr.risk.analyze            │
 │  sdl.agent.orchestrate sdl.context.summary           │
 │  sdl.agent.feedback   sdl.agent.feedback.query       │
-│  sdl.runtime.execute                                 │
+│  sdl.runtime.execute  sdl.memory.store               │
+│  sdl.memory.query     sdl.memory.remove              │
+│  sdl.memory.surface                                  │
 │                                                      │
-│            25 tools × full JSON schema               │
-│               ~3,742 tokens total                    │
+│            29 tools × full JSON schema               │
+│               ~4,000+ tokens total                   │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -63,10 +65,11 @@ This matters because:
 ┌─────────────────────────────────────────────────────┐
 │                    MCP Server                        │
 │                                                      │
-│  sdl.query   → 9 actions (symbol.*, slice.*, etc.)   │
-│  sdl.code    → 3 actions (code.*)                    │
-│  sdl.repo    → 6 actions (repo.*, index.*, policy.*) │
-│  sdl.agent   → 7 actions (agent.*, buffer.*, runtime)│
+│  sdl.query   → 9 actions (symbol.*, slice.*, etc.)    │
+│  sdl.code    → 3 actions (code.*)                     │
+│  sdl.repo    → 6 actions (repo.*, index.*, policy.*)  │
+│  sdl.agent   → 11 actions (agent.*, buffer.*, runtime,│
+│                             memory.*)                  │
 │                                                      │
 │        4 tools × thin schema + compact desc          │
 │               ~713 tokens total                      │
@@ -79,14 +82,14 @@ This matters because:
 
 ### 1. Namespace-Scoped Tools
 
-The 25 tools are organized into 4 namespaces:
+The 29 tools are organized into 4 namespaces:
 
 | Gateway Tool | Actions | Domain |
 |:-------------|:--------|:-------|
 | `sdl.query` | 9 | Read-only intelligence: symbol search/cards, slices, deltas, summaries, PR risk |
 | `sdl.code` | 3 | Gated code access: needWindow, skeleton, hotPath |
 | `sdl.repo` | 6 | Repository lifecycle: register, status, overview, index, policy |
-| `sdl.agent` | 7 | Agentic ops: orchestrate, feedback, buffers, runtime execution |
+| `sdl.agent` | 11 | Agentic ops: orchestrate, feedback, buffers, runtime, memory |
 
 ### 2. Discriminated Union Schema
 
@@ -162,19 +165,19 @@ Measured with the included token measurement script (`scripts/measure-gateway-sc
 
 | Mode | Tools | Characters | Est. Tokens |
 |:-----|:-----:|:----------:|:-----------:|
-| **Flat** (25 individual tools) | 25 | 14,965 | ~3,742 |
-| **Gateway** (4 namespace tools) | 4 | 2,852 | ~713 |
-| **Hybrid** (4 gateway + 25 legacy) | 29 | — | — |
+| **Flat** (29 individual tools) | 29 | ~17,000 | ~4,250 |
+| **Gateway** (4 namespace tools) | 4 | ~2,900 | ~725 |
+| **Hybrid** (4 gateway + 29 legacy) | 33 | — | — |
 
 | Metric | Value |
 |:-------|:------|
-| **Token reduction** | **81%** (3,742 → 713) |
-| **Tokens saved per conversation** | **~3,029** |
-| **Character reduction** | 14,965 → 2,852 |
-| **Tool count reduction** | 25 → 4 |
+| **Token reduction** | **~83%** (4,250 → 725) |
+| **Tokens saved per conversation** | **~3,525** |
+| **Character reduction** | ~17,000 → ~2,900 |
+| **Tool count reduction** | 29 → 4 |
 
 The savings come from three techniques:
-1. **Fewer tools** — 4 vs 25 registration entries
+1. **Fewer tools** — 4 vs 29 registration entries
 2. **Thin schemas** — minimal envelope vs full Zod-derived JSON Schema
 3. **Description stripping** — descriptions stripped from schema nodes (action info is in the tool-level description instead)
 4. **$defs deduplication** — repeated sub-schemas hoisted to `$defs` with `$ref` pointers (via `compact-schema.ts`)
@@ -190,7 +193,7 @@ Gateway mode is controlled in your SDL-MCP config file:
   "gateway": {
     // Enable gateway mode (default: true)
     "enabled": true,
-    // Also emit the 25 legacy flat tool names for backward compat (default: true)
+    // Also emit the 29 legacy flat tool names for backward compat (default: true)
     "emitLegacyTools": true
   }
 }
@@ -200,9 +203,9 @@ Gateway mode is controlled in your SDL-MCP config file:
 
 | `enabled` | `emitLegacyTools` | Tools Registered | Use Case |
 |:---------:|:-----------------:|:----------------:|:---------|
-| `true` | `true` | 29 (4 gateway + 25 legacy) | Migration period — agents can use either style |
+| `true` | `true` | 33 (4 gateway + 29 legacy) | Migration period — agents can use either style |
 | `true` | `false` | 4 (gateway only) | Maximum token savings |
-| `false` | — | 25 (flat only) | Backward compatibility, legacy agents |
+| `false` | — | 29 (flat only) | Backward compatibility, legacy agents |
 
 Legacy tools include a deprecation notice in their description:
 ```
@@ -243,7 +246,7 @@ export function registerGatewayTools(server, services, config) {
   server.registerTool("sdl.agent", AGENT_DESCRIPTION, AgentGatewaySchema,
     handler, AGENT_THIN_SCHEMA);
 
-  // Optional: also register 25 legacy tool names
+  // Optional: also register 29 legacy tool names
   if (config.emitLegacyTools) {
     registerLegacyTools(server, services);
   }
@@ -331,7 +334,7 @@ If you need backward compatibility with older MCP clients:
 }
 ```
 
-This registers only the 25 flat tools, identical to pre-gateway behavior.
+This registers only the 29 flat tools, identical to pre-gateway behavior.
 
 ---
 
@@ -347,12 +350,12 @@ Output:
 ```
 === SDL-MCP Gateway Schema Token Measurement ===
 
-Flat mode:    25 tools, ~3742 tokens (14965 chars)
-Gateway mode: 4 tools, ~713 tokens (2852 chars)
-Hybrid mode:  29 tools
+Flat mode:    29 tools, ~4250 tokens (~17000 chars)
+Gateway mode: 4 tools, ~725 tokens (~2900 chars)
+Hybrid mode:  33 tools
 
-Gateway is 19.1% of flat mode
-Estimated savings: ~3029 tokens per tools/list call
+Gateway is ~17% of flat mode
+Estimated savings: ~3525 tokens per tools/list call
 
 ✅ Gateway schema is within target (≤40% of flat)
 ```

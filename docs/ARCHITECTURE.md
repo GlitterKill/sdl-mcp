@@ -87,7 +87,7 @@ SDL-MCP follows a **hexagonal / ports-and-adapters** design. Each module has a c
 2. initGraphDb()                        Open/create LadybugDB file
 3. ensureConfiguredReposRegistered()     Bootstrap repos into graph
 4. getDefaultLiveIndexCoordinator()      Singleton overlay service
-5. registerTools(server, services)       Wire 25+ MCP tools
+5. registerTools(server, services)       Wire 29 MCP tools
 6. setupFileWatchers()                   chokidar for incremental re-index
 7. ShutdownManager.register(callbacks)   Graceful cleanup handlers
 8. server.start()                        Begin accepting MCP requests
@@ -99,7 +99,7 @@ Startup is sequenced (not parallel) — the DB must be ready before tools regist
 
 ## Tool Dispatch
 
-All 25 MCP tools flow through a single dispatch path in `src/server.ts`:
+All 29 MCP tools flow through a single dispatch path in `src/server.ts`:
 
 ```
   Client request
@@ -540,6 +540,20 @@ Both are text models that benefit from LLM summaries when enabled.
 
 ---
 
+## Development Memories
+
+Graph-backed cross-session knowledge persistence. Agents store decisions, bugfix context, and task notes as `Memory` nodes linked to symbols and files via `MEMORY_OF` and `MEMORY_OF_FILE` edges.
+
+- **Dual storage** — graph database (fast queries) + `.sdl-memory/*.md` files (version control)
+- **Auto-surfacing** — memories appear inside `slice.build` responses when they link to slice symbols
+- **Staleness detection** — memories are flagged stale when linked symbols change during re-indexing
+- **File import** — `.sdl-memory/` files are imported into the graph during `index.refresh`
+- **4 MCP tools** — `memory.store`, `memory.query`, `memory.remove`, `memory.surface`
+
+See [Development Memories deep dive](./feature-deep-dives/development-memories.md).
+
+---
+
 ## Error Handling
 
 **Typed errors** (`src/mcp/errors.ts`):
@@ -604,9 +618,11 @@ src/
 ├── live-index/
 │   ├── overlay-store.ts       In-memory draft storage
 │   └── coordinator.ts         Parse queue + reconciliation
+├── memory/
+│   └── file-sync.ts           .sdl-memory/ file read/write/scan
 ├── mcp/
-│   ├── tools.ts               Zod schemas for all 25 tools
-│   ├── tools/                 Handler implementations (12 files)
+│   ├── tools.ts               Zod schemas for all 29 tools
+│   ├── tools/                 Handler implementations (13 files)
 │   ├── errors.ts              Typed error hierarchy
 │   ├── telemetry.ts           Tool call logging
 │   ├── token-usage.ts         Sideband token accounting
@@ -639,7 +655,7 @@ graph TD
     C --> I[Embedding Pipeline + LLM Summaries]
     I --> C
 
-    C --> J[MCP Tool Layer - 25 tools]
+    C --> J[MCP Tool Layer - 29 tools]
 
     J --> K[Iris Gate Ladder]
     K --> |Cards → Skeleton → HotPath → Window| L[AI Agent]
@@ -655,6 +671,10 @@ graph TD
 
     L --> P[Agent Feedback]
     P --> C
+
+    J --> T[Development Memories]
+    T --> |Store/surface memories| C
+    T --> |Auto-surface in slices| L
 
     Q[Policy Engine] -.-> |Gates code windows| K
     R[Session Manager] -.-> |Max 8 sessions| J

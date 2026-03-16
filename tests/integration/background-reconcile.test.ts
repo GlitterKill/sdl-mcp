@@ -10,7 +10,11 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../../src/db/ladybug.js";
 import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { indexRepo } from "../../src/indexer/indexer.js";
 import { ReconcileQueue } from "../../src/live-index/reconcile-queue.js";
@@ -19,7 +23,10 @@ import { ReconcileWorker } from "../../src/live-index/reconcile-worker.js";
 describe("background reconcile worker", () => {
   const repoId = "background-reconcile-repo";
   const dbPath = join(tmpdir(), ".lbug-background-reconcile-test-db.lbug");
-  const configPath = join(tmpdir(), `sdl-background-reconcile-${Date.now()}.json`);
+  const configPath = join(
+    tmpdir(),
+    `sdl-background-reconcile-${Date.now()}.json`,
+  );
   let repoDir = "";
   const prevConfig = process.env.SDL_CONFIG;
   const prevConfigPath = process.env.SDL_CONFIG_PATH;
@@ -44,7 +51,11 @@ describe("background reconcile worker", () => {
     writeFileSync(
       configPath,
       JSON.stringify(
-        { repos: [], policy: {}, indexing: { engine: "typescript", enableFileWatching: false } },
+        {
+          repos: [],
+          policy: {},
+          indexing: { engine: "typescript", enableFileWatching: false },
+        },
         null,
         2,
       ),
@@ -74,19 +85,27 @@ describe("background reconcile worker", () => {
   });
 
   after(async () => {
-    await closeLadybugDb();
-    if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
-    if (existsSync(configPath)) rmSync(configPath, { force: true });
-    if (repoDir && existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
-    if (prevConfig === undefined) delete process.env.SDL_CONFIG;
-    else process.env.SDL_CONFIG = prevConfig;
-    if (prevConfigPath === undefined) delete process.env.SDL_CONFIG_PATH;
-    else process.env.SDL_CONFIG_PATH = prevConfigPath;
+    try {
+      await closeLadybugDb();
+      if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
+      if (existsSync(configPath)) rmSync(configPath, { force: true });
+      if (repoDir && existsSync(repoDir))
+        rmSync(repoDir, { recursive: true, force: true });
+    } finally {
+      if (prevConfig === undefined) delete process.env.SDL_CONFIG;
+      else process.env.SDL_CONFIG = prevConfig;
+      if (prevConfigPath === undefined) delete process.env.SDL_CONFIG_PATH;
+      else process.env.SDL_CONFIG_PATH = prevConfigPath;
+    }
   });
 
   it("patches queued dependent files from disk in the background", async () => {
     const conn = await getLadybugConn();
-    const beforeFile = await ladybugDb.getFileByRepoPath(conn, repoId, "src/consumer.ts");
+    const beforeFile = await ladybugDb.getFileByRepoPath(
+      conn,
+      repoId,
+      "src/consumer.ts",
+    );
     assert.ok(beforeFile);
 
     writeFileSync(
@@ -118,7 +137,11 @@ describe("background reconcile worker", () => {
     );
     await worker.waitForIdle();
 
-    const afterFile = await ladybugDb.getFileByRepoPath(conn, repoId, "src/consumer.ts");
+    const afterFile = await ladybugDb.getFileByRepoPath(
+      conn,
+      repoId,
+      "src/consumer.ts",
+    );
     assert.ok(afterFile);
     assert.notStrictEqual(afterFile?.contentHash, beforeFile?.contentHash);
   });
