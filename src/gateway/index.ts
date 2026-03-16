@@ -23,7 +23,7 @@ import {
   REPO_THIN_SCHEMA,
   AGENT_THIN_SCHEMA,
 } from "./thin-schemas.js";
-import { createActionMap, routeGatewayCall } from "./router.js";
+import { createActionMap, routeGatewayCall, type ActionMap } from "./router.js";
 import { registerLegacyTools } from "./legacy.js";
 
 export type ToolServices = {
@@ -37,13 +37,17 @@ export type ToolServices = {
  * Each gateway tool gets:
  * - Full Zod schema (for runtime validation in the router)
  * - Thin wire schema (for tools/list — minimal JSON to save tokens)
+ *
+ * @param prebuiltActionMap Optional pre-built action map to avoid duplicate creation
+ *   when code-mode is registered alongside gateway.
  */
 export function registerGatewayTools(
   server: MCPServer,
   services: ToolServices,
   config: GatewayConfig,
+  prebuiltActionMap?: ActionMap,
 ): void {
-  const actionMap = createActionMap(services.liveIndex);
+  const actionMap = prebuiltActionMap ?? createActionMap(services.liveIndex);
 
   const makeHandler = () => {
     return async (args: unknown, ctx?: ToolContext): Promise<unknown> => {

@@ -359,3 +359,11 @@ Estimated savings: ~3525 tokens per tools/list call
 
 ✅ Gateway schema is within target (≤40% of flat)
 ```
+
+---
+
+## What's Next: Code Mode
+
+Gateway mode optimizes **tool registration** overhead. **Code Mode** takes optimization further by eliminating **per-operation round-trip** overhead — batching entire context retrieval pipelines into a single tool call with `$N` inter-step references.
+
+[Code Mode Deep Dive →](./code-mode.md)

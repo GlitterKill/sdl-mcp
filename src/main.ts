@@ -91,7 +91,7 @@ async function main(): Promise<void> {
     if (config.liveIndex?.enabled ?? true) {
       idleMonitor.start();
     }
-    registerTools(server, { liveIndex });
+    registerTools(server, { liveIndex }, config.gateway, config.codeMode);
 
     if (config.indexing?.enableFileWatching) {
       log("Starting file watchers...");

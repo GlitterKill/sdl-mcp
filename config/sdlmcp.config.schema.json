@@ -832,6 +832,57 @@
         "enabled": true,
         "emitLegacyTools": true
       }
+    },
+    "codeMode": {
+      "type": "object",
+      "description": "Code Mode configuration — batch multiple tool calls in a single chain with $N references between steps",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable Code Mode tools (sdl.manual + sdl.chain)",
+          "default": false
+        },
+        "exclusive": {
+          "type": "boolean",
+          "description": "When true, suppress gateway and legacy tools — only register code-mode tools",
+          "default": false
+        },
+        "maxChainSteps": {
+          "type": "integer",
+          "description": "Maximum steps allowed in a single chain",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 20
+        },
+        "maxChainTokens": {
+          "type": "integer",
+          "description": "Maximum total estimated tokens for chain results",
+          "minimum": 100,
+          "maximum": 500000,
+          "default": 50000
+        },
+        "maxChainDurationMs": {
+          "type": "integer",
+          "description": "Maximum wall-clock duration for a chain in milliseconds",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 60000
+        },
+        "ladderValidation": {
+          "type": "string",
+          "enum": ["off", "warn", "enforce"],
+          "description": "Context ladder validation mode",
+          "default": "warn"
+        },
+        "etagCaching": {
+          "type": "boolean",
+          "description": "Auto-inject ifNoneMatch ETags for repeated symbol card requests",
+          "default": true
+        }
+      },
+      "default": {
+        "enabled": false
+      }
     }
   }
 }

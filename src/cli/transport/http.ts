@@ -1007,6 +1007,8 @@ export async function setupHttpTransport(
                 // it is available to the callback closure.
                 const mcpServer = createMCPServer({
                   liveIndex: effectiveServices.liveIndex,
+                  gatewayConfig: effectiveServices.gatewayConfig,
+                  codeModeConfig: effectiveServices.codeModeConfig,
                 });
                 // Capture the session ID set by onsessioninitialized
                 // so onclose can use a stable reference.
@@ -1159,6 +1161,8 @@ export async function setupHttpTransport(
             // Create per-session MCP server via factory
             const mcpServer = createMCPServer({
               liveIndex: effectiveServices.liveIndex,
+              gatewayConfig: effectiveServices.gatewayConfig,
+              codeModeConfig: effectiveServices.codeModeConfig,
             });
             mcpServers.set(sseSessionId, mcpServer);
 

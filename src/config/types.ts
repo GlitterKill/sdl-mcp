@@ -328,6 +328,25 @@ export const GatewayConfigSchema = z.object({
 
 export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
 
+export const CodeModeConfigSchema = z.object({
+  /** Enable Code Mode tools (sdl.manual + sdl.chain) */
+  enabled: z.boolean().default(false),
+  /** When true, suppress gateway and legacy tools — only register code-mode tools */
+  exclusive: z.boolean().default(false),
+  /** Maximum steps allowed in a single chain */
+  maxChainSteps: z.number().int().min(1).max(50).default(20),
+  /** Maximum total estimated tokens for a chain's results */
+  maxChainTokens: z.number().int().min(100).max(500_000).default(50_000),
+  /** Maximum wall-clock duration for a chain in milliseconds */
+  maxChainDurationMs: z.number().int().min(1000).max(300_000).default(60_000),
+  /** Context ladder validation: off, warn (add warnings), enforce (reject violations) */
+  ladderValidation: z.enum(["off", "warn", "enforce"]).default("warn"),
+  /** Auto-inject ifNoneMatch ETags for repeated symbol card requests within a chain */
+  etagCaching: z.boolean().default(true),
+});
+
+export type CodeModeConfig = z.infer<typeof CodeModeConfigSchema>;
+
 export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
   /**
@@ -351,6 +370,7 @@ export const AppConfigSchema = z.object({
   concurrency: ConcurrencyConfigSchema.optional(),
   runtime: RuntimeConfigSchema.optional(),
   gateway: GatewayConfigSchema.optional(),
+  codeMode: CodeModeConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

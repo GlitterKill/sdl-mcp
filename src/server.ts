@@ -19,6 +19,7 @@ import {
 } from "./mcp/token-usage.js";
 import { registerTools } from "./mcp/tools/index.js";
 import type { LiveIndexCoordinator } from "./live-index/types.js";
+import type { CodeModeConfig } from "./config/types.js";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../package.json");
@@ -77,7 +78,9 @@ export class MCPServer {
           tools: Array.from(this.tools.values()).map((tool) => ({
             name: tool.name,
             description: tool.description,
-            inputSchema: tool.wireSchema ?? convertSchema(tool.inputSchema, this._gatewayMode),
+            inputSchema:
+              tool.wireSchema ??
+              convertSchema(tool.inputSchema, this._gatewayMode),
           })),
         };
       } catch (error) {
@@ -217,7 +220,12 @@ export class MCPServer {
             `[sdl-mcp] CallTool outer error: ${outerError}\n`,
           );
           return {
-            content: [{ type: "text", text: JSON.stringify(errorToMcpResponse(outerError), null, 2) }],
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(errorToMcpResponse(outerError), null, 2),
+              },
+            ],
             isError: true,
           };
         }
@@ -232,7 +240,13 @@ export class MCPServer {
     handler: ToolHandler,
     wireSchema?: Record<string, unknown>,
   ): void {
-    this.tools.set(name, { name, description, inputSchema, handler, wireSchema });
+    this.tools.set(name, {
+      name,
+      description,
+      inputSchema,
+      handler,
+      wireSchema,
+    });
   }
 
   async start(): Promise<void> {
@@ -309,6 +323,7 @@ function convertSchema(
 export interface MCPServerServices {
   liveIndex?: LiveIndexCoordinator;
   gatewayConfig?: { enabled?: boolean; emitLegacyTools?: boolean };
+  codeModeConfig?: CodeModeConfig;
 }
 
 /**
@@ -321,6 +336,7 @@ export function createMCPServer(services: MCPServerServices = {}): MCPServer {
     server,
     { liveIndex: services.liveIndex },
     services.gatewayConfig,
+    services.codeModeConfig,
   );
   return server;
 }

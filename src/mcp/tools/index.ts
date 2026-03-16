@@ -82,23 +82,45 @@ import {
   handleMemoryRemove,
   handleMemorySurface,
 } from "./memory.js";
-import type { LiveIndexCoordinator } from "../../live-index/types.js";
-
-type ToolServices = {
-  liveIndex?: LiveIndexCoordinator;
-};
+import type { ToolServices } from "../../gateway/index.js";
+import { createActionMap } from "../../gateway/router.js";
+import { registerCodeModeTools } from "../../code-mode/index.js";
+import type { CodeModeConfig } from "../../config/types.js";
 
 export function registerTools(
   server: MCPServer,
   services: ToolServices = {},
   gatewayConfig?: { enabled?: boolean; emitLegacyTools?: boolean },
+  codeModeConfig?: CodeModeConfig,
 ): void {
+  // Code Mode exclusive: only register sdl.manual + sdl.chain
+  if (codeModeConfig?.enabled && codeModeConfig?.exclusive) {
+    registerCodeModeTools(server, services, codeModeConfig);
+    return;
+  }
+
   if (gatewayConfig?.enabled) {
     server.gatewayMode = true;
-    registerGatewayTools(server, services, {
-      enabled: true,
-      emitLegacyTools: gatewayConfig.emitLegacyTools ?? true,
-    });
+
+    // When both gateway and code-mode are active, share one actionMap
+    const sharedActionMap = codeModeConfig?.enabled
+      ? createActionMap(services.liveIndex)
+      : undefined;
+
+    registerGatewayTools(
+      server,
+      services,
+      {
+        enabled: true,
+        emitLegacyTools: gatewayConfig.emitLegacyTools ?? true,
+      },
+      sharedActionMap,
+    );
+
+    // Code Mode alongside gateway — reuse shared action map
+    if (codeModeConfig?.enabled && sharedActionMap) {
+      registerCodeModeTools(server, services, codeModeConfig, sharedActionMap);
+    }
     return;
   }
 
@@ -311,4 +333,9 @@ export function registerTools(
     MemorySurfaceRequestSchema,
     handleMemorySurface,
   );
+
+  // Code Mode alongside flat tools
+  if (codeModeConfig?.enabled) {
+    registerCodeModeTools(server, services, codeModeConfig);
+  }
 }

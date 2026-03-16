@@ -86,19 +86,19 @@ import type { z } from "zod";
 
 type ActionHandler = (args: unknown, context?: ToolContext) => Promise<unknown>;
 
-interface ActionEntry {
+export interface ActionEntry {
   schema: z.ZodType;
   handler: ActionHandler;
 }
+
+export type ActionMap = Record<string, ActionEntry>;
 
 /**
  * Maps action name -> { schema, handler } for all 25 tool actions.
  * Some handlers need the liveIndex service — those are patched in via
  * `createActionMap()` at registration time.
  */
-export function createActionMap(
-  liveIndex?: LiveIndexCoordinator,
-): Record<string, ActionEntry> {
+export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
   return {
     // === Query actions ===
     "symbol.search": {
@@ -236,7 +236,7 @@ export function createActionMap(
  */
 export async function routeGatewayCall(
   rawArgs: unknown,
-  actionMap: Record<string, ActionEntry>,
+  actionMap: ActionMap,
   ctx?: ToolContext,
 ): Promise<unknown> {
   if (!rawArgs || typeof rawArgs !== "object") {

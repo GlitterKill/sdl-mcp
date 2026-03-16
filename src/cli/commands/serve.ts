@@ -155,7 +155,11 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   // For HTTP: the transport creates per-session servers via createMCPServer().
   let stdioServer: MCPServer | undefined;
   if (options.transport === "stdio") {
-    stdioServer = createMCPServer({ liveIndex });
+    stdioServer = createMCPServer({
+      liveIndex,
+      gatewayConfig: config.gateway,
+      codeModeConfig: config.codeMode,
+    });
   }
 
   // Create session manager for HTTP transport
@@ -219,6 +223,8 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       const httpHandle = await setupHttpTransport(host, httpPort, graphDbPath, {
         liveIndex,
         sessionManager,
+        gatewayConfig: config.gateway,
+        codeModeConfig: config.codeMode,
       });
 
       // Now that we know the actual bound port, write the pidfile.

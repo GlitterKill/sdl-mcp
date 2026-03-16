@@ -136,5 +136,14 @@
     "readPoolSize": 4,
     "writeQueueTimeoutMs": 30000,
     "toolQueueTimeoutMs": 30000
+  },
+  "codeMode": {
+    "enabled": false,
+    "exclusive": false,
+    "maxChainSteps": 20,
+    "maxChainTokens": 50000,
+    "maxChainDurationMs": 60000,
+    "ladderValidation": "warn",
+    "etagCaching": true
   }
 }
