@@ -17,6 +17,15 @@ const preparedStatementCacheByConn = new WeakMap<
 >();
 const transactionDepthByConn = new WeakMap<Connection, number>();
 
+/**
+ * Clear the prepared statement cache for a specific connection.
+ * Must be called after DDL schema changes (migrations) so that
+ * cached prepared statements referencing the old catalog are evicted.
+ */
+export function clearPreparedStatementCache(conn: Connection): void {
+  preparedStatementCacheByConn.delete(conn);
+}
+
 export function isJoinHintSyntaxUnsupported(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return (

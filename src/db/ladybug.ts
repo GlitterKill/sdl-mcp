@@ -7,11 +7,10 @@ import { logger } from "../util/logger.js";
 import { DatabaseError } from "../domain/errors.js";
 import { ConcurrencyLimiter } from "../util/concurrency.js";
 import { normalizeGraphDbPath } from "./graph-db-path.js";
-import {
-  createSchema,
-  getSchemaVersion,
-  LADYBUG_SCHEMA_VERSION,
-} from "./ladybug-schema.js";
+import { createSchema, getSchemaVersion } from "./ladybug-schema.js";
+import { LADYBUG_SCHEMA_VERSION, migrations } from "./migrations/index.js";
+import { runPendingMigrations } from "./migration-runner.js";
+import { clearPreparedStatementCache } from "./ladybug-core.js";
 
 // Local interface for optional thread-count method on LadybugDB connections
 interface LadybugConnectionWithThreads {
@@ -35,9 +34,8 @@ const DEFAULT_CHECKPOINT_THRESHOLD_BYTES = 128 * 1024 * 1024;
 
 function formatReindexGuidanceError(dbPath: string, msg: string): string {
   return (
-    `Database at '${dbPath}' is not compatible with the current graph engine (Ladybug). ` +
-    `Delete the existing database directory and re-run indexing: rm -rf '${dbPath}' && sdl-mcp index. ` +
-    "Migrating older graph databases in-place is not supported. " +
+    `Database at '${dbPath}' could not be opened or initialized. ` +
+    `If the database is corrupted, delete it and re-run indexing: rm -rf '${dbPath}' && sdl-mcp index. ` +
     `Original error: ${msg}`
   );
 }
@@ -460,24 +458,60 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
   }
 
   try {
+    // Step 1: Open database and initialize connection pool
     await getLadybugDb(normalizedPath);
-    // getLadybugConn() triggers pool initialization; use the read conn
-    // for the read-only schema version check, but route DDL writes
-    // through the write connection for serialization safety (H2).
-    const conn = await getLadybugConn();
+    await getLadybugConn(); // triggers pool init
 
-    await withWriteConn(async (wConn) => {
-      await createSchema(wConn);
-    });
-    const schemaVersion = await getSchemaVersion(conn);
-    if (schemaVersion !== LADYBUG_SCHEMA_VERSION) {
-      throw new DatabaseError(
-        `LadybugDB schema version mismatch: expected ${LADYBUG_SCHEMA_VERSION}, found ${schemaVersion ?? "unknown"}. Rebuild or reindex the graph database with this version of SDL-MCP.`,
-      );
+    // Step 2: Read current schema version (may throw if table doesn't exist)
+    let currentVersion: number | null = null;
+    try {
+      const conn = await getLadybugConn();
+      currentVersion = await getSchemaVersion(conn);
+    } catch {
+      // SchemaVersion table does not exist — fresh database
+      currentVersion = null;
     }
 
-    logger.info("LadybugDB schema initialized", { path: normalizedPath });
+    if (currentVersion === null) {
+      // Fresh DB (SchemaVersion table missing) or corrupted (table exists, no row).
+      // Run createSchema() to set up everything at latest version.
+      logger.info("Fresh database detected, creating schema", {
+        version: LADYBUG_SCHEMA_VERSION,
+      });
+      await withWriteConn(async (wConn) => {
+        await createSchema(wConn);
+      });
+    } else if (currentVersion < LADYBUG_SCHEMA_VERSION) {
+      // Existing DB needs migration — capture version in const for TS narrowing
+      const dbVersion = currentVersion;
+      await withWriteConn(async (wConn) => {
+        await runPendingMigrations(wConn, dbVersion, migrations);
+      });
+      // Clear prepared statement cache on read pool connections too
+      for (const conn of getReadPool()) {
+        clearPreparedStatementCache(conn);
+      }
+    } else if (currentVersion > LADYBUG_SCHEMA_VERSION) {
+      // DB is newer than code — best-effort
+      logger.warn("Database schema is newer than this version of SDL-MCP", {
+        dbVersion: currentVersion,
+        codeVersion: LADYBUG_SCHEMA_VERSION,
+        message: "Running in best-effort mode",
+      });
+    }
+    // else: currentVersion === LADYBUG_SCHEMA_VERSION — no-op
+
+    // Confirm final state
+    const finalConn = await getLadybugConn();
+    const finalVersion = await getSchemaVersion(finalConn);
+    logger.info("LadybugDB schema initialized", {
+      path: normalizedPath,
+      schemaVersion: finalVersion,
+    });
   } catch (err) {
+    if (err instanceof DatabaseError) {
+      throw err;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     throw new DatabaseError(formatReindexGuidanceError(normalizedPath, msg));
   }
@@ -562,6 +596,14 @@ export function getPoolStats(): {
     writeQueued: writeStats.queued,
     writeActive: writeStats.active,
   };
+}
+
+/**
+ * Return all read pool connections. Used by the migration runner
+ * to clear prepared statement caches after DDL changes.
+ */
+export function getReadPool(): readonly import("kuzu").Connection[] {
+  return readPool;
 }
 
 export function isLadybugAvailable(): boolean {

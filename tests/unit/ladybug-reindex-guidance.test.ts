@@ -78,12 +78,6 @@ describe("Ladybug reindex guidance", { skip: !ladybugAvailable }, () => {
           containsAny(message, ["reindex", "rebuild", "re-run"]),
           "error should include reindex/rebuild/re-run guidance",
         );
-        assert.ok(
-          message.includes(
-            "migrating older graph databases in-place is not supported",
-          ),
-          "error should state that migration is not supported",
-        );
 
         return true;
       },

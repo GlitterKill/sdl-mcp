@@ -8,9 +8,14 @@ import {
 } from "../../db/graph-db-path.js";
 import {
   CALL_EDGE_METADATA_FIELDS,
-  LADYBUG_SCHEMA_VERSION,
+  getSchemaVersion,
   supportsCallResolutionMetadata,
 } from "../../db/ladybug-schema.js";
+import {
+  LADYBUG_SCHEMA_VERSION,
+  migrations,
+} from "../../db/migrations/index.js";
+import { computePendingMigrations } from "../../db/migration-runner.js";
 import { getAllWatcherHealth } from "../../indexer/indexer.js";
 import { createDefaultPass2ResolverRegistry } from "../../indexer/pass2/registry.js";
 import {
@@ -602,12 +607,26 @@ async function checkLadybugDb(
     );
     const edgeCount = toNumber(edgeCountRow?.edgeCount ?? 0);
 
+    // Schema migration status
+    let schemaInfo = "";
+    try {
+      const schemaVersion = await getSchemaVersion(conn);
+      const dbVer = schemaVersion ?? 0;
+      const pending = computePendingMigrations(migrations, dbVer);
+      schemaInfo = `, schema: v${dbVer}/${LADYBUG_SCHEMA_VERSION}`;
+      if (pending.length > 0) {
+        schemaInfo += ` (${pending.length} pending migration${pending.length > 1 ? "s" : ""})`;
+      }
+    } catch {
+      // Schema version query may fail on very old DBs; skip gracefully
+    }
+
     const currentPath = getLadybugDbPath();
     const pathInfo = currentPath ? ` (active: ${currentPath})` : "";
 
     return {
       status: "pass",
-      message: `Ladybug OK: ${ladybugDbPath}${pathInfo} (symbols: ${symbolCount}, edges: ${edgeCount})`,
+      message: `Ladybug OK: ${ladybugDbPath}${pathInfo} (symbols: ${symbolCount}, edges: ${edgeCount}${schemaInfo})`,
     };
   } catch (error) {
     return {

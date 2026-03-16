@@ -20,6 +20,7 @@
 
 import type { Connection } from "kuzu";
 import { exec } from "./ladybug-core.js";
+import { LADYBUG_SCHEMA_VERSION } from "./migrations/index.js";
 
 const NODE_TABLES: string[] = [
   `CREATE NODE TABLE IF NOT EXISTS Repo (
@@ -366,7 +367,7 @@ export async function getSchemaVersion(
   }
 }
 
-export const LADYBUG_SCHEMA_VERSION = 4;
+export { LADYBUG_SCHEMA_VERSION };
 
 export function supportsCallResolutionMetadata(
   schemaVersion: number | null | undefined,
