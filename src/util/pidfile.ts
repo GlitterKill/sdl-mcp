@@ -27,6 +27,8 @@ export interface PidfileData {
   transport: "stdio" | "http";
   /** HTTP port (only present when transport === "http"). */
   port?: number;
+  /** Bearer token for authenticating HTTP API requests. */
+  authToken?: string;
   /** ISO-8601 timestamp when the server started. */
   startedAt: string;
 }
@@ -135,6 +137,7 @@ export function writePidfile(
   graphDbPath: string,
   transport: "stdio" | "http",
   port?: number,
+  authToken?: string,
 ): string {
   const pidfilePath = resolvePidfilePath(graphDbPath);
 
@@ -161,6 +164,7 @@ export function writePidfile(
     pid: process.pid,
     transport,
     ...(port !== undefined ? { port } : {}),
+    ...(authToken !== undefined ? { authToken } : {}),
     startedAt: new Date().toISOString(),
   };
 

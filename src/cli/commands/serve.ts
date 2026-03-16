@@ -228,7 +228,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       });
 
       // Now that we know the actual bound port, write the pidfile.
-      pidfilePath = writePidfile(graphDbPath, transport, httpHandle.port);
+      pidfilePath = writePidfile(graphDbPath, transport, httpHandle.port, httpHandle.authToken);
       console.error(`PID file written: ${pidfilePath}`);
       shutdownMgr.setPidfilePath(pidfilePath);
 

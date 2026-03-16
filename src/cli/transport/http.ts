@@ -23,7 +23,7 @@ import * as ladybugDb from "../../db/ladybug-queries.js";
 import { computeDelta } from "../../delta/diff.js";
 import { runGovernorLoop } from "../../delta/blastRadius.js";
 import { getLadybugConn, initLadybugDb } from "../../db/ladybug.js";
-import { indexRepo } from "../../indexer/indexer.js";
+import { indexRepo, type IndexProgress } from "../../indexer/indexer.js";
 import {
   BufferCheckpointRequestSchema,
   BufferPushRequestSchema,
@@ -788,6 +788,82 @@ async function handleRestRequest(
         changedFiles: result.changedFiles,
         durationMs: result.durationMs,
       });
+      return true;
+    }
+
+    // SSE streaming reindex endpoint — streams progress events, then a
+    // final "complete" or "error" event. Used by `sdl-mcp index` when it
+    // detects a running HTTP server and delegates indexing.
+    const reindexStreamMatch = pathname.match(
+      /^\/api\/repo\/([^/]+)\/reindex-stream$/,
+    );
+    if (req.method === "POST" && reindexStreamMatch) {
+      const [, rawRepoId] = reindexStreamMatch;
+      const repoId = decodeURIComponent(rawRepoId);
+
+      // Parse optional request body for mode
+      let mode: "full" | "incremental" = "incremental";
+      try {
+        const body = await readJsonBody(req);
+        if (body && typeof body === "object" && "mode" in body) {
+          const m = (body as Record<string, unknown>).mode;
+          if (m === "full" || m === "incremental") {
+            mode = m;
+          }
+        }
+      } catch {
+        // Empty or invalid body — use default mode
+      }
+
+      // Set up SSE response
+      setCorsHeaders(req, res);
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+
+      const sendEvent = (event: string, data: unknown): void => {
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      try {
+        const result = await indexRepo(
+          repoId,
+          mode,
+          (progress: IndexProgress) => {
+            sendEvent("progress", {
+              stage: progress.stage,
+              current: progress.current,
+              total: progress.total,
+              currentFile: progress.currentFile,
+            });
+          },
+        );
+
+        const conn = await getLadybugConn();
+        const totalSymbols = await ladybugDb.getSymbolCount(conn, repoId);
+        const totalEdges = await ladybugDb.getEdgeCount(conn, repoId);
+
+        sendEvent("complete", {
+          repoId,
+          versionId: result.versionId,
+          filesProcessed: result.filesProcessed,
+          changedFiles: result.changedFiles,
+          symbolsIndexed: result.symbolsIndexed,
+          totalSymbols,
+          edgesCreated: result.edgesCreated,
+          totalEdges,
+          durationMs: result.durationMs,
+          summaryStats: result.summaryStats ?? null,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+        sendEvent("error", { message });
+      }
+
+      res.end();
       return true;
     }
   } catch (error) {

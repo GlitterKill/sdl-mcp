@@ -6,18 +6,129 @@ import {
   IndexWatchHandle,
   IndexResult,
 } from "../../indexer/indexer.js";
-import { initGraphDb } from "../../db/initGraphDb.js";
+import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getCurrentTimestamp } from "../../util/time.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
+import { findExistingProcess, type PidfileData } from "../../util/pidfile.js";
+import { connectSSE, type SSEEvent } from "../../util/sse-client.js";
+
+/**
+ * Delegate indexing for a single repo to the running HTTP server via SSE.
+ * Returns true if delegation succeeded, false if it failed (caller should
+ * fall back to direct indexing).
+ */
+async function delegateIndexToServer(
+  server: PidfileData,
+  repoId: string,
+  mode: "full" | "incremental",
+): Promise<boolean> {
+  console.log(
+    `  Delegating to running server (PID ${server.pid}, port ${server.port})...`,
+  );
+
+  let lastProgressLine = "";
+  let completed = false;
+
+  try {
+    await connectSSE({
+      host: "localhost",
+      port: server.port!,
+      path: `/api/repo/${encodeURIComponent(repoId)}/reindex-stream`,
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${server.authToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ mode }),
+      onEvent: (evt: SSEEvent) => {
+        if (evt.event === "progress") {
+          const p = JSON.parse(evt.data) as {
+            stage: string;
+            current: number;
+            total: number;
+            currentFile?: string;
+          };
+          if (p.stage === "pass1" || p.stage === "pass2") {
+            const line = `  ${p.stage}: ${p.current}/${p.total}${p.currentFile ? ` ${p.currentFile}` : ""}`;
+            if (line !== lastProgressLine) {
+              console.log(line);
+              lastProgressLine = line;
+            }
+          }
+        } else if (evt.event === "complete") {
+          const c = JSON.parse(evt.data) as {
+            filesProcessed: number;
+            symbolsIndexed: number;
+            totalSymbols: number;
+            edgesCreated: number;
+            totalEdges: number;
+            durationMs: number;
+            summaryStats?: {
+              generated: number;
+              totalCostUsd: number;
+              skipped: number;
+              failed: number;
+            } | null;
+          };
+          console.log(`  Files: ${c.filesProcessed}`);
+          console.log(
+            `  Symbols: ${c.symbolsIndexed} new (${c.totalSymbols} total)`,
+          );
+          console.log(
+            `  Edges: ${c.edgesCreated} new (${c.totalEdges} total)`,
+          );
+          console.log(`  Duration: ${c.durationMs}ms`);
+          if (c.summaryStats) {
+            const s = c.summaryStats;
+            console.log(
+              `  Summaries: ${s.generated} new ($${s.totalCostUsd.toFixed(4)}), ${s.skipped} cached, ${s.failed} failed`,
+            );
+          }
+          completed = true;
+        } else if (evt.event === "error") {
+          const e = JSON.parse(evt.data) as { message: string };
+          console.error(`  Error from server: ${e.message}`);
+        }
+      },
+    });
+
+    return completed;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`  Failed to delegate to server: ${msg}`);
+    return false;
+  }
+}
 
 export async function indexCommand(options: IndexOptions): Promise<void> {
   const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
 
-  await initGraphDb(config, configPath);
-  const conn = await getLadybugConn();
+  // Check if an HTTP server is already running on this database.
+  const graphDbPath = resolveGraphDbPath(config, configPath);
+  const existing = findExistingProcess(graphDbPath);
+
+  const canDelegate =
+    existing &&
+    existing.transport === "http" &&
+    existing.port != null &&
+    existing.authToken != null;
+
+  if (canDelegate) {
+    console.log(
+      `Detected running SDL-MCP HTTP server (PID ${existing.pid}, port ${existing.port}).`,
+    );
+    console.log("Delegating indexing to the running server.\n");
+
+    if (options.watch) {
+      console.log(
+        "Note: --watch flag is ignored when delegating to a running server " +
+          "(the server manages its own file watchers).\n",
+      );
+    }
+  }
 
   const reposToIndex = options.repoId
     ? config.repos.filter((r) => r.repoId === options.repoId)
@@ -32,16 +143,44 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     process.exit(1);
   }
 
+  // If we cannot delegate, initialize the DB for direct indexing.
+  // Track initialization state for lazy init on delegation fallback.
+  let dbInitialized = false;
+  if (!canDelegate) {
+    await initGraphDb(config, configPath);
+    dbInitialized = true;
+  }
+
   console.log(`Indexing ${reposToIndex.length} repo(s)...`);
 
   for (const repo of reposToIndex) {
-    // Register repo in database if it doesn't exist
-    const existingRepo = await ladybugDb.getRepo(conn, repo.repoId);
-    if (!existingRepo) {
-      console.log(`Registering repository: ${repo.repoId}`);
+    const mode = options.force ? "full" : "incremental";
+    console.log(
+      `\nIndexing ${repo.repoId} (${repo.rootPath}) [mode=${mode}]...`,
+    );
+
+    // Try delegating to the running server first.
+    if (canDelegate) {
+      const ok = await delegateIndexToServer(existing, repo.repoId, mode);
+      if (ok) {
+        continue;
+      }
+      // Delegation failed — fall back to direct indexing.
+      console.log("  Falling back to direct indexing...");
+      if (!dbInitialized) {
+        await initGraphDb(config, configPath);
+        dbInitialized = true;
+      }
     }
 
-    // Keep the DB's repo config in sync with the active config file.
+    // Direct indexing path (original behavior).
+    const conn = await getLadybugConn();
+
+    const existingRepo = await ladybugDb.getRepo(conn, repo.repoId);
+    if (!existingRepo) {
+      console.log(`  Registering repository: ${repo.repoId}`);
+    }
+
     await withWriteConn(async (wConn) => {
       await ladybugDb.upsertRepo(wConn, {
         repoId: repo.repoId,
@@ -51,16 +190,14 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       });
     });
 
-    const mode = options.force || !existingRepo ? "full" : "incremental";
-    console.log(
-      `\nIndexing ${repo.repoId} (${repo.rootPath}) [mode=${mode}]...`,
-    );
+    const directMode =
+      options.force || !existingRepo ? "full" : "incremental";
 
     try {
       let lastProgressLine = "";
       const stats: IndexResult = await indexRepo(
         repo.repoId,
-        mode,
+        directMode,
         (progress) => {
           if (progress.stage !== "pass1" && progress.stage !== "pass2") {
             return;
@@ -98,7 +235,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     }
   }
 
-  if (options.watch) {
+  if (options.watch && !canDelegate) {
     console.log("\nWatching for file changes (Ctrl+C to stop)...");
 
     const watchers: IndexWatchHandle[] = [];
@@ -158,3 +295,4 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
 
   console.log("\n✓ Indexing complete");
 }
+
