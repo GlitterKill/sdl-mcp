@@ -63,6 +63,7 @@ export function resolveCallTarget(
   namespaceImports: Map<string, Map<string, string>>,
   adapter?: LanguageAdapter | null,
   globalNameToSymbolIds?: Map<string, string[]>,
+  globalPreferredSymbolId?: Map<string, string>,
 ): ResolvedCallTarget | null {
   if (adapter?.resolveCall) {
     const adapterResolved = adapter.resolveCall({
@@ -157,7 +158,6 @@ export function resolveCallTarget(
   }
 
   // Global symbol index fallback: try repo-wide symbol lookup for cross-file calls.
-  // Only resolve when there is a single unique match (high confidence).
   if (globalNameToSymbolIds && identifier) {
     const globalCandidates = globalNameToSymbolIds.get(identifier);
     if (globalCandidates && globalCandidates.length === 1) {
@@ -167,6 +167,19 @@ export function resolveCallTarget(
         strategy: "heuristic",
         confidence: 0.9,
       });
+    }
+    // Disambiguate multiple global matches using pre-computed preferred symbol
+    if (globalCandidates && globalCandidates.length > 1 && globalPreferredSymbolId) {
+      const preferred = globalPreferredSymbolId.get(identifier);
+      if (preferred) {
+        return finalizeCallResolution({
+          symbolId: preferred,
+          isResolved: true,
+          strategy: "heuristic",
+          confidence: 0.72,
+          candidateCount: globalCandidates.length,
+        });
+      }
     }
   }
 

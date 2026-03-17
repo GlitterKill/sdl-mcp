@@ -115,6 +115,7 @@ async function resolveTsCallEdgesPass2(params: {
   languages: string[];
   createdCallEdges: Set<string>;
   globalNameToSymbolIds?: Map<string, string[]>;
+  globalPreferredSymbolId?: Map<string, string>;
   telemetry?: CallResolutionTelemetry;
 }): Promise<number> {
   const {
@@ -126,6 +127,7 @@ async function resolveTsCallEdgesPass2(params: {
     languages,
     createdCallEdges,
     globalNameToSymbolIds,
+    globalPreferredSymbolId,
     telemetry,
   } = params;
   if (!isTsCallResolutionFile(fileMeta.path)) {
@@ -439,6 +441,7 @@ async function resolveTsCallEdgesPass2(params: {
           importResolution.namespaceImports,
           adapter,
           globalNameToSymbolIds,
+          globalPreferredSymbolId,
         );
         if (!resolved) {
           if (telemetry) telemetry.adapterCalls.returnedNull++;

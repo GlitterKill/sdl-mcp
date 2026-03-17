@@ -27,6 +27,19 @@ const IMPORT_RESOLUTION_ADAPTERS: ImportResolutionAdapter[] = [
   new ShellImportResolutionAdapter(),
 ];
 
+/**
+ * ESM-style imports use `.js` extensions that map to `.ts` source files at
+ * build time.  When the literal `.js` path does not exist on disk we try the
+ * TypeScript counterpart so that import resolution succeeds for the indexed
+ * source tree.
+ */
+const TS_IMPORT_EXT_REMAPS: Record<string, string> = {
+  ".js": ".ts",
+  ".jsx": ".tsx",
+  ".mjs": ".mts",
+  ".cjs": ".cts",
+};
+
 async function resolveRelativeImportCandidatePaths(
   params: ResolveImportCandidatePathsParams,
 ): Promise<string[]> {
@@ -46,6 +59,13 @@ async function resolveRelativeImportCandidatePaths(
 
   if (hasExtension) {
     candidates.push(baseRelPath);
+
+    // Try TS counterpart for ESM .js → .ts remapping
+    const ext = params.extensions.find((e) => baseRelPath.endsWith(e));
+    const tsExt = ext ? TS_IMPORT_EXT_REMAPS[ext] : undefined;
+    if (tsExt) {
+      candidates.push(baseRelPath.slice(0, -ext!.length) + tsExt);
+    }
   } else {
     for (const extension of params.extensions) {
       candidates.push(`${baseRelPath}${extension}`);

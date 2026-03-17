@@ -60,6 +60,7 @@ export async function processFileFromRustResult(params: {
   allSymbolsByName: Map<string, ladybugDb.SymbolLiteRow[]>;
   skipCallResolution: boolean;
   globalNameToSymbolIds?: Map<string, string[]>;
+  globalPreferredSymbolId?: Map<string, string>;
   supportsPass2FilePath?: (relPath: string) => boolean;
 }): Promise<{
   symbolsIndexed: number;
@@ -80,6 +81,7 @@ export async function processFileFromRustResult(params: {
     createdCallEdges,
     skipCallResolution,
     globalNameToSymbolIds,
+    globalPreferredSymbolId,
     supportsPass2FilePath = isTsCallResolutionFile,
   } = params;
 
@@ -461,6 +463,7 @@ export async function processFileFromRustResult(params: {
             importResolution.namespaceImports,
             adapter,
             globalNameToSymbolIds,
+            globalPreferredSymbolId,
           );
 
           if (!resolved) continue;

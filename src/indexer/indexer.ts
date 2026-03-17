@@ -127,6 +127,7 @@ interface Pass1Params {
   tsResolver: TsCallResolver | null;
   allSymbolsByName: Map<string, ladybugDb.SymbolLiteRow[]>;
   globalNameToSymbolIds: Map<string, string[]>;
+  globalPreferredSymbolId: Map<string, string>;
   pass2ResolverRegistry: Pass2ResolverRegistry;
   supportsPass2FilePath: (relPath: string) => boolean;
   concurrency: number;
@@ -199,6 +200,7 @@ async function loadExistingSymbolMaps(
 ): Promise<{
   allSymbolsByName: Map<string, ladybugDb.SymbolLiteRow[]>;
   globalNameToSymbolIds: Map<string, string[]>;
+  globalPreferredSymbolId: Map<string, string>;
 }> {
   const allSymbolsByName = new Map<string, ladybugDb.SymbolLiteRow[]>();
   const globalNameToSymbolIds = new Map<string, string[]>();
@@ -211,7 +213,29 @@ async function loadExistingSymbolMaps(
     byId.push(symbol.symbolId);
     globalNameToSymbolIds.set(symbol.name, byId);
   }
-  return { allSymbolsByName, globalNameToSymbolIds };
+  const globalPreferredSymbolId = buildGlobalPreferredSymbolIds(allSymbolsByName);
+  return { allSymbolsByName, globalNameToSymbolIds, globalPreferredSymbolId };
+}
+
+/**
+ * For names with multiple symbols, pre-compute a single preferred symbol ID.
+ * Prefers exported symbols; if exactly one exported candidate exists among
+ * multiple total candidates, it wins.  This resolves the common pattern where
+ * a function is defined once in source (exported) but re-declared in test
+ * files (non-exported `let`/`const`).
+ */
+function buildGlobalPreferredSymbolIds(
+  allSymbolsByName: Map<string, ladybugDb.SymbolLiteRow[]>,
+): Map<string, string> {
+  const preferred = new Map<string, string>();
+  for (const [name, symbols] of allSymbolsByName) {
+    if (symbols.length <= 1) continue;
+    const exported = symbols.filter((s) => s.exported);
+    if (exported.length === 1) {
+      preferred.set(name, exported[0].symbolId);
+    }
+  }
+  return preferred;
 }
 
 /** Create the Pass 2 resolver registry, eligible file list, and telemetry object. */
@@ -258,8 +282,8 @@ async function runPass1WithRustEngine(
   const {
     repoId, repoRoot, config, mode, files, existingByPath, symbolIndex,
     pendingCallEdges, createdCallEdges, tsResolver, allSymbolsByName,
-    globalNameToSymbolIds, pass2ResolverRegistry, supportsPass2FilePath,
-    concurrency, onProgress,
+    globalNameToSymbolIds, globalPreferredSymbolId, pass2ResolverRegistry,
+    supportsPass2FilePath, concurrency, onProgress,
   } = params;
 
   const acc: Pass1Accumulator = {
@@ -347,6 +371,7 @@ async function runPass1WithRustEngine(
         allSymbolsByName,
         skipCallResolution,
         globalNameToSymbolIds,
+        globalPreferredSymbolId,
         supportsPass2FilePath,
       });
       acc.filesProcessed++;
@@ -393,6 +418,7 @@ async function runPass1WithRustEngine(
         workerPool: null,
         skipCallResolution,
         globalNameToSymbolIds,
+        globalPreferredSymbolId,
         supportsPass2FilePath,
       });
       acc.filesProcessed++;
@@ -426,8 +452,8 @@ async function runPass1WithTsEngine(
   const {
     repoId, repoRoot, config, mode, files, existingByPath, symbolIndex,
     pendingCallEdges, createdCallEdges, tsResolver, allSymbolsByName,
-    globalNameToSymbolIds, pass2ResolverRegistry, supportsPass2FilePath,
-    concurrency, workerPool, onProgress,
+    globalNameToSymbolIds, globalPreferredSymbolId, pass2ResolverRegistry,
+    supportsPass2FilePath, concurrency, workerPool, onProgress,
   } = params;
 
   const acc: Pass1Accumulator = {
@@ -470,6 +496,7 @@ async function runPass1WithTsEngine(
           workerPool,
           skipCallResolution,
           globalNameToSymbolIds,
+          globalPreferredSymbolId,
           supportsPass2FilePath,
         });
         acc.filesProcessed++;
@@ -511,6 +538,7 @@ async function refreshSymbolIndexFromDb(
   repoId: string,
   symbolIndex: SymbolIndex,
   globalNameToSymbolIds: Map<string, string[]>,
+  globalPreferredSymbolId?: Map<string, string>,
 ): Promise<void> {
   const refreshed: SymbolIndex = new Map();
   const allFiles = await ladybugDb.getFilesByRepo(conn, repoId);
@@ -526,15 +554,35 @@ async function refreshSymbolIndexFromDb(
 
   // Refresh global name index so Pass 2 can heuristically resolve cross-file calls.
   globalNameToSymbolIds.clear();
+  const allSymbolsByName = new Map<string, ladybugDb.SymbolLiteRow[]>();
   for (const symbol of symbols) {
     const byId = globalNameToSymbolIds.get(symbol.name) ?? [];
     byId.push(symbol.symbolId);
     globalNameToSymbolIds.set(symbol.name, byId);
+    const byName = allSymbolsByName.get(symbol.name) ?? [];
+    byName.push({
+      symbolId: symbol.symbolId,
+      repoId: symbol.repoId,
+      fileId: symbol.fileId,
+      name: symbol.name,
+      kind: symbol.kind,
+      exported: symbol.exported,
+    });
+    allSymbolsByName.set(symbol.name, byName);
   }
   for (const ids of globalNameToSymbolIds.values()) {
     ids.sort();
     for (let i = ids.length - 1; i > 0; i--) {
       if (ids[i] === ids[i - 1]) ids.splice(i, 1);
+    }
+  }
+
+  // Refresh preferred symbol disambiguation map
+  if (globalPreferredSymbolId) {
+    globalPreferredSymbolId.clear();
+    const refreshedPreferred = buildGlobalPreferredSymbolIds(allSymbolsByName);
+    for (const [name, id] of refreshedPreferred) {
+      globalPreferredSymbolId.set(name, id);
     }
   }
 }
@@ -553,14 +601,15 @@ async function runPass2Resolvers(params: {
   config: RepoConfig;
   createdCallEdges: Set<string>;
   globalNameToSymbolIds: Map<string, string[]>;
+  globalPreferredSymbolId: Map<string, string>;
   callResolutionTelemetry: CallResolutionTelemetry;
   onProgress: ((progress: IndexProgress) => void) | undefined;
 }): Promise<number> {
   const {
     repoId, repoRoot, mode, pass2EligibleFiles, changedPass2FilePaths,
     supportsPass2FilePath, pass2ResolverRegistry, symbolIndex, tsResolver,
-    config, createdCallEdges, globalNameToSymbolIds, callResolutionTelemetry,
-    onProgress,
+    config, createdCallEdges, globalNameToSymbolIds, globalPreferredSymbolId,
+    callResolutionTelemetry, onProgress,
   } = params;
 
   const pass2Targets = await resolvePass2Targets({
@@ -602,6 +651,7 @@ async function runPass2Resolvers(params: {
         languages: config.languages,
         createdCallEdges,
         globalNameToSymbolIds,
+        globalPreferredSymbolId,
         telemetry: callResolutionTelemetry,
         cache: pass2ResolverCache,
       },
@@ -862,9 +912,10 @@ async function indexRepoImpl(
     // --- Phase: initialize shared indexing state ---
 
     logger.debug("Initializing TS call resolver", { repoId, useRustEngine });
-    // Skip TS call resolver when Rust engine is active — it starts a full
-    // TypeScript compiler program which is expensive and unused in that path.
-    const tsResolver: TsCallResolver | null = useRustEngine
+    // When using the Rust engine for Pass 1, defer TS compiler resolver
+    // creation until Pass 2 where it provides type-aware call resolution
+    // that the import-based resolver cannot.
+    let tsResolver: TsCallResolver | null = useRustEngine
       ? null
       : createTsCallResolver(repoRow.rootPath, files, {
           includeNodeModulesTypes: config.includeNodeModulesTypes ?? true,
@@ -874,7 +925,7 @@ async function indexRepoImpl(
       enabled: Boolean(tsResolver),
     });
 
-    const { allSymbolsByName, globalNameToSymbolIds } =
+    const { allSymbolsByName, globalNameToSymbolIds, globalPreferredSymbolId } =
       await loadExistingSymbolMaps(conn, repoId);
     const symbolIndex: SymbolIndex = new Map();
     const pendingCallEdges: PendingCallEdge[] = [];
@@ -901,6 +952,7 @@ async function indexRepoImpl(
       tsResolver,
       allSymbolsByName,
       globalNameToSymbolIds,
+      globalPreferredSymbolId,
       pass2ResolverRegistry,
       supportsPass2FilePath,
       concurrency,
@@ -930,9 +982,20 @@ async function indexRepoImpl(
 
     // --- Phase: refresh symbol index from DB (Pass 1 → Pass 2 bridge) ---
 
-    await refreshSymbolIndexFromDb(conn, repoId, symbolIndex, globalNameToSymbolIds);
+    await refreshSymbolIndexFromDb(conn, repoId, symbolIndex, globalNameToSymbolIds, globalPreferredSymbolId);
 
     // --- Phase: Pass 2 — cross-file call resolution ---
+
+    // Lazily create TS compiler resolver for Pass 2 when Rust engine was used
+    // for Pass 1.  The TS compiler provides type-aware call resolution that
+    // complements the import-based resolver.
+    if (!tsResolver && useRustEngine && pass2EligibleFiles.length > 0) {
+      logger.debug("Creating deferred TS call resolver for Pass 2");
+      tsResolver = createTsCallResolver(repoRow.rootPath, files, {
+        includeNodeModulesTypes: config.includeNodeModulesTypes ?? true,
+      });
+      logger.debug("Deferred TS call resolver ready");
+    }
 
     totalEdgesCreated += await runPass2Resolvers({
       repoId,
@@ -947,6 +1010,7 @@ async function indexRepoImpl(
       config,
       createdCallEdges,
       globalNameToSymbolIds,
+      globalPreferredSymbolId,
       callResolutionTelemetry,
       onProgress,
     });

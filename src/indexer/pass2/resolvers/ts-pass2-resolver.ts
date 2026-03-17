@@ -19,6 +19,7 @@ type ResolveTsPass2Delegate = (params: {
   languages: Pass2ResolverContext["languages"];
   createdCallEdges: Pass2ResolverContext["createdCallEdges"];
   globalNameToSymbolIds?: Pass2ResolverContext["globalNameToSymbolIds"];
+  globalPreferredSymbolId?: Pass2ResolverContext["globalPreferredSymbolId"];
   telemetry?: Pass2ResolverContext["telemetry"];
 }) => Promise<number>;
 
@@ -54,6 +55,7 @@ export class TsPass2Resolver implements Pass2Resolver {
       languages: context.languages,
       createdCallEdges: context.createdCallEdges,
       globalNameToSymbolIds: context.globalNameToSymbolIds,
+      globalPreferredSymbolId: context.globalPreferredSymbolId,
       telemetry: context.telemetry,
     });
 

@@ -20,6 +20,7 @@ export interface Pass2ResolverContext {
   languages: string[];
   createdCallEdges: Set<string>;
   globalNameToSymbolIds?: Map<string, string[]>;
+  globalPreferredSymbolId?: Map<string, string>;
   telemetry?: CallResolutionTelemetry;
   cache?: Map<string, unknown>;
 }

@@ -66,6 +66,7 @@ export interface ProcessFileParams {
   workerPool?: ParserWorkerPool | null;
   skipCallResolution?: boolean;
   globalNameToSymbolIds?: Map<string, string[]>;
+  globalPreferredSymbolId?: Map<string, string>;
   supportsPass2FilePath?: (relPath: string) => boolean;
 }
 
@@ -92,6 +93,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
     workerPool,
     skipCallResolution,
     globalNameToSymbolIds,
+    globalPreferredSymbolId,
     supportsPass2FilePath = isTsCallResolutionFile,
   } = params;
   try {
@@ -528,6 +530,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
             importResolution.namespaceImports,
             adapter,
             globalNameToSymbolIds,
+            globalPreferredSymbolId,
           );
 
           if (!resolved) {
