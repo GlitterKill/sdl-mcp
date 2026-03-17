@@ -13,9 +13,9 @@ import type { RepoConfig } from "../../config/types.js";
 import { indexRepo } from "../../indexer/indexer.js";
 import { buildSlice } from "../../graph/slice.js";
 import { generateSymbolSkeleton } from "../../code/skeleton.js";
-import type { SymbolRow } from "../../db/ladybug-queries.js";
-import { generateContextSummary } from "../../mcp/summary.js";
-import { getRepoHealthSnapshot } from "../../mcp/health.js";
+import { generateContextSummary } from "../../services/summary.js";
+import { buildCardForSymbol } from "../../services/card-builder.js";
+import { getRepoHealthSnapshot } from "../../services/health.js";
 import {
   ThresholdEvaluator,
   loadThresholdConfig,
@@ -185,78 +185,6 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-async function buildCardFromSymbol(
-  conn: Connection,
-  repoId: string,
-  symbol: SymbolRow,
-  fileRelPath: string,
-): Promise<{ card: unknown; tokens: number } | null> {
-  if (!fileRelPath) return null;
-
-  const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
-  const edgesFrom = await ladybugDb.getEdgesFrom(conn, symbol.symbolId);
-  const metrics = await ladybugDb.getMetrics(conn, symbol.symbolId);
-
-  const signature = symbol.signatureJson
-    ? JSON.parse(symbol.signatureJson)
-    : undefined;
-  const invariants = symbol.invariantsJson
-    ? JSON.parse(symbol.invariantsJson)
-    : undefined;
-  const sideEffects = symbol.sideEffectsJson
-    ? JSON.parse(symbol.sideEffectsJson)
-    : undefined;
-
-  const deps = {
-    imports: edgesFrom
-      .filter((e) => e.edgeType === "import")
-      .map((e) => e.toSymbolId),
-    calls: edgesFrom
-      .filter((e) => e.edgeType === "call")
-      .map((e) => e.toSymbolId),
-  };
-
-  const cardMetrics = metrics
-    ? {
-        fanIn: metrics.fanIn,
-        fanOut: metrics.fanOut,
-        churn30d: metrics.churn30d,
-        testRefs: metrics.testRefsJson
-          ? JSON.parse(metrics.testRefsJson)
-          : undefined,
-      }
-    : undefined;
-
-  const card = {
-    symbolId: symbol.symbolId,
-    repoId: symbol.repoId,
-    file: fileRelPath,
-    range: {
-      startLine: symbol.rangeStartLine,
-      startCol: symbol.rangeStartCol,
-      endLine: symbol.rangeEndLine,
-      endCol: symbol.rangeEndCol,
-    },
-    kind: symbol.kind,
-    name: symbol.name,
-    exported: symbol.exported,
-    visibility: symbol.visibility,
-    signature,
-    summary: symbol.summary ?? undefined,
-    invariants,
-    sideEffects,
-    deps,
-    metrics: cardMetrics,
-    version: {
-      ledgerVersion: latestVersion?.versionId ?? "current",
-      astFingerprint: symbol.astFingerprint,
-    },
-  };
-
-  const tokens = estimateTokens(JSON.stringify(card));
-  return { card, tokens };
-}
-
 async function collectBenchmarkMetrics(
   conn: Connection,
   repoId: string,
@@ -309,15 +237,13 @@ async function collectBenchmarkMetrics(
 
   for (const symbol of sampleSymbols) {
     try {
-      const fileRelPath = filesById.get(symbol.fileId) ?? "";
-      const cardResult = await buildCardFromSymbol(
-        conn,
+      const cardResult = await buildCardForSymbol(
         repoId,
-        symbol,
-        fileRelPath,
+        symbol.symbolId,
+        undefined,
       );
-      if (cardResult) {
-        totalCardTokens += cardResult.tokens;
+      if (!("notModified" in cardResult)) {
+        totalCardTokens += estimateTokens(JSON.stringify(cardResult));
       }
 
       if (symbol.kind === "function" || symbol.kind === "method") {

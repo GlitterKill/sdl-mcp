@@ -4,8 +4,10 @@ import type {
   VersionId,
   EdgeType,
   EdgeResolutionStrategy,
-} from "../../db/schema.js";
-import type { SymbolDeps, Range, SymbolSignature } from "../types.js";
+  SymbolDeps,
+  Range,
+  SymbolSignature,
+} from "../types.js";
 
 export interface SymbolReadModel {
   symbolId: SymbolId;

@@ -76,7 +76,12 @@ class LocalEmbeddingProvider implements EmbeddingProvider {
     }
     try {
       return getModelInfo(this.modelName).dimension;
-    } catch {
+    } catch (err) {
+      logger.debug("Failed to get model dimension, using default", {
+        modelName: this.modelName,
+        fallbackDimension: EMBEDDING_DIMENSION,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return EMBEDDING_DIMENSION;
     }
   }
@@ -203,7 +208,10 @@ function parseSignatureText(signatureJson: string | null): string | null {
     return typeof parsed === "string"
       ? parsed
       : (parsed?.text ?? signatureJson);
-  } catch {
+  } catch (err) {
+    logger.debug("Failed to parse signature JSON, using raw", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return signatureJson;
   }
 }
@@ -320,9 +328,7 @@ export async function refreshSymbolEmbeddings(params: {
     }
 
     const [vector] = await provider.embed([text]);
-    storageModel = provider.isMockFallback?.()
-      ? "mock-fallback"
-      : modelName;
+    storageModel = provider.isMockFallback?.() ? "mock-fallback" : modelName;
     if (
       existing &&
       existing.model === storageModel &&
@@ -392,7 +398,9 @@ export async function rerankByEmbeddings(params: {
   const symbolById = new Map(
     params.symbols.map((item) => [item.symbol.symbolId, item.symbol]),
   );
-  const summaryCacheForRerank = await ladybugDb.getSummaryCaches(conn, [...embeddingMap.keys()]);
+  const summaryCacheForRerank = await ladybugDb.getSummaryCaches(conn, [
+    ...embeddingMap.keys(),
+  ]);
   const staleHash: string[] = [];
   for (const [symbolId, row] of embeddingMap) {
     const sym = symbolById.get(symbolId);

@@ -1,5 +1,6 @@
 import type { ConfigEdge } from "./configEdges.js";
 import type {
+  CallResolutionTelemetry,
   PendingCallEdge,
   SymbolIndex,
   TsCallResolver,
@@ -40,12 +41,14 @@ import {
 import {
   createDefaultPass2ResolverRegistry,
   toPass2Target,
+  type Pass2ResolverRegistry,
 } from "./pass2/registry.js";
 import { createTsCallResolver } from "./ts/tsParser.js";
 import { ParserWorkerPool } from "./workerPool.js";
 import { invalidateGraphSnapshot } from "../graph/graphSnapshotCache.js";
 import { clearFingerprintCollisionLog } from "./fingerprints.js";
 import { scanMemoryFiles, readMemoryFile } from "../memory/file-sync.js";
+import type { FileMetadata } from "./fileScanner.js";
 import crypto from "node:crypto";
 import path from "node:path";
 
@@ -95,6 +98,46 @@ export {
 } from "./parser.js";
 export type { ProcessFileParams } from "./parser.js";
 
+// ---------------------------------------------------------------------------
+// Internal types
+// ---------------------------------------------------------------------------
+
+type LadybugConn = Awaited<ReturnType<typeof getLadybugConn>>;
+
+interface Pass1Accumulator {
+  filesProcessed: number;
+  changedFiles: number;
+  totalSymbolsIndexed: number;
+  totalEdgesCreated: number;
+  allConfigEdges: ConfigEdge[];
+  changedFileIds: Set<string>;
+  changedPass2FilePaths: Set<string>;
+}
+
+interface Pass1Params {
+  repoId: string;
+  repoRoot: string;
+  config: RepoConfig;
+  mode: "full" | "incremental";
+  files: FileMetadata[];
+  existingByPath: Map<string, ladybugDb.FileRow>;
+  symbolIndex: SymbolIndex;
+  pendingCallEdges: PendingCallEdge[];
+  createdCallEdges: Set<string>;
+  tsResolver: TsCallResolver | null;
+  allSymbolsByName: Map<string, ladybugDb.SymbolLiteRow[]>;
+  globalNameToSymbolIds: Map<string, string[]>;
+  pass2ResolverRegistry: Pass2ResolverRegistry;
+  supportsPass2FilePath: (relPath: string) => boolean;
+  concurrency: number;
+  workerPool?: ParserWorkerPool | null;
+  onProgress: ((progress: IndexProgress) => void) | undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
 function computeFileId(repoId: string, relPath: string): string {
   return `${repoId}:${normalizePath(relPath)}`;
 }
@@ -120,12 +163,8 @@ async function createVersionAndSnapshot(params: {
   reason: string;
 }): Promise<void> {
   const { repoId, versionId, reason } = params;
-
-  // Read symbols using read connection
   const readConn = await getLadybugConn();
   const symbols = await ladybugDb.getSymbolsByRepoForSnapshot(readConn, repoId);
-
-  // Write version + snapshots using serialized write connection
   await withWriteConn(async (wConn) => {
     await ladybugDb.createVersion(wConn, {
       versionId,
@@ -135,7 +174,6 @@ async function createVersionAndSnapshot(params: {
       prevVersionHash: null,
       versionHash: null,
     });
-
     for (const symbol of symbols) {
       await ladybugDb.snapshotSymbolVersion(wConn, {
         versionId,
@@ -149,6 +187,588 @@ async function createVersionAndSnapshot(params: {
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// Pipeline phase helpers
+// ---------------------------------------------------------------------------
+
+/** Load existing symbols from DB and build name-to-symbol lookup maps. */
+async function loadExistingSymbolMaps(
+  conn: LadybugConn,
+  repoId: string,
+): Promise<{
+  allSymbolsByName: Map<string, ladybugDb.SymbolLiteRow[]>;
+  globalNameToSymbolIds: Map<string, string[]>;
+}> {
+  const allSymbolsByName = new Map<string, ladybugDb.SymbolLiteRow[]>();
+  const globalNameToSymbolIds = new Map<string, string[]>();
+  const repoSymbols = await ladybugDb.getSymbolsByRepoLite(conn, repoId);
+  for (const symbol of repoSymbols) {
+    const byName = allSymbolsByName.get(symbol.name) ?? [];
+    byName.push(symbol);
+    allSymbolsByName.set(symbol.name, byName);
+    const byId = globalNameToSymbolIds.get(symbol.name) ?? [];
+    byId.push(symbol.symbolId);
+    globalNameToSymbolIds.set(symbol.name, byId);
+  }
+  return { allSymbolsByName, globalNameToSymbolIds };
+}
+
+/** Create the Pass 2 resolver registry, eligible file list, and telemetry object. */
+function initPass2Context(
+  repoId: string,
+  mode: "full" | "incremental",
+  files: FileMetadata[],
+): {
+  pass2ResolverRegistry: Pass2ResolverRegistry;
+  pass2EligibleFiles: FileMetadata[];
+  callResolutionTelemetry: CallResolutionTelemetry;
+  supportsPass2FilePath: (relPath: string) => boolean;
+} {
+  const pass2ResolverRegistry = createDefaultPass2ResolverRegistry();
+  const registeredPass2Resolvers = pass2ResolverRegistry
+    .listResolvers()
+    .map((r) => r.id);
+  const pass2EligibleFiles = files.filter((f) =>
+    pass2ResolverRegistry.supports(toPass2Target(f)),
+  );
+  const supportsPass2FilePath = (relPath: string): boolean =>
+    pass2ResolverRegistry.supports(toPass2Target({ path: relPath }));
+  const callResolutionTelemetry = createCallResolutionTelemetry({
+    repoId,
+    mode,
+    pass2EligibleFileCount: pass2EligibleFiles.length,
+    registeredResolvers: registeredPass2Resolvers,
+  });
+  return {
+    pass2ResolverRegistry,
+    pass2EligibleFiles,
+    callResolutionTelemetry,
+    supportsPass2FilePath,
+  };
+}
+
+/**
+ * Pass 1 — Rust engine path. Returns `usedRust: false` when the native addon
+ * returns null, signalling the caller to re-run with the TypeScript engine.
+ */
+async function runPass1WithRustEngine(
+  params: Pass1Params,
+): Promise<{ acc: Pass1Accumulator; usedRust: boolean }> {
+  const {
+    repoId, repoRoot, config, mode, files, existingByPath, symbolIndex,
+    pendingCallEdges, createdCallEdges, tsResolver, allSymbolsByName,
+    globalNameToSymbolIds, pass2ResolverRegistry, supportsPass2FilePath,
+    concurrency, onProgress,
+  } = params;
+
+  const acc: Pass1Accumulator = {
+    filesProcessed: 0, changedFiles: 0, totalSymbolsIndexed: 0,
+    totalEdgesCreated: 0, allConfigEdges: [], changedFileIds: new Set(),
+    changedPass2FilePaths: new Set(),
+  };
+  const updateProgress = (currentFile?: string): void => {
+    onProgress?.({
+      stage: "pass1",
+      current: Math.min(acc.filesProcessed, files.length),
+      total: files.length,
+      currentFile,
+    });
+  };
+
+  let rustFiles = files;
+  let skippedRustFiles = 0;
+  if (mode === "incremental") {
+    rustFiles = files.filter((file) => {
+      const existing = existingByPath.get(file.path);
+      return (
+        !existing?.lastIndexedAt ||
+        file.mtime > new Date(existing.lastIndexedAt).getTime()
+      );
+    });
+    skippedRustFiles = files.length - rustFiles.length;
+  }
+
+  const rustResults = parseFilesRust(repoId, repoRoot, rustFiles, concurrency);
+  logger.debug("Native parseFilesRust completed", {
+    repoId,
+    fileCount: rustFiles.length,
+    resultCount: rustResults?.length ?? null,
+  });
+
+  if (!rustResults) {
+    logger.warn("Rust engine returned null, falling back to TypeScript engine");
+    return { acc, usedRust: false };
+  }
+
+  acc.filesProcessed += skippedRustFiles;
+  const resultByPath = new Map<string, RustParseResult>();
+  for (const result of rustResults) resultByPath.set(result.relPath, result);
+
+  const tsFallbackFiles: FileMetadata[] = [];
+  for (const file of rustFiles) {
+    updateProgress(file.path);
+    const rustResult = resultByPath.get(file.path);
+    if (!rustResult) {
+      acc.filesProcessed++;
+      continue;
+    }
+
+    // Fall back to TS engine for languages the Rust engine doesn't support
+    if (
+      rustResult.parseError &&
+      rustResult.symbols.length === 0 &&
+      rustResult.parseError.includes("Unsupported language")
+    ) {
+      logger.info(
+        `Rust engine does not support language for ${file.path}, falling back to TypeScript engine`,
+      );
+      tsFallbackFiles.push(file);
+      continue;
+    }
+
+    const skipCallResolution = pass2ResolverRegistry.supports(
+      toPass2Target(file),
+    );
+    try {
+      const result = await processFileFromRustResult({
+        repoId,
+        repoRoot,
+        fileMeta: file,
+        rustResult,
+        languages: config.languages,
+        mode,
+        existingFile: existingByPath.get(file.path),
+        symbolIndex,
+        pendingCallEdges,
+        createdCallEdges,
+        tsResolver,
+        config,
+        allSymbolsByName,
+        skipCallResolution,
+        globalNameToSymbolIds,
+        supportsPass2FilePath,
+      });
+      acc.filesProcessed++;
+      if (result.changed) {
+        acc.changedFiles++;
+        acc.changedFileIds.add(
+          fileIdForPath(repoId, file.path, existingByPath),
+        );
+        if (skipCallResolution) {
+          acc.changedPass2FilePaths.add(file.path);
+          for (const hinted of result.pass2HintPaths)
+            acc.changedPass2FilePaths.add(hinted);
+        }
+      }
+      acc.totalSymbolsIndexed += result.symbolsIndexed;
+      acc.totalEdgesCreated += result.edgesCreated;
+      acc.allConfigEdges.push(...result.configEdges);
+    } catch (error) {
+      acc.filesProcessed++;
+      logger.error(`Error processing Rust result for ${file.path}`, { error });
+    }
+  }
+
+  // Process files that the Rust engine couldn't handle via the TS engine
+  for (const file of tsFallbackFiles) {
+    updateProgress(file.path);
+    const skipCallResolution = pass2ResolverRegistry.supports(
+      toPass2Target(file),
+    );
+    try {
+      const result = await processFile({
+        repoId,
+        repoRoot,
+        fileMeta: file,
+        languages: config.languages,
+        mode,
+        existingFile: existingByPath.get(file.path),
+        symbolIndex,
+        pendingCallEdges,
+        createdCallEdges,
+        tsResolver,
+        config,
+        allSymbolsByName,
+        workerPool: null,
+        skipCallResolution,
+        globalNameToSymbolIds,
+        supportsPass2FilePath,
+      });
+      acc.filesProcessed++;
+      if (result.changed) {
+        acc.changedFiles++;
+        acc.changedFileIds.add(
+          fileIdForPath(repoId, file.path, existingByPath),
+        );
+        if (skipCallResolution) {
+          acc.changedPass2FilePaths.add(file.path);
+          for (const hinted of result.pass2HintPaths)
+            acc.changedPass2FilePaths.add(hinted);
+        }
+      }
+      acc.totalSymbolsIndexed += result.symbolsIndexed;
+      acc.totalEdgesCreated += result.edgesCreated;
+      acc.allConfigEdges.push(...result.configEdges);
+    } catch (error) {
+      acc.filesProcessed++;
+      logger.error(`Error in TS fallback for ${file.path}`, { error });
+    }
+  }
+
+  return { acc, usedRust: true };
+}
+
+/** Pass 1 — TypeScript engine path. Dispatches files to a worker pool. */
+async function runPass1WithTsEngine(
+  params: Pass1Params,
+): Promise<Pass1Accumulator> {
+  const {
+    repoId, repoRoot, config, mode, files, existingByPath, symbolIndex,
+    pendingCallEdges, createdCallEdges, tsResolver, allSymbolsByName,
+    globalNameToSymbolIds, pass2ResolverRegistry, supportsPass2FilePath,
+    concurrency, workerPool, onProgress,
+  } = params;
+
+  const acc: Pass1Accumulator = {
+    filesProcessed: 0, changedFiles: 0, totalSymbolsIndexed: 0,
+    totalEdgesCreated: 0, allConfigEdges: [], changedFileIds: new Set(),
+    changedPass2FilePaths: new Set(),
+  };
+  let nextIndex = 0;
+
+  const runWorker = async (): Promise<void> => {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const index = nextIndex++;
+      if (index >= files.length) return;
+      const file = files[index];
+      onProgress?.({
+        stage: "pass1",
+        current: Math.min(acc.filesProcessed, files.length),
+        total: files.length,
+        currentFile: file.path,
+      });
+      const skipCallResolution = pass2ResolverRegistry.supports(
+        toPass2Target(file),
+      );
+      try {
+        const result = await processFile({
+          repoId,
+          repoRoot,
+          fileMeta: file,
+          languages: config.languages,
+          mode,
+          existingFile: existingByPath.get(file.path),
+          symbolIndex,
+          pendingCallEdges,
+          createdCallEdges,
+          tsResolver,
+          config,
+          allSymbolsByName,
+          onProgress,
+          workerPool,
+          skipCallResolution,
+          globalNameToSymbolIds,
+          supportsPass2FilePath,
+        });
+        acc.filesProcessed++;
+        if (result.changed) {
+          acc.changedFiles++;
+          acc.changedFileIds.add(
+            fileIdForPath(repoId, file.path, existingByPath),
+          );
+          if (skipCallResolution) {
+            acc.changedPass2FilePaths.add(file.path);
+            for (const hinted of result.pass2HintPaths)
+              acc.changedPass2FilePaths.add(hinted);
+          }
+        }
+        acc.totalSymbolsIndexed += result.symbolsIndexed;
+        acc.totalEdgesCreated += result.edgesCreated;
+        acc.allConfigEdges.push(...result.configEdges);
+      } catch (error) {
+        acc.filesProcessed++;
+        logger.error(`Error processing file ${file.path}`, { error });
+      }
+    }
+  };
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, files.length || 1) },
+    () => runWorker(),
+  );
+  await Promise.all(workers);
+  return acc;
+}
+
+/**
+ * Rebuild the in-memory `symbolIndex` and `globalNameToSymbolIds` from the DB
+ * after Pass 1 so Pass 2 resolvers see all freshly indexed symbols.
+ */
+async function refreshSymbolIndexFromDb(
+  conn: LadybugConn,
+  repoId: string,
+  symbolIndex: SymbolIndex,
+  globalNameToSymbolIds: Map<string, string[]>,
+): Promise<void> {
+  const refreshed: SymbolIndex = new Map();
+  const allFiles = await ladybugDb.getFilesByRepo(conn, repoId);
+  const filePathById = new Map(allFiles.map((f) => [f.fileId, f.relPath]));
+  const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+  for (const symbol of symbols) {
+    const filePath = filePathById.get(symbol.fileId);
+    if (filePath)
+      addToSymbolIndex(refreshed, filePath, symbol.symbolId, symbol.name, symbol.kind as SymbolKind);
+  }
+  symbolIndex.clear();
+  for (const [fp, names] of refreshed) symbolIndex.set(fp, names);
+
+  // Refresh global name index so Pass 2 can heuristically resolve cross-file calls.
+  globalNameToSymbolIds.clear();
+  for (const symbol of symbols) {
+    const byId = globalNameToSymbolIds.get(symbol.name) ?? [];
+    byId.push(symbol.symbolId);
+    globalNameToSymbolIds.set(symbol.name, byId);
+  }
+  for (const ids of globalNameToSymbolIds.values()) {
+    ids.sort();
+    for (let i = ids.length - 1; i > 0; i--) {
+      if (ids[i] === ids[i - 1]) ids.splice(i, 1);
+    }
+  }
+}
+
+/** Pass 2 — cross-file call resolution. Returns total new edges created. */
+async function runPass2Resolvers(params: {
+  repoId: string;
+  repoRoot: string;
+  mode: "full" | "incremental";
+  pass2EligibleFiles: FileMetadata[];
+  changedPass2FilePaths: Set<string>;
+  supportsPass2FilePath: (relPath: string) => boolean;
+  pass2ResolverRegistry: Pass2ResolverRegistry;
+  symbolIndex: SymbolIndex;
+  tsResolver: TsCallResolver | null;
+  config: RepoConfig;
+  createdCallEdges: Set<string>;
+  globalNameToSymbolIds: Map<string, string[]>;
+  callResolutionTelemetry: CallResolutionTelemetry;
+  onProgress: ((progress: IndexProgress) => void) | undefined;
+}): Promise<number> {
+  const {
+    repoId, repoRoot, mode, pass2EligibleFiles, changedPass2FilePaths,
+    supportsPass2FilePath, pass2ResolverRegistry, symbolIndex, tsResolver,
+    config, createdCallEdges, globalNameToSymbolIds, callResolutionTelemetry,
+    onProgress,
+  } = params;
+
+  const pass2Targets = await resolvePass2Targets({
+    repoId,
+    mode,
+    pass2Files: pass2EligibleFiles,
+    changedPass2FilePaths,
+    supportsPass2FilePath,
+  });
+  callResolutionTelemetry.pass2Targets = pass2Targets.length;
+
+  let totalEdgesCreated = 0;
+  const pass2ResolverCache = new Map<string, unknown>();
+  let pass2Processed = 0;
+
+  for (const fileMeta of pass2Targets) {
+    callResolutionTelemetry.pass2FilesProcessed++;
+    onProgress?.({
+      stage: "pass2",
+      current: pass2Processed,
+      total: pass2Targets.length,
+      currentFile: fileMeta.path,
+    });
+    const resolver = pass2ResolverRegistry.getResolver(
+      toPass2Target({ ...fileMeta, repoId }),
+    );
+    if (!resolver) {
+      pass2Processed++;
+      continue;
+    }
+    recordPass2ResolverTarget(callResolutionTelemetry, resolver.id);
+    const resolverStartedAt = Date.now();
+    const pass2Result = await resolver.resolve(
+      toPass2Target({ ...fileMeta, repoId }),
+      {
+        repoRoot,
+        symbolIndex,
+        tsResolver,
+        languages: config.languages,
+        createdCallEdges,
+        globalNameToSymbolIds,
+        telemetry: callResolutionTelemetry,
+        cache: pass2ResolverCache,
+      },
+    );
+    recordPass2ResolverResult(callResolutionTelemetry, resolver.id, {
+      edgesCreated: pass2Result.edgesCreated,
+      elapsedMs: Date.now() - resolverStartedAt,
+    });
+    totalEdgesCreated += pass2Result.edgesCreated;
+    pass2Processed++;
+  }
+
+  if (pass2Targets.length > 0) {
+    onProgress?.({
+      stage: "pass2",
+      current: pass2Targets.length,
+      total: pass2Targets.length,
+    });
+  }
+  return totalEdgesCreated;
+}
+
+/** Resolve pending call edges, clean up dangling edges, and persist config edges. */
+async function finalizeEdges(params: {
+  repoId: string;
+  pendingCallEdges: PendingCallEdge[];
+  symbolIndex: SymbolIndex;
+  createdCallEdges: Set<string>;
+  allConfigEdges: ConfigEdge[];
+  configEdgeWeight: number;
+}): Promise<{ configEdgesCreated: number }> {
+  const { repoId, pendingCallEdges, symbolIndex, createdCallEdges, allConfigEdges, configEdgeWeight } = params;
+
+  await resolvePendingCallEdges(pendingCallEdges, symbolIndex, createdCallEdges, repoId);
+  await cleanupUnresolvedEdges(repoId);
+
+  const now = new Date().toISOString();
+  const configEdgesToInsert: ladybugDb.EdgeRow[] = allConfigEdges.map(
+    (edge) => ({
+      repoId,
+      fromSymbolId: edge.fromSymbolId,
+      toSymbolId: edge.toSymbolId,
+      edgeType: "config",
+      weight: edge.weight ?? configEdgeWeight,
+      confidence: 1.0,
+      resolution: "exact",
+      provenance: edge.provenance ?? "config",
+      createdAt: now,
+    }),
+  );
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.insertEdges(wConn, configEdgesToInsert);
+  });
+  return { configEdgesCreated: configEdgesToInsert.length };
+}
+
+/** Flag memories linked to symbols in changed files as stale. Failures are swallowed. */
+async function flagStaleMemoriesForChangedFiles(
+  conn: LadybugConn,
+  repoId: string,
+  changedFileIds: Set<string>,
+  versionId: string,
+): Promise<void> {
+  if (changedFileIds.size === 0) return;
+  try {
+    const changedSymbolIds: string[] = [];
+    for (const symbol of await ladybugDb.getSymbolsByRepo(conn, repoId)) {
+      if (changedFileIds.has(symbol.fileId))
+        changedSymbolIds.push(symbol.symbolId);
+    }
+    if (changedSymbolIds.length > 0) {
+      await withWriteConn(async (wConn) => {
+        const flagged = await ladybugDb.flagMemoriesStale(
+          wConn,
+          changedSymbolIds,
+          versionId,
+        );
+        if (flagged > 0) {
+          logger.info("Flagged stale memories", {
+            repoId,
+            memoriesFlagged: flagged,
+            changedSymbols: changedSymbolIds.length,
+          });
+        }
+      });
+    }
+  } catch (error) {
+    logger.warn("Memory staleness flagging failed; continuing", {
+      repoId,
+      error,
+    });
+  }
+}
+
+/** Read `.sdl-memory/` files from disk and upsert them into the graph. Failures are swallowed. */
+async function importMemoryFilesFromDisk(
+  repoRoot: string,
+  repoId: string,
+  versionId: string,
+): Promise<void> {
+  try {
+    const memoryFiles = await scanMemoryFiles(repoRoot);
+    if (memoryFiles.length === 0) return;
+    let imported = 0;
+    await withWriteConn(async (wConn) => {
+      for (const filePath of memoryFiles) {
+        const data = await readMemoryFile(filePath);
+        if (!data || data.deleted) continue;
+        const contentHash = crypto
+          .createHash("sha256")
+          .update(repoId + data.type + data.title + data.content)
+          .digest("hex");
+        const relPath = normalizePath(path.relative(repoRoot, filePath));
+        await ladybugDb.upsertMemory(wConn, {
+          memoryId: data.memoryId,
+          repoId,
+          type: data.type,
+          title: data.title,
+          content: data.content,
+          contentHash,
+          searchText: data.title + " " + data.content,
+          tagsJson: JSON.stringify(data.tags),
+          confidence: data.confidence,
+          createdAt: data.createdAt,
+          updatedAt: new Date().toISOString(),
+          createdByVersion: versionId,
+          stale: false,
+          staleVersion: null,
+          sourceFile: relPath,
+          deleted: false,
+        });
+        await ladybugDb.deleteMemoryEdges(wConn, data.memoryId);
+        await ladybugDb.createHasMemoryEdge(wConn, repoId, data.memoryId);
+        for (const symbolId of data.symbols) {
+          await ladybugDb.createMemoryOfEdge(wConn, data.memoryId, symbolId);
+        }
+        for (const fileRelPath of data.files) {
+          const file = await ladybugDb.getFileByRepoPath(
+            wConn,
+            repoId,
+            fileRelPath,
+          );
+          if (file)
+            await ladybugDb.createMemoryOfFileEdge(
+              wConn,
+              data.memoryId,
+              file.fileId,
+            );
+        }
+        imported++;
+      }
+    });
+    if (imported > 0) {
+      logger.info("Imported memory files", {
+        repoId,
+        imported,
+        total: memoryFiles.length,
+      });
+    }
+  } catch (error) {
+    logger.warn("Memory file import failed; continuing", { repoId, error });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 export async function indexRepo(
   repoId: string,
@@ -169,8 +789,13 @@ export async function indexRepo(
     });
     try {
       await existing;
-    } catch {
+    } catch (err) {
       // Previous run failed — proceed with our own run.
+      logger.debug("Previous indexing run failed, proceeding with new run", {
+        repoId,
+        mode,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -198,7 +823,6 @@ async function indexRepoImpl(
   if (!repoRow) {
     throw new Error(`Repository ${repoId} not found`);
   }
-
   const config: RepoConfig = JSON.parse(repoRow.configJson);
 
   const { files, existingByPath, removedFiles } = await scanRepoForIndex({
@@ -219,7 +843,6 @@ async function indexRepoImpl(
     1,
     Math.min(appConfig.indexing?.concurrency ?? 4, files.length || 1),
   );
-
   const useRustEngine =
     appConfig.indexing?.engine === "rust" && isRustEngineAvailable();
 
@@ -233,19 +856,14 @@ async function indexRepoImpl(
     });
     workerPool = new ParserWorkerPool(workerPoolSize);
   }
-
-  if (useRustEngine) {
-    logger.info("Using native Rust indexer engine for Pass 1");
-  }
+  if (useRustEngine) logger.info("Using native Rust indexer engine for Pass 1");
 
   try {
-    const symbolIndex: SymbolIndex = new Map();
-    const pendingCallEdges: PendingCallEdge[] = [];
-    const createdCallEdges = new Set<string>();
+    // --- Phase: initialize shared indexing state ---
 
-    // Skip TS call resolver when Rust engine is active � it starts a full
-    // TypeScript compiler program which is expensive and unused in that path.
     logger.debug("Initializing TS call resolver", { repoId, useRustEngine });
+    // Skip TS call resolver when Rust engine is active — it starts a full
+    // TypeScript compiler program which is expensive and unused in that path.
     const tsResolver: TsCallResolver | null = useRustEngine
       ? null
       : createTsCallResolver(repoRow.rootPath, files, {
@@ -256,439 +874,118 @@ async function indexRepoImpl(
       enabled: Boolean(tsResolver),
     });
 
-    const allSymbolsByName = new Map<string, ladybugDb.SymbolLiteRow[]>();
-    const globalNameToSymbolIds = new Map<string, string[]>();
-    logger.debug("Loading existing symbols", { repoId });
-    const repoSymbols = await ladybugDb.getSymbolsByRepoLite(conn, repoId);
-    logger.debug("Loaded existing symbols", {
-      repoId,
-      count: repoSymbols.length,
-    });
-    for (const symbol of repoSymbols) {
-      const byName = allSymbolsByName.get(symbol.name) ?? [];
-      byName.push(symbol);
-      allSymbolsByName.set(symbol.name, byName);
+    const { allSymbolsByName, globalNameToSymbolIds } =
+      await loadExistingSymbolMaps(conn, repoId);
+    const symbolIndex: SymbolIndex = new Map();
+    const pendingCallEdges: PendingCallEdge[] = [];
+    const createdCallEdges = new Set<string>();
+    const {
+      pass2ResolverRegistry,
+      pass2EligibleFiles,
+      callResolutionTelemetry,
+      supportsPass2FilePath,
+    } = initPass2Context(repoId, mode, files);
 
-      const byId = globalNameToSymbolIds.get(symbol.name) ?? [];
-      byId.push(symbol.symbolId);
-      globalNameToSymbolIds.set(symbol.name, byId);
-    }
+    // --- Phase: Pass 1 — parse all files and extract symbols/edges ---
 
-    let filesProcessed = 0;
-    let changedFiles = 0;
-    let totalSymbolsIndexed = 0;
-    let totalEdgesCreated = 0;
-    let configEdgesCreated = 0;
-    const allConfigEdges: ConfigEdge[] = [];
-    const changedFileIds = new Set<string>();
-    const changedPass2FilePaths = new Set<string>();
-    const pass2ResolverRegistry = createDefaultPass2ResolverRegistry();
-    const registeredPass2Resolvers = pass2ResolverRegistry
-      .listResolvers()
-      .map((resolver) => resolver.id);
-    const supportsPass2FilePath = (relPath: string): boolean =>
-      pass2ResolverRegistry.supports(
-        toPass2Target({
-          path: relPath,
-        }),
-      );
-    const pass2EligibleFiles = files.filter((file) =>
-      pass2ResolverRegistry.supports(toPass2Target(file)),
-    );
-    const pass2ResolverCache = new Map<string, unknown>();
-    const callResolutionTelemetry = createCallResolutionTelemetry({
+    const pass1Params: Pass1Params = {
       repoId,
+      repoRoot: repoRow.rootPath,
+      config,
       mode,
-      pass2EligibleFileCount: pass2EligibleFiles.length,
-      registeredResolvers: registeredPass2Resolvers,
-    });
-
-    let nextIndex = 0;
-    const updatePass1Progress = (currentFile?: string): void => {
-      onProgress?.({
-        stage: "pass1",
-        current: Math.min(filesProcessed, files.length),
-        total: files.length,
-        currentFile,
-      });
+      files,
+      existingByPath,
+      symbolIndex,
+      pendingCallEdges,
+      createdCallEdges,
+      tsResolver,
+      allSymbolsByName,
+      globalNameToSymbolIds,
+      pass2ResolverRegistry,
+      supportsPass2FilePath,
+      concurrency,
+      workerPool,
+      onProgress,
     };
 
-    let usedRust = false;
+    let pass1Acc: Pass1Accumulator;
     if (useRustEngine) {
-      let rustFiles = files;
-      let skippedRustFiles = 0;
-      if (mode === "incremental") {
-        rustFiles = files.filter((file) => {
-          const existing = existingByPath.get(file.path);
-          if (!existing?.lastIndexedAt) {
-            return true;
-          }
-          return file.mtime > new Date(existing.lastIndexedAt).getTime();
-        });
-        skippedRustFiles = files.length - rustFiles.length;
-      }
-
-      const rustResults = parseFilesRust(
-        repoId,
-        repoRow.rootPath,
-        rustFiles,
-        concurrency,
-      );
-      logger.debug("Native parseFilesRust completed", {
-        repoId,
-        fileCount: rustFiles.length,
-        resultCount: rustResults?.length ?? null,
-      });
-
-      if (rustResults) {
-        usedRust = true;
-        filesProcessed += skippedRustFiles;
-
-        const resultByPath = new Map<string, RustParseResult>();
-        for (const result of rustResults) {
-          resultByPath.set(result.relPath, result);
-        }
-
-        const tsFallbackFiles: typeof rustFiles = [];
-
-        for (const file of rustFiles) {
-          updatePass1Progress(file.path);
-          const rustResult = resultByPath.get(file.path);
-          if (!rustResult) {
-            filesProcessed++;
-            continue;
-          }
-
-          // Fall back to TS engine for languages the Rust engine doesn't support
-          if (
-            rustResult.parseError &&
-            rustResult.symbols.length === 0 &&
-            rustResult.parseError.includes("Unsupported language")
-          ) {
-            logger.info(
-              `Rust engine does not support language for ${file.path}, falling back to TypeScript engine`,
-            );
-            tsFallbackFiles.push(file);
-            continue;
-          }
-
-          const skipCallResolution = pass2ResolverRegistry.supports(
-            toPass2Target(file),
-          );
-
-          try {
-            const result = await processFileFromRustResult({
-              repoId,
-              repoRoot: repoRow.rootPath,
-              fileMeta: file,
-              rustResult,
-              languages: config.languages,
-              mode,
-              existingFile: existingByPath.get(file.path),
-              symbolIndex,
-              pendingCallEdges,
-              createdCallEdges,
-              tsResolver,
-              config,
-              allSymbolsByName,
-              skipCallResolution,
-              globalNameToSymbolIds,
-              supportsPass2FilePath,
-            });
-            filesProcessed++;
-            if (result.changed) {
-              changedFiles++;
-              changedFileIds.add(
-                fileIdForPath(repoId, file.path, existingByPath),
-              );
-              if (skipCallResolution) {
-                changedPass2FilePaths.add(file.path);
-                for (const hinted of result.pass2HintPaths) {
-                  changedPass2FilePaths.add(hinted);
-                }
-              }
-            }
-            totalSymbolsIndexed += result.symbolsIndexed;
-            totalEdgesCreated += result.edgesCreated;
-            allConfigEdges.push(...result.configEdges);
-          } catch (error) {
-            filesProcessed++;
-            logger.error(`Error processing Rust result for ${file.path}`, {
-              error,
-            });
-          }
-        }
-
-        // Process files that the Rust engine couldn't handle via the TS engine
-        for (const file of tsFallbackFiles) {
-          updatePass1Progress(file.path);
-          const skipCallResolution = pass2ResolverRegistry.supports(
-            toPass2Target(file),
-          );
-          try {
-            const result = await processFile({
-              repoId,
-              repoRoot: repoRow.rootPath,
-              fileMeta: file,
-              languages: config.languages,
-              mode,
-              existingFile: existingByPath.get(file.path),
-              symbolIndex,
-              pendingCallEdges,
-              createdCallEdges,
-              tsResolver,
-              config,
-              allSymbolsByName,
-              workerPool: null,
-              skipCallResolution,
-              globalNameToSymbolIds,
-              supportsPass2FilePath,
-            });
-            filesProcessed++;
-            if (result.changed) {
-              changedFiles++;
-              changedFileIds.add(
-                fileIdForPath(repoId, file.path, existingByPath),
-              );
-              if (skipCallResolution) {
-                changedPass2FilePaths.add(file.path);
-                for (const hinted of result.pass2HintPaths) {
-                  changedPass2FilePaths.add(hinted);
-                }
-              }
-            }
-            totalSymbolsIndexed += result.symbolsIndexed;
-            totalEdgesCreated += result.edgesCreated;
-            allConfigEdges.push(...result.configEdges);
-          } catch (error) {
-            filesProcessed++;
-            logger.error(`Error in TS fallback for ${file.path}`, { error });
-          }
-        }
-      } else {
-        logger.warn(
-          "Rust engine returned null, falling back to TypeScript engine",
-        );
-      }
+      const outcome = await runPass1WithRustEngine(pass1Params);
+      pass1Acc = outcome.usedRust
+        ? outcome.acc
+        : await runPass1WithTsEngine(pass1Params);
+    } else {
+      pass1Acc = await runPass1WithTsEngine(pass1Params);
     }
 
-    if (!usedRust) {
-      const runWorker = async (): Promise<void> => {
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-          const index = nextIndex++;
-          if (index >= files.length) {
-            return;
-          }
+    const {
+      filesProcessed,
+      changedFiles: changedFilesFromPass1,
+      totalSymbolsIndexed,
+      allConfigEdges,
+      changedFileIds,
+      changedPass2FilePaths,
+    } = pass1Acc;
+    let { totalEdgesCreated } = pass1Acc;
 
-          const file = files[index];
-          updatePass1Progress(file.path);
-          const skipCallResolution = pass2ResolverRegistry.supports(
-            toPass2Target(file),
-          );
+    // --- Phase: refresh symbol index from DB (Pass 1 → Pass 2 bridge) ---
 
-          try {
-            const result = await processFile({
-              repoId,
-              repoRoot: repoRow.rootPath,
-              fileMeta: file,
-              languages: config.languages,
-              mode,
-              existingFile: existingByPath.get(file.path),
-              symbolIndex,
-              pendingCallEdges,
-              createdCallEdges,
-              tsResolver,
-              config,
-              allSymbolsByName,
-              onProgress,
-              workerPool,
-              skipCallResolution,
-              globalNameToSymbolIds,
-              supportsPass2FilePath,
-            });
-            filesProcessed++;
-            if (result.changed) {
-              changedFiles++;
-              changedFileIds.add(
-                fileIdForPath(repoId, file.path, existingByPath),
-              );
-              if (skipCallResolution) {
-                changedPass2FilePaths.add(file.path);
-                for (const hinted of result.pass2HintPaths) {
-                  changedPass2FilePaths.add(hinted);
-                }
-              }
-            }
-            totalSymbolsIndexed += result.symbolsIndexed;
-            totalEdgesCreated += result.edgesCreated;
-            allConfigEdges.push(...result.configEdges);
-          } catch (error) {
-            filesProcessed++;
-            logger.error(`Error processing file ${file.path}`, { error });
-          }
-        }
-      };
+    await refreshSymbolIndexFromDb(conn, repoId, symbolIndex, globalNameToSymbolIds);
 
-      const workers = Array.from(
-        { length: Math.min(concurrency, files.length || 1) },
-        () => runWorker(),
-      );
-      await Promise.all(workers);
-    }
+    // --- Phase: Pass 2 — cross-file call resolution ---
 
-    // Refresh symbol index from DB after pass 1
-    const refreshedSymbolIndex: SymbolIndex = new Map();
-    const allFilesAfterPass1 = await ladybugDb.getFilesByRepo(conn, repoId);
-    const filePathById = new Map(
-      allFilesAfterPass1.map((file) => [file.fileId, file.relPath]),
-    );
-    const symbolsAfterPass1 = await ladybugDb.getSymbolsByRepo(conn, repoId);
-    for (const symbol of symbolsAfterPass1) {
-      const filePath = filePathById.get(symbol.fileId);
-      if (!filePath) continue;
-      addToSymbolIndex(
-        refreshedSymbolIndex,
-        filePath,
-        symbol.symbolId,
-        symbol.name,
-        symbol.kind as SymbolKind,
-      );
-    }
-
-    symbolIndex.clear();
-    for (const [filePath, names] of refreshedSymbolIndex) {
-      symbolIndex.set(filePath, names);
-    }
-
-    // Refresh global symbol-name index after Pass 1 so Pass 2 can heuristically
-    // resolve cross-file calls in freshly indexed repositories.
-    globalNameToSymbolIds.clear();
-    for (const symbol of symbolsAfterPass1) {
-      const byId = globalNameToSymbolIds.get(symbol.name) ?? [];
-      byId.push(symbol.symbolId);
-      globalNameToSymbolIds.set(symbol.name, byId);
-    }
-    for (const ids of globalNameToSymbolIds.values()) {
-      ids.sort();
-      for (let i = ids.length - 1; i > 0; i--) {
-        if (ids[i] === ids[i - 1]) {
-          ids.splice(i, 1);
-        }
-      }
-    }
-
-    // Pass 2: TS call resolution for selected targets
-    const pass2Targets = await resolvePass2Targets({
+    totalEdgesCreated += await runPass2Resolvers({
       repoId,
+      repoRoot: repoRow.rootPath,
       mode,
-      pass2Files: pass2EligibleFiles,
+      pass2EligibleFiles,
       changedPass2FilePaths,
       supportsPass2FilePath,
+      pass2ResolverRegistry,
+      symbolIndex,
+      tsResolver,
+      config,
+      createdCallEdges,
+      globalNameToSymbolIds,
+      callResolutionTelemetry,
+      onProgress,
     });
-    callResolutionTelemetry.pass2Targets = pass2Targets.length;
-
-    let pass2Processed = 0;
-    for (const fileMeta of pass2Targets) {
-      callResolutionTelemetry.pass2FilesProcessed++;
-      onProgress?.({
-        stage: "pass2",
-        current: pass2Processed,
-        total: pass2Targets.length,
-        currentFile: fileMeta.path,
-      });
-      const resolver = pass2ResolverRegistry.getResolver(
-        toPass2Target({ ...fileMeta, repoId }),
-      );
-      if (!resolver) {
-        pass2Processed++;
-        continue;
-      }
-      recordPass2ResolverTarget(callResolutionTelemetry, resolver.id);
-      const resolverStartedAt = Date.now();
-      const pass2Result = await resolver.resolve(
-        toPass2Target({ ...fileMeta, repoId }),
-        {
-          repoRoot: repoRow.rootPath,
-          symbolIndex,
-          tsResolver,
-          languages: config.languages,
-          createdCallEdges,
-          globalNameToSymbolIds,
-          telemetry: callResolutionTelemetry,
-          cache: pass2ResolverCache,
-        },
-      );
-      recordPass2ResolverResult(callResolutionTelemetry, resolver.id, {
-        edgesCreated: pass2Result.edgesCreated,
-        elapsedMs: Date.now() - resolverStartedAt,
-      });
-      totalEdgesCreated += pass2Result.edgesCreated;
-      pass2Processed++;
-    }
-    if (pass2Targets.length > 0) {
-      onProgress?.({
-        stage: "pass2",
-        current: pass2Targets.length,
-        total: pass2Targets.length,
-      });
-    }
 
     onProgress?.({
       stage: "finalizing",
       current: files.length,
       total: files.length,
     });
+    const changedFiles = changedFilesFromPass1 + removedFiles;
 
-    changedFiles += removedFiles;
+    // --- Phase: finalize edges (pending calls + config edges) ---
 
-    await resolvePendingCallEdges(
-      pendingCallEdges,
-      symbolIndex,
-      createdCallEdges,
-      repoId,
-    );
-
-    await cleanupUnresolvedEdges(repoId);
-
-    const configWeight =
+    const configEdgeWeight =
       appConfig.slice?.edgeWeights?.config !== undefined
         ? appConfig.slice.edgeWeights.config
         : 0.8;
-
-    const now = new Date().toISOString();
-    const configEdgesToInsert: ladybugDb.EdgeRow[] = [];
-    for (const edge of allConfigEdges) {
-      configEdgesToInsert.push({
-        repoId,
-        fromSymbolId: edge.fromSymbolId,
-        toSymbolId: edge.toSymbolId,
-        edgeType: "config",
-        weight: edge.weight ?? configWeight,
-        confidence: 1.0,
-        resolution: "exact",
-        provenance: edge.provenance ?? "config",
-        createdAt: now,
-      });
-    }
-    await withWriteConn(async (wConn) => {
-      await ladybugDb.insertEdges(wConn, configEdgesToInsert);
+    const { configEdgesCreated } = await finalizeEdges({
+      repoId,
+      pendingCallEdges,
+      symbolIndex,
+      createdCallEdges,
+      allConfigEdges,
+      configEdgeWeight,
     });
-    configEdgesCreated += configEdgesToInsert.length;
+
+    // --- Phase: version management ---
 
     const versionReason = mode === "full" ? "Full index" : "Incremental index";
-
-    let versionId: string;
     const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
+    let versionId: string;
     if (changedFiles === 0 && mode === "incremental") {
       versionId = latestVersion ? latestVersion.versionId : `v${Date.now()}`;
-      if (!latestVersion) {
+      if (!latestVersion)
         await createVersionAndSnapshot({
           repoId,
           versionId,
           reason: versionReason,
         });
-      }
     } else {
       versionId = `v${Date.now()}`;
       await createVersionAndSnapshot({
@@ -699,6 +996,8 @@ async function indexRepoImpl(
     }
 
     const durationMs = Date.now() - startTime;
+
+    // --- Phase: post-index metrics (summaries, clusters, processes) ---
 
     const changedFileIdsParam =
       mode === "incremental" ? changedFileIds : undefined;
@@ -712,7 +1011,6 @@ async function indexRepoImpl(
 
     let clustersComputed = 0;
     let processesTraced = 0;
-
     if (!(mode === "incremental" && changedFiles === 0)) {
       try {
         const result = await computeAndStoreClustersAndProcesses({
@@ -725,132 +1023,17 @@ async function indexRepoImpl(
       } catch (error) {
         logger.warn(
           "Cluster/process computation failed; continuing without it",
-          {
-            repoId,
-            error,
-          },
+          { repoId, error },
         );
       }
     }
 
-    // Flag stale memories for symbols in changed files
-    if (changedFileIds.size > 0) {
-      try {
-        const changedSymbolIds: string[] = [];
-        for (const symbol of await ladybugDb.getSymbolsByRepo(conn, repoId)) {
-          if (changedFileIds.has(symbol.fileId)) {
-            changedSymbolIds.push(symbol.symbolId);
-          }
-        }
-        if (changedSymbolIds.length > 0) {
-          await withWriteConn(async (wConn) => {
-            const flagged = await ladybugDb.flagMemoriesStale(
-              wConn,
-              changedSymbolIds,
-              versionId,
-            );
-            if (flagged > 0) {
-              logger.info("Flagged stale memories", {
-                repoId,
-                memoriesFlagged: flagged,
-                changedSymbols: changedSymbolIds.length,
-              });
-            }
-          });
-        }
-      } catch (error) {
-        logger.warn("Memory staleness flagging failed; continuing", {
-          repoId,
-          error,
-        });
-      }
-    }
+    // --- Phase: memory management (staleness flagging + file import) ---
 
-    // Import .sdl-memory/ files into graph during index refresh
-    try {
-      const memoryFiles = await scanMemoryFiles(repoRow.rootPath);
-      if (memoryFiles.length > 0) {
-        let imported = 0;
-        await withWriteConn(async (wConn) => {
-          for (const filePath of memoryFiles) {
-            const data = await readMemoryFile(filePath);
-            if (!data || data.deleted) continue;
+    await flagStaleMemoriesForChangedFiles(conn, repoId, changedFileIds, versionId);
+    await importMemoryFilesFromDisk(repoRow.rootPath, repoId, versionId);
 
-            const contentHash = crypto
-              .createHash("sha256")
-              .update(repoId + data.type + data.title + data.content)
-              .digest("hex");
-
-            const relPath = normalizePath(
-              path.relative(repoRow.rootPath, filePath),
-            );
-
-            await ladybugDb.upsertMemory(wConn, {
-              memoryId: data.memoryId,
-              repoId,
-              type: data.type,
-              title: data.title,
-              content: data.content,
-              contentHash,
-              searchText: data.title + " " + data.content,
-              tagsJson: JSON.stringify(data.tags),
-              confidence: data.confidence,
-              createdAt: data.createdAt,
-              updatedAt: new Date().toISOString(),
-              createdByVersion: versionId,
-              stale: false,
-              staleVersion: null,
-              sourceFile: relPath,
-              deleted: false,
-            });
-
-            // Create edges
-            await ladybugDb.deleteMemoryEdges(wConn, data.memoryId);
-            await ladybugDb.createHasMemoryEdge(wConn, repoId, data.memoryId);
-
-            for (const symbolId of data.symbols) {
-              await ladybugDb.createMemoryOfEdge(
-                wConn,
-                data.memoryId,
-                symbolId,
-              );
-            }
-
-            for (const fileRelPath of data.files) {
-              const file = await ladybugDb.getFileByRepoPath(
-                wConn,
-                repoId,
-                fileRelPath,
-              );
-              if (file) {
-                await ladybugDb.createMemoryOfFileEdge(
-                  wConn,
-                  data.memoryId,
-                  file.fileId,
-                );
-              }
-            }
-
-            imported++;
-          }
-        });
-
-        if (imported > 0) {
-          logger.info("Imported memory files", {
-            repoId,
-            imported,
-            total: memoryFiles.length,
-          });
-        }
-      }
-    } catch (error) {
-      logger.warn("Memory file import failed; continuing", {
-        repoId,
-        error,
-      });
-    }
-
-    const result = {
+    const result: IndexResult = {
       versionId,
       filesProcessed,
       changedFiles,

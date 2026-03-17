@@ -1,6 +1,24 @@
-export type RepoId = string;
-export type SymbolId = string;
-export type VersionId = string;
+// Domain primitives are canonical in domain/types.ts — imported and re-exported
+// here so existing importers of db/schema.ts need no changes.
+import type {
+  RepoId,
+  SymbolId,
+  VersionId,
+  EdgeType,
+  EdgeResolutionStrategy,
+  SymbolKind,
+  Visibility,
+} from "../domain/types.js";
+
+export type {
+  RepoId,
+  SymbolId,
+  VersionId,
+  EdgeType,
+  EdgeResolutionStrategy,
+  SymbolKind,
+  Visibility,
+};
 
 export interface RepoRow {
   repo_id: RepoId;
@@ -175,25 +193,6 @@ export interface SyncArtifactRow {
   created_at: string;
   size_bytes: number;
 }
-
-export type EdgeType = "import" | "call" | "config";
-export type EdgeResolutionStrategy = "exact" | "heuristic" | "unresolved";
-export type SymbolKind =
-  | "function"
-  | "class"
-  | "interface"
-  | "type"
-  | "module"
-  | "method"
-  | "constructor"
-  | "variable";
-
-export type Visibility =
-  | "public"
-  | "protected"
-  | "private"
-  | "exported"
-  | "internal";
 
 export interface AgentFeedbackRow {
   feedback_id: number;

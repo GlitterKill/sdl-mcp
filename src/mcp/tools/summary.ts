@@ -5,7 +5,7 @@ import {
 import {
   generateContextSummary,
   renderContextSummary,
-} from "../summary.js";
+} from "../../services/summary.js";
 
 export async function handleContextSummary(
   args: unknown,

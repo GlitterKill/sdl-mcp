@@ -1,9 +1,13 @@
 import { parentPort } from "worker_threads";
+import type { SyntaxNode } from "tree-sitter";
 import { getAdapterForExtension } from "./adapter/registry.js";
 import { logger } from "../util/logger.js";
 import { generateAstFingerprint } from "./fingerprints.js";
 
-import type { ExtractedSymbol, ExtractedCall } from "./treesitter/extractCalls.js";
+import type {
+  ExtractedSymbol,
+  ExtractedCall,
+} from "./treesitter/extractCalls.js";
 import type { ExtractedImport } from "./treesitter/extractImports.js";
 
 interface WorkerMessage {
@@ -53,13 +57,16 @@ parentPort?.on("message", (msg: WorkerMessage) => {
         msg.filePath,
       );
     } catch (error) {
-      logger.warn("Symbol extraction failed", { file: msg.filePath, error: String(error) });
+      logger.warn("Symbol extraction failed", {
+        file: msg.filePath,
+        error: String(error),
+      });
       extractedSymbols = [];
     }
 
     const imports = adapter.extractImports(tree, msg.content, msg.filePath);
 
-    const nodesByType = new Map<string, any[]>();
+    const nodesByType = new Map<string, SyntaxNode[]>();
     const getNodeTypeForKind = (kind: string): string =>
       kind === "function"
         ? "function_declaration"
@@ -86,13 +93,18 @@ parentPort?.on("message", (msg: WorkerMessage) => {
           nodesByType.set(nodeType, candidates);
         }
 
-        const astNode = candidates.find((node: any) => {
-          const nameNode = node.childForFieldName?.("name");
+        const astNode = candidates.find((node: SyntaxNode) => {
+          const nameNode = node.childForFieldName("name");
           return nameNode?.text === symbol.name;
         });
 
         astFingerprint = astNode ? generateAstFingerprint(astNode) : "";
-      } catch {
+      } catch (err) {
+        logger.debug("AST fingerprint generation failed", {
+          symbol: symbol.name,
+          filePath: msg.filePath,
+          error: err instanceof Error ? err.message : String(err),
+        });
         astFingerprint = "";
       }
 

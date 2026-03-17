@@ -3,7 +3,7 @@ import { activateCliConfigPath } from "../../config/configPath.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
 import { LADYBUG_SCHEMA_VERSION } from "../../db/ladybug-schema.js";
-import { getBadgeColor, getRepoHealthSnapshot } from "../../mcp/health.js";
+import { getBadgeColor, getRepoHealthSnapshot } from "../../services/health.js";
 
 function resolveRepoId(
   repoId: string | undefined,
@@ -54,9 +54,15 @@ export async function healthCommand(options: HealthOptions): Promise<void> {
   }
 
   console.log(`Health Score: ${snapshot.score} (${repoId})`);
-  console.log(`  Freshness: ${(snapshot.components.freshness * 100).toFixed(1)}%`);
-  console.log(`  Coverage: ${(snapshot.components.coverage * 100).toFixed(1)}%`);
-  console.log(`  Error Rate: ${(snapshot.components.errorRate * 100).toFixed(1)}%`);
+  console.log(
+    `  Freshness: ${(snapshot.components.freshness * 100).toFixed(1)}%`,
+  );
+  console.log(
+    `  Coverage: ${(snapshot.components.coverage * 100).toFixed(1)}%`,
+  );
+  console.log(
+    `  Error Rate: ${(snapshot.components.errorRate * 100).toFixed(1)}%`,
+  );
   console.log(
     `  Edge Quality: ${(snapshot.components.edgeQuality * 100).toFixed(1)}%`,
   );

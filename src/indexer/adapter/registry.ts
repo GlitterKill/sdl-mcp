@@ -35,12 +35,18 @@ function loadBuiltInAdapters(): void {
   builtInAdaptersLoaded = true;
 }
 
-async function loadPlugins(pluginPaths: string[] | undefined): Promise<void> {
+async function loadPlugins(
+  pluginPaths: string[] | undefined,
+  allowedRoot?: string,
+): Promise<void> {
   if (pluginsLoaded || !pluginPaths || pluginPaths.length === 0) {
     return;
   }
 
-  const { successful, failed } = await loadPluginsFromConfig(pluginPaths);
+  const { successful, failed } = await loadPluginsFromConfig(
+    pluginPaths,
+    allowedRoot,
+  );
 
   for (const plugin of successful) {
     try {
@@ -96,8 +102,9 @@ async function loadPlugins(pluginPaths: string[] | undefined): Promise<void> {
 
 async function loadPluginsSync(
   pluginPaths: string[] | undefined,
+  allowedRoot?: string,
 ): Promise<void> {
-  await loadPlugins(pluginPaths);
+  await loadPlugins(pluginPaths, allowedRoot);
 }
 
 function registerAdapter(

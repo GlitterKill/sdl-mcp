@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { normalizePath } from "../util/paths.js";
+import { logger } from "../util/logger.js";
 
 export interface MemoryFileData {
   memoryId: string;
@@ -133,7 +134,7 @@ export function parseMemoryFileContent(raw: string): MemoryFileData | null {
   // Split on --- delimiters
   const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!fmMatch) {
-    console.warn("Malformed frontmatter: missing --- delimiters");
+    logger.warn("Malformed frontmatter: missing --- delimiters");
     return null;
   }
 
@@ -152,7 +153,7 @@ export function parseMemoryFileContent(raw: string): MemoryFileData | null {
   const memoryId = fields.get("memoryId");
   const type = fields.get("type");
   if (!memoryId || !type) {
-    console.warn("Malformed frontmatter: missing memoryId or type");
+    logger.warn("Malformed frontmatter: missing memoryId or type");
     return null;
   }
 

@@ -22,11 +22,12 @@ import { LanguageSchema } from "../../config/types.js";
 import { normalizePath } from "../../util/paths.js";
 import { DatabaseError, ConfigError, ValidationError } from "../errors.js";
 import { logger } from "../../util/logger.js";
+import { loadConfig } from "../../config/loadConfig.js";
 import { MAX_FILE_BYTES } from "../../config/constants.js";
 import { buildRepoOverview } from "../../graph/overview.js";
 import { clearSliceCache } from "../../graph/sliceCache.js";
 import { symbolCardCache } from "../../graph/cache.js";
-import { getRepoHealthSnapshot } from "../health.js";
+import { getRepoHealthSnapshot } from "../../services/health.js";
 import {
   logPrefetchTelemetry,
   logWatcherHealthTelemetry,
@@ -44,6 +45,43 @@ import type { ToolContext } from "../../server.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 
 const SUPPORTED_LANGUAGES = [...LanguageSchema.options];
+
+/**
+ * Checks whether a resolved repository root path is within at least one of the
+ * configured allowed roots.  When `allowedRoots` is empty the check is a no-op
+ * (backward-compatible unrestricted mode).
+ *
+ * @param resolvedRoot - Absolute, normalised path to the repo root
+ * @param allowedRoots - Allowed root prefixes from security config (may be empty)
+ * @throws {ValidationError} If the path is not under any allowed root
+ */
+export function checkRepoRootAllowlist(
+  resolvedRoot: string,
+  allowedRoots: string[],
+): void {
+  if (allowedRoots.length === 0) {
+    return; // empty allowlist = unrestricted (backward compatible)
+  }
+
+  const normalizedResolvedRoot = normalizePath(resolvedRoot);
+
+  const allowed = allowedRoots.some((allowedRoot) => {
+    const normalizedAllowed = normalizePath(resolve(allowedRoot));
+    const prefix = normalizedAllowed.endsWith("/")
+      ? normalizedAllowed
+      : `${normalizedAllowed}/`;
+    return (
+      normalizedResolvedRoot === normalizedAllowed ||
+      normalizedResolvedRoot.startsWith(prefix)
+    );
+  });
+
+  if (!allowed) {
+    throw new ValidationError(
+      `Repository root path is not within any allowed root: ${resolvedRoot}`,
+    );
+  }
+}
 
 export function resolveRepoLanguages(
   languages?: string[],
@@ -101,6 +139,13 @@ export async function handleRepoRegister(
   if (!existsSync(resolvedRoot)) {
     throw new ConfigError(`Path does not exist: ${rootPath}`);
   }
+
+  // Security: enforce allowlist if configured
+  const appConfig = loadConfig();
+  checkRepoRootAllowlist(
+    resolvedRoot,
+    appConfig.security?.allowedRepoRoots ?? [],
+  );
 
   const packageJson = detectPackageJson(rootPath);
   const tsconfigPath = detectTsconfig(rootPath);

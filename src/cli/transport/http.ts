@@ -779,7 +779,8 @@ async function handleRestRequest(
 
     const repoReindexMatch = pathname.match(/^\/api\/repo\/([^/]+)\/reindex$/);
     if (req.method === "POST" && repoReindexMatch) {
-      const [, repoId] = repoReindexMatch;
+      const [, rawRepoId] = repoReindexMatch;
+      const repoId = decodeURIComponent(rawRepoId);
       const result = await indexRepo(repoId, "incremental");
       json(res, 200, {
         repoId,
@@ -858,8 +859,7 @@ async function handleRestRequest(
           summaryStats: result.summaryStats ?? null,
         });
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
         sendEvent("error", { message });
       }
 
@@ -870,11 +870,300 @@ async function handleRestRequest(
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[sdl-mcp] REST API error: ${message}`);
     setCorsHeaders(req, res);
-    json(res, 500, { error: message });
+    // Sanitize: don't expose raw internal error messages to HTTP clients
+    json(res, 500, {
+      error: "An internal error occurred. Check server logs for details.",
+    });
     return true;
   }
 
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Session-level route handlers for HTTP transport
+// ---------------------------------------------------------------------------
+
+/**
+ * Shared state threaded through per-session MCP route handlers.
+ * All fields are references to the same mutable maps/objects created in
+ * `setupHttpTransport`, so mutations are reflected across all handlers.
+ */
+type SessionContext = {
+  transports: Map<string, Transport>;
+  mcpServers: Map<string, MCPServer>;
+  sessionManager: SessionManager;
+  effectiveServices: HttpTransportServices & MCPServerServices;
+  cleanupSession: (
+    sessionId: string,
+    opts?: { closeTransport?: boolean },
+  ) => void;
+};
+
+/**
+ * Handle all requests to the `/mcp` endpoint (Streamable HTTP transport).
+ * Manages session creation (initialize), routing to existing sessions,
+ * and GET/DELETE for SSE stream and session termination.
+ */
+async function handleMcpStreamableRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: SessionContext,
+): Promise<void> {
+  setCorsHeaders(req, res);
+
+  try {
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    let transport: StreamableHTTPServerTransport | undefined;
+
+    if (sessionId && ctx.transports.has(sessionId)) {
+      const existing = ctx.transports.get(sessionId)!;
+      if (existing instanceof StreamableHTTPServerTransport) {
+        transport = existing;
+      } else {
+        json(res, 400, {
+          jsonrpc: "2.0",
+          error: {
+            code: -32000,
+            message: "Bad Request: Session uses a different transport protocol",
+          },
+          id: null,
+        });
+        return;
+      }
+    } else if (!sessionId && req.method === "POST") {
+      // Read body to check if initialize request
+      const body = await readJsonBody(req);
+      if (isInitializeRequest(body)) {
+        // Atomically reserve a session slot before allocating resources
+        if (!ctx.sessionManager.reserveSession()) {
+          json(res, 503, {
+            jsonrpc: "2.0",
+            error: {
+              code: -32000,
+              message: `Service unavailable: maximum session limit (${ctx.sessionManager.getMaxSessions()}) reached`,
+            },
+            id: null,
+          });
+          return;
+        }
+
+        let reservationHeld = true;
+        // Track the MCPServer outside onsessioninitialized so
+        // it is available to the callback closure.
+        const mcpServer = createMCPServer({
+          liveIndex: ctx.effectiveServices.liveIndex,
+          gatewayConfig: ctx.effectiveServices.gatewayConfig,
+          codeModeConfig: ctx.effectiveServices.codeModeConfig,
+        });
+        // Capture the session ID set by onsessioninitialized
+        // so onclose can use a stable reference.
+        let registeredSessionId: string | undefined;
+
+        try {
+          const eventStore = new InMemoryEventStore();
+          transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+            eventStore,
+            onsessioninitialized: (newSessionId: string) => {
+              console.error(
+                `[sdl-mcp] StreamableHTTP session initialized: ${newSessionId}`,
+              );
+              registeredSessionId = newSessionId;
+              ctx.transports.set(newSessionId, transport!);
+              // Track MCPServer immediately so onclose/reaper can find it
+              ctx.mcpServers.set(newSessionId, mcpServer);
+              // registerSession internally releases the reservation
+              ctx.sessionManager.registerSession(
+                newSessionId,
+                "streamable-http",
+              );
+              reservationHeld = false;
+            },
+          });
+
+          transport.onclose = () => {
+            const sid = registeredSessionId ?? transport!.sessionId;
+            if (sid) {
+              ctx.cleanupSession(sid);
+            } else {
+              console.error(
+                "[sdl-mcp] StreamableHTTP transport closed before session ID was assigned",
+              );
+            }
+          };
+
+          await mcpServer.getServer().connect(transport);
+
+          // Handle the initialize request with pre-parsed body
+          await transport.handleRequest(req, res, body);
+          return;
+        } catch (initError) {
+          // If session was partially registered but connect/handleRequest
+          // failed, clean up the broken session to avoid slot leak (C2).
+          if (registeredSessionId) {
+            ctx.cleanupSession(registeredSessionId);
+          } else {
+            // MCPServer was created but never connected — stop it directly
+            void mcpServer.stop().catch((err) => {
+              logger.debug("Failed to stop unconnected MCP server", {
+                error: err,
+              });
+            });
+          }
+          throw initError;
+        } finally {
+          // If reservation was never consumed (registerSession not called), release it
+          if (reservationHeld) {
+            ctx.sessionManager.releaseReservation();
+          }
+        }
+      } else {
+        json(res, 400, {
+          jsonrpc: "2.0",
+          error: {
+            code: -32000,
+            message: "Bad Request: First request must be an initialize request",
+          },
+          id: null,
+        });
+        return;
+      }
+    } else if (sessionId && !ctx.transports.has(sessionId)) {
+      // Unknown session ID
+      res.writeHead(404);
+      res.end("Session not found");
+      return;
+    } else {
+      json(res, 400, {
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: "Bad Request: No valid session ID provided",
+        },
+        id: null,
+      });
+      return;
+    }
+
+    // For GET (SSE stream) and DELETE (session termination)
+    // and subsequent POST requests with session ID
+    await transport.handleRequest(req, res);
+  } catch (error) {
+    console.error(`[sdl-mcp] Error handling /mcp request: ${error}`);
+    if (!res.headersSent) {
+      json(res, 500, {
+        jsonrpc: "2.0",
+        error: {
+          code: -32603,
+          message: "Internal server error",
+        },
+        id: null,
+      });
+    }
+  }
+}
+
+/**
+ * Handle `GET /sse` — establishes a new SSE (deprecated) transport session.
+ * Validates the `Accept: text/event-stream` header, reserves a session slot,
+ * creates the SSEServerTransport, and connects a new per-session MCP server.
+ */
+function handleSseConnection(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: SessionContext,
+): void {
+  setCorsHeaders(req, res);
+
+  const accept = Array.isArray(req.headers.accept)
+    ? req.headers.accept.join(",")
+    : (req.headers.accept ?? "");
+  if (!accept.toLowerCase().includes("text/event-stream")) {
+    res.writeHead(406);
+    res.end("Accept header must include text/event-stream");
+    return;
+  }
+
+  // Atomically reserve a session slot before allocating resources
+  if (!ctx.sessionManager.reserveSession()) {
+    res.writeHead(503);
+    res.end(
+      `Maximum session limit (${ctx.sessionManager.getMaxSessions()}) reached`,
+    );
+    return;
+  }
+
+  let sseReservationHeld = true;
+  try {
+    const sseTransport = new SSEServerTransport("/message", res);
+    const sseSessionId = sseTransport.sessionId;
+    ctx.transports.set(sseSessionId, sseTransport);
+    // registerSession internally releases the reservation
+    ctx.sessionManager.registerSession(sseSessionId, "sse");
+    sseReservationHeld = false;
+
+    sseTransport.onclose = () => {
+      ctx.cleanupSession(sseSessionId);
+    };
+
+    // Create per-session MCP server via factory
+    const mcpServer = createMCPServer({
+      liveIndex: ctx.effectiveServices.liveIndex,
+      gatewayConfig: ctx.effectiveServices.gatewayConfig,
+      codeModeConfig: ctx.effectiveServices.codeModeConfig,
+    });
+    ctx.mcpServers.set(sseSessionId, mcpServer);
+
+    void mcpServer
+      .getServer()
+      .connect(sseTransport)
+      .catch((error) => {
+        console.error(`[sdl-mcp] Failed to establish SSE transport: ${error}`);
+        ctx.cleanupSession(sseSessionId);
+        if (!res.headersSent) {
+          res.writeHead(500);
+          res.end("Failed to establish SSE transport");
+        }
+      });
+  } finally {
+    if (sseReservationHeld) {
+      ctx.sessionManager.releaseReservation();
+    }
+  }
+}
+
+/**
+ * Handle `POST /message` — routes an incoming MCP message to an existing SSE
+ * (deprecated) session identified by the `sessionId` query parameter.
+ */
+function handleSseMessage(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  ctx: SessionContext,
+): void {
+  const sessionId = url.searchParams.get("sessionId");
+  if (!sessionId) {
+    res.writeHead(400);
+    res.end("Missing sessionId");
+    return;
+  }
+
+  const transport = ctx.transports.get(sessionId);
+  if (!transport || !(transport instanceof SSEServerTransport)) {
+    res.writeHead(404);
+    res.end("Unknown sessionId");
+    return;
+  }
+
+  void transport.handlePostMessage(req, res).catch((error) => {
+    console.error(`[sdl-mcp] Failed to process SSE POST message: ${error}`);
+    if (!res.headersSent) {
+      res.writeHead(500);
+      res.end("Failed to process message");
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -964,6 +1253,15 @@ export async function setupHttpTransport(
     sessionManager,
   };
 
+  // Bundle shared state for route handler functions
+  const sessionCtx: SessionContext = {
+    transports,
+    mcpServers,
+    sessionManager,
+    effectiveServices,
+    cleanupSession,
+  };
+
   await initLadybugDb(graphDbPath);
 
   const checkHealth = async (): Promise<boolean> => {
@@ -1037,162 +1335,7 @@ export async function setupHttpTransport(
         // Streamable HTTP Transport — /mcp (POST, GET, DELETE)
         // ---------------------------------------------------------------
         if (pathname === "/mcp") {
-          setCorsHeaders(req, res);
-
-          try {
-            const sessionId = req.headers["mcp-session-id"] as
-              | string
-              | undefined;
-            let transport: StreamableHTTPServerTransport | undefined;
-
-            if (sessionId && transports.has(sessionId)) {
-              const existing = transports.get(sessionId)!;
-              if (existing instanceof StreamableHTTPServerTransport) {
-                transport = existing;
-              } else {
-                json(res, 400, {
-                  jsonrpc: "2.0",
-                  error: {
-                    code: -32000,
-                    message:
-                      "Bad Request: Session uses a different transport protocol",
-                  },
-                  id: null,
-                });
-                return;
-              }
-            } else if (!sessionId && req.method === "POST") {
-              // Read body to check if initialize request
-              const body = await readJsonBody(req);
-              if (isInitializeRequest(body)) {
-                // Atomically reserve a session slot before allocating resources
-                if (!sessionManager.reserveSession()) {
-                  json(res, 503, {
-                    jsonrpc: "2.0",
-                    error: {
-                      code: -32000,
-                      message: `Service unavailable: maximum session limit (${sessionManager.getMaxSessions()}) reached`,
-                    },
-                    id: null,
-                  });
-                  return;
-                }
-
-                let reservationHeld = true;
-                // Track the MCPServer outside onsessioninitialized so
-                // it is available to the callback closure.
-                const mcpServer = createMCPServer({
-                  liveIndex: effectiveServices.liveIndex,
-                  gatewayConfig: effectiveServices.gatewayConfig,
-                  codeModeConfig: effectiveServices.codeModeConfig,
-                });
-                // Capture the session ID set by onsessioninitialized
-                // so onclose can use a stable reference.
-                let registeredSessionId: string | undefined;
-
-                try {
-                  const eventStore = new InMemoryEventStore();
-                  transport = new StreamableHTTPServerTransport({
-                    sessionIdGenerator: () => randomUUID(),
-                    eventStore,
-                    onsessioninitialized: (newSessionId: string) => {
-                      console.error(
-                        `[sdl-mcp] StreamableHTTP session initialized: ${newSessionId}`,
-                      );
-                      registeredSessionId = newSessionId;
-                      transports.set(newSessionId, transport!);
-                      // Track MCPServer immediately so onclose/reaper can find it
-                      mcpServers.set(newSessionId, mcpServer);
-                      // registerSession internally releases the reservation
-                      sessionManager.registerSession(
-                        newSessionId,
-                        "streamable-http",
-                      );
-                      reservationHeld = false;
-                    },
-                  });
-
-                  transport.onclose = () => {
-                    const sid = registeredSessionId ?? transport!.sessionId;
-                    if (sid) {
-                      cleanupSession(sid);
-                    } else {
-                      console.error(
-                        "[sdl-mcp] StreamableHTTP transport closed before session ID was assigned",
-                      );
-                    }
-                  };
-
-                  await mcpServer.getServer().connect(transport);
-
-                  // Handle the initialize request with pre-parsed body
-                  await transport.handleRequest(req, res, body);
-                  return;
-                } catch (initError) {
-                  // If session was partially registered but connect/handleRequest
-                  // failed, clean up the broken session to avoid slot leak (C2).
-                  if (registeredSessionId) {
-                    cleanupSession(registeredSessionId);
-                  } else {
-                    // MCPServer was created but never connected — stop it directly
-                    void mcpServer.stop().catch((err) => {
-                      logger.debug("Failed to stop unconnected MCP server", {
-                        error: err,
-                      });
-                    });
-                  }
-                  throw initError;
-                } finally {
-                  // If reservation was never consumed (registerSession not called), release it
-                  if (reservationHeld) {
-                    sessionManager.releaseReservation();
-                  }
-                }
-              } else {
-                json(res, 400, {
-                  jsonrpc: "2.0",
-                  error: {
-                    code: -32000,
-                    message:
-                      "Bad Request: First request must be an initialize request",
-                  },
-                  id: null,
-                });
-                return;
-              }
-            } else if (sessionId && !transports.has(sessionId)) {
-              // Unknown session ID
-              res.writeHead(404);
-              res.end("Session not found");
-              return;
-            } else {
-              json(res, 400, {
-                jsonrpc: "2.0",
-                error: {
-                  code: -32000,
-                  message: "Bad Request: No valid session ID provided",
-                },
-                id: null,
-              });
-              return;
-            }
-
-            // For GET (SSE stream) and DELETE (session termination)
-            // and subsequent POST requests with session ID
-            await transport.handleRequest(req, res);
-          } catch (error) {
-            console.error(`[sdl-mcp] Error handling /mcp request: ${error}`);
-            if (!res.headersSent) {
-              json(res, 500, {
-                jsonrpc: "2.0",
-                error: {
-                  code: -32603,
-                  message: "Internal server error",
-                },
-                id: null,
-              });
-            }
-          }
+          await handleMcpStreamableRequest(req, res, sessionCtx);
           return;
         }
 
@@ -1201,92 +1344,12 @@ export async function setupHttpTransport(
         // Supports multiple concurrent SSE sessions (no singleton)
         // ---------------------------------------------------------------
         if (req.method === "GET" && pathname === "/sse") {
-          setCorsHeaders(req, res);
-
-          const accept = Array.isArray(req.headers.accept)
-            ? req.headers.accept.join(",")
-            : (req.headers.accept ?? "");
-          if (!accept.toLowerCase().includes("text/event-stream")) {
-            res.writeHead(406);
-            res.end("Accept header must include text/event-stream");
-            return;
-          }
-
-          // Atomically reserve a session slot before allocating resources
-          if (!sessionManager.reserveSession()) {
-            res.writeHead(503);
-            res.end(
-              `Maximum session limit (${sessionManager.getMaxSessions()}) reached`,
-            );
-            return;
-          }
-
-          let sseReservationHeld = true;
-          try {
-            const sseTransport = new SSEServerTransport("/message", res);
-            const sseSessionId = sseTransport.sessionId;
-            transports.set(sseSessionId, sseTransport);
-            // registerSession internally releases the reservation
-            sessionManager.registerSession(sseSessionId, "sse");
-            sseReservationHeld = false;
-
-            sseTransport.onclose = () => {
-              cleanupSession(sseSessionId);
-            };
-
-            // Create per-session MCP server via factory
-            const mcpServer = createMCPServer({
-              liveIndex: effectiveServices.liveIndex,
-              gatewayConfig: effectiveServices.gatewayConfig,
-              codeModeConfig: effectiveServices.codeModeConfig,
-            });
-            mcpServers.set(sseSessionId, mcpServer);
-
-            void mcpServer
-              .getServer()
-              .connect(sseTransport)
-              .catch((error) => {
-                console.error(
-                  `[sdl-mcp] Failed to establish SSE transport: ${error}`,
-                );
-                cleanupSession(sseSessionId);
-                if (!res.headersSent) {
-                  res.writeHead(500);
-                  res.end("Failed to establish SSE transport");
-                }
-              });
-          } finally {
-            if (sseReservationHeld) {
-              sessionManager.releaseReservation();
-            }
-          }
+          handleSseConnection(req, res, sessionCtx);
           return;
         }
 
         if (req.method === "POST" && pathname === "/message") {
-          const sessionId = url.searchParams.get("sessionId");
-          if (!sessionId) {
-            res.writeHead(400);
-            res.end("Missing sessionId");
-            return;
-          }
-
-          const transport = transports.get(sessionId);
-          if (!transport || !(transport instanceof SSEServerTransport)) {
-            res.writeHead(404);
-            res.end("Unknown sessionId");
-            return;
-          }
-
-          void transport.handlePostMessage(req, res).catch((error) => {
-            console.error(
-              `[sdl-mcp] Failed to process SSE POST message: ${error}`,
-            );
-            if (!res.headersSent) {
-              res.writeHead(500);
-              res.end("Failed to process message");
-            }
-          });
+          handleSseMessage(req, res, url, sessionCtx);
           return;
         }
 

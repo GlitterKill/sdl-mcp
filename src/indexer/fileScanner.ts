@@ -3,6 +3,7 @@ import { resolve } from "path";
 import { RepoConfig } from "../config/types.js";
 import { normalizePath } from "../util/paths.js";
 import { readFileAsync, statAsync } from "../util/asyncFs.js";
+import { logger } from "../util/logger.js";
 
 export interface FileMetadata {
   path: string;
@@ -50,7 +51,11 @@ async function resolveWorkspaces(
     }
 
     return workspaces;
-  } catch {
+  } catch (err) {
+    logger.debug("Failed to detect workspaces from package.json", {
+      packageJsonPath,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return [];
   }
 }

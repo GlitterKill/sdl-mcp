@@ -7,7 +7,9 @@ function expandEnvVars(obj: unknown, configPath: string): unknown {
     return obj.replace(/\$\{([^}]+)\}/g, (_, varName) => {
       const value = process.env[varName];
       if (value === undefined) {
-        throw new Error(`Environment variable "${varName}" is not set (in config: ${configPath})`);
+        throw new Error(
+          `Environment variable "${varName}" is not set (in config: ${configPath})`,
+        );
       }
       return value;
     });
@@ -75,8 +77,29 @@ export function loadConfig(configPath?: string): AppConfig {
       throw new Error(`Config validation failed:\n${errors}`);
     }
 
+    const config = result.data;
+
+    // Merge SDL_ALLOWED_REPO_ROOTS env var (comma-separated absolute paths)
+    // into config.security.allowedRepoRoots at load time.
+    const envAllowedRootsRaw = process.env.SDL_ALLOWED_REPO_ROOTS;
+    if (envAllowedRootsRaw && envAllowedRootsRaw.trim().length > 0) {
+      const envRoots = envAllowedRootsRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      if (envRoots.length > 0) {
+        if (!config.security) {
+          config.security = { allowedRepoRoots: [] };
+        }
+        config.security.allowedRepoRoots = [
+          ...config.security.allowedRepoRoots,
+          ...envRoots,
+        ];
+      }
+    }
+
     // Cache the result
-    cachedConfig = result.data;
+    cachedConfig = config;
     cachedConfigPath = filePath;
     try {
       cachedConfigMtimeMs = statSync(filePath).mtimeMs;
@@ -84,7 +107,7 @@ export function loadConfig(configPath?: string): AppConfig {
       cachedConfigMtimeMs = null;
     }
 
-    return result.data;
+    return config;
   } catch (err) {
     if (err instanceof Error && "code" in err && err.code === "ENOENT") {
       throw new Error(`Config file not found: ${filePath}`);

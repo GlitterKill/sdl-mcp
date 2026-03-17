@@ -11,15 +11,25 @@ import type { z } from "zod";
  * 2. Stripping description fields (they're in the tool-level description)
  * 3. Deduplicating repeated sub-schemas into $defs/$ref
  */
-export function buildCompactJsonSchema(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+/**
+ * Convert a Zod schema to JSON Schema (OpenAPI 3.x target).
+ * Centralizes the `as any` cast required by zodToJsonSchema's strict types.
+ */
+export function zodSchemaToJsonSchema(
   schema: z.ZodType,
 ): Record<string, unknown> {
+  // zodToJsonSchema has deep type instantiation issues with strict Zod types;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const raw = zodToJsonSchema(schema as any, { target: "openApi3" }) as Record<
+  return zodToJsonSchema(schema as any, { target: "openApi3" }) as Record<
     string,
     unknown
   >;
+}
+
+export function buildCompactJsonSchema(
+  schema: z.ZodType,
+): Record<string, unknown> {
+  const raw = zodSchemaToJsonSchema(schema);
   const stripped = stripDescriptions(raw) as Record<string, unknown>;
   return deduplicateRefs(stripped);
 }
@@ -99,7 +109,10 @@ function canonicalize(obj: unknown): string {
     "{" +
     sorted
       .map(
-        (k) => JSON.stringify(k) + ":" + canonicalize((obj as Record<string, unknown>)[k]),
+        (k) =>
+          JSON.stringify(k) +
+          ":" +
+          canonicalize((obj as Record<string, unknown>)[k]),
       )
       .join(",") +
     "}"
@@ -118,7 +131,13 @@ function collectFingerprints(
 
   const rec = obj as Record<string, unknown>;
   // Only fingerprint objects with "type" key (actual schema nodes)
-  if ("type" in rec || "properties" in rec || "oneOf" in rec || "anyOf" in rec || "allOf" in rec) {
+  if (
+    "type" in rec ||
+    "properties" in rec ||
+    "oneOf" in rec ||
+    "anyOf" in rec ||
+    "allOf" in rec
+  ) {
     const fp = canonicalize(rec);
     const existing = map.get(fp);
     if (existing) {
@@ -148,7 +167,13 @@ function replaceWithRefs(
 
   // Check if this entire object should be replaced with a $ref
   if (!isRoot) {
-    if ("type" in rec || "properties" in rec || "oneOf" in rec || "anyOf" in rec || "allOf" in rec) {
+    if (
+      "type" in rec ||
+      "properties" in rec ||
+      "oneOf" in rec ||
+      "anyOf" in rec ||
+      "allOf" in rec
+    ) {
       const fp = canonicalize(rec);
       const defName = hoistable.get(fp);
       if (defName) {

@@ -7,11 +7,13 @@ import {
   type ServerNotification,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import { errorToMcpResponse } from "./mcp/errors.js";
 import { getToolDispatchLimiter } from "./mcp/dispatch-limiter.js";
 import { logToolCall } from "./mcp/telemetry.js";
-import { buildCompactJsonSchema } from "./gateway/compact-schema.js";
+import {
+  buildCompactJsonSchema,
+  zodSchemaToJsonSchema,
+} from "./gateway/compact-schema.js";
 import {
   shouldAttachUsage,
   computeTokenUsage,
@@ -309,12 +311,7 @@ function convertSchema(
   if (compact) {
     return buildCompactJsonSchema(schema);
   }
-  // zodToJsonSchema has deep type instantiation issues with strict Zod types;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return zodToJsonSchema(schema as any, { target: "openApi3" }) as Record<
-    string,
-    unknown
-  >;
+  return zodSchemaToJsonSchema(schema);
 }
 
 /**

@@ -18,10 +18,14 @@ type ErrorResponse = {
 };
 
 describe("errorToMcpResponse", () => {
-  it("should preserve error message for plain errors", () => {
-    const error = new Error("something failed");
+  it("should sanitize error message for plain (untyped) errors", () => {
+    const error = new Error("something failed with internal details");
     const response = errorToMcpResponse(error) as ErrorResponse;
-    assert.strictEqual(response.error?.message, "something failed");
+    // Plain Error without ErrorCode is treated as unexpected — message is sanitized
+    assert.strictEqual(
+      response.error?.message,
+      "An internal error occurred. Check server logs for details.",
+    );
   });
 
   it("should preserve error code from typed errors", () => {
@@ -46,9 +50,13 @@ describe("errorToMcpResponse", () => {
     });
   });
 
-  it("should handle non-Error values", () => {
+  it("should sanitize non-Error values", () => {
     const response = errorToMcpResponse("string error") as ErrorResponse;
-    assert.strictEqual(response.error?.message, "string error");
+    // Non-Error values are treated as unexpected — message is sanitized
+    assert.strictEqual(
+      response.error?.message,
+      "An internal error occurred. Check server logs for details.",
+    );
   });
 
   it("should handle ConfigError", () => {

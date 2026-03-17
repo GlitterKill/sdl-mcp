@@ -15,6 +15,7 @@ import { Worker } from "worker_threads";
 import type { Connection } from "kuzu";
 
 import type {
+  EdgeRow,
   EdgeType,
   FileRow,
   MetricsRow,
@@ -33,6 +34,7 @@ import {
 } from "../../config/constants.js";
 import { logger } from "../../util/logger.js";
 import { findPackageRoot } from "../../util/findPackageRoot.js";
+import { tokenize } from "../../util/tokenize.js";
 
 import type { Graph } from "../buildGraph.js";
 import { MinHeap } from "../minHeap.js";
@@ -215,6 +217,359 @@ export function getAdaptiveMinConfidence(
   return Math.max(0, Math.min(1, minConfidence));
 }
 
+// =============================================================================
+// Shared Beam Search Core Infrastructure
+// =============================================================================
+
+/**
+ * Mutable bookkeeping state shared across all beam search iterations.
+ * Passed by reference so helper functions can update it in-place.
+ */
+interface BeamCoreState {
+  sliceCards: Set<SymbolId>;
+  visited: Set<SymbolId>;
+  frontier: MinHeap<FrontierItem>;
+  droppedCandidates: number;
+  sequence: number;
+  effectiveCardCap: number;
+  entrySymbols: Set<SymbolId>;
+  requiredEntryCoverage: number;
+  minCardsForDynamicCap: number;
+  coveredEntrySymbols: number;
+  highConfidenceCards: number;
+  recentAcceptedScores: number[];
+  /** Set of symbolIds (from editedFile start nodes) that bypass score threshold. */
+  forcedSymbolIds: Set<SymbolId>;
+  belowThresholdCount: number;
+  wasTruncated: boolean;
+  totalTokens: number;
+  effectiveMinConfidence: number;
+}
+
+/** Initialises all shared mutable state from budget, request and start nodes. */
+function createBeamCoreState(
+  budget: Required<SliceBudget>,
+  request: BeamSearchRequest,
+  startNodes: ResolvedStartNode[],
+  minConfidence: number,
+): BeamCoreState {
+  const entrySymbols = new Set(request.entrySymbols ?? []);
+  const requiredEntryCoverage = entrySymbols.size;
+  return {
+    sliceCards: new Set<SymbolId>(),
+    visited: new Set<SymbolId>(),
+    frontier: new MinHeap<FrontierItem>(),
+    droppedCandidates: 0,
+    sequence: 0,
+    effectiveCardCap: budget.maxCards,
+    entrySymbols,
+    requiredEntryCoverage,
+    minCardsForDynamicCap: computeMinCardsForDynamicCap(
+      budget.maxCards,
+      requiredEntryCoverage,
+    ),
+    coveredEntrySymbols: 0,
+    highConfidenceCards: 0,
+    recentAcceptedScores: [],
+    // editedFile nodes bypass score threshold pruning
+    forcedSymbolIds: new Set<SymbolId>(
+      startNodes
+        .filter((n) => n.source === "editedFile")
+        .map((n) => n.symbolId),
+    ),
+    belowThresholdCount: 0,
+    wasTruncated: false,
+    totalTokens: 0,
+    effectiveMinConfidence: minConfidence,
+  };
+}
+
+/** Builds the SliceContext used for symbol scoring. */
+function buildSliceContext(request: BeamSearchRequest): SliceContext {
+  return {
+    query: request.taskText ?? "",
+    queryTokens: request.taskText ? tokenize(request.taskText) : undefined,
+    stackTrace: request.stackTrace,
+    failingTestPath: request.failingTestPath,
+    editedFiles: request.editedFiles,
+    entrySymbols: request.entrySymbols,
+  };
+}
+
+/** Adds a symbol to the slice and updates coverage / high-confidence counters. */
+function acceptNodeIntoSlice(
+  state: BeamCoreState,
+  symbolId: SymbolId,
+  actualScore: number,
+): void {
+  state.sliceCards.add(symbolId);
+  if (state.entrySymbols.has(symbolId)) {
+    state.coveredEntrySymbols++;
+  }
+  if (
+    actualScore >=
+    SLICE_SCORE_THRESHOLD + DYNAMIC_CAP_HIGH_CONFIDENCE_MARGIN
+  ) {
+    state.highConfidenceCards++;
+  }
+  state.recentAcceptedScores.push(actualScore);
+  if (state.recentAcceptedScores.length > DYNAMIC_CAP_RECENT_SCORE_WINDOW) {
+    state.recentAcceptedScores.shift();
+  }
+}
+
+/**
+ * Inserts a scored candidate into the frontier using the capped beam-search
+ * replacement strategy.  Increments state.droppedCandidates when evicted.
+ */
+function insertCandidateIntoFrontier(
+  state: BeamCoreState,
+  symbolId: SymbolId,
+  score: number,
+  why: string,
+): void {
+  const item: FrontierItem = {
+    symbolId,
+    score,
+    why,
+    priority: 10,
+    sequence: state.sequence++,
+  };
+  if (state.frontier.size() < MAX_FRONTIER) {
+    state.frontier.insert(item);
+    return;
+  }
+  const min = state.frontier.peek();
+  if (min && compareFrontierItems(min, item) > 0) {
+    state.frontier.extractMin();
+    state.frontier.insert(item);
+  } else {
+    state.droppedCandidates++;
+  }
+}
+
+/** Constructs the final BeamSearchResult from accumulated state. */
+function buildBeamSearchResult(
+  state: BeamCoreState,
+  budget: Required<SliceBudget>,
+): BeamSearchResult {
+  const frontierArray = state.frontier.toHeapArray().map((item) => ({
+    symbolId: item.symbolId,
+    score: -item.score,
+    why: item.why,
+    priority: item.priority,
+    sequence: item.sequence,
+  }));
+  if (state.sliceCards.size >= budget.maxCards || frontierArray.length > 0) {
+    state.wasTruncated = true;
+    state.droppedCandidates += frontierArray.length;
+  }
+  return {
+    sliceCards: state.sliceCards,
+    frontier: frontierArray,
+    wasTruncated: state.wasTruncated,
+    droppedCandidates: state.droppedCandidates,
+  };
+}
+
+/**
+ * Seeds the beam frontier with start nodes that exist in the in-memory graph.
+ * Used by both `beamSearch` (sync) and `beamSearchAsync` (async-in-memory) variants.
+ */
+function seedFrontierFromGraph(
+  state: BeamCoreState,
+  startNodes: ResolvedStartNode[],
+  graph: Graph,
+): void {
+  for (const { symbolId, source } of startNodes) {
+    if (!state.visited.has(symbolId) && graph.symbols.has(symbolId)) {
+      state.frontier.insert({
+        symbolId,
+        score: START_NODE_SOURCE_SCORE[source],
+        why: getStartNodeWhy(source),
+        priority: 0,
+        sequence: state.sequence++,
+      });
+      state.visited.add(symbolId);
+    }
+  }
+}
+
+/**
+ * Builds the edge-by-target and neighbor-symbol maps for an in-memory graph
+ * expansion step.  Returns null when there are no unvisited, non-slice
+ * neighbours to explore.
+ * Used by both `beamSearch` (sync) and `beamSearchAsync` (async-in-memory) variants.
+ */
+function buildUnvisitedNeighborMaps(
+  currentSymbolId: SymbolId,
+  state: BeamCoreState,
+  graph: Graph,
+): {
+  edgeByTarget: Map<SymbolId, EdgeRow>;
+  neighborsMap: Map<SymbolId, SymbolRow>;
+} | null {
+  const outgoing = graph.adjacencyOut.get(currentSymbolId) ?? [];
+  const edgeByTarget = new Map<SymbolId, EdgeRow>();
+  for (const e of outgoing) {
+    if (
+      !state.visited.has(e.to_symbol_id) &&
+      !state.sliceCards.has(e.to_symbol_id)
+    ) {
+      edgeByTarget.set(e.to_symbol_id, e);
+    }
+  }
+  if (edgeByTarget.size === 0) return null;
+
+  const neighborsMap = new Map<SymbolId, SymbolRow>();
+  for (const id of edgeByTarget.keys()) {
+    const symbol = graph.symbols.get(id);
+    if (symbol) {
+      neighborsMap.set(id, symbol);
+    }
+  }
+  if (neighborsMap.size === 0) return null;
+
+  return { edgeByTarget, neighborsMap };
+}
+
+/**
+ * Strategy callbacks that define the variant behaviour plugged into the shared
+ * beam search loop.  All async to accommodate both DB-backed and in-memory
+ * implementations.
+ */
+interface BeamSearchStrategy {
+  /** Called once before the main loop (e.g. initial cache prefetch). */
+  onBeforeLoop?(state: BeamCoreState): Promise<void>;
+  /** Called at the start of each iteration (e.g. periodic cache prefetch). */
+  onIterationStart?(state: BeamCoreState): Promise<void>;
+  /**
+   * Validates and resolves the current node.  Return false to skip it.
+   * Used by DB-backed variants to confirm the symbol exists in the repo.
+   */
+  resolveCurrentNode?(
+    symbolId: SymbolId,
+    state: BeamCoreState,
+  ): Promise<boolean>;
+  /** Returns the estimated token cost for the current node. */
+  estimateCardTokens(symbolId: SymbolId, state: BeamCoreState): Promise<number>;
+  /**
+   * Expands neighbours of the current node, scores them, and inserts
+   * passing candidates via insertCandidateIntoFrontier().  Must also
+   * increment state.droppedCandidates for every filtered-out candidate.
+   */
+  expandNeighbors(
+    symbolId: SymbolId,
+    state: BeamCoreState,
+    context: SliceContext,
+    edgeWeights: Record<EdgeType, number>,
+  ): Promise<void>;
+}
+
+/**
+ * Core async beam search loop shared by beamSearchLadybug and beamSearchAsync.
+ *
+ * Handles the BFS skeleton: frontier extraction, threshold gating, node
+ * acceptance, token-budget enforcement, and dynamic cap tightening.
+ * All variant data-access and scoring logic is delegated to `strategy`.
+ */
+async function beamSearchCoreAsync(
+  state: BeamCoreState,
+  budget: Required<SliceBudget>,
+  context: SliceContext,
+  edgeWeights: Record<EdgeType, number>,
+  minConfidence: number,
+  strategy: BeamSearchStrategy,
+): Promise<BeamSearchResult> {
+  await strategy.onBeforeLoop?.(state);
+
+  while (
+    !state.frontier.isEmpty() &&
+    state.sliceCards.size < state.effectiveCardCap
+  ) {
+    await strategy.onIterationStart?.(state);
+
+    state.effectiveMinConfidence = getAdaptiveMinConfidence(
+      minConfidence,
+      state.totalTokens,
+      budget.maxEstimatedTokens,
+    );
+    const current = state.frontier.extractMin()!;
+    const actualScore = -current.score;
+
+    if (state.sliceCards.size >= state.effectiveCardCap) {
+      state.wasTruncated = true;
+      break;
+    }
+
+    if (
+      actualScore < SLICE_SCORE_THRESHOLD &&
+      !state.forcedSymbolIds.has(current.symbolId)
+    ) {
+      state.belowThresholdCount++;
+      if (state.belowThresholdCount >= 5) break;
+      continue;
+    }
+
+    state.belowThresholdCount = 0;
+
+    if (
+      strategy.resolveCurrentNode &&
+      !(await strategy.resolveCurrentNode(current.symbolId, state))
+    ) {
+      continue;
+    }
+
+    acceptNodeIntoSlice(state, current.symbolId, actualScore);
+
+    const cardTokens = await strategy.estimateCardTokens(
+      current.symbolId,
+      state,
+    );
+    state.totalTokens += cardTokens;
+
+    if (state.totalTokens > budget.maxEstimatedTokens) {
+      state.sliceCards.delete(current.symbolId);
+      state.totalTokens -= cardTokens;
+      state.wasTruncated = true;
+      state.droppedCandidates++;
+      break;
+    }
+
+    await strategy.expandNeighbors(
+      current.symbolId,
+      state,
+      context,
+      edgeWeights,
+    );
+
+    if (
+      shouldTightenDynamicCardCap({
+        sliceSize: state.sliceCards.size,
+        minCardsForDynamicCap: state.minCardsForDynamicCap,
+        highConfidenceCards: state.highConfidenceCards,
+        requiredEntryCoverage: state.requiredEntryCoverage,
+        coveredEntrySymbols: state.coveredEntrySymbols,
+        recentAcceptedScores: state.recentAcceptedScores,
+        nextFrontierScore: state.frontier.peek()
+          ? -state.frontier.peek()!.score
+          : null,
+      })
+    ) {
+      state.effectiveCardCap = Math.min(
+        state.effectiveCardCap,
+        state.sliceCards.size,
+      );
+    }
+  }
+
+  return buildBeamSearchResult(state, budget);
+}
+
+// =============================================================================
+// Exported beam search variants
+// =============================================================================
+
 export function beamSearch(
   graph: Graph,
   startNodes: ResolvedStartNode[],
@@ -223,48 +578,11 @@ export function beamSearch(
   edgeWeights: Record<EdgeType, number>,
   minConfidence: number,
 ): BeamSearchResult {
-  const sliceCards = new Set<SymbolId>();
-  const visited = new Set<SymbolId>();
-  const frontier = new MinHeap<FrontierItem>();
-  let droppedCandidates = 0;
-  let sequence = 0;
-  let effectiveCardCap = budget.maxCards;
-  const entrySymbols = new Set(request.entrySymbols ?? []);
-  const requiredEntryCoverage = entrySymbols.size;
-  const minCardsForDynamicCap = computeMinCardsForDynamicCap(
-    budget.maxCards,
-    requiredEntryCoverage,
-  );
-  let coveredEntrySymbols = 0;
-  let highConfidenceCards = 0;
-  const recentAcceptedScores: number[] = [];
+  const state = createBeamCoreState(budget, request, startNodes, minConfidence);
 
-  // Collect forced symbolIds: editedFile nodes bypass score threshold pruning
-  const forcedSymbolIds = new Set<SymbolId>(
-    startNodes.filter((n) => n.source === "editedFile").map((n) => n.symbolId),
-  );
+  seedFrontierFromGraph(state, startNodes, graph);
 
-  for (const { symbolId, source } of startNodes) {
-    if (!visited.has(symbolId) && graph.symbols.has(symbolId)) {
-      frontier.insert({
-        symbolId,
-        score: START_NODE_SOURCE_SCORE[source],
-        why: getStartNodeWhy(source),
-        priority: 0,
-        sequence: sequence++,
-      });
-      visited.add(symbolId);
-    }
-  }
-
-  const context: SliceContext = {
-    query: request.taskText ?? "",
-    queryTokens: request.taskText ? tokenize(request.taskText) : undefined,
-    stackTrace: request.stackTrace,
-    failingTestPath: request.failingTestPath,
-    editedFiles: request.editedFiles,
-    entrySymbols: request.entrySymbols,
-  };
+  const context = buildSliceContext(request);
 
   const entryClusterIds = new Set<string>(
     request.clusterContext?.entryClusterIds ?? [],
@@ -276,93 +594,65 @@ export function beamSearch(
     (entryClusterIds.size > 0 || relatedClusterIds.size > 0) &&
     !!graph.clusters;
 
-  let belowThresholdCount = 0;
-  let wasTruncated = false;
-  let totalTokens = 0;
-  let effectiveMinConfidence = minConfidence;
-
-  while (!frontier.isEmpty() && sliceCards.size < effectiveCardCap) {
-    effectiveMinConfidence = getAdaptiveMinConfidence(
+  while (
+    !state.frontier.isEmpty() &&
+    state.sliceCards.size < state.effectiveCardCap
+  ) {
+    state.effectiveMinConfidence = getAdaptiveMinConfidence(
       minConfidence,
-      totalTokens,
+      state.totalTokens,
       budget.maxEstimatedTokens,
     );
-    const current = frontier.extractMin()!;
+    const current = state.frontier.extractMin()!;
     const actualScore = -current.score;
 
-    if (sliceCards.size >= effectiveCardCap) {
-      wasTruncated = true;
+    if (state.sliceCards.size >= state.effectiveCardCap) {
+      state.wasTruncated = true;
       break;
     }
 
     if (
       actualScore < SLICE_SCORE_THRESHOLD &&
-      !forcedSymbolIds.has(current.symbolId)
+      !state.forcedSymbolIds.has(current.symbolId)
     ) {
-      belowThresholdCount++;
-      if (belowThresholdCount >= 5) break;
+      state.belowThresholdCount++;
+      if (state.belowThresholdCount >= 5) break;
       continue;
     }
 
-    belowThresholdCount = 0;
+    state.belowThresholdCount = 0;
 
-    sliceCards.add(current.symbolId);
-    if (entrySymbols.has(current.symbolId)) {
-      coveredEntrySymbols++;
-    }
-    if (
-      actualScore >=
-      SLICE_SCORE_THRESHOLD + DYNAMIC_CAP_HIGH_CONFIDENCE_MARGIN
-    ) {
-      highConfidenceCards++;
-    }
-    recentAcceptedScores.push(actualScore);
-    if (recentAcceptedScores.length > DYNAMIC_CAP_RECENT_SCORE_WINDOW) {
-      recentAcceptedScores.shift();
-    }
+    acceptNodeIntoSlice(state, current.symbolId, actualScore);
 
     const cardTokens = estimateCardTokens(current.symbolId, graph);
-    totalTokens += cardTokens;
+    state.totalTokens += cardTokens;
 
-    if (totalTokens > budget.maxEstimatedTokens) {
-      sliceCards.delete(current.symbolId);
-      totalTokens -= cardTokens;
-      wasTruncated = true;
-      droppedCandidates++;
+    if (state.totalTokens > budget.maxEstimatedTokens) {
+      state.sliceCards.delete(current.symbolId);
+      state.totalTokens -= cardTokens;
+      state.wasTruncated = true;
+      state.droppedCandidates++;
       break;
     }
 
-    const outgoing = graph.adjacencyOut.get(current.symbolId) ?? [];
-
-    const edgeByTarget = new Map<SymbolId, (typeof outgoing)[number]>();
-    for (const e of outgoing) {
-      if (!visited.has(e.to_symbol_id) && !sliceCards.has(e.to_symbol_id)) {
-        edgeByTarget.set(e.to_symbol_id, e);
-      }
-    }
-
-    if (edgeByTarget.size === 0) continue;
-
-    const neighborsMap = new Map<SymbolId, SymbolRow>();
-    for (const id of edgeByTarget.keys()) {
-      const symbol = graph.symbols.get(id);
-      if (symbol) {
-        neighborsMap.set(id, symbol);
-      }
-    }
-
-    if (neighborsMap.size === 0) continue;
+    const neighborMaps = buildUnvisitedNeighborMaps(
+      current.symbolId,
+      state,
+      graph,
+    );
+    if (!neighborMaps) continue;
+    const { edgeByTarget, neighborsMap } = neighborMaps;
 
     for (const [neighborId, neighborSymbol] of neighborsMap) {
-      if (visited.has(neighborId)) continue;
-      visited.add(neighborId);
+      if (state.visited.has(neighborId)) continue;
+      state.visited.add(neighborId);
 
       const edge = edgeByTarget.get(neighborId);
       if (!edge) continue;
 
       const edgeConfidence = normalizeEdgeConfidence(edge.confidence);
-      if (edgeConfidence < effectiveMinConfidence) {
-        droppedCandidates++;
+      if (edgeConfidence < state.effectiveMinConfidence) {
+        state.droppedCandidates++;
         continue;
       }
 
@@ -394,69 +684,39 @@ export function beamSearch(
       const neighborScore = -(rawScore * edgeWeight + clusterBoost);
 
       if (-neighborScore < SLICE_SCORE_THRESHOLD) {
-        droppedCandidates++;
+        state.droppedCandidates++;
         continue;
       }
 
-      if (frontier.size() < MAX_FRONTIER) {
-        frontier.insert({
-          symbolId: neighborId,
-          score: neighborScore,
-          why: getEdgeWhy(edge.type),
-          priority: 10,
-          sequence: sequence++,
-        });
-      } else {
-        const min = frontier.peek();
-        const candidate: FrontierItem = {
-          symbolId: neighborId,
-          score: neighborScore,
-          why: getEdgeWhy(edge.type),
-          priority: 10,
-          sequence: sequence++,
-        };
-        if (min && compareFrontierItems(min, candidate) > 0) {
-          frontier.extractMin();
-          frontier.insert(candidate);
-        } else {
-          droppedCandidates++;
-        }
-      }
+      insertCandidateIntoFrontier(
+        state,
+        neighborId,
+        neighborScore,
+        getEdgeWhy(edge.type),
+      );
     }
 
     if (
       shouldTightenDynamicCardCap({
-        sliceSize: sliceCards.size,
-        minCardsForDynamicCap,
-        highConfidenceCards,
-        requiredEntryCoverage,
-        coveredEntrySymbols,
-        recentAcceptedScores,
-        nextFrontierScore: frontier.peek() ? -frontier.peek()!.score : null,
+        sliceSize: state.sliceCards.size,
+        minCardsForDynamicCap: state.minCardsForDynamicCap,
+        highConfidenceCards: state.highConfidenceCards,
+        requiredEntryCoverage: state.requiredEntryCoverage,
+        coveredEntrySymbols: state.coveredEntrySymbols,
+        recentAcceptedScores: state.recentAcceptedScores,
+        nextFrontierScore: state.frontier.peek()
+          ? -state.frontier.peek()!.score
+          : null,
       })
     ) {
-      effectiveCardCap = Math.min(effectiveCardCap, sliceCards.size);
+      state.effectiveCardCap = Math.min(
+        state.effectiveCardCap,
+        state.sliceCards.size,
+      );
     }
   }
 
-  const frontierArray = frontier.toHeapArray().map((item) => ({
-    symbolId: item.symbolId,
-    score: -item.score,
-    why: item.why,
-    priority: item.priority,
-    sequence: item.sequence,
-  }));
-  if (sliceCards.size >= budget.maxCards || frontierArray.length > 0) {
-    wasTruncated = true;
-    droppedCandidates += frontierArray.length;
-  }
-
-  return {
-    sliceCards,
-    frontier: frontierArray,
-    wasTruncated,
-    droppedCandidates,
-  };
+  return buildBeamSearchResult(state, budget);
 }
 
 /**
@@ -480,26 +740,7 @@ export async function beamSearchLadybug(
   edgeWeights: Record<EdgeType, number>,
   minConfidence: number,
 ): Promise<BeamSearchResult> {
-  const sliceCards = new Set<SymbolId>();
-  const visited = new Set<SymbolId>();
-  const frontier = new MinHeap<FrontierItem>();
-  let droppedCandidates = 0;
-  let sequence = 0;
-  let effectiveCardCap = budget.maxCards;
-  const entrySymbols = new Set(request.entrySymbols ?? []);
-  const requiredEntryCoverage = entrySymbols.size;
-  const minCardsForDynamicCap = computeMinCardsForDynamicCap(
-    budget.maxCards,
-    requiredEntryCoverage,
-  );
-  let coveredEntrySymbols = 0;
-  let highConfidenceCards = 0;
-  const recentAcceptedScores: number[] = [];
-
-  // Collect forced symbolIds: editedFile nodes bypass score threshold pruning
-  const forcedSymbolIds = new Set<SymbolId>(
-    startNodes.filter((n) => n.source === "editedFile").map((n) => n.symbolId),
-  );
+  const state = createBeamCoreState(budget, request, startNodes, minConfidence);
 
   const symbolCache = new Map<SymbolId, ladybugDb.SymbolRow>();
   const fileCache = new Map<string, ladybugDb.FileRow>();
@@ -522,7 +763,7 @@ export async function beamSearchLadybug(
   // single batched fetch, eliminating the await waterfall.
   // ---------------------------------------------------------------------------
   const prefetchFrontierBatch = async (): Promise<void> => {
-    const peekItems = frontier.peekTopN(PREFETCH_LOOKAHEAD);
+    const peekItems = state.frontier.peekTopN(PREFETCH_LOOKAHEAD);
     const idsToFetch = peekItems
       .map((item) => item.symbolId)
       .filter((id) => !symbolCache.has(id));
@@ -552,14 +793,14 @@ export async function beamSearchLadybug(
       outgoingEdgesCache.set(symbolId, sorted);
     }
 
-    // Step 2: Collect all neighbor symbol IDs from prefetched edges
+    // Step 2: Collect all neighbour symbol IDs from prefetched edges
     const neighborIds = new Set<SymbolId>();
     for (const edges of edgesMap.values()) {
       for (const edge of edges) {
         if (
           !symbolCache.has(edge.toSymbolId) &&
-          !visited.has(edge.toSymbolId) &&
-          !sliceCards.has(edge.toSymbolId)
+          !state.visited.has(edge.toSymbolId) &&
+          !state.sliceCards.has(edge.toSymbolId)
         ) {
           neighborIds.add(edge.toSymbolId);
         }
@@ -570,13 +811,13 @@ export async function beamSearchLadybug(
 
     const neighborIdList = Array.from(neighborIds);
 
-    // Step 3: Batch-fetch neighbor symbols, metrics, clusters, and files in parallel
+    // Step 3: Batch-fetch neighbour symbols, metrics, clusters, and files in parallel
     const [neighborSymbols, neighborMetrics] = await Promise.all([
       ladybugDb.getSymbolsByIds(conn, neighborIdList),
       ladybugDb.getMetricsBySymbolIds(conn, neighborIdList),
     ]);
 
-    // Populate neighbor caches
+    // Populate neighbour caches
     const fileIds = new Set<string>();
     for (const [symbolId, symbol] of neighborSymbols) {
       if (symbol.repoId === repoId) {
@@ -684,6 +925,7 @@ export async function beamSearchLadybug(
     return edges;
   };
 
+  // Warm start-node caches before seeding the frontier
   const startNodeIds = Array.from(new Set(startNodes.map((n) => n.symbolId)));
   if (startNodeIds.length > 0) {
     const startSymbols = await ladybugDb.getSymbolsByIds(conn, startNodeIds);
@@ -696,282 +938,187 @@ export async function beamSearchLadybug(
   }
 
   for (const { symbolId, source } of startNodes) {
-    if (visited.has(symbolId)) continue;
+    if (state.visited.has(symbolId)) continue;
     if (!symbolCache.has(symbolId)) continue;
 
-    frontier.insert({
+    state.frontier.insert({
       symbolId,
       score: START_NODE_SOURCE_SCORE[source],
       why: getStartNodeWhy(source),
       priority: 0,
-      sequence: sequence++,
+      sequence: state.sequence++,
     });
-    visited.add(symbolId);
+    state.visited.add(symbolId);
   }
 
-  const context: SliceContext = {
-    query: request.taskText ?? "",
-    queryTokens: request.taskText ? tokenize(request.taskText) : undefined,
-    stackTrace: request.stackTrace,
-    failingTestPath: request.failingTestPath,
-    editedFiles: request.editedFiles,
-    entrySymbols: request.entrySymbols,
-  };
+  const context = buildSliceContext(request);
 
-  let belowThresholdCount = 0;
-  let wasTruncated = false;
-  let totalTokens = 0;
-  let effectiveMinConfidence = minConfidence;
-
-  // Initial prefetch: warm caches for all frontier items before the main loop
-  await prefetchFrontierBatch();
   let iterationsSincePrefetch = 0;
 
-  while (!frontier.isEmpty() && sliceCards.size < effectiveCardCap) {
-    // Periodically re-prefetch when the previous batch is likely exhausted
-    iterationsSincePrefetch++;
-    if (iterationsSincePrefetch >= PREFETCH_INTERVAL) {
+  const strategy: BeamSearchStrategy = {
+    async onBeforeLoop(_st) {
       await prefetchFrontierBatch();
       iterationsSincePrefetch = 0;
-    }
+    },
 
-    effectiveMinConfidence = getAdaptiveMinConfidence(
-      minConfidence,
-      totalTokens,
-      budget.maxEstimatedTokens,
-    );
-
-    const current = frontier.extractMin()!;
-    const actualScore = -current.score;
-
-    if (sliceCards.size >= effectiveCardCap) {
-      wasTruncated = true;
-      break;
-    }
-
-    if (
-      actualScore < SLICE_SCORE_THRESHOLD &&
-      !forcedSymbolIds.has(current.symbolId)
-    ) {
-      belowThresholdCount++;
-      if (belowThresholdCount >= 5) break;
-      continue;
-    }
-
-    belowThresholdCount = 0;
-
-    const currentSymbol = await getSymbol(current.symbolId);
-    if (!currentSymbol) {
-      continue;
-    }
-
-    sliceCards.add(current.symbolId);
-    if (entrySymbols.has(current.symbolId)) {
-      coveredEntrySymbols++;
-    }
-    if (
-      actualScore >=
-      SLICE_SCORE_THRESHOLD + DYNAMIC_CAP_HIGH_CONFIDENCE_MARGIN
-    ) {
-      highConfidenceCards++;
-    }
-    recentAcceptedScores.push(actualScore);
-    if (recentAcceptedScores.length > DYNAMIC_CAP_RECENT_SCORE_WINDOW) {
-      recentAcceptedScores.shift();
-    }
-
-    const outgoing = await getOutgoingEdges(current.symbolId);
-    const cardTokens = estimateCardTokensLadybug(
-      currentSymbol,
-      outgoing.length,
-    );
-    totalTokens += cardTokens;
-
-    if (totalTokens > budget.maxEstimatedTokens) {
-      sliceCards.delete(current.symbolId);
-      totalTokens -= cardTokens;
-      wasTruncated = true;
-      droppedCandidates++;
-      break;
-    }
-
-    const edgeByTarget = new Map<
-      SymbolId,
-      { edgeType: EdgeType; confidence: number | undefined }
-    >();
-    const edgeTypePriority: Record<EdgeType, number> = {
-      call: 0,
-      import: 1,
-      config: 2,
-    };
-
-    for (const edge of outgoing) {
-      const edgeType = normalizeEdgeType(edge.edgeType);
-      if (!edgeType) continue;
-
-      const toId = edge.toSymbolId;
-      if (visited.has(toId) || sliceCards.has(toId)) continue;
-
-      const candidateScore = applyEdgeConfidenceWeight(
-        edgeWeights[edgeType] ?? 0.5,
-        edge.confidence,
-      );
-
-      const existing = edgeByTarget.get(toId);
-      if (!existing) {
-        edgeByTarget.set(toId, { edgeType, confidence: edge.confidence });
-        continue;
+    async onIterationStart(_st) {
+      iterationsSincePrefetch++;
+      if (iterationsSincePrefetch >= PREFETCH_INTERVAL) {
+        await prefetchFrontierBatch();
+        iterationsSincePrefetch = 0;
       }
+    },
 
-      const existingScore = applyEdgeConfidenceWeight(
-        edgeWeights[existing.edgeType] ?? 0.5,
-        existing.confidence,
-      );
+    async resolveCurrentNode(symbolId, _st) {
+      const currentSymbol = await getSymbol(symbolId);
+      return currentSymbol !== null;
+    },
 
-      if (
-        candidateScore > existingScore ||
-        (candidateScore === existingScore &&
-          edgeTypePriority[edgeType] < edgeTypePriority[existing.edgeType])
-      ) {
-        edgeByTarget.set(toId, { edgeType, confidence: edge.confidence });
-      }
-    }
+    async estimateCardTokens(symbolId, _st) {
+      const currentSymbol = symbolCache.get(symbolId)!;
+      const outgoing = await getOutgoingEdges(symbolId);
+      return estimateCardTokensLadybug(currentSymbol, outgoing.length);
+    },
 
-    if (edgeByTarget.size === 0) continue;
+    async expandNeighbors(currentSymbolId, st, ctx, ew) {
+      const outgoing = await getOutgoingEdges(currentSymbolId);
 
-    const neighborIds = Array.from(edgeByTarget.keys());
-    const neighborSymbolsMap = await ladybugDb.getSymbolsByIds(
-      conn,
-      neighborIds,
-    );
+      // Build edgeByTarget keeping the best-scoring edge type per target
+      const edgeByTarget = new Map<
+        SymbolId,
+        { edgeType: EdgeType; confidence: number | undefined }
+      >();
+      const edgeTypePriority: Record<EdgeType, number> = {
+        call: 0,
+        import: 1,
+        config: 2,
+      };
 
-    const validNeighborIds: SymbolId[] = [];
-    const fileIds = new Set<string>();
-    for (const neighborId of neighborIds) {
-      const symbol = neighborSymbolsMap.get(neighborId);
-      if (!symbol || symbol.repoId !== repoId) continue;
-      symbolCache.set(neighborId, symbol);
-      validNeighborIds.push(neighborId);
-      fileIds.add(symbol.fileId);
-    }
+      for (const edge of outgoing) {
+        const edgeType = normalizeEdgeType(edge.edgeType);
+        if (!edgeType) continue;
 
-    if (validNeighborIds.length === 0) continue;
+        const toId = edge.toSymbolId;
+        if (st.visited.has(toId) || st.sliceCards.has(toId)) continue;
 
-    await getClusters(validNeighborIds);
-    await getMetrics(validNeighborIds);
+        const candidateScore = applyEdgeConfidenceWeight(
+          ew[edgeType] ?? 0.5,
+          edge.confidence,
+        );
 
-    const missingFileIds = Array.from(fileIds).filter(
-      (id) => !fileCache.has(id),
-    );
-    if (missingFileIds.length > 0) {
-      const filesMap = await ladybugDb.getFilesByIds(conn, missingFileIds);
-      for (const [fileId, file] of filesMap) {
-        fileCache.set(fileId, file);
-      }
-    }
+        const existing = edgeByTarget.get(toId);
+        if (!existing) {
+          edgeByTarget.set(toId, { edgeType, confidence: edge.confidence });
+          continue;
+        }
 
-    for (const neighborId of neighborIds) {
-      const neighborSymbol = symbolCache.get(neighborId);
-      if (!neighborSymbol || neighborSymbol.repoId !== repoId) continue;
-      if (visited.has(neighborId)) continue;
-      visited.add(neighborId);
+        const existingScore = applyEdgeConfidenceWeight(
+          ew[existing.edgeType] ?? 0.5,
+          existing.confidence,
+        );
 
-      const edge = edgeByTarget.get(neighborId);
-      if (!edge) continue;
-
-      const edgeConfidence = normalizeEdgeConfidence(edge.confidence);
-      if (edgeConfidence < effectiveMinConfidence) {
-        droppedCandidates++;
-        continue;
-      }
-
-      const edgeWeight = applyEdgeConfidenceWeight(
-        edgeWeights[edge.edgeType] ?? 0.5,
-        edgeConfidence,
-      );
-
-      const metrics = metricsCache.get(neighborId) ?? null;
-      const file = fileCache.get(neighborSymbol.fileId);
-      const baseScore = scoreSymbolWithMetrics(
-        toLegacySymbolRow(neighborSymbol),
-        context,
-        metrics ? toLegacyMetricsRow(metrics) : null,
-        file ? toLegacyFileRow(file) : undefined,
-      );
-      const cohesionBoost = clusterCohesionEnabled
-        ? calculateClusterCohesion({
-            symbolClusterId: clusterCache.get(neighborId),
-            entryClusterIds,
-            relatedClusterIds,
-          })
-        : 0;
-      const neighborScore = -(baseScore * edgeWeight + cohesionBoost);
-
-      if (-neighborScore < SLICE_SCORE_THRESHOLD) {
-        droppedCandidates++;
-        continue;
-      }
-
-      if (frontier.size() < MAX_FRONTIER) {
-        frontier.insert({
-          symbolId: neighborId,
-          score: neighborScore,
-          why: getEdgeWhy(edge.edgeType),
-          priority: 10,
-          sequence: sequence++,
-        });
-      } else {
-        const min = frontier.peek();
-        const candidate: FrontierItem = {
-          symbolId: neighborId,
-          score: neighborScore,
-          why: getEdgeWhy(edge.edgeType),
-          priority: 10,
-          sequence: sequence++,
-        };
-        if (min && compareFrontierItems(min, candidate) > 0) {
-          frontier.extractMin();
-          frontier.insert(candidate);
-        } else {
-          droppedCandidates++;
+        if (
+          candidateScore > existingScore ||
+          (candidateScore === existingScore &&
+            edgeTypePriority[edgeType] < edgeTypePriority[existing.edgeType])
+        ) {
+          edgeByTarget.set(toId, { edgeType, confidence: edge.confidence });
         }
       }
-    }
 
-    if (
-      shouldTightenDynamicCardCap({
-        sliceSize: sliceCards.size,
-        minCardsForDynamicCap,
-        highConfidenceCards,
-        requiredEntryCoverage,
-        coveredEntrySymbols,
-        recentAcceptedScores,
-        nextFrontierScore: frontier.peek() ? -frontier.peek()!.score : null,
-      })
-    ) {
-      effectiveCardCap = Math.min(effectiveCardCap, sliceCards.size);
-    }
-  }
+      if (edgeByTarget.size === 0) return;
 
-  const frontierArray = frontier.toHeapArray().map((item) => ({
-    symbolId: item.symbolId,
-    score: -item.score,
-    why: item.why,
-    priority: item.priority,
-    sequence: item.sequence,
-  }));
+      const neighborIds = Array.from(edgeByTarget.keys());
+      const neighborSymbolsMap = await ladybugDb.getSymbolsByIds(
+        conn,
+        neighborIds,
+      );
 
-  if (sliceCards.size >= budget.maxCards || frontierArray.length > 0) {
-    wasTruncated = true;
-    droppedCandidates += frontierArray.length;
-  }
+      const validNeighborIds: SymbolId[] = [];
+      const fileIds = new Set<string>();
+      for (const neighborId of neighborIds) {
+        const symbol = neighborSymbolsMap.get(neighborId);
+        if (!symbol || symbol.repoId !== repoId) continue;
+        symbolCache.set(neighborId, symbol);
+        validNeighborIds.push(neighborId);
+        fileIds.add(symbol.fileId);
+      }
 
-  return {
-    sliceCards,
-    frontier: frontierArray,
-    wasTruncated,
-    droppedCandidates,
+      if (validNeighborIds.length === 0) return;
+
+      await getClusters(validNeighborIds);
+      await getMetrics(validNeighborIds);
+
+      const missingFileIds = Array.from(fileIds).filter(
+        (id) => !fileCache.has(id),
+      );
+      if (missingFileIds.length > 0) {
+        const filesMap = await ladybugDb.getFilesByIds(conn, missingFileIds);
+        for (const [fileId, file] of filesMap) {
+          fileCache.set(fileId, file);
+        }
+      }
+
+      for (const neighborId of neighborIds) {
+        const neighborSymbol = symbolCache.get(neighborId);
+        if (!neighborSymbol || neighborSymbol.repoId !== repoId) continue;
+        if (st.visited.has(neighborId)) continue;
+        st.visited.add(neighborId);
+
+        const edge = edgeByTarget.get(neighborId);
+        if (!edge) continue;
+
+        const edgeConfidence = normalizeEdgeConfidence(edge.confidence);
+        if (edgeConfidence < st.effectiveMinConfidence) {
+          st.droppedCandidates++;
+          continue;
+        }
+
+        const edgeWeight = applyEdgeConfidenceWeight(
+          ew[edge.edgeType] ?? 0.5,
+          edgeConfidence,
+        );
+
+        const metrics = metricsCache.get(neighborId) ?? null;
+        const file = fileCache.get(neighborSymbol.fileId);
+        const baseScore = scoreSymbolWithMetrics(
+          toLegacySymbolRow(neighborSymbol),
+          ctx,
+          metrics ? toLegacyMetricsRow(metrics) : null,
+          file ? toLegacyFileRow(file) : undefined,
+        );
+        const cohesionBoost = clusterCohesionEnabled
+          ? calculateClusterCohesion({
+              symbolClusterId: clusterCache.get(neighborId),
+              entryClusterIds,
+              relatedClusterIds,
+            })
+          : 0;
+        const neighborScore = -(baseScore * edgeWeight + cohesionBoost);
+
+        if (-neighborScore < SLICE_SCORE_THRESHOLD) {
+          st.droppedCandidates++;
+          continue;
+        }
+
+        insertCandidateIntoFrontier(
+          st,
+          neighborId,
+          neighborScore,
+          getEdgeWhy(edge.edgeType),
+        );
+      }
+    },
   };
+
+  return beamSearchCoreAsync(
+    state,
+    budget,
+    context,
+    edgeWeights,
+    minConfidence,
+    strategy,
+  );
 }
 
 export function computeMinCardsForDynamicCap(
@@ -1053,8 +1200,6 @@ export function estimateCardTokens(symbolId: SymbolId, graph: Graph): number {
 
   return Math.ceil(tokens);
 }
-
-import { tokenize } from "../../util/tokenize.js";
 
 export interface ParallelScorerConfig {
   enabled: boolean;
@@ -1145,6 +1290,35 @@ class ParallelScorerPool {
     return this.failed ? "sequential" : this.mode;
   }
 
+  /**
+   * Scores all candidates sequentially in the calling thread.
+   * Used as the fallback path when the parallel worker pool is unavailable,
+   * timed out, errored, or when the candidate batch is below minBatchSize.
+   */
+  private scoreSequential(
+    candidates: ScoreCandidate[],
+    context: SliceContext,
+    metricsMap: Map<string, MetricsRow | null>,
+    filesMap: Map<number, FileRow | undefined>,
+    scoreThreshold: number,
+  ): Map<string, { score: number; passed: boolean }> {
+    const result = new Map<string, { score: number; passed: boolean }>();
+    for (const c of candidates) {
+      const baseScore = scoreSymbolWithMetrics(
+        c.neighborSymbol,
+        context,
+        metricsMap.get(c.symbolId) ?? null,
+        filesMap.get(c.neighborSymbol.file_id),
+      );
+      const finalScore = baseScore * c.edgeWeight;
+      result.set(c.symbolId, {
+        score: finalScore,
+        passed: finalScore >= scoreThreshold,
+      });
+    }
+    return result;
+  }
+
   async scoreBatch(
     candidates: ScoreCandidate[],
     context: SliceContext,
@@ -1152,45 +1326,29 @@ class ParallelScorerPool {
     filesMap: Map<number, import("../../db/schema.js").FileRow | undefined>,
     scoreThreshold: number,
   ): Promise<Map<string, { score: number; passed: boolean }>> {
-    const result = new Map<string, { score: number; passed: boolean }>();
-
     if (
       this.failed ||
       this.mode === "sequential" ||
       candidates.length < this.config.minBatchSize
     ) {
-      for (const c of candidates) {
-        const baseScore = scoreSymbolWithMetrics(
-          c.neighborSymbol,
-          context,
-          metricsMap.get(c.symbolId) ?? null,
-          filesMap.get(c.neighborSymbol.file_id),
-        );
-        const finalScore = baseScore * c.edgeWeight;
-        result.set(c.symbolId, {
-          score: finalScore,
-          passed: finalScore >= scoreThreshold,
-        });
-      }
-      return result;
+      return this.scoreSequential(
+        candidates,
+        context,
+        metricsMap,
+        filesMap,
+        scoreThreshold,
+      );
     }
 
     const availableWorker = this.workers.find((w) => !w.busy);
     if (!availableWorker) {
-      for (const c of candidates) {
-        const baseScore = scoreSymbolWithMetrics(
-          c.neighborSymbol,
-          context,
-          metricsMap.get(c.symbolId) ?? null,
-          filesMap.get(c.neighborSymbol.file_id),
-        );
-        const finalScore = baseScore * c.edgeWeight;
-        result.set(c.symbolId, {
-          score: finalScore,
-          passed: finalScore >= scoreThreshold,
-        });
-      }
-      return result;
+      return this.scoreSequential(
+        candidates,
+        context,
+        metricsMap,
+        filesMap,
+        scoreThreshold,
+      );
     }
 
     const input: ScoreWorkerInput = {
@@ -1215,25 +1373,15 @@ class ParallelScorerPool {
         availableWorker.busy = false;
         logger.warn("Parallel scorer timeout, falling back to sequential");
         this.failed = true;
-
-        const fallbackResult = new Map<
-          string,
-          { score: number; passed: boolean }
-        >();
-        for (const c of candidates) {
-          const baseScore = scoreSymbolWithMetrics(
-            c.neighborSymbol,
+        resolve(
+          this.scoreSequential(
+            candidates,
             context,
-            metricsMap.get(c.symbolId) ?? null,
-            filesMap.get(c.neighborSymbol.file_id),
-          );
-          const finalScore = baseScore * c.edgeWeight;
-          fallbackResult.set(c.symbolId, {
-            score: finalScore,
-            passed: finalScore >= scoreThreshold,
-          });
-        }
-        resolve(fallbackResult);
+            metricsMap,
+            filesMap,
+            scoreThreshold,
+          ),
+        );
       }, 5000);
 
       const handler = (msg: ScoreWorkerOutput) => {
@@ -1246,28 +1394,19 @@ class ParallelScorerPool {
             error: msg.error,
           });
           this.failed = true;
-
-          const fallbackResult = new Map<
-            string,
-            { score: number; passed: boolean }
-          >();
-          for (const c of candidates) {
-            const baseScore = scoreSymbolWithMetrics(
-              c.neighborSymbol,
+          resolve(
+            this.scoreSequential(
+              candidates,
               context,
-              metricsMap.get(c.symbolId) ?? null,
-              filesMap.get(c.neighborSymbol.file_id),
-            );
-            const finalScore = baseScore * c.edgeWeight;
-            fallbackResult.set(c.symbolId, {
-              score: finalScore,
-              passed: finalScore >= scoreThreshold,
-            });
-          }
-          resolve(fallbackResult);
+              metricsMap,
+              filesMap,
+              scoreThreshold,
+            ),
+          );
           return;
         }
 
+        const result = new Map<string, { score: number; passed: boolean }>();
         for (const r of msg.results) {
           result.set(r.symbolId, { score: r.score, passed: r.passed });
         }
@@ -1330,237 +1469,95 @@ export async function beamSearchAsync(
   const pool = getScorerPool(scorerConfig);
   const scorerMode = await pool.initialize();
 
-  const sliceCards = new Set<SymbolId>();
-  const visited = new Set<SymbolId>();
-  const frontier = new MinHeap<FrontierItem>();
-  let droppedCandidates = 0;
-  let sequence = 0;
-  let effectiveCardCap = budget.maxCards;
-  const entrySymbols = new Set(request.entrySymbols ?? []);
-  const requiredEntryCoverage = entrySymbols.size;
-  const minCardsForDynamicCap = computeMinCardsForDynamicCap(
-    budget.maxCards,
-    requiredEntryCoverage,
-  );
-  let coveredEntrySymbols = 0;
-  let highConfidenceCards = 0;
-  const recentAcceptedScores: number[] = [];
+  const state = createBeamCoreState(budget, request, startNodes, minConfidence);
 
-  // Collect forced symbolIds: editedFile nodes bypass score threshold pruning
-  const forcedSymbolIds = new Set<SymbolId>(
-    startNodes.filter((n) => n.source === "editedFile").map((n) => n.symbolId),
-  );
+  seedFrontierFromGraph(state, startNodes, graph);
 
-  for (const { symbolId, source } of startNodes) {
-    if (!visited.has(symbolId) && graph.symbols.has(symbolId)) {
-      frontier.insert({
-        symbolId,
-        score: START_NODE_SOURCE_SCORE[source],
-        why: getStartNodeWhy(source),
-        priority: 0,
-        sequence: sequence++,
-      });
-      visited.add(symbolId);
-    }
-  }
+  const context = buildSliceContext(request);
 
-  const context: SliceContext = {
-    query: request.taskText ?? "",
-    queryTokens: request.taskText ? tokenize(request.taskText) : undefined,
-    stackTrace: request.stackTrace,
-    failingTestPath: request.failingTestPath,
-    editedFiles: request.editedFiles,
-    entrySymbols: request.entrySymbols,
-  };
+  const strategy: BeamSearchStrategy = {
+    async estimateCardTokens(symbolId, _st) {
+      return estimateCardTokens(symbolId, graph);
+    },
 
-  let belowThresholdCount = 0;
-  let wasTruncated = false;
-  let totalTokens = 0;
-  let effectiveMinConfidence = minConfidence;
+    async expandNeighbors(currentSymbolId, st, ctx, ew) {
+      const neighborMaps = buildUnvisitedNeighborMaps(
+        currentSymbolId,
+        st,
+        graph,
+      );
+      if (!neighborMaps) return;
+      const { edgeByTarget, neighborsMap } = neighborMaps;
 
-  while (!frontier.isEmpty() && sliceCards.size < effectiveCardCap) {
-    effectiveMinConfidence = getAdaptiveMinConfidence(
-      minConfidence,
-      totalTokens,
-      budget.maxEstimatedTokens,
-    );
-    const current = frontier.extractMin()!;
-    const actualScore = -current.score;
+      const metricsMap = new Map<SymbolId, MetricsRow>();
+      const filesMap = new Map<number, FileRow>();
 
-    if (sliceCards.size >= effectiveCardCap) {
-      wasTruncated = true;
-      break;
-    }
+      const candidates: ScoreCandidate[] = [];
+      for (const [neighborId, neighborSymbol] of neighborsMap) {
+        if (st.visited.has(neighborId)) continue;
 
-    if (
-      actualScore < SLICE_SCORE_THRESHOLD &&
-      !forcedSymbolIds.has(current.symbolId)
-    ) {
-      belowThresholdCount++;
-      if (belowThresholdCount >= 5) break;
-      continue;
-    }
+        const edge = edgeByTarget.get(neighborId);
+        if (!edge) continue;
 
-    belowThresholdCount = 0;
+        const edgeConfidence = normalizeEdgeConfidence(edge.confidence);
+        if (edgeConfidence < st.effectiveMinConfidence) {
+          st.droppedCandidates++;
+          continue;
+        }
 
-    sliceCards.add(current.symbolId);
-    if (entrySymbols.has(current.symbolId)) {
-      coveredEntrySymbols++;
-    }
-    if (
-      actualScore >=
-      SLICE_SCORE_THRESHOLD + DYNAMIC_CAP_HIGH_CONFIDENCE_MARGIN
-    ) {
-      highConfidenceCards++;
-    }
-    recentAcceptedScores.push(actualScore);
-    if (recentAcceptedScores.length > DYNAMIC_CAP_RECENT_SCORE_WINDOW) {
-      recentAcceptedScores.shift();
-    }
+        const edgeWeight = applyEdgeConfidenceWeight(
+          ew[edge.type] ?? 0.5,
+          edgeConfidence,
+        );
 
-    const cardTokens = estimateCardTokens(current.symbolId, graph);
-    totalTokens += cardTokens;
-
-    if (totalTokens > budget.maxEstimatedTokens) {
-      sliceCards.delete(current.symbolId);
-      totalTokens -= cardTokens;
-      wasTruncated = true;
-      droppedCandidates++;
-      break;
-    }
-
-    const outgoing = graph.adjacencyOut.get(current.symbolId) ?? [];
-
-    const edgeByTarget = new Map<SymbolId, (typeof outgoing)[number]>();
-    for (const e of outgoing) {
-      if (!visited.has(e.to_symbol_id) && !sliceCards.has(e.to_symbol_id)) {
-        edgeByTarget.set(e.to_symbol_id, e);
-      }
-    }
-
-    if (edgeByTarget.size === 0) continue;
-
-    const neighborsMap = new Map<SymbolId, SymbolRow>();
-    for (const id of edgeByTarget.keys()) {
-      const symbol = graph.symbols.get(id);
-      if (symbol) {
-        neighborsMap.set(id, symbol);
-      }
-    }
-
-    if (neighborsMap.size === 0) continue;
-
-    const metricsMap = new Map<SymbolId, MetricsRow>();
-    const filesMap = new Map<number, FileRow>();
-
-    const candidates: ScoreCandidate[] = [];
-    for (const [neighborId, neighborSymbol] of neighborsMap) {
-      if (visited.has(neighborId)) continue;
-
-      const edge = edgeByTarget.get(neighborId);
-      if (!edge) continue;
-
-      const edgeConfidence = normalizeEdgeConfidence(edge.confidence);
-      if (edgeConfidence < effectiveMinConfidence) {
-        droppedCandidates++;
-        continue;
+        candidates.push({
+          symbolId: neighborId,
+          neighborSymbol,
+          edgeWeight,
+        });
       }
 
-      const edgeWeight = applyEdgeConfidenceWeight(
-        edgeWeights[edge.type] ?? 0.5,
-        edgeConfidence,
+      if (candidates.length === 0) return;
+
+      const scoredResults = await pool.scoreBatch(
+        candidates,
+        ctx,
+        metricsMap,
+        filesMap,
+        SLICE_SCORE_THRESHOLD,
       );
 
-      candidates.push({
-        symbolId: neighborId,
-        neighborSymbol,
-        edgeWeight,
-      });
-    }
+      for (const candidate of candidates) {
+        const neighborId = candidate.symbolId;
+        const scored = scoredResults.get(neighborId);
 
-    if (candidates.length === 0) continue;
-
-    const scoredResults = await pool.scoreBatch(
-      candidates,
-      context,
-      metricsMap,
-      filesMap,
-      SLICE_SCORE_THRESHOLD,
-    );
-
-    for (let i = 0; i < candidates.length; i++) {
-      const candidate = candidates[i];
-      const neighborId = candidate.symbolId;
-      const scored = scoredResults.get(neighborId);
-
-      if (!scored) continue;
-      if (!scored.passed) {
-        droppedCandidates++;
-        continue;
-      }
-
-      visited.add(neighborId);
-      const neighborScore = -scored.score;
-      const edge = edgeByTarget.get(neighborId)!;
-
-      if (frontier.size() < MAX_FRONTIER) {
-        frontier.insert({
-          symbolId: neighborId,
-          score: neighborScore,
-          why: getEdgeWhy(edge.type),
-          priority: 10,
-          sequence: sequence++,
-        });
-      } else {
-        const min = frontier.peek();
-        const candidateItem: FrontierItem = {
-          symbolId: neighborId,
-          score: neighborScore,
-          why: getEdgeWhy(edge.type),
-          priority: 10,
-          sequence: sequence++,
-        };
-        if (min && compareFrontierItems(min, candidateItem) > 0) {
-          frontier.extractMin();
-          frontier.insert(candidateItem);
-        } else {
-          droppedCandidates++;
+        if (!scored) continue;
+        if (!scored.passed) {
+          st.droppedCandidates++;
+          continue;
         }
+
+        st.visited.add(neighborId);
+        const neighborScore = -scored.score;
+        const edge = edgeByTarget.get(neighborId)!;
+
+        insertCandidateIntoFrontier(
+          st,
+          neighborId,
+          neighborScore,
+          getEdgeWhy(edge.type),
+        );
       }
-    }
-
-    if (
-      shouldTightenDynamicCardCap({
-        sliceSize: sliceCards.size,
-        minCardsForDynamicCap,
-        highConfidenceCards,
-        requiredEntryCoverage,
-        coveredEntrySymbols,
-        recentAcceptedScores,
-        nextFrontierScore: frontier.peek() ? -frontier.peek()!.score : null,
-      })
-    ) {
-      effectiveCardCap = Math.min(effectiveCardCap, sliceCards.size);
-    }
-  }
-
-  const frontierArray = frontier.toHeapArray().map((item) => ({
-    symbolId: item.symbolId,
-    score: -item.score,
-    why: item.why,
-    priority: item.priority,
-    sequence: item.sequence,
-  }));
-  if (sliceCards.size >= budget.maxCards || frontierArray.length > 0) {
-    wasTruncated = true;
-    droppedCandidates += frontierArray.length;
-  }
-
-  return {
-    sliceCards,
-    frontier: frontierArray,
-    wasTruncated,
-    droppedCandidates,
-    scorerMode,
+    },
   };
+
+  const result = await beamSearchCoreAsync(
+    state,
+    budget,
+    context,
+    edgeWeights,
+    minConfidence,
+    strategy,
+  );
+  return { ...result, scorerMode };
 }

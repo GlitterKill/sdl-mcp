@@ -130,6 +130,7 @@ export async function loadPlugin(
 
 export async function loadPluginsFromConfig(
   pluginPaths: string[] | undefined,
+  allowedRoot?: string,
 ): Promise<{
   successful: AdapterPlugin[];
   failed: PluginLoadError[];
@@ -142,7 +143,7 @@ export async function loadPluginsFromConfig(
   }
 
   for (const pluginPath of pluginPaths) {
-    const result = await loadPlugin(pluginPath);
+    const result = await loadPlugin(pluginPath, allowedRoot);
 
     if (result.loaded) {
       successful.push(result.plugin);

@@ -450,7 +450,11 @@ export async function generateSummariesForRepo(
             return typeof parsed === "string"
               ? parsed
               : (parsed?.text ?? sym.signatureJson);
-          } catch {
+          } catch (err) {
+            logger.debug("Failed to parse signatureJson for card hash", {
+              symbolId: sym.symbolId,
+              error: err instanceof Error ? err.message : String(err),
+            });
             return sym.signatureJson;
           }
         })()
@@ -523,7 +527,11 @@ export async function generateSummariesForRepo(
                 return typeof parsed === "string"
                   ? parsed
                   : (parsed?.text ?? sym.signatureJson);
-              } catch {
+              } catch (err) {
+                logger.debug("Failed to parse signatureJson for summary", {
+                  symbolId: sym.symbolId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
                 return sym.signatureJson;
               }
             })()

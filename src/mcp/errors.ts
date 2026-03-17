@@ -46,10 +46,27 @@ export interface McpErrorDetail {
   requiredFieldsForNext?: RequiredFieldsForNext;
 }
 
+/**
+ * Determines whether an error is a known domain error whose message is safe
+ * to expose to MCP clients.  Unknown/unexpected errors are sanitized to
+ * prevent leaking internal paths, stack traces, or DB state.
+ */
+function isDomainError(error: Error): boolean {
+  const code = (error as { code?: string }).code;
+  return (
+    typeof code === "string" &&
+    Object.values(ErrorCode).includes(code as ErrorCode)
+  );
+}
+
 export function errorToMcpResponse(error: unknown): Record<string, unknown> {
   if (error instanceof Error) {
+    // Only expose the raw message for known domain errors; sanitize unexpected errors.
+    const safe = isDomainError(error);
     const detail: McpErrorDetail = {
-      message: error.message,
+      message: safe
+        ? error.message
+        : "An internal error occurred. Check server logs for details.",
     };
 
     const codeError = error as { code?: string };
@@ -69,7 +86,7 @@ export function errorToMcpResponse(error: unknown): Record<string, unknown> {
   }
   return {
     error: {
-      message: String(error),
+      message: "An internal error occurred. Check server logs for details.",
     },
   };
 }

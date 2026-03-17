@@ -1,4 +1,24 @@
-import type { EdgeType, SymbolKind, Visibility } from "../db/schema.js";
+// ---------------------------------------------------------------------------
+// Domain primitives — canonical definitions (no imports from ../db/)
+// ---------------------------------------------------------------------------
+
+export type EdgeType = "import" | "call" | "config";
+export type EdgeResolutionStrategy = "exact" | "heuristic" | "unresolved";
+export type SymbolKind =
+  | "function"
+  | "class"
+  | "interface"
+  | "type"
+  | "module"
+  | "method"
+  | "constructor"
+  | "variable";
+export type Visibility =
+  | "public"
+  | "protected"
+  | "private"
+  | "exported"
+  | "internal";
 
 export type RepoId = string;
 export type SymbolId = string;

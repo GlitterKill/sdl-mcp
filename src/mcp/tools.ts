@@ -552,8 +552,8 @@ const CodeWindowRequestSchema = z.object({
   sliceContext: z
     .object({
       taskText: z.string().min(1).max(2000),
-      stackTrace: z.string().optional(),
-      failingTestPath: z.string().optional(),
+      stackTrace: z.string().max(10000).optional(),
+      failingTestPath: z.string().max(500).optional(),
       editedFiles: z.array(z.string()).max(100).optional(),
       entrySymbols: z.array(z.string()).max(100).optional(),
       budget: SliceBudgetSchema.optional(),
@@ -689,6 +689,12 @@ export const BufferPushRequestSchema = z.object({
     .min(1)
     .refine((p) => !p.includes(".."), {
       message: "filePath must not contain path traversal sequences",
+    })
+    .refine((p) => !/^[/\\]/.test(p) && !/^[a-zA-Z]:/.test(p), {
+      message: "filePath must be relative (absolute paths are not allowed)",
+    })
+    .refine((p) => !p.includes("\0"), {
+      message: "filePath must not contain null bytes",
     }),
   content: z.string().max(5_242_880),
   language: z.string().optional(),
@@ -856,8 +862,8 @@ export const SliceBuildRequestSchema = z.object({
         "to auto-discover relevant symbols via full-text search and build the slice " +
         "in a single round trip.",
     ),
-  stackTrace: z.string().optional(),
-  failingTestPath: z.string().optional(),
+  stackTrace: z.string().max(10000).optional(),
+  failingTestPath: z.string().max(500).optional(),
   editedFiles: z.array(z.string()).max(100).optional(),
   entrySymbols: z.array(z.string()).max(100).optional(),
   knownCardEtags: z.record(z.string()).optional(),
@@ -988,8 +994,8 @@ export const CodeNeedWindowRequestSchema = z.object({
   sliceContext: z
     .object({
       taskText: z.string().min(1).max(2000),
-      stackTrace: z.string().optional(),
-      failingTestPath: z.string().optional(),
+      stackTrace: z.string().max(10000).optional(),
+      failingTestPath: z.string().max(500).optional(),
       editedFiles: z.array(z.string()).max(100).optional(),
       entrySymbols: z.array(z.string()).max(100).optional(),
       budget: SliceBudgetSchema.optional(),

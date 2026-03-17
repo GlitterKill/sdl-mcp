@@ -347,6 +347,12 @@ export const CodeModeConfigSchema = z.object({
 
 export type CodeModeConfig = z.infer<typeof CodeModeConfigSchema>;
 
+export const SecurityConfigSchema = z.object({
+  allowedRepoRoots: z.array(z.string()).default([]),
+});
+
+export type SecurityConfig = z.infer<typeof SecurityConfigSchema>;
+
 export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
   /**
@@ -371,6 +377,7 @@ export const AppConfigSchema = z.object({
   runtime: RuntimeConfigSchema.optional(),
   gateway: GatewayConfigSchema.optional(),
   codeMode: CodeModeConfigSchema.optional(),
+  security: SecurityConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
