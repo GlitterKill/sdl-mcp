@@ -14,7 +14,7 @@ function estimateTokens(charCount: number): number {
 function measure() {
   console.log("=== SDL-MCP Gateway Schema Token Measurement ===\n");
 
-  // --- Flat mode (25 tools) ---
+  // --- Flat mode (29 tools) ---
   const flatServer = createMCPServer();
   const flatTools = (flatServer as any).tools as Map<
     string,

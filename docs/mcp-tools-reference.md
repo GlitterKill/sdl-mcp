@@ -17,7 +17,7 @@
 </details>
 </div>
 
-Complete reference for all 24 MCP tools exposed by `registerTools`. Tools are organized by category and listed in the recommended usage order within each category.
+Complete reference for all 29 MCP tools exposed by `registerTools`. Tools are organized by category and listed in the recommended usage order within each category.
 
 ---
 
@@ -816,6 +816,172 @@ Query stored feedback records and aggregated statistics. Useful for offline tuni
 
 ---
 
+## Runtime Execution (1 tool)
+
+### `sdl.runtime.execute`
+
+Run a command in a repo-scoped subprocess. Requires `runtime.enabled: true` in config.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `runtime` | `"node" \| "python" \| "shell"` | Yes | Runtime environment |
+| `executable` | `string` | No | Custom executable path |
+| `args` | `string[]` | No | Command arguments (max 100) |
+| `code` | `string` | No | Inline code to execute (max 1 MB) |
+| `relativeCwd` | `string` | No | Working directory relative to repo root (default: `"."`) |
+| `timeoutMs` | `integer` | No | Timeout in milliseconds (100-300,000) |
+| `queryTerms` | `string[]` | No | Filter output to lines matching these terms (max 10) |
+| `maxResponseLines` | `integer` | No | Max output lines returned (10-1,000, default: 100) |
+| `persistOutput` | `boolean` | No | Save full output to an artifact handle (default: true) |
+
+Use `code` for inline snippets or `args` for invoking files/commands. `queryTerms` acts like a built-in grep, extracting only matching lines from long output.
+
+**Response includes:**
+
+- `exitCode`, `stdout`, `stderr`, `truncated`, `durationMs`
+- `artifactHandle` (when `persistOutput: true`) for retrieving full output later
+- `matchedLines` (when `queryTerms` provided)
+
+**Example:**
+
+```json
+{
+  "repoId": "my-repo",
+  "runtime": "node",
+  "args": ["--test", "tests/auth.test.ts"],
+  "timeoutMs": 30000,
+  "queryTerms": ["FAIL", "Error"],
+  "maxResponseLines": 100
+}
+```
+
+---
+
+## Development Memories (4 tools)
+
+### `sdl.memory.store`
+
+Store or update a development memory with optional symbol and file links. Memories persist across sessions and are automatically surfaced in relevant slices.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `type` | `"decision" \| "bugfix" \| "task_context"` | Yes | Memory type |
+| `title` | `string` | Yes | Short title (1-120 chars) |
+| `content` | `string` | Yes | Memory content (1-50,000 chars) |
+| `tags` | `string[]` | No | Categorization tags (max 20) |
+| `confidence` | `number` | No | Confidence score (0-1) |
+| `symbolIds` | `string[]` | No | Link memory to symbols (max 100) |
+| `fileRelPaths` | `string[]` | No | Link memory to files (max 100) |
+| `memoryId` | `string` | No | Existing memory ID for upsert |
+
+Content-addressed deduplication prevents duplicate memories — if the same `repoId + type + title + content` hash already exists, the existing memory is returned.
+
+**Response:** `{ ok: boolean, memoryId: string, created: boolean, deduplicated?: boolean }`
+
+**Example:**
+
+```json
+{
+  "repoId": "my-repo",
+  "type": "bugfix",
+  "title": "Race condition in authenticate()",
+  "content": "The authenticate() function was not awaiting the token refresh promise, causing intermittent failures under concurrent requests.",
+  "symbolIds": ["<symbol-id>"],
+  "tags": ["auth", "concurrency"],
+  "confidence": 0.9
+}
+```
+
+---
+
+### `sdl.memory.query`
+
+Search and filter memories by text, type, tags, or linked symbols.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `query` | `string` | No | Full-text search query (max 1,000 chars) |
+| `types` | `("decision" \| "bugfix" \| "task_context")[]` | No | Filter by memory types |
+| `tags` | `string[]` | No | Filter by tags (max 20) |
+| `symbolIds` | `string[]` | No | Filter by linked symbols (max 100) |
+| `staleOnly` | `boolean` | No | Return only stale memories (linked symbols have changed) |
+| `limit` | `integer` | No | Max results (1-100) |
+| `sortBy` | `"recency" \| "confidence"` | No | Sort order |
+
+**Response:** `{ memories: Memory[], total: number }`
+
+**Examples:**
+
+```json
+{ "repoId": "my-repo", "query": "auth token", "limit": 10 }
+```
+
+```json
+{ "repoId": "my-repo", "staleOnly": true, "sortBy": "recency" }
+```
+
+---
+
+### `sdl.memory.remove`
+
+Soft-delete a memory from the graph. Optionally also removes the `.sdl-memory/` file from disk.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `memoryId` | `string` | Yes | Memory ID to remove |
+| `deleteFile` | `boolean` | No | Also delete the backing `.sdl-memory/*.md` file |
+
+**Response:** `{ ok: boolean, memoryId: string, fileDeleted?: boolean }`
+
+**Example:**
+
+```json
+{ "repoId": "my-repo", "memoryId": "<memory-id>", "deleteFile": true }
+```
+
+---
+
+### `sdl.memory.surface`
+
+Auto-surface memories relevant to a set of symbols or task type. Memories are ranked by `confidence × recencyFactor × overlapFactor`.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
+| `symbolIds` | `string[]` | No | Symbols to find related memories for (max 500) |
+| `taskType` | `"decision" \| "bugfix" \| "task_context"` | No | Filter by memory type |
+| `limit` | `integer` | No | Max memories to return (1-50) |
+
+**Response:** `{ memories: SurfacedMemory[], total: number }`
+
+Each `SurfacedMemory` includes the memory content plus a `score` field showing the ranking value and a `matchedSymbols` field showing which of the queried symbols matched.
+
+**Example:**
+
+```json
+{
+  "repoId": "my-repo",
+  "symbolIds": ["<symbol-id-1>", "<symbol-id-2>"],
+  "limit": 5
+}
+```
+
+---
+
 ## Tool-Usage Pattern for Agents
 
 Use tools in this order for most tasks:
@@ -824,19 +990,22 @@ Use tools in this order for most tasks:
 2. `sdl.repo.overview` — understand codebase structure (start with `level: "stats"`)
 3. `sdl.symbol.search` — find relevant symbols (start with tight limits)
 4. `sdl.symbol.getCard` / `sdl.symbol.getCards` — understand what symbols do
-5. `sdl.slice.build` — get related symbols for a task
+5. `sdl.slice.build` — get related symbols for a task (auto-surfaces relevant memories)
 6. `sdl.code.getSkeleton` — see code structure without full bodies
 7. `sdl.code.getHotPath` — find specific identifiers in code
 8. `sdl.code.needWindow` — raw code only when necessary
 9. `sdl.agent.feedback` — record which symbols were useful after completing a task
+10. `sdl.memory.store` — persist important decisions, bugfixes, or context for future sessions
 
 ### Task-Specific Workflows
 
 | Task | Workflow |
 |------|----------|
 | **Debug** | search -> card -> slice.build -> hotPath -> needWindow (if still ambiguous) |
-| **Feature** | repo.overview -> search -> card -> slice.build |
+| **Debug (auto)** | slice.build with `taskText` + `stackTrace` -> hotPath -> needWindow with `sliceContext` |
+| **Feature** | repo.overview -> search -> card -> slice.build (use `editedFiles` for impact) |
 | **PR Review** | delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols |
+| **Cross-session** | memory.surface -> slice.build -> work -> memory.store when done |
 
 ---
 
