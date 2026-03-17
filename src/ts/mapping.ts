@@ -2,6 +2,7 @@ import type { RepoId } from "../db/schema.js";
 import { RepoConfigSchema } from "../config/types.js";
 import type { Diagnostic, DiagnosticSummary } from "./diagnostics.js";
 import { diagnosticsManager } from "./diagnostics.js";
+import { NotFoundError } from "../domain/errors.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { normalizePath, getRelativePath } from "../util/paths.js";
@@ -33,7 +34,7 @@ export async function mapDiagnosticsToSymbols(
   const conn = await getLadybugConn();
   const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
-    throw new Error(`Repository not found: ${repoId}`);
+    throw new NotFoundError(`Repository not found: ${repoId}`);
   }
 
   const suspects: DiagnosticSuspect[] = [];
@@ -99,7 +100,7 @@ export async function getDiagnosticsWithSuspects(
   const conn = await getLadybugConn();
   const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
-    throw new Error(`Repository not found: ${repoId}`);
+    throw new NotFoundError(`Repository not found: ${repoId}`);
   }
 
   const repoConfig = RepoConfigSchema.parse(JSON.parse(repo.configJson));

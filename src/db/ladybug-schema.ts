@@ -331,7 +331,8 @@ export async function createSchema(conn: Connection): Promise<void> {
     try {
       await execDdl(conn, ddl);
     } catch {
-      // Index creation may not be supported on all Kùzu versions; skip gracefully
+      // Kùzu versions before 0.4 do not support CREATE INDEX. Since indexes
+      // are performance-only (not correctness), silently skipping is safe.
     }
   }
 

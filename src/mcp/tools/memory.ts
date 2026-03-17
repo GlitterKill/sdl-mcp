@@ -16,7 +16,7 @@ import {
 import type { SurfacedMemory } from "../types.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
-import { DatabaseError } from "../errors.js";
+import { DatabaseError, ValidationError } from "../errors.js";
 import {
   writeMemoryFile,
   deleteMemoryFile,
@@ -50,7 +50,7 @@ function typeToDir(type: string): string {
     case "task_context":
       return "task_context";
     default:
-      throw new Error(`Unknown memory type: ${type}`);
+      throw new ValidationError(`Unknown memory type: ${type}`);
   }
 }
 

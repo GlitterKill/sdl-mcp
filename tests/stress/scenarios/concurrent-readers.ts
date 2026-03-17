@@ -27,14 +27,14 @@ const SEARCH_QUERIES = [
   "Validate",
   "Create",
 ];
-const ITERATIONS_PER_CLIENT = 3;
+const ITERATIONS_PER_CLIENT = 4;
 
 async function runReaderWorkflow(
   client: import("../infra/client-factory.js").StressClient,
   queryIndex: number,
 ): Promise<void> {
   for (let i = 0; i < ITERATIONS_PER_CLIENT; i++) {
-    const query = SEARCH_QUERIES[queryIndex % SEARCH_QUERIES.length];
+    const query = SEARCH_QUERIES[(queryIndex + i) % SEARCH_QUERIES.length];
 
     // 1. Search
     const searchResult = await client.callToolParsed("sdl.symbol.search", {
@@ -69,7 +69,33 @@ async function runReaderWorkflow(
       symbolId,
     });
 
-    // 5. Policy check
+    // 5. Hot path — find specific identifiers in the symbol
+    await client.callToolParsed("sdl.code.getHotPath", {
+      repoId: "stress-fixtures",
+      symbolId,
+      identifiersToFind: [query, "return"],
+    });
+
+    // 6. Need window — full code ladder escalation
+    try {
+      await client.callToolParsed("sdl.code.needWindow", {
+        repoId: "stress-fixtures",
+        symbolId,
+        reason: `Stress test: verify ${query} implementation`,
+        expectedLines: 50,
+        identifiersToFind: [query],
+      });
+    } catch {
+      // Policy denial is acceptable — we're testing throughput not gating
+    }
+
+    // 7. Repo overview (lightweight stats call)
+    await client.callToolParsed("sdl.repo.overview", {
+      repoId: "stress-fixtures",
+      level: "stats",
+    });
+
+    // 8. Policy check
     await client.callToolParsed("sdl.policy.get", {
       repoId: "stress-fixtures",
     });

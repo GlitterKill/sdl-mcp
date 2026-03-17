@@ -1,7 +1,6 @@
 import { readFile, stat } from "fs/promises";
 
 import Parser from "tree-sitter";
-import TypeScript from "tree-sitter-typescript";
 
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { Range } from "../domain/types.js";
@@ -18,12 +17,7 @@ import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { getParser as getGrammarParser } from "../indexer/treesitter/grammarLoader.js";
-
-const tsParser = new Parser();
-const tsxParser = new Parser();
-
-tsParser.setLanguage(TypeScript.typescript as unknown as Parser.Language);
-tsxParser.setLanguage(TypeScript.tsx as unknown as Parser.Language);
+import { tsParser, tsxParser } from "./ts-parsers.js";
 
 /**
  * Maps file extensions to grammarLoader language IDs for non-JS/TS languages.

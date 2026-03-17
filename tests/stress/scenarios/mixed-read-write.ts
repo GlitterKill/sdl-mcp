@@ -19,8 +19,8 @@ import {
   mergeResultStats,
 } from "../infra/types.js";
 
-const WRITER_ITERATIONS = 3;
-const READER_ITERATIONS = 5;
+const WRITER_ITERATIONS = 4;
+const READER_ITERATIONS = 6;
 const SEARCH_QUERIES = [
   "User",
   "Server",
@@ -45,8 +45,19 @@ async function writerWorkflow(
       repoId: "stress-fixtures",
     });
 
+    // Repo overview between writes — tests read contention during write phase
+    await client.callToolParsed("sdl.repo.overview", {
+      repoId: "stress-fixtures",
+      level: "stats",
+    });
+
+    // Policy get — lightweight read interleaved with writes
+    await client.callToolParsed("sdl.policy.get", {
+      repoId: "stress-fixtures",
+    });
+
     // Small delay to simulate realistic write cadence
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 80));
   }
 }
 
@@ -82,6 +93,19 @@ async function readerWorkflow(
       repoId: "stress-fixtures",
       entrySymbols: [symbolId],
       budget: { maxCards: 15, maxEstimatedTokens: 2000 },
+    });
+
+    // Skeleton — test code tools under write contention
+    await client.callToolParsed("sdl.code.getSkeleton", {
+      repoId: "stress-fixtures",
+      symbolId,
+    });
+
+    // Hot path — focused identifier lookup during writes
+    await client.callToolParsed("sdl.code.getHotPath", {
+      repoId: "stress-fixtures",
+      symbolId,
+      identifiersToFind: [query],
     });
   }
 }

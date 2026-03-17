@@ -11,7 +11,8 @@
  * 6. Restart server with maxSessions: 4 → run session saturation
  * 7. Restart server with maxToolConcurrency: 4 → run dispatch pressure
  * 8. Restart server (default config) → run semantic tools
- * 9. Generate report
+ * 9. Restart server (max config) → run limit stress (1 writer + 7 readers)
+ * 10. Generate report
  *
  * Usage:
  *   node --import tsx tests/stress/run-stress.ts
@@ -32,6 +33,7 @@ import { runMixedReadWrite } from "./scenarios/mixed-read-write.js";
 import { runSessionSaturation } from "./scenarios/session-saturation.js";
 import { runDispatchPressure } from "./scenarios/dispatch-pressure.js";
 import { runSemanticTools } from "./scenarios/semantic-tools.js";
+import { runLimitStress } from "./scenarios/limit-stress.js";
 import type {
   StressTestConfig,
   ScenarioResult,
@@ -312,6 +314,33 @@ async function main(): Promise<void> {
       scenarios.push(result);
     } catch (err) {
       scenarios.push(errorResult("semantic-tools", err));
+    } finally {
+      await harness.stop();
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Scenario 7: Limit Stress (maxSessions: 8, 1 writer + 7 readers)
+  // -----------------------------------------------------------------------
+  if (shouldRun("limit-stress")) {
+    stressLog(
+      "info",
+      "=== Scenario 7: Limit Stress (1 writer + 7 readers, max sessions) ===",
+    );
+    const harness = new ServerHarness(config);
+    try {
+      const port = await harness.start({
+        maxSessions: 8,
+        maxToolConcurrency: 8,
+      });
+      const result = await withTimeout(
+        runLimitStress(makeCtx(port, harness.getAuthToken())),
+        cliArgs.timeout * 2, // extended timeout for longer scenario
+        "limit-stress",
+      );
+      scenarios.push(result);
+    } catch (err) {
+      scenarios.push(errorResult("limit-stress", err));
     } finally {
       await harness.stop();
     }

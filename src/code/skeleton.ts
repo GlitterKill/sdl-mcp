@@ -2,7 +2,6 @@ import { createHash } from "crypto";
 import { readFile, stat } from "fs/promises";
 
 import Parser from "tree-sitter";
-import TypeScript from "tree-sitter-typescript";
 
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { Range, SkeletonOp, SkeletonIR } from "../domain/types.js";
@@ -20,12 +19,7 @@ import { getParser as getGrammarParser } from "../indexer/treesitter/grammarLoad
 import { logger } from "../util/logger.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
-
-const tsParser = new Parser();
-const tsxParser = new Parser();
-
-tsParser.setLanguage(TypeScript.typescript as unknown as Parser.Language);
-tsxParser.setLanguage(TypeScript.tsx as unknown as Parser.Language);
+import { tsParser, tsxParser } from "./ts-parsers.js";
 
 export interface SkeletonResult {
   skeleton: string;

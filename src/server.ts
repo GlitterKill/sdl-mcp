@@ -278,14 +278,7 @@ export class MCPServer {
    */
   async notifyToolListChanged(): Promise<void> {
     try {
-      // The MCP SDK Server class provides sendToolListChanged()
-      // which sends notifications/tools/list_changed
-      const server = this.server as unknown as {
-        sendToolListChanged?: () => Promise<void>;
-      };
-      if (typeof server.sendToolListChanged === "function") {
-        await server.sendToolListChanged();
-      }
+      await this.server.sendToolListChanged();
     } catch (_err) {
       // Swallow errors if no client is connected or notification fails
       process.stderr.write(
@@ -303,7 +296,7 @@ function extractStringField(args: unknown, field: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- z.ZodType has `any` in its generic parameters
 function convertSchema(
   schema: z.ZodType,
   compact = false,

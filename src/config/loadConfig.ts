@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "fs";
 import { AppConfig, AppConfigSchema } from "./types.js";
+import { ConfigError } from "../domain/errors.js";
 import { resolveCliConfigPath } from "./configPath.js";
 
 function expandEnvVars(obj: unknown, configPath: string): unknown {
@@ -7,7 +8,7 @@ function expandEnvVars(obj: unknown, configPath: string): unknown {
     return obj.replace(/\$\{([^}]+)\}/g, (_, varName) => {
       const value = process.env[varName];
       if (value === undefined) {
-        throw new Error(
+        throw new ConfigError(
           `Environment variable "${varName}" is not set (in config: ${configPath})`,
         );
       }
@@ -58,7 +59,7 @@ export function loadConfig(configPath?: string): AppConfig {
       parsedConfig = JSON.parse(normalizedContent);
     } catch (err) {
       if (err instanceof SyntaxError) {
-        throw new Error(`Invalid JSON in config file: ${filePath}`);
+        throw new ConfigError(`Invalid JSON in config file: ${filePath}`);
       }
       throw err;
     }
@@ -74,7 +75,7 @@ export function loadConfig(configPath?: string): AppConfig {
           return `  - ${path}: ${e.message}`;
         })
         .join("\n");
-      throw new Error(`Config validation failed:\n${errors}`);
+      throw new ConfigError(`Config validation failed:\n${errors}`);
     }
 
     const config = result.data;
@@ -110,7 +111,7 @@ export function loadConfig(configPath?: string): AppConfig {
     return config;
   } catch (err) {
     if (err instanceof Error && "code" in err && err.code === "ENOENT") {
-      throw new Error(`Config file not found: ${filePath}`);
+      throw new ConfigError(`Config file not found: ${filePath}`);
     }
     throw err;
   }

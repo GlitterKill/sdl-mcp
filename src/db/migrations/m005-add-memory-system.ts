@@ -63,7 +63,8 @@ export async function up(conn: Connection): Promise<void> {
     try {
       await execDdl(conn, idx);
     } catch {
-      // Index creation may not be supported; skip gracefully
+      // Kùzu versions before 0.4 do not support CREATE INDEX. Since indexes
+      // are performance-only (not correctness), silently skipping is safe.
     }
   }
 }

@@ -52,6 +52,7 @@ export interface ToolCallRecord {
 
 export interface AggregateMetrics {
   count: number;
+  min: number;
   p50: number;
   p95: number;
   p99: number;
@@ -60,6 +61,10 @@ export interface AggregateMetrics {
   errorCount: number;
   errorRate: number;
   throughputPerSec: number;
+  /** Average response payload size in bytes */
+  avgResponseSize: number;
+  /** Maximum response payload size in bytes */
+  maxResponseSize: number;
 }
 
 // ---------------------------------------------------------------------------

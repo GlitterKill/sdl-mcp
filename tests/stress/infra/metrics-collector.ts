@@ -89,6 +89,7 @@ export class MetricsCollector {
     if (filtered.length === 0) {
       return {
         count: 0,
+        min: 0,
         p50: 0,
         p95: 0,
         p99: 0,
@@ -97,6 +98,8 @@ export class MetricsCollector {
         errorCount: 0,
         errorRate: 0,
         throughputPerSec: 0,
+        avgResponseSize: 0,
+        maxResponseSize: 0,
       };
     }
 
@@ -107,8 +110,12 @@ export class MetricsCollector {
         ? filtered[filtered.length - 1].timestamp - filtered[0].timestamp
         : 1000;
 
+    const sizes = filtered.map((r) => r.responseSize);
+    const totalSize = sizes.reduce((a, b) => a + b, 0);
+
     return {
       count: filtered.length,
+      min: durations[0],
       p50: percentile(durations, 0.5),
       p95: percentile(durations, 0.95),
       p99: percentile(durations, 0.99),
@@ -118,6 +125,8 @@ export class MetricsCollector {
       errorRate: errorCount / filtered.length,
       throughputPerSec:
         Math.round((filtered.length / (totalMs / 1000)) * 100) / 100,
+      avgResponseSize: Math.round(totalSize / filtered.length),
+      maxResponseSize: Math.max(...sizes),
     };
   }
 
@@ -206,6 +215,95 @@ export class MetricsCollector {
   getPeakDispatchQueued(): number {
     if (this.dispatchSnapshots.length === 0) return 0;
     return Math.max(...this.dispatchSnapshots.map((s) => s.queued));
+  }
+
+  getPeakDispatchActive(): number {
+    if (this.dispatchSnapshots.length === 0) return 0;
+    return Math.max(...this.dispatchSnapshots.map((s) => s.active));
+  }
+
+  getAvgDispatchQueued(): number {
+    if (this.dispatchSnapshots.length === 0) return 0;
+    const sum = this.dispatchSnapshots.reduce((a, s) => a + s.queued, 0);
+    return Math.round((sum / this.dispatchSnapshots.length) * 10) / 10;
+  }
+
+  getDispatchSampleCount(): number {
+    return this.dispatchSnapshots.length;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Per-Client Analysis
+  // ---------------------------------------------------------------------------
+
+  /** Get metrics broken down by clientId — reveals uneven load distribution. */
+  getPerClientMetrics(): Record<string, AggregateMetrics> {
+    const clientIds = [...new Set(this.records.map((r) => r.clientId))];
+    const result: Record<string, AggregateMetrics> = {};
+    for (const id of clientIds) {
+      const filtered = this.records.filter((r) => r.clientId === id);
+      if (filtered.length === 0) continue;
+      const durations = filtered.map((r) => r.durationMs).sort((a, b) => a - b);
+      const sizes = filtered.map((r) => r.responseSize);
+      const errorCount = filtered.filter((r) => !r.success).length;
+      const totalMs =
+        filtered.length > 1
+          ? filtered[filtered.length - 1].timestamp - filtered[0].timestamp
+          : 1000;
+      result[id] = {
+        count: filtered.length,
+        min: durations[0],
+        p50: percentile(durations, 0.5),
+        p95: percentile(durations, 0.95),
+        p99: percentile(durations, 0.99),
+        max: durations[durations.length - 1],
+        avg: Math.round(durations.reduce((a, b) => a + b, 0) / filtered.length),
+        errorCount,
+        errorRate: errorCount / filtered.length,
+        throughputPerSec:
+          Math.round((filtered.length / (totalMs / 1000)) * 100) / 100,
+        avgResponseSize: Math.round(
+          sizes.reduce((a, b) => a + b, 0) / filtered.length,
+        ),
+        maxResponseSize: Math.max(...sizes),
+      };
+    }
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Throughput Timeline
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Return time-bucketed throughput and error counts.
+   * Each bucket covers `bucketMs` milliseconds from the first recorded call.
+   */
+  getThroughputTimeline(
+    bucketMs: number = 1000,
+  ): Array<{ offsetMs: number; calls: number; errors: number }> {
+    if (this.records.length === 0) return [];
+    const sorted = [...this.records].sort((a, b) => a.timestamp - b.timestamp);
+    const startTs = sorted[0].timestamp;
+    const endTs = sorted[sorted.length - 1].timestamp;
+    const buckets: Array<{ offsetMs: number; calls: number; errors: number }> =
+      [];
+    for (let t = startTs; t <= endTs + bucketMs; t += bucketMs) {
+      const inBucket = sorted.filter(
+        (r) => r.timestamp >= t && r.timestamp < t + bucketMs,
+      );
+      buckets.push({
+        offsetMs: t - startTs,
+        calls: inBucket.length,
+        errors: inBucket.filter((r) => !r.success).length,
+      });
+    }
+    return buckets;
+  }
+
+  /** Expose raw records for advanced external analysis. */
+  getRawRecords(): readonly ToolCallRecord[] {
+    return this.records;
   }
 
   // ---------------------------------------------------------------------------

@@ -76,10 +76,10 @@ function writeScenarioSection(scenario: ScenarioResult): void {
   const toolNames = Object.keys(scenario.toolMetrics);
   if (toolNames.length > 0) {
     w(
-      `  ${"Tool".padEnd(30)} ${"Count".padStart(6)} ${"P50".padStart(8)} ${"P95".padStart(8)} ${"P99".padStart(8)} ${"Max".padStart(8)} ${"Err%".padStart(7)}`,
+      `  ${"Tool".padEnd(30)} ${"Count".padStart(6)} ${"Min".padStart(8)} ${"P50".padStart(8)} ${"P95".padStart(8)} ${"P99".padStart(8)} ${"Max".padStart(8)} ${"Err%".padStart(7)} ${"AvgSize".padStart(9)} ${"Ops/s".padStart(7)}`,
     );
     w(
-      `  ${"─".repeat(30)} ${"─".repeat(6)} ${"─".repeat(8)} ${"─".repeat(8)} ${"─".repeat(8)} ${"─".repeat(8)} ${"─".repeat(7)}`,
+      `  ${"─".repeat(30)} ${"─".repeat(6)} ${"─".repeat(8)} ${"─".repeat(8)} ${"─".repeat(8)} ${"─".repeat(8)} ${"─".repeat(8)} ${"─".repeat(7)} ${"─".repeat(9)} ${"─".repeat(7)}`,
     );
 
     for (const name of toolNames) {
@@ -88,8 +88,10 @@ function writeScenarioSection(scenario: ScenarioResult): void {
         m.errorRate > 0
           ? `${RED}${(m.errorRate * 100).toFixed(1)}%${RESET}`
           : `${GREEN}0%${RESET}`;
+      const sizeStr = formatBytes(m.avgResponseSize);
+      const opsStr = String(m.throughputPerSec);
       w(
-        `  ${name.padEnd(30)} ${String(m.count).padStart(6)} ${formatMs(m.p50).padStart(8)} ${formatMs(m.p95).padStart(8)} ${formatMs(m.p99).padStart(8)} ${formatMs(m.max).padStart(8)} ${errStr.padStart(7 + RED.length + RESET.length)}`,
+        `  ${name.padEnd(30)} ${String(m.count).padStart(6)} ${formatMs(m.min).padStart(8)} ${formatMs(m.p50).padStart(8)} ${formatMs(m.p95).padStart(8)} ${formatMs(m.p99).padStart(8)} ${formatMs(m.max).padStart(8)} ${errStr.padStart(7 + RED.length + RESET.length)} ${sizeStr.padStart(9)} ${opsStr.padStart(7)}`,
       );
     }
     w();
@@ -178,6 +180,13 @@ function formatMs(ms: number): string {
   if (ms < 1) return "<1ms";
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0B";
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
 function formatDuration(ms: number): string {
