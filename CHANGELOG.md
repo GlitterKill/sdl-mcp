@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-03-17
+
+### Added
+
+- **Development memory system** — DB-backed `sdl.memory.store`, `sdl.memory.query`, `sdl.memory.remove`, and `sdl.memory.surface` tools with graph-backed persistence (`Memory` nodes, `HAS_MEMORY`/`MEMORY_OF`/`MEMORY_OF_FILE` edges), file sync to `.sdl-memory/`, and memory surfacing for task context
+- **Code-mode tool chaining** — `sdl.code.chain` executes multi-step tool chains with budget tracking, ETag caching, ladder validation, reference resolution, and manual generation for composable context retrieval
+- **Database migration framework** — `src/db/migration-runner.ts` with versioned migrations, idempotent execution, and schema upgrade support so re-indexing is not required on version bumps
+- **Memory tools registered in tool gateway** with compact schema and routing support
+
+### Changed
+
+- **Call edge resolution dramatically improved** — ESM `.js` → `.ts` extension remapping in import resolution fixes the primary cause of broken cross-file call links; global disambiguation prefers exported symbols over test-local redeclarations; TS compiler resolver now activates for Pass 2 even when Rust indexer handles Pass 1
+- HTTP transport auth setup refactored for cleaner token handling
+- Semantic embedding progress now visible during `sdl-mcp index`
+- GitHub Actions upgraded to Node.js 24 runner versions
+
+### Fixed
+
+- Two pre-existing CI test failures resolved
+- `flatted` dependency overridden to >=3.4.0 to resolve CI security audit failure
+- Stress test and tokenizer install script reliability improved
+- CLI and HTTP server interaction edge cases
+- Runtime tool dispatch bugfix
+- Broader code hardening pass across MCP, indexing, and test infrastructure
+
 ## [0.8.8] - 2026-03-15
 
 ### Added
