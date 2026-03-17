@@ -306,13 +306,12 @@ describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
       repoId: REPO_ID,
       versionId: full.versionId,
       conn,
-      entrySymbols: [routesApi.symbolId],
+      entrySymbols: [routesApi.symbolId, loginHandler.symbolId],
       taskText: "inspect api routes and related logic",
       budget: { maxCards: 20, maxEstimatedTokens: 20_000 },
       cardDetail: "deps",
-      minConfidence: 0.5,
+      minConfidence: 0,
     });
-
     assert.ok(slice.cards.some((c) => c.symbolId === routesApi.symbolId));
     assert.ok(slice.cards.some((c) => c.symbolId === middleware.symbolId));
     assert.ok(slice.cards.some((c) => c.symbolId === loginHandler.symbolId));

@@ -120,13 +120,13 @@ describe("release regression guards", () => {
 
     assert.match(
       benchmarksJob,
-      /needs:\s*native-build[\s\S]*uses:\s*actions\/download-artifact@v4[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
+      /needs:\s*native-build[\s\S]*uses:\s*actions\/download-artifact@v7[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
       "benchmarks job should run against the freshly built native addon",
     );
 
     assert.match(
       syncMemoryJob,
-      /needs:\s*\[[^\]]*tests[^\]]*native-build[^\]]*\][\s\S]*uses:\s*actions\/download-artifact@v4[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
+      /needs:\s*\[[^\]]*tests[^\]]*native-build[^\]]*\][\s\S]*uses:\s*actions\/download-artifact@v7[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
       "sync-memory job should also consume the freshly built native addon",
     );
   });
@@ -263,13 +263,13 @@ describe("release regression guards", () => {
 
     assert.match(
       source,
-      /"tokenizers":\s*"\^0\.13\.3"/,
+      /"tokenizers":\s*"[\^~]?0\.13\.\d+[\w.-]*"/,
       "package.json should pin optional tokenizers to a published npm range",
     );
 
     assert.doesNotMatch(
       source,
-      /"tokenizers":\s*"\^0\.22\.0"/,
+      /"tokenizers":\s*"[\^~]?0\.22\.0"/,
       "package.json should not reference an unpublished tokenizers range",
     );
   });
