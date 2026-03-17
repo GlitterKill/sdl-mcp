@@ -25,19 +25,19 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20.x
           cache: "npm"
 
       - name: Cache node_modules
         id: cache-node-modules
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: node_modules
           key: ${{ runner.os }}-node-20.x-modules-${{ hashFiles('package-lock.json') }}
@@ -46,7 +46,7 @@ jobs:
 
       - name: Cache dist build artifacts
         id: cache-dist
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             dist
@@ -57,7 +57,7 @@ jobs:
       - name: Cache indexed memory
         if: github.event_name == 'pull_request'
         id: cache-memory
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             data
@@ -112,7 +112,7 @@ jobs:
 
       - name: Upload test output on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-output-${{ matrix.os }}
           path: ${{ runner.temp }}/test-output.txt
@@ -197,19 +197,19 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20.x
           cache: "npm"
 
       - name: Cache node_modules
         id: cache-node-modules
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: node_modules
           key: ${{ runner.os }}-node-20.x-modules-${{ hashFiles('package-lock.json') }}
@@ -218,7 +218,7 @@ jobs:
 
       - name: Cache dist build artifacts
         id: cache-dist
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             dist
@@ -241,7 +241,7 @@ jobs:
           fi
 
       - name: Download native addon artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ matrix.native-artifact }}
           path: native
@@ -264,7 +264,7 @@ jobs:
 
       - name: Cache locked benchmark repos
         id: cache-benchmark-repos
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .tmp/external-benchmarks
           key: benchmark-repos-${{ hashFiles('scripts/benchmark/phase-a-benchmark-lock.json') }}
@@ -372,10 +372,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20.x
           cache: "npm"
@@ -398,7 +398,7 @@ jobs:
           sudo apt-get install -y musl-tools
 
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -462,7 +462,7 @@ jobs:
         run: npm run test:native-parity
 
       - name: Upload native addon
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-addon-${{ matrix.target }}
           path: native/${{ matrix.addon-file }}
@@ -475,12 +475,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20.x
           cache: "npm"
@@ -497,7 +497,7 @@ jobs:
           targets: x86_64-unknown-linux-gnu
 
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -567,7 +567,7 @@ jobs:
         run: npx tsx scripts/check-benchmark-claims.ts --in .benchmark/matrix-nightly/aggregate.json --min-family-p50 50 --min-family-p25 40 --min-task-floor 20
 
       - name: Upload matrix artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-matrix-nightly
           path: .benchmark/matrix-nightly/**
@@ -595,18 +595,18 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
           cache: "npm"
 
       - name: Cache node_modules
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: node_modules
           key: ${{ runner.os }}-node-${{ matrix.node-version }}-modules-${{ hashFiles('package-lock.json') }}
@@ -614,7 +614,7 @@ jobs:
             ${{ runner.os }}-node-${{ matrix.node-version }}-modules-
 
       - name: Cache dist build artifacts
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             dist
@@ -636,7 +636,7 @@ jobs:
           fi
 
       - name: Download native addon artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ matrix.native-artifact }}
           path: native
@@ -727,7 +727,7 @@ jobs:
           fi
 
       - name: Upload sync artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sync-artifact-${{ matrix.os }}
           path: ./ci-artifacts/*.sdl-artifact.json
@@ -799,10 +799,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20.x
           cache: "npm"
@@ -824,13 +824,13 @@ jobs:
         run: npm run build:all
 
       - name: Download Linux artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: sync-artifact-ubuntu-latest
           path: ./artifacts/linux/
 
       - name: Download Windows artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: sync-artifact-windows-latest
           path: ./artifacts/windows/
