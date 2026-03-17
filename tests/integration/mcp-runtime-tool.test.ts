@@ -9,6 +9,7 @@ import {
   getLadybugConn,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 
 
 /**
@@ -70,6 +71,30 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     }
     mkdirSync(testDir, { recursive: true });
 
+    // Write a default config with NO runtime section so that
+    // RuntimeConfigSchema.parse({}) yields enabled: false.
+    // This avoids picking up a user-level SDL_CONFIG that may
+    // have runtime.enabled = true.
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          repos: [{ repoId, rootPath: testDir }],
+          policy: {
+            maxWindowLines: 180,
+            maxWindowTokens: 1400,
+            requireIdentifiers: true,
+            allowBreakGlass: true,
+          },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    process.env.SDL_CONFIG = configPath;
+    invalidateConfigCache();
+
     await closeLadybugDb();
     await initLadybugDb(graphDbPath);
 
@@ -96,6 +121,7 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
 
   afterEach(async () => {
     await closeLadybugDb();
+    invalidateConfigCache();
     if (originalConfigPath) {
       process.env.SDL_CONFIG = originalConfigPath;
     } else {
