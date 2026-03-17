@@ -1047,8 +1047,14 @@ async function handleMcpStreamableRequest(
     }
 
     // For GET (SSE stream) and DELETE (session termination)
-    // and subsequent POST requests with session ID
-    await transport.handleRequest(req, res);
+    // and subsequent POST requests with session ID.
+    // Track activity so the idle reaper does not expire active sessions.
+    const completeRequest = ctx.sessionManager.trackRequest(sessionId!);
+    try {
+      await transport.handleRequest(req, res);
+    } finally {
+      completeRequest();
+    }
   } catch (error) {
     console.error(`[sdl-mcp] Error handling /mcp request: ${error}`);
     if (!res.headersSent) {
@@ -1157,13 +1163,20 @@ function handleSseMessage(
     return;
   }
 
-  void transport.handlePostMessage(req, res).catch((error) => {
-    console.error(`[sdl-mcp] Failed to process SSE POST message: ${error}`);
-    if (!res.headersSent) {
-      res.writeHead(500);
-      res.end("Failed to process message");
-    }
-  });
+  // Track activity so the idle reaper does not expire active SSE sessions.
+  const completeRequest = ctx.sessionManager.trackRequest(sessionId);
+  void transport
+    .handlePostMessage(req, res)
+    .catch((error) => {
+      console.error(`[sdl-mcp] Failed to process SSE POST message: ${error}`);
+      if (!res.headersSent) {
+        res.writeHead(500);
+        res.end("Failed to process message");
+      }
+    })
+    .finally(() => {
+      completeRequest();
+    });
 }
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
 import type { FileMetadata } from "../../fileScanner.js";
+import { isBuiltinCall } from "../../edge-builder/builtins.js";
 import { resolveImportTargets } from "../../edge-builder/import-resolution.js";
 import { findEnclosingSymbolByRange } from "../../edge-builder/pass2.js";
 
@@ -534,6 +535,68 @@ function collectExplicitImportedNames(
   return names;
 }
 
+// Well-known external crate prefixes that supplement the dynamic set built
+// from each file's `use` imports. Only truly universal crates belong here;
+// the dynamic set (externalCratePrefixes) built from each file's `use`
+// imports is the primary mechanism and handles ecosystem-specific crates.
+const KNOWN_EXTERNAL_CRATE_PREFIXES = new Set([
+  "std",
+  "core",
+  "alloc",
+]);
+
+function isExternalCrateCall(
+  calleeId: string,
+  externalCratePrefixes: Set<string>,
+): boolean {
+  if (!calleeId.includes("::")) return false;
+  const prefix = calleeId.split("::")[0];
+  if (externalCratePrefixes.has(prefix)) return true;
+  return KNOWN_EXTERNAL_CRATE_PREFIXES.has(prefix);
+}
+
+function disambiguateRustCandidates(
+  candidates: string[],
+  callerFilePath: string,
+  symbolIdDetails: Map<string, { filePath: string; exported: boolean }>,
+): string | null {
+  if (candidates.length <= 1) return candidates[0] ?? null;
+
+  // 1. Prefer symbols in the same Rust module subtree
+  const callerModule = inferRustModulePath(callerFilePath);
+  const parentModule = callerModule.split("::").slice(0, -1).join("::");
+  if (parentModule) {
+    const sameModule = candidates.filter((id) => {
+      const detail = symbolIdDetails.get(id);
+      return (
+        detail && inferRustModulePath(detail.filePath).startsWith(parentModule)
+      );
+    });
+    if (sameModule.length === 1) return sameModule[0];
+  }
+
+  // 2. Prefer exported (pub) symbols over private
+  const exported = candidates.filter((id) => {
+    const detail = symbolIdDetails.get(id);
+    return detail?.exported;
+  });
+  if (exported.length === 1) return exported[0];
+
+  // 3. Prefer non-test symbols over test symbols
+  const nonTest = candidates.filter((id) => {
+    const detail = symbolIdDetails.get(id);
+    return (
+      detail &&
+      !detail.filePath.includes("/tests/") &&
+      !detail.filePath.endsWith("_test.rs") &&
+      !detail.filePath.endsWith(".test.rs")
+    );
+  });
+  if (nonTest.length === 1) return nonTest[0];
+
+  return null; // Still ambiguous
+}
+
 function resolveRustPass2CallTarget(params: {
   call: ExtractedCall;
   callerSymbol: ExtractedSymbol;
@@ -546,6 +609,8 @@ function resolveRustPass2CallTarget(params: {
   sameModuleNameToSymbolIds: Map<string, string[]>;
   cratePathToSymbolIds: Map<string, string[]>;
   globalNameToSymbolIds?: Map<string, string[]>;
+  callerFilePath?: string;
+  symbolIdDetails?: Map<string, { filePath: string; exported: boolean }>;
 }): RustResolvedCall | null {
   const {
     call,
@@ -559,6 +624,8 @@ function resolveRustPass2CallTarget(params: {
     sameModuleNameToSymbolIds,
     cratePathToSymbolIds,
     globalNameToSymbolIds,
+    callerFilePath,
+    symbolIdDetails,
   } = params;
 
   if (call.calleeSymbolId && nodeIdToSymbolId.has(call.calleeSymbolId)) {
@@ -719,6 +786,28 @@ function resolveRustPass2CallTarget(params: {
     };
   }
 
+  // Attempt disambiguation when multiple candidates exist
+  const allCandidates = toUniqueCandidates([
+    ...directImportedCandidates,
+    ...sameModuleCandidates,
+    ...globalCandidates,
+  ]);
+  if (allCandidates.length > 1 && callerFilePath && symbolIdDetails) {
+    const disambiguated = disambiguateRustCandidates(
+      allCandidates,
+      callerFilePath,
+      symbolIdDetails,
+    );
+    if (disambiguated) {
+      return {
+        symbolId: disambiguated,
+        isResolved: true,
+        confidence: 0.55,
+        resolution: "disambiguated",
+      };
+    }
+  }
+
   return {
     symbolId: null,
     isResolved: false,
@@ -863,6 +952,29 @@ async function resolveRustCallEdgesPass2(params: {
     moduleIndex.symbolsByModulePath,
   );
 
+  // Build external crate prefix set from file's imports (Step 2)
+  const externalCratePrefixes = new Set<string>();
+  for (const imp of imports) {
+    if (imp.isExternal && imp.specifier) {
+      const prefix = imp.specifier.split("::")[0];
+      if (prefix) externalCratePrefixes.add(prefix);
+    }
+  }
+
+  // Build symbolId → details map for disambiguation (Step 6)
+  const symbolIdDetails = new Map<
+    string,
+    { filePath: string; exported: boolean }
+  >();
+  for (const [_modPath, symbols] of moduleIndex.symbolsByModulePath) {
+    for (const sym of symbols) {
+      symbolIdDetails.set(sym.symbolId, {
+        filePath: sym.relPath,
+        exported: sym.exported,
+      });
+    }
+  }
+
   const now = new Date().toISOString();
   const edgesToInsert: ladybugDb.EdgeRow[] = [];
   let createdEdges = 0;
@@ -888,6 +1000,8 @@ async function resolveRustCallEdgesPass2(params: {
         sameModuleNameToSymbolIds,
         cratePathToSymbolIds,
         globalNameToSymbolIds,
+        callerFilePath: fileMeta.path,
+        symbolIdDetails,
       });
       if (!resolved) {
         continue;
@@ -914,6 +1028,18 @@ async function resolveRustCallEdgesPass2(params: {
         createdCallEdges.add(edgeKey);
         createdEdges++;
       } else if (resolved.targetName) {
+        // Skip Rust macro invocations (original identifier retains !)
+        if (call.calleeIdentifier.endsWith("!")) {
+          continue;
+        }
+        // Skip external crate calls (e.g. serde_json::from_str, tokio::spawn)
+        if (isExternalCrateCall(resolved.targetName, externalCratePrefixes)) {
+          continue;
+        }
+        // Skip known builtins (std methods, stripped macro names)
+        if (isBuiltinCall(resolved.targetName)) {
+          continue;
+        }
         const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
         const edgeKey = `${detail.symbolId}->${unresolvedTargetId}`;
         if (createdCallEdges.has(edgeKey)) {
@@ -993,8 +1119,11 @@ export {
   buildLocalImplMethodNamespaces,
   buildRustModuleIndex,
   buildSameModuleFunctionIndex,
+  disambiguateRustCandidates,
   inferRustModulePath,
   inferRustReceiverTypes,
+  isExternalCrateCall,
+  KNOWN_EXTERNAL_CRATE_PREFIXES,
   normalizeRustTypeName,
   parseOwnerTypeFromNodeId,
   resolveRustPass2CallTarget,

@@ -60,7 +60,9 @@ export async function resolveImportTargets(
 
     const targetFiles = (
       await Promise.all(
-        resolvedPaths.map((relPath) => ladybugDb.getFileByRepoPath(conn, repoId, relPath)),
+        resolvedPaths.map((relPath) =>
+          ladybugDb.getFileByRepoPath(conn, repoId, relPath),
+        ),
       )
     ).flatMap((targetFile) => (targetFile ? [targetFile] : []));
 
@@ -161,6 +163,33 @@ export async function resolveImportTargets(
         });
       }
     }
+
+    // Handle default imports used as namespace-like dot access
+    // e.g., import db from "./queries.js"; db.getRepo()
+    // Merge into existing map rather than skipping — two files could
+    // use the same default import name (e.g., import db from "./a.js"
+    // and import db from "./b.js" in different scopes).
+    // Explicit namespace imports (import * as X) take precedence since
+    // they capture exact exports, so only add if no namespace import exists.
+    //
+    // NOTE: This is a heuristic. If the default export is a single value
+    // (e.g., `export default class Db { ... }`), mapping all file exports
+    // under the default import name is semantically incorrect. The TS
+    // adapter's confidence scores (0.92 for namespace lookups) signal
+    // this uncertainty to downstream consumers.
+    if (imp.defaultImport && !imp.namespaceImport) {
+      const existing =
+        namespaceImports.get(imp.defaultImport) ?? new Map<string, string>();
+      for (const symbol of targetSymbols) {
+        // Don't overwrite entries from a prior namespace import
+        if (!existing.has(symbol.name)) {
+          existing.set(symbol.name, symbol.symbolId);
+        }
+      }
+      if (existing.size > 0) {
+        namespaceImports.set(imp.defaultImport, existing);
+      }
+    }
   }
 
   return { targets, importedNameToSymbolIds, namespaceImports };
@@ -182,7 +211,8 @@ function extractCommonJsRequireImports(content: string): ExtractedImport[] {
     const key = `ns:${alias}:${specifier}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const isRelative = specifier.startsWith("./") || specifier.startsWith("../");
+    const isRelative =
+      specifier.startsWith("./") || specifier.startsWith("../");
     imports.push({
       specifier,
       isRelative,
@@ -210,7 +240,8 @@ function extractCommonJsRequireImports(content: string): ExtractedImport[] {
     const key = `destruct:${names.join(",")}:${specifier}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const isRelative = specifier.startsWith("./") || specifier.startsWith("../");
+    const isRelative =
+      specifier.startsWith("./") || specifier.startsWith("../");
     imports.push({
       specifier,
       isRelative,
