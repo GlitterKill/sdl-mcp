@@ -108,7 +108,7 @@ On startup, the server prints a **bearer token** to stderr:
 
 ```
 [sdl-mcp] HTTP server listening on http://localhost:3000
-[sdl-mcp] Auth token: a1b2c3d4...  (64 characters)
+[sdl-mcp] HTTP auth token: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4
 ```
 
 Copy this token — agents must include it as `Authorization: Bearer <token>` in every request.

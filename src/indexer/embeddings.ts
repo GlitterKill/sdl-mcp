@@ -7,6 +7,7 @@ import {
   type OnnxEmbeddingSession,
 } from "./embeddings-local.js";
 import { getModelInfo } from "./model-registry.js";
+import type { IndexProgress } from "./indexer.js";
 
 /** Legacy dimension constant — only used by MockEmbeddingProvider */
 export const EMBEDDING_DIMENSION = 64;
@@ -250,6 +251,7 @@ export async function refreshSymbolEmbeddings(params: {
   provider: "api" | "local" | "mock";
   model: string;
   symbols?: ladybugDb.SymbolRow[];
+  onProgress?: (progress: IndexProgress) => void;
 }): Promise<{ embedded: number; skipped: number }> {
   const modelName = params.model ?? "all-MiniLM-L6-v2";
   const provider = getEmbeddingProvider(params.provider, modelName);
@@ -265,7 +267,13 @@ export async function refreshSymbolEmbeddings(params: {
     symbols.map((s) => s.symbolId),
   );
 
-  for (const symbol of symbols) {
+  params.onProgress?.({ stage: "embeddings", current: 0, total: symbols.length });
+
+  for (let si = 0; si < symbols.length; si++) {
+    if (si > 0 && si % 25 === 0) {
+      params.onProgress?.({ stage: "embeddings", current: si, total: symbols.length });
+    }
+    const symbol = symbols[si];
     // Text construction (all models are text-based):
     // - Without summaries (Low/Medium): embed raw symbol text (name + kind + signature)
     // - With summaries (High): embed LLM summary when available (better for all text models)
@@ -351,6 +359,7 @@ export async function refreshSymbolEmbeddings(params: {
     embedded += 1;
   }
 
+  params.onProgress?.({ stage: "embeddings", current: symbols.length, total: symbols.length });
   return { embedded, skipped };
 }
 

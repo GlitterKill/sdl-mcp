@@ -1190,9 +1190,7 @@ export async function setupHttpTransport(
   // Generate auth token for this server instance (H3).
   // Non-browser clients (curl, scripts) must include this token.
   const authToken = generateAuthToken();
-  console.error(
-    `[sdl-mcp] HTTP auth token: ${authToken.slice(0, 8)}…(truncated)`,
-  );
+  console.error(`[sdl-mcp] HTTP auth token: ${authToken}`);
   console.error(
     "[sdl-mcp] Include header: Authorization: Bearer <token> for /mcp and /api/* endpoints",
   );

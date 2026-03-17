@@ -8,6 +8,7 @@ import { logger } from "../util/logger.js";
 import { refreshSymbolEmbeddings } from "./embeddings.js";
 import { getAnnIndexManager } from "./ann-index.js";
 import type { CallResolutionTelemetry } from "./edge-builder.js";
+import type { IndexProgress } from "./indexer.js";
 import {
   generateSummariesForRepo,
   type SummaryBatchResult,
@@ -21,6 +22,7 @@ export interface FinalizeIndexingParams {
   appConfig: AppConfig;
   changedFileIds?: Set<string>;
   callResolutionTelemetry: CallResolutionTelemetry;
+  onProgress?: (progress: IndexProgress) => void;
 }
 
 export interface FinalizeIndexingResult {
@@ -33,6 +35,7 @@ export async function finalizeIndexing({
   appConfig,
   changedFileIds,
   callResolutionTelemetry,
+  onProgress,
 }: FinalizeIndexingParams): Promise<FinalizeIndexingResult> {
   await updateMetricsForRepo(repoId, changedFileIds);
 
@@ -46,7 +49,7 @@ export async function finalizeIndexing({
     //    so the embedding step can incorporate them.
     if (appConfig.semantic.generateSummaries) {
       try {
-        summaryStats = await generateSummariesForRepo(repoId, appConfig);
+        summaryStats = await generateSummariesForRepo(repoId, appConfig, onProgress);
         logger.info(
           `Summaries: ${summaryStats.generated} generated, ${summaryStats.skipped} cached, ${summaryStats.failed} failed ($${summaryStats.totalCostUsd.toFixed(4)})`,
         );
@@ -62,6 +65,7 @@ export async function finalizeIndexing({
         repoId,
         provider: appConfig.semantic.provider ?? "local",
         model,
+        onProgress,
       });
       logger.info(
         `Embeddings: ${embResult.embedded} embedded, ${embResult.skipped} cached (model: ${model})`,
@@ -73,8 +77,10 @@ export async function finalizeIndexing({
     // 3. ANN index rebuild (enabled by default now).
     if (appConfig.semantic.ann?.enabled !== false) {
       try {
+        onProgress?.({ stage: "ann-index", current: 0, total: 1 });
         const annManager = getAnnIndexManager(appConfig.semantic.ann);
         const annResult = await annManager.buildIndex({ repoId, model });
+        onProgress?.({ stage: "ann-index", current: 1, total: 1 });
         logger.info(
           `ANN index: ${annResult.indexed} indexed, ${annResult.skipped} skipped`,
         );

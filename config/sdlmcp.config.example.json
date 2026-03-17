@@ -94,7 +94,7 @@
     "enabled": true,
     "alpha": 0.6,
     "provider": "local",
-    "model": "all-MiniLM-L6-v2",
+    "model": "nomic-embed-text-v1.5",
     "generateSummaries": false,
     "summaryProvider": null,
     "summaryModel": null,

@@ -3,6 +3,7 @@ import { logger } from "../util/logger.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import type { AppConfig } from "../config/types.js";
+import type { IndexProgress } from "./indexer.js";
 
 export interface GeneratedSummaryResult {
   summary: string;
@@ -386,6 +387,7 @@ export interface SummaryBatchResult {
 export async function generateSummariesForRepo(
   repoId: string,
   config: AppConfig,
+  onProgress?: (progress: IndexProgress) => void,
 ): Promise<SummaryBatchResult> {
   const conn = await getLadybugConn();
   const semantic = config.semantic;
@@ -500,6 +502,8 @@ export async function generateSummariesForRepo(
     return result;
   }
 
+  onProgress?.({ stage: "summaries", current: 0, total: needsSummary.length });
+
   // Split into batches
   const batches: (typeof needsSummary)[] = [];
   for (let i = 0; i < needsSummary.length; i += batchSize) {
@@ -508,6 +512,7 @@ export async function generateSummariesForRepo(
 
   // Process batches with limited concurrency
   let batchIndex = 0;
+  let symbolsProcessed = 0;
 
   const processBatch = async (
     batch: typeof needsSummary,
@@ -583,16 +588,20 @@ export async function generateSummariesForRepo(
 
     const settled = await Promise.allSettled(chunk.map((b) => processBatch(b)));
 
-    for (const outcome of settled) {
+    for (let ci = 0; ci < settled.length; ci++) {
+      const outcome = settled[ci];
+      const chunkBatchSize = chunk[ci]?.length ?? 0;
       if (outcome.status === "fulfilled") {
         result.generated += outcome.value.generated;
         result.failed += outcome.value.failed;
         result.totalCostUsd += outcome.value.costUsd;
       } else {
         // Entire batch threw — count all as failed
-        result.failed += chunk[0]?.length ?? 0;
+        result.failed += chunkBatchSize;
         logger.warn(`Batch failed entirely: ${String(outcome.reason)}`);
       }
+      symbolsProcessed += chunkBatchSize;
+      onProgress?.({ stage: "summaries", current: symbolsProcessed, total: needsSummary.length });
     }
   }
 

@@ -53,7 +53,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 
 export interface IndexProgress {
-  stage: "scanning" | "parsing" | "pass1" | "pass2" | "finalizing";
+  stage: "scanning" | "parsing" | "pass1" | "pass2" | "finalizing" | "summaries" | "embeddings" | "ann-index";
   current: number;
   total: number;
   currentFile?: string;
@@ -1007,6 +1007,7 @@ async function indexRepoImpl(
       appConfig,
       changedFileIds: changedFileIdsParam,
       callResolutionTelemetry,
+      onProgress,
     });
 
     let clustersComputed = 0;
