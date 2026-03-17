@@ -833,6 +833,27 @@
         "emitLegacyTools": true
       }
     },
+    "httpAuth": {
+      "type": "object",
+      "description": "HTTP transport authentication configuration — set a static bearer token or disable auth entirely",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable bearer-token authentication for /mcp and /api/* endpoints",
+          "default": true
+        },
+        "token": {
+          "type": ["string", "null"],
+          "description": "Static bearer token. When null a random token is generated at startup.",
+          "minLength": 1,
+          "default": null
+        }
+      },
+      "default": {
+        "enabled": true,
+        "token": null
+      }
+    },
     "codeMode": {
       "type": "object",
       "description": "Code Mode configuration — batch multiple tool calls in a single chain with $N references between steps",

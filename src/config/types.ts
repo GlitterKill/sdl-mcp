@@ -347,6 +347,15 @@ export const CodeModeConfigSchema = z.object({
 
 export type CodeModeConfig = z.infer<typeof CodeModeConfigSchema>;
 
+export const HttpAuthConfigSchema = z.object({
+  /** Enable bearer-token authentication for HTTP transport endpoints. */
+  enabled: z.boolean().default(true),
+  /** Static bearer token. When null/omitted a random token is generated at startup. */
+  token: z.string().min(1).nullish().default(null),
+});
+
+export type HttpAuthConfig = z.infer<typeof HttpAuthConfigSchema>;
+
 export const SecurityConfigSchema = z.object({
   allowedRepoRoots: z.array(z.string()).default([]),
 });
@@ -378,6 +387,7 @@ export const AppConfigSchema = z.object({
   gateway: GatewayConfigSchema.optional(),
   codeMode: CodeModeConfigSchema.optional(),
   security: SecurityConfigSchema.optional(),
+  httpAuth: HttpAuthConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

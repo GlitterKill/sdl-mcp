@@ -225,10 +225,10 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
         sessionManager,
         gatewayConfig: config.gateway,
         codeModeConfig: config.codeMode,
-      });
+      }, config.httpAuth);
 
       // Now that we know the actual bound port, write the pidfile.
-      pidfilePath = writePidfile(graphDbPath, transport, httpHandle.port, httpHandle.authToken);
+      pidfilePath = writePidfile(graphDbPath, transport, httpHandle.port, httpHandle.authToken ?? undefined);
       console.error(`PID file written: ${pidfilePath}`);
       shutdownMgr.setPidfilePath(pidfilePath);
 

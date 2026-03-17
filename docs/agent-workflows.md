@@ -200,134 +200,57 @@ Run commands in a repo-scoped subprocess. Requires `runtime.enabled: true` in co
 
 ### 7) Context export (`sdl.context.summary`)
 
-Generate a token-bounded summary for contexts that don't support MCP tool calls (e.g., pasting into a chat, a PR description, or a ticket).
+Use `sdl.context.summary` to generate token-bounded summaries for non-MCP contexts (clipboard, PR descriptions, tickets).
 
-```json
-{
-  "repoId": "[repoid]",
-  "query": "authentication flow",
-  "budget": 2000,
-  "format": "clipboard",
-  "scope": "task"
-}
-```
+- Pass `query` (required), `budget` (token cap), `format` (`"markdown"` | `"json"` | `"clipboard"`), and `scope` (`"symbol"` | `"file"` | `"task"`).
+- Use `scope: "task"` for multi-symbol summaries; `scope: "symbol"` for single-symbol.
+- Use `format: "clipboard"` for paste-ready output.
 
-- **Formats**: `"markdown"` (default), `"json"` (structured), `"clipboard"` (paste-ready).
-- **Scopes**: `"symbol"` (single symbol), `"file"` (all exports in a file), `"task"` (multi-symbol via search).
+### 8) Code Mode (`sdl.chain`)
 
-### 8) Code Mode (`sdl.chain`) — multi-step operations
+When `codeMode.enabled: true` is set in config, two additional tools are available:
 
-When `codeMode.enabled: true` is set in config, two additional tools become available:
+- `sdl.manual` — returns a compact TypeScript API reference for all actions.
+- `sdl.chain` — executes up to 50 actions in a single round trip with `$N` result piping between steps.
 
-- `sdl.manual` — returns a compact TypeScript API reference for all available actions.
-- `sdl.chain` — executes up to 50 actions in a single round trip with budget tracking.
+Chain guidance:
+- Each step has `fn` (action name) and `args`. Use `$N.path.to.field` to reference step N's result (0-based).
+- Set `budget`: `{ maxTotalTokens, maxSteps, maxDurationMs }`.
+- `onError`: `"continue"` (default, skip failed steps) or `"stop"` (halt on first error).
+- The chain enforces the same context-ladder escalation rules as individual tools.
+- Cross-step ETag caching is automatic — no need to pass ETags manually between steps.
+- Use chains for multi-step lookups (search → getCards → getSkeleton) in high-latency environments or CI pipelines. Do not use for single actions.
 
-Chain steps can reference previous results using `$N` syntax (where N is the 0-based step index):
+### 9) Feedback loop (`sdl.agent.feedback`)
 
-```json
-{
-  "repoId": "[repoid]",
-  "steps": [
-    { "fn": "symbol.search", "args": { "query": "handleAuth", "limit": 5 } },
-    { "fn": "symbol.getCard", "args": { "symbolId": "$0.symbols[0].symbolId" } },
-    { "fn": "code.getSkeleton", "args": { "symbolId": "$0.symbols[0].symbolId" } }
-  ],
-  "budget": {
-    "maxTotalTokens": 8000,
-    "maxSteps": 10,
-    "maxDurationMs": 30000
-  },
-  "onError": "continue"
-}
-```
+After completing a task, call `sdl.agent.feedback` with:
+- `versionId` (from `sdl.repo.status`), `sliceHandle` (from `sdl.slice.build`).
+- `usefulSymbols` (required, min 1), `missingSymbols` (optional).
+- `taskType` (`"debug"` | `"review"` | `"implement"` | `"explain"`), `taskText`, `taskTags`.
 
-Key behaviors:
-- **Result piping**: `$0.symbols[0].symbolId` resolves to a value from step 0's result. Supports nested paths and array indexing.
-- **Budget tracking**: chain aborts if cumulative token output exceeds `maxTotalTokens`.
-- **Context-ladder validation**: the chain enforces the same escalation rules as individual tool calls (e.g., can't skip to `needWindow` without trying `getSkeleton` first).
-- **Cross-step ETag caching**: if step 1 fetches a card with an ETag, subsequent steps re-use it automatically.
-- **Error handling**: `"continue"` (default) skips failed steps and proceeds; `"stop"` halts on first error.
+This trains the slice ranker and improves future context quality.
 
-Use chains when you need multiple related lookups in a single request (e.g., search → getCards → getSkeleton), especially in high-latency environments or CI pipelines.
+Use `sdl.agent.feedback.query` with `limit` and `since` (ISO timestamp) to review aggregated stats on which symbols are most frequently useful/missing.
 
-### 9) Feedback loop
+### 10) Policy management (`sdl.policy.get` / `sdl.policy.set`)
 
-After completing a task, record what worked:
-
-```json
-{
-  "repoId": "[repoid]",
-  "versionId": "<from sdl.repo.status>",
-  "sliceHandle": "<from sdl.slice.build>",
-  "usefulSymbols": ["<id1>", "<id2>"],
-  "missingSymbols": ["<id3>"],
-  "taskType": "debug",
-  "taskText": "Fix auth token expiry bug",
-  "taskTags": ["auth", "security"]
-}
-```
-
-This trains the slice ranker over time and improves context quality for the repo.
-
-To review recorded feedback later (e.g., for tuning or reporting):
-
-```json
-sdl.agent.feedback.query({
-  "repoId": "[repoid]",
-  "limit": 50,
-  "since": "2026-03-01T00:00:00Z"
-})
-```
-
-Returns aggregated stats on which symbols are most frequently useful/missing.
-
-### 10) Policy management
-
-Read current gating thresholds:
-
-```json
-sdl.policy.get({ "repoId": "[repoid]" })
-```
-
-Adjust policy for the session (merge patch — only supplied fields change):
-
-```json
-sdl.policy.set({
-  "repoId": "[repoid]",
-  "policyPatch": {
-    "maxWindowLines": 250,
-    "allowBreakGlass": false
-  }
-})
-```
-
-Common adjustments:
-- Raise `maxWindowLines`/`maxWindowTokens` for large functions.
-- Set `allowBreakGlass: false` to enforce strict proof-of-need gating.
-- Set `requireIdentifiers: false` to allow unscoped code window requests (not recommended).
+1. Call `sdl.policy.get` to read current gating thresholds.
+2. Call `sdl.policy.set` with `policyPatch` (merge patch — only supplied fields change):
+   - `maxWindowLines` / `maxWindowTokens` — raise for large functions.
+   - `allowBreakGlass: false` — enforce strict proof-of-need gating.
+   - `requireIdentifiers: false` — allow unscoped code window requests (not recommended).
 
 ### 11) Development memories
 
-Store cross-session knowledge and retrieve it automatically:
+Store cross-session knowledge that auto-surfaces in future slice builds:
 
-- **After a debugging session**: store a `bugfix` memory linked to the relevant symbols.
-  ```
-  sdl.memory.store({ repoId, type: "bugfix", title: "Race condition in authenticate()",
-    content: "...", symbolIds: ["sym_abc"], tags: ["auth", "concurrency"] })
-  ```
-- **After an architectural decision**: store a `decision` memory.
-  ```
-  sdl.memory.store({ repoId, type: "decision", title: "Use mutex for session store",
-    content: "...", symbolIds: ["sym_sessionStore"], confidence: 0.95 })
-  ```
-- **Automatic surfacing**: `sdl.slice.build` includes relevant memories by default.
-  Set `includeMemories: false` to disable, or `memoryLimit: N` to control count.
-- **Review stale memories**: after refactors, query `sdl.memory.query({ repoId, staleOnly: true })`
-  and update or remove outdated knowledge.
-- **Surface for current task**: `sdl.memory.surface({ repoId, symbolIds: [...], limit: 5 })`
-  returns the most relevant memories ranked by confidence × recency × symbol overlap.
-- **Team sharing**: memories are saved to `.sdl-memory/` files that can be committed to Git.
-  On the next `sdl.index.refresh`, other team members' files are imported into the graph.
+- **Store**: `sdl.memory.store` with `type` (`"decision"` | `"bugfix"` | `"task_context"`), `title`, `content`, optional `symbolIds`, `fileRelPaths`, `tags`, `confidence`.
+- **Query**: `sdl.memory.query` with `query` (text search), `types`, `tags`, `symbolIds`, `staleOnly`, `limit`, `sortBy` (`"recency"` | `"confidence"`).
+- **Surface**: `sdl.memory.surface` with `symbolIds` and/or `taskType` — returns ranked by confidence × recency × symbol overlap.
+- **Remove**: `sdl.memory.remove` with `memoryId`; add `deleteFile: true` to also remove the `.sdl-memory/` file.
+- **Automatic surfacing**: `sdl.slice.build` includes relevant memories by default. Set `includeMemories: false` to disable, or `memoryLimit: N` to control count.
+- **Staleness**: after refactors, query `sdl.memory.query` with `staleOnly: true` and update or remove outdated memories.
+- **Team sharing**: memories save to `.sdl-memory/` files; commit to Git. On `sdl.index.refresh`, other team members' files are imported into the graph.
 
 ### 12) Do not
 

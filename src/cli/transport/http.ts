@@ -1173,8 +1173,8 @@ function handleSseMessage(
 export interface HttpServerHandle {
   /** The port the server is actually listening on (resolves port 0 → OS-assigned). */
   port: number;
-  /** The bearer token required for /mcp and /api/* endpoints. */
-  authToken: string;
+  /** The bearer token required for /mcp and /api/* endpoints, or null if auth is disabled. */
+  authToken: string | null;
   /** Resolves when the server closes. */
   serverClosed: Promise<void>;
   /** Gracefully close the HTTP server and stop the idle reaper. */
@@ -1186,14 +1186,27 @@ export async function setupHttpTransport(
   port: number,
   graphDbPath: string,
   services: HttpTransportServices & MCPServerServices = {},
+  httpAuthConfig?: { enabled?: boolean; token?: string | null },
 ): Promise<HttpServerHandle> {
-  // Generate auth token for this server instance (H3).
-  // Non-browser clients (curl, scripts) must include this token.
-  const authToken = generateAuthToken();
-  console.error(`[sdl-mcp] HTTP auth token: ${authToken}`);
-  console.error(
-    "[sdl-mcp] Include header: Authorization: Bearer <token> for /mcp and /api/* endpoints",
-  );
+  // Resolve auth token from config (H3).
+  const authEnabled = httpAuthConfig?.enabled !== false;
+  let authToken: string | null;
+  if (!authEnabled) {
+    authToken = null;
+    console.error("[sdl-mcp] HTTP auth is DISABLED (httpAuth.enabled = false)");
+  } else if (httpAuthConfig?.token) {
+    authToken = httpAuthConfig.token;
+    console.error("[sdl-mcp] HTTP auth using static token from config");
+    console.error(
+      "[sdl-mcp] Include header: Authorization: Bearer <token> for /mcp and /api/* endpoints",
+    );
+  } else {
+    authToken = generateAuthToken();
+    console.error(`[sdl-mcp] HTTP auth token: ${authToken}`);
+    console.error(
+      "[sdl-mcp] Include header: Authorization: Bearer <token> for /mcp and /api/* endpoints",
+    );
+  }
 
   // Unified transport map: sessionId -> Transport (SSE or StreamableHTTP)
   const transports = new Map<string, Transport>();

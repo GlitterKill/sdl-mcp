@@ -113,6 +113,19 @@ On startup, the server prints a **bearer token** to stderr:
 
 Copy this token — agents must include it as `Authorization: Bearer <token>` in every request.
 
+You can also set a **static token** or **disable auth entirely** via config:
+
+```json
+{
+  "httpAuth": {
+    "enabled": true,
+    "token": "my-static-token"
+  }
+}
+```
+
+Set `"enabled": false` to disable auth for trusted local environments. See [Configuration Reference → httpAuth](./configuration-reference.md#httpauth-optional) for details.
+
 ### Endpoints
 
 | Endpoint | Method | Purpose |

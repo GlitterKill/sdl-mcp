@@ -137,6 +137,10 @@
     "writeQueueTimeoutMs": 30000,
     "toolQueueTimeoutMs": 30000
   },
+  "httpAuth": {
+    "enabled": true,
+    "token": null
+  },
   "codeMode": {
     "enabled": false,
     "exclusive": false,

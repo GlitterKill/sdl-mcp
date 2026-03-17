@@ -349,6 +349,19 @@ Below is every option with inline commentary. JSON does not support comments, so
   },
 
   // ──────────────────────────────────────────────────────────
+  // HTTP AUTH — bearer-token authentication for HTTP transport
+  // ──────────────────────────────────────────────────────────
+  "httpAuth": {
+    // Enable bearer-token authentication for /mcp and /api/* endpoints.
+    // Set false to disable auth entirely (trusted local environments).
+    "enabled": true,
+
+    // Static bearer token. When null, a random token is generated at startup.
+    // Set a fixed value for shared dev servers or CI pipelines.
+    "token": null,
+  },
+
+  // ──────────────────────────────────────────────────────────
   // PARALLEL SCORER — worker-thread beam search acceleration
   // ──────────────────────────────────────────────────────────
   "parallelScorer": {
@@ -624,6 +637,31 @@ Worker-thread acceleration for beam search scoring in `sdl.slice.build`.
 | `minBatchSize` | `integer?` | Auto    | 1-100 | Min candidates to trigger parallelism |
 
 > **When to change:** Enable on multi-core machines where slice building is a bottleneck. Most useful for repos with >5k symbols and large slices.
+
+---
+
+### `httpAuth` (optional)
+
+Controls bearer-token authentication for the HTTP transport (`sdl-mcp serve --http`). Has no effect on stdio transport.
+
+| Field     | Type      | Default | Description                                                                 |
+| --------- | --------- | ------- | --------------------------------------------------------------------------- |
+| `enabled` | `boolean` | `true`  | Enable bearer-token authentication for `/mcp` and `/api/*` endpoints        |
+| `token`   | `string?` | `null`  | Static bearer token. When `null`, a random token is generated at startup.   |
+
+Three modes:
+
+| Configuration                              | Behavior                                                                 |
+| ------------------------------------------ | ------------------------------------------------------------------------ |
+| Omitted / `{ "enabled": true }`            | Random token generated at startup, printed to stderr (default behavior)  |
+| `{ "enabled": true, "token": "my-token" }` | Static token from config — no random generation, token not printed       |
+| `{ "enabled": false }`                     | Auth disabled entirely — all requests accepted without a token           |
+
+> **When to change:**
+>
+> - **Shared dev servers:** Set a static `token` so all agents can use the same credential without reading stderr.
+> - **Trusted local environment:** Set `enabled: false` to skip auth entirely.
+> - **Production / CI:** Leave default (random per-instance token) or set a static token via config with restricted file permissions.
 
 ---
 
