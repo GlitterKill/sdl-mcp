@@ -294,7 +294,11 @@ const VALIDATORS: Record<string, ValidatorFn> = {
     const tool = "sdl.slice.refresh";
     return [
       checkNonEmptyString(tool, "sliceHandle present", result.sliceHandle),
-      checkExists(tool, "delta or noChange", result.delta ?? result.noChange),
+      checkExists(
+        tool,
+        "delta or notModified",
+        result.delta ?? (result.notModified === true ? true : undefined),
+      ),
     ];
   },
 

@@ -114,7 +114,7 @@ async function readerWorkflow(
       repoId: "stress-fixtures",
       entrySymbols: [symbolId],
       budget: { maxCards: 20, maxEstimatedTokens: 3000 },
-    });
+    }) as Record<string, unknown> & { slice?: { vid?: string } };
 
     // 4. Skeleton
     await client.callToolParsed("sdl.code.getSkeleton", {
@@ -144,11 +144,14 @@ async function readerWorkflow(
 
     // 7. Slice refresh if we have a handle (tests incremental path)
     const sliceHandle = sliceResult?.sliceHandle as string | undefined;
-    if (sliceHandle) {
+    const knownVersion = (
+      sliceResult?.ledgerVersion ?? sliceResult?.slice?.vid
+    ) as string | undefined;
+    if (sliceHandle && knownVersion) {
       try {
         await client.callToolParsed("sdl.slice.refresh", {
-          repoId: "stress-fixtures",
           sliceHandle,
+          knownVersion,
         });
       } catch {
         // Handle may have expired under heavy load — acceptable
