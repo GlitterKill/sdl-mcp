@@ -85,6 +85,9 @@ TASKS.md
 V06-*.md
 nul
 
+# Worktrees
+.worktrees/
+
 # Tool caches
 .ruff_cache/
 .codex/
@@ -137,3 +140,4 @@ tests.tap
 docs/plans/code-mode-integration.md
 docs/superpowers/plans/2026-03-16-http-auth-config.md
 NODE24-MIGRATION.md
+docs/plans/auto-memory-plan.md

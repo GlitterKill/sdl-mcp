@@ -142,7 +142,7 @@
     "graphSliceMaxSizeBytes": 52428800
   },
   "semantic": {
-    "enabled": false,
+    "enabled": true,
     "alpha": 0.6,
     "provider": "mock",
     "model": "all-MiniLM-L6-v2",
