@@ -1,0 +1,22 @@
+{
+  "name": "@sdl-mcp/ladybug-win32-x64",
+  "version": "0.15.1-sdl.1",
+  "description": "LadybugDB 0.15.1 native binary for win32-x64",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "lbugjs.node",
+  "files": [
+    "lbugjs.node",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GlitterKill/sdl-mcp.git",
+    "directory": "packages/kuzu-split"
+  }
+}

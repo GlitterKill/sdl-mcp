@@ -1,0 +1,268 @@
+name: Publish LadybugDB Split Packages
+
+# Publishes @sdl-mcp/ladybug and @sdl-mcp/ladybug-{platform}-{arch} packages.
+# Run this when updating the upstream @ladybugdb/core version.
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_version:
+        description: "Upstream @ladybugdb/core version (e.g. 0.15.1)"
+        required: true
+        type: string
+      sdl_revision:
+        description: "SDL revision suffix (e.g. 1 -> 0.15.1-sdl.1)"
+        required: true
+        default: "1"
+        type: string
+      dry_run:
+        description: "Dry run (skip actual publish)"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  UPSTREAM_VERSION: ${{ github.event.inputs.upstream_version }}
+  SDL_REVISION: ${{ github.event.inputs.sdl_revision }}
+  DRY_RUN: ${{ github.event.inputs.dry_run }}
+
+jobs:
+  build-and-publish:
+    name: Build & Publish LadybugDB Split Packages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install upstream @ladybugdb/core (fresh, with all platform binaries)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ladybug-extract
+          cd /tmp/ladybug-extract
+          npm init -y
+          npm install "@ladybugdb/core@${UPSTREAM_VERSION}" --ignore-scripts
+
+          # Verify all platform binaries exist
+          echo "Checking prebuilt binaries..."
+          for binary in lbugjs-win32-x64.node lbugjs-linux-x64.node lbugjs-linux-arm64.node lbugjs-darwin-arm64.node; do
+            if [ ! -f "node_modules/@ladybugdb/core/prebuilt/${binary}" ]; then
+              echo "ERROR: Missing binary: ${binary}"
+              exit 1
+            fi
+            size=$(du -h "node_modules/@ladybugdb/core/prebuilt/${binary}" | cut -f1)
+            echo "  OK: ${binary} (${size})"
+          done
+
+      - name: Update build script version config
+        run: |
+          set -euo pipefail
+          WRAPPER_VERSION="${UPSTREAM_VERSION}-sdl.${SDL_REVISION}"
+          echo "Building split packages for LadybugDB ${UPSTREAM_VERSION} -> ${WRAPPER_VERSION}"
+
+          # Patch the build script with the correct versions
+          sed -i "s/const UPSTREAM_VERSION = \".*\"/const UPSTREAM_VERSION = \"${UPSTREAM_VERSION}\"/" packages/kuzu-split/build.mjs
+          sed -i "s/const WRAPPER_VERSION = \".*\"/const WRAPPER_VERSION = \"${WRAPPER_VERSION}\"/" packages/kuzu-split/build.mjs
+
+      - name: Build split packages
+        run: |
+          node packages/kuzu-split/build.mjs \
+            --kuzu-dir /tmp/ladybug-extract/node_modules/@ladybugdb/core \
+            --out-dir packages/kuzu-split/out
+
+      - name: Verify all platform packages built
+        run: |
+          set -euo pipefail
+          for pkg_dir in packages/kuzu-split/out/ladybug-*/; do
+            pkg_name=$(node -e "console.log(require('./${pkg_dir}package.json').name)")
+            if [ ! -f "${pkg_dir}lbugjs.node" ]; then
+              echo "ERROR: Missing binary in ${pkg_name}"
+              exit 1
+            fi
+            size=$(du -h "${pkg_dir}lbugjs.node" | cut -f1)
+
+            # Verify os/cpu fields
+            os=$(node -e "console.log(require('./${pkg_dir}package.json').os[0])")
+            cpu=$(node -e "console.log(require('./${pkg_dir}package.json').cpu[0])")
+            echo "OK: ${pkg_name} (${size}) [os=${os}, cpu=${cpu}]"
+          done
+
+          # Verify wrapper
+          wrapper_dir="packages/kuzu-split/out/ladybug"
+          wrapper_name=$(node -e "console.log(require('./${wrapper_dir}/package.json').name)")
+          echo "OK: ${wrapper_name} (wrapper)"
+
+          # Verify wrapper has optionalDependencies for all platforms
+          node -e "
+            const pkg = require('./${wrapper_dir}/package.json');
+            const expected = [
+              '@sdl-mcp/ladybug-win32-x64',
+              '@sdl-mcp/ladybug-linux-x64',
+              '@sdl-mcp/ladybug-linux-arm64',
+              '@sdl-mcp/ladybug-darwin-arm64',
+            ];
+            for (const dep of expected) {
+              if (!pkg.optionalDependencies[dep]) {
+                throw new Error('Missing optionalDependency: ' + dep);
+              }
+            }
+            console.log('OK: All platform optionalDependencies present');
+          "
+
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          WRAPPER_VERSION="${UPSTREAM_VERSION}-sdl.${SDL_REVISION}"
+          FAILED=0
+
+          # Publish platform packages first (wrapper depends on them)
+          for pkg_dir in packages/kuzu-split/out/ladybug-*/; do
+            pkg_name=$(node -e "console.log(require('./${pkg_dir}package.json').name)")
+            echo "Publishing ${pkg_name}@${WRAPPER_VERSION}..."
+
+            if [ "${DRY_RUN}" = "true" ]; then
+              npm publish "${pkg_dir}" --access public --dry-run
+              continue
+            fi
+
+            existing=$(npm view "${pkg_name}@${WRAPPER_VERSION}" version 2>/dev/null || true)
+            if [ "${existing}" = "${WRAPPER_VERSION}" ]; then
+              echo "  SKIP: ${pkg_name}@${WRAPPER_VERSION} already published"
+              continue
+            fi
+
+            if npm publish "${pkg_dir}" --access public 2>&1; then
+              echo "  OK: ${pkg_name}@${WRAPPER_VERSION} published"
+            else
+              recheck=$(npm view "${pkg_name}@${WRAPPER_VERSION}" version 2>/dev/null || true)
+              if [ "${recheck}" = "${WRAPPER_VERSION}" ]; then
+                echo "  SKIP: ${pkg_name}@${WRAPPER_VERSION} already published (confirmed after retry)"
+              else
+                echo "  FAIL: ${pkg_name}@${WRAPPER_VERSION}"
+                FAILED=1
+              fi
+            fi
+          done
+
+          if [ "${FAILED}" -eq 1 ]; then
+            echo "ERROR: Some platform packages failed to publish"
+            exit 1
+          fi
+
+      - name: Publish wrapper package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          WRAPPER_VERSION="${UPSTREAM_VERSION}-sdl.${SDL_REVISION}"
+          wrapper_dir="packages/kuzu-split/out/ladybug"
+          pkg_name=$(node -e "console.log(require('./${wrapper_dir}/package.json').name)")
+
+          echo "Publishing ${pkg_name}@${WRAPPER_VERSION}..."
+
+          if [ "${DRY_RUN}" = "true" ]; then
+            npm publish "${wrapper_dir}" --access public --dry-run
+            exit 0
+          fi
+
+          existing=$(npm view "${pkg_name}@${WRAPPER_VERSION}" version 2>/dev/null || true)
+          if [ "${existing}" = "${WRAPPER_VERSION}" ]; then
+            echo "SKIP: ${pkg_name}@${WRAPPER_VERSION} already published"
+            exit 0
+          fi
+
+          if npm publish "${wrapper_dir}" --access public 2>&1; then
+            echo "OK: ${pkg_name}@${WRAPPER_VERSION} published"
+          else
+            recheck=$(npm view "${pkg_name}@${WRAPPER_VERSION}" version 2>/dev/null || true)
+            if [ "${recheck}" = "${WRAPPER_VERSION}" ]; then
+              echo "SKIP: ${pkg_name}@${WRAPPER_VERSION} already published (confirmed after retry)"
+            else
+              echo "FAIL: ${pkg_name}@${WRAPPER_VERSION}"
+              exit 1
+            fi
+          fi
+
+      - name: Verify install on ubuntu (platform selection test)
+        if: always() && github.event.inputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          WRAPPER_VERSION="${UPSTREAM_VERSION}-sdl.${SDL_REVISION}"
+
+          mkdir -p /tmp/ladybug-verify
+          cd /tmp/ladybug-verify
+          npm init -y
+
+          echo "Installing @sdl-mcp/ladybug@${WRAPPER_VERSION}..."
+          npm install "@sdl-mcp/ladybug@${WRAPPER_VERSION}"
+
+          echo "Checking installed packages..."
+          ls node_modules/@sdl-mcp/
+
+          # Verify only linux-x64 platform package was installed
+          if [ -d "node_modules/@sdl-mcp/ladybug-linux-x64" ]; then
+            echo "OK: linux-x64 platform package installed"
+          else
+            echo "FAIL: linux-x64 platform package not found"
+            exit 1
+          fi
+
+          # Verify other platforms were NOT installed
+          for plat in win32-x64 linux-arm64 darwin-arm64; do
+            if [ -d "node_modules/@sdl-mcp/ladybug-${plat}" ]; then
+              echo "WARN: ${plat} package unexpectedly installed (npm may ignore os/cpu on some versions)"
+            else
+              echo "OK: ${plat} package correctly excluded"
+            fi
+          done
+
+          # Verify the binary loads
+          node -e "
+            const kuzu = require('@sdl-mcp/ladybug');
+            console.log('Version:', kuzu.VERSION);
+            const db = new kuzu.Database(':memory:');
+            const conn = new kuzu.Connection(db);
+            conn.initSync();
+            const result = conn.querySync('RETURN 1 AS x');
+            console.log('Query result:', result.getNextSync());
+            conn.closeSync();
+            db.closeSync();
+            console.log('OK: LadybugDB split package works');
+          "
+
+      - name: Summary
+        if: always()
+        run: |
+          WRAPPER_VERSION="${UPSTREAM_VERSION}-sdl.${SDL_REVISION}"
+          echo "## LadybugDB Split Package Publish" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | Version | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`@sdl-mcp/ladybug\` | ${WRAPPER_VERSION} | Wrapper |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`@sdl-mcp/ladybug-win32-x64\` | ${WRAPPER_VERSION} | Windows x64 |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`@sdl-mcp/ladybug-linux-x64\` | ${WRAPPER_VERSION} | Linux x64 |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`@sdl-mcp/ladybug-linux-arm64\` | ${WRAPPER_VERSION} | Linux ARM64 |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`@sdl-mcp/ladybug-darwin-arm64\` | ${WRAPPER_VERSION} | macOS ARM64 |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "> **Dry run** — no packages were published" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To use in sdl-mcp:" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo "\"kuzu\": \"npm:@sdl-mcp/ladybug@${WRAPPER_VERSION}\"" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,46 @@
+{
+  "name": "@sdl-mcp/ladybug",
+  "version": "0.15.1-sdl.1",
+  "description": "LadybugDB 0.15.1 — repackaged with per-platform binaries (saves ~460 MB vs upstream)",
+  "type": "commonjs",
+  "main": "index.js",
+  "module": "./index.mjs",
+  "types": "./lbug.d.ts",
+  "exports": {
+    ".": {
+      "require": "./index.js",
+      "import": "./index.mjs",
+      "types": "./lbug.d.ts"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.mjs",
+    "lbug.d.ts",
+    "lbug_native.js",
+    "connection.js",
+    "database.js",
+    "prepared_statement.js",
+    "query_result.js",
+    "LICENSE",
+    "README.md"
+  ],
+  "optionalDependencies": {
+    "@sdl-mcp/ladybug-win32-x64": "0.15.1-sdl.1",
+    "@sdl-mcp/ladybug-linux-x64": "0.15.1-sdl.1",
+    "@sdl-mcp/ladybug-linux-arm64": "0.15.1-sdl.1",
+    "@sdl-mcp/ladybug-darwin-arm64": "0.15.1-sdl.1"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GlitterKill/sdl-mcp.git",
+    "directory": "packages/kuzu-split"
+  },
+  "keywords": [
+    "ladybugdb",
+    "graph-database",
+    "cypher",
+    "native"
+  ]
+}

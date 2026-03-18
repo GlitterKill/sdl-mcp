@@ -21,10 +21,12 @@
     "migrations",
     "models",
     "templates",
+    "scripts/postinstall-prune-kuzu.mjs",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
+    "postinstall": "node scripts/postinstall-prune-kuzu.mjs",
     "clean:dist": "node scripts/clean-dist.mjs",
     "build": "tsc -p tsconfig.build.json",
     "build:scripts": "tsc -p tsconfig.scripts.json && tsx scripts/fix-imports.ts",

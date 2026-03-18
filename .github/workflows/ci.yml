@@ -73,11 +73,16 @@ jobs:
       - name: Setup tree-sitter native binding
         run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
-      - name: Setup kuzu native binary
+      - name: Setup LadybugDB native binary
         shell: bash
         run: |
-          if [ -f node_modules/kuzu/install.js ]; then
+          # Split packages (@sdl-mcp/ladybug-*): binary resolves via require.resolve(), no setup needed.
+          # Upstream kuzu (@ladybugdb/core): needs install.js to copy prebuilt binary.
+          if [ -f node_modules/kuzu/install.js ] && [ ! -f node_modules/kuzu/lbugjs.node ]; then
+            echo "Running upstream kuzu install.js to copy platform binary..."
             cd node_modules/kuzu && node install.js
+          else
+            echo "LadybugDB binary available (split package or already installed)"
           fi
 
       - name: Build all
@@ -233,11 +238,14 @@ jobs:
       - name: Setup tree-sitter native binding
         run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
-      - name: Setup kuzu native binary
+      - name: Setup LadybugDB native binary
         shell: bash
         run: |
-          if [ -f node_modules/kuzu/install.js ]; then
+          if [ -f node_modules/kuzu/install.js ] && [ ! -f node_modules/kuzu/lbugjs.node ]; then
+            echo "Running upstream kuzu install.js to copy platform binary..."
             cd node_modules/kuzu && node install.js
+          else
+            echo "LadybugDB binary available (split package or already installed)"
           fi
 
       - name: Download native addon artifact
@@ -414,12 +422,15 @@ jobs:
       - name: Setup tree-sitter native binding
         run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
-      - name: Setup kuzu native binary
+      - name: Setup LadybugDB native binary
         if: matrix.run-tests
         shell: bash
         run: |
-          if [ -f node_modules/kuzu/install.js ]; then
+          if [ -f node_modules/kuzu/install.js ] && [ ! -f node_modules/kuzu/lbugjs.node ]; then
+            echo "Running upstream kuzu install.js to copy platform binary..."
             cd node_modules/kuzu && node install.js
+          else
+            echo "LadybugDB binary available (split package or already installed)"
           fi
 
       - name: Build native addon
@@ -507,11 +518,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-
 
-      - name: Setup kuzu native binary
+      - name: Setup LadybugDB native binary
         shell: bash
         run: |
-          if [ -f node_modules/kuzu/install.js ]; then
+          if [ -f node_modules/kuzu/install.js ] && [ ! -f node_modules/kuzu/lbugjs.node ]; then
+            echo "Running upstream kuzu install.js to copy platform binary..."
             cd node_modules/kuzu && node install.js
+          else
+            echo "LadybugDB binary available (split package or already installed)"
           fi
 
       - name: Build native addon
@@ -628,11 +642,14 @@ jobs:
       - name: Setup tree-sitter native binding
         run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
-      - name: Setup kuzu native binary
+      - name: Setup LadybugDB native binary
         shell: bash
         run: |
-          if [ -f node_modules/kuzu/install.js ]; then
+          if [ -f node_modules/kuzu/install.js ] && [ ! -f node_modules/kuzu/lbugjs.node ]; then
+            echo "Running upstream kuzu install.js to copy platform binary..."
             cd node_modules/kuzu && node install.js
+          else
+            echo "LadybugDB binary available (split package or already installed)"
           fi
 
       - name: Download native addon artifact
@@ -813,11 +830,14 @@ jobs:
       - name: Setup tree-sitter native binding
         run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
-      - name: Setup kuzu native binary
+      - name: Setup LadybugDB native binary
         shell: bash
         run: |
-          if [ -f node_modules/kuzu/install.js ]; then
+          if [ -f node_modules/kuzu/install.js ] && [ ! -f node_modules/kuzu/lbugjs.node ]; then
+            echo "Running upstream kuzu install.js to copy platform binary..."
             cd node_modules/kuzu && node install.js
+          else
+            echo "LadybugDB binary available (split package or already installed)"
           fi
 
       - name: Build all
