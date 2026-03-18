@@ -27,6 +27,7 @@ import {
 import { logger } from "../../util/logger.js";
 import { rerankByEmbeddings } from "../../indexer/embeddings.js";
 import { buildCardForSymbol } from "../../services/card-builder.js";
+import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 
 export async function handleSymbolSearch(
   args: unknown,
@@ -179,9 +180,10 @@ export async function handleSymbolGetCard(
   args: unknown,
 ): Promise<SymbolGetCardResponse | NotModifiedResponse> {
   const request = SymbolGetCardRequestSchema.parse(args);
+  const conn = await getLadybugConn();
+  const { symbolId } = await resolveSymbolId(conn, request.repoId, request.symbolId);
   const {
     repoId,
-    symbolId,
     ifNoneMatch,
     minCallConfidence,
     includeResolutionMetadata,
@@ -207,7 +209,6 @@ export async function handleSymbolGetCard(
   prefetchSliceFrontier(repoId, [symbolId]);
 
   const response = { card: result };
-  const conn = await getLadybugConn();
   const symbol = await ladybugDb.getSymbol(conn, symbolId);
   if (symbol) {
     attachRawContext(response, { fileIds: [symbol.fileId] });

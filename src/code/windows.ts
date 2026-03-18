@@ -141,6 +141,8 @@ export function identifiersExistInWindow(
   return identifiers.every((id) => found.has(id));
 }
 
+export type EmptyReason = "file-too-large" | "io-error" | "token-budget-exceeded";
+
 export interface ExtractWindowResult {
   code: string;
   actualRange: Range;
@@ -148,6 +150,7 @@ export interface ExtractWindowResult {
   originalLines: number;
   originalTokens: number;
   truncated: boolean;
+  emptyReason?: EmptyReason;
 }
 
 export async function extractWindow(
@@ -175,6 +178,7 @@ export async function extractWindow(
         originalLines: 0,
         originalTokens: 0,
         truncated: true,
+        emptyReason: "file-too-large",
       };
     }
     content = await readFile(resolvedPath, "utf-8");
@@ -195,6 +199,7 @@ export async function extractWindow(
       originalLines: 0,
       originalTokens: 0,
       truncated: true,
+      emptyReason: "io-error",
     };
   }
 
@@ -270,6 +275,7 @@ export async function extractWindow(
     originalLines,
     originalTokens,
     truncated,
+    emptyReason: boundedCode === "" && originalLines > 0 ? "token-budget-exceeded" : undefined,
   };
 }
 

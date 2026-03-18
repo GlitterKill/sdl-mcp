@@ -27,6 +27,7 @@ export interface SkeletonResult {
   estimatedTokens: number;
   originalLines: number;
   truncated: boolean;
+  skeletonLinesConsumed?: number;
 }
 
 export interface SkeletonIRResult {
@@ -41,6 +42,7 @@ export interface SkeletonOptions {
   maxLines?: number;
   maxTokens?: number;
   includeIdentifiers?: string[];
+  skeletonOffset?: number;
 }
 
 function shouldIncludeIdentifier(
@@ -516,12 +518,16 @@ export function trimSkeletonToBounds(
   skeleton: string,
   maxLines: number,
   maxTokens: number,
-): { code: string; truncated: boolean } {
-  const lines = skeleton.split("\n");
-  const tokenCount = estimateTokenCount(skeleton);
+  skipLines: number = 0,
+): { code: string; truncated: boolean; skeletonLinesConsumed: number } {
+  const allLines = skeleton.split("\n");
+  const lines = skipLines > 0 ? allLines.slice(skipLines) : allLines;
 
-  if (lines.length <= maxLines && tokenCount <= maxTokens) {
-    return { code: skeleton, truncated: false };
+  if (skipLines === 0) {
+    const tokenCount = estimateTokenCount(skeleton);
+    if (lines.length <= maxLines && tokenCount <= maxTokens) {
+      return { code: skeleton, truncated: false, skeletonLinesConsumed: allLines.length };
+    }
   }
 
   const result: string[] = [];
@@ -540,7 +546,11 @@ export function trimSkeletonToBounds(
   }
 
   const truncated = result.length < lines.length;
-  return { code: result.join("\n"), truncated };
+  return {
+    code: result.join("\n"),
+    truncated,
+    skeletonLinesConsumed: skipLines + result.length,
+  };
 }
 
 /**
@@ -729,10 +739,11 @@ export async function generateSymbolSkeleton(
     const maxLines = options.maxLines ?? 100;
     const maxTokens = options.maxTokens ?? 2000;
 
-    const { code, truncated } = trimSkeletonToBounds(
+    const { code, truncated, skeletonLinesConsumed } = trimSkeletonToBounds(
       skeletonText,
       maxLines,
       maxTokens,
+      options.skeletonOffset,
     );
     const skeletonLines = code.split("\n");
 
@@ -752,6 +763,7 @@ export async function generateSymbolSkeleton(
       estimatedTokens: estimateTokenCount(code),
       originalLines: symbol.rangeEndLine - symbol.rangeStartLine + 1,
       truncated,
+      skeletonLinesConsumed,
     };
   } catch (error) {
     logger.error(
@@ -811,10 +823,11 @@ export async function generateFileSkeleton(
     const maxLines = options.maxLines ?? DEFAULT_MAX_LINES_SKELETON_DETAILED;
     const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS_SKELETON_DETAILED;
 
-    const { code, truncated } = trimSkeletonToBounds(
+    const { code, truncated, skeletonLinesConsumed } = trimSkeletonToBounds(
       skeletonText,
       maxLines,
       maxTokens,
+      options.skeletonOffset,
     );
     const skeletonLines = code.split("\n");
 
@@ -831,6 +844,7 @@ export async function generateFileSkeleton(
       estimatedTokens: estimateTokenCount(code),
       originalLines: content.split("\n").length,
       truncated,
+      skeletonLinesConsumed,
     };
   } catch (error) {
     logger.error(

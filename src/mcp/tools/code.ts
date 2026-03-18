@@ -52,6 +52,7 @@ import { consumePrefetchedKey } from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { toLegacySymbolRow } from "./symbol-utils.js";
 import type { CodeNeedWindowRequest } from "../tools.js";
+import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 
 function buildPolicyNextBestAction(params: {
   request: CodeNeedWindowRequest;
@@ -199,7 +200,11 @@ function buildPolicyNextBestAction(params: {
 export async function handleCodeNeedWindow(
   args: unknown,
 ): Promise<CodeNeedWindowResponse> {
-  const request = CodeNeedWindowRequestSchema.parse(args);
+  const rawRequest = CodeNeedWindowRequestSchema.parse(args);
+
+  const conn = await getLadybugConn();
+  const { symbolId: resolvedSymbolId } = await resolveSymbolId(conn, rawRequest.repoId, rawRequest.symbolId);
+  const request = { ...rawRequest, symbolId: resolvedSymbolId };
 
   recordToolTrace({
     repoId: request.repoId,
@@ -208,8 +213,6 @@ export async function handleCodeNeedWindow(
     symbolId: request.symbolId,
   });
   consumePrefetchedKey(request.repoId, `card:${request.symbolId}`);
-
-  const conn = await getLadybugConn();
 
   const symbol = await ladybugDb.getSymbol(conn, request.symbolId);
   if (!symbol) {
@@ -379,7 +382,7 @@ export async function handleCodeNeedWindow(
             skeletonResult.skeleton.split("\n").length,
           howToResume: {
             type: "cursor" as const,
-            value: skeletonResult.actualRange.endLine,
+            value: skeletonResult.skeletonLinesConsumed ?? skeletonResult.actualRange.endLine,
           },
         }
       : undefined;
@@ -512,6 +515,25 @@ export async function handleCodeNeedWindow(
       whyApproved.push("redaction-applied");
     }
 
+    // Surface warnings when code is empty despite approval
+    const warnings: string[] = [];
+    if (redactedCode === "" && windowResult.emptyReason) {
+      switch (windowResult.emptyReason) {
+        case "file-too-large":
+          warnings.push("File exceeds maximum size limit and could not be read. Try sdl.code.getSkeleton instead.");
+          break;
+        case "io-error":
+          warnings.push("File could not be read from disk (may have been moved, deleted, or is inaccessible).");
+          break;
+        case "token-budget-exceeded":
+          warnings.push("Code window empty: the first line exceeds the token budget. Try increasing maxTokens or use sdl.code.getSkeleton.");
+          break;
+      }
+    }
+    if (redactedCode === "" && !windowResult.emptyReason && windowResult.code !== "") {
+      warnings.push("Code was fully redacted by security policy. No content available.");
+    }
+
     logCodeWindowDecision({
       symbolId: request.symbolId,
       approved: true,
@@ -537,6 +559,7 @@ export async function handleCodeNeedWindow(
       range: windowResult.actualRange,
       code: redactedCode,
       whyApproved,
+      ...(warnings.length > 0 ? { warnings } : {}),
       estimatedTokens: windowResult.estimatedTokens,
       truncation: codeTruncation,
     };
@@ -570,7 +593,16 @@ export async function handleCodeNeedWindow(
 export async function handleGetSkeleton(
   args: unknown,
 ): Promise<GetSkeletonResponse> {
-  const request = GetSkeletonRequestSchema.parse(args);
+  const rawSkeletonRequest = GetSkeletonRequestSchema.parse(args);
+
+  // Resolve symbolId shorthand if present
+  let resolvedSkeletonSymbolId = rawSkeletonRequest.symbolId;
+  if (rawSkeletonRequest.symbolId) {
+    const skeletonConn = await getLadybugConn();
+    const resolved = await resolveSymbolId(skeletonConn, rawSkeletonRequest.repoId, rawSkeletonRequest.symbolId);
+    resolvedSkeletonSymbolId = resolved.symbolId;
+  }
+  const request = { ...rawSkeletonRequest, symbolId: resolvedSkeletonSymbolId };
 
   recordToolTrace({
     repoId: request.repoId,
@@ -604,6 +636,7 @@ export async function handleGetSkeleton(
         maxLines: effectiveMaxLines,
         maxTokens: effectiveMaxTokens,
         includeIdentifiers: request.identifiersToFind,
+        skeletonOffset: request.skeletonOffset,
       },
     );
 
@@ -628,7 +661,7 @@ export async function handleGetSkeleton(
             result.originalLines - result.skeleton.split("\n").length,
           howToResume: {
             type: "cursor" as const,
-            value: result.actualRange.endLine,
+            value: result.skeletonLinesConsumed ?? result.actualRange.endLine,
           },
         }
       : undefined;
@@ -656,6 +689,7 @@ export async function handleGetSkeleton(
         maxLines: effectiveMaxLines,
         maxTokens: effectiveMaxTokens,
         includeIdentifiers: request.identifiersToFind,
+        skeletonOffset: request.skeletonOffset,
       },
     );
 
@@ -672,7 +706,7 @@ export async function handleGetSkeleton(
             result.originalLines - result.skeleton.split("\n").length,
           howToResume: {
             type: "cursor" as const,
-            value: result.actualRange.endLine,
+            value: result.skeletonLinesConsumed ?? result.actualRange.endLine,
           },
         }
       : undefined;
@@ -714,7 +748,11 @@ export async function handleGetSkeleton(
 export async function handleGetHotPath(
   args: unknown,
 ): Promise<GetHotPathResponse> {
-  const request = GetHotPathRequestSchema.parse(args);
+  const rawHotPathRequest = GetHotPathRequestSchema.parse(args);
+
+  const conn = await getLadybugConn();
+  const { symbolId: resolvedHotPathSymbolId } = await resolveSymbolId(conn, rawHotPathRequest.repoId, rawHotPathRequest.symbolId);
+  const request = { ...rawHotPathRequest, symbolId: resolvedHotPathSymbolId };
 
   recordToolTrace({
     repoId: request.repoId,
@@ -759,7 +797,6 @@ export async function handleGetHotPath(
     );
   }
 
-  const conn = await getLadybugConn();
   const symbol = await ladybugDb.getSymbol(conn, request.symbolId);
   const fileData = symbol
     ? ((await ladybugDb.getFilesByIds(conn, [symbol.fileId])).get(

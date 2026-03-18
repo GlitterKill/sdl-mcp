@@ -366,6 +366,7 @@ export interface CodeWindowResponseApproved {
   range: Range;
   code: string;
   whyApproved: string[];
+  warnings?: string[];
   estimatedTokens: number;
 }
 

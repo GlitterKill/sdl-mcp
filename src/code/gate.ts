@@ -75,7 +75,10 @@ export async function evaluateRequest(
   if (!window) {
     return {
       approved: false,
-      whyDenied: ["Symbol not found or invalid range"],
+      whyDenied: [
+        "Code window could not be extracted — file may be too large, unreadable on disk, or the symbol range is invalid. " +
+          "Try sdl.code.getSkeleton or sdl.symbol.getCard instead.",
+      ],
       suggestedNextRequest: undefined,
     };
   }

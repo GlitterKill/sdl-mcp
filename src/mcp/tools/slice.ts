@@ -51,6 +51,7 @@ import {
   ValidationError,
 } from "../errors.js";
 import { pickDepLabel } from "../../util/depLabels.js";
+import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 import {
   safeJsonParseOptional,
   safeJsonParseOrThrow,
@@ -254,11 +255,23 @@ async function handleSliceBuildInternal(
     memoryLimit,
   } = request;
 
+  // Resolve any file::name shorthands in entrySymbols
+  let resolvedEntrySymbols = entrySymbols;
+  if (entrySymbols && entrySymbols.length > 0) {
+    const sliceConn = await getLadybugConn();
+    resolvedEntrySymbols = await Promise.all(
+      entrySymbols.map(async (id) => {
+        const { symbolId: resolved } = await resolveSymbolId(sliceConn, repoId, id);
+        return resolved;
+      }),
+    );
+  }
+
   recordToolTrace({
     repoId,
     taskType: "slice",
     tool: "slice.build",
-    symbolId: entrySymbols?.[0],
+    symbolId: resolvedEntrySymbols?.[0],
   });
 
   const buildSliceWithTracing = async (): Promise<SliceBuildResponse> => {
@@ -268,8 +281,8 @@ async function handleSliceBuildInternal(
 
     const config = loadConfig();
 
-    if (entrySymbols && entrySymbols.length > 0) {
-      for (const symbolId of entrySymbols) {
+    if (resolvedEntrySymbols && resolvedEntrySymbols.length > 0) {
+      for (const symbolId of resolvedEntrySymbols) {
         consumePrefetchedKey(repoId, `slice:${symbolId}`);
       }
     }
@@ -345,7 +358,7 @@ async function handleSliceBuildInternal(
       stackTrace,
       failingTestPath,
       editedFiles,
-      entrySymbols,
+      entrySymbols: resolvedEntrySymbols,
       knownCardEtags,
       cardDetail,
       budget: effectiveBudget,
@@ -389,8 +402,8 @@ async function handleSliceBuildInternal(
 
     const slice: GraphSlice = await buildSlice(sliceRequest);
     const frontierSeeds =
-      entrySymbols && entrySymbols.length > 0
-        ? entrySymbols
+      resolvedEntrySymbols && resolvedEntrySymbols.length > 0
+        ? resolvedEntrySymbols
         : slice.cards.slice(0, 12).map((card) => card.symbolId);
     prefetchSliceFrontier(repoId, frontierSeeds);
 
@@ -469,8 +482,8 @@ async function handleSliceBuildInternal(
       repoId,
       budget: budget ?? {},
     };
-    if (entrySymbols && entrySymbols.length > 0) {
-      attrs.entrySymbolsCount = entrySymbols.length;
+    if (resolvedEntrySymbols && resolvedEntrySymbols.length > 0) {
+      attrs.entrySymbolsCount = resolvedEntrySymbols.length;
     }
     return withSpan(
       SPAN_NAMES.SLICE_BUILD,

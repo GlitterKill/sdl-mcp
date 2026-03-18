@@ -4,6 +4,7 @@ export interface OverlaySearchResult extends SearchSymbolLiteRow {
   filePath: string;
   summary?: string | null;
   searchText?: string | null;
+  matchedTermCount?: number;
 }
 
 function filePenalty(filePath: string): number {
@@ -44,7 +45,18 @@ function kindRank(kind: string): number {
 function searchRank(row: OverlaySearchResult, query: string): number[] {
   const loweredQuery = query.toLowerCase();
   const loweredName = row.name.toLowerCase();
+  const terms = loweredQuery.includes(" ")
+    ? loweredQuery.split(/\s+/).filter((t) => t.length > 0)
+    : [loweredQuery];
+
+  // For multi-term queries, count how many terms match this symbol
+  const termMatchCount = row.matchedTermCount ??
+    (terms.length > 1
+      ? terms.filter((t) => loweredName.includes(t) || (row.searchText ?? "").toLowerCase().includes(t)).length
+      : 1);
+
   return [
+    -(termMatchCount),  // More matched terms = better (negative for ascending sort)
     row.name === query ? 0 : 1,
     loweredName === loweredQuery ? 0 : 1,
     filePenalty(row.filePath),

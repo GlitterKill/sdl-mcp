@@ -1013,6 +1013,7 @@ const CodeWindowResponseApprovedSchema = z.object({
   range: RangeSchema,
   code: z.string(),
   whyApproved: z.array(z.string()),
+  warnings: z.array(z.string()).optional(),
   estimatedTokens: z.number().int(),
   downgradedFrom: z.enum(["raw-code", "skeleton", "hotpath"]).optional(),
   truncation: z
@@ -1063,6 +1064,7 @@ export const GetSkeletonRequestSchema = z
     maxLines: z.number().int().min(1).optional(),
     maxTokens: z.number().int().min(1).optional(),
     identifiersToFind: z.array(z.string()).max(50).optional(),
+    skeletonOffset: z.number().int().min(0).optional(),
   })
   .refine((data) => data.symbolId !== undefined || data.file !== undefined, {
     message: "Either symbolId or file must be provided",

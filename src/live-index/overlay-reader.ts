@@ -153,6 +153,11 @@ export async function searchSymbolsWithOverlay(
   );
 
   const loweredQuery = query.trim().toLowerCase();
+  const terms = loweredQuery.includes(" ")
+    ? loweredQuery.split(/\s+/).filter((t) => t.length > 0)
+    : [loweredQuery];
+  const isMultiTerm = terms.length > 1;
+
   const overlayRows: OverlaySearchResult[] = [];
   for (const symbol of snapshot.symbolsById.values()) {
     if (symbol.repoId !== repoId) {
@@ -165,7 +170,13 @@ export async function searchSymbolsWithOverlay(
     ]
       .join(" ")
       .toLowerCase();
-    if (!loweredQuery || !haystack.includes(loweredQuery)) {
+
+    // For multi-term: match if ANY term matches (OR semantics)
+    // For single-term: existing behavior
+    const matchCount = isMultiTerm
+      ? terms.filter((t) => haystack.includes(t)).length
+      : (haystack.includes(loweredQuery) ? 1 : 0);
+    if (matchCount === 0) {
       continue;
     }
     const file = snapshot.filesById.get(symbol.fileId);
@@ -180,6 +191,7 @@ export async function searchSymbolsWithOverlay(
       filePath: file.relPath,
       summary: symbol.summary,
       searchText: symbol.searchText,
+      matchedTermCount: matchCount,
     });
   }
 

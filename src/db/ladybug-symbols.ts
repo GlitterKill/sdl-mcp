@@ -723,37 +723,55 @@ export async function deleteSymbolsByFileId(
   );
 }
 
-export async function searchSymbols(
+interface SearchSymbolsRawRow {
+  symbolId: string;
+  fileId: string;
+  kind: string;
+  name: string;
+  exported: unknown;
+  visibility: string | null;
+  language: string;
+  rangeStartLine: unknown;
+  rangeStartCol: unknown;
+  rangeEndLine: unknown;
+  rangeEndCol: unknown;
+  astFingerprint: string;
+  signatureJson: string | null;
+  summary: string | null;
+  invariantsJson: string | null;
+  sideEffectsJson: string | null;
+  updatedAt: string;
+}
+
+function mapSearchSymbolRow(row: SearchSymbolsRawRow, repoId: string): SymbolRow {
+  return {
+    symbolId: row.symbolId,
+    repoId,
+    fileId: row.fileId,
+    kind: row.kind,
+    name: row.name,
+    exported: toBoolean(row.exported),
+    visibility: row.visibility,
+    language: row.language,
+    rangeStartLine: toNumber(row.rangeStartLine),
+    rangeStartCol: toNumber(row.rangeStartCol),
+    rangeEndLine: toNumber(row.rangeEndLine),
+    rangeEndCol: toNumber(row.rangeEndCol),
+    astFingerprint: row.astFingerprint,
+    signatureJson: row.signatureJson,
+    summary: row.summary,
+    invariantsJson: row.invariantsJson,
+    sideEffectsJson: row.sideEffectsJson,
+    updatedAt: row.updatedAt,
+  };
+}
+
+async function searchSymbolsSingleTerm(
   conn: Connection,
   repoId: string,
-  query: string,
-  limit: number,
-): Promise<SymbolRow[]> {
-  const trimmed = query.trim();
-  if (!trimmed) return [];
-
-  assertSafeInt(limit, "limit");
-  const safeLimit = Math.max(1, Math.min(limit, 1000));
-
-  const rows = await queryAll<{
-    symbolId: string;
-    fileId: string;
-    kind: string;
-    name: string;
-    exported: unknown;
-    visibility: string | null;
-    language: string;
-    rangeStartLine: unknown;
-    rangeStartCol: unknown;
-    rangeEndLine: unknown;
-    rangeEndCol: unknown;
-    astFingerprint: string;
-    signatureJson: string | null;
-    summary: string | null;
-    invariantsJson: string | null;
-    sideEffectsJson: string | null;
-    updatedAt: string;
-  }>(
+  term: string,
+): Promise<SearchSymbolsRawRow[]> {
+  return queryAll<SearchSymbolsRawRow>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
      WHERE lower(s.name) CONTAINS lower($query)
@@ -798,29 +816,51 @@ export async function searchSymbols(
             s.sideEffectsJson AS sideEffectsJson,
             s.updatedAt AS updatedAt
      ORDER BY exactNameRank, ciExactNameRank, filePenalty, kindRank, nameMatchRank`,
-    { repoId, query: trimmed },
+    { repoId, query: term },
+  );
+}
+
+export async function searchSymbols(
+  conn: Connection,
+  repoId: string,
+  query: string,
+  limit: number,
+): Promise<SymbolRow[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  assertSafeInt(limit, "limit");
+  const safeLimit = Math.max(1, Math.min(limit, 1000));
+
+  const terms = splitSearchTerms(trimmed);
+
+  // Single-term: use existing behavior
+  if (terms.length <= 1) {
+    const rows = await searchSymbolsSingleTerm(conn, repoId, trimmed);
+    return rows.slice(0, safeLimit).map((row) => mapSearchSymbolRow(row, repoId));
+  }
+
+  // Multi-term: run per-term queries, merge with match-count ranking
+  const perTermResults = await Promise.all(
+    terms.map((term) => searchSymbolsSingleTerm(conn, repoId, term)),
   );
 
-  return rows.slice(0, safeLimit).map((row) => ({
-    symbolId: row.symbolId,
-    repoId,
-    fileId: row.fileId,
-    kind: row.kind,
-    name: row.name,
-    exported: toBoolean(row.exported),
-    visibility: row.visibility,
-    language: row.language,
-    rangeStartLine: toNumber(row.rangeStartLine),
-    rangeStartCol: toNumber(row.rangeStartCol),
-    rangeEndLine: toNumber(row.rangeEndLine),
-    rangeEndCol: toNumber(row.rangeEndCol),
-    astFingerprint: row.astFingerprint,
-    signatureJson: row.signatureJson,
-    summary: row.summary,
-    invariantsJson: row.invariantsJson,
-    sideEffectsJson: row.sideEffectsJson,
-    updatedAt: row.updatedAt,
-  }));
+  const matchCounts = new Map<string, { row: SearchSymbolsRawRow; count: number }>();
+  for (const termRows of perTermResults) {
+    for (const row of termRows) {
+      const existing = matchCounts.get(row.symbolId);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        matchCounts.set(row.symbolId, { row, count: 1 });
+      }
+    }
+  }
+
+  return Array.from(matchCounts.values())
+    .sort((a, b) => b.count - a.count || a.row.name.localeCompare(b.row.name))
+    .map((entry) => mapSearchSymbolRow(entry.row, repoId))
+    .slice(0, safeLimit);
 }
 
 export interface SearchSymbolLiteRow {
@@ -830,19 +870,23 @@ export interface SearchSymbolLiteRow {
   kind: string;
 }
 
-export async function searchSymbolsLite(
-  conn: Connection,
-  repoId: string,
-  query: string,
-  limit: number,
-): Promise<SearchSymbolLiteRow[]> {
+/**
+ * Split a search query into individual terms for OR matching.
+ * Single words (no spaces) return as a single-element array.
+ */
+export function splitSearchTerms(query: string): string[] {
   const trimmed = query.trim();
   if (!trimmed) return [];
+  if (!trimmed.includes(" ")) return [trimmed];
+  return trimmed.split(/\s+/).filter((t) => t.length > 0);
+}
 
-  assertSafeInt(limit, "limit");
-  const safeLimit = Math.max(1, Math.min(limit, 1000));
-
-  const rows = await queryAll<SearchSymbolLiteRow>(
+async function searchSymbolsLiteSingleTerm(
+  conn: Connection,
+  repoId: string,
+  term: string,
+): Promise<SearchSymbolLiteRow[]> {
+  return queryAll<SearchSymbolLiteRow>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
      WHERE lower(s.name) CONTAINS lower($query)
@@ -874,9 +918,96 @@ export async function searchSymbolsLite(
             f.fileId AS fileId,
             s.kind AS kind
      ORDER BY exactNameRank, ciExactNameRank, filePenalty, kindRank, nameMatchRank`,
-    { repoId, query: trimmed },
+    { repoId, query: term },
+  );
+}
+
+export async function searchSymbolsLite(
+  conn: Connection,
+  repoId: string,
+  query: string,
+  limit: number,
+): Promise<SearchSymbolLiteRow[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  assertSafeInt(limit, "limit");
+  const safeLimit = Math.max(1, Math.min(limit, 1000));
+
+  const terms = splitSearchTerms(trimmed);
+
+  // Single-term: use existing behavior
+  if (terms.length <= 1) {
+    const rows = await searchSymbolsLiteSingleTerm(conn, repoId, trimmed);
+    return rows.slice(0, safeLimit);
+  }
+
+  // Multi-term: run per-term queries, merge with match-count ranking
+  const perTermResults = await Promise.all(
+    terms.map((term) => searchSymbolsLiteSingleTerm(conn, repoId, term)),
   );
 
-  return rows.slice(0, safeLimit);
+  // Count how many terms each symbol matched
+  const matchCounts = new Map<string, { row: SearchSymbolLiteRow; count: number }>();
+  for (const termRows of perTermResults) {
+    for (const row of termRows) {
+      const existing = matchCounts.get(row.symbolId);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        matchCounts.set(row.symbolId, { row, count: 1 });
+      }
+    }
+  }
+
+  // Sort by match count descending, then by name
+  return Array.from(matchCounts.values())
+    .sort((a, b) => b.count - a.count || a.row.name.localeCompare(b.row.name))
+    .map((entry) => entry.row)
+    .slice(0, safeLimit);
+}
+
+/**
+ * Resolve a file::name shorthand to a symbolId.
+ * Uses ENDS WITH on relPath so callers can abbreviate paths
+ * (e.g. "code.ts::handleGetSkeleton" instead of full "src/mcp/tools/code.ts::handleGetSkeleton").
+ * Returns the best match by kind priority, or null if none found.
+ */
+export async function resolveSymbolByShorthand(
+  conn: Connection,
+  repoId: string,
+  relPath: string,
+  symbolName: string,
+): Promise<string | null> {
+  const normalizedPath = relPath.replace(/\\/g, "/");
+
+  const rows = await queryAll<{ symbolId: string; kind: string }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol {name: $name})-[:SYMBOL_IN_FILE]->(f:File)
+     WHERE f.relPath ENDS WITH $relPath
+     RETURN s.symbolId AS symbolId, s.kind AS kind
+     ORDER BY CASE s.kind
+       WHEN 'class' THEN 0
+       WHEN 'function' THEN 1
+       WHEN 'interface' THEN 2
+       WHEN 'type' THEN 3
+       WHEN 'method' THEN 4
+       WHEN 'constructor' THEN 5
+       WHEN 'module' THEN 6
+       ELSE 7
+     END
+     LIMIT 5`,
+    { repoId, name: symbolName, relPath: normalizedPath },
+  );
+
+  if (rows.length === 0) return null;
+
+  if (rows.length > 1) {
+    logger.debug(
+      `resolveSymbolByShorthand: multiple matches for "${relPath}::${symbolName}" — using best by kind (${rows[0].kind})`,
+    );
+  }
+
+  return rows[0].symbolId;
 }
 
