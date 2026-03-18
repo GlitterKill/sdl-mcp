@@ -5,14 +5,22 @@ import { resolveCliConfigPath } from "./configPath.js";
 
 function expandEnvVars(obj: unknown, configPath: string): unknown {
   if (typeof obj === "string") {
-    return obj.replace(/\$\{([^}]+)\}/g, (_, varName) => {
+    return obj.replace(/\$\{([^}]+)\}/g, (_, captured: string) => {
+      // Support ${VAR:-default} syntax
+      const sepIdx = captured.indexOf(":-");
+      const varName = sepIdx >= 0 ? captured.slice(0, sepIdx) : captured;
+      const defaultValue = sepIdx >= 0 ? captured.slice(sepIdx + 2) : undefined;
+
       const value = process.env[varName];
-      if (value === undefined) {
-        throw new ConfigError(
-          `Environment variable "${varName}" is not set (in config: ${configPath})`,
-        );
+      if (value !== undefined) {
+        return value;
       }
-      return value;
+      if (defaultValue !== undefined) {
+        return defaultValue;
+      }
+      throw new ConfigError(
+        `Environment variable "${varName}" is not set (in config: ${configPath})`,
+      );
     });
   }
 
@@ -51,6 +59,16 @@ export function loadConfig(configPath?: string): AppConfig {
   }
 
   try {
+    // Read mtime BEFORE file content to avoid TOCTOU race:
+    // if the file changes between read and stat, we get an older mtime,
+    // so the next call will detect the change and re-read.
+    let mtimeBeforeRead: number | null = null;
+    try {
+      mtimeBeforeRead = statSync(filePath).mtimeMs;
+    } catch {
+      // stat may fail; will fall through with null mtime
+    }
+
     const rawContent = readFileSync(filePath, "utf-8");
     const normalizedContent = rawContent.replace(/^\uFEFF/, "");
     let parsedConfig: unknown;
@@ -102,14 +120,10 @@ export function loadConfig(configPath?: string): AppConfig {
       }
     }
 
-    // Cache the result
+    // Cache the result (use mtime captured before read to avoid TOCTOU)
     cachedConfig = finalConfig;
     cachedConfigPath = filePath;
-    try {
-      cachedConfigMtimeMs = statSync(filePath).mtimeMs;
-    } catch {
-      cachedConfigMtimeMs = null;
-    }
+    cachedConfigMtimeMs = mtimeBeforeRead;
 
     return finalConfig;
   } catch (err) {

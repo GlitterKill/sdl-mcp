@@ -443,6 +443,11 @@ export function buildPayloadCardsAndRefs(
     const etag = hashCard(cardWithoutEtag);
 
     if (knownEtags[card.symbolId] === etag) {
+      cardRefs.push({
+        symbolId: card.symbolId,
+        etag,
+        detailLevel,
+      });
       continue;
     }
 

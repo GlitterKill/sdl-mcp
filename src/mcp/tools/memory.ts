@@ -16,7 +16,7 @@ import {
 import type { SurfacedMemory } from "../types.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
-import { DatabaseError } from "../errors.js";
+import { DatabaseError, ValidationError } from "../errors.js";
 import { surfaceRelevantMemories } from "../../memory/surface.js";
 import {
   writeMemoryFile,
@@ -73,6 +73,11 @@ export async function handleMemoryStore(
     const existing = await ladybugDb.getMemory(conn, providedMemoryId);
     if (!existing) {
       throw new DatabaseError(`Memory ${providedMemoryId} not found`);
+    }
+    if (existing.repoId !== repoId) {
+      throw new ValidationError(
+        `Memory ${providedMemoryId} belongs to a different repository`,
+      );
     }
 
     const contentHash = computeContentHash(repoId, type, title, content);
@@ -307,6 +312,11 @@ export async function handleMemoryRemove(
   const memory = await ladybugDb.getMemory(conn, memoryId);
   if (!memory) {
     throw new DatabaseError(`Memory ${memoryId} not found`);
+  }
+  if (memory.repoId !== repoId) {
+    throw new ValidationError(
+      `Memory ${memoryId} belongs to a different repository`,
+    );
   }
 
   await withWriteConn(async (wConn) => {

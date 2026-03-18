@@ -37,10 +37,26 @@ async function findNearestComposerJson(
 async function readPsr4Mappings(
   composerJsonPath: string,
 ): Promise<Array<{ prefix: string; baseDir: string }>> {
-  const content = await readFileAsync(composerJsonPath, "utf-8");
-  const parsed = JSON.parse(content) as {
-    autoload?: { "psr-4"?: Psr4Map };
-  };
+  let content: string;
+  try {
+    content = await readFileAsync(composerJsonPath, "utf-8");
+  } catch (error) {
+    console.warn(
+      `[php-adapter] Failed to read ${composerJsonPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return [];
+  }
+
+  let parsed: { autoload?: { "psr-4"?: Psr4Map } };
+  try {
+    parsed = JSON.parse(content) as { autoload?: { "psr-4"?: Psr4Map } };
+  } catch (error) {
+    console.warn(
+      `[php-adapter] Failed to parse ${composerJsonPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return [];
+  }
+
   const mappings = parsed.autoload?.["psr-4"] ?? {};
   const results: Array<{ prefix: string; baseDir: string }> = [];
 

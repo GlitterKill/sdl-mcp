@@ -943,55 +943,75 @@ async function resolveCSharpCallEdgesPass2(params: {
     return 0;
   }
 
-  const extractedSymbols = adapter.extractSymbols(
-    tree,
-    content,
-    filePath,
-  ) as ExtractedSymbol[];
-  const calls = adapter.extractCalls(
-    tree,
-    content,
-    filePath,
-    extractedSymbols as never,
-  ) as ExtractedCall[];
-  const imports = adapter.extractImports(tree, content, filePath);
-
-  const fileRecord = await ladybugDb.getFileByRepoPath(
-    conn,
-    repoId,
-    fileMeta.path,
-  );
-  if (!fileRecord) {
-    return 0;
+  let extractedSymbols: ExtractedSymbol[];
+  let calls: ExtractedCall[];
+  let imports: ReturnType<typeof adapter.extractImports>;
+  // Store tree reference for later use by buildCSharpCallScope
+  const treeRef = tree;
+  try {
+    extractedSymbols = adapter.extractSymbols(
+      tree,
+      content,
+      filePath,
+    ) as ExtractedSymbol[];
+    calls = adapter.extractCalls(
+      tree,
+      content,
+      filePath,
+      extractedSymbols as never,
+    ) as ExtractedCall[];
+    imports = adapter.extractImports(tree, content, filePath);
+  } catch (e) {
+    (tree as unknown as { delete?: () => void }).delete?.();
+    throw e;
   }
 
-  const existingSymbols = await ladybugDb.getSymbolsByFile(
-    conn,
-    fileRecord.fileId,
-  );
-  if (existingSymbols.length === 0) {
-    return 0;
+  // Tree is still needed by buildCSharpCallScope; free in finally below
+  let fileRecord: Awaited<ReturnType<typeof ladybugDb.getFileByRepoPath>>;
+  let existingSymbols: Awaited<ReturnType<typeof ladybugDb.getSymbolsByFile>>;
+  let filteredSymbolDetails: ReturnType<typeof mapExtractedSymbolsToExisting>;
+  let nodeIdToSymbolId: ReturnType<typeof createNodeIdToSymbolId>;
+  let callScope: ReturnType<typeof buildCSharpCallScope>;
+  try {
+    fileRecord = await ladybugDb.getFileByRepoPath(
+      conn,
+      repoId,
+      fileMeta.path,
+    );
+    if (!fileRecord) {
+      return 0;
+    }
+
+    existingSymbols = await ladybugDb.getSymbolsByFile(
+      conn,
+      fileRecord.fileId,
+    );
+    if (existingSymbols.length === 0) {
+      return 0;
+    }
+
+    filteredSymbolDetails = mapExtractedSymbolsToExisting(
+      fileMeta.path,
+      extractedSymbols,
+      existingSymbols,
+      telemetry,
+    );
+    if (filteredSymbolDetails.length === 0) {
+      return 0;
+    }
+
+    const symbolIdsToRefresh = filteredSymbolDetails.map(
+      (detail) => detail.symbolId,
+    );
+    await withWriteConn(async (wConn) => {
+      await clearOutgoingCallEdges(wConn, symbolIdsToRefresh, createdCallEdges);
+    });
+
+    nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
+    callScope = buildCSharpCallScope(treeRef, filteredSymbolDetails);
+  } finally {
+    (treeRef as unknown as { delete?: () => void }).delete?.();
   }
-
-  const filteredSymbolDetails = mapExtractedSymbolsToExisting(
-    fileMeta.path,
-    extractedSymbols,
-    existingSymbols,
-    telemetry,
-  );
-  if (filteredSymbolDetails.length === 0) {
-    return 0;
-  }
-
-  const symbolIdsToRefresh = filteredSymbolDetails.map(
-    (detail) => detail.symbolId,
-  );
-  await withWriteConn(async (wConn) => {
-    await clearOutgoingCallEdges(wConn, symbolIdsToRefresh, createdCallEdges);
-  });
-
-  const nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
-  const callScope = buildCSharpCallScope(tree, filteredSymbolDetails);
   const importResolution = await resolveImportTargets(
     repoId,
     repoRoot,

@@ -1,11 +1,11 @@
 import {
-  SliceBuildRequestSchema,
+  type SliceBuildRequest,
   SliceBuildResponse,
   SliceBuildWireFormat,
   CompactGraphSliceV2,
-  SliceRefreshRequestSchema,
+  type SliceRefreshRequest,
   SliceRefreshResponse,
-  SliceSpilloverGetRequestSchema,
+  type SliceSpilloverGetRequest,
   SliceSpilloverGetResponse,
 } from "../tools.js";
 import type {
@@ -235,7 +235,7 @@ function safeParseArgs(args: unknown): { repoId?: string } | null {
 async function handleSliceBuildInternal(
   args: unknown,
 ): Promise<SliceBuildResponse> {
-  const request = SliceBuildRequestSchema.parse(args);
+  const request = args as SliceBuildRequest;
   const {
     repoId,
     taskText,
@@ -518,7 +518,7 @@ async function handleSliceBuildInternal(
 export async function handleSliceRefresh(
   args: unknown,
 ): Promise<SliceRefreshResponse> {
-  const request = SliceRefreshRequestSchema.parse(args);
+  const request = args as SliceRefreshRequest;
   const { sliceHandle, knownVersion } = request;
 
   const conn = await getLadybugConn();
@@ -537,12 +537,11 @@ export async function handleSliceRefresh(
   const now = new Date();
   if (new Date(handleRow.expiresAt) < now) {
     const error = createPolicyDenial(
-      `Slice handle expired at ${handleRow.expiresAt}. NextBestAction: 'refreshSlice' or build new slice`,
-      "refreshSlice",
+      `Slice handle expired at ${handleRow.expiresAt}. Build a new slice instead of refreshing an expired handle.`,
+      "buildSlice",
       {
-        refreshSlice: {
-          sliceHandle,
-          knownVersion,
+        buildSlice: {
+          repoId: handleRow.repoId,
         },
       },
     );
@@ -649,7 +648,7 @@ export async function cleanupExpiredSliceHandles(): Promise<number> {
 export async function handleSliceSpilloverGet(
   args: unknown,
 ): Promise<SliceSpilloverGetResponse> {
-  const request = SliceSpilloverGetRequestSchema.parse(args);
+  const request = args as SliceSpilloverGetRequest;
   const { spilloverHandle, cursor, pageSize } = request;
 
   const conn = await getLadybugConn();

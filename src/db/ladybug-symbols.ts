@@ -715,6 +715,50 @@ export async function deleteSymbolsByFileId(
       { symbolIds },
     );
 
+    // Delete SymbolEmbedding nodes
+    await exec(
+      txConn,
+      `MATCH (e:SymbolEmbedding)
+       WHERE e.symbolId IN $symbolIds
+       DELETE e`,
+      { symbolIds },
+    );
+
+    // Delete SummaryCache nodes
+    await exec(
+      txConn,
+      `MATCH (sc:SummaryCache)
+       WHERE sc.symbolId IN $symbolIds
+       DELETE sc`,
+      { symbolIds },
+    );
+
+    // Delete SymbolReference nodes for this file
+    await exec(
+      txConn,
+      `MATCH (sr:SymbolReference)
+       WHERE sr.fileId = $fileId
+       DELETE sr`,
+      { fileId },
+    );
+
+    // Delete MEMORY_OF edges (Memory -> deleted Symbol)
+    await exec(
+      txConn,
+      `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
+
+    // Delete MEMORY_OF_FILE edges (Memory -> deleted File)
+    await exec(
+      txConn,
+      `MATCH (mem:Memory)-[r:MEMORY_OF_FILE]->(f:File {fileId: $fileId})
+       DELETE r`,
+      { fileId },
+    );
+
     await exec(
       txConn,
       `MATCH (s:Symbol)

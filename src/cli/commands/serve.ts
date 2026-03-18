@@ -133,7 +133,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     console.error("File watching disabled by --no-watch");
   }
 
-  configureDefaultLiveIndexCoordinator({
+  await configureDefaultLiveIndexCoordinator({
     enabled: config.liveIndex?.enabled ?? true,
     debounceMs: config.liveIndex?.debounceMs,
     maxDraftFiles: config.liveIndex?.maxDraftFiles,

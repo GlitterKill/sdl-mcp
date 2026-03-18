@@ -1,9 +1,9 @@
 import {
-  CodeNeedWindowRequestSchema,
+  type CodeNeedWindowRequest,
   CodeNeedWindowResponse,
-  GetSkeletonRequestSchema,
+  type GetSkeletonRequest,
   GetSkeletonResponse,
-  GetHotPathRequestSchema,
+  type GetHotPathRequest,
   GetHotPathResponse,
 } from "../tools.js";
 import {
@@ -51,7 +51,6 @@ import {
 import { consumePrefetchedKey } from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { toLegacySymbolRow } from "./symbol-utils.js";
-import type { CodeNeedWindowRequest } from "../tools.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 
 function buildPolicyNextBestAction(params: {
@@ -200,7 +199,7 @@ function buildPolicyNextBestAction(params: {
 export async function handleCodeNeedWindow(
   args: unknown,
 ): Promise<CodeNeedWindowResponse> {
-  const rawRequest = CodeNeedWindowRequestSchema.parse(args);
+  const rawRequest = args as CodeNeedWindowRequest;
 
   const conn = await getLadybugConn();
   const { symbolId: resolvedSymbolId } = await resolveSymbolId(conn, rawRequest.repoId, rawRequest.symbolId);
@@ -288,14 +287,6 @@ export async function handleCodeNeedWindow(
     }
   }
 
-  const gateResult = await evaluateRequest(request, context);
-  const suggestedNextRequest = !gateResult.approved
-    ? gateResult.suggestedNextRequest
-    : undefined;
-  const gateNextBestAction = !gateResult.approved
-    ? gateResult.nextBestAction
-    : undefined;
-
   const policyContext: PolicyRequestContext = {
     requestType: "codeWindow",
     repoId: request.repoId,
@@ -308,7 +299,18 @@ export async function handleCodeNeedWindow(
     symbolData: legacySymbol,
   };
 
+  // Evaluate policy first so break-glass can flow into the gate
   const policyDecision = policyEngine.evaluate(policyContext);
+  const isBreakGlass = policyDecision.decision === "approve" &&
+    (policyDecision.evidenceUsed ?? []).some((e) => e.type === "break-glass");
+
+  const gateResult = await evaluateRequest(request, { ...context, breakGlass: isBreakGlass });
+  const suggestedNextRequest = !gateResult.approved
+    ? gateResult.suggestedNextRequest
+    : undefined;
+  const gateNextBestAction = !gateResult.approved
+    ? gateResult.nextBestAction
+    : undefined;
   const { nextBestAction: policyNextBestAction, requiredFieldsForNext } =
     policyEngine.generateNextBestAction(policyDecision, policyContext);
   const policyAction = buildPolicyNextBestAction({
@@ -597,7 +599,7 @@ export async function handleCodeNeedWindow(
 export async function handleGetSkeleton(
   args: unknown,
 ): Promise<GetSkeletonResponse> {
-  const rawSkeletonRequest = GetSkeletonRequestSchema.parse(args);
+  const rawSkeletonRequest = args as GetSkeletonRequest;
 
   // Resolve symbolId shorthand if present
   let resolvedSkeletonSymbolId = rawSkeletonRequest.symbolId;
@@ -752,7 +754,7 @@ export async function handleGetSkeleton(
 export async function handleGetHotPath(
   args: unknown,
 ): Promise<GetHotPathResponse> {
-  const rawHotPathRequest = GetHotPathRequestSchema.parse(args);
+  const rawHotPathRequest = args as GetHotPathRequest;
 
   const conn = await getLadybugConn();
   const { symbolId: resolvedHotPathSymbolId } = await resolveSymbolId(conn, rawHotPathRequest.repoId, rawHotPathRequest.symbolId);

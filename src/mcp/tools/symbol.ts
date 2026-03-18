@@ -1,9 +1,9 @@
 import {
-  SymbolSearchRequestSchema,
+  type SymbolSearchRequest,
   SymbolSearchResponse,
-  SymbolGetCardRequestSchema,
+  type SymbolGetCardRequest,
   SymbolGetCardResponse,
-  SymbolGetCardsRequestSchema,
+  type SymbolGetCardsRequest,
   SymbolGetCardsResponse,
 } from "../tools.js";
 import { SYMBOL_SEARCH_DEFAULT_LIMIT } from "../../config/constants.js";
@@ -33,7 +33,7 @@ export async function handleSymbolSearch(
   args: unknown,
 ): Promise<SymbolSearchResponse> {
   const startedAt = Date.now();
-  const request = SymbolSearchRequestSchema.parse(args);
+  const request = args as SymbolSearchRequest;
   const limit = request.limit ?? SYMBOL_SEARCH_DEFAULT_LIMIT;
   const config = loadConfig();
   const semanticConfig = config.semantic;
@@ -173,7 +173,7 @@ export async function handleSymbolSearch(
 export async function handleSymbolGetCard(
   args: unknown,
 ): Promise<SymbolGetCardResponse | NotModifiedResponse> {
-  const request = SymbolGetCardRequestSchema.parse(args);
+  const request = args as SymbolGetCardRequest;
   const conn = await getLadybugConn();
   const { symbolId } = await resolveSymbolId(conn, request.repoId, request.symbolId);
   const {
@@ -219,7 +219,7 @@ export async function handleSymbolGetCards(
     knownEtags,
     minCallConfidence,
     includeResolutionMetadata,
-  } = SymbolGetCardsRequestSchema.parse(args);
+  } = args as SymbolGetCardsRequest;
 
   for (const symbolId of symbolIds) {
     consumePrefetchedKey(repoId, `card:${symbolId}`);

@@ -1,6 +1,6 @@
 import type { SymbolId, VersionId } from "../db/schema.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
-import { getLadybugConn } from "../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import { hashContent } from "../util/hashing.js";
 import { getCurrentTimestamp } from "../util/time.js";
 import { logger } from "../util/logger.js";
@@ -89,39 +89,43 @@ export async function snapshotSymbols(
   versionId: VersionId,
   symbolIds: SymbolId[],
 ): Promise<void> {
-  const conn = await getLadybugConn();
+  const readConn = await getLadybugConn();
 
   try {
-    const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
+    const symbolMap = await ladybugDb.getSymbolsByIds(readConn, symbolIds);
     const snapshots: Array<
       Pick<ladybugDb.SymbolVersionRow, "symbolId" | "astFingerprint">
     > = [];
 
-    for (const symbolId of symbolIds) {
-      const symbol = symbolMap.get(symbolId);
-      if (!symbol) {
-        logger.warn("Symbol not found during version snapshot, skipping", {
-          versionId,
-          symbolId,
-        });
-        continue;
-      }
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.withTransaction(wConn, async (txConn) => {
+        for (const symbolId of symbolIds) {
+          const symbol = symbolMap.get(symbolId);
+          if (!symbol) {
+            logger.warn("Symbol not found during version snapshot, skipping", {
+              versionId,
+              symbolId,
+            });
+            continue;
+          }
 
-      await ladybugDb.snapshotSymbolVersion(conn, {
-        versionId,
-        symbolId,
-        astFingerprint: symbol.astFingerprint,
-        signatureJson: symbol.signatureJson,
-        summary: symbol.summary,
-        invariantsJson: symbol.invariantsJson,
-        sideEffectsJson: symbol.sideEffectsJson,
-      });
+          await ladybugDb.snapshotSymbolVersion(txConn, {
+            versionId,
+            symbolId,
+            astFingerprint: symbol.astFingerprint,
+            signatureJson: symbol.signatureJson,
+            summary: symbol.summary,
+            invariantsJson: symbol.invariantsJson,
+            sideEffectsJson: symbol.sideEffectsJson,
+          });
 
-      snapshots.push({
-        symbolId,
-        astFingerprint: symbol.astFingerprint,
+          snapshots.push({
+            symbolId,
+            astFingerprint: symbol.astFingerprint,
+          });
+        }
       });
-    }
+    });
 
     await finalizeVersionHash(versionId, snapshots);
   } catch (error) {

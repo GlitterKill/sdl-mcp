@@ -66,7 +66,7 @@ async function getSymbolFromLadybug(symbolId: string): Promise<SymbolRow | null>
 
 export async function evaluateRequest(
   request: CodeWindowRequest,
-  context: GateContext,
+  context: GateContext & { breakGlass?: boolean },
 ): Promise<CodeWindowResponse> {
   const config = loadConfig();
   const policy = context.policy ?? config.policy;
@@ -92,38 +92,41 @@ export async function evaluateRequest(
     };
   }
 
-  // Check policy limits first, before any approval logic
-  const policyViolations: string[] = [];
+  // Policy limit checks — skip when break-glass is active so the
+  // PolicyEngine remains the single enforcer of those limits.
+  if (!context.breakGlass) {
+    const policyViolations: string[] = [];
 
-  if (request.expectedLines > policy.maxWindowLines) {
-    policyViolations.push(
-      `Request exceeds maximum window lines (${request.expectedLines} > ${policy.maxWindowLines})`,
-    );
-  }
+    if (request.expectedLines > policy.maxWindowLines) {
+      policyViolations.push(
+        `Request exceeds maximum window lines (${request.expectedLines} > ${policy.maxWindowLines})`,
+      );
+    }
 
-  if (request.maxTokens && request.maxTokens > policy.maxWindowTokens) {
-    policyViolations.push(
-      `Request exceeds maximum window tokens (${request.maxTokens} > ${policy.maxWindowTokens})`,
-    );
-  }
+    if (request.maxTokens && request.maxTokens > policy.maxWindowTokens) {
+      policyViolations.push(
+        `Request exceeds maximum window tokens (${request.maxTokens} > ${policy.maxWindowTokens})`,
+      );
+    }
 
-  if (request.identifiersToFind.length === 0 && policy.requireIdentifiers) {
-    policyViolations.push("No identifiers to find provided");
-  }
+    if (request.identifiersToFind.length === 0 && policy.requireIdentifiers) {
+      policyViolations.push("No identifiers to find provided");
+    }
 
-  if (policyViolations.length > 0) {
-    const guidance = generateDenialGuidance(
-      request,
-      "general",
-      policy,
-      symbol,
-    );
-    return {
-      approved: false,
-      whyDenied: policyViolations,
-      suggestedNextRequest: guidance.suggestedNextRequest,
-      nextBestAction: guidance.nextBestAction,
-    };
+    if (policyViolations.length > 0) {
+      const guidance = generateDenialGuidance(
+        request,
+        "general",
+        policy,
+        symbol,
+      );
+      return {
+        approved: false,
+        whyDenied: policyViolations,
+        suggestedNextRequest: guidance.suggestedNextRequest,
+        nextBestAction: guidance.nextBestAction,
+      };
+    }
   }
 
   // Policy limits pass - now check approval criteria

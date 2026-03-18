@@ -34,7 +34,15 @@ async function findNearestGoMod(
 }
 
 async function readGoModuleName(goModPath: string): Promise<string | null> {
-  const content = await readFileAsync(goModPath, "utf-8");
+  let content: string;
+  try {
+    content = await readFileAsync(goModPath, "utf-8");
+  } catch (error) {
+    console.warn(
+      `[go-adapter] Failed to read ${goModPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
   const match = content.match(/^\s*module\s+([^\s]+)\s*$/m);
   return match?.[1] ?? null;
 }

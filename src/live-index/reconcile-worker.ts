@@ -32,9 +32,18 @@ export class ReconcileWorker {
 
   enqueue(repoId: string, frontier: DependencyFrontier, enqueuedAt = new Date().toISOString()): void {
     this.queue.enqueue(repoId, frontier, enqueuedAt);
+    this.ensureDraining();
+  }
+
+  private ensureDraining(): void {
     if (!this.pendingDrain) {
       this.pendingDrain = this.drain().finally(() => {
         this.pendingDrain = null;
+        // Check if new items were enqueued between drain teardown and
+        // pendingDrain being cleared — restart the drain if needed.
+        if (this.queue.peekNext()) {
+          this.ensureDraining();
+        }
       });
     }
   }

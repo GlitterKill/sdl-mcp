@@ -178,7 +178,8 @@ export async function getTopSymbolsByFanIn(
             m.fanIn AS fanIn,
             m.fanOut AS fanOut,
             m.churn30d AS churn30d
-     ORDER BY m.fanIn DESC`,
+     ORDER BY m.fanIn DESC
+     LIMIT 10000`,
     { repoId },
   );
 
@@ -252,7 +253,8 @@ export async function getTopSymbolsByChurn(
             m.fanIn AS fanIn,
             m.fanOut AS fanOut,
             m.churn30d AS churn30d
-     ORDER BY m.churn30d DESC`,
+     ORDER BY m.churn30d DESC
+     LIMIT 10000`,
     { repoId },
   );
 

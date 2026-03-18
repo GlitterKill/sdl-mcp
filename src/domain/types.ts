@@ -441,6 +441,7 @@ export type NextBestAction =
   | "requestHotPath"
   | "requestRaw"
   | "refreshSlice"
+  | "buildSlice"
   | "provideIdentifiersToFind"
   | "provideErrorCodeRefs"
   | "provideFrontierJustification"
@@ -481,6 +482,9 @@ export interface RequiredFieldsForNext {
   refreshSlice?: {
     sliceHandle: SliceHandle;
     knownVersion: VersionId;
+  };
+  buildSlice?: {
+    repoId: RepoId;
   };
   provideIdentifiersToFind?: {
     minCount: number;

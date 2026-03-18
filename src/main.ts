@@ -74,7 +74,7 @@ async function main(): Promise<void> {
     // Dynamic imports AFTER migrations - these modules prepare SQL statements
     log("Registering MCP tools...");
     const { registerTools } = await import("./mcp/tools/index.js");
-    configureDefaultLiveIndexCoordinator({
+    await configureDefaultLiveIndexCoordinator({
       enabled: config.liveIndex?.enabled ?? true,
       debounceMs: config.liveIndex?.debounceMs,
       maxDraftFiles: config.liveIndex?.maxDraftFiles,

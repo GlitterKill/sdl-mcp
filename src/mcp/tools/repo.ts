@@ -1,13 +1,13 @@
 import { existsSync, readFileSync } from "fs";
 import { join, relative, resolve } from "path";
 import {
-  RepoRegisterRequestSchema,
+  type RepoRegisterRequest,
   RepoRegisterResponse,
-  RepoStatusRequestSchema,
+  type RepoStatusRequest,
   RepoStatusResponse,
-  IndexRefreshRequestSchema,
+  type IndexRefreshRequest,
   IndexRefreshResponse,
-  RepoOverviewRequestSchema,
+  type RepoOverviewRequest,
   RepoOverviewResponse,
 } from "../tools.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
@@ -119,7 +119,7 @@ export function resolveRepoLanguages(
 export async function handleRepoRegister(
   args: unknown,
 ): Promise<RepoRegisterResponse> {
-  const request = RepoRegisterRequestSchema.parse(args);
+  const request = args as RepoRegisterRequest;
   const { repoId, rootPath, ignore, languages, maxFileBytes } = request;
 
   recordToolTrace({
@@ -279,7 +279,7 @@ function detectWorkspaces(packageJsonPath: string): string[] | undefined {
 export async function handleRepoStatus(
   args: unknown,
 ): Promise<RepoStatusResponse> {
-  const request = RepoStatusRequestSchema.parse(args);
+  const request = args as RepoStatusRequest;
   const { repoId, surfaceMemories } = request;
 
   const executeStatus = async () => {
@@ -402,7 +402,7 @@ export async function handleIndexRefresh(
   args: unknown,
   context?: ToolContext,
 ): Promise<IndexRefreshResponse> {
-  const request = IndexRefreshRequestSchema.parse(args);
+  const request = args as IndexRefreshRequest;
   const { repoId, mode } = request;
 
   recordToolTrace({
@@ -491,7 +491,7 @@ export async function handleIndexRefresh(
 export async function handleRepoOverview(
   args: unknown,
 ): Promise<RepoOverviewResponse> {
-  const request = RepoOverviewRequestSchema.parse(args);
+  const request = args as RepoOverviewRequest;
   const { repoId } = request;
 
   const conn = await getLadybugConn();

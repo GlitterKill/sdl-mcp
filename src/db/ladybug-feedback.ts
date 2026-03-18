@@ -85,7 +85,8 @@ export async function getAuditEvents(
             a.repoId AS repoId,
             a.symbolId AS symbolId,
             a.detailsJson AS detailsJson
-     ORDER BY a.timestamp DESC`,
+     ORDER BY a.timestamp DESC
+     LIMIT 10000`,
     params,
   );
   return rows.slice(0, safeLimit);
@@ -176,7 +177,8 @@ export async function getAgentFeedbackByRepo(
             f.taskType AS taskType,
             f.taskText AS taskText,
             f.createdAt AS createdAt
-     ORDER BY f.createdAt DESC`,
+     ORDER BY f.createdAt DESC
+     LIMIT 10000`,
     { repoId },
   );
   return rows.slice(0, limit);

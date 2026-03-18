@@ -363,8 +363,23 @@ export async function buildSlice(
     };
   }
 
+  // Cache the full slice (before ETag dedup) so that cache hits serve
+  // complete data regardless of the requesting client's known ETags.
   if (cacheEnabled) {
-    setCachedSlice(cacheKey, slice);
+    const hasKnownEtags = request.knownCardEtags && Object.keys(request.knownCardEtags).length > 0;
+    if (hasKnownEtags) {
+      // Rebuild full cards (without ETag dedup) for caching
+      const { cardsForPayload: fullCards } = buildPayloadCardsAndRefs(
+        cards,
+        undefined,
+        sliceDepsBySymbol,
+        sliceCards,
+      );
+      const fullSlice: GraphSlice = { ...slice, cards: fullCards, cardRefs: undefined };
+      setCachedSlice(cacheKey, fullSlice);
+    } else {
+      setCachedSlice(cacheKey, slice);
+    }
   }
 
   return slice;

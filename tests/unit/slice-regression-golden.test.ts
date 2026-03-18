@@ -354,8 +354,8 @@ describe("Golden parity: known etag behavior", () => {
     );
     assert.strictEqual(
       cardRefs?.length ?? 0,
-      0,
-      "unchanged card should not be in cardRefs",
+      1,
+      "unchanged card should appear in cardRefs so client knows it is still in slice",
     );
   });
 

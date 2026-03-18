@@ -62,11 +62,11 @@ describe("windows centerOnSymbol", () => {
 
   it("centers around middle symbol position", () => {
     const result = centerOnSymbol(fileContent, makeRange(5, 5), 4);
-    assert.strictEqual(result.actualRange.startLine, 4);
-    assert.strictEqual(result.actualRange.endLine, 7);
+    assert.strictEqual(result.actualRange.startLine, 3);
+    assert.strictEqual(result.actualRange.endLine, 6);
     assert.strictEqual(
       result.code,
-      ["line-4", "line-5", "line-6", "line-7"].join("\n"),
+      ["line-3", "line-4", "line-5", "line-6"].join("\n"),
     );
   });
 

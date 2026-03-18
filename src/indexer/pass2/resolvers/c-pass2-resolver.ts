@@ -728,18 +728,27 @@ async function resolveCCallEdgesPass2(params: {
     return 0;
   }
 
-  const extractedSymbols = adapter.extractSymbols(
-    tree,
-    content,
-    filePath,
-  ) as ExtractedSymbol[];
-  const calls = adapter.extractCalls(
-    tree,
-    content,
-    filePath,
-    extractedSymbols as never,
-  ) as ExtractedCall[];
-  const imports = adapter.extractImports(tree, content, filePath);
+  let extractedSymbols: ExtractedSymbol[];
+  let calls: ExtractedCall[];
+  let imports: ReturnType<typeof adapter.extractImports>;
+  let includeFallbacks: ReturnType<typeof collectIncludeImportFallbacks>;
+  try {
+    extractedSymbols = adapter.extractSymbols(
+      tree,
+      content,
+      filePath,
+    ) as ExtractedSymbol[];
+    calls = adapter.extractCalls(
+      tree,
+      content,
+      filePath,
+      extractedSymbols as never,
+    ) as ExtractedCall[];
+    imports = adapter.extractImports(tree, content, filePath);
+    includeFallbacks = collectIncludeImportFallbacks(tree);
+  } finally {
+    (tree as unknown as { delete?: () => void }).delete?.();
+  }
 
   const fileRecord = await ladybugDb.getFileByRepoPath(
     conn,
@@ -779,7 +788,7 @@ async function resolveCCallEdgesPass2(params: {
   const repoIndex = await buildCRepoIndex(repoId, cache);
 
   const importsForResolution =
-    imports.length > 0 ? imports : collectIncludeImportFallbacks(tree);
+    imports.length > 0 ? imports : includeFallbacks;
   const includeIndex = await buildIncludedSymbolIndex({
     repoId,
     repoRoot,

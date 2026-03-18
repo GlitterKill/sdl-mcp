@@ -1,4 +1,5 @@
 import type { Range } from "../domain/types.js";
+import { estimateTokens } from "./tokenize.js";
 
 export interface TruncationMetadata {
   truncated: boolean;
@@ -29,12 +30,6 @@ export interface TruncatedText extends TruncationMetadata {
 export interface TruncatedResult<T> {
   data: T;
   truncation: TruncationMetadata;
-}
-
-function estimateTokens(text: string): number {
-  const words = text.split(/\s+/).filter((w) => w.length > 0);
-  const chars = text.length;
-  return Math.max(words.length, Math.floor(chars / 4));
 }
 
 export function applyCountTruncation<T>(

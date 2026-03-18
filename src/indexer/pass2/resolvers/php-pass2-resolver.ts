@@ -1129,18 +1129,25 @@ async function resolvePhpCallEdgesPass2(params: {
     return 0;
   }
 
-  const extractedSymbols = adapter.extractSymbols(
-    tree,
-    content,
-    filePath,
-  ) as ExtractedSymbol[];
-  const calls = adapter.extractCalls(
-    tree,
-    content,
-    filePath,
-    extractedSymbols as never,
-  ) as ExtractedCall[];
-  const imports = adapter.extractImports(tree, content, filePath);
+  let extractedSymbols: ExtractedSymbol[];
+  let calls: ExtractedCall[];
+  let imports: ReturnType<typeof adapter.extractImports>;
+  try {
+    extractedSymbols = adapter.extractSymbols(
+      tree,
+      content,
+      filePath,
+    ) as ExtractedSymbol[];
+    calls = adapter.extractCalls(
+      tree,
+      content,
+      filePath,
+      extractedSymbols as never,
+    ) as ExtractedCall[];
+    imports = adapter.extractImports(tree, content, filePath);
+  } finally {
+    (tree as unknown as { delete?: () => void }).delete?.();
+  }
 
   const fileRecord = await ladybugDb.getFileByRepoPath(
     conn,

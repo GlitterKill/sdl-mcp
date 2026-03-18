@@ -317,13 +317,14 @@ export function centerOnSymbol(
   windowSize: number,
 ): ExtractWindowResult {
   const lines = splitLines(fileContent);
-  const centerLine = Math.floor(
+  // symbolRange lines are 1-indexed; convert to 0-indexed for array slicing
+  const centerIndex = Math.floor(
     (symbolRange.startLine + symbolRange.endLine) / 2,
-  );
+  ) - 1;
   const halfWindow = Math.floor(windowSize / 2);
 
-  const startLine = Math.max(0, centerLine - halfWindow);
-  const endLine = Math.min(lines.length, centerLine + halfWindow);
+  const startLine = Math.max(0, centerIndex - halfWindow);
+  const endLine = Math.min(lines.length, centerIndex + halfWindow);
 
   const selectedLines = lines.slice(startLine, endLine);
   const code = selectedLines.join("\n");

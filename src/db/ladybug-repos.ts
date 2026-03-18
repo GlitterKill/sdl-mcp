@@ -108,7 +108,8 @@ export async function listRepos(
             r.rootPath AS rootPath,
             r.configJson AS configJson,
             r.createdAt AS createdAt
-     ORDER BY r.repoId`,
+     ORDER BY r.repoId
+     LIMIT 10000`,
   );
   return rows.slice(0, limit);
 }
@@ -333,6 +334,33 @@ async function _deleteFilesByIdsInner(
       { symbolIds },
     );
 
+    // Step 5b: Batch-delete SymbolEmbedding nodes
+    await exec(
+      conn,
+      `MATCH (e:SymbolEmbedding)
+       WHERE e.symbolId IN $symbolIds
+       DELETE e`,
+      { symbolIds },
+    );
+
+    // Step 5c: Batch-delete SummaryCache nodes
+    await exec(
+      conn,
+      `MATCH (sc:SummaryCache)
+       WHERE sc.symbolId IN $symbolIds
+       DELETE sc`,
+      { symbolIds },
+    );
+
+    // Step 5d: Batch-delete MEMORY_OF edges (Memory -> deleted Symbol)
+    await exec(
+      conn,
+      `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
+
     // Step 6: Batch-delete Symbol nodes
     await exec(
       conn,
@@ -342,6 +370,24 @@ async function _deleteFilesByIdsInner(
       { symbolIds },
     );
   }
+
+  // Step 6b: Batch-delete SymbolReference nodes for these files
+  await exec(
+    conn,
+    `MATCH (sr:SymbolReference)
+     WHERE sr.fileId IN $fileIds
+     DELETE sr`,
+    { fileIds: uniqueFileIds },
+  );
+
+  // Step 6c: Batch-delete MEMORY_OF_FILE edges (Memory -> deleted File)
+  await exec(
+    conn,
+    `MATCH (mem:Memory)-[r:MEMORY_OF_FILE]->(f:File)
+     WHERE f.fileId IN $fileIds
+     DELETE r`,
+    { fileIds: uniqueFileIds },
+  );
 
   // Step 7: Batch-delete FILE_IN_REPO rels and File nodes
   await exec(

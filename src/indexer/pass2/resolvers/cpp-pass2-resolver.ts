@@ -477,7 +477,12 @@ async function buildCppIncludeIndex(params: {
       continue;
     }
 
-    const imports = adapter.extractImports(tree, content, absolutePath);
+    let imports;
+    try {
+      imports = adapter.extractImports(tree, content, absolutePath);
+    } finally {
+      (tree as unknown as { delete?: () => void }).delete?.();
+    }
     const importResolution = await resolveImportTargets(
       params.repoId,
       params.repoRoot,
@@ -947,17 +952,25 @@ async function resolveCppCallEdgesPass2(params: {
     return 0;
   }
 
-  const extractedSymbols = adapter.extractSymbols(
-    tree,
-    content,
-    filePath,
-  ) as ExtractedSymbol[];
-  const calls = adapter.extractCalls(
-    tree,
-    content,
-    filePath,
-    extractedSymbols as never,
-  ) as ExtractedCall[];
+  let extractedSymbols: ExtractedSymbol[];
+  let calls: ExtractedCall[];
+  let usingNamespaces: Set<string>;
+  try {
+    extractedSymbols = adapter.extractSymbols(
+      tree,
+      content,
+      filePath,
+    ) as ExtractedSymbol[];
+    calls = adapter.extractCalls(
+      tree,
+      content,
+      filePath,
+      extractedSymbols as never,
+    ) as ExtractedCall[];
+    usingNamespaces = extractUsingNamespaces(tree);
+  } finally {
+    (tree as unknown as { delete?: () => void }).delete?.();
+  }
 
   const fileRecord = await ladybugDb.getFileByRepoPath(
     conn,
@@ -994,7 +1007,6 @@ async function resolveCppCallEdgesPass2(params: {
   });
 
   const nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
-  const usingNamespaces = extractUsingNamespaces(tree);
 
   const includeIndex = await buildCppIncludeIndex({
     repoId,

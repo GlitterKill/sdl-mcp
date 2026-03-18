@@ -84,6 +84,8 @@ export class ParserWorkerPool {
         const wq = this.workers[workerIdx];
         if (wq.currentTask) {
           wq.currentTask.reject(error);
+          wq.currentTask = undefined;
+          wq.busy = false;
         }
         // Remove the dead worker and replace it
         this.workers.splice(workerIdx, 1);
@@ -93,6 +95,25 @@ export class ParserWorkerPool {
       }
       logger.error(`Worker ${index} crashed and was replaced`, { error: error instanceof Error ? error.message : String(error) });
       this.processQueue();
+    });
+
+    worker.on("exit", (code) => {
+      const workerIdx = this.workers.findIndex((w) => w.worker === worker);
+      if (workerIdx !== -1) {
+        const wq = this.workers[workerIdx];
+        if (wq.currentTask) {
+          wq.currentTask.reject(
+            new Error(`Worker ${index} exited with code ${code}`),
+          );
+          wq.currentTask = undefined;
+          wq.busy = false;
+        }
+        this.workers.splice(workerIdx, 1);
+        if (!this.shuttingDown) {
+          this.workers.push(this.createWorker(this.workers.length));
+          this.processQueue();
+        }
+      }
     });
 
     return { worker, busy: false };
@@ -142,6 +163,14 @@ export class ParserWorkerPool {
       item.reject(new Error("Worker pool shut down"));
     }
     this.queue.length = 0;
+    // Reject in-flight tasks so callers don't hang
+    for (const w of this.workers) {
+      if (w.currentTask) {
+        w.currentTask.reject(new Error("Worker pool shut down"));
+        w.currentTask = undefined;
+        w.busy = false;
+      }
+    }
     await Promise.all(this.workers.map((w) => w.worker.terminate()));
   }
 

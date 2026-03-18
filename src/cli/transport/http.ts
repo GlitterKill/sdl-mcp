@@ -1241,6 +1241,8 @@ export async function setupHttpTransport(
   ): void {
     if (cleanedUp.has(sessionId)) return;
     cleanedUp.add(sessionId);
+    // Prevent unbounded growth: remove from guard set after 30 seconds
+    setTimeout(() => cleanedUp.delete(sessionId), 30_000).unref();
 
     const transport = transports.get(sessionId);
     if (opts?.closeTransport && transport) {

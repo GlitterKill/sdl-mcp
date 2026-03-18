@@ -339,10 +339,21 @@ function insertCandidateIntoFrontier(
     state.frontier.insert(item);
     return;
   }
-  const min = state.frontier.peek();
-  if (min && compareFrontierItems(min, item) > 0) {
-    state.frontier.extractMin();
-    state.frontier.insert(item);
+  // Frontier is full — find the worst (least-promising) item and evict it
+  // if the new candidate is better.  The min-heap root is the BEST item
+  // (most-negative score), so we must scan the array to locate the worst.
+  const heapArr = state.frontier.toHeapArray();
+  let worstIdx = 0;
+  for (let i = 1; i < heapArr.length; i++) {
+    if (compareFrontierItems(heapArr[i], heapArr[worstIdx]) > 0) {
+      worstIdx = i;
+    }
+  }
+  if (compareFrontierItems(item, heapArr[worstIdx]) < 0) {
+    // New item is more promising than the current worst — replace it
+    heapArr[worstIdx] = item;
+    state.frontier.clear();
+    for (const h of heapArr) state.frontier.insert(h);
   } else {
     state.droppedCandidates++;
   }
@@ -363,9 +374,8 @@ function buildBeamSearchResult(
   if (state.sliceCards.size >= budget.maxCards) {
     state.wasTruncated = true;
   }
-  if (state.wasTruncated) {
-    state.droppedCandidates += frontierArray.length;
-  }
+  // Note: frontier items are NOT counted as dropped because they remain
+  // available to clients via spillover (sdl.slice.spillover.get).
   return {
     sliceCards: state.sliceCards,
     frontier: frontierArray,
@@ -496,13 +506,15 @@ async function beamSearchCoreAsync(
       state.totalTokens,
       budget.maxEstimatedTokens,
     );
-    const current = state.frontier.extractMin()!;
-    const actualScore = -current.score;
 
+    // Check card cap BEFORE extracting so the item is not lost from the frontier
     if (state.sliceCards.size >= state.effectiveCardCap) {
       state.wasTruncated = true;
       break;
     }
+
+    const current = state.frontier.extractMin()!;
+    const actualScore = -current.score;
 
     if (
       actualScore < SLICE_SCORE_THRESHOLD &&
@@ -605,13 +617,15 @@ export function beamSearch(
       state.totalTokens,
       budget.maxEstimatedTokens,
     );
-    const current = state.frontier.extractMin()!;
-    const actualScore = -current.score;
 
+    // Check card cap BEFORE extracting so the item is not lost from the frontier
     if (state.sliceCards.size >= state.effectiveCardCap) {
       state.wasTruncated = true;
       break;
     }
+
+    const current = state.frontier.extractMin()!;
+    const actualScore = -current.score;
 
     if (
       actualScore < SLICE_SCORE_THRESHOLD &&
@@ -1373,6 +1387,7 @@ class ParallelScorerPool {
 
       const timeout = setTimeout(() => {
         availableWorker.busy = false;
+        availableWorker.worker.off("message", handler);
         logger.warn("Parallel scorer timeout, falling back to sequential");
         this.failed = true;
         resolve(
@@ -1511,6 +1526,19 @@ export async function beamSearchAsync(
           ew[edge.type] ?? 0.5,
           edgeConfidence,
         );
+
+        // Populate scoring maps from the in-memory graph so that
+        // scoreBatch / scoreSequential have access to metrics and file data.
+        const metrics = graph.metrics?.get(neighborId) ?? null;
+        if (metrics !== null) {
+          metricsMap.set(neighborId, metrics);
+        }
+        if (neighborSymbol.file_id && graph.files) {
+          const file = graph.files.get(neighborSymbol.file_id);
+          if (file) {
+            filesMap.set(neighborSymbol.file_id, file);
+          }
+        }
 
         candidates.push({
           symbolId: neighborId,

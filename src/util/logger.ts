@@ -1,7 +1,7 @@
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 import { mkdirSync, appendFileSync, statSync, renameSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
 import { homedir } from "os";
 import {
   initTracing as initTracingInternal,
@@ -88,10 +88,7 @@ function writeToLogFile(msg: string): void {
  */
 export function enableFileLogging(filePath?: string): void {
   const resolvedPath = filePath ?? join(DEFAULT_LOG_DIR, "sdl-mcp.log");
-  const dir = resolvedPath.substring(
-    0,
-    Math.max(resolvedPath.lastIndexOf("/"), resolvedPath.lastIndexOf("\\")),
-  );
+  const dir = dirname(resolvedPath);
   ensureLogDir(dir);
   logFilePath = resolvedPath;
   logFileEnabled = true;

@@ -51,6 +51,14 @@ export function clearDetectionCache(): void {
 
 const IS_WINDOWS = process.platform === "win32";
 
+/**
+ * Escape a string for safe inclusion in a shell command by wrapping it in
+ * single quotes and escaping any embedded single quotes.
+ */
+function shellEscape(arg: string): string {
+  return "'" + arg.replace(/'/g, "'\\''") + "'";
+}
+
 export function normalizeExecutableName(executable: string): string {
   const trimmed = executable.trim().replace(/^["']|["']$/g, "");
   return basename(trimmed.replace(/\\/g, "/")).toLowerCase();
@@ -282,7 +290,7 @@ const shellRuntime: RuntimeDescriptor = {
     if (opts.codePath) {
       return { executable, args: [opts.codePath, ...args] };
     }
-    return { executable, args: ["-c", args.join(" ")] };
+    return { executable, args: ["-c", args.map(shellEscape).join(" ")] };
   },
 };
 

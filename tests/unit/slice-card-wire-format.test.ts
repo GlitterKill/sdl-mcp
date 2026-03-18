@@ -58,7 +58,7 @@ describe("slice card wire format", () => {
     );
   });
 
-  it("skips both payload and cardRefs for unchanged cards (delta-only refs)", () => {
+  it("adds unchanged cards to cardRefs but not payload when etag matches", () => {
     const knownEtag = hashCard(fullCard);
     const { cardsForPayload, cardRefs } = buildPayloadCardsAndRefs([fullCard], {
       [fullCard.symbolId]: knownEtag,
@@ -72,9 +72,10 @@ describe("slice card wire format", () => {
     assert.ok(cardRefs, "expected cardRefs to be present");
     assert.strictEqual(
       cardRefs?.length,
-      0,
-      "unchanged card should not appear in cardRefs",
+      1,
+      "unchanged card should appear in cardRefs so client knows it is still in slice",
     );
+    assert.strictEqual(cardRefs?.[0]?.symbolId, fullCard.symbolId);
   });
 
   it("includes changed cards in both payload and cardRefs", () => {

@@ -395,26 +395,6 @@ function processModule(node: Parser.SyntaxNode): ExtractedSymbol | null {
   };
 }
 
-function processArrowFunction(node: Parser.SyntaxNode): ExtractedSymbol | null {
-  const name = extractIdentifier(node);
-  if (!name) return null;
-
-  const params = extractParameters(node);
-  const returns = extractReturnType(node);
-
-  return {
-    name,
-    kind: "function",
-    exported: isExported(node),
-    visibility: undefined,
-    range: extractRange(node),
-    signature: {
-      params,
-      returns,
-    },
-  };
-}
-
 function traverseAST(
   node: Parser.SyntaxNode,
   symbols: ExtractedSymbol[],
@@ -474,13 +454,19 @@ function traverseAST(
             (arrowFunc.type === "arrow_function" ||
               arrowFunc.type === "function_expression")
           ) {
-            const arrowSymbol = processArrowFunction(arrowFunc);
-            if (arrowSymbol) {
-              symbols.push({
-                ...arrowSymbol,
-                name: left.text,
-              });
-            }
+            const params = extractParameters(arrowFunc);
+            const returns = extractReturnType(arrowFunc);
+            symbols.push({
+              name: left.text,
+              kind: "function",
+              exported: isExported(node),
+              visibility: undefined,
+              range: extractRange(node),
+              signature: {
+                params,
+                returns,
+              },
+            });
           }
         }
       }
@@ -488,7 +474,15 @@ function traverseAST(
   }
 
   for (const child of node.children) {
-    traverseAST(child, symbols);
+    try {
+      traverseAST(child, symbols);
+    } catch (error) {
+      // Log and continue so one bad node doesn't lose all symbols for the file
+      const msg = error instanceof Error ? error.message : String(error);
+      const loc = `${child.type}@${child.startPosition.row + 1}:${child.startPosition.column}`;
+      // Use console.warn as a lightweight fallback; logger may not be imported here
+      console.warn(`[extractSymbols] Error processing node ${loc}: ${msg}`);
+    }
   }
 }
 

@@ -136,6 +136,21 @@ export class ReconcileQueue {
     };
   }
 
+  /** Returns true if any repo has pending (non-inflight) work. */
+  peekNext(): boolean {
+    for (const state of this.repos.values()) {
+      if (
+        !state.inflight &&
+        (state.filePaths.size > 0 ||
+          state.touchedSymbolIds.size > 0 ||
+          state.invalidations.size > 0)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   clear(): void {
     this.repos.clear();
   }

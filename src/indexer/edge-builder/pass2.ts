@@ -163,26 +163,34 @@ async function resolveTsCallEdgesPass2(params: {
       return 0;
     }
 
-    const extractedSymbols = adapter.extractSymbols(tree, content, filePath);
-    if (telemetry) {
-      telemetry.pass2SymbolMapping.extractedSymbols += extractedSymbols.length;
+    let extractedSymbols;
+    let symbolsWithNodeIds;
+    let imports;
+    let calls;
+    try {
+      extractedSymbols = adapter.extractSymbols(tree, content, filePath);
+      if (telemetry) {
+        telemetry.pass2SymbolMapping.extractedSymbols += extractedSymbols.length;
+      }
+      symbolsWithNodeIds = extractedSymbols.map((symbol) => ({
+        nodeId: symbol.nodeId,
+        kind: symbol.kind,
+        name: symbol.name,
+        exported: symbol.exported,
+        range: symbol.range,
+        signature: symbol.signature,
+        visibility: symbol.visibility,
+      }));
+      imports = adapter.extractImports(tree, content, filePath);
+      calls = adapter.extractCalls(
+        tree,
+        content,
+        filePath,
+        symbolsWithNodeIds,
+      );
+    } finally {
+      (tree as unknown as { delete?: () => void }).delete?.();
     }
-    const symbolsWithNodeIds = extractedSymbols.map((symbol) => ({
-      nodeId: symbol.nodeId,
-      kind: symbol.kind,
-      name: symbol.name,
-      exported: symbol.exported,
-      range: symbol.range,
-      signature: symbol.signature,
-      visibility: symbol.visibility,
-    }));
-    const imports = adapter.extractImports(tree, content, filePath);
-    const calls = adapter.extractCalls(
-      tree,
-      content,
-      filePath,
-      symbolsWithNodeIds,
-    );
 
     const fileRecord = await ladybugDb.getFileByRepoPath(
       conn,

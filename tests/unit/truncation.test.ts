@@ -72,20 +72,20 @@ describe("truncation utilities", () => {
     it("truncates from end with token resume metadata", () => {
       const text = ["aaaa", "bbbb", "cccc", "dddd"].join("\n");
       const result = applyTokenTruncation(text, {
-        maxTokens: 2,
+        maxTokens: 3,
         truncateAt: "end",
       });
 
       assert.strictEqual(result.truncated, true);
       assert.strictEqual(result.text, "aaaa\nbbbb");
       assert.strictEqual(result.droppedCount, 2);
-      assert.deepStrictEqual(result.howToResume, { type: "token", value: 2 });
+      assert.deepStrictEqual(result.howToResume, { type: "token", value: 3 });
     });
 
     it("truncates from start", () => {
       const text = ["aaaa", "bbbb", "cccc", "dddd"].join("\n");
       const result = applyTokenTruncation(text, {
-        maxTokens: 2,
+        maxTokens: 3,
         truncateAt: "start",
       });
 
@@ -127,7 +127,7 @@ describe("truncation utilities", () => {
     it("combines token and line truncation when both limits are provided", () => {
       const text = ["aaaa", "bbbb", "cccc", "dddd"].join("\n");
       const result = truncateText(text, {
-        maxTokens: 4,
+        maxTokens: 7,
         maxLines: 2,
         truncateAt: "end",
       });

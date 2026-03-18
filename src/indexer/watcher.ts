@@ -260,6 +260,9 @@ export async function watchRepositoryWithIndexer(
             recordWatcherError(`[sdl-mcp] reindexWithRetry failed: ${errMsg}`);
           });
         }, delay);
+      } else {
+        // All retry attempts exhausted; decrement pending so stale detection stays accurate
+        health.pendingChanges = Math.max(0, health.pendingChanges - 1);
       }
     }
   };

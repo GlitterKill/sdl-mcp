@@ -543,7 +543,7 @@ const DeltaPackSchema = z.object({
 
 const CodeWindowRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  symbolId: z.string().max(MAX_SYMBOL_ID_LENGTH),
+  symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
   reason: z.string().max(10000),
   expectedLines: z.number().int().min(1),
   identifiersToFind: z.array(z.string()).max(50),
@@ -806,14 +806,14 @@ const NotModifiedResponseSchema = z.object({
 
 export const SymbolGetCardRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  symbolId: z.string().max(MAX_SYMBOL_ID_LENGTH),
+  symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
   ifNoneMatch: z.string().optional(),
   minCallConfidence: z.number().min(0).max(1).optional(),
   includeResolutionMetadata: z.boolean().optional(),
 });
 
 export const SymbolGetCardsRequestSchema = z.object({
-  repoId: z.string().max(MAX_REPO_ID_LENGTH).describe("Repository ID"),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH).describe("Repository ID"),
   symbolIds: z
     .array(z.string())
     .min(1)
@@ -987,7 +987,7 @@ export const SliceSpilloverGetResponseSchema = z.object({
 
 export const CodeNeedWindowRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  symbolId: z.string().max(MAX_SYMBOL_ID_LENGTH),
+  symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
   reason: z.string().min(1).max(10000),
   expectedLines: z.number().int().min(1),
   identifiersToFind: z.array(z.string()).max(50),
@@ -1093,7 +1093,7 @@ export const GetSkeletonResponseSchema = z.object({
 
 export const GetHotPathRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  symbolId: z.string().max(MAX_SYMBOL_ID_LENGTH),
+  symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
   identifiersToFind: z.array(z.string()).min(1).max(50),
   maxLines: z.number().int().min(1).optional(),
   maxTokens: z.number().int().min(1).optional(),

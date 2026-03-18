@@ -293,9 +293,10 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
 
 let defaultLiveIndexCoordinator = new InMemoryLiveIndexCoordinator();
 
-export function configureDefaultLiveIndexCoordinator(
+export async function configureDefaultLiveIndexCoordinator(
   options: InMemoryLiveIndexCoordinatorOptions = {},
-): void {
+): Promise<void> {
+  await defaultLiveIndexCoordinator.waitForIdle();
   defaultLiveIndexCoordinator.reset();
   defaultLiveIndexCoordinator = new InMemoryLiveIndexCoordinator(options);
 }
