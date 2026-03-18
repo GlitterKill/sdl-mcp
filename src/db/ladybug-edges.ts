@@ -3,12 +3,37 @@
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber, withTransaction, isJoinHintSyntaxUnsupported } from "./ladybug-core.js";
+import { exec, queryAll, querySingle, toNumber, withTransaction } from "./ladybug-core.js";
 
-// Module-level flag for join hint support detection.
+// Promise-based singleton for join hint support detection.
 // Used by getEdgesToSymbols and getCallersOfSymbols to avoid
 // re-probing on every call after the first success/failure.
-let joinHintSupported: boolean | null = null;
+let joinHintSupportedPromise: Promise<boolean> | null = null;
+
+async function detectJoinHintSupport(conn: Connection): Promise<boolean> {
+  try {
+    await queryAll(conn, `MATCH (a:Symbol)-[d:DEPENDS_ON]->(b:Symbol) WITH a, d, b HINT (b JOIN (d JOIN a)) RETURN a.symbolId LIMIT 0`, {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getJoinHintSupported(conn: Connection): Promise<boolean> {
+  if (!joinHintSupportedPromise) {
+    joinHintSupportedPromise = detectJoinHintSupport(conn);
+  }
+  return joinHintSupportedPromise;
+}
+
+/**
+ * Reset the cached join-hint detection result.
+ * Must be called when closing the database so that
+ * a subsequent initLadybugDb() re-probes the new connection.
+ */
+export function resetJoinHintCache(): void {
+  joinHintSupportedPromise = null;
+}
 
 export interface EdgeRow {
   repoId: string;
@@ -57,6 +82,10 @@ function buildMinCallConfidenceClause(
 }
 
 export async function insertEdge(conn: Connection, edge: EdgeRow): Promise<void> {
+  // Note: MERGE on target symbol (b) may create "stub" nodes with only symbolId
+  // and SYMBOL_IN_REPO edge when the target hasn't been indexed yet. This is
+  // intentional — stubs are populated when the target file is indexed, and
+  // queries that need full symbol data filter via SYMBOL_IN_FILE joins.
   await exec(
     conn,
     `MATCH (r:Repo {repoId: $repoId})
@@ -446,22 +475,8 @@ export async function getEdgesToSymbols(
             d.createdAt AS createdAt
      ORDER BY a.symbolId`;
 
-  let rows: Array<{
-    repoId: string;
-    fromSymbolId: string;
-    toSymbolId: string;
-    edgeType: string;
-    weight: unknown;
-    confidence: unknown;
-    resolution: string;
-    resolverId: string | null;
-    resolutionPhase: string | null;
-    provenance: string | null;
-    createdAt: string;
-  }>;
-
-  try {
-    rows = await queryAll<{
+  const useJoinHint = await getJoinHintSupported(conn);
+  const rows = await queryAll<{
     repoId: string;
     fromSymbolId: string;
     toSymbolId: string;
@@ -474,43 +489,15 @@ export async function getEdgesToSymbols(
     provenance: string | null;
     createdAt: string;
   }>(
-      conn,
-      joinHintSupported === false ? queryWithoutHint : queryWithHint,
-      {
-        symbolIds,
-        ...(options?.minCallConfidence !== undefined
-          ? { minCallConfidence: options.minCallConfidence }
-          : {}),
-      },
-    );
-    if (joinHintSupported === null) {
-      joinHintSupported = true;
-    }
-  } catch (error) {
-    if (joinHintSupported !== false && isJoinHintSyntaxUnsupported(error)) {
-      joinHintSupported = false;
-      rows = await queryAll<{
-        repoId: string;
-        fromSymbolId: string;
-        toSymbolId: string;
-        edgeType: string;
-        weight: unknown;
-        confidence: unknown;
-        resolution: string;
-        resolverId: string | null;
-        resolutionPhase: string | null;
-        provenance: string | null;
-        createdAt: string;
-      }>(conn, queryWithoutHint, {
-        symbolIds,
-        ...(options?.minCallConfidence !== undefined
-          ? { minCallConfidence: options.minCallConfidence }
-          : {}),
-      });
-    } else {
-      throw error;
-    }
-  }
+    conn,
+    useJoinHint ? queryWithHint : queryWithoutHint,
+    {
+      symbolIds,
+      ...(options?.minCallConfidence !== undefined
+        ? { minCallConfidence: options.minCallConfidence }
+        : {}),
+    },
+  );
 
   for (const row of rows) {
     const bucket = result.get(row.toSymbolId);
@@ -606,28 +593,12 @@ export async function getCallersOfSymbols(
      RETURN DISTINCT from.symbolId AS symbolId
      ORDER BY symbolId`;
 
-  let rows: Array<{ symbolId: string }>;
-
-  try {
-    rows = await queryAll<{ symbolId: string }>(
-      conn,
-      joinHintSupported === false ? queryWithoutHint : queryWithHint,
-      { repoId, symbolIds },
-    );
-    if (joinHintSupported === null) {
-      joinHintSupported = true;
-    }
-  } catch (error) {
-    if (joinHintSupported !== false && isJoinHintSyntaxUnsupported(error)) {
-      joinHintSupported = false;
-      rows = await queryAll<{ symbolId: string }>(conn, queryWithoutHint, {
-        repoId,
-        symbolIds,
-      });
-    } else {
-      throw error;
-    }
-  }
+  const useJoinHint = await getJoinHintSupported(conn);
+  const rows = await queryAll<{ symbolId: string }>(
+    conn,
+    useJoinHint ? queryWithHint : queryWithoutHint,
+    { repoId, symbolIds },
+  );
 
   return rows.map((row) => row.symbolId);
 }

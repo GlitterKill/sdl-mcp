@@ -26,13 +26,6 @@ export function clearPreparedStatementCache(conn: Connection): void {
   preparedStatementCacheByConn.delete(conn);
 }
 
-export function isJoinHintSyntaxUnsupported(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return (
-    message.includes("extraneous input 'HINT'") ||
-    message.includes('extraneous input "HINT"')
-  );
-}
 
 export function assertSafeInt(value: number, name: string): void {
   if (!Number.isSafeInteger(value)) {

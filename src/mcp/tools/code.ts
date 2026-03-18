@@ -431,7 +431,11 @@ export async function handleCodeNeedWindow(
     const hotpathTruncation = hotpathResult.truncated
       ? {
           truncated: true,
-          droppedCount: 0,
+          droppedCount: Math.max(
+            0,
+            (symbolRange.endLine - symbolRange.startLine + 1) -
+            (hotpathResult.actualRange.endLine - hotpathResult.actualRange.startLine + 1),
+          ),
           howToResume: {
             type: "cursor" as const,
             value: hotpathResult.actualRange.endLine,

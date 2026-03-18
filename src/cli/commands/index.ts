@@ -153,6 +153,8 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
 
   console.log(`Indexing ${reposToIndex.length} repo(s)...`);
 
+  const errors: Array<{ repoId: string; error: string }> = [];
+
   for (const repo of reposToIndex) {
     const mode = options.force ? "full" : "incremental";
     console.log(
@@ -224,15 +226,22 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
         );
       }
     } catch (error) {
-      console.error(
-        `  Error: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      process.exit(1);
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`  Error indexing: ${msg}`);
+      errors.push({ repoId: repo.repoId, error: msg });
     }
 
     if (options.watch) {
       console.log(`  Starting file watcher for ${repo.repoId}...`);
     }
+  }
+
+  if (errors.length > 0) {
+    console.error(`\nFailed to index ${errors.length} repo(s):`);
+    for (const e of errors) {
+      console.error(`  - ${e.repoId}: ${e.error}`);
+    }
+    process.exit(1);
   }
 
   if (options.watch && !canDelegate) {

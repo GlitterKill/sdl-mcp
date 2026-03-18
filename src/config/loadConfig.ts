@@ -82,25 +82,28 @@ export function loadConfig(configPath?: string): AppConfig {
 
     // Merge SDL_ALLOWED_REPO_ROOTS env var (comma-separated absolute paths)
     // into config.security.allowedRepoRoots at load time.
+    // Build a new object instead of mutating the Zod-parsed result.
     const envAllowedRootsRaw = process.env.SDL_ALLOWED_REPO_ROOTS;
+    let finalConfig = config;
     if (envAllowedRootsRaw && envAllowedRootsRaw.trim().length > 0) {
       const envRoots = envAllowedRootsRaw
         .split(",")
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
       if (envRoots.length > 0) {
-        if (!config.security) {
-          config.security = { allowedRepoRoots: [] };
-        }
-        config.security.allowedRepoRoots = [
-          ...config.security.allowedRepoRoots,
-          ...envRoots,
-        ];
+        const mergedSecurity = {
+          ...(config.security ?? { allowedRepoRoots: [] }),
+          allowedRepoRoots: [
+            ...(config.security?.allowedRepoRoots ?? []),
+            ...envRoots,
+          ],
+        };
+        finalConfig = { ...config, security: mergedSecurity };
       }
     }
 
     // Cache the result
-    cachedConfig = config;
+    cachedConfig = finalConfig;
     cachedConfigPath = filePath;
     try {
       cachedConfigMtimeMs = statSync(filePath).mtimeMs;
@@ -108,7 +111,7 @@ export function loadConfig(configPath?: string): AppConfig {
       cachedConfigMtimeMs = null;
     }
 
-    return config;
+    return finalConfig;
   } catch (err) {
     if (err instanceof Error && "code" in err && err.code === "ENOENT") {
       throw new ConfigError(`Config file not found: ${filePath}`);

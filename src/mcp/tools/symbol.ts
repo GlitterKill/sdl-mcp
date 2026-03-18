@@ -127,22 +127,16 @@ export async function handleSymbolSearch(
         const nonRerankableById = new Map(
           nonRerankableResults.map((row) => [row.symbolId, row]),
         );
-        const mergedResults: typeof results = [];
-        let rerankedIndex = 0;
-        for (const row of rows) {
-          if (rerankableSymbolIds.has(row.symbolId)) {
-            const rerankedRow = rerankedResults[rerankedIndex];
-            rerankedIndex += 1;
-            if (rerankedRow) {
-              mergedResults.push(rerankedRow);
-            }
-            continue;
-          }
-          const nonRerankableRow = nonRerankableById.get(row.symbolId);
-          if (nonRerankableRow) {
-            mergedResults.push(nonRerankableRow);
-          }
-        }
+
+        // Reranked symbols first (in semantic relevance order),
+        // then non-rerankable symbols (in original lexical order)
+        const mergedResults: typeof results = [
+          ...rerankedResults,
+          ...rows
+            .filter((row) => !rerankableSymbolIds.has(row.symbolId))
+            .map((row) => nonRerankableById.get(row.symbolId))
+            .filter((r): r is NonNullable<typeof r> => r != null),
+        ];
 
         results = mergedResults.slice(0, limit);
         semanticEnabled = true;

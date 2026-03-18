@@ -10,8 +10,8 @@ import { logger } from "./logger.js";
  * @returns true if pattern has ReDoS risk, false otherwise
  */
 export function isReDoSRisk(pattern: string): boolean {
-  // 1. Nested quantifiers after group closing paren: (a+)+, (a*)*,  (a+)*, etc.
-  if (/\)[+*?{]/.test(pattern)) {
+  // 1. Nested quantifiers: (a+)+, (a*)*  — require a quantifier inside the group
+  if (/\([^)]*[+*]\)[+*{]/.test(pattern)) {
     return true;
   }
 

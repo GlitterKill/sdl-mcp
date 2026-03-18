@@ -79,13 +79,19 @@ export class ParserWorkerPool {
     });
 
     worker.on("error", (error) => {
-      const workerWithQueue = this.workers.find((w) => w.worker === worker);
-      if (workerWithQueue && workerWithQueue.currentTask) {
-        workerWithQueue.currentTask.reject(error);
-        workerWithQueue.busy = false;
-        workerWithQueue.currentTask = undefined;
+      const workerIdx = this.workers.findIndex((w) => w.worker === worker);
+      if (workerIdx !== -1) {
+        const wq = this.workers[workerIdx];
+        if (wq.currentTask) {
+          wq.currentTask.reject(error);
+        }
+        // Remove the dead worker and replace it
+        this.workers.splice(workerIdx, 1);
+        if (!this.shuttingDown) {
+          this.workers.push(this.createWorker(this.workers.length));
+        }
       }
-      logger.error(`Worker ${index} error:`, { error });
+      logger.error(`Worker ${index} crashed and was replaced`, { error: error instanceof Error ? error.message : String(error) });
       this.processQueue();
     });
 

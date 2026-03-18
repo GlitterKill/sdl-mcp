@@ -61,6 +61,7 @@ export function checkRepoRootAllowlist(
   allowedRoots: string[],
 ): void {
   if (allowedRoots.length === 0) {
+    logger.warn("No allowedRepoRoots configured — any absolute path can be registered as a repository");
     return; // empty allowlist = unrestricted (backward compatible)
   }
 

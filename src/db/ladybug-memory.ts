@@ -211,7 +211,20 @@ export async function queryMemories(
      RETURN DISTINCT ${MEMORY_RETURN_FIELDS}
      ${orderBy}`;
 
-  const rows = await queryAll<Record<string, unknown>>(conn, cypher, params);
+  let rows = await queryAll<Record<string, unknown>>(conn, cypher, params);
+
+  // Post-filter tags at application level for exact array-element matching
+  if (options.tags && options.tags.length > 0) {
+    rows = rows.filter((row) => {
+      try {
+        const memTags: string[] = JSON.parse((row.tagsJson as string) || "[]");
+        return options.tags!.some((t) => memTags.includes(t));
+      } catch {
+        return false;
+      }
+    });
+  }
+
   return rows.slice(0, safeLimit).map(toMemoryRow);
 }
 

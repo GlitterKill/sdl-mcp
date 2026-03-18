@@ -117,7 +117,9 @@ export abstract class BaseAdapter implements LanguageAdapter {
     extractedSymbols: ExtractedSymbol[],
   ): ExtractedCall[];
 
-  protected handleParseErrors(_filePath: string, _tree: Tree): void {}
+  protected handleParseErrors(filePath: string, _tree: Tree): void {
+    logger.warn("Parse errors detected in file, results may be incomplete", { filePath });
+  }
 
   protected logParseError(filePath: string, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);

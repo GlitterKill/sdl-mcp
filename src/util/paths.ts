@@ -62,7 +62,14 @@ export function safeJoin(...parts: string[]): string {
 }
 
 function containsPathTraversal(p: string): boolean {
-  const normalized = normalizePath(p);
+  // Decode percent-encoded sequences before checking (e.g., %2e%2e = ..)
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(p);
+  } catch {
+    decoded = p;
+  }
+  const normalized = normalizePath(decoded);
   if (normalized.startsWith("..")) return true;
   if (normalized.includes("/../")) return true;
   if (normalized.endsWith("/..")) return true;

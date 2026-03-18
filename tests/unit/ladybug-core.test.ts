@@ -10,7 +10,6 @@ import {
   toNumber,
   toBoolean,
   assertSafeInt,
-  isJoinHintSyntaxUnsupported,
   queryAll,
   querySingle,
   exec,
@@ -107,32 +106,6 @@ describe("assertSafeInt", () => {
   });
 });
 
-describe("isJoinHintSyntaxUnsupported", () => {
-  it("returns true for HINT-related error messages", () => {
-    assert.equal(
-      isJoinHintSyntaxUnsupported(new Error("extraneous input 'HINT'")),
-      true,
-    );
-    assert.equal(
-      isJoinHintSyntaxUnsupported(new Error('extraneous input "HINT"')),
-      true,
-    );
-  });
-
-  it("returns false for unrelated errors", () => {
-    assert.equal(
-      isJoinHintSyntaxUnsupported(new Error("connection failed")),
-      false,
-    );
-    assert.equal(isJoinHintSyntaxUnsupported(new Error("syntax error")), false);
-  });
-
-  it("handles non-Error values", () => {
-    assert.equal(isJoinHintSyntaxUnsupported("extraneous input 'HINT'"), true);
-    assert.equal(isJoinHintSyntaxUnsupported("some other error"), false);
-    assert.equal(isJoinHintSyntaxUnsupported(null), false);
-  });
-});
 
 describe("query helpers", () => {
   function makeQueryResult<T>(rows: T[]) {

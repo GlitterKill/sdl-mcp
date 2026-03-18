@@ -218,20 +218,6 @@ function calculateSymbolKindSpecificity(symbol: SymbolRow): number {
   }
 }
 
-export function normalizeScores(scores: number[]): number[] {
-  if (scores.length === 0) return [];
-  if (scores.length === 1) return [1];
-
-  const min = Math.min(...scores);
-  const max = Math.max(...scores);
-
-  if (min === max) {
-    return scores.map(() => 0.5);
-  }
-
-  return scores.map((score) => (score - min) / (max - min));
-}
-
 export function combineScores(
   scores: Map<string, number>,
   weights: Map<string, number>,

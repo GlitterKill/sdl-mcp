@@ -29,12 +29,12 @@
     "version": "napi version"
   },
   "optionalDependencies": {
-    "sdl-mcp-native-win32-x64-msvc": "0.8.8",
-    "sdl-mcp-native-darwin-x64": "0.8.8",
-    "sdl-mcp-native-darwin-arm64": "0.8.8",
-    "sdl-mcp-native-linux-x64-gnu": "0.8.8",
-    "sdl-mcp-native-linux-x64-musl": "0.8.8",
-    "sdl-mcp-native-linux-arm64-gnu": "0.8.8"
+    "sdl-mcp-native-win32-x64-msvc": "0.9.0",
+    "sdl-mcp-native-darwin-x64": "0.9.0",
+    "sdl-mcp-native-darwin-arm64": "0.9.0",
+    "sdl-mcp-native-linux-x64-gnu": "0.9.0",
+    "sdl-mcp-native-linux-x64-musl": "0.9.0",
+    "sdl-mcp-native-linux-arm64-gnu": "0.9.0"
   },
   "repository": {
     "type": "git",

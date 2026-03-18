@@ -22,7 +22,7 @@ export interface MemoryFileData {
 }
 
 /** Map memory type to subdirectory name */
-function typeToDir(type: string): string {
+export function typeToDir(type: string): string {
   switch (type) {
     case "decision":
       return "decisions";
@@ -58,7 +58,7 @@ function parseYamlArray(value: string): string[] {
 function serializeMemoryFile(data: MemoryFileData): string {
   const lines = [
     "---",
-    `memoryId: ${data.memoryId}`,
+    `memoryId: ${escapeYamlString(data.memoryId)}`,
     `type: ${data.type}`,
     `title: ${escapeYamlString(data.title)}`,
     `tags: ${serializeYamlArray(data.tags)}`,
@@ -100,7 +100,13 @@ export async function writeMemoryFile(
 
   const content = serializeMemoryFile(memory);
   fs.writeFileSync(tmpPath, content, "utf-8");
-  fs.renameSync(tmpPath, filePath);
+  try {
+    fs.renameSync(tmpPath, filePath);
+  } catch (err) {
+    // Clean up temp file on rename failure (e.g., cross-drive, file locked)
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore cleanup failure */ }
+    throw err;
+  }
 
   const relPath = path.relative(repoRoot, filePath);
   return normalizePath(relPath);

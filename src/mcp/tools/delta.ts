@@ -3,7 +3,7 @@ import { computeDelta } from "../../delta/diff.js";
 import { runGovernorLoop } from "../../delta/blastRadius.js";
 import { truncateArray } from "../../util/truncation.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { getLadybugConn } from "../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import {
   getSliceHandle,
   updateSliceHandleSpillover,
@@ -98,18 +98,21 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     delta.trimmedSet = governorResult.trimmedSet;
 
     if (governorResult.spilloverHandle) {
-      delta.spilloverHandle = governorResult.spilloverHandle;
+      const spilloverHandle = governorResult.spilloverHandle;
+      delta.spilloverHandle = spilloverHandle;
 
       const handleRow = await getSliceHandle(
         conn,
-        governorResult.spilloverHandle,
+        spilloverHandle,
       );
       if (handleRow) {
-        await updateSliceHandleSpillover(
-          conn,
-          governorResult.spilloverHandle,
-          JSON.stringify(governorResult.trimmedSet.droppedSymbols),
-        );
+        await withWriteConn(async (wConn) => {
+          await updateSliceHandleSpillover(
+            wConn,
+            spilloverHandle,
+            JSON.stringify(governorResult.trimmedSet.droppedSymbols),
+          );
+        });
       }
     }
 

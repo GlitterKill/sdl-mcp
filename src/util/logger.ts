@@ -220,6 +220,12 @@ class Logger {
 
 export const logger = new Logger();
 
+// Read log level from environment if set
+const envLogLevel = process.env.SDL_LOG_LEVEL?.toLowerCase();
+if (envLogLevel && ["debug", "info", "warn", "error"].includes(envLogLevel)) {
+  logger.setLevel(envLogLevel as LogLevel);
+}
+
 export {
   initTracingInternal as initTracing,
   isTracingEnabled,

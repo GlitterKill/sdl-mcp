@@ -71,14 +71,18 @@ export async function handlePRRiskAnalysis(args: unknown) {
     riskScore >= (validated.riskThreshold ?? 70) &&
     findings.some((f) => f.severity === "high");
 
-  let policyDecision;
+  let policyDecision: { decision: string; deniedReasons: string[] } | undefined;
   if (escalationRequired) {
-    policyDecision = policyEngine.evaluate({
+    const rawDecision = policyEngine.evaluate({
       requestType: "codeWindow",
       repoId: validated.repoId,
-      identifiersToFind: [],
+      identifiersToFind: ["pr-risk-escalation"],
       reason: `PR risk score ${riskScore} exceeds threshold`,
     });
+    policyDecision = {
+      decision: rawDecision.decision,
+      deniedReasons: rawDecision.deniedReasons ?? [],
+    };
   }
 
   const response = {

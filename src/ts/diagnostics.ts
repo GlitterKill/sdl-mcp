@@ -47,13 +47,14 @@ interface LanguageServiceInstance {
 }
 
 class DiagnosticsManager {
-  private servicesCache = new Map<string, LanguageServiceInstance>();
+  private servicesCache = new Map<string, { instance: LanguageServiceInstance; cachedAt: number }>();
 
   async getLanguageService(repo: RepoConfig): Promise<LanguageServiceInstance> {
     const cacheKey = repo.repoId;
 
-    if (this.servicesCache.has(cacheKey)) {
-      return this.servicesCache.get(cacheKey)!;
+    const cached = this.servicesCache.get(cacheKey);
+    if (cached && Date.now() - cached.cachedAt < 60_000) {
+      return cached.instance;
     }
 
     const tsConfigPath = this.findTsConfig(
@@ -94,7 +95,7 @@ class DiagnosticsManager {
       projectRoot,
     };
 
-    this.servicesCache.set(cacheKey, instance);
+    this.servicesCache.set(cacheKey, { instance, cachedAt: Date.now() });
     return instance;
   }
 

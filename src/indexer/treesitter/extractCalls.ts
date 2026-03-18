@@ -212,14 +212,11 @@ export function extractCalls(
     let calleeSymbolId: string | undefined;
 
     if (calleeCapture) {
-      calleeIdentifier = callNode.node.text.includes("new")
+      calleeIdentifier = callNode.node.type === "new_expression"
         ? `new ${calleeCapture.node.text}`
         : calleeCapture.node.text;
 
-      if (
-        callNode.node.text.includes("new") ||
-        callNode.node.type === "new_expression"
-      ) {
+      if (callNode.node.type === "new_expression") {
         callType = "constructor";
       } else if (objCapture) {
         callType = "method";
@@ -554,9 +551,9 @@ function extractChainedCalls(
             callType,
             calleeSymbolId,
             range: {
-              startLine: objNode.startPosition.row,
+              startLine: objNode.startPosition.row + 1,
               startCol: objNode.startPosition.column,
-              endLine: objNode.endPosition.row,
+              endLine: objNode.endPosition.row + 1,
               endCol: objNode.endPosition.column,
             },
           });
@@ -795,9 +792,9 @@ function extractSingleCall(
     callType,
     calleeSymbolId,
     range: {
-      startLine: callNode.startPosition.row,
+      startLine: callNode.startPosition.row + 1,
       startCol: callNode.startPosition.column,
-      endLine: callNode.endPosition.row,
+      endLine: callNode.endPosition.row + 1,
       endCol: callNode.endPosition.column,
     },
   };

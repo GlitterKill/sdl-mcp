@@ -282,7 +282,7 @@ function buildLocalClassMethodIndex(
   const methodNameToSymbolIds = new Map<string, string[]>();
 
   for (const detail of filteredSymbolDetails) {
-    if (detail.extractedSymbol.kind !== "function") {
+    if (detail.extractedSymbol.kind !== "function" && detail.extractedSymbol.kind !== "method") {
       continue;
     }
 
@@ -296,10 +296,16 @@ function buildLocalClassMethodIndex(
       continue;
     }
 
+    // For methods with dotted names (e.g. "ClassName.methodName"),
+    // use only the bare method name as the map key.
+    const rawName = detail.extractedSymbol.name;
+    const methodName = rawName.includes(".")
+      ? rawName.slice(rawName.lastIndexOf(".") + 1)
+      : rawName;
     const existing =
-      methodNameToSymbolIds.get(detail.extractedSymbol.name) ?? [];
+      methodNameToSymbolIds.get(methodName) ?? [];
     existing.push(detail.symbolId);
-    methodNameToSymbolIds.set(detail.extractedSymbol.name, existing);
+    methodNameToSymbolIds.set(methodName, existing);
   }
 
   return methodNameToSymbolIds;
@@ -319,7 +325,7 @@ function buildPythonClassMethodIndex(
       classesByFileId.set(symbol.fileId, existing);
       continue;
     }
-    if (symbol.kind === "function") {
+    if (symbol.kind === "function" || symbol.kind === "method") {
       const existing = functionsByFileId.get(symbol.fileId) ?? [];
       existing.push(symbol);
       functionsByFileId.set(symbol.fileId, existing);
@@ -356,9 +362,15 @@ function buildPythonClassMethodIndex(
       const methods =
         methodsByClassSymbolId.get(ownerClass.symbolId) ??
         new Map<string, string[]>();
-      const existing = methods.get(fn.name) ?? [];
+      // For methods with dotted names (e.g. "ClassName.methodName"),
+      // use only the bare method name as the map key so that
+      // instance method resolution can look up by bare member name.
+      const methodName = fn.name.includes(".")
+        ? fn.name.slice(fn.name.lastIndexOf(".") + 1)
+        : fn.name;
+      const existing = methods.get(methodName) ?? [];
       existing.push(fn.symbolId);
-      methods.set(fn.name, existing);
+      methods.set(methodName, existing);
       methodsByClassSymbolId.set(ownerClass.symbolId, methods);
     }
   }

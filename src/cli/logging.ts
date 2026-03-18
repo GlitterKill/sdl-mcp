@@ -1,4 +1,5 @@
 import type { LogLevel, LogFormat } from "./types.js";
+import { logger as domainLogger } from "../util/logger.js";
 
 let currentLogLevel: LogLevel = "info";
 let currentFormat: LogFormat = "pretty";
@@ -7,6 +8,8 @@ let requestIdCounter = 0;
 export function configureLogger(level: LogLevel, format: LogFormat): void {
   currentLogLevel = level;
   currentFormat = format;
+  // Sync domain-layer logger level
+  domainLogger.setLevel(level);
 }
 
 export function generateRequestId(): string {

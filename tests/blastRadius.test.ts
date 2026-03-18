@@ -6,35 +6,34 @@ import type { SymbolId } from "../dist/db/schema.js";
 
 describe("BlastRadius Edge Cases", () => {
   describe("maxHops validation", () => {
-    it("should handle maxHops=0 gracefully (AC1)", async () => {
+    it("should correct maxHops=0 to default of 3 and proceed (AC1)", async () => {
+      // maxHops <= 0 is now corrected to 3 (not returning []),
+      // so with a real connection this would compute blast radius.
+      // With a mock connection, it will throw because it tries to query.
       const changedSymbols: SymbolId[] = ["symbol-1"];
       const conn = {} as unknown as Connection;
 
-      const result = await computeBlastRadius(conn, changedSymbols, {
-        repoId: "test-repo",
-        maxHops: 0,
-      });
-
-      assert.strictEqual(
-        result.length,
-        0,
-        "Should return empty array for maxHops=0",
+      await assert.rejects(
+        () => computeBlastRadius(conn, changedSymbols, {
+          repoId: "test-repo",
+          maxHops: 0,
+        }),
+        /prepare is not a function/,
+        "Should attempt to compute blast radius (maxHops corrected to 3)",
       );
     });
 
-    it("should handle negative maxHops gracefully", async () => {
+    it("should correct negative maxHops to default of 3 and proceed", async () => {
       const changedSymbols: SymbolId[] = ["symbol-1"];
       const conn = {} as unknown as Connection;
 
-      const result = await computeBlastRadius(conn, changedSymbols, {
-        repoId: "test-repo",
-        maxHops: -1,
-      });
-
-      assert.strictEqual(
-        result.length,
-        0,
-        "Should return empty array for negative maxHops",
+      await assert.rejects(
+        () => computeBlastRadius(conn, changedSymbols, {
+          repoId: "test-repo",
+          maxHops: -1,
+        }),
+        /prepare is not a function/,
+        "Should attempt to compute blast radius (maxHops corrected to 3)",
       );
     });
   });

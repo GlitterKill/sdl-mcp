@@ -301,8 +301,14 @@ async function loadClientTemplate(client: ClientType): Promise<unknown> {
     "../../../templates",
     `${client}.json`,
   );
-  const content = readFileSync(templatePath, "utf-8");
-  return JSON.parse(content);
+  try {
+    const content = readFileSync(templatePath, "utf-8");
+    return JSON.parse(content);
+  } catch (error) {
+    throw new Error(
+      `Failed to load client template '${client}' from ${templatePath}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 function generateClientConfig(template: any, configPath: string): string {

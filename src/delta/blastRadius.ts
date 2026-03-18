@@ -70,13 +70,13 @@ export async function computeBlastRadius(
   changedSymbols: SymbolId[],
   options?: BlastRadiusOptions,
 ): Promise<BlastRadiusItem[]> {
-  const maxHops = options?.maxHops ?? 3;
+  let maxHops = options?.maxHops ?? 3;
   const maxResults = options?.maxResults ?? 20;
   const repoId = options?.repoId;
 
   if (maxHops <= 0) {
     logger.warn("Invalid maxHops value, using default of 3", { maxHops });
-    return [];
+    maxHops = 3;
   }
 
   if (changedSymbols.length === 0) {
@@ -335,13 +335,9 @@ export async function runGovernorLoop(
   ) {
     try {
       const timeoutMs = options.diagnosticsTimeoutMs ?? 5000;
-      const startTime = Date.now();
 
       const { suspects } = await runDiagnosticsWithTimeout(options.repoId, timeoutMs);
-
-      if (Date.now() - startTime <= timeoutMs) {
-        diagnosticSuspects = suspects;
-      }
+      diagnosticSuspects = suspects;
     } catch (error) {
       logger.warn("Failed to run diagnostics with timeout", {
         repoId: options.repoId,

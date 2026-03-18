@@ -128,6 +128,32 @@ export async function deleteRepo(
     const fileIds = fileRows.map((r) => r.fileId);
     await deleteFilesByIds(txConn, fileIds);
 
+    // Clean up Version nodes and their edges
+    await exec(txConn, `MATCH (v:Version)-[e:VERSION_OF_REPO]->(r:Repo {repoId: $repoId}) DELETE e, v`, { repoId });
+
+    // Clean up Cluster nodes
+    await exec(txConn, `MATCH (c:Cluster {repoId: $repoId})<-[e:BELONGS_TO_CLUSTER]-() DELETE e`, { repoId });
+    await exec(txConn, `MATCH (c:Cluster {repoId: $repoId}) DELETE c`, { repoId });
+
+    // Clean up Process nodes
+    await exec(txConn, `MATCH (p:Process {repoId: $repoId})<-[e:PARTICIPATES_IN]-() DELETE e`, { repoId });
+    await exec(txConn, `MATCH (p:Process {repoId: $repoId}) DELETE p`, { repoId });
+
+    // Clean up SliceHandle nodes
+    await exec(txConn, `MATCH (h:SliceHandle {repoId: $repoId}) DELETE h`, { repoId });
+
+    // Clean up Memory nodes and their edges
+    await exec(txConn, `MATCH (r:Repo {repoId: $repoId})-[e:HAS_MEMORY]->(m:Memory) DELETE e`, { repoId });
+    await exec(txConn, `MATCH (m:Memory)-[e:MEMORY_OF]->() WHERE m.repoId = $repoId DELETE e`, { repoId });
+    await exec(txConn, `MATCH (m:Memory)-[e:MEMORY_OF_FILE]->() WHERE m.repoId = $repoId DELETE e`, { repoId });
+    await exec(txConn, `MATCH (m:Memory {repoId: $repoId}) DELETE m`, { repoId });
+
+    // Clean up AgentFeedback nodes
+    await exec(txConn, `MATCH (a:AgentFeedback {repoId: $repoId}) DELETE a`, { repoId });
+
+    // Clean up SyncArtifact nodes
+    await exec(txConn, `MATCH (s:SyncArtifact {repoId: $repoId}) DELETE s`, { repoId });
+
     await exec(
       txConn,
       `MATCH (r:Repo {repoId: $repoId})

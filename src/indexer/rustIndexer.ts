@@ -152,6 +152,7 @@ interface NativeAddon {
 let nativeAddon: NativeAddon | null = null;
 let loadAttempted = false;
 let nativeDisableLogged = false;
+let nativeDisabledForSession = false;
 
 function isCompatibleNativeAddon(addon: unknown): addon is NativeAddon {
   if (!addon || typeof addon !== "object") return false;
@@ -178,6 +179,7 @@ function loadNativeAddon(): NativeAddon | null {
   // Reset so toggling the env var at runtime re-emits the log on the next disable.
   nativeDisableLogged = false;
 
+  if (nativeDisabledForSession) return null;
   if (loadAttempted) return nativeAddon;
   loadAttempted = true;
 
@@ -415,7 +417,7 @@ export function parseFilesRust(
           batchSize: batch.length,
         },
       );
-      nativeAddon = null;
+      nativeDisabledForSession = true;
       return null;
     }
 
@@ -425,7 +427,7 @@ export function parseFilesRust(
         actual: nativeResults.length,
         batchOffset: offset,
       });
-      nativeAddon = null;
+      nativeDisabledForSession = true;
       return null;
     }
 
@@ -443,7 +445,7 @@ export function parseFilesRust(
           batchOffset: offset,
         },
       );
-      nativeAddon = null;
+      nativeDisabledForSession = true;
       return null;
     }
   }

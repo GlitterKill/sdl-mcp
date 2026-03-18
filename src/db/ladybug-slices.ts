@@ -77,12 +77,13 @@ export async function deleteExpiredSliceHandles(
   );
 
   if (rows.length > 0) {
+    const handles = rows.map((r) => r.handle);
     await exec(
       conn,
       `MATCH (h:SliceHandle)
-       WHERE h.expiresAt < $beforeTimestamp
+       WHERE h.handle IN $handles
        DELETE h`,
-      { beforeTimestamp },
+      { handles },
     );
   }
 

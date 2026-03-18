@@ -75,6 +75,9 @@ export function generateAstFingerprint(node: Parser.SyntaxNode): string {
   if (existingMeta && (existingMeta.row !== newMeta.row || existingMeta.col !== newMeta.col)) {
     logger.debug("Fingerprint collision detected", { fingerprint, existing: `${existingMeta.type}:${existingMeta.name}@${existingMeta.row}:${existingMeta.col}`, new_entry: `${newMeta.type}:${newMeta.name}@${newMeta.row}:${newMeta.col}` });
   } else {
+    if (fingerprintCollisionLog.size >= 10000) {
+      fingerprintCollisionLog.clear();
+    }
     fingerprintCollisionLog.set(fingerprint, newMeta);
   }
 

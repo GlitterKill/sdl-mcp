@@ -106,7 +106,7 @@ describe("PolicyConfigSchema defaults", () => {
     expected: boolean;
   }> = [
     { field: "requireIdentifiers", expected: true },
-    { field: "allowBreakGlass", expected: true },
+    { field: "allowBreakGlass", expected: false },
   ];
 
   for (const { field, expected } of booleanDefaults) {

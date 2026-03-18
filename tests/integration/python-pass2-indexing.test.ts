@@ -147,7 +147,7 @@ describe("Python pass2 indexing", () => {
     const symbols = await ladybugDb.getSymbolsByRepo(conn, REPO_ID);
 
     const run = symbols.find(
-      (symbol) => symbol.name === "run" && symbol.kind === "function",
+      (symbol) => symbol.name === "Service.run" && symbol.kind === "method",
     );
     const helper = symbols.find(
       (symbol) => symbol.name === "helper" && symbol.kind === "function",
@@ -156,7 +156,7 @@ describe("Python pass2 indexing", () => {
       (symbol) => symbol.name === "Service" && symbol.kind === "class",
     );
 
-    assert.ok(run);
+    assert.ok(run, "Service.run method should exist");
     assert.ok(helper);
     assert.ok(serviceClass);
 
@@ -213,11 +213,11 @@ describe("Python pass2 indexing", () => {
       (symbol) => symbol.name === "main" && symbol.kind === "function",
     );
     const run = symbols.find(
-      (symbol) => symbol.name === "run" && symbol.kind === "function",
+      (symbol) => symbol.name === "Service.run" && symbol.kind === "method",
     );
 
     assert.ok(main);
-    assert.ok(run);
+    assert.ok(run, "Service.run method should exist");
 
     const mainEdges = await ladybugDb.getEdgesFrom(conn, main.symbolId);
     const runCall = mainEdges.find(

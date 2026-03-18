@@ -155,7 +155,7 @@ function extractSymbols(tree: any): Array<{
     decorators?: string[];
   }> = [];
 
-  function traverse(node: SyntaxNode): void {
+  function traverse(node: SyntaxNode, parentClass?: string): void {
     switch (node.type) {
       case "function_definition": {
         const name = extractFunctionName(node);
@@ -164,10 +164,11 @@ function extractSymbols(tree: any): Array<{
           const returns = extractReturnType(node);
           const decorators = extractDecorators(node);
           const visibility = name.startsWith("_") ? "private" : "public";
+          const kind = parentClass ? "method" : "function";
 
           symbols.push({
-            name,
-            kind: "function",
+            name: parentClass ? `${parentClass}.${name}` : name,
+            kind,
             exported: !name.startsWith("_"),
             range: extractRange(node),
             signature: {
@@ -199,7 +200,11 @@ function extractSymbols(tree: any): Array<{
             decorators: decorators.length > 0 ? decorators : undefined,
           });
         }
-        break;
+        // Traverse class body with class context
+        for (const child of node.children) {
+          traverse(child, name ?? parentClass);
+        }
+        return; // Don't fall through to the generic child traversal
       }
 
       case "assignment": {
@@ -219,7 +224,7 @@ function extractSymbols(tree: any): Array<{
     }
 
     for (const child of node.children) {
-      traverse(child);
+      traverse(child, parentClass);
     }
   }
 

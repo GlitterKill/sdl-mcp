@@ -74,6 +74,8 @@ export async function extractCodeWindow(
   const estimatedTokens = Math.ceil(code.length / 4);
 
   return {
+    // Note: `approved` here means "extraction succeeded", not "policy approved".
+    // Policy enforcement is handled by evaluateRequest() in gate.ts.
     approved: true,
     repoId,
     symbolId,

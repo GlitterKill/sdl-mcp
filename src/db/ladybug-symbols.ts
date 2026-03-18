@@ -3,7 +3,7 @@
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber, toBoolean, assertSafeInt } from "./ladybug-core.js";
+import { exec, queryAll, querySingle, toNumber, toBoolean, assertSafeInt, withTransaction } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
 
 const MAX_BATCH_WARNING_THRESHOLD = 5000;
@@ -646,81 +646,83 @@ export async function deleteSymbolsByFileId(
   conn: Connection,
   fileId: string,
 ): Promise<void> {
-  const symbolRows = await queryAll<{ symbolId: string }>(
-    conn,
-    `MATCH (f:File {fileId: $fileId})<-[:SYMBOL_IN_FILE]-(s:Symbol)
-     RETURN s.symbolId AS symbolId`,
-    { fileId },
-  );
+  await withTransaction(conn, async (txConn) => {
+    const symbolRows = await queryAll<{ symbolId: string }>(
+      txConn,
+      `MATCH (f:File {fileId: $fileId})<-[:SYMBOL_IN_FILE]-(s:Symbol)
+       RETURN s.symbolId AS symbolId`,
+      { fileId },
+    );
 
-  if (symbolRows.length === 0) return;
+    if (symbolRows.length === 0) return;
 
-  const symbolIds = symbolRows.map((r) => r.symbolId);
+    const symbolIds = symbolRows.map((r) => r.symbolId);
 
-  // Batch delete all relationships and nodes for the collected symbols
-  await exec(
-    conn,
-    `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
-     WHERE s.symbolId IN $symbolIds
-     DELETE d`,
-    { symbolIds },
-  );
+    // Batch delete all relationships and nodes for the collected symbols
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE d`,
+      { symbolIds },
+    );
 
-  await exec(
-    conn,
-    `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
-     WHERE s.symbolId IN $symbolIds
-     DELETE d`,
-    { symbolIds },
-  );
+    await exec(
+      txConn,
+      `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE d`,
+      { symbolIds },
+    );
 
-  await exec(
-    conn,
-    `MATCH (s:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo)
-     WHERE s.symbolId IN $symbolIds
-     DELETE r`,
-    { symbolIds },
-  );
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
 
-  await exec(
-    conn,
-    `MATCH (s:Symbol)-[r:SYMBOL_IN_FILE]->(:File {fileId: $fileId})
-     WHERE s.symbolId IN $symbolIds
-     DELETE r`,
-    { symbolIds, fileId },
-  );
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[r:SYMBOL_IN_FILE]->(:File {fileId: $fileId})
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds, fileId },
+    );
 
-  await exec(
-    conn,
-    `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
-     WHERE s.symbolId IN $symbolIds
-     DELETE r`,
-    { symbolIds },
-  );
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
 
-  await exec(
-    conn,
-    `MATCH (s:Symbol)-[r:PARTICIPATES_IN]->(:Process)
-     WHERE s.symbolId IN $symbolIds
-     DELETE r`,
-    { symbolIds },
-  );
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[r:PARTICIPATES_IN]->(:Process)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
 
-  await exec(
-    conn,
-    `MATCH (m:Metrics)
-     WHERE m.symbolId IN $symbolIds
-     DELETE m`,
-    { symbolIds },
-  );
+    await exec(
+      txConn,
+      `MATCH (m:Metrics)
+       WHERE m.symbolId IN $symbolIds
+       DELETE m`,
+      { symbolIds },
+    );
 
-  await exec(
-    conn,
-    `MATCH (s:Symbol)
-     WHERE s.symbolId IN $symbolIds
-     DELETE s`,
-    { symbolIds },
-  );
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE s`,
+      { symbolIds },
+    );
+  });
 }
 
 interface SearchSymbolsRawRow {

@@ -92,25 +92,22 @@ describe("semantic pipeline regressions", () => {
     assert.ok(fnStart !== -1 && fnEnd !== -1 && fnEnd > fnStart);
 
     const fnBody = source.slice(fnStart, fnEnd);
-    assert.doesNotMatch(
-      fnBody,
-      /\[\.\.\.rerankedResults,\s*\.\.\.nonRerankableResults\]\.slice\(/s,
-      "handleSymbolSearch should not append non-rerankable overlay results after all reranked rows",
-    );
     assert.match(
       fnBody,
       /const rerankableSymbolIds = new Set/,
       "handleSymbolSearch should track rerankable lexical slots",
     );
+    // New behavior: reranked items come first in semantic relevance order,
+    // then non-rerankable items in original lexical order
     assert.match(
       fnBody,
-      /for\s*\(const row of rows\)/,
-      "handleSymbolSearch should rebuild final results by walking original lexical order",
+      /\.\.\.rerankedResults/,
+      "handleSymbolSearch should place reranked results first",
     );
     assert.match(
       fnBody,
-      /if\s*\(rerankableSymbolIds\.has\(row\.symbolId\)\)/,
-      "handleSymbolSearch should only replace rerankable positions with reranked items",
+      /!rerankableSymbolIds\.has\(row\.symbolId\)/,
+      "handleSymbolSearch should filter out rerankable symbols from the non-reranked tail",
     );
   });
 

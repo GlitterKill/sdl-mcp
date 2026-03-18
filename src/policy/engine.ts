@@ -411,7 +411,7 @@ export class PolicyEngine {
         evidence.push(result.evidence);
 
         // Break-glass runs first (highest priority) and short-circuits all subsequent rules
-        if (rule.name === "break-glass" && result.evidence.type === "break-glass-triggered") {
+        if (result.evidence.type === "break-glass-triggered") {
           breakGlassTriggered = true;
           continue;
         }

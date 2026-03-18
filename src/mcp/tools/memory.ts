@@ -16,12 +16,13 @@ import {
 import type { SurfacedMemory } from "../types.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
-import { DatabaseError, ValidationError } from "../errors.js";
+import { DatabaseError } from "../errors.js";
 import { surfaceRelevantMemories } from "../../memory/surface.js";
 import {
   writeMemoryFile,
   deleteMemoryFile,
   updateMemoryFileFrontmatter,
+  typeToDir,
 } from "../../memory/file-sync.js";
 import { safeJsonParse, StringArraySchema } from "../../util/safeJson.js";
 import path from "node:path";
@@ -40,19 +41,6 @@ function computeContentHash(
 
 function generateMemoryId(): string {
   return crypto.randomBytes(8).toString("hex");
-}
-
-function typeToDir(type: string): string {
-  switch (type) {
-    case "decision":
-      return "decisions";
-    case "bugfix":
-      return "bugfixes";
-    case "task_context":
-      return "task_context";
-    default:
-      throw new ValidationError(`Unknown memory type: ${type}`);
-  }
 }
 
 export async function handleMemoryStore(
@@ -292,7 +280,7 @@ export async function handleMemoryQuery(
     content: row.content,
     confidence: row.confidence,
     stale: row.stale,
-    linkedSymbols: symbolIds ?? [],
+    linkedSymbols: [], // Per-memory linked symbols resolved separately via sdl.memory.surface
     tags: safeJsonParse(row.tagsJson, StringArraySchema, []),
   }));
 

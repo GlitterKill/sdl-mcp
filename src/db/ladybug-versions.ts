@@ -117,6 +117,8 @@ export async function getLatestVersion(
             v.versionHash AS versionHash
      ORDER BY v.createdAt DESC
      LIMIT 1`,
+    // Note: ISO-8601 string sort is correct because all createdAt values
+    // use Date.toISOString() which produces consistent UTC format with ms precision.
     { repoId },
   );
 

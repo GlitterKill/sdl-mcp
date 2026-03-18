@@ -158,9 +158,9 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:__init__:8",
-    "kind": "function",
-    "name": "__init__",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Animal.__init__:8",
+    "kind": "method",
+    "name": "Animal.__init__",
     "exported": false,
     "range": {
       "startLine": 44,
@@ -182,9 +182,9 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:speak:9",
-    "kind": "function",
-    "name": "speak",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Animal.speak:9",
+    "kind": "method",
+    "name": "Animal.speak",
     "exported": true,
     "range": {
       "startLine": 47,
@@ -218,9 +218,9 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:speak:11",
-    "kind": "function",
-    "name": "speak",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Dog.speak:11",
+    "kind": "method",
+    "name": "Dog.speak",
     "exported": true,
     "range": {
       "startLine": 53,
@@ -239,9 +239,9 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:fetch:12",
-    "kind": "function",
-    "name": "fetch",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:Dog.fetch:12",
+    "kind": "method",
+    "name": "Dog.fetch",
     "exported": true,
     "range": {
       "startLine": 56,
@@ -280,9 +280,9 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:method:14",
-    "kind": "function",
-    "name": "method",
+    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\integration\\fixtures\\python\\symbols.py:_InternalClass.method:14",
+    "kind": "method",
+    "name": "_InternalClass.method",
     "exported": true,
     "range": {
       "startLine": 62,

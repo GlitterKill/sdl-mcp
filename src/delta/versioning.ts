@@ -11,7 +11,8 @@ export async function createVersion(
   reason?: string,
 ): Promise<VersionId> {
   const timestamp = Date.now();
-  const versionId: VersionId = `${repoId}-v${timestamp}`;
+  const suffix = Math.random().toString(36).slice(2, 6);
+  const versionId: VersionId = `${repoId}-v${timestamp}-${suffix}`;
 
   const conn = await getLadybugConn();
   const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);

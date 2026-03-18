@@ -11,6 +11,7 @@ import { createSchema, getSchemaVersion } from "./ladybug-schema.js";
 import { LADYBUG_SCHEMA_VERSION, migrations } from "./migrations/index.js";
 import { runPendingMigrations } from "./migration-runner.js";
 import { clearPreparedStatementCache } from "./ladybug-core.js";
+import { resetJoinHintCache } from "./ladybug-edges.js";
 
 // Local interface for optional thread-count method on LadybugDB connections
 interface LadybugConnectionWithThreads {
@@ -575,6 +576,7 @@ export async function closeLadybugDb(): Promise<void> {
   }
 
   currentDbPath = null;
+  resetJoinHintCache();
   logger.debug("LadybugDB closed");
 }
 

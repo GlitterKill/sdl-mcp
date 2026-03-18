@@ -360,8 +360,10 @@ function buildBeamSearchResult(
     priority: item.priority,
     sequence: item.sequence,
   }));
-  if (state.sliceCards.size >= budget.maxCards || frontierArray.length > 0) {
+  if (state.sliceCards.size >= budget.maxCards) {
     state.wasTruncated = true;
+  }
+  if (state.wasTruncated) {
     state.droppedCandidates += frontierArray.length;
   }
   return {
