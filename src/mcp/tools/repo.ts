@@ -33,6 +33,7 @@ import {
   logWatcherHealthTelemetry,
 } from "../telemetry.js";
 import { getPrefetchStats } from "../../graph/prefetch.js";
+import { surfaceRelevantMemories } from "../../memory/surface.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { invalidateGraphSnapshot } from "../../graph/graphSnapshotCache.js";
 import {
@@ -278,7 +279,7 @@ export async function handleRepoStatus(
   args: unknown,
 ): Promise<RepoStatusResponse> {
   const request = RepoStatusRequestSchema.parse(args);
-  const { repoId } = request;
+  const { repoId, surfaceMemories } = request;
 
   const executeStatus = async () => {
     recordToolTrace({
@@ -328,6 +329,17 @@ export async function handleRepoStatus(
       queueDepth: prefetchStats.queueDepth,
     });
 
+    // Surface relevant memories if enabled (default: true)
+    let memories: Awaited<ReturnType<typeof surfaceRelevantMemories>> | undefined;
+    if (surfaceMemories !== false) {
+      try {
+        memories = await surfaceRelevantMemories(conn, { repoId, limit: 5 });
+        if (memories.length === 0) memories = undefined;
+      } catch {
+        // Memory surfacing is non-critical
+      }
+    }
+
     const lastIndexedFile = files
       .filter((f) => f.lastIndexedAt !== null)
       .sort(
@@ -353,6 +365,7 @@ export async function handleRepoStatus(
           : undefined,
       prefetchStats,
       liveIndexStatus,
+      memories,
     };
   };
 

@@ -2,21 +2,26 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 import { registerTools } from "../../src/mcp/tools/index.js";
 
+function makeFakeGatewayServer(names: string[]) {
+  return {
+    _gatewayMode: false,
+    set gatewayMode(v: boolean) {
+      this._gatewayMode = v;
+    },
+    get gatewayMode() {
+      return this._gatewayMode;
+    },
+    registerTool(name: string): void {
+      names.push(name);
+    },
+    registerPostDispatchHook(): void {},
+  };
+}
+
 describe("Gateway tool registration", () => {
   it("registers 4 gateway tools when gateway enabled", () => {
     const names: string[] = [];
-    const fakeServer = {
-      _gatewayMode: false,
-      set gatewayMode(v: boolean) {
-        this._gatewayMode = v;
-      },
-      get gatewayMode() {
-        return this._gatewayMode;
-      },
-      registerTool(name: string): void {
-        names.push(name);
-      },
-    };
+    const fakeServer = makeFakeGatewayServer(names);
 
     registerTools(
       fakeServer as any,
@@ -36,18 +41,7 @@ describe("Gateway tool registration", () => {
 
   it("registers 33 tools when gateway enabled with legacy", () => {
     const names: string[] = [];
-    const fakeServer = {
-      _gatewayMode: false,
-      set gatewayMode(v: boolean) {
-        this._gatewayMode = v;
-      },
-      get gatewayMode() {
-        return this._gatewayMode;
-      },
-      registerTool(name: string): void {
-        names.push(name);
-      },
-    };
+    const fakeServer = makeFakeGatewayServer(names);
 
     registerTools(
       fakeServer as any,
@@ -77,6 +71,7 @@ describe("Gateway tool registration", () => {
       registerTool(name: string): void {
         names.push(name);
       },
+      registerPostDispatchHook(): void {},
     };
 
     registerTools(
@@ -104,6 +99,7 @@ describe("Gateway tool registration", () => {
       registerTool(name: string): void {
         names.push(name);
       },
+      registerPostDispatchHook(): void {},
     };
 
     registerTools(fakeServer as any);
@@ -126,6 +122,7 @@ describe("Gateway tool registration", () => {
         return this._gatewayMode;
       },
       registerTool(): void {},
+      registerPostDispatchHook(): void {},
     };
 
     registerTools(

@@ -30,7 +30,16 @@ export interface ToolContext {
   progressToken?: string | number;
   sendNotification: (notification: ServerNotification) => Promise<void>;
   signal: AbortSignal;
+  /** Set from transport session for HTTP; undefined for stdio (defaults to "stdio" in hooks). */
+  sessionId?: string;
 }
+
+export type PostDispatchHook = (
+  toolName: string,
+  args: unknown,
+  result: unknown,
+  context: ToolContext,
+) => Promise<void>;
 
 interface ToolHandler {
   (args: unknown, context?: ToolContext): Promise<unknown>;
@@ -48,6 +57,7 @@ export class MCPServer {
   private server: Server;
   private tools: Map<string, ToolDefinition> = new Map();
   private _gatewayMode = false;
+  private postDispatchHooks: PostDispatchHook[] = [];
 
   constructor() {
     this.server = new Server(
@@ -71,6 +81,10 @@ export class MCPServer {
 
   set gatewayMode(value: boolean) {
     this._gatewayMode = value;
+  }
+
+  registerPostDispatchHook(hook: PostDispatchHook): void {
+    this.postDispatchHooks.push(hook);
   }
 
   private setupHandlers(): void {
@@ -175,6 +189,15 @@ export class MCPServer {
                 r._tokenUsage = await computeTokenUsage(r);
               }
               finalResult = stripRawContext(r);
+            }
+
+            // Run post-dispatch hooks (non-critical)
+            for (const hook of this.postDispatchHooks) {
+              try {
+                await hook(request.params.name, parseResult.data, finalResult, toolContext);
+              } catch {
+                // Post-dispatch hooks are non-critical
+              }
             }
 
             logToolCall({

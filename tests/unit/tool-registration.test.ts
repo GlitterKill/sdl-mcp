@@ -9,6 +9,7 @@ function makeFakeServer(): { names: string[]; server: any } {
     registerTool(name: string): void {
       names.push(name);
     },
+    registerPostDispatchHook(): void {},
   };
   return { names, server };
 }

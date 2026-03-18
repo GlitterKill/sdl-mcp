@@ -17,6 +17,7 @@ import type { SurfacedMemory } from "../types.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { DatabaseError, ValidationError } from "../errors.js";
+import { surfaceRelevantMemories } from "../../memory/surface.js";
 import {
   writeMemoryFile,
   deleteMemoryFile,
@@ -359,88 +360,11 @@ export async function handleMemorySurface(
     throw new DatabaseError(`Repository ${repoId} not found`);
   }
 
-  // Collect memories from both symbol edges and repo edges
-  const symbolMemoryRows =
-    symbolIds && symbolIds.length > 0
-      ? await ladybugDb.getMemoriesForSymbols(conn, symbolIds, 100)
-      : [];
-
-  const repoMemoryRows = await ladybugDb.getRepoMemories(conn, repoId, 100);
-
-  // Deduplicate by memoryId, track linked symbols per memory
-  const memoryMap = new Map<
-    string,
-    { row: ladybugDb.MemoryRow; linkedSymbolIds: Set<string> }
-  >();
-
-  for (const row of symbolMemoryRows) {
-    const existing = memoryMap.get(row.memoryId);
-    if (existing) {
-      existing.linkedSymbolIds.add(row.linkedSymbolId);
-    } else {
-      memoryMap.set(row.memoryId, {
-        row,
-        linkedSymbolIds: new Set([row.linkedSymbolId]),
-      });
-    }
-  }
-
-  for (const row of repoMemoryRows) {
-    if (!memoryMap.has(row.memoryId)) {
-      memoryMap.set(row.memoryId, {
-        row,
-        linkedSymbolIds: new Set(),
-      });
-    }
-  }
-
-  // Filter by taskType if provided
-  let entries = Array.from(memoryMap.values());
-  if (taskType) {
-    entries = entries.filter((e) => e.row.type === taskType);
-  }
-
-  // Rank
-  const now = Date.now();
-  const querySymbolIds = symbolIds ?? [];
-  const querySymbolCount = querySymbolIds.length;
-
-  const scored = entries.map((entry) => {
-    const daysSinceCreation =
-      (now - new Date(entry.row.createdAt).getTime()) / (1000 * 60 * 60 * 24);
-    const recencyFactor = 1.0 / (1 + daysSinceCreation / 30);
-
-    let score: number;
-    if (querySymbolCount > 0) {
-      const overlap = entry.linkedSymbolIds.size;
-      score =
-        entry.row.confidence * recencyFactor * (overlap / querySymbolCount);
-    } else {
-      score = entry.row.confidence * recencyFactor;
-    }
-
-    return { ...entry, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  const topN = scored.slice(0, limit);
-
-  const memories: SurfacedMemory[] = topN.map((entry) => {
-    // Compute overlap with query symbolIds
-    const linkedSymbols = querySymbolIds.filter((sid) =>
-      entry.linkedSymbolIds.has(sid),
-    );
-
-    return {
-      memoryId: entry.row.memoryId,
-      type: entry.row.type as SurfacedMemory["type"],
-      title: entry.row.title,
-      content: entry.row.content,
-      confidence: entry.row.confidence,
-      stale: entry.row.stale,
-      linkedSymbols,
-      tags: safeJsonParse(entry.row.tagsJson, StringArraySchema, []),
-    };
+  const memories = await surfaceRelevantMemories(conn, {
+    repoId,
+    symbolIds,
+    taskType,
+    limit,
   });
 
   return { repoId, memories };

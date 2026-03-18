@@ -1,4 +1,5 @@
 import type { MCPServer } from "../../server.js";
+import { createMemoryHintHook } from "../hooks/memory-hint.js";
 import { registerGatewayTools } from "../../gateway/index.js";
 import {
   RepoRegisterRequestSchema,
@@ -93,6 +94,9 @@ export function registerTools(
   gatewayConfig?: { enabled?: boolean; emitLegacyTools?: boolean },
   codeModeConfig?: CodeModeConfig,
 ): void {
+  // Register memory hint hook for all modes
+  server.registerPostDispatchHook(createMemoryHintHook());
+
   // Code Mode exclusive: only register sdl.manual + sdl.chain
   if (codeModeConfig?.enabled && codeModeConfig?.exclusive) {
     registerCodeModeTools(server, services, codeModeConfig);
