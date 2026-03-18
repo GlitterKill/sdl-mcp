@@ -464,6 +464,43 @@ async function buildRepoPreview(
   };
 }
 
+export async function buildGraphForSliceHandle(
+  conn: Connection,
+  repoId: string,
+  handle: string,
+  maxNodes: number,
+  deps: {
+    getSliceHandle?: typeof ladybugDb.getSliceHandle;
+    buildRepoPreview?: typeof buildRepoPreview;
+    buildBlastRadiusGraph?: typeof buildBlastRadiusGraph;
+  } = {},
+): Promise<{
+  nodes: GraphNode[];
+  links: GraphLink[];
+} | null> {
+  const getSliceHandleFn = deps.getSliceHandle ?? ladybugDb.getSliceHandle;
+  const buildRepoPreviewFn = deps.buildRepoPreview ?? buildRepoPreview;
+  const buildBlastRadiusGraphFn =
+    deps.buildBlastRadiusGraph ?? buildBlastRadiusGraph;
+
+  const handleRow = await getSliceHandleFn(conn, handle);
+  if (!handleRow || handleRow.repoId !== repoId) {
+    return null;
+  }
+
+  if (handleRow.minVersion && handleRow.maxVersion) {
+    return buildBlastRadiusGraphFn(
+      conn,
+      repoId,
+      handleRow.minVersion,
+      handleRow.maxVersion,
+      maxNodes,
+    );
+  }
+
+  return buildRepoPreviewFn(conn, repoId, maxNodes);
+}
+
 async function buildBlastRadiusGraph(
   conn: Connection,
   repoId: string,
@@ -644,23 +681,30 @@ async function handleRestRequest(
       const conn = await getLadybugConn();
       const [, repoId, handle] = graphSliceMatch;
       const maxNodes = Number(url.searchParams.get("maxNodes") ?? "200");
-      const graph = await buildRepoPreview(
+      const handleRow = await ladybugDb.getSliceHandle(conn, handle);
+      if (!handleRow) {
+        json(res, 404, { error: `Slice handle not found: ${handle}` });
+        return true;
+      }
+      const graph = await buildGraphForSliceHandle(
         conn,
         repoId,
+        handle,
         Math.min(500, Math.max(10, maxNodes)),
       );
-      const handleRow = await ladybugDb.getSliceHandle(conn, handle);
+      if (!graph) {
+        json(res, 404, { error: `Slice handle not found: ${handle}` });
+        return true;
+      }
       json(res, 200, {
         repoId,
         handle,
-        handleMetadata: handleRow
-          ? {
-              createdAt: handleRow.createdAt,
-              expiresAt: handleRow.expiresAt,
-              minVersion: handleRow.minVersion,
-              maxVersion: handleRow.maxVersion,
-            }
-          : null,
+        handleMetadata: {
+          createdAt: handleRow.createdAt,
+          expiresAt: handleRow.expiresAt,
+          minVersion: handleRow.minVersion,
+          maxVersion: handleRow.maxVersion,
+        },
         ...graph,
       });
       return true;
@@ -1371,6 +1415,13 @@ export async function setupHttpTransport(
         // ---------------------------------------------------------------
         if (req.method === "GET" && pathname === "/sse") {
           handleSseConnection(req, res, sessionCtx);
+          return;
+        }
+
+        if (req.method === "OPTIONS" && pathname === "/message") {
+          setCorsHeaders(req, res);
+          res.writeHead(204);
+          res.end();
           return;
         }
 

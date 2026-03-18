@@ -184,7 +184,7 @@ export async function exportArtifact(
 
   const outputPath =
     options.outputPath ??
-    join(process.cwd(), ".sdl-sync", `${artifactId}.sdl-artifact.json`);
+    join(repo.rootPath, ".sdl-sync", `${artifactId}.sdl-artifact.json`);
 
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(artifact, null, 2), "utf-8");
@@ -413,19 +413,23 @@ export function getArtifactMetadata(
 
 export async function listArtifacts(
   repoId: string,
-  directory: string = join(process.cwd(), ".sdl-sync"),
+  directory?: string,
 ): Promise<SyncArtifactMetadata[]> {
   try {
-    const files = await readdir(directory);
+    const resolvedDirectory = directory ?? (await getRepoSyncDir(repoId));
+    const files = await readdir(resolvedDirectory);
     const artifacts: SyncArtifactMetadata[] = [];
 
     for (const file of files) {
       if (!file.endsWith(".sdl-artifact.json")) {
         continue;
       }
-      const metadata = getArtifactMetadata(join(directory, file));
+      const metadata = getArtifactMetadata(join(resolvedDirectory, file));
       if (metadata && metadata.repo_id === repoId) {
-        artifacts.push(metadata);
+        artifacts.push({
+          ...metadata,
+          artifact_path: join(resolvedDirectory, file),
+        });
       }
     }
 
@@ -436,6 +440,15 @@ export async function listArtifacts(
   } catch {
     return [];
   }
+}
+
+async function getRepoSyncDir(repoId: string): Promise<string> {
+  const conn = await getLadybugConn();
+  const repo = await ladybugDb.getRepo(conn, repoId);
+  if (!repo) {
+    throw new IndexError(`Repository not found: ${repoId}`);
+  }
+  return join(repo.rootPath, ".sdl-sync");
 }
 
 function parseSignatureJson(signatureJson: string | null): {

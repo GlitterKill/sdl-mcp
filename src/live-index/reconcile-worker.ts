@@ -14,21 +14,41 @@ export class ReconcileWorker {
   private draining = false;
   private pendingDrain: Promise<void> | null = null;
   private idleWaiters: Array<() => void> = [];
+  private readonly clusterScheduler: {
+    schedule(repoId: string, delay?: number | undefined): Promise<void> | void;
+    waitForIdle(): Promise<void>;
+  };
+  private readonly planReconcileWorkFn: typeof planReconcileWork;
+  private readonly patchSavedFileFn: typeof patchSavedFile;
 
-  private readonly clusterScheduler = createDebouncedJobScheduler({
-    delayMs: 5000,
-    run: async (repoId) => {
-      const conn = await getLadybugConn();
-      const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
-      await computeAndStoreClustersAndProcesses({
-        conn,
-        repoId,
-        versionId: latestVersion?.versionId ?? "live-reconcile",
+  constructor(
+    private readonly queue: ReconcileQueue,
+    deps: {
+      clusterScheduler?: {
+        schedule(repoId: string, delay?: number | undefined): Promise<void> | void;
+        waitForIdle(): Promise<void>;
+      };
+      planReconcileWork?: typeof planReconcileWork;
+      patchSavedFile?: typeof patchSavedFile;
+    } = {},
+  ) {
+    this.clusterScheduler =
+      deps.clusterScheduler ??
+      createDebouncedJobScheduler({
+        delayMs: 5000,
+        run: async (repoId) => {
+          const conn = await getLadybugConn();
+          const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
+          await computeAndStoreClustersAndProcesses({
+            conn,
+            repoId,
+            versionId: latestVersion?.versionId ?? "live-reconcile",
+          });
+        },
       });
-    },
-  });
-
-  constructor(private readonly queue: ReconcileQueue) {}
+    this.planReconcileWorkFn = deps.planReconcileWork ?? planReconcileWork;
+    this.patchSavedFileFn = deps.patchSavedFile ?? patchSavedFile;
+  }
 
   enqueue(repoId: string, frontier: DependencyFrontier, enqueuedAt = new Date().toISOString()): void {
     this.queue.enqueue(repoId, frontier, enqueuedAt);
@@ -67,7 +87,6 @@ export class ReconcileWorker {
     this.draining = true;
 
     try {
-      const visitedFiles = new Set<string>();
       let iterations = 0;
 
       while (this.draining) {
@@ -82,20 +101,21 @@ export class ReconcileWorker {
         }
 
         try {
-          const plan = planReconcileWork({
+          const plan = this.planReconcileWorkFn({
             repoId: claimed.repoId,
             frontier: claimed.frontier,
           });
+          const seenFiles = new Set<string>();
 
           for (const filePath of plan.filePaths) {
             const fileKey = `${claimed.repoId}:${filePath}`;
-            if (visitedFiles.has(fileKey)) {
+            if (seenFiles.has(fileKey)) {
               continue;
             }
-            visitedFiles.add(fileKey);
+            seenFiles.add(fileKey);
             iterations++;
 
-            const patched = await patchSavedFile({
+            const patched = await this.patchSavedFileFn({
               repoId: claimed.repoId,
               filePath,
             });

@@ -16,6 +16,7 @@ const preparedStatementCacheByConn = new WeakMap<
   Map<string, PreparedStatement>
 >();
 const transactionDepthByConn = new WeakMap<Connection, number>();
+const poisonedConnections = new WeakMap<Connection, true>();
 
 /**
  * Clear the prepared statement cache for a specific connection.
@@ -162,6 +163,14 @@ export async function exec(
   result.close();
 }
 
+export function isConnectionPoisoned(conn: Connection): boolean {
+  return poisonedConnections.has(conn);
+}
+
+export function clearConnectionPoisoned(conn: Connection): void {
+  poisonedConnections.delete(conn);
+}
+
 /**
  * Execute `fn` inside a transaction. Supports nesting via depth tracking.
  *
@@ -184,6 +193,12 @@ export async function withTransaction<T>(
   fn: (conn: Connection) => Promise<T>,
 ): Promise<T> {
   const depth = transactionDepthByConn.get(conn) ?? 0;
+
+  if (depth === 0 && isConnectionPoisoned(conn)) {
+    throw new DatabaseError(
+      "Connection is unusable after a rollback failure. Recreate it before starting a new transaction.",
+    );
+  }
 
   // At depth 0, ensure no other caller is concurrently entering a
   // transaction on this same connection. Nested calls (depth > 0) from
@@ -214,8 +229,14 @@ export async function withTransaction<T>(
     if (depth === 0) {
       try {
         await exec(conn, "ROLLBACK");
-      } catch {
-        // Ignore rollback failures
+      } catch (rollbackErr) {
+        poisonedConnections.set(conn, true);
+        const originalMessage = err instanceof Error ? err.message : String(err);
+        const rollbackMessage =
+          rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+        throw new DatabaseError(
+          `Transaction rollback failed after ${originalMessage}: ${rollbackMessage}`,
+        );
       }
     }
     throw err;

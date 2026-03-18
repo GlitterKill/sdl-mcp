@@ -146,6 +146,30 @@ export function _clearWatcherHealthForTesting(repoId: string): void {
   watcherHealthByRepo.delete(repoId);
 }
 
+export function isWatcherStale(
+  health: Pick<
+    MutableWatcherHealth,
+    "pendingChanges" | "eventsReceived" | "lastSuccessfulReindexAt"
+  >,
+  nowMs = Date.now(),
+): boolean {
+  if (health.pendingChanges <= 0) {
+    return false;
+  }
+  if (health.eventsReceived <= 0) {
+    return false;
+  }
+
+  const lastSuccessMs = health.lastSuccessfulReindexAt
+    ? Date.parse(health.lastSuccessfulReindexAt)
+    : 0;
+
+  return (
+    lastSuccessMs === 0 ||
+    nowMs - lastSuccessMs > WATCHER_STALE_THRESHOLD_MS
+  );
+}
+
 export async function watchRepositoryWithIndexer(
   repoId: string,
   indexRepo: IndexRepoFn,
@@ -400,16 +424,7 @@ export async function watchRepositoryWithIndexer(
     if (closed) {
       return;
     }
-    if (health.pendingChanges <= 0) {
-      health.stale = false;
-      return;
-    }
-    const lastSuccessMs = health.lastSuccessfulReindexAt
-      ? Date.parse(health.lastSuccessfulReindexAt)
-      : 0;
-    const stale =
-      lastSuccessMs === 0 ||
-      Date.now() - lastSuccessMs > WATCHER_STALE_THRESHOLD_MS;
+    const stale = isWatcherStale(health);
     health.stale = stale;
     if (stale) {
       const staleMsg = `[sdl-mcp] Watcher stale detected for ${repoId}: pending=${health.pendingChanges}, queueDepth=${health.queueDepth}`;

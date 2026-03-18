@@ -12,6 +12,10 @@ import type {
   PolicyDecision,
 } from "../policy/engine.js";
 import { IndexError } from "../domain/errors.js";
+import {
+  DEFAULT_MAX_WINDOW_LINES,
+  DEFAULT_MAX_WINDOW_TOKENS,
+} from "../config/constants.js";
 
 export class Executor {
   private evidenceCapture: EvidenceCapture;
@@ -225,11 +229,14 @@ export class Executor {
 
       if (this.policyEngine && symbols.length > 0) {
         const symbolId = symbols[0];
+        const identifiersToFind = [symbolId];
         const policyContext: PolicyRequestContext = {
           requestType: "codeWindow",
           repoId: task.repoId,
           symbolId,
-          identifiersToFind: [],
+          identifiersToFind,
+          maxWindowLines: DEFAULT_MAX_WINDOW_LINES,
+          maxWindowTokens: DEFAULT_MAX_WINDOW_TOKENS,
           reason: `Raw code access for ${task.taskType} task`,
         };
 
@@ -258,13 +265,29 @@ export class Executor {
         }
       }
 
+      const rawEvidence =
+        rawAccessAllowed && symbols.length > 0
+          ? [
+              this.evidenceCapture.captureCodeWindow(
+                `symbol:${symbols[0]}`,
+                DEFAULT_MAX_WINDOW_LINES,
+                `Raw code window request approved for ${symbols[0]}`,
+              ),
+            ]
+          : [];
+
       const action: Action = {
         id: actionId,
         type: "needWindow",
         status: rawAccessAllowed ? "completed" : "failed",
         input: { context },
         output: rawAccessAllowed
-          ? { message: "Raw code window accessed successfully" }
+          ? {
+              message: "Raw code window request approved",
+              identifiersToFind: symbols.slice(0, 1),
+              maxWindowLines: DEFAULT_MAX_WINDOW_LINES,
+              maxWindowTokens: DEFAULT_MAX_WINDOW_TOKENS,
+            }
           : {
               message: "Raw code access denied or downgraded by policy",
               policyDecision: policyDecision?.decision,
@@ -275,7 +298,7 @@ export class Executor {
         timestamp: startTime,
         durationMs: Date.now() - startTime,
         evidence: rawAccessAllowed
-          ? []
+          ? rawEvidence
           : this.evidenceCapture.getEvidenceByType("diagnostic"),
       };
 
@@ -309,6 +332,10 @@ export class Executor {
 
   getEvidence(): Evidence[] {
     return this.evidenceCapture.getAllEvidence();
+  }
+
+  getPolicyDecision(actionId: string): PolicyDecision | undefined {
+    return this.policyDecisions.get(actionId);
   }
 
   getNextBestAction(): string | undefined {

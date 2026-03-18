@@ -155,6 +155,8 @@ export async function buildSlice(
   const config = loadConfig();
   const cacheConfig = config.cache;
   const cacheEnabled = cacheConfig?.enabled ?? true;
+  const overlaySnapshot = getOverlaySnapshot(request.repoId);
+  const canUseCache = cacheEnabled && overlaySnapshot === null;
 
   if (cacheConfig) {
     configureSliceCache({
@@ -163,7 +165,7 @@ export async function buildSlice(
   }
 
   const cacheKey = getSliceCacheKey(request);
-  const cached = cacheEnabled ? getCachedSlice(cacheKey) : null;
+  const cached = canUseCache ? getCachedSlice(cacheKey) : null;
   if (cached) {
     return cached;
   }
@@ -189,7 +191,6 @@ export async function buildSlice(
   const minCallConfidence = request.minCallConfidence;
 
   const conn = request.conn ?? (await getLadybugConn());
-  const overlaySnapshot = getOverlaySnapshot(request.repoId);
 
   // -----------------------------------------------------------------------
   // Try in-memory graph snapshot path first (zero DB calls during traversal)
@@ -365,7 +366,7 @@ export async function buildSlice(
 
   // Cache the full slice (before ETag dedup) so that cache hits serve
   // complete data regardless of the requesting client's known ETags.
-  if (cacheEnabled) {
+  if (canUseCache) {
     const hasKnownEtags = request.knownCardEtags && Object.keys(request.knownCardEtags).length > 0;
     if (hasKnownEtags) {
       // Rebuild full cards (without ETag dedup) for caching

@@ -5,6 +5,7 @@ import {
   _setWatcherHealthForTesting,
   _clearWatcherHealthForTesting,
 } from "../../src/indexer/indexer.js";
+import { isWatcherStale } from "../../src/indexer/watcher.js";
 import { RepoStatusResponseSchema } from "../../src/mcp/tools.js";
 import { WATCHER_ERROR_MAX_COUNT } from "../../src/config/constants.js";
 
@@ -59,6 +60,9 @@ describe("watcher health", () => {
         wasteRate: 0,
         avgLatencyReductionMs: 0,
         lastRunAt: null,
+        modelEnabled: true,
+        strategyMetrics: [],
+        deterministicFallback: false,
       },
     };
 
@@ -136,6 +140,46 @@ describe("watcher health", () => {
       snapshot!.errors,
       0,
       "snapshot should not reflect subsequent mutations",
+    );
+  });
+
+  it("does not consider an idle watcher stale before any events are received", () => {
+    assert.strictEqual(
+      isWatcherStale({
+        enabled: true,
+        running: true,
+        filesWatched: 1,
+        eventsReceived: 0,
+        eventsProcessed: 0,
+        errors: 0,
+        queueDepth: 0,
+        restartCount: 0,
+        stale: false,
+        lastEventAt: null,
+        lastSuccessfulReindexAt: null,
+        pendingChanges: 0,
+      }),
+      false,
+    );
+  });
+
+  it("treats pending work without a successful reindex as stale", () => {
+    assert.strictEqual(
+      isWatcherStale({
+        enabled: true,
+        running: true,
+        filesWatched: 1,
+        eventsReceived: 1,
+        eventsProcessed: 0,
+        errors: 0,
+        queueDepth: 1,
+        restartCount: 0,
+        stale: false,
+        lastEventAt: "2026-03-18T18:00:00.000Z",
+        lastSuccessfulReindexAt: null,
+        pendingChanges: 1,
+      }),
+      true,
     );
   });
 });

@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
 import * as ladybugDb from "../../src/db/ladybug-queries.js";
 import { buildSlice } from "../../src/graph/slice.js";
+import { clearSliceCache } from "../../src/graph/sliceCache.js";
 import { indexRepo } from "../../src/indexer/indexer.js";
 import {
   handleBufferPush,
@@ -115,6 +116,7 @@ describe("draft live reads", () => {
   });
 
   beforeEach(() => {
+    clearSliceCache();
     resetDefaultLiveIndexCoordinator();
   });
 
@@ -219,6 +221,58 @@ describe("draft live reads", () => {
     assert.notStrictEqual(
       betaCard?.version.astFingerprint,
       durableBeta.astFingerprint,
+    );
+  });
+
+  it("bypasses cached slices when a draft overlay is present", async () => {
+    const initialSlice = await buildSlice({
+      repoId: REPO_ID,
+      versionId: latestVersionId,
+      entrySymbols: [durableAlpha.symbolId],
+      budget: { maxCards: 10, maxEstimatedTokens: 10_000 },
+      minConfidence: 0,
+    });
+    const initialBeta = initialSlice.cards.find(
+      (card) => card.symbolId === durableBeta.symbolId,
+    );
+    assert.ok(initialBeta, "Expected durable beta card in initial slice");
+
+    await handleBufferPush({
+      repoId: REPO_ID,
+      eventType: "change",
+      filePath: "src/example.ts",
+      content: [
+        "export function alpha() {",
+        "  return beta();",
+        "}",
+        "",
+        "export function beta() {",
+        "  const value = 3;",
+        "  return value;",
+        "}",
+      ].join("\n"),
+      language: "typescript",
+      version: 4,
+      dirty: true,
+      timestamp: "2026-03-07T12:11:00.000Z",
+    });
+    await waitForDefaultLiveIndexIdle();
+
+    const draftSlice = await buildSlice({
+      repoId: REPO_ID,
+      versionId: latestVersionId,
+      entrySymbols: [durableAlpha.symbolId],
+      budget: { maxCards: 10, maxEstimatedTokens: 10_000 },
+      minConfidence: 0,
+    });
+
+    const draftBeta = draftSlice.cards.find(
+      (card) => card.symbolId === durableBeta.symbolId,
+    );
+    assert.ok(draftBeta, "Expected beta card in draft slice");
+    assert.notStrictEqual(
+      draftBeta?.version.astFingerprint,
+      initialBeta?.version.astFingerprint,
     );
   });
 });

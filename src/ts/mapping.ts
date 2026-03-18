@@ -67,7 +67,7 @@ export async function mapDiagnosticsToSymbols(
       continue;
     }
 
-    const symbol = symbols[0];
+    const symbol = chooseMostSpecificSymbol(symbols);
     const messageShort = truncateMessage(diagnostic.message, 100);
 
     suspects.push({
@@ -133,4 +133,31 @@ function truncateMessage(message: string, maxLength: number): string {
     return message;
   }
   return message.substring(0, maxLength - 3) + "...";
+}
+
+function chooseMostSpecificSymbol<T extends {
+  rangeStartLine: number;
+  rangeStartCol: number;
+  rangeEndLine: number;
+  rangeEndCol: number;
+}>(symbols: T[]): T {
+  return [...symbols].sort((a, b) => {
+    const aLineSpan = a.rangeEndLine - a.rangeStartLine;
+    const bLineSpan = b.rangeEndLine - b.rangeStartLine;
+    if (aLineSpan !== bLineSpan) {
+      return aLineSpan - bLineSpan;
+    }
+
+    const aColSpan = a.rangeEndCol - a.rangeStartCol;
+    const bColSpan = b.rangeEndCol - b.rangeStartCol;
+    if (aColSpan !== bColSpan) {
+      return aColSpan - bColSpan;
+    }
+
+    if (a.rangeStartLine !== b.rangeStartLine) {
+      return b.rangeStartLine - a.rangeStartLine;
+    }
+
+    return b.rangeStartCol - a.rangeStartCol;
+  })[0]!;
 }

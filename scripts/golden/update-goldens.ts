@@ -3,12 +3,12 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { RustAdapter } from "../../dist/indexer/adapter/rust.js";
-import { CAdapter } from "../../dist/indexer/adapter/c.js";
-import { CppAdapter } from "../../dist/indexer/adapter/cpp.js";
-import { PhpAdapter } from "../../dist/indexer/adapter/php.js";
-import { KotlinAdapter } from "../../dist/indexer/adapter/kotlin.js";
-import { ShellAdapter } from "../../dist/indexer/adapter/shell.js";
+import { RustAdapter } from "../../src/indexer/adapter/rust.js";
+import { CAdapter } from "../../src/indexer/adapter/c.js";
+import { CppAdapter } from "../../src/indexer/adapter/cpp.js";
+import { PhpAdapter } from "../../src/indexer/adapter/php.js";
+import { KotlinAdapter } from "../../src/indexer/adapter/kotlin.js";
+import { ShellAdapter } from "../../src/indexer/adapter/shell.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = dirname(__filename);
@@ -105,8 +105,8 @@ function generateGoldenFile(spec: GoldenFileSpec): void {
 function validateGoldenFile(spec: GoldenFileSpec): boolean {
   const adapter = getAdapter(spec.language);
   if (!adapter) {
-    console.log(`⏭️  Skipping ${spec.language} - adapter not available`);
-    return true;
+    console.error(`❌ ${spec.language} adapter not available`);
+    return false;
   }
 
   const fixturesDir = resolve(PROJECT_ROOT, "tests/fixtures", spec.language);
@@ -114,8 +114,8 @@ function validateGoldenFile(spec: GoldenFileSpec): boolean {
   const goldenPath = join(fixturesDir, spec.goldenFile);
 
   if (!existsSync(sourcePath)) {
-    console.log(`⏭️  Skipping ${spec.sourceFile} - source file not found`);
-    return true;
+    console.error(`❌ Source file not found: ${spec.language}/${spec.sourceFile}`);
+    return false;
   }
 
   if (!existsSync(goldenPath)) {

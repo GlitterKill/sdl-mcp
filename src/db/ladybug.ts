@@ -10,7 +10,11 @@ import { normalizeGraphDbPath } from "./graph-db-path.js";
 import { createSchema, getSchemaVersion } from "./ladybug-schema.js";
 import { LADYBUG_SCHEMA_VERSION, migrations } from "./migrations/index.js";
 import { runPendingMigrations } from "./migration-runner.js";
-import { clearPreparedStatementCache } from "./ladybug-core.js";
+import {
+  clearConnectionPoisoned,
+  clearPreparedStatementCache,
+  isConnectionPoisoned,
+} from "./ladybug-core.js";
 import { resetJoinHintCache } from "./ladybug-edges.js";
 
 // Local interface for optional thread-count method on LadybugDB connections
@@ -247,11 +251,11 @@ async function getHealthyConnection(
   db: LadybugDatabase,
   label: string,
 ): Promise<LadybugConnection> {
-  if (await isConnectionHealthy(conn)) {
+  if (!isConnectionPoisoned(conn) && (await isConnectionHealthy(conn))) {
     return conn;
   }
 
-  logger.warn(`LadybugDB ${label} connection unhealthy, recreating`);
+  logger.warn(`LadybugDB ${label} connection unhealthy or poisoned, recreating`);
   try {
     await conn.close();
   } catch (closeError) {
@@ -262,6 +266,8 @@ async function getHealthyConnection(
           closeError instanceof Error ? closeError.message : String(closeError),
       },
     );
+  } finally {
+    clearConnectionPoisoned(conn);
   }
 
   return createConnection(db);

@@ -628,9 +628,23 @@ export const RepoStatusResponseSchema = z.object({
     cacheMisses: z.number().int().min(0),
     wastedPrefetch: z.number().int().min(0),
     hitRate: z.number().min(0).max(1),
-    wasteRate: z.number().min(0).max(1),
+    wasteRate: z.number().min(0),
     avgLatencyReductionMs: z.number().min(0),
     lastRunAt: z.string().nullable(),
+    modelEnabled: z.boolean(),
+    strategyMetrics: z.array(
+      z.object({
+        strategy: z.string(),
+        hitRate: z.number().min(0),
+        wasteRate: z.number().min(0),
+        avgLatencyReductionMs: z.number().min(0),
+        samples: z.number().int().min(0),
+        cacheHits: z.number().int().min(0),
+        cacheMisses: z.number().int().min(0),
+        wastedPrefetch: z.number().int().min(0),
+      }),
+    ),
+    deterministicFallback: z.boolean(),
   }),
   liveIndexStatus: z
     .object({

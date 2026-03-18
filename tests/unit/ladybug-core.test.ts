@@ -15,6 +15,7 @@ import {
   exec,
   withTransaction,
   getPreparedStatement,
+  isConnectionPoisoned,
 } from "../../src/db/ladybug-core.js";
 
 describe("toNumber", () => {
@@ -236,6 +237,50 @@ describe("query helpers", () => {
       "BEGIN TRANSACTION",
       "RETURN 2",
       "COMMIT",
+      "BEGIN TRANSACTION",
+      "ROLLBACK",
+    ]);
+  });
+
+  it("withTransaction surfaces rollback failure and marks the connection for recycle", async () => {
+    const statements: string[] = [];
+    const conn = {
+      prepare: async (statement: string) => statement,
+      execute: async (prepared: unknown) => {
+        const statement = String(prepared);
+        statements.push(statement);
+        if (statement === "ROLLBACK") {
+          throw new Error("rollback exploded");
+        }
+        const qr = makeQueryResult<Record<string, unknown>>([]);
+        return qr.result;
+      },
+    };
+
+    await assert.rejects(
+      withTransaction(
+        conn as unknown as import("kuzu").Connection,
+        async () => {
+          throw new Error("boom");
+        },
+      ),
+      /rollback exploded/i,
+    );
+
+    assert.equal(
+      isConnectionPoisoned(conn as unknown as import("kuzu").Connection),
+      true,
+    );
+
+    await assert.rejects(
+      withTransaction(
+        conn as unknown as import("kuzu").Connection,
+        async () => null,
+      ),
+      /unusable after a rollback failure/i,
+    );
+
+    assert.deepEqual(statements, [
       "BEGIN TRANSACTION",
       "ROLLBACK",
     ]);

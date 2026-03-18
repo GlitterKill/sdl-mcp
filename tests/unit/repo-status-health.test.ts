@@ -1,5 +1,6 @@
-import { describe, it } from "node:test";
 import assert from "node:assert";
+import { describe, it } from "node:test";
+
 import { RepoStatusResponseSchema } from "../../src/mcp/tools.js";
 
 describe("repo status health fields", () => {
@@ -41,9 +42,12 @@ describe("repo status health fields", () => {
         cacheMisses: 0,
         wastedPrefetch: 0,
         hitRate: 0,
-        wasteRate: 0,
+        wasteRate: 5.5,
         avgLatencyReductionMs: 0,
         lastRunAt: null,
+        modelEnabled: true,
+        strategyMetrics: [],
+        deterministicFallback: false,
       },
       liveIndexStatus: {
         enabled: true,
@@ -67,6 +71,10 @@ describe("repo status health fields", () => {
 
     assert.strictEqual(parsed.healthScore, 88);
     assert.strictEqual(parsed.healthAvailable, true);
+    assert.strictEqual(parsed.prefetchStats.wasteRate, 5.5);
+    assert.strictEqual(parsed.prefetchStats.modelEnabled, true);
+    assert.deepStrictEqual(parsed.prefetchStats.strategyMetrics, []);
+    assert.strictEqual(parsed.prefetchStats.deterministicFallback, false);
     assert.strictEqual(parsed.liveIndexStatus?.enabled, true);
     assert.strictEqual(parsed.liveIndexStatus?.lastCheckpointResult, "success");
   });

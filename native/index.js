@@ -35,6 +35,9 @@ function getPackageName() {
     return "sdl-mcp-native-linux-x64-gnu";
   }
   if (platform === "linux" && arch === "arm64") {
+    if (isMusl()) {
+      return "sdl-mcp-native-linux-arm64-musl";
+    }
     return "sdl-mcp-native-linux-arm64-gnu";
   }
 
@@ -81,6 +84,7 @@ const PLATFORM_NODE_FILES = {
   "sdl-mcp-native-linux-x64-gnu": "sdl-mcp-native.linux-x64-gnu.node",
   "sdl-mcp-native-linux-x64-musl": "sdl-mcp-native.linux-x64-musl.node",
   "sdl-mcp-native-linux-arm64-gnu": "sdl-mcp-native.linux-arm64-gnu.node",
+  "sdl-mcp-native-linux-arm64-musl": "sdl-mcp-native.linux-arm64-musl.node",
 };
 
 let nativeBinding = null;

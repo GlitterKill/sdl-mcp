@@ -14,6 +14,7 @@ export interface SyncArtifact {
 
 export interface SyncArtifactMetadata {
   artifact_id: string;
+  artifact_path?: string;
   repo_id: RepoId;
   version_id: VersionId;
   commit_sha: string | null;

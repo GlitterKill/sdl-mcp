@@ -31,7 +31,7 @@ export async function pullLatestState(
         throw new IndexError(`Repository not found: ${options.repoId}`);
       }
 
-      const syncDir = join(process.cwd(), ".sdl-sync");
+      const syncDir = join(repo.rootPath, ".sdl-sync");
       const artifacts = await listArtifacts(options.repoId, syncDir);
 
       let targetArtifact: SyncArtifactMetadata | undefined;
@@ -49,10 +49,9 @@ export async function pullLatestState(
       }
 
       if (targetArtifact) {
-        const artifactPath = join(
-          syncDir,
-          `${targetArtifact.artifact_id}.sdl-artifact.json`,
-        );
+        const artifactPath =
+          targetArtifact.artifact_path ??
+          join(syncDir, `${targetArtifact.artifact_id}.sdl-artifact.json`);
         const metadata = getArtifactMetadata(artifactPath);
 
         if (!metadata) {

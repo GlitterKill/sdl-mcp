@@ -246,6 +246,14 @@ interface BeamCoreState {
   effectiveMinConfidence: number;
 }
 
+export interface RollbackSliceState {
+  sliceCards: Set<SymbolId>;
+  entrySymbols: Set<SymbolId>;
+  coveredEntrySymbols: number;
+  highConfidenceCards: number;
+  recentAcceptedScores: number[];
+}
+
 /** Initialises all shared mutable state from budget, request and start nodes. */
 function createBeamCoreState(
   budget: Required<SliceBudget>,
@@ -315,6 +323,26 @@ function acceptNodeIntoSlice(
   state.recentAcceptedScores.push(actualScore);
   if (state.recentAcceptedScores.length > DYNAMIC_CAP_RECENT_SCORE_WINDOW) {
     state.recentAcceptedScores.shift();
+  }
+}
+
+export function rollbackAcceptedNodeFromSlice(
+  state: RollbackSliceState,
+  symbolId: SymbolId,
+  actualScore: number,
+): void {
+  state.sliceCards.delete(symbolId);
+  if (state.entrySymbols.has(symbolId)) {
+    state.coveredEntrySymbols = Math.max(0, state.coveredEntrySymbols - 1);
+  }
+  if (
+    actualScore >=
+    SLICE_SCORE_THRESHOLD + DYNAMIC_CAP_HIGH_CONFIDENCE_MARGIN
+  ) {
+    state.highConfidenceCards = Math.max(0, state.highConfidenceCards - 1);
+  }
+  if (state.recentAcceptedScores.length > 0) {
+    state.recentAcceptedScores.pop();
   }
 }
 
@@ -543,7 +571,7 @@ async function beamSearchCoreAsync(
     state.totalTokens += cardTokens;
 
     if (state.totalTokens > budget.maxEstimatedTokens) {
-      state.sliceCards.delete(current.symbolId);
+      rollbackAcceptedNodeFromSlice(state, current.symbolId, actualScore);
       state.totalTokens -= cardTokens;
       state.wasTruncated = true;
       state.droppedCandidates++;
@@ -644,7 +672,7 @@ export function beamSearch(
     state.totalTokens += cardTokens;
 
     if (state.totalTokens > budget.maxEstimatedTokens) {
-      state.sliceCards.delete(current.symbolId);
+      rollbackAcceptedNodeFromSlice(state, current.symbolId, actualScore);
       state.totalTokens -= cardTokens;
       state.wasTruncated = true;
       state.droppedCandidates++;
