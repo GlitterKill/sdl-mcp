@@ -75,6 +75,10 @@ describe("MCP tool registration", () => {
       "expected sdl.manual to be registered alongside flat tools",
     );
     assert.ok(
+      names.includes("sdl.action.search"),
+      "expected sdl.action.search to be registered alongside flat tools",
+    );
+    assert.ok(
       names.includes("sdl.chain"),
       "expected sdl.chain to be registered alongside flat tools",
     );
@@ -102,10 +106,14 @@ describe("MCP tool registration", () => {
       names.includes("sdl.chain"),
       "expected sdl.chain in exclusive mode",
     );
+    assert.ok(
+      names.includes("sdl.action.search"),
+      "expected sdl.action.search in exclusive mode",
+    );
     assert.strictEqual(
       names.length,
-      2,
-      `exclusive mode should register exactly 2 tools, got ${names.length}: ${names.join(", ")}`,
+      3,
+      `exclusive mode should register exactly 3 tools, got ${names.length}: ${names.join(", ")}`,
     );
 
     // No flat tools

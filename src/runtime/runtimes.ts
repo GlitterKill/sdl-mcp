@@ -40,7 +40,7 @@ const RUNTIME_TABLE: RuntimeTableEntry[] = [
     aliases: ["node", "bun"],
     extension: ".js",
     versionFlag: "--version",
-    candidates: { win32: ["bun", "node"], unix: ["bun", "node"] },
+    candidates: { win32: ["node", "bun"], unix: ["node", "bun"] },
     commandBuilder: "interpreted",
   },
   {
