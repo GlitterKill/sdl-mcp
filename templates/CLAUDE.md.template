@@ -1,10 +1,39 @@
-# CLAUDE.md - SDL-MCP Integration
+# Tool Usage Rules — SDL-MCP Enforcement
 
-This file instructs Claude Code (and other AI agents) to use SDL-MCP for efficient code context.
+**NEVER use the built-in `Read` tool for source code files in SDL-MCP supported languages.**
+Use SDL-MCP tools (`mcp__sdl-mcp__*`) instead — follow the Context Ladder in the protocol section below.
 
-## Code Context Protocol
+### Blocked Extensions (use SDL-MCP instead of Read)
 
-**IMPORTANT**: This project uses SDL-MCP for code understanding. Always prefer SDL-MCP tools over reading raw files directly.
+| Language | Extensions |
+|----------|-----------|
+| TypeScript/JavaScript | `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` |
+| Python | `.py` `.pyw` |
+| Go | `.go` |
+| Java | `.java` |
+| C# | `.cs` |
+| C/C++ | `.c` `.h` `.cpp` `.hpp` `.cc` `.cxx` `.hxx` |
+| PHP | `.php` `.phtml` |
+| Rust | `.rs` |
+| Kotlin | `.kt` `.kts` |
+| Shell | `.sh` `.bash` `.zsh` |
+
+### Read IS permitted for non-indexed file types
+
+`.md`, `.json`, `.yaml`, `.yml`, `.toml`, `.xml`, `.sql`, `.css`, `.html`, `.txt`, config files, lock files, and any other non-source-code files.
+
+### If a Read attempt is denied by a hook
+
+Do **NOT** retry with `Read`. Switch to SDL-MCP tools immediately:
+1. `sdl_symbol_search` to find the symbol
+2. `sdl_symbol_getCard` for metadata
+3. `sdl_code_getSkeleton` for structure
+4. `sdl_code_getHotPath` for specific identifiers
+5. `sdl_code_needWindow` only as a last resort (requires justification)
+
+### Codebase Exploration
+
+When exploring the codebase or understanding code, use the **`explore-sdl`** subagent instead of the built-in `Explore` agent. The `explore-sdl` agent uses SDL-MCP tools for source code and is the only authorized exploration path.
 
 ### Repository Configuration
 
