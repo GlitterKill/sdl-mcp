@@ -286,6 +286,10 @@ export function applyBounds(
   maxLines: number,
   maxTokens: number,
 ): string {
+  if (maxLines <= 0 || maxTokens <= 0) {
+    return "";
+  }
+
   const lines = splitLines(code);
   const tokenCount = estimateTokenCount(code);
 

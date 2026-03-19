@@ -52,6 +52,10 @@ describe("windows applyBounds", () => {
   it("returns empty string when token budget is zero", () => {
     assert.strictEqual(applyBounds("abc\ndef", 10, 0), "");
   });
+
+  it("returns empty string when maxLines is zero", () => {
+    assert.strictEqual(applyBounds("abc\ndef", 0, 10_000), "");
+  });
 });
 
 describe("windows centerOnSymbol", () => {
