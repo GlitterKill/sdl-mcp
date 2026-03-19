@@ -22,6 +22,9 @@ export function validateLadder(
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
+    // Skip internal transform steps (ladder-neutral)
+    if (step.internal) continue;
+
     const rung = RUNG_ORDER[step.action];
 
     // Skip actions not in the ladder map (neutral)

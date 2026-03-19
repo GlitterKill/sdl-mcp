@@ -1,10 +1,13 @@
 import { ChainRequestSchema, type ChainBudget } from "./types.js";
 import { FN_NAME_MAP } from "./manual-generator.js";
+import { isInternalTransform } from "./transforms.js";
 
 export interface ParsedChainStep {
   fn: string; // original camelCase name
   action: string; // dot-notation action name (e.g., "symbol.search")
   args: Record<string, unknown>;
+  /** Whether this step is an internal transform (not routed through gateway) */
+  internal: boolean;
 }
 
 export interface ParsedChainRequest {
@@ -70,10 +73,12 @@ export function parseChainRequest(
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
 
-    // Validate fn exists in FN_NAME_MAP
-    if (!(step.fn in FN_NAME_MAP)) {
+    const isTransform = isInternalTransform(step.fn);
+
+    // Validate fn exists in FN_NAME_MAP or is an internal transform
+    if (!isTransform && !(step.fn in FN_NAME_MAP)) {
       errors.push(
-        `Unknown function '${step.fn}' in step ${i}. Available: ${Object.keys(FN_NAME_MAP).join(", ")}`,
+        `Unknown function '${step.fn}' in step ${i}. Available: ${Object.keys(FN_NAME_MAP).join(", ")}, dataPick, dataMap, dataFilter, dataSort, dataTemplate`,
       );
       continue;
     }
@@ -88,8 +93,9 @@ export function parseChainRequest(
 
     parsedSteps.push({
       fn: step.fn,
-      action: FN_NAME_MAP[step.fn],
+      action: isTransform ? step.fn : FN_NAME_MAP[step.fn],
       args: step.args,
+      internal: isTransform,
     });
   }
 

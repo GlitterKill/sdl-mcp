@@ -1,0 +1,469 @@
+import { createActionMap } from "../gateway/router.js";
+import { ACTION_TO_FN } from "./manual-generator.js";
+import { INTERNAL_TRANSFORMS } from "./transforms.js";
+import type { LiveIndexCoordinator } from "../live-index/types.js";
+import type { z } from "zod";
+
+// --- Action Tags / Categories ---
+
+export type ActionTag =
+  | "query"
+  | "code"
+  | "repo"
+  | "policy"
+  | "agent"
+  | "buffer"
+  | "runtime"
+  | "memory"
+  | "transform";
+
+const ACTION_TAGS: Record<string, ActionTag[]> = {
+  "symbol.search": ["query"],
+  "symbol.getCard": ["query"],
+  "symbol.getCards": ["query"],
+  "slice.build": ["query"],
+  "slice.refresh": ["query"],
+  "slice.spillover.get": ["query"],
+  "delta.get": ["query"],
+  "context.summary": ["query"],
+  "pr.risk.analyze": ["query"],
+  "code.needWindow": ["code"],
+  "code.getSkeleton": ["code"],
+  "code.getHotPath": ["code"],
+  "repo.register": ["repo"],
+  "repo.status": ["repo"],
+  "repo.overview": ["repo"],
+  "index.refresh": ["repo"],
+  "policy.get": ["policy"],
+  "policy.set": ["policy"],
+  "agent.orchestrate": ["agent"],
+  "agent.feedback": ["agent"],
+  "agent.feedback.query": ["agent"],
+  "buffer.push": ["buffer"],
+  "buffer.checkpoint": ["buffer"],
+  "buffer.status": ["buffer"],
+  "runtime.execute": ["runtime"],
+  "memory.store": ["memory"],
+  "memory.query": ["memory"],
+  "memory.remove": ["memory"],
+  "memory.surface": ["memory"],
+};
+
+// --- Schema Introspection ---
+
+export interface SchemaSummaryField {
+  name: string;
+  type: string;
+  required: boolean;
+  default?: unknown;
+  enumValues?: string[];
+  description?: string;
+}
+
+export interface SchemaSummary {
+  fields: SchemaSummaryField[];
+}
+
+/**
+ * Converts a Zod schema into a stable SchemaSummary shape.
+ * Handles ZodObject, ZodDefault, ZodOptional, ZodNullable, ZodEnum, ZodArray,
+ * and ZodPassthrough. Falls back to { type: "unknown" } for unrecognized shapes.
+ */
+export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
+  const fields: SchemaSummaryField[] = [];
+
+  // Unwrap to get the inner ZodObject if wrapped in ZodEffects/ZodPipeline
+  const inner = unwrapZod(schema);
+  if (!inner || typeof (inner as unknown as Record<string, unknown>).shape !== "object") {
+    return { fields };
+  }
+
+  const shape = (inner as unknown as Record<string, unknown>).shape as Record<
+    string,
+    z.ZodType
+  >;
+  for (const [name, fieldSchema] of Object.entries(shape)) {
+    fields.push(describeField(name, fieldSchema));
+  }
+
+  return { fields };
+}
+
+function unwrapZod(s: z.ZodType): z.ZodType {
+  const def = (s as unknown as Record<string, unknown>)._def as Record<string, unknown>;
+  if (!def) return s;
+
+  // ZodEffects (transform, refine, preprocess)
+  if (def.typeName === "ZodEffects" && def.schema) {
+    return unwrapZod(def.schema as z.ZodType);
+  }
+  // ZodPipeline
+  if (def.typeName === "ZodPipeline" && def.in) {
+    return unwrapZod(def.in as z.ZodType);
+  }
+  return s;
+}
+
+function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
+  let required = true;
+  let defaultValue: unknown = undefined;
+  let hasDefault = false;
+  let current = schema;
+
+  // Peel optional/default/nullable wrappers
+  for (;;) {
+    const def = (current as unknown as Record<string, unknown>)._def as Record<
+      string,
+      unknown
+    >;
+    if (!def) break;
+
+    if (def.typeName === "ZodDefault") {
+      required = false;
+      hasDefault = true;
+      defaultValue = typeof def.defaultValue === "function"
+        ? (def.defaultValue as () => unknown)()
+        : def.defaultValue;
+      current = def.innerType as z.ZodType;
+      continue;
+    }
+    if (def.typeName === "ZodOptional") {
+      required = false;
+      current = def.innerType as z.ZodType;
+      continue;
+    }
+    if (def.typeName === "ZodNullable") {
+      current = def.innerType as z.ZodType;
+      continue;
+    }
+    break;
+  }
+
+  const typeName = resolveTypeName(current);
+  const field: SchemaSummaryField = { name, type: typeName, required };
+
+  if (hasDefault) {
+    field.default = defaultValue;
+  }
+
+  // Extract enum values
+  const def = (current as unknown as Record<string, unknown>)._def as Record<
+    string,
+    unknown
+  >;
+  if (def?.typeName === "ZodEnum" && Array.isArray(def.values)) {
+    field.enumValues = def.values as string[];
+  }
+
+  return field;
+}
+
+function resolveTypeName(schema: z.ZodType): string {
+  const def = (schema as unknown as Record<string, unknown>)._def as Record<
+    string,
+    unknown
+  >;
+  if (!def?.typeName) return "unknown";
+
+  switch (def.typeName) {
+    case "ZodString":
+      return "string";
+    case "ZodNumber":
+      return "number";
+    case "ZodBoolean":
+      return "boolean";
+    case "ZodArray":
+      return `${resolveTypeName(def.type as z.ZodType)}[]`;
+    case "ZodObject":
+      return "object";
+    case "ZodRecord":
+      return "Record<string, unknown>";
+    case "ZodEnum":
+      return `enum(${(def.values as string[]).join("|")})`;
+    case "ZodLiteral":
+      return `literal(${JSON.stringify(def.value)})`;
+    case "ZodUnion":
+      return (def.options as z.ZodType[])
+        .map((o) => resolveTypeName(o))
+        .join(" | ");
+    default:
+      return "unknown";
+  }
+}
+
+// --- Hand-Authored Examples ---
+
+const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
+  "symbol.search": { query: "handleError", kinds: ["function"], limit: 10 },
+  "symbol.getCard": { symbolId: "<symbolId>" },
+  "symbol.getCards": { symbolIds: ["<id1>", "<id2>"] },
+  "slice.build": {
+    taskText: "debug authentication flow",
+    entrySymbols: ["<symbolId>"],
+    budget: { maxCards: 30 },
+  },
+  "slice.refresh": { sliceHandle: "<handle>" },
+  "slice.spillover.get": { spilloverHandle: "<handle>", pageSize: 20 },
+  "delta.get": { includeBlastRadius: true },
+  "context.summary": { taskQuery: "error handling patterns" },
+  "pr.risk.analyze": { riskThreshold: 80 },
+  "code.getSkeleton": { symbolId: "<symbolId>" },
+  "code.getHotPath": {
+    symbolId: "<symbolId>",
+    identifiersToFind: ["validate", "parse"],
+  },
+  "code.needWindow": {
+    symbolId: "<symbolId>",
+    reason: "Need to see validation logic",
+    expectedLines: 50,
+    identifiersToFind: ["validateInput"],
+  },
+  "repo.register": { rootPath: "/path/to/repo" },
+  "repo.status": {},
+  "repo.overview": { level: "stats" },
+  "index.refresh": { mode: "incremental" },
+  "policy.get": {},
+  "policy.set": { maxWindowLines: 200 },
+  "agent.orchestrate": {
+    taskText: "understand the auth flow",
+    focusSymbols: ["<symbolId>"],
+    budget: { maxTokens: 5000 },
+  },
+  "agent.feedback": {
+    useful: ["<symbolId>"],
+    missing: [],
+    taskText: "auth debugging",
+  },
+  "agent.feedback.query": { limit: 10 },
+  "buffer.push": { file: "src/main.ts", content: "// updated" },
+  "buffer.checkpoint": {},
+  "buffer.status": {},
+  "runtime.execute": { runtime: "node", args: ["--version"] },
+  "memory.store": {
+    type: "pattern",
+    title: "Auth uses JWT",
+    content: "Authentication is JWT-based with refresh tokens",
+    tags: ["auth"],
+  },
+  "memory.query": { query: "auth", limit: 5 },
+  "memory.remove": { memoryId: "<memoryId>" },
+  "memory.surface": { taskText: "fix auth bug", limit: 5 },
+};
+
+// --- ActionDescriptor ---
+
+export interface ActionDescriptor {
+  /** Dot-notation action name (e.g., "symbol.search") */
+  action: string;
+  /** CamelCase fn name for use in sdl.chain (e.g., "symbolSearch") */
+  fn: string;
+  /** Human-readable description */
+  description: string;
+  /** Category tags */
+  tags: ActionTag[];
+  /** Whether this is a gateway action or internal transform */
+  kind: "gateway" | "internal";
+  /** Schema summary (if requested) */
+  schemaSummary?: SchemaSummary;
+  /** Example args (if requested) */
+  example?: Record<string, unknown>;
+}
+
+// --- Descriptions from manual template (extracted) ---
+
+const ACTION_DESCRIPTIONS: Record<string, string> = {
+  "symbol.search": "Search symbols by name/pattern",
+  "symbol.getCard": "Get symbol card (metadata, deps, metrics)",
+  "symbol.getCards": "Batch-fetch symbol cards",
+  "slice.build": "Build dependency graph slice",
+  "slice.refresh": "Refresh existing slice (delta only)",
+  "slice.spillover.get": "Fetch spillover page",
+  "delta.get": "Get delta between versions",
+  "context.summary": "Generate context summary",
+  "pr.risk.analyze": "Analyze PR risk",
+  "code.needWindow": "Request raw code window (requires justification)",
+  "code.getSkeleton": "Get skeleton IR (signatures + control flow)",
+  "code.getHotPath": "Get hot-path excerpt for specific identifiers",
+  "repo.register": "Register a repository",
+  "repo.status": "Get repository status",
+  "repo.overview": "Get codebase overview",
+  "index.refresh": "Refresh index",
+  "policy.get": "Get policy config",
+  "policy.set": "Set policy config",
+  "agent.orchestrate": "Orchestrate multi-rung context retrieval",
+  "agent.feedback": "Record agent feedback",
+  "agent.feedback.query": "Query feedback records",
+  "buffer.push": "Push buffer update",
+  "buffer.checkpoint": "Request buffer checkpoint",
+  "buffer.status": "Get buffer status",
+  "runtime.execute": "Execute runtime command",
+  "memory.store": "Store a development memory",
+  "memory.query": "Query memories",
+  "memory.remove": "Soft-delete a memory",
+  "memory.surface": "Auto-surface relevant memories",
+};
+
+const TRANSFORM_DESCRIPTIONS: Record<string, string> = {
+  dataPick: "Project fields from an object",
+  dataMap: "Project fields from each element of an array",
+  dataFilter: "Filter array elements by clauses",
+  dataSort: "Sort array elements by a field",
+  dataTemplate: "Render template strings from object(s)",
+};
+
+const TRANSFORM_EXAMPLES: Record<string, Record<string, unknown>> = {
+  dataPick: { input: "$0", fields: { name: "name", file: "file" } },
+  dataMap: { input: "$0.symbols", fields: { id: "symbolId", name: "name" } },
+  dataFilter: {
+    input: "$0.symbols",
+    clauses: [{ path: "kind", op: "eq", value: "function" }],
+  },
+  dataSort: {
+    input: "$0.symbols",
+    by: { path: "name", direction: "asc" },
+  },
+  dataTemplate: {
+    input: "$0.symbols",
+    template: "{{name}} ({{kind}}) in {{file}}",
+    joinWith: "\n",
+  },
+};
+
+// --- Catalog Builder ---
+
+let cachedCatalog: ActionDescriptor[] | null = null;
+// Cache the action map alongside the catalog to avoid redundant createActionMap calls.
+// Assumes liveIndex is a singleton; if it changes, call invalidateCatalog().
+let cachedActionMap: ReturnType<typeof createActionMap> | null = null;
+
+/**
+ * Builds the full action catalog from the gateway action map and internal transforms.
+ * Results are cached; call `invalidateCatalog()` to clear.
+ */
+export function buildCatalog(opts?: {
+  liveIndex?: LiveIndexCoordinator;
+  includeSchemas?: boolean;
+  includeExamples?: boolean;
+}): ActionDescriptor[] {
+  const includeSchemas = opts?.includeSchemas ?? false;
+  const includeExamples = opts?.includeExamples ?? false;
+
+  // Use cached base catalog if available and no dynamic options
+  if (cachedCatalog === null || cachedActionMap === null) {
+    cachedActionMap = createActionMap(opts?.liveIndex);
+    cachedCatalog = buildBaseCatalogFromMap(cachedActionMap);
+  }
+
+  if (!includeSchemas && !includeExamples) {
+    return cachedCatalog;
+  }
+
+  // Augment with optional fields using the cached action map
+  return cachedCatalog.map((desc) => {
+    const result = { ...desc };
+
+    if (includeSchemas) {
+      if (desc.kind === "gateway") {
+        const entry = cachedActionMap![desc.action];
+        if (entry) {
+          result.schemaSummary = zodToSchemaSummary(entry.schema);
+        }
+      } else {
+        const transform = INTERNAL_TRANSFORMS[desc.fn];
+        if (transform) {
+          result.schemaSummary = zodToSchemaSummary(transform.schema);
+        }
+      }
+    }
+
+    if (includeExamples) {
+      if (desc.kind === "gateway") {
+        result.example = EXAMPLE_REGISTRY[desc.action];
+      } else {
+        result.example = TRANSFORM_EXAMPLES[desc.fn];
+      }
+    }
+
+    return result;
+  });
+}
+
+function buildBaseCatalogFromMap(actionMap: ReturnType<typeof createActionMap>): ActionDescriptor[] {
+  const catalog: ActionDescriptor[] = [];
+
+  // Gateway actions
+  for (const action of Object.keys(actionMap)) {
+    const fn = ACTION_TO_FN[action];
+    if (!fn) continue;
+
+    catalog.push({
+      action,
+      fn,
+      description: ACTION_DESCRIPTIONS[action] ?? "",
+      tags: ACTION_TAGS[action] ?? [],
+      kind: "gateway",
+    });
+  }
+
+  // Internal transforms
+  for (const [fn, transform] of Object.entries(INTERNAL_TRANSFORMS)) {
+    catalog.push({
+      action: fn, // transforms use fn as action name
+      fn,
+      description: TRANSFORM_DESCRIPTIONS[fn] ?? transform.description,
+      tags: ["transform"],
+      kind: "internal",
+    });
+  }
+
+  return catalog;
+}
+
+export function invalidateCatalog(): void {
+  cachedCatalog = null;
+  cachedActionMap = null;
+}
+
+// --- Discovery Ranking ---
+
+/**
+ * Ranks catalog entries against a query string using deterministic lexical matching.
+ * Scores based on: exact name match > prefix match > substring in name > substring in description > tag match.
+ */
+export function rankCatalog(
+  catalog: ActionDescriptor[],
+  query: string,
+): ActionDescriptor[] {
+  const q = query.toLowerCase();
+  const terms = q.split(/\s+/).filter(Boolean);
+
+  const scored = catalog.map((desc) => {
+    let score = 0;
+    const name = desc.action.toLowerCase();
+    const fn = desc.fn.toLowerCase();
+    const description = desc.description.toLowerCase();
+    const tagStr = desc.tags.join(" ").toLowerCase();
+
+    for (const term of terms) {
+      // Exact name match
+      if (name === term || fn === term) {
+        score += 100;
+      } else if (name.startsWith(term) || fn.startsWith(term)) {
+        score += 50;
+      } else if (name.includes(term) || fn.includes(term)) {
+        score += 30;
+      } else if (description.includes(term)) {
+        score += 10;
+      } else if (tagStr.includes(term)) {
+        score += 5;
+      }
+    }
+
+    return { desc, score };
+  });
+
+  return scored
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((s) => s.desc);
+}

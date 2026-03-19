@@ -5,6 +5,12 @@ export const MANUAL_DESCRIPTION =
 
 export const CHAIN_DESCRIPTION =
   "Execute a chain of SDL-MCP operations in a single round-trip. Each step calls " +
-  "a function from the API manual. Use $N references (e.g., $0.symbols[0].symbolId) " +
+  "a function from the API manual or an internal transform (dataPick, dataMap, " +
+  "dataFilter, dataSort, dataTemplate). Use $N references (e.g., $0.symbols[0].symbolId) " +
   "to pass results between steps. Includes budget tracking, context-ladder validation, " +
-  "and cross-step ETag caching.";
+  "cross-step ETag caching, and opt-in execution tracing.";
+
+export const ACTION_SEARCH_DESCRIPTION =
+  "Search for SDL-MCP actions by keyword. Returns ranked matches with optional " +
+  "schema summaries and examples. Use this as the first discovery step before " +
+  "loading the full manual or building chains.";

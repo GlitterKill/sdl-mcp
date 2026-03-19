@@ -5,9 +5,12 @@ import { RefResolutionError } from "./ref-resolver.js";
 import { ChainBudgetTracker } from "./chain-budget.js";
 import { validateLadder } from "./ladder-validator.js";
 import { ChainEtagCache } from "./etag-cache.js";
-import type { ChainResponse, ChainStepResult } from "./types.js";
+import { executeTransform, TransformError } from "./transforms.js";
+import type { ChainResponse, ChainStepResult, ChainTraceOptions, ChainTraceStep } from "./types.js";
 import type { ParsedChainRequest } from "./chain-parser.js";
 import type { CodeModeConfig } from "../config/types.js";
+import { buildCatalog, type ActionDescriptor } from "./action-catalog.js";
+import { estimateTokens } from "../util/tokenize.js";
 
 /**
  * Execute a parsed chain request sequentially, resolving $N references,
@@ -18,6 +21,7 @@ export async function executeChain(
   actionMap: ActionMap,
   config: CodeModeConfig,
   context?: ToolContext,
+  traceOpts?: ChainTraceOptions,
 ): Promise<ChainResponse> {
   const budget = new ChainBudgetTracker(request.budget, {
     maxSteps: config.maxChainSteps,
@@ -28,7 +32,13 @@ export async function executeChain(
   const etagCache = config.etagCaching ? new ChainEtagCache() : null;
   const priorResults: unknown[] = [];
   const stepResults: ChainStepResult[] = [];
+  const traceSteps: ChainTraceStep[] = [];
   const startTime = Date.now();
+
+  // Pre-build enriched catalog once if trace needs schemas/examples
+  const traceCatalog = traceOpts && (traceOpts.includeSchemas || traceOpts.includeExamples)
+    ? buildCatalog({ includeSchemas: traceOpts.includeSchemas, includeExamples: traceOpts.includeExamples })
+    : null;
 
   for (let i = 0; i < request.steps.length; i++) {
     const step = request.steps[i];
@@ -105,73 +115,141 @@ export async function executeChain(
       continue;
     }
 
-    // Inject ETags for card requests
-    if (etagCache) {
-      etagCache.injectEtags(step.action, resolvedArgs);
-    }
-
-    // Build gateway args: merge repoId + action into resolved args
-    const gatewayArgs = {
-      repoId: request.repoId,
-      action: step.action,
-      ...resolvedArgs,
-    };
-
-    // Execute the step
+    // Execute internal transform or gateway step
     const stepStart = Date.now();
-    try {
-      const result = await routeGatewayCall(gatewayArgs, actionMap, context);
-      const stepDuration = Date.now() - stepStart;
-      const tokens = ChainBudgetTracker.estimateResultTokens(result);
 
-      budget.record(tokens, stepDuration);
+    if (step.internal) {
+      // Internal transform — execute directly, bypass gateway
+      try {
+        const result = executeTransform(step.fn, resolvedArgs);
+        const stepDuration = Date.now() - stepStart;
+        const tokens = ChainBudgetTracker.estimateResultTokens(result);
 
-      // Extract ETags from result
+        budget.record(tokens, stepDuration);
+        priorResults.push(result);
+
+        const stepResult: ChainStepResult = {
+          stepIndex: i,
+          fn: step.fn,
+          result,
+          tokens,
+          durationMs: stepDuration,
+          status: "ok",
+        };
+        stepResults.push(stepResult);
+
+        if (traceOpts) {
+          traceSteps.push(buildTraceStep(i, step.fn, step.fn, "internal", "ok", stepDuration, tokens, traceOpts, traceCatalog, resolvedArgs, result));
+        }
+      } catch (err) {
+        const stepDuration = Date.now() - stepStart;
+        const errorMsg =
+          err instanceof TransformError
+            ? err.message
+            : `Transform failed: ${String(err)}`;
+
+        stepResults.push({
+          stepIndex: i,
+          fn: step.fn,
+          result: null,
+          tokens: 0,
+          durationMs: stepDuration,
+          status: "error",
+          error: errorMsg,
+        });
+        priorResults.push(null);
+
+        if (traceOpts) {
+          traceSteps.push(buildTraceStep(i, step.fn, step.fn, "internal", "error", stepDuration, 0, traceOpts, traceCatalog, resolvedArgs, null, errorMsg));
+        }
+
+        if (request.onError === "stop") {
+          for (let j = i + 1; j < request.steps.length; j++) {
+            stepResults.push({
+              stepIndex: j,
+              fn: request.steps[j].fn,
+              result: null,
+              tokens: 0,
+              durationMs: 0,
+              status: "skipped",
+            });
+            priorResults.push(null);
+          }
+          break;
+        }
+      }
+    } else {
+      // Gateway step — inject ETags, route through gateway
       if (etagCache) {
-        etagCache.extractEtags(step.action, result);
+        etagCache.injectEtags(step.action, resolvedArgs);
       }
 
-      priorResults.push(result);
-      stepResults.push({
-        stepIndex: i,
-        fn: step.fn,
-        result,
-        tokens,
-        durationMs: stepDuration,
-        status: "ok",
-      });
-    } catch (err) {
-      const stepDuration = Date.now() - stepStart;
-      const errorMsg =
-        err instanceof Error
-          ? err.message
-          : `Step execution failed: ${String(err)}`;
+      const gatewayArgs = {
+        repoId: request.repoId,
+        action: step.action,
+        ...resolvedArgs,
+      };
 
-      stepResults.push({
-        stepIndex: i,
-        fn: step.fn,
-        result: null,
-        tokens: 0,
-        durationMs: stepDuration,
-        status: "error",
-        error: errorMsg,
-      });
-      priorResults.push(null);
+      try {
+        const result = await routeGatewayCall(gatewayArgs, actionMap, context);
+        const stepDuration = Date.now() - stepStart;
+        const tokens = ChainBudgetTracker.estimateResultTokens(result);
 
-      if (request.onError === "stop") {
-        // Mark remaining as skipped
-        for (let j = i + 1; j < request.steps.length; j++) {
-          stepResults.push({
-            stepIndex: j,
-            fn: request.steps[j].fn,
-            result: null,
-            tokens: 0,
-            durationMs: 0,
-            status: "skipped",
-          });
-          priorResults.push(null);
+        budget.record(tokens, stepDuration);
+
+        if (etagCache) {
+          etagCache.extractEtags(step.action, result);
         }
-        break;
+
+        priorResults.push(result);
+        stepResults.push({
+          stepIndex: i,
+          fn: step.fn,
+          result,
+          tokens,
+          durationMs: stepDuration,
+          status: "ok",
+        });
+
+        if (traceOpts) {
+          traceSteps.push(buildTraceStep(i, step.fn, step.action, "gateway", "ok", stepDuration, tokens, traceOpts, traceCatalog, resolvedArgs, result));
+        }
+      } catch (err) {
+        const stepDuration = Date.now() - stepStart;
+        const errorMsg =
+          err instanceof Error
+            ? err.message
+            : `Step execution failed: ${String(err)}`;
+
+        stepResults.push({
+          stepIndex: i,
+          fn: step.fn,
+          result: null,
+          tokens: 0,
+          durationMs: stepDuration,
+          status: "error",
+          error: errorMsg,
+        });
+        priorResults.push(null);
+
+        if (traceOpts) {
+          traceSteps.push(buildTraceStep(i, step.fn, step.action, "gateway", "error", stepDuration, 0, traceOpts, traceCatalog, resolvedArgs, null, errorMsg));
+        }
+
+        if (request.onError === "stop") {
+          for (let j = i + 1; j < request.steps.length; j++) {
+            stepResults.push({
+              stepIndex: j,
+              fn: request.steps[j].fn,
+              result: null,
+              tokens: 0,
+              durationMs: 0,
+              status: "skipped",
+            });
+            priorResults.push(null);
+          }
+          break;
+        }
       }
     }
   }
@@ -188,12 +266,99 @@ export async function executeChain(
   const hasEtags =
     etagCacheState !== undefined && Object.keys(etagCacheState).length > 0;
 
-  return {
+  const totalDurationMs = Date.now() - startTime;
+
+  const response: ChainResponse = {
     results: stepResults,
     totalTokens: budgetState.tokensUsed,
-    durationMs: Date.now() - startTime,
+    durationMs: totalDurationMs,
     truncated: budgetState.truncated,
     ladderWarnings: ladderWarnings.length > 0 ? ladderWarnings : undefined,
     etagCache: hasEtags ? etagCacheState : undefined,
   };
+
+  // Attach trace only when requested
+  if (traceOpts && traceSteps.length > 0) {
+    response.trace = {
+      steps: traceSteps,
+      totals: {
+        durationMs: totalDurationMs,
+        tokens: budgetState.tokensUsed,
+        stepsExecuted: stepResults.filter((s) => s.status === "ok" || s.status === "error").length,
+      },
+    };
+  }
+
+  return response;
+}
+
+// --- Trace Helpers ---
+
+const DEFAULT_MAX_PREVIEW_TOKENS = 200;
+
+function truncatePreview(value: unknown, maxTokens: number): string {
+  const json = JSON.stringify(value);
+  const est = estimateTokens(json);
+  if (est <= maxTokens) return json;
+
+  // Truncate deterministically by character count approximation (4 chars per token)
+  const maxChars = maxTokens * 4;
+  return json.slice(0, maxChars) + "…";
+}
+
+function buildTraceStep(
+  stepIndex: number,
+  fn: string,
+  action: string,
+  kind: "gateway" | "internal",
+  status: string,
+  durationMs: number,
+  tokens: number,
+  opts: ChainTraceOptions,
+  catalog: ActionDescriptor[] | null,
+  resolvedArgs?: Record<string, unknown>,
+  result?: unknown,
+  error?: string,
+): ChainTraceStep {
+  const maxPreview = opts.maxPreviewTokens ?? DEFAULT_MAX_PREVIEW_TOKENS;
+  const level = opts.level ?? "summary";
+
+  const step: ChainTraceStep = {
+    stepIndex,
+    fn,
+    action,
+    kind,
+    status,
+    durationMs,
+    tokens,
+    summary: error
+      ? `${fn}: error — ${error}`
+      : `${fn}: ${tokens} tokens in ${durationMs}ms`,
+  };
+
+  if (level === "verbose") {
+    if (opts.includeResolvedArgs && resolvedArgs !== undefined) {
+      step.resolvedArgsPreview = truncatePreview(resolvedArgs, maxPreview);
+    }
+
+    if (result !== undefined && result !== null) {
+      step.resultPreview = truncatePreview(result, maxPreview);
+    }
+
+    if (catalog) {
+      const desc = catalog.find(
+        (d) => d.fn === fn || d.action === action,
+      );
+      if (desc) {
+        if (opts.includeSchemas && desc.schemaSummary) {
+          step.schemaSummary = desc.schemaSummary;
+        }
+        if (opts.includeExamples && desc.example) {
+          step.example = desc.example;
+        }
+      }
+    }
+  }
+
+  return step;
 }
