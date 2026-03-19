@@ -49,6 +49,7 @@ export function killProcessTree(pid: number): void {
 
 export function buildScrubbedEnv(
   allowedKeys: string[],
+  requiredEnvKeys: string[] = [],
 ): Record<string, string> {
   const env: Record<string, string> = {};
 
@@ -81,6 +82,13 @@ export function buildScrubbedEnv(
     const value = process.env[key];
     if (value !== undefined) {
       env[key] = value;
+    }
+  }
+
+  // Add runtime-required env keys
+  for (const key of requiredEnvKeys) {
+    if (process.env[key] !== undefined) {
+      env[key] = process.env[key]!;
     }
   }
 
