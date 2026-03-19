@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RUNTIME_NAMES } from "../runtime/runtimes.js";
 import {
   MAX_FILE_BYTES,
   DEFAULT_MAX_WINDOW_LINES,
@@ -286,7 +287,7 @@ export type ConcurrencyConfig = z.infer<typeof ConcurrencyConfigSchema>;
 
 export const RuntimeConfigSchema = z.object({
   enabled: z.boolean().default(false),
-  allowedRuntimes: z.array(z.string()).default(["node", "python"]),
+  allowedRuntimes: z.array(z.enum(RUNTIME_NAMES)).default(["node", "python"]),
   allowedExecutables: z.array(z.string()).default([]),
   maxDurationMs: z
     .number()

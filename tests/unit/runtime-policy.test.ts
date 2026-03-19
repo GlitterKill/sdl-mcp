@@ -277,3 +277,31 @@ describe("PolicyEngine - Runtime Execution Policy", () => {
     assert.notStrictEqual(approved.auditHash, denied.auditHash);
   });
 });
+
+describe("config validation", () => {
+  it("should accept valid runtime names in allowedRuntimes", () => {
+    const config = RuntimeConfigSchema.parse({
+      enabled: true,
+      allowedRuntimes: ["node", "go", "rust", "typescript"],
+    });
+    assert.deepStrictEqual(config.allowedRuntimes, ["node", "go", "rust", "typescript"]);
+  });
+
+  it("should reject typos in allowedRuntimes", () => {
+    assert.throws(() => {
+      RuntimeConfigSchema.parse({
+        enabled: true,
+        allowedRuntimes: ["noed"],
+      });
+    });
+  });
+
+  it("should reject unknown runtime names", () => {
+    assert.throws(() => {
+      RuntimeConfigSchema.parse({
+        enabled: true,
+        allowedRuntimes: ["lua"],
+      });
+    });
+  });
+});

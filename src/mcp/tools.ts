@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RUNTIME_NAMES } from "../runtime/runtimes.js";
 import {
   SYMBOL_SEARCH_MAX_RESULTS,
   PAGE_SIZE_MAX,
@@ -1750,7 +1751,7 @@ export type AgentFeedbackQueryResponse = z.infer<
 
 export const RuntimeExecuteRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  runtime: z.enum(["node", "python", "shell"]),
+  runtime: z.enum(RUNTIME_NAMES),
   executable: z
     .string()
     .min(1)
