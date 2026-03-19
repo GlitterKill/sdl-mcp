@@ -1,34 +1,187 @@
-/**
- * Runtime registry — detection and command-building for supported runtimes.
- *
- * v1 runtimes: node, python, shell.
- * Each runtime implements RuntimeDescriptor for detection and command construction.
- */
-
 import { execSync } from "child_process";
 import { basename } from "path";
 import type { RuntimeDescriptor, RuntimeDetectionResult } from "./types.js";
 
-// ============================================================================
-// Detection Cache
-// ============================================================================
+// ── Table types ──────────────────────────────────────────────
+
+interface PlatformCandidates {
+  win32: string[];
+  unix: string[];
+}
+
+interface PlatformExtensions {
+  win32: string;
+  unix: string;
+}
+
+interface CompileStepConfig {
+  mode: "run-command" | "compile-then-execute";
+  command: string;
+  args: string[];
+  outExtension?: string;
+}
+
+interface RuntimeTableEntry {
+  name: string;
+  aliases: string[];
+  extension: string | PlatformExtensions;
+  versionFlag: string;
+  candidates: PlatformCandidates;
+  commandBuilder: "interpreted" | "compiled" | "shell";
+  compileStep?: CompileStepConfig;
+  requiredEnvKeys?: string[];
+}
+
+// ── The table ────────────────────────────────────────────────
+
+const RUNTIME_TABLE: RuntimeTableEntry[] = [
+  {
+    name: "node",
+    aliases: ["node", "bun"],
+    extension: ".js",
+    versionFlag: "--version",
+    candidates: { win32: ["bun", "node"], unix: ["bun", "node"] },
+    commandBuilder: "interpreted",
+  },
+  {
+    name: "typescript",
+    aliases: ["tsx", "bun", "ts-node"],
+    extension: ".ts",
+    versionFlag: "--version",
+    candidates: { win32: ["bun", "tsx"], unix: ["bun", "tsx"] },
+    commandBuilder: "interpreted",
+  },
+  {
+    name: "python",
+    aliases: ["python3", "python", "py"],
+    extension: ".py",
+    versionFlag: "--version",
+    candidates: { win32: ["python", "python3", "py"], unix: ["python3", "python"] },
+    commandBuilder: "interpreted",
+  },
+  {
+    name: "shell",
+    aliases: ["bash", "sh", "cmd"],
+    extension: { win32: ".cmd", unix: ".sh" },
+    versionFlag: "--version",
+    candidates: { win32: ["cmd.exe"], unix: ["bash", "sh"] },
+    commandBuilder: "shell",
+  },
+  {
+    name: "ruby",
+    aliases: ["ruby"],
+    extension: ".rb",
+    versionFlag: "--version",
+    candidates: { win32: ["ruby"], unix: ["ruby"] },
+    commandBuilder: "interpreted",
+  },
+  {
+    name: "php",
+    aliases: ["php"],
+    extension: ".php",
+    versionFlag: "--version",
+    candidates: { win32: ["php"], unix: ["php"] },
+    commandBuilder: "interpreted",
+  },
+  {
+    name: "perl",
+    aliases: ["perl"],
+    extension: ".pl",
+    versionFlag: "--version",
+    candidates: { win32: ["perl"], unix: ["perl"] },
+    commandBuilder: "interpreted",
+  },
+  {
+    name: "r",
+    aliases: ["Rscript"],
+    extension: ".R",
+    versionFlag: "--version",
+    candidates: { win32: ["Rscript"], unix: ["Rscript"] },
+    commandBuilder: "interpreted",
+    requiredEnvKeys: ["R_HOME"],
+  },
+  {
+    name: "elixir",
+    aliases: ["elixir"],
+    extension: ".exs",
+    versionFlag: "--version",
+    candidates: { win32: ["elixir"], unix: ["elixir"] },
+    commandBuilder: "interpreted",
+  },
+  {
+    name: "go",
+    aliases: ["go"],
+    extension: ".go",
+    versionFlag: "version",
+    candidates: { win32: ["go"], unix: ["go"] },
+    commandBuilder: "compiled",
+    compileStep: { mode: "run-command", command: "go", args: ["run"] },
+    requiredEnvKeys: ["GOPATH", "GOROOT", "GOMODCACHE"],
+  },
+  {
+    name: "java",
+    aliases: ["java"],
+    extension: ".java",
+    versionFlag: "--version",
+    candidates: { win32: ["java"], unix: ["java"] },
+    commandBuilder: "compiled",
+    compileStep: { mode: "run-command", command: "java", args: [] },
+    requiredEnvKeys: ["JAVA_HOME"],
+  },
+  {
+    name: "kotlin",
+    aliases: ["kotlin"],
+    extension: ".kts",
+    versionFlag: "-version",
+    candidates: { win32: ["kotlin"], unix: ["kotlin"] },
+    commandBuilder: "compiled",
+    compileStep: { mode: "run-command", command: "kotlin", args: [] },
+    requiredEnvKeys: ["KOTLIN_HOME"],
+  },
+  {
+    name: "rust",
+    aliases: ["rustc"],
+    extension: ".rs",
+    versionFlag: "--version",
+    candidates: { win32: ["rustc"], unix: ["rustc"] },
+    commandBuilder: "compiled",
+    compileStep: { mode: "compile-then-execute", command: "rustc", args: ["$CODE", "-o", "$OUT"] },
+  },
+  {
+    name: "c",
+    aliases: ["gcc", "cc"],
+    extension: ".c",
+    versionFlag: "--version",
+    candidates: { win32: ["gcc"], unix: ["gcc", "cc"] },
+    commandBuilder: "compiled",
+    compileStep: { mode: "compile-then-execute", command: "gcc", args: ["$CODE", "-o", "$OUT"] },
+  },
+  {
+    name: "cpp",
+    aliases: ["g++", "c++"],
+    extension: ".cpp",
+    versionFlag: "--version",
+    candidates: { win32: ["g++"], unix: ["g++", "c++"] },
+    commandBuilder: "compiled",
+    compileStep: { mode: "compile-then-execute", command: "g++", args: ["$CODE", "-o", "$OUT"] },
+  },
+  {
+    name: "csharp",
+    aliases: ["dotnet-script"],
+    extension: ".csx",
+    versionFlag: "--version",
+    candidates: { win32: ["dotnet-script"], unix: ["dotnet-script"] },
+    commandBuilder: "compiled",
+    compileStep: { mode: "run-command", command: "dotnet-script", args: [] },
+    requiredEnvKeys: ["DOTNET_ROOT"],
+  },
+];
+
+export const RUNTIME_NAMES = RUNTIME_TABLE.map(e => e.name) as [string, ...string[]];
+
+const IS_WINDOWS = process.platform === "win32";
 
 const detectionCache = new Map<string, RuntimeDetectionResult>();
-const RUNTIME_EXECUTABLE_ALIASES = new Map<string, Set<string>>([
-  ["node", new Set(["node", "node.exe", "bun", "bun.exe"])],
-  [
-    "python",
-    new Set([
-      "python",
-      "python.exe",
-      "python3",
-      "python3.exe",
-      "py",
-      "py.exe",
-    ]),
-  ],
-  ["shell", new Set(["bash", "bash.exe", "sh", "sh.exe", "cmd", "cmd.exe"])],
-]);
 
 function getCached(name: string): RuntimeDetectionResult | undefined {
   return detectionCache.get(name);
@@ -38,296 +191,184 @@ function setCached(name: string, result: RuntimeDetectionResult): void {
   detectionCache.set(name, result);
 }
 
-/**
- * Clear the detection cache. Primarily for testing.
- */
 export function clearDetectionCache(): void {
   detectionCache.clear();
 }
 
-// ============================================================================
-// Cross-Platform Helpers
-// ============================================================================
+function buildAliasMap(): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
+  for (const entry of RUNTIME_TABLE) {
+    const aliases = new Set<string>();
+    for (const alias of entry.aliases) {
+      aliases.add(alias.toLowerCase());
+      if (IS_WINDOWS) {
+        const lower = alias.toLowerCase();
+        if (!lower.endsWith(".exe")) {
+          aliases.add(`${lower}.exe`);
+        }
+      }
+    }
+    map.set(entry.name, aliases);
+  }
+  return map;
+}
 
-const IS_WINDOWS = process.platform === "win32";
+const RUNTIME_EXECUTABLE_ALIASES = buildAliasMap();
 
-/**
- * Escape a string for safe inclusion in a shell command by wrapping it in
- * single quotes and escaping any embedded single quotes.
- */
 function shellEscape(arg: string): string {
   return "'" + arg.replace(/'/g, "'\\''") + "'";
 }
 
 export function normalizeExecutableName(executable: string): string {
-  const trimmed = executable.trim().replace(/^["']|["']$/g, "");
-  return basename(trimmed.replace(/\\/g, "/")).toLowerCase();
+  const trimmed = executable.replace(/^["']|["']$/g, "");
+  const normalized = trimmed.replace(/\\/g, "/");
+  return basename(normalized).toLowerCase();
 }
 
-export function isExecutableCompatibleWithRuntime(
-  runtime: string,
-  executable: string,
-): boolean {
+export function isExecutableCompatibleWithRuntime(runtime: string, executable: string): boolean {
   const aliases = RUNTIME_EXECUTABLE_ALIASES.get(runtime);
-  if (!aliases) {
-    return false;
-  }
+  if (!aliases) return false;
   return aliases.has(normalizeExecutableName(executable));
 }
 
-/**
- * Resolve an executable to its absolute path using `where` (Windows) or `which` (Unix).
- * Returns undefined if not found.
- */
 function resolveExecutable(name: string): string | undefined {
   try {
     const cmd = IS_WINDOWS ? `where ${name}` : `which ${name}`;
-    const result = execSync(cmd, {
-      encoding: "utf-8",
-      timeout: 5000,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    // `where` on Windows may return multiple lines; take the first
-    const firstLine = result.split(/\r?\n/)[0];
+    const result = execSync(cmd, { timeout: 5000, encoding: "utf-8" }).trim();
+    const firstLine = result.split(/\r?\n/)[0]?.trim();
     return firstLine || undefined;
   } catch {
     return undefined;
   }
 }
 
-/**
- * Get version string from an executable.
- */
-function getVersion(
-  executable: string,
-  versionFlag: string,
-): string | undefined {
+function getVersion(executable: string, versionFlag: string): string | undefined {
   try {
-    const result = execSync(`${executable} ${versionFlag}`, {
-      encoding: "utf-8",
+    const raw = execSync(`${executable} ${versionFlag}`, {
       timeout: 5000,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
     }).trim();
-    return result || undefined;
+    const match = raw.match(/\d+\.\d+[\w.+-]*/);
+    return match ? match[0] : raw.split(/\r?\n/)[0]?.trim();
   } catch {
     return undefined;
   }
 }
 
-// ============================================================================
-// Node Runtime
-// ============================================================================
+function getExtension(entry: RuntimeTableEntry): string {
+  if (typeof entry.extension === "string") return entry.extension;
+  return IS_WINDOWS ? entry.extension.win32 : entry.extension.unix;
+}
 
-const nodeRuntime: RuntimeDescriptor = {
-  name: "node",
+function createDescriptor(entry: RuntimeTableEntry): RuntimeDescriptor {
+  const candidates = IS_WINDOWS ? entry.candidates.win32 : entry.candidates.unix;
 
-  async detect(): Promise<RuntimeDetectionResult> {
-    const cached = getCached("node");
-    if (cached) return cached;
+  return {
+    name: entry.name,
 
-    // Check for Bun first (preferred for JS/TS)
-    const bunPath = resolveExecutable("bun");
-    if (bunPath) {
-      const version = getVersion("bun", "--version");
-      const result: RuntimeDetectionResult = {
-        available: true,
-        version: version ? `bun ${version}` : "bun",
-        path: bunPath,
-      };
-      setCached("node", result);
-      return result;
-    }
+    async detect(): Promise<RuntimeDetectionResult> {
+      const cached = getCached(entry.name);
+      if (cached) return cached;
 
-    // Fall back to Node
-    const nodePath = resolveExecutable("node");
-    if (nodePath) {
-      const version = getVersion("node", "--version");
-      const result: RuntimeDetectionResult = {
-        available: true,
-        version: version ? `node ${version}` : "node",
-        path: nodePath,
-      };
-      setCached("node", result);
-      return result;
-    }
-
-    const result: RuntimeDetectionResult = { available: false };
-    setCached("node", result);
-    return result;
-  },
-
-  buildCommand(
-    args: string[],
-    opts: { codePath?: string; executable?: string },
-  ): { executable: string; args: string[] } {
-    const executable = opts.executable ?? "node";
-
-    if (opts.codePath) {
-      return { executable, args: [opts.codePath, ...args] };
-    }
-
-    return { executable, args };
-  },
-};
-
-// ============================================================================
-// Python Runtime
-// ============================================================================
-
-const pythonRuntime: RuntimeDescriptor = {
-  name: "python",
-
-  async detect(): Promise<RuntimeDetectionResult> {
-    const cached = getCached("python");
-    if (cached) return cached;
-
-    // On Unix, prefer `python3`; on Windows, `python`
-    const candidates = IS_WINDOWS
-      ? ["python", "python3"]
-      : ["python3", "python"];
-
-    for (const candidate of candidates) {
-      const execPath = resolveExecutable(candidate);
-      if (execPath) {
-        const version = getVersion(candidate, "--version");
-        const result: RuntimeDetectionResult = {
-          available: true,
-          version: version ?? candidate,
-          path: execPath,
-        };
-        setCached("python", result);
-        return result;
+      for (const candidate of candidates) {
+        const path = resolveExecutable(candidate);
+        if (path) {
+          const version = getVersion(candidate, entry.versionFlag);
+          const result: RuntimeDetectionResult = { available: true, version, path };
+          setCached(entry.name, result);
+          return result;
+        }
       }
-    }
 
-    const result: RuntimeDetectionResult = { available: false };
-    setCached("python", result);
-    return result;
-  },
-
-  buildCommand(
-    args: string[],
-    opts: { codePath?: string; executable?: string },
-  ): { executable: string; args: string[] } {
-    const executable = opts.executable ?? (IS_WINDOWS ? "python" : "python3");
-
-    if (opts.codePath) {
-      return { executable, args: [opts.codePath, ...args] };
-    }
-
-    return { executable, args };
-  },
-};
-
-// ============================================================================
-// Shell Runtime
-// ============================================================================
-
-const shellRuntime: RuntimeDescriptor = {
-  name: "shell",
-
-  async detect(): Promise<RuntimeDetectionResult> {
-    const cached = getCached("shell");
-    if (cached) return cached;
-
-    if (IS_WINDOWS) {
-      // cmd.exe is always available on Windows
-      const result: RuntimeDetectionResult = {
-        available: true,
-        version: "cmd.exe",
-        path: "cmd.exe",
-      };
-      setCached("shell", result);
+      const result: RuntimeDetectionResult = { available: false };
+      setCached(entry.name, result);
       return result;
-    }
+    },
 
-    // Unix: prefer bash
-    const bashPath = resolveExecutable("bash");
-    if (bashPath) {
-      const version = getVersion("bash", "--version");
-      const firstLine = version?.split("\n")[0];
-      const result: RuntimeDetectionResult = {
-        available: true,
-        version: firstLine ?? "bash",
-        path: bashPath,
-      };
-      setCached("shell", result);
-      return result;
-    }
+    buildCommand(
+      args: string[],
+      opts: { codePath?: string; executable?: string },
+    ): { executable: string; args: string[] } {
+      const exe = opts.executable ?? candidates[0];
 
-    // Fall back to sh
-    const shPath = resolveExecutable("sh");
-    if (shPath) {
-      const result: RuntimeDetectionResult = {
-        available: true,
-        version: "sh",
-        path: shPath,
-      };
-      setCached("shell", result);
-      return result;
-    }
-
-    const result: RuntimeDetectionResult = { available: false };
-    setCached("shell", result);
-    return result;
-  },
-
-  buildCommand(
-    args: string[],
-    opts: { codePath?: string; executable?: string },
-  ): { executable: string; args: string[] } {
-    if (IS_WINDOWS) {
-      const executable = opts.executable ?? "cmd.exe";
-      if (opts.codePath) {
-        return { executable, args: ["/c", opts.codePath, ...args] };
+      if (entry.commandBuilder === "shell") {
+        if (IS_WINDOWS) {
+          const cmd = opts.executable ?? "cmd.exe";
+          return opts.codePath
+            ? { executable: cmd, args: ["/c", opts.codePath, ...args] }
+            : { executable: cmd, args: ["/c", ...args] };
+        }
+        const sh = opts.executable ?? "bash";
+        return opts.codePath
+          ? { executable: sh, args: [opts.codePath, ...args] }
+          : { executable: sh, args: ["-c", args.map(shellEscape).join(" ")] };
       }
-      return { executable, args: ["/c", ...args] };
-    }
 
-    const executable = opts.executable ?? "bash";
-    if (opts.codePath) {
-      return { executable, args: [opts.codePath, ...args] };
-    }
-    return { executable, args: ["-c", args.map(shellEscape).join(" ")] };
-  },
-};
+      if (entry.commandBuilder === "compiled" && entry.compileStep?.mode === "run-command") {
+        const cmd = opts.executable ?? entry.compileStep.command;
+        return opts.codePath
+          ? { executable: cmd, args: [...entry.compileStep.args, opts.codePath, ...args] }
+          : { executable: cmd, args: [...entry.compileStep.args, ...args] };
+      }
 
-// ============================================================================
-// Registry
-// ============================================================================
+      if (entry.commandBuilder === "compiled" && entry.compileStep?.mode === "compile-then-execute") {
+        if (opts.codePath) {
+          const outPath = opts.codePath.replace(/\.[^.]+$/, "") + (IS_WINDOWS ? ".exe" : "");
+          const compileArgs = entry.compileStep.args.map(a =>
+            a === "$CODE" ? opts.codePath! : a === "$OUT" ? outPath : a,
+          );
+          return { executable: opts.executable ?? entry.compileStep.command, args: compileArgs };
+        }
+        return { executable: exe, args };
+      }
 
-const RUNTIME_REGISTRY = new Map<string, RuntimeDescriptor>([
-  ["node", nodeRuntime],
-  ["python", pythonRuntime],
-  ["shell", shellRuntime],
-]);
+      return opts.codePath
+        ? { executable: exe, args: [opts.codePath, ...args] }
+        : { executable: exe, args };
+    },
+  };
+}
 
-/**
- * Get a runtime descriptor by name.
- */
+const RUNTIME_REGISTRY = new Map<string, RuntimeDescriptor>();
+for (const entry of RUNTIME_TABLE) {
+  RUNTIME_REGISTRY.set(entry.name, createDescriptor(entry));
+}
+
 export function getRuntime(name: string): RuntimeDescriptor | undefined {
   return RUNTIME_REGISTRY.get(name);
 }
 
-/**
- * Get all registered runtime names.
- */
 export function getRegisteredRuntimes(): string[] {
-  return Array.from(RUNTIME_REGISTRY.keys());
+  return [...RUNTIME_REGISTRY.keys()];
 }
 
-/**
- * Detect all registered runtimes and return their availability.
- */
-export async function detectAllRuntimes(): Promise<
-  Map<string, RuntimeDetectionResult>
-> {
+export async function detectAllRuntimes(): Promise<Map<string, RuntimeDetectionResult>> {
   const results = new Map<string, RuntimeDetectionResult>();
-  for (const [name, descriptor] of RUNTIME_REGISTRY) {
-    const detection = await descriptor.detect();
-    results.set(name, detection);
+  const entries = [...RUNTIME_REGISTRY.entries()];
+  const detected = await Promise.all(entries.map(([, rt]) => rt.detect()));
+  for (let i = 0; i < entries.length; i++) {
+    results.set(entries[i][0], detected[i]);
   }
   return results;
+}
+
+export function getRuntimeTableEntry(name: string): RuntimeTableEntry | undefined {
+  return RUNTIME_TABLE.find(e => e.name === name);
+}
+
+export function getRuntimeExtension(name: string): string | undefined {
+  const entry = RUNTIME_TABLE.find(e => e.name === name);
+  if (!entry) return undefined;
+  return getExtension(entry);
+}
+
+export function getRuntimeRequiredEnvKeys(name: string): string[] {
+  const entry = RUNTIME_TABLE.find(e => e.name === name);
+  return entry?.requiredEnvKeys ?? [];
+}
+
+export function isCompileThenExecute(name: string): boolean {
+  const entry = RUNTIME_TABLE.find(e => e.name === name);
+  return entry?.compileStep?.mode === "compile-then-execute";
 }
