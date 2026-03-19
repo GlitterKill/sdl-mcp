@@ -316,6 +316,7 @@ const INDEXES: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_memory_repoId ON Memory(repoId)`,
   `CREATE INDEX IF NOT EXISTS idx_memory_type ON Memory(type)`,
   `CREATE INDEX IF NOT EXISTS idx_memory_contentHash ON Memory(contentHash)`,
+  `CREATE INDEX IF NOT EXISTS idx_symbolversion_versionId ON SymbolVersion(versionId)`,
 ];
 
 export async function createSchema(conn: Connection): Promise<void> {

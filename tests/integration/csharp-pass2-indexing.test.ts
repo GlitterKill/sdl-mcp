@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -90,6 +91,10 @@ describe("CSharp pass2 indexing", () => {
     delete process.env.SDL_CONFIG_PATH;
 
     await closeLadybugDb();
+    // Clean up stale WAL/lock files from previous test runs
+    for (const suffix of [".wal", ".lock"]) {
+      try { unlinkSync(graphDbPath + suffix); } catch { /* may not exist */ }
+    }
     await initLadybugDb(graphDbPath);
     const conn = await getLadybugConn();
     const now = new Date().toISOString();

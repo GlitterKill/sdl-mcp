@@ -182,17 +182,9 @@ export async function queryMemories(
     params.types = options.types;
   }
 
-  if (options.tags && options.tags.length > 0) {
-    // Check each tag exists in the JSON array string.
-    // Tags are stored as JSON arrays (e.g. '["foo","bar"]'), so we wrap each
-    // tag value in escaped double-quotes for a safe CONTAINS check.
-    const tagConditions = options.tags.map((tag, i) => {
-      const escaped = tag.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-      params[`tag_${i}`] = `"${escaped}"`;
-      return `m.tagsJson CONTAINS $tag_${i}`;
-    });
-    conditions.push(`(${tagConditions.join(" OR ")})`);
-  }
+  // Tag filtering is handled by the application-level post-filter below
+  // (lines ~217-226) for exact array-element matching. We skip Cypher-level
+  // tag conditions to keep the query shape stable for prepared statement caching.
 
   if (options.staleOnly) {
     conditions.push("m.stale = true");

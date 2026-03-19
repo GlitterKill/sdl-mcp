@@ -8,6 +8,9 @@ import { exec, queryAll, querySingle, toNumber, withTransaction } from "./ladybu
 // Promise-based singleton for join hint support detection.
 // Used by getEdgesToSymbols and getCallersOfSymbols to avoid
 // re-probing on every call after the first success/failure.
+// NOTE: This is a module-level singleton keyed to "any connection" rather than
+// a specific database instance. resetJoinHintCache() is called in closeLadybugDb()
+// to handle database switches. For single-DB usage (all known scenarios), this is safe.
 let joinHintSupportedPromise: Promise<boolean> | null = null;
 
 async function detectJoinHintSupport(conn: Connection): Promise<boolean> {

@@ -23,7 +23,7 @@ import { normalizePath } from "../../util/paths.js";
 import { DatabaseError, ConfigError, ValidationError } from "../errors.js";
 import { logger } from "../../util/logger.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { MAX_FILE_BYTES } from "../../config/constants.js";
+import { MAX_FILE_BYTES, DEFAULT_MEMORY_SURFACE_LIMIT } from "../../config/constants.js";
 import { buildRepoOverview } from "../../graph/overview.js";
 import { clearSliceCache } from "../../graph/sliceCache.js";
 import { symbolCardCache } from "../../graph/cache.js";
@@ -135,11 +135,11 @@ export async function handleRepoRegister(
 
   // Reject any path that doesn't resolve to itself (contains traversal sequences)
   if (resolvedRoot !== normalizedRoot) {
-    throw new ValidationError(`Root path contains path traversal: ${rootPath}`);
+    throw new ValidationError("Root path contains path traversal sequences");
   }
 
   if (!existsSync(resolvedRoot)) {
-    throw new ConfigError(`Path does not exist: ${rootPath}`);
+    throw new ConfigError("The provided rootPath does not exist or is inaccessible");
   }
 
   // Security: enforce allowlist if configured
@@ -296,8 +296,9 @@ export async function handleRepoStatus(
     }
 
     const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
-    const files = await ladybugDb.getFilesByRepo(conn, repoId);
+    const filesIndexed = await ladybugDb.getFileCount(conn, repoId);
     const symbolsIndexed = await ladybugDb.getSymbolCount(conn, repoId);
+    const lastIndexedAt = await ladybugDb.getLastIndexedAt(conn, repoId);
     const health = await getRepoHealthSnapshot(repoId);
     const watcherHealth = getWatcherHealth(repoId);
     const prefetchStats = getPrefetchStats(repoId);
@@ -334,28 +335,20 @@ export async function handleRepoStatus(
     let memories: Awaited<ReturnType<typeof surfaceRelevantMemories>> | undefined;
     if (surfaceMemories !== false) {
       try {
-        memories = await surfaceRelevantMemories(conn, { repoId, limit: 5 });
+        memories = await surfaceRelevantMemories(conn, { repoId, limit: DEFAULT_MEMORY_SURFACE_LIMIT });
         if (memories.length === 0) memories = undefined;
       } catch {
         // Memory surfacing is non-critical
       }
     }
 
-    const lastIndexedFile = files
-      .filter((f) => f.lastIndexedAt !== null)
-      .sort(
-        (a, b) =>
-          new Date(b.lastIndexedAt!).getTime() -
-          new Date(a.lastIndexedAt!).getTime(),
-      )[0];
-
     return {
       repoId,
       rootPath: repo.rootPath,
       latestVersionId: latestVersion?.versionId ?? null,
-      filesIndexed: files.length,
+      filesIndexed,
       symbolsIndexed,
-      lastIndexedAt: lastIndexedFile?.lastIndexedAt ?? null,
+      lastIndexedAt,
       healthScore: health.score,
       healthComponents: health.components,
       healthAvailable: health.available,

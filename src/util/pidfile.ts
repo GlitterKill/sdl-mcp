@@ -10,6 +10,7 @@
  */
 
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -169,6 +170,8 @@ export function writePidfile(
   };
 
   writeFileSync(pidfilePath, JSON.stringify(data, null, 2) + "\n", "utf8");
+  // Restrict permissions since the file may contain an auth token
+  try { chmodSync(pidfilePath, 0o600); } catch { /* Best-effort on Windows */ }
   return pidfilePath;
 }
 

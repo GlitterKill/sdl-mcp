@@ -100,6 +100,7 @@ export async function listRepos(
   limit = DEFAULT_QUERY_LIMIT,
 ): Promise<RepoRow[]> {
   assertSafeInt(limit, "limit");
+  const maxFetch = Math.min(Math.max(0, limit), 10000);
 
   const rows = await queryAll<RepoRow>(
     conn,
@@ -109,9 +110,9 @@ export async function listRepos(
             r.configJson AS configJson,
             r.createdAt AS createdAt
      ORDER BY r.repoId
-     LIMIT 10000`,
+     LIMIT ${maxFetch}`,
   );
-  return rows.slice(0, limit);
+  return rows;
 }
 
 export async function deleteRepo(
@@ -129,8 +130,23 @@ export async function deleteRepo(
     const fileIds = fileRows.map((r) => r.fileId);
     await deleteFilesByIds(txConn, fileIds);
 
+    // Collect versionIds before deleting Version nodes so we can clean up SymbolVersions
+    const versionRows = await queryAll<{ versionId: string }>(
+      txConn,
+      `MATCH (v:Version)-[:VERSION_OF_REPO]->(r:Repo {repoId: $repoId})
+       RETURN v.versionId AS versionId`,
+      { repoId },
+    );
     // Clean up Version nodes and their edges
     await exec(txConn, `MATCH (v:Version)-[e:VERSION_OF_REPO]->(r:Repo {repoId: $repoId}) DELETE e, v`, { repoId });
+
+    // Clean up orphaned SymbolVersion nodes for the deleted versions
+    const versionIds = versionRows.map((r) => r.versionId);
+    if (versionIds.length > 0) {
+      for (const vid of versionIds) {
+        await exec(txConn, `MATCH (sv:SymbolVersion {versionId: $vid}) DELETE sv`, { vid });
+      }
+    }
 
     // Clean up Cluster nodes
     await exec(txConn, `MATCH (c:Cluster {repoId: $repoId})<-[e:BELONGS_TO_CLUSTER]-() DELETE e`, { repoId });
@@ -446,6 +462,21 @@ export async function getFileCount(
     { repoId },
   );
   return row ? toNumber(row.count) : 0;
+}
+
+export async function getLastIndexedAt(
+  conn: Connection,
+  repoId: string,
+): Promise<string | null> {
+  const row = await querySingle<{ lastIndexedAt: unknown }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
+     WHERE f.lastIndexedAt IS NOT NULL
+     RETURN f.lastIndexedAt AS lastIndexedAt
+     ORDER BY f.lastIndexedAt DESC LIMIT 1`,
+    { repoId },
+  );
+  return row ? (row.lastIndexedAt as string) ?? null : null;
 }
 
 export async function getFilesByIds(

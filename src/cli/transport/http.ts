@@ -995,7 +995,7 @@ async function handleMcpStreamableRequest(
         let reservationHeld = true;
         // Track the MCPServer outside onsessioninitialized so
         // it is available to the callback closure.
-        const mcpServer = createMCPServer({
+        const mcpServer = await createMCPServer({
           liveIndex: ctx.effectiveServices.liveIndex,
           gatewayConfig: ctx.effectiveServices.gatewayConfig,
           codeModeConfig: ctx.effectiveServices.codeModeConfig,
@@ -1093,7 +1093,7 @@ async function handleMcpStreamableRequest(
     // For GET (SSE stream) and DELETE (session termination)
     // and subsequent POST requests with session ID.
     // Track activity so the idle reaper does not expire active sessions.
-    const completeRequest = ctx.sessionManager.trackRequest(sessionId!);
+    const completeRequest = ctx.sessionManager.trackRequest(sessionId);
     try {
       await transport.handleRequest(req, res);
     } finally {
@@ -1119,11 +1119,11 @@ async function handleMcpStreamableRequest(
  * Validates the `Accept: text/event-stream` header, reserves a session slot,
  * creates the SSEServerTransport, and connects a new per-session MCP server.
  */
-function handleSseConnection(
+async function handleSseConnection(
   req: IncomingMessage,
   res: ServerResponse,
   ctx: SessionContext,
-): void {
+): Promise<void> {
   setCorsHeaders(req, res);
 
   const accept = Array.isArray(req.headers.accept)
@@ -1158,7 +1158,7 @@ function handleSseConnection(
     };
 
     // Create per-session MCP server via factory
-    const mcpServer = createMCPServer({
+    const mcpServer = await createMCPServer({
       liveIndex: ctx.effectiveServices.liveIndex,
       gatewayConfig: ctx.effectiveServices.gatewayConfig,
       codeModeConfig: ctx.effectiveServices.codeModeConfig,
@@ -1414,7 +1414,13 @@ export async function setupHttpTransport(
         // Supports multiple concurrent SSE sessions (no singleton)
         // ---------------------------------------------------------------
         if (req.method === "GET" && pathname === "/sse") {
-          handleSseConnection(req, res, sessionCtx);
+          handleSseConnection(req, res, sessionCtx).catch((err) => {
+            process.stderr.write(`[sdl-mcp] SSE connection error: ${err}\n`);
+            if (!res.headersSent) {
+              res.writeHead(500);
+              res.end("Internal server error");
+            }
+          });
           return;
         }
 

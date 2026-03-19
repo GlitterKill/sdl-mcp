@@ -82,14 +82,17 @@ export async function handleAgentFeedbackQuery(
     throw new DatabaseError(`Repository ${repoId} not found`);
   }
 
-  const feedbackRows = versionId
+  const allFeedbackRows = versionId
     ? await ladybugDb.getAgentFeedbackByVersion(
         conn,
         repoId,
         versionId,
         limit + 1,
+        since,
       )
-    : await ladybugDb.getAgentFeedbackByRepo(conn, repoId, limit + 1);
+    : await ladybugDb.getAgentFeedbackByRepo(conn, repoId, limit + 1, since);
+
+  const feedbackRows = allFeedbackRows;
 
   const hasMore = feedbackRows.length > limit;
   const rows = hasMore ? feedbackRows.slice(0, limit) : feedbackRows;

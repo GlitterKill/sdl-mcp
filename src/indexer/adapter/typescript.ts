@@ -37,6 +37,7 @@ class TypeScriptAdapter extends BaseAdapter {
       range: symbol.range,
       signature: symbol.signature,
       visibility: symbol.visibility,
+      decorators: symbol.decorators,
     }));
 
     return symbols;

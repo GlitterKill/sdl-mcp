@@ -33,22 +33,24 @@ import { configureToolDispatchLimiter } from "../../mcp/dispatch-limiter.js";
 import { SessionManager } from "../../mcp/session-manager.js";
 import { ensureConfiguredReposRegistered } from "../../startup/bootstrap.js";
 
-// Enable file logging by default so crash evidence is always persisted.
-if (!getLogFilePath()) {
-  enableFileLogging();
-}
-
-// Catch uncaught errors to prevent silent crashes (parity with main.ts)
-process.on("uncaughtException", (error) => {
-  process.stderr.write(`[sdl-mcp] UNCAUGHT EXCEPTION: ${error}\n`);
-  process.stderr.write(`[sdl-mcp] Stack: ${error.stack}\n`);
-});
-
-process.on("unhandledRejection", (reason) => {
-  process.stderr.write(`[sdl-mcp] UNHANDLED REJECTION: ${reason}\n`);
-});
-
 export async function serveCommand(options: ServeOptions): Promise<void> {
+  // Enable file logging by default so crash evidence is always persisted.
+  // Placed inside the function body so these side effects only fire when
+  // the serve command is actually invoked, not on module import.
+  if (!getLogFilePath()) {
+    enableFileLogging();
+  }
+
+  // Catch uncaught errors to prevent silent crashes (parity with main.ts)
+  process.on("uncaughtException", (error) => {
+    process.stderr.write(`[sdl-mcp] UNCAUGHT EXCEPTION: ${error}\n`);
+    process.stderr.write(`[sdl-mcp] Stack: ${error.stack}\n`);
+  });
+
+  process.on("unhandledRejection", (reason) => {
+    process.stderr.write(`[sdl-mcp] UNHANDLED REJECTION: ${reason}\n`);
+  });
+
   const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
 
@@ -155,7 +157,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   // For HTTP: the transport creates per-session servers via createMCPServer().
   let stdioServer: MCPServer | undefined;
   if (options.transport === "stdio") {
-    stdioServer = createMCPServer({
+    stdioServer = await createMCPServer({
       liveIndex,
       gatewayConfig: config.gateway,
       codeModeConfig: config.codeMode,

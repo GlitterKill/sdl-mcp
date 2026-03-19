@@ -27,6 +27,7 @@ export interface ExtractedSymbol {
     generics?: string[];
   };
   visibility?: "public" | "private" | "protected" | "internal";
+  decorators?: string[];
 }
 
 export interface ExtractedCall {
@@ -488,6 +489,14 @@ export function extractCalls(
   }
 
   // --- 36-1.2 & 36-1.5: Extract calls from await expressions and arrow functions ---
+  // NOTE: This second pass performs a full recursive AST walk after the tree-sitter
+  // query-based extraction above. The two passes are intentional:
+  //   1) Tree-sitter queries (above) efficiently catch standard call patterns.
+  //   2) The recursive walk (below) catches edge cases that queries miss, such as
+  //      calls inside await expressions, arrow function bodies, and deeply nested
+  //      chained calls. The `seenCallNodes` Set deduplicates between passes, so
+  //      correctness is preserved. Merging into a single pass would require
+  //      restructuring all query-based extraction logic for marginal gain.
   extractNestedCalls(
     tree.rootNode,
     extractedSymbols,

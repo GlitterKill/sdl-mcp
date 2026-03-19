@@ -39,13 +39,13 @@ export async function resolveSymbolId(
     const [, relPath, symbolName] = match;
 
     // Try durable DB first
-    const resolved = await resolveSymbolByShorthand(conn, repoId, relPath!, symbolName!);
+    const resolved = await resolveSymbolByShorthand(conn, repoId, relPath, symbolName);
     if (resolved) {
       return { symbolId: resolved, wasShorthand: true };
     }
 
     // Try overlay (in-memory symbols from recently changed files)
-    const overlayResult = resolveShorthandFromOverlay(repoId, relPath!, symbolName!);
+    const overlayResult = resolveShorthandFromOverlay(repoId, relPath, symbolName);
     if (overlayResult) {
       return { symbolId: overlayResult, wasShorthand: true };
     }

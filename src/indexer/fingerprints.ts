@@ -118,6 +118,31 @@ export function clearFingerprintCollisionLog(): void {
   fingerprintCollisionLog.clear();
 }
 
+/**
+ * Generate a deterministic fingerprint from symbol metadata when the
+ * tree-sitter AST is unavailable (e.g., worker pool path).
+ * Uses kind, name, range, and signature to produce a stable hash.
+ */
+export function generateMetadataFingerprint(meta: {
+  kind: string;
+  name: string;
+  range: { startLine: number; startCol: number; endLine: number; endCol: number };
+  signature?: { params?: Array<{ name: string; type?: string }>; returns?: string; generics?: string[] };
+}): string {
+  const parts = [
+    `kind:${meta.kind}`,
+    `name:${meta.name}`,
+    `range:${meta.range.startLine}:${meta.range.startCol}:${meta.range.endLine}:${meta.range.endCol}`,
+  ];
+  if (meta.signature?.params) {
+    parts.push(`params:${meta.signature.params.map((p) => `${p.name}:${p.type ?? ""}`).join(",")}`);
+  }
+  if (meta.signature?.returns) {
+    parts.push(`returns:${meta.signature.returns}`);
+  }
+  return hashContent(parts.join("|"));
+}
+
 export { generateSymbolId as hashSymbolId };
 
 /**

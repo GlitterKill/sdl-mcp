@@ -19,7 +19,6 @@ import {
   computeTokenUsage,
   stripRawContext,
 } from "./mcp/token-usage.js";
-import { registerTools } from "./mcp/tools/index.js";
 import type { LiveIndexCoordinator } from "./live-index/types.js";
 import type { CodeModeConfig } from "./config/types.js";
 
@@ -341,9 +340,11 @@ export interface MCPServerServices {
 
 /**
  * Factory function to create a fully-configured MCPServer with all tools registered.
+ * Uses dynamic import to avoid eager loading of all tool modules at the top level.
  * Used by the HTTP transport to create per-session server instances.
  */
-export function createMCPServer(services: MCPServerServices = {}): MCPServer {
+export async function createMCPServer(services: MCPServerServices = {}): Promise<MCPServer> {
+  const { registerTools } = await import("./mcp/tools/index.js");
   const server = new MCPServer();
   registerTools(
     server,

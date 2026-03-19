@@ -49,10 +49,12 @@ import { tmpdir } from "os";
 // ============================================================================
 
 let concurrencyTracker: ConcurrencyTracker | undefined;
+let trackerMaxJobs: number | undefined;
 
 function getOrCreateConcurrencyTracker(maxJobs: number): ConcurrencyTracker {
-  if (!concurrencyTracker) {
+  if (!concurrencyTracker || trackerMaxJobs !== maxJobs) {
     concurrencyTracker = createConcurrencyTracker(maxJobs);
+    trackerMaxJobs = maxJobs;
   }
   return concurrencyTracker;
 }

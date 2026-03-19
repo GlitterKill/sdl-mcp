@@ -254,6 +254,39 @@ describe("Agent Feedback Tool", () => {
       assert.ok(response.feedback.every((f) => f.versionId === versionId));
     });
 
+    it("applies since consistently when versionId is also provided", async () => {
+      const conn = await getLadybugConn();
+      const since = new Date(Date.now() + 5_000).toISOString();
+      const createdAt = new Date(Date.parse(since) + 1_000).toISOString();
+
+      await ladybugDb.upsertAgentFeedback(conn, {
+        feedbackId: "fb-since-version",
+        repoId,
+        versionId,
+        sliceHandle: "slice-since-version",
+        usefulSymbolsJson: JSON.stringify(["sym-future"]),
+        missingSymbolsJson: JSON.stringify([]),
+        taskTagsJson: null,
+        taskType: "debug",
+        taskText: "future entry",
+        createdAt,
+      });
+
+      const response = await handleAgentFeedbackQuery({
+        repoId,
+        versionId,
+        since,
+        limit: 10,
+      });
+
+      assert.strictEqual(response.feedback.length, 1);
+      assert.strictEqual(response.feedback[0]?.feedbackId, "fb-since-version");
+      assert.strictEqual(response.aggregatedStats.totalFeedback, 1);
+      assert.deepStrictEqual(response.aggregatedStats.topUsefulSymbols, [
+        { symbolId: "sym-future", count: 1 },
+      ]);
+    });
+
     it("returns aggregated statistics", async () => {
       const response = await handleAgentFeedbackQuery({
         repoId,
@@ -282,4 +315,3 @@ describe("Agent Feedback Tool", () => {
     });
   });
 });
-

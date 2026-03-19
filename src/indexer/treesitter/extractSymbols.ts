@@ -1,31 +1,10 @@
 import Parser from "tree-sitter";
 
-export interface ExtractedSymbol {
-  name: string;
-  kind:
-    | "function"
-    | "class"
-    | "interface"
-    | "type"
-    | "module"
-    | "method"
-    | "constructor"
-    | "variable";
-  exported: boolean;
-  visibility?: "public" | "private" | "protected" | "internal";
-  range: {
-    startLine: number;
-    startCol: number;
-    endLine: number;
-    endCol: number;
-  };
-  signature?: {
-    params: Array<{ name: string; type?: string }>;
-    returns?: string;
-    generics?: string[];
-  };
-  decorators?: string[];
-}
+import type { ExtractedSymbol } from "./extractCalls.js";
+export type { ExtractedSymbol } from "./extractCalls.js";
+
+/** Symbol as extracted from the AST before adapter enrichment (no nodeId yet). */
+export type RawExtractedSymbol = Omit<ExtractedSymbol, "nodeId">;
 
 function extractIdentifier(node: Parser.SyntaxNode | null): string | null {
   if (!node) return null;
@@ -190,7 +169,7 @@ function extractRange(node: Parser.SyntaxNode) {
 
 function processFunctionDeclaration(
   node: Parser.SyntaxNode,
-): ExtractedSymbol | null {
+): RawExtractedSymbol | null {
   const name = extractIdentifier(node);
   if (!name) return null;
 
@@ -222,7 +201,7 @@ function processFunctionDeclaration(
 
 function processMethodDefinition(
   node: Parser.SyntaxNode,
-): ExtractedSymbol | null {
+): RawExtractedSymbol | null {
   const name = extractIdentifier(node);
   if (!name) return null;
 
@@ -251,7 +230,7 @@ function processMethodDefinition(
 
 function processClassDeclaration(
   node: Parser.SyntaxNode,
-): ExtractedSymbol | null {
+): RawExtractedSymbol | null {
   const name = extractIdentifier(node);
   if (!name) return null;
 
@@ -274,7 +253,7 @@ function processClassDeclaration(
 
 function processInterfaceDeclaration(
   node: Parser.SyntaxNode,
-): ExtractedSymbol | null {
+): RawExtractedSymbol | null {
   const name = extractIdentifier(node);
   if (!name) return null;
 
@@ -295,7 +274,7 @@ function processInterfaceDeclaration(
 
 function processTypeAliasDeclaration(
   node: Parser.SyntaxNode,
-): ExtractedSymbol | null {
+): RawExtractedSymbol | null {
   const name = extractIdentifier(node);
   if (!name) return null;
 
@@ -316,7 +295,7 @@ function processTypeAliasDeclaration(
 
 function processVariableDeclaration(
   node: Parser.SyntaxNode,
-): ExtractedSymbol[] {
+): RawExtractedSymbol[] {
   // Check the "name" field first to detect destructuring patterns.
   // extractIdentifier() can incorrectly match the RHS identifier
   // (e.g. "config" in `const { host, port } = config`).
@@ -325,7 +304,7 @@ function processVariableDeclaration(
     left &&
     (left.type === "object_pattern" || left.type === "array_pattern")
   ) {
-    const patterns: ExtractedSymbol[] = [];
+    const patterns: RawExtractedSymbol[] = [];
     for (const child of left.children) {
       if (
         child.type === "object_pattern" ||
@@ -382,7 +361,7 @@ function processVariableDeclaration(
   ];
 }
 
-function processModule(node: Parser.SyntaxNode): ExtractedSymbol | null {
+function processModule(node: Parser.SyntaxNode): RawExtractedSymbol | null {
   const name = extractIdentifier(node);
   if (!name) return null;
 
@@ -397,7 +376,7 @@ function processModule(node: Parser.SyntaxNode): ExtractedSymbol | null {
 
 function traverseAST(
   node: Parser.SyntaxNode,
-  symbols: ExtractedSymbol[],
+  symbols: RawExtractedSymbol[],
 ): void {
   switch (node.type) {
     case "function_declaration":
@@ -486,8 +465,8 @@ function traverseAST(
   }
 }
 
-export function extractSymbols(tree: Parser.Tree): ExtractedSymbol[] {
-  const symbols: ExtractedSymbol[] = [];
+export function extractSymbols(tree: Parser.Tree): RawExtractedSymbol[] {
+  const symbols: RawExtractedSymbol[] = [];
 
   traverseAST(tree.rootNode, symbols);
 

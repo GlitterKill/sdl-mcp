@@ -123,7 +123,7 @@ export function createMemoryHintHook(): PostDispatchHook {
       const r = result as Record<string, unknown>;
       if (typeof r.changedFiles === "number" && r.changedFiles > 10) {
         session.hintsSent.add("large_change");
-        (r as Record<string, unknown>)._memoryHint = {
+        (r)._memoryHint = {
           suggestedType: "task_context",
           message: `Large code change indexed (${r.changedFiles} files). Consider storing context about the changes via sdl.memory.store.`,
           pattern: "large_change",

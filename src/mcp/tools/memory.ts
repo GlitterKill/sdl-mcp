@@ -5,13 +5,13 @@
 import crypto from "crypto";
 import {
   MemoryStoreRequestSchema,
-  MemoryStoreResponse,
+  type MemoryStoreResponse,
   MemoryQueryRequestSchema,
-  MemoryQueryResponse,
+  type MemoryQueryResponse,
   MemoryRemoveRequestSchema,
-  MemoryRemoveResponse,
+  type MemoryRemoveResponse,
   MemorySurfaceRequestSchema,
-  MemorySurfaceResponse,
+  type MemorySurfaceResponse,
 } from "../tools.js";
 import type { SurfacedMemory } from "../types.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";

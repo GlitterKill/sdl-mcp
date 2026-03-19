@@ -45,14 +45,6 @@ export interface SkeletonOptions {
   skeletonOffset?: number;
 }
 
-function shouldIncludeIdentifier(
-  identifier: string,
-  includeIdentifiers: string[] = [],
-): boolean {
-  if (includeIdentifiers.length === 0) return false;
-  return includeIdentifiers.includes(identifier);
-}
-
 /**
  * Node types that represent top-level containers (file/module root).
  * These get their children recursively processed.
@@ -381,8 +373,7 @@ function extractSkeletonFromBody(
       const isThrow = child.children.some((c) => c.type === "throw_statement");
 
       const hasImportantIdentifier =
-        includeIdentifiers.some((id) => childText.includes(id)) ||
-        shouldIncludeIdentifier(childText, includeIdentifiers);
+        includeIdentifiers.some((id) => childText.includes(id));
 
       if (isReturn || isThrow || hasImportantIdentifier) {
         result += child.text.trim() + "\n";
@@ -557,7 +548,7 @@ export function trimSkeletonToBounds(
  * Maps file extensions to grammarLoader language IDs for non-JS/TS languages.
  * JS/TS uses the dedicated tsParser/tsxParser (which handle JSX/TSX correctly).
  */
-const EXTENSION_TO_LANGUAGE: Record<
+export const EXTENSION_TO_LANGUAGE: Record<
   string,
   import("../indexer/treesitter/grammarLoader.js").SupportedLanguage
 > = {
@@ -630,7 +621,11 @@ export function parseFile(
       bufferSize: 1024 * 1024,
     });
 
-    if (!tree || tree.rootNode.hasError) {
+    if (!tree) {
+      return null;
+    }
+    // Allow partial ASTs from error recovery when the root has children
+    if (tree.rootNode.hasError && tree.rootNode.childCount === 0) {
       return null;
     }
 

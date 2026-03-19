@@ -88,6 +88,11 @@ export const PolicyConfigSchema = z.object({
   requireIdentifiers: z.boolean().default(true),
   allowBreakGlass: z.boolean().default(false),
   defaultMinCallConfidence: z.number().min(0).max(1).optional(),
+  defaultDenyRaw: z.boolean().default(true),
+  budgetCaps: z.object({
+    maxCards: z.number().int().min(1).default(DEFAULT_MAX_CARDS),
+    maxEstimatedTokens: z.number().int().min(1).default(DEFAULT_MAX_TOKENS_SLICE),
+  }).optional(),
 });
 
 export type PolicyConfig = z.infer<typeof PolicyConfigSchema>;

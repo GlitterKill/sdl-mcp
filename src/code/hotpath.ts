@@ -1,6 +1,6 @@
 import { readFile, stat } from "fs/promises";
 
-import Parser from "tree-sitter";
+import type Parser from "tree-sitter";
 
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { Range } from "../domain/types.js";
@@ -9,40 +9,13 @@ import {
   DEFAULT_MAX_LINES_HOTPATH,
   DEFAULT_MAX_TOKENS_HOTPATH,
   MAX_FILE_BYTES,
-  MAX_TREESITTER_PARSE_BYTES,
 } from "../config/constants.js";
 import { logger } from "../util/logger.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
-import { getParser as getGrammarParser } from "../indexer/treesitter/grammarLoader.js";
-import { tsParser, tsxParser } from "./ts-parsers.js";
-
-/**
- * Maps file extensions to grammarLoader language IDs for non-JS/TS languages.
- */
-const EXTENSION_TO_LANGUAGE: Record<
-  string,
-  import("../indexer/treesitter/grammarLoader.js").SupportedLanguage
-> = {
-  ".py": "python",
-  ".go": "go",
-  ".java": "java",
-  ".rs": "rust",
-  ".cs": "csharp",
-  ".c": "c",
-  ".h": "c",
-  ".cpp": "cpp",
-  ".cc": "cpp",
-  ".cxx": "cpp",
-  ".hpp": "cpp",
-  ".php": "php",
-  ".kt": "kotlin",
-  ".kts": "kotlin",
-  ".sh": "bash",
-  ".bash": "bash",
-};
+import { parseFile } from "./skeleton.js";
 
 export interface HotPathOptions {
   maxLines?: number;
@@ -57,70 +30,6 @@ export interface HotPathResult {
   matchedIdentifiers: string[];
   matchedLineNumbers: number[];
   truncated: boolean;
-}
-
-function parseFile(content: string, extension: string): Parser.Tree | null {
-  try {
-    // Guard: reject content exceeding the tree-sitter safety limit.
-    const byteLength = Buffer.byteLength(content, "utf-8");
-    if (byteLength > MAX_TREESITTER_PARSE_BYTES) {
-      logger.warn(
-        "File content exceeds tree-sitter parse limit for hot path, skipping",
-        {
-          extension,
-          byteLength,
-          maxBytes: MAX_TREESITTER_PARSE_BYTES,
-        },
-      );
-      return null;
-    }
-
-    // JS/TS: use dedicated parsers (handle JSX/TSX correctly)
-    const isTS = extension === ".ts";
-    const isTSX = extension === ".tsx";
-    const isJS = extension === ".js";
-    const isJSX = extension === ".jsx";
-
-    let parser: Parser | null = null;
-
-    if (isTS || isTSX || isJS || isJSX) {
-      parser = isTS || isJS ? tsParser : tsxParser;
-    } else {
-      // All other languages: use the shared grammarLoader
-      const language = EXTENSION_TO_LANGUAGE[extension];
-      if (!language) {
-        logger.debug("No grammar available for hot path generation", {
-          extension,
-        });
-        return null;
-      }
-      parser = getGrammarParser(language);
-      if (!parser) {
-        logger.debug("Grammar parser not loaded for hot path generation", {
-          extension,
-          language,
-        });
-        return null;
-      }
-    }
-
-    // Use 1MB buffer to handle files >32KB (tree-sitter default limit)
-    const tree = parser.parse(content, undefined, {
-      bufferSize: 1024 * 1024,
-    });
-
-    if (!tree || tree.rootNode.hasError) {
-      return null;
-    }
-
-    return tree;
-  } catch (error) {
-    logger.warn("Failed to parse file for hot path", {
-      extension,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
 }
 
 interface IdentifierMatchResult {

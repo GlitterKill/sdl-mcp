@@ -367,21 +367,15 @@ function insertCandidateIntoFrontier(
     state.frontier.insert(item);
     return;
   }
-  // Frontier is full — find the worst (least-promising) item and evict it
-  // if the new candidate is better.  The min-heap root is the BEST item
-  // (most-negative score), so we must scan the array to locate the worst.
-  const heapArr = state.frontier.toHeapArray();
-  let worstIdx = 0;
-  for (let i = 1; i < heapArr.length; i++) {
-    if (compareFrontierItems(heapArr[i], heapArr[worstIdx]) > 0) {
-      worstIdx = i;
-    }
-  }
-  if (compareFrontierItems(item, heapArr[worstIdx]) < 0) {
-    // New item is more promising than the current worst — replace it
-    heapArr[worstIdx] = item;
-    state.frontier.clear();
-    for (const h of heapArr) state.frontier.insert(h);
+  // Frontier is full — find the worst (least-promising) item among leaf
+  // nodes (O(n/2)) and replace it in-place (O(log n)) if the new
+  // candidate is better. The min-heap root is the BEST item, so the
+  // worst is always a leaf.
+  const worstIdx = state.frontier.findWorstIndex(compareFrontierItems);
+  if (worstIdx === -1) return;
+  const worstItem = state.frontier.toHeapArray()[worstIdx];
+  if (compareFrontierItems(item, worstItem) < 0) {
+    state.frontier.replaceAt(worstIdx, item);
   } else {
     state.droppedCandidates++;
   }

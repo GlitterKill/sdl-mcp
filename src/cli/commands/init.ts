@@ -499,6 +499,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
       maxWindowTokens: DEFAULT_MAX_WINDOW_TOKENS,
       requireIdentifiers: true,
       allowBreakGlass: true,
+      defaultDenyRaw: true,
     },
     redaction: {
       enabled: true,

@@ -455,6 +455,11 @@ export const SDL_MCP_VERSION = "0.8.0";
 // ============================================================================
 
 /**
+ * Default number of memories to surface in repo status and slice builds.
+ */
+export const DEFAULT_MEMORY_SURFACE_LIMIT = 5;
+
+/**
  * Default concurrency level for indexing operations.
  * Set to 8 for modern SSD systems; parsing and graph DB writes are the actual bottlenecks.
  */

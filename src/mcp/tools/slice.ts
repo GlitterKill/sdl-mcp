@@ -45,6 +45,7 @@ import {
 } from "../../config/constants.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyConfigSchema } from "../../config/types.js";
+import { DEFAULT_MEMORY_SURFACE_LIMIT } from "../../config/constants.js";
 import {
   createPolicyDenial,
   NotFoundError,
@@ -167,31 +168,27 @@ function createSliceEtag(
 export async function handleSliceBuild(
   args: unknown,
 ): Promise<SliceBuildResponse | SliceErrorResponse> {
-  // Validate that at least one entry hint is provided before parsing the full
-  // request. This check must come first since taskText is now optional in the
-  // schema and the internal handler relies on start-node resolution to proceed.
-  const rawArgs = safeParseArgs(args);
-  if (rawArgs !== null) {
-    const a = args as Record<string, unknown>;
-    const hasAnyEntryHint =
-      (Array.isArray(a.entrySymbols) && a.entrySymbols.length > 0) ||
-      Boolean(a.taskText) ||
-      (Array.isArray(a.editedFiles) && a.editedFiles.length > 0) ||
-      Boolean(a.stackTrace) ||
-      Boolean(a.failingTestPath);
+  // Validate that at least one entry hint is provided. taskText is optional
+  // in the schema and the internal handler relies on start-node resolution.
+  const request = args as SliceBuildRequest;
+  const hasAnyEntryHint =
+    (request.entrySymbols && request.entrySymbols.length > 0) ||
+    Boolean(request.taskText) ||
+    (request.editedFiles && request.editedFiles.length > 0) ||
+    Boolean(request.stackTrace) ||
+    Boolean(request.failingTestPath);
 
-    if (!hasAnyEntryHint) {
-      return sliceErrorToResponse({
-        type: "no_symbols",
-        repoId: rawArgs.repoId ?? "unknown",
-      });
-    }
+  if (!hasAnyEntryHint) {
+    return sliceErrorToResponse({
+      type: "no_symbols",
+      repoId: request.repoId ?? "unknown",
+    });
   }
 
   try {
     return await handleSliceBuildInternal(args);
   } catch (error) {
-    const parsed = safeParseArgs(args);
+    const parsed = args as SliceBuildRequest;
 
     if (error instanceof NotFoundError) {
       return sliceErrorToResponse({
@@ -208,28 +205,16 @@ export async function handleSliceBuild(
     }
 
     // PolicyDenialError (from createPolicyDenial) has code === POLICY_ERROR
-    const codeError = error as { code?: string };
-    if (codeError.code === "POLICY_ERROR") {
-      const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof Error && "code" in error && (error as { code?: string }).code === "POLICY_ERROR") {
       return sliceErrorToResponse({
         type: "policy_denied",
-        reason: message.replace("Policy denied slice request: ", ""),
+        reason: error.message.replace("Policy denied slice request: ", ""),
       });
     }
 
-    const message = error instanceof Error ? error.message : String(error);
-    return sliceErrorToResponse({
-      type: "internal",
-      message,
-    });
+    // Let unexpected errors propagate to the centralized handler in server.ts
+    throw error;
   }
-}
-
-function safeParseArgs(args: unknown): { repoId?: string } | null {
-  if (typeof args !== "object" || args === null || Array.isArray(args))
-    return null;
-  const a = args as Record<string, unknown>;
-  return typeof a.repoId === "string" ? { repoId: a.repoId } : null;
 }
 
 async function handleSliceBuildInternal(
@@ -442,7 +427,7 @@ async function handleSliceBuildInternal(
         const memories = await surfaceRelevantMemories(conn, {
           repoId,
           symbolIds: sliceSymbolIds,
-          limit: memoryLimit ?? 5,
+          limit: memoryLimit ?? DEFAULT_MEMORY_SURFACE_LIMIT,
         });
         if (memories.length > 0) {
           slice.memories = memories;

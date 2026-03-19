@@ -504,7 +504,8 @@ export function expandToBlock(lines: string[], range: Range): Range {
   // Note: inBlockComment state is not chained across lines during backward
   // traversal because we'd need to scan from file start to know the true
   // state. Single-line /* ... */ within each line IS still handled.
-  for (let i = startLine - 1; i >= 0; i--) {
+  const maxBackwardScan = Math.max(0, startLine - 500);
+  for (let i = startLine - 1; i >= maxBackwardScan; i--) {
     const line = lines[i].trim();
     const { open, close } = countBracesOutsideStrings(lines[i]);
 

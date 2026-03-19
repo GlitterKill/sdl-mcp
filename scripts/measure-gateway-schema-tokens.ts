@@ -11,11 +11,11 @@ function estimateTokens(charCount: number): number {
   return Math.ceil(charCount / 4);
 }
 
-function measure() {
+async function measure() {
   console.log("=== SDL-MCP Gateway Schema Token Measurement ===\n");
 
   // --- Flat mode (29 tools) ---
-  const flatServer = createMCPServer();
+  const flatServer = await createMCPServer();
   const flatTools = (flatServer as any).tools as Map<
     string,
     { name: string; description: string; inputSchema: any; wireSchema?: Record<string, unknown> }
@@ -34,7 +34,7 @@ function measure() {
   }
 
   // --- Gateway mode (4 tools) — uses wireSchema if present ---
-  const gatewayServer = createMCPServer({
+  const gatewayServer = await createMCPServer({
     gatewayConfig: { enabled: true, emitLegacyTools: false },
   });
   const gatewayTools = (gatewayServer as any).tools as Map<
@@ -56,7 +56,7 @@ function measure() {
   }
 
   // --- Gateway + Legacy mode ---
-  const hybridServer = createMCPServer({
+  const hybridServer = await createMCPServer({
     gatewayConfig: { enabled: true, emitLegacyTools: true },
   });
   const hybridTools = (hybridServer as any).tools as Map<string, unknown>;
@@ -85,4 +85,4 @@ function measure() {
   }
 }
 
-measure();
+await measure();

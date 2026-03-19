@@ -21,6 +21,7 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
  */
 
 const REPO_ID = "test-get-cards-repo";
+const FOREIGN_REPO_ID = "test-get-cards-foreign-repo";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -30,6 +31,7 @@ describe("handleSymbolGetCards", () => {
 
   let symbolIdA: string;
   let symbolIdB: string;
+  let foreignSymbolId: string;
 
   before(async () => {
     if (existsSync(graphDbPath)) {
@@ -60,6 +62,21 @@ describe("handleSymbolGetCards", () => {
       createdAt: now,
     });
 
+    await ladybugDb.upsertRepo(conn, {
+      repoId: FOREIGN_REPO_ID,
+      rootPath: "/tmp/foreign-repo",
+      configJson: JSON.stringify({
+        root: ".",
+        languages: ["ts"],
+        maxFileBytes: 2_000_000,
+        includeNodeModulesTypes: true,
+        packageJsonPath: null,
+        tsconfigPath: null,
+        workspaceGlobs: null,
+      }),
+      createdAt: now,
+    });
+
     await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId: REPO_ID,
@@ -70,8 +87,19 @@ describe("handleSymbolGetCards", () => {
       lastIndexedAt: now,
     });
 
+    await ladybugDb.upsertFile(conn, {
+      fileId: "file-foreign-1",
+      repoId: FOREIGN_REPO_ID,
+      relPath: "src/foreign.ts",
+      contentHash: "hash-foreign",
+      language: "ts",
+      byteSize: 100,
+      lastIndexedAt: now,
+    });
+
     symbolIdA = `sym-cards-a-${REPO_ID}`;
     symbolIdB = `sym-cards-b-${REPO_ID}`;
+    foreignSymbolId = `sym-cards-foreign-${FOREIGN_REPO_ID}`;
 
     await ladybugDb.upsertSymbol(conn, {
       symbolId: symbolIdA,
@@ -108,6 +136,27 @@ describe("handleSymbolGetCards", () => {
       rangeEndLine: 5,
       rangeEndCol: 1,
       astFingerprint: "fp-abc",
+      signatureJson: null,
+      summary: null,
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: now,
+    });
+
+    await ladybugDb.upsertSymbol(conn, {
+      symbolId: foreignSymbolId,
+      repoId: FOREIGN_REPO_ID,
+      fileId: "file-foreign-1",
+      kind: "function",
+      name: "fnForeign",
+      exported: false,
+      visibility: null,
+      language: "ts",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 5,
+      rangeEndCol: 1,
+      astFingerprint: "fp-foreign",
       signatureJson: null,
       summary: null,
       invariantsJson: null,
@@ -219,6 +268,17 @@ describe("handleSymbolGetCards", () => {
 
     assert.ok(!("notModified" in resultB), "Expected full card for symbolIdB");
     assert.ok("etag" in resultB, "Expected etag in symbolIdB result");
+  });
+
+  it("rejects symbolIds that belong to a different repo", async () => {
+    await assert.rejects(
+      () =>
+        handleSymbolGetCards({
+          repoId: REPO_ID,
+          symbolIds: [symbolIdA, foreignSymbolId],
+        }),
+      /belongs to repo/,
+    );
   });
 
   it("schema rejects requests with more than 100 symbolIds", () => {

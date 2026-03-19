@@ -159,5 +159,5 @@ function chooseMostSpecificSymbol<T extends {
     }
 
     return b.rangeStartCol - a.rangeStartCol;
-  })[0]!;
+  })[0];
 }

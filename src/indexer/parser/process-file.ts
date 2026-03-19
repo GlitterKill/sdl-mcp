@@ -25,7 +25,7 @@ import {
 import { getAdapterForExtension } from "../adapter/registry.js";
 import { extractConfigEdgesFromTree, type ConfigEdge } from "../configEdges.js";
 import type { FileMetadata } from "../fileScanner.js";
-import { generateAstFingerprint, generateSymbolId } from "../fingerprints.js";
+import { generateAstFingerprint, generateMetadataFingerprint, generateSymbolId } from "../fingerprints.js";
 import type { IndexProgress } from "../indexer.js";
 import { resolveSymbolEnrichment } from "../symbol-enrichment.js";
 import {
@@ -197,7 +197,7 @@ export async function processFile(params: ProcessFileParams): Promise<{
           symbolsWithNodeIds = result.symbols;
           imports = result.imports;
           calls = result.calls;
-          // tree remains null when using worker pool - fingerprinting will use empty string
+          // tree remains null when using worker pool - fingerprinting uses worker-provided values or metadata fallback
         } catch (workerError) {
           parseError =
             workerError instanceof Error
@@ -388,6 +388,18 @@ export async function processFile(params: ProcessFileParams): Promise<{
         astFingerprint = astNode
           ? generateAstFingerprint(astNode)
           : astFingerprint;
+      }
+
+      // When tree is unavailable (worker pool path) and no fingerprint was
+      // provided, compute a deterministic fingerprint from symbol metadata
+      // so that symbol IDs remain stable across runs.
+      if (!astFingerprint && extractedSymbol.range) {
+        astFingerprint = generateMetadataFingerprint({
+          kind: extractedSymbol.kind,
+          name: extractedSymbol.name,
+          range: extractedSymbol.range,
+          signature: extractedSymbol.signature,
+        });
       }
 
       const symbolId = generateSymbolId(

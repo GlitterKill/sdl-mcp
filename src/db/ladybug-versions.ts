@@ -133,7 +133,7 @@ export async function getVersionsByRepo(
   limit = DEFAULT_BATCH_QUERY_LIMIT,
 ): Promise<VersionRow[]> {
   assertSafeInt(limit, "limit");
-  limit = Math.max(0, Math.min(limit, 10000));
+  const maxFetch = Math.max(0, Math.min(limit, 10000));
 
   const rows = await queryAll<{
     versionId: string;
@@ -149,11 +149,12 @@ export async function getVersionsByRepo(
             v.reason AS reason,
             v.prevVersionHash AS prevVersionHash,
             v.versionHash AS versionHash
-     ORDER BY v.createdAt DESC`,
+     ORDER BY v.createdAt DESC
+     LIMIT ${maxFetch}`,
     { repoId },
   );
 
-  return rows.slice(0, limit).map((row) => ({ repoId, ...row }));
+  return rows.map((row) => ({ repoId, ...row }));
 }
 
 export async function snapshotSymbolVersion(

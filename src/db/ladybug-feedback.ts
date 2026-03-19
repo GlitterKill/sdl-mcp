@@ -52,6 +52,7 @@ export async function getAuditEvents(
 ): Promise<AuditRow[]> {
   const safeLimit = options.limit ?? 1000;
   assertSafeInt(safeLimit, "limit");
+  const maxFetch = Math.min(Math.max(0, safeLimit), 10000);
 
   const conditions: string[] = [];
   const params: Record<string, unknown> = {};
@@ -86,10 +87,10 @@ export async function getAuditEvents(
             a.symbolId AS symbolId,
             a.detailsJson AS detailsJson
      ORDER BY a.timestamp DESC
-     LIMIT 10000`,
+     LIMIT ${maxFetch}`,
     params,
   );
-  return rows.slice(0, safeLimit);
+  return rows;
 }
 
 export interface AgentFeedbackRow {
@@ -162,26 +163,44 @@ export async function getAgentFeedbackByRepo(
   conn: Connection,
   repoId: string,
   limit: number,
+  since?: string,
 ): Promise<AgentFeedbackRow[]> {
   assertSafeInt(limit, "limit");
+  const maxFetch = Math.min(Math.max(0, limit), 10000);
+  const query = since
+    ? `MATCH (f:AgentFeedback {repoId: $repoId})
+       WHERE f.createdAt >= $since
+       RETURN f.feedbackId AS feedbackId,
+              f.repoId AS repoId,
+              f.versionId AS versionId,
+              f.sliceHandle AS sliceHandle,
+              f.usefulSymbolsJson AS usefulSymbolsJson,
+              f.missingSymbolsJson AS missingSymbolsJson,
+              f.taskTagsJson AS taskTagsJson,
+              f.taskType AS taskType,
+              f.taskText AS taskText,
+              f.createdAt AS createdAt
+       ORDER BY f.createdAt DESC
+       LIMIT ${maxFetch}`
+    : `MATCH (f:AgentFeedback {repoId: $repoId})
+       RETURN f.feedbackId AS feedbackId,
+              f.repoId AS repoId,
+              f.versionId AS versionId,
+              f.sliceHandle AS sliceHandle,
+              f.usefulSymbolsJson AS usefulSymbolsJson,
+              f.missingSymbolsJson AS missingSymbolsJson,
+              f.taskTagsJson AS taskTagsJson,
+              f.taskType AS taskType,
+              f.taskText AS taskText,
+              f.createdAt AS createdAt
+       ORDER BY f.createdAt DESC
+       LIMIT ${maxFetch}`;
   const rows = await queryAll<AgentFeedbackRow>(
     conn,
-    `MATCH (f:AgentFeedback {repoId: $repoId})
-     RETURN f.feedbackId AS feedbackId,
-            f.repoId AS repoId,
-            f.versionId AS versionId,
-            f.sliceHandle AS sliceHandle,
-            f.usefulSymbolsJson AS usefulSymbolsJson,
-            f.missingSymbolsJson AS missingSymbolsJson,
-            f.taskTagsJson AS taskTagsJson,
-            f.taskType AS taskType,
-            f.taskText AS taskText,
-            f.createdAt AS createdAt
-     ORDER BY f.createdAt DESC
-     LIMIT 10000`,
-    { repoId },
+    query,
+    since ? { repoId, since } : { repoId },
   );
-  return rows.slice(0, limit);
+  return rows;
 }
 
 export async function getAgentFeedbackByVersion(
@@ -189,25 +208,44 @@ export async function getAgentFeedbackByVersion(
   repoId: string,
   versionId: string,
   limit: number,
+  since?: string,
 ): Promise<AgentFeedbackRow[]> {
   assertSafeInt(limit, "limit");
+  const maxFetch = Math.min(Math.max(0, limit), 10000);
+  const query = since
+    ? `MATCH (f:AgentFeedback {repoId: $repoId, versionId: $versionId})
+       WHERE f.createdAt >= $since
+       RETURN f.feedbackId AS feedbackId,
+              f.repoId AS repoId,
+              f.versionId AS versionId,
+              f.sliceHandle AS sliceHandle,
+              f.usefulSymbolsJson AS usefulSymbolsJson,
+              f.missingSymbolsJson AS missingSymbolsJson,
+              f.taskTagsJson AS taskTagsJson,
+              f.taskType AS taskType,
+              f.taskText AS taskText,
+              f.createdAt AS createdAt
+       ORDER BY f.createdAt DESC
+       LIMIT ${maxFetch}`
+    : `MATCH (f:AgentFeedback {repoId: $repoId, versionId: $versionId})
+       RETURN f.feedbackId AS feedbackId,
+              f.repoId AS repoId,
+              f.versionId AS versionId,
+              f.sliceHandle AS sliceHandle,
+              f.usefulSymbolsJson AS usefulSymbolsJson,
+              f.missingSymbolsJson AS missingSymbolsJson,
+              f.taskTagsJson AS taskTagsJson,
+              f.taskType AS taskType,
+              f.taskText AS taskText,
+              f.createdAt AS createdAt
+       ORDER BY f.createdAt DESC
+       LIMIT ${maxFetch}`;
   const rows = await queryAll<AgentFeedbackRow>(
     conn,
-    `MATCH (f:AgentFeedback {repoId: $repoId, versionId: $versionId})
-     RETURN f.feedbackId AS feedbackId,
-            f.repoId AS repoId,
-            f.versionId AS versionId,
-            f.sliceHandle AS sliceHandle,
-            f.usefulSymbolsJson AS usefulSymbolsJson,
-            f.missingSymbolsJson AS missingSymbolsJson,
-            f.taskTagsJson AS taskTagsJson,
-            f.taskType AS taskType,
-            f.taskText AS taskText,
-            f.createdAt AS createdAt
-     ORDER BY f.createdAt DESC`,
-    { repoId, versionId },
+    query,
+    since ? { repoId, versionId, since } : { repoId, versionId },
   );
-  return rows.slice(0, limit);
+  return rows;
 }
 
 export interface AggregatedFeedback {

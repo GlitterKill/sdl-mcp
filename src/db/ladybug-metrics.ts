@@ -165,6 +165,7 @@ export async function getTopSymbolsByFanIn(
   assertSafeInt(limit, "limit");
   limit = Math.max(0, Math.min(limit, 1000));
 
+  const maxFetch = Math.min(limit, 10000);
   const rows = await queryAll<{
     symbolId: string;
     fanIn: unknown;
@@ -179,11 +180,11 @@ export async function getTopSymbolsByFanIn(
             m.fanOut AS fanOut,
             m.churn30d AS churn30d
      ORDER BY m.fanIn DESC
-     LIMIT 10000`,
+     LIMIT ${maxFetch}`,
     { repoId },
   );
 
-  return rows.slice(0, limit).map((row) => ({
+  return rows.map((row) => ({
     symbolId: row.symbolId,
     fanIn: toNumber(row.fanIn),
     fanOut: toNumber(row.fanOut),
@@ -240,6 +241,7 @@ export async function getTopSymbolsByChurn(
   assertSafeInt(limit, "limit");
   limit = Math.max(0, Math.min(limit, 1000));
 
+  const maxFetch = Math.min(limit, 10000);
   const rows = await queryAll<{
     symbolId: string;
     fanIn: unknown;
@@ -254,11 +256,11 @@ export async function getTopSymbolsByChurn(
             m.fanOut AS fanOut,
             m.churn30d AS churn30d
      ORDER BY m.churn30d DESC
-     LIMIT 10000`,
+     LIMIT ${maxFetch}`,
     { repoId },
   );
 
-  return rows.slice(0, limit).map((row) => ({
+  return rows.map((row) => ({
     symbolId: row.symbolId,
     fanIn: toNumber(row.fanIn),
     fanOut: toNumber(row.fanOut),

@@ -46,7 +46,7 @@ let snapshotTtlMs = 5 * 60_000;
 let maxSnapshotSymbols = 15_000;
 
 const snapshotsByRepo = new Map<RepoId, GraphSnapshot>();
-const loadingRepos = new Set<RepoId>();
+const loadingPromises = new Map<RepoId, Promise<Graph | null>>();
 
 /**
  * Configure cache settings.
@@ -159,56 +159,71 @@ export function getGraphSnapshotStats(): {
  *
  * This builds the legacy Graph shape with adjacency maps that the in-memory
  * beamSearch function expects.
+ *
+ * If a load is already in-flight for this repo, the second caller awaits
+ * the same promise instead of returning null.
  */
 export async function loadAndCacheGraphSnapshot(
   conn: Connection,
   repoId: RepoId,
 ): Promise<Graph | null> {
-  if (loadingRepos.has(repoId)) {
-    return null;
+  const inflight = loadingPromises.get(repoId);
+  if (inflight) {
+    return inflight;
   }
-  loadingRepos.add(repoId);
 
+  const promise = _loadGraphSnapshot(conn, repoId);
+  loadingPromises.set(repoId, promise);
   try {
+    return await promise;
+  } finally {
+    loadingPromises.delete(repoId);
+  }
+}
+
+async function _loadGraphSnapshot(
+  conn: Connection,
+  repoId: RepoId,
+): Promise<Graph | null> {
     // Check symbol count first to avoid loading huge repos
     const symbolCount = await ladybugDb.getSymbolCount(conn, repoId);
     if (symbolCount > maxSnapshotSymbols) {
-      logger.debug("Repo too large for graph snapshot cache", {
-        repoId,
-        symbolCount,
-        maxSnapshotSymbols,
-      });
-      return null;
+        logger.debug("Repo too large for graph snapshot cache", {
+            repoId,
+            symbolCount,
+            maxSnapshotSymbols,
+        });
+        return null;
     }
 
     const allSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
     if (allSymbols.length === 0) {
-      return null;
+        return null;
     }
 
     // Load edges, metrics, files, and clusters in parallel (independent queries)
     const [allEdges, allMetrics, allFiles, clusterMembers] = await Promise.all([
-      ladybugDb.getEdgesByRepo(conn, repoId),
-      ladybugDb.getMetricsByRepo(conn, repoId),
-      ladybugDb.getFilesByRepo(conn, repoId),
-      ladybugDb.getClusterMembersForRepo(conn, repoId).catch((error) => {
-        logger.debug("Optional clusters load failed for snapshot", { error: String(error) });
-        return [] as Awaited<ReturnType<typeof ladybugDb.getClusterMembersForRepo>>;
-      }),
+        ladybugDb.getEdgesByRepo(conn, repoId),
+        ladybugDb.getMetricsByRepo(conn, repoId),
+        ladybugDb.getFilesByRepo(conn, repoId),
+        ladybugDb.getClusterMembersForRepo(conn, repoId).catch((error) => {
+            logger.debug("Optional clusters load failed for snapshot", { error: String(error) });
+            return [] as Awaited<ReturnType<typeof ladybugDb.getClusterMembersForRepo>>;
+        }),
     ]);
 
     const metrics = new Map<SymbolId, MetricsRow>();
 
     for (const [symbolId, m] of allMetrics.entries()) {
-      metrics.set(symbolId, {
-        symbol_id: symbolId,
-        fan_in: m.fanIn,
-        fan_out: m.fanOut,
-        churn_30d: m.churn30d,
-        test_refs_json: m.testRefsJson,
-        canonical_test_json: m.canonicalTestJson,
-        updated_at: m.updatedAt,
-      } as MetricsRow);
+        metrics.set(symbolId, {
+            symbol_id: symbolId,
+            fan_in: m.fanIn,
+            fan_out: m.fanOut,
+            churn_30d: m.churn30d,
+            test_refs_json: m.testRefsJson,
+            canonical_test_json: m.canonicalTestJson,
+            updated_at: m.updatedAt,
+        } as MetricsRow);
     }
 
     // Build file maps
@@ -217,104 +232,101 @@ export async function loadAndCacheGraphSnapshot(
     let nextFileId = 1;
 
     for (const f of allFiles) {
-      const numericId = nextFileId++;
-      fileIdMap.set(f.fileId, numericId);
-      files.set(numericId, {
-        file_id: numericId,
-        repo_id: repoId,
-        rel_path: f.relPath,
-        content_hash: f.contentHash,
-        language: f.language,
-        byte_size: f.byteSize,
-        last_indexed_at: f.lastIndexedAt,
-        directory: f.directory,
-      } as FileRow);
+        const numericId = nextFileId++;
+        fileIdMap.set(f.fileId, numericId);
+        files.set(numericId, {
+            file_id: numericId,
+            repo_id: repoId,
+            rel_path: f.relPath,
+            content_hash: f.contentHash,
+            language: f.language,
+            byte_size: f.byteSize,
+            last_indexed_at: f.lastIndexedAt,
+            directory: f.directory,
+        } as FileRow);
     }
 
     // Build cluster map
     const clusters = new Map<SymbolId, string>();
     for (const m of clusterMembers) {
-      clusters.set(m.symbolId, m.clusterId);
+        clusters.set(m.symbolId, m.clusterId);
     }
 
-  // Build symbol map (converting ladybugDb.SymbolRow → legacy SymbolRow)
-  const symbols = new Map<SymbolId, SymbolRow>();
-  for (const sym of allSymbols) {
-    const fileId = fileIdMap.get(sym.fileId) ?? 0;
-    symbols.set(sym.symbolId, {
-      symbol_id: sym.symbolId,
-      repo_id: sym.repoId,
-      file_id: fileId,
-      kind: sym.kind as SymbolRow["kind"],
-      name: sym.name,
-      exported: sym.exported ? 1 : 0,
-      visibility: sym.visibility as SymbolRow["visibility"],
-      language: sym.language,
-      range_start_line: sym.rangeStartLine,
-      range_start_col: sym.rangeStartCol,
-      range_end_line: sym.rangeEndLine,
-      range_end_col: sym.rangeEndCol,
-      ast_fingerprint: sym.astFingerprint,
-      signature_json: sym.signatureJson,
-      summary: sym.summary,
-      invariants_json: sym.invariantsJson,
-      side_effects_json: sym.sideEffectsJson,
-      updated_at: sym.updatedAt,
-    } as SymbolRow);
-  }
+    // Build symbol map (converting ladybugDb.SymbolRow -> legacy SymbolRow)
+    const symbols = new Map<SymbolId, SymbolRow>();
+    for (const sym of allSymbols) {
+        const fileId = fileIdMap.get(sym.fileId) ?? 0;
+        symbols.set(sym.symbolId, {
+            symbol_id: sym.symbolId,
+            repo_id: sym.repoId,
+            file_id: fileId,
+            kind: sym.kind as SymbolRow["kind"],
+            name: sym.name,
+            exported: sym.exported ? 1 : 0,
+            visibility: sym.visibility as SymbolRow["visibility"],
+            language: sym.language,
+            range_start_line: sym.rangeStartLine,
+            range_start_col: sym.rangeStartCol,
+            range_end_line: sym.rangeEndLine,
+            range_end_col: sym.rangeEndCol,
+            ast_fingerprint: sym.astFingerprint,
+            signature_json: sym.signatureJson,
+            summary: sym.summary,
+            invariants_json: sym.invariantsJson,
+            side_effects_json: sym.sideEffectsJson,
+            updated_at: sym.updatedAt,
+        } as SymbolRow);
+    }
 
-  // Build edge list + adjacency maps (converting ladybugDb.EdgeRow → legacy EdgeRow)
-  const edges: EdgeRow[] = [];
-  const adjacencyOut = new Map<SymbolId, EdgeRow[]>();
-  const adjacencyIn = new Map<SymbolId, EdgeRow[]>();
+    // Build edge list + adjacency maps (converting ladybugDb.EdgeRow -> legacy EdgeRow)
+    const edges: EdgeRow[] = [];
+    const adjacencyOut = new Map<SymbolId, EdgeRow[]>();
+    const adjacencyIn = new Map<SymbolId, EdgeRow[]>();
 
-  // Init adjacency maps for all symbols
-  for (const symbolId of symbols.keys()) {
-    adjacencyOut.set(symbolId, []);
-    adjacencyIn.set(symbolId, []);
-  }
+    // Init adjacency maps for all symbols
+    for (const symbolId of symbols.keys()) {
+        adjacencyOut.set(symbolId, []);
+        adjacencyIn.set(symbolId, []);
+    }
 
-  for (const edge of allEdges) {
-    const legacyEdge = {
-      from_symbol_id: edge.fromSymbolId,
-      to_symbol_id: edge.toSymbolId,
-      type: edge.edgeType as EdgeType,
-      weight: edge.weight,
-      confidence: edge.confidence,
-    } as EdgeRow;
+    for (const edge of allEdges) {
+        const legacyEdge = {
+            from_symbol_id: edge.fromSymbolId,
+            to_symbol_id: edge.toSymbolId,
+            type: edge.edgeType as EdgeType,
+            weight: edge.weight,
+            confidence: edge.confidence,
+        } as EdgeRow;
 
-    edges.push(legacyEdge);
+        edges.push(legacyEdge);
 
-    const outList = adjacencyOut.get(edge.fromSymbolId);
-    if (outList) outList.push(legacyEdge);
+        const outList = adjacencyOut.get(edge.fromSymbolId);
+        if (outList) outList.push(legacyEdge);
 
-    const inList = adjacencyIn.get(edge.toSymbolId);
-    if (inList) inList.push(legacyEdge);
-  }
+        const inList = adjacencyIn.get(edge.toSymbolId);
+        if (inList) inList.push(legacyEdge);
+    }
 
-  const graph: Graph = {
-    repoId,
-    symbols,
-    edges,
-    adjacencyIn,
-    adjacencyOut,
-    metrics,
-    files,
-    clusters,
-  };
+    const graph: Graph = {
+        repoId,
+        symbols,
+        edges,
+        adjacencyIn,
+        adjacencyOut,
+        metrics,
+        files,
+        clusters,
+    };
 
-  setGraphSnapshot(repoId, graph);
+    setGraphSnapshot(repoId, graph);
 
-  logger.info("Graph snapshot loaded and cached", {
-    repoId,
-    symbolCount: symbols.size,
-    edgeCount: edges.length,
-    fileCount: files.size,
-    clusterCount: clusters.size,
-  });
+    logger.info("Graph snapshot loaded and cached", {
+        repoId,
+        symbolCount: symbols.size,
+        edgeCount: edges.length,
+        fileCount: files.size,
+        clusterCount: clusters.size,
+    });
 
-  return graph;
-  } finally {
-    loadingRepos.delete(repoId);
-  }
+    return graph;
 }

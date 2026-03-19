@@ -73,11 +73,20 @@ export class MinHeap<
   }
 
   /**
-   * Convert heap to array sorted by score (lowest to highest).
-   * This is a destructive operation - empties the heap.
+   * Drain the heap into a sorted array (lowest to highest score).
+   * This is a destructive operation — empties the heap.
    *
    * @returns Array of items sorted by score (lowest to highest)
    */
+  drain(): T[] {
+    const sorted: T[] = [];
+    while (!this.isEmpty()) {
+      sorted.push(this.extractMin()!);
+    }
+    return sorted;
+  }
+
+  /** @deprecated Use `drain()` — this method is destructive and the name does not indicate it. */
   toArray(): T[] {
     const sorted: T[] = [];
     while (!this.isEmpty()) {
@@ -123,6 +132,43 @@ export class MinHeap<
       this.insert(item);
     }
     return result;
+  }
+
+  /**
+   * Replace the item at a given index and restore heap order.
+   * Time complexity: O(log n)
+   *
+   * @param index - Index of item to replace (must be in bounds)
+   * @param item - New item to place at the index
+   */
+  replaceAt(index: number, item: T): void {
+    if (index < 0 || index >= this.heap.length) return;
+    this.heap[index] = item;
+    // The new item may need to go up or down
+    this.bubbleUp(index);
+    this.bubbleDown(index);
+  }
+
+  /**
+   * Find the index of the maximum item (worst in a min-heap).
+   * In a min-heap the maximum must be a leaf node, so we only
+   * scan from floor(n/2) to n-1.
+   * Time complexity: O(n/2)
+   *
+   * @param compareFn - Comparison function (a > b → positive)
+   * @returns Index of the worst item, or -1 if empty
+   */
+  findWorstIndex(compareFn: (a: T, b: T) => number): number {
+    const n = this.heap.length;
+    if (n === 0) return -1;
+    const leafStart = Math.floor(n / 2);
+    let worstIdx = leafStart;
+    for (let i = leafStart + 1; i < n; i++) {
+      if (compareFn(this.heap[i], this.heap[worstIdx]) > 0) {
+        worstIdx = i;
+      }
+    }
+    return worstIdx;
   }
 
   /**

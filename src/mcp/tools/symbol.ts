@@ -28,6 +28,7 @@ import { logger } from "../../util/logger.js";
 import { rerankByEmbeddings } from "../../indexer/embeddings.js";
 import { buildCardForSymbol } from "../../services/card-builder.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
+import { DatabaseError } from "../errors.js";
 
 export async function handleSymbolSearch(
   args: unknown,
@@ -225,6 +226,17 @@ export async function handleSymbolGetCards(
     consumePrefetchedKey(repoId, `card:${symbolId}`);
   }
 
+  const conn = await getLadybugConn();
+  const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
+  for (const symbolId of symbolIds) {
+    const symbol = symbolMap.get(symbolId) ?? await ladybugDb.getSymbol(conn, symbolId);
+    if (symbol && symbol.repoId !== repoId) {
+      throw new DatabaseError(
+        `Symbol ${symbolId} belongs to repo "${symbol.repoId}", not "${repoId}"`,
+      );
+    }
+  }
+
   // Cap parallelism to avoid overwhelming DB with concurrent queries
   const BATCH_SIZE = 10;
   const cards: Awaited<ReturnType<typeof buildCardForSymbol>>[] = [];
@@ -241,10 +253,10 @@ export async function handleSymbolGetCards(
     cards.push(...batchResults);
   }
 
-  const conn = await getLadybugConn();
-  const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
   const fileIds = [
-    ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
+    ...new Set(
+      Array.from(symbolMap.values()).map((s) => s.fileId),
+    ),
   ];
 
   const response = { cards };

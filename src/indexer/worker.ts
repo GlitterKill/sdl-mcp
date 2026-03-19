@@ -2,7 +2,7 @@ import { parentPort } from "worker_threads";
 import type { SyntaxNode } from "tree-sitter";
 import { getAdapterForExtension } from "./adapter/registry.js";
 import { logger } from "../util/logger.js";
-import { generateAstFingerprint } from "./fingerprints.js";
+import { generateAstFingerprint, generateMetadataFingerprint } from "./fingerprints.js";
 
 import type {
   ExtractedSymbol,
@@ -98,14 +98,26 @@ parentPort?.on("message", (msg: WorkerMessage) => {
           return nameNode?.text === symbol.name;
         });
 
-        astFingerprint = astNode ? generateAstFingerprint(astNode) : "";
+        astFingerprint = astNode
+          ? generateAstFingerprint(astNode)
+          : generateMetadataFingerprint({
+              kind: symbol.kind,
+              name: symbol.name,
+              range: symbol.range,
+              signature: symbol.signature,
+            });
       } catch (err) {
         logger.debug("AST fingerprint generation failed", {
           symbol: symbol.name,
           filePath: msg.filePath,
           error: err instanceof Error ? err.message : String(err),
         });
-        astFingerprint = "";
+        astFingerprint = generateMetadataFingerprint({
+          kind: symbol.kind,
+          name: symbol.name,
+          range: symbol.range,
+          signature: symbol.signature,
+        });
       }
 
       return {
