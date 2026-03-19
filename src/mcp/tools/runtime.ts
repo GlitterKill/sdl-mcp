@@ -20,7 +20,7 @@ import { loadConfig } from "../../config/loadConfig.js";
 import { RuntimeConfigSchema } from "../../config/types.js";
 import { PolicyEngine } from "../../policy/engine.js";
 import type { RuntimePolicyRequestContext } from "../../policy/types.js";
-import { getRuntime } from "../../runtime/runtimes.js";
+import { getRuntime, getRegisteredRuntimes, getRuntimeExtension, getRuntimeRequiredEnvKeys, isCompileThenExecute } from "../../runtime/runtimes.js";
 import {
   execute,
   createConcurrencyTracker,
@@ -164,9 +164,8 @@ export async function handleRuntimeExecute(
   // 2. Resolve runtime descriptor
   const runtimeDescriptor = getRuntime(request.runtime);
   if (!runtimeDescriptor) {
-    throw new RuntimePolicyDeniedError(
-      `Unknown runtime: ${request.runtime}. Available: node, python, shell`,
-    );
+    const available = getRegisteredRuntimes().join(", ");
+    throw new RuntimePolicyDeniedError(`Unknown runtime: ${request.runtime}. Available: ${available}`);
   }
 
   // 3. Evaluate policy
@@ -261,24 +260,114 @@ export async function handleRuntimeExecute(
     let codePath: string | undefined;
     if (request.code) {
       tempCodeDir = await mkdtemp(join(tmpdir(), "sdl-runtime-code-"));
-      const ext =
-        request.runtime === "python"
-          ? ".py"
-          : request.runtime === "node"
-            ? ".js"
-            : ".sh";
+      const ext = getRuntimeExtension(request.runtime) ?? ".txt";
       codePath = join(tempCodeDir, `code${ext}`);
       await writeFile(codePath, request.code, "utf-8");
     }
 
     // 7. Build command
-    const cmd = runtimeDescriptor.buildCommand(request.args, {
+    let cmd = runtimeDescriptor.buildCommand(request.args, {
       codePath,
       executable,
     });
 
     // 8. Build env
-    const env = buildScrubbedEnv(runtimeConfig.envAllowlist);
+    const requiredKeys = getRuntimeRequiredEnvKeys(request.runtime);
+    const env = buildScrubbedEnv(runtimeConfig.envAllowlist, requiredKeys);
+
+    // 8b. Compile-then-execute orchestration
+    const COMPILE_MIN_EXEC_BUDGET_MS = 1000;
+    let effectiveTimeoutMs = timeoutMs;
+
+    if (isCompileThenExecute(request.runtime) && codePath) {
+      const compileStart = Date.now();
+      const compileResult = await execute({
+        repoId: request.repoId,
+        runtime: request.runtime,
+        executable: cmd.executable,
+        args: cmd.args,
+        cwd,
+        env,
+        timeoutMs: effectiveTimeoutMs,
+        maxStdoutBytes: runtimeConfig.maxStdoutBytes,
+        maxStderrBytes: runtimeConfig.maxStderrBytes,
+        signal: context?.signal,
+      });
+
+      if (compileResult.exitCode !== 0 || compileResult.status !== "success") {
+        // Compile failed — return compiler output immediately
+        const compileStdout = compileResult.stdout.toString("utf-8");
+        const compileStderr = compileResult.stderr.toString("utf-8");
+        const { stdoutSummary, stderrSummary, excerpts } = generateExcerpts(
+          compileStdout,
+          compileStderr,
+          request.maxResponseLines,
+          request.queryTerms,
+        );
+        logRuntimeExecution({
+          repoId: request.repoId,
+          runtime: request.runtime,
+          executable: cmd.executable,
+          exitCode: compileResult.exitCode,
+          durationMs: compileResult.durationMs,
+          stdoutBytes: compileResult.totalStdoutBytes,
+          stderrBytes: compileResult.totalStderrBytes,
+          timedOut: compileResult.status === "timeout",
+          policyDecision: policyDecision.decision,
+          auditHash: policyDecision.auditHash,
+          artifactHandle: null,
+        });
+        return {
+          status: compileResult.status,
+          exitCode: compileResult.exitCode,
+          signal: compileResult.signal,
+          durationMs: compileResult.durationMs,
+          stdoutSummary,
+          stderrSummary,
+          artifactHandle: null,
+          excerpts: excerpts.length > 0 ? excerpts : undefined,
+          truncation: {
+            stdoutTruncated: compileResult.stdoutTruncated,
+            stderrTruncated: compileResult.stderrTruncated,
+            totalStdoutBytes: compileResult.totalStdoutBytes,
+            totalStderrBytes: compileResult.totalStderrBytes,
+          },
+          policyDecision: {
+            auditHash: policyDecision.auditHash,
+          },
+        };
+      }
+
+      const compileDurationMs = Date.now() - compileStart;
+      const remainingMs = effectiveTimeoutMs - compileDurationMs;
+      if (remainingMs < COMPILE_MIN_EXEC_BUDGET_MS) {
+        // Not enough time left to execute
+        return {
+          status: "timeout",
+          exitCode: null,
+          signal: null,
+          durationMs: compileDurationMs,
+          stdoutSummary: "",
+          stderrSummary: "Compile succeeded but execution budget exhausted.",
+          artifactHandle: null,
+          truncation: {
+            stdoutTruncated: false,
+            stderrTruncated: false,
+            totalStdoutBytes: 0,
+            totalStderrBytes: 0,
+          },
+          policyDecision: {
+            auditHash: policyDecision.auditHash,
+          },
+        };
+      }
+
+      // Derive output binary path and replace cmd/codePath for execution phase
+      const outBinary = codePath.replace(/\.[^.]+$/, "") + (process.platform === "win32" ? ".exe" : "");
+      cmd = { executable: outBinary, args: request.args };
+      codePath = undefined;
+      effectiveTimeoutMs = remainingMs;
+    }
 
     // 9. Execute
     const result = await execute({
@@ -288,7 +377,7 @@ export async function handleRuntimeExecute(
       args: cmd.args,
       cwd,
       env,
-      timeoutMs,
+      timeoutMs: effectiveTimeoutMs,
       maxStdoutBytes: runtimeConfig.maxStdoutBytes,
       maxStderrBytes: runtimeConfig.maxStderrBytes,
       signal: context?.signal,
