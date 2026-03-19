@@ -81,6 +81,9 @@ benchmarks/**/budget-sensitivity/
 devdocs/
 AGENTS.md
 CLAUDE.md
+CODEX.md
+GEMINI.md
+OPENCODE.md
 TASKS.md
 V06-*.md
 nul
