@@ -109,7 +109,7 @@
   },
   "overrides": {
     "@hono/node-server": "1.19.11",
-    "flatted": ">=3.4.0",
+    "flatted": "3.4.2",
     "hono": "4.12.7",
     "tar": "7.5.11"
   },
