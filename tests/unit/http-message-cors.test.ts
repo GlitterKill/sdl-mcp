@@ -3,8 +3,26 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { setupHttpTransport } from "../../src/cli/transport/http.js";
+
+async function rmWithRetry(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code?: unknown }).code ?? "")
+          : "";
+      if (!["ENOTEMPTY", "EPERM", "EBUSY"].includes(code)) throw error;
+      if (attempt === 9) return; // best-effort on final attempt
+      await delay(100 * (attempt + 1));
+    }
+  }
+}
 
 test("OPTIONS /message returns CORS headers for the deprecated SSE transport", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "sdl-mcp-http-message-cors-"));
@@ -28,6 +46,6 @@ test("OPTIONS /message returns CORS headers for the deprecated SSE transport", a
     assert.match(response.headers.get("vary") ?? "", /Origin/);
   } finally {
     await server.close();
-    await rm(tempDir, { recursive: true, force: true });
+    await rmWithRetry(tempDir);
   }
 });
