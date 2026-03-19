@@ -750,35 +750,35 @@ async function checkRuntimeExecution(
     const { detectAllRuntimes } = await import("../../runtime/runtimes.js");
     const detections = await detectAllRuntimes();
 
-    const results: string[] = [];
-    const allowedRuntimes = runtimeConfig.allowedRuntimes ?? ["node", "python"];
+    const allowed = new Set(runtimeConfig.allowedRuntimes ?? ["node", "python"]);
+    const available: string[] = [];
+    const unavailable: string[] = [];
+    const details: string[] = [];
 
-    for (const [name, detection] of detections) {
-      const isAllowed = allowedRuntimes.includes(name);
-      if (detection.available) {
-        results.push(
-          `${name}: ${detection.version ?? "available"}${isAllowed ? "" : " (not in allowedRuntimes)"}`,
-        );
-      } else if (isAllowed) {
-        results.push(`${name}: NOT FOUND (allowed but missing)`);
+    for (const [name, result] of detections) {
+      if (result.available) {
+        const allowedTag = allowed.has(name) ? "" : " (not in allowedRuntimes)";
+        available.push(name);
+        details.push(`${name}: ${result.version ?? "unknown version"}${allowedTag}`);
+      } else if (allowed.has(name)) {
+        unavailable.push(name);
+        details.push(`${name}: NOT FOUND (allowed but missing)`);
       }
+      // Skip unavailable runtimes that aren't in allowedRuntimes (don't clutter output)
     }
 
-    const allowedAvailable = allowedRuntimes.filter((r) => {
-      const d = detections.get(r);
-      return d?.available;
-    });
+    const allowedAvailable = available.filter((r) => allowed.has(r));
 
     if (allowedAvailable.length === 0) {
       return {
         status: "fail",
-        message: `No allowed runtimes detected. Allowed: [${allowedRuntimes.join(", ")}]\n  ${results.join("\n  ")}`,
+        message: `No allowed runtimes detected. Allowed: [${[...allowed].join(", ")}]\n  ${details.join("\n  ")}`,
       };
     }
 
     return {
       status: "pass",
-      message: `Runtimes: ${results.join("; ")}; maxDuration=${runtimeConfig.maxDurationMs}ms; maxConcurrent=${runtimeConfig.maxConcurrentJobs}`,
+      message: `Runtimes: ${details.join("; ")}; maxDuration=${runtimeConfig.maxDurationMs}ms; maxConcurrent=${runtimeConfig.maxConcurrentJobs}`,
     };
   } catch (error) {
     return {
