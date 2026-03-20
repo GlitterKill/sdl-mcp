@@ -11,11 +11,9 @@
 
 <br/>
 
-![npm version](https://img.shields.io/npm/v/sdl-mcp.svg)
-![npm downloads](https://img.shields.io/npm/dm/sdl-mcp.svg)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/GlitterKill/sdl-mcp/ci.yml?label=CI%20Builds)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/GlitterKill/sdl-mcp/publish-native.yml?label=Rust%20Indexer%20Builds)
-![GitHub commit activity](https://img.shields.io/github/commit-activity/w/GlitterKill/sdl-mcp)
+![npm version](https://img.shields.io/npm/v/sdl-mcp.svg?style=for-the-badge)
+![npm downloads](https://img.shields.io/npm/dm/sdl-mcp.svg?style=for-the-badge)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/w/GlitterKill/sdl-mcp?style=for-the-badge)
 
 </div>
 
