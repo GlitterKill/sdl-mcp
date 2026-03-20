@@ -90,10 +90,38 @@ The last resort. Full source code access, but with guardrails:
 
 ---
 
+## Escalation Flow
+
+```mermaid
+flowchart TD
+    Q["Agent Question"]
+    R1["Rung 1: Symbol Card<br/>~100 tokens"]
+    R2["Rung 2: Skeleton IR<br/>~300 tokens"]
+    R3["Rung 3: Hot-Path Excerpt<br/>~600 tokens"]
+    R4["Rung 4: Raw Code Window<br/>~2,000 tokens"]
+    Done["Answer Found"]
+
+    Q --> R1
+    R1 -->|"Answered?"| Done
+    R1 -->|"Need structure"| R2
+    R2 -->|"Answered?"| Done
+    R2 -->|"Need specific lines"| R3
+    R3 -->|"Answered?"| Done
+    R3 -->|"Need full code"| R4
+    R4 -->|"Policy gate:<br/>reason + identifiers<br/>+ line/token limits"| Done
+
+    style R1 fill:#d4edda,stroke:#28a745
+    style R2 fill:#fff3cd,stroke:#ffc107
+    style R3 fill:#ffeaa7,stroke:#fdcb6e
+    style R4 fill:#f8d7da,stroke:#dc3545
+```
+
+---
+
 ## Related Tools
 
-- [`sdl.symbol.search`](./mcp-tools-detailed.md#sdlsymbolsearch) - Find symbols to get cards for
-- [`sdl.slice.build`](./mcp-tools-detailed.md#sdlslicebuild) - Get cards for an entire task context at once
-- [`sdl.context.summary`](./mcp-tools-detailed.md#sdlcontextsummary) - Generate a portable context briefing
+- [`sdl.symbol.search`](../mcp-tools-detailed.md#sdlsymbolsearch) - Find symbols to get cards for
+- [`sdl.slice.build`](../mcp-tools-detailed.md#sdlslicebuild) - Get cards for an entire task context at once
+- [`sdl.context.summary`](../mcp-tools-detailed.md#sdlcontextsummary) - Generate a portable context briefing
 
 [Back to README](../../README.md)

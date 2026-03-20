@@ -93,6 +93,43 @@ When a request is denied, the response doesn't just say "no." It provides:
 
 ---
 
+## Policy Decision Tree
+
+```mermaid
+flowchart TD
+    Req["sdl.code.needWindow request"]
+    C1{"Identifiers<br/>provided?"}
+    C2{"Within line<br/>limit?"}
+    C3{"Within token<br/>limit?"}
+    C4{"Identifiers<br/>exist in range?"}
+    C5{"Symbol in<br/>current slice?"}
+    C6{"Scorer utility<br/>above threshold?"}
+    C7{"Break-glass<br/>allowed?"}
+    Approve["APPROVE<br/>Return code + audit log"]
+    Deny["DENY<br/>Return guidance +<br/>nextBestAction"]
+
+    Req --> C1
+    C1 -->|No| Deny
+    C1 -->|Yes| C2
+    C2 -->|Exceeds maxWindowLines| Deny
+    C2 -->|OK| C3
+    C3 -->|Exceeds maxWindowTokens| Deny
+    C3 -->|OK| C4
+    C4 -->|Found| Approve
+    C4 -->|Not found| C5
+    C5 -->|In slice/frontier| Approve
+    C5 -->|Not in slice| C6
+    C6 -->|Above threshold| Approve
+    C6 -->|Below threshold| C7
+    C7 -->|Enabled + audit| Approve
+    C7 -->|Disabled| Deny
+
+    style Approve fill:#d4edda,stroke:#28a745
+    style Deny fill:#f8d7da,stroke:#dc3545
+```
+
+---
+
 ## Runtime Execution Governance
 
 `sdl.runtime.execute` has its own governance layer:

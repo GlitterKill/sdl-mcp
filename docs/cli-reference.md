@@ -12,7 +12,6 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -214,6 +213,24 @@ Key options:
 - `--repo-id <ID>`
 - `--json`
 - `--badge`
+
+### `sdl-mcp tool <action> [args]`
+
+Direct MCP tool invocation from the CLI. Supports all 30 flat-mode actions plus code-mode tools.
+
+```bash
+sdl-mcp tool repo.status --repo-id my-repo
+sdl-mcp tool symbol.search --repo-id my-repo --query "handleRequest"
+sdl-mcp tool slice.build --repo-id my-repo --entry-symbols sym123
+```
+
+Key options:
+
+- `--format <json|pretty|compact>` (default: `pretty`)
+- `--repo-id <ID>` (passed through to the underlying tool)
+- All remaining arguments are forwarded as tool parameters
+
+Any tool listed in `sdl.manual` can be invoked this way. The output format can be switched for scripting (`json`) or human reading (`pretty`, `compact`).
 
 ### `sdl-mcp version`
 

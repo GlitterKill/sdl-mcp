@@ -39,6 +39,52 @@ AI coding agents are stateless. Every session starts from scratch — the agent 
               └──────────────────────┘
 ```
 
+### Dual Storage and Auto-Surfacing Flow
+
+```mermaid
+flowchart TD
+    subgraph "Write Path"
+        Store["sdl.memory.store"]
+        Graph["LadybugDB<br/>(Memory node + edges)"]
+        File[".sdl-memory/<type>/<id>.md<br/>(YAML frontmatter + markdown)"]
+        Store --> Graph
+        Store --> File
+    end
+
+    subgraph "Read Path: Explicit Query"
+        MQ["sdl.memory.query"]
+        MS["sdl.memory.surface"]
+        MQ --> Graph
+        MS --> Graph
+    end
+
+    subgraph "Read Path: Auto-Surfacing"
+        Slice["sdl.slice.build"]
+        Syms["Collect symbolIds<br/>from slice cards"]
+        Rank["Rank memories by<br/>confidence x recency x overlap"]
+        Embed["Embed top N memories<br/>in slice response"]
+        Slice --> Syms
+        Syms --> Graph
+        Graph --> Rank
+        Rank --> Embed
+    end
+
+    subgraph "Sync Path"
+        Git["Git pull<br/>(team member)"]
+        Index["sdl.index.refresh"]
+        Scan["scanMemoryFiles()"]
+        Upsert["upsertMemory()"]
+        Git --> Index
+        Index --> Scan
+        Scan --> File
+        File --> Upsert
+        Upsert --> Graph
+    end
+
+    style Graph fill:#d4edda,stroke:#28a745
+    style File fill:#fff3cd,stroke:#ffc107
+```
+
 ### Dual Storage
 
 Every memory exists in two places:

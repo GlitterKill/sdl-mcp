@@ -12,7 +12,6 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -142,6 +141,22 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 - [ ] Shows indexed file count
 - [ ] Shows symbol count
 
+#### sdl.repo.overview
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "level": "stats"
+}
+```
+
+**Expected:** Returns token-efficient codebase overview.
+
+- [ ] Returns stats overview
+- [ ] Shows file count, symbol count, edge count
+- [ ] Minimal token cost at "stats" level
+
 ### 2.2 Indexing
 
 #### sdl.index.refresh (Full)
@@ -231,6 +246,21 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 
 - [ ] Returns notModified: true
 - [ ] Minimal response (no full card)
+
+#### sdl.symbol.getCards (Batch)
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "symbolIds": ["<symbolId1>", "<symbolId2>"]
+}
+```
+
+**Expected:** Returns multiple symbol cards in a single request.
+
+- [ ] Returns cards array matching requested symbolIds
+- [ ] Each card has full metadata
 
 ### 2.4 Graph Slicing
 
@@ -396,6 +426,252 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 - [ ] Returns updated policy
 - [ ] Changes persist
 
+### 2.8 Memory Tools
+
+#### sdl.memory.store
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "type": "insight",
+  "content": "Test memory entry",
+  "tags": ["test"]
+}
+```
+
+**Expected:** Memory stored successfully.
+
+- [ ] Returns memory ID
+- [ ] No errors
+
+#### sdl.memory.query
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "query": "test"
+}
+```
+
+**Expected:** Returns matching memories.
+
+- [ ] Returns results array
+- [ ] Results match query
+
+#### sdl.memory.remove
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "memoryId": "<memoryId-from-store>"
+}
+```
+
+**Expected:** Memory soft-deleted.
+
+- [ ] Returns success
+- [ ] Memory no longer appears in query results
+
+#### sdl.memory.surface
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "taskText": "understand the server implementation"
+}
+```
+
+**Expected:** Returns relevant memories for the task.
+
+- [ ] Returns memories array
+- [ ] Relevance scores included
+
+### 2.9 Agent & Orchestration Tools
+
+#### sdl.agent.orchestrate
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "taskType": "explain",
+  "taskText": "Explain the MCP server implementation",
+  "budget": { "maxTokens": 2000, "maxActions": 5 }
+}
+```
+
+**Expected:** Returns orchestrated context retrieval results.
+
+- [ ] Returns taskId
+- [ ] Returns actionsTaken array
+- [ ] Returns path with rungs
+- [ ] Returns summary and answer
+
+#### sdl.agent.feedback
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "taskId": "<taskId-from-orchestrate>",
+  "rating": "positive",
+  "comment": "Helpful context"
+}
+```
+
+**Expected:** Feedback recorded.
+
+- [ ] Returns success
+
+#### sdl.agent.feedback.query
+
+**Input:**
+```json
+{
+  "repoId": "test-repo"
+}
+```
+
+**Expected:** Returns feedback history.
+
+- [ ] Returns feedback entries
+
+#### sdl.context.summary
+
+**Input:**
+```json
+{
+  "repoId": "test-repo"
+}
+```
+
+**Expected:** Returns context summary.
+
+- [ ] Returns summary text
+
+#### sdl.chain
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "steps": [
+    { "tool": "sdl.symbol.search", "args": { "query": "MCPServer", "limit": 5 } }
+  ]
+}
+```
+
+**Expected:** Executes multi-step tool chain with budget tracking.
+
+- [ ] Returns step results
+- [ ] Budget tracking included
+
+#### sdl.manual
+
+**Input:**
+```json
+{}
+```
+
+**Expected:** Returns self-documentation / usage guide.
+
+- [ ] Returns tool documentation
+- [ ] Covers all available tools
+
+### 2.10 Buffer Tools
+
+#### sdl.buffer.push
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "filePath": "src/test.ts",
+  "content": "export function test() { return 42; }"
+}
+```
+
+**Expected:** Draft buffer content pushed.
+
+- [ ] Returns success
+
+#### sdl.buffer.checkpoint
+
+**Input:**
+```json
+{
+  "repoId": "test-repo"
+}
+```
+
+**Expected:** Draft buffer checkpointed.
+
+- [ ] Returns checkpoint info
+
+#### sdl.buffer.status
+
+**Input:**
+```json
+{
+  "repoId": "test-repo"
+}
+```
+
+**Expected:** Returns draft buffer status.
+
+- [ ] Returns buffer state
+
+### 2.11 Runtime & Analysis Tools
+
+#### sdl.runtime.execute
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "command": "echo hello"
+}
+```
+
+**Expected:** Executes runtime operation.
+
+- [ ] Returns execution result
+
+#### sdl.pr.risk.analyze
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "riskThreshold": 70
+}
+```
+
+**Expected:** Returns PR risk analysis.
+
+- [ ] Returns riskScore (0-100)
+- [ ] Returns findings array
+- [ ] Returns impactedSymbols
+- [ ] Returns recommendedTests
+
+#### sdl.usage.stats
+
+**Input:**
+```json
+{
+  "repoId": "test-repo"
+}
+```
+
+**Expected:** Returns usage statistics.
+
+- [ ] Returns token savings data
+- [ ] Returns tool usage counts
+
 ---
 
 ## Part 3: Integration Tests
@@ -544,6 +820,10 @@ Test with each supported client:
 | Delta Packs | | | |
 | Code Access | | | |
 | Policy Management | | | |
+| Memory Tools | | | |
+| Agent & Orchestration | | | |
+| Buffer Tools | | | |
+| Runtime & Analysis | | | |
 | Integration Tests | | | |
 | Error Handling | | | |
 | Performance | | | |
@@ -551,5 +831,5 @@ Test with each supported client:
 
 **Tested By:** _______________
 **Date:** _______________
-**Version:** 0.8.0
+**Version:** 0.9.0
 **Result:** PASS / FAIL

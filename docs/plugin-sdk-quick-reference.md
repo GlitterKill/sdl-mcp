@@ -12,7 +12,6 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -54,9 +53,8 @@ sdl-mcp index
 
 | Document                                                               | Description                              |
 | ---------------------------------------------------------------------- | ---------------------------------------- |
-| [PLUGIN_SDK_AUTHOR_GUIDE.md](./PLUGIN_SDK_AUTHOR_GUIDE.md)             | Complete guide for creating plugins      |
-| [PLUGIN_SDK_SECURITY.md](./PLUGIN_SDK_SECURITY.md)                     | Security best practices and threat model |
-| [PLUGIN_SDK_IMPLEMENTATION.md](./PLUGIN_SDK_IMPLEMENTATION.md)         | Plugin SDK implementation details        |
+| [plugin-sdk-author-guide.md](./plugin-sdk-author-guide.md)             | Complete guide for creating plugins      |
+| [plugin-sdk-security.md](./plugin-sdk-security.md)                     | Security best practices and threat model |
 | [templates/README.md](../templates/README.md)                          | Template usage guide                     |
 | [examples/example-plugin/README.md](../examples/example-plugin/README.md) | Example plugin documentation          |
 
@@ -149,7 +147,7 @@ node --import tsx --test tests/integration/external-plugin-loading.test.ts
 | Version error       | Match `apiVersion` in manifest with host version |
 | Adapter not working | Verify `fileExtensions` and `languageId` match   |
 
-See [PLUGIN_SDK_AUTHOR_GUIDE.md#troubleshooting](./PLUGIN_SDK_AUTHOR_GUIDE.md#troubleshooting) for more.
+See [plugin-sdk-author-guide.md#troubleshooting](./plugin-sdk-author-guide.md#troubleshooting) for more.
 
 ## Security Checklist
 
@@ -161,7 +159,7 @@ Before installing a plugin:
 - [ ] Manifest is valid
 - [ ] API version matches host
 
-See [PLUGIN_SDK_SECURITY.md](./PLUGIN_SDK_SECURITY.md) for complete security guidelines.
+See [plugin-sdk-security.md](./plugin-sdk-security.md) for complete security guidelines.
 
 ## Configuration Options
 
@@ -255,6 +253,6 @@ npm install ./my-plugin
 # Run indexer
 sdl-mcp index
 
-# Check logs
-tail -f /var/log/sdl-mcp.log
+# Check logs (SDL-MCP logs to stderr)
+SDL_LOG_LEVEL=debug sdl-mcp serve 2>&1 | tail -f
 ```

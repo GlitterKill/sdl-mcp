@@ -50,6 +50,41 @@ This document covers all three in depth, with architecture diagrams, configurati
   └───────────────────────────────────────────────────────────────────┘
 ```
 
+```mermaid
+flowchart TD
+    subgraph "Pillar 1: Pass-2 Call Resolution"
+        P1["11 language resolvers"]
+        P1a["Import alias mapping"]
+        P1b["Barrel re-export tracing"]
+        P1c["Scope analysis"]
+        P1 --> P1a & P1b & P1c
+        P1a & P1b & P1c --> Conf["Confidence-scored<br/>call edges (0.0-1.0)"]
+    end
+
+    subgraph "Pillar 2: Embedding Search"
+        P2["Local ONNX or API embeddings"]
+        P2a["Lexical search (always)"]
+        P2b["Embed query + symbols"]
+        P2c["Alpha-blend scores"]
+        P2 --> P2a & P2b
+        P2a & P2b --> P2c
+        P2c --> Rerank["Reranked results"]
+    end
+
+    subgraph "Pillar 3: LLM Summaries"
+        P3["Claude Haiku / Ollama / Mock"]
+        P3a["1-3 sentence descriptions"]
+        P3b["Cached with content hash"]
+        P3 --> P3a --> P3b
+    end
+
+    Conf --> Cards["Symbol Cards & Slices"]
+    Rerank --> Cards
+    P3b --> Cards
+
+    style Cards fill:#d4edda,stroke:#28a745
+```
+
 | Pillar | Runs When | Output | Default State |
 |:-------|:----------|:-------|:--------------|
 | **Pass-2 Resolution** | Every index (full & incremental) | Confidence-scored call edges | Always on |

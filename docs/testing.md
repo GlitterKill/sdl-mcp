@@ -12,7 +12,6 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -830,7 +829,7 @@ node --import tsx --test --experimental-test-coverage
 Run the real-world benchmark:
 
 ```bash
-npm run benchmark:real
+npm run benchmark
 ```
 
 ### Test Fixture Performance

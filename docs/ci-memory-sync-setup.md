@@ -12,7 +12,6 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -25,7 +24,7 @@ This guide provides step-by-step instructions for setting up CI Memory Sync in y
 
 Before starting, ensure you have:
 
-- [ ] Node.js >= 18.0.0 installed
+- [ ] Node.js >= 20.0.0 installed
 - [ ] Git repository initialized
 - [ ] SDL-MCP installed locally
 - [ ] GitHub Actions enabled for your repository
@@ -41,7 +40,7 @@ sdl-mcp version
 npx --yes sdl-mcp@latest version
 
 # Expected output:
-# SDL-MCP version: 0.6.0
+# SDL-MCP version: 0.9.0
 # Environment:
 #   Node.js: v20.11.0
 #   Platform: linux/win32
@@ -171,7 +170,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node-version: [18.x, 20.x]
+        node-version: [20.x]
 
     steps:
       - name: Checkout code
@@ -661,13 +660,12 @@ After setup:
 
 For issues or questions:
 
-- Review [CI Memory Sync Operations Guide](CI_MEMORY_SYNC.md)
-- Check [Troubleshooting](CI_MEMORY_SYNC.md#troubleshooting)
+- Review [CI Memory Sync Operations Guide](ci-memory-sync.md)
+- Check [Troubleshooting](ci-memory-sync.md#troubleshooting)
 - Open an issue with workflow run URL
 
 ## Related Documentation
 
-- [CI Memory Sync Operations Guide](CI_MEMORY_SYNC.md)
+- [CI Memory Sync Operations Guide](ci-memory-sync.md)
 - [Sync Artifact Documentation](sync-artifacts.md)
-- [User Guide](USER_GUIDE.md)
-- [Testing Guide](TESTING.md)
+- [Testing Guide](testing.md)

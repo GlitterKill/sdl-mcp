@@ -1,6 +1,6 @@
 # CLI Tool Access
 
-**Access all 25 SDL-MCP tool actions directly from the command line — no MCP server, transport, or SDK required.**
+**Access all 30 SDL-MCP tool actions directly from the command line — no MCP server, transport, or SDK required.**
 
 The `sdl-mcp tool` command invokes MCP tool handlers directly, giving you full access to SDL-MCP's capabilities from shell scripts, CI pipelines, and interactive terminal sessions.
 
@@ -66,7 +66,7 @@ The CLI tool dispatcher bypasses the MCP server/transport layer entirely. Instea
 
 ---
 
-## All 25 Actions
+## All 30 Actions
 
 Run `sdl-mcp tool --list` to see all actions grouped by namespace:
 
@@ -113,6 +113,10 @@ Run `sdl-mcp tool --list` to see all actions grouped by namespace:
 | `buffer.push` | Push editor buffer updates (limited in CLI) |
 | `buffer.checkpoint` | Force checkpoint (limited in CLI) |
 | `buffer.status` | Get buffer status (limited in CLI) |
+| `memory.store` | Store a development memory |
+| `memory.query` | Query development memories |
+| `memory.remove` | Remove a development memory |
+| `memory.surface` | Auto-surface relevant memories |
 | `runtime.execute` | Execute command in sandboxed subprocess |
 
 > **Note:** `buffer.*` actions require a running MCP server with live indexing and will return limited results in CLI mode.
@@ -157,7 +161,7 @@ Repository: my-repo
   Files Indexed:   142
   Symbols Indexed: 1,847
   Latest Version:  v23
-  Last Indexed:    2024-03-14T19:00:00Z
+  Last Indexed:    2026-03-14T19:00:00Z
   Health Score:    92
 ```
 
@@ -317,7 +321,7 @@ The CLI tool access feature is composed of four modules:
 
 | Module | File | Responsibility |
 |:-------|:-----|:---------------|
-| **Action Definitions** | `src/cli/commands/tool-actions.ts` | 25 action definitions with arg specs, types, and examples |
+| **Action Definitions** | `src/cli/commands/tool-actions.ts` | 30 action definitions with arg specs, types, and examples |
 | **Arg Parser** | `src/cli/commands/tool-arg-parser.ts` | Flag→field mapping, type coercion, budget merging, required validation |
 | **Dispatcher** | `src/cli/commands/tool-dispatch.ts` | Config/DB init, repoId resolution, handler routing, error handling |
 | **Output Formatter** | `src/cli/commands/tool-output.ts` | JSON, compact JSON, pretty, and table output with action-specific formatting |

@@ -12,7 +12,6 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -60,7 +59,7 @@ graph LR
 
 ### Prerequisites
 
-- Node.js >= 18.0.0
+- Node.js >= 20.0.0
 - Git repository with proper `.github/workflows/ci.yml`
 - SDL-MCP installed and configured
 - Write permissions for `data/` and `.sdl-sync/` directories
@@ -564,9 +563,8 @@ When upgrading SDL-MCP:
 ### Related Documentation
 
 - [Sync Artifact Documentation](sync-artifacts.md)
-- [User Guide](USER_GUIDE.md)
-- [Testing Guide](TESTING.md)
-- [PR Risk Implementation](PR_RISK_IMPLEMENTATION.md)
+- [Testing Guide](testing.md)
+- [PR Risk / Delta Blast Radius](feature-deep-dives/delta-blast-radius.md)
 
 ## Support
 

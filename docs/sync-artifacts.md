@@ -12,7 +12,6 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -177,7 +176,7 @@ if (result.success) {
       --output ./artifacts/${{ github.sha }}.sdl-artifact.json
 
 - name: Upload Artifact
-  uses: actions/upload-artifact@v3
+  uses: actions/upload-artifact@v4
   with:
     name: sync-artifact
     path: ./artifacts/*.sdl-artifact.json
@@ -187,7 +186,7 @@ if (result.success) {
 
 ```yaml
 - name: Download Artifact
-  uses: actions/download-artifact@v3
+  uses: actions/download-artifact@v4
   with:
     name: sync-artifact
     path: ./artifacts/
@@ -366,22 +365,4 @@ No migration needed. Sync artifacts are self-contained and can be used across ve
 
 ### Database Schema
 
-New migration adds `sync_artifacts` table:
-
-```sql
-CREATE TABLE sync_artifacts (
-  artifact_id TEXT PRIMARY KEY,
-  repo_id TEXT NOT NULL,
-  version_id TEXT NOT NULL,
-  commit_sha TEXT,
-  branch TEXT,
-  artifact_hash TEXT NOT NULL,
-  compressed_data TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  size_bytes INTEGER NOT NULL,
-  FOREIGN KEY(repo_id) REFERENCES repos(repo_id),
-  FOREIGN KEY(version_id) REFERENCES versions(version_id)
-);
-```
-
-Run `npm run migrate` to apply migration.
+Sync metadata is stored as graph nodes in LadybugDB. The schema is applied idempotently on startup via `src/db/ladybug-schema.ts`.

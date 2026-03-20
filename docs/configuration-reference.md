@@ -12,7 +12,6 @@
   - [Configuration Reference (this page)](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -269,7 +268,7 @@ Below is every option with inline commentary. JSON does not support comments, so
 
     // Generate LLM-powered symbol summaries during indexing.
     // Requires an API key (summaryApiKey or ANTHROPIC_API_KEY env var).
-    // Summaries are cached in the symbol_summary_cache table.
+    // Summaries are cached as SummaryCache graph nodes in LadybugDB.
     "generateSummaries": false,
 
     // LLM model for summary generation. Supports Anthropic Claude or OpenAI-compatible APIs.

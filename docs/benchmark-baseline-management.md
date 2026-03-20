@@ -12,7 +12,6 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -270,5 +269,5 @@ Thresholds are defined in `config/benchmark.config.json`:
 ## References
 
 - [Benchmark Guardrails Documentation](./benchmark-guardrails.md)
-- [Benchmark Implementation Details](./benchmark-implementation.md)
+- [Benchmark Guardrails](./benchmark-guardrails.md)
 - [CI Configuration](../.github/workflows/ci.yml)

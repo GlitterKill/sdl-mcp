@@ -12,7 +12,6 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -533,7 +532,6 @@ Consider setting up alerts for:
 
 ## Related Documentation
 
-- [CI Memory Sync Operations Guide](CI_MEMORY_SYNC.md)
-- [CI Memory Sync Setup Guide](CI_MEMORY_SYNC_SETUP.md)
+- [CI Memory Sync Operations Guide](ci-memory-sync.md)
+- [CI Memory Sync Setup Guide](ci-memory-sync-setup.md)
 - [Sync Artifact Documentation](sync-artifacts.md)
-- [User Guide](USER_GUIDE.md)

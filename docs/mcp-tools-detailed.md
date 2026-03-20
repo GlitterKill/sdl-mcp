@@ -42,6 +42,17 @@ This document provides comprehensive documentation for every MCP tool exposed by
     - [sdl.agent.feedback.query](#sdlagentfeedbackquery)
 11. [Runtime Execution](#11-runtime-execution)
     - [sdl.runtime.execute](#sdlruntimeexecute)
+12. [Development Memories](#12-development-memories)
+    - [sdl.memory.store](#sdlmemorystore)
+    - [sdl.memory.query](#sdlmemoryquery)
+    - [sdl.memory.remove](#sdlmemoryremove)
+    - [sdl.memory.surface](#sdlmemorysurface)
+13. [Usage Statistics](#13-usage-statistics)
+    - [sdl.usage.stats](#sdlusagestats)
+14. [Code Mode Tools](#14-code-mode-tools)
+    - [sdl.chain](#sdlchain)
+    - [sdl.action.search](#sdlactionsearch)
+    - [sdl.manual](#sdlmanual)
 
 ---
 
@@ -60,7 +71,7 @@ Registers a new repository (or updates an existing one) for indexing. This is ty
 | `repoId` | string | Yes | Unique identifier for the repository (e.g., `"my-app"`) |
 | `rootPath` | string | Yes | Absolute path to the repository root directory |
 | `ignore` | string[] | No | Glob patterns to ignore (defaults to `node_modules`, `dist`, `.next`, `build`) |
-| `languages` | string[] | No | Language extensions to index. Defaults to all 12 supported: `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh` |
+| `languages` | string[] | No | Language extensions to index. Defaults to all 12 languages (11 adapters): `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh` |
 | `maxFileBytes` | number | No | Maximum file size to index in bytes (default: 2,000,000) |
 
 **Response:**
@@ -285,6 +296,7 @@ Searches the symbol graph by name, with optional semantic reranking via local em
 |:----------|:-----|:---------|:------------|
 | `repoId` | string | Yes | Repository identifier |
 | `query` | string | Yes | Search query (matched against symbol names) |
+| `kinds` | string[] | No | Filter by symbol kind (e.g., `["function", "class"]`). Valid kinds: `function`, `class`, `interface`, `type`, `module`, `method`, `constructor`, `variable` |
 | `limit` | number (1-1000) | No | Maximum results to return (default: 50) |
 | `semantic` | boolean | No | Enable semantic reranking using embeddings |
 

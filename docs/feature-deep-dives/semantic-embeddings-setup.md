@@ -20,7 +20,7 @@ SDL-MCP's semantic system has three layers — **embedding models**, **LLM summa
 │   ┌───────────────┐   ┌───────────────┐   ┌───────────────────┐    │
 │   │ all-MiniLM    │   │ nomic-embed   │   │ Mock (fallback)   │    │
 │   │ 384-dim       │   │ 768-dim       │   │ 64-dim            │    │
-│   │ ~22 MB        │   │ ~274 MB       │   │ Deterministic     │    │
+│   │ ~22 MB        │   │ ~138 MB       │   │ Deterministic     │    │
 │   │ Bundled       │   │ Downloaded    │   │ No deps needed    │    │
 │   └───────────────┘   └───────────────┘   └───────────────────┘    │
 │                                                                     │

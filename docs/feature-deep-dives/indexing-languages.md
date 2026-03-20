@@ -8,23 +8,23 @@
 
 SDL-MCP ships with two indexing engines that can be selected via configuration:
 
-### Native Rust Engine (Default)
+### Native Rust Engine (Optional)
 
-A high-performance, multi-threaded Rust addon compiled via `napi-rs`. It handles pass-1 symbol extraction at near-native speed and is the default for production use.
+A high-performance, multi-threaded Rust addon compiled via `napi-rs`. It handles pass-1 symbol extraction at near-native speed.
 
 - Multi-threaded file parsing
 - ~18MB DLL on Windows
 - Distributed as per-platform npm packages (`sdl-mcp-native`)
 
-### Tree-sitter TypeScript Engine (Fallback)
+### Tree-sitter TypeScript Engine (Default)
 
-A pure Node.js engine using tree-sitter grammars for AST parsing. It's slower but has zero native dependencies and works everywhere Node.js runs. Automatically used when the Rust addon is unavailable.
+A pure Node.js engine using tree-sitter grammars for AST parsing. This is the **default engine** (`indexing.engine` defaults to `"typescript"`). It works everywhere Node.js runs. The Rust addon is automatically used instead when available and configured.
 
 Select via config:
 ```jsonc
 {
   "indexing": {
-    "engine": "rust"        // or "typescript"
+    "engine": "typescript"  // default; or "rust" if native addon is available
   }
 }
 ```
@@ -49,6 +49,36 @@ Indexing happens in two passes:
  │  types   │                      │   resolver: "import- │
  └──────────┘                      │    alias-resolver"   │
                                    └──────────────────────┘
+```
+
+### Two-Pass Pipeline Diagram
+
+```mermaid
+flowchart LR
+    subgraph "Pass 1: Local Extraction (per-file, parallel)"
+        F1["Source File"] --> Parse["Parse AST<br/>(tree-sitter)"]
+        Parse --> Sym["Symbols"]
+        Parse --> Imp["Imports"]
+        Parse --> Calls["Raw Calls<br/>(names only)"]
+        Parse --> FP["AST Fingerprints"]
+        Parse --> Sig["Signatures"]
+    end
+
+    subgraph "Pass 2: Global Resolution (cross-file, sequential)"
+        Calls --> Resolve["Resolve call targets<br/>to symbolIds"]
+        Imp --> Resolve
+        Resolve --> Score["Score confidence<br/>(0.0 - 1.0)"]
+        Score --> Edge["Create edges<br/>with metadata"]
+    end
+
+    subgraph "Enrichment"
+        Edge --> Cluster["Community Detection<br/>(clusters)"]
+        Edge --> Process["Call-Chain Tracing<br/>(processes)"]
+        Edge --> Summary["LLM Summaries<br/>(optional)"]
+    end
+
+    style F1 fill:#cce5ff,stroke:#004085
+    style Edge fill:#d4edda,stroke:#28a745
 ```
 
 ### Pass 1: What Gets Extracted

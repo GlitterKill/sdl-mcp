@@ -12,7 +12,6 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -169,7 +168,7 @@ If the degradation is intentional and justified:
 
    ```bash
    # Compare symbol extraction before/after
-   git diff HEAD~1 src/indexer/adapters/typescript.ts
+   git diff HEAD~1 src/indexer/adapter/typescript.ts
 
    # Test specific file
    node dist/cli/index.js index --file src/complex/file.ts
@@ -546,13 +545,16 @@ Should we adjust the threshold or optimize further?
 
    ```typescript
    // tests/performance/slice-build.test.ts
+   import { describe, it } from "node:test";
+   import assert from "node:assert";
+
    describe('Slice Building Performance', () => {
      it('should complete within threshold', async () => {
        const start = performance.now();
        await buildSlice({...});
        const elapsed = performance.now() - start;
 
-       expect(elapsed).toBeLessThan(500); // Threshold
+       assert.ok(elapsed < 500, `Slice build took ${elapsed}ms, threshold: 500ms`);
      });
    });
    ```

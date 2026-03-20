@@ -12,7 +12,6 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting (this page)](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -122,6 +121,53 @@ Then run manual refreshes with `sdl-mcp index` until the underlying issue is fix
 - Ensure agent points to `sdl-mcp serve --stdio`
 - Validate generated client config from `init --client <name>`
 - Confirm process logs for startup errors on stderr
+
+### LadybugDB Issues
+
+#### Lock file prevents startup
+
+- Symptom: error about database lock or "directory in use" on startup
+- Cause: a previous SDL-MCP process crashed without releasing the lock, or another process has the DB open
+- Resolution:
+  - ensure no other `sdl-mcp serve` or `sdl-mcp index` process is running
+  - delete the lock file inside the `.lbug` database directory (the directory named in your `graphDatabase.path` config), then restart
+  - if the database is corrupted, delete the entire `.lbug` directory and re-run `sdl-mcp index`
+
+#### Concurrent access errors
+
+- Symptom: intermittent query failures or "transaction conflict" errors when multiple agents connect
+- Cause: LadybugDB allows concurrent reads but serializes writes; long-running write transactions can conflict
+- Resolution:
+  - use HTTP transport (`serve --http`) for multi-agent setups — sessions are isolated
+  - avoid running `sdl-mcp index` while agents are actively querying; index during quiet periods or use incremental mode
+  - if errors persist, restart the server to clear stale transaction state
+
+#### Database incompatible after upgrade
+
+- Symptom: error "not compatible with the current graph engine" on startup
+- Cause: LadybugDB schema version changed between SDL-MCP releases; in-place migration is not supported
+- Resolution: delete the `.lbug` database directory and re-run `sdl-mcp index` to rebuild from source
+
+### Semantic / Embedding Setup Issues
+
+#### ONNX Runtime not loading
+
+- Symptom: warning "Failed to load ONNX runtime" or semantic search returns no results
+- Cause: `onnxruntime-node` native binary is missing or incompatible with the current platform/Node.js version
+- Resolution:
+  - run `npm rebuild onnxruntime-node` to recompile for your platform
+  - on Windows, ensure the Visual C++ Redistributable is installed
+  - if the ONNX binary cannot be built, set `semantic.enabled: false` in config to disable semantic features and fall back to text-based search
+  - check `sdl-mcp doctor` output for ONNX-specific diagnostics
+
+#### Embedding model download fails
+
+- Symptom: first-run hangs or errors during model download (e.g., `nomic-embed-text-v1.5`)
+- Cause: network restrictions or proxy settings blocking the model download (~138 MB)
+- Resolution:
+  - ensure outbound HTTPS access to Hugging Face model hub
+  - configure proxy via `HTTPS_PROXY` environment variable if needed
+  - use the smaller default model (`all-MiniLM-L6-v2`) which may already be cached
 
 ## Debug Commands
 

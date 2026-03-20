@@ -12,12 +12,11 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
 
-Complete reference for all 29 MCP tools exposed by `registerTools`. Tools are organized by category and listed in the recommended usage order within each category.
+Complete reference for all 30 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway tools) exposed by `registerTools`. Tools are organized by category and listed in the recommended usage order within each category.
 
 ---
 
@@ -159,7 +158,7 @@ Push an editor buffer update into the live draft overlay so symbol/search/slice 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `repoId` | `string` | Yes | Repository identifier |
-| `eventType` | `"change" \| "save" \| "close"` | Yes | Buffer lifecycle event |
+| `eventType` | `"open" \| "change" \| "save" \| "close"` | Yes | Buffer lifecycle event |
 | `filePath` | `string` | Yes | Repository-relative file path |
 | `content` | `string` | Yes | Current buffer contents |
 | `language` | `string` | No | Explicit language hint |
@@ -254,6 +253,7 @@ Search symbols by name or summary text.
 |-----------|------|----------|-------------|
 | `repoId` | `string` | Yes | Repository identifier |
 | `query` | `string` | Yes | Search query (min length: 1) |
+| `kinds` | `string[]` | No | Filter by symbol kind (e.g., `["function", "class"]`) |
 | `limit` | `integer` | No | Max results (1-1000, default: 50) |
 | `semantic` | `boolean` | No | Enable semantic reranking via embeddings |
 
@@ -978,6 +978,31 @@ Each `SurfacedMemory` includes the memory content plus a `score` field showing t
   "symbolIds": ["<symbol-id-1>", "<symbol-id-2>"],
   "limit": 5
 }
+```
+
+---
+
+## Usage Statistics (1 tool)
+
+### `sdl.usage.stats`
+
+Get cumulative token usage statistics and savings metrics for the current session or a specific repository.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repoId` | `string` | No | Repository identifier (omit for global stats) |
+
+**Response includes:**
+
+- Token usage counters, savings estimates, and compression ratios
+- Per-tool breakdowns when available
+
+**Example:**
+
+```json
+{ "repoId": "my-repo" }
 ```
 
 ---

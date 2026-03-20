@@ -12,7 +12,6 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -426,8 +425,8 @@ sudo -u sdl-mcp unshare -n sdl-mcp index
 # Monitor plugin directory
 sudo auditctl -w /opt/sdl-mcp/plugins -p wa -k sdl-mcp-plugins
 
-# Log plugin loading
-tail -f /var/log/sdl-mcp.log | grep "Plugin loaded"
+# Log plugin loading (SDL-MCP logs to stderr)
+SDL_LOG_LEVEL=debug sdl-mcp serve 2>&1 | grep "Plugin loaded"
 ```
 
 #### 6. Use Containerization
@@ -620,11 +619,11 @@ SDL-MCP logs security-relevant events:
 **Monitor logs**:
 
 ```bash
-# Watch for security events
-tail -f /var/log/sdl-mcp.log | grep -i "security\|error\|failed"
+# Watch for security events (SDL-MCP logs to stderr)
+SDL_LOG_LEVEL=debug sdl-mcp serve 2>&1 | grep -i "security\|error\|failed"
 
 # Alert on suspicious activity
-tail -f /var/log/sdl-mcp.log | grep "security violation" | mail -s "SDL-MCP Security Alert" admin@example.com
+SDL_LOG_LEVEL=debug sdl-mcp serve 2>&1 | grep "security violation" | mail -s "SDL-MCP Security Alert" admin@example.com
 ```
 
 ## Auditing and Validation
@@ -683,8 +682,8 @@ strace -f -e trace=clone,fork,vfork,execve sdl-mcp index 2>&1
 2. **Preserve Evidence**:
 
    ```bash
-   # Copy logs
-   cp /var/log/sdl-mcp.log /tmp/sdl-mcp.log.backup
+   # Copy logs (SDL-MCP logs to stderr; redirect to a file if needed)
+   # SDL_LOG_LEVEL=debug sdl-mcp serve 2>/tmp/sdl-mcp.log &
 
    # Copy plugin
    cp -r /opt/sdl-mcp/plugins/suspicious-plugin /tmp/evidence/
@@ -753,8 +752,8 @@ strace -f -e trace=clone,fork,vfork,execve sdl-mcp index 2>&1
    # Start SDL-MCP
    sudo -u sdl-mcp sdl-mcp index
 
-   # Monitor logs
-   tail -f /var/log/sdl-mcp.log
+   # Monitor logs (SDL-MCP logs to stderr)
+   SDL_LOG_LEVEL=debug sdl-mcp serve 2>&1 | tail -f
    ```
 
 ## Summary
@@ -786,7 +785,7 @@ strace -f -e trace=clone,fork,vfork,execve sdl-mcp index 2>&1
 ## Additional Resources
 
 - [SDL-MCP README](../README.md)
-- [Plugin Author Guide](PLUGIN_SDK_AUTHOR_GUIDE.md)
+- [Plugin Author Guide](plugin-sdk-author-guide.md)
 - [Node.js Security Best Practices](https://nodejs.org/en/docs/guides/security/)
 - [OWASP Top 10](https://owasp.org/www-project-top-ten/)
 - [CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks)

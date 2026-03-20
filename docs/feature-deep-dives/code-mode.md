@@ -89,6 +89,42 @@ Example:
 
 ---
 
+## Architecture
+
+```mermaid
+flowchart TD
+    Agent["Agent"]
+
+    subgraph "Code Mode Tools"
+        AS["sdl.action.search<br/>Discovery: find the right action"]
+        MN["sdl.manual<br/>Reference: load API subset"]
+        CH["sdl.chain<br/>Execution: multi-step pipeline"]
+    end
+
+    Agent -->|"1. What action do I need?"| AS
+    AS -->|"ranked actions + schemas"| Agent
+    Agent -->|"2. Show me the interface"| MN
+    MN -->|"compact manual"| Agent
+    Agent -->|"3. Execute workflow"| CH
+
+    subgraph "sdl.chain Execution"
+        S1["Step 0: symbolSearch<br/>args: query='handleAuth'"]
+        S2["Step 1: symbolGetCard<br/>args: symbolId=$0.symbols[0].symbolId"]
+        S3["Step 2: codeSkeleton<br/>args: symbolId=$1.card.symbolId"]
+        S1 -->|"$0 result"| S2
+        S2 -->|"$1 result"| S3
+    end
+
+    CH --> S1
+    S3 -->|"combined results<br/>+ budget tracking"| Agent
+
+    style AS fill:#cce5ff,stroke:#004085
+    style MN fill:#fff3cd,stroke:#ffc107
+    style CH fill:#d4edda,stroke:#28a745
+```
+
+---
+
 ## Current Features
 
 ### Result piping

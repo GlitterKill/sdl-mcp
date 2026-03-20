@@ -45,6 +45,42 @@ SDL-MCP's live indexing system eliminates this gap. As you type in your editor, 
   └──────────────────┘
 ```
 
+### Overlay Merge and Checkpoint Flow
+
+```mermaid
+flowchart TD
+    Editor["Editor (VSCode, etc.)"]
+    Push["sdl.buffer.push<br/>(full buffer content)"]
+    Overlay["Overlay Store (in-memory)"]
+    Parse["Background AST Parse<br/>(tree-sitter)"]
+    Cache["Draft Symbol Cache"]
+
+    subgraph "MCP Tool Query"
+        Query["search / card / slice / skeleton"]
+        Merge["Merge overlay symbols<br/>on top of durable DB"]
+        Result["Return combined results<br/>(draft shadows durable)"]
+    end
+
+    Save["File Save / sdl.buffer.checkpoint"]
+    DB["LadybugDB (durable)"]
+    Reconcile["Background Reconciler<br/>(cleanup stale drafts)"]
+
+    Editor -->|"buffer events"| Push
+    Push --> Overlay
+    Overlay --> Parse
+    Parse --> Cache
+    Cache --> Merge
+    Query --> Merge
+    Merge --> Result
+    Save --> DB
+    DB --> Reconcile
+    Reconcile --> Overlay
+
+    style Editor fill:#cce5ff,stroke:#004085
+    style DB fill:#d4edda,stroke:#28a745
+    style Overlay fill:#fff3cd,stroke:#ffc107
+```
+
 ### How It Works
 
 1. **Buffer Push**: Your editor extension sends the full file content on every keystroke (debounced) via `sdl.buffer.push`.

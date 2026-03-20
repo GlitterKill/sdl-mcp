@@ -84,6 +84,26 @@ Slices aren't one-shot. They have a full lifecycle:
 2. **Refresh** (`sdl.slice.refresh`) — Returns only what changed since your last version (dramatically cheaper than rebuilding)
 3. **Spillover** (`sdl.slice.spillover.get`) — Pages through symbols that didn't fit in the budget
 
+### Lifecycle Diagram
+
+```mermaid
+stateDiagram-v2
+    [*] --> Build: sdl.slice.build
+    Build --> Handle: returns handle + lease
+    Handle --> Refresh: sdl.slice.refresh
+    Refresh --> Delta: changed cards
+    Refresh --> NotModified: nothing changed
+    Delta --> Handle: updated handle
+    NotModified --> Handle
+    Handle --> Spillover: sdl.slice.spillover.get
+    Spillover --> Page: next page of overflow cards
+    Page --> Spillover: more pages?
+    Page --> Done: no more pages
+    Handle --> Expired: lease expires
+    Expired --> Build: rebuild
+    Done --> [*]
+```
+
 ### Auto-Discovery Mode
 
 You don't even need to know symbol IDs. Pass a `taskText` string and SDL-MCP will:

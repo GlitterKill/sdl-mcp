@@ -48,10 +48,10 @@ After fixing a bug:
 sdl.memory.store({
   repoId: "<repo>",
   type: "bugfix",
-  title: "better-sqlite3 .get() returns undefined not null",
-  content: "When querying for a missing row, better-sqlite3 returns undefined, not null. Use ?? null when the caller expects null. This caused silent failures in getSymbolCard when the symbol was deleted between index runs.",
-  fileRelPaths: ["src/db/queries.ts"],
-  tags: ["sqlite", "null-handling"],
+  title: "Always use MERGE not CREATE for Cypher upserts in LadybugDB",
+  content: "Using CREATE in Cypher queries causes duplicate nodes when the same symbol is re-indexed. Always use MERGE for idempotent upserts. Also, call normalizePath() before storing any file path — LadybugDB stores forward-slash-only paths, and forgetting this on Windows causes duplicate File nodes with mismatched path separators.",
+  fileRelPaths: ["src/db/ladybug-queries.ts"],
+  tags: ["ladybugdb", "cypher", "upsert", "paths"],
   confidence: 0.95
 })
 ```

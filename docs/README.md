@@ -6,8 +6,8 @@
 
 - [Overview](../README.md)
 - [Documentation Hub (this page)](./README.md)
-  - [Iris Gate Ladder](./IRIS_GATE_LADDER.md)
-  - [Architecture](./ARCHITECTURE.md)
+  - [Iris Gate Ladder](./feature-deep-dives/iris-gate-ladder.md)
+  - [Architecture](./architecture.md)
   - [Getting Started](./getting-started.md)
   - [CLI Reference](./cli-reference.md)
   - [MCP Tools Reference](./mcp-tools-reference.md)
@@ -15,7 +15,6 @@
   - [Agent Workflows](./agent-workflows.md)
   - [Tool Enforcement](./tool-enforcement.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Legacy User Guide](./USER_GUIDE.md)
 
 </details>
 </div>
@@ -25,23 +24,43 @@ Use this page as the entry point for SDL-MCP documentation.
 ## Read By Goal
 
 - I want to understand the technical stack and data flow:
-  - [Architecture](./ARCHITECTURE.md)
+  - [Architecture](./architecture.md)
 - I want to install and run SDL-MCP quickly:
   - [Getting Started](./getting-started.md)
 - I need command syntax and examples:
   - [CLI Reference](./cli-reference.md)
 - I need MCP tool payloads and responses:
   - [MCP Tools Reference](./mcp-tools-reference.md)
+  - [MCP Tools Detailed](./mcp-tools-detailed.md)
 - I need to tune repository, policy, and slice behavior:
   - [Configuration Reference](./configuration-reference.md)
 - I want agent best practices and Iris Gate Ladder workflows:
   - [Agent Workflows](./agent-workflows.md)
-  - [Iris Gate Ladder](./IRIS_GATE_LADDER.md)
+  - [Iris Gate Ladder](./feature-deep-dives/iris-gate-ladder.md)
 - I want agents to actually use SDL-MCP instead of native token-heavy tools:
   - [Tool Enforcement](./tool-enforcement.md)
   - [Claude-Specific Enforcement](./tool-enforcement-for-claude.md)
 - I need operational debugging guidance:
   - [Troubleshooting](./troubleshooting.md)
+- I want to understand the memory protocol:
+  - [Memory Protocol](./memory-protocol.md)
+
+## Feature Deep-Dives
+
+- [Iris Gate Ladder](./feature-deep-dives/iris-gate-ladder.md)
+- [Graph Slicing](./feature-deep-dives/graph-slicing.md)
+- [Delta & Blast Radius](./feature-deep-dives/delta-blast-radius.md)
+- [Live Indexing](./feature-deep-dives/live-indexing.md)
+- [Governance & Policy](./feature-deep-dives/governance-policy.md)
+- [Agent Orchestration](./feature-deep-dives/agent-orchestration.md)
+- [Indexing & Languages](./feature-deep-dives/indexing-languages.md)
+- [Semantic Engine](./feature-deep-dives/semantic-engine.md)
+- [Semantic Embeddings Setup](./feature-deep-dives/semantic-embeddings-setup.md)
+- [CLI Tool Access](./feature-deep-dives/cli-tool-access.md)
+- [Development Memories](./feature-deep-dives/development-memories.md)
+- [Tool Gateway](./feature-deep-dives/tool-gateway.md)
+- [Code Mode](./feature-deep-dives/code-mode.md)
+- [Runtime Execution](./feature-deep-dives/runtime-execution.md)
 
 ## Advanced and Supporting Docs
 
@@ -49,21 +68,33 @@ Use this page as the entry point for SDL-MCP documentation.
 - [Benchmark Guardrails](./benchmark-guardrails.md)
 - [Benchmark Baseline Management](./benchmark-baseline-management.md)
 - [Benchmark Failure Guide](./benchmark-failure-guide.md)
-- [CI Memory Sync Setup](./CI_MEMORY_SYNC_SETUP.md)
-- [CI Memory Sync Operations](./CI_MEMORY_SYNC.md)
-- [Testing Guide](./TESTING.md)
-- [Release Test Checklist](./RELEASETEST.md)
-- [Plugin SDK Author Guide](./PLUGIN_SDK_AUTHOR_GUIDE.md)
-- [Plugin SDK Quick Reference](./PLUGIN_SDK_QUICK_REFERENCE.md)
-- [Plugin SDK Implementation](./PLUGIN_SDK_IMPLEMENTATION.md)
-- [Plugin SDK Security](./PLUGIN_SDK_SECURITY.md)
-- [VSCode Extension README](../sdl-mcp-vscode/README.md)
+- [CI Memory Sync Setup](./ci-memory-sync-setup.md)
+- [CI Memory Sync Operations](./ci-memory-sync.md)
+- [Cross-Platform Validation](./cross-platform-validation.md)
+- [Testing Guide](./testing.md)
+- [Release Test Checklist](./release-test.md)
+- [PR Risk / Delta Blast Radius](./feature-deep-dives/delta-blast-radius.md)
+- [Agent Orchestration](./feature-deep-dives/agent-orchestration.md)
+- [Plugin SDK Author Guide](./plugin-sdk-author-guide.md)
+- [Plugin SDK Quick Reference](./plugin-sdk-quick-reference.md)
+- [Plugin SDK Security](./plugin-sdk-security.md)
 
 ## Current Scope Snapshot
 
-- Supported languages: TS, JS, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, Shell
-- CLI: init, doctor, index, serve, export, import, pull, benchmark:ci, summary, health, version
-- MCP tools (19 total): repository overview, symbol search and batch card fetch, graph slice workflows, delta and PR risk analysis, code access ladder, context summary, agent orchestration, and agent feedback recording/query
-- Semantic and summary features: optional semantic reranking and generated symbol summaries (feature-flagged)
-- HTTP graph surface: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
-- VSCode extension MVP: see `../sdl-mcp-vscode/README.md`
+- **Version**: 0.9.0
+- **Supported languages**: TS, JS, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, Shell (11 adapters, 12 languages)
+- **CLI commands** (12): init, doctor, index, serve, export, import, pull, benchmark:ci, summary, health, version, tool
+- **MCP tools** (30 flat-mode + 3 code-mode + 4 gateway-mode):
+  - Core: repo register/status/overview, index refresh, symbol search/getCard/getCards, slice build/refresh/spillover, delta get, PR risk analyze
+  - Code access: getSkeleton, getHotPath, needWindow (Iris Gate Ladder)
+  - Policy: get/set
+  - Agent: orchestrate, feedback, feedback.query, context summary
+  - Memory: store, query, remove, surface
+  - Buffer: push, checkpoint, status
+  - Runtime: execute
+  - Usage: stats
+  - Code Mode (optional): chain, action.search, manual
+  - Gateway (optional): sdl.query, sdl.code, sdl.repo, sdl.agent
+- **Semantic features**: optional semantic reranking, LLM-generated symbol summaries (Anthropic/Ollama/mock)
+- **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
+- **Native addon**: Rust via napi-rs for multi-threaded indexing (optional, TS fallback)

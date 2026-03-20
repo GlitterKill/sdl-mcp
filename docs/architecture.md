@@ -12,9 +12,8 @@
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Troubleshooting](./troubleshooting.md)
-- [Iris Gate Ladder](./IRIS_GATE_LADDER.md)
-- [Architecture (this page)](./ARCHITECTURE.md)
-- [Legacy User Guide](./USER_GUIDE.md)
+- [Iris Gate Ladder](./feature-deep-dives/iris-gate-ladder.md)
+- [Architecture (this page)](./architecture.md)
 
 </details>
 </div>
@@ -29,11 +28,11 @@ SDL-MCP is a high-performance codebase indexing and context retrieval server. Th
 |:------|:-----------|
 | Runtime | Node.js v20+ / TypeScript 5.9+ (strict, ESM) |
 | Database | LadybugDB (embedded graph database, single-file storage, Kuzu engine) |
-| MCP SDK | `@modelcontextprotocol/sdk` ^0.4.0 |
+| MCP SDK | `@modelcontextprotocol/sdk` ^1.27.1 |
 | Transports | stdio (CLI agents), HTTP/SSE (network clients) |
-| AST parsing | tree-sitter + language grammars (0.21.x) |
+| AST parsing | tree-sitter 0.25.0 + language grammars (0.23.x–0.25.x) |
 | Native addon | Rust via napi-rs (optional, multi-threaded pass-1) |
-| Embeddings | ONNX Runtime (MiniLM 384-dim, Nomic 768-dim) |
+| Embeddings | ONNX Runtime (MiniLM 384-dim, nomic-embed-text-v1.5 768-dim) |
 | Validation | Zod schemas for all tool payloads and responses |
 
 ---
@@ -87,7 +86,7 @@ SDL-MCP follows a **hexagonal / ports-and-adapters** design. Each module has a c
 2. initGraphDb()                        Open/create LadybugDB file
 3. ensureConfiguredReposRegistered()     Bootstrap repos into graph
 4. getDefaultLiveIndexCoordinator()      Singleton overlay service
-5. registerTools(server, services)       Wire 29 MCP tools
+5. registerTools(server, services)       Wire 30+ MCP tools (mode-dependent)
 6. setupFileWatchers()                   chokidar for incremental re-index
 7. ShutdownManager.register(callbacks)   Graceful cleanup handlers
 8. server.start()                        Begin accepting MCP requests
@@ -99,7 +98,7 @@ Startup is sequenced (not parallel) — the DB must be ready before tools regist
 
 ## Tool Dispatch
 
-All 29 MCP tools flow through a single dispatch path in `src/server.ts`:
+All MCP tools (30 flat + 3 code-mode + 4 gateway, configuration-dependent) flow through a single dispatch path in `src/server.ts`:
 
 ```
   Client request
@@ -162,9 +161,8 @@ Per-file, parallelizable. Each file produces:
   sig)
 ```
 
-**Language adapters** (`src/indexer/adapter/`) — one per language, each extends `BaseAdapter`:
-- `typescript.ts` (shared by TS/JS)
-- `python.ts`, `go.ts`, `java.ts`, `rust.ts`, `csharp.ts`, `c.ts`, `cpp.ts`, `php.ts`, `kotlin.ts`, `shell.ts`
+**Language adapters** (`src/indexer/adapter/`) — 11 adapters covering 12 languages, each extends `BaseAdapter`:
+- `typescript.ts` (shared by TS/JS), `python.ts`, `go.ts`, `java.ts`, `rust.ts`, `csharp.ts`, `c.ts`, `cpp.ts`, `php.ts`, `kotlin.ts`, `shell.ts`
 
 **Native Rust engine** (`native/src/extract/`) — optional, mirrors all TS adapters at near-native speed via napi-rs.
 
@@ -587,22 +585,28 @@ src/
 ├── main.ts                    Server entry point + bootstrap
 ├── server.ts                  MCPServer class + tool dispatch
 ├── cli/
-│   ├── commands/              CLI commands (init, doctor, index, serve, version)
+│   ├── commands/              CLI commands (12: init, doctor, index, serve, version,
+│   │                            export, import, pull, benchmark:ci, summary, health, tool)
 │   └── transport/             stdio + HTTP transport setup
 ├── config/
 │   └── types.ts               Zod config schemas
 ├── db/
 │   ├── initGraphDb.ts         DB path resolution + initialization
 │   ├── ladybug-schema.ts      Idempotent Cypher DDL
-│   └── ladybug-*.ts           Per-domain query modules (12 files)
+│   └── ladybug-*.ts           Per-domain query modules (repos, symbols, edges,
+│                                versions, clusters, processes, embeddings,
+│                                metrics, feedback, slices)
+├── domain/
+│   ├── types.ts               Canonical domain types (SymbolCard, GraphSlice, etc.)
+│   └── errors.ts              Typed error hierarchy
 ├── indexer/
 │   ├── indexer.ts             Main indexing orchestrator
-│   ├── adapter/               Language adapters (12 languages)
+│   ├── adapter/               Language adapters (11 adapters, 12 languages)
 │   ├── pass2/                 Cross-file resolvers (11 resolvers)
 │   ├── import-resolution/     Import chain analysis
 │   ├── embeddings.ts          ONNX embedding pipeline
 │   ├── summary-generator.ts   LLM summary providers
-│   └── watcher.ts             File system monitoring
+│   └── watcher.ts             File system monitoring (chokidar)
 ├── graph/
 │   └── slice/                 Beam search, serializer, start-node resolver
 ├── delta/
@@ -613,17 +617,47 @@ src/
 │   ├── hotpath.ts             Identifier-filtered excerpts
 │   ├── gate.ts                Proof-of-need gating
 │   └── windows.ts             Raw code extraction
+├── code-mode/
+│   ├── chain-*.ts             Multi-step tool chaining (sdl.chain)
+│   ├── manual-generator.ts    Self-documentation (sdl.manual)
+│   ├── action-catalog.ts      Action discovery (sdl.action.search)
+│   └── ladder-validator.ts    Context ladder validation
+├── gateway/
+│   ├── router.ts              Namespace-scoped tool routing
+│   ├── thin-schemas.ts        Compact gateway schemas
+│   └── compact-schema.ts      Schema size optimization
+├── agent/
+│   ├── orchestrator.ts        Autopilot planning + execution
+│   ├── planner.ts             Rung selection + budget allocation
+│   └── evidence.ts            Evidence collection
 ├── policy/
 │   └── engine.ts              Rule-based decision engine
 ├── live-index/
 │   ├── overlay-store.ts       In-memory draft storage
-│   └── coordinator.ts         Parse queue + reconciliation
+│   ├── coordinator.ts         Parse queue + reconciliation
+│   ├── checkpoint-service.ts  Persist drafts to DB
+│   └── idle-monitor.ts        Auto-checkpoint on idle
 ├── memory/
+│   ├── surface.ts             Auto-surface memories in slices
 │   └── file-sync.ts           .sdl-memory/ file read/write/scan
+├── runtime/
+│   ├── executor.ts            Sandboxed code execution
+│   └── runtimes.ts            Runtime definitions (node, python, shell)
+├── services/
+│   ├── summary.ts             Context summary generation
+│   ├── health.ts              Health check service
+│   └── card-builder.ts        Symbol card construction
+├── sync/
+│   ├── sync.ts                Export/import gzip artifacts
+│   └── pull.ts                Remote artifact pull
+├── startup/
+│   └── bootstrap.ts           Server initialization sequence
+├── benchmark/
+│   ├── threshold.ts           Regression threshold config
+│   └── regression.ts          Regression detection engine
 ├── mcp/
-│   ├── tools.ts               Zod schemas for all 29 tools
-│   ├── tools/                 Handler implementations (13 files)
-│   ├── errors.ts              Typed error hierarchy
+│   ├── tools/                 Handler implementations
+│   ├── errors.ts              Error-to-MCP response conversion
 │   ├── telemetry.ts           Tool call logging
 │   ├── token-usage.ts         Sideband token accounting
 │   ├── session-manager.ts     Multi-session lifecycle
@@ -631,7 +665,8 @@ src/
 └── util/
     ├── paths.ts               Windows path normalization
     ├── concurrency.ts         Generic ConcurrencyLimiter
-    └── hashing.ts             SHA-256 utilities
+    ├── hashing.ts             SHA-256 utilities
+    └── tokenizer.ts           Token counting utilities
 ```
 
 ---
@@ -655,7 +690,16 @@ graph TD
     C --> I[Embedding Pipeline + LLM Summaries]
     I --> C
 
-    C --> J[MCP Tool Layer - 29 tools]
+    C --> J[MCP Tool Layer]
+
+    subgraph Tool Registration Modes
+        J1[Flat Mode: 30 tools]
+        J2[Gateway Mode: 4 namespace tools]
+        J3[Code Mode: 3 chain tools]
+    end
+    J --- J1
+    J --- J2
+    J --- J3
 
     J --> K[Iris Gate Ladder]
     K --> |Cards → Skeleton → HotPath → Window| L[AI Agent]
@@ -669,12 +713,18 @@ graph TD
     J --> O[Agent Orchestration]
     O --> |Autonomous rung planning| L
 
+    J --> U[Runtime Execution]
+    U --> |Sandboxed code execution| L
+
     L --> P[Agent Feedback]
     P --> C
 
     J --> T[Development Memories]
     T --> |Store/surface memories| C
     T --> |Auto-surface in slices| L
+
+    J --> V[Usage Stats]
+    V --> |Token savings tracking| L
 
     Q[Policy Engine] -.-> |Gates code windows| K
     R[Session Manager] -.-> |Max 8 sessions| J
