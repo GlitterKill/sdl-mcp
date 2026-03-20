@@ -32,11 +32,32 @@ describe("Gateway schemas", () => {
       assert.strictEqual(result.success, true);
     });
 
+    it("validates symbol.getCard action with symbolRef", () => {
+      const result = QueryGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "symbol.getCard",
+        symbolRef: {
+          name: "MCPServer",
+          file: "src/server.ts",
+        },
+      });
+      assert.strictEqual(result.success, true);
+    });
+
     it("validates symbol.getCards action", () => {
       const result = QueryGatewaySchema.safeParse({
         repoId: "test-repo",
         action: "symbol.getCards",
         symbolIds: ["sym1", "sym2"],
+      });
+      assert.strictEqual(result.success, true);
+    });
+
+    it("validates symbol.getCards action with symbolRefs", () => {
+      const result = QueryGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "symbol.getCards",
+        symbolRefs: [{ name: "handleRequest" }],
       });
       assert.strictEqual(result.success, true);
     });

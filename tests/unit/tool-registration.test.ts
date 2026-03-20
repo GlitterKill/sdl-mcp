@@ -172,12 +172,12 @@ describe("MCP tool registration", () => {
       "sdl.manual should NOT be registered without codeModeConfig",
     );
     assert.ok(
-      !names.includes("sdl.action.search"),
-      "sdl.action.search should NOT be registered without codeModeConfig",
-    );
-    assert.ok(
       !names.includes("sdl.chain"),
       "sdl.chain should NOT be registered without codeModeConfig",
+    );
+    assert.ok(
+      names.includes("sdl.action.search"),
+      "sdl.action.search should register as a universal discovery surface",
     );
 
     // Flat tools should still work
@@ -205,12 +205,12 @@ describe("MCP tool registration", () => {
       "sdl.manual should NOT be registered when enabled=false",
     );
     assert.ok(
-      !names.includes("sdl.action.search"),
-      "sdl.action.search should NOT be registered when enabled=false",
-    );
-    assert.ok(
       !names.includes("sdl.chain"),
       "sdl.chain should NOT be registered when enabled=false",
+    );
+    assert.ok(
+      names.includes("sdl.action.search"),
+      "sdl.action.search should still register when enabled=false",
     );
   });
 });

@@ -819,12 +819,29 @@ const NotModifiedResponseSchema = z.object({
   ledgerVersion: z.string(),
 });
 
+export const SymbolRefSchema = z.object({
+  name: z.string().min(1),
+  file: z.string().min(1).optional(),
+  kind: z.string().min(1).optional(),
+  exportedOnly: z.boolean().optional(),
+});
+
 export const SymbolGetCardRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
+  symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH).optional(),
+  symbolRef: SymbolRefSchema.optional(),
   ifNoneMatch: z.string().optional(),
   minCallConfidence: z.number().min(0).max(1).optional(),
   includeResolutionMetadata: z.boolean().optional(),
+}).superRefine((value, ctx) => {
+  const provided = Number(value.symbolId !== undefined) + Number(value.symbolRef !== undefined);
+  if (provided !== 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide exactly one of symbolId or symbolRef.",
+      path: ["symbolId"],
+    });
+  }
 });
 
 export const SymbolGetCardsRequestSchema = z.object({
@@ -833,7 +850,9 @@ export const SymbolGetCardsRequestSchema = z.object({
     .array(z.string())
     .min(1)
     .max(100)
-    .describe("Array of symbol IDs to fetch (max 100)"),
+    .describe("Array of symbol IDs to fetch (max 100)")
+    .optional(),
+  symbolRefs: z.array(SymbolRefSchema).min(1).max(100).optional(),
   minCallConfidence: z.number().min(0).max(1).optional(),
   includeResolutionMetadata: z.boolean().optional(),
   knownEtags: z
@@ -842,6 +861,16 @@ export const SymbolGetCardsRequestSchema = z.object({
     .describe(
       "Map of symbolId → known ETag. Matching symbols return notModified instead of full card.",
     ),
+}).superRefine((value, ctx) => {
+  const provided =
+    Number(value.symbolIds !== undefined) + Number(value.symbolRefs !== undefined);
+  if (provided !== 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide exactly one of symbolIds or symbolRefs.",
+      path: ["symbolIds"],
+    });
+  }
 });
 
 const CardWithETagSchema = SymbolCardSchema.extend({
@@ -1391,6 +1420,7 @@ export type BufferStatusRequest = z.infer<typeof BufferStatusRequestSchema>;
 export type BufferStatusResponse = z.infer<typeof BufferStatusResponseSchema>;
 export type SymbolSearchRequest = z.infer<typeof SymbolSearchRequestSchema>;
 export type SymbolSearchResponse = z.infer<typeof SymbolSearchResponseSchema>;
+export type SymbolRef = z.infer<typeof SymbolRefSchema>;
 export type SymbolGetCardRequest = z.infer<typeof SymbolGetCardRequestSchema>;
 export type SymbolGetCardResponse = z.infer<typeof SymbolGetCardResponseSchema>;
 export type SymbolGetCardsRequest = z.infer<typeof SymbolGetCardsRequestSchema>;
@@ -1398,6 +1428,19 @@ export type SymbolGetCardsResponse = {
   cards: Array<
     import("./types.js").CardWithETag | import("./types.js").NotModifiedResponse
   >;
+  partial?: boolean;
+  succeeded?: string[];
+  failed?: string[];
+  failures?: Array<{
+    input: string;
+    message: string;
+    code?: string;
+    classification?: string;
+    retryable?: boolean;
+    fallbackTools?: string[];
+    fallbackRationale?: string;
+    candidates?: Array<Record<string, unknown>>;
+  }>;
 };
 export type SliceBuildRequest = z.infer<typeof SliceBuildRequestSchema>;
 export type SliceBuildResponse = z.infer<typeof SliceBuildResponseSchema>;

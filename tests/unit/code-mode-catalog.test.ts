@@ -34,6 +34,37 @@ describe("code-mode action catalog", () => {
       }
     });
 
+    it("includes shared agent-facing metadata for dependency hints and fallbacks", () => {
+      invalidateCatalog();
+      const catalog = buildCatalog({ includeExamples: true });
+      const getCard = catalog.find((d) => d.action === "symbol.getCard");
+      const needWindow = catalog.find((d) => d.action === "code.needWindow");
+
+      assert.ok(getCard, "expected symbol.getCard descriptor");
+      assert.ok(
+        Array.isArray(getCard?.prerequisites),
+        "symbol.getCard should expose prerequisites",
+      );
+      assert.ok(
+        Array.isArray(getCard?.recommendedNextActions),
+        "symbol.getCard should expose recommended next actions",
+      );
+      assert.ok(
+        Array.isArray(getCard?.fallbacks),
+        "symbol.getCard should expose fallbacks",
+      );
+
+      assert.ok(needWindow, "expected code.needWindow descriptor");
+      assert.deepStrictEqual(needWindow?.prerequisites, [
+        "code.getSkeleton",
+        "code.getHotPath",
+      ]);
+      assert.ok(
+        needWindow?.fallbacks.includes("code.getSkeleton"),
+        "code.needWindow should suggest code.getSkeleton as a fallback",
+      );
+    });
+
     it("includeSchemas adds schemaSummary to descriptors", () => {
       invalidateCatalog();
       const catalog = buildCatalog({ includeSchemas: true });

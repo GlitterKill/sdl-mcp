@@ -67,6 +67,17 @@ describe("Gateway descriptions", () => {
     assert.ok(QUERY_DESCRIPTION.includes("delta.get"));
   });
 
+  it("QUERY_DESCRIPTION includes dependency hints for the common ladder", () => {
+    assert.ok(
+      QUERY_DESCRIPTION.includes("Prefer"),
+      "query description should include a preferred call sequence",
+    );
+    assert.ok(
+      QUERY_DESCRIPTION.includes("symbol.search -> symbol.getCard"),
+      "query description should hint search before getCard",
+    );
+  });
+
   it("CODE_DESCRIPTION mentions key code actions", () => {
     assert.ok(CODE_DESCRIPTION.includes("code.needWindow"));
     assert.ok(CODE_DESCRIPTION.includes("code.getSkeleton"));

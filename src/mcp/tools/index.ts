@@ -87,7 +87,10 @@ import {
 import { handleUsageStats } from "./usage.js";
 import type { ToolServices } from "../../gateway/index.js";
 import { createActionMap } from "../../gateway/router.js";
-import { registerCodeModeTools } from "../../code-mode/index.js";
+import {
+  registerActionSearchTool,
+  registerCodeModeTools,
+} from "../../code-mode/index.js";
 import type { CodeModeConfig } from "../../config/types.js";
 
 export function registerTools(
@@ -99,7 +102,10 @@ export function registerTools(
   // Register memory hint hook for all modes
   server.registerPostDispatchHook(createMemoryHintHook());
 
-  // Code Mode exclusive: only register sdl.manual + sdl.chain
+  // Universal discovery surface
+  registerActionSearchTool(server, services);
+
+  // Code Mode exclusive: register action search plus code-mode tools only
   if (codeModeConfig?.enabled && codeModeConfig?.exclusive) {
     registerCodeModeTools(server, services, codeModeConfig);
     return;

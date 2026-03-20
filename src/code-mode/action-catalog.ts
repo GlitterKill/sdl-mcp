@@ -263,10 +263,22 @@ export interface ActionDescriptor {
   tags: ActionTag[];
   /** Whether this is a gateway action or internal transform */
   kind: "gateway" | "internal";
+  /** Prior actions that usually improve this action's inputs */
+  prerequisites: string[];
+  /** Likely next actions after this action succeeds */
+  recommendedNextActions: string[];
+  /** Fallback actions when this action is unavailable or denied */
+  fallbacks: string[];
   /** Schema summary (if requested) */
   schemaSummary?: SchemaSummary;
   /** Example args (if requested) */
   example?: Record<string, unknown>;
+}
+
+export interface ActionMetadata {
+  prerequisites: string[];
+  recommendedNextActions: string[];
+  fallbacks: string[];
 }
 
 // --- Descriptions from manual template (extracted) ---
@@ -328,6 +340,179 @@ const TRANSFORM_EXAMPLES: Record<string, Record<string, unknown>> = {
     joinWith: "\n",
   },
 };
+
+const EMPTY_METADATA: ActionMetadata = {
+  prerequisites: [],
+  recommendedNextActions: [],
+  fallbacks: [],
+};
+
+const ACTION_METADATA: Record<string, ActionMetadata> = {
+  "symbol.search": {
+    prerequisites: ["repo.status"],
+    recommendedNextActions: ["symbol.getCard", "slice.build"],
+    fallbacks: ["repo.overview"],
+  },
+  "symbol.getCard": {
+    prerequisites: ["symbol.search"],
+    recommendedNextActions: ["slice.build", "code.getSkeleton"],
+    fallbacks: ["symbol.search"],
+  },
+  "symbol.getCards": {
+    prerequisites: ["symbol.search"],
+    recommendedNextActions: ["slice.build"],
+    fallbacks: ["symbol.getCard"],
+  },
+  "slice.build": {
+    prerequisites: ["symbol.getCard", "repo.overview"],
+    recommendedNextActions: ["slice.refresh", "code.getSkeleton"],
+    fallbacks: ["context.summary"],
+  },
+  "slice.refresh": {
+    prerequisites: ["slice.build"],
+    recommendedNextActions: ["slice.spillover.get", "code.getSkeleton"],
+    fallbacks: ["slice.build"],
+  },
+  "slice.spillover.get": {
+    prerequisites: ["slice.build", "slice.refresh"],
+    recommendedNextActions: ["code.getSkeleton"],
+    fallbacks: ["slice.refresh"],
+  },
+  "delta.get": {
+    prerequisites: ["repo.status"],
+    recommendedNextActions: ["pr.risk.analyze", "context.summary"],
+    fallbacks: ["repo.overview"],
+  },
+  "context.summary": {
+    prerequisites: ["symbol.getCard", "slice.build"],
+    recommendedNextActions: [],
+    fallbacks: ["repo.overview"],
+  },
+  "pr.risk.analyze": {
+    prerequisites: ["delta.get"],
+    recommendedNextActions: ["symbol.getCard", "code.getHotPath"],
+    fallbacks: ["context.summary"],
+  },
+  "code.needWindow": {
+    prerequisites: ["code.getSkeleton", "code.getHotPath"],
+    recommendedNextActions: [],
+    fallbacks: ["code.getSkeleton", "code.getHotPath"],
+  },
+  "code.getSkeleton": {
+    prerequisites: ["symbol.getCard", "slice.build"],
+    recommendedNextActions: ["code.getHotPath", "code.needWindow"],
+    fallbacks: ["context.summary"],
+  },
+  "code.getHotPath": {
+    prerequisites: ["code.getSkeleton", "symbol.getCard"],
+    recommendedNextActions: ["code.needWindow"],
+    fallbacks: ["code.getSkeleton"],
+  },
+  "repo.register": {
+    prerequisites: [],
+    recommendedNextActions: ["repo.status", "index.refresh"],
+    fallbacks: [],
+  },
+  "repo.status": {
+    prerequisites: [],
+    recommendedNextActions: ["repo.overview", "index.refresh"],
+    fallbacks: [],
+  },
+  "repo.overview": {
+    prerequisites: ["repo.status"],
+    recommendedNextActions: ["symbol.search", "slice.build"],
+    fallbacks: ["context.summary"],
+  },
+  "index.refresh": {
+    prerequisites: ["repo.status"],
+    recommendedNextActions: ["repo.status", "repo.overview"],
+    fallbacks: ["buffer.checkpoint"],
+  },
+  "policy.get": {
+    prerequisites: ["repo.status"],
+    recommendedNextActions: ["policy.set", "code.needWindow"],
+    fallbacks: [],
+  },
+  "policy.set": {
+    prerequisites: ["policy.get"],
+    recommendedNextActions: ["code.needWindow"],
+    fallbacks: ["policy.get"],
+  },
+  "agent.orchestrate": {
+    prerequisites: ["repo.status", "repo.overview"],
+    recommendedNextActions: ["agent.feedback"],
+    fallbacks: ["slice.build", "context.summary"],
+  },
+  "agent.feedback": {
+    prerequisites: ["slice.build", "agent.orchestrate"],
+    recommendedNextActions: ["agent.feedback.query"],
+    fallbacks: [],
+  },
+  "agent.feedback.query": {
+    prerequisites: [],
+    recommendedNextActions: [],
+    fallbacks: [],
+  },
+  "buffer.push": {
+    prerequisites: ["repo.status"],
+    recommendedNextActions: ["buffer.checkpoint", "buffer.status"],
+    fallbacks: ["index.refresh"],
+  },
+  "buffer.checkpoint": {
+    prerequisites: ["buffer.push"],
+    recommendedNextActions: ["symbol.search", "code.getSkeleton"],
+    fallbacks: ["index.refresh"],
+  },
+  "buffer.status": {
+    prerequisites: ["buffer.push"],
+    recommendedNextActions: ["buffer.checkpoint"],
+    fallbacks: [],
+  },
+  "runtime.execute": {
+    prerequisites: ["repo.status", "policy.get"],
+    recommendedNextActions: ["context.summary"],
+    fallbacks: ["code.getSkeleton"],
+  },
+  "memory.store": {
+    prerequisites: ["symbol.getCard", "slice.build"],
+    recommendedNextActions: ["memory.surface", "memory.query"],
+    fallbacks: [],
+  },
+  "memory.query": {
+    prerequisites: [],
+    recommendedNextActions: ["memory.surface"],
+    fallbacks: [],
+  },
+  "memory.remove": {
+    prerequisites: ["memory.query"],
+    recommendedNextActions: [],
+    fallbacks: [],
+  },
+  "memory.surface": {
+    prerequisites: ["symbol.getCard", "slice.build"],
+    recommendedNextActions: ["memory.store"],
+    fallbacks: ["memory.query"],
+  },
+};
+
+export function getActionMetadata(action: string): ActionMetadata {
+  return ACTION_METADATA[action] ?? EMPTY_METADATA;
+}
+
+export function formatActionDiscoveryHints(action: string): string {
+  const metadata = getActionMetadata(action);
+  const parts: string[] = [];
+  if (metadata.prerequisites.length > 0) {
+    parts.push(`before: ${metadata.prerequisites.join(", ")}`);
+  }
+  if (metadata.recommendedNextActions.length > 0) {
+    parts.push(`next: ${metadata.recommendedNextActions.join(", ")}`);
+  }
+  if (metadata.fallbacks.length > 0) {
+    parts.push(`fallbacks: ${metadata.fallbacks.join(", ")}`);
+  }
+  return parts.length > 0 ? ` Hints: ${parts.join(" | ")}.` : "";
+}
 
 // --- Catalog Builder ---
 
@@ -402,6 +587,7 @@ function buildBaseCatalogFromMap(actionMap: ReturnType<typeof createActionMap>):
       description: ACTION_DESCRIPTIONS[action] ?? "",
       tags: ACTION_TAGS[action] ?? [],
       kind: "gateway",
+      ...getActionMetadata(action),
     });
   }
 
@@ -413,6 +599,7 @@ function buildBaseCatalogFromMap(actionMap: ReturnType<typeof createActionMap>):
       description: TRANSFORM_DESCRIPTIONS[fn] ?? transform.description,
       tags: ["transform"],
       kind: "internal",
+      ...EMPTY_METADATA,
     });
   }
 
@@ -443,6 +630,13 @@ export function rankCatalog(
     const fn = desc.fn.toLowerCase();
     const description = desc.description.toLowerCase();
     const tagStr = desc.tags.join(" ").toLowerCase();
+    const metadataStr = [
+      ...desc.prerequisites,
+      ...desc.recommendedNextActions,
+      ...desc.fallbacks,
+    ]
+      .join(" ")
+      .toLowerCase();
 
     for (const term of terms) {
       // Exact name match
@@ -456,6 +650,8 @@ export function rankCatalog(
         score += 10;
       } else if (tagStr.includes(term)) {
         score += 5;
+      } else if (metadataStr.includes(term)) {
+        score += 4;
       }
     }
 

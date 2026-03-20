@@ -14,6 +14,10 @@ type ErrorResponse = {
     code?: string;
     nextBestAction?: string;
     requiredFieldsForNext?: Record<string, string>;
+    classification?: string;
+    retryable?: boolean;
+    fallbackTools?: string[];
+    candidates?: Array<{ symbolId: string }>;
   };
 };
 
@@ -48,6 +52,22 @@ describe("errorToMcpResponse", () => {
       symbolId: "sym-1",
       repoId: "repo-1",
     });
+  });
+
+  it("classifies typed errors and preserves guidance metadata", () => {
+    const error = new DatabaseError("db failed");
+    Object.assign(error, {
+      classification: "transient",
+      retryable: true,
+      fallbackTools: ["sdl.repo.status"],
+      candidates: [{ symbolId: "sym-1" }],
+    });
+
+    const response = errorToMcpResponse(error) as ErrorResponse;
+    assert.strictEqual(response.error?.classification, "transient");
+    assert.strictEqual(response.error?.retryable, true);
+    assert.deepStrictEqual(response.error?.fallbackTools, ["sdl.repo.status"]);
+    assert.deepStrictEqual(response.error?.candidates, [{ symbolId: "sym-1" }]);
   });
 
   it("should sanitize non-Error values", () => {

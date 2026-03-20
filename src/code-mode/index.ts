@@ -6,12 +6,63 @@ import { getManualCached, FN_NAME_MAP } from "./manual-generator.js";
 import { parseChainRequest } from "./chain-parser.js";
 import { executeChain } from "./chain-executor.js";
 import { ChainRequestSchema, ChainTraceOptionsSchema } from "./types.js";
-import { MANUAL_DESCRIPTION, CHAIN_DESCRIPTION, ACTION_SEARCH_DESCRIPTION } from "./descriptions.js";
+import {
+  MANUAL_DESCRIPTION,
+  CHAIN_DESCRIPTION,
+  ACTION_SEARCH_DESCRIPTION,
+} from "./descriptions.js";
 import { estimateTokens } from "../util/tokenize.js";
-import { buildCatalog, rankCatalog, type ActionDescriptor } from "./action-catalog.js";
+import {
+  buildCatalog,
+  rankCatalog,
+  type ActionDescriptor,
+} from "./action-catalog.js";
 import { INTERNAL_TRANSFORM_NAMES } from "./transforms.js";
 import { ValidationError } from "../domain/errors.js";
 import { z } from "zod";
+
+export const ActionSearchRequestSchema = z.object({
+  query: z.string().min(1),
+  limit: z.number().int().min(1).max(25).default(10),
+  includeSchemas: z.boolean().default(false),
+  includeExamples: z.boolean().default(false),
+});
+
+export function registerActionSearchTool(
+  server: MCPServer,
+  services: ToolServices,
+): void {
+  server.registerTool(
+    "sdl.action.search",
+    ACTION_SEARCH_DESCRIPTION,
+    ActionSearchRequestSchema,
+    async (rawArgs: unknown) => {
+      const args = ActionSearchRequestSchema.parse(rawArgs);
+      const catalog = buildCatalog({
+        liveIndex: services.liveIndex,
+        includeSchemas: args.includeSchemas,
+        includeExamples: args.includeExamples,
+      });
+
+      const ranked = rankCatalog(catalog, args.query).slice(0, args.limit);
+      return {
+        actions: ranked,
+        tokenEstimate: estimateTokens(JSON.stringify(ranked)),
+      };
+    },
+    {
+      type: "object",
+      properties: {
+        query: { type: "string", minLength: 1 },
+        limit: { type: "integer", minimum: 1, maximum: 25 },
+        includeSchemas: { type: "boolean" },
+        includeExamples: { type: "boolean" },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  );
+}
 
 /**
  * Register Code Mode tools (sdl.manual + sdl.chain) on the MCP server.
@@ -27,7 +78,7 @@ export function registerCodeModeTools(
 ): void {
   const actionMap = prebuiltActionMap ?? createActionMap(services.liveIndex);
 
-  // --- sdl.manual — enhanced with query/actions/format/schema/example filtering ---
+  // --- sdl.manual - enhanced with query/actions/format/schema/example filtering ---
   const ManualRequestSchema = z.object({
     query: z.string().min(1).optional(),
     actions: z.array(z.string().min(1)).optional(),
@@ -46,20 +97,24 @@ export function registerCodeModeTools(
       const includeSchemas = args.includeSchemas;
       const includeExamples = args.includeExamples;
 
-      // Default behavior: no query, no actions filter — return legacy manual
-      if (!args.query && !args.actions && format === "typescript" && !includeSchemas && !includeExamples) {
+      // Default behavior: no query, no actions filter - return legacy manual
+      if (
+        !args.query &&
+        !args.actions &&
+        format === "typescript" &&
+        !includeSchemas &&
+        !includeExamples
+      ) {
         const manual = getManualCached(services.liveIndex);
         return { manual, tokenEstimate: estimateTokens(manual) };
       }
 
-      // Build catalog with optional enrichment
       let catalog = buildCatalog({
         liveIndex: services.liveIndex,
         includeSchemas,
         includeExamples,
       });
 
-      // Filter by exact action/fn names
       if (args.actions && args.actions.length > 0) {
         const validNames = new Set([
           ...Object.keys(FN_NAME_MAP),
@@ -76,7 +131,6 @@ export function registerCodeModeTools(
           };
         }
 
-        // Preserve caller order
         const filtered: ActionDescriptor[] = [];
         for (const name of args.actions) {
           const match = catalog.find((d) => d.action === name || d.fn === name);
@@ -87,12 +141,10 @@ export function registerCodeModeTools(
         catalog = filtered;
       }
 
-      // Filter by query (intersect with actions filter if both present)
       if (args.query) {
         catalog = rankCatalog(catalog, args.query);
       }
 
-      // Return in requested format
       if (format === "json") {
         return {
           actions: catalog,
@@ -100,13 +152,11 @@ export function registerCodeModeTools(
         };
       }
 
-      // typescript or markdown — render as string
       const rendered = format === "markdown"
         ? renderMarkdown(catalog)
         : renderTypescript(catalog);
       return { manual: rendered, tokenEstimate: estimateTokens(rendered) };
     },
-    // thin wire schema
     {
       type: "object",
       properties: {
@@ -120,47 +170,7 @@ export function registerCodeModeTools(
     },
   );
 
-  // --- sdl.action.search — discovery surface ---
-  const ActionSearchRequestSchema = z.object({
-    query: z.string().min(1),
-    limit: z.number().int().min(1).max(25).default(10),
-    includeSchemas: z.boolean().default(false),
-    includeExamples: z.boolean().default(false),
-  });
-
-  server.registerTool(
-    "sdl.action.search",
-    ACTION_SEARCH_DESCRIPTION,
-    ActionSearchRequestSchema,
-    async (rawArgs: unknown) => {
-      const args = ActionSearchRequestSchema.parse(rawArgs);
-      const limit = args.limit;
-      const catalog = buildCatalog({
-        liveIndex: services.liveIndex,
-        includeSchemas: args.includeSchemas,
-        includeExamples: args.includeExamples,
-      });
-
-      const ranked = rankCatalog(catalog, args.query).slice(0, limit);
-      return {
-        actions: ranked,
-        tokenEstimate: estimateTokens(JSON.stringify(ranked)),
-      };
-    },
-    {
-      type: "object",
-      properties: {
-        query: { type: "string", minLength: 1 },
-        limit: { type: "integer", minimum: 1, maximum: 25 },
-        includeSchemas: { type: "boolean" },
-        includeExamples: { type: "boolean" },
-      },
-      required: ["query"],
-      additionalProperties: false,
-    },
-  );
-
-  // --- sdl.chain — execute a chain of operations in a single round-trip ---
+  // --- sdl.chain - execute a chain of operations in a single round-trip ---
   server.registerTool(
     "sdl.chain",
     CHAIN_DESCRIPTION,
@@ -173,7 +183,6 @@ export function registerCodeModeTools(
         throw error;
       }
 
-      // Extract trace options from raw args (already validated by Zod via ChainRequestSchema)
       const rawObj = rawArgs as Record<string, unknown>;
       const traceOpts = rawObj.trace
         ? ChainTraceOptionsSchema.parse(rawObj.trace)
@@ -181,7 +190,6 @@ export function registerCodeModeTools(
 
       return executeChain(parsed.request, actionMap, config, context, traceOpts);
     },
-    // thin wire schema — minimal envelope
     {
       type: "object",
       properties: {
@@ -208,11 +216,9 @@ export function registerCodeModeTools(
   );
 }
 
-// --- Rendering Helpers ---
-
 function renderTypescript(catalog: ActionDescriptor[]): string {
   const lines: string[] = [
-    "// SDL-MCP API — use with sdl.chain tool",
+    "// SDL-MCP API - use with sdl.chain tool",
     "// repoId is set in the chain envelope, not per-step.",
     "// Reference prior step results with $N (e.g., $0.symbols[0].symbolId).",
     "",
@@ -220,6 +226,15 @@ function renderTypescript(catalog: ActionDescriptor[]): string {
 
   for (const desc of catalog) {
     lines.push(`/** ${desc.description} */`);
+    if (desc.prerequisites.length > 0) {
+      lines.push(`// Prerequisites: ${desc.prerequisites.join(", ")}`);
+    }
+    if (desc.recommendedNextActions.length > 0) {
+      lines.push(`// Next: ${desc.recommendedNextActions.join(", ")}`);
+    }
+    if (desc.fallbacks.length > 0) {
+      lines.push(`// Fallbacks: ${desc.fallbacks.join(", ")}`);
+    }
     if (desc.schemaSummary) {
       const params = desc.schemaSummary.fields
         .map((f) => `${f.name}${f.required ? "" : "?"}: ${f.type}`)
@@ -251,6 +266,17 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
     lines.push("");
     lines.push(`- **Kind**: ${desc.kind}`);
     lines.push(`- **Tags**: ${desc.tags.join(", ")}`);
+    if (desc.prerequisites.length > 0) {
+      lines.push(`- **Prerequisites**: ${desc.prerequisites.join(", ")}`);
+    }
+    if (desc.recommendedNextActions.length > 0) {
+      lines.push(
+        `- **Recommended next**: ${desc.recommendedNextActions.join(", ")}`,
+      );
+    }
+    if (desc.fallbacks.length > 0) {
+      lines.push(`- **Fallbacks**: ${desc.fallbacks.join(", ")}`);
+    }
 
     if (desc.schemaSummary) {
       lines.push("");
@@ -258,7 +284,9 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
       lines.push("|-----------|------|----------|---------|");
       for (const f of desc.schemaSummary.fields) {
         const def = f.default !== undefined ? JSON.stringify(f.default) : "";
-        lines.push(`| ${f.name} | ${f.type} | ${f.required ? "yes" : "no"} | ${def} |`);
+        lines.push(
+          `| ${f.name} | ${f.type} | ${f.required ? "yes" : "no"} | ${def} |`,
+        );
       }
     }
 

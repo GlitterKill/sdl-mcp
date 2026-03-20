@@ -39,21 +39,53 @@ const SymbolSearchAction = z.object({
   semantic: z.boolean().optional(),
 });
 
-const SymbolGetCardAction = z.object({
-  action: z.literal("symbol.getCard"),
-  symbolId: z.string(),
-  ifNoneMatch: z.string().optional(),
-  minCallConfidence: z.number().min(0).max(1).optional(),
-  includeResolutionMetadata: z.boolean().optional(),
+const SymbolRefFields = z.object({
+  name: z.string().min(1),
+  file: z.string().min(1).optional(),
+  kind: z.string().min(1).optional(),
+  exportedOnly: z.boolean().optional(),
 });
 
-const SymbolGetCardsAction = z.object({
-  action: z.literal("symbol.getCards"),
-  symbolIds: z.array(z.string()).min(1).max(100),
-  minCallConfidence: z.number().min(0).max(1).optional(),
-  includeResolutionMetadata: z.boolean().optional(),
-  knownEtags: z.record(z.string(), z.string()).optional(),
-});
+const SymbolGetCardAction = z
+  .object({
+    action: z.literal("symbol.getCard"),
+    symbolId: z.string().optional(),
+    symbolRef: SymbolRefFields.optional(),
+    ifNoneMatch: z.string().optional(),
+    minCallConfidence: z.number().min(0).max(1).optional(),
+    includeResolutionMetadata: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const provided = Number(value.symbolId !== undefined) + Number(value.symbolRef !== undefined);
+    if (provided !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide exactly one of symbolId or symbolRef.",
+        path: ["symbolId"],
+      });
+    }
+  });
+
+const SymbolGetCardsAction = z
+  .object({
+    action: z.literal("symbol.getCards"),
+    symbolIds: z.array(z.string()).min(1).max(100).optional(),
+    symbolRefs: z.array(SymbolRefFields).min(1).max(100).optional(),
+    minCallConfidence: z.number().min(0).max(1).optional(),
+    includeResolutionMetadata: z.boolean().optional(),
+    knownEtags: z.record(z.string(), z.string()).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const provided =
+      Number(value.symbolIds !== undefined) + Number(value.symbolRefs !== undefined);
+    if (provided !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide exactly one of symbolIds or symbolRefs.",
+        path: ["symbolIds"],
+      });
+    }
+  });
 
 const SliceBuildAction = z.object({
   action: z.literal("slice.build"),
@@ -117,7 +149,7 @@ export const QueryGatewaySchema = z
     repoId: z.string().min(1),
   })
   .and(
-    z.discriminatedUnion("action", [
+    z.union([
       SymbolSearchAction,
       SymbolGetCardAction,
       SymbolGetCardsAction,
