@@ -32,8 +32,8 @@ SDL-MCP exposes 30 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway 
 | | `sdl.buffer.checkpoint` | Trigger a checkpoint to persist draft changes into the symbol overlay |
 | | `sdl.buffer.status` | Check live buffer state (pending, dirty, queue depth) |
 | **Symbols** | `sdl.symbol.search` | Search symbols by name or summary; supports semantic reranking via `semantic: true` |
-| | `sdl.symbol.getCard` | Get a single symbol card with ETag caching and optional `minCallConfidence` filtering |
-| | `sdl.symbol.getCards` | Batch fetch up to 100 cards in one round trip; supports `knownEtags` for delta fetching |
+| | `sdl.symbol.getCard` | Get a single symbol card by `symbolId` or `symbolRef`, with ETag caching and optional `minCallConfidence` filtering |
+| | `sdl.symbol.getCards` | Batch fetch up to 100 cards by `symbolIds` or `symbolRefs`; supports `knownEtags` and partial-success metadata |
 | **Slices** | `sdl.slice.build` | Build graph slice from entry symbols, task text, stack traces, or edited files |
 | | `sdl.slice.refresh` | Refresh an existing slice handle; returns incremental delta only |
 | | `sdl.slice.spillover.get` | Paginated fetch for overflow symbols beyond budget |
@@ -87,7 +87,9 @@ Use this order unless task constraints force escalation:
 2. `sdl.symbol.search` with a tight `limit` (`5-20` to start; default is `50`, max is `1000`).
    - Add `semantic: true` to enable embedding-based reranking for fuzzy or conceptual queries.
 3. `sdl.symbol.getCard` for single lookups; send `ifNoneMatch` to get `notModified` responses.
+   - Provide exactly one of `symbolId` or `symbolRef`. Use `symbolRef` when you know a symbol name and optional file or kind hints but do not yet have the canonical ID.
    - Use `sdl.symbol.getCards` (batch, up to 100 IDs) when fetching multiple symbols — one round trip instead of many.
+   - `sdl.symbol.getCards` also accepts `symbolRefs`; mixed batches can return `partial`, `succeeded`, `failed`, and structured `failures[]` metadata instead of failing the whole request.
    - Pass `knownEtags` to `getCards` for delta fetching (unchanged cards return as refs, not full payloads).
    - Use `minCallConfidence` to filter low-confidence call edges from card responses.
 4. `sdl.slice.build` with explicit budget and compact output:
@@ -131,6 +133,7 @@ Use this order unless task constraints force escalation:
   - Keep `limit` low (5–20) to start. Increase only if no results match.
   - `semantic: true` adds ~50ms latency but dramatically improves relevance for conceptual queries.
 - `sdl.symbol.getCard` / `sdl.symbol.getCards`:
+  - Prefer `symbolRef` inputs when the agent knows a stable symbol name but has not yet resolved the canonical ID.
   - Use `minCallConfidence` to filter out low-confidence call edges, reducing card size.
   - Use `knownEtags` (batch) or `ifNoneMatch` (single) to skip unchanged cards entirely.
 - `sdl.slice.build`:
@@ -265,7 +268,7 @@ Store cross-session knowledge that auto-surfaces in future slice builds:
 - Do not call `sdl.symbol.getCard` N times when `sdl.symbol.getCards` can fetch all N in one call.
 - Do not skip `sdl.agent.feedback` after completing a task — it improves future context quality.
 - Do not call `sdl.runtime.execute` without setting `timeoutMs` — long-running processes will hang.
-- Do not ignore `nextBestAction` in denied `code.needWindow` responses — it tells you what to try instead.
+- Do not ignore `nextBestAction`, `fallbackTools`, or `fallbackRationale` in denied or ambiguous responses — they tell you what to try instead.
 - Do not ignore stale memories surfaced in slices — review and update or remove them.
 - Do not store trivial or ephemeral notes as memories — they add noise to future surfacing.
 - Do not use `sdl.chain` for a single action — it adds overhead. Use the direct tool instead.

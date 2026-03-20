@@ -8,6 +8,8 @@ Use SDL-MCP as the default path for repository `{{REPO_ID}}`.
 2. Use `sdl.action.search` when the correct SDL action is unclear.
 3. Use `sdl.manual(query|actions|format)` for focused reference instead of loading the full manual.
 4. Use `sdl.chain` for multi-step lookups and `runtimeExecute` inside `sdl.chain` for repo-local commands.
+5. Use `symbolRef` or `symbolRefs` when you know a symbol name but not the canonical `symbolId`.
+6. Follow `nextBestAction`, `fallbackTools`, `fallbackRationale`, and ranked candidates from SDL responses instead of retrying blocked native tools.
 
 ## Native Tool Restrictions
 
@@ -35,4 +37,5 @@ Use SDL-MCP as the default path for repository `{{REPO_ID}}`.
 
 - Discovery: `sdl.action.search({ query: "auth tests" })`
 - Focused manual: `sdl.manual({ actions: ["symbol.search", "slice.build"] })`
+- Natural lookup: `sdl.symbol.getCard({ repoId: "{{REPO_ID}}", symbolRef: { name: "handleRequest", file: "src/server.ts" } })`
 - Runtime execution: `sdl.chain(... runtimeExecute ...)`

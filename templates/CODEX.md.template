@@ -9,6 +9,8 @@ Use SDL-MCP as the default workflow for repository `{{REPO_ID}}`.
 3. Use `sdl.manual` with `query` or `actions` for focused reference.
 4. Use `sdl.chain` for multi-step context gathering.
 5. Use `runtimeExecute` inside `sdl.chain` for repo-local commands instead of native shell execution.
+6. Use `symbolRef` or `symbolRefs` when you know a symbol name but not the canonical `symbolId`.
+7. If SDL returns `nextBestAction`, `fallbackTools`, `fallbackRationale`, or ranked candidates, follow that guidance instead of retrying native tools.
 
 ## Restrictions
 

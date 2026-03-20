@@ -47,6 +47,18 @@ Example:
 
 This returns a ranked subset of actions, with optional schema and example metadata.
 
+Each ranked action can include:
+
+- `action` and `description`
+- `tags`
+- `schemaSummary`
+- `example`
+- `prerequisites`
+- `recommendedNextActions`
+- `fallbacks`
+
+Code Mode uses the same metadata model that now powers gateway descriptions and manual output, so discovery, reference, and execution all point the agent toward the same next-step ladder.
+
 ### `sdl.manual`
 
 Use this when you already know the rough area and want a compact manual instead of the full API surface.
@@ -67,6 +79,8 @@ Example:
   "includeExamples": true
 }
 ```
+
+When you pass `includeSchemas` or `includeExamples`, `sdl.manual` preserves the same discovery hints from `sdl.action.search` instead of expanding into the full API surface.
 
 ### `sdl.chain`
 

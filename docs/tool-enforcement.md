@@ -42,6 +42,11 @@ SDL-MCP's token savings depend on the model actually using SDL tools:
 4. `sdl.chain`
 5. `runtimeExecute` inside `sdl.chain`
 
+The generated enforcement files also teach two newer patterns:
+
+- use `symbolRef` / `symbolRefs` when the agent knows a symbol name but not the canonical `symbolId`
+- follow structured recovery guidance such as `nextBestAction`, `fallbackTools`, `fallbackRationale`, and candidate lists instead of retrying blocked native tools
+
 If an agent falls back to native file reads or native shell commands for indexed code and repo-local execution, you lose much of the token-efficiency benefit.
 
 ---
@@ -73,6 +78,8 @@ See the client-specific guide in [tool-enforcement-for-claude.md](./tool-enforce
 
 Codex currently relies on repo-local instruction files rather than generated hook assets. The generated `CODEX.md` and `AGENTS.md` direct the agent toward SDL-first workflows and away from token-heavy native reads and shell commands.
 
+Those generated files also describe natural-identifier lookup and fallback-guided recovery so Codex can stay inside SDL-MCP even when the exact `symbolId` is unknown.
+
 ### Gemini CLI
 
 Gemini currently uses the same repo-local instruction strategy as Codex in SDL-MCP's generated setup. The goal is the same: keep code understanding and repo-local execution inside SDL-MCP whenever possible.
@@ -86,6 +93,8 @@ OpenCode gets both instruction files and generated project-local enforcement ass
 
 This allows SDL-MCP to steer both discovery and execution more aggressively than instruction-only setups.
 
+The generated instruction layer still matters because it tells the model how to use the newer SDL patterns after a plugin or permission rule blocks a native tool.
+
 ---
 
 ## Recommended Next Step
@@ -95,4 +104,6 @@ After generating the enforcement setup:
 1. connect the client to SDL-MCP
 2. start the session with `sdl.repo.status`
 3. confirm the agent is using `sdl.action.search`, `sdl.manual`, and `sdl.chain`
-4. confirm repo-local execution is happening through SDL runtime rather than the client's native shell tool
+4. confirm symbol lookups can use `symbolRef` / `symbolRefs` when IDs are not yet known
+5. confirm repo-local execution is happening through SDL runtime rather than the client's native shell tool
+6. confirm denied or ambiguous responses are followed via `nextBestAction`, `fallbackTools`, or `fallbackRationale` instead of retrying native tools

@@ -34,6 +34,8 @@ The generated files steer Claude toward:
 4. `sdl.chain`
 5. `runtimeExecute` inside `sdl.chain`
 
+They also teach Claude to use `symbolRef` / `symbolRefs` when it knows a symbol name but not the canonical ID, and to follow SDL fallback guidance instead of retrying blocked native tools.
+
 ---
 
 ## Enforcement Layers
@@ -53,6 +55,8 @@ The generated files steer Claude toward:
 ### Instruction layer
 
 `CLAUDE.md`, `AGENTS.md`, and `.claude/sdl-prompt.md` reinforce the same SDL-first behavior in plain language.
+
+That instruction layer now includes natural-identifier lookup and guidance fields such as `fallbackTools` and `fallbackRationale`.
 
 ---
 
@@ -84,12 +88,17 @@ For code understanding:
 3. `sdl.manual(query|actions|format)`
 4. `sdl.chain`
 
+For symbol lookup:
+
+- use `symbolRef` or `symbolRefs` when the symbol name is known but the exact `symbolId` is not
+- if SDL returns ranked candidates or fallback guidance, refine the SDL request instead of retrying native `Read`
+
 For repo-local execution:
 
 - use `runtimeExecute` inside `sdl.chain`
 - prefer `node`, `typescript`, `python`, `ruby`, `php`, and `shell`
 
-Do not retry denied native `Read` or `Bash` calls. Switch to SDL-MCP immediately.
+Do not retry denied native `Read` or `Bash` calls. Switch to SDL-MCP immediately and follow the SDL response guidance fields when present.
 
 ---
 

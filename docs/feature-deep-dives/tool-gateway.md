@@ -2,7 +2,7 @@
 
 **Reduce MCP tool registration overhead by 81% — from 30 individual tools down to 4 namespace-scoped gateway tools.**
 
-The tool gateway consolidates all 30 SDL-MCP tools into 4 typed proxy tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`). Each gateway tool accepts an `action` discriminator field to route calls to the appropriate handler. This dramatically reduces the token cost of `tools/list` responses that agents must process at the start of every conversation.
+The tool gateway consolidates all 30 SDL-MCP tools into 4 typed proxy tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`). Each gateway tool accepts an `action` field that routes the call to the appropriate handler and then applies the original per-tool validation. This dramatically reduces the token cost of `tools/list` responses that agents must process at the start of every conversation.
 
 ---
 
@@ -124,9 +124,9 @@ The 30 tools are organized into 4 namespaces:
 | `sdl.repo` | 6 | Repository lifecycle: register, status, overview, index, policy |
 | `sdl.agent` | 11 | Agentic ops: orchestrate, feedback, buffers, runtime, memory |
 
-### 2. Discriminated Union Schema
+### 2. Action-Based Union Schema
 
-Each gateway tool uses a Zod discriminated union on the `action` field. The calling pattern is:
+Each gateway tool uses an action-based union schema on the `action` field. Some actions add a second validation layer for mutually exclusive inputs such as `symbolId` versus `symbolRef`. The calling pattern is:
 
 ```json
 // Instead of:
@@ -136,7 +136,22 @@ Each gateway tool uses a Zod discriminated union on the `action` field. The call
 { "tool": "sdl.query", "args": { "repoId": "x", "action": "symbol.search", "query": "auth" } }
 ```
 
-The `repoId` field is hoisted to the envelope level (shared across all actions in a namespace), and the `action` field discriminates which handler processes the call.
+The `repoId` field is hoisted to the envelope level (shared across all actions in a namespace), and the `action` field selects which handler processes the call.
+
+For symbol-card actions, gateway mode now accepts the same natural-identifier shape as flat mode:
+
+```json
+{
+  "tool": "sdl.query",
+  "args": {
+    "repoId": "x",
+    "action": "symbol.getCard",
+    "symbolRef": { "name": "handleRequest", "file": "src/server.ts" }
+  }
+}
+```
+
+`symbol.getCards` follows the same pattern with `symbolRefs`. Mixed natural-reference batches can return partial-success metadata instead of failing the whole request.
 
 ### 3. Double Validation
 
@@ -186,7 +201,7 @@ The key to token savings is the **thin schema** emitted in `tools/list` response
 }
 ```
 
-The `additionalProperties: true` flag lets action-specific parameters pass through. The tool description contains a compact reference card listing all actions and their parameters, which gives the agent enough information to construct correct calls.
+The `additionalProperties: true` flag lets action-specific parameters pass through. The tool description contains a compact reference card listing all actions and their parameters, plus common ladder hints and fallback paths, which gives the agent enough information to construct correct calls.
 
 Full validation still happens server-side via the strict Zod schemas — the thin wire schema is purely for the `tools/list` response to minimize token cost.
 
@@ -255,7 +270,7 @@ Legacy tools include a deprecation notice in their description:
 src/gateway/
   index.ts            # Registration orchestrator — registers 4 gateway + optional legacy
   router.ts           # Action routing — maps action names to { schema, handler } pairs
-  schemas.ts          # Full Zod schemas — discriminated unions per namespace
+  schemas.ts          # Full Zod schemas — action-based unions per namespace
   thin-schemas.ts     # Thin wire schemas — minimal JSON for tools/list
   descriptions.ts     # Compact tool descriptions — action reference cards
   compact-schema.ts   # $defs/$ref deduplicator for schema optimization

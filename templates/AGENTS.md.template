@@ -12,6 +12,8 @@
 3. Use `sdl.manual` with `query` or `actions` to load only the relevant subset.
 4. Use `sdl.chain` for any workflow that would otherwise require multiple SDL calls.
 5. Use `runtimeExecute` inside `sdl.chain` for repo-local tests, builds, lint, and diagnostics.
+6. Use `symbolRef` or `symbolRefs` when you know a symbol name but not the canonical `symbolId`.
+7. If SDL returns `nextBestAction`, `fallbackTools`, `fallbackRationale`, or candidate matches, follow that guidance instead of retrying native tools.
 
 ### Do Not Use Default Tools For Indexed Code
 
@@ -39,6 +41,7 @@
 - Discovery: `sdl.action.search` -> `sdl.manual(query|actions)`
 - Multi-step context: `sdl.chain`
 - Repo-local execution: `sdl.chain` + `runtimeExecute`
+- Natural identifier lookup: `sdl.symbol.getCard` / `sdl.symbol.getCards` with `symbolRef` / `symbolRefs`
 - Direct code access: only after cards, slices, skeletons, or hot paths are insufficient
 
 ### Runtime Defaults
@@ -57,9 +60,16 @@ The enforced agent profile expects these SDL runtimes to be enabled:
 ```json
 {
   "repoId": "{{REPO_ID}}",
-  "chain": [
+  "steps": [
     { "fn": "repoStatus", "args": { "repoId": "{{REPO_ID}}" } },
     { "fn": "actionSearch", "args": { "query": "find relevant symbol tools", "limit": 5 } },
+    {
+      "fn": "symbolGetCard",
+      "args": {
+        "repoId": "{{REPO_ID}}",
+        "symbolRef": { "name": "handleRequest", "file": "src/server.ts" }
+      }
+    },
     {
       "fn": "runtimeExecute",
       "args": {

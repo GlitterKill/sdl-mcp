@@ -324,10 +324,13 @@ Supports ETag-based conditional requests via `ifNoneMatch` — if the symbol has
 | Parameter | Type | Required | Description |
 |:----------|:-----|:---------|:------------|
 | `repoId` | string | Yes | Repository identifier |
-| `symbolId` | string | Yes | Symbol identifier (SHA-256 hash) |
+| `symbolId` | string | Conditional | Symbol identifier (SHA-256 hash) |
+| `symbolRef` | object | Conditional | Natural symbol reference: `{name, file?, kind?, exportedOnly?}` |
 | `ifNoneMatch` | string | No | ETag from a previous card response. Returns `notModified` if unchanged. |
 | `minCallConfidence` | number (0-1) | No | Filter out call edges below this confidence threshold |
 | `includeResolutionMetadata` | boolean | No | Include full call resolution details (resolver ID, resolution phase, reason) |
+
+Provide exactly one of `symbolId` or `symbolRef`.
 
 **Response (full card):**
 
@@ -364,6 +367,8 @@ Supports ETag-based conditional requests via `ifNoneMatch` — if the symbol has
 }
 ```
 
+**Natural-reference resolution:** When `symbolRef` resolves to a single high-confidence match, the tool returns the same card payload as an ID lookup. When it is ambiguous or missing, the MCP error payload includes `classification`, `fallbackTools`, `fallbackRationale`, and ranked `candidates`.
+
 **Token cost:** ~50-150 tokens per card. This is Rung 1 of the Iris Gate Ladder and should always be tried before requesting code.
 
 ---
@@ -379,10 +384,13 @@ Batch-fetches multiple symbol cards in a single round trip.
 | Parameter | Type | Required | Description |
 |:----------|:-----|:---------|:------------|
 | `repoId` | string | Yes | Repository identifier |
-| `symbolIds` | string[] (1-100) | Yes | Array of symbol IDs to fetch |
+| `symbolIds` | string[] (1-100) | Conditional | Array of symbol IDs to fetch |
+| `symbolRefs` | object[] (1-100) | Conditional | Array of natural symbol references: `{name, file?, kind?, exportedOnly?}` |
 | `knownEtags` | Record<string, string> | No | Map of `symbolId → ETag` for conditional fetching |
 | `minCallConfidence` | number (0-1) | No | Filter call edges below this confidence |
 | `includeResolutionMetadata` | boolean | No | Include full call resolution details |
+
+Provide exactly one of `symbolIds` or `symbolRefs`.
 
 **Response:**
 
@@ -391,11 +399,21 @@ Batch-fetches multiple symbol cards in a single round trip.
   "cards": [
     { "symbolId": "...", "name": "...", ... },
     { "notModified": true, "etag": "...", "ledgerVersion": "..." }
+  ],
+  "partial": true,
+  "succeeded": ["sym-1"],
+  "failed": ["missingNode"],
+  "failures": [
+    {
+      "input": "missingNode",
+      "classification": "not_found",
+      "fallbackTools": ["sdl.symbol.search"]
+    }
   ]
 }
 ```
 
-**Notes:** Use this when you know you need multiple cards (e.g., after a search or slice). One round trip instead of many.
+**Notes:** Use this when you know you need multiple cards (for example after a search or slice). When you pass `symbolRefs`, SDL resolves each input independently and can return partial-success metadata instead of failing the whole batch.
 
 ---
 

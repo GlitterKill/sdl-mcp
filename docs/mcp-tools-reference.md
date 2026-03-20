@@ -275,19 +275,24 @@ When semantic mode is enabled, lexical candidates are reranked by embeddings. If
 
 ### `sdl.symbol.getCard`
 
-Fetch a single symbol card by ID with ETag support.
+Fetch a single symbol card by ID or natural reference with ETag support.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `repoId` | `string` | Yes | Repository identifier |
-| `symbolId` | `string` | Yes | Symbol identifier |
+| `symbolId` | `string` | Conditional | Symbol identifier |
+| `symbolRef` | `{ name, file?, kind?, exportedOnly? }` | Conditional | Natural symbol reference. Use this when you know the symbol name and optionally the file or kind. |
 | `ifNoneMatch` | `string` | No | ETag for conditional fetch (returns `notModified` if unchanged) |
+
+Provide exactly one of `symbolId` or `symbolRef`.
 
 The returned card includes identity, signature, summary, invariants, side effects, dependency edges (imports/calls), metrics, and (when available) cluster/process metadata (`card.cluster`, `card.processes`). `metrics.canonicalTest` (if available) contains the file path, distance, and proximity of the nearest associated test.
 
 **Response:** Either `{ card: SymbolCard }` or `{ notModified: true, etag, ledgerVersion }`.
+
+If a natural reference is ambiguous or not found, the error response includes structured guidance such as `classification`, `fallbackTools`, `fallbackRationale`, and ranked `candidates`.
 
 **Examples:**
 
@@ -299,21 +304,38 @@ The returned card includes identity, signature, summary, invariants, side effect
 { "repoId": "my-repo", "symbolId": "<symbol-id>", "ifNoneMatch": "<etag>" }
 ```
 
+```json
+{
+  "repoId": "my-repo",
+  "symbolRef": { "name": "handleRequest", "file": "src/server.ts" }
+}
+```
+
 ---
 
 ### `sdl.symbol.getCards`
 
-Batch fetch up to 100 symbol cards in a single round trip. Prefer this over multiple sequential `sdl.symbol.getCard` calls when you already have a list of symbol IDs.
+Batch fetch up to 100 symbol cards in a single round trip. Prefer this over multiple sequential `sdl.symbol.getCard` calls when you already have a list of symbol IDs or natural symbol references.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `repoId` | `string` | Yes | Repository identifier |
-| `symbolIds` | `string[]` | Yes | Array of symbol IDs (1-100) |
+| `symbolIds` | `string[]` | Conditional | Array of symbol IDs (1-100) |
+| `symbolRefs` | `Array<{ name, file?, kind?, exportedOnly? }>` | Conditional | Array of natural symbol references (1-100) |
 | `knownEtags` | `Record<string, string>` | No | Map of symbolId to known ETag; matching symbols return `notModified` |
 
-**Response:** `{ cards: Array<SymbolCard | NotModifiedResponse> }`
+Provide exactly one of `symbolIds` or `symbolRefs`.
+
+**Response:** `{ cards: Array<SymbolCard | NotModifiedResponse>, partial?, succeeded?, failed?, failures? }`
+
+When you use `symbolRefs`, the batch resolves each reference independently. Mixed batches can succeed partially and return:
+
+- `partial` when some references resolved and others did not
+- `succeeded` with resolved symbol IDs
+- `failed` with the unresolved input names
+- `failures` with structured per-input error metadata such as `classification`, `fallbackTools`, and ranked `candidates`
 
 **Example:**
 
@@ -322,6 +344,16 @@ Batch fetch up to 100 symbol cards in a single round trip. Prefer this over mult
   "repoId": "my-repo",
   "symbolIds": ["<id1>", "<id2>", "<id3>"],
   "knownEtags": { "<id1>": "<etag1>" }
+}
+```
+
+```json
+{
+  "repoId": "my-repo",
+  "symbolRefs": [
+    { "name": "handleRequest", "file": "src/server.ts" },
+    { "name": "parseConfig", "kind": "function" }
+  ]
 }
 ```
 

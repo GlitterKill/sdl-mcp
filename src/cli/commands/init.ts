@@ -490,7 +490,7 @@ ext=".\${ext##*.}"
 
 for blocked_ext in ${blocked}; do
   if [ "$ext" = "$blocked_ext" ]; then
-    python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Use SDL-MCP tools instead of native Read for indexed source code. Start with sdl.repo.status, then use sdl.action.search, focused sdl.manual, and sdl.chain. Read is only allowed for non-indexed file types.'}}))"
+    python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Use SDL-MCP tools instead of native Read for indexed source code. Start with sdl.repo.status, then use sdl.action.search, focused sdl.manual, and sdl.chain. Use symbolRef when the symbol name is known but the ID is not, and follow SDL fallback guidance when present. Read is only allowed for non-indexed file types.'}}))"
     exit 0
   fi
 done
@@ -570,7 +570,9 @@ Use SDL-MCP for source code understanding in this repository.
 - Use \`mcp__sdl-mcp__sdl.action.search\` when the right action is unclear.
 - Use \`mcp__sdl-mcp__sdl.manual\` with focused \`query\` or \`actions\`.
 - Prefer \`mcp__sdl-mcp__sdl.chain\` for multi-step workflows.
+- Use \`mcp__sdl-mcp__sdl.symbol.getCard\` or \`mcp__sdl-mcp__sdl.symbol.getCards\` with \`symbolRef\` / \`symbolRefs\` when the exact \`symbolId\` is unknown.
 - Use SDL runtime via \`runtimeExecute\` in \`sdl.chain\` for repo-local commands.
+- Follow \`nextBestAction\`, \`fallbackTools\`, \`fallbackRationale\`, and candidate guidance from SDL responses instead of retrying native tools.
 - Do not use native \`Read\` for indexed source files.
 - If you need a non-code file, ask the parent session to read it directly.
 `;
@@ -581,7 +583,9 @@ function buildClaudePrompt(repoId: string): string {
 
 - Never use native Read for indexed source-code extensions: ${SDL_SOURCE_EXTENSIONS.join(", ")}.
 - Start with sdl.repo.status, then use sdl.action.search, focused sdl.manual, and sdl.chain.
+- Use symbolRef / symbolRefs when you know a symbol name but not the canonical symbolId.
 - Use runtimeExecute inside sdl.chain for repo-local test, build, lint, and diagnostic commands.
+- Follow nextBestAction, fallbackTools, fallbackRationale, and candidate guidance from SDL responses instead of retrying blocked native tools.
 - If native Read or Bash is denied by a hook, switch to SDL-MCP immediately and do not retry the denied tool.
 `;
 }
@@ -630,7 +634,7 @@ export const EnforceSDL: Plugin = async () => {
         const loweredPath = rawPath.toLowerCase();
         if (BLOCKED_EXTENSIONS.some((ext) => loweredPath.endsWith(ext))) {
           throw new Error(
-            "Use SDL-MCP tools for indexed source code. Start with sdl.repo.status, then use sdl.action.search, focused sdl.manual, and sdl.chain instead of native read."
+            "Use SDL-MCP tools for indexed source code. Start with sdl.repo.status, then use sdl.action.search, focused sdl.manual, and sdl.chain. Use symbolRef when the symbol name is known but the ID is not."
           );
         }
       }
