@@ -73,6 +73,23 @@ What this does:
 2. `serve --stdio` exposes MCP tools for coding agents.
 3. `serve --no-watch` is the fallback mode when file watching is unreliable in your environment.
 
+## Optional but Highly Recommended: Tool Enforcement
+
+Tool enforcement is optional, but it is the recommended way to make sure agents actually use SDL-MCP and realize the token savings.
+
+Without enforcement, a client can have SDL-MCP connected and still waste tokens on native read and shell tools.
+
+Generate an SDL-first setup for your client:
+
+```bash
+sdl-mcp init --client claude-code --enforce-agent-tools
+# or: codex, gemini, opencode
+```
+
+This enables SDL runtime and exclusive Code Mode, then generates the repo-local instruction files and client-specific enforcement assets for the chosen client.
+
+See [Tool Enforcement](./tool-enforcement.md) for the cross-client guide and [Claude-specific enforcement](./tool-enforcement-for-claude.md) for the Claude details.
+
 ## Optional: Streamable HTTP Transport (Multi-Agent)
 
 By default, `sdl-mcp serve --stdio` runs a single MCP session over standard I/O — one agent, one connection. **Streamable HTTP** mode exposes the same MCP tools over HTTP, enabling multiple agents to connect concurrently with full session isolation.

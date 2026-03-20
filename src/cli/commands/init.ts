@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -19,6 +20,12 @@ import {
   DEFAULT_MAX_WINDOW_LINES,
   DEFAULT_MAX_WINDOW_TOKENS,
   MAX_FILE_BYTES,
+  RUNTIME_DEFAULT_ARTIFACT_TTL_HOURS,
+  RUNTIME_DEFAULT_MAX_ARTIFACT_BYTES,
+  RUNTIME_DEFAULT_MAX_CONCURRENT_JOBS,
+  RUNTIME_DEFAULT_MAX_STDERR_BYTES,
+  RUNTIME_DEFAULT_MAX_STDOUT_BYTES,
+  RUNTIME_DEFAULT_TIMEOUT_MS,
 } from "../../config/constants.js";
 import { resolveCliConfigPath } from "../../config/configPath.js";
 import { defaultGraphDbPath } from "../../db/graph-db-path.js";
@@ -100,6 +107,96 @@ const SKIP_SCAN_DIRS = new Set([
   "venv",
   "__pycache__",
 ]);
+
+const ENFORCED_ALLOWED_RUNTIMES = [
+  "node",
+  "typescript",
+  "python",
+  "ruby",
+  "php",
+  "shell",
+] as const;
+
+const ENFORCED_CODE_MODE_CONFIG = {
+  enabled: true,
+  exclusive: true,
+  maxChainSteps: 20,
+  maxChainTokens: 50_000,
+  maxChainDurationMs: 60_000,
+  ladderValidation: "warn" as const,
+  etagCaching: true,
+};
+
+const ENFORCED_RUNTIME_CONFIG = {
+  enabled: true,
+  allowedRuntimes: [...ENFORCED_ALLOWED_RUNTIMES],
+  allowedExecutables: [],
+  maxDurationMs: RUNTIME_DEFAULT_TIMEOUT_MS,
+  maxStdoutBytes: RUNTIME_DEFAULT_MAX_STDOUT_BYTES,
+  maxStderrBytes: RUNTIME_DEFAULT_MAX_STDERR_BYTES,
+  maxArtifactBytes: RUNTIME_DEFAULT_MAX_ARTIFACT_BYTES,
+  artifactTtlHours: RUNTIME_DEFAULT_ARTIFACT_TTL_HOURS,
+  maxConcurrentJobs: RUNTIME_DEFAULT_MAX_CONCURRENT_JOBS,
+  envAllowlist: [],
+  artifactBaseDir: undefined,
+};
+
+const SDL_SOURCE_EXTENSIONS_BY_LANGUAGE: Array<{
+  language: string;
+  extensions: string[];
+}> = [
+  {
+    language: "TypeScript/JavaScript",
+    extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
+  },
+  { language: "Python", extensions: [".py", ".pyw"] },
+  { language: "Go", extensions: [".go"] },
+  { language: "Java", extensions: [".java"] },
+  { language: "C#", extensions: [".cs"] },
+  { language: "C/C++", extensions: [".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx"] },
+  { language: "PHP", extensions: [".php", ".phtml"] },
+  { language: "Rust", extensions: [".rs"] },
+  { language: "Kotlin", extensions: [".kt", ".kts"] },
+  { language: "Shell", extensions: [".sh", ".bash", ".zsh"] },
+];
+
+const SDL_SOURCE_EXTENSIONS = SDL_SOURCE_EXTENSIONS_BY_LANGUAGE.flatMap(
+  ({ extensions }) => extensions,
+);
+
+const SDL_RUNTIME_REDIRECT_PREFIXES = [
+  "npm test",
+  "npm run test",
+  "npm run lint",
+  "npm run build",
+  "pnpm test",
+  "pnpm lint",
+  "pnpm build",
+  "yarn test",
+  "yarn lint",
+  "yarn build",
+  "bun test",
+  "bun run test",
+  "bun run lint",
+  "bun run build",
+  "pytest",
+  "python -m pytest",
+  "python -m unittest",
+  "bundle exec rspec",
+  "bundle exec rake",
+  "rake test",
+  "phpunit",
+  "vendor/bin/phpunit",
+  "composer test",
+  "go test",
+  "cargo test",
+];
+
+type GeneratedAsset = {
+  path: string;
+  content: string;
+  executable?: boolean;
+};
 
 function validateLanguages(languages: string[]): LanguageType[] {
   const validLanguages: LanguageType[] = [];
@@ -311,6 +408,328 @@ async function loadClientTemplate(client: ClientType): Promise<unknown> {
   }
 }
 
+function loadTextTemplate(templateName: string): string {
+  const templatePath = resolve(__dirname, "../../../templates", templateName);
+  return readFileSync(templatePath, "utf-8");
+}
+
+function renderTextTemplate(templateName: string, values: Record<string, string>): string {
+  let rendered = loadTextTemplate(templateName);
+  for (const [key, value] of Object.entries(values)) {
+    rendered = rendered.replaceAll(`{{${key}}}`, value);
+  }
+  return rendered;
+}
+
+function formatExtensionArrayLiteral(): string {
+  return SDL_SOURCE_EXTENSIONS.map((ext) => `"${ext}"`).join(", ");
+}
+
+function formatReadDenyRules(): string[] {
+  return SDL_SOURCE_EXTENSIONS.map((ext) => `Read(**${ext})`);
+}
+
+function ensureDirectory(path: string, createdDirs: string[]): void {
+  if (existsSync(path)) {
+    return;
+  }
+  mkdirSync(path, { recursive: true });
+  createdDirs.push(path);
+}
+
+function writeGeneratedAsset(
+  asset: GeneratedAsset,
+  createdPaths: string[],
+  createdDirs: string[],
+  force = false,
+): void {
+  const targetDir = dirname(asset.path);
+  ensureDirectory(targetDir, createdDirs);
+
+  const existed = existsSync(asset.path);
+  if (existed && !force) {
+    return;
+  }
+
+  writeFileSync(
+    asset.path,
+    asset.content.endsWith("\n") ? asset.content : `${asset.content}\n`,
+    "utf-8",
+  );
+  if (!existed) {
+    createdPaths.push(asset.path);
+  }
+  if (asset.executable) {
+    try {
+      chmodSync(asset.path, 0o755);
+    } catch {
+      // Best-effort on platforms that ignore executable bits.
+    }
+  }
+}
+
+function buildClaudeReadHook(): string {
+  const blocked = SDL_SOURCE_EXTENSIONS.map((ext) => `'${ext}'`).join(" ");
+  return `#!/bin/sh
+set -eu
+
+payload="$(cat)"
+tool_name="$(printf '%s' "$payload" | python -c "import json,sys; data=json.load(sys.stdin); print(data.get('tool_name',''))")"
+file_path="$(printf '%s' "$payload" | python -c "import json,sys; data=json.load(sys.stdin); tool_input=data.get('tool_input') or {}; print(tool_input.get('file_path') or tool_input.get('path') or '')")"
+
+if [ "$tool_name" != "Read" ]; then
+  exit 0
+fi
+
+if [ -z "$file_path" ]; then
+  exit 0
+fi
+
+ext="$(printf '%s' "$file_path" | tr '[:upper:]' '[:lower:]')"
+ext=".\${ext##*.}"
+
+for blocked_ext in ${blocked}; do
+  if [ "$ext" = "$blocked_ext" ]; then
+    python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Use SDL-MCP tools instead of native Read for indexed source code. Start with sdl.repo.status, then use sdl.action.search, focused sdl.manual, and sdl.chain. Read is only allowed for non-indexed file types.'}}))"
+    exit 0
+  fi
+done
+`;
+}
+
+function buildClaudeRuntimeHook(): string {
+  const prefixes = SDL_RUNTIME_REDIRECT_PREFIXES.map((prefix) => `'${prefix}'`).join(" ");
+  return `#!/bin/sh
+set -eu
+
+payload="$(cat)"
+tool_name="$(printf '%s' "$payload" | python -c "import json,sys; data=json.load(sys.stdin); print(data.get('tool_name',''))")"
+command="$(printf '%s' "$payload" | python -c "import json,sys; data=json.load(sys.stdin); tool_input=data.get('tool_input') or {}; print(tool_input.get('command') or tool_input.get('cmd') or '')")"
+
+if [ "$tool_name" != "Bash" ]; then
+  exit 0
+fi
+
+trimmed="$(printf '%s' "$command" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//')"
+
+for prefix in ${prefixes}; do
+  case "$trimmed" in
+    "$prefix"|"$prefix "*) 
+      python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Run repo-local test/build/lint commands through SDL runtime instead of native Bash. Use sdl.chain with runtimeExecute so command execution stays in SDL-MCP and avoids redundant token spend.'}}))"
+      exit 0
+      ;;
+  esac
+done
+`;
+}
+
+function buildClaudeSettings(): string {
+  const settings = {
+    permissions: {
+      deny: [...formatReadDenyRules(), "Task(Explore)"],
+      allow: ["Read(**.md)", "Read(**.json)", "mcp__sdl-mcp__*"],
+    },
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: "Read",
+          hooks: [
+            {
+              type: "command",
+              command: ".claude/hooks/force-sdl-mcp.sh",
+            },
+          ],
+        },
+        {
+          matcher: "Bash",
+          hooks: [
+            {
+              type: "command",
+              command: ".claude/hooks/force-sdl-runtime.sh",
+            },
+          ],
+        },
+      ],
+    },
+  };
+  return JSON.stringify(settings, null, 2);
+}
+
+function buildClaudeExploreAgent(repoId: string): string {
+  return `---
+name: explore-sdl
+description: Explore indexed source code in ${repoId} with SDL-MCP instead of native Read.
+tools: Grep, Glob, mcp__sdl-mcp__*
+disallowedTools: Read
+model: inherit
+---
+
+Use SDL-MCP for source code understanding in this repository.
+
+- Start with \`mcp__sdl-mcp__sdl.repo.status\`.
+- Use \`mcp__sdl-mcp__sdl.action.search\` when the right action is unclear.
+- Use \`mcp__sdl-mcp__sdl.manual\` with focused \`query\` or \`actions\`.
+- Prefer \`mcp__sdl-mcp__sdl.chain\` for multi-step workflows.
+- Use SDL runtime via \`runtimeExecute\` in \`sdl.chain\` for repo-local commands.
+- Do not use native \`Read\` for indexed source files.
+- If you need a non-code file, ask the parent session to read it directly.
+`;
+}
+
+function buildClaudePrompt(repoId: string): string {
+  return `Use SDL-MCP as the default path for repository ${repoId}.
+
+- Never use native Read for indexed source-code extensions: ${SDL_SOURCE_EXTENSIONS.join(", ")}.
+- Start with sdl.repo.status, then use sdl.action.search, focused sdl.manual, and sdl.chain.
+- Use runtimeExecute inside sdl.chain for repo-local test, build, lint, and diagnostic commands.
+- If native Read or Bash is denied by a hook, switch to SDL-MCP immediately and do not retry the denied tool.
+`;
+}
+
+function buildOpenCodeProjectConfig(configPath: string): string {
+  const config = {
+    $schema: "https://opencode.ai/config.json",
+    mcp: {
+      "sdl-mcp": {
+        type: "local",
+        enabled: true,
+        command: ["npx", "--yes", "sdl-mcp@latest", "serve", "--stdio"],
+        env: {
+          SDL_CONFIG: normalizePath(configPath),
+        },
+      },
+    },
+    permission: {
+      read: Object.fromEntries([
+        ["*", "allow"],
+        ...SDL_SOURCE_EXTENSIONS.map((ext) => [`*${ext}`, "deny"]),
+      ]),
+      bash: Object.fromEntries([
+        ["*", "ask"],
+        ...SDL_RUNTIME_REDIRECT_PREFIXES.map((prefix) => [`${prefix}*`, "deny"]),
+      ]),
+    },
+  };
+  return JSON.stringify(config, null, 2);
+}
+
+function buildOpenCodePlugin(): string {
+  return `import type { Plugin } from "@opencode-ai/plugin";
+
+const BLOCKED_EXTENSIONS = [${formatExtensionArrayLiteral()}];
+const REDIRECT_PREFIXES = ${JSON.stringify(SDL_RUNTIME_REDIRECT_PREFIXES, null, 2)};
+
+export const EnforceSDL: Plugin = async () => {
+  return {
+    "tool.execute.before": async (input, output) => {
+      if (input.tool === "read") {
+        const rawPath =
+          (output.args.filePath as string | undefined) ??
+          (output.args.path as string | undefined) ??
+          "";
+        const loweredPath = rawPath.toLowerCase();
+        if (BLOCKED_EXTENSIONS.some((ext) => loweredPath.endsWith(ext))) {
+          throw new Error(
+            "Use SDL-MCP tools for indexed source code. Start with sdl.repo.status, then use sdl.action.search, focused sdl.manual, and sdl.chain instead of native read."
+          );
+        }
+      }
+
+      if (input.tool === "bash") {
+        const command = String(output.args.command ?? "").trim().toLowerCase();
+        if (REDIRECT_PREFIXES.some((prefix) => command === prefix || command.startsWith(\`\${prefix} \`))) {
+          throw new Error(
+            "Run repo-local build, test, lint, and diagnostic commands through SDL runtime using sdl.chain + runtimeExecute instead of native bash."
+          );
+        }
+      }
+    },
+  };
+};
+`;
+}
+
+function buildEnforcementAssets(
+  repoRoot: string,
+  repoId: string,
+  configPath: string,
+  client?: ClientType,
+): GeneratedAsset[] {
+  const assets: GeneratedAsset[] = [
+    {
+      path: join(repoRoot, "AGENTS.md"),
+      content: renderTextTemplate("AGENTS.md.template", { REPO_ID: repoId }),
+    },
+  ];
+
+  if (!client) {
+    return assets;
+  }
+
+  const markdownTemplateByClient: Record<ClientType, string> = {
+    "claude-code": "CLAUDE.md.template",
+    codex: "CODEX.md.template",
+    gemini: "GEMINI.md.template",
+    opencode: "OPENCODE.md.template",
+  };
+
+  const markdownNameByClient: Record<ClientType, string> = {
+    "claude-code": "CLAUDE.md",
+    codex: "CODEX.md",
+    gemini: "GEMINI.md",
+    opencode: "OPENCODE.md",
+  };
+
+  assets.push({
+    path: join(repoRoot, markdownNameByClient[client]),
+    content: renderTextTemplate(markdownTemplateByClient[client], {
+      REPO_ID: repoId,
+    }),
+  });
+
+  if (client === "claude-code") {
+    assets.push(
+      {
+        path: join(repoRoot, ".claude", "settings.json"),
+        content: buildClaudeSettings(),
+      },
+      {
+        path: join(repoRoot, ".claude", "hooks", "force-sdl-mcp.sh"),
+        content: buildClaudeReadHook(),
+        executable: true,
+      },
+      {
+        path: join(repoRoot, ".claude", "hooks", "force-sdl-runtime.sh"),
+        content: buildClaudeRuntimeHook(),
+        executable: true,
+      },
+      {
+        path: join(repoRoot, ".claude", "agents", "explore-sdl.md"),
+        content: buildClaudeExploreAgent(repoId),
+      },
+      {
+        path: join(repoRoot, ".claude", "sdl-prompt.md"),
+        content: buildClaudePrompt(repoId),
+      },
+    );
+  }
+
+  if (client === "opencode") {
+    assets.push(
+      {
+        path: join(repoRoot, "opencode.json"),
+        content: buildOpenCodeProjectConfig(configPath),
+      },
+      {
+        path: join(repoRoot, ".opencode", "plugins", "enforce-sdl.ts"),
+        content: buildOpenCodePlugin(),
+      },
+    );
+  }
+
+  return assets;
+}
+
 function generateClientConfig(template: any, configPath: string): string {
   const mcpServers = template.mcpServers;
   const config = {
@@ -434,11 +853,22 @@ async function emitClientConfigBlocks(configPath: string): Promise<void> {
   }
 }
 
-function printDryRunPreview(configPath: string, config: unknown): void {
+function printDryRunPreview(
+  configPath: string,
+  config: unknown,
+  generatedAssets: GeneratedAsset[],
+): void {
   console.log("Dry run: no files written.");
   console.log(`Target config path: ${normalizePath(configPath)}`);
   console.log("");
   console.log(JSON.stringify(config, null, 2));
+  if (generatedAssets.length > 0) {
+    console.log("");
+    console.log("Generated repo-local assets:");
+    for (const asset of generatedAssets) {
+      console.log(`- ${normalizePath(asset.path)}`);
+    }
+  }
 }
 
 export async function initCommand(options: InitOptions): Promise<void> {
@@ -462,6 +892,12 @@ export async function initCommand(options: InitOptions): Promise<void> {
   const configDir = dirname(configPath);
   const dbDir = dirname(dbPath);
   const ladybugDbDir = dirname(ladybugDbPath);
+
+  if (options.client && !VALID_CLIENTS.includes(options.client as ClientType)) {
+    console.error(`Invalid client: ${options.client}`);
+    console.error(`Valid options: ${VALID_CLIENTS.join(", ")}`);
+    process.exit(1);
+  }
 
   const repoId = detectRepoId(repoRoot);
   const ignorePatterns = mergeIgnorePatterns(repoRoot);
@@ -530,10 +966,25 @@ export async function initCommand(options: InitOptions): Promise<void> {
         config: 0.8,
       },
     },
+    ...(options.enforceAgentTools
+      ? {
+          runtime: ENFORCED_RUNTIME_CONFIG,
+          codeMode: ENFORCED_CODE_MODE_CONFIG,
+        }
+      : {}),
   };
 
+  const generatedAssets = options.enforceAgentTools
+    ? buildEnforcementAssets(
+        repoRoot,
+        repoId,
+        configPath,
+        options.client as ClientType | undefined,
+      )
+    : [];
+
   if (options.dryRun) {
-    printDryRunPreview(configPath, config);
+    printDryRunPreview(configPath, config, generatedAssets);
     await emitClientConfigBlocks(configPath);
     return;
   }
@@ -578,6 +1029,10 @@ export async function initCommand(options: InitOptions): Promise<void> {
     writeFileSync(configPath, JSON.stringify(config, null, 2));
     createdPaths.push(configPath);
 
+    for (const asset of generatedAssets) {
+      writeGeneratedAsset(asset, createdPaths, createdDirs, false);
+    }
+
     console.log(`Configuration created: ${normalizePath(configPath)}`);
     console.log(`Database path: ${normalizePath(dbPath)}`);
     console.log(`Graph database path: ${normalizePath(ladybugDbPath)}`);
@@ -600,6 +1055,13 @@ export async function initCommand(options: InitOptions): Promise<void> {
       console.log(
         `${options.client} config created: ${normalizePath(clientConfigPath)}`,
       );
+    }
+
+    if (generatedAssets.length > 0) {
+      console.log("Generated agent enforcement assets:");
+      for (const asset of generatedAssets) {
+        console.log(`  - ${normalizePath(asset.path)}`);
+      }
     }
 
     await emitClientConfigBlocks(configPath);

@@ -21,7 +21,7 @@ This page defines practical workflows for coding agents using SDL-MCP.
 
 ## Complete Tool Reference
 
-SDL-MCP exposes 29 core MCP tools across 12 categories, plus 2 optional Code Mode tools for multi-step chaining. Every workflow on this page uses tools from this table.
+SDL-MCP exposes 29 core MCP tools across 12 categories, plus 3 optional Code Mode tools for discovery, focused reference, and multi-step chaining. Every workflow on this page uses tools from this table.
 
 | Category | Tool | Purpose |
 |:---------|:-----|:--------|
@@ -49,13 +49,14 @@ SDL-MCP exposes 29 core MCP tools across 12 categories, plus 2 optional Code Mod
 | | `sdl.agent.feedback` | Record which symbols were useful/missing after a task; supports `taskTags` |
 | | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics |
 | **Context** | `sdl.context.summary` | Generate token-bounded summary for non-MCP contexts (clipboard, markdown, JSON) |
-| **Runtime** | `sdl.runtime.execute` | Sandboxed subprocess execution (Node/Python/Shell) with structured output |
+| **Runtime** | `sdl.runtime.execute` | Sandboxed subprocess execution (`node`, `typescript`, `python`, `ruby`, `php`, `shell`, and more) with structured output |
 | **Memory** | `sdl.memory.store` | Store or update a development memory with symbol/file links |
 | | `sdl.memory.query` | Search memories by text, type, tags, or linked symbols; `staleOnly` filter |
 | | `sdl.memory.remove` | Soft-delete a memory from graph and optionally from disk |
 | | `sdl.memory.surface` | Auto-surface relevant memories ranked by confidence, recency, and symbol overlap |
-| **Code Mode** *(optional)* | `sdl.manual` | Return a compact TypeScript API reference for all available actions |
-| | `sdl.chain` | Execute up to 50 actions in a single round trip with `$N` result piping and budget tracking |
+| **Code Mode** *(optional)* | `sdl.action.search` | Discover the most relevant SDL actions with optional schema/example metadata |
+| | `sdl.manual` | Return a compact filtered API reference for a queried or explicit action subset |
+| | `sdl.chain` | Execute up to 50 actions in a single round trip with `$N` result piping, transforms, and optional traces |
 
 ---
 
@@ -117,8 +118,8 @@ Use this order unless task constraints force escalation:
 - **PR review**: `delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols`.
 - **Live editing**: `buffer.push` as files change (with cursor/selection tracking) → `buffer.checkpoint` to persist → search/card/slice now reflect draft state.
 - **Context export**: `context.summary` with `format: "clipboard"` to produce a summary for non-MCP tools.
-- **Test execution**: `runtime.execute` with `runtime: "node"` or `"shell"` to run tests and capture structured output.
-- **Multi-step chain** *(Code Mode)*: `sdl.chain` to execute multiple actions in a single round trip — e.g., search → getCard → getSkeleton in one call with `$N` result piping between steps.
+- **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `typescript`, `python`, `ruby`, `php`, or `shell`) to run tests and capture structured output.
+- **Multi-step chain** *(Code Mode)*: `sdl.action.search` -> focused `sdl.manual` -> `sdl.chain` for multi-step context or runtime workflows in one round trip.
 
 ### 3) Token controls by tool
 
@@ -193,7 +194,7 @@ Run commands in a repo-scoped subprocess. Requires `runtime.enabled: true` in co
 }
 ```
 
-- **Runtimes**: `"node"`, `"python"`, `"shell"`.
+- **Runtimes**: prefer `"node"`, `"typescript"`, `"python"`, `"ruby"`, `"php"`, or `"shell"` for agent workflows; additional runtimes are also available.
 - Use `code` to run inline code or `args` to invoke a file.
 - `queryTerms` extracts only matching lines from output (like a built-in grep).
 - `persistOutput: true` saves full output to an artifact handle for later retrieval.
@@ -208,18 +209,21 @@ Use `sdl.context.summary` to generate token-bounded summaries for non-MCP contex
 
 ### 8) Code Mode (`sdl.chain`)
 
-When `codeMode.enabled: true` is set in config, two additional tools are available:
+When `codeMode.enabled: true` is set in config, three additional tools are available:
 
-- `sdl.manual` — returns a compact TypeScript API reference for all actions.
-- `sdl.chain` — executes up to 50 actions in a single round trip with `$N` result piping between steps.
+- `sdl.action.search` — returns the most relevant SDL actions for a query, optionally with schema and example metadata.
+- `sdl.manual` — returns a compact filtered API reference for all or part of the action surface.
+- `sdl.chain` — executes up to 50 actions in a single round trip with `$N` result piping, internal data transforms, and optional traces.
 
 Chain guidance:
+- Start with `sdl.action.search` when the right action is unclear.
+- Use `sdl.manual(query|actions)` to avoid loading the full manual when a subset is enough.
 - Each step has `fn` (action name) and `args`. Use `$N.path.to.field` to reference step N's result (0-based).
 - Set `budget`: `{ maxTotalTokens, maxSteps, maxDurationMs }`.
 - `onError`: `"continue"` (default, skip failed steps) or `"stop"` (halt on first error).
 - The chain enforces the same context-ladder escalation rules as individual tools.
 - Cross-step ETag caching is automatic — no need to pass ETags manually between steps.
-- Use chains for multi-step lookups (search → getCards → getSkeleton) in high-latency environments or CI pipelines. Do not use for single actions.
+- Use chains for multi-step lookups, data shaping, and runtime execution in high-latency environments or CI pipelines. Do not use for single actions.
 
 ### 9) Feedback loop (`sdl.agent.feedback`)
 

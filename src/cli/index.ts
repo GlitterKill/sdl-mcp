@@ -49,6 +49,7 @@ async function main(): Promise<void> {
       yes: { type: "boolean", short: "y" },
       "auto-index": { type: "boolean" },
       "dry-run": { type: "boolean" },
+      "enforce-agent-tools": { type: "boolean" },
       watch: { type: "boolean", short: "w" },
       "repo-id": { type: "string" },
       stdio: { type: "boolean" },
@@ -272,6 +273,7 @@ Global Options:
     -y, --yes             Non-interactive mode (auto-detect repo/languages)
     --auto-index          Run index + doctor automatically after init
     --dry-run             Print generated config and exit without writing files
+    --enforce-agent-tools Enable SDL-first runtime/code-mode config and write client enforcement assets
 
  Index Options:
    -w, --watch          Watch for file changes

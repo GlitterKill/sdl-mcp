@@ -153,6 +153,10 @@ describe("MCP tool registration", () => {
       "expected sdl.manual alongside gateway",
     );
     assert.ok(
+      names.includes("sdl.action.search"),
+      "expected sdl.action.search alongside gateway",
+    );
+    assert.ok(
       names.includes("sdl.chain"),
       "expected sdl.chain alongside gateway",
     );
@@ -166,6 +170,10 @@ describe("MCP tool registration", () => {
     assert.ok(
       !names.includes("sdl.manual"),
       "sdl.manual should NOT be registered without codeModeConfig",
+    );
+    assert.ok(
+      !names.includes("sdl.action.search"),
+      "sdl.action.search should NOT be registered without codeModeConfig",
     );
     assert.ok(
       !names.includes("sdl.chain"),
@@ -195,6 +203,10 @@ describe("MCP tool registration", () => {
     assert.ok(
       !names.includes("sdl.manual"),
       "sdl.manual should NOT be registered when enabled=false",
+    );
+    assert.ok(
+      !names.includes("sdl.action.search"),
+      "sdl.action.search should NOT be registered when enabled=false",
     );
     assert.ok(
       !names.includes("sdl.chain"),

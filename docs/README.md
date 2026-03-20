@@ -13,6 +13,7 @@
   - [MCP Tools Reference](./mcp-tools-reference.md)
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
+  - [Tool Enforcement](./tool-enforcement.md)
   - [Troubleshooting](./troubleshooting.md)
 - [Legacy User Guide](./USER_GUIDE.md)
 
@@ -36,6 +37,9 @@ Use this page as the entry point for SDL-MCP documentation.
 - I want agent best practices and Iris Gate Ladder workflows:
   - [Agent Workflows](./agent-workflows.md)
   - [Iris Gate Ladder](./IRIS_GATE_LADDER.md)
+- I want agents to actually use SDL-MCP instead of native token-heavy tools:
+  - [Tool Enforcement](./tool-enforcement.md)
+  - [Claude-Specific Enforcement](./tool-enforcement-for-claude.md)
 - I need operational debugging guidance:
   - [Troubleshooting](./troubleshooting.md)
 

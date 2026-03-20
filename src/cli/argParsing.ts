@@ -86,6 +86,8 @@ export function parseInitOptions(
       options.autoIndex = true;
     } else if (arg === "--dry-run") {
       options.dryRun = true;
+    } else if (arg === "--enforce-agent-tools") {
+      options.enforceAgentTools = true;
     }
   }
 
@@ -122,6 +124,9 @@ export function parseInitOptions(
   }
   if (values["dry-run"] === true) {
     options.dryRun = true;
+  }
+  if (values["enforce-agent-tools"] === true) {
+    options.enforceAgentTools = true;
   }
 
   return options;
@@ -627,4 +632,3 @@ export function parseToolDispatchOptions(
 
   return options;
 }
-

@@ -21,6 +21,7 @@ export interface InitOptions extends CLIOptions {
   yes?: boolean;
   autoIndex?: boolean;
   dryRun?: boolean;
+  enforceAgentTools?: boolean;
 }
 
 export interface DoctorOptions extends CLIOptions {}

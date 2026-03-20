@@ -1,38 +1,78 @@
 # Code Mode
 
-**Batch multiple SDL-MCP operations in a single round-trip with `$N` references between steps — the next level of token optimization beyond gateway mode.**
+**Use SDL-MCP Code Mode to reduce tool-list overhead, collapse multi-step workflows into one round trip, and keep code understanding inside SDL instead of falling back to token-heavy native tools.**
 
-Code Mode introduces two new tools (`sdl.manual` + `sdl.chain`) that let LLMs batch entire context retrieval pipelines into a single tool call, using structured JSON call chains with inter-step references.
+Code Mode now exposes three complementary tools:
+
+- `sdl.action.search` for discovery
+- `sdl.manual` for focused reference
+- `sdl.chain` for execution
+
+Together they let agents discover the right SDL action, load only the relevant interface details, and execute a full lookup or runtime workflow in one call.
 
 ---
 
-## The Opportunity
+## What It Solves
 
-Gateway mode reduced `tools/list` overhead by 81%. Code Mode reduces **per-operation overhead** by eliminating multi-turn round trips. SDL-MCP's context ladder (search → card → skeleton → hotPath → window) is a natural sequential pipeline — exactly what call chains excel at.
+Without Code Mode, agents often spend tokens on:
 
+- large tool lists
+- repeated schema exposure
+- multiple round trips for sequential lookups
+- native shell and file tools that SDL could replace
+
+Code Mode keeps those workflows inside SDL-MCP:
+
+1. Discover the right action with `sdl.action.search`
+2. Load only the relevant API subset with `sdl.manual`
+3. Execute the workflow with `sdl.chain`
+
+---
+
+## Tool Surface
+
+### `sdl.action.search`
+
+Use this first when the right SDL action is unclear.
+
+Example:
+
+```json
+{
+  "query": "find auth symbol and inspect code structure",
+  "limit": 5,
+  "includeSchemas": true
+}
 ```
-Without Code Mode:
-  Turn 1: sdl.query { action: "symbol.search", query: "auth" }      → ~500ms
-  Turn 2: sdl.query { action: "symbol.getCard", symbolId: "..." }   → ~500ms
-  Turn 3: sdl.code  { action: "code.getSkeleton", symbolId: "..." } → ~500ms
-  = 3 round trips, ~1500ms total
 
-With Code Mode:
-  Turn 1: sdl.chain { steps: [search, getCard, getSkeleton] }       → ~500ms
-  = 1 round trip, ~500ms total
+This returns a ranked subset of actions, with optional schema and example metadata.
+
+### `sdl.manual`
+
+Use this when you already know the rough area and want a compact manual instead of the full API surface.
+
+Supported patterns:
+
+- `query` to filter by text
+- `actions` to request an exact subset
+- `format` to choose `typescript`, `markdown`, or `json`
+- `includeSchemas` / `includeExamples` for richer output
+
+Example:
+
+```json
+{
+  "actions": ["symbol.search", "symbol.getCard", "slice.build"],
+  "format": "typescript",
+  "includeExamples": true
+}
 ```
 
-## How It Works
+### `sdl.chain`
 
-### The Manual (`sdl.manual`)
+Use this for any multi-step workflow that would otherwise require multiple SDL calls.
 
-Call once per session. Returns a compact TypeScript API reference (~1,000 tokens) listing all available functions with their parameters and return types. This replaces thousands of tokens of JSON Schema with an efficient function signature format.
-
-### The Chain (`sdl.chain`)
-
-Batch multiple operations in a single call. Each step specifies a function name and arguments, with `$N` references to pass results between steps.
-
-#### Chain Request Format
+Example:
 
 ```json
 {
@@ -47,67 +87,41 @@ Batch multiple operations in a single call. Each step specifies a function name 
 }
 ```
 
-### `$N` Reference Syntax
+---
 
-Reference prior step results using `$N` notation:
+## Current Features
 
-| Reference                | Resolves To                            |
-| ------------------------ | -------------------------------------- |
-| `$0`                     | Entire result of step 0                |
-| `$0.symbols`             | The `symbols` field of step 0's result |
-| `$0.symbols[0].symbolId` | First symbol's ID from step 0          |
-| `$1.card.signature`      | The signature field from step 1's card |
+### Result piping
 
-**Rules:**
+Use `$N.path` references to feed step results into later steps.
 
-- Maximum 4 path segments after `$N`
-- Forward references are rejected (step 1 cannot reference `$2`)
-- Full-value references preserve type (objects stay objects, arrays stay arrays)
-- Embedded references in strings are interpolated: `"prefix $0.name suffix"`
+### Internal transforms
 
-## Features
+`sdl.chain` supports chain-only data shaping without opening a general-purpose VM. Use internal transform steps such as:
 
-### Budget Tracking
+- `dataPick`
+- `dataMap`
+- `dataFilter`
+- `dataSort`
+- `dataTemplate`
 
-Chain-level budget wraps per-step policy enforcement:
+These are useful for fetch-shape-summarize workflows where the model would otherwise waste tokens interpreting raw payloads.
 
-- **Token budget**: Stop when cumulative estimated tokens exceed limit
-- **Step budget**: Stop after N steps
-- **Duration budget**: Stop after wall-clock time limit
-- Request budgets can only be MORE restrictive than config defaults
+### Traces
 
-### Context Ladder Validation
+`sdl.chain` supports opt-in traces for debugging and prompt construction. Trace output can include:
 
-Validates that steps follow the recommended escalation order per symbol:
+- per-step summaries
+- resolved argument previews
+- schema summaries
+- examples
+- bounded result previews
 
-```
-Rung 0: symbol.search
-Rung 1: symbol.getCard / symbol.getCards / slice.build
-Rung 2: code.getSkeleton
-Rung 3: code.getHotPath
-Rung 4: code.needWindow
-```
+### Context ladder validation
 
-Three modes:
+Chains still honor SDL-MCP’s escalation model. Code Mode does not bypass policy or proof-of-need gating.
 
-- `off`: No validation
-- `warn` (default): Warnings in response but chain executes
-- `enforce`: Stronger warnings (full enforcement planned)
-
-### Cross-Step ETag Caching
-
-Automatic ETag management within chains:
-
-- ETags extracted from `symbolGetCard` / `symbolGetCards` results
-- Automatically injected as `ifNoneMatch` in subsequent card requests
-- ETag cache returned in response for cross-chain persistence via `seed()`
-
-### Error Handling
-
-Two policies:
-
-- `continue` (default): Mark failed step as error, continue remaining steps
-- `stop`: Mark failed step as error, mark remaining as skipped
+---
 
 ## Configuration
 
@@ -125,72 +139,25 @@ Two policies:
 }
 ```
 
-| Field                | Type    | Default  | Description                                           |
-| -------------------- | ------- | -------- | ----------------------------------------------------- |
-| `enabled`            | boolean | `false`  | Enable Code Mode tools                                |
-| `exclusive`          | boolean | `false`  | Only register Code Mode tools (suppress gateway/flat) |
-| `maxChainSteps`      | integer | `20`     | Max steps per chain                                   |
-| `maxChainTokens`     | integer | `50000`  | Max total result tokens per chain                     |
-| `maxChainDurationMs` | integer | `60000`  | Max wall-clock time per chain                         |
-| `ladderValidation`   | string  | `"warn"` | Ladder check mode: off, warn, enforce                 |
-| `etagCaching`        | boolean | `true`   | Auto-inject ETags for card requests                   |
+### Registration modes
 
-## Deployment Modes
+| Mode | Registered tools |
+|:-----|:-----------------|
+| Disabled | Gateway or flat tools only |
+| Enabled + gateway | Gateway tools plus `sdl.action.search`, `sdl.manual`, `sdl.chain` |
+| Enabled + flat | Flat tools plus `sdl.action.search`, `sdl.manual`, `sdl.chain` |
+| Exclusive | `sdl.action.search`, `sdl.manual`, `sdl.chain` only |
 
-| Mode                | Tools Registered                | Use When               |
-| ------------------- | ------------------------------- | ---------------------- |
-| Code Mode disabled  | Gateway (4) or Flat (29)        | Default behavior       |
-| Code Mode + Gateway | Gateway (4) + Code Mode (2) = 6 | Best of both worlds    |
-| Code Mode + Flat    | Flat (29) + Code Mode (2) = 31  | Maximum compatibility  |
-| Code Mode exclusive | Code Mode (2) only              | Minimum token overhead |
+---
 
-## Token Savings Comparison
+## Recommended Agent Workflow
 
-| Mode                | tools/list tokens    | Per-operation overhead     | Best for               |
-| ------------------- | -------------------- | -------------------------- | ---------------------- |
-| Flat (29 tools)     | ~4,250               | 1 round-trip per operation | Maximum compatibility  |
-| Gateway (4 tools)   | ~725                 | 1 round-trip per operation | Most agents            |
-| Code Mode (2 tools) | ~300 + ~1,000 manual | 1 round-trip per pipeline  | Token-optimized agents |
-| Code Mode exclusive | ~300 + ~1,000 manual | 1 round-trip per pipeline  | Minimum overhead       |
+For SDL-first agents:
 
-## Example Workflows
+1. `sdl.repo.status`
+2. `sdl.action.search`
+3. `sdl.manual(query|actions)`
+4. `sdl.chain`
+5. `runtimeExecute` inside `sdl.chain` for repo-local build, test, lint, or diagnostics
 
-### Debug Workflow (3 steps, 1 round-trip)
-
-```json
-{
-  "repoId": "my-repo",
-  "steps": [
-    { "fn": "symbolSearch", "args": { "query": "handleAuth", "limit": 5 } },
-    { "fn": "symbolGetCard", "args": { "symbolId": "$0.symbols[0].symbolId" } },
-    {
-      "fn": "codeHotPath",
-      "args": {
-        "symbolId": "$1.card.symbolId",
-        "identifiersToFind": ["token", "validate"]
-      }
-    }
-  ],
-  "budget": { "maxTotalTokens": 3000 }
-}
-```
-
-### Implementation Workflow (4 steps, 1 round-trip)
-
-```json
-{
-  "repoId": "my-repo",
-  "steps": [
-    { "fn": "repoOverview", "args": { "level": "stats" } },
-    { "fn": "symbolSearch", "args": { "query": "UserService", "limit": 10 } },
-    { "fn": "symbolGetCard", "args": { "symbolId": "$1.symbols[0].symbolId" } },
-    {
-      "fn": "sliceBuild",
-      "args": {
-        "entrySymbols": ["$2.card.symbolId"],
-        "budget": { "maxCards": 20 }
-      }
-    }
-  ]
-}
-```
+This is the intended path for enforced agent setups where SDL-MCP should replace token-heavy default tools whenever possible.
