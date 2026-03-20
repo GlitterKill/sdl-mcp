@@ -121,3 +121,5 @@ target/
 fix-kuzu.cjs
 fix_prRisk.js
 tests.tap
+claude-code-mcp-config.json
+opencode-mcp-config.json

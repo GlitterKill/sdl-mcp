@@ -2,7 +2,17 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -16,13 +26,22 @@ const PACKAGE_PATH = join(ROOT, "package.json");
 const NATIVE_PACKAGE_PATH = join(ROOT, "native", "package.json");
 const NATIVE_NPM_DIR = join(ROOT, "native", "npm");
 const TARBALL_WARN_BYTES = 25 * 1024 * 1024;
+const NPM_COMMAND = "npm";
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf-8"));
 }
 
 function runCommand(command, args, options = {}) {
-  return execFileSync(command, args, {
+  const invocation =
+    process.platform === "win32" && command === NPM_COMMAND
+      ? {
+          command: "cmd.exe",
+          args: ["/d", "/s", "/c", command, ...args],
+        }
+      : { command, args };
+
+  return execFileSync(invocation.command, invocation.args, {
     cwd: ROOT,
     encoding: "utf-8",
     stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
@@ -77,6 +96,23 @@ export function findMissingPackEntries(packFileEntries) {
 }
 
 async function runJsonRpcSmokeTest() {
+  const tempDir = mkdtempSync(join(tmpdir(), "sdl-mcp-prepare-release-"));
+  const configPath = join(tempDir, "sdlmcp.config.json");
+  const dbPath = join(tempDir, "prepare-release-graph.lbug");
+  const logPath = join(tempDir, "prepare-release.log");
+  writeFileSync(
+    configPath,
+    JSON.stringify(
+      {
+        repos: [],
+        policy: {},
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
+
   const client = new Client({
     name: "prepare-release",
     version: "1.0.0",
@@ -87,6 +123,10 @@ async function runJsonRpcSmokeTest() {
     env: {
       ...process.env,
       NODE_ENV: "test",
+      SDL_CONFIG: configPath,
+      SDL_GRAPH_DB_PATH: dbPath,
+      SDL_LOG_FILE: logPath,
+      SDL_CONSOLE_LOGGING: "false",
     },
   });
 
@@ -103,6 +143,7 @@ async function runJsonRpcSmokeTest() {
     );
   } finally {
     await client.close().catch(() => {});
+    rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
@@ -162,7 +203,7 @@ async function main() {
 
   try {
     const published = runCommand(
-      "npm",
+      NPM_COMMAND,
       ["view", `sdl-mcp@${pkg.version}`, "version", "--json"],
       { capture: true },
     ).trim();
@@ -176,15 +217,15 @@ async function main() {
     }
   }
 
-  runCommand("npm", ["run", "build:all"]);
-  runCommand("npm", ["run", "lint"]);
-  runCommand("npm", ["run", "typecheck"]);
-  runCommand("npm", ["test"]);
-  runCommand("npm", ["audit", "--audit-level=high"]);
+  runCommand(NPM_COMMAND, ["run", "build:all"]);
+  runCommand(NPM_COMMAND, ["run", "lint"]);
+  runCommand(NPM_COMMAND, ["run", "typecheck"]);
+  runCommand(NPM_COMMAND, ["test"]);
+  runCommand(NPM_COMMAND, ["audit", "--audit-level=high"]);
 
   let outdatedOutput = "";
   try {
-    outdatedOutput = runCommand("npm", ["outdated", "--json"], {
+    outdatedOutput = runCommand(NPM_COMMAND, ["outdated", "--json"], {
       capture: true,
     }).trim();
   } catch (error) {
@@ -194,7 +235,7 @@ async function main() {
     warn("npm outdated reports dependency updates");
   }
 
-  const packOutput = runCommand("npm", ["pack", "--json"], {
+  const packOutput = runCommand(NPM_COMMAND, ["pack", "--json"], {
     capture: true,
   });
   const [packResult] = JSON.parse(packOutput);

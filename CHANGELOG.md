@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-03-20
+
+### Added
+
+- Unified runtime diagnostics via CLI `sdl-mcp info` and MCP `sdl.info`
+- `prepare-release` and `inspector` npm workflows for release preflight and MCP inspection
+
+### Changed
+
+- MCP tool registration now publishes human-friendly titles, version-stamped descriptions, and shared request normalization across flat, gateway, and CLI tool-dispatch surfaces
+- Gateway `tools/list` schemas now preserve action-specific fields, descriptions, and defaults instead of collapsing to a bare envelope
+- Logging is now file-first with `SDL_LOG_FILE`, `SDL_CONSOLE_LOGGING`, temp-path fallback, and explicit shutdown flushing
+- Documentation was refreshed across CLI, architecture, troubleshooting, gateway, code-mode, and release workflow references
+
+### Fixed
+
+- Native platform package versions are synchronized with the root `sdl-mcp` release version
+- `prepare-release` now launches npm subcommands correctly on Windows
+- Release preflight packaging and stdio smoke coverage now validate the new diagnostics and tool registration surfaces
+
 ## [0.9.0] - 2026-03-17
 
 ### Added
