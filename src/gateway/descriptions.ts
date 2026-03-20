@@ -21,7 +21,8 @@ export const REPO_DESCRIPTION =
   `sdl.repo — Repository lifecycle. Pass { repoId, action, ...params }.` +
   `\nActions: repo.register(rootPath,ignore?,languages?,maxFileBytes?) | repo.status() | ` +
   `repo.overview(level,includeHotspots?,directories?,maxDirectories?) | ` +
-  `index.refresh(mode,reason?) | policy.get() | policy.set(policyPatch)`;
+  `index.refresh(mode,reason?) | policy.get() | policy.set(policyPatch) | ` +
+  `usage.stats(scope?,since?,limit?,persist?)`;
 
 export const AGENT_DESCRIPTION =
   `sdl.agent — Agentic + live-edit operations. Pass { repoId, action, ...params }.` +

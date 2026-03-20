@@ -39,6 +39,7 @@ import {
   MemoryQueryRequestSchema,
   MemoryRemoveRequestSchema,
   MemorySurfaceRequestSchema,
+  UsageStatsRequestSchema,
 } from "../mcp/tools.js";
 import {
   handleSymbolSearch,
@@ -82,6 +83,7 @@ import {
   handleMemoryRemove,
   handleMemorySurface,
 } from "../mcp/tools/memory.js";
+import { handleUsageStats } from "../mcp/tools/usage.js";
 import type { z } from "zod";
 
 type ActionHandler = (args: unknown, context?: ToolContext) => Promise<unknown>;
@@ -176,6 +178,10 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
     "policy.set": {
       schema: PolicySetRequestSchema,
       handler: handlePolicySet,
+    },
+    "usage.stats": {
+      schema: UsageStatsRequestSchema,
+      handler: handleUsageStats,
     },
 
     // === Agent actions ===

@@ -18,7 +18,9 @@ import {
   shouldAttachUsage,
   computeTokenUsage,
   stripRawContext,
+  type TokenUsageMetadata,
 } from "./mcp/token-usage.js";
+import { tokenAccumulator } from "./mcp/token-accumulator.js";
 import type { LiveIndexCoordinator } from "./live-index/types.js";
 import type { CodeModeConfig } from "./config/types.js";
 
@@ -187,6 +189,15 @@ export class MCPServer {
               if (shouldAttachUsage(request.params.name) && r._rawContext) {
                 r._tokenUsage = await computeTokenUsage(r);
               }
+              // Accumulate session-level token usage
+              if (r._tokenUsage) {
+                const usage = r._tokenUsage as TokenUsageMetadata;
+                tokenAccumulator.recordUsage(
+                  request.params.name,
+                  usage.sdlTokens,
+                  usage.rawEquivalent,
+                );
+              }
               finalResult = stripRawContext(r);
             }
 
@@ -279,6 +290,15 @@ export class MCPServer {
   }
 
   async stop(): Promise<void> {
+    // Persist session usage snapshot before shutdown
+    if (tokenAccumulator.hasUsage) {
+      try {
+        const { persistUsageSnapshot } = await import("./db/ladybug-usage.js");
+        await persistUsageSnapshot(tokenAccumulator.getSnapshot());
+      } catch {
+        // Non-critical — don't block shutdown
+      }
+    }
     await this.server.close();
   }
 

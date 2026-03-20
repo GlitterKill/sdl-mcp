@@ -66,3 +66,6 @@ export * from "./ladybug-processes.js";
 
 // Memory operations
 export * from "./ladybug-memory.js";
+
+// Usage snapshot operations
+export * from "./ladybug-usage.js";

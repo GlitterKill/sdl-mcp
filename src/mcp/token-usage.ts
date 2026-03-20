@@ -23,6 +23,7 @@ const SKIP_TOOLS = new Set([
   "sdl.policy.set",
   "sdl.agent.feedback",
   "sdl.agent.feedback.query",
+  "sdl.usage.stats",
 ]);
 
 const BYTES_PER_TOKEN = 4;

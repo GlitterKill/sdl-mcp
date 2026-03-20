@@ -71,6 +71,7 @@ import {
   MemoryQueryRequestSchema,
   MemoryRemoveRequestSchema,
   MemorySurfaceRequestSchema,
+  UsageStatsRequestSchema,
 } from "../tools.js";
 import {
   handleAgentFeedback,
@@ -83,6 +84,7 @@ import {
   handleMemoryRemove,
   handleMemorySurface,
 } from "./memory.js";
+import { handleUsageStats } from "./usage.js";
 import type { ToolServices } from "../../gateway/index.js";
 import { createActionMap } from "../../gateway/router.js";
 import { registerCodeModeTools } from "../../code-mode/index.js";
@@ -336,6 +338,13 @@ export function registerTools(
     "Auto-surface relevant memories for a task context based on symbol overlap and recency",
     MemorySurfaceRequestSchema,
     handleMemorySurface,
+  );
+
+  server.registerTool(
+    "sdl.usage.stats",
+    "Get cumulative token savings statistics for the current session and/or historical sessions",
+    UsageStatsRequestSchema,
+    handleUsageStats,
   );
 
   // Code Mode alongside flat tools

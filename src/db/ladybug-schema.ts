@@ -10,7 +10,7 @@
  * Node tables: Repo, File, Symbol, Version, SymbolVersion, Metrics,
  *              Cluster, Process, SliceHandle, CardHash, Audit,
  *              AgentFeedback, SymbolEmbedding, SummaryCache, SyncArtifact,
- *              SymbolReference, Memory, SchemaVersion
+ *              SymbolReference, Memory, UsageSnapshot, SchemaVersion
  *
  * Rel tables: FILE_IN_REPO, SYMBOL_IN_FILE, SYMBOL_IN_REPO, DEPENDS_ON,
  *             VERSION_OF_REPO, BELONGS_TO_CLUSTER, PARTICIPATES_IN,
@@ -223,6 +223,19 @@ const NODE_TABLES: string[] = [
     deleted BOOLEAN DEFAULT false
   )`,
 
+  `CREATE NODE TABLE IF NOT EXISTS UsageSnapshot (
+    snapshotId STRING PRIMARY KEY,
+    sessionId STRING,
+    repoId STRING,
+    timestamp STRING,
+    totalSdlTokens INT64,
+    totalRawEquivalent INT64,
+    totalSavedTokens INT64,
+    savingsPercent DOUBLE,
+    callCount INT64,
+    toolBreakdownJson STRING
+  )`,
+
   `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (
     id STRING PRIMARY KEY,
     schemaVersion INT64,
@@ -317,6 +330,8 @@ const INDEXES: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_memory_type ON Memory(type)`,
   `CREATE INDEX IF NOT EXISTS idx_memory_contentHash ON Memory(contentHash)`,
   `CREATE INDEX IF NOT EXISTS idx_symbolversion_versionId ON SymbolVersion(versionId)`,
+  `CREATE INDEX IF NOT EXISTS idx_usagesnapshot_repoId ON UsageSnapshot(repoId)`,
+  `CREATE INDEX IF NOT EXISTS idx_usagesnapshot_timestamp ON UsageSnapshot(timestamp)`,
 ];
 
 export async function createSchema(conn: Connection): Promise<void> {

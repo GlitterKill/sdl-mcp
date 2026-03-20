@@ -1911,3 +1911,73 @@ export type MemoryRemoveRequest = z.infer<typeof MemoryRemoveRequestSchema>;
 export type MemoryRemoveResponse = z.infer<typeof MemoryRemoveResponseSchema>;
 export type MemorySurfaceRequest = z.infer<typeof MemorySurfaceRequestSchema>;
 export type MemorySurfaceResponse = z.infer<typeof MemorySurfaceResponseSchema>;
+
+// ============================================================================
+// Usage Stats
+// ============================================================================
+
+const ToolUsageEntrySchema = z.object({
+  tool: z.string(),
+  sdlTokens: z.number(),
+  rawEquivalent: z.number(),
+  savedTokens: z.number(),
+  callCount: z.number().int(),
+});
+
+const SessionUsageSnapshotSchema = z.object({
+  sessionId: z.string(),
+  startedAt: z.string(),
+  totalSdlTokens: z.number(),
+  totalRawEquivalent: z.number(),
+  totalSavedTokens: z.number(),
+  overallSavingsPercent: z.number(),
+  toolBreakdown: z.array(ToolUsageEntrySchema),
+  callCount: z.number().int(),
+});
+
+const UsageHistorySnapshotSchema = z.object({
+  snapshotId: z.string(),
+  sessionId: z.string(),
+  repoId: z.string(),
+  timestamp: z.string(),
+  totalSdlTokens: z.number(),
+  totalRawEquivalent: z.number(),
+  totalSavedTokens: z.number(),
+  savingsPercent: z.number(),
+  callCount: z.number().int(),
+});
+
+const TopToolSavingsSchema = z.object({
+  tool: z.string(),
+  savedTokens: z.number(),
+  savingsPercent: z.number(),
+});
+
+export const UsageStatsRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH).optional(),
+  scope: z.enum(["session", "history", "both"]).default("both"),
+  since: z.string().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  persist: z.boolean().optional(),
+});
+
+export const UsageStatsResponseSchema = z.object({
+  session: SessionUsageSnapshotSchema.optional(),
+  history: z
+    .object({
+      snapshots: z.array(UsageHistorySnapshotSchema),
+      aggregate: z.object({
+        totalSdlTokens: z.number(),
+        totalRawEquivalent: z.number(),
+        totalSavedTokens: z.number(),
+        overallSavingsPercent: z.number(),
+        totalCalls: z.number().int(),
+        sessionCount: z.number().int(),
+        topToolsBySavings: z.array(TopToolSavingsSchema),
+      }),
+    })
+    .optional(),
+});
+
+export type UsageStatsRequest = z.infer<typeof UsageStatsRequestSchema>;
+export type UsageStatsResponse = z.infer<typeof UsageStatsResponseSchema>;

@@ -31,6 +31,7 @@ import { writeArtifact } from "../../runtime/artifacts.js";
 import type { OutputExcerpt, ConcurrencyTracker } from "../../runtime/types.js";
 import { logRuntimeExecution } from "../telemetry.js";
 import { logPolicyDecision } from "../telemetry.js";
+import { attachRawContext } from "../token-usage.js";
 import { hashContent } from "../../util/hashing.js";
 import { logger } from "../../util/logger.js";
 import {
@@ -443,7 +444,11 @@ export async function handleRuntimeExecute(
     });
 
     // 13. Return response
-    return {
+    // Raw equivalent = what the agent would consume watching full output
+    const rawOutputTokens = Math.ceil(
+      (result.totalStdoutBytes + result.totalStderrBytes) / 4,
+    );
+    const response = {
       status: result.status,
       exitCode: result.exitCode,
       signal: result.signal,
@@ -462,6 +467,7 @@ export async function handleRuntimeExecute(
         auditHash: policyDecision.auditHash,
       },
     };
+    return attachRawContext(response, { rawTokens: rawOutputTokens });
   } finally {
     tracker.release();
 

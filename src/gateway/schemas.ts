@@ -240,6 +240,14 @@ const PolicySetAction = z.object({
   }),
 });
 
+const UsageStatsAction = z.object({
+  action: z.literal("usage.stats"),
+  scope: z.enum(["session", "history", "both"]).default("both"),
+  since: z.string().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  persist: z.boolean().optional(),
+});
+
 export const RepoGatewaySchema = z
   .object({
     repoId: z.string().min(1),
@@ -252,6 +260,7 @@ export const RepoGatewaySchema = z
       IndexRefreshAction,
       PolicyGetAction,
       PolicySetAction,
+      UsageStatsAction,
     ]),
   );
 
@@ -449,6 +458,7 @@ export const REPO_ACTIONS = [
   "index.refresh",
   "policy.get",
   "policy.set",
+  "usage.stats",
 ] as const;
 
 export const AGENT_ACTIONS = [
