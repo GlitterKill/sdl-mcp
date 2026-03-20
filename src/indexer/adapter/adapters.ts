@@ -126,4 +126,24 @@ export const adapters = [
     languageId: "shell",
     factory: () => new ShellAdapter(),
   },
+  {
+    extension: ".mjs",
+    languageId: "typescript",
+    factory: () => new TypeScriptAdapter(),
+  },
+  {
+    extension: ".cjs",
+    languageId: "typescript",
+    factory: () => new TypeScriptAdapter(),
+  },
+  {
+    extension: ".pyw",
+    languageId: "python",
+    factory: () => new PythonAdapter(),
+  },
+  {
+    extension: ".zsh",
+    languageId: "shell",
+    factory: () => new ShellAdapter(),
+  },
 ];

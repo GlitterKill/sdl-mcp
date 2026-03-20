@@ -6,23 +6,39 @@ import {
   generateContextSummary,
   renderContextSummary,
 } from "../../services/summary.js";
+import { ValidationError, IndexError } from "../errors.js";
+import { ZodError } from "zod";
 
 export async function handleContextSummary(
   args: unknown,
 ): Promise<ContextSummaryResponse> {
-  const request = ContextSummaryRequestSchema.parse(args);
-  const summary = await generateContextSummary({
-    repoId: request.repoId,
-    query: request.query,
-    budget: request.budget,
-    scope: request.scope,
-  });
+  try {
+    const request = ContextSummaryRequestSchema.parse(args);
+    const summary = await generateContextSummary({
+      repoId: request.repoId,
+      query: request.query,
+      budget: request.budget,
+      scope: request.scope,
+    });
 
-  const format = request.format ?? "markdown";
-  return {
-    repoId: request.repoId,
-    format,
-    summary,
-    content: renderContextSummary(summary, format),
-  };
+    const format = request.format ?? "markdown";
+    return {
+      repoId: request.repoId,
+      format,
+      summary,
+      content: renderContextSummary(summary, format),
+    };
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new ValidationError(
+        `Invalid context summary request: ${error.errors.map((e) => e.message).join(", ")}`,
+      );
+    }
+    if (error instanceof ValidationError || error instanceof IndexError) {
+      throw error;
+    }
+    throw new IndexError(
+      `Context summary generation failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }

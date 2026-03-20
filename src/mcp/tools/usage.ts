@@ -23,11 +23,25 @@ import {
   renderLifetimeSummary,
   type AggregateUsage,
 } from "../savings-meter.js";
+import { ValidationError, DatabaseError } from "../errors.js";
+import { ZodError } from "zod";
 
 export async function handleUsageStats(
   args: unknown,
 ): Promise<UsageStatsResponse> {
-  const request = UsageStatsRequestSchema.parse(args);
+  let request;
+  try {
+    request = UsageStatsRequestSchema.parse(args);
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new ValidationError(
+        `Invalid usage stats request: ${error.errors.map((e) => e.message).join(", ")}`,
+      );
+    }
+    throw error;
+  }
+
+  try {
   const response: UsageStatsResponse = {};
 
   // Optionally persist current session snapshot first
@@ -123,4 +137,12 @@ export async function handleUsageStats(
   }
 
   return response;
+  } catch (error) {
+    if (error instanceof ValidationError || error instanceof DatabaseError) {
+      throw error;
+    }
+    throw new DatabaseError(
+      `Usage stats retrieval failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }

@@ -69,6 +69,7 @@
     "spike:ladybug": "tsx scripts/ladybug-spike.ts",
     "test:stress": "node --import tsx --max-old-space-size=4096 tests/stress/run-stress.ts",
     "test:mutation": "stryker run stryker.conf.cjs",
+    "test:coverage": "c8 --reporter=text --reporter=html --exclude dist --exclude tests --exclude node_modules --exclude native --exclude scripts node scripts/run-tests.mjs",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit"
   },
   "keywords": [
@@ -119,15 +120,15 @@
     "onnxruntime-node": "^1.24.3",
     "sdl-mcp-native": "0.9.0",
     "tokenizers": "0.13.4-rc2",
-    "tokenizers-win32-x64-msvc": "0.13.4-rc2",
-    "tokenizers-win32-ia32-msvc": "0.13.4-rc2",
-    "tokenizers-win32-arm64-msvc": "0.13.4-rc2",
-    "tokenizers-darwin-x64": "0.13.4-rc2",
     "tokenizers-darwin-arm64": "0.13.4-rc2",
+    "tokenizers-darwin-x64": "0.13.4-rc2",
+    "tokenizers-linux-arm64-gnu": "0.13.4-rc2",
+    "tokenizers-linux-arm64-musl": "0.13.4-rc2",
     "tokenizers-linux-x64-gnu": "0.13.4-rc2",
     "tokenizers-linux-x64-musl": "0.13.4-rc2",
-    "tokenizers-linux-arm64-gnu": "0.13.4-rc2",
-    "tokenizers-linux-arm64-musl": "0.13.4-rc2"
+    "tokenizers-win32-arm64-msvc": "0.13.4-rc2",
+    "tokenizers-win32-ia32-msvc": "0.13.4-rc2",
+    "tokenizers-win32-x64-msvc": "0.13.4-rc2"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",
@@ -136,6 +137,7 @@
     "@types/node": "^20.19.37",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
+    "c8": "^11.0.0",
     "eslint": "^8.0.0",
     "eslint-plugin-import": "^2.32.0",
     "fast-check": "^3.23.2",

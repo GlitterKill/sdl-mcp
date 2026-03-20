@@ -9,11 +9,17 @@ import {
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import type { LiveIndexCoordinator } from "../../live-index/types.js";
 import type { ToolContext } from "../../server.js";
+import { ValidationError, IndexError } from "../errors.js";
+import { ZodError } from "zod";
 
 function resolveLiveIndex(
   liveIndex?: LiveIndexCoordinator,
 ): LiveIndexCoordinator {
-  return liveIndex ?? getDefaultLiveIndexCoordinator();
+  const coordinator = liveIndex ?? getDefaultLiveIndexCoordinator();
+  if (!coordinator) {
+    throw new IndexError("Live index coordinator is not available");
+  }
+  return coordinator;
 }
 
 export async function handleBufferPush(
@@ -21,8 +27,22 @@ export async function handleBufferPush(
   _context?: ToolContext,
   liveIndex?: LiveIndexCoordinator,
 ): Promise<BufferPushResponse> {
-  const request = BufferPushRequestSchema.parse(args);
-  return resolveLiveIndex(liveIndex).pushBufferUpdate(request);
+  try {
+    const request = BufferPushRequestSchema.parse(args);
+    return await resolveLiveIndex(liveIndex).pushBufferUpdate(request);
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new ValidationError(
+        `Invalid buffer push request: ${error.errors.map((e) => e.message).join(", ")}`,
+      );
+    }
+    if (error instanceof ValidationError || error instanceof IndexError) {
+      throw error;
+    }
+    throw new IndexError(
+      `Buffer push failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 export async function handleBufferCheckpoint(
@@ -30,8 +50,22 @@ export async function handleBufferCheckpoint(
   _context?: ToolContext,
   liveIndex?: LiveIndexCoordinator,
 ): Promise<BufferCheckpointResponse> {
-  const request = BufferCheckpointRequestSchema.parse(args);
-  return resolveLiveIndex(liveIndex).checkpointRepo(request);
+  try {
+    const request = BufferCheckpointRequestSchema.parse(args);
+    return await resolveLiveIndex(liveIndex).checkpointRepo(request);
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new ValidationError(
+        `Invalid buffer checkpoint request: ${error.errors.map((e) => e.message).join(", ")}`,
+      );
+    }
+    if (error instanceof ValidationError || error instanceof IndexError) {
+      throw error;
+    }
+    throw new IndexError(
+      `Buffer checkpoint failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 export async function handleBufferStatus(
@@ -39,6 +73,20 @@ export async function handleBufferStatus(
   _context?: ToolContext,
   liveIndex?: LiveIndexCoordinator,
 ): Promise<BufferStatusResponse> {
-  const request = BufferStatusRequestSchema.parse(args);
-  return resolveLiveIndex(liveIndex).getLiveStatus(request.repoId);
+  try {
+    const request = BufferStatusRequestSchema.parse(args);
+    return await resolveLiveIndex(liveIndex).getLiveStatus(request.repoId);
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new ValidationError(
+        `Invalid buffer status request: ${error.errors.map((e) => e.message).join(", ")}`,
+      );
+    }
+    if (error instanceof ValidationError || error instanceof IndexError) {
+      throw error;
+    }
+    throw new IndexError(
+      `Buffer status failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
