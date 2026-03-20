@@ -40,6 +40,12 @@ describe("token-usage", () => {
       assert.strictEqual(result.savingsPercent, 94);
     });
 
+    it("includes meter string in result", () => {
+      const result = computeSavings(135, 2400);
+      assert.ok(typeof result.meter === "string");
+      assert.match(result.meter, /^[\u2588\u2591]{10} \d+%$/);
+    });
+
     it("returns 0 savings when rawEquivalent is 0", () => {
       const result = computeSavings(100, 0);
       assert.strictEqual(result.savingsPercent, 0);

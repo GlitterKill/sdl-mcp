@@ -8,7 +8,10 @@
 import type { Connection } from "kuzu";
 import { exec, queryAll, toNumber, assertSafeInt } from "./ladybug-core.js";
 import { withWriteConn } from "./ladybug.js";
-import type { SessionUsageSnapshot } from "../mcp/token-accumulator.js";
+import type {
+  SessionUsageSnapshot,
+  ToolUsageEntry,
+} from "../mcp/token-accumulator.js";
 import { getCurrentTimestamp } from "../util/time.js";
 
 // ---------------------------------------------------------------------------
@@ -194,6 +197,64 @@ export async function getAggregateUsage(
     totalCalls: toNumber(r.totalCalls),
     sessionCount: toNumber(r.sessionCount),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Pure aggregation (no DB access)
+// ---------------------------------------------------------------------------
+
+/**
+ * Aggregate tool breakdown entries from multiple snapshot JSON strings.
+ * Returns a single array of ToolUsageEntry with totals per tool.
+ */
+export function aggregateToolBreakdowns(
+  toolBreakdownJsons: string[],
+): ToolUsageEntry[] {
+  const map = new Map<
+    string,
+    { sdl: number; raw: number; saved: number; calls: number }
+  >();
+
+  for (const json of toolBreakdownJsons) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(json);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(parsed)) continue;
+
+    for (const entry of parsed as ToolUsageEntry[]) {
+      if (
+        typeof entry.tool !== "string" ||
+        typeof entry.savedTokens !== "number"
+      ) {
+        continue;
+      }
+      const existing = map.get(entry.tool);
+      if (existing) {
+        existing.sdl += entry.sdlTokens ?? 0;
+        existing.raw += entry.rawEquivalent ?? 0;
+        existing.saved += entry.savedTokens;
+        existing.calls += entry.callCount ?? 0;
+      } else {
+        map.set(entry.tool, {
+          sdl: entry.sdlTokens ?? 0,
+          raw: entry.rawEquivalent ?? 0,
+          saved: entry.savedTokens,
+          calls: entry.callCount ?? 0,
+        });
+      }
+    }
+  }
+
+  return Array.from(map.entries()).map(([tool, v]) => ({
+    tool,
+    sdlTokens: v.sdl,
+    rawEquivalent: v.raw,
+    savedTokens: v.saved,
+    callCount: v.calls,
+  }));
 }
 
 // ---------------------------------------------------------------------------

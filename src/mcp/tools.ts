@@ -1977,6 +1977,7 @@ export const UsageStatsResponseSchema = z.object({
       }),
     })
     .optional(),
+  formattedSummary: z.string().optional(),
 });
 
 export type UsageStatsRequest = z.infer<typeof UsageStatsRequestSchema>;

@@ -15,20 +15,14 @@ import {
   getUsageSnapshots,
   getAggregateUsage,
   persistUsageSnapshot,
+  aggregateToolBreakdowns,
 } from "../../db/ladybug-usage.js";
-import { safeJsonParse } from "../../util/safeJson.js";
-import { z } from "zod";
-import type { ToolUsageEntry } from "../token-accumulator.js";
-
-const ToolBreakdownSchema = z.array(
-  z.object({
-    tool: z.string(),
-    sdlTokens: z.number(),
-    rawEquivalent: z.number(),
-    savedTokens: z.number(),
-    callCount: z.number(),
-  }),
-);
+import {
+  renderTaskSummary,
+  renderSessionSummary,
+  renderLifetimeSummary,
+  type AggregateUsage,
+} from "../savings-meter.js";
 
 export async function handleUsageStats(
   args: unknown,
@@ -65,36 +59,17 @@ export async function handleUsageStats(
     });
 
     // Compute top tools by savings across all historical snapshots
-    const toolTotals = new Map<string, { saved: number; sdl: number; raw: number }>();
-    for (const snap of snapshots) {
-      const breakdown = safeJsonParse(
-        snap.toolBreakdownJson,
-        ToolBreakdownSchema,
-        [] as ToolUsageEntry[],
-      );
-      for (const entry of breakdown) {
-        const existing = toolTotals.get(entry.tool);
-        if (existing) {
-          existing.saved += entry.savedTokens;
-          existing.sdl += entry.sdlTokens;
-          existing.raw += entry.rawEquivalent;
-        } else {
-          toolTotals.set(entry.tool, {
-            saved: entry.savedTokens,
-            sdl: entry.sdlTokens,
-            raw: entry.rawEquivalent,
-          });
-        }
-      }
-    }
+    const allToolEntries = aggregateToolBreakdowns(
+      snapshots.map((s) => s.toolBreakdownJson),
+    );
 
-    const topToolsBySavings = [...toolTotals.entries()]
-      .map(([tool, t]) => ({
-        tool,
-        savedTokens: t.saved,
+    const topToolsBySavings = allToolEntries
+      .map((e) => ({
+        tool: e.tool,
+        savedTokens: e.savedTokens,
         savingsPercent:
-          t.raw > 0 && t.sdl < t.raw
-            ? Math.round((1 - t.sdl / t.raw) * 100)
+          e.rawEquivalent > 0 && e.sdlTokens < e.rawEquivalent
+            ? Math.round((1 - e.sdlTokens / e.rawEquivalent) * 100)
             : 0,
       }))
       .sort((a, b) => b.savedTokens - a.savedTokens)
@@ -117,6 +92,34 @@ export async function handleUsageStats(
         topToolsBySavings,
       },
     };
+
+    // Build formatted summary for history-aware scopes
+    const ltAggregate: AggregateUsage = {
+      totalSdlTokens: aggregate.totalSdlTokens,
+      totalRawEquivalent: aggregate.totalRawEquivalent,
+      totalSavedTokens: aggregate.totalSavedTokens,
+      overallSavingsPercent: aggregate.overallSavingsPercent,
+      totalCalls: aggregate.totalCalls,
+      sessionCount: aggregate.sessionCount,
+    };
+
+    if (request.scope === "both" && response.session) {
+      response.formattedSummary = renderSessionSummary(
+        response.session,
+        ltAggregate,
+        allToolEntries,
+      );
+    } else if (request.scope === "history") {
+      response.formattedSummary = renderLifetimeSummary(
+        ltAggregate,
+        allToolEntries,
+      );
+    }
+  }
+
+  // Session-only formatted summary (no history fetch needed)
+  if (request.scope === "session" && response.session) {
+    response.formattedSummary = renderTaskSummary(response.session);
   }
 
   return response;

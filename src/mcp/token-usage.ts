@@ -1,11 +1,13 @@
 import { estimateTokens } from "../util/tokenize.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import { renderOperationMeter } from "./savings-meter.js";
 
 export interface TokenUsageMetadata {
   sdlTokens: number;
   rawEquivalent: number;
   savingsPercent: number;
+  meter: string;
 }
 
 export interface RawContextHint {
@@ -41,7 +43,7 @@ export function computeSavings(
       ? Math.round((1 - sdlTokens / rawEquivalent) * 100)
       : 0;
 
-  return { sdlTokens, rawEquivalent, savingsPercent };
+  return { sdlTokens, rawEquivalent, savingsPercent, meter: renderOperationMeter(savingsPercent) };
 }
 
 export async function computeTokenUsage(
@@ -49,7 +51,7 @@ export async function computeTokenUsage(
 ): Promise<TokenUsageMetadata> {
   const hint = result._rawContext as RawContextHint | undefined;
   if (!hint) {
-    return { sdlTokens: 0, rawEquivalent: 0, savingsPercent: 0 };
+    return { sdlTokens: 0, rawEquivalent: 0, savingsPercent: 0, meter: renderOperationMeter(0) };
   }
 
   const { _rawContext: _, ...cleanResult } = result;
