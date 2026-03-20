@@ -326,25 +326,27 @@ export async function deleteClustersByRepo(
   conn: Connection,
   repoId: string,
 ): Promise<void> {
-  await exec(
-    conn,
-    `MATCH (c:Cluster {repoId: $repoId})
-     OPTIONAL MATCH (:Symbol)-[m:BELONGS_TO_CLUSTER]->(c)
-     DELETE m`,
-    { repoId },
-  );
+  await withTransaction(conn, async (txConn) => {
+    await exec(
+      txConn,
+      `MATCH (c:Cluster {repoId: $repoId})
+       OPTIONAL MATCH (:Symbol)-[m:BELONGS_TO_CLUSTER]->(c)
+       DELETE m`,
+      { repoId },
+    );
 
-  await exec(
-    conn,
-    `MATCH (c:Cluster {repoId: $repoId})-[rel:CLUSTER_IN_REPO]->(:Repo {repoId: $repoId})
-     DELETE rel`,
-    { repoId },
-  );
+    await exec(
+      txConn,
+      `MATCH (c:Cluster {repoId: $repoId})-[rel:CLUSTER_IN_REPO]->(:Repo {repoId: $repoId})
+       DELETE rel`,
+      { repoId },
+    );
 
-  await exec(
-    conn,
-    `MATCH (c:Cluster {repoId: $repoId})
-     DELETE c`,
-    { repoId },
-  );
+    await exec(
+      txConn,
+      `MATCH (c:Cluster {repoId: $repoId})
+       DELETE c`,
+      { repoId },
+    );
+  });
 }

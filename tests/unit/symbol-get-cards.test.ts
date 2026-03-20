@@ -3,6 +3,7 @@ import assert from "node:assert";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 import { handleSymbolGetCards } from "../../dist/mcp/tools/symbol.js";
 import { SymbolGetCardsRequestSchema } from "../../src/mcp/tools.js";
@@ -27,7 +28,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("handleSymbolGetCards", () => {
-  const graphDbPath = join(__dirname, ".lbug-get-cards-test-db");
+  const graphDbPath = join(tmpdir(), ".lbug-get-cards-test-db");
 
   let symbolIdA: string;
   let symbolIdB: string;

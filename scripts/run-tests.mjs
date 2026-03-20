@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -130,5 +130,12 @@ const result = spawnSync(process.execPath, nodeArgs, {
   stdio: "inherit",
   env: testEnv,
 });
+
+// Clean up temp directory created for this test run
+try {
+  rmSync(testTempDir, { recursive: true, force: true });
+} catch {
+  // Best-effort cleanup (files may be locked on Windows)
+}
 
 process.exit(result.status ?? 1);

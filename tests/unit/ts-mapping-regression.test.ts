@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("TS diagnostic mapping regression", () => {
-  const dbPath = join(__dirname, ".lbug-ts-mapping-regression-db");
+  const dbPath = join(tmpdir(), ".lbug-ts-mapping-regression-db");
   const repoRoot = join(__dirname, ".tmp-ts-mapping-repo-root");
   const repoId = "ts-mapping-regression-repo";
   const fileId = "ts-mapping-file";

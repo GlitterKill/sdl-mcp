@@ -2,25 +2,18 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { join, dirname } from "path";
-import { fileURLToPath } from "url";
+import { tmpdir } from "node:os";
 // @ts-expect-error — node:sqlite types not available in this TS target
 import { DatabaseSync } from "node:sqlite";
 
 import { migrateSqliteToLadybug } from "../../scripts/migrate-sqlite-to-ladybug.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
 const SQLITE_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
+  tmpdir(),
   ".sqlite-to-ladybug-migration-test.sqlite",
 );
 const LADYBUG_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
+  tmpdir(),
   ".lbug-migration-test-db.lbug",
 );
 

@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, rmSync } from "fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -29,12 +30,7 @@ import { upsertRepo, upsertFile } from "../../src/db/ladybug-queries.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
-  ".lbug-embeddings-queries-test-db.lbug",
-);
+const TEST_DB_PATH = join(tmpdir(), ".lbug-embeddings-queries-test-db.lbug");
 
 interface LadybugConnection {
   close: () => Promise<void>;

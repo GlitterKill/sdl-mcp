@@ -3,6 +3,7 @@ import assert from "node:assert";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
@@ -13,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("kuzu cluster/process queries", () => {
-  const graphDbPath = join(__dirname, ".lbug-cluster-process-queries-test-db");
+  const graphDbPath = join(tmpdir(), ".lbug-cluster-process-queries-test-db");
 
   let symbolA: string;
   let symbolB: string;

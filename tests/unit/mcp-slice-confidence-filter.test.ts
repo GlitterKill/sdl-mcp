@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,12 +12,7 @@ import * as ladybugDb from "../../src/db/ladybug-queries.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
-  ".lbug-mcp-slice-confidence-test-db.lbug",
-);
+const TEST_DB_PATH = join(tmpdir(), ".lbug-mcp-slice-confidence-test-db.lbug");
 
 interface LadybugConnection {
   close: () => Promise<void>;

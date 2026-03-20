@@ -1,17 +1,13 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
-  ".lbug-lazy-graph-loading-test-db.lbug",
-);
+const TEST_DB_PATH = join(tmpdir(), ".lbug-lazy-graph-loading-test-db.lbug");
 
 interface LadybugConnection {
   query: (q: string) => Promise<{

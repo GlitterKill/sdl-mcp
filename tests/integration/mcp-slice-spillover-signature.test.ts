@@ -1,6 +1,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,12 +11,7 @@ import { handleSliceSpilloverGet } from "../../dist/mcp/tools/slice.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
-  ".lbug-mcp-slice-spillover-signature-test-db.lbug",
-);
+const TEST_DB_PATH = join(tmpdir(), ".lbug-mcp-slice-spillover-signature-test-db.lbug");
 
 describe("MCP slice spillover signatures", () => {
   const repoId = "mcp-slice-spillover-signature-repo";

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,12 +13,7 @@ import { handleSymbolGetCard } from "../../src/mcp/tools/symbol.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
-  ".lbug-mcp-symbol-card-confidence-test-db.lbug",
-);
+const TEST_DB_PATH = join(tmpdir(), ".lbug-mcp-symbol-card-confidence-test-db.lbug");
 
 describe("symbol card confidence-aware filtering", () => {
   beforeEach(async () => {

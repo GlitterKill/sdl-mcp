@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { clearAllCaches } from "../../src/graph/cache.js";
@@ -22,12 +23,7 @@ import { errorToMcpResponse } from "../../src/mcp/errors.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
-  ".lbug-symbol-natural-identifiers-test-db.lbug",
-);
+const TEST_DB_PATH = join(tmpdir(), ".lbug-symbol-natural-identifiers-test-db.lbug");
 
 describe("symbol natural identifiers", () => {
   beforeEach(async () => {

@@ -393,10 +393,8 @@ async function main(): Promise<void> {
   const jsonPath = writeJsonReport(report, resultsDir);
   stressLog("info", `JSON report saved to: ${jsonPath}`);
 
-  // Exit with failure code if any scenario failed or result checks failed
-  if (!report.overallPassed) {
-    process.exit(1);
-  }
+  // Exit explicitly to avoid hanging on dangling handles/timers
+  process.exit(report.overallPassed ? 0 : 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -408,18 +406,27 @@ async function withTimeout(
   timeoutMs: number,
   name: string,
 ): Promise<ScenarioResult> {
+  let timer: ReturnType<typeof setTimeout>;
   return Promise.race([
     promise,
-    new Promise<ScenarioResult>((_, reject) =>
-      setTimeout(
+    new Promise<ScenarioResult>((_, reject) => {
+      timer = setTimeout(
         () =>
           reject(
             new Error(`Scenario "${name}" timed out after ${timeoutMs}ms`),
           ),
         timeoutMs,
-      ),
-    ),
-  ]).catch((err) => errorResult(name, err));
+      );
+    }),
+  ])
+    .then((result) => {
+      clearTimeout(timer);
+      return result;
+    })
+    .catch((err) => {
+      clearTimeout(timer);
+      return errorResult(name, err);
+    });
 }
 
 function errorResult(name: string, err: unknown): ScenarioResult {

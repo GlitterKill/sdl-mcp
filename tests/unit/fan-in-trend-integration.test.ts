@@ -10,6 +10,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, rmSync } from "fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -18,12 +19,7 @@ import { computeBlastRadius } from "../../dist/delta/blastRadius.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
-  ".lbug-fan-in-trend-test-db.lbug",
-);
+const TEST_DB_PATH = join(tmpdir(), ".lbug-fan-in-trend-test-db.lbug");
 
 interface LadybugConnection {
   query: (q: string) => Promise<{

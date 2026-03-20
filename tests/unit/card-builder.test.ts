@@ -1,6 +1,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,12 +19,7 @@ import { PolicyEngine } from "../../src/policy/engine.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
-  ".lbug-card-builder-unit-test-db.lbug",
-);
+const TEST_DB_PATH = join(tmpdir(), ".lbug-card-builder-unit-test-db.lbug");
 
 async function resetDb(): Promise<void> {
   clearAllCaches();

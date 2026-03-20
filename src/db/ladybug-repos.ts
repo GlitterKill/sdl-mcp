@@ -148,12 +148,14 @@ export async function deleteRepo(
       }
     }
 
-    // Clean up Cluster nodes
+    // Clean up Cluster nodes (delete all edge types before nodes)
     await exec(txConn, `MATCH (c:Cluster {repoId: $repoId})<-[e:BELONGS_TO_CLUSTER]-() DELETE e`, { repoId });
+    await exec(txConn, `MATCH (c:Cluster {repoId: $repoId})-[e:CLUSTER_IN_REPO]->() DELETE e`, { repoId });
     await exec(txConn, `MATCH (c:Cluster {repoId: $repoId}) DELETE c`, { repoId });
 
-    // Clean up Process nodes
+    // Clean up Process nodes (delete all edge types before nodes)
     await exec(txConn, `MATCH (p:Process {repoId: $repoId})<-[e:PARTICIPATES_IN]-() DELETE e`, { repoId });
+    await exec(txConn, `MATCH (p:Process {repoId: $repoId})-[e:PROCESS_IN_REPO]->() DELETE e`, { repoId });
     await exec(txConn, `MATCH (p:Process {repoId: $repoId}) DELETE p`, { repoId });
 
     // Clean up SliceHandle nodes

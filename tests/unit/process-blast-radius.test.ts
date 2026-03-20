@@ -3,6 +3,7 @@ import assert from "node:assert";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 import { computeBlastRadius } from "../../dist/delta/blastRadius.js";
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
@@ -14,7 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("process-aware blast radius", () => {
-  const graphDbPath = join(__dirname, ".lbug-process-blast-radius-test-db");
+  const graphDbPath = join(tmpdir(), ".lbug-process-blast-radius-test-db");
 
   const changed = `${REPO_ID}-changed`;
   const caller = `${REPO_ID}-caller`;

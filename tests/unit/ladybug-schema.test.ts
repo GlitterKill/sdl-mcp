@@ -10,6 +10,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import { existsSync, rmSync, mkdirSync } from "fs";
+import { tmpdir } from "node:os";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
@@ -18,7 +19,7 @@ import { createSchema, getSchemaVersion } from "../../src/db/ladybug-schema.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const TEST_DB_PATH = join(__dirname, "..", "..", ".lbug-schema-test-db.lbug");
+const TEST_DB_PATH = join(tmpdir(), ".lbug-schema-test-db.lbug");
 
 interface LadybugConnection {
   query: (q: string) => Promise<{

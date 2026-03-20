@@ -3,6 +3,7 @@ import assert from "node:assert";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
@@ -14,7 +15,7 @@ const __dirname = dirname(__filename);
 const REPO_ID = "test-cluster-slice-cohesion-repo";
 
 describe("cluster-aware slice cohesion (integration)", () => {
-  const graphDbPath = join(__dirname, ".lbug-cluster-slice-cohesion-test-db");
+  const graphDbPath = join(tmpdir(), ".lbug-cluster-slice-cohesion-test-db");
 
   const symbolA1 = `${REPO_ID}-a1`;
   const symbolA2 = `${REPO_ID}-a2`;

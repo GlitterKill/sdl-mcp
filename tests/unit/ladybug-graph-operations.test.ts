@@ -2,17 +2,13 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import { queryAll as coreQueryAll } from "../../src/db/ladybug-core.js";
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
-  ".lbug-graph-ops-test-db.lbug",
-);
+const TEST_DB_PATH = join(tmpdir(), ".lbug-graph-ops-test-db.lbug");
 
 interface LadybugConnection {
   query: (q: string) => Promise<{

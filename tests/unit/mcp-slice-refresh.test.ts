@@ -1,6 +1,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,12 +9,7 @@ import { SliceRefreshRequestSchema } from "../../dist/mcp/tools.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(
-  __dirname,
-  "..",
-  "..",
-  ".lbug-slice-refresh-test-db.lbug",
-);
+const TEST_DB_PATH = join(tmpdir(), ".lbug-slice-refresh-test-db.lbug");
 
 interface LadybugDatabase {
   close: () => Promise<void>;

@@ -1,11 +1,10 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import { existsSync, rmSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
+import { join } from "path";
+import { tmpdir } from "node:os";
 
-const testDir = dirname(fileURLToPath(import.meta.url));
-const testDbBase = join(testDir, "..", "..", ".test-kuzu-db");
+const testDbBase = join(tmpdir(), ".test-kuzu-db");
 
 let getLadybugDb: (dbPath?: string) => Promise<unknown>;
 let getLadybugConn: () => Promise<unknown>;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,7 +18,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("sync path regressions", () => {
-  const dbPath = join(__dirname, ".lbug-sync-path-regression-db");
+  const dbPath = join(tmpdir(), ".lbug-sync-path-regression-db");
   const repoRoot = join(__dirname, ".tmp-sync-repo-root");
   const workspaceSyncDir = join(process.cwd(), ".sdl-sync");
   const repoId = "sync-path-regression-repo";

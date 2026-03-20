@@ -15,7 +15,7 @@ const __dirname = dirname(__filename);
 const REPO_ID = "test-indexer-clusters-repo";
 
 describe("Indexer cluster/process integration", () => {
-  const graphDbPath = join(__dirname, ".lbug-indexer-clusters-test-db");
+  const graphDbPath = join(tmpdir(), ".lbug-indexer-clusters-test-db");
   const configPath = join(graphDbPath, "test-config.json");
   let repoDir: string | null = null;
   const prevSDL_CONFIG = process.env.SDL_CONFIG;

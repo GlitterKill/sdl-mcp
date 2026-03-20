@@ -3,6 +3,7 @@ import assert from "node:assert";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rmSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { gunzipSync, gzipSync } from "node:zlib";
 
 import {
@@ -16,7 +17,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("Sync Artifact Model", () => {
-  const graphDbPath = join(__dirname, ".lbug-sync-artifact-test-db");
+  const graphDbPath = join(tmpdir(), ".lbug-sync-artifact-test-db");
   const syncDir = join(__dirname, ".tmp-sync-artifacts");
   const repoId = "test-repo-sync";
 

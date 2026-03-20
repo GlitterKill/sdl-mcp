@@ -1,11 +1,12 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, rmSync, mkdirSync } from "fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DB_DIR = join(__dirname, "..", "..", ".ladybug-contract-test-db");
+const TEST_DB_DIR = join(tmpdir(), ".ladybug-contract-test-db");
 const TEST_DB_PATH = join(TEST_DB_DIR, "contract.lbug");
 
 // Test vendor package contract directly - no SDL-MCP helpers

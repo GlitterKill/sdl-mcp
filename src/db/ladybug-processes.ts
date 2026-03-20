@@ -300,25 +300,27 @@ export async function deleteProcessesByRepo(
   conn: Connection,
   repoId: string,
 ): Promise<void> {
-  await exec(
-    conn,
-    `MATCH (p:Process {repoId: $repoId})
-     OPTIONAL MATCH (:Symbol)-[m:PARTICIPATES_IN]->(p)
-     DELETE m`,
-    { repoId },
-  );
+  await withTransaction(conn, async (txConn) => {
+    await exec(
+      txConn,
+      `MATCH (p:Process {repoId: $repoId})
+       OPTIONAL MATCH (:Symbol)-[m:PARTICIPATES_IN]->(p)
+       DELETE m`,
+      { repoId },
+    );
 
-  await exec(
-    conn,
-    `MATCH (p:Process {repoId: $repoId})-[rel:PROCESS_IN_REPO]->(:Repo {repoId: $repoId})
-     DELETE rel`,
-    { repoId },
-  );
+    await exec(
+      txConn,
+      `MATCH (p:Process {repoId: $repoId})-[rel:PROCESS_IN_REPO]->(:Repo {repoId: $repoId})
+       DELETE rel`,
+      { repoId },
+    );
 
-  await exec(
-    conn,
-    `MATCH (p:Process {repoId: $repoId})
-     DELETE p`,
-    { repoId },
-  );
+    await exec(
+      txConn,
+      `MATCH (p:Process {repoId: $repoId})
+       DELETE p`,
+      { repoId },
+    );
+  });
 }
