@@ -127,7 +127,10 @@ export class ReconcileQueue {
     const state = this.getRepo(repoId);
     return {
       repoId,
-      queueDepth: state.filePaths.size,
+      queueDepth:
+        state.filePaths.size +
+        state.touchedSymbolIds.size +
+        state.invalidations.size,
       oldestQueuedAt: state.enqueuedAt,
       lastSuccessfulReconcileAt: state.lastSuccessfulReconcileAt,
       lastFailedReconcileAt: state.lastFailedReconcileAt,

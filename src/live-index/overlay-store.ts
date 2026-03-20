@@ -37,7 +37,7 @@ export class OverlayStore {
     const key = toStoreKey(update.filePath);
     const existing = repo.get(key);
 
-    if (existing && update.version < existing.version) {
+    if (existing && update.version <= existing.version) {
       return existing;
     }
 

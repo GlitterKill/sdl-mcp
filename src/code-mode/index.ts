@@ -10,6 +10,7 @@ import { MANUAL_DESCRIPTION, CHAIN_DESCRIPTION, ACTION_SEARCH_DESCRIPTION } from
 import { estimateTokens } from "../util/tokenize.js";
 import { buildCatalog, rankCatalog, type ActionDescriptor } from "./action-catalog.js";
 import { INTERNAL_TRANSFORM_NAMES } from "./transforms.js";
+import { ValidationError } from "../domain/errors.js";
 import { z } from "zod";
 
 /**
@@ -167,7 +168,9 @@ export function registerCodeModeTools(
     async (rawArgs: unknown, context?: ToolContext) => {
       const parsed = parseChainRequest(rawArgs);
       if (!parsed.ok) {
-        return { error: "CHAIN_VALIDATION_ERROR", details: parsed.errors };
+        const error = new ValidationError("Invalid sdl.chain request");
+        Object.assign(error, { details: parsed.errors });
+        throw error;
       }
 
       // Extract trace options from raw args (already validated by Zod via ChainRequestSchema)

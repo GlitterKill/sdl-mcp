@@ -679,7 +679,9 @@ async function handleRestRequest(
     );
     if (req.method === "GET" && graphSliceMatch) {
       const conn = await getLadybugConn();
-      const [, repoId, handle] = graphSliceMatch;
+      const [, rawRepoId, rawHandle] = graphSliceMatch;
+      const repoId = decodeURIComponent(rawRepoId);
+      const handle = decodeURIComponent(rawHandle);
       const maxNodes = Number(url.searchParams.get("maxNodes") ?? "200");
       const handleRow = await ladybugDb.getSliceHandle(conn, handle);
       if (!handleRow) {

@@ -24,6 +24,8 @@ describe("process-aware blast radius", () => {
 
   const otherChanged = `${REPO_ID}-other-changed`;
   const otherCaller = `${REPO_ID}-other-caller`;
+  const foreignRepoId = `${REPO_ID}-foreign`;
+  const foreignStep = `${foreignRepoId}-step`;
 
   before(async () => {
     if (existsSync(graphDbPath)) {
@@ -54,11 +56,38 @@ describe("process-aware blast radius", () => {
       createdAt: now,
     });
 
+    await ladybugDb.upsertRepo(conn, {
+      repoId: foreignRepoId,
+      rootPath: "/tmp/test-process-blast-radius-foreign",
+      configJson: JSON.stringify({
+        repoId: foreignRepoId,
+        rootPath: "/tmp/test-process-blast-radius-foreign",
+        ignore: [],
+        languages: ["ts"],
+        maxFileBytes: 2_000_000,
+        includeNodeModulesTypes: true,
+        packageJsonPath: null,
+        tsconfigPath: null,
+        workspaceGlobs: null,
+      }),
+      createdAt: now,
+    });
+
     await ladybugDb.upsertFile(conn, {
       fileId: "file-1",
       repoId: REPO_ID,
       relPath: "src/app.ts",
       contentHash: "hash",
+      language: "ts",
+      byteSize: 100,
+      lastIndexedAt: now,
+    });
+
+    await ladybugDb.upsertFile(conn, {
+      fileId: "file-foreign",
+      repoId: foreignRepoId,
+      relPath: "src/foreign.ts",
+      contentHash: "hash-foreign",
       language: "ts",
       byteSize: 100,
       lastIndexedAt: now,
@@ -94,6 +123,27 @@ describe("process-aware blast radius", () => {
         updatedAt: now,
       });
     }
+
+    await ladybugDb.upsertSymbol(conn, {
+      symbolId: foreignStep,
+      repoId: foreignRepoId,
+      fileId: "file-foreign",
+      kind: "function",
+      name: "foreignStep",
+      exported: true,
+      visibility: "public",
+      language: "ts",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 2,
+      rangeEndCol: 1,
+      astFingerprint: `fp-${foreignStep}`,
+      signatureJson: null,
+      summary: null,
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: now,
+    });
 
     // Graph dependents (incoming to changed)
     await ladybugDb.insertEdge(conn, {
@@ -170,6 +220,12 @@ describe("process-aware blast radius", () => {
       stepOrder: 3,
       role: "exit",
     });
+    await ladybugDb.upsertProcessStep(conn, {
+      processId,
+      symbolId: foreignStep,
+      stepOrder: 4,
+      role: "exit",
+    });
   });
 
   after(async () => {
@@ -217,5 +273,16 @@ describe("process-aware blast radius", () => {
 
     assert.ok(result.some((i) => i.symbolId === otherCaller));
     assert.ok(result.every((i) => i.signal !== "process"));
+  });
+
+  it("filters out process-linked symbols from other repositories", async () => {
+    const conn = await getLadybugConn();
+    const result = await computeBlastRadius(conn, [changed], {
+      repoId: REPO_ID,
+      maxHops: 1,
+      maxResults: 50,
+    });
+
+    assert.ok(result.every((item) => item.symbolId !== foreignStep));
   });
 });

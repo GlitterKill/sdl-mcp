@@ -1,3 +1,4 @@
+import { builtinModules } from "node:module";
 import Parser from "tree-sitter";
 import { createQuery } from "./grammarLoader.js";
 
@@ -11,35 +12,14 @@ export interface ExtractedImport {
   isReExport: boolean;
 }
 
-const BUILTIN_MODULES = new Set([
-  "fs",
-  "path",
-  "os",
-  "http",
-  "https",
-  "url",
-  "querystring",
-  "stream",
-  "util",
-  "events",
-  "buffer",
-  "crypto",
-  "timers",
-  "cluster",
-  "child_process",
-  "net",
-  "dgram",
-  "dns",
-  "readline",
-  "repl",
-  "vm",
-  "zlib",
-  "assert",
-  "tty",
-  "module",
-  "process",
-  "console",
-]);
+const BUILTIN_MODULES = new Set(
+  [...builtinModules, "test"].flatMap((moduleName) => {
+    const normalized = moduleName.startsWith("node:")
+      ? moduleName.slice("node:".length)
+      : moduleName;
+    return [normalized, normalized.split("/")[0]];
+  }),
+);
 
 export function extractImports(tree: Parser.Tree): ExtractedImport[] {
   const imports: ExtractedImport[] = [];
@@ -121,7 +101,7 @@ function parseImportNode(
 ): ExtractedImport {
   const isReExport = node.type === "export_statement";
   const isRelative = specifier.startsWith("./") || specifier.startsWith("../");
-  const isExternal = !isRelative && !BUILTIN_MODULES.has(specifier);
+  const isExternal = !isRelative && !isBuiltinSpecifier(specifier);
 
   const result: ExtractedImport = {
     specifier,
@@ -208,6 +188,16 @@ function parseImportNode(
   }
 
   return result;
+}
+
+function isBuiltinSpecifier(specifier: string): boolean {
+  const normalized = specifier.startsWith("node:")
+    ? specifier.slice("node:".length)
+    : specifier;
+  return (
+    BUILTIN_MODULES.has(normalized) ||
+    BUILTIN_MODULES.has(normalized.split("/")[0])
+  );
 }
 
 function extractNamedImports(node: Parser.SyntaxNode): string[] {

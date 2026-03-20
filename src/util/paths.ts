@@ -93,11 +93,20 @@ export function validatePathWithinRoot(root: string, target: string): string {
 
   const normalizedRoot = normalizePath(absoluteRoot);
   const normalizedTarget = normalizePath(absoluteTarget);
-  const rootPrefix = normalizedRoot.endsWith("/")
-    ? normalizedRoot
-    : `${normalizedRoot}/`;
+  const comparisonRoot = useWindowsPaths
+    ? normalizedRoot.toLowerCase()
+    : normalizedRoot;
+  const comparisonTarget = useWindowsPaths
+    ? normalizedTarget.toLowerCase()
+    : normalizedTarget;
+  const rootPrefix = comparisonRoot.endsWith("/")
+    ? comparisonRoot
+    : `${comparisonRoot}/`;
 
-  if (normalizedTarget !== normalizedRoot && !normalizedTarget.startsWith(rootPrefix)) {
+  if (
+    comparisonTarget !== comparisonRoot &&
+    !comparisonTarget.startsWith(rootPrefix)
+  ) {
     throw new ValidationError(
       `Path traversal detected: ${target} escapes repository root`,
     );

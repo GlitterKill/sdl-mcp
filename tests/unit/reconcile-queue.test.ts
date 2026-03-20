@@ -51,4 +51,23 @@ describe("ReconcileQueue", () => {
     assert.strictEqual(status.lastSuccessfulReconcileAt, "2026-03-07T12:02:00.000Z");
     assert.strictEqual(status.inflight, false);
   });
+
+  it("counts symbol-only and invalidation-only work in queue depth", () => {
+    const queue = new ReconcileQueue();
+
+    queue.enqueue(
+      "demo-repo",
+      {
+        touchedSymbolIds: ["sym-a"],
+        dependentSymbolIds: [],
+        dependentFilePaths: [],
+        importedFilePaths: [],
+        invalidations: ["metrics"],
+      },
+      "2026-03-07T12:00:00.000Z",
+    );
+
+    const status = queue.getStatus("demo-repo");
+    assert.strictEqual(status.queueDepth, 2);
+  });
 });

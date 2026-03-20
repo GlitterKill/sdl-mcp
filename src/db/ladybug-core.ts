@@ -5,6 +5,7 @@
  * and transaction management utilities used by all domain-specific DB modules.
  * It is the foundation of the ladybug-queries.ts split.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { Connection, PreparedStatement, QueryResult } from "kuzu";
 import { logger } from "../util/logger.js";
 import { DatabaseError } from "../domain/errors.js";
@@ -17,6 +18,8 @@ const preparedStatementCacheByConn = new WeakMap<
 >();
 const transactionDepthByConn = new WeakMap<Connection, number>();
 const poisonedConnections = new WeakMap<Connection, true>();
+const transactionOwnerByConn = new WeakMap<Connection, symbol>();
+const transactionContext = new AsyncLocalStorage<Map<Connection, symbol>>();
 
 /**
  * Clear the prepared statement cache for a specific connection.
@@ -48,11 +51,7 @@ export function toNumber(value: unknown): number {
   if (typeof value === "number") return value;
   if (typeof value === "bigint") {
     const n = Number(value);
-    if (n > Number.MAX_SAFE_INTEGER || n < -Number.MAX_SAFE_INTEGER) {
-      logger.warn("toNumber: bigint exceeds safe integer range", {
-        value: String(value).slice(0, 50),
-      });
-    }
+    assertSafeInt(n, "numeric value");
     return n;
   }
   if (typeof value === "string") {
@@ -192,7 +191,10 @@ export async function withTransaction<T>(
   conn: Connection,
   fn: (conn: Connection) => Promise<T>,
 ): Promise<T> {
+  const store = transactionContext.getStore();
   const depth = transactionDepthByConn.get(conn) ?? 0;
+  const activeOwner = transactionOwnerByConn.get(conn);
+  const currentOwner = store?.get(conn);
 
   if (depth === 0 && isConnectionPoisoned(conn)) {
     throw new DatabaseError(
@@ -200,9 +202,13 @@ export async function withTransaction<T>(
     );
   }
 
-  // At depth 0, ensure no other caller is concurrently entering a
-  // transaction on this same connection. Nested calls (depth > 0) from
-  // within the same async chain are safe.
+  if (depth > 0 && currentOwner !== activeOwner) {
+    throw new DatabaseError(
+      "Concurrent withTransaction() detected on the same connection. " +
+        "Callers must serialize access (e.g., via the write limiter).",
+    );
+  }
+
   if (depth === 0 && transactionLockByConn.get(conn)) {
     throw new DatabaseError(
       "Concurrent withTransaction() detected on the same connection. " +
@@ -210,43 +216,51 @@ export async function withTransaction<T>(
     );
   }
 
-  if (depth === 0) {
-    transactionLockByConn.set(conn, true);
-  }
-  transactionDepthByConn.set(conn, depth + 1);
+  const owner = activeOwner ?? Symbol("transaction-owner");
+  const nextStore = new Map(store ?? []);
+  nextStore.set(conn, owner);
 
-  if (depth === 0) {
-    await exec(conn, "BEGIN TRANSACTION");
-  }
-
-  try {
-    const result = await fn(conn);
+  return transactionContext.run(nextStore, async () => {
     if (depth === 0) {
-      await exec(conn, "COMMIT");
+      transactionLockByConn.set(conn, true);
+      transactionOwnerByConn.set(conn, owner);
     }
-    return result;
-  } catch (err) {
+    transactionDepthByConn.set(conn, depth + 1);
+
     if (depth === 0) {
-      try {
-        await exec(conn, "ROLLBACK");
-      } catch (rollbackErr) {
-        poisonedConnections.set(conn, true);
-        const originalMessage = err instanceof Error ? err.message : String(err);
-        const rollbackMessage =
-          rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
-        throw new DatabaseError(
-          `Transaction rollback failed after ${originalMessage}: ${rollbackMessage}`,
-        );
+      await exec(conn, "BEGIN TRANSACTION");
+    }
+
+    try {
+      const result = await fn(conn);
+      if (depth === 0) {
+        await exec(conn, "COMMIT");
+      }
+      return result;
+    } catch (err) {
+      if (depth === 0) {
+        try {
+          await exec(conn, "ROLLBACK");
+        } catch (rollbackErr) {
+          poisonedConnections.set(conn, true);
+          const originalMessage = err instanceof Error ? err.message : String(err);
+          const rollbackMessage =
+            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+          throw new DatabaseError(
+            `Transaction rollback failed after ${originalMessage}: ${rollbackMessage}`,
+          );
+        }
+      }
+      throw err;
+    } finally {
+      const nextDepth = (transactionDepthByConn.get(conn) ?? 1) - 1;
+      if (nextDepth > 0) {
+        transactionDepthByConn.set(conn, nextDepth);
+      } else {
+        transactionDepthByConn.delete(conn);
+        transactionLockByConn.delete(conn);
+        transactionOwnerByConn.delete(conn);
       }
     }
-    throw err;
-  } finally {
-    const nextDepth = (transactionDepthByConn.get(conn) ?? 1) - 1;
-    if (nextDepth > 0) {
-      transactionDepthByConn.set(conn, nextDepth);
-    } else {
-      transactionDepthByConn.delete(conn);
-      transactionLockByConn.delete(conn);
-    }
-  }
+  });
 }

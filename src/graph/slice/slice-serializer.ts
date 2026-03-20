@@ -440,22 +440,6 @@ export function buildPayloadCardsAndRefs(
     const cardWithoutEtag: SymbolCard = { ...card };
     cardWithoutEtag.detailLevel = detailLevel;
     delete cardWithoutEtag.etag;
-    const etag = hashCard(cardWithoutEtag);
-
-    if (knownEtags[card.symbolId] === etag) {
-      cardRefs.push({
-        symbolId: card.symbolId,
-        etag,
-        detailLevel,
-      });
-      continue;
-    }
-
-    cardRefs.push({
-      symbolId: card.symbolId,
-      etag,
-      detailLevel,
-    });
     const deps = resolveSliceDeps(
       cardWithoutEtag,
       sliceDepsBySymbol,
@@ -467,7 +451,20 @@ export function buildPayloadCardsAndRefs(
           sliceSymbolSet,
         )
       : cardWithoutEtag.callResolution;
-    cardsForPayload.push(toSliceSymbolCard(cardWithoutEtag, deps, callResolution));
+    const payloadCard = toSliceSymbolCard(cardWithoutEtag, deps, callResolution);
+    const etag = hashCard(payloadCard as unknown as SymbolCard);
+
+    cardRefs.push({
+      symbolId: card.symbolId,
+      etag,
+      detailLevel,
+    });
+
+    if (knownEtags[card.symbolId] === etag) {
+      continue;
+    }
+
+    cardsForPayload.push(payloadCard);
   }
 
   return {

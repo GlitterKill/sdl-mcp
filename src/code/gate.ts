@@ -131,12 +131,27 @@ export async function evaluateRequest(
 
   // Policy limits pass - now check approval criteria
   const whyApproved: string[] = [];
+  const identifiersMatch = request.identifiersToFind.length > 0 &&
+    window.approved &&
+    identifiersExistInWindow(window.code, request.identifiersToFind);
 
   if (request.identifiersToFind.length > 0) {
-    if (
-      window.approved &&
-      identifiersExistInWindow(window.code, request.identifiersToFind)
-    ) {
+    if (!identifiersMatch && window.approved) {
+      const guidance = generateDenialGuidance(
+        request,
+        "general",
+        policy,
+        symbol,
+      );
+      return {
+        approved: false,
+        whyDenied: ["Identifiers not found in code window"],
+        suggestedNextRequest: guidance.suggestedNextRequest,
+        nextBestAction: guidance.nextBestAction,
+      };
+    }
+
+    if (identifiersMatch) {
       whyApproved.push("identifiers-exist");
       return {
         ...window,
@@ -184,14 +199,6 @@ export async function evaluateRequest(
     policy,
     symbol,
   );
-
-  if (
-    request.identifiersToFind.length > 0 &&
-    window.approved &&
-    !identifiersExistInWindow(window.code, request.identifiersToFind)
-  ) {
-    whyDenied.push("Identifiers not found in code window");
-  }
 
   if (whyDenied.length === 0) {
     whyDenied.push("Request does not meet approval criteria");

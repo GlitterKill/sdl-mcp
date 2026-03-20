@@ -5,6 +5,7 @@ import {
   getRelativePath,
   safeJoin,
   getAbsolutePathFromRepoRoot,
+  validatePathWithinRoot,
 } from "../../dist/util/paths.js";
 
 describe("Cross-Platform Path Utilities", () => {
@@ -246,6 +247,12 @@ describe("Cross-Platform Path Utilities", () => {
       const normalized = normalizePath(p);
       // path.normalize resolves ../ references
       assert.strictEqual(normalized, "indexer/adapter");
+    });
+
+    it("treats Windows roots as case-insensitive during traversal checks", () => {
+      assert.doesNotThrow(() =>
+        validatePathWithinRoot("C:/Repo", "c:/repo/src/index.ts"),
+      );
     });
   });
 });

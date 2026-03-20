@@ -39,7 +39,7 @@ describe("Gateway tool registration", () => {
     assert.strictEqual(names.length, 4, "expected exactly 4 gateway tools");
   });
 
-  it("registers 33 tools when gateway enabled with legacy", () => {
+  it("registers 34 tools when gateway enabled with legacy", () => {
     const names: string[] = [];
     const fakeServer = makeFakeGatewayServer(names);
 
@@ -52,7 +52,7 @@ describe("Gateway tool registration", () => {
       },
     );
 
-    // 4 gateway + 29 legacy = 33
+    // 4 gateway + 30 legacy = 34
     assert.ok(names.includes("sdl.query"), "expected sdl.query gateway tool");
     assert.ok(
       names.includes("sdl.repo.register"),
@@ -60,12 +60,12 @@ describe("Gateway tool registration", () => {
     );
     assert.strictEqual(
       names.length,
-      33,
-      "expected 33 tools (4 gateway + 29 legacy)",
+      34,
+      "expected 34 tools (4 gateway + 30 legacy)",
     );
   });
 
-  it("registers 29 flat tools when gateway disabled", () => {
+  it("registers 30 flat tools when gateway disabled", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -90,10 +90,10 @@ describe("Gateway tool registration", () => {
       !names.includes("sdl.query"),
       "should not register gateway tools",
     );
-    assert.strictEqual(names.length, 29, "expected 29 flat tools");
+    assert.strictEqual(names.length, 30, "expected 30 flat tools");
   });
 
-  it("registers 29 flat tools when no gateway config", () => {
+  it("registers 30 flat tools when no gateway config", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -108,7 +108,7 @@ describe("Gateway tool registration", () => {
       names.includes("sdl.slice.refresh"),
       "expected sdl.slice.refresh",
     );
-    assert.strictEqual(names.length, 29, "expected 29 flat tools");
+    assert.strictEqual(names.length, 30, "expected 30 flat tools");
   });
 
   it("sets gatewayMode on server when gateway enabled", () => {

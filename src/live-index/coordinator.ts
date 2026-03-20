@@ -109,7 +109,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     const existing = this.overlayStore.getDraft(input.repoId, input.filePath);
     const warnings: string[] = [];
 
-    if (existing && input.version < existing.version) {
+    if (existing && input.version <= existing.version) {
       warnings.push("Ignored stale buffer update.");
       return {
         accepted: false,

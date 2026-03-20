@@ -18,6 +18,18 @@ import { findEnclosingSymbol as findEnclosingSymbolUtil } from "../treesitter/sy
 // errors on larger files. We use a 1MB buffer to handle large source files.
 // See: https://github.com/tree-sitter/tree-sitter/issues/3473
 const TREESITTER_BUFFER_SIZE = 1024 * 1024; // 1 MB
+const PARSER_CACHE_GENERATIONS = new Map<SupportedLanguage, number>();
+
+function getParserCacheGeneration(languageId: SupportedLanguage): number {
+  return PARSER_CACHE_GENERATIONS.get(languageId) ?? 0;
+}
+
+function bumpParserCacheGeneration(languageId: SupportedLanguage): void {
+  PARSER_CACHE_GENERATIONS.set(
+    languageId,
+    getParserCacheGeneration(languageId) + 1,
+  );
+}
 
 export abstract class BaseAdapter implements LanguageAdapter {
   abstract languageId: string;
@@ -25,10 +37,14 @@ export abstract class BaseAdapter implements LanguageAdapter {
   abstract fileExtensions: readonly string[];
 
   protected parser: Parser | null = null;
+  private parserCacheGeneration = -1;
 
   getParser(): Parser | null {
-    if (!this.parser) {
-      this.parser = getParser(this.languageId as SupportedLanguage);
+    const languageId = this.languageId as SupportedLanguage;
+    const currentGeneration = getParserCacheGeneration(languageId);
+    if (!this.parser || this.parserCacheGeneration !== currentGeneration) {
+      this.parser = getParser(languageId);
+      this.parserCacheGeneration = currentGeneration;
     }
     return this.parser;
   }
@@ -157,6 +173,8 @@ export abstract class BaseAdapter implements LanguageAdapter {
 
 export function createClearCacheFunction(languageId: string): () => void {
   return function clearCache(): void {
-    clearGrammarCache(languageId as SupportedLanguage);
+    const supportedLanguage = languageId as SupportedLanguage;
+    clearGrammarCache(supportedLanguage);
+    bumpParserCacheGeneration(supportedLanguage);
   };
 }

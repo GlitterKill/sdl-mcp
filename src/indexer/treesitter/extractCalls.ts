@@ -51,6 +51,112 @@ export interface ExtractedCall {
   };
 }
 
+function rangeContains(
+  outer: ExtractedSymbol["range"],
+  inner: ExtractedSymbol["range"],
+): boolean {
+  if (inner.startLine < outer.startLine || inner.endLine > outer.endLine) {
+    return false;
+  }
+  if (inner.startLine === outer.startLine && inner.startCol < outer.startCol) {
+    return false;
+  }
+  if (inner.endLine === outer.endLine && inner.endCol > outer.endCol) {
+    return false;
+  }
+  return true;
+}
+
+function getNearestClassNode(node: SyntaxNode): SyntaxNode | null {
+  let current: SyntaxNode | null = node;
+  while (current) {
+    if (current.type === "class_declaration") {
+      return current;
+    }
+    current = current.parent;
+  }
+  return null;
+}
+
+function findEnclosingClassSymbol(
+  node: SyntaxNode,
+  extractedSymbols: ExtractedSymbol[],
+): ExtractedSymbol | null {
+  const classNode = getNearestClassNode(node);
+  if (!classNode) {
+    return null;
+  }
+
+  const classRange = {
+    startLine: classNode.startPosition.row + 1,
+    startCol: classNode.startPosition.column,
+    endLine: classNode.endPosition.row + 1,
+    endCol: classNode.endPosition.column,
+  };
+  return extractedSymbols.find((symbol) =>
+    symbol.kind === "class" &&
+    symbol.range.startLine === classRange.startLine &&
+    symbol.range.startCol === classRange.startCol &&
+    symbol.range.endLine === classRange.endLine &&
+    symbol.range.endCol === classRange.endCol
+  ) ?? null;
+}
+
+function findClassMethodSymbol(
+  extractedSymbols: ExtractedSymbol[],
+  classSymbol: ExtractedSymbol,
+  methodName: string,
+): ExtractedSymbol | null {
+  const matches = extractedSymbols.filter((symbol) =>
+    (symbol.kind === "method" || symbol.kind === "constructor") &&
+    symbol.name === methodName &&
+    rangeContains(classSymbol.range, symbol.range)
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function getSuperClassName(classNode: SyntaxNode): string | null {
+  const heritage = classNode.children.find((child) => child.type === "class_heritage");
+  const extendsClause = heritage?.children.find((child) => child.type === "extends_clause");
+  const superClass = extendsClause?.children.find((child) =>
+    child.type === "identifier" || child.type === "type_identifier"
+  );
+  return superClass?.text ?? null;
+}
+
+function resolveSpecialMemberCall(
+  callNode: SyntaxNode,
+  receiverText: string,
+  methodName: string,
+  extractedSymbols: ExtractedSymbol[],
+): ExtractedSymbol | null {
+  const enclosingClass = findEnclosingClassSymbol(callNode, extractedSymbols);
+  if (!enclosingClass) {
+    return null;
+  }
+
+  if (receiverText === "this") {
+    return findClassMethodSymbol(extractedSymbols, enclosingClass, methodName);
+  }
+
+  if (receiverText === "super") {
+    const classNode = getNearestClassNode(callNode);
+    const superClassName = classNode ? getSuperClassName(classNode) : null;
+    if (!superClassName) {
+      return null;
+    }
+    const superClasses = extractedSymbols.filter((symbol) =>
+      symbol.kind === "class" && symbol.name === superClassName
+    );
+    if (superClasses.length !== 1) {
+      return null;
+    }
+    return findClassMethodSymbol(extractedSymbols, superClasses[0], methodName);
+  }
+
+  return null;
+}
+
 export function extractCalls(
   tree: Tree,
   extractedSymbols: ExtractedSymbol[],
@@ -226,13 +332,14 @@ export function extractCalls(
       if (objCapture) {
         const objText = objCapture.node.text;
         if (objText === "this" || objText === "super") {
-          isResolved = symbolMap.has(calleeCapture.node.text);
-          if (isResolved) {
-            const resolvedSymbol = symbolMap.get(calleeCapture.node.text);
-            if (resolvedSymbol) {
-              calleeSymbolId = resolvedSymbol.nodeId;
-            }
-          }
+          const resolvedSymbol = resolveSpecialMemberCall(
+            callNode.node,
+            objText,
+            calleeCapture.node.text,
+            extractedSymbols,
+          );
+          isResolved = resolvedSymbol !== null;
+          calleeSymbolId = resolvedSymbol?.nodeId;
         } else if (objText === "exports" || objText === "module") {
           isResolved = false;
         } else {
@@ -330,10 +437,15 @@ export function extractCalls(
       const objText = objCapture.node.text;
       calleeIdentifier = `${objText}?.${propCapture.node.text}`;
       if (objText === "this" || objText === "super") {
-        const symbol = symbolMap.get(propCapture.node.text);
-        if (symbol) {
+        const resolvedSymbol = resolveSpecialMemberCall(
+          callNode.node,
+          objText,
+          propCapture.node.text,
+          extractedSymbols,
+        );
+        if (resolvedSymbol) {
           isResolved = true;
-          calleeSymbolId = symbol.nodeId;
+          calleeSymbolId = resolvedSymbol.nodeId;
         }
       }
     }

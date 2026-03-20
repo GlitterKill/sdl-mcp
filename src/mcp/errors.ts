@@ -42,6 +42,7 @@ export function createPolicyDenial(
 export interface McpErrorDetail {
   message: string;
   code?: string;
+  details?: string[];
   nextBestAction?: NextBestAction;
   requiredFieldsForNext?: RequiredFieldsForNext;
 }
@@ -72,6 +73,10 @@ export function errorToMcpResponse(error: unknown): Record<string, unknown> {
     const codeError = error as { code?: string };
     if (codeError.code) {
       detail.code = codeError.code;
+    }
+    const detailError = error as { details?: string[] };
+    if (Array.isArray(detailError.details)) {
+      detail.details = detailError.details;
     }
 
     const policyError = error as Partial<PolicyDenialError>;

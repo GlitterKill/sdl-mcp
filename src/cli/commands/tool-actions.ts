@@ -493,6 +493,116 @@ const runtimeExecute: ActionDefinition = {
   ],
 };
 
+const usageStats: ActionDefinition = {
+  action: "usage.stats",
+  namespace: "repo",
+  description: "Get token usage statistics for the current session or history",
+  args: [
+    { ...REPO_ID_ARG },
+    {
+      flag: "--scope",
+      field: "scope",
+      type: "string",
+      description: "Usage scope: session|history|both",
+    },
+    {
+      flag: "--since",
+      field: "since",
+      type: "string",
+      description: "Only include usage since the given ISO timestamp",
+    },
+    {
+      flag: "--limit",
+      field: "limit",
+      type: "number",
+      description: "Maximum number of history entries to return",
+    },
+    {
+      flag: "--persist",
+      field: "persist",
+      type: "boolean",
+      description: "Persist the current usage snapshot",
+    },
+  ],
+  examples: [
+    "sdl-mcp tool usage.stats --repo-id my-repo --scope session",
+  ],
+};
+
+const memoryStore: ActionDefinition = {
+  action: "memory.store",
+  namespace: "agent",
+  description: "Store or update a development memory",
+  args: [
+    { ...REPO_ID_ARG },
+    {
+      flag: "--type",
+      field: "type",
+      type: "string",
+      required: true,
+      description: "Memory type: decision|bugfix|task_context",
+    },
+    { flag: "--title", field: "title", type: "string", required: true, description: "Memory title" },
+    { flag: "--content", field: "content", type: "string", required: true, description: "Memory content" },
+    { flag: "--tags", field: "tags", type: "string[]", description: "Comma-separated tags" },
+    { flag: "--confidence", field: "confidence", type: "number", description: "Confidence score between 0 and 1" },
+    { flag: "--symbol-ids", field: "symbolIds", type: "string[]", description: "Comma-separated symbol IDs" },
+    { flag: "--file-rel-paths", field: "fileRelPaths", type: "string[]", description: "Comma-separated relative file paths" },
+    { flag: "--memory-id", field: "memoryId", type: "string", description: "Optional existing memory ID" },
+  ],
+  examples: [
+    'sdl-mcp tool memory.store --repo-id my-repo --type decision --title "Use slices" --content "Prefer slice.build for task context."',
+  ],
+};
+
+const memoryQuery: ActionDefinition = {
+  action: "memory.query",
+  namespace: "agent",
+  description: "Search stored development memories",
+  args: [
+    { ...REPO_ID_ARG },
+    { flag: "--query", field: "query", type: "string", description: "Search text" },
+    { flag: "--types", field: "types", type: "string[]", description: "Comma-separated memory types" },
+    { flag: "--tags", field: "tags", type: "string[]", description: "Comma-separated tags" },
+    { flag: "--symbol-ids", field: "symbolIds", type: "string[]", description: "Comma-separated symbol IDs" },
+    { flag: "--stale-only", field: "staleOnly", type: "boolean", description: "Only return stale memories" },
+    { flag: "--limit", field: "limit", type: "number", description: "Maximum number of memories to return" },
+    { flag: "--sort-by", field: "sortBy", type: "string", description: "Sort order: recency|confidence" },
+  ],
+  examples: [
+    "sdl-mcp tool memory.query --repo-id my-repo --query slice --limit 10",
+  ],
+};
+
+const memoryRemove: ActionDefinition = {
+  action: "memory.remove",
+  namespace: "agent",
+  description: "Remove a stored development memory",
+  args: [
+    { ...REPO_ID_ARG },
+    { flag: "--memory-id", field: "memoryId", type: "string", required: true, description: "Memory ID to remove" },
+    { flag: "--delete-file", field: "deleteFile", type: "boolean", description: "Also delete the backing memory file" },
+  ],
+  examples: [
+    "sdl-mcp tool memory.remove --repo-id my-repo --memory-id mem-123",
+  ],
+};
+
+const memorySurface: ActionDefinition = {
+  action: "memory.surface",
+  namespace: "agent",
+  description: "Surface the most relevant development memories for a task",
+  args: [
+    { ...REPO_ID_ARG },
+    { flag: "--symbol-ids", field: "symbolIds", type: "string[]", description: "Comma-separated symbol IDs" },
+    { flag: "--task-type", field: "taskType", type: "string", description: "Task type: debug|review|implement|explain" },
+    { flag: "--limit", field: "limit", type: "number", description: "Maximum number of memories to return" },
+  ],
+  examples: [
+    "sdl-mcp tool memory.surface --repo-id my-repo --task-type debug --limit 5",
+  ],
+};
+
 // ---------------------------------------------------------------------------
 // All action definitions, grouped by namespace
 // ---------------------------------------------------------------------------
@@ -506,10 +616,11 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   codeNeedWindow, codeGetSkeleton, codeGetHotPath,
   // Repo
   repoRegister, repoStatus, repoOverview,
-  indexRefresh, policyGet, policySet,
+  indexRefresh, policyGet, policySet, usageStats,
   // Agent
   agentOrchestrate, agentFeedback, agentFeedbackQuery,
   bufferPush, bufferCheckpoint, bufferStatus, runtimeExecute,
+  memoryStore, memoryQuery, memoryRemove, memorySurface,
 ];
 
 /** Lookup by action name */

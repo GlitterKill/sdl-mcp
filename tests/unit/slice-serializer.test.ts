@@ -36,6 +36,7 @@ import {
   SYMBOL_TOKEN_BASE,
   AST_FINGERPRINT_WIRE_LENGTH,
 } from "../../src/config/constants.js";
+import { hashCard } from "../../src/util/hashing.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -86,6 +87,31 @@ describe("uniqueLimit", () => {
 
   it("deduplicates consecutive identical values", () => {
     assert.deepStrictEqual(uniqueLimit(["a", "a", "a"], 5), ["a"]);
+  });
+  it("does not reuse a known etag when slice filtering changes deps", () => {
+    const card = makeCard({
+      symbolId: "s1",
+      deps: { imports: ["a", "b"], calls: ["c"] },
+    });
+    const broadKnownEtag = hashCard({
+      ...card,
+      detailLevel: card.detailLevel ?? "compact",
+    });
+
+    const result = buildPayloadCardsAndRefs(
+      [card],
+      { s1: broadKnownEtag },
+      undefined,
+      new Set(["a"]),
+    );
+
+    assert.strictEqual(result.cardsForPayload.length, 1);
+    assert.ok(result.cardRefs);
+    assert.strictEqual(result.cardRefs?.[0]?.symbolId, "s1");
+    assert.deepStrictEqual(result.cardsForPayload[0]?.deps.imports, [
+      { symbolId: "a", confidence: 1 },
+    ]);
+    assert.deepStrictEqual(result.cardsForPayload[0]?.deps.calls, []);
   });
 });
 

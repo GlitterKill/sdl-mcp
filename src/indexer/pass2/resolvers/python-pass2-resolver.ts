@@ -1,4 +1,4 @@
-import { dirname, join } from "path";
+import { join } from "path";
 
 import { getLadybugConn, withWriteConn } from "../../../db/ladybug.js";
 import * as ladybugDb from "../../../db/ladybug-queries.js";
@@ -6,7 +6,6 @@ import type { SymbolRow } from "../../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../../db/schema.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
 import { logger } from "../../../util/logger.js";
-import { normalizePath } from "../../../util/paths.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
 import type { FileMetadata } from "../../fileScanner.js";
 import { resolveImportTargets } from "../../edge-builder/import-resolution.js";
@@ -60,12 +59,6 @@ type PythonResolvedCall = {
   resolution: string;
   targetName?: string;
   candidateCount?: number;
-};
-
-type PythonModuleIndex = {
-  directoryByFilePath: Map<string, string>;
-  symbolsByDirectory: Map<string, Array<SymbolRow & { relPath: string }>>;
-  methodsByClassSymbolId: Map<string, Map<string, string[]>>;
 };
 
 const PYTHON_PASS2_EXTENSIONS = new Set([".py"]);
@@ -378,81 +371,6 @@ function buildPythonClassMethodIndex(
   return methodsByClassSymbolId;
 }
 
-async function buildPythonModuleIndex(
-  repoId: string,
-  cache?: Map<string, unknown>,
-): Promise<PythonModuleIndex> {
-  const cacheKey = `pass2-python:module-index:${repoId}`;
-  const cached = cache?.get(cacheKey);
-  if (cached) {
-    return cached as PythonModuleIndex;
-  }
-
-  const conn = await getLadybugConn();
-  const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
-  const pythonFiles = repoFiles.filter((file) => file.language === "python");
-  const pythonFileIds = new Set(pythonFiles.map((file) => file.fileId));
-  const fileById = new Map(pythonFiles.map((file) => [file.fileId, file]));
-  const directoryByFilePath = new Map<string, string>();
-  const symbolsByDirectory = new Map<
-    string,
-    Array<SymbolRow & { relPath: string }>
-  >();
-  const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
-  const pythonSymbols = repoSymbols.filter((symbol) =>
-    pythonFileIds.has(symbol.fileId),
-  );
-  const methodsByClassSymbolId = buildPythonClassMethodIndex(pythonSymbols);
-
-  for (const file of pythonFiles) {
-    directoryByFilePath.set(file.relPath, normalizePath(dirname(file.relPath)));
-  }
-
-  for (const symbol of pythonSymbols) {
-    const file = fileById.get(symbol.fileId);
-    if (!file) {
-      continue;
-    }
-    const directory = directoryByFilePath.get(file.relPath);
-    if (!directory) {
-      continue;
-    }
-    const bucket = symbolsByDirectory.get(directory) ?? [];
-    bucket.push({
-      ...symbol,
-      relPath: file.relPath,
-    });
-    symbolsByDirectory.set(directory, bucket);
-  }
-
-  const moduleIndex = {
-    directoryByFilePath,
-    symbolsByDirectory,
-    methodsByClassSymbolId,
-  };
-  cache?.set(cacheKey, moduleIndex);
-  return moduleIndex;
-}
-
-function buildSameModuleFunctionIndex(
-  currentFilePath: string,
-  sameDirectorySymbols: Array<SymbolRow & { relPath: string }>,
-): Map<string, string[]> {
-  const sameModuleNameToSymbolIds = new Map<string, string[]>();
-  for (const symbol of sameDirectorySymbols) {
-    if (symbol.relPath === currentFilePath) {
-      continue;
-    }
-    if (symbol.kind !== "function") {
-      continue;
-    }
-    const existing = sameModuleNameToSymbolIds.get(symbol.name) ?? [];
-    existing.push(symbol.symbolId);
-    sameModuleNameToSymbolIds.set(symbol.name, existing);
-  }
-  return sameModuleNameToSymbolIds;
-}
-
 function getTextBeforeCallWithinCaller(params: {
   content: string;
   callerRange: ExtractedSymbol["range"];
@@ -697,9 +615,7 @@ function resolvePythonPass2CallTarget(params: {
   importedNameToSymbolIds: Map<string, string[]>;
   namespaceImports: Map<string, Map<string, string>>;
   localClassMethodNameToSymbolIds: Map<string, string[]>;
-  sameModuleNameToSymbolIds: Map<string, string[]>;
   methodsByImportedClassSymbolId: Map<string, Map<string, string[]>>;
-  globalNameToSymbolIds?: Map<string, string[]>;
 }): PythonResolvedCall | null {
   const {
     call,
@@ -709,9 +625,7 @@ function resolvePythonPass2CallTarget(params: {
     importedNameToSymbolIds,
     namespaceImports,
     localClassMethodNameToSymbolIds,
-    sameModuleNameToSymbolIds,
     methodsByImportedClassSymbolId,
-    globalNameToSymbolIds,
   } = params;
 
   if (call.calleeSymbolId && nodeIdToSymbolId.has(call.calleeSymbolId)) {
@@ -778,36 +692,13 @@ function resolvePythonPass2CallTarget(params: {
     }
   }
 
-  const sameModuleCandidates = sameModuleNameToSymbolIds.get(identifier);
-  if (sameModuleCandidates && sameModuleCandidates.length === 1) {
-    return {
-      symbolId: sameModuleCandidates[0],
-      isResolved: true,
-      confidence: 0.82,
-      resolution: "same-module",
-    };
-  }
-
-  const globalCandidates = globalNameToSymbolIds?.get(identifier);
-  if (globalCandidates && globalCandidates.length === 1) {
-    return {
-      symbolId: globalCandidates[0],
-      isResolved: true,
-      confidence: 0.45,
-      resolution: "global-fallback",
-    };
-  }
-
   return {
     symbolId: null,
     isResolved: false,
     confidence: 0.35,
     resolution: "unresolved",
     targetName: identifier,
-    candidateCount:
-      (importedCandidates?.length ?? 0) +
-      (sameModuleCandidates?.length ?? 0) +
-      (globalCandidates?.length ?? 0),
+    candidateCount: importedCandidates?.length ?? 0,
   };
 }
 
@@ -816,19 +707,9 @@ async function resolvePythonCallEdgesPass2(params: {
   repoRoot: string;
   fileMeta: FileMetadata;
   createdCallEdges: Set<string>;
-  globalNameToSymbolIds?: Map<string, string[]>;
   telemetry?: Pass2ResolverContext["telemetry"];
-  cache?: Map<string, unknown>;
 }): Promise<number> {
-  const {
-    repoId,
-    repoRoot,
-    fileMeta,
-    createdCallEdges,
-    globalNameToSymbolIds,
-    telemetry,
-    cache,
-  } = params;
+  const { repoId, repoRoot, fileMeta, createdCallEdges, telemetry } = params;
 
   const conn = await getLadybugConn();
   const filePath = join(repoRoot, fileMeta.path);
@@ -940,17 +821,6 @@ async function resolvePythonCallEdgesPass2(params: {
     importResolution.namespaceImports,
     pythonImportMaps.namespaceImports,
   );
-
-  const moduleIndex = await buildPythonModuleIndex(repoId, cache);
-  const currentDirectory = moduleIndex.directoryByFilePath.get(fileMeta.path);
-  const sameDirectorySymbols = currentDirectory
-    ? (moduleIndex.symbolsByDirectory.get(currentDirectory) ?? [])
-    : [];
-  const sameModuleNameToSymbolIds = buildSameModuleFunctionIndex(
-    fileMeta.path,
-    sameDirectorySymbols,
-  );
-
   const now = new Date().toISOString();
   const edgesToInsert: ladybugDb.EdgeRow[] = [];
   let createdEdges = 0;
@@ -972,10 +842,8 @@ async function resolvePythonCallEdgesPass2(params: {
         importedNameToSymbolIds,
         namespaceImports,
         localClassMethodNameToSymbolIds,
-        sameModuleNameToSymbolIds,
         methodsByImportedClassSymbolId:
           pythonImportMaps.methodsByImportedClassSymbolId,
-        globalNameToSymbolIds,
       });
       if (!resolved) {
         continue;
@@ -1060,9 +928,7 @@ export class PythonPass2Resolver implements Pass2Resolver {
           mtime: 0,
         },
         createdCallEdges: context.createdCallEdges,
-        globalNameToSymbolIds: context.globalNameToSymbolIds,
         telemetry: context.telemetry,
-        cache: context.cache,
       });
       return { edgesCreated };
     } catch (error) {

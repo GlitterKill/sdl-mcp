@@ -218,7 +218,21 @@ export async function computeBlastRadius(
     return [];
   }
 
-  const ranked = rankDependents(mergedDependents).slice(0, safeMaxResults);
+  let filteredDependents = mergedDependents;
+  if (repoId) {
+    const dependentSymbols = await getSymbolsByIds(
+      conn,
+      mergedDependents.map((item) => item.symbolId),
+    );
+    filteredDependents = mergedDependents.filter(
+      (item) => dependentSymbols.get(item.symbolId)?.repoId === repoId,
+    );
+  }
+  if (filteredDependents.length === 0) {
+    return [];
+  }
+
+  const ranked = rankDependents(filteredDependents).slice(0, safeMaxResults);
 
   // Attach fan-in trend data when version IDs are provided
   const { fromVersionId, toVersionId } = options ?? {};

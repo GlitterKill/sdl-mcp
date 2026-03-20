@@ -73,6 +73,24 @@ describe("Python pass2 indexing", () => {
         "",
       ].join("\n"),
     );
+    writeRepoFile(
+      repoDir,
+      "helpers.py",
+      [
+        "def orphan_helper():",
+        "    return 1",
+        "",
+      ].join("\n"),
+    );
+    writeRepoFile(
+      repoDir,
+      "consumer.py",
+      [
+        "def local_run():",
+        "    orphan_helper()",
+        "",
+      ].join("\n"),
+    );
 
     writeFileSync(
       configPath,
@@ -228,5 +246,35 @@ describe("Python pass2 indexing", () => {
     assert.equal(runCall.resolverId, "pass2-python");
     assert.equal(runCall.resolutionPhase, "pass2");
     assert.equal(runCall.resolution, "receiver-imported-instance");
+  });
+
+  it("does not create same-directory call edges without an import", async () => {
+    const result = await indexRepo(REPO_ID, "full");
+    assert.ok(result.versionId.length > 0);
+
+    const conn = await getLadybugConn();
+    const symbols = await ladybugDb.getSymbolsByRepo(conn, REPO_ID);
+
+    const localRun = symbols.find(
+      (symbol) => symbol.name === "local_run" && symbol.kind === "function",
+    );
+    const orphanHelper = symbols.find(
+      (symbol) => symbol.name === "orphan_helper" && symbol.kind === "function",
+    );
+
+    assert.ok(localRun);
+    assert.ok(orphanHelper);
+
+    const edges = await ladybugDb.getEdgesFrom(conn, localRun.symbolId);
+    const falsePositive = edges.find(
+      (edge) =>
+        edge.edgeType === "call" && edge.toSymbolId === orphanHelper.symbolId,
+    );
+
+    assert.equal(
+      falsePositive,
+      undefined,
+      "bare Python calls must not resolve to sibling-module functions without an import",
+    );
   });
 });

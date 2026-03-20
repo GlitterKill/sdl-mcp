@@ -328,7 +328,10 @@ export function centerOnSymbol(
   const halfWindow = Math.floor(windowSize / 2);
 
   const startLine = Math.max(0, centerIndex - halfWindow);
-  const endLine = Math.min(lines.length, centerIndex + halfWindow);
+  const endLine = Math.min(
+    lines.length,
+    centerIndex + halfWindow + (windowSize % 2 === 0 ? 0 : 1),
+  );
 
   const selectedLines = lines.slice(startLine, endLine);
   const code = selectedLines.join("\n");

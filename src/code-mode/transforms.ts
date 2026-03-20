@@ -23,7 +23,6 @@ function navigatePath(obj: unknown, path: string): unknown {
   if (!rest.startsWith(".") && !rest.startsWith("[")) {
     const dotIdx = rest.indexOf(".");
     const bracketIdx = rest.indexOf("[");
-    let endIdx: number;
     if (dotIdx === -1 && bracketIdx === -1) {
       // Entire path is a single field
       if (current !== null && current !== undefined && typeof current === "object") {
@@ -31,7 +30,12 @@ function navigatePath(obj: unknown, path: string): unknown {
       }
       return undefined;
     }
-    endIdx = dotIdx === -1 ? bracketIdx : bracketIdx === -1 ? dotIdx : Math.min(dotIdx, bracketIdx);
+    const endIdx =
+      dotIdx === -1
+        ? bracketIdx
+        : bracketIdx === -1
+          ? dotIdx
+          : Math.min(dotIdx, bracketIdx);
     const firstField = rest.slice(0, endIdx);
     segments.push(firstField);
     rest = rest.slice(endIdx);

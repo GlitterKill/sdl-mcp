@@ -142,4 +142,24 @@ async function loadMod() {
     assert.strictEqual(imports[0].isExternal, false);
     assert.strictEqual(imports[0].defaultImport, "fs");
   });
+
+  it("marks node: and builtin subpath specifiers as non-external", () => {
+    const {
+      extractImports,
+    } = require("../../dist/indexer/treesitter/extractImports.js");
+    const tree = parseTypeScript(`
+import fs from "node:fs";
+import { test } from "node:test";
+import promises from "fs/promises";
+`.trim());
+
+    const imports = extractImports(tree);
+
+    assert.strictEqual(imports.length, 3);
+    assert.ok(imports.every((entry: { isExternal: boolean }) => entry.isExternal === false));
+    assert.deepStrictEqual(
+      imports.map((entry: { specifier: string }) => entry.specifier),
+      ["node:fs", "node:test", "fs/promises"],
+    );
+  });
 });

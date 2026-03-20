@@ -87,6 +87,13 @@ describe("windows centerOnSymbol", () => {
     assert.ok(result.actualRange.startLine >= 7);
     assert.strictEqual(result.code.split("\n").at(-1), "line-10");
   });
+
+  it("fills odd-sized windows instead of dropping the center line", () => {
+    const result = centerOnSymbol(fileContent, makeRange(5, 5), 1);
+    assert.strictEqual(result.actualRange.startLine, 5);
+    assert.strictEqual(result.actualRange.endLine, 5);
+    assert.strictEqual(result.code, "line-5");
+  });
 });
 
 describe("windows expandToBlock", () => {

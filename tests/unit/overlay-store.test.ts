@@ -34,6 +34,38 @@ describe("OverlayStore", () => {
     assert.strictEqual(draft?.content, "export const value = 1;");
   });
 
+  it("rejects equal-version retries instead of overwriting the current draft", () => {
+    const store = new OverlayStore();
+
+    store.upsertDraft({
+      repoId: "demo-repo",
+      eventType: "change",
+      filePath: "src/example.ts",
+      content: "export const value = 1;",
+      language: "typescript",
+      version: 3,
+      dirty: true,
+      timestamp: "2026-03-07T12:00:00.000Z",
+    });
+
+    store.upsertDraft({
+      repoId: "demo-repo",
+      eventType: "change",
+      filePath: "src/example.ts",
+      content: "export const value = 2;",
+      language: "typescript",
+      version: 3,
+      dirty: true,
+      timestamp: "2026-03-07T12:00:01.000Z",
+    });
+
+    const draft = store.getDraft("demo-repo", "src/example.ts");
+    assert.ok(draft);
+    assert.strictEqual(draft?.version, 3);
+    assert.strictEqual(draft?.content, "export const value = 1;");
+    assert.strictEqual(draft?.timestamp, "2026-03-07T12:00:00.000Z");
+  });
+
   it("tracks dirty files and checkpoint metadata", () => {
     const store = new OverlayStore();
 

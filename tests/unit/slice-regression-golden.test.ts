@@ -339,9 +339,15 @@ describe("Golden parity: known etag behavior", () => {
       version: { ledgerVersion: "v1", astFingerprint: "abcd" },
     };
 
-    const cardWithoutEtag = { ...card };
-    delete (cardWithoutEtag as any).etag;
-    const etag = hashCard(cardWithoutEtag);
+    const normalizedCard = { ...card, detailLevel: card.detailLevel ?? "compact" };
+    delete (normalizedCard as Partial<SymbolCard>).etag;
+    const etag = hashCard(
+      toSliceSymbolCard(
+        normalizedCard,
+        normalizedCard.deps,
+        normalizedCard.callResolution,
+      ) as unknown as SymbolCard,
+    );
 
     const { cardsForPayload, cardRefs } = buildPayloadCardsAndRefs([card], {
       [card.symbolId]: etag,

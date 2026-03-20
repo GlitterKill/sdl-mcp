@@ -30,6 +30,12 @@ describe("toNumber", () => {
     assert.equal(toNumber(0n), 0);
   });
 
+  it("throws for bigint values outside the safe integer range", () => {
+    assert.throws(() => toNumber(BigInt(Number.MAX_SAFE_INTEGER) + 1n), {
+      name: "DatabaseError",
+    });
+  });
+
   it("converts numeric string to number", () => {
     assert.equal(toNumber("42"), 42);
     assert.equal(toNumber("3.14"), 3.14);
@@ -283,6 +289,52 @@ describe("query helpers", () => {
     assert.deepEqual(statements, [
       "BEGIN TRANSACTION",
       "ROLLBACK",
+    ]);
+  });
+
+  it("rejects concurrent transactions on the same connection", async () => {
+    const statements: string[] = [];
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let allowFinish: (() => void) | undefined;
+    const canFinish = new Promise<void>((resolve) => {
+      allowFinish = resolve;
+    });
+    const conn = {
+      prepare: async (statement: string) => statement,
+      execute: async (prepared: unknown) => {
+        statements.push(String(prepared));
+        const qr = makeQueryResult<Record<string, unknown>>([]);
+        return qr.result;
+      },
+    };
+
+    const outer = withTransaction(
+      conn as unknown as import("kuzu").Connection,
+      async () => {
+        markStarted?.();
+        await canFinish;
+        return "outer";
+      },
+    );
+
+    await started;
+
+    await assert.rejects(
+      withTransaction(
+        conn as unknown as import("kuzu").Connection,
+        async () => "inner",
+      ),
+      /Concurrent withTransaction\(\)|serialize access/i,
+    );
+
+    allowFinish?.();
+    await assert.doesNotReject(outer);
+    assert.deepEqual(statements, [
+      "BEGIN TRANSACTION",
+      "COMMIT",
     ]);
   });
 });

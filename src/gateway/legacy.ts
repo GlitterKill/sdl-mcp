@@ -24,6 +24,7 @@ import {
   GetHotPathRequestSchema,
   PolicyGetRequestSchema,
   PolicySetRequestSchema,
+  UsageStatsRequestSchema,
   PRRiskAnalysisRequestSchema,
   AgentOrchestrateRequestSchema,
   ContextSummaryRequestSchema,
@@ -63,6 +64,7 @@ import {
   handleGetHotPath,
 } from "../mcp/tools/code.js";
 import { handlePolicyGet, handlePolicySet } from "../mcp/tools/policy.js";
+import { handleUsageStats } from "../mcp/tools/usage.js";
 import { handlePRRiskAnalysis } from "../mcp/tools/prRisk.js";
 import { handleAgentOrchestrate } from "../mcp/tools/agent.js";
 import { handleContextSummary } from "../mcp/tools/summary.js";
@@ -207,6 +209,12 @@ export function registerLegacyTools(
     dep("sdl.repo", "Get token-efficient codebase overview"),
     RepoOverviewRequestSchema,
     handleRepoOverview,
+  );
+  server.registerTool(
+    "sdl.usage.stats",
+    dep("sdl.repo", "Get token usage statistics for the current session or history"),
+    UsageStatsRequestSchema,
+    handleUsageStats,
   );
   server.registerTool(
     "sdl.pr.risk.analyze",

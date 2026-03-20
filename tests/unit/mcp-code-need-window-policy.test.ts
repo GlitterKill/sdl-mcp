@@ -10,6 +10,7 @@ import {
   initLadybugDb,
 } from "../../src/db/ladybug.js";
 import * as ladybugDb from "../../src/db/ladybug-queries.js";
+import { evaluateRequest } from "../../src/code/gate.js";
 import { handleCodeNeedWindow } from "../../src/mcp/tools/code.js";
 import { PolicyEngine } from "../../src/policy/engine.js";
 
@@ -516,5 +517,57 @@ describe("code.needWindow policy remediation", () => {
         "Must not emit getHotPath with empty identifiersToFind",
       );
     }
+  });
+
+  it("denies requests whose identifiers are missing even when the symbol is already in the slice", async () => {
+    const response = await evaluateRequest(
+      {
+        repoId: "repo-test",
+        symbolId: "sym-demo",
+        reason: "inspect flagged branch",
+        expectedLines: 20,
+        maxTokens: 120,
+        identifiersToFind: ["missingIdentifier"],
+      },
+      {
+        policy: {
+          maxWindowLines: 180,
+          maxWindowTokens: 1400,
+          requireIdentifiers: true,
+          allowBreakGlass: false,
+        },
+        symbol: {
+          symbol_id: "sym-demo",
+          repo_id: "repo-test",
+          file_id: 0,
+          kind: "function",
+          name: "demoWindow",
+          exported: 1,
+          visibility: "public",
+          language: "ts",
+          range_start_line: 1,
+          range_start_col: 0,
+          range_end_line: 4,
+          range_end_col: 1,
+          ast_fingerprint: "fp-demo-window",
+          signature_json: JSON.stringify({ name: "demoWindow", params: [] }),
+          summary: "Demo code window target",
+          invariants_json: null,
+          side_effects_json: null,
+          updated_at: "2026-03-07T12:00:00.000Z",
+        },
+        slice: {
+          cards: [{ symbolId: "sym-demo" }],
+          frontier: [],
+        } as any,
+      },
+    );
+
+    assert.equal(response.approved, false);
+    if (response.approved) throw new Error("Expected denial");
+    assert.ok(
+      response.whyDenied.includes("Identifiers not found in code window"),
+      `Expected identifier-miss denial, got: ${response.whyDenied.join(", ")}`,
+    );
   });
 });

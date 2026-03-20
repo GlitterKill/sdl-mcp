@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { hashCard } from "../../src/util/hashing.js";
 import type { SymbolCard } from "../../dist/domain/types.js";
 import {
   buildPayloadCardsAndRefs,
@@ -59,7 +58,11 @@ describe("slice card wire format", () => {
   });
 
   it("adds unchanged cards to cardRefs but not payload when etag matches", () => {
-    const knownEtag = hashCard(fullCard);
+    const initial = buildPayloadCardsAndRefs([fullCard], {
+      [fullCard.symbolId]: "stale-etag",
+    });
+    const knownEtag = initial.cardRefs?.[0]?.etag;
+    assert.ok(knownEtag, "expected initial payload build to produce an etag");
     const { cardsForPayload, cardRefs } = buildPayloadCardsAndRefs([fullCard], {
       [fullCard.symbolId]: knownEtag,
     });
