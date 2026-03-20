@@ -1,20 +1,80 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { registerTools } from "../../src/mcp/tools/index.js";
+import { getVersion } from "../../src/cli/commands/version.js";
 
-function makeFakeServer(): { names: string[]; server: any } {
+interface RegisteredToolCall {
+  name: string;
+  description?: string;
+  wireSchema?: Record<string, unknown>;
+  presentation?: { title?: string };
+}
+
+function makeFakeServer(): { names: string[]; tools: RegisteredToolCall[]; server: any } {
   const names: string[] = [];
+  const tools: RegisteredToolCall[] = [];
   const server = {
     gatewayMode: false,
-    registerTool(name: string): void {
+    registerTool(
+      name: string,
+      description?: string,
+      _inputSchema?: unknown,
+      _handler?: unknown,
+      wireSchema?: Record<string, unknown>,
+      presentation?: { title?: string },
+    ): void {
       names.push(name);
+      tools.push({ name, description, wireSchema, presentation });
     },
     registerPostDispatchHook(): void {},
   };
-  return { names, server };
+  return { names, tools, server };
 }
 
 describe("MCP tool registration", () => {
+  it("registers sdl.info with a human title", () => {
+    const { tools, server } = makeFakeServer();
+
+    registerTools(server as any);
+
+    const infoTool = tools.find((tool) => tool.name === "sdl.info");
+    assert.ok(infoTool, "expected sdl.info to be registered");
+    assert.strictEqual(infoTool.presentation?.title, "SDL Info");
+  });
+
+  it("preserves gateway wire schemas with action-specific fields and descriptions", () => {
+    const { tools, server } = makeFakeServer();
+
+    registerTools(server as any, {}, { enabled: true, emitLegacyTools: false });
+
+    const queryTool = tools.find((tool) => tool.name === "sdl.query");
+    assert.ok(queryTool?.wireSchema, "expected sdl.query wire schema");
+    const wireSchema = queryTool.wireSchema as Record<string, unknown>;
+    const variants = wireSchema.oneOf as Array<Record<string, unknown>> | undefined;
+    assert.ok(Array.isArray(variants) && variants.length > 0, "expected oneOf gateway variants");
+
+    const sliceBuildVariant = variants.find((variant) =>
+      JSON.stringify(variant).includes('"const":"slice.build"'),
+    );
+    assert.ok(sliceBuildVariant, "expected slice.build gateway variant");
+    assert.match(
+      JSON.stringify(sliceBuildVariant),
+      /Natural language task description|Repository ID|Gateway action name/,
+    );
+  });
+
+  it("keeps tool descriptions version-stamped at registration time", () => {
+    const { tools, server } = makeFakeServer();
+
+    registerTools(server as any);
+
+    const repoStatus = tools.find((tool) => tool.name === "sdl.repo.status");
+    assert.ok(repoStatus, "expected sdl.repo.status to be registered");
+    assert.ok(repoStatus.description?.length, "expected description to be present");
+    assert.match(repoStatus.description ?? "", /repository/i);
+    assert.ok(getVersion().length > 0, "package version should resolve");
+  });
+
   it("registers live buffer tools alongside existing slice tools", () => {
     const { names, server } = makeFakeServer();
 
@@ -103,6 +163,10 @@ describe("MCP tool registration", () => {
       "expected sdl.manual in exclusive mode",
     );
     assert.ok(
+      names.includes("sdl.info"),
+      "expected sdl.info in exclusive mode",
+    );
+    assert.ok(
       names.includes("sdl.chain"),
       "expected sdl.chain in exclusive mode",
     );
@@ -112,8 +176,8 @@ describe("MCP tool registration", () => {
     );
     assert.strictEqual(
       names.length,
-      3,
-      `exclusive mode should register exactly 3 tools, got ${names.length}: ${names.join(", ")}`,
+      4,
+      `exclusive mode should register exactly 4 tools, got ${names.length}: ${names.join(", ")}`,
     );
 
     // No flat tools

@@ -19,7 +19,7 @@ function makeFakeGatewayServer(names: string[]) {
 }
 
 describe("Gateway tool registration", () => {
-  it("registers 4 gateway tools + 1 universal tool when gateway enabled", () => {
+  it("registers 4 gateway tools + 2 universal tools when gateway enabled", () => {
     const names: string[] = [];
     const fakeServer = makeFakeGatewayServer(names);
 
@@ -37,10 +37,11 @@ describe("Gateway tool registration", () => {
     assert.ok(names.includes("sdl.repo"), "expected sdl.repo");
     assert.ok(names.includes("sdl.agent"), "expected sdl.agent");
     assert.ok(names.includes("sdl.action.search"), "expected sdl.action.search");
-    assert.strictEqual(names.length, 5, "expected 5 tools (4 gateway + 1 universal)");
+    assert.ok(names.includes("sdl.info"), "expected sdl.info");
+    assert.strictEqual(names.length, 6, "expected 6 tools (4 gateway + 2 universal)");
   });
 
-  it("registers 35 tools when gateway enabled with legacy", () => {
+  it("registers 36 tools when gateway enabled with legacy", () => {
     const names: string[] = [];
     const fakeServer = makeFakeGatewayServer(names);
 
@@ -53,21 +54,22 @@ describe("Gateway tool registration", () => {
       },
     );
 
-    // 1 universal + 4 gateway + 30 legacy = 35
+    // 2 universal + 4 gateway + 30 legacy = 36
     assert.ok(names.includes("sdl.query"), "expected sdl.query gateway tool");
     assert.ok(
       names.includes("sdl.repo.register"),
       "expected sdl.repo.register legacy tool",
     );
     assert.ok(names.includes("sdl.action.search"), "expected sdl.action.search universal tool");
+    assert.ok(names.includes("sdl.info"), "expected sdl.info universal tool");
     assert.strictEqual(
       names.length,
-      35,
-      "expected 35 tools (1 universal + 4 gateway + 30 legacy)",
+      36,
+      "expected 36 tools (2 universal + 4 gateway + 30 legacy)",
     );
   });
 
-  it("registers 31 tools when gateway disabled (30 flat + 1 universal)", () => {
+  it("registers 32 tools when gateway disabled (30 flat + 2 universal)", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -93,10 +95,11 @@ describe("Gateway tool registration", () => {
       "should not register gateway tools",
     );
     assert.ok(names.includes("sdl.action.search"), "expected sdl.action.search");
-    assert.strictEqual(names.length, 31, "expected 31 tools (30 flat + 1 universal)");
+    assert.ok(names.includes("sdl.info"), "expected sdl.info");
+    assert.strictEqual(names.length, 32, "expected 32 tools (30 flat + 2 universal)");
   });
 
-  it("registers 31 tools when no gateway config (30 flat + 1 universal)", () => {
+  it("registers 32 tools when no gateway config (30 flat + 2 universal)", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -112,7 +115,8 @@ describe("Gateway tool registration", () => {
       "expected sdl.slice.refresh",
     );
     assert.ok(names.includes("sdl.action.search"), "expected sdl.action.search");
-    assert.strictEqual(names.length, 31, "expected 31 tools (30 flat + 1 universal)");
+    assert.ok(names.includes("sdl.info"), "expected sdl.info");
+    assert.strictEqual(names.length, 32, "expected 32 tools (30 flat + 2 universal)");
   });
 
   it("sets gatewayMode on server when gateway enabled", () => {

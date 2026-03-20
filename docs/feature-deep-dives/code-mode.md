@@ -5,6 +5,7 @@
 Code Mode now exposes three complementary tools:
 
 - `sdl.action.search` for discovery
+- `sdl.info` remains available alongside Code Mode for environment diagnostics
 - `sdl.manual` for focused reference
 - `sdl.chain` for execution
 
@@ -193,10 +194,10 @@ Chains still honor SDL-MCP’s escalation model. Code Mode does not bypass polic
 
 | Mode | Registered tools |
 |:-----|:-----------------|
-| Disabled | Gateway or flat tools only |
-| Enabled + gateway | Gateway tools plus `sdl.action.search`, `sdl.manual`, `sdl.chain` |
-| Enabled + flat | Flat tools plus `sdl.action.search`, `sdl.manual`, `sdl.chain` |
-| Exclusive | `sdl.action.search`, `sdl.manual`, `sdl.chain` only |
+| Disabled | Base flat or gateway tools, plus universal `sdl.action.search` and `sdl.info` |
+| Enabled + gateway | Gateway tools plus `sdl.action.search`, `sdl.info`, `sdl.manual`, `sdl.chain` |
+| Enabled + flat | Flat tools plus `sdl.action.search`, `sdl.info`, `sdl.manual`, `sdl.chain` |
+| Exclusive | `sdl.action.search`, `sdl.info`, `sdl.manual`, `sdl.chain` only |
 
 ---
 

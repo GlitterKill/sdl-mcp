@@ -673,11 +673,23 @@ Three modes:
 | `SDL_GRAPH_DB_PATH`              | Override graph DB file path (takes precedence over config)                     |
 | `SDL_GRAPH_DB_DIR`               | Legacy directory-style override; SDL-MCP stores `sdl-mcp-graph.lbug` inside it |
 | `SDL_DB_PATH`                    | Legacy alias for graph DB path override (v0.7.x)                               |
-| `SDL_LOG_LEVEL`                  | Log level: `debug`, `info`, `warn`, `error`                                    |
+| `SDL_LOG_FILE`                   | Explicit log file path. If unusable, SDL-MCP falls back to an OS temp file     |
+| `SDL_LOG_LEVEL`                  | Log level: `debug`, `info`, `warn`, `error` (case-insensitive)                 |
+| `SDL_CONSOLE_LOGGING`            | Set to `true` to mirror log lines to stderr in addition to file logging        |
 | `SDL_LOG_FORMAT`                 | Log format: `json`, `text`                                                     |
 | `ANTHROPIC_API_KEY`              | Fallback API key for `semantic.generateSummaries`                              |
 
 SDL-MCP expands `${VAR_NAME}` references inside JSON config values at load time.
+
+## Operational Diagnostics
+
+Use `sdl-mcp info` or the MCP tool `sdl.info` to inspect the resolved runtime state without starting a debugging session by hand. The report includes:
+
+- config path, existence, and load status
+- resolved log file path and whether temp-file fallback is active
+- whether `SDL_CONSOLE_LOGGING` is mirroring logs to stderr
+- Ladybug availability and active DB path
+- native-addon availability, source path, and fallback reason
 
 ---
 

@@ -4,10 +4,12 @@ import { parseArgs } from "util";
 import type {
   CLIOptions,
   DoctorOptions,
+  InfoOptions,
   VersionOptions,
 } from "./types.js";
 import { initCommand } from "./commands/init.js";
 import { doctorCommand } from "./commands/doctor.js";
+import { infoCommand } from "./commands/info.js";
 import { versionCommand } from "./commands/version.js";
 import { indexCommand } from "./commands/index.js";
 import { serveCommand } from "./commands/serve.js";
@@ -124,6 +126,12 @@ async function main(): Promise<void> {
     case "doctor": {
       const options = { ...global } as DoctorOptions;
       await doctorCommand(options);
+      break;
+    }
+
+    case "info": {
+      const options = { ...global } as InfoOptions;
+      await infoCommand(options);
       break;
     }
 
@@ -244,6 +252,7 @@ Usage:
 Commands:
   init              Initialize SDL-MCP configuration
   doctor            Validate SDL-MCP environment
+  info              Show unified runtime, config, log, Ladybug, and native-addon info
   version           Show version information
   index             Index repositories (optional: --watch, --repo-id, --force)
   serve             Start MCP server (default: stdio, optional: --http, --port, --host)
@@ -335,6 +344,7 @@ Global Options:
  Examples:
    sdl-mcp init
    sdl-mcp doctor
+   sdl-mcp info
    sdl-mcp index --watch
    sdl-mcp serve --stdio
    sdl-mcp tool --list

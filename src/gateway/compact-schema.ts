@@ -8,8 +8,7 @@ import type { z } from "zod";
 /**
  * Build a compact JSON Schema from a Zod schema by:
  * 1. Converting with zodToJsonSchema
- * 2. Stripping description fields (they're in the tool-level description)
- * 3. Deduplicating repeated sub-schemas into $defs/$ref
+ * 2. Deduplicating repeated sub-schemas into $defs/$ref
  */
 /**
  * Convert a Zod schema to JSON Schema (OpenAPI 3.x target).
@@ -30,25 +29,13 @@ export function buildCompactJsonSchema(
   schema: z.ZodType,
 ): Record<string, unknown> {
   const raw = zodSchemaToJsonSchema(schema);
-  const stripped = stripDescriptions(raw) as Record<string, unknown>;
-  return deduplicateRefs(stripped);
+  return compactJsonSchema(raw);
 }
 
-/**
- * Recursively strip all "description" keys from a JSON Schema tree.
- * Descriptions are redundant since the gateway tool-level description
- * already contains the compact reference card.
- */
-function stripDescriptions(obj: unknown): unknown {
-  if (obj === null || typeof obj !== "object") return obj;
-  if (Array.isArray(obj)) return obj.map(stripDescriptions);
-
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-    if (key === "description") continue;
-    result[key] = stripDescriptions(value);
-  }
-  return result;
+export function compactJsonSchema(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  return deduplicateRefs(structuredClone(schema));
 }
 
 /**

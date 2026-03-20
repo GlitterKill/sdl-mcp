@@ -1,9 +1,9 @@
-import { createRequire } from "module";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
+  type ToolAnnotations,
   type ServerNotification,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -23,9 +23,13 @@ import {
 import { tokenAccumulator } from "./mcp/token-accumulator.js";
 import type { LiveIndexCoordinator } from "./live-index/types.js";
 import type { CodeModeConfig } from "./config/types.js";
-
-const require = createRequire(import.meta.url);
-const packageJson = require("../package.json");
+import { normalizeToolArguments } from "./mcp/request-normalization.js";
+import {
+  buildToolPresentation,
+  buildVersionedToolDescription,
+  type ToolPresentation,
+} from "./mcp/tool-presentation.js";
+import { getPackageVersion } from "./util/package-info.js";
 
 export interface ToolContext {
   progressToken?: string | number;
@@ -52,6 +56,7 @@ interface ToolDefinition {
   inputSchema: z.ZodType;
   handler: ToolHandler;
   wireSchema?: Record<string, unknown>;
+  presentation: ToolPresentation;
 }
 
 export class MCPServer {
@@ -64,7 +69,7 @@ export class MCPServer {
     this.server = new Server(
       {
         name: "sdl-mcp",
-        version: packageJson.version,
+        version: getPackageVersion(),
       },
       {
         capabilities: {
@@ -94,7 +99,13 @@ export class MCPServer {
         return {
           tools: Array.from(this.tools.values()).map((tool) => ({
             name: tool.name,
-            description: tool.description,
+            title: tool.presentation.title,
+            description: tool.presentation.includeVersionInDescription === false
+              ? tool.description
+              : buildVersionedToolDescription(tool.description),
+            annotations: {
+              title: tool.presentation.title,
+            } satisfies ToolAnnotations,
             inputSchema:
               tool.wireSchema ??
               convertSchema(tool.inputSchema, this._gatewayMode),
@@ -130,17 +141,15 @@ export class MCPServer {
           }
 
           const start = Date.now();
-          const repoId = extractStringField(request.params.arguments, "repoId");
-          const symbolId = extractStringField(
-            request.params.arguments,
-            "symbolId",
-          );
+          const normalizedArgs = normalizeToolArguments(request.params.arguments);
+          const repoId = extractStringField(normalizedArgs, "repoId");
+          const symbolId = extractStringField(normalizedArgs, "symbolId");
 
           // Centralized input validation: parse against the registered Zod schema
           // before dispatching to the handler. This ensures all tools receive
           // validated, coerced arguments regardless of individual handler logic.
           const parseResult = tool.inputSchema.safeParse(
-            request.params.arguments,
+            normalizedArgs,
           );
           if (!parseResult.success) {
             const validationError = {
@@ -159,7 +168,7 @@ export class MCPServer {
             );
             logToolCall({
               tool: request.params.name,
-              request: request.params.arguments as Record<string, unknown>,
+              request: normalizedArgs as Record<string, unknown>,
               response: validationError,
               durationMs: Date.now() - start,
               repoId,
@@ -212,7 +221,7 @@ export class MCPServer {
 
             logToolCall({
               tool: request.params.name,
-              request: request.params.arguments as Record<string, unknown>,
+              request: normalizedArgs as Record<string, unknown>,
               response: finalResult as Record<string, unknown>,
               durationMs: Date.now() - start,
               repoId,
@@ -233,7 +242,7 @@ export class MCPServer {
             );
             logToolCall({
               tool: request.params.name,
-              request: request.params.arguments as Record<string, unknown>,
+              request: normalizedArgs as Record<string, unknown>,
               response: errorToMcpResponse(error),
               durationMs: Date.now() - start,
               repoId,
@@ -274,6 +283,7 @@ export class MCPServer {
     inputSchema: z.ZodType,
     handler: ToolHandler,
     wireSchema?: Record<string, unknown>,
+    presentation?: Partial<ToolPresentation>,
   ): void {
     this.tools.set(name, {
       name,
@@ -281,6 +291,7 @@ export class MCPServer {
       inputSchema,
       handler,
       wireSchema,
+      presentation: buildToolPresentation(name, presentation),
     });
   }
 

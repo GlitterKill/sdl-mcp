@@ -23,6 +23,7 @@ If you do not want a global install, run commands through `npx`:
 ```bash
 npx --yes sdl-mcp@latest version
 npx --yes sdl-mcp@latest doctor
+npx --yes sdl-mcp@latest info
 ```
 
 In this document, replace `sdl-mcp` with `npx --yes sdl-mcp@latest` if you use `npx`.
@@ -73,6 +74,23 @@ sdl-mcp doctor --log-level info
 ```
 
 Checks include Node version, config readability, DB writability, grammar availability, and repo path accessibility.
+
+### `sdl-mcp info`
+
+Show unified runtime, config, log, Ladybug, and native-addon diagnostics.
+
+```bash
+sdl-mcp info
+sdl-mcp info --config ./config/sdlmcp.config.json
+```
+
+The report includes:
+
+- resolved config path and load status
+- active log file path and whether temp-file fallback is in use
+- whether console log mirroring is enabled
+- Ladybug availability and active DB path
+- native-addon availability, source path, and fallback reason
 
 ### `sdl-mcp index`
 
@@ -216,7 +234,7 @@ Key options:
 
 ### `sdl-mcp tool <action> [args]`
 
-Direct MCP tool invocation from the CLI. Supports all 30 flat-mode actions plus code-mode tools.
+Direct MCP tool invocation from the CLI. Supports all 30 gateway-routable SDL actions and reuses the same validation and normalization path as the MCP server.
 
 ```bash
 sdl-mcp tool repo.status --repo-id my-repo
@@ -230,7 +248,9 @@ Key options:
 - `--repo-id <ID>` (passed through to the underlying tool)
 - All remaining arguments are forwarded as tool parameters
 
-Any tool listed in `sdl.manual` can be invoked this way. The output format can be switched for scripting (`json`) or human reading (`pretty`, `compact`).
+The CLI parser accepts the canonical action fields plus the same common aliases accepted by MCP requests, such as `--repo-id`, `--symbol-id`, `--symbol-ids`, `--from-version`, `--to-version`, and `--slice-handle`.
+
+Any action listed in `sdl.manual` can be invoked this way. The output format can be switched for scripting (`json`) or human reading (`pretty`, `compact`).
 
 ### `sdl-mcp version`
 
@@ -246,6 +266,7 @@ sdl-mcp version
 
 ```bash
 sdl-mcp init --client codex
+sdl-mcp info
 sdl-mcp doctor
 sdl-mcp index
 sdl-mcp serve --stdio

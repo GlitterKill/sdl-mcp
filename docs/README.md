@@ -83,8 +83,8 @@ Use this page as the entry point for SDL-MCP documentation.
 
 - **Version**: 0.9.0
 - **Supported languages**: TS, JS, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, Shell (11 adapters, 12 languages)
-- **CLI commands** (12): init, doctor, index, serve, export, import, pull, benchmark:ci, summary, health, version, tool
-- **MCP tools** (30 flat-mode + 3 code-mode + 4 gateway-mode):
+- **CLI commands** (13): init, doctor, info, index, serve, export, import, pull, benchmark:ci, summary, health, version, tool
+- **MCP surfaces**:
   - Core: repo register/status/overview, index refresh, symbol search/getCard/getCards, slice build/refresh/spillover, delta get, PR risk analyze
   - Code access: getSkeleton, getHotPath, needWindow (Iris Gate Ladder)
   - Policy: get/set
@@ -93,8 +93,11 @@ Use this page as the entry point for SDL-MCP documentation.
   - Buffer: push, checkpoint, status
   - Runtime: execute
   - Usage: stats
-  - Code Mode (optional): chain, action.search, manual
-  - Gateway (optional): sdl.query, sdl.code, sdl.repo, sdl.agent
+  - Universal: `sdl.action.search` and `sdl.info`
+  - Default flat mode: 32 tools (`30` flat tools + `sdl.action.search` + `sdl.info`)
+  - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
+  - Gateway + legacy mode: 36 tools (`4` gateway + `30` legacy flat + `sdl.action.search` + `sdl.info`)
+  - Code Mode (optional): adds `sdl.manual` and `sdl.chain`, or can run exclusive with `sdl.action.search`, `sdl.info`, `sdl.manual`, and `sdl.chain`
 - **Semantic features**: optional semantic reranking, LLM-generated symbol summaries (Anthropic/Ollama/mock)
 - **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
 - **Native addon**: Rust via napi-rs for multi-threaded indexing (optional, TS fallback)

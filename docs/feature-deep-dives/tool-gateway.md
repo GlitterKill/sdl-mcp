@@ -1,25 +1,25 @@
 # Tool Gateway
 
-**Reduce MCP tool registration overhead by 81% — from 30 individual tools down to 4 namespace-scoped gateway tools.**
+**Reduce MCP tool registration overhead by collapsing the 30 legacy action tools into 4 namespace-scoped gateway tools, while keeping `sdl.action.search` and `sdl.info` available as universal discovery and diagnostics surfaces.**
 
-The tool gateway consolidates all 30 SDL-MCP tools into 4 typed proxy tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`). Each gateway tool accepts an `action` field that routes the call to the appropriate handler and then applies the original per-tool validation. This dramatically reduces the token cost of `tools/list` responses that agents must process at the start of every conversation.
+The tool gateway consolidates the 30 legacy action tools into 4 typed proxy tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`). Each gateway tool accepts an `action` field that routes the call to the appropriate handler and then applies the original per-tool validation. `sdl.action.search` and `sdl.info` stay registered outside the gateway so discovery and environment diagnostics remain available in every mode.
 
 ---
 
 ## The Problem
 
-When an MCP client connects, it calls `tools/list` to discover available tools. The response includes tool names, descriptions, and JSON schemas. For 30 tools with detailed Zod-derived schemas, this can consume **~3,742+ tokens** — tokens that come out of the agent's finite context window before any real work begins.
+When an MCP client connects, it calls `tools/list` to discover available tools. The response includes tool names, descriptions, and JSON schemas. Registering 30 legacy action tools separately is expensive, especially once titles, richer descriptions, and action-specific schema metadata are included.
 
 ```
 Without gateway:
-  tools/list → 30 tools × (name + description + schema)
-  = ~4,000+ tokens consumed at conversation start
+  tools/list → 32 tools
+  = 30 legacy action tools + sdl.action.search + sdl.info
 
 With gateway:
-  tools/list → 4 tools × (name + compact description + thin schema)
-  = ~713 tokens consumed at conversation start
+  tools/list → 6 tools
+  = 4 gateway tools + sdl.action.search + sdl.info
 
-Savings: ~3,029 tokens per conversation (81% reduction)
+The gateway measurement script still compares the core 30 legacy tools against the 4 gateway tools, because those are the surfaces being consolidated. The two universal tools are present in both modes.
 ```
 
 This matters because:
@@ -71,7 +71,7 @@ This matters because:
 │  sdl.agent   → 11 actions (agent.*, buffer.*, runtime,│
 │                             memory.*)                  │
 │                                                      │
-│        4 tools × thin schema + compact desc          │
+│     4 tools × compact schema + compact desc          │
 │               ~713 tokens total                      │
 └─────────────────────────────────────────────────────┘
 ```
@@ -115,14 +115,19 @@ flowchart LR
 
 ### 1. Namespace-Scoped Tools
 
-The 30 tools are organized into 4 namespaces:
+The 30 legacy action tools are organized into 4 namespaces:
 
 | Gateway Tool | Actions | Domain |
 |:-------------|:--------|:-------|
 | `sdl.query` | 9 | Read-only intelligence: symbol search/cards, slices, deltas, summaries, PR risk |
 | `sdl.code` | 3 | Gated code access: needWindow, skeleton, hotPath |
-| `sdl.repo` | 6 | Repository lifecycle: register, status, overview, index, policy |
+| `sdl.repo` | 7 | Repository lifecycle: register, status, overview, index, policy, usage stats |
 | `sdl.agent` | 11 | Agentic ops: orchestrate, feedback, buffers, runtime, memory |
+
+Outside the gateway, SDL-MCP always keeps:
+
+- `sdl.action.search` for action discovery
+- `sdl.info` for runtime and environment diagnostics
 
 ### 2. Action-Based Union Schema
 
@@ -152,6 +157,22 @@ For symbol-card actions, gateway mode now accepts the same natural-identifier sh
 ```
 
 `symbol.getCards` follows the same pattern with `symbolRefs`. Mixed natural-reference batches can return partial-success metadata instead of failing the whole request.
+
+Gateway requests also go through the shared normalization layer before validation, so common aliases and snake_case forms work the same way they do in flat mode:
+
+```json
+{
+  "tool": "sdl.query",
+  "args": {
+    "repo_id": "x",
+    "action": "slice.build",
+    "task_text": "trace auth flow",
+    "edited_files": ["src/auth/token.ts"]
+  }
+}
+```
+
+Aliases such as `repo`, `repo_id`, `root_path`, `project_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, `spillover_handle`, `if_none_match`, `known_etags`, `known_card_etags`, `failing_test_path`, `edited_files`, `entry_symbols`, `relative_cwd`, and `identifiers` normalize to the canonical field names before strict validation.
 
 ### 3. Double Validation
 
@@ -185,25 +206,11 @@ Agent Call
 └─────────────────────┘
 ```
 
-### 4. Thin Wire Schemas
+### 4. Compact Action-Aware Schemas
 
-The key to token savings is the **thin schema** emitted in `tools/list` responses. Instead of the full Zod-derived JSON Schema (which includes every field, constraint, and nested object), the thin schema is a minimal envelope:
+The key to token savings is the **compact schema** emitted in `tools/list` responses. SDL-MCP no longer publishes a description-free envelope with only `repoId` and `action`. Instead, each gateway tool exposes a compact `oneOf` schema with action-specific fields, while still preserving user-facing descriptions, required-vs-optional visibility, and default semantics where they help the agent construct valid calls.
 
-```json
-{
-  "type": "object",
-  "properties": {
-    "repoId": { "type": "string", "minLength": 1 },
-    "action": { "type": "string", "enum": ["symbol.search", "symbol.getCard", "..."] }
-  },
-  "required": ["action", "repoId"],
-  "additionalProperties": true
-}
-```
-
-The `additionalProperties: true` flag lets action-specific parameters pass through. The tool description contains a compact reference card listing all actions and their parameters, plus common ladder hints and fallback paths, which gives the agent enough information to construct correct calls.
-
-Full validation still happens server-side via the strict Zod schemas — the thin wire schema is purely for the `tools/list` response to minimize token cost.
+That means gateway mode keeps most of the usability benefits of flat mode while still compressing the registration surface down to 4 namespace tools.
 
 ---
 
@@ -213,9 +220,10 @@ Measured with the included token measurement script (`scripts/measure-gateway-sc
 
 | Mode | Tools | Characters | Est. Tokens |
 |:-----|:-----:|:----------:|:-----------:|
-| **Flat** (30 individual tools) | 30 | ~17,000 | ~4,250 |
-| **Gateway** (4 namespace tools) | 4 | ~2,900 | ~725 |
-| **Hybrid** (4 gateway + 30 legacy) | 34 | — | — |
+| **Flat core action tools** | 30 | ~17,000 | ~4,250 |
+| **Gateway core namespace tools** | 4 | ~2,900 | ~725 |
+| **Gateway-only runtime surface** | 6 | includes universal tools | varies slightly |
+| **Hybrid runtime surface** | 36 | includes universal tools | varies slightly |
 
 | Metric | Value |
 |:-------|:------|
@@ -226,9 +234,8 @@ Measured with the included token measurement script (`scripts/measure-gateway-sc
 
 The savings come from three techniques:
 1. **Fewer tools** — 4 vs 30 registration entries
-2. **Thin schemas** — minimal envelope vs full Zod-derived JSON Schema
-3. **Description stripping** — descriptions stripped from schema nodes (action info is in the tool-level description instead)
-4. **$defs deduplication** — repeated sub-schemas hoisted to `$defs` with `$ref` pointers (via `compact-schema.ts`)
+2. **Compact action-aware schemas** — gateway `oneOf` variants preserve useful field metadata without publishing every full flat schema separately
+3. **$defs deduplication** — repeated sub-schemas are hoisted to `$defs` with `$ref` pointers (via `compact-schema.ts`)
 
 ---
 
@@ -251,9 +258,9 @@ Gateway mode is controlled in your SDL-MCP config file:
 
 | `enabled` | `emitLegacyTools` | Tools Registered | Use Case |
 |:---------:|:-----------------:|:----------------:|:---------|
-| `true` | `true` | 34 (4 gateway + 30 legacy) | Migration period — agents can use either style |
-| `true` | `false` | 4 (gateway only) | Maximum token savings |
-| `false` | — | 30 (flat only) | Backward compatibility, legacy agents |
+| `true` | `true` | 36 (4 gateway + 30 legacy + 2 universal) | Migration period — agents can use either style |
+| `true` | `false` | 6 (4 gateway + 2 universal) | Maximum registration savings |
+| `false` | — | 32 (30 flat + 2 universal) | Backward compatibility, legacy agents |
 
 Legacy tools include a deprecation notice in their description:
 ```
@@ -271,7 +278,7 @@ src/gateway/
   index.ts            # Registration orchestrator — registers 4 gateway + optional legacy
   router.ts           # Action routing — maps action names to { schema, handler } pairs
   schemas.ts          # Full Zod schemas — action-based unions per namespace
-  thin-schemas.ts     # Thin wire schemas — minimal JSON for tools/list
+  thin-schemas.ts     # Compact action-aware schemas for tools/list
   descriptions.ts     # Compact tool descriptions — action reference cards
   compact-schema.ts   # $defs/$ref deduplicator for schema optimization
   legacy.ts           # Legacy tool aliases with deprecation notices
@@ -284,7 +291,7 @@ src/gateway/
 export function registerGatewayTools(server, services, config) {
   const actionMap = createActionMap(services.liveIndex);
 
-  // Register 4 gateway tools with thin wire schemas
+  // Register 4 gateway tools with compact action-aware schemas
   server.registerTool("sdl.query", QUERY_DESCRIPTION, QueryGatewaySchema,
     handler, QUERY_THIN_SCHEMA);
   server.registerTool("sdl.code", CODE_DESCRIPTION, CodeGatewaySchema,
@@ -307,7 +314,8 @@ The gateway router (`src/gateway/router.ts`) performs the core dispatch:
 
 ```typescript
 export async function routeGatewayCall(rawArgs, actionMap, ctx) {
-  const { action, repoId, ...rest } = rawArgs;
+  const normalized = normalizeToolArgs(rawArgs);
+  const { action, repoId, ...rest } = normalized;
 
   // Look up handler by action name
   const entry = actionMap[action];
@@ -327,9 +335,9 @@ export async function routeGatewayCall(rawArgs, actionMap, ctx) {
 
 The `compact-schema.ts` module optimizes JSON Schemas for token efficiency:
 
-1. **Strip descriptions** — `description` fields are redundant since the tool-level description contains the reference card
-2. **Fingerprint sub-schemas** — canonicalize and hash every object node
-3. **Deduplicate** — sub-schemas appearing 2+ times with size >40 chars are hoisted to `$defs` and replaced with `$ref` pointers
+1. **Fingerprint sub-schemas** — canonicalize and hash every object node
+2. **Deduplicate** — sub-schemas appearing 2+ times with size >40 chars are hoisted to `$defs` and replaced with `$ref` pointers
+3. **Preserve useful metadata** — keep action-specific descriptions and defaults that help agents call the gateway correctly
 
 Example deduplication:
 ```json
@@ -382,7 +390,7 @@ If you need backward compatibility with older MCP clients:
 }
 ```
 
-This registers only the 30 flat tools, identical to pre-gateway behavior.
+This registers the 30 flat tools plus the universal `sdl.action.search` and `sdl.info` surfaces.
 
 ---
 

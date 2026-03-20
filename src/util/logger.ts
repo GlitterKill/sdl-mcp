@@ -1,44 +1,49 @@
-export type LogLevel = "debug" | "info" | "warn" | "error";
-
-import { mkdirSync, appendFileSync, statSync, renameSync } from "fs";
-import { join, dirname } from "path";
-import { homedir } from "os";
+import { appendFileSync, mkdirSync, renameSync, statSync } from "fs";
+import { dirname, join } from "path";
+import { homedir, tmpdir } from "os";
 import {
   initTracing as initTracingInternal,
   isTracingEnabled,
   shutdownTracing as shutdownTracingInternal,
 } from "./tracing.js";
 
-// ============================================================================
-// File logging support
-// ============================================================================
+export type LogLevel = "debug" | "info" | "warn" | "error";
 
-/**
- * Maximum log file size before rotation (5 MB).
- */
 const LOG_FILE_MAX_BYTES = 5 * 1024 * 1024;
-
-/**
- * Number of rotated log files to keep.
- */
 const LOG_FILE_MAX_ROTATIONS = 3;
-
-/**
- * Default log directory under user home.
- */
+const LOG_ROTATION_CHECK_INTERVAL_BYTES = 64 * 1024;
 const DEFAULT_LOG_DIR = join(homedir(), ".sdl-mcp", "logs");
+const FALLBACK_LOG_DIR = join(tmpdir(), "sdl-mcp");
+const DEFAULT_LOG_FILE_NAME = "sdl-mcp.log";
+
+interface LoggerDiagnostics {
+  configuredPath: string | null;
+  activePath: string | null;
+  consoleMirroring: boolean;
+  fallbackUsed: boolean;
+}
 
 let logFilePath: string | null = null;
+let configuredLogFilePath: string | null = null;
 let logFileEnabled = false;
 let logFileBytesSinceRotationCheck = 0;
-const LOG_ROTATION_CHECK_INTERVAL_BYTES = 64 * 1024; // check every ~64KB of writes
+let consoleMirroringEnabled = false;
+let fallbackUsed = false;
 
-function ensureLogDir(dir: string): void {
-  try {
-    mkdirSync(dir, { recursive: true });
-  } catch {
-    // Directory may already exist or be uncreatable — degrade gracefully.
-  }
+function isLogLevel(value: string | undefined): value is LogLevel {
+  return value === "debug" || value === "info" || value === "warn" || value === "error";
+}
+
+function ensureDirectory(dirPath: string): void {
+  mkdirSync(dirPath, { recursive: true });
+}
+
+function resolveDefaultLogPath(): string {
+  return join(DEFAULT_LOG_DIR, DEFAULT_LOG_FILE_NAME);
+}
+
+function resolveFallbackLogPath(): string {
+  return join(FALLBACK_LOG_DIR, DEFAULT_LOG_FILE_NAME);
 }
 
 function rotateLogFile(filePath: string): void {
@@ -46,24 +51,44 @@ function rotateLogFile(filePath: string): void {
     const fileStats = statSync(filePath);
     if (fileStats.size < LOG_FILE_MAX_BYTES) return;
   } catch {
-    // File does not exist yet — nothing to rotate.
     return;
   }
 
-  // Shift existing rotations: .3 → delete, .2 → .3, .1 → .2, current → .1
   for (let i = LOG_FILE_MAX_ROTATIONS; i >= 1; i--) {
     const src = i === 1 ? filePath : `${filePath}.${i - 1}`;
     const dst = `${filePath}.${i}`;
     try {
       renameSync(src, dst);
     } catch {
-      // Source may not exist — skip.
+      // Source may not exist. Skip rotation for that slot.
     }
+  }
+}
+
+function setLogDestination(targetPath: string): void {
+  ensureDirectory(dirname(targetPath));
+  appendFileSync(targetPath, "", "utf-8");
+  logFilePath = targetPath;
+  logFileEnabled = true;
+}
+
+function applyLogPath(targetPath: string): void {
+  configuredLogFilePath = targetPath;
+  fallbackUsed = false;
+
+  try {
+    setLogDestination(targetPath);
+  } catch {
+    const fallbackPath = resolveFallbackLogPath();
+    ensureDirectory(dirname(fallbackPath));
+    setLogDestination(fallbackPath);
+    fallbackUsed = true;
   }
 }
 
 function writeToLogFile(msg: string): void {
   if (!logFileEnabled || !logFilePath) return;
+
   try {
     const line = msg + "\n";
     logFileBytesSinceRotationCheck += line.length;
@@ -73,60 +98,16 @@ function writeToLogFile(msg: string): void {
     }
     appendFileSync(logFilePath, line, "utf-8");
   } catch {
-    // File write failed — degrade silently. Don't crash the server
-    // because of a logging failure.
+    // Logging failures should never crash the server.
   }
 }
 
-/**
- * Enable file-based logging.
- *
- * - Pass a specific file path, or omit to use the default
- *   `~/.sdl-mcp/logs/sdl-mcp.log`.
- * - Can also be enabled via the `SDL_LOG_FILE` environment variable.
- *   Set it to a file path or `"1"` / `"true"` to use the default location.
- */
-export function enableFileLogging(filePath?: string): void {
-  const resolvedPath = filePath ?? join(DEFAULT_LOG_DIR, "sdl-mcp.log");
-  const dir = dirname(resolvedPath);
-  ensureLogDir(dir);
-  logFilePath = resolvedPath;
-  logFileEnabled = true;
-}
-
-/**
- * Disable file-based logging.
- */
-export function disableFileLogging(): void {
-  logFileEnabled = false;
-  logFilePath = null;
-}
-
-/**
- * Returns the currently active log file path, or null if file logging
- * is disabled.
- */
-export function getLogFilePath(): string | null {
-  return logFileEnabled ? logFilePath : null;
-}
-
-// Auto-enable from environment variable.
-const envLogFile = process.env.SDL_LOG_FILE;
-if (envLogFile) {
-  if (envLogFile === "1" || envLogFile.toLowerCase() === "true") {
-    enableFileLogging();
-  } else {
-    enableFileLogging(envLogFile);
+function writeToStderr(msg: string): void {
+  if (!consoleMirroringEnabled) {
+    return;
   }
-}
-
-// ============================================================================
-// Core logger
-// ============================================================================
-
-const writeToStderr = (msg: string): void => {
   process.stderr.write(msg + "\n");
-};
+}
 
 function safeStringify(obj: Record<string, unknown>): string {
   try {
@@ -140,6 +121,7 @@ function extractErrorMeta(
   meta?: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   if (!meta) return undefined;
+
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(meta)) {
     if (value instanceof Error) {
@@ -154,6 +136,16 @@ function extractErrorMeta(
   return result;
 }
 
+function formatLogLine(
+  level: Uppercase<LogLevel>,
+  message: string,
+  meta?: Record<string, unknown>,
+): string {
+  const processed = extractErrorMeta(meta);
+  const metaStr = processed ? " " + safeStringify(processed) : "";
+  return `[${new Date().toISOString()}] [${level}] ${message}${metaStr}`;
+}
+
 class Logger {
   private level: LogLevel;
 
@@ -166,62 +158,106 @@ class Logger {
     return levels.indexOf(level) >= levels.indexOf(this.level);
   }
 
+  private emit(
+    level: LogLevel,
+    uppercaseLevel: Uppercase<LogLevel>,
+    message: string,
+    meta?: Record<string, unknown>,
+  ): void {
+    if (!this.shouldLog(level)) {
+      return;
+    }
+
+    const line = formatLogLine(uppercaseLevel, message, meta);
+    writeToLogFile(line);
+    writeToStderr(line);
+  }
+
   setLevel(level: LogLevel): void {
     this.level = level;
   }
 
   debug(message: string, meta?: Record<string, unknown>): void {
-    if (this.shouldLog("debug")) {
-      const processed = extractErrorMeta(meta);
-      const metaStr = processed ? " " + safeStringify(processed) : "";
-      const timestamp = new Date().toISOString();
-      const line = `[${timestamp}] [DEBUG] ${message}${metaStr}`;
-      writeToStderr(line);
-      writeToLogFile(line);
-    }
+    this.emit("debug", "DEBUG", message, meta);
   }
 
   info(message: string, meta?: Record<string, unknown>): void {
-    if (this.shouldLog("info")) {
-      const processed = extractErrorMeta(meta);
-      const metaStr = processed ? " " + safeStringify(processed) : "";
-      const timestamp = new Date().toISOString();
-      const line = `[${timestamp}] [INFO] ${message}${metaStr}`;
-      writeToStderr(line);
-      writeToLogFile(line);
-    }
+    this.emit("info", "INFO", message, meta);
   }
 
   warn(message: string, meta?: Record<string, unknown>): void {
-    if (this.shouldLog("warn")) {
-      const processed = extractErrorMeta(meta);
-      const metaStr = processed ? " " + safeStringify(processed) : "";
-      const timestamp = new Date().toISOString();
-      const line = `[${timestamp}] [WARN] ${message}${metaStr}`;
-      writeToStderr(line);
-      writeToLogFile(line);
-    }
+    this.emit("warn", "WARN", message, meta);
   }
 
   error(message: string, meta?: Record<string, unknown>): void {
-    if (this.shouldLog("error")) {
-      const processed = extractErrorMeta(meta);
-      const metaStr = processed ? " " + safeStringify(processed) : "";
-      const timestamp = new Date().toISOString();
-      const line = `[${timestamp}] [ERROR] ${message}${metaStr}`;
-      writeToStderr(line);
-      writeToLogFile(line);
-    }
+    this.emit("error", "ERROR", message, meta);
   }
 }
 
 export const logger = new Logger();
 
-// Read log level from environment if set
-const envLogLevel = process.env.SDL_LOG_LEVEL?.toLowerCase();
-if (envLogLevel && ["debug", "info", "warn", "error"].includes(envLogLevel)) {
-  logger.setLevel(envLogLevel as LogLevel);
+export function enableFileLogging(filePath?: string): void {
+  applyLogPath(filePath ?? resolveDefaultLogPath());
 }
+
+export function disableFileLogging(): void {
+  logFileEnabled = false;
+  logFilePath = null;
+  configuredLogFilePath = null;
+  fallbackUsed = false;
+}
+
+export function getLogFilePath(): string | null {
+  return logFileEnabled ? logFilePath : null;
+}
+
+export function setConsoleMirroring(enabled: boolean): void {
+  consoleMirroringEnabled = enabled;
+}
+
+export function getLoggerDiagnostics(): LoggerDiagnostics {
+  return {
+    configuredPath: configuredLogFilePath,
+    activePath: getLogFilePath(),
+    consoleMirroring: consoleMirroringEnabled,
+    fallbackUsed,
+  };
+}
+
+export function configureLoggerFromEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const envLogLevel = env.SDL_LOG_LEVEL?.toLowerCase();
+  if (isLogLevel(envLogLevel)) {
+    logger.setLevel(envLogLevel);
+  }
+
+  consoleMirroringEnabled = /^(1|true)$/i.test(
+    env.SDL_CONSOLE_LOGGING ?? "",
+  );
+
+  const envLogFile = env.SDL_LOG_FILE;
+  if (!envLogFile) {
+    return;
+  }
+
+  if (envLogFile === "1" || envLogFile.toLowerCase() === "true") {
+    enableFileLogging();
+    return;
+  }
+
+  enableFileLogging(envLogFile);
+}
+
+export function flushLogger(): void {
+  // appendFileSync flushes writes immediately; this is a stable shutdown hook.
+}
+
+export function shutdownLogger(): void {
+  flushLogger();
+}
+
+configureLoggerFromEnvironment();
 
 export {
   initTracingInternal as initTracing,

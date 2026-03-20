@@ -16,7 +16,33 @@
 </details>
 </div>
 
-This document provides step-by-step testing for all SDL-MCP features before release.
+This document provides step-by-step testing for SDL-MCP releases. Start with the automated preflight and use the manual checklist only for targeted spot checks or release candidates.
+
+## Recommended Automated Preflight
+
+Run this first:
+
+```powershell
+npm run prepare-release
+```
+
+`prepare-release` hard-fails on:
+
+- version mismatch
+- published-version collision
+- missing changelog entry
+- build, lint, typecheck, or test failures
+- `npm audit` findings at `high` or above
+- missing package contents in `npm pack --json`
+- JSON-RPC stdio smoke failure against `dist/main.js`
+
+It also warns on non-main branches, unsynced branches, outdated dependencies, and oversized tarballs.
+
+If you need an interactive MCP inspection session after the preflight, run:
+
+```powershell
+npm run inspector
+```
 
 ## Prerequisites
 
@@ -72,7 +98,20 @@ node dist/cli/index.js doctor
 - [ ] All checks pass (green checkmarks)
 - [ ] No errors
 
-### 1.4 Index Command
+### 1.4 Info Command
+
+```powershell
+node dist/cli/index.js info
+```
+
+**Expected:** Shows unified config, logging, Ladybug, and native-addon status.
+
+- [ ] Config path is correct
+- [ ] Log path is shown
+- [ ] Fallback path state is correct
+- [ ] Native-addon status is explained clearly
+
+### 1.5 Index Command
 
 ```powershell
 node dist/cli/index.js index
@@ -86,18 +125,16 @@ node dist/cli/index.js index
 - [ ] Duration shown
 - [ ] "Indexing complete" message
 
-### 1.5 Serve Command (Manual Test)
+### 1.6 Serve Command (Manual Test)
 
 ```powershell
 node dist/cli/index.js serve --stdio
 ```
 
-**Expected:** Server starts and shows startup logs on stderr.
+**Expected:** Server starts cleanly. Stdout remains reserved for JSON-RPC traffic. Operational logs go to the configured log file by default and only mirror to stderr when `SDL_CONSOLE_LOGGING=true`.
 
-- [ ] "Loading configuration..." appears
-- [ ] "Initializing LadybugDB..." appears
-- [ ] "Registering MCP tools..." appears
-- [ ] "SDL-MCP server running..." appears
+- [ ] `sdl-mcp info` shows the expected log file path before the test
+- [ ] If `SDL_CONSOLE_LOGGING=true`, startup messages appear on stderr
 - [ ] No stdout output (stdout reserved for JSON-RPC)
 - [ ] Ctrl+C gracefully shuts down
 

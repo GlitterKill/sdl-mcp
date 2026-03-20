@@ -40,6 +40,18 @@ describe("CLI command routing", () => {
       );
       assert.match(
         cliEntrypointSource,
+        /case "doctor":[\s\S]*await doctorCommand\(options\)/,
+      );
+      assert.match(
+        cliEntrypointSource,
+        /case "info":[\s\S]*await infoCommand\(options\)/,
+      );
+      assert.match(
+        cliEntrypointSource,
+        /case "version":[\s\S]*await versionCommand\(options\)/,
+      );
+      assert.match(
+        cliEntrypointSource,
         /case "index":[\s\S]*parseIndexOptions\([\s\S]*await indexCommand\(options\)/,
       );
       assert.match(
@@ -137,6 +149,15 @@ describe("CLI command routing", () => {
   describe("doctor command routing", () => {
     it("inherits global options only (no extra parsing)", () => {
       // doctor uses { ...global } as DoctorOptions — no dedicated parser
+      const globalWithConfig: CLIOptions = { config: "/tmp/test.json" };
+      const options = { ...globalWithConfig };
+      assert.strictEqual(options.config, "/tmp/test.json");
+    });
+  });
+
+  // ----- info -----
+  describe("info command routing", () => {
+    it("inherits global options only (no extra parsing)", () => {
       const globalWithConfig: CLIOptions = { config: "/tmp/test.json" };
       const options = { ...globalWithConfig };
       assert.strictEqual(options.config, "/tmp/test.json");
@@ -365,6 +386,7 @@ describe("CLI command routing", () => {
       const expectedCases = [
         'case "init":',
         'case "doctor":',
+        'case "info":',
         'case "version":',
         'case "index":',
         'case "serve":',

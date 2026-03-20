@@ -28,7 +28,11 @@ import {
   formatExistingProcessMessage,
   writePidfile,
 } from "../../util/pidfile.js";
-import { enableFileLogging, getLogFilePath } from "../../util/logger.js";
+import {
+  enableFileLogging,
+  getLogFilePath,
+  shutdownLogger,
+} from "../../util/logger.js";
 import { configureToolDispatchLimiter } from "../../mcp/dispatch-limiter.js";
 import { SessionManager } from "../../mcp/session-manager.js";
 import { ensureConfiguredReposRegistered } from "../../startup/bootstrap.js";
@@ -194,6 +198,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     shutdownMgr.addCleanup("server", () => stdioServer.stop());
   }
   shutdownMgr.addCleanup("db", () => closeLadybugDb());
+  shutdownMgr.addCleanup("logger", () => shutdownLogger());
   shutdownMgr.addCleanup("watchers", async () => {
     for (const watcher of watchers) {
       await watcher.close();

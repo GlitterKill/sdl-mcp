@@ -16,9 +16,17 @@
 </details>
 </div>
 
-## `doctor` First
+## `info` Then `doctor`
 
 Start with:
+
+```bash
+sdl-mcp info
+```
+
+This shows the resolved config path, active log file, log fallback status, Ladybug availability, and native-addon state in one place.
+
+Then run:
 
 ```bash
 sdl-mcp doctor --log-level debug
@@ -120,7 +128,17 @@ Then run manual refreshes with `sdl-mcp index` until the underlying issue is fix
 
 - Ensure agent points to `sdl-mcp serve --stdio`
 - Validate generated client config from `init --client <name>`
-- Confirm process logs for startup errors on stderr
+- Use `sdl-mcp info` to confirm the resolved config path, log file path, and native-addon status
+- Confirm process logs in the configured log file; enable `SDL_CONSOLE_LOGGING=true` if you want stderr mirroring during manual debugging
+
+### Log File Missing or Unexpected
+
+- Symptom: no logs in the configured location, or logs appear under a temp directory
+- Cause: `SDL_LOG_FILE` or the derived default path is not writable
+- Resolution:
+  - run `sdl-mcp info` and inspect `logging.path` and `logging.fallbackUsed`
+  - fix permissions or choose a writable `SDL_LOG_FILE`
+  - set `SDL_CONSOLE_LOGGING=true` temporarily if you need stderr mirroring while fixing file logging
 
 ### LadybugDB Issues
 
@@ -173,6 +191,7 @@ Then run manual refreshes with `sdl-mcp index` until the underlying issue is fix
 
 ```bash
 sdl-mcp version
+sdl-mcp info
 sdl-mcp doctor --log-level debug
 sdl-mcp index --repo-id <repo-id>
 sdl-mcp serve --stdio

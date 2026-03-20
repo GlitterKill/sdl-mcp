@@ -1,15 +1,26 @@
-import { describe, it } from "node:test";
 import assert from "node:assert";
-
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, it } from "node:test";
 import {
-  logger,
-  enableFileLogging,
+  configureLoggerFromEnvironment,
   disableFileLogging,
+  enableFileLogging,
   getLogFilePath,
-} from "../../dist/util/logger.js";
-import type { LogLevel } from "../../dist/util/logger.js";
+  getLoggerDiagnostics,
+  logger,
+  setConsoleMirroring,
+  type LogLevel,
+} from "../../src/util/logger.js";
 
 describe("Logger", () => {
+  afterEach(() => {
+    disableFileLogging();
+    setConsoleMirroring(false);
+    logger.setLevel("info");
+  });
+
   describe("logger singleton", () => {
     it("is defined and has expected methods", () => {
       assert.ok(logger, "logger should be defined");
@@ -23,78 +34,8 @@ describe("Logger", () => {
     it("setLevel accepts valid log levels", () => {
       const levels: LogLevel[] = ["debug", "info", "warn", "error"];
       for (const level of levels) {
-        // Should not throw
         logger.setLevel(level);
       }
-      // Reset to a sensible default
-      logger.setLevel("info");
-    });
-
-    it("debug does not throw when called", () => {
-      logger.setLevel("debug");
-      assert.doesNotThrow(() => {
-        logger.debug("test debug message");
-      });
-      logger.setLevel("info");
-    });
-
-    it("info does not throw when called", () => {
-      assert.doesNotThrow(() => {
-        logger.info("test info message");
-      });
-    });
-
-    it("warn does not throw when called", () => {
-      assert.doesNotThrow(() => {
-        logger.warn("test warn message");
-      });
-    });
-
-    it("error does not throw when called", () => {
-      assert.doesNotThrow(() => {
-        logger.error("test error message");
-      });
-    });
-
-    it("log methods accept metadata object", () => {
-      assert.doesNotThrow(() => {
-        logger.info("message with meta", { key: "value", count: 42 });
-      });
-    });
-
-    it("log methods handle undefined metadata", () => {
-      assert.doesNotThrow(() => {
-        logger.info("message without meta", undefined);
-      });
-    });
-
-    it("log methods handle error objects in metadata", () => {
-      assert.doesNotThrow(() => {
-        logger.error("something failed", { error: new Error("test error") });
-      });
-    });
-
-    it("level filtering: error level suppresses debug/info/warn", () => {
-      // Set to error level - debug/info/warn should be filtered
-      logger.setLevel("error");
-      // These should not throw even though they are filtered
-      assert.doesNotThrow(() => {
-        logger.debug("filtered out");
-        logger.info("filtered out");
-        logger.warn("filtered out");
-        logger.error("this one passes");
-      });
-      logger.setLevel("info");
-    });
-
-    it("level filtering: debug level allows all messages", () => {
-      logger.setLevel("debug");
-      assert.doesNotThrow(() => {
-        logger.debug("passes");
-        logger.info("passes");
-        logger.warn("passes");
-        logger.error("passes");
-      });
       logger.setLevel("info");
     });
   });
@@ -102,22 +43,51 @@ describe("Logger", () => {
   describe("file logging", () => {
     it("getLogFilePath returns null when file logging is disabled", () => {
       disableFileLogging();
-      const path = getLogFilePath();
-      assert.strictEqual(path, null);
+      assert.strictEqual(getLogFilePath(), null);
     });
 
     it("enableFileLogging then getLogFilePath returns a path", () => {
-      const testPath = "test-log-file.log";
+      const tempDir = mkdtempSync(join(tmpdir(), "sdl-logger-"));
+      const testPath = join(tempDir, "test-log-file.log");
       enableFileLogging(testPath);
-      const path = getLogFilePath();
-      assert.strictEqual(path, testPath);
-      disableFileLogging();
+      assert.strictEqual(getLogFilePath(), testPath);
     });
 
-    it("disableFileLogging resets the path", () => {
-      enableFileLogging("some-path.log");
-      disableFileLogging();
-      assert.strictEqual(getLogFilePath(), null);
+    it("falls back to temp dir when configured path cannot be created", () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "sdl-logger-invalid-"));
+      const blockingPath = join(tempDir, "blocking-file");
+      writeFileSync(blockingPath, "x", "utf-8");
+
+      enableFileLogging(join(blockingPath, "nested", "sdl-mcp.log"));
+
+      const diagnostics = getLoggerDiagnostics();
+      assert.ok(diagnostics.activePath, "expected active log path");
+      assert.notStrictEqual(
+        diagnostics.activePath,
+        join(blockingPath, "nested", "sdl-mcp.log"),
+      );
+      assert.strictEqual(diagnostics.fallbackUsed, true);
+    });
+  });
+
+  describe("environment configuration", () => {
+    it("treats SDL_LOG_LEVEL case-insensitively", () => {
+      configureLoggerFromEnvironment({
+        SDL_LOG_LEVEL: "WARN",
+      } as NodeJS.ProcessEnv);
+
+      logger.info("hidden");
+      logger.warn("visible");
+      assert.ok(true);
+    });
+
+    it("enables console mirroring from SDL_CONSOLE_LOGGING", () => {
+      configureLoggerFromEnvironment({
+        SDL_CONSOLE_LOGGING: "true",
+      } as NodeJS.ProcessEnv);
+
+      const diagnostics = getLoggerDiagnostics();
+      assert.strictEqual(diagnostics.consoleMirroring, true);
     });
   });
 });

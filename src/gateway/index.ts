@@ -17,14 +17,15 @@ import {
   REPO_DESCRIPTION,
   AGENT_DESCRIPTION,
 } from "./descriptions.js";
-import {
-  QUERY_THIN_SCHEMA,
-  CODE_THIN_SCHEMA,
-  REPO_THIN_SCHEMA,
-  AGENT_THIN_SCHEMA,
-} from "./thin-schemas.js";
 import { createActionMap, routeGatewayCall, type ActionMap } from "./router.js";
 import { registerLegacyTools } from "./legacy.js";
+import {
+  QUERY_ACTIONS,
+  CODE_ACTIONS,
+  REPO_ACTIONS,
+  AGENT_ACTIONS,
+} from "./schemas.js";
+import { buildGatewayWireSchema } from "./thin-schemas.js";
 
 export type ToolServices = {
   liveIndex?: LiveIndexCoordinator;
@@ -48,6 +49,10 @@ export function registerGatewayTools(
   prebuiltActionMap?: ActionMap,
 ): void {
   const actionMap = prebuiltActionMap ?? createActionMap(services.liveIndex);
+  const queryWireSchema = buildGatewayWireSchema(QUERY_ACTIONS, actionMap);
+  const codeWireSchema = buildGatewayWireSchema(CODE_ACTIONS, actionMap);
+  const repoWireSchema = buildGatewayWireSchema(REPO_ACTIONS, actionMap);
+  const agentWireSchema = buildGatewayWireSchema(AGENT_ACTIONS, actionMap);
 
   const makeHandler = () => {
     return async (args: unknown, ctx?: ToolContext): Promise<unknown> => {
@@ -60,7 +65,8 @@ export function registerGatewayTools(
     QUERY_DESCRIPTION,
     QueryGatewaySchema,
     makeHandler(),
-    QUERY_THIN_SCHEMA,
+    queryWireSchema,
+    { title: "SDL Query" },
   );
 
   server.registerTool(
@@ -68,7 +74,8 @@ export function registerGatewayTools(
     CODE_DESCRIPTION,
     CodeGatewaySchema,
     makeHandler(),
-    CODE_THIN_SCHEMA,
+    codeWireSchema,
+    { title: "SDL Code" },
   );
 
   server.registerTool(
@@ -76,7 +83,8 @@ export function registerGatewayTools(
     REPO_DESCRIPTION,
     RepoGatewaySchema,
     makeHandler(),
-    REPO_THIN_SCHEMA,
+    repoWireSchema,
+    { title: "SDL Repository" },
   );
 
   server.registerTool(
@@ -84,7 +92,8 @@ export function registerGatewayTools(
     AGENT_DESCRIPTION,
     AgentGatewaySchema,
     makeHandler(),
-    AGENT_THIN_SCHEMA,
+    agentWireSchema,
+    { title: "SDL Agent" },
   );
 
   if (config.emitLegacyTools) {

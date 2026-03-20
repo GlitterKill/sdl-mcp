@@ -2,10 +2,14 @@
 
 This document provides comprehensive documentation for every MCP tool exposed by SDL-MCP. Each entry covers what the tool does, its full parameter schema, response shape, and practical usage guidance.
 
+Flat mode, gateway mode, and the CLI `tool` command share the same normalization path. In addition to canonical camelCase fields, common aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, `spillover_handle`, `if_none_match`, `known_etags`, `known_card_etags`, `edited_files`, `entry_symbols`, and `relative_cwd` are accepted before strict validation.
+
 ---
 
 ## Table of Contents
 
+0. [Diagnostics](#0-diagnostics)
+   - [sdl.info](#sdlinfo)
 1. [Repository Management](#1-repository-management)
    - [sdl.repo.register](#sdlreporegister)
    - [sdl.repo.status](#sdlrepostatus)
@@ -53,6 +57,33 @@ This document provides comprehensive documentation for every MCP tool exposed by
     - [sdl.chain](#sdlchain)
     - [sdl.action.search](#sdlactionsearch)
     - [sdl.manual](#sdlmanual)
+
+---
+
+## 0. Diagnostics
+
+### sdl.info
+
+Returns a unified runtime and environment report for SDL-MCP.
+
+**What it does:** Collects the same diagnostic view exposed by the CLI `sdl-mcp info` command. It reports the resolved config path, whether the config loaded, the active log file path, whether log-path fallback to a temp file is active, whether console mirroring is enabled, Ladybug availability, and the current Rust native-addon status.
+
+**Parameters:** none
+
+**Response:**
+
+| Field | Type | Description |
+|:------|:-----|:------------|
+| `version` | string | SDL-MCP package version |
+| `runtime` | object | `{node, platform, arch}` |
+| `config` | object | `{path, exists, loaded}` |
+| `logging` | object | `{path, consoleMirroring, fallbackUsed}` |
+| `ladybug` | object | `{available, activePath}` |
+| `native` | object | `{available, sourcePath, disabledByEnv, reason}` |
+| `warnings` | string[] | Non-fatal environment warnings |
+| `misconfigurations` | string[] | Actionable setup problems |
+
+**Typical use:** Call this when startup, logging, DB, or native-addon behavior looks wrong and you need one consolidated environment snapshot.
 
 ---
 

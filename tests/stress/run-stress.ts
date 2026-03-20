@@ -393,8 +393,12 @@ async function main(): Promise<void> {
   const jsonPath = writeJsonReport(report, resultsDir);
   stressLog("info", `JSON report saved to: ${jsonPath}`);
 
-  // Exit explicitly to avoid hanging on dangling handles/timers
-  process.exit(report.overallPassed ? 0 : 1);
+  // Set exit code and allow stderr to flush before force-exiting.
+  // process.exit() alone truncates buffered console.error output on Windows.
+  // The unref'd timer lets the process exit naturally if no dangling handles
+  // remain, but forces exit after 500ms if handles keep the loop alive.
+  process.exitCode = report.overallPassed ? 0 : 1;
+  setTimeout(() => process.exit(), 500).unref();
 }
 
 // ---------------------------------------------------------------------------

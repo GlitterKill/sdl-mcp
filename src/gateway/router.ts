@@ -85,6 +85,7 @@ import {
 } from "../mcp/tools/memory.js";
 import { handleUsageStats } from "../mcp/tools/usage.js";
 import type { z } from "zod";
+import { normalizeToolArguments } from "../mcp/request-normalization.js";
 
 type ActionHandler = (args: unknown, context?: ToolContext) => Promise<unknown>;
 
@@ -245,10 +246,11 @@ export async function routeGatewayCall(
   actionMap: ActionMap,
   ctx?: ToolContext,
 ): Promise<unknown> {
-  if (!rawArgs || typeof rawArgs !== "object") {
+  const normalizedArgs = normalizeToolArguments(rawArgs);
+  if (!normalizedArgs || typeof normalizedArgs !== "object") {
     throw new Error("Gateway args must be a non-null object");
   }
-  const args = rawArgs as Record<string, unknown>;
+  const args = normalizedArgs as Record<string, unknown>;
   const action = args.action as string;
   const repoId = args.repoId as string | undefined;
 

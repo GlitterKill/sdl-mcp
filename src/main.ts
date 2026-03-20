@@ -21,7 +21,11 @@ import {
   formatExistingProcessMessage,
   writePidfile,
 } from "./util/pidfile.js";
-import { enableFileLogging, getLogFilePath } from "./util/logger.js";
+import {
+  enableFileLogging,
+  getLogFilePath,
+  shutdownLogger,
+} from "./util/logger.js";
 import { ensureConfiguredReposRegistered } from "./startup/bootstrap.js";
 
 // Enable file logging by default for the direct MCP entry point so crash
@@ -136,6 +140,7 @@ async function main(): Promise<void> {
     });
     shutdownMgr.addCleanup("server", () => server.stop());
     shutdownMgr.addCleanup("db", () => closeLadybugDb());
+    shutdownMgr.addCleanup("logger", () => shutdownLogger());
     shutdownMgr.addCleanup("watchers", async () => {
       for (const watcher of watchers) {
         try {

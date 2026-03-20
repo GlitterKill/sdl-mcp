@@ -1,48 +1,66 @@
-/**
- * Thin JSON Schemas for gateway tools — these are the schemas sent in
- * tools/list responses. They are intentionally minimal to save tokens.
- *
- * Full validation happens in the router via the strict Zod schemas.
- * These thin schemas just tell the LLM what fields are available.
- */
-
 import {
-  QUERY_ACTIONS,
-  CODE_ACTIONS,
-  REPO_ACTIONS,
+  compactJsonSchema,
+  zodSchemaToJsonSchema,
+} from "./compact-schema.js";
+import {
   AGENT_ACTIONS,
+  CODE_ACTIONS,
+  QUERY_ACTIONS,
+  REPO_ACTIONS,
 } from "./schemas.js";
+import { createActionMap, type ActionMap } from "./router.js";
 
-type ThinSchema = Record<string, unknown>;
+type JsonSchema = Record<string, unknown>;
 
-function buildThinSchema(
-  actions: readonly string[],
-  options?: { repoIdOptional?: boolean },
-): ThinSchema {
-  const repoIdProp = {
-    type: "string" as const,
-    minLength: 1,
-  };
-  const required = options?.repoIdOptional
-    ? ["action"]
-    : ["action", "repoId"];
-
+function buildActionEnvelope(
+  action: string,
+  actionMap: ActionMap,
+): JsonSchema {
+  const baseSchema = zodSchemaToJsonSchema(actionMap[action].schema);
   return {
     type: "object",
-    properties: {
-      repoId: repoIdProp,
-      action: {
-        type: "string",
-        enum: [...actions],
+    allOf: [
+      baseSchema,
+      {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            const: action,
+            description: "Gateway action name.",
+          },
+        },
+        required: ["action"],
       },
-    },
-    required,
-    // Allow action-specific params to pass through
-    additionalProperties: true,
+    ],
   };
 }
 
-export const QUERY_THIN_SCHEMA = buildThinSchema(QUERY_ACTIONS);
-export const CODE_THIN_SCHEMA = buildThinSchema(CODE_ACTIONS);
-export const REPO_THIN_SCHEMA = buildThinSchema(REPO_ACTIONS);
-export const AGENT_THIN_SCHEMA = buildThinSchema(AGENT_ACTIONS);
+export function buildGatewayWireSchema(
+  actions: readonly string[],
+  actionMap: ActionMap,
+): JsonSchema {
+  return compactJsonSchema({
+    type: "object",
+    oneOf: actions.map((action) => buildActionEnvelope(action, actionMap)),
+  });
+}
+
+const DEFAULT_ACTION_MAP = createActionMap();
+
+export const QUERY_THIN_SCHEMA = buildGatewayWireSchema(
+  QUERY_ACTIONS,
+  DEFAULT_ACTION_MAP,
+);
+export const CODE_THIN_SCHEMA = buildGatewayWireSchema(
+  CODE_ACTIONS,
+  DEFAULT_ACTION_MAP,
+);
+export const REPO_THIN_SCHEMA = buildGatewayWireSchema(
+  REPO_ACTIONS,
+  DEFAULT_ACTION_MAP,
+);
+export const AGENT_THIN_SCHEMA = buildGatewayWireSchema(
+  AGENT_ACTIONS,
+  DEFAULT_ACTION_MAP,
+);

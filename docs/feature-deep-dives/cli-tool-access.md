@@ -34,7 +34,7 @@ The CLI tool dispatcher bypasses the MCP server/transport layer entirely. Instea
 1. **Parses CLI flags** into typed arguments using action definitions
 2. **Loads config and initializes the graph DB** (same as the MCP server)
 3. **Routes directly** to the same handler functions the MCP server uses
-4. **Validates** with the same Zod schemas
+4. **Normalizes and validates** with the same alias-mapping and Zod schemas
 5. **Formats output** in your choice of format
 
 ```
@@ -186,6 +186,8 @@ The CLI automatically coerces flag values to the expected types:
 | `boolean` | `--flag` | `--semantic` |
 | `string[]` | `--flag a,b,c` | `--entry-symbols "sym1,sym2"` |
 | `json` | `--flag '{"key":"val"}'` | `--policy-patch '{"maxWindowLines":200}'` |
+
+The parser also accepts the same common aliases that MCP requests do, so CLI flags such as `--repo-id`, `--root-path`, `--symbol-id`, `--symbol-ids`, `--from-version`, `--to-version`, and `--slice-handle` all normalize to the canonical action fields before validation.
 
 ### Budget flags
 

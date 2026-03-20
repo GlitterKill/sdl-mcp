@@ -153,6 +153,8 @@ let nativeAddon: NativeAddon | null = null;
 let loadAttempted = false;
 let nativeDisableLogged = false;
 let nativeDisabledForSession = false;
+let nativeAddonSourcePath: string | null = null;
+let nativeAddonReason = "not attempted";
 
 function isCompatibleNativeAddon(addon: unknown): addon is NativeAddon {
   if (!addon || typeof addon !== "object") return false;
@@ -170,6 +172,8 @@ function loadNativeAddon(): NativeAddon | null {
     process.env.SDL_MCP_DISABLE_NATIVE_ADDON ?? "",
   );
   if (disableNativeAddon) {
+    nativeAddonReason = "disabled by SDL_MCP_DISABLE_NATIVE_ADDON";
+    nativeAddonSourcePath = null;
     if (!nativeDisableLogged) {
       logger.info("Native Rust indexer explicitly disabled by environment");
       nativeDisableLogged = true;
@@ -179,7 +183,10 @@ function loadNativeAddon(): NativeAddon | null {
   // Reset so toggling the env var at runtime re-emits the log on the next disable.
   nativeDisableLogged = false;
 
-  if (nativeDisabledForSession) return null;
+  if (nativeDisabledForSession) {
+    nativeAddonReason = "disabled for this process after an earlier load failure";
+    return null;
+  }
   if (loadAttempted) return nativeAddon;
   loadAttempted = true;
 
@@ -197,6 +204,7 @@ function loadNativeAddon(): NativeAddon | null {
     try {
       const loaded = require(addonPath) as unknown;
       if (!isCompatibleNativeAddon(loaded)) {
+        nativeAddonReason = `incompatible addon at ${addonPath}`;
         logger.warn("Native Rust indexer found but incompatible; ignoring", {
           path: addonPath,
           exports:
@@ -206,6 +214,8 @@ function loadNativeAddon(): NativeAddon | null {
       }
 
       nativeAddon = loaded;
+      nativeAddonSourcePath = addonPath;
+      nativeAddonReason = "loaded";
       logger.info("Loaded native Rust indexer", { path: addonPath });
       return loaded;
     } catch (error) {
@@ -217,6 +227,8 @@ function loadNativeAddon(): NativeAddon | null {
     }
   }
 
+  nativeAddonSourcePath = null;
+  nativeAddonReason = "not found";
   logger.warn("Native Rust indexer not available, using TypeScript engine");
   return null;
 }
@@ -228,6 +240,23 @@ function loadNativeAddon(): NativeAddon | null {
  */
 export function isRustEngineAvailable(): boolean {
   return loadNativeAddon() !== null;
+}
+
+export function getRustEngineStatus(): {
+  available: boolean;
+  sourcePath: string | null;
+  disabledByEnv: boolean;
+  reason: string;
+} {
+  const available = loadNativeAddon() !== null;
+  return {
+    available,
+    sourcePath: nativeAddonSourcePath,
+    disabledByEnv: /^(1|true)$/i.test(
+      process.env.SDL_MCP_DISABLE_NATIVE_ADDON ?? "",
+    ),
+    reason: available ? "loaded" : nativeAddonReason,
+  };
 }
 
 /**

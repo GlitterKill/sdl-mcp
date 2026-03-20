@@ -85,6 +85,7 @@ import {
   handleMemorySurface,
 } from "./memory.js";
 import { handleUsageStats } from "./usage.js";
+import { InfoRequestSchema, handleInfo } from "./info.js";
 import type { ToolServices } from "../../gateway/index.js";
 import { createActionMap } from "../../gateway/router.js";
 import {
@@ -104,6 +105,15 @@ export function registerTools(
 
   // Universal discovery surface
   registerActionSearchTool(server, services);
+
+  server.registerTool(
+    "sdl.info",
+    "Get unified SDL-MCP runtime, config, logging, Ladybug, and native-addon status.",
+    InfoRequestSchema,
+    handleInfo,
+    undefined,
+    { title: "SDL Info" },
+  );
 
   // Code Mode exclusive: register action search plus code-mode tools only
   if (codeModeConfig?.enabled && codeModeConfig?.exclusive) {

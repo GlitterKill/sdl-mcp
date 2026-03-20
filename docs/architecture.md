@@ -86,7 +86,7 @@ SDL-MCP follows a **hexagonal / ports-and-adapters** design. Each module has a c
 2. initGraphDb()                        Open/create LadybugDB file
 3. ensureConfiguredReposRegistered()     Bootstrap repos into graph
 4. getDefaultLiveIndexCoordinator()      Singleton overlay service
-5. registerTools(server, services)       Wire 30+ MCP tools (mode-dependent)
+5. registerTools(server, services)       Wire discovery/info tools plus flat, gateway, and/or code-mode tools
 6. setupFileWatchers()                   chokidar for incremental re-index
 7. ShutdownManager.register(callbacks)   Graceful cleanup handlers
 8. server.start()                        Begin accepting MCP requests
@@ -98,7 +98,14 @@ Startup is sequenced (not parallel) — the DB must be ready before tools regist
 
 ## Tool Dispatch
 
-All MCP tools (30 flat + 3 code-mode + 4 gateway, configuration-dependent) flow through a single dispatch path in `src/server.ts`:
+All MCP tools flow through a single dispatch path in `src/server.ts`. The exact surface is configuration-dependent:
+
+- Flat mode: 32 tools (`30` flat tools + `sdl.action.search` + `sdl.info`)
+- Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
+- Gateway + legacy mode: 36 tools (`4` gateway tools + `30` legacy flat tools + `sdl.action.search` + `sdl.info`)
+- Code Mode adds `sdl.manual` and `sdl.chain`, or can run in exclusive mode with just `sdl.action.search`, `sdl.info`, `sdl.manual`, and `sdl.chain`
+
+Before strict Zod validation, requests also pass through a shared normalization layer. Flat and gateway calls therefore accept the same canonical camelCase fields plus common aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, and `spillover_handle`.
 
 ```
   Client request
@@ -132,6 +139,8 @@ All MCP tools (30 flat + 3 code-mode + 4 gateway, configuration-dependent) flow 
 ```
 
 **Sideband system:** Handlers can attach `_rawContext` hints (file IDs or raw token counts). The post-processor computes `_tokenUsage` metadata (SDL tokens vs. raw-file equivalent, savings percentage) and strips internal fields before serialization.
+
+`tools/list` metadata is assembled here as well. SDL-MCP emits human-friendly tool titles and version-stamped descriptions so flat, gateway, and code-mode registrations present a consistent surface to clients.
 
 ---
 
@@ -580,12 +589,18 @@ See [Development Memories deep dive](./feature-deep-dives/development-memories.m
 
 ## Source Directory Map
 
+Current command/tool registration notes:
+
+- CLI commands: 13 (`init`, `doctor`, `info`, `index`, `serve`, `version`, `export`, `import`, `pull`, `benchmark:ci`, `summary`, `health`, `tool`)
+- Gateway mode keeps `sdl.action.search` and `sdl.info` outside the 4 namespace tools
+- Code Mode adds `sdl.manual` and `sdl.chain`, or can run exclusive with the 4-tool discovery/diagnostics surface
+
 ```
 src/
 ├── main.ts                    Server entry point + bootstrap
 ├── server.ts                  MCPServer class + tool dispatch
 ├── cli/
-│   ├── commands/              CLI commands (12: init, doctor, index, serve, version,
+│   ├── commands/              CLI commands (13: init, doctor, info, index, serve, version,
 │   │                            export, import, pull, benchmark:ci, summary, health, tool)
 │   └── transport/             stdio + HTTP transport setup
 ├── config/
@@ -693,9 +708,9 @@ graph TD
     C --> J[MCP Tool Layer]
 
     subgraph Tool Registration Modes
-        J1[Flat Mode: 30 tools]
-        J2[Gateway Mode: 4 namespace tools]
-        J3[Code Mode: 3 chain tools]
+        J1[Flat Mode: 32 tools]
+        J2[Gateway Mode: 6 tools]
+        J3[Code Mode adds manual and chain]
     end
     J --- J1
     J --- J2
@@ -730,5 +745,12 @@ graph TD
     R[Session Manager] -.-> |Max 8 sessions| J
     S[Dispatch Limiter] -.-> |Max 8 concurrent| J
 ```
+
+Registration-mode counts in the current implementation:
+
+- Flat mode: 32 tools
+- Gateway-only mode: 6 tools
+- Gateway + legacy mode: 36 tools
+- Code Mode adds `sdl.manual` and `sdl.chain`
 
 [Back to README](../README.md)

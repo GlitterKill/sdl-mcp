@@ -16,7 +16,48 @@
 </details>
 </div>
 
-Complete reference for all 30 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway tools) exposed by `registerTools`. Tools are organized by category and listed in the recommended usage order within each category.
+Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
+
+- `30` gateway-routable SDL actions
+- `2` universal tools: `sdl.action.search` and `sdl.info`
+- optional Code Mode tools: `sdl.manual` and `sdl.chain`
+
+Flat mode, gateway mode, and the CLI `tool` command all route into the same handler layer.
+
+Parameter normalization is shared across flat and gateway calls. SDL-MCP accepts canonical camelCase fields plus common public aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, `spillover_handle`, `if_none_match`, `known_etags`, `known_card_etags`, `edited_files`, `entry_symbols`, and `relative_cwd`.
+
+---
+
+## Diagnostics and Discovery (2 tools)
+
+### `sdl.info`
+
+Return unified runtime, config, logging, Ladybug, and native-addon status.
+
+**Parameters:** none
+
+**Response includes:**
+
+- `version`
+- `runtime` (`node`, `platform`, `arch`)
+- `config` (`path`, `exists`, `loaded`)
+- `logging` (`path`, `consoleMirroring`, `fallbackUsed`)
+- `ladybug` (`available`, `activePath`)
+- `native` (`available`, `sourcePath`, `reason`, `disabledByEnv`)
+- `warnings`
+- `misconfigurations`
+
+**Example:**
+
+```json
+{}
+```
+
+### `sdl.action.search`
+
+Search the SDL action catalog and return the best matching actions, examples, and schema summaries. Use this to discover the right SDL action before calling `sdl.manual`, `sdl.chain`, or the direct flat or gateway tool surfaces.
+
+See the [Code Mode deep dive](./feature-deep-dives/code-mode.md) for end-to-end discovery and chaining workflows.
 
 ---
 

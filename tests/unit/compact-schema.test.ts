@@ -4,7 +4,7 @@ import { z } from "zod";
 import { buildCompactJsonSchema } from "../../src/gateway/compact-schema.js";
 
 describe("Compact JSON Schema builder", () => {
-  it("strips description fields", () => {
+  it("preserves description fields", () => {
     const schema = z.object({
       name: z.string().describe("The name"),
       age: z.number().describe("The age"),
@@ -12,7 +12,7 @@ describe("Compact JSON Schema builder", () => {
 
     const result = buildCompactJsonSchema(schema);
     const json = JSON.stringify(result);
-    assert.ok(!json.includes('"description"'), "should strip descriptions");
+    assert.ok(json.includes('"description"'), "should retain descriptions");
   });
 
   it("preserves required fields", () => {
@@ -100,7 +100,7 @@ describe("Compact JSON Schema builder", () => {
     assert.ok(result, "should produce a schema for nested objects");
   });
 
-  it("output token count is smaller than input with descriptions", () => {
+  it("retains user-facing description text for tool parameters", () => {
     const schema = z.object({
       repoId: z.string().min(1).describe("Repository identifier"),
       query: z.string().min(1).describe("Search query string"),
@@ -120,14 +120,13 @@ describe("Compact JSON Schema builder", () => {
     const compact = buildCompactJsonSchema(schema);
     const compactStr = JSON.stringify(compact);
 
-    // The compact schema should not contain any description strings
     assert.ok(
-      !compactStr.includes("Repository identifier"),
-      "should strip description text",
+      compactStr.includes("Repository identifier"),
+      "should preserve repoId description text",
     );
     assert.ok(
-      !compactStr.includes("Search query string"),
-      "should strip description text",
+      compactStr.includes("Search query string"),
+      "should preserve query description text",
     );
   });
 });

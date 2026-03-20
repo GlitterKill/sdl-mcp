@@ -18,9 +18,9 @@
   "files": [
     "dist",
     "config",
-    "migrations",
     "models",
-    "templates",
+    "templates/*.json",
+    "templates/*.template",
     "scripts/postinstall-prune-kuzu.mjs",
     "README.md",
     "LICENSE"
@@ -63,6 +63,8 @@
     "build:native:debug": "napi build --cargo-cwd native --config native/package.json native",
     "native:artifacts": "napi artifacts --config native/package.json --npm-dir native/npm",
     "native:version": "node scripts/sync-native-version.mjs",
+    "prepare-release": "node scripts/prepare-release.mjs",
+    "inspector": "npx @modelcontextprotocol/inspector node dist/main.js",
     "test:native-parity": "node --import tsx tests/native/parity-test.ts",
     "check:config-sync": "tsx scripts/check-config-sync.ts",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck",
