@@ -34,14 +34,10 @@ export class Planner {
   }
 
   private planDebug(task: AgentTask, options: TaskOptions): RungPath {
-    const rungs: RungType[] = [];
+    const rungs: RungType[] = ["card", "skeleton", "hotPath"];
 
     if (options.requireDiagnostics) {
-      rungs.push("card", "skeleton", "hotPath", "raw");
-    } else if (options.focusSymbols && options.focusSymbols.length > 0) {
-      rungs.push("card", "skeleton", "hotPath");
-    } else {
-      rungs.push("card", "skeleton");
+      rungs.push("raw");
     }
 
     return this.buildRungPath(
@@ -52,16 +48,17 @@ export class Planner {
   }
 
   private planReview(task: AgentTask, options: TaskOptions): RungPath {
-    const rungs: RungType[] = [];
+    const rungs: RungType[] = ["card", "skeleton"];
 
-    if (options.focusSymbols && options.focusSymbols.length > 0) {
-      rungs.push("card", "skeleton", "hotPath");
-    } else {
-      rungs.push("card", "skeleton");
+    if (
+      (options.focusSymbols && options.focusSymbols.length > 0) ||
+      (options.focusPaths && options.focusPaths.length > 0)
+    ) {
+      rungs.push("hotPath");
     }
 
     if (options.includeTests) {
-      rungs.push("hotPath");
+      if (!rungs.includes("hotPath")) rungs.push("hotPath");
     }
 
     return this.buildRungPath(
@@ -74,7 +71,10 @@ export class Planner {
   private planImplement(task: AgentTask, options: TaskOptions): RungPath {
     const rungs: RungType[] = ["card", "skeleton"];
 
-    if (options.focusPaths && options.focusPaths.length > 0) {
+    if (
+      (options.focusPaths && options.focusPaths.length > 0) ||
+      (options.focusSymbols && options.focusSymbols.length > 0)
+    ) {
       rungs.push("hotPath");
     }
 
@@ -88,7 +88,10 @@ export class Planner {
   private planExplain(task: AgentTask, options: TaskOptions): RungPath {
     const rungs: RungType[] = ["card"];
 
-    if (options.focusSymbols && options.focusSymbols.length > 0) {
+    if (
+      (options.focusSymbols && options.focusSymbols.length > 0) ||
+      (options.focusPaths && options.focusPaths.length > 0)
+    ) {
       rungs.push("skeleton");
     }
 
@@ -109,13 +112,10 @@ export class Planner {
     task: AgentTask,
     reasoning: string,
   ): RungPath {
-    const estimatedTokens = this.estimateTokens(rungs);
-    const estimatedDurationMs = this.estimateDuration(rungs);
-
     const path: RungPath = {
       rungs,
-      estimatedTokens,
-      estimatedDurationMs,
+      estimatedTokens: this.estimateTokens(rungs),
+      estimatedDurationMs: this.estimateDuration(rungs),
       reasoning,
     };
 
@@ -142,7 +142,7 @@ export class Planner {
 
   private adjustForBudget(
     path: RungPath,
-    budget: { maxTokens?: number; maxDurationMs?: number },
+    budget: NonNullable<AgentTask["budget"]>,
   ): void {
     if (budget.maxTokens && path.estimatedTokens > budget.maxTokens) {
       this.reducePathForTokenLimit(path, budget.maxTokens);
@@ -157,12 +157,15 @@ export class Planner {
   }
 
   private reducePathForTokenLimit(path: RungPath, maxTokens: number): void {
+    const originalRungs = [...path.rungs];
     while (path.estimatedTokens > maxTokens && path.rungs.length > 1) {
-      const removedRung = path.rungs.pop()!;
-      path.estimatedTokens -= DEFAULT_TOKEN_ESTIMATES[removedRung] ?? 0;
-      path.estimatedDurationMs -=
-        DEFAULT_DURATION_ESTIMATES_MS[removedRung] ?? 0;
-      path.reasoning += `; Reduced rung ${removedRung} to meet token budget`;
+      path.rungs.pop();
+      path.estimatedTokens = this.estimateTokens(path.rungs);
+      path.estimatedDurationMs = this.estimateDuration(path.rungs);
+    }
+    const removed = originalRungs.filter((r) => !path.rungs.includes(r));
+    if (removed.length > 0) {
+      path.reasoning += `; Trimmed rung(s) ${removed.join(", ")} to meet token budget (${maxTokens})`;
     }
   }
 
@@ -170,12 +173,15 @@ export class Planner {
     path: RungPath,
     maxDurationMs: number,
   ): void {
+    const originalRungs = [...path.rungs];
     while (path.estimatedDurationMs > maxDurationMs && path.rungs.length > 1) {
-      const removedRung = path.rungs.pop()!;
-      path.estimatedTokens -= DEFAULT_TOKEN_ESTIMATES[removedRung] ?? 0;
-      path.estimatedDurationMs -=
-        DEFAULT_DURATION_ESTIMATES_MS[removedRung] ?? 0;
-      path.reasoning += `; Reduced rung ${removedRung} to meet duration budget`;
+      path.rungs.pop();
+      path.estimatedTokens = this.estimateTokens(path.rungs);
+      path.estimatedDurationMs = this.estimateDuration(path.rungs);
+    }
+    const removed = originalRungs.filter((r) => !path.rungs.includes(r));
+    if (removed.length > 0) {
+      path.reasoning += `; Trimmed rung(s) ${removed.join(", ")} to meet duration budget (${maxDurationMs}ms)`;
     }
   }
 
@@ -184,11 +190,15 @@ export class Planner {
     const context: string[] = [];
 
     if (options.focusSymbols && options.focusSymbols.length > 0) {
-      context.push(...options.focusSymbols.map((symbolId) => `symbol:${symbolId}`));
+      context.push(
+        ...options.focusSymbols.map((symbolId) => `symbol:${symbolId}`),
+      );
     }
 
     if (options.focusPaths && options.focusPaths.length > 0) {
-      context.push(...options.focusPaths.map((filePath) => `file:${filePath}`));
+      context.push(
+        ...options.focusPaths.map((filePath) => `file:${filePath}`),
+      );
     }
 
     return context;

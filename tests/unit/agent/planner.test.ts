@@ -46,12 +46,12 @@ describe("Agent Planner", () => {
       assert.deepStrictEqual(path.rungs, ["card", "skeleton", "hotPath"]);
     });
 
-    it("plans debug task without focus to include two rungs", () => {
+    it("plans debug task without focus to include three rungs", () => {
       const task = createTask("debug");
       const path = planner.plan(task);
 
-      assert.strictEqual(path.rungs.length, 2);
-      assert.deepStrictEqual(path.rungs, ["card", "skeleton"]);
+      assert.strictEqual(path.rungs.length, 3);
+      assert.deepStrictEqual(path.rungs, ["card", "skeleton", "hotPath"]);
     });
   });
 

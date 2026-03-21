@@ -1,5 +1,7 @@
 import type {
   AgentTask,
+  Evidence,
+  Action,
   OrchestrationResult,
   PlannedExecution,
 } from "./types.js";
@@ -10,6 +12,10 @@ import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { ValidationError } from "../domain/errors.js";
 import { logger } from "../util/logger.js";
+
+const HANDLED_EVIDENCE_TYPES = new Set([
+  "symbolCard", "skeleton", "hotPath", "codeWindow", "diagnostic", "searchResult",
+]);
 
 export class Orchestrator {
   private planner: Planner;
@@ -92,17 +98,17 @@ export class Orchestrator {
 
   private generateSummary(
     task: AgentTask,
-    actions: unknown[],
-    evidence: unknown[],
+    actions: Action[],
+    evidence: Evidence[],
     success: boolean,
-    extras: { clusterExpandedCount: number } = { clusterExpandedCount: 0 },
+    extra: { clusterExpandedCount: number } = { clusterExpandedCount: 0 },
   ): string {
-    const status = success ? "completed successfully" : "failed";
+    const status = success ? "completed successfully" : "completed with errors";
     const actionCount = actions.length;
     const evidenceCount = evidence.length;
     const clusterNote =
-      extras.clusterExpandedCount > 0
-        ? ` Context expanded with ${extras.clusterExpandedCount} same-cluster symbol(s).`
+      extra.clusterExpandedCount > 0
+        ? ` (expanded ${extra.clusterExpandedCount} symbols via cluster analysis)`
         : "";
 
     return `Task "${task.taskType}" ${status}. Executed ${actionCount} action(s), collected ${evidenceCount} evidence item(s).${clusterNote}`;
@@ -110,25 +116,99 @@ export class Orchestrator {
 
   private generateAnswer(
     task: AgentTask,
-    evidence: unknown[],
+    evidence: Evidence[],
     success: boolean,
   ): string {
-    if (!success) {
+    if (!success && evidence.length === 0) {
       return `Task execution failed. Review actions and errors for details.`;
     }
 
-    switch (task.taskType) {
-      case "explain":
-        return `Based on the collected evidence from ${evidence.length} sources, the code structure and relationships have been analyzed. Review the evidence sections for detailed information.`;
-      case "debug":
-        return `Debugging analysis completed with ${evidence.length} evidence items collected. Check actions taken and final evidence for specific findings.`;
-      case "review":
-        return `Code review completed with ${evidence.length} evidence items. Review findings include structure analysis and key symbols identified.`;
-      case "implement":
-        return `Implementation task completed with ${evidence.length} evidence items collected. Context gathered from the selected rungs should support the requested changes.`;
-      default:
-        return `Task completed successfully with ${evidence.length} evidence items collected.`;
+    if (evidence.length === 0) {
+      return `No evidence was collected for task "${task.taskType}". Try providing focusSymbols or focusPaths, or broadening the task description.`;
     }
+
+    // Group evidence by type
+    const byType = new Map<string, Evidence[]>();
+    for (const e of evidence) {
+      const list = byType.get(e.type) ?? [];
+      list.push(e);
+      byType.set(e.type, list);
+    }
+
+    const taskLabel = task.taskType.charAt(0).toUpperCase() + task.taskType.slice(1);
+    const sections: string[] = [`# ${taskLabel} Results`];
+
+    if (!success) {
+      sections.push(
+        "> **Note:** Task completed with errors. Some rungs failed \u2014 see Diagnostics below.",
+      );
+    }
+
+    // Symbol cards section
+    const cards = byType.get("symbolCard");
+    if (cards && cards.length > 0) {
+      sections.push(
+        `## Symbols Found (${cards.length})\n` +
+          cards.map((c) => `- ${c.summary}`).join("\n"),
+      );
+    }
+
+    // Skeleton section
+    const skeletons = byType.get("skeleton");
+    if (skeletons && skeletons.length > 0) {
+      sections.push(
+        `## Code Structure (${skeletons.length} skeleton(s))\n` +
+          skeletons.map((s) => `- ${s.reference}: ${s.summary}`).join("\n"),
+      );
+    }
+
+    // Hot path section
+    const hotPaths = byType.get("hotPath");
+    if (hotPaths && hotPaths.length > 0) {
+      sections.push(
+        `## Hot Paths (${hotPaths.length})\n` +
+          hotPaths.map((h) => `- ${h.reference}: ${h.summary}`).join("\n"),
+      );
+    }
+
+    // Code window section
+    const windows = byType.get("codeWindow");
+    if (windows && windows.length > 0) {
+      sections.push(
+        `## Code Windows (${windows.length})\n` +
+          windows.map((w) => `- ${w.reference}: ${w.summary}`).join("\n"),
+      );
+    }
+
+    // Diagnostics section
+    const diagnostics = byType.get("diagnostic");
+    if (diagnostics && diagnostics.length > 0) {
+      sections.push(
+        `## Diagnostics (${diagnostics.length})\n` +
+          diagnostics.map((d) => `- ${d.summary}`).join("\n"),
+      );
+    }
+
+    // Search results section
+    const searches = byType.get("searchResult");
+    if (searches && searches.length > 0) {
+      sections.push(
+        `## Search Results\n` +
+          searches.map((s) => `- ${s.summary}`).join("\n"),
+      );
+    }
+
+    // Catch-all for unhandled evidence types (e.g. delta)
+    for (const [type, items] of byType) {
+      if (!HANDLED_EVIDENCE_TYPES.has(type) && items.length > 0) {
+        sections.push(
+          `## Other (${type}) (${items.length})\n` +
+            items.map((e) => `- ${e.reference}: ${e.summary}`).join("\n"),
+        );
+      }
+    }
+
+    return sections.join("\n\n");
   }
 
   private createErrorResult(
@@ -204,8 +284,9 @@ export class Orchestrator {
           if (already.has(ref)) continue;
           additional.push(ref);
           already.add(ref);
-          if (additional.length >= 20) break;
         }
+        // Outer loop break is sufficient — inner loop processes all members
+        // of each cluster before checking the cap.
         if (additional.length >= 20) break;
       }
 

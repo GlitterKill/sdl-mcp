@@ -122,7 +122,7 @@ describe("Orchestrator", () => {
     assert.deepEqual(result.finalEvidence, evidence);
     assert.equal(result.metrics.totalActions, 2);
     assert.equal(result.nextBestAction, "none");
-    assert.match(result.answer ?? "", /Debugging analysis completed/);
+    assert.match(result.answer ?? "", /## Symbols Found \(1\)/);
   });
 
   it("enforces planner budget constraints for token and duration", async () => {
@@ -215,7 +215,7 @@ describe("Orchestrator", () => {
 
     assert.equal(result.success, false);
     assert.equal(result.actionsTaken.length, 1);
-    assert.match(result.summary, /failed/);
+    assert.match(result.summary, /completed with errors/);
     assert.equal(
       result.answer,
       "Task execution failed. Review actions and errors for details.",
@@ -275,7 +275,7 @@ describe("Orchestrator", () => {
     const result = await orchestrator.orchestrate(createTask());
 
     assert.equal(result.success, true);
-    assert.ok(!result.summary.includes("Context expanded with"));
+    assert.ok(!result.summary.includes("expanded"));
   });
 
   it("keeps original symbol context even if cluster expansion is unavailable", async () => {
