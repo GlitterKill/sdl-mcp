@@ -9,7 +9,7 @@ import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
 import type { FileMetadata } from "../../fileScanner.js";
-import { findEnclosingSymbolByRange } from "../../edge-builder/pass2.js";
+import { findEnclosingSymbolByRange } from "../../edge-builder/enclosing-symbol.js";
 import { resolveImportTargets } from "../../edge-builder/import-resolution.js";
 import { resolveImportCandidatePaths } from "../../import-resolution/registry.js";
 import type { ExtractedImport } from "../../treesitter/extractImports.js";

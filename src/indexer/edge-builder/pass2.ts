@@ -1,6 +1,5 @@
 import { join } from "path";
 
-import type { SymbolKind } from "../../db/schema.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { readFileAsync } from "../../util/asyncFs.js";
@@ -10,8 +9,10 @@ import type { FileMetadata } from "../fileScanner.js";
 
 import { isBuiltinCall } from "./builtins.js";
 import { resolveCallTarget } from "./call-resolution.js";
+import { findEnclosingSymbolByRange } from "./enclosing-symbol.js";
 import { resolveImportTargets } from "./import-resolution.js";
 import { resolveSymbolIdFromIndex } from "./symbol-index.js";
+import { buildSymbolKeyMaps, mapExtractedSymbolId } from "./symbol-mapping.js";
 import {
   incRecord,
   isTsCallResolutionFile,
@@ -19,93 +20,6 @@ import {
 } from "./telemetry.js";
 import type { CallResolutionTelemetry } from "./telemetry.js";
 import type { SymbolIndex, TsCallResolver } from "./types.js";
-
-async function resolvePass2Targets(params: {
-  repoId: string;
-  mode: "full" | "incremental";
-  pass2Files: FileMetadata[];
-  changedPass2FilePaths: Set<string>;
-  supportsPass2FilePath?: (relPath: string) => boolean;
-}): Promise<FileMetadata[]> {
-  const {
-    repoId,
-    mode,
-    pass2Files,
-    changedPass2FilePaths,
-    supportsPass2FilePath = isTsCallResolutionFile,
-  } = params;
-  if (mode === "full") {
-    return pass2Files;
-  }
-  if (changedPass2FilePaths.size === 0) {
-    return [];
-  }
-
-  const conn = await getLadybugConn();
-
-  const pass2FilesByPath = new Map(pass2Files.map((file) => [file.path, file]));
-  const targetPaths = new Set<string>(changedPass2FilePaths);
-  const changedSymbolIds = new Set<string>();
-
-  for (const changedPath of changedPass2FilePaths) {
-    const file = await ladybugDb.getFileByRepoPath(conn, repoId, changedPath);
-    if (!file) continue;
-    const symbolIds = await ladybugDb.getSymbolIdsByFile(conn, file.fileId);
-    for (const symbolId of symbolIds) {
-      changedSymbolIds.add(symbolId);
-    }
-  }
-
-  if (changedSymbolIds.size === 0) {
-    return Array.from(targetPaths)
-      .map((path) => pass2FilesByPath.get(path))
-      .filter((file): file is FileMetadata => Boolean(file));
-  }
-
-  const incomingByToSymbol = await ladybugDb.getEdgesToSymbols(
-    conn,
-    Array.from(changedSymbolIds),
-  );
-
-  const importerSymbolIds = new Set<string>();
-  for (const edges of incomingByToSymbol.values()) {
-    for (const edge of edges) {
-      if (edge.edgeType !== "import") continue;
-      importerSymbolIds.add(edge.fromSymbolId);
-    }
-  }
-
-  if (importerSymbolIds.size === 0) {
-    return Array.from(targetPaths)
-      .map((path) => pass2FilesByPath.get(path))
-      .filter((file): file is FileMetadata => Boolean(file));
-  }
-
-  const importerSymbols = await ladybugDb.getSymbolsByIds(
-    conn,
-    Array.from(importerSymbolIds),
-  );
-  const fileIds = new Set<string>();
-  for (const symbol of importerSymbols.values()) {
-    fileIds.add(symbol.fileId);
-  }
-
-  const importerFiles = await ladybugDb.getFilesByIds(
-    conn,
-    Array.from(fileIds),
-  );
-  for (const symbol of importerSymbols.values()) {
-    const file = importerFiles.get(symbol.fileId);
-    if (!file) continue;
-    if (!supportsPass2FilePath(file.relPath)) continue;
-    targetPaths.add(file.relPath);
-  }
-
-  return Array.from(targetPaths)
-    .map((path) => pass2FilesByPath.get(path))
-    .filter((file): file is FileMetadata => Boolean(file));
-}
-
 async function resolveTsCallEdgesPass2(params: {
   repoId: string;
   repoRoot: string;
@@ -216,140 +130,11 @@ async function resolveTsCallEdgesPass2(params: {
       return 0;
     }
 
-    const toFullKey = (
-      kind: SymbolKind,
-      name: string,
-      range: {
-        startLine: number;
-        startCol: number;
-        endLine: number;
-        endCol: number;
-      },
-    ): string =>
-      `${kind}:${name}:${range.startLine}:${range.startCol}:${range.endLine}:${range.endCol}`;
-
-    const toStartKey = (
-      kind: SymbolKind,
-      name: string,
-      range: {
-        startLine: number;
-        startCol: number;
-      },
-    ): string => `${kind}:${name}:${range.startLine}:${range.startCol}`;
-
-    const toStartLineKey = (
-      kind: SymbolKind,
-      name: string,
-      range: {
-        startLine: number;
-      },
-    ): string => `${kind}:${name}:${range.startLine}`;
-
-    const toNameKindKey = (kind: SymbolKind, name: string): string =>
-      `${kind}:${name}`;
-
-    const symbolIdByFullKey = new Map<string, string>();
-    const symbolsByStartKey = new Map<string, ladybugDb.SymbolRow[]>();
-    const symbolsByStartLineKey = new Map<string, ladybugDb.SymbolRow[]>();
-    const symbolsByNameKindKey = new Map<string, ladybugDb.SymbolRow[]>();
-
-    const pushSymbol = (
-      map: Map<string, ladybugDb.SymbolRow[]>,
-      key: string,
-      symbol: ladybugDb.SymbolRow,
-    ): void => {
-      const existing = map.get(key) ?? [];
-      existing.push(symbol);
-      map.set(key, existing);
-    };
-
-    for (const symbol of existingSymbols) {
-      const range = {
-        startLine: symbol.rangeStartLine,
-        startCol: symbol.rangeStartCol,
-        endLine: symbol.rangeEndLine,
-        endCol: symbol.rangeEndCol,
-      };
-
-      symbolIdByFullKey.set(
-        toFullKey(symbol.kind as SymbolKind, symbol.name, range),
-        symbol.symbolId,
-      );
-      pushSymbol(
-        symbolsByStartKey,
-        toStartKey(symbol.kind as SymbolKind, symbol.name, range),
-        symbol,
-      );
-      pushSymbol(
-        symbolsByStartLineKey,
-        toStartLineKey(symbol.kind as SymbolKind, symbol.name, range),
-        symbol,
-      );
-      pushSymbol(
-        symbolsByNameKindKey,
-        toNameKindKey(symbol.kind as SymbolKind, symbol.name),
-        symbol,
-      );
-    }
-
-    const mapExtractedSymbolId = (
-      extractedSymbol: (typeof symbolsWithNodeIds)[number],
-    ): { symbolId: string; strategy: string } | null => {
-      const fullMatch = symbolIdByFullKey.get(
-        toFullKey(
-          extractedSymbol.kind,
-          extractedSymbol.name,
-          extractedSymbol.range,
-        ),
-      );
-      if (fullMatch) {
-        return { symbolId: fullMatch, strategy: "full_range" };
-      }
-
-      const startCandidates = symbolsByStartKey.get(
-        toStartKey(
-          extractedSymbol.kind,
-          extractedSymbol.name,
-          extractedSymbol.range,
-        ),
-      );
-      if (startCandidates && startCandidates.length === 1) {
-        return {
-          symbolId: startCandidates[0].symbolId,
-          strategy: "start_only",
-        };
-      }
-
-      const startLineCandidates = symbolsByStartLineKey.get(
-        toStartLineKey(
-          extractedSymbol.kind,
-          extractedSymbol.name,
-          extractedSymbol.range,
-        ),
-      );
-      if (startLineCandidates && startLineCandidates.length === 1) {
-        return {
-          symbolId: startLineCandidates[0].symbolId,
-          strategy: "start_line",
-        };
-      }
-
-      const nameKindCandidates = symbolsByNameKindKey.get(
-        toNameKindKey(extractedSymbol.kind, extractedSymbol.name),
-      );
-      if (nameKindCandidates && nameKindCandidates.length === 1) {
-        return {
-          symbolId: nameKindCandidates[0].symbolId,
-          strategy: "name_kind_unique",
-        };
-      }
-
-      return null;
-    };
+    const symbolKeyMaps = buildSymbolKeyMaps(existingSymbols);
 
     const filteredSymbolDetails = symbolsWithNodeIds
       .map((extractedSymbol) => {
-        const mapped = mapExtractedSymbolId(extractedSymbol);
+        const mapped = mapExtractedSymbolId(extractedSymbol, symbolKeyMaps);
         if (!mapped) {
           if (telemetry) telemetry.pass2SymbolMapping.unmappedSymbols++;
           if (telemetry) {
@@ -596,146 +381,5 @@ async function resolveTsCallEdgesPass2(params: {
   }
 }
 
-function findEnclosingSymbolByRange(
-  range: {
-    startLine: number;
-    startCol: number;
-    endLine: number;
-    endCol: number;
-  },
-  symbols: Array<{
-    extractedSymbol: {
-      nodeId: string;
-      kind: string;
-      range: {
-        startLine: number;
-        startCol: number;
-        endLine: number;
-        endCol: number;
-      };
-    };
-  }>,
-): string | null {
-  let bestNonVariable: { nodeId: string; size: number } | null = null;
-  let bestVariable: { nodeId: string; size: number } | null = null;
 
-  for (const detail of symbols) {
-    const symRange = detail.extractedSymbol.range;
-    const nodeLine = range.startLine;
-    const nodeCol = range.startCol;
-
-    if (nodeLine < symRange.startLine || nodeLine > symRange.endLine) {
-      continue;
-    }
-    if (nodeLine === symRange.startLine && nodeCol < symRange.startCol) {
-      continue;
-    }
-    if (nodeLine === symRange.endLine && nodeCol > symRange.endCol) {
-      continue;
-    }
-
-    const size =
-      symRange.endLine -
-      symRange.startLine +
-      (symRange.endCol - symRange.startCol);
-
-    if (detail.extractedSymbol.kind === "variable") {
-      if (!bestVariable || size < bestVariable.size) {
-        bestVariable = { nodeId: detail.extractedSymbol.nodeId, size };
-      }
-      continue;
-    }
-
-    if (!bestNonVariable || size < bestNonVariable.size) {
-      bestNonVariable = { nodeId: detail.extractedSymbol.nodeId, size };
-    }
-  }
-
-  return bestNonVariable?.nodeId ?? bestVariable?.nodeId ?? null;
-}
-
-async function resolveUnresolvedImportEdges(
-  repoId: string,
-): Promise<{ resolved: number; total: number }> {
-  const conn = await getLadybugConn();
-  const allEdges = await ladybugDb.getEdgesByRepo(conn, repoId);
-  const unresolvedImports = allEdges.filter(
-    (edge) =>
-      edge.edgeType === "import" &&
-      edge.toSymbolId.startsWith("unresolved:"),
-  );
-
-  if (unresolvedImports.length === 0) {
-    return { resolved: 0, total: 0 };
-  }
-
-  let resolved = 0;
-
-  for (const edge of unresolvedImports) {
-    // Parse "unresolved:<filePath|specifier>:<symbolName>" format
-    const raw = edge.toSymbolId;
-    const withoutPrefix = raw.slice("unresolved:".length);
-    const lastColon = withoutPrefix.lastIndexOf(":");
-    if (lastColon === -1) continue;
-
-    const filePath = withoutPrefix.substring(0, lastColon);
-    const symbolName = withoutPrefix.substring(lastColon + 1);
-    if (!filePath || !symbolName) continue;
-
-    // Skip namespace imports (e.g. "* as foo") — they cannot resolve to a single symbol
-    if (symbolName.startsWith("* as ")) continue;
-
-    // Look up the target file in the DB
-    const file = await ladybugDb.getFileByRepoPath(conn, repoId, filePath);
-    if (!file) continue;
-
-    // Look up exported symbols in that file
-    const symbols = await ladybugDb.getSymbolsByFile(conn, file.fileId);
-    const target = symbols.find(
-      (s) => s.name === symbolName && s.exported,
-    );
-    if (!target) {
-      // For default imports (symbolName === "default"), try the first default-exported symbol
-      if (symbolName === "default" || symbolName === "*") continue;
-      // Also try without export filter for wildcard re-exports
-      const anyMatch = symbols.find((s) => s.name === symbolName);
-      if (!anyMatch) continue;
-      // If the symbol exists but isn't exported, skip — it's likely an internal symbol
-      continue;
-    }
-
-    // Update: delete old edge pointing to unresolved stub, create new edge to real symbol
-    await withWriteConn(async (wConn) => {
-      await ladybugDb.deleteEdge(wConn, {
-        fromSymbolId: edge.fromSymbolId,
-        toSymbolId: edge.toSymbolId,
-        edgeType: "import",
-      });
-
-      await ladybugDb.insertEdge(wConn, {
-        repoId,
-        fromSymbolId: edge.fromSymbolId,
-        toSymbolId: target.symbolId,
-        edgeType: "import",
-        weight: 0.6,
-        confidence: 1.0,
-        resolution: "re-resolved",
-        resolverId: "import-reresolution",
-        resolutionPhase: "pass2",
-        provenance: edge.provenance ?? `import:${symbolName}`,
-        createdAt: new Date().toISOString(),
-      });
-    });
-
-    resolved++;
-  }
-
-  return { resolved, total: unresolvedImports.length };
-}
-
-export {
-  findEnclosingSymbolByRange,
-  resolvePass2Targets,
-  resolveUnresolvedImportEdges,
-  resolveTsCallEdgesPass2,
-};
+export { resolveTsCallEdgesPass2 };

@@ -10,7 +10,7 @@ import { readFileAsync } from "../../../util/asyncFs.js";
 import { logger } from "../../../util/logger.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
 import type { FileMetadata } from "../../fileScanner.js";
-import { findEnclosingSymbolByRange } from "../../edge-builder/pass2.js";
+import { findEnclosingSymbolByRange } from "../../edge-builder/enclosing-symbol.js";
 import { resolveImportTargets } from "../../edge-builder/import-resolution.js";
 
 import type {

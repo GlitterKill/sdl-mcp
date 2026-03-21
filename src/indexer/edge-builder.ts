@@ -18,12 +18,20 @@ export {
   isBuiltinCall,
 } from "./edge-builder/builtins.js";
 export { cleanupUnresolvedEdges } from "./edge-builder/cleanup.js";
+export { findEnclosingSymbolByRange } from "./edge-builder/enclosing-symbol.js";
 export {
-  findEnclosingSymbolByRange,
-  resolvePass2Targets,
-  resolveUnresolvedImportEdges,
-  resolveTsCallEdgesPass2,
-} from "./edge-builder/pass2.js";
+  buildSymbolKeyMaps,
+  mapExtractedSymbolId,
+  toFullKey,
+  toStartKey,
+  toStartLineKey,
+  toNameKindKey,
+  type MappedSymbolResult,
+  type SymbolKeyMaps,
+} from "./edge-builder/symbol-mapping.js";
+export { resolvePass2Targets } from "./edge-builder/target-selection.js";
+export { resolveUnresolvedImportEdges } from "./edge-builder/unresolved-imports.js";
+export { resolveTsCallEdgesPass2 } from "./edge-builder/pass2.js";
 export type {
   PendingCallEdge,
   SymbolIndex,

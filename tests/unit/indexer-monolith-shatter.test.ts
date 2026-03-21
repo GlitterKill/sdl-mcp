@@ -64,14 +64,18 @@ describe("indexer.ts monolith shattering", () => {
     const edgeBuilderDir = join(repoRoot, "src/indexer/edge-builder");
     const subModules = [
       "builtins.ts",
+      "enclosing-symbol.ts",
       "call-resolution.ts",
       "cleanup.ts",
       "import-resolution.ts",
       "pass2.ts",
       "pending.ts",
       "symbol-index.ts",
+      "symbol-mapping.ts",
+      "target-selection.ts",
       "telemetry.ts",
       "types.ts",
+      "unresolved-imports.ts",
     ];
     for (const mod of subModules) {
       const modPath = join(edgeBuilderDir, mod);
