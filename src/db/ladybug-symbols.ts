@@ -827,9 +827,9 @@ async function searchSymbolsSingleTerm(
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
           CASE
-            WHEN lower(coalesce(s.searchText, '')) CONTAINS (' ' || lower($query) || ' ')
-              OR lower(coalesce(s.searchText, '')) STARTS WITH (lower($query) || ' ')
-              OR lower(coalesce(s.searchText, '')) ENDS WITH (' ' || lower($query))
+            WHEN lower(coalesce(s.searchText, '')) CONTAINS $queryPadded
+              OR lower(coalesce(s.searchText, '')) STARTS WITH $queryStart
+              OR lower(coalesce(s.searchText, '')) ENDS WITH $queryEnd
             THEN 0 ELSE 1
           END AS wordBoundaryRank,
           CASE
@@ -871,7 +871,7 @@ async function searchSymbolsSingleTerm(
             s.updatedAt AS updatedAt
      ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
      LIMIT $limit`,
-    { repoId, query: term, limit: 200 },
+    { repoId, query: term, queryPadded: ` ${term.toLowerCase()} `, queryStart: `${term.toLowerCase()} `, queryEnd: ` ${term.toLowerCase()}`, limit: 200 },
   );
 }
 
@@ -960,9 +960,9 @@ async function searchSymbolsLiteSingleTerm(
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
           CASE
-            WHEN lower(coalesce(s.searchText, '')) CONTAINS (' ' || lower($query) || ' ')
-              OR lower(coalesce(s.searchText, '')) STARTS WITH (lower($query) || ' ')
-              OR lower(coalesce(s.searchText, '')) ENDS WITH (' ' || lower($query))
+            WHEN lower(coalesce(s.searchText, '')) CONTAINS $queryPadded
+              OR lower(coalesce(s.searchText, '')) STARTS WITH $queryStart
+              OR lower(coalesce(s.searchText, '')) ENDS WITH $queryEnd
             THEN 0 ELSE 1
           END AS wordBoundaryRank,
           CASE
@@ -991,7 +991,7 @@ async function searchSymbolsLiteSingleTerm(
             s.kind AS kind
      ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
      LIMIT $limit`,
-    { repoId, query: term, limit: 200 },
+    { repoId, query: term, queryPadded: ` ${term.toLowerCase()} `, queryStart: `${term.toLowerCase()} `, queryEnd: ` ${term.toLowerCase()}`, limit: 200 },
   );
 }
 

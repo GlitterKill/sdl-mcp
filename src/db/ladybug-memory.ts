@@ -195,8 +195,8 @@ export async function queryMemories(
 
   const orderBy =
     options.sortBy === "confidence"
-      ? "ORDER BY m.confidence DESC"
-      : "ORDER BY m.updatedAt DESC";
+      ? "ORDER BY confidence DESC"
+      : "ORDER BY updatedAt DESC";
 
   const cypher = `${matchClause}
      ${whereClause}

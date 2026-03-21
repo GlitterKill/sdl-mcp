@@ -28,8 +28,8 @@ const TEST_DB_PATH = join(tmpdir(), ".lbug-symbol-natural-identifiers-test-db.lb
 describe("symbol natural identifiers", () => {
   beforeEach(async () => {
     clearAllCaches();
-    if (existsSync(TEST_DB_PATH)) {
-      rmSync(TEST_DB_PATH, { recursive: true, force: true });
+    for (const p of [TEST_DB_PATH, TEST_DB_PATH + ".wal", TEST_DB_PATH + ".lock"]) {
+      if (existsSync(p)) rmSync(p, { force: true });
     }
     mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
 
@@ -121,8 +121,8 @@ describe("symbol natural identifiers", () => {
   afterEach(async () => {
     clearAllCaches();
     await closeLadybugDb();
-    if (existsSync(TEST_DB_PATH)) {
-      rmSync(TEST_DB_PATH, { recursive: true, force: true });
+    for (const p of [TEST_DB_PATH, TEST_DB_PATH + ".wal", TEST_DB_PATH + ".lock"]) {
+      if (existsSync(p)) rmSync(p, { force: true });
     }
   });
 
