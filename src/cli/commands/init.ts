@@ -29,6 +29,7 @@ import {
 } from "../../config/constants.js";
 import { resolveCliConfigPath } from "../../config/configPath.js";
 import { defaultGraphDbPath } from "../../db/graph-db-path.js";
+import { resolvePidfilePath } from "../../util/pidfile.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
@@ -429,10 +430,6 @@ function formatExtensionArrayLiteral(): string {
   return SDL_SOURCE_EXTENSIONS.map((ext) => `"${ext}"`).join(", ");
 }
 
-function formatReadDenyRules(): string[] {
-  return SDL_SOURCE_EXTENSIONS.map((ext) => `Read(**${ext})`);
-}
-
 function ensureDirectory(path: string, createdDirs: string[]): void {
   if (existsSync(path)) {
     return;
@@ -472,10 +469,15 @@ function writeGeneratedAsset(
   }
 }
 
-function buildClaudeReadHook(): string {
+function buildClaudeReadHook(pidfilePath: string): string {
   const blocked = SDL_SOURCE_EXTENSIONS.map((ext) => `'${ext}'`).join(" ");
   return `#!/bin/sh
 set -eu
+
+# Only enforce when SDL-MCP server is running (PID file exists)
+if [ ! -f '${pidfilePath}' ]; then
+  exit 0
+fi
 
 payload="$(cat)"
 tool_name="$(printf '%s' "$payload" | python -c "import json,sys; data=json.load(sys.stdin); print(data.get('tool_name',''))")"
@@ -501,10 +503,15 @@ done
 `;
 }
 
-function buildClaudeRuntimeHook(): string {
+function buildClaudeRuntimeHook(pidfilePath: string): string {
   const prefixes = SDL_RUNTIME_REDIRECT_PREFIXES.map((prefix) => `'${prefix}'`).join(" ");
   return `#!/bin/sh
 set -eu
+
+# Only enforce when SDL-MCP server is running (PID file exists)
+if [ ! -f '${pidfilePath}' ]; then
+  exit 0
+fi
 
 payload="$(cat)"
 tool_name="$(printf '%s' "$payload" | python -c "import json,sys; data=json.load(sys.stdin); print(data.get('tool_name',''))")"
@@ -530,7 +537,7 @@ done
 function buildClaudeSettings(): string {
   const settings = {
     permissions: {
-      deny: [...formatReadDenyRules(), "Task(Explore)"],
+      deny: ["Task(Explore)"],
       allow: ["Read(**.md)", "Read(**.json)", "mcp__sdl-mcp__*"],
     },
     hooks: {
@@ -696,6 +703,8 @@ function buildEnforcementAssets(
   });
 
   if (client === "claude-code") {
+    const graphDbPath = defaultGraphDbPath(configPath);
+    const pidfilePath = resolvePidfilePath(graphDbPath).replace(/\\/g, "/");
     assets.push(
       {
         path: join(repoRoot, ".claude", "settings.json"),
@@ -703,12 +712,12 @@ function buildEnforcementAssets(
       },
       {
         path: join(repoRoot, ".claude", "hooks", "force-sdl-mcp.sh"),
-        content: buildClaudeReadHook(),
+        content: buildClaudeReadHook(pidfilePath),
         executable: true,
       },
       {
         path: join(repoRoot, ".claude", "hooks", "force-sdl-runtime.sh"),
-        content: buildClaudeRuntimeHook(),
+        content: buildClaudeRuntimeHook(pidfilePath),
         executable: true,
       },
       {
