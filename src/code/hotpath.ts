@@ -243,7 +243,7 @@ export async function extractHotPath(
       });
       return null;
     }
-    content = await readFile(filePath, "utf-8");
+    content = (await readFile(filePath, "utf-8")).replace(/\r\n/g, "\n");
   } catch (error) {
     logger.warn("Failed to read file for hot path extraction", {
       filePath: file.relPath,

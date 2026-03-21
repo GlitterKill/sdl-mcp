@@ -21,6 +21,7 @@ export { cleanupUnresolvedEdges } from "./edge-builder/cleanup.js";
 export {
   findEnclosingSymbolByRange,
   resolvePass2Targets,
+  resolveUnresolvedImportEdges,
   resolveTsCallEdgesPass2,
 } from "./edge-builder/pass2.js";
 export type {

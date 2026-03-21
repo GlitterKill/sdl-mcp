@@ -68,6 +68,10 @@ const DEFAULT_IGNORE_PATTERNS = [
   "**/build/**",
   "**/.git/**",
   "**/coverage/**",
+  "**/target/**",
+  "**/vendor/**",
+  "**/*.min.js",
+  "**/*.min.css",
 ];
 
 const LANGUAGE_BY_EXTENSION: Record<string, LanguageType> = {

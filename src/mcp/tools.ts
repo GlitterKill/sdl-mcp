@@ -792,6 +792,7 @@ const SymbolSearchResultSchema = z.object({
 export const SymbolSearchRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   query: z.string().min(1).max(1000),
+  kinds: z.array(z.string()).optional(),
   limit: z.number().int().min(1).max(SYMBOL_SEARCH_MAX_RESULTS).optional(),
   semantic: z.boolean().optional(),
 });

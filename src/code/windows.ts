@@ -52,7 +52,7 @@ export async function extractCodeWindow(
     return null;
   }
 
-  const lines = fileContent.split("\n");
+  const lines = fileContent.replace(/\r\n/g, "\n").split("\n");
 
   const startLine = symbol.rangeStartLine;
   const endLine = symbol.rangeEndLine;

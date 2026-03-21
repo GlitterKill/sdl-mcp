@@ -358,6 +358,28 @@ export class PolicyEngine {
 
         const hasIdentifiers =
           ctx.identifiersToFind && ctx.identifiersToFind.length > 0;
+        const hasReason = ctx.reason && ctx.reason.length > 0;
+        const withinLineLimit =
+          ctx.expectedLines != null &&
+          ctx.expectedLines <= this.config.maxWindowLines;
+
+        // Allow raw access when request provides sufficient justification:
+        // identifiers to find + a reason + expected lines within limits
+        if (hasIdentifiers && hasReason && withinLineLimit) {
+          return {
+            passed: true,
+            evidence: {
+              type: "justified-raw-access",
+              value: {
+                symbolId: ctx.symbolId,
+                identifierCount: ctx.identifiersToFind!.length,
+                expectedLines: ctx.expectedLines,
+              },
+              reason:
+                "Raw code access approved: identifiers, reason, and line limit provided",
+            },
+          };
+        }
 
         const downgradeTarget = hasIdentifiers ? "hotpath" : "skeleton";
 
@@ -368,6 +390,8 @@ export class PolicyEngine {
             value: {
               symbolId: ctx.symbolId,
               hasIdentifiers,
+              hasReason,
+              withinLineLimit,
               suggestedDowngrade: downgradeTarget,
             },
             reason: `Raw code access denied by default policy - try ${downgradeTarget} instead`,

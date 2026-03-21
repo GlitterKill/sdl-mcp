@@ -13,6 +13,7 @@ import {
   recordPass2ResolverTarget,
   resolvePass2Targets,
   resolvePendingCallEdges,
+  resolveUnresolvedImportEdges,
 } from "./edge-builder.js";
 import {
   processFile,
@@ -1014,6 +1015,18 @@ async function indexRepoImpl(
       callResolutionTelemetry,
       onProgress,
     });
+
+    // --- Phase: re-resolve unresolved import edges ---
+
+    const importReResolution = await resolveUnresolvedImportEdges(repoId);
+    if (importReResolution.resolved > 0) {
+      logger.info("Re-resolved unresolved import edges", {
+        repoId,
+        resolved: importReResolution.resolved,
+        total: importReResolution.total,
+      });
+      totalEdgesCreated += importReResolution.resolved;
+    }
 
     onProgress?.({
       stage: "finalizing",

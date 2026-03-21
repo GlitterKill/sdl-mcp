@@ -249,6 +249,19 @@ const MAX_BFS_VISITED = 500;
  */
 function isTestFile(relPath: string): boolean {
   const normalized = relPath.replace(/\\/g, "/");
+
+  // Exclude fixture/testdata directories — these are test inputs, not tests
+  if (
+    normalized.includes("/fixtures/") ||
+    normalized.includes("/__fixtures__/") ||
+    normalized.includes("/testdata/") ||
+    normalized.includes("/test-data/") ||
+    normalized.includes("/mocks/") ||
+    normalized.includes("/stubs/")
+  ) {
+    return false;
+  }
+
   if (
     normalized.endsWith(".test.ts") ||
     normalized.endsWith(".test.js") ||
@@ -263,7 +276,14 @@ function isTestFile(relPath: string): boolean {
     normalized.includes("/__tests__/") ||
     normalized.startsWith("__tests__/")
   ) {
-    return true;
+    // Only count as test file if it has a test-like extension
+    return (
+      normalized.endsWith(".ts") ||
+      normalized.endsWith(".js") ||
+      normalized.endsWith(".tsx") ||
+      normalized.endsWith(".jsx") ||
+      normalized.endsWith(".mjs")
+    );
   }
   return false;
 }

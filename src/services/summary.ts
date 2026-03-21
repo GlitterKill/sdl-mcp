@@ -3,6 +3,7 @@ import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { ValidationError } from "../domain/errors.js";
 import { estimateTokens, tokenize } from "../util/tokenize.js";
+import { TASK_TEXT_STOP_WORDS } from "../graph/slice/start-node-resolver.js";
 import { logger } from "../util/logger.js";
 import { SYMBOL_CARD_MAX_PROCESSES } from "../config/constants.js";
 import type {
@@ -187,7 +188,7 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
   if (results.length === 0) {
     const tokenResults: ladybugDb.SearchSymbolLiteRow[] = [];
     const seen = new Set<string>();
-    const tokens = tokenize(query).filter((token) => token.length >= 2);
+    const tokens = tokenize(query).filter((token) => token.length >= 3 && !TASK_TEXT_STOP_WORDS.has(token));
     const perTokenLimit = Math.max(
       5,
       Math.floor(SUMMARY_MAX_RESULTS / Math.max(1, tokens.length)),

@@ -827,10 +827,18 @@ async function searchSymbolsSingleTerm(
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
           CASE
+            WHEN lower(coalesce(s.searchText, '')) CONTAINS (' ' || lower($query) || ' ')
+              OR lower(coalesce(s.searchText, '')) STARTS WITH (lower($query) || ' ')
+              OR lower(coalesce(s.searchText, '')) ENDS WITH (' ' || lower($query))
+            THEN 0 ELSE 1
+          END AS wordBoundaryRank,
+          CASE
             WHEN f.relPath CONTAINS '/adapter/' THEN 2
             WHEN f.relPath CONTAINS '/tests/' OR f.relPath STARTS WITH 'tests/' THEN 2
             WHEN f.relPath STARTS WITH 'scripts/' THEN 2
             WHEN f.relPath CONTAINS '.test.' OR f.relPath CONTAINS '.spec.' THEN 2
+            WHEN f.relPath CONTAINS 'target/' THEN 2
+            WHEN f.relPath CONTAINS 'vendor/' THEN 2
             ELSE 0
           END AS filePenalty,
           CASE s.kind
@@ -861,8 +869,9 @@ async function searchSymbolsSingleTerm(
             s.invariantsJson AS invariantsJson,
             s.sideEffectsJson AS sideEffectsJson,
             s.updatedAt AS updatedAt
-     ORDER BY exactNameRank, ciExactNameRank, filePenalty, kindRank, nameMatchRank`,
-    { repoId, query: term },
+     ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
+     LIMIT $limit`,
+    { repoId, query: term, limit: 200 },
   );
 }
 
@@ -923,7 +932,16 @@ export interface SearchSymbolLiteRow {
 export function splitSearchTerms(query: string): string[] {
   const trimmed = query.trim();
   if (!trimmed) return [];
-  if (!trimmed.includes(" ")) return [trimmed];
+  if (!trimmed.includes(" ")) {
+    // Split camelCase/PascalCase into words for multi-term search
+    const words = trimmed.match(
+      /[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+/g,
+    );
+    if (words && words.length > 1) {
+      return words.map((w) => w.toLowerCase());
+    }
+    return [trimmed];
+  }
   return trimmed.split(/\s+/).filter((t) => t.length > 0);
 }
 
@@ -942,10 +960,18 @@ async function searchSymbolsLiteSingleTerm(
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
           CASE
+            WHEN lower(coalesce(s.searchText, '')) CONTAINS (' ' || lower($query) || ' ')
+              OR lower(coalesce(s.searchText, '')) STARTS WITH (lower($query) || ' ')
+              OR lower(coalesce(s.searchText, '')) ENDS WITH (' ' || lower($query))
+            THEN 0 ELSE 1
+          END AS wordBoundaryRank,
+          CASE
             WHEN f.relPath CONTAINS '/adapter/' THEN 2
             WHEN f.relPath CONTAINS '/tests/' OR f.relPath STARTS WITH 'tests/' THEN 2
             WHEN f.relPath STARTS WITH 'scripts/' THEN 2
             WHEN f.relPath CONTAINS '.test.' OR f.relPath CONTAINS '.spec.' THEN 2
+            WHEN f.relPath CONTAINS 'target/' THEN 2
+            WHEN f.relPath CONTAINS 'vendor/' THEN 2
             ELSE 0
           END AS filePenalty,
           CASE s.kind
@@ -963,8 +989,9 @@ async function searchSymbolsLiteSingleTerm(
             s.name AS name,
             f.fileId AS fileId,
             s.kind AS kind
-     ORDER BY exactNameRank, ciExactNameRank, filePenalty, kindRank, nameMatchRank`,
-    { repoId, query: term },
+     ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
+     LIMIT $limit`,
+    { repoId, query: term, limit: 200 },
   );
 }
 

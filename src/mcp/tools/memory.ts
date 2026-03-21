@@ -267,16 +267,23 @@ export async function handleMemoryQuery(
     throw new DatabaseError(`Repository ${repoId} not found`);
   }
 
-  const rows = await ladybugDb.queryMemories(conn, {
-    repoId,
-    query,
-    types,
-    tags,
-    symbolIds,
-    staleOnly,
-    limit,
-    sortBy,
-  });
+  let rows;
+  try {
+    rows = await ladybugDb.queryMemories(conn, {
+      repoId,
+      query,
+      types,
+      tags,
+      symbolIds,
+      staleOnly,
+      limit,
+      sortBy,
+    });
+  } catch (err) {
+    throw new DatabaseError(
+      `Failed to query memories: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 
   const memories: SurfacedMemory[] = rows.map((row) => ({
     memoryId: row.memoryId,

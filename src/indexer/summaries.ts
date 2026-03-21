@@ -215,7 +215,7 @@ function extractJSDoc(symbol: ExtractedSymbol, fileContent: string): JSDoc {
   const startLine = symbol.range.startLine;
 
   const jsdocLines: string[] = [];
-  let i = startLine - 1;
+  let i = startLine - 2;
 
   while (i >= 0 && i < lines.length) {
     const line = lines[i].trim();
@@ -294,47 +294,21 @@ function extractJSDoc(symbol: ExtractedSymbol, fileContent: string): JSDoc {
 }
 
 function splitCamelCase(str: string): string[] {
+  // Split on underscores, hyphens, dots first
+  const segments = str.split(/[_\-\.]+/).filter(Boolean);
   const result: string[] = [];
-  let currentWord = "";
 
-  for (let i = 0; i < str.length; i++) {
-    const char = str[i];
-
-    if (char === "_" || char === "-" || char === ".") {
-      if (currentWord) {
-        result.push(currentWord);
-        currentWord = "";
-      }
-    } else if (
-      i > 0 &&
-      char === char.toUpperCase() &&
-      str[i - 1] !== char.toUpperCase()
-    ) {
-      if (currentWord) {
-        result.push(currentWord);
-        currentWord = char;
-      } else {
-        currentWord = char;
-      }
-    } else if (
-      i > 0 &&
-      char === char.toUpperCase() &&
-      i < str.length - 1 &&
-      str[i + 1] === str[i + 1].toLowerCase()
-    ) {
-      if (currentWord) {
-        result.push(currentWord);
-        currentWord = char;
-      } else {
-        currentWord = char;
-      }
+  for (const segment of segments) {
+    // Split camelCase and PascalCase with proper acronym handling
+    // "MCPServer" → ["MCP", "Server"], "buildSlice" → ["build", "Slice"]
+    const words = segment.match(
+      /[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+/g,
+    );
+    if (words) {
+      result.push(...words);
     } else {
-      currentWord += char;
+      result.push(segment);
     }
-  }
-
-  if (currentWord) {
-    result.push(currentWord);
   }
 
   return result;

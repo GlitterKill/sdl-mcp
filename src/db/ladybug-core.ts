@@ -121,14 +121,20 @@ async function execute(
   statement: string,
   params: Record<string, unknown> = {},
 ): Promise<QueryResult> {
-  const prepared = await getPreparedStatement(conn, statement);
-  // Ladybug accepts string | number | boolean | null | bigint — callers pass
-  // Record<string, unknown> for convenience; the cast is safe.
-  const result = await conn.execute(
-    prepared,
-    params as Parameters<Connection["execute"]>[1],
-  );
-  return result;
+  try {
+    const prepared = await getPreparedStatement(conn, statement);
+    // Ladybug accepts string | number | boolean | null | bigint — callers pass
+    // Record<string, unknown> for convenience; the cast is safe.
+    const result = await conn.execute(
+      prepared,
+      params as Parameters<Connection["execute"]>[1],
+    );
+    return result;
+  } catch (err) {
+    throw new DatabaseError(
+      `Query execution failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 export async function queryAll<T>(

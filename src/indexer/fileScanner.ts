@@ -78,7 +78,8 @@ async function discoverFiles(
     const workspaceNodeModules = `${workspace}/**/node_modules/**`;
     const workspaceDist = `${workspace}/**/dist/**`;
     const workspaceBuild = `${workspace}/**/build/**`;
-    ignorePatterns.push(workspaceNodeModules, workspaceDist, workspaceBuild);
+    const workspaceTarget = `${workspace}/**/target/**`;
+    ignorePatterns.push(workspaceNodeModules, workspaceDist, workspaceBuild, workspaceTarget);
   }
 
   const files = await fastGlob(patterns, {

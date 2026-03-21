@@ -185,6 +185,19 @@ function calculateStructuralSpecificity(file?: FileRow): number {
     specificity *= 0.75;
   }
 
+  if (
+    relPath.includes("/target/") ||
+    relPath.startsWith("target/") ||
+    relPath.includes("/vendor/") ||
+    relPath.startsWith("vendor/")
+  ) {
+    specificity *= 0.3;
+  }
+
+  if (relPath.endsWith(".min.js") || relPath.endsWith(".min.css")) {
+    specificity *= 0.2;
+  }
+
   if (/(^|\/)(index|tools|types|main|mod|util|utils)\.[^.]+$/.test(relPath)) {
     specificity *= 0.72;
   }
