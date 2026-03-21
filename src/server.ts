@@ -21,6 +21,8 @@ import {
   type TokenUsageMetadata,
 } from "./mcp/token-usage.js";
 import { tokenAccumulator } from "./mcp/token-accumulator.js";
+import { renderUserNotificationLine } from "./mcp/savings-meter.js";
+import { formatToolCallForUser } from "./mcp/tool-call-formatter.js";
 import type { LiveIndexCoordinator } from "./live-index/types.js";
 import type { CodeModeConfig } from "./config/types.js";
 import { normalizeToolArguments } from "./mcp/request-normalization.js";
@@ -74,6 +76,7 @@ export class MCPServer {
       {
         capabilities: {
           tools: { listChanged: true },
+          logging: {},
         },
       },
     );
@@ -206,8 +209,72 @@ export class MCPServer {
                   usage.sdlTokens,
                   usage.rawEquivalent,
                 );
+                // Send per-call savings notification to user (MCP logging)
+                try {
+                  await toolContext.sendNotification({
+                    method: "notifications/message",
+                    params: {
+                      level: "info",
+                      logger: "sdl-mcp",
+                      data: renderUserNotificationLine(
+                        usage.sdlTokens,
+                        usage.rawEquivalent,
+                      ),
+                    },
+                  });
+                } catch {
+                  // Non-critical — don't break tool dispatch
+                }
               }
+
+              // Send human-readable tool call summary to user (MCP logging)
+              const userDisplay = formatToolCallForUser(
+                request.params.name,
+                normalizedArgs as Record<string, unknown>,
+                r,
+              );
+              if (userDisplay) {
+                try {
+                  await toolContext.sendNotification({
+                    method: "notifications/message",
+                    params: {
+                      level: "info",
+                      logger: "sdl-mcp",
+                      data: userDisplay,
+                    },
+                  });
+                } catch {
+                  // Non-critical
+                }
+              }
+
               finalResult = stripRawContext(r);
+            }
+
+            // Send formatted summary as user notification for usage stats
+            if (
+              request.params.name === "sdl.usage.stats" &&
+              finalResult &&
+              typeof finalResult === "object" &&
+              "formattedSummary" in finalResult
+            ) {
+              const summary = (finalResult as Record<string, unknown>).formattedSummary;
+              if (typeof summary === "string") {
+                try {
+                  await toolContext.sendNotification({
+                    method: "notifications/message",
+                    params: {
+                      level: "info",
+                      logger: "sdl-mcp",
+                      data: summary,
+                    },
+                  });
+                } catch {
+                  // Non-critical
+                }
+                // Strip from tool response — summary is for the user, not the LLM
+                delete (finalResult as Record<string, unknown>).formattedSummary;
+              }
             }
 
             // Run post-dispatch hooks (non-critical)

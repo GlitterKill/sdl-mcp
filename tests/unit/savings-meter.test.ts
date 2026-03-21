@@ -4,7 +4,6 @@ import {
   renderMeter,
   formatTokenCount,
   renderOperationMeter,
-  renderTaskSummary,
   renderSessionSummary,
   renderLifetimeSummary,
   type AggregateUsage,
@@ -117,81 +116,6 @@ describe("renderOperationMeter", () => {
     for (const pct of [0, 50, 98, 100]) {
       assert.match(renderOperationMeter(pct), /^[\u2588\u2591]{10} \d+%$/);
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// renderTaskSummary
-// ---------------------------------------------------------------------------
-
-describe("renderTaskSummary", () => {
-  const snapshot: SessionUsageSnapshot = {
-    sessionId: "test-session",
-    startedAt: "2026-03-20T00:00:00Z",
-    totalSdlTokens: 12450,
-    totalRawEquivalent: 89200,
-    totalSavedTokens: 76750,
-    overallSavingsPercent: 86,
-    callCount: 47,
-    toolBreakdown: [
-      { tool: "sdl.symbol.search", sdlTokens: 200, rawEquivalent: 1400, savedTokens: 1200, callCount: 18 },
-      { tool: "sdl.slice.build", sdlTokens: 3000, rawEquivalent: 68000, savedTokens: 65000, callCount: 8 },
-    ],
-  };
-
-  it("contains header line with Token Savings", () => {
-    const result = renderTaskSummary(snapshot);
-    const lines = result.split("\n");
-    assert.ok(lines[0].includes("Token Savings"));
-    assert.ok(lines[0].startsWith("\u2500\u2500"));
-  });
-
-  it("contains session totals line", () => {
-    const result = renderTaskSummary(snapshot);
-    assert.ok(result.includes("47 calls"));
-    assert.ok(result.includes("76.8k saved"));
-    assert.ok(result.includes("86%"));
-  });
-
-  it("contains overall meter", () => {
-    const result = renderTaskSummary(snapshot);
-    assert.ok(result.includes("\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591\u2591"));
-  });
-
-  it("contains tool breakdown without sdl. prefix", () => {
-    const result = renderTaskSummary(snapshot);
-    assert.ok(result.includes("symbol.search"));
-    assert.ok(result.includes("slice.build"));
-    assert.ok(!result.includes("sdl.symbol"));
-  });
-
-  it("sorts tools by saved tokens descending", () => {
-    const result = renderTaskSummary(snapshot);
-    const sliceIdx = result.indexOf("slice.build");
-    const searchIdx = result.indexOf("symbol.search");
-    assert.ok(sliceIdx < searchIdx, "slice.build (65k saved) should come before symbol.search (1.2k saved)");
-  });
-
-  it("contains footer line of border characters", () => {
-    const result = renderTaskSummary(snapshot);
-    const lines = result.split("\n");
-    assert.match(lines[lines.length - 1], /^\u2500+$/);
-  });
-
-  it("renders empty summary when no calls", () => {
-    const empty: SessionUsageSnapshot = {
-      sessionId: "empty",
-      startedAt: "2026-03-20T00:00:00Z",
-      totalSdlTokens: 0,
-      totalRawEquivalent: 0,
-      totalSavedTokens: 0,
-      overallSavingsPercent: 0,
-      callCount: 0,
-      toolBreakdown: [],
-    };
-    const result = renderTaskSummary(empty);
-    assert.ok(result.includes("0 calls"));
-    assert.ok(result.includes("\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591"));
   });
 });
 

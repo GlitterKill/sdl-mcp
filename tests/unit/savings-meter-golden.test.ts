@@ -3,7 +3,6 @@ import assert from "node:assert";
 import {
   renderMeter,
   renderOperationMeter,
-  renderTaskSummary,
   renderSessionSummary,
   renderLifetimeSummary,
   formatTokenCount,
@@ -21,57 +20,6 @@ describe("savings-meter golden snapshots", () => {
     assert.strictEqual(renderOperationMeter(0), "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 0%");
     assert.strictEqual(renderOperationMeter(51), "\u2588\u2588\u2588\u2588\u2588\u2591\u2591\u2591\u2591\u2591 51%");
     assert.strictEqual(renderOperationMeter(100), "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 100%");
-  });
-
-  // ---------------------------------------------------------------------------
-  // Golden: renderTaskSummary structure
-  // ---------------------------------------------------------------------------
-
-  it("renderTaskSummary golden structure", () => {
-    const snapshot: SessionUsageSnapshot = {
-      sessionId: "golden-test",
-      startedAt: "2026-03-20T00:00:00Z",
-      totalSdlTokens: 500,
-      totalRawEquivalent: 5000,
-      totalSavedTokens: 4500,
-      overallSavingsPercent: 90,
-      callCount: 10,
-      toolBreakdown: [
-        { tool: "sdl.symbol.search", sdlTokens: 50, rawEquivalent: 500, savedTokens: 450, callCount: 5 },
-        { tool: "sdl.slice.build", sdlTokens: 200, rawEquivalent: 4000, savedTokens: 3800, callCount: 3 },
-        { tool: "sdl.code.getSkeleton", sdlTokens: 250, rawEquivalent: 500, savedTokens: 250, callCount: 2 },
-      ],
-    };
-
-    const result = renderTaskSummary(snapshot);
-    const lines = result.split("\n");
-
-    // 7 lines: header, session, blank, 3 tools (sorted by saved desc), footer
-    assert.strictEqual(lines.length, 7);
-
-    // Header starts with ──
-    assert.ok(lines[0].startsWith("\u2500\u2500"));
-    assert.ok(lines[0].includes("Token Savings"));
-
-    // Session summary line
-    assert.ok(lines[1].includes("10 calls"));
-    assert.ok(lines[1].includes("4.5k saved"));
-    assert.ok(lines[1].includes("\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591")); // 90% = 9 filled
-    assert.ok(lines[1].includes("90%"));
-
-    // Blank line
-    assert.strictEqual(lines[2], "");
-
-    // Tools sorted by savedTokens desc: slice.build (3800) > symbol.search (450) > getSkeleton (250)
-    assert.ok(lines[3].includes("slice.build"));
-    assert.ok(lines[3].includes("3.8k saved"));
-    assert.ok(lines[4].includes("symbol.search"));
-    assert.ok(lines[4].includes("450 saved"));
-    assert.ok(lines[5].includes("code.getSkeleton"));
-    assert.ok(lines[5].includes("250 saved"));
-
-    // Footer: all ─ characters
-    assert.match(lines[6], /^\u2500+$/);
   });
 
   // ---------------------------------------------------------------------------

@@ -18,7 +18,6 @@ import {
   aggregateToolBreakdowns,
 } from "../../db/ladybug-usage.js";
 import {
-  renderTaskSummary,
   renderSessionSummary,
   renderLifetimeSummary,
   type AggregateUsage,
@@ -131,9 +130,38 @@ export async function handleUsageStats(
     }
   }
 
-  // Session-only formatted summary (no history fetch needed)
+  // Session-only: still fetch lifetime for the combined summary
   if (request.scope === "session" && response.session) {
-    response.formattedSummary = renderTaskSummary(response.session);
+    try {
+      const conn = await getLadybugConn();
+      const aggregate = await getAggregateUsage(conn, { repoId: request.repoId });
+      const snapshots = await getUsageSnapshots(conn, { repoId: request.repoId, limit: 100 });
+      const allToolEntries = aggregateToolBreakdowns(snapshots.map((s) => s.toolBreakdownJson));
+      const ltAggregate: AggregateUsage = {
+        totalSdlTokens: aggregate.totalSdlTokens,
+        totalRawEquivalent: aggregate.totalRawEquivalent,
+        totalSavedTokens: aggregate.totalSavedTokens,
+        overallSavingsPercent: aggregate.overallSavingsPercent,
+        totalCalls: aggregate.totalCalls,
+        sessionCount: aggregate.sessionCount,
+      };
+      response.formattedSummary = renderSessionSummary(
+        response.session,
+        ltAggregate,
+        allToolEntries,
+      );
+    } catch {
+      // Fallback: session-only without lifetime (DB unavailable)
+      process.stderr.write(
+        "[sdl-mcp] Usage stats: could not fetch lifetime data from LadybugDB\n",
+      );
+      // Render session section only — omit lifetime to avoid showing misleading zeros
+      response.formattedSummary = renderSessionSummary(
+        response.session,
+        { totalSdlTokens: 0, totalRawEquivalent: 0, totalSavedTokens: 0, overallSavingsPercent: 0, totalCalls: 0, sessionCount: 0 },
+        [],
+      );
+    }
   }
 
   return response;

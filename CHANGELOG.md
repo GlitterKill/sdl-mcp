@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-03-21
+
+### Added
+
+- User-visible token savings meter via MCP logging notifications (`notifications/message`)
+  - Per-call: compact meter bar showing that call's savings (e.g., `████████░░ 84%`)
+  - End-of-task: session + lifetime cumulative stats sent when `sdl.usage.stats` is called
+- Human-readable tool call formatter (`src/mcp/tool-call-formatter.ts`) with 17 per-tool formatters
+  - Sends concise text summaries to the user (e.g., `symbol.search "foo" → 5 results`)
+  - JSON responses remain unchanged for the LLM
+- `logging` capability declared in MCP Server capabilities
+
+### Changed
+
+- `renderSessionSummary` now skips lifetime section when no lifetime data exists (avoids misleading zeros when DB is unavailable)
+- Session-scope usage stats now fetch lifetime data from LadybugDB for combined summary display
+- Usage stats `formattedSummary` is sent as MCP notification to user and stripped from tool response (reduces unnecessary LLM context)
+
+### Removed
+
+- `renderTaskSummary` function (redundant with `renderSessionSummary`)
+
 ## [0.9.1] - 2026-03-20
 
 ### Added

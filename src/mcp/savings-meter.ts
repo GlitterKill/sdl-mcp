@@ -121,28 +121,6 @@ function maxToolNameWidth(...arrays: ToolUsageEntry[][]): number {
 // ---------------------------------------------------------------------------
 
 /**
- * Render the end-of-task summary (session scope).
- */
-export function renderTaskSummary(snapshot: SessionUsageSnapshot): string {
-  const headerLine = `${BORDER.repeat(2)} Token Savings ${BORDER.repeat(18)}`;
-  const footerLine = BORDER.repeat(35);
-
-  const overallMeter = renderMeter(snapshot.overallSavingsPercent);
-  const savedStr = formatTokenCount(snapshot.totalSavedTokens);
-
-  const lines: string[] = [
-    headerLine,
-    `Session: ${snapshot.callCount} calls ${PIPE} ${savedStr} saved ${PIPE} ${overallMeter} ${snapshot.overallSavingsPercent}%`,
-    "",
-  ];
-
-  const nameWidth = maxToolNameWidth(snapshot.toolBreakdown);
-  lines.push(...renderToolRows(snapshot.toolBreakdown, nameWidth));
-  lines.push(footerLine);
-  return lines.join("\n");
-}
-
-/**
  * Render the end-of-session summary with both session and lifetime sections.
  */
 export function renderSessionSummary(
@@ -169,18 +147,20 @@ export function renderSessionSummary(
 
   lines.push(...renderToolRows(session.toolBreakdown, nameWidth));
 
-  // --- Lifetime section ---
-  const ltMeter = renderMeter(lifetime.overallSavingsPercent);
-  const ltSaved = formatTokenCount(lifetime.totalSavedTokens);
+  // --- Lifetime section (skip when no data, e.g. DB unavailable) ---
+  if (lifetime.totalCalls > 0 || lifetime.sessionCount > 0) {
+    const ltMeter = renderMeter(lifetime.overallSavingsPercent);
+    const ltSaved = formatTokenCount(lifetime.totalSavedTokens);
 
-  lines.push("");
-  lines.push(
-    `Lifetime: ${lifetime.totalCalls} calls ${PIPE} ${lifetime.sessionCount} sessions ${PIPE} ${ltSaved} saved ${PIPE} ${ltMeter} ${lifetime.overallSavingsPercent}%`,
-  );
-
-  if (lifetimeToolBreakdown.length > 0) {
     lines.push("");
-    lines.push(...renderToolRows(lifetimeToolBreakdown, nameWidth));
+    lines.push(
+      `Lifetime: ${lifetime.totalCalls} calls ${PIPE} ${lifetime.sessionCount} sessions ${PIPE} ${ltSaved} saved ${PIPE} ${ltMeter} ${lifetime.overallSavingsPercent}%`,
+    );
+
+    if (lifetimeToolBreakdown.length > 0) {
+      lines.push("");
+      lines.push(...renderToolRows(lifetimeToolBreakdown, nameWidth));
+    }
   }
 
   lines.push(footerLine);
@@ -213,4 +193,19 @@ export function renderLifetimeSummary(
 
   lines.push(footerLine);
   return lines.join("\n");
+}
+
+/**
+ * Render a compact savings meter for a single tool call notification.
+ * Example: "████████░░ 84%"
+ */
+export function renderUserNotificationLine(
+  totalSdlTokens: number,
+  totalRawEquivalent: number,
+): string {
+  const saved = Math.max(0, totalRawEquivalent - totalSdlTokens);
+  const pct = totalRawEquivalent > 0
+    ? Math.round((saved / totalRawEquivalent) * 100)
+    : 0;
+  return `${renderMeter(pct)} ${pct}%`;
 }
