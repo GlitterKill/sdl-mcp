@@ -211,9 +211,9 @@ class GoAdapter extends BaseAdapter {
       }
 
       const range = {
-        startLine: callNode.node.startPosition.row,
+        startLine: callNode.node.startPosition.row + 1,
         startCol: callNode.node.startPosition.column,
-        endLine: callNode.node.endPosition.row,
+        endLine: callNode.node.endPosition.row + 1,
         endCol: callNode.node.endPosition.column,
       };
 
@@ -601,8 +601,7 @@ function extractResults(node: SyntaxNode): string[] {
 
 function isExported(name: string): boolean {
   if (!name || name.length === 0) return false;
-  const firstChar = name.charAt(0);
-  return firstChar === firstChar.toUpperCase();
+  return /^\p{Lu}/u.test(name);
 }
 
 function extractRange(node: SyntaxNode) {

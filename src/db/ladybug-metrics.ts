@@ -180,8 +180,8 @@ export async function getTopSymbolsByFanIn(
             m.fanOut AS fanOut,
             m.churn30d AS churn30d
      ORDER BY m.fanIn DESC
-     LIMIT ${maxFetch}`,
-    { repoId },
+     LIMIT $limit`,
+    { repoId, limit: maxFetch },
   );
 
   return rows.map((row) => ({
@@ -256,8 +256,8 @@ export async function getTopSymbolsByChurn(
             m.fanOut AS fanOut,
             m.churn30d AS churn30d
      ORDER BY m.churn30d DESC
-     LIMIT ${maxFetch}`,
-    { repoId },
+     LIMIT $limit`,
+    { repoId, limit: maxFetch },
   );
 
   return rows.map((row) => ({

@@ -646,7 +646,7 @@ async function loadSymbolCards(
 
     let signature;
     if (includeSignature && symbolRow.signatureJson) {
-      signature = safeJsonParse(symbolRow.signatureJson, SignatureSchema, { name: symbolRow.name }) as SymbolCard["signature"];
+      signature = safeJsonParse(symbolRow.signatureJson, SignatureSchema, { name: symbolRow.name }) as unknown as SymbolCard["signature"];
     } else if (includeSignature) {
       signature = { name: symbolRow.name };
     }

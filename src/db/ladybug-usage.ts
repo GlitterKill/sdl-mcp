@@ -112,8 +112,8 @@ export async function getUsageSnapshots(
             u.callCount AS callCount,
             u.toolBreakdownJson AS toolBreakdownJson
      ORDER BY u.timestamp DESC
-     LIMIT ${maxFetch}`,
-    params,
+     LIMIT $limit`,
+    { ...params, limit: maxFetch },
   ).then((rows) =>
     rows.map((r) => ({
       snapshotId: String(r.snapshotId),

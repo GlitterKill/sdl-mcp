@@ -56,9 +56,8 @@ describe("Ladybug reindex guidance", { skip: !ladybugAvailable }, () => {
             : String(error).toLowerCase();
 
         assert.ok(
-          message.includes("database at '") &&
-            message.includes("fake-old-db.lbug"),
-          "error should include the database path context",
+          message.includes("database could not be opened or initialized"),
+          "error should include the database problem description",
         );
         assert.ok(
           containsAny(message, ["delete", "remove"]),

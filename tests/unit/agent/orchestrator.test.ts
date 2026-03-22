@@ -161,7 +161,7 @@ describe("Orchestrator", () => {
     );
 
     assert.equal(result.success, false);
-    assert.match(result.error ?? "", /Max actions cannot be negative/);
+    assert.match(result.error ?? "", /maxActions must be positive/);
     assert.deepEqual(result.actionsTaken, []);
     assert.deepEqual(result.finalEvidence, []);
   });

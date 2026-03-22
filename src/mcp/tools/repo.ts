@@ -338,8 +338,11 @@ export async function handleRepoStatus(
       try {
         memories = await surfaceRelevantMemories(conn, { repoId, limit: DEFAULT_MEMORY_SURFACE_LIMIT });
         if (memories.length === 0) memories = undefined;
-      } catch {
-        // Memory surfacing is non-critical
+      } catch (err) {
+        logger.debug("Memory surfacing failed (non-critical)", {
+          repoId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 

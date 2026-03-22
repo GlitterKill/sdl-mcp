@@ -170,6 +170,7 @@ function calculateHotness(metrics: MetricsRow | null): number {
   };
 
   const normalizeLinear = (value: number, max: number): number => {
+    if (max <= 0) return 0;
     return Math.min(value / max, 1);
   };
 

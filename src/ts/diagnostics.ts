@@ -143,9 +143,10 @@ class DiagnosticsManager {
           }
         }
       } catch (error) {
-        process.stderr.write(
-          `[sdl-mcp] Failed to get diagnostics for ${fileName}: ${error instanceof Error ? error.message : String(error)}\n`,
-        );
+        logger.warn("Failed to get diagnostics for file", {
+          fileName,
+          error: error instanceof Error ? error.message : String(error),
+        });
         continue;
       }
     }

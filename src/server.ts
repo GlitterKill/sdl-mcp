@@ -402,10 +402,10 @@ export class MCPServer {
   async notifyToolListChanged(): Promise<void> {
     try {
       await this.server.sendToolListChanged();
-    } catch (_err) {
+    } catch (err) {
       // Swallow errors if no client is connected or notification fails
       process.stderr.write(
-        `[sdl-mcp] Failed to send tool list changed notification\n`,
+        `[sdl-mcp] Failed to send tool list changed notification: ${err instanceof Error ? err.message : String(err)}\n`,
       );
     }
   }

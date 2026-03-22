@@ -260,7 +260,7 @@ export function recordStrategyMetrics(
   } else {
     existing.cacheMisses += 1;
   }
-  existing.hitRate = existing.cacheHits / existing.samples;
+  existing.hitRate = existing.cacheHits / Math.max(1, existing.samples);
   existing.wasteRate = existing.wastedPrefetch / Math.max(1, existing.samples);
   strategyMetricsMap.set(strategy, existing);
 }

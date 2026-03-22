@@ -87,8 +87,8 @@ export async function getAuditEvents(
             a.symbolId AS symbolId,
             a.detailsJson AS detailsJson
      ORDER BY a.timestamp DESC
-     LIMIT ${maxFetch}`,
-    params,
+     LIMIT $limit`,
+    { ...params, limit: maxFetch },
   );
   return rows;
 }
@@ -181,7 +181,7 @@ export async function getAgentFeedbackByRepo(
               f.taskText AS taskText,
               f.createdAt AS createdAt
        ORDER BY f.createdAt DESC
-       LIMIT ${maxFetch}`
+       LIMIT $limit`
     : `MATCH (f:AgentFeedback {repoId: $repoId})
        RETURN f.feedbackId AS feedbackId,
               f.repoId AS repoId,
@@ -194,11 +194,11 @@ export async function getAgentFeedbackByRepo(
               f.taskText AS taskText,
               f.createdAt AS createdAt
        ORDER BY f.createdAt DESC
-       LIMIT ${maxFetch}`;
+       LIMIT $limit`;
   const rows = await queryAll<AgentFeedbackRow>(
     conn,
     query,
-    since ? { repoId, since } : { repoId },
+    since ? { repoId, since, limit: maxFetch } : { repoId, limit: maxFetch },
   );
   return rows;
 }
@@ -226,7 +226,7 @@ export async function getAgentFeedbackByVersion(
               f.taskText AS taskText,
               f.createdAt AS createdAt
        ORDER BY f.createdAt DESC
-       LIMIT ${maxFetch}`
+       LIMIT $limit`
     : `MATCH (f:AgentFeedback {repoId: $repoId, versionId: $versionId})
        RETURN f.feedbackId AS feedbackId,
               f.repoId AS repoId,
@@ -239,11 +239,11 @@ export async function getAgentFeedbackByVersion(
               f.taskText AS taskText,
               f.createdAt AS createdAt
        ORDER BY f.createdAt DESC
-       LIMIT ${maxFetch}`;
+       LIMIT $limit`;
   const rows = await queryAll<AgentFeedbackRow>(
     conn,
     query,
-    since ? { repoId, versionId, since } : { repoId, versionId },
+    since ? { repoId, versionId, since, limit: maxFetch } : { repoId, versionId, limit: maxFetch },
   );
   return rows;
 }

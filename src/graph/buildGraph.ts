@@ -225,8 +225,8 @@ export async function loadNeighborhood(
      WHERE s.symbolId IN $entrySymbols
      MATCH (s)${relPattern}(t:Symbol)-[:SYMBOL_IN_REPO]->(r)
      RETURN DISTINCT t.symbolId AS symbolId
-     LIMIT ${safeMaxSymbols}`,
-    { repoId, entrySymbols },
+     LIMIT $limit`,
+    { repoId, entrySymbols, limit: safeMaxSymbols },
   );
 
   const symbolIds = new Set(symbolRows.map((r) => r.symbolId));

@@ -39,14 +39,20 @@ export function typeToDir(type: string): string {
     case "task_context":
       return "task_context";
     default:
-      return type;
+      throw new Error(`Unknown memory type: ${type}`);
   }
 }
 
 /** Serialize a string array to YAML inline format: [a, b, c] */
 function serializeYamlArray(arr: string[]): string {
   if (arr.length === 0) return "[]";
-  return `[${arr.join(", ")}]`;
+  const escaped = arr.map((s) => {
+    if (/[,\[\]"'\\]/.test(s) || s !== s.trim()) {
+      return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    }
+    return s;
+  });
+  return `[${escaped.join(", ")}]`;
 }
 
 /** Parse a YAML inline array string: [a, b, c] → ["a", "b", "c"] */
@@ -55,11 +61,25 @@ function parseYamlArray(value: string): string[] {
   if (trimmed === "[]" || trimmed === "") return [];
   const match = trimmed.match(/^\[(.*)\]$/s);
   if (!match) return [];
-  return match[1]
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-    .map((s) => s.replace(/^["']|["']$/g, ""));
+  const items: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  let escaped = false;
+  for (const ch of match[1]) {
+    if (escaped) { current += ch; escaped = false; continue; }
+    if (ch === "\\") { escaped = true; continue; }
+    if (ch === '"') { inQuotes = !inQuotes; continue; }
+    if (ch === "," && !inQuotes) {
+      const t = current.trim();
+      if (t.length > 0) items.push(t);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  const last = current.trim();
+  if (last.length > 0) items.push(last);
+  return items;
 }
 
 /** Serialize memory data to YAML frontmatter + markdown body */
@@ -136,7 +156,11 @@ export async function readMemoryFile(
     }
 
     return parseMemoryFileContent(raw);
-  } catch {
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      logger.warn("Failed to read memory file", { filePath, error: String(err) });
+    }
     return null;
   }
 }
@@ -244,15 +268,19 @@ export async function deleteMemoryFile(
   type: string,
   memoryId: string,
 ): Promise<boolean> {
+  validateMemoryId(memoryId);
   const subDir = typeToDir(type);
   const filePath = path.join(repoRoot, ".sdl-memory", subDir, `${memoryId}.md`);
 
-  if (!fs.existsSync(filePath)) {
-    return false;
+  try {
+    fs.unlinkSync(filePath);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw err;
   }
-
-  fs.unlinkSync(filePath);
-  return true;
 }
 
 /**

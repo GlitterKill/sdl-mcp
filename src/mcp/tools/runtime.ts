@@ -263,7 +263,7 @@ export async function handleRuntimeExecute(
       tempCodeDir = await mkdtemp(join(tmpdir(), "sdl-runtime-code-"));
       const ext = getRuntimeExtension(request.runtime) ?? ".txt";
       codePath = join(tempCodeDir, `code${ext}`);
-      await writeFile(codePath, request.code, "utf-8");
+      await writeFile(codePath, request.code, { encoding: "utf-8", mode: 0o600 });
     }
 
     // 7. Build command

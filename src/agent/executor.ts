@@ -92,7 +92,7 @@ export class Executor {
       totalActions: 0,
       successfulActions: 0,
       failedActions: 0,
-      cacheHits: 0,
+      cacheHits: 0, // TODO: Not yet implemented
     };
   }
 
@@ -345,7 +345,9 @@ export class Executor {
             try {
               const sig = JSON.parse(sym.signatureJson);
               if (sig.text) parts.push(`sig: ${sig.text}`);
-            } catch { /* ignore parse errors */ }
+            } catch (err) {
+              logger.debug("Failed to parse signature JSON", { error: String(err) });
+            }
           }
           if (sym.summary) parts.push(sym.summary);
           this.evidenceCapture.captureSymbolCard(
@@ -720,7 +722,7 @@ export class Executor {
       totalActions: 0,
       successfulActions: 0,
       failedActions: 0,
-      cacheHits: 0,
+      cacheHits: 0, // TODO: Not yet implemented
     };
     this.startTime = 0;
     this.policyDecisions.clear();

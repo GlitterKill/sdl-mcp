@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from "path";
 
 import { existsAsync, readFileAsync } from "../../util/asyncFs.js";
+import { logger } from "../../util/logger.js";
 import { normalizePath } from "../../util/paths.js";
 
 import type {
@@ -41,7 +42,7 @@ async function readPsr4Mappings(
   try {
     content = await readFileAsync(composerJsonPath, "utf-8");
   } catch (error) {
-    console.warn(
+    logger.warn(
       `[php-adapter] Failed to read ${composerJsonPath}: ${error instanceof Error ? error.message : String(error)}`,
     );
     return [];
@@ -51,7 +52,7 @@ async function readPsr4Mappings(
   try {
     parsed = JSON.parse(content) as { autoload?: { "psr-4"?: Psr4Map } };
   } catch (error) {
-    console.warn(
+    logger.warn(
       `[php-adapter] Failed to parse ${composerJsonPath}: ${error instanceof Error ? error.message : String(error)}`,
     );
     return [];

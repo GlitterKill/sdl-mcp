@@ -239,7 +239,7 @@ describe("Agent Planner", () => {
       const result = planner.validateTask(task);
 
       assert.strictEqual(result.valid, false);
-      assert.ok(result.error?.includes("negative"));
+      assert.ok(result.error?.includes("positive"));
     });
 
     it("rejects task with negative max duration", () => {
@@ -249,7 +249,7 @@ describe("Agent Planner", () => {
       const result = planner.validateTask(task);
 
       assert.strictEqual(result.valid, false);
-      assert.ok(result.error?.includes("negative"));
+      assert.ok(result.error?.includes("positive"));
     });
 
     it("rejects task with negative max actions", () => {
@@ -259,7 +259,7 @@ describe("Agent Planner", () => {
       const result = planner.validateTask(task);
 
       assert.strictEqual(result.valid, false);
-      assert.ok(result.error?.includes("negative"));
+      assert.ok(result.error?.includes("positive"));
     });
 
     it("validates task with valid budget constraints", () => {

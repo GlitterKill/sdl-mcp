@@ -38,9 +38,10 @@ const DEFAULT_BUFFER_MANAGER_RATIO = 0.5;
 const DEFAULT_CHECKPOINT_THRESHOLD_BYTES = 128 * 1024 * 1024;
 
 function formatReindexGuidanceError(dbPath: string, msg: string): string {
+  logger.error("Database initialization failed", { dbPath, error: msg });
   return (
-    `Database at '${dbPath}' could not be opened or initialized. ` +
-    `If the database is corrupted, delete it and re-run indexing: rm -rf '${dbPath}' && sdl-mcp index. ` +
+    `Database could not be opened or initialized. ` +
+    `If the database is corrupted, delete it and re-run indexing with: sdl-mcp index. ` +
     `Original error: ${msg}`
   );
 }

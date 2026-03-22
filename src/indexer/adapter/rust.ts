@@ -754,9 +754,9 @@ function extractCalls(
       const macroName = macroCapture.node.text;
 
       const range = {
-        startLine: macroCallCapture.node.startPosition.row,
+        startLine: macroCallCapture.node.startPosition.row + 1,
         startCol: macroCallCapture.node.startPosition.column,
-        endLine: macroCallCapture.node.endPosition.row,
+        endLine: macroCallCapture.node.endPosition.row + 1,
         endCol: macroCallCapture.node.endPosition.column,
       };
 
@@ -850,9 +850,9 @@ function extractCalls(
     }
 
     const range = {
-      startLine: callNode.startPosition.row,
+      startLine: callNode.startPosition.row + 1,
       startCol: callNode.startPosition.column,
-      endLine: callNode.endPosition.row,
+      endLine: callNode.endPosition.row + 1,
       endCol: callNode.endPosition.column,
     };
 
@@ -939,9 +939,9 @@ function extractChainedCalls(
       callType,
       calleeSymbolId,
       range: {
-        startLine: node.startPosition.row,
+        startLine: node.startPosition.row + 1,
         startCol: node.startPosition.column,
-        endLine: node.endPosition.row,
+        endLine: node.endPosition.row + 1,
         endCol: node.endPosition.column,
       },
     });

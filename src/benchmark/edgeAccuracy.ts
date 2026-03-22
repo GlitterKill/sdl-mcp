@@ -64,7 +64,12 @@ function toNamespaceMap(
 
 function loadFixture(): EdgeAccuracyFixture {
   const path = join(process.cwd(), "tests/benchmark/edge-accuracy/cases.json");
-  return JSON.parse(readFileSync(path, "utf-8")) as EdgeAccuracyFixture;
+  const raw = readFileSync(path, "utf-8");
+  try {
+    return JSON.parse(raw) as EdgeAccuracyFixture;
+  } catch (err) {
+    throw new Error(`Failed to parse edge-accuracy fixture at ${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 function buildContext(input: EdgeAccuracyCase): CallResolutionContext {

@@ -123,7 +123,7 @@ export class ThresholdEvaluator {
 
     if (baselineValue !== undefined) {
       delta = currentValue - baselineValue;
-      deltaPercent = (delta / baselineValue) * 100;
+      deltaPercent = baselineValue !== 0 ? (delta / baselineValue) * 100 : (delta !== 0 ? Infinity : 0);
 
       if (threshold.trend === "lower-is-better") {
         if (threshold.allowableIncreasePercent) {
@@ -218,7 +218,11 @@ export class ThresholdEvaluator {
 
 export function loadThresholdConfig(configPath: string): BenchmarkThresholds {
   const content = readFileSync(configPath, "utf-8");
-  return JSON.parse(content) as BenchmarkThresholds;
+  try {
+    return JSON.parse(content) as BenchmarkThresholds;
+  } catch (err) {
+    throw new Error(`Failed to parse threshold config at ${configPath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 function normalizeBaselineDerivedMetrics(
@@ -248,7 +252,12 @@ export function loadBaselineMetrics(
   }
 
   const content = readFileSync(baselinePath, "utf-8");
-  const baseline = JSON.parse(content);
+  let baseline: any;
+  try {
+    baseline = JSON.parse(content);
+  } catch (err) {
+    throw new Error(`Failed to parse baseline metrics at ${baselinePath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   if (
     expectedRepoId &&

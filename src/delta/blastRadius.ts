@@ -138,7 +138,7 @@ export async function computeBlastRadius(
       const testProximity = relPath && isTestFile(relPath) ? 1 : 0;
 
       const normalizedDistance = 1 - distance / safeMaxHops;
-      const normalizedFanIn = Math.log(fanIn + 1) / Math.log(100);
+      const normalizedFanIn = Math.min(1, Math.log(fanIn + 1) / Math.log(100));
       const rank =
         0.6 * normalizedDistance +
         0.3 * normalizedFanIn +
@@ -191,8 +191,10 @@ export async function computeBlastRadius(
         }
       }
     }
-  } catch {
-    // graceful degradation without process data
+  } catch (error) {
+    logger.debug("Process-based dependency expansion unavailable", {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   const processDependents: BlastRadiusItem[] = Array.from(

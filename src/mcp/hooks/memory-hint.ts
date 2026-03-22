@@ -16,7 +16,14 @@ interface SessionTracker {
 
 const sessions = new Map<string, SessionTracker>();
 
+const MAX_TRACKED_SESSIONS = 64;
+
 function getSession(sessionId: string): SessionTracker {
+  // Evict oldest session if at capacity before creating new ones
+  if (!sessions.has(sessionId) && sessions.size >= MAX_TRACKED_SESSIONS) {
+    const oldest = sessions.keys().next().value;
+    if (oldest) sessions.delete(oldest);
+  }
   let session = sessions.get(sessionId);
   if (!session) {
     session = { calls: [], hintsSent: new Set() };
@@ -108,10 +115,18 @@ export function createMemoryHintHook(): PostDispatchHook {
     const sessionId = context.sessionId ?? "stdio";
     const session = getSession(sessionId);
 
-    // Prune entries older than 30 minutes and record this call
+    // Record this call first
+    session.calls.push({ tool: toolName, timestamp: Date.now() });
+
+    // Prune entries older than 30 minutes
     const cutoff = Date.now() - 30 * 60 * 1000;
     session.calls = session.calls.filter((c) => c.timestamp >= cutoff);
-    session.calls.push({ tool: toolName, timestamp: Date.now() });
+
+    // Evict stale sessions with no recent calls
+    if (session.calls.length === 0) {
+      sessions.delete(sessionId);
+      return;
+    }
 
     // Check for index.refresh with large changes (uses result, not args)
     if (

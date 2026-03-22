@@ -158,7 +158,7 @@ describe("memory file-sync", () => {
   test("deleteMemoryFile returns false for non-existent", async () => {
     const tmpDir = createTmpDir();
     try {
-      const deleted = await deleteMemoryFile(tmpDir, "decision", "nonexistent");
+      const deleted = await deleteMemoryFile(tmpDir, "decision", "deadbeef12345678");
       assert.strictEqual(deleted, false);
     } finally {
       cleanup(tmpDir);

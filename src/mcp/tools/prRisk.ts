@@ -71,7 +71,7 @@ export async function handlePRRiskAnalysis(args: unknown) {
     riskScore >= (validated.riskThreshold ?? 70) &&
     findings.some((f) => f.severity === "high");
 
-  let policyDecision: { decision: string; deniedReasons: string[] } | undefined;
+  let policyDecision: { decision: string; deniedReasons: string[]; auditHash?: string } | undefined;
   if (escalationRequired) {
     const rawDecision = policyEngine.evaluate({
       requestType: "codeWindow",
@@ -82,6 +82,7 @@ export async function handlePRRiskAnalysis(args: unknown) {
     policyDecision = {
       decision: rawDecision.decision,
       deniedReasons: rawDecision.deniedReasons ?? [],
+      auditHash: rawDecision.auditHash,
     };
   }
 
@@ -245,7 +246,7 @@ function computeOverallRiskScore(
   if (blastRadiusItems.length > 0) {
     const avgBlastRadiusScore =
       blastRadiusItems.reduce((sum: number, item: BlastRadiusItem) => {
-        return sum + (item.rank || 0) * 100;
+        return sum + (item.rank ?? 0) * 100;
       }, 0) / blastRadiusItems.length;
     totalRisk += avgBlastRadiusScore * riskWeights.blastRadius;
     weightSum += riskWeights.blastRadius;

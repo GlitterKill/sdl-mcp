@@ -44,21 +44,26 @@ async function delegateIndexToServer(
       body: JSON.stringify({ mode }),
       onEvent: (evt: SSEEvent) => {
         if (evt.event === "progress") {
-          const p = JSON.parse(evt.data) as {
-            stage: string;
-            current: number;
-            total: number;
-            currentFile?: string;
-          };
-          if (p.stage === "pass1" || p.stage === "pass2") {
-            const line = `  ${p.stage}: ${p.current}/${p.total}${p.currentFile ? ` ${p.currentFile}` : ""}`;
-            if (line !== lastProgressLine) {
-              console.log(line);
-              lastProgressLine = line;
+          try {
+            const p = JSON.parse(evt.data) as {
+              stage: string;
+              current: number;
+              total: number;
+              currentFile?: string;
+            };
+            if (p.stage === "pass1" || p.stage === "pass2") {
+              const line = `  ${p.stage}: ${p.current}/${p.total}${p.currentFile ? ` ${p.currentFile}` : ""}`;
+              if (line !== lastProgressLine) {
+                console.log(line);
+                lastProgressLine = line;
+              }
             }
+          } catch {
+            // Skip malformed SSE event
           }
         } else if (evt.event === "complete") {
-          const c = JSON.parse(evt.data) as {
+          try {
+            const c = JSON.parse(evt.data) as {
             filesProcessed: number;
             symbolsIndexed: number;
             totalSymbols: number;
@@ -87,9 +92,16 @@ async function delegateIndexToServer(
             );
           }
           completed = true;
+          } catch {
+            // Skip malformed SSE event
+          }
         } else if (evt.event === "error") {
-          const e = JSON.parse(evt.data) as { message: string };
-          console.error(`  Error from server: ${e.message}`);
+          try {
+            const e = JSON.parse(evt.data) as { message: string };
+            console.error(`  Error from server: ${e.message}`);
+          } catch {
+            // Skip malformed SSE event
+          }
         }
       },
     });

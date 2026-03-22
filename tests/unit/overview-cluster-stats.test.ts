@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
-import { buildRepoOverview } from "../../dist/graph/overview.js";
+import { buildRepoOverview, clearOverviewCache } from "../../dist/graph/overview.js";
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 
@@ -102,6 +102,7 @@ describe("repo overview cluster/process stats", () => {
   });
 
   it("includes aggregate cluster/process stats when data exists", async () => {
+    clearOverviewCache();
     const conn = await getLadybugConn();
     const now = new Date().toISOString();
 

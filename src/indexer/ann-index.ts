@@ -89,7 +89,7 @@ class SimplePseudoRandom {
   }
 
   next(): number {
-    this.state = (this.state * 1103515245 + 12345) & 0x7fffffff;
+    this.state = (Math.imul(this.state, 1103515245) + 12345) & 0x7fffffff;
     return this.state / 0x7fffffff;
   }
 

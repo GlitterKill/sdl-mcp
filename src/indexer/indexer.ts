@@ -153,7 +153,13 @@ async function indexRepoImpl(
   if (!repoRow) {
     throw new Error(`Repository ${repoId} not found`);
   }
-  const config: RepoConfig = JSON.parse(repoRow.configJson);
+  let config: RepoConfig;
+  try {
+    config = JSON.parse(repoRow.configJson);
+  } catch {
+    logger.error("Corrupt configJson for repo", { repoId });
+    throw new Error(`Corrupt configJson for repo ${repoId}`);
+  }
 
   const { files, existingByPath, removedFiles } = await scanRepoForIndex({
     repoId,

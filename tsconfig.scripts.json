@@ -15,7 +15,7 @@
     "scripts/migrate.ts",
     "scripts/index-repo.ts",
     "scripts/dump-symbol.ts",
-    "scripts/migrate-sqlite-to-kuzu.ts",
+    "scripts/migrate-sqlite-to-ladybug.ts",
     "tests/harness/*.ts",
     "src/types/**/*.d.ts"
   ],

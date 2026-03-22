@@ -299,7 +299,11 @@ export function parsePullOptions(
       if (i + 1 >= args.length) {
         throw new Error("--retries requires a value");
       }
-      options.retries = parseInt(args[++i], 10);
+      const retries = parseInt(args[++i], 10);
+      if (!Number.isFinite(retries) || retries < 0) {
+        throw new Error("--retries must be a non-negative integer");
+      }
+      options.retries = retries;
     }
   }
 
@@ -316,7 +320,11 @@ export function parsePullOptions(
     options.fallback = true;
   }
   if (typeof values.retries === "string") {
-    options.retries = parseInt(values.retries, 10);
+    const retries = parseInt(values.retries, 10);
+    if (!Number.isFinite(retries) || retries < 0) {
+      throw new Error("--retries must be a non-negative integer");
+    }
+    options.retries = retries;
   }
 
   return options;

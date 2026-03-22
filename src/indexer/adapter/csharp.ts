@@ -861,7 +861,7 @@ class CSharpAdapter implements LanguageAdapter {
     symbolMap: Map<string, ExtractedSymbol>,
     extractedSymbols: ExtractedSymbol[],
   ): void {
-    const expression = node.firstChild;
+    const expression = node.firstNamedChild;
     if (!expression) return;
 
     if (expression.type === "invocation_expression") {

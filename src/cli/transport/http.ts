@@ -682,7 +682,8 @@ async function handleRestRequest(
       const [, rawRepoId, rawHandle] = graphSliceMatch;
       const repoId = decodeURIComponent(rawRepoId);
       const handle = decodeURIComponent(rawHandle);
-      const maxNodes = Number(url.searchParams.get("maxNodes") ?? "200");
+      const rawMaxNodes = Number(url.searchParams.get("maxNodes") ?? "200");
+      const maxNodes = Number.isFinite(rawMaxNodes) ? rawMaxNodes : 200;
       const handleRow = await ladybugDb.getSliceHandle(conn, handle);
       if (!handleRow) {
         json(res, 404, { error: `Slice handle not found: ${handle}` });
@@ -718,7 +719,8 @@ async function handleRestRequest(
     if (req.method === "GET" && graphNeighborhoodMatch) {
       const conn = await getLadybugConn();
       const [, repoId, symbolId] = graphNeighborhoodMatch;
-      const maxNodes = Number(url.searchParams.get("maxNodes") ?? "200");
+      const rawMaxNodes = Number(url.searchParams.get("maxNodes") ?? "200");
+      const maxNodes = Number.isFinite(rawMaxNodes) ? rawMaxNodes : 200;
       const graph = await buildNeighborhood(
         conn,
         decodeURIComponent(symbolId),
@@ -738,7 +740,8 @@ async function handleRestRequest(
     if (req.method === "GET" && graphBlastMatch) {
       const conn = await getLadybugConn();
       const [, repoId, fromVersion, toVersion] = graphBlastMatch;
-      const maxNodes = Number(url.searchParams.get("maxNodes") ?? "200");
+      const rawMaxNodes = Number(url.searchParams.get("maxNodes") ?? "200");
+      const maxNodes = Number.isFinite(rawMaxNodes) ? rawMaxNodes : 200;
       const graph = await buildBlastRadiusGraph(
         conn,
         repoId,
@@ -756,7 +759,8 @@ async function handleRestRequest(
     if (req.method === "GET" && symbolSearchMatch) {
       const [, repoId] = symbolSearchMatch;
       const query = (url.searchParams.get("q") ?? "").trim();
-      const limit = Number(url.searchParams.get("limit") ?? "20");
+      const rawLimit = Number(url.searchParams.get("limit") ?? "20");
+      const limit = Number.isFinite(rawLimit) ? rawLimit : 20;
       if (!query) {
         json(res, 200, { repoId, results: [] });
         return true;

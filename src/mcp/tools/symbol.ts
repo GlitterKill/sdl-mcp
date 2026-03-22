@@ -161,6 +161,12 @@ export async function handleSymbolSearch(
     }
   }
 
+  // Filter by kinds if specified (after semantic reranking, so it applies to both paths)
+  if (request.kinds && request.kinds.length > 0) {
+    const kindsSet = new Set(request.kinds);
+    results = results.filter((r) => kindsSet.has(r.kind));
+  }
+
   // Prefetch cards for top search results (anticipating getCard calls)
   const topSymbolIds = results.slice(0, 5).map((r) => r.symbolId);
   if (topSymbolIds.length > 0) {

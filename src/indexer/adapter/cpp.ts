@@ -98,13 +98,19 @@ class CppAdapter implements LanguageAdapter {
       let current: Parser.SyntaxNode | null = node.parent;
 
       while (current) {
+        let lastSpecifier: "public" | "private" | "protected" | undefined;
         for (const child of current.children) {
+          if (child === node || child.startPosition.row > node.startPosition.row ||
+              (child.startPosition.row === node.startPosition.row && child.startPosition.column >= node.startPosition.column)) {
+            break;
+          }
           if (child.type === "access_specifier") {
-            if (child.text.includes("public")) return "public";
-            if (child.text.includes("private")) return "private";
-            if (child.text.includes("protected")) return "protected";
+            if (child.text.includes("public")) lastSpecifier = "public";
+            else if (child.text.includes("private")) lastSpecifier = "private";
+            else if (child.text.includes("protected")) lastSpecifier = "protected";
           }
         }
+        if (lastSpecifier) return lastSpecifier;
         if (
           current.type === "class_specifier" ||
           current.type === "struct_specifier"

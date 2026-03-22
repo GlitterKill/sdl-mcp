@@ -1554,12 +1554,13 @@ export type PRRiskAnalysisResponse = z.infer<
 export const AgentOrchestrateRequestSchema = z.object({
   repoId: z
     .string()
+    .min(1)
     .max(MAX_REPO_ID_LENGTH)
     .describe("Repository ID to work with"),
   taskType: z
     .enum(["debug", "review", "implement", "explain"])
     .describe("Type of task to perform"),
-  taskText: z.string().max(2000).describe("Task description or prompt"),
+  taskText: z.string().min(1).max(2000).describe("Task description or prompt"),
   budget: z
     .object({
       maxTokens: z.number().optional().describe("Maximum tokens to consume"),
@@ -1608,12 +1609,12 @@ export const AgentOrchestrateResponseSchema = z.object({
         id: z.string(),
         type: z.string(),
         status: z.enum(["pending", "inProgress", "completed", "failed"]),
-        input: z.record(z.any()),
-        output: z.any().optional(),
+        input: z.record(z.unknown()),
+        output: z.unknown().optional(),
         error: z.string().optional(),
         timestamp: z.number(),
         durationMs: z.number(),
-        evidence: z.array(z.any()),
+        evidence: z.array(z.unknown()),
       }),
     )
     .describe("Actions taken during execution"),

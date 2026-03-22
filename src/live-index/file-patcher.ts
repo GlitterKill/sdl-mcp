@@ -9,6 +9,7 @@ import {
 } from "./dependency-frontier.js";
 import { parseDraftFile, type DraftParseResult } from "./draft-parser.js";
 import { IndexError } from "../domain/errors.js";
+import { logger } from "../util/logger.js";
 
 export interface SavedFilePatchRequest {
   repoId: string;
@@ -39,7 +40,13 @@ export async function patchSavedFile(
     throw new IndexError(`Repository ${request.repoId} not found`);
   }
 
-  const repoConfig = JSON.parse(repo.configJson) as RepoConfig;
+  let repoConfig: RepoConfig;
+  try {
+    repoConfig = JSON.parse(repo.configJson) as RepoConfig;
+  } catch {
+    logger.error("Corrupt configJson for repo", { repoId: request.repoId });
+    throw new IndexError(`Corrupt configJson for repo ${request.repoId}`);
+  }
   const relPath = normalizePath(request.filePath);
   const existingFile = await ladybugDb.getFileByRepoPath(
     conn,

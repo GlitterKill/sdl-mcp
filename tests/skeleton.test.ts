@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
-import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
+import { writeFileSync, rmSync, existsSync, mkdirSync, mkdtempSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import {
   parseFile,
@@ -9,7 +10,7 @@ import {
 } from "../dist/code/skeleton.js";
 
 describe("Skeleton Generator Unit Tests", () => {
-  const testDir = join(process.cwd(), "test-fixtures");
+  const testDir = mkdtempSync(join(tmpdir(), "sdl-mcp-skeleton-test-"));
 
   beforeEach(() => {
     if (!existsSync(testDir)) {

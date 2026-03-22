@@ -214,14 +214,14 @@ export class Planner {
     }
 
     if (task.budget) {
-      if (task.budget.maxTokens && task.budget.maxTokens < 0) {
-        return { valid: false, error: "Max tokens cannot be negative" };
+      if (task.budget.maxTokens != null && task.budget.maxTokens <= 0) {
+        return { valid: false, error: "maxTokens must be positive" };
       }
-      if (task.budget.maxDurationMs && task.budget.maxDurationMs < 0) {
-        return { valid: false, error: "Max duration cannot be negative" };
+      if (task.budget.maxDurationMs != null && task.budget.maxDurationMs <= 0) {
+        return { valid: false, error: "maxDurationMs must be positive" };
       }
-      if (task.budget.maxActions && task.budget.maxActions < 0) {
-        return { valid: false, error: "Max actions cannot be negative" };
+      if (task.budget.maxActions != null && task.budget.maxActions <= 0) {
+        return { valid: false, error: "maxActions must be positive" };
       }
     }
 

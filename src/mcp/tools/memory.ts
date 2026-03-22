@@ -26,6 +26,7 @@ import {
 } from "../../memory/file-sync.js";
 import { safeJsonParse, StringArraySchema } from "../../util/safeJson.js";
 import path from "node:path";
+import { logger } from "../../util/logger.js";
 
 function computeContentHash(
   repoId: string,
@@ -138,8 +139,8 @@ export async function handleMemoryStore(
       files: fileRelPaths ?? [],
       createdAt: existing.createdAt,
       deleted: false,
-    }).catch(() => {
-      // Non-critical: file write failure shouldn't fail the operation
+    }).catch((err) => {
+      logger.warn("Failed to write memory file", { error: String(err) });
     });
 
     return {
@@ -222,7 +223,7 @@ export async function handleMemoryStore(
     files: fileRelPaths ?? [],
     createdAt: now,
     deleted: false,
-  }).catch(() => null);
+  }).catch((err) => { logger.debug("Failed to write memory file for sourceFile update", { error: String(err) }); return null; });
 
   // Update sourceFile in DB if write succeeded
   if (sourceFile) {
@@ -333,7 +334,7 @@ export async function handleMemoryRemove(
 
   if (shouldDeleteFile) {
     await deleteMemoryFile(repo.rootPath, memory.type, memoryId).catch(
-      () => {},
+      (err) => logger.warn("Failed to sync memory file", { error: String(err) }),
     );
   } else {
     // Update frontmatter to mark deleted without removing file
@@ -345,7 +346,7 @@ export async function handleMemoryRemove(
       `${memoryId}.md`,
     );
     await updateMemoryFileFrontmatter(filePath, { deleted: true }).catch(
-      () => {},
+      (err) => logger.warn("Failed to sync memory file", { error: String(err) }),
     );
   }
 

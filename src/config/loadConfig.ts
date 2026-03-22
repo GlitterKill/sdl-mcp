@@ -31,6 +31,9 @@ function expandEnvVars(obj: unknown, configPath: string): unknown {
   if (obj !== null && typeof obj === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      if (key === "__proto__" || key === "constructor" || key === "prototype") {
+        continue;
+      }
       result[key] = expandEnvVars(value, configPath);
     }
     return result;

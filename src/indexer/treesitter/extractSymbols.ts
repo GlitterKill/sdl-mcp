@@ -1,6 +1,7 @@
 import Parser from "tree-sitter";
 
 import type { ExtractedSymbol } from "./extractCalls.js";
+import { logger } from "../../util/logger.js";
 export type { ExtractedSymbol } from "./extractCalls.js";
 
 /** Symbol as extracted from the AST before adapter enrichment (no nodeId yet). */
@@ -472,8 +473,7 @@ function traverseAST(
       // Log and continue so one bad node doesn't lose all symbols for the file
       const msg = error instanceof Error ? error.message : String(error);
       const loc = `${child.type}@${child.startPosition.row + 1}:${child.startPosition.column}`;
-      // Use console.warn as a lightweight fallback; logger may not be imported here
-      console.warn(`[extractSymbols] Error processing node ${loc}: ${msg}`);
+      logger.warn(`[extractSymbols] Error processing node ${loc}: ${msg}`);
     }
   }
 }

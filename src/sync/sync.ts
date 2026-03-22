@@ -9,6 +9,7 @@ import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { resolveSymbolEnrichment } from "../indexer/symbol-enrichment.js";
 import { hashContent } from "../util/hashing.js";
+import { logger } from "../util/logger.js";
 import { getCurrentTimestamp } from "../util/time.js";
 import type {
   SyncArtifact,
@@ -224,7 +225,12 @@ export async function importArtifact(
   const startTime = Date.now();
 
   const artifactContent = await readFile(options.artifactPath, "utf-8");
-  const artifact: SyncArtifact = JSON.parse(artifactContent);
+  let artifact: SyncArtifact;
+  try {
+    artifact = JSON.parse(artifactContent);
+  } catch {
+    throw new IndexError("Failed to parse sync artifact: invalid JSON");
+  }
 
   if (options.repoId && artifact.repo_id !== options.repoId) {
     if (!options.force) {
@@ -236,7 +242,12 @@ export async function importArtifact(
 
   const compressed = Buffer.from(artifact.compressed_data, "base64");
   const decompressed = await gunzipAsync(compressed);
-  const state: SyncIndexState = JSON.parse(decompressed.toString("utf-8"));
+  let state: SyncIndexState;
+  try {
+    state = JSON.parse(decompressed.toString("utf-8"));
+  } catch {
+    throw new IndexError("Failed to parse decompressed sync artifact: invalid JSON");
+  }
   const relPathByFileId = new Map(
     state.files.map((file) => [file.file_id, file.rel_path] as const),
   );
@@ -389,7 +400,12 @@ export function getArtifactMetadata(
 
     const compressed = Buffer.from(artifact.compressed_data, "base64");
     const decompressed = gunzipSync(compressed);
-    const state: SyncIndexState = JSON.parse(decompressed.toString("utf-8"));
+    let state: SyncIndexState;
+    try {
+      state = JSON.parse(decompressed.toString("utf-8"));
+    } catch {
+      throw new IndexError("Failed to parse decompressed sync artifact: invalid JSON");
+    }
 
     return {
       artifact_id: artifact.artifact_id,
@@ -406,7 +422,11 @@ export function getArtifactMetadata(
       symbol_count: state.symbols.length,
       edge_count: state.edges.length,
     };
-  } catch {
+  } catch (err) {
+    logger.debug("Failed to read artifact metadata", {
+      artifactPath,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -437,7 +457,11 @@ export async function listArtifacts(
       (a, b) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
-  } catch {
+  } catch (err) {
+    logger.debug("Failed to list artifacts", {
+      repoId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return [];
   }
 }

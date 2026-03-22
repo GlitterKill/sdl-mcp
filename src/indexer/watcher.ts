@@ -180,7 +180,13 @@ export async function watchRepositoryWithIndexer(
     throw new Error(`Repository ${repoId} not found`);
   }
 
-  const repoConfig: RepoConfig = JSON.parse(repoRow.configJson);
+  let repoConfig: RepoConfig;
+  try {
+    repoConfig = JSON.parse(repoRow.configJson);
+  } catch {
+    logger.error("Corrupt configJson for repo", { repoId });
+    throw new Error(`Corrupt configJson for repo ${repoId}`);
+  }
   const ignorePatterns = repoConfig.ignore ?? [];
   const extensions = repoConfig.languages.map((lang) => `.${lang}`);
 
@@ -435,6 +441,7 @@ export async function watchRepositoryWithIndexer(
       });
     }
   }, staleCheckIntervalMs);
+  staleTimer.unref();
 
   activeWatcher = startWatcher();
 

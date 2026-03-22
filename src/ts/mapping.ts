@@ -6,6 +6,7 @@ import { NotFoundError } from "../domain/errors.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { normalizePath, getRelativePath } from "../util/paths.js";
+import { logger } from "../util/logger.js";
 
 export interface DiagnosticSuspect {
   symbolId: string;
@@ -103,7 +104,14 @@ export async function getDiagnosticsWithSuspects(
     throw new NotFoundError(`Repository not found: ${repoId}`);
   }
 
-  const repoConfig = RepoConfigSchema.parse(JSON.parse(repo.configJson));
+  let parsedConfigJson: unknown;
+  try {
+    parsedConfigJson = JSON.parse(repo.configJson);
+  } catch {
+    logger.error("Corrupt configJson for repo", { repoId });
+    throw new Error(`Corrupt configJson for repo ${repoId}`);
+  }
+  const repoConfig = RepoConfigSchema.parse(parsedConfigJson);
 
   const { diagnostics, summary } = await diagnosticsManager.getDiagnostics(
     repoConfig,

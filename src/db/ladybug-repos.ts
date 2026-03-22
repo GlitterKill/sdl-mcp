@@ -110,7 +110,8 @@ export async function listRepos(
             r.configJson AS configJson,
             r.createdAt AS createdAt
      ORDER BY r.repoId
-     LIMIT ${maxFetch}`,
+     LIMIT $limit`,
+    { limit: maxFetch },
   );
   return rows;
 }

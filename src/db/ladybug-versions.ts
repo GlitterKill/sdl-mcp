@@ -150,8 +150,8 @@ export async function getVersionsByRepo(
             v.prevVersionHash AS prevVersionHash,
             v.versionHash AS versionHash
      ORDER BY v.createdAt DESC
-     LIMIT ${maxFetch}`,
-    { repoId },
+     LIMIT $limit`,
+    { repoId, limit: maxFetch },
   );
 
   return rows.map((row) => ({ repoId, ...row }));

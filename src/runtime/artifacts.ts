@@ -10,6 +10,7 @@ import { hashContent } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
 import { ArtifactCleanupError } from "../domain/errors.js";
 import type { RedactionConfig } from "../config/types.js";
+import { isReDoSRisk } from "../util/safeRegex.js";
 
 const gzipAsync = promisify(gzip);
 const ARTIFACT_DIR_PREFIX = "sdl-runtime";
@@ -78,6 +79,10 @@ export function applyRedaction(
   }
 
   for (const customPattern of redactionConfig.patterns) {
+    if (isReDoSRisk(customPattern.pattern)) {
+      logger.warn("Skipping redaction pattern with ReDoS risk", { pattern: customPattern.pattern });
+      continue;
+    }
     try {
       const flags = customPattern.flags ?? "g";
       const regex = new RegExp(customPattern.pattern, flags);

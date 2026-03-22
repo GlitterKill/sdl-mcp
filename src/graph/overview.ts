@@ -26,6 +26,7 @@ import { SYMBOL_TOKEN_MAX } from "../config/constants.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { safeJsonParseOptional, SignatureSchema } from "../util/safeJson.js";
+import { globToSafeRegex } from "../util/safeRegex.js";
 
 // ============================================================================
 // Constants
@@ -483,7 +484,7 @@ async function buildDirectorySummaries(
     if (directoryFilter && directoryFilter.length > 0) {
       const matches = directoryFilter.some((pattern) => {
         if (pattern.includes("*")) {
-          const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
+          const regex = globToSafeRegex(pattern);
           return regex.test(agg.directory);
         }
         return agg.directory.startsWith(pattern);

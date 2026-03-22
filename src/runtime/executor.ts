@@ -43,7 +43,7 @@ export function killProcessTree(pid: number): void {
     } catch {
       // Process group may already be gone.
     }
-  }, RUNTIME_SIGKILL_GRACE_MS);
+  }, RUNTIME_SIGKILL_GRACE_MS).unref();
 }
 
 export function buildScrubbedEnv(

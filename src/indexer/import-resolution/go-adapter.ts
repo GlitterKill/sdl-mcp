@@ -2,6 +2,7 @@ import fastGlob from "fast-glob";
 import { dirname, join, resolve } from "path";
 
 import { existsAsync, readFileAsync } from "../../util/asyncFs.js";
+import { logger } from "../../util/logger.js";
 import { normalizePath } from "../../util/paths.js";
 
 import type {
@@ -38,7 +39,7 @@ async function readGoModuleName(goModPath: string): Promise<string | null> {
   try {
     content = await readFileAsync(goModPath, "utf-8");
   } catch (error) {
-    console.warn(
+    logger.warn(
       `[go-adapter] Failed to read ${goModPath}: ${error instanceof Error ? error.message : String(error)}`,
     );
     return null;
