@@ -40,7 +40,7 @@ sdl-mcp version
 npx --yes sdl-mcp@latest version
 
 # Expected output:
-# SDL-MCP version: 0.9.0
+# SDL-MCP version: 0.9.2
 # Environment:
 #   Node.js: v20.11.0
 #   Platform: linux/win32

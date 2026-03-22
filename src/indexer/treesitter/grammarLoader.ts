@@ -70,7 +70,7 @@ export type SupportedLanguage =
   | "bash";
 
 const parserCache = new Map<SupportedLanguage, Parser | null>();
-const languageCache = new Map<SupportedLanguage, any | null>();
+const languageCache = new Map<SupportedLanguage, Parser.Language | null>();
 
 /**
  * Map from language ID to npm package name and optional property path.
@@ -94,13 +94,13 @@ const GRAMMAR_PACKAGES: Record<
   bash: { pkg: "tree-sitter-bash" },
 };
 
-function getLanguageModule(language: SupportedLanguage): any | null {
+function getLanguageModule(language: SupportedLanguage): Parser.Language | null {
   const cached = languageCache.get(language);
   if (cached !== undefined) {
     return cached;
   }
 
-  let lang: any | null = null;
+  let lang: Parser.Language | null = null;
 
   try {
     const spec = GRAMMAR_PACKAGES[language];

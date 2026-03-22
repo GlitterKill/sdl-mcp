@@ -1,4 +1,4 @@
-import { Tree } from "tree-sitter";
+import Parser, { Tree } from "tree-sitter";
 import type {
   ExtractedSymbol,
   ExtractedCall,
@@ -27,7 +27,7 @@ export interface LanguageAdapter {
 
   fileExtensions: readonly string[];
 
-  getParser(): any;
+  getParser(): Parser | null;
 
   parse(content: string, filePath: string): Tree | null;
 

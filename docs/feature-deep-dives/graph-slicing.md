@@ -57,13 +57,15 @@ Not all relationships are equal. SDL-MCP weights edges by how strongly they indi
 
 ### Scoring Factors
 
-Each symbol in the BFS frontier is scored by:
+Each symbol in the BFS frontier is scored by weighted factors:
 
-- **Graph distance** from entry symbols (closer = more relevant)
-- **Fan-in** (how many other symbols depend on it)
-- **Centrality** (its position in the overall graph)
-- **Search term proximity** (if `taskText` was provided)
-- **Confidence** of the edge resolution (low-confidence call edges can be filtered)
+- **Query relevance** (weight: 0.4) — search term overlap from `taskText`
+- **Stack trace locality** (weight: 0.2) — proximity to parsed stack trace entries
+- **Hotness** (weight: 0.15) — composite of fan-in, fan-out, and churn metrics
+- **Structure** (weight: 0.15) — file path structural specificity
+- **Kind** (weight: 0.1) — symbol kind weight (functions/methods scored higher than variables)
+- **Cluster cohesion** — same-cluster symbols get a +0.15 boost, related-cluster +0.05
+- **Confidence** of the edge resolution (low-confidence call edges can be filtered via `minConfidence` or `minCallConfidence`)
 
 ---
 

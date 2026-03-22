@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- untyped tree-sitter grammar modules */
 declare module "tree-sitter-c" {
   const grammar: any;
   export default grammar;

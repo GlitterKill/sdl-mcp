@@ -136,7 +136,7 @@ class PythonAdapter extends BaseAdapter {
   }
 }
 
-function extractSymbols(tree: any): Array<{
+function extractSymbols(tree: Tree): Array<{
   name: string;
   kind: ExtractedSymbol["kind"];
   exported: boolean;

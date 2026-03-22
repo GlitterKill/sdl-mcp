@@ -747,8 +747,12 @@ function buildEnforcementAssets(
   return assets;
 }
 
-function generateClientConfig(template: any, configPath: string): string {
-  const mcpServers = template.mcpServers;
+function generateClientConfig(template: unknown, configPath: string): string {
+  // Template is JSON-parsed client config with mcpServers shape
+  const tpl = template as {
+    mcpServers: Record<string, { env?: Record<string, string>; [k: string]: unknown }>;
+  };
+  const mcpServers = tpl.mcpServers;
   const config = {
     mcpServers: {
       "sdl-mcp": {

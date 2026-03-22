@@ -23,7 +23,7 @@
   },
   "rules": {
     "import/extensions": ["error", "ignorePackages"],
-    "@typescript-eslint/no-explicit-any": "off",
+    "@typescript-eslint/no-explicit-any": "warn",
     "@typescript-eslint/explicit-function-return-type": "off",
     "@typescript-eslint/explicit-module-boundary-types": "off",
     "@typescript-eslint/no-non-null-assertion": "off",
@@ -34,7 +34,7 @@
         "varsIgnorePattern": "^_"
       }
     ],
-    "@typescript-eslint/no-floating-promises": "warn",
+    "@typescript-eslint/no-floating-promises": "error",
     "@typescript-eslint/no-misused-promises": "warn",
     "@typescript-eslint/require-await": "off",
     "@typescript-eslint/no-unnecessary-type-assertion": "warn",

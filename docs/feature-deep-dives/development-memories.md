@@ -332,7 +332,7 @@ Results are deduplicated, scored, and returned in descending rank order.
 
 ## Automatic Slice Integration
 
-When `sdl.slice.build` is called, memories are **automatically surfaced** alongside the slice cards. No extra tool call is required.
+When `sdl.slice.build` or `sdl.repo.status` is called, memories are **automatically surfaced** alongside the response. No extra tool call is required. `repo.status` surfaces memories by default (`surfaceMemories: true`) to give agents immediate session context.
 
 **How it works:**
 
@@ -425,14 +425,16 @@ File sync failures are non-critical — indexing continues if memory import fail
 
 | File | Purpose |
 |:-----|:--------|
-| `src/db/ladybug-memory.ts` | CRUD operations for Memory nodes and edges (352 lines) |
-| `src/db/ladybug-schema.ts` | Memory node table, edge tables, indexes (schema v4) |
-| `src/mcp/tools/memory.ts` | MCP tool handlers: store, query, remove, surface (447 lines) |
-| `src/memory/file-sync.ts` | File read/write/scan with YAML frontmatter parser (256 lines) |
+| `src/db/ladybug-memory.ts` | CRUD operations for Memory nodes and edges |
+| `src/db/ladybug-schema.ts` | Memory node table, edge tables, indexes (schema v6) |
+| `src/mcp/tools/memory.ts` | MCP tool handlers: store, query, remove, surface |
+| `src/memory/file-sync.ts` | File read/write/scan with YAML frontmatter parser |
+| `src/memory/surface.ts` | Shared `surfaceRelevantMemories()` ranking (used by slice.build, repo.status, memory.surface) |
 | `src/domain/types.ts` | `MemoryType`, `SurfacedMemory` type definitions |
 | `src/mcp/tools.ts` | Zod schemas for all memory request/response types |
 | `src/mcp/tools/slice.ts` | Automatic memory surfacing in `slice.build` |
-| `src/indexer/indexer.ts` | Staleness flagging + file import during indexing |
+| `src/indexer/indexer-memory.ts` | Staleness flagging + file import during indexing |
+| `src/mcp/hooks/memory-hint.ts` | Memory hint hook system |
 | `src/gateway/schemas.ts` | Gateway action schemas for memory tools |
 | `src/gateway/router.ts` | Gateway routing for memory actions |
 | `src/gateway/legacy.ts` | Legacy flat tool registration for memory tools |

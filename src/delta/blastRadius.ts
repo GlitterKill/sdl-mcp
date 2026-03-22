@@ -278,7 +278,7 @@ export async function computeBlastRadius(
 export function rankDependents(
   dependents: BlastRadiusItem[],
 ): BlastRadiusItem[] {
-  return dependents.sort((a, b) => b.rank - a.rank);
+  return dependents.sort((a, b) => b.rank - a.rank || a.symbolId.localeCompare(b.symbolId));
 }
 
 export function mergeBlastRadiusWithDiagnostics(

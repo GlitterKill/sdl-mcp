@@ -107,9 +107,11 @@ flowchart TD
 {
   "liveIndex": {
     "enabled": true,          // master switch
-    "debounceMs": 300,        // debounce between buffer events
-    "idleCheckpointMs": 5000, // auto-checkpoint after idle period
-    "maxDraftFiles": 50       // max concurrent draft files
+    "debounceMs": 75,         // debounce between buffer events (25-5000, default: 75)
+    "idleCheckpointMs": 15000,// auto-checkpoint after idle period (default: 15s)
+    "maxDraftFiles": 200,     // max concurrent draft files (default: 200)
+    "reconcileConcurrency": 1,// concurrent overlay→DB merge jobs (1-8)
+    "clusterRefreshThreshold": 25 // reconciled symbols before cluster refresh
   }
 }
 ```

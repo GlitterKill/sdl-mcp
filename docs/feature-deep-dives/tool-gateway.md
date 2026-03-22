@@ -52,7 +52,7 @@ This matters because:
 │  sdl.agent.feedback   sdl.agent.feedback.query       │
 │  sdl.runtime.execute  sdl.memory.store               │
 │  sdl.memory.query     sdl.memory.remove              │
-│  sdl.memory.surface  sdl.manual                      │
+│  sdl.memory.surface  sdl.usage.stats                  │
 │                                                      │
 │            30 tools × full JSON schema               │
 │               ~4,000+ tokens total                   │
@@ -67,7 +67,8 @@ This matters because:
 │                                                      │
 │  sdl.query   → 9 actions (symbol.*, slice.*, etc.)    │
 │  sdl.code    → 3 actions (code.*)                     │
-│  sdl.repo    → 6 actions (repo.*, index.*, policy.*)  │
+│  sdl.repo    → 7 actions (repo.*, index.*, policy.*,  │
+│                             usage.stats)              │
 │  sdl.agent   → 11 actions (agent.*, buffer.*, runtime,│
 │                             memory.*)                  │
 │                                                      │
@@ -90,7 +91,7 @@ flowchart LR
         GW{"Which gateway<br/>tool?"}
         Q["sdl.query<br/>(9 actions)"]
         C["sdl.code<br/>(3 actions)"]
-        R["sdl.repo<br/>(6 actions)"]
+        R["sdl.repo<br/>(7 actions)"]
         A["sdl.agent<br/>(12 actions)"]
     end
 

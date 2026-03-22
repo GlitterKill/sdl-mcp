@@ -97,7 +97,7 @@ export function parseFile(
   }
 }
 
-export function queryTree(tree: Parser.Tree, query: string): any[] {
+export function queryTree(tree: Parser.Tree, query: string): Parser.QueryMatch[] {
   try {
     const tsQuery = createQuery("typescript", query);
     if (!tsQuery) {

@@ -281,8 +281,11 @@ export class MCPServer {
             for (const hook of this.postDispatchHooks) {
               try {
                 await hook(request.params.name, parseResult.data, finalResult, toolContext);
-              } catch {
-                // Post-dispatch hooks are non-critical
+              } catch (err) {
+                process.stderr.write(
+                  `[sdl-mcp] Post-dispatch hook failed for tool ${request.params.name}: ${err instanceof Error ? err.message : String(err)}
+`,
+                );
               }
             }
 

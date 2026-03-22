@@ -48,12 +48,13 @@ SDL-MCP exposes 30 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway 
 | | `sdl.agent.feedback` | Record which symbols were useful/missing after a task; supports `taskTags` |
 | | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics |
 | **Context** | `sdl.context.summary` | Generate token-bounded summary for non-MCP contexts (clipboard, markdown, JSON) |
-| **Runtime** | `sdl.runtime.execute` | Sandboxed subprocess execution (`node`, `python`, `shell`) with structured output |
+| **Runtime** | `sdl.runtime.execute` | Sandboxed subprocess execution (16 runtimes including `node`, `typescript`, `python`, `shell`, `go`, `rust`, etc.) |
 | **Memory** | `sdl.memory.store` | Store or update a development memory with symbol/file links |
 | | `sdl.memory.query` | Search memories by text, type, tags, or linked symbols; `staleOnly` filter |
 | | `sdl.memory.remove` | Soft-delete a memory from graph and optionally from disk |
 | | `sdl.memory.surface` | Auto-surface relevant memories ranked by confidence, recency, and symbol overlap |
 | **Usage** | `sdl.usage.stats` | Get cumulative token usage statistics and savings metrics |
+| **Diagnostics** | `sdl.info` | Unified runtime, config, logging, LadybugDB, and native-addon status |
 | **Code Mode** *(optional)* | `sdl.action.search` | Discover the most relevant SDL actions with optional schema/example metadata |
 | | `sdl.manual` | Return a compact filtered API reference for a queried or explicit action subset |
 | | `sdl.chain` | Execute up to 50 actions in a single round trip with `$N` result piping, transforms, and optional traces |
@@ -197,7 +198,7 @@ Run commands in a repo-scoped subprocess. Requires `runtime.enabled: true` in co
 }
 ```
 
-- **Runtimes**: currently supported runtimes are `"node"`, `"python"`, and `"shell"`.
+- **Runtimes**: 16 supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`. Default allowed: `["node", "python"]`.
 - Use `code` to run inline code or `args` to invoke a file.
 - `queryTerms` extracts only matching lines from output (like a built-in grep).
 - `persistOutput: true` saves full output to an artifact handle for later retrieval.

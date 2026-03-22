@@ -8,23 +8,23 @@
 
 SDL-MCP ships with two indexing engines that can be selected via configuration:
 
-### Native Rust Engine (Optional)
+### Native Rust Engine (Default)
 
-A high-performance, multi-threaded Rust addon compiled via `napi-rs`. It handles pass-1 symbol extraction at near-native speed.
+A high-performance, multi-threaded Rust addon compiled via `napi-rs`. This is the **default engine** (`indexing.engine` defaults to `"rust"`). It handles pass-1 symbol extraction at near-native speed. Falls back to the TypeScript engine automatically if the native addon is unavailable.
 
 - Multi-threaded file parsing
 - ~18MB DLL on Windows
 - Distributed as per-platform npm packages (`sdl-mcp-native`)
 
-### Tree-sitter TypeScript Engine (Default)
+### Tree-sitter TypeScript Engine (Fallback)
 
-A pure Node.js engine using tree-sitter grammars for AST parsing. This is the **default engine** (`indexing.engine` defaults to `"typescript"`). It works everywhere Node.js runs. The Rust addon is automatically used instead when available and configured.
+A pure Node.js engine using tree-sitter grammars for AST parsing. This is the **fallback engine** used when the native Rust addon is unavailable. It works everywhere Node.js runs.
 
-Select via config:
+Select explicitly via config:
 ```jsonc
 {
   "indexing": {
-    "engine": "typescript"  // default; or "rust" if native addon is available
+    "engine": "typescript"  // fallback; default is "rust" (native addon)
   }
 }
 ```
@@ -173,8 +173,8 @@ Every resolved call edge includes a **confidence score** (0.0–1.0), a **resolv
 | C++ | `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx` | Full | Semantic (`#include` chains, namespaces, templates) |
 | PHP | `.php`, `.phtml` | Full | Semantic (namespaces, `use`, FQN resolution) |
 | Rust | `.rs` | Full | Semantic (module tree, `use` paths, trait methods) |
-| Kotlin | `.kt`, `.kts` | Partial | Semantic (packages, imports, extension functions) |
-| Shell | `.sh`, `.bash`, `.zsh` | Basic | Semantic (`source` statements, directory scoping) |
+| Kotlin | `.kt`, `.kts` | Full | Semantic (packages, imports, extension functions, companion objects) |
+| Shell | `.sh`, `.bash`, `.zsh` | Full | Semantic (`source` statements, directory scoping) |
 
 ---
 

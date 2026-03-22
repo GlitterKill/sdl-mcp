@@ -574,6 +574,7 @@ Returns a deterministic "table of contents" for a symbol or file — signatures 
 | `maxLines` | number | No | Maximum lines to return |
 | `maxTokens` | number | No | Maximum tokens to return |
 | `identifiersToFind` | string[] (max 50) | No | Highlight specific identifiers in the skeleton |
+| `skeletonOffset` | number (min: 0) | No | Resume from a previous truncation point (line offset for pagination) |
 
 **Response:**
 
@@ -973,7 +974,7 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | Parameter | Type | Required | Description |
 |:----------|:-----|:---------|:------------|
 | `repoId` | string | Yes | Repository identifier |
-| `runtime` | `"node"` \| `"python"` \| `"shell"` | Yes | Runtime to use |
+| `runtime` | string | Yes | Runtime to use. Supported: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp` |
 | `executable` | string | No | Override the default executable (e.g., `"bun"` instead of `"node"`) |
 | `args` | string[] | No | Arguments to pass to the executable |
 | `code` | string | No | Inline code to execute (written to temp file). Mutually exclusive with args-only mode. |
@@ -1004,3 +1005,172 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 - `shell` → `bash` (Unix) / `cmd.exe` (Windows)
 
 **Use cases:** Running tests, linters, build scripts, or diagnostic commands within SDL-MCP's governance framework.
+
+---
+
+## 12. Development Memories
+
+### sdl.memory.store
+
+Stores or updates a development memory with optional symbol and file links. Memories persist across sessions and are automatically surfaced in relevant slices.
+
+**What it does:** Creates a `Memory` node in the graph database linked to the repository, and optionally to specific symbols and files via `MEMORY_OF` and `MEMORY_OF_FILE` edges. Also writes a backing `.sdl-memory/*.md` file for version control. Content-addressed deduplication prevents duplicate memories.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `repoId` | string | Yes | Repository identifier |
+| `type` | `"decision"` \| `"bugfix"` \| `"task_context"` | Yes | Memory type |
+| `title` | string (1-120 chars) | Yes | Short, scannable title |
+| `content` | string (1-50,000 chars) | Yes | Memory content (include the *why*, not just the *what*) |
+| `tags` | string[] (max 20) | No | Categorization tags |
+| `confidence` | number (0-1) | No | Confidence score (0.9 for verified facts, 0.7 for hypotheses) |
+| `symbolIds` | string[] (max 100) | No | Link memory to specific symbols |
+| `fileRelPaths` | string[] (max 100) | No | Link memory to specific files |
+| `memoryId` | string | No | Existing memory ID for upsert |
+
+**Response:** `{ ok, memoryId, created, deduplicated? }`
+
+---
+
+### sdl.memory.query
+
+Searches and filters memories by text, type, tags, or linked symbols.
+
+**What it does:** Queries the graph for memories matching the given criteria. Supports full-text search across title and content, filtering by type/tags/symbols, staleness detection, and sorting.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `repoId` | string | Yes | Repository identifier |
+| `query` | string (max 1,000) | No | Full-text search query |
+| `types` | string[] | No | Filter by memory types |
+| `tags` | string[] (max 20) | No | Filter by tags |
+| `symbolIds` | string[] (max 100) | No | Filter by linked symbols |
+| `staleOnly` | boolean | No | Return only stale memories (linked symbols changed) |
+| `limit` | number (1-100) | No | Max results |
+| `sortBy` | `"recency"` \| `"confidence"` | No | Sort order |
+
+**Response:** `{ memories, total }`
+
+---
+
+### sdl.memory.remove
+
+Soft-deletes a memory from the graph. Optionally removes the backing `.sdl-memory/*.md` file.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `repoId` | string | Yes | Repository identifier |
+| `memoryId` | string | Yes | Memory ID to remove |
+| `deleteFile` | boolean | No | Also delete the backing markdown file |
+
+**Response:** `{ ok, memoryId, fileDeleted? }`
+
+---
+
+### sdl.memory.surface
+
+Auto-surfaces memories relevant to a set of symbols or task type. Memories are ranked by `confidence × recencyFactor × overlapFactor`.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `repoId` | string | Yes | Repository identifier |
+| `symbolIds` | string[] (max 500) | No | Symbols to find related memories for |
+| `taskType` | string | No | Filter by memory type |
+| `limit` | number (1-50) | No | Max memories to return |
+
+**Response:** `{ memories: SurfacedMemory[], total }` — each memory includes a `score` and `matchedSymbols` field.
+
+---
+
+## 13. Usage Statistics
+
+### sdl.usage.stats
+
+Returns cumulative token usage statistics and savings metrics.
+
+**What it does:** Tracks how many tokens SDL-MCP has saved compared to raw file reads across all tool calls. Reports per-tool breakdowns, compression ratios, and session/historical aggregations.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `repoId` | string | No | Repository identifier (omit for global stats) |
+| `scope` | `"session"` \| `"history"` \| `"both"` | No | Stats scope (default: `"both"`) |
+| `persist` | boolean | No | Whether to persist current session stats |
+| `since` | string | No | ISO timestamp to filter historical stats from |
+| `limit` | number (1-100) | No | Max historical entries to return |
+
+**Response:** Token usage counters, savings estimates, compression ratios, and per-tool breakdowns when available.
+
+---
+
+## 14. Code Mode Tools
+
+### sdl.chain
+
+Executes a chain of SDL-MCP operations in a single round-trip with budget tracking and cross-step result passing.
+
+**What it does:** Takes an array of steps, each calling an action from the API manual or an internal transform (`dataPick`, `dataMap`, `dataFilter`, `dataSort`, `dataTemplate`). Results flow between steps via `$N` references (e.g., `$0.symbols[0].symbolId`). Includes budget tracking, context-ladder validation, cross-step ETag caching, and optional execution tracing.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `repoId` | string | Yes | Repository scope for all steps |
+| `steps` | array (min 1) | Yes | Chain steps: `[{ fn, args? }]` |
+| `budget` | object | No | Budget constraints for the chain |
+| `onError` | `"continue"` \| `"stop"` | No | Error handling mode |
+| `trace` | object | No | Enable execution tracing |
+
+Each step has:
+- `fn`: Action name (e.g., `"symbolSearch"`, `"dataPick"`)
+- `args`: Arguments object (supports `$N` references to previous step results)
+
+**Internal transforms:** `dataPick` (project fields), `dataMap` (project from arrays), `dataFilter` (filter by clauses), `dataSort` (sort by field), `dataTemplate` (render template strings).
+
+**Response:** Array of step results plus budget usage metrics.
+
+---
+
+### sdl.action.search
+
+Searches the SDL action catalog for matching actions. Use this as the first discovery step.
+
+**What it does:** Keyword-searches across all registered SDL actions and returns ranked matches with optional schema summaries and examples.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `query` | string | Yes | Search query |
+| `limit` | number (1-25) | No | Max results |
+| `includeSchemas` | boolean | No | Include parameter schema summaries |
+| `includeExamples` | boolean | No | Include usage examples |
+
+**Response:** `{ actions: ActionMatch[], tokenEstimate }`
+
+---
+
+### sdl.manual
+
+Returns the SDL-MCP API manual — a compact reference listing all available functions, their parameters, and return types. Call once per session to learn the API before using `sdl.chain`.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `query` | string | No | Filter manual to matching actions |
+| `actions` | string[] | No | Specific actions to include |
+| `format` | `"typescript"` \| `"markdown"` \| `"json"` | No | Output format |
+| `includeSchemas` | boolean | No | Include full parameter schemas |
+| `includeExamples` | boolean | No | Include usage examples |
+
+**Response:** `{ manual, tokenEstimate }`

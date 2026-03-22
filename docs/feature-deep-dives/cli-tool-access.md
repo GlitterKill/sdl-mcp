@@ -1,6 +1,6 @@
 # CLI Tool Access
 
-**Access all 30 SDL-MCP tool actions directly from the command line — no MCP server, transport, or SDK required.**
+**Access all 30 gateway-routable SDL-MCP tool actions directly from the command line — no MCP server, transport, or SDK required.**
 
 The `sdl-mcp tool` command invokes MCP tool handlers directly, giving you full access to SDL-MCP's capabilities from shell scripts, CI pipelines, and interactive terminal sessions.
 
@@ -102,6 +102,7 @@ Run `sdl-mcp tool --list` to see all actions grouped by namespace:
 | `index.refresh` | Trigger full or incremental re-indexing |
 | `policy.get` | Read current gating policy |
 | `policy.set` | Update policy configuration |
+| `usage.stats` | Get token usage statistics for session or history |
 
 ### Agent — Agentic + live-edit operations
 

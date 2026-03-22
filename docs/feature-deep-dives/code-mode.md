@@ -2,12 +2,12 @@
 
 **Use SDL-MCP Code Mode to reduce tool-list overhead, collapse multi-step workflows into one round trip, and keep code understanding inside SDL instead of falling back to token-heavy native tools.**
 
-Code Mode now exposes three complementary tools:
+Code Mode exposes three complementary tools plus the always-available diagnostics tool:
 
 - `sdl.action.search` for discovery
-- `sdl.info` remains available alongside Code Mode for environment diagnostics
 - `sdl.manual` for focused reference
 - `sdl.chain` for execution
+- `sdl.info` is always available alongside Code Mode for environment diagnostics
 
 Together they let agents discover the right SDL action, load only the relevant interface details, and execute a full lookup or runtime workflow in one call.
 

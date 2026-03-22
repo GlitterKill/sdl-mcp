@@ -49,7 +49,9 @@ Every request to `sdl.code.needWindow` (raw code, Rung 4) passes through the pol
 | `maxWindowLines` | 180 | Maximum lines per raw code request |
 | `maxWindowTokens` | 1400 | Maximum tokens per raw code request |
 | `requireIdentifiers` | true | Agent must specify what identifiers it expects to find |
-| `allowBreakGlass` | true | Allow emergency override with full audit logging |
+| `allowBreakGlass` | false | Allow emergency override with full audit logging (set to `true` to enable) |
+| `defaultDenyRaw` | true | Default deny for raw code windows — requires proof-of-need (symbol in slice, identifiers provided, reason given) |
+| `budgetCaps` | — | Optional server-side budget defaults: `{ maxCards, maxEstimatedTokens }` |
 
 Adjust via `sdl.policy.set`:
 

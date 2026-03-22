@@ -73,15 +73,13 @@ Use this page as the entry point for SDL-MCP documentation.
 - [Cross-Platform Validation](./cross-platform-validation.md)
 - [Testing Guide](./testing.md)
 - [Release Test Checklist](./release-test.md)
-- [PR Risk / Delta Blast Radius](./feature-deep-dives/delta-blast-radius.md)
-- [Agent Orchestration](./feature-deep-dives/agent-orchestration.md)
 - [Plugin SDK Author Guide](./plugin-sdk-author-guide.md)
 - [Plugin SDK Quick Reference](./plugin-sdk-quick-reference.md)
 - [Plugin SDK Security](./plugin-sdk-security.md)
 
 ## Current Scope Snapshot
 
-- **Version**: 0.9.0
+- **Version**: 0.9.2
 - **Supported languages**: TS, JS, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, Shell (11 adapters, 12 languages)
 - **CLI commands** (13): init, doctor, info, index, serve, export, import, pull, benchmark:ci, summary, health, version, tool
 - **MCP surfaces**:
@@ -100,4 +98,5 @@ Use this page as the entry point for SDL-MCP documentation.
   - Code Mode (optional): adds `sdl.manual` and `sdl.chain`, or can run exclusive with `sdl.action.search`, `sdl.info`, `sdl.manual`, and `sdl.chain`
 - **Semantic features**: optional semantic reranking, LLM-generated symbol summaries (Anthropic/Ollama/mock)
 - **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
-- **Native addon**: Rust via napi-rs for multi-threaded indexing (optional, TS fallback)
+- **Native addon**: Rust via napi-rs for multi-threaded indexing (default engine, TS fallback)
+- **Runtime execution**: 16 supported runtimes (node, typescript, python, shell, ruby, php, perl, r, elixir, go, java, kotlin, rust, c, cpp, csharp)

@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { basename } from "path";
 import type { RuntimeDescriptor, RuntimeDetectionResult } from "./types.js";
 
@@ -233,8 +233,8 @@ export function isExecutableCompatibleWithRuntime(runtime: string, executable: s
 
 function resolveExecutable(name: string): string | undefined {
   try {
-    const cmd = IS_WINDOWS ? `where ${name}` : `which ${name}`;
-    const result = execSync(cmd, { timeout: 5000, encoding: "utf-8" }).trim();
+    const [prog, ...args] = IS_WINDOWS ? ["where", name] : ["which", name];
+    const result = execFileSync(prog, args, { timeout: 5000, encoding: "utf-8" }).trim();
     const firstLine = result.split(/\r?\n/)[0]?.trim();
     return firstLine || undefined;
   } catch {
@@ -244,7 +244,7 @@ function resolveExecutable(name: string): string | undefined {
 
 function getVersion(executable: string, versionFlag: string): string | undefined {
   try {
-    const raw = execSync(`${executable} ${versionFlag}`, {
+    const raw = execFileSync(executable, [versionFlag], {
       timeout: 5000,
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -274,7 +274,7 @@ function createDescriptor(entry: RuntimeTableEntry): RuntimeDescriptor {
       for (const candidate of candidates) {
         const path = resolveExecutable(candidate);
         if (path) {
-          const version = getVersion(candidate, entry.versionFlag);
+          const version = getVersion(path, entry.versionFlag);
           const result: RuntimeDetectionResult = { available: true, version, path };
           setCached(entry.name, result);
           return result;

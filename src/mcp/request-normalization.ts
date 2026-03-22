@@ -1,3 +1,5 @@
+import { logger } from "../util/logger.js";
+
 const FIELD_ALIASES: Record<string, string> = {
   repo: "repoId",
   repo_id: "repoId",
@@ -45,6 +47,12 @@ export function normalizeToolArguments(args: unknown): unknown {
     const normalizedKey = normalizeKey(key);
     if (!(normalizedKey in normalized)) {
       normalized[normalizedKey] = value;
+    } else {
+      logger.warn("Request key collision during normalization", {
+        originalKey: key,
+        normalizedKey,
+        droppedValue: typeof value,
+      });
     }
   }
 

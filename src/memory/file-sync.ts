@@ -8,6 +8,14 @@ import path from "node:path";
 import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
 
+const MEMORY_ID_PATTERN = /^[0-9a-f]{8,64}$/;
+
+function validateMemoryId(memoryId: string): void {
+  if (!MEMORY_ID_PATTERN.test(memoryId)) {
+    throw new Error(`Invalid memoryId format: ${memoryId}. Must be 8-64 lowercase hex characters.`);
+  }
+}
+
 export interface MemoryFileData {
   memoryId: string;
   type: string;
@@ -91,6 +99,7 @@ export async function writeMemoryFile(
   repoRoot: string,
   memory: MemoryFileData,
 ): Promise<string> {
+  validateMemoryId(memory.memoryId);
   const subDir = typeToDir(memory.type);
   const dirPath = path.join(repoRoot, ".sdl-memory", subDir);
   const filePath = path.join(dirPath, `${memory.memoryId}.md`);
@@ -160,6 +169,10 @@ export function parseMemoryFileContent(raw: string): MemoryFileData | null {
   const type = fields.get("type");
   if (!memoryId || !type) {
     logger.warn("Malformed frontmatter: missing memoryId or type");
+    return null;
+  }
+  if (!MEMORY_ID_PATTERN.test(memoryId)) {
+    logger.warn("Malformed frontmatter: invalid memoryId format", { memoryId });
     return null;
   }
 

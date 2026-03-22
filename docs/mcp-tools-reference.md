@@ -101,6 +101,7 @@ Get status for one repository including latest version, indexed files/symbols, t
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `repoId` | `string` | Yes | Repository identifier |
+| `surfaceMemories` | `boolean` | No | Include relevant development memories (default: `true`) |
 
 **Response includes:**
 
@@ -108,6 +109,8 @@ Get status for one repository including latest version, indexed files/symbols, t
 - `healthScore` (0-100), `healthComponents` (freshness, coverage, errorRate, edgeQuality, callResolution), `healthAvailable`
 - `watcherHealth` (nullable) — runtime telemetry: enabled, running, filesWatched, eventsReceived/Processed, errors, queueDepth, restartCount, stale, lastEventAt, lastSuccessfulReindexAt
 - `prefetchStats` — queue depth, hit/waste rates, latency reduction, last run
+- `liveIndexStatus` — live buffer overlay state: enabled, pendingBuffers, dirtyBuffers, parseQueueDepth, checkpointPending, reconcileQueueDepth, etc.
+- `memories` (when `surfaceMemories: true`) — array of relevant development memories auto-surfaced for the repository
 
 **Example:**
 
@@ -199,13 +202,15 @@ Push an editor buffer update into the live draft overlay so symbol/search/slice 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `repoId` | `string` | Yes | Repository identifier |
-| `eventType` | `"open" \| "change" \| "save" \| "close"` | Yes | Buffer lifecycle event |
+| `eventType` | `"open" \| "change" \| "save" \| "close" \| "checkpoint"` | Yes | Buffer lifecycle event |
 | `filePath` | `string` | Yes | Repository-relative file path |
 | `content` | `string` | Yes | Current buffer contents |
 | `language` | `string` | No | Explicit language hint |
 | `version` | `integer` | Yes | Monotonic buffer version |
 | `dirty` | `boolean` | Yes | Whether the buffer has unsaved edits |
 | `timestamp` | `string` | Yes | ISO timestamp for the event |
+| `cursor` | `object` | No | Cursor position (`{ line, character }`) |
+| `selections` | `object[]` | No | Active selections (`[{ start, end }]`) |
 
 **Response includes:**
 
@@ -326,6 +331,8 @@ Fetch a single symbol card by ID or natural reference with ETag support.
 | `symbolId` | `string` | Conditional | Symbol identifier |
 | `symbolRef` | `{ name, file?, kind?, exportedOnly? }` | Conditional | Natural symbol reference. Use this when you know the symbol name and optionally the file or kind. |
 | `ifNoneMatch` | `string` | No | ETag for conditional fetch (returns `notModified` if unchanged) |
+| `minCallConfidence` | `number` | No | Filter call edges below this confidence threshold (0-1) |
+| `includeResolutionMetadata` | `boolean` | No | Include call resolution strategy and provenance in edge data |
 
 Provide exactly one of `symbolId` or `symbolRef`.
 
@@ -366,6 +373,8 @@ Batch fetch up to 100 symbol cards in a single round trip. Prefer this over mult
 | `symbolIds` | `string[]` | Conditional | Array of symbol IDs (1-100) |
 | `symbolRefs` | `Array<{ name, file?, kind?, exportedOnly? }>` | Conditional | Array of natural symbol references (1-100) |
 | `knownEtags` | `Record<string, string>` | No | Map of symbolId to known ETag; matching symbols return `notModified` |
+| `minCallConfidence` | `number` | No | Filter call edges below this confidence threshold (0-1) |
+| `includeResolutionMetadata` | `boolean` | No | Include call resolution strategy and provenance in edge data |
 
 Provide exactly one of `symbolIds` or `symbolRefs`.
 
@@ -456,6 +465,10 @@ Build a task-scoped graph slice. `taskText` alone is sufficient — it triggers 
 | `adaptiveDetail` | `boolean` | No | Enable adaptive detail level selection |
 | `wireFormat` | `"standard" \| "compact"` | No | Wire format (default: compact) |
 | `wireFormatVersion` | `1 \| 2 \| 3` | No | Wire format version (default: 2) |
+| `minCallConfidence` | `number` | No | Filter call edges below this confidence threshold (0-1) |
+| `includeResolutionMetadata` | `boolean` | No | Include call resolution metadata in edge data |
+| `includeMemories` | `boolean` | No | Include related development memories in the response |
+| `memoryLimit` | `integer` | No | Max memories to include (default: 5) |
 
 **Response:** `{ sliceHandle, ledgerVersion, lease, sliceEtag?, slice }` or `{ notModified }`.
 
@@ -612,6 +625,7 @@ Get a skeleton view of code showing signatures, control flow structure, and elid
 | `maxLines` | `integer` | No | Max output lines (min: 1) |
 | `maxTokens` | `integer` | No | Max output tokens (min: 1) |
 | `identifiersToFind` | `string[]` | No | Highlight specific identifiers |
+| `skeletonOffset` | `integer` | No | Resume from a previous truncation point (line offset, min: 0) |
 
 *Either `symbolId` or `file` must be provided.
 
@@ -718,7 +732,7 @@ Fetch the effective policy configuration for a repository.
 
 **Response:** `{ policy: { maxWindowLines, maxWindowTokens, requireIdentifiers, allowBreakGlass } }`
 
-Default policy values: `maxWindowLines: 180`, `maxWindowTokens: 1400`, `requireIdentifiers: true`, `allowBreakGlass: true`.
+Default policy values: `maxWindowLines: 180`, `maxWindowTokens: 1400`, `requireIdentifiers: true`, `allowBreakGlass: false`.
 
 **Example:**
 
@@ -746,7 +760,7 @@ Update policy configuration for a repository. Accepts a partial patch — only s
 | `maxWindowLines` | `integer` | 180 | Max lines per code window |
 | `maxWindowTokens` | `integer` | 1400 | Max tokens per code window |
 | `requireIdentifiers` | `boolean` | true | Require identifiersToFind in needWindow |
-| `allowBreakGlass` | `boolean` | true | Allow break-glass override for denied requests |
+| `allowBreakGlass` | `boolean` | false | Allow break-glass override for denied requests |
 
 **Response:** `{ ok: boolean, repoId: string }`
 
@@ -900,7 +914,7 @@ Run a command in a repo-scoped subprocess. Requires `runtime.enabled: true` in c
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `repoId` | `string` | Yes | Repository identifier |
-| `runtime` | `"node" \| "python" \| "shell"` | Yes | Runtime environment |
+| `runtime` | `string` | Yes | Runtime environment. Supported: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp` |
 | `executable` | `string` | No | Custom executable path |
 | `args` | `string[]` | No | Command arguments (max 100) |
 | `code` | `string` | No | Inline code to execute (max 1 MB) |
@@ -1059,23 +1073,32 @@ Each `SurfacedMemory` includes the memory content plus a `score` field showing t
 
 ### `sdl.usage.stats`
 
-Get cumulative token usage statistics and savings metrics for the current session or a specific repository.
+Get cumulative token usage statistics and savings metrics for the current session and/or historical sessions.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `repoId` | `string` | No | Repository identifier (omit for global stats) |
+| `scope` | `"session" \| "history" \| "both"` | No | Stats scope (default: `"both"`) |
+| `persist` | `boolean` | No | Whether to persist current session stats |
+| `since` | `string` | No | ISO timestamp to filter historical stats from |
+| `limit` | `integer` | No | Max historical entries to return (1-100) |
 
 **Response includes:**
 
 - Token usage counters, savings estimates, and compression ratios
 - Per-tool breakdowns when available
+- Session-scoped and/or historical aggregations depending on `scope`
 
 **Example:**
 
 ```json
 { "repoId": "my-repo" }
+```
+
+```json
+{ "repoId": "my-repo", "scope": "session" }
 ```
 
 ---

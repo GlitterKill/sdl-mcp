@@ -868,5 +868,5 @@ Test with each supported client:
 
 **Tested By:** _______________
 **Date:** _______________
-**Version:** 0.9.0
+**Version:** 0.9.2
 **Result:** PASS / FAIL

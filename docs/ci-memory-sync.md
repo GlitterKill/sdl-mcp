@@ -51,7 +51,7 @@ graph LR
 
 ### Job Dependencies
 
-- `sync-memory` depends on `ci` (only runs after successful CI)
+- `sync-memory` depends on `tests` and `native-build` (only runs after both succeed)
 - `sync-validation` depends on `sync-memory` (only runs after successful sync)
 - Both sync jobs only run on `push` to `refs/heads/main`
 
@@ -85,7 +85,7 @@ The CI workflow is configured in `.github/workflows/ci.yml`:
 sync-memory:
   name: Sync Indexed Memory (${{ matrix.os }}, Node ${{ matrix.node-version }})
   runs-on: ${{ matrix.os }}
-  needs: ci
+  needs: [tests, native-build]
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   strategy:
     matrix:
@@ -95,7 +95,7 @@ sync-memory:
 
 **Key Settings:**
 
-- `needs: ci`: Only runs after successful CI job
+- `needs: [tests, native-build]`: Only runs after both jobs succeed
 - `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`: Only on main merges
 - `matrix.os: [ubuntu-latest, windows-latest]`: Cross-platform validation
 - `matrix.node-version: [20.x]`: Single Node.js version for consistency

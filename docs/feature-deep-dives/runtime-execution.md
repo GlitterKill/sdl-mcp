@@ -12,15 +12,37 @@ This is the preferred execution path for SDL-enforced agent workflows. In Code M
 
 ---
 
-## Supported Interpreted Runtimes
+## Supported Runtimes (16)
 
 SDL-MCP is Windows-first but supports all major platforms (Windows, Linux, macOS). The following runtimes are supported:
 
+### Interpreted Runtimes
+
 | Runtime | Typical executable | Common uses |
 |:--------|:-------------------|:------------|
-| `node` | `node` or `bun` | JavaScript/TypeScript tests, scripts, build tooling |
+| `node` | `node` or `bun` | JavaScript tests, scripts, build tooling |
+| `typescript` | `tsx` / `ts-node` | TypeScript scripts without pre-compilation |
 | `python` | `python3` / `python` | Tests, scripts, analysis, automation |
-| `shell` | `bash` / `sh` / `cmd.exe` / `powershell` | General command execution when a shell is actually needed |
+| `shell` | `bash` / `sh` / `cmd.exe` / `powershell` | General command execution |
+| `ruby` | `ruby` | Ruby scripts and tests |
+| `php` | `php` | PHP scripts |
+| `perl` | `perl` | Perl scripts |
+| `r` | `Rscript` | R scripts and analysis |
+| `elixir` | `elixir` | Elixir scripts |
+
+### Compiled Runtimes
+
+| Runtime | Build step | Common uses |
+|:--------|:-----------|:------------|
+| `go` | `go run` | Go programs |
+| `java` | `javac` then `java` | Java programs |
+| `kotlin` | `kotlinc` then `kotlin` | Kotlin programs |
+| `rust` | `rustc` then execute | Rust programs |
+| `c` | `gcc` / `cl` then execute | C programs |
+| `cpp` | `g++` / `cl` then execute | C++ programs |
+| `csharp` | `dotnet-script` / `csc` | C# scripts/programs |
+
+Compiled runtimes use a compile-then-execute workflow: SDL-MCP compiles the source, runs the resulting binary, then cleans up.
 
 ---
 
@@ -96,8 +118,9 @@ This keeps command execution consistent with SDL policy rather than depending on
 
 Example uses:
 
-- `node` for JavaScript/TypeScript tests and scripts
-- `python` for test helpers and analysis
+- `node` / `typescript` for JavaScript/TypeScript tests and scripts
+- `python` for test helpers, analysis, and automation
+- `go`, `rust`, `java`, `kotlin` for compiled language programs
 - `shell` only when a shell wrapper is the right abstraction
 
 ---
@@ -108,12 +131,18 @@ Example uses:
 {
   "runtime": {
     "enabled": true,
+    // Default: ["node", "python"]. Add more as needed from the 16 supported runtimes.
     "allowedRuntimes": ["node", "python", "shell"],
     "maxDurationMs": 30000,
     "maxConcurrentJobs": 2,
     "maxStdoutBytes": 1048576,
     "maxStderrBytes": 262144,
-    "maxArtifactBytes": 10485760
+    "maxArtifactBytes": 10485760,
+    "artifactTtlHours": 24,
+    // Whitelist additional executables beyond the runtime defaults
+    "allowedExecutables": [],
+    // Environment variables passed through to subprocesses
+    "envAllowlist": ["NODE_ENV", "DATABASE_URL"]
   }
 }
 ```

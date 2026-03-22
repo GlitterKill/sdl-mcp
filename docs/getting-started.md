@@ -240,7 +240,9 @@ The HTTP server includes a built-in graph visualization UI:
 
 ## Optional: Switch to TypeScript Indexer
 
-SDL-MCP ships with a native Rust indexer as the default engine. It handles pass-1 symbol extraction with multi-threaded performance. If you prefer a pure Node.js setup with zero native dependencies, you can switch to the TypeScript engine:
+SDL-MCP defaults to the native Rust indexer for pass-1 symbol extraction with multi-threaded performance. If the Rust addon is missing at startup (e.g., unsupported platform), SDL-MCP falls back to the TypeScript engine automatically.
+
+If you prefer a pure Node.js setup with zero native dependencies, you can explicitly switch to the TypeScript engine:
 
 ```json
 {
@@ -252,21 +254,14 @@ SDL-MCP ships with a native Rust indexer as the default engine. It handles pass-
 
 The TypeScript engine uses tree-sitter grammars for AST parsing and works everywhere Node.js runs. It's slower than the Rust engine but has no native build requirements.
 
-> If the Rust addon is missing at startup (e.g., unsupported platform), SDL-MCP falls back to the TypeScript engine automatically. See [Configuration Reference](./configuration-reference.md#native-rust-engine) for details.
+See [Configuration Reference](./configuration-reference.md#native-rust-engine) for details.
 
-## Optional: Enable Semantic Search and Prefetch
+## Optional: Enable Prefetch
 
-Add these sections to your config (or update existing values):
+Semantic search is enabled by default with the `local` ONNX embedding provider. To also enable predictive background warming of likely-needed results:
 
 ```json
 {
-  "semantic": {
-    "enabled": true,
-    "alpha": 0.6,
-    "provider": "local",
-    "model": "all-MiniLM-L6-v2",
-    "generateSummaries": false
-  },
   "prefetch": {
     "enabled": true,
     "maxBudgetPercent": 20,
@@ -277,8 +272,9 @@ Add these sections to your config (or update existing values):
 
 Notes:
 
-- Set `semantic.provider` to `local` to use optional ONNX runtime (`onnxruntime-node`) for offline reranking.
+- Semantic search (`semantic.enabled`) is `true` by default with `provider: "local"` using ONNX runtime.
 - Keep `generateSummaries` disabled until you validate summary quality for your repository.
+- Prefetch is disabled by default; enable it for long-running `serve` sessions to pre-warm results.
 - Prefetch stats are visible in `sdl.repo.status` under `prefetchStats`.
 
 ## Optional: Enable LLM-Generated Summaries

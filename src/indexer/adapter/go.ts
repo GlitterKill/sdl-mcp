@@ -585,7 +585,7 @@ function extractResults(node: SyntaxNode): string[] {
         for (const paramChild of child.children) {
           if (paramChild.type === "parameter_declaration") {
             const typeNode = paramChild.children.find(
-              (c: any) => c.type !== "identifier",
+              (c: SyntaxNode) => c.type !== "identifier",
             );
             if (typeNode) {
               results.push(typeNode.text);

@@ -489,7 +489,7 @@
         "model": {
           "type": "string",
           "enum": ["all-MiniLM-L6-v2", "nomic-embed-text-v1.5"],
-          "default": "all-MiniLM-L6-v2"
+          "default": "nomic-embed-text-v1.5"
         },
         "modelCacheDir": {
           "type": "string",
@@ -581,7 +581,7 @@
         "enabled": true,
         "alpha": 0.6,
         "provider": "local",
-        "model": "all-MiniLM-L6-v2",
+        "model": "nomic-embed-text-v1.5",
         "generateSummaries": false,
         "summaryModel": "claude-haiku-4-5-20251001",
         "summaryMaxConcurrency": 5,

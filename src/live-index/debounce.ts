@@ -7,7 +7,7 @@ type PendingJob<T> = {
   timer: ReturnType<typeof setTimeout>;
   completion: Promise<void>;
   resolveCompletion: () => void;
-  rejectCompletion: (err: any) => void;
+  rejectCompletion: (err: unknown) => void;
   payload: T;
   alreadyRun: boolean;
 };
@@ -26,7 +26,7 @@ export function createDebouncedJobScheduler<T>(options: SchedulerOptions<T>) {
     }
 
     let resolveCompletion: () => void = () => undefined;
-    let rejectCompletion: (err: any) => void = () => undefined;
+    let rejectCompletion: (err: unknown) => void = () => undefined;
     const completion = new Promise<void>((resolve, reject) => {
       resolveCompletion = resolve;
       rejectCompletion = reject;
