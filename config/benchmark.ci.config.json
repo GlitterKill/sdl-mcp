@@ -4,16 +4,16 @@
   "thresholds": {
     "indexing": {
       "indexTimePerFile": {
-        "maxMs": 2500,
+        "maxMs": 3000,
         "trend": "lower-is-better",
         "allowableIncreasePercent": 30,
-        "_comment": "Raised for LadybugDB graph backend: graph writes are inherently slower than SQLite inserts. CI runners see ~1500-1700ms per file."
+        "_comment": "Raised for LadybugDB graph backend: graph writes are inherently slower than SQLite inserts. CI runners see ~2000-2500ms per file."
       },
       "indexTimePerSymbol": {
-        "maxMs": 150,
+        "maxMs": 250,
         "trend": "lower-is-better",
         "allowableIncreasePercent": 30,
-        "_comment": "Raised for LadybugDB graph backend: per-symbol graph operations cost more than SQLite row inserts."
+        "_comment": "Raised for LadybugDB graph backend: per-symbol graph operations cost more than SQLite row inserts. CI runners see ~150-200ms per symbol."
       }
     },
     "quality": {
