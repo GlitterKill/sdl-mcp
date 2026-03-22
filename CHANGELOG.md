@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.2] - 2026-03-21
+## [0.9.1] - 2026-03-20
 
 ### Added
 
@@ -16,26 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Sends concise text summaries to the user (e.g., `symbol.search "foo" → 5 results`)
   - JSON responses remain unchanged for the LLM
 - `logging` capability declared in MCP Server capabilities
+- Unified runtime diagnostics via CLI `sdl-mcp info` and MCP `sdl.info`
+- `prepare-release` and `inspector` npm workflows for release preflight and MCP inspection
+- Performance cache for repo overview with singleflight deduplication (5s TTL)
 
 ### Changed
 
 - `renderSessionSummary` now skips lifetime section when no lifetime data exists (avoids misleading zeros when DB is unavailable)
 - Session-scope usage stats now fetch lifetime data from LadybugDB for combined summary display
 - Usage stats `formattedSummary` is sent as MCP notification to user and stripped from tool response (reduces unnecessary LLM context)
-
-### Removed
-
-- `renderTaskSummary` function (redundant with `renderSessionSummary`)
-
-## [0.9.1] - 2026-03-20
-
-### Added
-
-- Unified runtime diagnostics via CLI `sdl-mcp info` and MCP `sdl.info`
-- `prepare-release` and `inspector` npm workflows for release preflight and MCP inspection
-
-### Changed
-
+- Refactored pass2 edge builder into focused sub-modules (`enclosing-symbol`, `symbol-mapping`, `target-selection`, `unresolved-imports`)
 - MCP tool registration now publishes human-friendly titles, version-stamped descriptions, and shared request normalization across flat, gateway, and CLI tool-dispatch surfaces
 - Gateway `tools/list` schemas now preserve action-specific fields, descriptions, and defaults instead of collapsing to a bare envelope
 - Logging is now file-first with `SDL_LOG_FILE`, `SDL_CONSOLE_LOGGING`, temp-path fallback, and explicit shutdown flushing
@@ -43,9 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cypher query bug: pre-compute word-boundary search strings on JS side to avoid LadybugDB expression evaluation issues in CASE expressions
+- Cypher query bug: ORDER BY in memory queries now references projected aliases instead of qualified node properties
 - Native platform package versions are synchronized with the root `sdl-mcp` release version
 - `prepare-release` now launches npm subcommands correctly on Windows
 - Release preflight packaging and stdio smoke coverage now validate the new diagnostics and tool registration surfaces
+
+### Removed
+
+- `renderTaskSummary` function (redundant with `renderSessionSummary`)
 
 ## [0.9.0] - 2026-03-17
 

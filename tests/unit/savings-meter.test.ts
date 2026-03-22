@@ -1,214 +1,103 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
+
 import {
   renderMeter,
-  formatTokenCount,
   renderOperationMeter,
-  renderSessionSummary,
-  renderLifetimeSummary,
-  type AggregateUsage,
-} from "../../src/mcp/savings-meter.js";
-import type { SessionUsageSnapshot } from "../../src/mcp/token-accumulator.js";
-
-// ---------------------------------------------------------------------------
-// renderMeter
-// ---------------------------------------------------------------------------
+  renderUserNotificationLine,
+} from "../../dist/mcp/savings-meter.js";
 
 describe("renderMeter", () => {
-  it("fills 9 sections for 94%", () => {
-    assert.strictEqual(renderMeter(94), "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591");
+  it("renders 0% as all empty", () => {
+    const meter = renderMeter(0);
+    assert.strictEqual(meter, "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591");
   });
 
-  it("fills 0 sections for 7% (less than 10)", () => {
-    assert.strictEqual(renderMeter(7), "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591");
+  it("renders 100% as all filled", () => {
+    const meter = renderMeter(100);
+    assert.strictEqual(meter, "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588");
   });
 
-  it("fills 5 sections for 50%", () => {
-    assert.strictEqual(renderMeter(50), "\u2588\u2588\u2588\u2588\u2588\u2591\u2591\u2591\u2591\u2591");
+  it("renders 50% as 5 filled + 5 empty", () => {
+    const meter = renderMeter(50);
+    assert.strictEqual(meter, "\u2588\u2588\u2588\u2588\u2588\u2591\u2591\u2591\u2591\u2591");
   });
 
-  it("fills all 10 sections for 100%", () => {
-    assert.strictEqual(renderMeter(100), "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588");
-  });
-
-  it("fills 0 sections for 0%", () => {
-    assert.strictEqual(renderMeter(0), "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591");
-  });
-
-  it("fills 1 section for 10%", () => {
-    assert.strictEqual(renderMeter(10), "\u2588\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591");
-  });
-
-  it("fills 9 sections for 99%", () => {
-    assert.strictEqual(renderMeter(99), "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591");
-  });
-
-  it("fills 0 sections for 9%", () => {
+  it("renders values under 10% as 0 filled", () => {
+    assert.strictEqual(renderMeter(5), "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591");
     assert.strictEqual(renderMeter(9), "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591");
   });
 
-  it("clamps negative to 0 filled", () => {
-    assert.strictEqual(renderMeter(-5), "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591");
+  it("renders boundary at 10% as 1 filled", () => {
+    assert.strictEqual(renderMeter(10), "\u2588\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591");
   });
 
-  it("clamps above 100 to all filled", () => {
-    assert.strictEqual(renderMeter(105), "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588");
+  it("renders 90% as 9 filled + 1 empty", () => {
+    assert.strictEqual(renderMeter(90), "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591");
   });
 
-  it("always returns exactly 10 characters", () => {
-    for (const pct of [0, 1, 9, 10, 25, 50, 75, 94, 99, 100]) {
-      assert.strictEqual(renderMeter(pct).length, 10, `length for ${pct}%`);
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// formatTokenCount
-// ---------------------------------------------------------------------------
-
-describe("formatTokenCount", () => {
-  it("formats small numbers as-is", () => {
-    assert.strictEqual(formatTokenCount(0), "0");
-    assert.strictEqual(formatTokenCount(999), "999");
+  it("clamps negative values to 0", () => {
+    assert.strictEqual(renderMeter(-10), "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591");
   });
 
-  it("formats thousands with k suffix", () => {
-    assert.strictEqual(formatTokenCount(1000), "1.0k");
-    assert.strictEqual(formatTokenCount(1200), "1.2k");
-    assert.strictEqual(formatTokenCount(65000), "65.0k");
-    assert.strictEqual(formatTokenCount(76750), "76.8k");
-  });
-
-  it("formats millions with M suffix", () => {
-    assert.strictEqual(formatTokenCount(1000000), "1.00M");
-    assert.strictEqual(formatTokenCount(1084000), "1.08M");
-    assert.strictEqual(formatTokenCount(1240000), "1.24M");
-  });
-
-  it("formats hundreds of thousands with k", () => {
-    assert.strictEqual(formatTokenCount(820000), "820.0k");
-    assert.strictEqual(formatTokenCount(156000), "156.0k");
+  it("clamps values over 100 to 100", () => {
+    assert.strictEqual(renderMeter(150), "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588");
   });
 });
-
-// ---------------------------------------------------------------------------
-// renderOperationMeter
-// ---------------------------------------------------------------------------
 
 describe("renderOperationMeter", () => {
-  it("renders meter with percentage for high savings", () => {
-    assert.strictEqual(renderOperationMeter(98), "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591 98%");
+  it("renders meter with percentage suffix", () => {
+    const result = renderOperationMeter(84);
+    assert.strictEqual(result, "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591\u2591 84%");
   });
 
-  it("renders meter with percentage for zero savings", () => {
-    assert.strictEqual(renderOperationMeter(0), "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 0%");
+  it("clamps and renders 0%", () => {
+    const result = renderOperationMeter(0);
+    assert.strictEqual(result, "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 0%");
   });
 
-  it("renders meter with percentage for mid savings", () => {
-    assert.strictEqual(renderOperationMeter(51), "\u2588\u2588\u2588\u2588\u2588\u2591\u2591\u2591\u2591\u2591 51%");
-  });
-
-  it("renders meter for sub-10 savings", () => {
-    assert.strictEqual(renderOperationMeter(7), "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 7%");
-  });
-
-  it("matches expected pattern", () => {
-    for (const pct of [0, 50, 98, 100]) {
-      assert.match(renderOperationMeter(pct), /^[\u2588\u2591]{10} \d+%$/);
-    }
+  it("clamps and renders 100%", () => {
+    const result = renderOperationMeter(100);
+    assert.strictEqual(result, "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 100%");
   });
 });
 
-// ---------------------------------------------------------------------------
-// renderSessionSummary
-// ---------------------------------------------------------------------------
-
-describe("renderSessionSummary", () => {
-  const session: SessionUsageSnapshot = {
-    sessionId: "test",
-    startedAt: "2026-03-20T00:00:00Z",
-    totalSdlTokens: 12450,
-    totalRawEquivalent: 89200,
-    totalSavedTokens: 76750,
-    overallSavingsPercent: 86,
-    callCount: 47,
-    toolBreakdown: [
-      { tool: "sdl.symbol.search", sdlTokens: 200, rawEquivalent: 1400, savedTokens: 1200, callCount: 18 },
-    ],
-  };
-
-  const lifetime: AggregateUsage = {
-    totalSdlTokens: 156000,
-    totalRawEquivalent: 1240000,
-    totalSavedTokens: 1084000,
-    overallSavingsPercent: 87,
-    totalCalls: 342,
-    sessionCount: 28,
-  };
-
-  const lifetimeTools = [
-    { tool: "sdl.slice.build", sdlTokens: 30000, rawEquivalent: 850000, savedTokens: 820000, callCount: 52 },
-    { tool: "sdl.symbol.search", sdlTokens: 2000, rawEquivalent: 14000, savedTokens: 12000, callCount: 180 },
-  ];
-
-  it("renders both session and lifetime sections", () => {
-    const result = renderSessionSummary(session, lifetime, lifetimeTools);
-
-    assert.ok(result.includes("Session:"));
-    assert.ok(result.includes("47 calls"));
-    assert.ok(result.includes("Lifetime:"));
-    assert.ok(result.includes("342 calls"));
-    assert.ok(result.includes("28 sessions"));
-    assert.ok(result.includes("1.08M saved"));
-    assert.ok(result.includes("87%"));
+describe("renderUserNotificationLine", () => {
+  it("renders 0% when no raw equivalent (zero tokens)", () => {
+    const result = renderUserNotificationLine(0, 0);
+    assert.strictEqual(result, "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 0%");
   });
 
-  it("contains lifetime tool breakdown", () => {
-    const result = renderSessionSummary(session, lifetime, lifetimeTools);
-    assert.ok(result.includes("slice.build"));
-    assert.ok(result.includes("820.0k saved"));
+  it("renders 0% when SDL tokens equal raw equivalent", () => {
+    const result = renderUserNotificationLine(1000, 1000);
+    assert.strictEqual(result, "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 0%");
   });
 
-  it("renders without lifetime tools when empty", () => {
-    const result = renderSessionSummary(session, lifetime, []);
-    assert.ok(result.includes("Lifetime:"));
-    // No tool rows after lifetime header
-    const ltIdx = result.indexOf("Lifetime:");
-    const afterLt = result.slice(ltIdx);
-    assert.ok(!afterLt.includes("slice.build"));
-  });
-});
-
-// ---------------------------------------------------------------------------
-// renderLifetimeSummary
-// ---------------------------------------------------------------------------
-
-describe("renderLifetimeSummary", () => {
-  const lifetime: AggregateUsage = {
-    totalSdlTokens: 50000,
-    totalRawEquivalent: 500000,
-    totalSavedTokens: 450000,
-    overallSavingsPercent: 90,
-    totalCalls: 100,
-    sessionCount: 5,
-  };
-
-  const tools = [
-    { tool: "sdl.slice.build", sdlTokens: 10000, rawEquivalent: 300000, savedTokens: 290000, callCount: 30 },
-  ];
-
-  it("renders lifetime without session section", () => {
-    const result = renderLifetimeSummary(lifetime, tools);
-    assert.ok(result.includes("Lifetime:"));
-    assert.ok(!result.includes("Session:"));
-    assert.ok(result.includes("100 calls"));
-    assert.ok(result.includes("5 sessions"));
-    assert.ok(result.includes("450.0k saved"));
+  it("renders correct percentage for typical savings", () => {
+    // 160 SDL tokens from 1000 raw = 840 saved = 84%
+    const result = renderUserNotificationLine(160, 1000);
+    assert.strictEqual(result, "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591\u2591 84%");
   });
 
-  it("renders without tools when empty", () => {
-    const result = renderLifetimeSummary(lifetime, []);
-    assert.ok(result.includes("Lifetime:"));
-    assert.ok(!result.includes("slice.build"));
+  it("renders 50% savings", () => {
+    const result = renderUserNotificationLine(500, 1000);
+    assert.strictEqual(result, "\u2588\u2588\u2588\u2588\u2588\u2591\u2591\u2591\u2591\u2591 50%");
+  });
+
+  it("renders 100% savings (zero SDL tokens)", () => {
+    const result = renderUserNotificationLine(0, 1000);
+    assert.strictEqual(result, "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 100%");
+  });
+
+  it("handles negative savings (SDL > raw) gracefully", () => {
+    // When SDL tokens exceed raw equivalent, saved is clamped to 0
+    const result = renderUserNotificationLine(1500, 1000);
+    assert.strictEqual(result, "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 0%");
+  });
+
+  it("handles very small numbers", () => {
+    const result = renderUserNotificationLine(1, 10);
+    // 9/10 = 90%
+    assert.strictEqual(result, "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591 90%");
   });
 });

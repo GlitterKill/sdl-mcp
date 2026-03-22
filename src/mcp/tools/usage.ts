@@ -25,6 +25,46 @@ import {
 import { ValidationError, DatabaseError } from "../errors.js";
 import { ZodError } from "zod";
 
+
+const EMPTY_AGGREGATE: AggregateUsage = {
+  totalSdlTokens: 0,
+  totalRawEquivalent: 0,
+  totalSavedTokens: 0,
+  overallSavingsPercent: 0,
+  totalCalls: 0,
+  sessionCount: 0,
+};
+
+function toAggregateUsage(aggregate: Record<string, number>): AggregateUsage {
+  return {
+    totalSdlTokens: aggregate.totalSdlTokens,
+    totalRawEquivalent: aggregate.totalRawEquivalent,
+    totalSavedTokens: aggregate.totalSavedTokens,
+    overallSavingsPercent: aggregate.overallSavingsPercent,
+    totalCalls: aggregate.totalCalls,
+    sessionCount: aggregate.sessionCount,
+  };
+}
+
+async function fetchLifetimeAggregate(
+  repoId: string | undefined,
+): Promise<{ ltAggregate: AggregateUsage; allToolEntries: import("../token-accumulator.js").ToolUsageEntry[] }> {
+  try {
+    const conn = await getLadybugConn();
+    const aggregate = await getAggregateUsage(conn, { repoId });
+    const snapshots = await getUsageSnapshots(conn, { repoId, limit: 100 });
+    const allToolEntries = aggregateToolBreakdowns(
+      snapshots.map((s) => s.toolBreakdownJson),
+    );
+    return { ltAggregate: toAggregateUsage(aggregate), allToolEntries };
+  } catch {
+    process.stderr.write(
+      "[sdl-mcp] Usage stats: could not fetch lifetime data from LadybugDB\n",
+    );
+    return { ltAggregate: EMPTY_AGGREGATE, allToolEntries: [] };
+  }
+}
+
 export async function handleUsageStats(
   args: unknown,
 ): Promise<UsageStatsResponse> {
@@ -107,14 +147,7 @@ export async function handleUsageStats(
     };
 
     // Build formatted summary for history-aware scopes
-    const ltAggregate: AggregateUsage = {
-      totalSdlTokens: aggregate.totalSdlTokens,
-      totalRawEquivalent: aggregate.totalRawEquivalent,
-      totalSavedTokens: aggregate.totalSavedTokens,
-      overallSavingsPercent: aggregate.overallSavingsPercent,
-      totalCalls: aggregate.totalCalls,
-      sessionCount: aggregate.sessionCount,
-    };
+    const ltAggregate: AggregateUsage = toAggregateUsage(aggregate);
 
     if (request.scope === "both" && response.session) {
       response.formattedSummary = renderSessionSummary(
@@ -132,36 +165,12 @@ export async function handleUsageStats(
 
   // Session-only: still fetch lifetime for the combined summary
   if (request.scope === "session" && response.session) {
-    try {
-      const conn = await getLadybugConn();
-      const aggregate = await getAggregateUsage(conn, { repoId: request.repoId });
-      const snapshots = await getUsageSnapshots(conn, { repoId: request.repoId, limit: 100 });
-      const allToolEntries = aggregateToolBreakdowns(snapshots.map((s) => s.toolBreakdownJson));
-      const ltAggregate: AggregateUsage = {
-        totalSdlTokens: aggregate.totalSdlTokens,
-        totalRawEquivalent: aggregate.totalRawEquivalent,
-        totalSavedTokens: aggregate.totalSavedTokens,
-        overallSavingsPercent: aggregate.overallSavingsPercent,
-        totalCalls: aggregate.totalCalls,
-        sessionCount: aggregate.sessionCount,
-      };
-      response.formattedSummary = renderSessionSummary(
-        response.session,
-        ltAggregate,
-        allToolEntries,
-      );
-    } catch {
-      // Fallback: session-only without lifetime (DB unavailable)
-      process.stderr.write(
-        "[sdl-mcp] Usage stats: could not fetch lifetime data from LadybugDB\n",
-      );
-      // Render session section only — omit lifetime to avoid showing misleading zeros
-      response.formattedSummary = renderSessionSummary(
-        response.session,
-        { totalSdlTokens: 0, totalRawEquivalent: 0, totalSavedTokens: 0, overallSavingsPercent: 0, totalCalls: 0, sessionCount: 0 },
-        [],
-      );
-    }
+    const { ltAggregate, allToolEntries } = await fetchLifetimeAggregate(request.repoId);
+    response.formattedSummary = renderSessionSummary(
+      response.session,
+      ltAggregate,
+      allToolEntries,
+    );
   }
 
   return response;

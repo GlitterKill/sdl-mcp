@@ -25,6 +25,15 @@ function tok(n: number): string {
   return (n / 1_000_000).toFixed(2) + "M";
 }
 
+function safeRange(obj: unknown): { startLine?: number; endLine?: number } | undefined {
+  if (!obj || typeof obj !== "object") return undefined;
+  const r = obj as Record<string, unknown>;
+  return {
+    startLine: typeof r.startLine === "number" ? r.startLine : undefined,
+    endLine: typeof r.endLine === "number" ? r.endLine : undefined,
+  };
+}
+
 function rng(r: { startLine?: number; endLine?: number } | undefined): string {
   if (!r) return "";
   return `L${r.startLine ?? "?"}–${r.endLine ?? "?"}`;
@@ -68,7 +77,7 @@ function fmtSymbolGetCard(_a: Record<string, unknown>, r: Record<string, unknown
   const deps = card.deps as Record<string, unknown[]> | undefined;
   const imports = deps?.imports?.length ?? 0;
   const calls = deps?.calls?.length ?? 0;
-  return `symbol.getCard → ${str(card.name)} (${str(card.kind)})\n  File: ${shortPath(str(card.file))} ${rng(card.range as any)}\n  Deps: ${imports} imports, ${calls} calls`;
+  return `symbol.getCard → ${str(card.name)} (${str(card.kind)})\n  File: ${shortPath(str(card.file))} ${rng(safeRange(card.range))}\n  Deps: ${imports} imports, ${calls} calls`;
 }
 
 function fmtSymbolGetCards(_a: Record<string, unknown>, r: Record<string, unknown>): string | null {
@@ -82,7 +91,7 @@ function fmtCodeSkeleton(_a: Record<string, unknown>, r: Record<string, unknown>
   const orig = num(r.originalLines);
   const est = num(r.estimatedTokens);
   const trunc = r.truncated ? " (truncated)" : "";
-  return `code.getSkeleton → ${shortPath(file)}\n  ${orig} → skeleton ${rng(r.range as any)}${trunc} (~${tok(est)} tokens)`;
+  return `code.getSkeleton → ${shortPath(file)}\n  ${orig} → skeleton ${rng(safeRange(r.range))}${trunc} (~${tok(est)} tokens)`;
 }
 
 function fmtCodeHotPath(_a: Record<string, unknown>, r: Record<string, unknown>): string | null {
@@ -90,7 +99,7 @@ function fmtCodeHotPath(_a: Record<string, unknown>, r: Record<string, unknown>)
   const requested = (_a.identifiersToFind as string[])?.length ?? 0;
   const found = matched?.length ?? 0;
   const trunc = r.truncated ? " (truncated)" : "";
-  return `code.getHotPath → matched ${found}/${requested} identifiers ${rng(r.range as any)}${trunc}\n  (~${tok(num(r.estimatedTokens))} tokens)`;
+  return `code.getHotPath → matched ${found}/${requested} identifiers ${rng(safeRange(r.range))}${trunc}\n  (~${tok(num(r.estimatedTokens))} tokens)`;
 }
 
 function fmtCodeNeedWindow(_a: Record<string, unknown>, r: Record<string, unknown>): string | null {
@@ -99,10 +108,10 @@ function fmtCodeNeedWindow(_a: Record<string, unknown>, r: Record<string, unknow
   const downgraded = r.downgradedFrom ? ` (downgraded from ${str(r.downgradedFrom)})` : "";
   const est = num(r.estimatedTokens);
   if (!approved) {
-    const next = str((r as any).nextBestAction);
+    const next = str(r.nextBestAction);
     return `code.needWindow → [${status}]${next ? "\n  Suggestion: " + next : ""}`;
   }
-  return `code.needWindow → [${status}]${downgraded} ${rng(r.range as any)}\n  (~${tok(est)} tokens)`;
+  return `code.needWindow → [${status}]${downgraded} ${rng(safeRange(r.range))}\n  (~${tok(est)} tokens)`;
 }
 
 function fmtSliceBuild(_a: Record<string, unknown>, r: Record<string, unknown>): string | null {
