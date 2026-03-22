@@ -47,6 +47,7 @@ const ACTION_TAGS: Record<string, ActionTag[]> = {
   "memory.query": ["memory"],
   "memory.remove": ["memory"],
   "memory.surface": ["memory"],
+  "usage.stats": ["query"],
 };
 
 // --- Schema Introspection ---
@@ -248,6 +249,7 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "memory.query": { query: "auth", limit: 5 },
   "memory.remove": { memoryId: "<memoryId>" },
   "memory.surface": { taskText: "fix auth bug", limit: 5 },
+  "usage.stats": { scope: "both", since: "2026-03-01T00:00:00Z" },
 };
 
 // --- ActionDescriptor ---
@@ -313,6 +315,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "memory.query": "Query memories",
   "memory.remove": "Soft-delete a memory",
   "memory.surface": "Auto-surface relevant memories",
+  "usage.stats": "Get cumulative token savings statistics",
 };
 
 const TRANSFORM_DESCRIPTIONS: Record<string, string> = {
@@ -492,6 +495,11 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     prerequisites: ["symbol.getCard", "slice.build"],
     recommendedNextActions: ["memory.store"],
     fallbacks: ["memory.query"],
+  },
+  "usage.stats": {
+    prerequisites: [],
+    recommendedNextActions: [],
+    fallbacks: ["policy.get"],
   },
 };
 

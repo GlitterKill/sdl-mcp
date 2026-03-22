@@ -377,6 +377,7 @@ function processModule(node: Parser.SyntaxNode): RawExtractedSymbol | null {
 function traverseAST(
   node: Parser.SyntaxNode,
   symbols: RawExtractedSymbol[],
+  scopeDepth: number = 0,
 ): void {
   switch (node.type) {
     case "function_declaration":
@@ -407,10 +408,12 @@ function traverseAST(
 
     case "lexical_declaration":
     case "variable_declaration":
-      for (const child of node.children) {
-        if (child.type === "variable_declarator") {
-          const varSymbols = processVariableDeclaration(child);
-          symbols.push(...varSymbols);
+      if (scopeDepth === 0) {
+        for (const child of node.children) {
+          if (child.type === "variable_declarator") {
+            const varSymbols = processVariableDeclaration(child);
+            symbols.push(...varSymbols);
+          }
         }
       }
       break;
@@ -452,9 +455,19 @@ function traverseAST(
       break;
   }
 
+  // Increment scope depth when entering function/method/arrow bodies
+  const entersFunctionScope =
+    node.type === "function_declaration" ||
+    node.type === "generator_function_declaration" ||
+    node.type === "method_definition" ||
+    node.type === "arrow_function" ||
+    node.type === "function" ||
+    node.type === "static_block";
+  const childScopeDepth = entersFunctionScope ? scopeDepth + 1 : scopeDepth;
+
   for (const child of node.children) {
     try {
-      traverseAST(child, symbols);
+      traverseAST(child, symbols, childScopeDepth);
     } catch (error) {
       // Log and continue so one bad node doesn't lose all symbols for the file
       const msg = error instanceof Error ? error.message : String(error);
@@ -468,7 +481,7 @@ function traverseAST(
 export function extractSymbols(tree: Parser.Tree): RawExtractedSymbol[] {
   const symbols: RawExtractedSymbol[] = [];
 
-  traverseAST(tree.rootNode, symbols);
+  traverseAST(tree.rootNode, symbols, 0);
 
   return symbols;
 }

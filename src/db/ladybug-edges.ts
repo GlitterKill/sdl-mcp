@@ -691,6 +691,7 @@ export async function getCallEdgeResolutionCounts(
   totalCallEdges: number;
   resolvedCallEdges: number;
   exactCallEdges: number;
+  resolvableCallEdges: number;
 }> {
   const total = await querySingle<{ count: unknown }>(
     conn,
@@ -716,10 +717,21 @@ export async function getCallEdgeResolutionCounts(
     { repoId },
   );
 
+  // Count of call edges that target repo-internal symbols (resolvable)
+  // Excludes edges targeting 'unresolved:call:' stubs (external/builtin calls)
+  const resolvable = await querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[d:DEPENDS_ON]->(t:Symbol)
+     WHERE d.edgeType = 'call' AND NOT (t.symbolId STARTS WITH 'unresolved:call:')
+     RETURN count(d) AS count`,
+    { repoId },
+  );
+
   return {
     totalCallEdges: total ? toNumber(total.count) : 0,
     resolvedCallEdges: resolved ? toNumber(resolved.count) : 0,
     exactCallEdges: exact ? toNumber(exact.count) : 0,
+    resolvableCallEdges: resolvable ? toNumber(resolvable.count) : 0,
   };
 }
 

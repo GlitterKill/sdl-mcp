@@ -163,7 +163,7 @@ const overviewInflight = new Map<string, Promise<RepoOverview>>();
 
 function makeOverviewCacheKey(request: RepoOverviewRequest): string {
   const hotspots = request.includeHotspots ?? (request.level === "full");
-  return `${request.repoId}:${request.level}:${hotspots}:${JSON.stringify(request.directories ?? [])}:${request.maxDirectories ?? ""}:${request.maxExportsPerDirectory ?? ""}`;
+  return `${request.repoId}:${request.level}:${hotspots}:${JSON.stringify([...(request.directories ?? [])].sort())}:${request.maxDirectories ?? ""}:${request.maxExportsPerDirectory ?? ""}`;
 }
 
 /**

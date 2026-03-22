@@ -311,7 +311,7 @@ export async function getMemoriesForSymbols(
      WHERE s.symbolId IN $symbolIds AND m.deleted = false
      RETURN ${MEMORY_RETURN_FIELDS},
             s.symbolId AS linkedSymbolId
-     ORDER BY m.confidence DESC`,
+     ORDER BY confidence DESC`,
     { symbolIds },
   );
 
@@ -333,7 +333,7 @@ export async function getRepoMemories(
     `MATCH (r:Repo {repoId: $repoId})-[:HAS_MEMORY]->(m:Memory)
      WHERE m.deleted = false
      RETURN ${MEMORY_RETURN_FIELDS}
-     ORDER BY m.updatedAt DESC`,
+     ORDER BY updatedAt DESC`,
     { repoId },
   );
 

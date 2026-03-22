@@ -346,6 +346,22 @@ const BUILTIN_IDENTIFIERS = new Set([
   "toJSON",
   "iterator",
   "isArray",
+
+  // Node.js path/fs/util builtins
+  "normalize",
+  "format",
+  "inspect",
+  "nextTick",
+  "hrtime",
+  "setImmediate",
+  "debuglog",
+
+  // DOM/browser builtins
+  "addEventListener",
+  "removeEventListener",
+  "querySelector",
+  "getElementById",
+  "createElement",
 ]);
 
 // Common Rust macros that should be filtered as non-resolvable.

@@ -34,6 +34,7 @@ export interface HealthScoreInput {
    * falls back to `resolvedCallEdges` for backward compatibility.
    */
   exactCallEdges?: number;
+  resolvableCallEdges?: number;
   minutesSinceLastIndex: number | null;
   minIndexedFiles?: number;
   minIndexedSymbols?: number;
@@ -82,9 +83,10 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
     input.totalFiles <= 0 ? 1 : 1 - input.indexErrors / input.totalFiles,
   );
   const edgeQuality = clamp01(
-    input.totalCallEdges <= 0
+    (input.resolvableCallEdges ?? input.totalCallEdges) <= 0
       ? 1
-      : input.resolvedCallEdges / input.totalCallEdges,
+      : input.resolvedCallEdges /
+          (input.resolvableCallEdges ?? input.totalCallEdges),
   );
 
   // callResolution: ratio of call edges resolved to 'exact' strategy or with
@@ -167,6 +169,7 @@ export async function getRepoHealthSnapshot(
     resolvedCallEdges: callCounts.resolvedCallEdges,
     totalCallEdges: callCounts.totalCallEdges,
     exactCallEdges: callCounts.exactCallEdges,
+    resolvableCallEdges: callCounts.resolvableCallEdges,
     minutesSinceLastIndex,
     indexedSymbols,
   });

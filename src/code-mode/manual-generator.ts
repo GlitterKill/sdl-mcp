@@ -31,6 +31,7 @@ export const FN_NAME_MAP: Record<string, string> = {
   memoryQuery: "memory.query",
   memoryRemove: "memory.remove",
   memorySurface: "memory.surface",
+  usageStats: "usage.stats",
 };
 
 export const ACTION_TO_FN: Record<string, string> = Object.fromEntries(
@@ -107,7 +108,11 @@ function bufferCheckpoint(): { checkpointed: boolean }
 /** Get buffer status */
 function bufferStatus(): { status: object }
 /** Execute runtime command */
-function runtimeExecute(p: { runtime: string; args?: string[]; code?: string }): { stdout: string; exitCode: number }`;
+function runtimeExecute(p: { runtime: string; args?: string[]; code?: string }): { stdout: string; exitCode: number }
+
+// === Usage ===
+/** Get cumulative token savings statistics */
+function usageStats(p: { scope?: "session" | "history" | "both"; since?: string; limit?: number }): { totalSdlTokens: number; totalSavedTokens: number; savingsPercent: number }`;
 
 export function generateManual(_liveIndex?: LiveIndexCoordinator): string {
   // Validate FN_NAME_MAP covers all actions

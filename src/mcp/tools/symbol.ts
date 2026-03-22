@@ -52,6 +52,12 @@ export async function handleSymbolSearch(
   });
 
   const conn = await getLadybugConn();
+
+  const repo = await ladybugDb.getRepo(conn, request.repoId);
+  if (!repo) {
+    throw new NotFoundError(`Repository not found: ${request.repoId}`);
+  }
+
   const rows = await searchSymbolsWithOverlay(
     conn,
     request.repoId,
@@ -319,6 +325,12 @@ export async function handleSymbolGetCard(
 ): Promise<SymbolGetCardResponse | NotModifiedResponse> {
   const request = args as SymbolGetCardRequest;
   const conn = await getLadybugConn();
+
+  const repo = await ladybugDb.getRepo(conn, request.repoId);
+  if (!repo) {
+    throw new NotFoundError(`Repository not found: ${request.repoId}`);
+  }
+
   const {
     repoId,
     ifNoneMatch,
@@ -366,6 +378,11 @@ export async function handleSymbolGetCards(
     includeResolutionMetadata,
   } = args as SymbolGetCardsRequest;
   const conn = await getLadybugConn();
+
+  const repo = await ladybugDb.getRepo(conn, repoId);
+  if (!repo) {
+    throw new NotFoundError(`Repository not found: ${repoId}`);
+  }
 
   if (symbolIds) {
     const { cards, symbolMap } = await buildCardsForSymbolIds(conn, {

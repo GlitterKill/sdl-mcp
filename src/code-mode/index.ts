@@ -120,6 +120,8 @@ export function registerCodeModeTools(
           ...Object.keys(FN_NAME_MAP),
           ...Object.values(FN_NAME_MAP),
           ...INTERNAL_TRANSFORM_NAMES,
+          // Meta-tools not in the gateway action map
+          "chain", "manual", "info", "action.search",
         ]);
 
         const unknowns = args.actions.filter((a) => !validNames.has(a));

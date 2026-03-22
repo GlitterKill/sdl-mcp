@@ -155,7 +155,14 @@ function collectTestRefs(
 
   const testFiles = fg.sync(patterns, {
     cwd: repoRoot,
-    ignore: config.ignore,
+    ignore: [
+      ...(config.ignore ?? []),
+      "**/fixtures/**",
+      "**/__fixtures__/**",
+      "**/testdata/**",
+      "**/test-data/**",
+      "**/mock-data/**",
+    ],
     dot: false,
   });
 

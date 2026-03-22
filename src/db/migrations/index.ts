@@ -9,9 +9,10 @@ export const BASE_SCHEMA_VERSION = 4;
 
 // Import migrations here as they are added:
 import * as m005 from "./m005-add-memory-system.js";
+import * as m006 from "./m006-add-usage-snapshot.js";
 
 /** Ordered list of all migrations. Must be sorted by version ascending. */
-export const migrations: Migration[] = [m005];
+export const migrations: Migration[] = [m005, m006];
 
 // --- Registry validation (runs at import time) ---
 function validateMigrations(migs: Migration[]): void {

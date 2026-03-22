@@ -704,7 +704,7 @@ function buildEnforcementAssets(
 
   if (client === "claude-code") {
     const graphDbPath = defaultGraphDbPath(configPath);
-    const pidfilePath = resolvePidfilePath(graphDbPath).replace(/\\/g, "/");
+    const pidfilePath = resolvePidfilePath(graphDbPath).replace(/\\/g, "/").replace(/'/g, "'\\''");
     assets.push(
       {
         path: join(repoRoot, ".claude", "settings.json"),

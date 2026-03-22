@@ -22,9 +22,9 @@ fn traverse_ast(
     rel_path: &str,
     symbols: &mut Vec<NativeParsedSymbol>,
 ) {
-    let mut stack = vec![root];
+    let mut stack: Vec<(Node, u32)> = vec![(root, 0)];
 
-    while let Some(node) = stack.pop() {
+    while let Some((node, scope_depth)) = stack.pop() {
         match node.kind() {
             "function_declaration" | "generator_function_declaration" => {
                 if let Some(sym) = process_function_declaration(node, source, repo_id, rel_path) {
@@ -52,12 +52,14 @@ fn traverse_ast(
                 }
             }
             "lexical_declaration" | "variable_declaration" => {
-                let mut cursor = node.walk();
-                for child in node.children(&mut cursor) {
-                    if child.kind() == "variable_declarator" {
-                        let var_symbols =
-                            process_variable_declaration(child, source, repo_id, rel_path, node);
-                        symbols.extend(var_symbols);
+                if scope_depth == 0 {
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "variable_declarator" {
+                            let var_symbols =
+                                process_variable_declaration(child, source, repo_id, rel_path, node);
+                            symbols.extend(var_symbols);
+                        }
                     }
                 }
             }
@@ -72,10 +74,26 @@ fn traverse_ast(
             _ => {}
         }
 
+        // Increment scope depth when entering function/method/arrow bodies
+        let enters_function_scope = matches!(
+            node.kind(),
+            "function_declaration"
+                | "generator_function_declaration"
+                | "method_definition"
+                | "arrow_function"
+                | "function"
+                | "static_block"
+        );
+        let child_scope_depth = if enters_function_scope {
+            scope_depth + 1
+        } else {
+            scope_depth
+        };
+
         let child_count = node.child_count();
         for i in (0..child_count).rev() {
             if let Some(child) = node.child(i) {
-                stack.push(child);
+                stack.push((child, child_scope_depth));
             }
         }
     }

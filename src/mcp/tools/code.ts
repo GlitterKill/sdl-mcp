@@ -362,8 +362,8 @@ export async function handleCodeNeedWindow(
     );
 
     if (!skeletonResult) {
-      throw new IndexError(
-        `Failed to generate skeleton for symbol: ${request.symbolId}`,
+      throw new NotFoundError(
+        `File not found on disk for symbol: ${request.symbolId}`,
       );
     }
 
@@ -647,8 +647,8 @@ export async function handleGetSkeleton(
     );
 
     if (!result) {
-      throw new IndexError(
-        `Failed to generate skeleton for symbol: ${request.symbolId}`,
+      throw new NotFoundError(
+        `File not found on disk for symbol: ${request.symbolId}`,
       );
     }
 
@@ -700,8 +700,8 @@ export async function handleGetSkeleton(
     );
 
     if (!result) {
-      throw new IndexError(
-        `Failed to generate skeleton for file: ${request.file}`,
+      throw new NotFoundError(
+        `File not found or unparseable: ${request.file}`,
       );
     }
 

@@ -15,23 +15,41 @@ export function generateSummary(
     }
   }
 
-  const nameWords = splitCamelCase(symbol.name).join(" ");
-  const capitalized = nameWords.charAt(0).toUpperCase() + nameWords.slice(1);
+  const words = splitCamelCase(symbol.name);
 
-  let summary = capitalized;
+  let summary: string;
 
-  if (symbol.signature?.params && symbol.signature.params.length > 0) {
-    const paramInfo = generateParamContext(symbol.signature.params);
-    if (paramInfo) {
-      summary += ` ${paramInfo}`;
+  if (symbol.kind === "function" || symbol.kind === "method") {
+    // Action-oriented: "Builds graph slice from entry symbols with budget"
+    const verb = verbify(words[0]);
+    const subject = words.slice(1).map((w) => w.toLowerCase()).join(" ");
+    summary = subject ? `${verb} ${subject}` : verb;
+
+    if (symbol.signature?.params && symbol.signature.params.length > 0) {
+      const paramInfo = generateParamContext(symbol.signature.params);
+      if (paramInfo) {
+        summary += ` ${paramInfo}`;
+      }
     }
-  }
-
-  if (symbol.signature?.returns && symbol.kind === "function") {
-    const returnType = extractSimpleType(symbol.signature.returns);
-    if (returnType && returnType !== "void" && returnType !== "unknown") {
-      summary += ` and returns ${returnType}`;
+    if (symbol.signature?.returns) {
+      const returnType = extractSimpleType(symbol.signature.returns);
+      if (returnType && returnType !== "void" && returnType !== "unknown") {
+        summary += ` returning ${returnType}`;
+      }
     }
+  } else if (symbol.kind === "class") {
+    const className = words.join(" ");
+    summary = `Class ${className}`;
+  } else if (symbol.kind === "interface") {
+    const ifaceName = words.join(" ");
+    summary = `Interface for ${ifaceName.toLowerCase()}`;
+  } else if (symbol.kind === "type") {
+    const typeName = words.join(" ");
+    summary = `Type alias for ${typeName.toLowerCase()}`;
+  } else {
+    // Variables, modules, constructors, etc.
+    const nameWords = words.join(" ");
+    summary = nameWords.charAt(0).toUpperCase() + nameWords.slice(1);
   }
 
   return summary;
@@ -291,6 +309,30 @@ function extractJSDoc(symbol: ExtractedSymbol, fileContent: string): JSDoc {
   }
 
   return jsdoc;
+}
+
+
+function verbify(word: string): string {
+  if (!word || word.length === 0) return "Handles";
+  const lower = word.toLowerCase();
+  // Common irregular verbs in code
+  const irregulars: Record<string, string> = {
+    get: "Gets", set: "Sets", is: "Checks if", has: "Checks for",
+    can: "Checks if can", should: "Determines if should",
+    do: "Does", run: "Runs", go: "Goes",
+  };
+  if (irregulars[lower]) return irregulars[lower];
+  if (lower.endsWith("fy")) return capitalize(lower.slice(0, -1)) + "ies";
+  if (lower.endsWith("e")) return capitalize(lower) + "s";
+  if (lower.endsWith("y") && !lower.endsWith("ay") && !lower.endsWith("ey") && !lower.endsWith("oy"))
+    return capitalize(lower.slice(0, -1)) + "ies";
+  if (lower.endsWith("s") || lower.endsWith("sh") || lower.endsWith("ch") || lower.endsWith("x") || lower.endsWith("z"))
+    return capitalize(lower) + "es";
+  return capitalize(lower) + "s";
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function splitCamelCase(str: string): string[] {
