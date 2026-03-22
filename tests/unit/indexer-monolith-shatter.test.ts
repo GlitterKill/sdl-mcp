@@ -21,6 +21,11 @@ describe("indexer.ts monolith shattering", () => {
     watcher: join(repoRoot, "src/indexer/watcher.ts"),
     edgeBuilder: join(repoRoot, "src/indexer/edge-builder.ts"),
     metricsUpdater: join(repoRoot, "src/indexer/metrics-updater.ts"),
+    indexerInit: join(repoRoot, "src/indexer/indexer-init.ts"),
+    indexerVersion: join(repoRoot, "src/indexer/indexer-version.ts"),
+    indexerPass1: join(repoRoot, "src/indexer/indexer-pass1.ts"),
+    indexerPass2: join(repoRoot, "src/indexer/indexer-pass2.ts"),
+    indexerMemory: join(repoRoot, "src/indexer/indexer-memory.ts"),
   } as const;
 
   it("splits into focused ~500-line modules", () => {
@@ -56,6 +61,49 @@ describe("indexer.ts monolith shattering", () => {
     assert.ok(
       countLines(modulePaths.metricsUpdater) <= moduleMaxLines,
       "metrics-updater.ts too large; split further",
+    );
+
+    // Extracted indexer modules
+    const extractedModuleMaxLines = 300;
+    assert.ok(
+      existsSync(modulePaths.indexerInit),
+      "missing src/indexer/indexer-init.ts",
+    );
+    assert.ok(
+      existsSync(modulePaths.indexerVersion),
+      "missing src/indexer/indexer-version.ts",
+    );
+    assert.ok(
+      existsSync(modulePaths.indexerPass1),
+      "missing src/indexer/indexer-pass1.ts",
+    );
+    assert.ok(
+      existsSync(modulePaths.indexerPass2),
+      "missing src/indexer/indexer-pass2.ts",
+    );
+    assert.ok(
+      existsSync(modulePaths.indexerMemory),
+      "missing src/indexer/indexer-memory.ts",
+    );
+    assert.ok(
+      countLines(modulePaths.indexerInit) <= extractedModuleMaxLines,
+      "indexer-init.ts too large; split further",
+    );
+    assert.ok(
+      countLines(modulePaths.indexerVersion) <= extractedModuleMaxLines,
+      "indexer-version.ts too large; split further",
+    );
+    assert.ok(
+      countLines(modulePaths.indexerPass1) <= extractedModuleMaxLines,
+      "indexer-pass1.ts too large; split further",
+    );
+    assert.ok(
+      countLines(modulePaths.indexerPass2) <= extractedModuleMaxLines,
+      "indexer-pass2.ts too large; split further",
+    );
+    assert.ok(
+      countLines(modulePaths.indexerMemory) <= extractedModuleMaxLines,
+      "indexer-memory.ts too large; split further",
     );
   });
 
@@ -131,8 +179,28 @@ describe("indexer.ts monolith shattering", () => {
       indexer.includes('from "./metrics-updater.js"'),
       'expected indexer.ts to import "./metrics-updater.js"',
     );
+    assert.ok(
+      indexer.includes('from "./indexer-init.js"'),
+      'expected indexer.ts to import "./indexer-init.js"',
+    );
+    assert.ok(
+      indexer.includes('from "./indexer-version.js"'),
+      'expected indexer.ts to import "./indexer-version.js"',
+    );
+    assert.ok(
+      indexer.includes('from "./indexer-pass1.js"'),
+      'expected indexer.ts to import "./indexer-pass1.js"',
+    );
+    assert.ok(
+      indexer.includes('from "./indexer-pass2.js"'),
+      'expected indexer.ts to import "./indexer-pass2.js"',
+    );
+    assert.ok(
+      indexer.includes('from "./indexer-memory.js"'),
+      'expected indexer.ts to import "./indexer-memory.js"',
+    );
 
-    const indexerMaxLines = 1150;
+    const indexerMaxLines = 450;
     assert.ok(
       countLines(indexerPath) <= indexerMaxLines,
       `indexer.ts still too large (expected <= ${indexerMaxLines} lines)`,
