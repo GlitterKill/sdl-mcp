@@ -47,6 +47,7 @@ import {
 import { createTsCallResolver } from "./ts/tsParser.js";
 import { ParserWorkerPool } from "./workerPool.js";
 import { invalidateGraphSnapshot } from "../graph/graphSnapshotCache.js";
+import { clearOverviewCache } from "../graph/overview.js";
 import { clearFingerprintCollisionLog } from "./fingerprints.js";
 import { scanMemoryFiles, readMemoryFile } from "../memory/file-sync.js";
 import type { FileMetadata } from "./fileScanner.js";
@@ -1125,6 +1126,7 @@ async function indexRepoImpl(
     };
 
     invalidateGraphSnapshot(repoId);
+    clearOverviewCache();
     clearFingerprintCollisionLog();
     return result;
   } finally {

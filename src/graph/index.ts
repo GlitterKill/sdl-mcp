@@ -10,7 +10,7 @@
 export { buildSlice } from "./slice.js";
 
 // Overview
-export { buildRepoOverview } from "./overview.js";
+export { buildRepoOverview, clearOverviewCache } from "./overview.js";
 
 // Symbol card cache
 export {

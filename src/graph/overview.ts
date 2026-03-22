@@ -144,16 +144,83 @@ function estimateDirectorySummaryTokens(summary: DirectorySummary): number {
 }
 
 // ============================================================================
+// Overview Cache (singleflight + TTL)
+// ============================================================================
+
+/**
+ * TTL for cached overview results. Short enough to catch version changes,
+ * long enough to coalesce concurrent bursts of identical requests.
+ */
+const OVERVIEW_CACHE_TTL_MS = 5_000;
+
+interface OverviewCacheEntry {
+  result: RepoOverview;
+  expiresAt: number;
+}
+
+const overviewCache = new Map<string, OverviewCacheEntry>();
+const overviewInflight = new Map<string, Promise<RepoOverview>>();
+
+function makeOverviewCacheKey(request: RepoOverviewRequest): string {
+  const hotspots = request.includeHotspots ?? (request.level === "full");
+  return `${request.repoId}:${request.level}:${hotspots}:${JSON.stringify(request.directories ?? [])}:${request.maxDirectories ?? ""}:${request.maxExportsPerDirectory ?? ""}`;
+}
+
+/**
+ * Clear the overview singleflight + TTL cache.
+ * Called on version changes / index refresh.
+ */
+export function clearOverviewCache(): void {
+  overviewCache.clear();
+  overviewInflight.clear();
+}
+
+// ============================================================================
 // Main Builder
 // ============================================================================
 
 /**
  * Builds a repository overview with configurable detail level.
+ * Uses singleflight dedup + short TTL cache to avoid redundant DB work
+ * under concurrent load.
  *
  * @param request - Overview request parameters
  * @returns Repository overview with stats, directories, and optionally hotspots
  */
 export async function buildRepoOverview(
+  request: RepoOverviewRequest,
+): Promise<RepoOverview> {
+  const cacheKey = makeOverviewCacheKey(request);
+
+  // 1. Check TTL cache
+  const cached = overviewCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
+  }
+
+  // 2. Singleflight: if the same request is already in-flight, share its promise
+  const inflight = overviewInflight.get(cacheKey);
+  if (inflight) {
+    return inflight;
+  }
+
+  // 3. Execute and cache
+  const promise = buildRepoOverviewImpl(request);
+  overviewInflight.set(cacheKey, promise);
+
+  try {
+    const result = await promise;
+    overviewCache.set(cacheKey, {
+      result,
+      expiresAt: Date.now() + OVERVIEW_CACHE_TTL_MS,
+    });
+    return result;
+  } finally {
+    overviewInflight.delete(cacheKey);
+  }
+}
+
+async function buildRepoOverviewImpl(
   request: RepoOverviewRequest,
 ): Promise<RepoOverview> {
   const conn = await getLadybugConn();

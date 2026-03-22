@@ -24,7 +24,7 @@ import { DatabaseError, ConfigError, ValidationError } from "../errors.js";
 import { logger } from "../../util/logger.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { MAX_FILE_BYTES, DEFAULT_MEMORY_SURFACE_LIMIT } from "../../config/constants.js";
-import { buildRepoOverview } from "../../graph/overview.js";
+import { buildRepoOverview, clearOverviewCache } from "../../graph/overview.js";
 import { clearSliceCache } from "../../graph/sliceCache.js";
 import { symbolCardCache } from "../../graph/cache.js";
 import { getRepoHealthSnapshot } from "../../services/health.js";
@@ -185,6 +185,7 @@ export async function handleRepoRegister(
   });
 
   invalidateGraphSnapshot(repoId);
+  clearOverviewCache();
 
   return {
     ok: true,
@@ -438,6 +439,7 @@ export async function handleIndexRefresh(
     const result = await indexRepo(repoId, mode, onProgress);
 
     clearSliceCache();
+    clearOverviewCache();
     symbolCardCache.clear();
     invalidateGraphSnapshot(repoId);
 
