@@ -85,7 +85,7 @@ function serializeMemoryFile(data: MemoryFileData): string {
 /** Escape a YAML string value if it contains special chars */
 function escapeYamlString(value: string): string {
   if (/[:#\[\]{}&*!|>'"%@`]/.test(value) || value.includes("\n")) {
-    return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    return `"${value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/"/g, '\\"')}"`;
   }
   return value;
 }
@@ -202,7 +202,7 @@ function unescapeYamlString(value: string): string {
     (value.startsWith('"') && value.endsWith('"')) ||
     (value.startsWith("'") && value.endsWith("'"))
   ) {
-    return value.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+    return value.slice(1, -1).replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
   }
   return value;
 }
@@ -272,5 +272,10 @@ export async function updateMemoryFileFrontmatter(
   const content = serializeMemoryFile(data);
   const tmpPath = filePath + ".tmp";
   fs.writeFileSync(tmpPath, content, "utf-8");
-  fs.renameSync(tmpPath, filePath);
+  try {
+    fs.renameSync(tmpPath, filePath);
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore cleanup failure */ }
+    throw err;
+  }
 }

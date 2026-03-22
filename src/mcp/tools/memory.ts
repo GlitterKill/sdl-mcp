@@ -35,7 +35,7 @@ function computeContentHash(
 ): string {
   return crypto
     .createHash("sha256")
-    .update(repoId + type + title + content)
+    .update([repoId, type, title, content].join("\0"))
     .digest("hex");
 }
 

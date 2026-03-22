@@ -618,7 +618,7 @@ export const RUNTIME_MIN_TIMEOUT_MS = 100;
 /**
  * Maximum allowed execution timeout in milliseconds (5 minutes).
  */
-export const RUNTIME_MAX_TIMEOUT_MS = 300_000;
+export const RUNTIME_MAX_TIMEOUT_MS = 600_000;
 
 /**
  * Default maximum stdout bytes captured (1 MB).

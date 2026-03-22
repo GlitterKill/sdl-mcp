@@ -468,8 +468,8 @@ function parseSignatureJson(signatureJson: string | null): {
 
 async function getGitCommitSha(repoPath: string): Promise<string | null> {
   try {
-    const { execSync } = await import("child_process");
-    const sha = execSync("git rev-parse HEAD", {
+    const { execFileSync } = await import("child_process");
+    const sha = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: repoPath,
       encoding: "utf-8",
     }).trim();
@@ -481,8 +481,8 @@ async function getGitCommitSha(repoPath: string): Promise<string | null> {
 
 async function getGitBranch(repoPath: string): Promise<string | null> {
   try {
-    const { execSync } = await import("child_process");
-    const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+    const { execFileSync } = await import("child_process");
+    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
       cwd: repoPath,
       encoding: "utf-8",
     }).trim();

@@ -229,6 +229,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     }
 
     await this.parseScheduler.waitForIdle();
+    await this.reconcileWorker.waitForIdle();
     return this.checkpointService.checkpointRepo(input);
   }
 

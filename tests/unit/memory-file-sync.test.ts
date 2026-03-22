@@ -94,7 +94,7 @@ describe("memory file-sync", () => {
 
   test("parseMemoryFileContent handles empty arrays", () => {
     const raw =
-      "---\nmemoryId: test123\ntype: bugfix\ntitle: Fix\ntags: []\nsymbols: []\nfiles: []\nconfidence: 0.5\ncreatedAt: 2026-01-01T00:00:00Z\ndeleted: false\n---\nBody";
+      "---\nmemoryId: ae5f0123\ntype: bugfix\ntitle: Fix\ntags: []\nsymbols: []\nfiles: []\nconfidence: 0.5\ncreatedAt: 2026-01-01T00:00:00Z\ndeleted: false\n---\nBody";
     const result = parseMemoryFileContent(raw);
     assert.ok(result);
     assert.deepStrictEqual(result.tags, []);
@@ -104,7 +104,7 @@ describe("memory file-sync", () => {
 
   test("parseMemoryFileContent handles deleted flag", () => {
     const raw =
-      "---\nmemoryId: del123\ntype: decision\ntitle: Old\ntags: []\nsymbols: []\nfiles: []\nconfidence: 0.8\ncreatedAt: 2026-01-01T00:00:00Z\ndeleted: true\n---\nOld content";
+      "---\nmemoryId: de1f0123\ntype: decision\ntitle: Old\ntags: []\nsymbols: []\nfiles: []\nconfidence: 0.8\ncreatedAt: 2026-01-01T00:00:00Z\ndeleted: true\n---\nOld content";
     const result = parseMemoryFileContent(raw);
     assert.ok(result);
     assert.strictEqual(result.deleted, true);
@@ -126,13 +126,13 @@ describe("memory file-sync", () => {
       await writeMemoryFile(tmpDir, sampleMemory);
       await writeMemoryFile(tmpDir, {
         ...sampleMemory,
-        memoryId: "xyz789",
+        memoryId: "a0b1c2d3",
         type: "bugfix",
       });
       const files = await scanMemoryFiles(tmpDir);
       assert.strictEqual(files.length, 2);
       assert.ok(files.some((f) => f.includes("abc123def456.md")));
-      assert.ok(files.some((f) => f.includes("xyz789.md")));
+      assert.ok(files.some((f) => f.includes("a0b1c2d3.md")));
     } finally {
       cleanup(tmpDir);
     }
@@ -216,7 +216,7 @@ describe("memory file-sync", () => {
     try {
       const special: MemoryFileData = {
         ...sampleMemory,
-        memoryId: "special123",
+        memoryId: "5bec1a12",
         title: 'Config: use "strict" mode & enable [feature]',
       };
       const relPath = await writeMemoryFile(tmpDir, special);
@@ -237,10 +237,10 @@ describe("memory file-sync", () => {
     try {
       const relPath = await writeMemoryFile(tmpDir, {
         ...sampleMemory,
-        memoryId: "bugfix1",
+        memoryId: "b09f1e01",
         type: "bugfix",
       });
-      assert.ok(relPath.includes("bugfixes/bugfix1.md"));
+      assert.ok(relPath.includes("bugfixes/b09f1e01.md"));
     } finally {
       cleanup(tmpDir);
     }
@@ -251,10 +251,10 @@ describe("memory file-sync", () => {
     try {
       const relPath = await writeMemoryFile(tmpDir, {
         ...sampleMemory,
-        memoryId: "task1",
+        memoryId: "1a5e0001",
         type: "task_context",
       });
-      assert.ok(relPath.includes("task_context/task1.md"));
+      assert.ok(relPath.includes("task_context/1a5e0001.md"));
     } finally {
       cleanup(tmpDir);
     }

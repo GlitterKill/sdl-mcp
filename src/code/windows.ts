@@ -461,8 +461,9 @@ function countBracesOutsideStrings(
         // Nested brace inside a template interpolation — track depth
         // so we know which } closes the interpolation vs. an inner block.
         interpDepth++;
-      }
+      } else {
       open++;
+      }
     } else if (ch === "}") {
       if (interpDepth > 0) {
         interpDepth--;
@@ -472,8 +473,9 @@ function countBracesOutsideStrings(
           inTemplate = true;
           continue;
         }
-      }
+      } else {
       close++;
+      }
     }
   }
 

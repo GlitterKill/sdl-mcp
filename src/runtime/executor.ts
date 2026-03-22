@@ -1,4 +1,4 @@
-import { spawn, execSync } from "child_process";
+import { spawn, execFileSync } from "child_process";
 import { mkdtemp, writeFile, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -10,7 +10,6 @@ import type {
   ConcurrencyTracker,
 } from "./types.js";
 import { validatePathWithinRoot } from "../util/paths.js";
-import { RuntimeTimeoutError } from "../domain/errors.js";
 import { logger } from "../util/logger.js";
 
 const IS_WINDOWS = process.platform === "win32";
@@ -22,7 +21,7 @@ export function killProcessTree(pid: number): void {
   }
   if (IS_WINDOWS) {
     try {
-      execSync(`taskkill /T /F /PID ${pid}`, {
+      execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
         windowsHide: true,
         stdio: "ignore",
       });
@@ -229,12 +228,9 @@ export async function execute(
   request.signal?.removeEventListener("abort", onAbort);
 
   if (timedOut) {
-    const timeoutError = new RuntimeTimeoutError(
-      `Runtime execution timed out after ${request.timeoutMs}ms`,
-    );
     logger.warn("Runtime execution timed out", {
       timeoutMs: request.timeoutMs,
-      error: timeoutError.message,
+      error: `Runtime execution timed out after ${request.timeoutMs}ms`,
       executable: request.executable,
     });
   }
@@ -283,4 +279,4 @@ export function createConcurrencyTracker(maxJobs: number): ConcurrencyTracker {
       }
     },
   };
-}
+}

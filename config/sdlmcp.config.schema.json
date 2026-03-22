@@ -145,7 +145,7 @@
         "maxWindowLines": 180,
         "maxWindowTokens": 1400,
         "requireIdentifiers": true,
-        "allowBreakGlass": true
+        "allowBreakGlass": false
       }
     },
     "redaction": {
@@ -263,7 +263,7 @@
           "type": "integer",
           "description": "Quiet-period threshold in milliseconds before idle checkpoint compaction runs",
           "minimum": 1000,
-          "maximum": 300000,
+          "maximum": 600000,
           "default": 15000
         },
         "maxDraftFiles": {

@@ -42,6 +42,18 @@ const RUNG_TO_ACTION_TYPE: Record<RungType, Action["type"]> = {
 };
 
 /**
+ * Per-rung token estimates matching planner values (src/agent/planner.ts).
+ * Used for coarse-grained runtime budget enforcement between rungs.
+ */
+const RUNG_TOKEN_ESTIMATES: Record<RungType, number> = {
+  card: 50,
+  skeleton: 200,
+  hotPath: 500,
+  raw: 2000,
+};
+
+
+/**
  * Common English words and SDL-MCP domain terms filtered out during
  * identifier extraction. Includes both natural-language noise words and
  * tool-specific jargon that would produce low-value hot-path matches.
@@ -110,6 +122,9 @@ export class Executor {
 
       await this.executeRung(task, rung, context);
 
+      // Track estimated tokens consumed by this rung
+      this.metrics.totalTokens += RUNG_TOKEN_ESTIMATES[rung] ?? 0;
+
       const evidenceAfter = this.evidenceCapture.getAllEvidence().length;
 
       // Escalation: if this rung produced no new evidence and it's the
@@ -140,6 +155,30 @@ export class Executor {
         task.budget?.maxActions &&
         this.actions.length >= task.budget.maxActions
       ) {
+        break;
+      }
+
+      // Check token budget
+      if (
+        task.budget?.maxTokens &&
+        this.metrics.totalTokens >= task.budget.maxTokens
+      ) {
+        logger.debug("Token budget exhausted", {
+          totalTokens: this.metrics.totalTokens,
+          maxTokens: task.budget.maxTokens,
+        });
+        break;
+      }
+
+      // Check duration budget
+      if (
+        task.budget?.maxDurationMs &&
+        Date.now() - this.startTime >= task.budget.maxDurationMs
+      ) {
+        logger.debug("Duration budget exhausted", {
+          elapsedMs: Date.now() - this.startTime,
+          maxDurationMs: task.budget.maxDurationMs,
+        });
         break;
       }
     }

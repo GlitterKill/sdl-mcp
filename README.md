@@ -129,6 +129,12 @@ The core innovation. Named after the adjustable aperture that controls light flo
 | "Show me the shape of `AuthService`" | ~4,000 tok | ~300 tok | **13x** |
 | "Where is `this.cache` set?" | ~2,000 tok | ~500 tok | **4x** |
 
+**Why it matters:**
+- **4–20x token savings** on typical code understanding queries
+- Most questions answered at Rungs 1–2 without ever reading raw code
+- Controlled escalation prevents agents from over-consuming context
+- Policy-gated raw access ensures agents prove they need full source
+
 [Iris Gate Ladder Deep Dive →](./docs/feature-deep-dives/iris-gate-ladder.md)
 
 <br/>
@@ -167,6 +173,12 @@ Every function, class, interface, type, and variable becomes a **Symbol Card**: 
 
 Cards include **confidence-scored call resolution** (the pass-2 resolver traces imports, aliases, barrel re-exports, and tagged templates to produce accurate dependency edges), **community detection** (cluster membership), and **call-chain tracing** (process participation with entry/intermediate/exit roles).
 
+**Why it matters:**
+- **~100 tokens per symbol** vs. ~2,000 tokens to read the full file
+- Confidence-scored dependency edges trace real call relationships across files
+- Community detection and call-chain tracing reveal architectural structure
+- ETag-based conditional requests avoid re-fetching unchanged symbols
+
 [Indexing & Language Support Deep Dive →](./docs/feature-deep-dives/indexing-languages.md)
 
 ---
@@ -196,6 +208,12 @@ Instead of reading files in the same directory, SDL-MCP follows the *dependency 
 
 Slices have handles, leases, refresh (delta-only updates), and spillover (paged overflow). You can also skip the symbol search entirely — pass a `taskText` string and SDL-MCP auto-discovers the relevant entry symbols.
 
+**Why it matters:**
+- Follows the **dependency graph**, not directory boundaries, for cross-cutting context
+- Weighted edge scoring (call > config > import) prioritizes the most relevant symbols
+- Token-budgeted: returns only what fits within your budget (~800 tokens vs. ~16,000 for raw files)
+- Natural-language task-text auto-discovers entry symbols — no symbol IDs needed
+
 [Graph Slicing Deep Dive →](./docs/feature-deep-dives/graph-slicing.md)
 
 ---
@@ -221,6 +239,12 @@ Slices have handles, leases, refresh (delta-only updates), and spillover (paged 
 
 **PR risk analysis** (`sdl.pr.risk.analyze`) wraps this into a scored assessment with findings, evidence, and test recommendations. **Fan-in trend analysis** detects "amplifier" symbols whose growing dependency count means changes ripple further over time.
 
+**Why it matters:**
+- Semantic diffs show what a change **means**, not just what lines moved
+- Ranked blast radius identifies which dependent symbols are most at risk
+- Fan-in trend analysis detects "amplifier" symbols whose changes ripple further over time
+- PR risk scoring produces actionable findings with test re-run recommendations
+
 [Delta & Blast Radius Deep Dive →](./docs/feature-deep-dives/delta-blast-radius.md)
 
 ---
@@ -238,6 +262,11 @@ SDL-MCP doesn't wait for you to save. As you type in your editor, buffer updates
                                         LadybugDB (durable)
 ```
 
+**Why it matters:**
+- Search, cards, and slices reflect **unsaved editor changes** in real time
+- No manual re-index needed during active development
+- Background AST parsing with in-memory overlay keeps queries fast
+
 [Live Indexing Deep Dive →](./docs/feature-deep-dives/live-indexing.md)
 
 ---
@@ -253,6 +282,12 @@ Requests that don't meet policy are denied with actionable guidance ("try `getHo
 
 The sandboxed runtime execution tool (`sdl.runtime.execute`) has its own governance layer: disabled by default, executable allowlisting, CWD jailing, environment scrubbing, concurrency limits, and timeout enforcement.
 
+**Why it matters:**
+- Proof-of-need gating prevents agents from wastefully reading raw code
+- Denied requests include **actionable next-best-action** guidance
+- Full audit logging of every code access decision
+- Sandboxed runtime with executable allowlisting, CWD jailing, and environment scrubbing
+
 [Governance & Policy Deep Dive →](./docs/feature-deep-dives/governance-policy.md)
 
 ---
@@ -265,6 +300,11 @@ The feedback loop (`sdl.agent.feedback`) records which symbols were useful and w
 
 `sdl.context.summary` generates portable, token-bounded context briefings in markdown, JSON, or clipboard format for use outside MCP environments.
 
+**Why it matters:**
+- Autonomous task execution plans the **optimal Iris Gate path** within a token budget
+- Feedback loop records what was useful/missing, improving future slice quality
+- Portable context summaries export findings for use outside MCP environments
+
 [Agent Orchestration Deep Dive →](./docs/feature-deep-dives/agent-orchestration.md)
 
 ---
@@ -272,6 +312,12 @@ The feedback loop (`sdl.agent.feedback`) records which symbols were useful and w
 ### Sandboxed Runtime Execution
 
 Run tests, linters, and scripts through SDL-MCP's governance layer instead of uncontrolled shell access. Three runtimes (Node.js, Python, Shell), code-mode or args-mode, smart output summarization with keyword-matched excerpts, and gzip artifact persistence.
+
+**Why it matters:**
+- Run tests, linters, and scripts **under governance** instead of uncontrolled shell access
+- 16 runtimes supported (Node, Python, Go, Java, Rust, Shell, and more)
+- Executable allowlisting, CWD jailing, timeout enforcement, and environment scrubbing
+- Smart output summarization with keyword-matched excerpts and gzip artifact persistence
 
 [Runtime Execution Deep Dive →](./docs/feature-deep-dives/runtime-execution.md)
 
@@ -300,6 +346,12 @@ Agents forget everything between sessions. SDL-MCP fixes this with a **graph-bac
 
 Memories are **automatically surfaced** inside graph slices — when an agent builds a slice touching symbols with linked memories, those memories appear alongside the cards. During re-indexing, memories linked to changed symbols are **flagged as stale**, prompting agents to review and update them. Four MCP tools (`store`, `query`, `remove`, `surface`) provide full CRUD plus intelligent ranking by confidence, recency, and symbol overlap.
 
+**Why it matters:**
+- Structured knowledge **persists across sessions**, linked directly to symbols and files
+- Automatically surfaced inside graph slices when touching related symbols
+- Stale memories flagged when linked symbols change during re-indexing
+- Dual storage: graph DB for fast querying + markdown files for version control and team sharing
+
 [Development Memories Deep Dive →](./docs/feature-deep-dives/development-memories.md)
 
 ---
@@ -321,6 +373,12 @@ echo '{"repoId":"my-repo"}' | sdl-mcp tool symbol.search --query "auth"
 
 Features include typed argument coercion (string, number, boolean, string[], json), budget flag merging, stdin JSON piping with CLI-flags-win precedence, auto-resolved `repoId` from cwd, four output formats (json, json-compact, pretty, table), typo suggestions, and per-action `--help`. The CLI dispatches through the same gateway router and Zod schemas as the MCP server — identical code paths, identical validation.
 
+**Why it matters:**
+- All MCP tool actions accessible from **any terminal** — no server, transport, or SDK required
+- Same code paths and Zod validation as the MCP server — identical behavior
+- Four output formats (json, json-compact, pretty, table) for scripting and CI pipelines
+- Auto-resolves repoId from cwd, supports stdin JSON piping and per-action `--help`
+
 [CLI Tool Access Deep Dive →](./docs/feature-deep-dives/cli-tool-access.md)
 
 ---
@@ -337,6 +395,12 @@ The tool gateway consolidates all 29 MCP tools into **4 namespace-scoped tools**
 ```
 
 Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "symbol.search", repoId: "x", query: "auth" }`) and routes to the same handlers with double Zod validation. Thin wire schemas in `tools/list` keep the registration compact while full validation happens server-side. Legacy flat tool names are optionally emitted alongside for backward compatibility.
+
+**Why it matters:**
+- **81% token reduction** in `tools/list` overhead (~3,742 → ~713 tokens per conversation)
+- 29 tools consolidated into 4 namespace-scoped tools for simpler agent selection
+- Fewer tool choices means faster and more accurate tool dispatch by the agent
+- Backward-compatible: legacy flat tool names optionally emitted alongside
 
 [Tool Gateway Deep Dive →](./docs/feature-deep-dives/tool-gateway.md)
 
