@@ -1,5 +1,5 @@
 import path from "path";
-import fg from "fast-glob";
+import { globSync } from "node:fs";
 import ts from "typescript";
 import type { SymbolKind } from "../../db/schema.js";
 import { normalizePath } from "../../util/paths.js";
@@ -84,20 +84,10 @@ export function createTsCallResolver(
       ? options.includeNodeModulesTypes
       : true;
   const typeDefinitionFiles = includeNodeModulesTypes
-    ? fg.sync(
-        [
-          "node_modules/@types/**/*.d.ts",
-          "!node_modules/@types/node/**",
-          "!node_modules/@types/node.d.ts",
-        ],
-        {
-          cwd: repoRoot,
-          absolute: true,
-          onlyFiles: true,
-          unique: true,
-          suppressErrors: true,
-        },
-      )
+    ? [...globSync("node_modules/@types/**/*.d.ts", {
+        cwd: repoRoot,
+        exclude: ["node_modules/@types/node/**", "node_modules/@types/node.d.ts"],
+      })].map(f => path.resolve(repoRoot, f))
     : [];
 
   const fileNames = Array.from(new Set([...sourceFileNames, ...typeDefinitionFiles]));

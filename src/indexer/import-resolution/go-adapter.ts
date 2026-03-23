@@ -1,4 +1,4 @@
-import fastGlob from "fast-glob";
+import { glob } from "node:fs/promises";
 import { dirname, join, resolve } from "path";
 
 import { existsAsync, readFileAsync } from "../../util/asyncFs.js";
@@ -86,11 +86,10 @@ export class GoImportResolutionAdapter implements ImportResolutionAdapter {
       (extension) => `${packageDir}/**/*${extension}`,
     );
 
-    const matches = await fastGlob(patterns, {
-      cwd: params.repoRoot,
-      onlyFiles: true,
-      unique: true,
-    });
+    const matches: string[] = [];
+    for await (const f of glob(patterns.length === 1 ? patterns[0] : `{${patterns.join(",")}}`, { cwd: params.repoRoot })) {
+      matches.push(f);
+    }
 
     return matches.map((path) => normalizePath(path)).sort();
   }

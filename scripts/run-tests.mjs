@@ -3,16 +3,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import fg from "fast-glob";
+import { globSync } from "node:fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, "..");
 
-const testFiles = await fg("tests/**/*.test.ts", {
-  cwd: repoRoot,
-  onlyFiles: true,
-}).then((paths) => paths.sort());
+const testFiles = [...globSync("tests/**/*.test.ts", { cwd: repoRoot })].sort();
 
 if (testFiles.length === 0) {
   console.error("No test files found under tests/**/*.test.ts");
@@ -20,7 +17,6 @@ if (testFiles.length === 0) {
 }
 
 const nodeArgs = [
-  "--experimental-strip-types",
   "--test-concurrency=1",
   "--test",
   resolve(repoRoot, "tests", "runner.test.ts"),

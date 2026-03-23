@@ -3,7 +3,7 @@ import { exec } from "child_process";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { promisify } from "util";
-import fg from "fast-glob";
+import { globSync } from "node:fs";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import type { EdgeRow, MetricsRow, SymbolRow } from "../db/ladybug-queries.js";
@@ -153,9 +153,10 @@ function collectTestRefs(
     `**/tests/**/*.${extGroup}`,
   ];
 
-  const testFiles = fg.sync(patterns, {
+  const bracePattern = patterns.length === 1 ? patterns[0] : `{${patterns.join(",")}}`;
+  const testFiles = [...globSync(bracePattern, {
     cwd: repoRoot,
-    ignore: [
+    exclude: [
       ...(config.ignore ?? []),
       "**/fixtures/**",
       "**/__fixtures__/**",
@@ -163,8 +164,7 @@ function collectTestRefs(
       "**/test-data/**",
       "**/mock-data/**",
     ],
-    dot: false,
-  });
+  })];
 
   const nameToSymbolIds = new Map<string, string[]>();
   for (const symbol of symbols) {

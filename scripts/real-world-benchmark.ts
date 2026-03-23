@@ -15,7 +15,7 @@
 
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import fg from "fast-glob";
+import { globSync } from "node:fs";
 import { initLadybugDb, getLadybugConn } from "../src/db/ladybug.js";
 import { resolveGraphDbPath } from "../src/db/graph-db-path.js";
 import type { Connection } from "kuzu";
@@ -490,7 +490,7 @@ function expandRelevantFiles(
   if (!patterns || patterns.length === 0) {
     return new Set();
   }
-  const matches = fg.sync(patterns, {
+  const matches = [...globSync(patterns, {
     cwd: repoRoot,
     dot: true,
     onlyFiles: true,
@@ -687,13 +687,13 @@ function clamp(value: number, min: number, max: number): number {
 function collectCandidateFiles(
   repoRoot: string,
   languages: string[],
-  ignore: string[],
+  exclude: string[],
 ): string[] {
   const codePatterns = languages.map((lang) => `**/*.${lang}`);
   const ancillaryPatterns = ["config/**/*.json"];
   const patterns = [...codePatterns, ...ancillaryPatterns];
 
-  return fg.sync(patterns, {
+  return [...globSync(patterns, {
     cwd: repoRoot,
     ignore,
     dot: true,

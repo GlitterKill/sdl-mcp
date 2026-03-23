@@ -1,4 +1,4 @@
-import fastGlob from "fast-glob";
+import { glob } from "node:fs/promises";
 import { join } from "path";
 
 import { existsAsync } from "../../util/asyncFs.js";
@@ -60,11 +60,10 @@ export class CSharpImportResolutionAdapter implements ImportResolutionAdapter {
     const fallbackPatterns = params.extensions.map(
       (extension) => `**/${typeName}${extension}`,
     );
-    const fallbackMatches = await fastGlob(fallbackPatterns, {
-      cwd: params.repoRoot,
-      onlyFiles: true,
-      unique: true,
-    });
+    const fallbackMatches: string[] = [];
+    for await (const f of glob(fallbackPatterns.length === 1 ? fallbackPatterns[0] : `{${fallbackPatterns.join(",")}}`, { cwd: params.repoRoot })) {
+      fallbackMatches.push(f);
+    }
 
     return fallbackMatches.map((path) => normalizePath(path)).sort();
   }
