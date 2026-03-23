@@ -248,8 +248,22 @@ export function clearTestRefCache(repoRoot?: string): void {
 
 export { collectTestRefs };
 
-const MAX_BFS_DEPTH = 6;
+const MAX_BFS_COST = 12;
 const MAX_BFS_VISITED = 500;
+
+/**
+ * Edge-type cost for canonical test BFS.
+ * Call edges indicate strong semantic relationships (cost 1).
+ * Import edges are weaker file-level dependencies (cost 2).
+ */
+function edgeCost(edgeType: string): number {
+  switch (edgeType) {
+    case "call": return 1;
+    case "config": return 1.5;
+    case "import": return 2;
+    default: return 2;
+  }
+}
 
 /**
  * Returns true if the given relative file path matches known test file patterns.
@@ -307,7 +321,9 @@ interface BfsCandidate {
  * Searches both forward (outgoing call/import edges) and backward (incoming edges)
  * from the given symbolId. Test nodes are identified by file path patterns.
  *
- * Caps: max BFS depth 6, max visited nodes 500.
+ * Caps: max BFS cost 12 (weighted: call=1, config=1.5, import=2), max visited nodes 500.
+ * Note: uses FIFO queue (not priority queue), so may not find the cheapest path.
+ * For optimal results, prefer batchComputeCanonicalTests which uses Dijkstra-style relaxation.
  * Returns null if no test node is reachable.
  */
 export function computeCanonicalTest(
@@ -350,42 +366,44 @@ export function computeCanonicalTest(
   while (queueHead < queue.length && visited.size < MAX_BFS_VISITED) {
     const [current, depth] = queue[queueHead++];
 
-    if (depth >= MAX_BFS_DEPTH) {
+    if (depth >= MAX_BFS_COST) {
       continue;
     }
 
-    // Forward edges (outgoing)
+    // Forward edges (outgoing) — weighted by edge type
     const outgoing = graph.adjacencyOut.get(current) ?? [];
     for (const edge of outgoing) {
       const neighbor = edge.toSymbolId;
       if (visited.has(neighbor)) continue;
       visited.add(neighbor);
+      const cost = depth + edgeCost(edge.edgeType);
       const neighborPath = getRelPath(neighbor);
       if (neighborPath && isTestFile(neighborPath)) {
         candidates.push({
           symbolId: neighbor,
           file: neighborPath,
-          distance: depth + 1,
+          distance: cost,
         });
       }
-      queue.push([neighbor, depth + 1]);
+      queue.push([neighbor, cost]);
     }
 
-    // Backward edges (incoming)
+    // Backward edges (incoming) — weighted by edge type
     const incoming = graph.adjacencyIn.get(current) ?? [];
     for (const edge of incoming) {
       const neighbor = edge.fromSymbolId;
       if (visited.has(neighbor)) continue;
       visited.add(neighbor);
+      const cost = depth + edgeCost(edge.edgeType);
       const neighborPath = getRelPath(neighbor);
       if (neighborPath && isTestFile(neighborPath)) {
         candidates.push({
           symbolId: neighbor,
           file: neighborPath,
-          distance: depth + 1,
+          distance: cost,
         });
       }
-      queue.push([neighbor, depth + 1]);
+      queue.push([neighbor, cost]);
     }
   }
 
@@ -473,40 +491,44 @@ function batchComputeCanonicalTests(
       testFile,
     } = queue[queueHead++];
 
-    if (distance >= MAX_BFS_DEPTH) {
+    if (distance >= MAX_BFS_COST) {
       continue;
     }
 
-    // Traverse outgoing edges (forward)
+    // Traverse outgoing edges (forward) — weighted by edge type
     for (const edge of graph.adjacencyOut.get(current) ?? []) {
       const neighbor = edge.toSymbolId;
-      if (!nearest.has(neighbor)) {
+      const cost = distance + edgeCost(edge.edgeType);
+      const existing = nearest.get(neighbor);
+      if (!existing || cost < existing.distance) {
         nearest.set(neighbor, {
           file: testFile,
           symbolId: testSymbolId,
-          distance: distance + 1,
+          distance: cost,
         });
         queue.push({
           symbolId: neighbor,
-          distance: distance + 1,
+          distance: cost,
           testSymbolId,
           testFile,
         });
       }
     }
 
-    // Traverse incoming edges (backward)
+    // Traverse incoming edges (backward) — weighted by edge type
     for (const edge of graph.adjacencyIn.get(current) ?? []) {
       const neighbor = edge.fromSymbolId;
-      if (!nearest.has(neighbor)) {
+      const cost = distance + edgeCost(edge.edgeType);
+      const existing = nearest.get(neighbor);
+      if (!existing || cost < existing.distance) {
         nearest.set(neighbor, {
           file: testFile,
           symbolId: testSymbolId,
-          distance: distance + 1,
+          distance: cost,
         });
         queue.push({
           symbolId: neighbor,
-          distance: distance + 1,
+          distance: cost,
           testSymbolId,
           testFile,
         });
@@ -682,6 +704,32 @@ export async function updateMetricsForRepo(
       canonicalTestJson: canonicalTest ? JSON.stringify(canonicalTest) : null,
       updatedAt: now,
     });
+  }
+
+  // During incremental indexing, also update canonical tests for symbols
+  // NOT in the changed set. The batch BFS computes results for all symbols
+  // but the rows loop above only includes changed symbols. Without this,
+  // stale canonical test data persists for unchanged symbols.
+  if (changedFileIds && changedFileIds.size > 0) {
+    const affectedSet = new Set(symbols.map((s) => s.symbolId));
+    const canonicalOnlyRows: Array<{ symbolId: string; canonicalTestJson: string | null; updatedAt: string }> = [];
+    for (const symbol of allSymbols) {
+      if (affectedSet.has(symbol.symbolId)) continue;
+      const ct = batchCanonical.get(symbol.symbolId) ?? null;
+      canonicalOnlyRows.push({
+        symbolId: symbol.symbolId,
+        canonicalTestJson: ct ? JSON.stringify(ct) : null,
+        updatedAt: now,
+      });
+    }
+    if (canonicalOnlyRows.length > 0) {
+      await withWriteConn(async (wConn) => {
+        for (let i = 0; i < canonicalOnlyRows.length; i += BATCH_SIZE) {
+          const chunk = canonicalOnlyRows.slice(i, i + BATCH_SIZE);
+          await ladybugDb.upsertCanonicalTestBatch(wConn, chunk);
+        }
+      });
+    }
   }
 
   await withWriteConn(async (wConn) => {

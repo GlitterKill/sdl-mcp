@@ -32,6 +32,7 @@ import {
   extractInvariants,
   extractSideEffects,
   generateSummary,
+  isNameOnlySummary,
 } from "../summaries.js";
 import type { ParserWorkerPool } from "../workerPool.js";
 import type { SymbolWithNodeId } from "../worker.js";
@@ -449,6 +450,9 @@ export async function processFile(params: ProcessFileParams): Promise<{
       const existingSymbol = existingSymbolsById.get(symbolId);
 
       let summary = existingSymbol?.summary ?? null;
+      if (summary !== null && isNameOnlySummary(summary, extractedSymbol.name)) {
+        summary = null;
+      }
       if (summary === null) {
         summary = generateSummary(extractedSymbol, content);
       }

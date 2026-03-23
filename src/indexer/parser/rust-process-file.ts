@@ -30,6 +30,7 @@ import {
   extractInvariants,
   extractSideEffects,
   generateSummary,
+  isNameOnlySummary,
 } from "../summaries.js";
 import { buildSymbolReferences, isTestFile } from "./helpers.js";
 
@@ -354,9 +355,16 @@ export async function processFileFromRustResult(params: {
           : "";
 
       // Prefer existing values for stable IDs, then Rust-native metadata, then TS fallback.
-      let summary =
-        existingSymbol?.summary ??
-        (nativeSummary.length > 0 ? nativeSummary : null);
+      // Filter out stale name-only summaries so they get regenerated with type info.
+      const nativeSummaryValue =
+        nativeSummary.length > 0 && !isNameOnlySummary(nativeSummary, extracted.name)
+          ? nativeSummary
+          : null;
+      let summary = existingSymbol?.summary ?? null;
+      if (summary !== null && isNameOnlySummary(summary, extracted.name)) {
+        summary = null;
+      }
+      summary = summary ?? nativeSummaryValue;
       if (summary === null) {
         summary = generateSummary(extracted, content);
       }

@@ -31,20 +31,59 @@ pub fn generate_summary(symbol: &NativeParsedSymbol, file_content: &str, languag
         }
     }
 
-    // Auto-generate from name
+    // Auto-generate only if type info adds value beyond the name.
+    // The TS layer treats empty strings as null (no summary).
+    // Only functions/methods benefit from type-based summaries;
+    // classes/interfaces/types/variables get kind+name from the card already.
+    if symbol.kind != "function" && symbol.kind != "method" {
+        return String::new();
+    }
+
+    let has_typed_params = symbol
+        .signature
+        .as_ref()
+        .and_then(|s| s.params.as_ref())
+        .map_or(false, |params| params.iter().any(|p| p.type_name.is_some()));
+
+    let has_return = symbol.kind == "function"
+        && symbol
+            .signature
+            .as_ref()
+            .and_then(|s| s.returns.as_ref())
+            .map_or(false, |r| {
+                let simple = extract_simple_type(r);
+                !simple.is_empty() && simple != "void" && simple != "unknown" && simple != "any"
+            });
+
+    if !has_typed_params && !has_return {
+        return String::new();
+    }
+
     let name_words = split_camel_case(&symbol.name).join(" ");
     let capitalized = capitalize_first(&name_words);
-
     let mut summary = capitalized;
 
-    // Add param context
+    // Add typed param context (use type annotations, not param names)
     if let Some(ref sig) = symbol.signature {
         if let Some(ref params) = sig.params {
-            let param_infos: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
-            let context = generate_param_context(&param_infos);
-            if !context.is_empty() {
-                summary.push(' ');
-                summary.push_str(&context);
+            let mut unique: Vec<String> = Vec::new();
+            for p in params {
+                if let Some(ref tn) = p.type_name {
+                    let simple = extract_simple_type(tn);
+                    if !simple.is_empty()
+                        && simple != "unknown"
+                        && simple != "any"
+                        && simple != "object"
+                        && simple != "Object"
+                        && !unique.contains(&simple)
+                    {
+                        unique.push(simple);
+                    }
+                }
+            }
+            if !unique.is_empty() {
+                summary.push_str(" from ");
+                summary.push_str(&unique.join(" and "));
             }
         }
 
@@ -52,8 +91,8 @@ pub fn generate_summary(symbol: &NativeParsedSymbol, file_content: &str, languag
         if symbol.kind == "function" {
             if let Some(ref returns) = sig.returns {
                 let simple_type = extract_simple_type(returns);
-                if !simple_type.is_empty() && simple_type != "void" && simple_type != "unknown" {
-                    summary.push_str(" and returns ");
+                if !simple_type.is_empty() && simple_type != "void" && simple_type != "unknown" && simple_type != "any" {
+                    summary.push_str(" returning ");
                     summary.push_str(&simple_type);
                 }
             }
@@ -384,29 +423,6 @@ fn capitalize_first(s: &str) -> String {
         }
     }
 }
-
-fn generate_param_context(param_names: &[String]) -> String {
-    let mut parts = Vec::new();
-
-    for name in param_names {
-        if name.starts_with("...") {
-            continue;
-        }
-
-        if name.contains("Id") || name.contains("ID") {
-            parts.push(format!("by {}", name.to_lowercase()));
-        } else if name.contains("Config") || name.contains("Options") {
-            parts.push(format!("with {}", name.to_lowercase()));
-        } else if name.contains("Data") || name.contains("Input") {
-            parts.push(format!("from {}", name.to_lowercase()));
-        } else if name.contains("Path") || name.contains("File") {
-            parts.push(format!("at {}", name.to_lowercase()));
-        }
-    }
-
-    parts.join(" ")
-}
-
 fn extract_simple_type(type_annotation: &str) -> String {
     let cleaned = type_annotation.trim_start_matches(':').trim_start();
 

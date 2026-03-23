@@ -3,7 +3,7 @@ import { ExtractedSymbol } from "./treesitter/extractSymbols.js";
 export function generateSummary(
   symbol: ExtractedSymbol,
   fileContent: string,
-): string {
+): string | null {
   const jsdoc = extractJSDoc(symbol, fileContent);
 
   if (jsdoc.description) {
@@ -15,44 +15,113 @@ export function generateSummary(
     }
   }
 
-  const words = splitCamelCase(symbol.name);
-
-  let summary: string;
-
+  // No JSDoc — only generate summary if type info adds value beyond the name
   if (symbol.kind === "function" || symbol.kind === "method") {
-    // Action-oriented: "Builds graph slice from entry symbols with budget"
-    const verb = verbify(words[0]);
-    const subject = words.slice(1).map((w) => w.toLowerCase()).join(" ");
-    summary = subject ? `${verb} ${subject}` : verb;
-
-    if (symbol.signature?.params && symbol.signature.params.length > 0) {
-      const paramInfo = generateParamContext(symbol.signature.params);
-      if (paramInfo) {
-        summary += ` ${paramInfo}`;
-      }
-    }
-    if (symbol.signature?.returns) {
-      const returnType = extractSimpleType(symbol.signature.returns);
-      if (returnType && returnType !== "void" && returnType !== "unknown") {
-        summary += ` returning ${returnType}`;
-      }
-    }
-  } else if (symbol.kind === "class") {
-    const className = words.join(" ");
-    summary = `Class ${className}`;
-  } else if (symbol.kind === "interface") {
-    const ifaceName = words.join(" ");
-    summary = `Interface for ${ifaceName.toLowerCase()}`;
-  } else if (symbol.kind === "type") {
-    const typeName = words.join(" ");
-    summary = `Type alias for ${typeName.toLowerCase()}`;
-  } else {
-    // Variables, modules, constructors, etc.
-    const nameWords = words.join(" ");
-    summary = nameWords.charAt(0).toUpperCase() + nameWords.slice(1);
+    return generateTypedFunctionSummary(symbol);
   }
 
+  // Classes, interfaces, types, variables: kind + name is already on the card
+  return null;
+}
+
+/**
+ * Build a summary for a function/method using typed params and return type.
+ * Returns null if no type information is available (the name alone is on the card).
+ */
+function generateTypedFunctionSummary(symbol: ExtractedSymbol): string | null {
+  const params = symbol.signature?.params ?? [];
+  const typedParams = params
+    .filter((p) => p.type && !p.name.startsWith("..."))
+    .map((p) => extractSimpleType(p.type!))
+    .filter(
+      (t) =>
+        t !== "" && t !== "unknown" && t !== "any" && t !== "object" && t !== "Object",
+    );
+
+  const returnType = symbol.signature?.returns
+    ? extractSimpleType(symbol.signature.returns)
+    : null;
+  const hasReturn =
+    returnType != null &&
+    returnType !== "void" &&
+    returnType !== "unknown" &&
+    returnType !== "any";
+
+  if (typedParams.length === 0 && !hasReturn) {
+    return null;
+  }
+
+  const words = splitCamelCase(symbol.name);
+  const verb = verbify(words[0]);
+  const subject = words
+    .slice(1)
+    .map((w) => w.toLowerCase())
+    .join(" ");
+  let summary = subject ? `${verb} ${subject}` : verb;
+
+  if (typedParams.length > 0) {
+    const unique = [...new Set(typedParams)];
+    summary += ` from ${unique.join(" and ")}`;
+  }
+  if (hasReturn) {
+    summary += ` returning ${returnType}`;
+  }
   return summary;
+}
+
+/**
+ * Detects whether a summary is just a reformatted version of the symbol name.
+ * Used to clear stale name-only summaries during incremental reindexing.
+ */
+const NAME_ONLY_NOISE = new Set([
+  "class", "interface", "for", "type", "alias",
+  "returning", "by", "with", "from", "at", "and", "returns",
+]);
+
+export function isNameOnlySummary(
+  summary: string,
+  symbolName: string,
+): boolean {
+  // Remove structural noise words BEFORE deconjugation (so "alias" isn't stemmed to "alia")
+
+
+  const rawSummaryWords = summary
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  const meaningful = rawSummaryWords
+    .filter((w) => !NAME_ONLY_NOISE.has(w))
+    .map(deconjugate);
+
+  const nameWords = new Set(
+    splitCamelCase(symbolName).map((w) => deconjugate(w.toLowerCase())),
+  );
+
+  if (meaningful.length === 0 || nameWords.size === 0) return true;
+
+  let overlap = 0;
+  for (const word of meaningful) {
+    if (nameWords.has(word)) overlap++;
+  }
+  return overlap / meaningful.length > 0.8;
+}
+
+function deconjugate(word: string): string {
+  const reverseIrregulars: Record<string, string> = {
+    gets: "get", sets: "set", does: "do", runs: "run", goes: "go",
+    checks: "check", determines: "determine", handles: "handle",
+  };
+  if (reverseIrregulars[word]) return reverseIrregulars[word];
+  if (word.endsWith("ies") && word.length > 4)
+    return word.slice(0, -3) + "y";
+  // For -es endings: sibilants lose -es (pushes→push), others lose just -s (creates→create)
+  if (word.endsWith("sses") || word.endsWith("zes") || word.endsWith("xes") ||
+      word.endsWith("shes") || word.endsWith("ches")) {
+    return word.slice(0, -2);
+  }
+  if (word.endsWith("s") && !word.endsWith("ss") && word.length > 2)
+    return word.slice(0, -1);
+  return word;
 }
 
 export function extractInvariants(
@@ -356,34 +425,6 @@ function splitCamelCase(str: string): string[] {
   return result;
 }
 
-function generateParamContext(
-  params: Array<{ name: string; type?: string }>,
-): string {
-  if (params.length === 0) return "";
-
-  const contextParts: string[] = [];
-
-  for (const param of params) {
-    if (param.name.startsWith("...")) {
-      continue;
-    }
-
-    if (param.name.includes("Id") || param.name.includes("ID")) {
-      contextParts.push(`by ${param.name.toLowerCase()}`);
-    } else if (
-      param.name.includes("Config") ||
-      param.name.includes("Options")
-    ) {
-      contextParts.push(`with ${param.name.toLowerCase()}`);
-    } else if (param.name.includes("Data") || param.name.includes("Input")) {
-      contextParts.push(`from ${param.name.toLowerCase()}`);
-    } else if (param.name.includes("Path") || param.name.includes("File")) {
-      contextParts.push(`at ${param.name.toLowerCase()}`);
-    }
-  }
-
-  return contextParts.join(" ");
-}
 
 function extractSimpleType(typeAnnotation: string): string {
   const cleaned = typeAnnotation

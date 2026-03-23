@@ -76,6 +76,33 @@ export async function upsertMetricsBatch(
   });
 }
 
+/**
+ * Batch-update only the canonicalTestJson field on Metrics nodes.
+ * Used during incremental indexing to propagate canonical test changes
+ * to symbols not in the changed-file set.
+ */
+export async function upsertCanonicalTestBatch(
+  conn: Connection,
+  rows: Array<{ symbolId: string; canonicalTestJson: string | null; updatedAt: string }>,
+): Promise<void> {
+  if (rows.length === 0) return;
+  await withTransaction(conn, async (txConn) => {
+    for (const row of rows) {
+      await exec(
+        txConn,
+        `MERGE (m:Metrics {symbolId: $symbolId})
+         SET m.canonicalTestJson = $canonicalTestJson,
+             m.updatedAt = $updatedAt`,
+        {
+          symbolId: row.symbolId,
+          canonicalTestJson: row.canonicalTestJson,
+          updatedAt: row.updatedAt,
+        },
+      );
+    }
+  });
+}
+
 export async function getMetrics(
   conn: Connection,
   symbolId: string,
