@@ -25,6 +25,7 @@ import { execSync } from "node:child_process";
 import { resolve, join } from "node:path";
 import { createRequire } from "node:module";
 
+import { resolveStressRepoRoot } from "./infra/dist-runtime.js";
 import { ServerHarness } from "./infra/server-harness.js";
 import { writeConsoleReport, writeJsonReport } from "./infra/report-writer.js";
 import { runSingleClientBaseline } from "./scenarios/single-client-baseline.js";
@@ -104,7 +105,7 @@ function runBuild(): void {
   stressLog("info", "Building dist/ via npm run build:runtime");
   try {
     execSync("npm run build:runtime", {
-      cwd: resolve(join(import.meta.dirname ?? ".", "..", "..")),
+      cwd: resolveStressRepoRoot(import.meta.url),
       stdio: "inherit",
       timeout: 120_000,
     });
@@ -122,10 +123,9 @@ function runBuild(): void {
 async function main(): Promise<void> {
   const cliArgs = parseArgs();
 
-  // Resolve project root (tests/stress/run-stress.ts → project root)
-  const projectRoot = resolve(join(import.meta.dirname ?? ".", "..", ".."));
-  const fixturePath = resolve(join(import.meta.dirname ?? ".", "fixtures"));
-  const resultsDir = resolve(join(import.meta.dirname ?? ".", "results"));
+  const projectRoot = resolveStressRepoRoot(import.meta.url);
+  const fixturePath = resolve(join(projectRoot, "tests/stress/fixtures"));
+  const resultsDir = resolve(join(projectRoot, "tests/stress/results"));
 
   // Determine concurrency levels based on max-clients
   const levels: number[] = [];

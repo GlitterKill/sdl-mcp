@@ -24,7 +24,6 @@ jobs:
           - ubuntu-latest
           - windows-latest
         node-version:
-          - 22.x
           - 24.x
 
     steps:
@@ -74,8 +73,30 @@ jobs:
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
+      - name: Verify tree-sitter packages load
+        shell: bash
+        run: |
+          node --input-type=module <<'EOF'
+          const packages = [
+            "tree-sitter",
+            "tree-sitter-bash",
+            "tree-sitter-c",
+            "tree-sitter-c-sharp",
+            "tree-sitter-cpp",
+            "tree-sitter-go",
+            "tree-sitter-java",
+            "tree-sitter-kotlin",
+            "tree-sitter-php",
+            "tree-sitter-python",
+            "tree-sitter-rust",
+            "tree-sitter-typescript",
+          ];
+
+          for (const pkg of packages) {
+            await import(pkg);
+            console.log(`[ok] ${pkg}`);
+          }
+          EOF
 
       - name: Setup LadybugDB native binary
         shell: bash
@@ -238,8 +259,30 @@ jobs:
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
+      - name: Verify tree-sitter packages load
+        shell: bash
+        run: |
+          node --input-type=module <<'EOF'
+          const packages = [
+            "tree-sitter",
+            "tree-sitter-bash",
+            "tree-sitter-c",
+            "tree-sitter-c-sharp",
+            "tree-sitter-cpp",
+            "tree-sitter-go",
+            "tree-sitter-java",
+            "tree-sitter-kotlin",
+            "tree-sitter-php",
+            "tree-sitter-python",
+            "tree-sitter-rust",
+            "tree-sitter-typescript",
+          ];
+
+          for (const pkg of packages) {
+            await import(pkg);
+            console.log(`[ok] ${pkg}`);
+          }
+          EOF
 
       - name: Setup LadybugDB native binary
         shell: bash
@@ -421,8 +464,30 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
+      - name: Verify tree-sitter packages load
+        shell: bash
+        run: |
+          node --input-type=module <<'EOF'
+          const packages = [
+            "tree-sitter",
+            "tree-sitter-bash",
+            "tree-sitter-c",
+            "tree-sitter-c-sharp",
+            "tree-sitter-cpp",
+            "tree-sitter-go",
+            "tree-sitter-java",
+            "tree-sitter-kotlin",
+            "tree-sitter-php",
+            "tree-sitter-python",
+            "tree-sitter-rust",
+            "tree-sitter-typescript",
+          ];
+
+          for (const pkg of packages) {
+            await import(pkg);
+            console.log(`[ok] ${pkg}`);
+          }
+          EOF
 
       - name: Setup LadybugDB native binary
         if: matrix.run-tests
@@ -501,8 +566,30 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
+      - name: Verify tree-sitter packages load
+        shell: bash
+        run: |
+          node --input-type=module <<'EOF'
+          const packages = [
+            "tree-sitter",
+            "tree-sitter-bash",
+            "tree-sitter-c",
+            "tree-sitter-c-sharp",
+            "tree-sitter-cpp",
+            "tree-sitter-go",
+            "tree-sitter-java",
+            "tree-sitter-kotlin",
+            "tree-sitter-php",
+            "tree-sitter-python",
+            "tree-sitter-rust",
+            "tree-sitter-typescript",
+          ];
+
+          for (const pkg of packages) {
+            await import(pkg);
+            console.log(`[ok] ${pkg}`);
+          }
+          EOF
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -641,8 +728,30 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
+      - name: Verify tree-sitter packages load
+        shell: bash
+        run: |
+          node --input-type=module <<'EOF'
+          const packages = [
+            "tree-sitter",
+            "tree-sitter-bash",
+            "tree-sitter-c",
+            "tree-sitter-c-sharp",
+            "tree-sitter-cpp",
+            "tree-sitter-go",
+            "tree-sitter-java",
+            "tree-sitter-kotlin",
+            "tree-sitter-php",
+            "tree-sitter-python",
+            "tree-sitter-rust",
+            "tree-sitter-typescript",
+          ];
+
+          for (const pkg of packages) {
+            await import(pkg);
+            console.log(`[ok] ${pkg}`);
+          }
+          EOF
 
       - name: Setup LadybugDB native binary
         shell: bash
@@ -829,8 +938,30 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
+      - name: Verify tree-sitter packages load
+        shell: bash
+        run: |
+          node --input-type=module <<'EOF'
+          const packages = [
+            "tree-sitter",
+            "tree-sitter-bash",
+            "tree-sitter-c",
+            "tree-sitter-c-sharp",
+            "tree-sitter-cpp",
+            "tree-sitter-go",
+            "tree-sitter-java",
+            "tree-sitter-kotlin",
+            "tree-sitter-php",
+            "tree-sitter-python",
+            "tree-sitter-rust",
+            "tree-sitter-typescript",
+          ];
+
+          for (const pkg of packages) {
+            await import(pkg);
+            console.log(`[ok] ${pkg}`);
+          }
+          EOF
 
       - name: Setup LadybugDB native binary
         shell: bash

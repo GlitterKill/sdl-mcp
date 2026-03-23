@@ -8,21 +8,67 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Dist imports — requires build:runtime first
-import {
-  setupHttpTransport,
-  type HttpServerHandle,
-} from "../../../dist/cli/transport/http.js";
-import { closeLadybugDb, getPoolStats } from "../../../dist/db/ladybug.js";
-import {
+import { importStressDistModule } from "./dist-runtime.js";
+import type { StressTestConfig } from "./types.js";
+import { stressLog } from "./types.js";
+
+interface HttpServerHandle {
+  close(): Promise<void>;
+  port: number;
+  authToken: string;
+}
+
+interface SessionManagerInstance {
+  getStats(): { activeSessions: number; maxSessions: number };
+}
+
+type SetupHttpTransport = (
+  host: string,
+  port: number,
+  graphDbPath: string,
+  options: { sessionManager: SessionManagerInstance | null },
+) => Promise<HttpServerHandle>;
+
+type PoolStats = {
+  readPoolSize: number;
+  readPoolInitialized: number;
+  writeQueued: number;
+  writeActive: number;
+};
+
+type ToolDispatchStats = { active: number; queued: number };
+
+type DispatchLimiter = { getStats(): ToolDispatchStats };
+
+type SessionManagerConstructor = new (maxSessions: number) => SessionManagerInstance;
+
+const transportModule = await importStressDistModule<{
+  setupHttpTransport: SetupHttpTransport;
+}>(import.meta.url, "cli/transport/http.js");
+const ladybugModule = await importStressDistModule<{
+  closeLadybugDb: () => Promise<void>;
+  getPoolStats: () => PoolStats;
+}>(import.meta.url, "db/ladybug.js");
+const dispatchLimiterModule = await importStressDistModule<{
+  configureToolDispatchLimiter: (opts: {
+    maxConcurrency?: number;
+    queueTimeoutMs?: number;
+  }) => void;
+  getToolDispatchLimiter: () => DispatchLimiter;
+  resetToolDispatchLimiter: () => void;
+}>(import.meta.url, "mcp/dispatch-limiter.js");
+const sessionManagerModule = await importStressDistModule<{
+  SessionManager: SessionManagerConstructor;
+}>(import.meta.url, "mcp/session-manager.js");
+
+const { setupHttpTransport } = transportModule;
+const { closeLadybugDb, getPoolStats } = ladybugModule;
+const {
   configureToolDispatchLimiter,
   getToolDispatchLimiter,
   resetToolDispatchLimiter,
-} from "../../../dist/mcp/dispatch-limiter.js";
-import { SessionManager } from "../../../dist/mcp/session-manager.js";
-
-import type { StressTestConfig } from "./types.js";
-import { stressLog } from "./types.js";
+} = dispatchLimiterModule;
+const { SessionManager } = sessionManagerModule;
 
 export interface ServerHarnessOptions {
   maxSessions?: number;
@@ -34,7 +80,7 @@ export class ServerHarness {
   private config: StressTestConfig;
   private handle: HttpServerHandle | null = null;
   private tempDir: string | null = null;
-  private sessionManager: SessionManager | null = null;
+  private sessionManager: SessionManagerInstance | null = null;
   private actualPort: number = 0;
   private _authToken: string = "";
 

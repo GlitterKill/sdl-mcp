@@ -12,10 +12,13 @@ import {
   createStressClients,
   disconnectAll,
 } from "../infra/client-factory.js";
+import { importStressDistModule } from "../infra/dist-runtime.js";
 import type { ScenarioContext, ScenarioResult } from "../infra/types.js";
 import { stressLog } from "../infra/types.js";
 
-import { getToolDispatchLimiter } from "../../../dist/mcp/dispatch-limiter.js";
+const { getToolDispatchLimiter } = await importStressDistModule<{
+  getToolDispatchLimiter: () => { getStats(): { active: number; queued: number } };
+}>(import.meta.url, "mcp/dispatch-limiter.js");
 
 const CLIENTS = 4;
 const CALLS_PER_CLIENT = 5;

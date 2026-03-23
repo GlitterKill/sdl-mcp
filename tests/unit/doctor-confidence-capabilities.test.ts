@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-describe("doctor command - call resolution capabilities", () => {
+describe("doctor command - call resolution capabilities", { concurrency: 1 }, () => {
   let tempDir: string;
   let originalExit: typeof process.exit;
   let originalSDLConfig: string | undefined;
