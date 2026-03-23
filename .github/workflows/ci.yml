@@ -73,6 +73,10 @@ jobs:
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts --legacy-peer-deps
 
+      - name: Rebuild native addons (tree-sitter)
+        shell: bash
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
+
       - name: Verify tree-sitter packages load
         shell: bash
         run: |
@@ -258,6 +262,10 @@ jobs:
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Rebuild native addons (tree-sitter)
+        shell: bash
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Verify tree-sitter packages load
         shell: bash
@@ -464,6 +472,10 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
+      - name: Rebuild native addons (tree-sitter)
+        shell: bash
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
+
       - name: Verify tree-sitter packages load
         shell: bash
         run: |
@@ -565,6 +577,10 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Rebuild native addons (tree-sitter)
+        shell: bash
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Verify tree-sitter packages load
         shell: bash
@@ -727,6 +743,10 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Rebuild native addons (tree-sitter)
+        shell: bash
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Verify tree-sitter packages load
         shell: bash
@@ -937,6 +957,10 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Rebuild native addons (tree-sitter)
+        shell: bash
+        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Verify tree-sitter packages load
         shell: bash
