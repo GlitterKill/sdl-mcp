@@ -137,7 +137,11 @@ jobs:
         run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
+        shell: bash
+        run: |
+          # Patch tree-sitter binding.gyp: Node 24 V8 requires C++20 but tree-sitter 0.25.0 hardcodes C++17
+          sed -i.bak 's/c++17/c++20/g' node_modules/tree-sitter/binding.gyp
+          npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Build native addon
         run: npx napi build --release --cargo-cwd native --config native/package.json --target ${{ matrix.target }} native
@@ -179,7 +183,11 @@ jobs:
         run: npm ci --ignore-scripts --legacy-peer-deps
 
       - name: Setup tree-sitter native binding
-        run: npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
+        shell: bash
+        run: |
+          # Patch tree-sitter binding.gyp: Node 24 V8 requires C++20 but tree-sitter 0.25.0 hardcodes C++17
+          sed -i.bak 's/c++17/c++20/g' node_modules/tree-sitter/binding.gyp
+          npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-javascript tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
 
       - name: Set package versions from release
         shell: bash
