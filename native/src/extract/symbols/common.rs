@@ -78,6 +78,7 @@ pub fn make_symbol(
         side_effects: vec![],
         role_tags: vec![],
         search_text: String::new(),
+        summary_quality: None,
     }
 }
 

@@ -27,9 +27,12 @@ import type { FileMetadata } from "../fileScanner.js";
 import type { RustParseResult } from "../rustIndexer.js";
 import { resolveSymbolEnrichment } from "../symbol-enrichment.js";
 import {
+  classifySummarySource,
   extractInvariants,
   extractSideEffects,
   generateSummary,
+  getSummaryQuality,
+  hasJSDoc,
   isNameOnlySummary,
 } from "../summaries.js";
 import { buildSymbolReferences, isTestFile } from "./helpers.js";
@@ -369,6 +372,13 @@ export async function processFileFromRustResult(params: {
         summary = generateSummary(extracted, content);
       }
 
+      // Compute summary quality/source metadata.
+      // Classify based on JSDoc presence and symbol kind regardless of whether
+      // the summary came from Rust native extraction or TS heuristic fallback.
+      const hadJSDoc = hasJSDoc(extracted, content);
+      const summarySource = classifySummarySource(summary, hadJSDoc, extracted.kind);
+      const summaryQuality = getSummaryQuality(summary, summarySource);
+
       let invariantsJson =
         existingSymbol?.invariantsJson ??
         (nativeInvariantsJson.length > 0 && nativeInvariantsJson !== "[]"
@@ -421,6 +431,8 @@ export async function processFileFromRustResult(params: {
         summary,
         invariantsJson,
         sideEffectsJson,
+        summaryQuality,
+        summarySource,
         roleTagsJson,
         searchText,
         updatedAt: new Date().toISOString(),

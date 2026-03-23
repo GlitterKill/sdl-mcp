@@ -108,22 +108,22 @@ describe("generateSummary", () => {
     assert.ok(result!.includes("GraphSlice"), "should mention return type");
   });
 
-  it("returns null for class without JSDoc", () => {
+  it("returns heuristic summary for class without JSDoc", () => {
     const symbol = makeSymbol({ name: "MyWidget", kind: "class" });
     const result = generateSummary(symbol as any, "class MyWidget {}");
-    assert.strictEqual(result, null);
+    assert.strictEqual(result, "Class encapsulating my widget behavior");
   });
 
-  it("returns null for interface without JSDoc", () => {
+  it("returns heuristic summary for interface without JSDoc", () => {
     const symbol = makeSymbol({ name: "SymbolCard", kind: "interface" });
     const result = generateSummary(symbol as any, "interface SymbolCard {}");
-    assert.strictEqual(result, null);
+    assert.strictEqual(result, "Interface defining symbol card contract");
   });
 
-  it("returns null for variable without JSDoc", () => {
+  it("returns heuristic summary for constant variable without JSDoc", () => {
     const symbol = makeSymbol({ name: "MAX_SIZE", kind: "variable" });
     const result = generateSummary(symbol as any, "const MAX_SIZE = 100;");
-    assert.strictEqual(result, null);
+    assert.strictEqual(result, "Constant defining max size");
   });
 
   it("deduplicates repeated param types", () => {

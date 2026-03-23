@@ -86,6 +86,8 @@ pub struct NativeParsedSymbol {
     pub role_tags: Vec<String>,
     /// Search-oriented text including identifier splits, summary, tags, and path hints.
     pub search_text: String,
+    /// Summary quality score: 1.0 = doc comment, 0.4 = typed function, 0.3 = heuristic, 0.0 = none.
+    pub summary_quality: Option<f64>,
 }
 
 /// Extracted import statement.

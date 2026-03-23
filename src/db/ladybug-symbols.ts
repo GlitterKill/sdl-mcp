@@ -26,6 +26,8 @@ export interface SymbolRow {
   summary: string | null;
   invariantsJson: string | null;
   sideEffectsJson: string | null;
+  summaryQuality?: number;
+  summarySource?: string;
   roleTagsJson?: string | null;
   searchText?: string | null;
   updatedAt: string;
@@ -65,6 +67,8 @@ export async function upsertSymbol(
          s.sideEffectsJson = $sideEffectsJson,
          s.roleTagsJson = $roleTagsJson,
          s.searchText = $searchText,
+         s.summaryQuality = $summaryQuality,
+         s.summarySource = $summarySource,
          s.updatedAt = $updatedAt
      MERGE (s)-[:SYMBOL_IN_FILE]->(f)
      MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
@@ -88,6 +92,8 @@ export async function upsertSymbol(
       sideEffectsJson: symbol.sideEffectsJson,
       roleTagsJson: symbol.roleTagsJson ?? null,
       searchText: symbol.searchText ?? null,
+      summaryQuality: symbol.summaryQuality ?? 0.0,
+      summarySource: symbol.summarySource ?? 'unknown',
       updatedAt: symbol.updatedAt,
     },
   );
@@ -115,6 +121,8 @@ export async function getSymbol(
     summary: string | null;
     invariantsJson: string | null;
     sideEffectsJson: string | null;
+    summaryQuality: number | null;
+    summarySource: string | null;
     updatedAt: string;
   }>(
     conn,
@@ -137,6 +145,8 @@ export async function getSymbol(
             s.summary AS summary,
             s.invariantsJson AS invariantsJson,
             s.sideEffectsJson AS sideEffectsJson,
+            s.summaryQuality AS summaryQuality,
+            s.summarySource AS summarySource,
             s.updatedAt AS updatedAt`,
     { symbolId },
   );
@@ -161,6 +171,8 @@ export async function getSymbol(
     summary: row.summary,
     invariantsJson: row.invariantsJson,
     sideEffectsJson: row.sideEffectsJson,
+    summaryQuality: row.summaryQuality ?? undefined,
+    summarySource: row.summarySource ?? undefined,
     updatedAt: row.updatedAt,
   };
 }
@@ -169,14 +181,18 @@ export async function updateSymbolSummary(
   conn: Connection,
   symbolId: string,
   summary: string | null,
+  summaryQuality: number,
+  summarySource: string,
   updatedAt = new Date().toISOString(),
 ): Promise<void> {
   await exec(
     conn,
     `MATCH (s:Symbol {symbolId: $symbolId})
      SET s.summary = $summary,
+         s.summaryQuality = $summaryQuality,
+         s.summarySource = $summarySource,
          s.updatedAt = $updatedAt`,
-    { symbolId, summary, updatedAt },
+    { symbolId, summary, summaryQuality, summarySource, updatedAt },
   );
 }
 
@@ -201,6 +217,8 @@ export async function getSymbolsByFile(
     summary: string | null;
     invariantsJson: string | null;
     sideEffectsJson: string | null;
+    summaryQuality: number | null;
+    summarySource: string | null;
     roleTagsJson: string | null;
     searchText: string | null;
     updatedAt: string;
@@ -224,6 +242,8 @@ export async function getSymbolsByFile(
             s.summary AS summary,
             s.invariantsJson AS invariantsJson,
             s.sideEffectsJson AS sideEffectsJson,
+            s.summaryQuality AS summaryQuality,
+            s.summarySource AS summarySource,
             s.roleTagsJson AS roleTagsJson,
             s.searchText AS searchText,
             s.updatedAt AS updatedAt`,
@@ -248,6 +268,8 @@ export async function getSymbolsByFile(
     summary: row.summary,
     invariantsJson: row.invariantsJson,
     sideEffectsJson: row.sideEffectsJson,
+    summaryQuality: row.summaryQuality ?? undefined,
+    summarySource: row.summarySource ?? undefined,
     roleTagsJson: row.roleTagsJson,
     searchText: row.searchText,
     updatedAt: row.updatedAt,
@@ -343,6 +365,8 @@ export async function getSymbolsByRepo(
     summary: string | null;
     invariantsJson: string | null;
     sideEffectsJson: string | null;
+    summaryQuality: number | null;
+    summarySource: string | null;
     roleTagsJson: string | null;
     searchText: string | null;
     updatedAt: string;
@@ -366,6 +390,8 @@ export async function getSymbolsByRepo(
             s.summary AS summary,
             s.invariantsJson AS invariantsJson,
             s.sideEffectsJson AS sideEffectsJson,
+            s.summaryQuality AS summaryQuality,
+            s.summarySource AS summarySource,
             s.roleTagsJson AS roleTagsJson,
             s.searchText AS searchText,
             s.updatedAt AS updatedAt`,
@@ -390,6 +416,8 @@ export async function getSymbolsByRepo(
     summary: row.summary,
     invariantsJson: row.invariantsJson,
     sideEffectsJson: row.sideEffectsJson,
+    summaryQuality: row.summaryQuality ?? undefined,
+    summarySource: row.summarySource ?? undefined,
     roleTagsJson: row.roleTagsJson,
     searchText: row.searchText,
     updatedAt: row.updatedAt,
@@ -458,6 +486,8 @@ export async function getSymbolsByIds(
     summary: string | null;
     invariantsJson: string | null;
     sideEffectsJson: string | null;
+    summaryQuality: number | null;
+    summarySource: string | null;
     roleTagsJson: string | null;
     searchText: string | null;
     updatedAt: string;
@@ -484,6 +514,8 @@ export async function getSymbolsByIds(
             s.summary AS summary,
             s.invariantsJson AS invariantsJson,
             s.sideEffectsJson AS sideEffectsJson,
+            s.summaryQuality AS summaryQuality,
+            s.summarySource AS summarySource,
             s.roleTagsJson AS roleTagsJson,
             s.searchText AS searchText,
             s.updatedAt AS updatedAt`,
@@ -510,6 +542,8 @@ export async function getSymbolsByIds(
       summary: row.summary,
       invariantsJson: row.invariantsJson,
       sideEffectsJson: row.sideEffectsJson,
+      summaryQuality: row.summaryQuality ?? undefined,
+      summarySource: row.summarySource ?? undefined,
       roleTagsJson: row.roleTagsJson,
       searchText: row.searchText,
       updatedAt: row.updatedAt,
@@ -586,6 +620,8 @@ export async function findSymbolsInRange(
     summary: string | null;
     invariantsJson: string | null;
     sideEffectsJson: string | null;
+    summaryQuality: number | null;
+    summarySource: string | null;
     updatedAt: string;
   }>(
     conn,
@@ -615,6 +651,8 @@ export async function findSymbolsInRange(
             s.summary AS summary,
             s.invariantsJson AS invariantsJson,
             s.sideEffectsJson AS sideEffectsJson,
+            s.summaryQuality AS summaryQuality,
+            s.summarySource AS summarySource,
             s.updatedAt AS updatedAt
      ORDER BY containmentRank, dist`,
     { repoId, fileId, startLine, endLine },
@@ -638,6 +676,8 @@ export async function findSymbolsInRange(
     summary: row.summary,
     invariantsJson: row.invariantsJson,
     sideEffectsJson: row.sideEffectsJson,
+    summaryQuality: row.summaryQuality ?? undefined,
+    summarySource: row.summarySource ?? undefined,
     updatedAt: row.updatedAt,
   }));
 }
@@ -786,6 +826,8 @@ interface SearchSymbolsRawRow {
   summary: string | null;
   invariantsJson: string | null;
   sideEffectsJson: string | null;
+  summaryQuality: number | null;
+  summarySource: string | null;
   updatedAt: string;
 }
 
@@ -808,6 +850,8 @@ function mapSearchSymbolRow(row: SearchSymbolsRawRow, repoId: string): SymbolRow
     summary: row.summary,
     invariantsJson: row.invariantsJson,
     sideEffectsJson: row.sideEffectsJson,
+    summaryQuality: row.summaryQuality ?? undefined,
+    summarySource: row.summarySource ?? undefined,
     updatedAt: row.updatedAt,
   };
 }
@@ -868,6 +912,8 @@ async function searchSymbolsSingleTerm(
             s.summary AS summary,
             s.invariantsJson AS invariantsJson,
             s.sideEffectsJson AS sideEffectsJson,
+            s.summaryQuality AS summaryQuality,
+            s.summarySource AS summarySource,
             s.updatedAt AS updatedAt
      ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
      LIMIT $limit`,

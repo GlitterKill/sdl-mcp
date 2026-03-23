@@ -483,9 +483,17 @@ export async function generateSummariesForRepo(
             wConn,
             sym.symbolId,
             cached.summary,
+            1.0,
+            "llm",
           );
         });
       }
+      continue;
+    }
+    // Skip symbols that already have good summaries (JSDoc or LLM-generated).
+    // Quality thresholds: JSDoc=1.0, LLM=0.8, NN-direct=0.6, NN-adapted=0.5,
+    // heuristic=0.3-0.4. We only regenerate below 0.8.
+    if (sym.summaryQuality !== undefined && sym.summaryQuality !== null && sym.summaryQuality >= 0.8) {
       continue;
     }
     needsSummary.push(sym);
@@ -561,6 +569,8 @@ export async function generateSummariesForRepo(
             wConn,
             sym.symbolId,
             genResult.summary,
+            1.0,
+            "llm",
           );
         });
 
