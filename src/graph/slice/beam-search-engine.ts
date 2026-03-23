@@ -514,6 +514,7 @@ async function beamSearchCoreAsync(
   edgeWeights: Record<EdgeType, number>,
   minConfidence: number,
   strategy: BeamSearchStrategy,
+  signal?: AbortSignal,
 ): Promise<BeamSearchResult> {
   await strategy.onBeforeLoop?.(state);
 
@@ -521,6 +522,7 @@ async function beamSearchCoreAsync(
     !state.frontier.isEmpty() &&
     state.sliceCards.size < state.effectiveCardCap
   ) {
+    if (signal?.aborted) break;
     await strategy.onIterationStart?.(state);
 
     state.effectiveMinConfidence = getAdaptiveMinConfidence(
@@ -613,6 +615,7 @@ export function beamSearch(
   request: BeamSearchRequest,
   edgeWeights: Record<EdgeType, number>,
   minConfidence: number,
+  signal?: AbortSignal,
 ): BeamSearchResult {
   const state = createBeamCoreState(budget, request, startNodes, minConfidence);
 
@@ -634,6 +637,7 @@ export function beamSearch(
     !state.frontier.isEmpty() &&
     state.sliceCards.size < state.effectiveCardCap
   ) {
+    if (signal?.aborted) break;
     state.effectiveMinConfidence = getAdaptiveMinConfidence(
       minConfidence,
       state.totalTokens,
@@ -777,6 +781,7 @@ export async function beamSearchLadybug(
   request: BeamSearchRequest,
   edgeWeights: Record<EdgeType, number>,
   minConfidence: number,
+  signal?: AbortSignal,
 ): Promise<BeamSearchResult> {
   const state = createBeamCoreState(budget, request, startNodes, minConfidence);
 
@@ -1156,6 +1161,7 @@ export async function beamSearchLadybug(
     edgeWeights,
     minConfidence,
     strategy,
+    signal,
   );
 }
 
@@ -1499,6 +1505,7 @@ export async function beamSearchAsync(
   edgeWeights: Record<EdgeType, number>,
   minConfidence: number,
   options?: BeamSearchOptions,
+  signal?: AbortSignal,
 ): Promise<BeamSearchResult & { scorerMode: ScorerMode }> {
   const scorerConfig: ParallelScorerConfig = {
     ...DEFAULT_PARALLEL_SCORER_CONFIG,
@@ -1610,6 +1617,7 @@ export async function beamSearchAsync(
     edgeWeights,
     minConfidence,
     strategy,
+    signal,
   );
   return { ...result, scorerMode };
 }

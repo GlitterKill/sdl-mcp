@@ -23,6 +23,9 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
+        node-version:
+          - 22.x
+          - 24.x
 
     steps:
       - name: Checkout code
@@ -33,7 +36,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: ${{ matrix.node-version }}
           cache: "npm"
 
       - name: Cache node_modules
@@ -41,9 +44,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: node_modules
-          key: ${{ runner.os }}-node-20.x-modules-${{ hashFiles('package-lock.json') }}
+          key: ${{ runner.os }}-node-${{ matrix.node-version }}-modules-${{ hashFiles('package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-node-20.x-modules-
+            ${{ runner.os }}-node-${{ matrix.node-version }}-modules-
 
       - name: Cache dist build artifacts
         id: cache-dist
@@ -109,7 +112,7 @@ jobs:
           cat "$TEST_OUT"
           grep -c "^not ok" "$TEST_OUT" && FAILURES=true || FAILURES=false
           if [ "$FAILURES" = "true" ] || ! grep -q "# fail 0" "$TEST_OUT"; then
-            echo "## Test Failures (${{ matrix.os }}, Node 20.x)" >> $GITHUB_STEP_SUMMARY
+            echo "## Test Failures (${{ matrix.os }}, Node ${{ matrix.node-version }})" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             grep -E "not ok|failureType|error:.*'|# fail|# tests|# pass" "$TEST_OUT" | head -80 >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
@@ -182,7 +185,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo "Tests completed on ${{ matrix.os }} with Node 20.x"
+          echo "Tests completed on ${{ matrix.os }} with Node ${{ matrix.node-version }}"
           echo "This validates cross-platform behavior for all language adapters."
 
   benchmarks:
@@ -209,7 +212,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 24.x
           cache: "npm"
 
       - name: Cache node_modules
@@ -217,9 +220,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: node_modules
-          key: ${{ runner.os }}-node-20.x-modules-${{ hashFiles('package-lock.json') }}
+          key: ${{ runner.os }}-node-24.x-modules-${{ hashFiles('package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-node-20.x-modules-
+            ${{ runner.os }}-node-24.x-modules-
 
       - name: Cache dist build artifacts
         id: cache-dist
@@ -343,7 +346,7 @@ jobs:
 
       - name: Validate benchmark matrix smoke claims
         if: matrix.os == 'ubuntu-latest'
-        run: npx tsx scripts/check-benchmark-claims.ts --in .benchmark/matrix-smoke/aggregate.json --min-family-p50 30 --min-family-p25 20 --min-task-floor 5
+        run: node --experimental-strip-types scripts/check-benchmark-claims.ts --in .benchmark/matrix-smoke/aggregate.json --min-family-p50 30 --min-family-p25 20 --min-task-floor 5
 
   native-build:
     runs-on: ${{ matrix.os }}
@@ -384,7 +387,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 24.x
           cache: "npm"
 
       - name: Setup Rust toolchain
@@ -492,7 +495,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 24.x
           cache: "npm"
 
       - name: Install dependencies
@@ -577,7 +580,7 @@ jobs:
         run: npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-nightly
 
       - name: Validate matrix benchmark claims
-        run: npx tsx scripts/check-benchmark-claims.ts --in .benchmark/matrix-nightly/aggregate.json --min-family-p50 50 --min-family-p25 35 --min-task-floor 20
+        run: node --experimental-strip-types scripts/check-benchmark-claims.ts --in .benchmark/matrix-nightly/aggregate.json --min-family-p50 50 --min-family-p25 35 --min-task-floor 20
 
       - name: Upload matrix artifacts
         uses: actions/upload-artifact@v7
@@ -598,11 +601,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            node-version: 20.x
+            node-version: 24.x
             native-artifact: native-addon-x86_64-unknown-linux-gnu
             native-addon-file: sdl-mcp-native.linux-x64-gnu.node
           - os: windows-latest
-            node-version: 20.x
+            node-version: 24.x
             native-artifact: native-addon-x86_64-pc-windows-msvc
             native-addon-file: sdl-mcp-native.win32-x64-msvc.node
 
@@ -820,7 +823,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 24.x
           cache: "npm"
 
       - name: Install dependencies

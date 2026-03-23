@@ -559,7 +559,7 @@ Change the Node.js version matrix:
 ```yaml
 matrix:
   os: [ubuntu-latest, windows-latest]
-  node-version: [20.x] # Use only Node 20.x for consistency
+  node-version: [24.x] # Use only Node 24.x for consistency
 ```
 
 ## Testing

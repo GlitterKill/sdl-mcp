@@ -75,27 +75,27 @@ npm run test:harness
 
 ### Specific Test Files
 
-Run any `tests/**/*.test.ts` file with Node's test runner and the `tsx` loader:
+Run any `tests/**/*.test.ts` file with Node's test runner and `--experimental-strip-types`:
 
 ```bash
-node --import tsx --test tests/unit/pr-risk-analysis.test.ts
-node --import tsx --test tests/integration/java-adapter.test.ts
+node --experimental-strip-types --test tests/unit/pr-risk-analysis.test.ts
+node --experimental-strip-types --test tests/integration/java-adapter.test.ts
 ```
 
 ### Watch Mode
 
 ```bash
 # Watch all tests
-node --import tsx --test --watch
+node --experimental-strip-types --test --watch
 
 # Watch specific test
-node --import tsx --test --watch tests/unit/pr-risk-analysis.test.ts
+node --experimental-strip-types --test --watch tests/unit/pr-risk-analysis.test.ts
 ```
 
 ### With Coverage
 
 ```bash
-node --import tsx --test --experimental-test-coverage
+node --experimental-strip-types --test --experimental-test-coverage
 ```
 
 ---
@@ -238,7 +238,7 @@ npm run test:golden
 npm run golden:update
 
 # Optional: limit to a specific language supported by the golden manager script
-npx tsx scripts/golden/update-goldens.ts generate rust
+node --experimental-strip-types scripts/golden/update-goldens.ts generate rust
 ```
 
 The golden manager script currently supports: `c`, `cpp`, `kotlin`, `php`, `rust`, and `shell`.
@@ -805,7 +805,7 @@ When adding a new language:
 Run with coverage:
 
 ```bash
-node --import tsx --test --experimental-test-coverage
+node --experimental-strip-types --test --experimental-test-coverage
 ```
 
 ### Coverage Goals

@@ -6,6 +6,7 @@ import {
   type Tracer,
   type SpanOptions,
 } from "@opentelemetry/api";
+// TODO(node24): Upgrade @opentelemetry/sdk-trace-* from 1.x to 2.x (1.x is maintenance-only)
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import {
   ConsoleSpanExporter,

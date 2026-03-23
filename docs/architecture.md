@@ -26,7 +26,7 @@ SDL-MCP is a high-performance codebase indexing and context retrieval server. Th
 
 | Layer | Technology |
 |:------|:-----------|
-| Runtime | Node.js v20+ / TypeScript 5.9+ (strict, ESM) |
+| Runtime | Node.js v24+ / TypeScript 5.9+ (strict, ESM) |
 | Database | LadybugDB (embedded graph database, single-file storage, Kuzu engine) |
 | MCP SDK | `@modelcontextprotocol/sdk` ^1.27.1 |
 | Transports | stdio (CLI agents), HTTP/SSE (network clients) |

@@ -104,6 +104,7 @@ export async function indexRepo(
   repoId: string,
   mode: "full" | "incremental",
   onProgress?: (progress: IndexProgress) => void,
+  signal?: AbortSignal,
 ): Promise<IndexResult> {
   // Serialize concurrent indexRepo calls for the same repo to prevent
   // LadybugDB write conflicts and race conditions during rapid watcher events.
@@ -129,7 +130,7 @@ export async function indexRepo(
     }
   }
 
-  const resultPromise = indexRepoImpl(repoId, mode, onProgress);
+  const resultPromise = indexRepoImpl(repoId, mode, onProgress, signal);
   indexLocks.set(repoId, resultPromise);
   try {
     return await resultPromise;
@@ -145,6 +146,7 @@ async function indexRepoImpl(
   repoId: string,
   mode: "full" | "incremental",
   onProgress?: (progress: IndexProgress) => void,
+  signal?: AbortSignal,
 ): Promise<IndexResult> {
   const startTime = Date.now();
   const conn = await getLadybugConn();
@@ -244,6 +246,7 @@ async function indexRepoImpl(
       concurrency,
       workerPool,
       onProgress,
+      signal,
     };
 
     let pass1Acc: Pass1Accumulator;

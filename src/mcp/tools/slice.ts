@@ -53,6 +53,7 @@ import {
 } from "../errors.js";
 import { pickDepLabel } from "../../util/depLabels.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
+import type { ToolContext } from "../../server.js";
 import {
   safeJsonParseOptional,
   safeJsonParseOrThrow,
@@ -167,6 +168,7 @@ function createSliceEtag(
  */
 export async function handleSliceBuild(
   args: unknown,
+  context?: ToolContext,
 ): Promise<SliceBuildResponse | SliceErrorResponse> {
   // Validate that at least one entry hint is provided. taskText is optional
   // in the schema and the internal handler relies on start-node resolution.
@@ -186,7 +188,7 @@ export async function handleSliceBuild(
   }
 
   try {
-    return await handleSliceBuildInternal(args);
+    return await handleSliceBuildInternal(args, context);
   } catch (error) {
     const parsed = args as SliceBuildRequest;
 
@@ -219,6 +221,7 @@ export async function handleSliceBuild(
 
 async function handleSliceBuildInternal(
   args: unknown,
+  context?: ToolContext,
 ): Promise<SliceBuildResponse> {
   const request = args as SliceBuildRequest;
   const {
@@ -351,6 +354,9 @@ async function handleSliceBuildInternal(
       minCallConfidence:
         minCallConfidence ?? mergedPolicy.defaultMinCallConfidence,
       includeResolutionMetadata,
+      signal: context?.signal
+        ? AbortSignal.any([context.signal, AbortSignal.timeout(30_000)])
+        : undefined,
     };
 
     const policyContext: PolicyRequestContext = {

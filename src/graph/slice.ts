@@ -147,6 +147,7 @@ interface SliceBuildRequest {
   minConfidence?: number;
   minCallConfidence?: number;
   includeResolutionMetadata?: boolean;
+  signal?: AbortSignal;
 }
 
 export async function buildSlice(
@@ -262,6 +263,7 @@ export async function buildSlice(
       beamRequest,
       edgeWeights,
       minConfidence,
+      request.signal,
     );
     sliceCards = result.sliceCards;
     frontier = result.frontier;
@@ -277,6 +279,7 @@ export async function buildSlice(
       beamRequest,
       edgeWeights,
       minConfidence,
+      request.signal,
     );
     sliceCards = result.sliceCards;
     frontier = result.frontier;

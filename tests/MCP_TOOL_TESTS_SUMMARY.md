@@ -200,7 +200,7 @@ describe("MCP Tools - <Category>", () => {
 
 Due to ESM module constraints in Node.js, the tests are structured to work with:
 
-- Node.js v18+ built-in test runner
+- Node.js v24+ built-in test runner
 - Built artifacts from `dist/` directory
 - `.js` extension imports (ESM requirement)
 

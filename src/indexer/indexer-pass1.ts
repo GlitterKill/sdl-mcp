@@ -77,6 +77,7 @@ export async function runPass1WithRustEngine(
 
   const tsFallbackFiles: FileMetadata[] = [];
   for (const file of rustFiles) {
+    if (params.signal?.aborted) break;
     updateProgress(file.path);
     const rustResult = resultByPath.get(file.path);
     if (!rustResult) {
@@ -143,6 +144,7 @@ export async function runPass1WithRustEngine(
 
   // Process files that the Rust engine couldn't handle via the TS engine
   for (const file of tsFallbackFiles) {
+    if (params.signal?.aborted) break;
     updateProgress(file.path);
     const skipCallResolution = pass2ResolverRegistry.supports(
       toPass2Target(file),
@@ -212,6 +214,7 @@ export async function runPass1WithTsEngine(
   const runWorker = async (): Promise<void> => {
     // eslint-disable-next-line no-constant-condition
     while (true) {
+      if (params.signal?.aborted) return;
       const index = nextIndex++;
       if (index >= files.length) return;
       const file = files[index];

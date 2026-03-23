@@ -67,7 +67,7 @@ npm run benchmark:real -- --out benchmarks/real-world/results.json
 npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir benchmarks/real-world/runs/coverage-matrix
 
 # Validate claim thresholds from matrix aggregate
-npx tsx scripts/check-benchmark-claims.ts --in benchmarks/real-world/runs/coverage-matrix/aggregate.json
+node --experimental-strip-types scripts/check-benchmark-claims.ts --in benchmarks/real-world/runs/coverage-matrix/aggregate.json
 ```
 
 ## Benchmark Policy

@@ -1,4 +1,5 @@
 import { watch } from "fs";
+// TODO(node24): Upgrade chokidar 3.x -> 5.x (ESM-only); change loadChokidar() from require() to dynamic import()
 import { createRequire } from "module";
 import { relative } from "path";
 

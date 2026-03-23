@@ -135,8 +135,8 @@ npm publish
 npm test
 
 # Integration tests (requires built SDL-MCP)
-node --import tsx --test tests/integration/example-plugin.test.ts
-node --import tsx --test tests/integration/external-plugin-loading.test.ts
+node --experimental-strip-types --test tests/integration/example-plugin.test.ts
+node --experimental-strip-types --test tests/integration/external-plugin-loading.test.ts
 ```
 
 ### Troubleshooting

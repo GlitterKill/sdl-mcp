@@ -21,7 +21,7 @@ import {
   type TokenUsageMetadata,
 } from "./mcp/token-usage.js";
 import { tokenAccumulator } from "./mcp/token-accumulator.js";
-import { renderUserNotificationLine } from "./mcp/savings-meter.js";
+import { renderUserNotificationLine, formatTokenCount } from "./mcp/savings-meter.js";
 import { formatToolCallForUser } from "./mcp/tool-call-formatter.js";
 import type { LiveIndexCoordinator } from "./live-index/types.js";
 import type { CodeModeConfig } from "./config/types.js";
@@ -196,6 +196,7 @@ export class MCPServer {
 
             // Inject _tokenUsage and strip _rawContext before serialization
             let finalResult = result;
+            let capturedUsage: TokenUsageMetadata | undefined;
             if (result && typeof result === "object") {
               const r = result as Record<string, unknown>;
               if (shouldAttachUsage(request.params.name) && r._rawContext) {
@@ -248,8 +249,17 @@ export class MCPServer {
                 }
               }
 
+              // Capture token usage before stripping internal fields
+              capturedUsage = r._tokenUsage as TokenUsageMetadata | undefined;
               finalResult = stripRawContext(r);
+              // Also strip _tokenUsage (stripRawContext only handles _rawContext)
+              if (finalResult && typeof finalResult === "object" && "_tokenUsage" in finalResult) {
+                delete (finalResult as Record<string, unknown>)._tokenUsage;
+              }
             }
+
+            // Capture formatted summary for content block before it gets deleted
+            let capturedSummary: string | undefined;
 
             // Send formatted summary as user notification for usage stats
             if (
@@ -273,6 +283,7 @@ export class MCPServer {
                   // Non-critical
                 }
                 // Strip from tool response — summary is for the user, not the LLM
+                capturedSummary = summary;
                 delete (finalResult as Record<string, unknown>).formattedSummary;
               }
             }
@@ -298,14 +309,30 @@ export class MCPServer {
               symbolId,
             });
             // Wrap result in MCP content format
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(finalResult, null, 2),
-                },
-              ],
-            };
+            const contentBlocks: Array<{ type: string; text: string }> = [
+              {
+                type: "text",
+                text: JSON.stringify(finalResult, null, 2),
+              },
+            ];
+
+            // Append per-call token savings meter (visible in tool response)
+            if (capturedUsage && capturedUsage.rawEquivalent > 0) {
+              contentBlocks.push({
+                type: "text",
+                text: `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens ${capturedUsage.meter}`,
+              });
+            }
+
+            // Append session/lifetime summary for usage.stats (visible in tool response)
+            if (capturedSummary) {
+              contentBlocks.push({
+                type: "text",
+                text: capturedSummary,
+              });
+            }
+
+            return { content: contentBlocks };
           } catch (error) {
             process.stderr.write(
               `[sdl-mcp] Tool ${request.params.name} error: ${error}\n`,

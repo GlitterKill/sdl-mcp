@@ -421,7 +421,7 @@ export const POLICY_PRIORITY_DEFAULT_DENY_RAW = 5;
 /**
  * Minimum Node.js major version required.
  */
-export const NODE_MIN_MAJOR_VERSION = 20;
+export const NODE_MIN_MAJOR_VERSION = 24;
 
 // ============================================================================
 // CLI & Server Constants

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-03-23
+
+### Breaking
+
+- **Minimum Node.js version raised from 20 to 24** — Node 20 and 22 are no longer supported as runtime targets
+- TypeScript compilation target upgraded from ES2022 to ES2024
+
+### Added
+
+- AbortSignal propagation to beam search engine and indexer for cancellation support
+  - Slice builds combine user cancellation with a 30-second hard timeout via `AbortSignal.any()`
+  - Indexer file-processing loops check for abort between files
+- CI test matrix expanded to Node 22.x and 24.x (ubuntu + windows)
+
+### Changed
+
+- Replaced `tsx` dev dependency with Node 24's native `--experimental-strip-types` across all 18 package.json scripts and the test runner
+- All CI workflows (ci, release-publish, publish-native, publish-ladybug) updated from Node 20.x to 24.x
+
+### Removed
+
+- `tsx` dev dependency (replaced by native type stripping)
+
 ## [0.9.2] - 2026-03-22
 
 ### Added

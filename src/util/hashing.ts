@@ -1,3 +1,4 @@
+// TODO(node24): Replace crypto.createHash().update().digest() with crypto.hash() one-shot API (1.2-1.6x faster)
 import * as crypto from "crypto";
 
 import type { SymbolCard } from "../domain/types.js";

@@ -66,6 +66,7 @@ export interface Pass1Params {
   concurrency: number;
   workerPool?: ParserWorkerPool | null;
   onProgress: ((progress: IndexProgress) => void) | undefined;
+  signal?: AbortSignal;
 }
 
 // ---------------------------------------------------------------------------

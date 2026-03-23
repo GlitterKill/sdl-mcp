@@ -439,7 +439,7 @@ export async function handleIndexRefresh(
           }
         : undefined;
 
-    const result = await indexRepo(repoId, mode, onProgress);
+    const result = await indexRepo(repoId, mode, onProgress, context?.signal);
 
     clearSliceCache();
     clearOverviewCache();

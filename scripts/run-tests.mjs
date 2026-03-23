@@ -20,8 +20,7 @@ if (testFiles.length === 0) {
 }
 
 const nodeArgs = [
-  "--import",
-  "tsx",
+  "--experimental-strip-types",
   "--test-concurrency=1",
   "--test",
   resolve(repoRoot, "tests", "runner.test.ts"),

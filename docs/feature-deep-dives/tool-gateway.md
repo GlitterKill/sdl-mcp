@@ -400,7 +400,7 @@ This registers the 30 flat tools plus the universal `sdl.action.search` and `sdl
 Run the included measurement script to verify savings for your configuration:
 
 ```bash
-npx tsx scripts/measure-gateway-schema-tokens.ts
+node --experimental-strip-types scripts/measure-gateway-schema-tokens.ts
 ```
 
 Output:

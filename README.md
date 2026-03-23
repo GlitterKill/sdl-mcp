@@ -527,7 +527,7 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 
 | Component | Technology |
 |:----------|:-----------|
-| Runtime | Node.js 20+ / TypeScript 5.9+ (strict ESM) |
+| Runtime | Node.js 24+ / TypeScript 5.9+ (strict ESM) |
 | Graph Database | LadybugDB (embedded, single-file) |
 | Indexer (default) | Rust via napi-rs (multi-threaded) |
 | Indexer (fallback) | tree-sitter + tree-sitter-typescript |

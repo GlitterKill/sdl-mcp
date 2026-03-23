@@ -19,7 +19,7 @@ Use `scripts/check-benchmark-claims.ts` on matrix aggregate output with:
 Command:
 
 ```bash
-npx tsx scripts/check-benchmark-claims.ts \
+node --experimental-strip-types scripts/check-benchmark-claims.ts \
   --in benchmarks/real-world/runs/coverage-matrix/aggregate.json \
   --min-family-p50 50 \
   --min-family-p25 40 \
@@ -39,7 +39,7 @@ node -e "const fs=require('fs');const b=JSON.parse(fs.readFileSync('config/sdlmc
 npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir benchmarks/real-world/runs/coverage-matrix
 
 # 4) Validate claim thresholds
-npx tsx scripts/check-benchmark-claims.ts --in benchmarks/real-world/runs/coverage-matrix/aggregate.json
+node --experimental-strip-types scripts/check-benchmark-claims.ts --in benchmarks/real-world/runs/coverage-matrix/aggregate.json
 ```
 
 ## Residual Risk

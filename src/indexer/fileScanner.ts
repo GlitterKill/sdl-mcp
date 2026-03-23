@@ -1,3 +1,4 @@
+// TODO(node24): Replace fast-glob with node:fs/promises glob() — stable in Node 24.1.0+
 import fastGlob from "fast-glob";
 import { resolve } from "path";
 import { RepoConfig } from "../config/types.js";
