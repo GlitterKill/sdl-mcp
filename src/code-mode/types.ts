@@ -6,7 +6,7 @@ export const ChainStepSchema = z.object({
   /** Function name in camelCase (e.g., "symbolSearch", "codeSkeleton") */
   fn: z.string().min(1),
   /** Arguments for the function. May contain $N references as string values. */
-  args: z.record(z.unknown()).default({}),
+  args: z.record(z.string(), z.unknown()).default({}),
 });
 
 export const ChainBudgetSchema = z.object({

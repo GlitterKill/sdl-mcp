@@ -74,7 +74,7 @@ export async function handleUsageStats(
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(
-        `Invalid usage stats request: ${error.errors.map((e) => e.message).join(", ")}`,
+        `Invalid usage stats request: ${error.issues.map((e) => e.message).join(", ")}`,
       );
     }
     throw error;

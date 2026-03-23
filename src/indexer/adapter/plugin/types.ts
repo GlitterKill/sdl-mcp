@@ -82,7 +82,7 @@ export function validateManifest(manifest: unknown): PluginValidationResult {
   const result = PluginManifestSchema.safeParse(manifest);
 
   if (!result.success) {
-    const errors = result.error.errors.map(
+    const errors = result.error.issues.map(
       (e) => `${e.path.join(".")}: ${e.message}`,
     );
     return {

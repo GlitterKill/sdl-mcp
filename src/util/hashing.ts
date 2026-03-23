@@ -1,4 +1,3 @@
-// TODO(node24): Replace crypto.createHash().update().digest() with crypto.hash() one-shot API (1.2-1.6x faster)
 import * as crypto from "crypto";
 
 import type { SymbolCard } from "../domain/types.js";
@@ -13,7 +12,7 @@ export type NormalizedValue =
   | { [key: string]: NormalizedValue };
 
 export function hashContent(content: string): string {
-  return crypto.createHash("sha256").update(content).digest("hex");
+  return crypto.hash("sha256", content, "hex");
 }
 
 export function generateSymbolId(
@@ -24,12 +23,12 @@ export function generateSymbolId(
   astFingerprint: string,
 ): string {
   const combined = `${repoId}:${relPath}:${kind}:${name}:${astFingerprint}`;
-  return crypto.createHash("sha256").update(combined).digest("hex");
+  return crypto.hash("sha256", combined, "hex");
 }
 
 export function generateFileId(repoId: string, relPath: string): string {
   const combined = `${repoId}:${normalizePath(relPath)}`;
-  return crypto.createHash("sha256").update(combined).digest("hex");
+  return crypto.hash("sha256", combined, "hex");
 }
 
 function normalizeObject(obj: unknown): NormalizedValue {

@@ -28,7 +28,7 @@ export async function handleAgentOrchestrate(
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(
-        `Invalid agent orchestrate request: ${error.errors.map((e) => e.message).join(", ")}`,
+        `Invalid agent orchestrate request: ${error.issues.map((e) => e.message).join(", ")}`,
       );
     }
     if (error instanceof ValidationError || error instanceof IndexError) {

@@ -14,7 +14,7 @@ import {
   InMemorySpanExporter,
   type SpanExporter,
 } from "@opentelemetry/sdk-trace-base";
-import { Resource } from "@opentelemetry/resources";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import type { TracingConfig } from "../config/types.js";
 import { SDL_MCP_VERSION } from "../config/constants.js";
@@ -52,24 +52,16 @@ export function initTracing(config: TracingConfig): void {
   }
 
   const serviceName = config.serviceName ?? TRACING_SERVICE_NAME;
-  const resource = Resource.default().merge(
-    new Resource({
-      [ATTR_SERVICE_NAME]: serviceName,
-    }),
-  );
-
-  provider = new NodeTracerProvider({ resource });
+  const resource = resourceFromAttributes({ [ATTR_SERVICE_NAME]: serviceName });
 
   let exporter: SpanExporter;
   switch (config.exporterType) {
     case "console":
       exporter = new ConsoleSpanExporter();
-      provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
       break;
     case "memory":
       memoryExporter = new InMemorySpanExporter();
       exporter = memoryExporter;
-      provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
       break;
     case "otlp":
       throw new Error(
@@ -78,9 +70,13 @@ export function initTracing(config: TracingConfig): void {
       );
     default:
       exporter = new ConsoleSpanExporter();
-      provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+      break;
   }
 
+  provider = new NodeTracerProvider({
+    resource,
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
   provider.register();
   tracer = trace.getTracer(serviceName, SDL_MCP_VERSION);
   isInitialized = true;

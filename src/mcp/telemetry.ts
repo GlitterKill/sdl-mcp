@@ -247,7 +247,7 @@ export async function getAuditTrail(
     decision: event.decision,
     repoId: event.repoId,
     symbolId: event.symbolId,
-    details: safeJsonParse(event.detailsJson, z.record(z.unknown()), {}),
+    details: safeJsonParse(event.detailsJson, z.record(z.string(), z.unknown()), {}),
   }));
 }
 

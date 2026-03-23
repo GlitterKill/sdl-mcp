@@ -31,7 +31,7 @@ export async function handleContextSummary(
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(
-        `Invalid context summary request: ${error.errors.map((e) => e.message).join(", ")}`,
+        `Invalid context summary request: ${error.issues.map((e) => e.message).join(", ")}`,
       );
     }
     if (error instanceof ValidationError || error instanceof IndexError) {

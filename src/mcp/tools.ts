@@ -913,7 +913,7 @@ export const SliceBuildRequestSchema = z.object({
   failingTestPath: z.string().max(500).optional(),
   editedFiles: z.array(z.string()).max(100).optional(),
   entrySymbols: z.array(z.string()).max(100).optional(),
-  knownCardEtags: z.record(z.string()).optional(),
+  knownCardEtags: z.record(z.string(), z.string()).optional(),
   cardDetail: CardDetailLevelSchema.optional(),
   adaptiveDetail: z.boolean().optional(),
   wireFormat: SliceBuildWireFormatSchema.optional(),
@@ -1084,7 +1084,7 @@ const CodeWindowResponseDeniedSchema = z.object({
   nextBestAction: z
     .object({
       tool: z.string(),
-      args: z.record(z.unknown()),
+      args: z.record(z.string(), z.unknown()),
       rationale: z.string(),
     })
     .optional(),
@@ -1491,14 +1491,14 @@ const FindingSchema = z.object({
   severity: z.enum(["low", "medium", "high"]),
   message: z.string(),
   affectedSymbols: z.array(z.string()),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 const EvidenceSchema = z.object({
   type: z.string(),
   description: z.string(),
   symbolId: z.string().optional(),
-  data: z.record(z.unknown()).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
 });
 
 const RecommendedTestSchema = z.object({
@@ -1609,7 +1609,7 @@ export const AgentOrchestrateResponseSchema = z.object({
         id: z.string(),
         type: z.string(),
         status: z.enum(["pending", "inProgress", "completed", "failed"]),
-        input: z.record(z.unknown()),
+        input: z.record(z.string(), z.unknown()),
         output: z.unknown().optional(),
         error: z.string().optional(),
         timestamp: z.number(),

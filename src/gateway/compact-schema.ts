@@ -2,27 +2,23 @@
  * Compact JSON Schema emitter — deduplicates repeated sub-schemas
  * using $defs/$ref to minimize token count in tools/list responses.
  */
-import { zodToJsonSchema } from "zod-to-json-schema";
-import type { z } from "zod";
+import { z } from "zod";
 
 /**
  * Build a compact JSON Schema from a Zod schema by:
- * 1. Converting with zodToJsonSchema
+ * 1. Converting with z.toJSONSchema
  * 2. Deduplicating repeated sub-schemas into $defs/$ref
  */
 /**
- * Convert a Zod schema to JSON Schema (OpenAPI 3.x target).
- * Centralizes the `as any` cast required by zodToJsonSchema's strict types.
+ * Convert a Zod schema to JSON Schema using Zod 4 built-in conversion.
  */
 export function zodSchemaToJsonSchema(
   schema: z.ZodType,
 ): Record<string, unknown> {
-  // zodToJsonSchema has deep type instantiation issues with strict Zod types;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return zodToJsonSchema(schema as any, { target: "openApi3" }) as Record<
-    string,
-    unknown
-  >;
+  const jsonSchema = z.toJSONSchema(schema) as Record<string, unknown>;
+  // Remove $schema key for compact MCP tool responses
+  delete jsonSchema["$schema"];
+  return jsonSchema;
 }
 
 export function buildCompactJsonSchema(

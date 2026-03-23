@@ -33,7 +33,7 @@ export async function handleBufferPush(
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(
-        `Invalid buffer push request: ${error.errors.map((e) => e.message).join(", ")}`,
+        `Invalid buffer push request: ${error.issues.map((e) => e.message).join(", ")}`,
       );
     }
     if (error instanceof ValidationError || error instanceof IndexError) {
@@ -56,7 +56,7 @@ export async function handleBufferCheckpoint(
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(
-        `Invalid buffer checkpoint request: ${error.errors.map((e) => e.message).join(", ")}`,
+        `Invalid buffer checkpoint request: ${error.issues.map((e) => e.message).join(", ")}`,
       );
     }
     if (error instanceof ValidationError || error instanceof IndexError) {
@@ -79,7 +79,7 @@ export async function handleBufferStatus(
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(
-        `Invalid buffer status request: ${error.errors.map((e) => e.message).join(", ")}`,
+        `Invalid buffer status request: ${error.issues.map((e) => e.message).join(", ")}`,
       );
     }
     if (error instanceof ValidationError || error instanceof IndexError) {

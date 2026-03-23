@@ -1,5 +1,4 @@
-// TODO(node24): Replace fast-glob with node:fs/promises glob() — stable in Node 24.1.0+
-import fastGlob from "fast-glob";
+import { glob } from "node:fs/promises";
 import { resolve } from "path";
 import { RepoConfig } from "../config/types.js";
 import { normalizePath } from "../util/paths.js";
@@ -83,14 +82,13 @@ async function discoverFiles(
     ignorePatterns.push(workspaceNodeModules, workspaceDist, workspaceBuild, workspaceTarget);
   }
 
-  const files = await fastGlob(patterns, {
-    cwd: repoPath,
-    ignore: ignorePatterns,
-    absolute: false,
-    onlyFiles: true,
-    unique: true,
-    followSymbolicLinks: false,
-  });
+  // Convert array of patterns to single brace pattern for node:fs glob
+  const bracePattern = patterns.length === 1 ? patterns[0] : `{${patterns.join(",")}}`;
+
+  const files: string[] = [];
+  for await (const file of glob(bracePattern, { cwd: repoPath, exclude: ignorePatterns })) {
+    files.push(normalizePath(file));
+  }
 
   return files;
 }

@@ -90,7 +90,7 @@ export function loadConfig(configPath?: string): AppConfig {
     const result = AppConfigSchema.safeParse(expandedConfig);
 
     if (!result.success) {
-      const errors = result.error.errors
+      const errors = result.error.issues
         .map((e) => {
           const path = e.path.join(".");
           return `  - ${path}: ${e.message}`;

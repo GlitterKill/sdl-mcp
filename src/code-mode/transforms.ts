@@ -109,12 +109,12 @@ function compareValues(
 
 const DataPickSchema = z.object({
   input: z.unknown(),
-  fields: z.record(z.string()),
+  fields: z.record(z.string(), z.string()),
 });
 
 const DataMapSchema = z.object({
   input: z.array(z.unknown()),
-  fields: z.record(z.string()),
+  fields: z.record(z.string(), z.string()),
 });
 
 const FilterClauseSchema = z.object({
@@ -139,7 +139,7 @@ const DataSortSchema = z.object({
 });
 
 const DataTemplateSchema = z.object({
-  input: z.union([z.record(z.unknown()), z.array(z.unknown())]),
+  input: z.union([z.record(z.string(), z.unknown()), z.array(z.unknown())]),
   template: z.string().min(1),
   joinWith: z.string().default("\n"),
 });

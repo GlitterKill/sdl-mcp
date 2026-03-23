@@ -107,11 +107,11 @@ export const StringArraySchema = z.array(z.string());
  * Accepts any object structure.
  * Used for fields like signatureJson.
  */
-export const SignatureSchema = z.record(z.unknown());
+export const SignatureSchema = z.record(z.string(), z.unknown());
 
 /**
  * Schema for validating config JSON objects.
  * Accepts any object with unknown values.
  * Used for fields like configJson from the database.
  */
-export const ConfigObjectSchema = z.record(z.unknown());
+export const ConfigObjectSchema = z.record(z.string(), z.unknown());

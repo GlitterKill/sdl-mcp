@@ -94,7 +94,7 @@ const SliceBuildAction = z.object({
   failingTestPath: z.string().optional(),
   editedFiles: z.array(z.string()).max(100).optional(),
   entrySymbols: z.array(z.string()).max(100).optional(),
-  knownCardEtags: z.record(z.string()).optional(),
+  knownCardEtags: z.record(z.string(), z.string()).optional(),
   cardDetail: z
     .enum(["minimal", "signature", "deps", "compact", "full"])
     .optional(),

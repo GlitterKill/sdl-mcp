@@ -1,6 +1,4 @@
 import { watch } from "fs";
-// TODO(node24): Upgrade chokidar 3.x -> 5.x (ESM-only); change loadChokidar() from require() to dynamic import()
-import { createRequire } from "module";
 import { relative } from "path";
 
 import type { RepoConfig } from "../config/types.js";
@@ -66,13 +64,12 @@ export async function processWatchedFileChange(params: {
   await indexRepo(repoId, "incremental");
 }
 
-type ChokidarModule = { watch: (path: string, options?: unknown) => unknown };
+type ChokidarModule = { watch: (paths: string | string[], options?: Record<string, unknown>) => unknown };
 
-const require = createRequire(import.meta.url);
 
-function loadChokidar(): ChokidarModule | null {
+async function loadChokidar(): Promise<ChokidarModule | null> {
   try {
-    return require("chokidar");
+    return await import("chokidar");
   } catch {
     return null;
   }
@@ -333,8 +330,8 @@ export async function watchRepositoryWithIndexer(
     schedule(normalizedFilePath);
   };
 
-  const startWatcher = (): RuntimeWatcher => {
-    const chokidar = loadChokidar();
+  const startWatcher = async (): Promise<RuntimeWatcher> => {
+    const chokidar = await loadChokidar();
     if (chokidar) {
       const watcher = chokidar.watch(repoRow.rootPath, {
         ignored: ignorePatterns,
@@ -414,7 +411,7 @@ export async function watchRepositoryWithIndexer(
       if (activeWatcher) {
         await activeWatcher.close();
       }
-      activeWatcher = startWatcher();
+      activeWatcher = await startWatcher();
       health.running = true;
       health.stale = false;
     } catch (error) {
@@ -444,7 +441,7 @@ export async function watchRepositoryWithIndexer(
   }, staleCheckIntervalMs);
   staleTimer.unref();
 
-  activeWatcher = startWatcher();
+  activeWatcher = await startWatcher();
 
   return {
     ready: activeWatcher.ready,
