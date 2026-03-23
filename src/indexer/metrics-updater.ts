@@ -1,11 +1,11 @@
 import * as crypto from "crypto";
 
 import type { AppConfig } from "../config/types.js";
-import { withWriteConn } from "../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { updateMetricsForRepo } from "../graph/metrics.js";
 import { logger } from "../util/logger.js";
-import { refreshSymbolEmbeddings } from "./embeddings.js";
+import { getEmbeddingProvider, refreshSymbolEmbeddings } from "./embeddings.js";
 import { getAnnIndexManager } from "./ann-index.js";
 import type { CallResolutionTelemetry } from "./edge-builder.js";
 import type { IndexProgress } from "./indexer.js";
@@ -13,6 +13,7 @@ import {
   generateSummariesForRepo,
   type SummaryBatchResult,
 } from "./summary-generator.js";
+import { transferSummariesFromNeighbors } from "./summary-transfer.js";
 
 export type { SummaryBatchResult } from "./summary-generator.js";
 
@@ -44,7 +45,29 @@ export async function finalizeIndexing({
   if (appConfig.semantic?.enabled) {
     const model = appConfig.semantic.model ?? "all-MiniLM-L6-v2";
 
-    // 1. Summaries first (if opted-in) — all text-based models benefit from
+    // 0. NN Summary Transfer (uses previous run's ANN index to propagate
+    //    high-quality summaries to structurally similar symbols).
+    try {
+      const conn = await getLadybugConn();
+      const embeddingProvider = getEmbeddingProvider(
+        appConfig.semantic.provider ?? "local",
+        model,
+      );
+      const transferResult = await transferSummariesFromNeighbors({
+        repoId,
+        conn,
+        embeddingProvider,
+      }, onProgress);
+      if (transferResult.transferred > 0) {
+        logger.info(
+          `NN summary transfer: ${transferResult.transferred} symbols enriched (${transferResult.directTransfers} direct, ${transferResult.adaptedTransfers} adapted)`,
+        );
+      }
+    } catch (error) {
+      logger.warn(`NN summary transfer skipped: ${String(error)}`);
+    }
+
+    // 1. LLM Summaries (if opted-in) — all text-based models benefit from
     //    LLM summaries when available. Summaries are generated before embeddings
     //    so the embedding step can incorporate them.
     if (appConfig.semantic.generateSummaries) {
@@ -58,7 +81,7 @@ export async function finalizeIndexing({
       }
     }
 
-    // 2. Embeddings second — uses summaries when available (High tier),
+    // 2. Embeddings — uses summaries when available (High tier),
     //    or raw symbol text (Low/Medium tier).
     try {
       const embResult = await refreshSymbolEmbeddings({

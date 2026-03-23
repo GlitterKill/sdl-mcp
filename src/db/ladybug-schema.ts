@@ -54,6 +54,8 @@ const NODE_TABLES: string[] = [
     astFingerprint STRING,
     signatureJson STRING,
     summary STRING,
+    summaryQuality DOUBLE DEFAULT 0.0,
+    summarySource STRING DEFAULT 'unknown',
     invariantsJson STRING,
     sideEffectsJson STRING,
     roleTagsJson STRING,

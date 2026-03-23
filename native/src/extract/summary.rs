@@ -3,6 +3,38 @@ use std::sync::LazyLock;
 
 use crate::types::NativeParsedSymbol;
 
+const ROLE_SUFFIXES: &[(&str, &str)] = &[
+    ("Provider", "provider"),
+    ("Factory", "factory"),
+    ("Builder", "builder"),
+    ("Handler", "handler"),
+    ("Service", "service"),
+    ("Repository", "repository"),
+    ("Adapter", "adapter"),
+    ("Controller", "controller"),
+    ("Manager", "manager"),
+    ("Middleware", "middleware"),
+    ("Resolver", "resolver"),
+    ("Validator", "validator"),
+    ("Serializer", "serializer"),
+    ("Transformer", "transformer"),
+];
+
+const SUFFIX_PATTERNS: &[(&str, &str)] = &[
+    ("Props", "Props definition"),
+    ("Options", "Options definition"),
+    ("Config", "Configuration"),
+    ("Settings", "Settings definition"),
+    ("Params", "Parameters definition"),
+    ("Result", "Result type"),
+    ("Response", "Response type"),
+    ("Output", "Output type"),
+    ("Input", "Input type"),
+    ("Request", "Request type"),
+    ("Args", "Arguments type"),
+];
+
+
 /// Generate a one-line summary for a symbol.
 ///
 /// Mirrors TypeScript `generateSummary` in `summaries.ts`.
@@ -31,12 +63,36 @@ pub fn generate_summary(symbol: &NativeParsedSymbol, file_content: &str, languag
         }
     }
 
-    // Auto-generate only if type info adds value beyond the name.
-    // The TS layer treats empty strings as null (no summary).
-    // Only functions/methods benefit from type-based summaries;
-    // classes/interfaces/types/variables get kind+name from the card already.
-    if symbol.kind != "function" && symbol.kind != "method" {
-        return String::new();
+    // Dispatch to per-kind generators for non-function/method symbols.
+    match symbol.kind.as_str() {
+        "function" | "method" => {
+            // Fall through to existing typed function summary logic below
+        }
+        "class" => {
+            if let Some(s) = generate_class_summary(symbol) { return s; }
+            return String::new();
+        }
+        "interface" => {
+            if let Some(s) = generate_interface_summary(symbol) { return s; }
+            return String::new();
+        }
+        "type" | "type_alias" => {
+            if let Some(s) = generate_type_summary(symbol) { return s; }
+            return String::new();
+        }
+        "enum" => {
+            if let Some(s) = generate_enum_summary(symbol) { return s; }
+            return String::new();
+        }
+        "variable" => {
+            if let Some(s) = generate_variable_summary(symbol) { return s; }
+            return String::new();
+        }
+        "constructor" => {
+            if let Some(s) = generate_constructor_summary(symbol) { return s; }
+            return String::new();
+        }
+        _ => return String::new(),
     }
 
     let has_typed_params = symbol
@@ -100,6 +156,12 @@ pub fn generate_summary(symbol: &NativeParsedSymbol, file_content: &str, languag
     }
 
     summary
+}
+
+/// Check whether a symbol has a doc comment (without generating the summary).
+pub fn has_doc_comment(symbol: &NativeParsedSymbol, file_content: &str, language: &str) -> bool {
+    let jsdoc = extract_doc_comment(symbol, file_content, language);
+    !jsdoc.description.is_empty()
 }
 
 struct JSDoc {
@@ -426,6 +488,20 @@ fn capitalize_first(s: &str) -> String {
 fn extract_simple_type(type_annotation: &str) -> String {
     let cleaned = type_annotation.trim_start_matches(':').trim_start();
 
+    // Handle Array<T> -> T[] before generic removal
+    if cleaned.contains("Array<") {
+        static RE_ARRAY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Array<([^>]+)>").unwrap());
+        if let Some(caps) = RE_ARRAY.captures(cleaned) {
+            if let Some(inner) = caps.get(1) {
+                return format!("{}[]", inner.as_str().trim());
+            }
+        }
+    }
+    // Handle T[] syntax
+    if cleaned.ends_with("[]") {
+        return cleaned.to_string();
+    }
+
     // Remove generics
     static RE_GENERICS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
     let cleaned = RE_GENERICS.replace_all(cleaned, "").trim().to_string();
@@ -453,4 +529,239 @@ fn extract_simple_type(type_annotation: &str) -> String {
     }
 
     cleaned
+}
+
+fn split_snake_case(name: &str) -> String {
+    name.to_lowercase()
+        .split('_')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn generate_class_summary(symbol: &NativeParsedSymbol) -> Option<String> {
+    let name = &symbol.name;
+    for (suffix, role) in ROLE_SUFFIXES {
+        if name.ends_with(suffix) && name.len() > suffix.len() {
+            let base_name = &name[..name.len() - suffix.len()];
+            let base = split_camel_case(base_name).join(" ").to_lowercase();
+            return Some(format!("Implements the {} pattern for {}", role, base));
+        }
+    }
+    if let Some(ref sig) = symbol.signature {
+        if let Some(ref generics) = sig.generics {
+            if !generics.is_empty() {
+                let type_params = generics.join(", ");
+                let base = split_camel_case(name).join(" ").to_lowercase();
+                return Some(format!("Generic {} class parameterized by {}", base, type_params));
+            }
+        }
+    }
+    let words = split_camel_case(name).join(" ").to_lowercase();
+    Some(format!("Class encapsulating {} behavior", words))
+}
+
+fn generate_interface_summary(symbol: &NativeParsedSymbol) -> Option<String> {
+    let name = &symbol.name;
+    let chars: Vec<char> = name.chars().collect();
+    if chars.len() > 1 && chars[0] == 'I' && chars[1].is_uppercase() {
+        let base = split_camel_case(&name[1..]).join(" ").to_lowercase();
+        return Some(format!("Contract for {}", base));
+    }
+    for (suffix, desc) in SUFFIX_PATTERNS {
+        if name.ends_with(suffix) && name.len() > suffix.len() {
+            let base_name = &name[..name.len() - suffix.len()];
+            let base = split_camel_case(base_name).join(" ").to_lowercase();
+            return Some(format!("{} for {}", desc, base));
+        }
+    }
+    if let Some(ref sig) = symbol.signature {
+        if let Some(ref generics) = sig.generics {
+            if !generics.is_empty() {
+                let type_params = generics.join(", ");
+                let base = split_camel_case(name).join(" ").to_lowercase();
+                return Some(format!("Generic interface defining {} contract for {}", base, type_params));
+            }
+        }
+    }
+    let words = split_camel_case(name).join(" ").to_lowercase();
+    Some(format!("Interface defining {} contract", words))
+}
+
+fn generate_type_summary(symbol: &NativeParsedSymbol) -> Option<String> {
+    let name = &symbol.name;
+    for (suffix, desc) in SUFFIX_PATTERNS {
+        if name.ends_with(suffix) && name.len() > suffix.len() {
+            let base_name = &name[..name.len() - suffix.len()];
+            let base = split_camel_case(base_name).join(" ").to_lowercase();
+            return Some(format!("{} for {}", desc, base));
+        }
+    }
+    if let Some(ref sig) = symbol.signature {
+        if let Some(ref generics) = sig.generics {
+            if !generics.is_empty() {
+                let type_params = generics.join(", ");
+                let base = split_camel_case(name).join(" ").to_lowercase();
+                return Some(format!("Generic type alias for {} over {}", base, type_params));
+            }
+        }
+    }
+    let words = split_camel_case(name).join(" ").to_lowercase();
+    Some(format!("Type alias for {}", words))
+}
+
+fn generate_enum_summary(symbol: &NativeParsedSymbol) -> Option<String> {
+    let words = split_camel_case(&symbol.name).join(" ").to_lowercase();
+    Some(format!("Enumeration of {} values", words))
+}
+
+fn generate_variable_summary(symbol: &NativeParsedSymbol) -> Option<String> {
+    let name = &symbol.name;
+    let is_screaming = name.len() > 1
+        && name.chars().next().map_or(false, |c| c.is_ascii_uppercase())
+        && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+    if is_screaming {
+        return Some(format!("Constant defining {}", split_snake_case(name)));
+    }
+    if name.ends_with("Schema") && name.len() > 6 {
+        let base = split_camel_case(&name[..name.len() - 6]).join(" ").to_lowercase();
+        return Some(format!("Validation schema for {}", base));
+    }
+    if name.ends_with("Validator") && name.len() > 9 {
+        let base = split_camel_case(&name[..name.len() - 9]).join(" ").to_lowercase();
+        return Some(format!("Validator for {}", base));
+    }
+    // Default/default prefix
+    if name.starts_with("default") || name.starts_with("Default") {
+        let rest = name.trim_start_matches("default").trim_start_matches("Default").trim_start_matches('_');
+        if !rest.is_empty() {
+            let words = split_camel_case(rest).join(" ").to_lowercase();
+            return Some(format!("Default {} value", words));
+        }
+    }
+    None
+}
+
+fn generate_constructor_summary(symbol: &NativeParsedSymbol) -> Option<String> {
+    if let Some(ref sig) = symbol.signature {
+        if let Some(ref params) = sig.params {
+            let typed: Vec<&str> = params.iter()
+                .filter_map(|p| p.type_name.as_deref())
+                .filter(|t| *t != "any" && *t != "unknown")
+                .collect();
+            if typed.is_empty() { return None; }
+            let type_context = typed.join(" and ");
+            return Some(format!("Constructs from {}", type_context));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{NativeParsedSymbol, NativeSymbolSignature, NativeSymbolSignatureParam, NativeRange};
+
+    fn make_symbol(name: &str, kind: &str) -> NativeParsedSymbol {
+        NativeParsedSymbol {
+            symbol_id: String::new(),
+            ast_fingerprint: String::new(),
+            kind: kind.to_string(),
+            name: name.to_string(),
+            exported: false,
+            visibility: String::new(),
+            range: NativeRange {
+                start_line: 0,
+                start_col: 0,
+                end_line: 0,
+                end_col: 0,
+            },
+            signature: Some(NativeSymbolSignature {
+                params: None,
+                returns: None,
+                generics: None,
+            }),
+            summary: String::new(),
+            invariants: vec![],
+            side_effects: vec![],
+            role_tags: vec![],
+            search_text: String::new(),
+            summary_quality: None,
+        }
+    }
+
+    #[test]
+    fn test_class_with_provider_suffix() {
+        let s = make_symbol("AuthProvider", "class");
+        let result = generate_class_summary(&s);
+        assert_eq!(result, Some("Implements the provider pattern for auth".to_string()));
+    }
+
+    #[test]
+    fn test_class_with_generics() {
+        let mut s = make_symbol("Repository", "class");
+        s.signature.as_mut().unwrap().generics = Some(vec!["T".to_string()]);
+        let result = generate_class_summary(&s);
+        assert_eq!(result, Some("Generic repository class parameterized by T".to_string()));
+    }
+
+    #[test]
+    fn test_interface_with_i_prefix() {
+        let s = make_symbol("IUserService", "interface");
+        let result = generate_interface_summary(&s);
+        assert_eq!(result, Some("Contract for user service".to_string()));
+    }
+
+    #[test]
+    fn test_interface_with_props_suffix() {
+        let s = make_symbol("ButtonProps", "interface");
+        let result = generate_interface_summary(&s);
+        assert_eq!(result, Some("Props definition for button".to_string()));
+    }
+
+    #[test]
+    fn test_type_with_result_suffix() {
+        let s = make_symbol("QueryResult", "type");
+        let result = generate_type_summary(&s);
+        assert_eq!(result, Some("Result type for query".to_string()));
+    }
+
+    #[test]
+    fn test_enum_summary() {
+        let s = make_symbol("LogLevel", "enum");
+        let result = generate_enum_summary(&s);
+        assert_eq!(result, Some("Enumeration of log level values".to_string()));
+    }
+
+    #[test]
+    fn test_variable_screaming_snake() {
+        let s = make_symbol("MAX_RETRIES", "variable");
+        let result = generate_variable_summary(&s);
+        assert_eq!(result, Some("Constant defining max retries".to_string()));
+    }
+
+    #[test]
+    fn test_variable_schema_suffix() {
+        let s = make_symbol("userSchema", "variable");
+        let result = generate_variable_summary(&s);
+        assert_eq!(result, Some("Validation schema for user".to_string()));
+    }
+
+    #[test]
+    fn test_constructor_with_typed_params() {
+        let mut s = make_symbol("constructor", "constructor");
+        s.signature.as_mut().unwrap().params = Some(vec![
+            NativeSymbolSignatureParam { name: "name".to_string(), type_name: Some("string".to_string()) },
+            NativeSymbolSignatureParam { name: "age".to_string(), type_name: Some("number".to_string()) },
+        ]);
+        let result = generate_constructor_summary(&s);
+        assert_eq!(result, Some("Constructs from string and number".to_string()));
+    }
+
+    #[test]
+    fn test_variable_no_summary() {
+        let s = make_symbol("count", "variable");
+        let result = generate_variable_summary(&s);
+        assert_eq!(result, None);
+    }
 }

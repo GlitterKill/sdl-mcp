@@ -141,7 +141,7 @@ function normalizeVector(vector: number[]): number[] {
   return vector.map((value) => value / norm);
 }
 
-function cosineSimilarity(a: number[], b: number[]): number {
+export function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0;
   let normA = 0;
   let normB = 0;
@@ -236,7 +236,7 @@ export function getEmbeddingProvider(
  * For MiniLM (general text model): name + kind + signature + summary.
  * Formats as natural language because MiniLM is a text model.
  */
-function buildRawEmbeddingText(symbol: ladybugDb.SymbolRow): string {
+export function buildRawEmbeddingText(symbol: ladybugDb.SymbolRow): string {
   const parts = [`${symbol.name} (${symbol.kind})`];
   const signatureText = parseSignatureText(symbol.signatureJson);
   if (signatureText) {

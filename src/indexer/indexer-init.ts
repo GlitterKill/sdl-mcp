@@ -21,7 +21,7 @@ import type { FileMetadata } from "./fileScanner.js";
 import type { ParserWorkerPool } from "./workerPool.js";
 
 export interface IndexProgress {
-  stage: "scanning" | "parsing" | "pass1" | "pass2" | "finalizing" | "summaries" | "embeddings" | "ann-index";
+  stage: "scanning" | "parsing" | "pass1" | "pass2" | "finalizing" | "summary-transfer" | "summaries" | "embeddings" | "ann-index";
   current: number;
   total: number;
   currentFile?: string;

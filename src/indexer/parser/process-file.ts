@@ -29,9 +29,12 @@ import { generateAstFingerprint, generateMetadataFingerprint, generateSymbolId }
 import type { IndexProgress } from "../indexer.js";
 import { resolveSymbolEnrichment } from "../symbol-enrichment.js";
 import {
+  classifySummarySource,
   extractInvariants,
   extractSideEffects,
   generateSummary,
+  getSummaryQuality,
+  hasJSDoc,
   isNameOnlySummary,
 } from "../summaries.js";
 import type { ParserWorkerPool } from "../workerPool.js";
@@ -457,6 +460,11 @@ export async function processFile(params: ProcessFileParams): Promise<{
         summary = generateSummary(extractedSymbol, content);
       }
 
+      // Compute summary quality/source metadata
+      const hadJSDoc = hasJSDoc(extractedSymbol, content);
+      const summarySource = classifySummarySource(summary, hadJSDoc, extractedSymbol.kind);
+      const summaryQuality = getSummaryQuality(summary, summarySource);
+
       let invariantsJson = existingSymbol?.invariantsJson ?? null;
       if (invariantsJson === null) {
         const invariants = extractInvariants(extractedSymbol, content);
@@ -499,6 +507,8 @@ export async function processFile(params: ProcessFileParams): Promise<{
         summary,
         invariantsJson,
         sideEffectsJson: sideEffectsJson,
+        summaryQuality,
+        summarySource,
         roleTagsJson,
         searchText,
         updatedAt: new Date().toISOString(),

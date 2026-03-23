@@ -167,6 +167,22 @@ fn parse_single_file(input: &NativeFileInput) -> NativeParsedFile {
     for symbol in &mut symbols {
         symbol.summary = extract::summary::generate_summary(symbol, &content, &input.language);
 
+        // Compute summary quality score
+        symbol.summary_quality = if !symbol.summary.is_empty() {
+            // Check if summary came from a doc comment by re-extracting
+            // (doc comment summaries tend to be longer and don't match auto-gen patterns)
+            let has_doc_comment = extract::summary::has_doc_comment(symbol, &content, &input.language);
+            if has_doc_comment {
+                Some(1.0)
+            } else if matches!(symbol.kind.as_str(), "function" | "method" | "constructor") {
+                Some(0.4)
+            } else {
+                Some(0.3)
+            }
+        } else {
+            Some(0.0)
+        };
+
         let invariants = extract::invariants::extract_invariants(symbol, &content);
         symbol.invariants = invariants;
 

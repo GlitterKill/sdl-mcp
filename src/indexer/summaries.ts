@@ -1,5 +1,40 @@
 import { ExtractedSymbol } from "./treesitter/extractSymbols.js";
 
+const ROLE_SUFFIXES: ReadonlyMap<string, string> = new Map([
+  ["Provider", "provider"],
+  ["Factory", "factory"],
+  ["Builder", "builder"],
+  ["Handler", "handler"],
+  ["Service", "service"],
+  ["Repository", "repository"],
+  ["Adapter", "adapter"],
+  ["Controller", "controller"],
+  ["Manager", "manager"],
+  ["Middleware", "middleware"],
+  ["Resolver", "resolver"],
+  ["Validator", "validator"],
+  ["Serializer", "serializer"],
+  ["Transformer", "transformer"],
+]);
+
+const SUFFIX_PATTERNS: ReadonlyMap<string, string> = new Map([
+  ["Props", "Props definition"],
+  ["Options", "Options definition"],
+  ["Config", "Configuration"],
+  ["Settings", "Settings definition"],
+  ["Params", "Parameters definition"],
+  ["Result", "Result type"],
+  ["Response", "Response type"],
+  ["Output", "Output type"],
+  ["Input", "Input type"],
+  ["Request", "Request type"],
+  ["Args", "Arguments type"],
+]);
+
+function splitSnakeCase(name: string): string {
+  return name.toLowerCase().split("_").filter(Boolean).join(" ");
+}
+
 export function generateSummary(
   symbol: ExtractedSymbol,
   fileContent: string,
@@ -15,13 +50,24 @@ export function generateSummary(
     }
   }
 
-  // No JSDoc — only generate summary if type info adds value beyond the name
-  if (symbol.kind === "function" || symbol.kind === "method") {
-    return generateTypedFunctionSummary(symbol);
+  // No JSDoc — dispatch to per-kind heuristic generators
+  switch (symbol.kind) {
+    case "function":
+    case "method":
+      return generateTypedFunctionSummary(symbol);
+    case "class":
+      return generateClassSummary(symbol);
+    case "interface":
+      return generateInterfaceSummary(symbol);
+    case "type":
+      return generateTypeSummary(symbol);
+    case "variable":
+      return generateVariableSummary(symbol);
+    case "constructor":
+      return generateConstructorSummary(symbol);
+    default:
+      return null;
   }
-
-  // Classes, interfaces, types, variables: kind + name is already on the card
-  return null;
 }
 
 /**
@@ -67,6 +113,98 @@ function generateTypedFunctionSummary(symbol: ExtractedSymbol): string | null {
     summary += ` returning ${returnType}`;
   }
   return summary;
+}
+
+function generateClassSummary(symbol: ExtractedSymbol): string | null {
+  const name = symbol.name;
+  for (const [suffix, role] of ROLE_SUFFIXES) {
+    if (name.endsWith(suffix) && name.length > suffix.length) {
+      const base = splitCamelCase(name.slice(0, -suffix.length)).join(" ").toLowerCase();
+      return `Implements the ${role} pattern for ${base}`;
+    }
+  }
+  if (symbol.signature?.generics && symbol.signature.generics.length > 0) {
+    const typeParams = symbol.signature.generics.join(", ");
+    const base = splitCamelCase(name).join(" ").toLowerCase();
+    return `Generic ${base} class parameterized by ${typeParams}`;
+  }
+  const words = splitCamelCase(name).join(" ").toLowerCase();
+  return `Class encapsulating ${words} behavior`;
+}
+
+function generateInterfaceSummary(symbol: ExtractedSymbol): string | null {
+  const name = symbol.name;
+  if (name.length > 1 && name[0] === "I" && name[1] === name[1].toUpperCase() && /[A-Z]/.test(name[1])) {
+    const base = splitCamelCase(name.slice(1)).join(" ").toLowerCase();
+    return `Contract for ${base}`;
+  }
+  for (const [suffix, desc] of SUFFIX_PATTERNS) {
+    if (name.endsWith(suffix) && name.length > suffix.length) {
+      const base = splitCamelCase(name.slice(0, -suffix.length)).join(" ").toLowerCase();
+      return `${desc} for ${base}`;
+    }
+  }
+  if (symbol.signature?.generics && symbol.signature.generics.length > 0) {
+    const typeParams = symbol.signature.generics.join(", ");
+    const base = splitCamelCase(name).join(" ").toLowerCase();
+    return `Generic interface defining ${base} contract for ${typeParams}`;
+  }
+  const words = splitCamelCase(name).join(" ").toLowerCase();
+  return `Interface defining ${words} contract`;
+}
+
+function generateTypeSummary(symbol: ExtractedSymbol): string | null {
+  const name = symbol.name;
+  for (const [suffix, desc] of SUFFIX_PATTERNS) {
+    if (name.endsWith(suffix) && name.length > suffix.length) {
+      const base = splitCamelCase(name.slice(0, -suffix.length)).join(" ").toLowerCase();
+      return `${desc} for ${base}`;
+    }
+  }
+  if (symbol.signature?.generics && symbol.signature.generics.length > 0) {
+    const typeParams = symbol.signature.generics.join(", ");
+    const base = splitCamelCase(name).join(" ").toLowerCase();
+    return `Generic type alias for ${base} over ${typeParams}`;
+  }
+  const words = splitCamelCase(name).join(" ").toLowerCase();
+  return `Type alias for ${words}`;
+}
+
+
+function generateVariableSummary(symbol: ExtractedSymbol): string | null {
+  const name = symbol.name;
+  if (/^[A-Z][A-Z0-9_]+$/.test(name)) {
+    return `Constant defining ${splitSnakeCase(name)}`;
+  }
+  if (name.endsWith("Schema") && name.length > 6) {
+    const base = splitCamelCase(name.slice(0, -6)).join(" ").toLowerCase();
+    return `Validation schema for ${base}`;
+  }
+  if (name.endsWith("Validator") && name.length > 9) {
+    const base = splitCamelCase(name.slice(0, -9)).join(" ").toLowerCase();
+    return `Validator for ${base}`;
+  }
+  if (/^[Dd]efault/.test(name)) {
+    const rest = name.replace(/^[Dd]efault_?/, "");
+    if (rest.length > 0) {
+      const words = splitCamelCase(rest).join(" ").toLowerCase();
+      return `Default ${words} value`;
+    }
+  }
+  return null;
+}
+
+function generateConstructorSummary(symbol: ExtractedSymbol): string | null {
+  const params = symbol.signature?.params;
+  if (!params || params.length === 0) return null;
+  const typedParams = params.filter((p) => p.type && p.type !== "any" && p.type !== "unknown");
+  if (typedParams.length === 0) return null;
+  const typeContext = typedParams
+    .map((p) => extractSimpleType(p.type!))
+    .filter(Boolean)
+    .join(" and ");
+  if (!typeContext) return null;
+  return `Constructs from ${typeContext}`;
 }
 
 /**
@@ -404,7 +542,7 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function splitCamelCase(str: string): string[] {
+export function splitCamelCase(str: string): string[] {
   // Split on underscores, hyphens, dots first
   const segments = str.split(/[_\-\.]+/).filter(Boolean);
   const result: string[] = [];
@@ -463,6 +601,47 @@ function extractSimpleType(typeAnnotation: string): string {
   }
 
   return cleaned;
+}
+
+export function getSummaryQuality(
+  summary: string | null,
+  source: "jsdoc" | "llm" | "nn-direct" | "nn-adapted" | "heuristic-typed" | "heuristic-fallback" | "unknown",
+): number {
+  if (!summary) return 0.0;
+  switch (source) {
+    case "jsdoc": return 1.0;
+    case "llm": return 0.8;
+    case "nn-direct": return 0.6;
+    case "nn-adapted": return 0.5;
+    case "heuristic-typed": return 0.4;
+    case "heuristic-fallback": return 0.3;
+    default: return 0.0;
+  }
+}
+
+export function classifySummarySource(
+  summary: string | null,
+  hadJSDoc: boolean,
+  symbolKind: string,
+): "jsdoc" | "heuristic-typed" | "heuristic-fallback" | "unknown" {
+  if (!summary) return "unknown";
+  if (hadJSDoc) return "jsdoc";
+  if (symbolKind === "function" || symbolKind === "method" || symbolKind === "constructor") {
+    return "heuristic-typed";
+  }
+  return "heuristic-fallback";
+}
+
+/**
+ * Returns true if the symbol has a JSDoc/doc-comment that extractJSDoc can parse.
+ * Used by process-file to determine summarySource classification.
+ */
+export function hasJSDoc(
+  symbol: ExtractedSymbol,
+  fileContent: string,
+): boolean {
+  const jsdoc = extractJSDoc(symbol, fileContent);
+  return jsdoc.description.length > 0;
 }
 
 function getSymbolLines(
