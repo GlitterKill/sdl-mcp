@@ -5,33 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.2] - 2026-03-21
+## [0.9.2] - 2026-03-22
+
+### Added
+
+- User-visible token savings meter via MCP logging notifications (`notifications/message`)
+  - Per-call: compact meter bar showing that call's savings (for example, `████████░░ 84%`)
+  - End-of-task: session + lifetime cumulative stats sent when `sdl.usage.stats` is called
+- Human-readable tool call formatter with concise per-tool summaries while keeping JSON responses unchanged for the LLM
+- `logging` capability declared in MCP Server capabilities
+- Repo overview performance cache with singleflight deduplication (5s TTL)
 
 ### Changed
 
-- Version bump for QA testing
+- Session usage summaries now combine session and lifetime data from LadybugDB and emit the formatted summary as an MCP notification instead of extra tool payload
+- Pass2 edge-builder logic was split into focused sub-modules (`enclosing-symbol`, `symbol-mapping`, `target-selection`, `unresolved-imports`)
+- The `indexer.ts` monolith was split into focused init, pass1, pass2, versioning, and memory modules for safer maintenance
+- Post-install pruning now keeps only required install artifacts, reducing package footprint by roughly 312 MB
+- Runtime tool maximum duration increased to 10 minutes, with broader runtime, config, and documentation hardening across the release
+
+### Fixed
+
+- Semantic summary generation bug in the native TypeScript extraction path
+- Orchestrator tool execution regressions and additional tool logic edge cases
+- LadybugDB Cypher query issues in memory ordering and word-boundary search handling
+- Repo overview performance regression, plus broader hardening across indexing, runtime, and benchmark paths
+
+### Removed
+
+- `renderTaskSummary` function (redundant with `renderSessionSummary`)
 
 ## [0.9.1] - 2026-03-20
 
 ### Added
 
-- User-visible token savings meter via MCP logging notifications (`notifications/message`)
-  - Per-call: compact meter bar showing that call's savings (e.g., `████████░░ 84%`)
-  - End-of-task: session + lifetime cumulative stats sent when `sdl.usage.stats` is called
-- Human-readable tool call formatter (`src/mcp/tool-call-formatter.ts`) with 17 per-tool formatters
-  - Sends concise text summaries to the user (e.g., `symbol.search "foo" → 5 results`)
-  - JSON responses remain unchanged for the LLM
-- `logging` capability declared in MCP Server capabilities
 - Unified runtime diagnostics via CLI `sdl-mcp info` and MCP `sdl.info`
 - `prepare-release` and `inspector` npm workflows for release preflight and MCP inspection
-- Performance cache for repo overview with singleflight deduplication (5s TTL)
 
 ### Changed
 
-- `renderSessionSummary` now skips lifetime section when no lifetime data exists (avoids misleading zeros when DB is unavailable)
-- Session-scope usage stats now fetch lifetime data from LadybugDB for combined summary display
-- Usage stats `formattedSummary` is sent as MCP notification to user and stripped from tool response (reduces unnecessary LLM context)
-- Refactored pass2 edge builder into focused sub-modules (`enclosing-symbol`, `symbol-mapping`, `target-selection`, `unresolved-imports`)
 - MCP tool registration now publishes human-friendly titles, version-stamped descriptions, and shared request normalization across flat, gateway, and CLI tool-dispatch surfaces
 - Gateway `tools/list` schemas now preserve action-specific fields, descriptions, and defaults instead of collapsing to a bare envelope
 - Logging is now file-first with `SDL_LOG_FILE`, `SDL_CONSOLE_LOGGING`, temp-path fallback, and explicit shutdown flushing
@@ -39,15 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Cypher query bug: pre-compute word-boundary search strings on JS side to avoid LadybugDB expression evaluation issues in CASE expressions
-- Cypher query bug: ORDER BY in memory queries now references projected aliases instead of qualified node properties
 - Native platform package versions are synchronized with the root `sdl-mcp` release version
 - `prepare-release` now launches npm subcommands correctly on Windows
 - Release preflight packaging and stdio smoke coverage now validate the new diagnostics and tool registration surfaces
-
-### Removed
-
-- `renderTaskSummary` function (redundant with `renderSessionSummary`)
 
 ## [0.9.0] - 2026-03-17
 
