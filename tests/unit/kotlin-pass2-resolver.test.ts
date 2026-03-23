@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { KotlinPass2Resolver } from "../../src/indexer/pass2/resolvers/kotlin-pass2-resolver.js";
+import { KotlinPass2Resolver } from "../../dist/indexer/pass2/resolvers/kotlin-pass2-resolver.js";
 
 describe("KotlinPass2Resolver", () => {
   it("supports kotlin .kt and .kts files", () => {

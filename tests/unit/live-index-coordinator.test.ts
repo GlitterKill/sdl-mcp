@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { InMemoryLiveIndexCoordinator } from "../../src/live-index/coordinator.js";
+import { InMemoryLiveIndexCoordinator } from "../../dist/live-index/coordinator.js";
 
 describe("InMemoryLiveIndexCoordinator", () => {
   it("rejects equal-version retries as stale updates", async () => {

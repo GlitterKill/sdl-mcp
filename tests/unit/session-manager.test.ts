@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { SessionManager } from "../../src/mcp/session-manager.js";
+import { SessionManager } from "../../dist/mcp/session-manager.js";
 
 describe("SessionManager", () => {
   let manager: SessionManager;

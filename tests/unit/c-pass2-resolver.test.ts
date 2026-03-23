@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { CPass2Resolver } from "../../src/indexer/pass2/resolvers/c-pass2-resolver.js";
+import { CPass2Resolver } from "../../dist/indexer/pass2/resolvers/c-pass2-resolver.js";
 
 describe("CPass2Resolver", () => {
   it("supports c files only", () => {

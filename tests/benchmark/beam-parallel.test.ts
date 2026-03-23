@@ -1,9 +1,9 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
 import * as os from "os";
-import type { SymbolRow, EdgeRow } from "../../src/db/schema.js";
-import type { SliceBudget } from "../../src/mcp/types.js";
-import type { Graph } from "../../src/graph/buildGraph.js";
+import type { SymbolRow, EdgeRow } from "../../dist/db/schema.js";
+import type { SliceBudget } from "../../dist/mcp/types.js";
+import type { Graph } from "../../dist/graph/buildGraph.js";
 
 type SymbolKind = SymbolRow["kind"];
 type EdgeType = EdgeRow["type"];
@@ -200,20 +200,20 @@ const TARGET_SPEEDUP = 1.5;
 describe("Beam Search Parallel Benchmark", () => {
   before(async () => {
     const { resetScorerPool } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
     resetScorerPool();
   });
 
   after(async () => {
     const { resetScorerPool } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
     resetScorerPool();
   });
 
   for (const config of BENCHMARK_CONFIGS) {
     it(`should achieve >= ${TARGET_SPEEDUP}x speedup on ${config.description} graph (${config.nodeCount} nodes)`, async () => {
       const { beamSearch, beamSearchAsync, resetScorerPool } =
-        await import("../../src/graph/slice/beam-search-engine.js");
+        await import("../../dist/graph/slice/beam-search-engine.js");
 
       resetScorerPool();
 
@@ -314,7 +314,7 @@ describe("Beam Search Parallel Benchmark", () => {
 
   it("should report benchmark configuration and system info", async () => {
     const { DEFAULT_PARALLEL_SCORER_CONFIG } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
 
     console.log("\n=== SYSTEM INFO ===");
     console.log(`Platform: ${os.platform()} ${os.arch()}`);
@@ -332,7 +332,7 @@ describe("Beam Search Parallel Benchmark", () => {
 
   it("should verify output parity between sequential and parallel modes", async () => {
     const { beamSearch, beamSearchAsync, resetScorerPool } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
 
     resetScorerPool();
 

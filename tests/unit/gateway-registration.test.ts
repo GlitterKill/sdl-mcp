@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { registerTools } from "../../src/mcp/tools/index.js";
+import { registerTools } from "../../dist/mcp/tools/index.js";
 
 function makeFakeGatewayServer(names: string[]) {
   return {

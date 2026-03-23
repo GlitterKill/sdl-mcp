@@ -10,19 +10,19 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { indexRepo } from "../../src/indexer/indexer.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { indexRepo } from "../../dist/indexer/indexer.js";
 import {
   routeLiveIndexApiRequest,
   type LiveIndexApiRequest,
-} from "../../src/cli/transport/http.js";
-import { handleBufferPush } from "../../src/mcp/tools/buffer.js";
+} from "../../dist/cli/transport/http.js";
+import { handleBufferPush } from "../../dist/mcp/tools/buffer.js";
 import {
   getDefaultOverlayStore,
   resetDefaultLiveIndexCoordinator,
   waitForDefaultLiveIndexIdle,
-} from "../../src/live-index/coordinator.js";
+} from "../../dist/live-index/coordinator.js";
 
 describe("explicit checkpoint API", () => {
   const repoId = "explicit-checkpoint-repo";

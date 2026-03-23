@@ -5,13 +5,13 @@ import {
   consumePrefetchedKey,
   getPrefetchStats,
   prefetchSliceFrontier,
-} from "../../src/graph/prefetch.js";
+} from "../../dist/graph/prefetch.js";
 import {
   trainPrefetchModel,
   predictNextTool,
   configureGating,
   resetModel,
-} from "../../src/graph/prefetch-model.js";
+} from "../../dist/graph/prefetch-model.js";
 
 describe("prefetch pipeline", () => {
   beforeEach(() => {

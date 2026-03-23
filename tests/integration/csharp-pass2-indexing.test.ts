@@ -15,9 +15,9 @@ import {
   closeLadybugDb,
   getLadybugConn,
   initLadybugDb,
-} from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { indexRepo } from "../../src/indexer/indexer.js";
+} from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { indexRepo } from "../../dist/indexer/indexer.js";
 
 const REPO_ID = "test-csharp-pass2-repo";
 

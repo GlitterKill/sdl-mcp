@@ -6,7 +6,7 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-import { setupHttpTransport } from "../../src/cli/transport/http.js";
+import { setupHttpTransport } from "../../dist/cli/transport/http.js";
 
 async function captureUncaughtException(
   action: () => Promise<Response>,

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createDebouncedJobScheduler } from "../../src/live-index/debounce.js";
+import { createDebouncedJobScheduler } from "../../dist/live-index/debounce.js";
 
 describe("createDebouncedJobScheduler", () => {
   it("coalesces rapid updates for the same file into one parse job", async () => {

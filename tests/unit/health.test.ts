@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { computeHealthScore } from "../../src/mcp/health.js";
+import { computeHealthScore } from "../../dist/mcp/health.js";
 
 describe("health scoring", () => {
   it("returns unavailable for empty repos", () => {

@@ -3,8 +3,8 @@ import assert from "node:assert";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { parseSummaryOptions } from "../../src/cli/argParsing.js";
-import type { CLIOptions } from "../../src/cli/types.js";
+import { parseSummaryOptions } from "../../dist/cli/argParsing.js";
+import type { CLIOptions } from "../../dist/cli/types.js";
 
 describe("CLI summary command", () => {
   const global: CLIOptions = {};
@@ -288,10 +288,10 @@ describe("CLI summary command", () => {
       );
 
       const { initLadybugDb, closeLadybugDb } = await import(
-        "../../src/db/ladybug.js"
+        "../../dist/db/ladybug.js"
       );
       const { summaryCommand } = await import(
-        "../../src/cli/commands/summary.js"
+        "../../dist/cli/commands/summary.js"
       );
 
       await initLadybugDb(ladybugPath);

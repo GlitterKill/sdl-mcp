@@ -21,7 +21,7 @@ describe("CLI version command", () => {
 
   it("outputs the version from package.json", async () => {
     const { versionCommand } = await import(
-      "../../src/cli/commands/version.js"
+      "../../dist/cli/commands/version.js"
     );
 
     await versionCommand({});
@@ -41,7 +41,7 @@ describe("CLI version command", () => {
 
   it("outputs Node.js version", async () => {
     const { versionCommand } = await import(
-      "../../src/cli/commands/version.js"
+      "../../dist/cli/commands/version.js"
     );
 
     await versionCommand({});
@@ -56,7 +56,7 @@ describe("CLI version command", () => {
 
   it("outputs platform information", async () => {
     const { versionCommand } = await import(
-      "../../src/cli/commands/version.js"
+      "../../dist/cli/commands/version.js"
     );
 
     await versionCommand({});
@@ -73,7 +73,7 @@ describe("CLI version command", () => {
 
   it("outputs architecture information", async () => {
     const { versionCommand } = await import(
-      "../../src/cli/commands/version.js"
+      "../../dist/cli/commands/version.js"
     );
 
     await versionCommand({});
@@ -88,7 +88,7 @@ describe("CLI version command", () => {
 
   it("outputs environment section header", async () => {
     const { versionCommand } = await import(
-      "../../src/cli/commands/version.js"
+      "../../dist/cli/commands/version.js"
     );
 
     await versionCommand({});

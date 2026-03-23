@@ -3,7 +3,7 @@
  *
  * Usage: npx tsx scripts/measure-gateway-schema-tokens.ts
  */
-import { createMCPServer } from "../src/server.js";
+import { createMCPServer } from "../dist/server.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 function estimateTokens(charCount: number): number {

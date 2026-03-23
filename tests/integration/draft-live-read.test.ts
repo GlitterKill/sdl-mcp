@@ -10,22 +10,22 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { buildSlice } from "../../src/graph/slice.js";
-import { clearSliceCache } from "../../src/graph/sliceCache.js";
-import { indexRepo } from "../../src/indexer/indexer.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { buildSlice } from "../../dist/graph/slice.js";
+import { clearSliceCache } from "../../dist/graph/sliceCache.js";
+import { indexRepo } from "../../dist/indexer/indexer.js";
 import {
   handleBufferPush,
-} from "../../src/mcp/tools/buffer.js";
+} from "../../dist/mcp/tools/buffer.js";
 import {
   handleSymbolGetCard,
   handleSymbolSearch,
-} from "../../src/mcp/tools/symbol.js";
+} from "../../dist/mcp/tools/symbol.js";
 import {
   resetDefaultLiveIndexCoordinator,
   waitForDefaultLiveIndexIdle,
-} from "../../src/live-index/coordinator.js";
+} from "../../dist/live-index/coordinator.js";
 
 const REPO_ID = "draft-live-read-repo";
 

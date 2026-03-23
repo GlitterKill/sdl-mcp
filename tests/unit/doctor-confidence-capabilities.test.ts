@@ -57,8 +57,8 @@ describe("doctor command - call resolution capabilities", () => {
     );
 
     const { initLadybugDb, closeLadybugDb } =
-      await import("../../src/db/ladybug.js");
-    const { doctorCommand } = await import("../../src/cli/commands/doctor.js");
+      await import("../../dist/db/ladybug.js");
+    const { doctorCommand } = await import("../../dist/cli/commands/doctor.js");
     await initLadybugDb(ladybugPath);
 
     let output = "";

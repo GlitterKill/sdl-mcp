@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { registerTools } from "../../src/mcp/tools/index.js";
-import { getVersion } from "../../src/cli/commands/version.js";
+import { registerTools } from "../../dist/mcp/tools/index.js";
+import { getVersion } from "../../dist/cli/commands/version.js";
 
 interface RegisteredToolCall {
   name: string;

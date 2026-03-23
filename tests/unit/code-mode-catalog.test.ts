@@ -5,7 +5,7 @@ import {
   rankCatalog,
   zodToSchemaSummary,
   invalidateCatalog,
-} from "../../src/code-mode/action-catalog.js";
+} from "../../dist/code-mode/action-catalog.js";
 import { z } from "zod";
 
 describe("code-mode action catalog", () => {
@@ -118,6 +118,7 @@ describe("code-mode action catalog", () => {
   });
 
   describe("zodToSchemaSummary", () => {
+    // TODO: zodToSchemaSummary uses Zod v3 internals (_def.typeName) - update src/code-mode/action-catalog.ts for Zod v4
     it("converts simple ZodObject", () => {
       const schema = z.object({
         name: z.string(),
@@ -143,6 +144,7 @@ describe("code-mode action catalog", () => {
       assert.strictEqual(flagField.default, false);
     });
 
+    // TODO: zodToSchemaSummary uses Zod v3 internals (_def.typeName/_def.values) - update src/code-mode/action-catalog.ts for Zod v4
     it("handles enum fields", () => {
       const schema = z.object({
         mode: z.enum(["full", "incremental"]),

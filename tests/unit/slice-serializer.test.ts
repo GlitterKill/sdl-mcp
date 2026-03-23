@@ -19,7 +19,7 @@ import {
   buildPayloadCardsAndRefs,
   encodeEdgesWithSymbolIndex,
   estimateTokens,
-} from "../../src/graph/slice/slice-serializer.js";
+} from "../../dist/graph/slice/slice-serializer.js";
 
 import type {
   SymbolCard,
@@ -27,7 +27,7 @@ import type {
   SliceSymbolDeps,
   CallResolution,
   CardDetailLevel,
-} from "../../src/domain/types.js";
+} from "../../dist/domain/types.js";
 
 import {
   SYMBOL_CARD_MAX_DEPS_PER_KIND_LIGHT,
@@ -35,8 +35,8 @@ import {
   SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT,
   SYMBOL_TOKEN_BASE,
   AST_FINGERPRINT_WIRE_LENGTH,
-} from "../../src/config/constants.js";
-import { hashCard } from "../../src/util/hashing.js";
+} from "../../dist/config/constants.js";
+import { hashCard } from "../../dist/util/hashing.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

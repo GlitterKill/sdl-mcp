@@ -15,7 +15,7 @@ import {
   RuntimePolicyDeniedError,
   RuntimeTimeoutError,
   ValidationError,
-} from "../../src/domain/errors.js";
+} from "../../dist/domain/errors.js";
 
 describe("domain errors", () => {
   const cases = [

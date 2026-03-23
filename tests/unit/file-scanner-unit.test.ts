@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { scanRepository } from "../../src/indexer/fileScanner.js";
-import type { RepoConfig } from "../../src/config/types.js";
+import { scanRepository } from "../../dist/indexer/fileScanner.js";
+import type { RepoConfig } from "../../dist/config/types.js";
 
 const tempDirs: string[] = [];
 

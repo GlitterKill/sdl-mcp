@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 import { handleSymbolGetCards } from "../../dist/mcp/tools/symbol.js";
-import { SymbolGetCardsRequestSchema } from "../../src/mcp/tools.js";
+import { SymbolGetCardsRequestSchema } from "../../dist/mcp/tools.js";
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 

@@ -8,7 +8,7 @@ import assert from "node:assert";
 import {
   generateSummary,
   isNameOnlySummary,
-} from "../src/indexer/summaries.js";
+} from "../dist/indexer/summaries.js";
 
 describe("isNameOnlySummary", () => {
   it("detects title-cased function name", () => {

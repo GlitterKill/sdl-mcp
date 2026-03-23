@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { encodeEdgesWithSymbolIndex } from "../../src/graph/slice.js";
-import { toCompactGraphSliceV2 } from "../../src/mcp/tools/slice.js";
+import { encodeEdgesWithSymbolIndex } from "../../dist/graph/slice.js";
+import { toCompactGraphSliceV2 } from "../../dist/mcp/tools/slice.js";
 
 describe("slice edge wire format", () => {
   it("encodes edges as index tuples with a deduplicated symbol index", () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 
-import { resolveLadybugBufferManagerSizeBytes } from "../../src/db/ladybug.js";
+import { resolveLadybugBufferManagerSizeBytes } from "../../dist/db/ladybug.js";
 
 const ONE_GB = 1024 * 1024 * 1024;
 

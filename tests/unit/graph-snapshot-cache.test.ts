@@ -8,7 +8,7 @@ import {
   invalidateGraphSnapshot,
   clearGraphSnapshots,
   getGraphSnapshotStats,
-} from "../../src/graph/graphSnapshotCache.js";
+} from "../../dist/graph/graphSnapshotCache.js";
 
 function makeFakeGraph(repoId: string) {
   return {

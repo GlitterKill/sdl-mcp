@@ -1,8 +1,8 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 import { z } from "zod";
-import { normalizeToolArguments } from "../../src/mcp/request-normalization.js";
-import { routeGatewayCall } from "../../src/gateway/router.js";
+import { normalizeToolArguments } from "../../dist/mcp/request-normalization.js";
+import { routeGatewayCall } from "../../dist/gateway/router.js";
 
 describe("request normalization", () => {
   it("normalizes snake_case and aliases to camelCase fields", () => {

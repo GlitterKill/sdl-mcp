@@ -8,13 +8,13 @@ import {
   closeLadybugDb,
   getLadybugConn,
   initLadybugDb,
-} from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { handleBufferPush } from "../../src/mcp/tools/buffer.js";
+} from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { handleBufferPush } from "../../dist/mcp/tools/buffer.js";
 import {
   resetDefaultLiveIndexCoordinator,
   waitForDefaultLiveIndexIdle,
-} from "../../src/live-index/coordinator.js";
+} from "../../dist/live-index/coordinator.js";
 
 describe("doctor command - live index runtime health", () => {
   let tempDir = "";
@@ -114,7 +114,7 @@ describe("doctor command - live index runtime health", () => {
     // and LadybugDB is not accessed concurrently during doctorCommand
     await waitForDefaultLiveIndexIdle();
 
-    const { doctorCommand } = await import("../../src/cli/commands/doctor.js");
+    const { doctorCommand } = await import("../../dist/cli/commands/doctor.js");
     let output = "";
     const originalLog = console.log;
     console.log = (message?: unknown) => {

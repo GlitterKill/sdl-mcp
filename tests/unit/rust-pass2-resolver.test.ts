@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { RustPass2Resolver } from "../../src/indexer/pass2/resolvers/rust-pass2-resolver.js";
+import { RustPass2Resolver } from "../../dist/indexer/pass2/resolvers/rust-pass2-resolver.js";
 
 describe("RustPass2Resolver", () => {
   it("supports rust files only", () => {

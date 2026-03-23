@@ -120,11 +120,30 @@ if ((initResult.status ?? 1) !== 0) {
   process.exit(initResult.status ?? 1);
 }
 
+let overallFailed = false;
 const result = spawnSync(process.execPath, nodeArgs, {
   cwd: repoRoot,
   stdio: "inherit",
   env: testEnv,
 });
+
+
+// Run tests that need process isolation (due to module cache pollution in the main suite)
+const isolatedTests = [
+  "tests/unit/draft-parser.test.ts",
+  "tests/unit/file-patcher.test.ts",
+];
+
+for (const testFile of isolatedTests) {
+  const isoResult = spawnSync(process.execPath, ["--test-concurrency=1", "--test", resolve(repoRoot, testFile)], {
+    cwd: repoRoot,
+    stdio: "inherit",
+    env: testEnv,
+  });
+  if ((isoResult.status ?? 1) !== 0) {
+    overallFailed = true;
+  }
+}
 
 // Clean up temp directory created for this test run
 try {
@@ -133,4 +152,5 @@ try {
   // Best-effort cleanup (files may be locked on Windows)
 }
 
-process.exit(result.status ?? 1);
+if ((result.status ?? 1) !== 0) overallFailed = true;
+process.exit(overallFailed ? 1 : 0);

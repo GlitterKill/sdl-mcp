@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { estimateTokens } from "../../src/util/tokenize.js";
+import { estimateTokens } from "../../dist/util/tokenize.js";
 
 describe("token estimate model", () => {
   it("returns 0 for empty input", () => {

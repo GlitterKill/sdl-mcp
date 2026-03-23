@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 
-import { calculateClusterCohesion } from "../../src/graph/score.js";
+import { calculateClusterCohesion } from "../../dist/graph/score.js";
 
 describe("cluster cohesion scoring", () => {
   it("returns 0 without cluster id", () => {

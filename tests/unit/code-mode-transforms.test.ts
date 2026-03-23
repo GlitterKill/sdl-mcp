@@ -5,7 +5,7 @@ import {
   isInternalTransform,
   INTERNAL_TRANSFORM_NAMES,
   TransformError,
-} from "../../src/code-mode/transforms.js";
+} from "../../dist/code-mode/transforms.js";
 
 describe("code-mode transforms", () => {
   describe("isInternalTransform", () => {

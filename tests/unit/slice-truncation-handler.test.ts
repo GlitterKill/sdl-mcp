@@ -6,7 +6,7 @@ import {
   buildTruncationInfo,
   DYNAMIC_CAP_MIN_CARDS,
   type DynamicCapState,
-} from "../../src/graph/slice/truncation-handler.js";
+} from "../../dist/graph/slice/truncation-handler.js";
 
 describe("computeMinCardsForDynamicCap", () => {
   it("returns DYNAMIC_CAP_MIN_CARDS when budget is large and no entries", () => {

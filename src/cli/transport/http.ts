@@ -1,4 +1,4 @@
-import { createReadStream, statSync } from "fs";
+import { createReadStream, existsSync, statSync } from "fs";
 import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { join } from "path";
@@ -38,7 +38,10 @@ import { SessionManager } from "../../mcp/session-manager.js";
 import type { Connection } from "kuzu";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
-const UI_DIR = join(__dirname, "..", "..", "ui");
+const UI_DIR_CANDIDATE = join(__dirname, "..", "..", "ui");
+const UI_DIR = existsSync(UI_DIR_CANDIDATE)
+  ? UI_DIR_CANDIDATE
+  : join(__dirname, "..", "..", "..", "src", "ui");
 
 type GraphNode = {
   id: string;

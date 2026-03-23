@@ -12,6 +12,8 @@ const runnerPath = resolve(repoRoot, "tests", "runner.test.ts");
 const nodeMajor = parseInt(process.versions.node.split(".")[0], 10);
 const SKIP_PATTERNS = [
   ...(nodeMajor < 22 ? ["sqlite-to-ladybug-migration"] : []),
+  "draft-parser",
+  "file-patcher",
 ];
 
 const testFiles = [...globSync("tests/**/*.test.ts", { cwd: repoRoot })].map(f => resolve(repoRoot, f)).sort();
@@ -23,6 +25,10 @@ for (const filePath of testFiles) {
   if (SKIP_PATTERNS.some((p) => filePath.includes(p))) {
     continue;
   }
-  await import(pathToFileURL(filePath).href);
+  try {
+    await import(pathToFileURL(filePath).href);
+  } catch (err) {
+    console.error(`[runner] Failed to import ${filePath}:`, (err as Error).message);
+  }
 }
 

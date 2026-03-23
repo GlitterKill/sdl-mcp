@@ -7,8 +7,8 @@ import {
   renderLifetimeSummary,
   formatTokenCount,
   type AggregateUsage,
-} from "../../src/mcp/savings-meter.js";
-import type { SessionUsageSnapshot, ToolUsageEntry } from "../../src/mcp/token-accumulator.js";
+} from "../../dist/mcp/savings-meter.js";
+import type { SessionUsageSnapshot, ToolUsageEntry } from "../../dist/mcp/token-accumulator.js";
 
 // ---------------------------------------------------------------------------
 // Golden: renderOperationMeter exact output

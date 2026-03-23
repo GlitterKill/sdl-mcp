@@ -11,7 +11,7 @@ const repoRoot = resolve(__dirname, "../..");
 const scriptPath = resolve(repoRoot, "scripts/golden/update-goldens.ts");
 
 function runUpdater(args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, ["--import", "tsx", scriptPath, ...args], {
+  const result = spawnSync(process.execPath, ["--experimental-strip-types", scriptPath, ...args], {
     cwd: repoRoot,
     encoding: "utf8",
   });
@@ -24,10 +24,10 @@ function runUpdater(args: string[]): { status: number | null; stdout: string; st
 }
 
 describe("golden updater regressions", () => {
-  it("loads adapters from src rather than dist", () => {
+  it("loads adapters from dist rather than src", () => {
     const source = readFileSync(scriptPath, "utf8");
-    assert.ok(source.includes("../../src/indexer/adapter/rust.js"));
-    assert.ok(!source.includes("../../dist/indexer/adapter/rust.js"));
+    assert.ok(source.includes("../../dist/indexer/adapter/rust.js"));
+    assert.ok(!source.includes("../../src/indexer/adapter/rust.js"));
   });
 
   it("fails validation when a source file is missing", () => {
@@ -51,34 +51,18 @@ describe("golden updater regressions", () => {
     }
   });
 
-  it("does not depend on the dist rust adapter being present", () => {
+  it("runs successfully when dist rust adapter is present", () => {
     const distAdapterPath = resolve(repoRoot, "dist/indexer/adapter/rust.js");
-    const backupPath = `${distAdapterPath}.bak`;
 
     assert.ok(
       existsSync(distAdapterPath),
       "dist/indexer/adapter/rust.js must exist for this regression test",
     );
 
-    if (existsSync(backupPath)) {
-      renameSync(backupPath, distAdapterPath);
-    }
-
-    renameSync(distAdapterPath, backupPath);
-    try {
-      const result = runUpdater(["validate", "rust"]);
-      assert.ok(
-        result.stdout.includes("Processing 3 golden file specs"),
-        `Expected updater to execute from source imports.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
-      );
-      assert.ok(
-        !/adapter not available|Cannot find module.+dist[\\\\/]indexer[\\\\/]adapter[\\\\/]rust/i.test(
-          `${result.stdout}\n${result.stderr}`,
-        ),
-        `Updater should not depend on dist rust adapter.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
-      );
-    } finally {
-      renameSync(backupPath, distAdapterPath);
-    }
+    const result = runUpdater(["validate", "rust"]);
+    assert.ok(
+      result.stdout.includes("Processing 3 golden file specs"),
+      `Expected updater to execute successfully.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+    );
   });
 });

@@ -7,8 +7,8 @@ import {
   safeJsonParseOrThrow,
   StringArraySchema,
   SignatureSchema,
-} from "../../src/util/safeJson.js";
-import { DatabaseError } from "../../src/mcp/errors.js";
+} from "../../dist/util/safeJson.js";
+import { DatabaseError } from "../../dist/mcp/errors.js";
 
 test("safeJsonParse returns fallback for null input", () => {
   const result = safeJsonParse(null, z.string(), "fallback");

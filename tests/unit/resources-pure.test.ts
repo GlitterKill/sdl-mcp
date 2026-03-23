@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { readSliceResource } from "../../src/mcp/resources.js";
+import { readSliceResource } from "../../dist/mcp/resources.js";
 
 describe("readSliceResource", () => {
   it("returns JSON for valid slice:// URI", () => {

@@ -1,8 +1,8 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
-import type { SymbolRow, EdgeRow } from "../../src/db/schema.js";
-import type { SliceBudget } from "../../src/mcp/types.js";
-import type { Graph } from "../../src/graph/buildGraph.js";
+import type { SymbolRow, EdgeRow } from "../../dist/db/schema.js";
+import type { SliceBudget } from "../../dist/mcp/types.js";
+import type { Graph } from "../../dist/graph/buildGraph.js";
 
 type SymbolKind = SymbolRow["kind"];
 type EdgeType = EdgeRow["type"];
@@ -125,19 +125,19 @@ function createMockEdge(
 describe("Beam Search Parallel Parity", () => {
   beforeEach(async () => {
     const { resetScorerPool } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
     resetScorerPool();
   });
 
   afterEach(async () => {
     const { resetScorerPool } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
     resetScorerPool();
   });
 
   it("should produce identical results in sequential and parallel mode for small graph", async () => {
     const { beamSearch, beamSearchAsync } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
 
     const symbols = [
       createMockSymbol("a", "alpha"),
@@ -204,7 +204,7 @@ describe("Beam Search Parallel Parity", () => {
 
   it("should maintain deterministic ordering with same sequence values", async () => {
     const { beamSearch } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
 
     const symbols = [
       createMockSymbol("a", "funcA"),
@@ -257,7 +257,7 @@ describe("Beam Search Parallel Parity", () => {
 
   it("should fallback to sequential on worker initialization failure", async () => {
     const { beamSearchAsync } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
 
     const symbols = [
       createMockSymbol("a", "alpha"),
@@ -296,7 +296,7 @@ describe("Beam Search Parallel Parity", () => {
 
   it("should handle edge confidence filtering identically", async () => {
     const { beamSearch, beamSearchAsync } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
 
     const symbols = [
       createMockSymbol("a", "alpha"),
@@ -349,7 +349,7 @@ describe("Beam Search Parallel Parity", () => {
 
   it("should respect budget limits identically", async () => {
     const { beamSearch, beamSearchAsync } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
 
     const symbols: MockSymbol[] = [createMockSymbol("start", "startNode")];
 
@@ -410,7 +410,7 @@ describe("Beam Search Parallel Parity", () => {
 
   it("should handle empty graph gracefully", async () => {
     const { beamSearch, beamSearchAsync } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
 
     const graph = createMockGraph([], []);
     const budget: Required<SliceBudget> = {
@@ -447,7 +447,7 @@ describe("Beam Search Parallel Parity", () => {
 
   it("should handle missing symbols in graph", async () => {
     const { beamSearchAsync } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
 
     const symbols = [createMockSymbol("a", "alpha")];
     const edges: MockEdge[] = [];
@@ -476,7 +476,7 @@ describe("Beam Search Parallel Parity", () => {
 
   it("should auto-fallback on worker failure", async () => {
     const { beamSearchAsync, resetScorerPool } =
-      await import("../../src/graph/slice/beam-search-engine.js");
+      await import("../../dist/graph/slice/beam-search-engine.js");
 
     resetScorerPool();
 

@@ -17,7 +17,7 @@ describe("Diff Symmetry Properties", () => {
   }
 
   const symbolArb = fc.record({
-    id: fc.hexaString({ minLength: 8, maxLength: 8 }),
+    id: fc.string({ minLength: 8, maxLength: 8 }),
     name: fc.stringMatching(/^[a-z][a-zA-Z0-9]{0,15}$/),
     signature: fc.stringMatching(/^[a-z]+\([a-z, ]*\): [a-z]+$/),
   });

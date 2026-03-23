@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import {
   extractRoleTags,
   resolveSymbolEnrichment,
-} from "../../src/indexer/symbol-enrichment.js";
+} from "../../dist/indexer/symbol-enrichment.js";
 
 describe("symbol enrichment", () => {
   it("derives role tags from symbol name and path", () => {

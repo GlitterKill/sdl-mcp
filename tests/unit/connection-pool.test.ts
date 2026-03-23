@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 
-import { configurePool, getPoolStats } from "../../src/db/ladybug.js";
+import { configurePool, getPoolStats } from "../../dist/db/ladybug.js";
 
 describe("ladybug connection pool configuration", () => {
   it("configurePool accepts readPoolSize values within 1-8", () => {

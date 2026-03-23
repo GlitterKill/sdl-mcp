@@ -4,11 +4,11 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AppConfigSchema } from "../../src/config/types.js";
-import { initGraphDb } from "../../src/db/initGraphDb.js";
-import { closeLadybugDb, getLadybugConn } from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { ensureConfiguredReposRegistered } from "../../src/startup/bootstrap.js";
+import { AppConfigSchema } from "../../dist/config/types.js";
+import { initGraphDb } from "../../dist/db/initGraphDb.js";
+import { closeLadybugDb, getLadybugConn } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { ensureConfiguredReposRegistered } from "../../dist/startup/bootstrap.js";
 
 describe("ensureConfiguredReposRegistered", () => {
   let tempDir: string;

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { MinHeap } from "../../src/graph/minHeap.js";
+import { MinHeap } from "../../dist/graph/minHeap.js";
 
 describe("MinHeap", () => {
   it("orders by score ascending", () => {

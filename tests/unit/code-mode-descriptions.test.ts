@@ -4,7 +4,7 @@ import {
   MANUAL_DESCRIPTION,
   CHAIN_DESCRIPTION,
   ACTION_SEARCH_DESCRIPTION,
-} from "../../src/code-mode/descriptions.js";
+} from "../../dist/code-mode/descriptions.js";
 
 /**
  * Tests for src/code-mode/descriptions.ts — description constants

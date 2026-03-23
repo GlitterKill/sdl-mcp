@@ -4,7 +4,7 @@ import {
   handleBufferCheckpoint,
   handleBufferPush,
   handleBufferStatus,
-} from "../../src/mcp/tools/buffer.js";
+} from "../../dist/mcp/tools/buffer.js";
 
 describe("buffer MCP tools", () => {
   it("pushes buffer updates through the live index coordinator", async () => {

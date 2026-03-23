@@ -7,7 +7,7 @@ import assert from "node:assert";
 import {
   GraphDatabaseConfigSchema,
   AppConfigSchema,
-} from "../../src/config/types.js";
+} from "../../dist/config/types.js";
 
 describe("GraphDatabaseConfigSchema", () => {
   describe("valid configurations", () => {

@@ -36,7 +36,7 @@ describe("Card Builder Invariants", () => {
   });
 
   const symbolInputArb = fc.record({
-    id: fc.hexaString({ minLength: 64, maxLength: 64 }),
+    id: fc.string({ minLength: 64, maxLength: 64 }),
     name: fc.stringMatching(/^[a-zA-Z_$][a-zA-Z0-9_$]{0,50}$/),
     kind: symbolKindArb,
     file: fc.stringMatching(/^src\/[a-z/]{1,30}\.[a-z]{1,4}$/),

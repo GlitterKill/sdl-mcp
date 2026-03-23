@@ -15,14 +15,14 @@ import {
   toSliceSymbolCard,
   filterDepsBySliceSymbolSet,
   estimateTokens,
-} from "../../src/graph/slice.js";
+} from "../../dist/graph/slice.js";
 import {
   encodeEdgesWithSymbolIndex as encodeEdgesFromSerializer,
   buildPayloadCardsAndRefs as buildPayloadFromSerializer,
   toSliceSymbolCard as toSliceFromSerializer,
   filterDepsBySliceSymbolSet as filterDepsFromSerializer,
   estimateTokens as estimateTokensFromSerializer,
-} from "../../src/graph/slice/slice-serializer.js";
+} from "../../dist/graph/slice/slice-serializer.js";
 import {
   resolveStartNodes,
   collectTaskTextSeedTokens,
@@ -31,7 +31,7 @@ import {
   commonPrefixLength,
   START_NODE_SOURCE_PRIORITY,
   START_NODE_SOURCE_SCORE,
-} from "../../src/graph/slice/start-node-resolver.js";
+} from "../../dist/graph/slice/start-node-resolver.js";
 import {
   normalizeEdgeConfidence,
   applyEdgeConfidenceWeight,
@@ -39,9 +39,9 @@ import {
   computeMinCardsForDynamicCap,
   shouldTightenDynamicCardCap,
   compareFrontierItems,
-} from "../../src/graph/slice/beam-search-engine.js";
-import { hashCard } from "../../src/util/hashing.js";
-import type { SymbolCard, SliceSymbolDeps } from "../../src/mcp/types.js";
+} from "../../dist/graph/slice/beam-search-engine.js";
+import { hashCard } from "../../dist/util/hashing.js";
+import type { SymbolCard, SliceSymbolDeps } from "../../dist/mcp/types.js";
 
 describe("Golden parity: slice.ts exports match slice-serializer.ts", () => {
   const baseCard: SymbolCard = {

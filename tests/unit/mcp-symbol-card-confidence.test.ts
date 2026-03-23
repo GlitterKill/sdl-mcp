@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { clearAllCaches } from "../../src/graph/cache.js";
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { SymbolGetCardRequestSchema } from "../../src/mcp/tools.js";
-import { handleSymbolGetCard } from "../../src/mcp/tools/symbol.js";
+import { clearAllCaches } from "../../dist/graph/cache.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { SymbolGetCardRequestSchema } from "../../dist/mcp/tools.js";
+import { handleSymbolGetCard } from "../../dist/mcp/tools/symbol.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

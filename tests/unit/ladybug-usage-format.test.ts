@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { aggregateToolBreakdowns } from "../../src/db/ladybug-usage.js";
+import { aggregateToolBreakdowns } from "../../dist/db/ladybug-usage.js";
 
 describe("aggregateToolBreakdowns", () => {
   it("aggregates tool entries from multiple snapshots", () => {

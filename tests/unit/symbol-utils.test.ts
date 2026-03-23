@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { toLegacySymbolRow } from "../../src/mcp/tools/symbol-utils.js";
+import { toLegacySymbolRow } from "../../dist/mcp/tools/symbol-utils.js";
 
 function makeSymbolRow(overrides: Record<string, unknown> = {}) {
   return {

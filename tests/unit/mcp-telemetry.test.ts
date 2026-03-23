@@ -25,7 +25,7 @@ import {
   type SummaryQualityTelemetryEvent,
   type PrefetchTelemetryEvent,
   type RuntimeExecutionEvent,
-} from "../../src/mcp/telemetry.js";
+} from "../../dist/mcp/telemetry.js";
 
 /**
  * Tests for src/mcp/telemetry.ts.

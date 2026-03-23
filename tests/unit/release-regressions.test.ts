@@ -39,8 +39,8 @@ describe("release regression guards", () => {
     const source = readSource("package.json");
     assert.match(
       source,
-      /"test:native-parity":\s*"node --import tsx tests\/native\/parity-test\.ts"/,
-      "native parity script should execute source test directly",
+      /"test:native-parity":\s*"node tests\/native\/parity-test\.ts"/,
+      "native parity script should execute source test directly via Node strip-types",
     );
   });
 

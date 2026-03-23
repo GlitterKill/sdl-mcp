@@ -39,7 +39,7 @@ describe("init agent enforcement", () => {
 
   it("writes runtime and code-mode config when enforceAgentTools is enabled", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const { initCommand } = await import("../../src/cli/commands/init.js");
+    const { initCommand } = await import("../../dist/cli/commands/init.js");
 
     await initCommand({
       config: configPath,
@@ -73,7 +73,7 @@ describe("init agent enforcement", () => {
 
   it("creates Claude enforcement assets", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const { initCommand } = await import("../../src/cli/commands/init.js");
+    const { initCommand } = await import("../../dist/cli/commands/init.js");
 
     await initCommand({
       config: configPath,
@@ -95,7 +95,7 @@ describe("init agent enforcement", () => {
 
   it("creates OpenCode enforcement assets", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
-    const { initCommand } = await import("../../src/cli/commands/init.js");
+    const { initCommand } = await import("../../dist/cli/commands/init.js");
 
     await initCommand({
       config: configPath,

@@ -1,5 +1,5 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
-import { queryAll as coreQueryAll } from "../../src/db/ladybug-core.js";
+import { queryAll as coreQueryAll } from "../../dist/db/ladybug-core.js";
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { tmpdir } from "node:os";

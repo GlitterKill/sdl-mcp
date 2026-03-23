@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert";
 import { join, resolve } from "path";
 
-import { resolveGraphDbPath } from "../../src/db/initGraphDb.js";
+import { resolveGraphDbPath } from "../../dist/db/initGraphDb.js";
 
 describe("resolveGraphDbPath", () => {
   let originalGraphDbPath: string | undefined;

@@ -3,7 +3,7 @@ import assert from "node:assert";
 import {
   generateSymbolId,
   clearFingerprintCollisionLog,
-} from "../../src/indexer/fingerprints.js";
+} from "../../dist/indexer/fingerprints.js";
 
 describe("generateSymbolId", () => {
   it("returns a hex string", () => {

@@ -1,19 +1,19 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { PythonAdapter } from "../../src/indexer/adapter/python.js";
-import { GoAdapter } from "../../src/indexer/adapter/go.js";
-import { JavaAdapter } from "../../src/indexer/adapter/java.js";
-import { CSharpAdapter } from "../../src/indexer/adapter/csharp.js";
-import { KotlinAdapter } from "../../src/indexer/adapter/kotlin.js";
-import { RustAdapter } from "../../src/indexer/adapter/rust.js";
-import { PhpAdapter } from "../../src/indexer/adapter/php.js";
-import { CppAdapter } from "../../src/indexer/adapter/cpp.js";
+import { PythonAdapter } from "../../dist/indexer/adapter/python.js";
+import { GoAdapter } from "../../dist/indexer/adapter/go.js";
+import { JavaAdapter } from "../../dist/indexer/adapter/java.js";
+import { CSharpAdapter } from "../../dist/indexer/adapter/csharp.js";
+import { KotlinAdapter } from "../../dist/indexer/adapter/kotlin.js";
+import { RustAdapter } from "../../dist/indexer/adapter/rust.js";
+import { PhpAdapter } from "../../dist/indexer/adapter/php.js";
+import { CppAdapter } from "../../dist/indexer/adapter/cpp.js";
 import type {
   CallResolutionContext,
   AdapterResolvedCall,
-} from "../../src/indexer/adapter/LanguageAdapter.js";
-import type { ExtractedCall } from "../../src/indexer/treesitter/extractCalls.js";
+} from "../../dist/indexer/adapter/LanguageAdapter.js";
+import type { ExtractedCall } from "../../dist/indexer/treesitter/extractCalls.js";
 
 function makeCall(calleeIdentifier: string): ExtractedCall {
   return {

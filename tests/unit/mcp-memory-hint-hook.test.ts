@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { createMemoryHintHook } from "../../src/mcp/hooks/memory-hint.js";
+import { createMemoryHintHook } from "../../dist/mcp/hooks/memory-hint.js";
 
 /**
  * Tests for src/mcp/hooks/memory-hint.ts — post-dispatch hook that

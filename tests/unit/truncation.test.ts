@@ -9,7 +9,7 @@ import {
   truncateArray,
   truncateRange,
   truncateText,
-} from "../../src/util/truncation.js";
+} from "../../dist/util/truncation.js";
 
 describe("truncation utilities", () => {
   describe("applyCountTruncation", () => {

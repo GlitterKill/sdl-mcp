@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { ShellPass2Resolver } from "../../src/indexer/pass2/resolvers/shell-pass2-resolver.js";
+import { ShellPass2Resolver } from "../../dist/indexer/pass2/resolvers/shell-pass2-resolver.js";
 
 describe("ShellPass2Resolver", () => {
   it("supports shell files only", () => {

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { extractCalls, type ExtractedSymbol } from "../../src/indexer/treesitter/extractCalls.js";
+import { extractCalls, type ExtractedSymbol } from "../../dist/indexer/treesitter/extractCalls.js";
 
 const require = createRequire(import.meta.url);
 

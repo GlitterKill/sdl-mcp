@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
-import { createSchema } from "../../src/db/ladybug-schema.js";
+import { createSchema } from "../../dist/db/ladybug-schema.js";
 import {
   upsertRepo,
   upsertFile,
@@ -14,8 +14,8 @@ import {
   createHasMemoryEdge,
   createMemoryOfEdge,
   type MemoryRow,
-} from "../../src/db/ladybug-queries.js";
-import { surfaceRelevantMemories } from "../../src/memory/surface.js";
+} from "../../dist/db/ladybug-queries.js";
+import { surfaceRelevantMemories } from "../../dist/memory/surface.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

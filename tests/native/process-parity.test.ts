@@ -11,7 +11,7 @@ import { traceProcessesTS } from "../../dist/graph/process.js";
 import {
   isRustEngineAvailable,
   traceProcessesRust,
-} from "../../src/indexer/rustIndexer.js";
+} from "../../dist/indexer/rustIndexer.js";
 
 const REPO_ID = "test-native-process-parity-repo";
 

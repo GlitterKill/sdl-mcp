@@ -9,8 +9,8 @@ import {
   execute,
   killProcessTree,
   resolveAndValidateCwd,
-} from "../../../src/runtime/executor.js";
-import type { ExecutionRequest } from "../../../src/runtime/types.js";
+} from "../../../dist/runtime/executor.js";
+import type { ExecutionRequest } from "../../../dist/runtime/types.js";
 
 function makeRequest(
   overrides: Partial<ExecutionRequest> = {},

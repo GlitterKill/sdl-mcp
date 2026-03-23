@@ -1,14 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import {
-  CardDetailLevel,
   normalizeCardDetailLevel,
   legacyDetailLevelToWire,
   cardDetailLevelOrder,
   CARD_DETAIL_LEVEL_RANK,
   CARD_DETAIL_LEVELS,
   isLegacyDetailLevel,
-} from "../../src/mcp/types.js";
+} from "../../dist/mcp/types.js";
 import {
   toMinimalCard,
   toSignatureCard,
@@ -18,8 +17,8 @@ import {
   toCardAtDetailLevel,
   selectAdaptiveDetailLevel,
   estimateTokens,
-} from "../../src/graph/slice/slice-serializer.js";
-import type { SymbolCard } from "../../src/mcp/types.js";
+} from "../../dist/graph/slice/slice-serializer.js";
+import type { CardDetailLevel, SymbolCard } from "../../dist/mcp/types.js";
 
 const FULL_CARD: SymbolCard = {
   symbolId: "sym-test-1",

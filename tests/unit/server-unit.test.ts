@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert";
 import { z } from "zod";
-import { MCPServer } from "../../src/server.js";
+import { MCPServer } from "../../dist/server.js";
 
 /**
  * Tests for src/server.ts — MCPServer class.

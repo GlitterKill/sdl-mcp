@@ -6,8 +6,9 @@ import {
   setCachedSlice,
   clearSliceCache,
   getSliceCacheStats,
-} from "../src/graph/sliceCache.js";
-import type { SliceBuildRequest } from "../src/graph/slice.js";
+  configureSliceCache,
+} from "../dist/graph/sliceCache.js";
+import type { SliceBuildRequest } from "../dist/graph/slice.js";
 
 test("Slice Cache - Cache key generation", async (t) => {
   await t.test(
@@ -140,6 +141,7 @@ test("Slice Cache - Cache operations", async (t) => {
   });
 
   await t.test("should respect cache size limit", () => {
+    configureSliceCache({ maxEntries: 100 });
     clearSliceCache();
     const maxEntries = 100;
     const keys: string[] = [];

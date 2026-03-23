@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { computeVersionHash } from "../../src/delta/versioning.js";
+import { computeVersionHash } from "../../dist/delta/versioning.js";
 
 describe("computeVersionHash", () => {
   it("returns a hex string", () => {

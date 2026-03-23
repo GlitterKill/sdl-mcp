@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { createActionMap, routeGatewayCall } from "../../src/gateway/router.js";
+import { createActionMap, routeGatewayCall } from "../../dist/gateway/router.js";
 
 describe("Gateway router", () => {
   describe("createActionMap", () => {

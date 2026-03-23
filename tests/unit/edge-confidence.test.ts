@@ -3,7 +3,7 @@ import assert from "node:assert";
 import {
   defaultConfidenceForStrategy,
   calibrateResolutionConfidence,
-} from "../../src/indexer/edge-confidence.js";
+} from "../../dist/indexer/edge-confidence.js";
 
 describe("defaultConfidenceForStrategy", () => {
   it("returns 0.92 for exact", () => {

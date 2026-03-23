@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { setupHttpTransport } from "../../src/cli/transport/http.js";
+import { setupHttpTransport } from "../../dist/cli/transport/http.js";
 
 async function rmWithRetry(path: string): Promise<void> {
   for (let attempt = 0; attempt < 10; attempt++) {

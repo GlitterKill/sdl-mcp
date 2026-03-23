@@ -12,7 +12,7 @@ import {
   START_NODE_SOURCE_PRIORITY,
   START_NODE_SOURCE_SCORE,
   TASK_TEXT_STOP_WORDS,
-} from "../../src/graph/slice/start-node-resolver.js";
+} from "../../dist/graph/slice/start-node-resolver.js";
 
 describe("getTaskTextTokenRank", () => {
   it("adds +4 for path separators", () => {

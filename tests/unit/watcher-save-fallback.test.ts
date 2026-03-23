@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { processWatchedFileChange } from "../../src/indexer/watcher.js";
+import { processWatchedFileChange } from "../../dist/indexer/watcher.js";
 
 describe("processWatchedFileChange", () => {
   it("prefers file patching over repo-wide incremental reindex", async () => {

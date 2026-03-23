@@ -41,8 +41,8 @@ describe("collectTestRefs Caching", () => {
       writeFileSync(
         join(testRepoRoot, "tests", "test1.test.ts"),
         `
-import { calculateFanMetrics } from "../src/graph/metrics";
-import { updateMetricsForRepo } from "../src/graph/metrics";
+import { calculateFanMetrics } from "../dist/graph/metrics.js";
+import { updateMetricsForRepo } from "../dist/graph/metrics.js";
 
 describe("test1", () => {
   it("should work", () => {

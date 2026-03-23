@@ -1,27 +1,31 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseDraftFile } from "../../src/live-index/draft-parser.js";
-import { closeLadybugDb, initLadybugDb } from "../../src/db/ladybug.js";
+import { parseDraftFile } from "../../dist/live-index/draft-parser.js";
+import { closeLadybugDb, initLadybugDb } from "../../dist/db/ladybug.js";
+import { loadBuiltInAdapters } from "../../dist/indexer/adapter/registry.js";
 
 describe("parseDraftFile", () => {
-  const testDbPath = join(tmpdir(), ".lbug-draft-parser-unit-test-db.lbug");
+  const testDbDir = mkdtempSync(join(tmpdir(), "sdl-draft-parser-test-"));
+  const testDbPath = join(testDbDir, "test.lbug");
+
+  const prevGraphDbPath = process.env.SDL_GRAPH_DB_PATH;
 
   before(async () => {
-    if (existsSync(testDbPath)) {
-      rmSync(testDbPath, { recursive: true, force: true });
-    }
-    await closeLadybugDb();
+    process.env.SDL_GRAPH_DB_PATH = testDbPath;
+    try { await closeLadybugDb(); } catch { /* may already be closed */ }
     await initLadybugDb(testDbPath);
+    loadBuiltInAdapters();
   });
 
   after(async () => {
-    await closeLadybugDb();
-    if (existsSync(testDbPath)) {
-      rmSync(testDbPath, { recursive: true, force: true });
-    }
+    try { await closeLadybugDb(); } catch { /* ignore */ }
+    if (prevGraphDbPath) process.env.SDL_GRAPH_DB_PATH = prevGraphDbPath;
+    else delete process.env.SDL_GRAPH_DB_PATH;
+    try { await initLadybugDb(prevGraphDbPath!); } catch { /* restore previous DB */ }
+    rmSync(testDbDir, { recursive: true, force: true });
   });
 
   it("extracts file-owned symbols, edges, and references from unsaved content", async () => {

@@ -6,8 +6,8 @@ import {
   invalidateManualCache,
   FN_NAME_MAP,
   ACTION_TO_FN,
-} from "../../src/code-mode/manual-generator.js";
-import { estimateTokens } from "../../src/util/tokenize.js";
+} from "../../dist/code-mode/manual-generator.js";
+import { estimateTokens } from "../../dist/util/tokenize.js";
 
 describe("code-mode manual generator", () => {
   it("generateManual() returns a non-empty string", () => {

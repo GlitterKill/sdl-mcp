@@ -6,7 +6,7 @@ import {
   computeTokenUsage,
   stripRawContext,
   attachRawContext,
-} from "../../src/mcp/token-usage.js";
+} from "../../dist/mcp/token-usage.js";
 
 describe("token-usage", () => {
   describe("shouldAttachUsage", () => {

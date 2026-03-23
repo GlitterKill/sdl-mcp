@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { validateLadder } from "../../src/code-mode/ladder-validator.js";
-import type { ParsedChainStep } from "../../src/code-mode/chain-parser.js";
+import { validateLadder } from "../../dist/code-mode/ladder-validator.js";
+import type { ParsedChainStep } from "../../dist/code-mode/chain-parser.js";
 
 describe("code-mode ladder validator", () => {
   it("correct order produces no warnings", () => {

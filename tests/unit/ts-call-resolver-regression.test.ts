@@ -13,8 +13,8 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { createTsCallResolver } from "../../src/indexer/ts/tsParser.js";
-import type { ResolvedCall } from "../../src/indexer/ts/tsParser.js";
+import { createTsCallResolver } from "../../dist/indexer/ts/tsParser.js";
+import type { ResolvedCall } from "../../dist/indexer/ts/tsParser.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

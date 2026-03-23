@@ -11,7 +11,7 @@ import {
   updateMemoryFileFrontmatter,
   parseMemoryFileContent,
   type MemoryFileData,
-} from "../../src/memory/file-sync.js";
+} from "../../dist/memory/file-sync.js";
 
 function createTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "sdl-memory-test-"));
@@ -263,7 +263,7 @@ describe("memory file-sync", () => {
 
 describe("memory Zod schemas", () => {
   test("MemoryStoreRequestSchema validates correct input", async () => {
-    const { MemoryStoreRequestSchema } = await import("../../src/mcp/tools.js");
+    const { MemoryStoreRequestSchema } = await import("../../dist/mcp/tools.js");
     const result = MemoryStoreRequestSchema.safeParse({
       repoId: "test-repo",
       type: "decision",
@@ -276,7 +276,7 @@ describe("memory Zod schemas", () => {
   });
 
   test("MemoryStoreRequestSchema rejects invalid type", async () => {
-    const { MemoryStoreRequestSchema } = await import("../../src/mcp/tools.js");
+    const { MemoryStoreRequestSchema } = await import("../../dist/mcp/tools.js");
     const result = MemoryStoreRequestSchema.safeParse({
       repoId: "test-repo",
       type: "invalid_type",
@@ -287,7 +287,7 @@ describe("memory Zod schemas", () => {
   });
 
   test("MemoryStoreRequestSchema rejects title over 120 chars", async () => {
-    const { MemoryStoreRequestSchema } = await import("../../src/mcp/tools.js");
+    const { MemoryStoreRequestSchema } = await import("../../dist/mcp/tools.js");
     const result = MemoryStoreRequestSchema.safeParse({
       repoId: "test-repo",
       type: "decision",
@@ -298,7 +298,7 @@ describe("memory Zod schemas", () => {
   });
 
   test("MemoryQueryRequestSchema validates with optional fields", async () => {
-    const { MemoryQueryRequestSchema } = await import("../../src/mcp/tools.js");
+    const { MemoryQueryRequestSchema } = await import("../../dist/mcp/tools.js");
     const result = MemoryQueryRequestSchema.safeParse({
       repoId: "test-repo",
     });
@@ -306,7 +306,7 @@ describe("memory Zod schemas", () => {
   });
 
   test("MemoryQueryRequestSchema validates with all filters", async () => {
-    const { MemoryQueryRequestSchema } = await import("../../src/mcp/tools.js");
+    const { MemoryQueryRequestSchema } = await import("../../dist/mcp/tools.js");
     const result = MemoryQueryRequestSchema.safeParse({
       repoId: "test-repo",
       query: "auth",
@@ -321,7 +321,7 @@ describe("memory Zod schemas", () => {
 
   test("MemorySurfaceRequestSchema validates with symbolIds", async () => {
     const { MemorySurfaceRequestSchema } =
-      await import("../../src/mcp/tools.js");
+      await import("../../dist/mcp/tools.js");
     const result = MemorySurfaceRequestSchema.safeParse({
       repoId: "test-repo",
       symbolIds: ["sym_1", "sym_2"],

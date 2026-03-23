@@ -78,7 +78,7 @@ const sliceSymbolCardArb: fc.Arbitrary<SliceSymbolCard> = fc
     exported: fc.boolean(),
     deps: sliceSymbolDepsArb,
     version: fc.record({
-      astFingerprint: fc.hexaString({ minLength: 32, maxLength: 64 }),
+      astFingerprint: fc.string({ minLength: 32, maxLength: 64 }),
     }),
   })
   .map((r) => ({

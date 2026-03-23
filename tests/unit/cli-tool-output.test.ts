@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { formatOutput, detectOutputFormat, formatError } from "../../src/cli/commands/tool-output.js";
+import { formatOutput, detectOutputFormat, formatError } from "../../dist/cli/commands/tool-output.js";
 
 describe("cli-tool-output", () => {
   describe("detectOutputFormat", () => {

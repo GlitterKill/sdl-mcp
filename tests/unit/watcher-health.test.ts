@@ -4,10 +4,10 @@ import {
   getWatcherHealth,
   _setWatcherHealthForTesting,
   _clearWatcherHealthForTesting,
-} from "../../src/indexer/indexer.js";
-import { isWatcherStale } from "../../src/indexer/watcher.js";
-import { RepoStatusResponseSchema } from "../../src/mcp/tools.js";
-import { WATCHER_ERROR_MAX_COUNT } from "../../src/config/constants.js";
+} from "../../dist/indexer/indexer.js";
+import { isWatcherStale } from "../../dist/indexer/watcher.js";
+import { RepoStatusResponseSchema } from "../../dist/mcp/tools.js";
+import { WATCHER_ERROR_MAX_COUNT } from "../../dist/config/constants.js";
 
 const TEST_REPO_ID = "watcher-health-test-repo";
 

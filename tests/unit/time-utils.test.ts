@@ -5,7 +5,7 @@ import {
   formatDuration,
   getCurrentTimestamp,
   sleep,
-} from "../../src/util/time.js";
+} from "../../dist/util/time.js";
 
 describe("time utilities", () => {
   describe("formatDuration", () => {

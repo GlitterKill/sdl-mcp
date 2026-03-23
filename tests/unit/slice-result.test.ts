@@ -8,7 +8,7 @@ import {
   sliceErrorToMessage,
   sliceErrorToCode,
   sliceErrorToResponse,
-} from "../../src/graph/slice/result.js";
+} from "../../dist/graph/slice/result.js";
 
 describe("sliceOk / sliceErr", () => {
   it("sliceOk wraps a slice in { ok: true }", () => {

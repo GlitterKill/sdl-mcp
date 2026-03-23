@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { resolve } from "path";
-import { resolveRepoId, suggestAction } from "../../src/cli/commands/tool-dispatch.js";
+import { resolveRepoId, suggestAction } from "../../dist/cli/commands/tool-dispatch.js";
 
 describe("cli-tool-dispatch", () => {
   describe("resolveRepoId", () => {

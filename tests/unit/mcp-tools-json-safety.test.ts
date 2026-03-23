@@ -7,8 +7,8 @@ import {
   safeJsonParseOrThrow,
   StringArraySchema,
   SignatureSchema,
-} from "../../src/util/safeJson.js";
-import { DatabaseError } from "../../src/mcp/errors.js";
+} from "../../dist/util/safeJson.js";
+import { DatabaseError } from "../../dist/mcp/errors.js";
 
 // Tests verifying that corrupted JSON in MCP tool fields doesn't crash handlers.
 // These tests exercise the safeJson utilities as used in the MCP tool files.
@@ -39,7 +39,7 @@ describe("mcp-tools JSON safety: agent-feedback fields", () => {
 });
 
 describe("mcp-tools JSON safety: policy configJson fields", () => {
-  const RepoConfigJsonSchema = z.record(z.any());
+  const RepoConfigJsonSchema = z.record(z.string(), z.any());
 
   test("configJson: corrupted JSON throws DatabaseError", () => {
     assert.throws(

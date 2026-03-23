@@ -1,14 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 
-import type { Range } from "../../src/domain/types.js";
+import type { Range } from "../../dist/domain/types.js";
 import {
   applyBounds,
   centerOnSymbol,
   estimateTokens,
   expandToBlock,
   identifiersExistInWindow,
-} from "../../src/code/windows.js";
+} from "../../dist/code/windows.js";
 
 function makeRange(startLine: number, endLine: number): Range {
   return {

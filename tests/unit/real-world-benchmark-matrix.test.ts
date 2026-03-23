@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import {
   buildMatrixGraphDbPath,
   buildMatrixRunEnv,
-} from "../../src/benchmark/matrix-runner.js";
+} from "../../dist/benchmark/matrix-runner.js";
 
 describe("benchmark matrix graph DB isolation", () => {
   it("builds a stable repo-scoped graph db path under the matrix output directory", () => {

@@ -10,7 +10,7 @@ import {
   REPO_ACTIONS,
   AGENT_ACTIONS,
   ALL_ACTIONS,
-} from "../../src/gateway/schemas.js";
+} from "../../dist/gateway/schemas.js";
 
 describe("Gateway schemas", () => {
   describe("QueryGatewaySchema", () => {

@@ -7,18 +7,18 @@ import {
   BUILTIN_GLOBAL_NAMESPACES,
   NODE_BUILTIN_MODULE_NAMES,
   isBuiltinCall,
-} from "../../src/indexer/edge-builder/builtins.js";
-import { TypeScriptAdapter } from "../../src/indexer/adapter/typescript.js";
+} from "../../dist/indexer/edge-builder/builtins.js";
+import { TypeScriptAdapter } from "../../dist/indexer/adapter/typescript.js";
 import type {
   CallResolutionContext,
   AdapterResolvedCall,
-} from "../../src/indexer/adapter/LanguageAdapter.js";
-import type { ExtractedCall } from "../../src/indexer/treesitter/extractCalls.js";
+} from "../../dist/indexer/adapter/LanguageAdapter.js";
+import type { ExtractedCall } from "../../dist/indexer/treesitter/extractCalls.js";
 import {
   disambiguateRustCandidates,
   isExternalCrateCall,
   KNOWN_EXTERNAL_CRATE_PREFIXES,
-} from "../../src/indexer/pass2/resolvers/rust-pass2-resolver.js";
+} from "../../dist/indexer/pass2/resolvers/rust-pass2-resolver.js";
 
 // --- Test helpers ---
 

@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
-import { Orchestrator } from "../../../src/agent/orchestrator.js";
-import { Planner } from "../../../src/agent/planner.js";
-import { Executor } from "../../../src/agent/executor.js";
+import { Orchestrator } from "../../../dist/agent/orchestrator.js";
+import { Planner } from "../../../dist/agent/planner.js";
+import { Executor } from "../../../dist/agent/executor.js";
 import type {
   Action,
   AgentTask,
   Evidence,
   ExecutionMetrics,
   RungPath,
-} from "../../../src/agent/types.js";
+} from "../../../dist/agent/types.js";
 
 function createTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {

@@ -17,7 +17,7 @@ import {
   legacyDetailLevelToWire as domainLegacy,
   isLegacyDetailLevel as domainIsLegacy,
   cardDetailLevelOrder as domainOrder,
-} from "../../src/domain/types.js";
+} from "../../dist/domain/types.js";
 
 // Import the same runtime values from the barrel re-export
 import {
@@ -27,7 +27,7 @@ import {
   legacyDetailLevelToWire as mcpLegacy,
   isLegacyDetailLevel as mcpIsLegacy,
   cardDetailLevelOrder as mcpOrder,
-} from "../../src/mcp/types.js";
+} from "../../dist/mcp/types.js";
 
 describe("domain/types.ts re-export barrel correctness", () => {
   describe("runtime value identity (export * not export type *)", () => {

@@ -5,7 +5,7 @@ import {
   configureToolDispatchLimiter,
   getToolDispatchLimiter,
   resetToolDispatchLimiter,
-} from "../../src/mcp/dispatch-limiter.js";
+} from "../../dist/mcp/dispatch-limiter.js";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

@@ -6,8 +6,8 @@ import { join } from "path";
 import {
   parseExportOptions,
   parseImportOptions,
-} from "../../src/cli/argParsing.js";
-import type { CLIOptions } from "../../src/cli/types.js";
+} from "../../dist/cli/argParsing.js";
+import type { CLIOptions } from "../../dist/cli/types.js";
 
 describe("CLI export command", () => {
   const global: CLIOptions = {};
@@ -183,10 +183,10 @@ describe("CLI export command", () => {
       );
 
       const { initLadybugDb, closeLadybugDb } = await import(
-        "../../src/db/ladybug.js"
+        "../../dist/db/ladybug.js"
       );
       const { exportCommand } = await import(
-        "../../src/cli/commands/export.js"
+        "../../dist/cli/commands/export.js"
       );
 
       await initLadybugDb(ladybugPath);
@@ -354,10 +354,10 @@ describe("CLI import command", () => {
       );
 
       const { initLadybugDb, closeLadybugDb } = await import(
-        "../../src/db/ladybug.js"
+        "../../dist/db/ladybug.js"
       );
       const { importCommand } = await import(
-        "../../src/cli/commands/import.js"
+        "../../dist/cli/commands/import.js"
       );
 
       await initLadybugDb(ladybugPath);

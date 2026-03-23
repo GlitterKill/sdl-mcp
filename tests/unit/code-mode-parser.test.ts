@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { parseChainRequest } from "../../src/code-mode/chain-parser.js";
+import { parseChainRequest } from "../../dist/code-mode/chain-parser.js";
 
 describe("code-mode chain parser", () => {
   it("valid single-step chain parses successfully", () => {

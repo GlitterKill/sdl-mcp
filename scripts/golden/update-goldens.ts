@@ -3,12 +3,12 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { RustAdapter } from "../../src/indexer/adapter/rust.js";
-import { CAdapter } from "../../src/indexer/adapter/c.js";
-import { CppAdapter } from "../../src/indexer/adapter/cpp.js";
-import { PhpAdapter } from "../../src/indexer/adapter/php.js";
-import { KotlinAdapter } from "../../src/indexer/adapter/kotlin.js";
-import { ShellAdapter } from "../../src/indexer/adapter/shell.js";
+import { RustAdapter } from "../../dist/indexer/adapter/rust.js";
+import { CAdapter } from "../../dist/indexer/adapter/c.js";
+import { CppAdapter } from "../../dist/indexer/adapter/cpp.js";
+import { PhpAdapter } from "../../dist/indexer/adapter/php.js";
+import { KotlinAdapter } from "../../dist/indexer/adapter/kotlin.js";
+import { ShellAdapter } from "../../dist/indexer/adapter/shell.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = dirname(__filename);

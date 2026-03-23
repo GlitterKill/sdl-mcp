@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
   collectInfoReport,
-} from "../../src/info/report.js";
+} from "../../dist/info/report.js";
 import {
   disableFileLogging,
   enableFileLogging,
   setConsoleMirroring,
-} from "../../src/util/logger.js";
+} from "../../dist/util/logger.js";
 
 describe("collectInfoReport", () => {
   afterEach(() => {

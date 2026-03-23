@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 
-import { getRelativePath, normalizePath, safeJoin } from "../../src/util/paths.js";
+import { getRelativePath, normalizePath, safeJoin } from "../../dist/util/paths.js";
 
 describe("Mutation: paths", () => {
   describe("normalizePath (Windows edge cases)", () => {

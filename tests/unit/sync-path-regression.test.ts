@@ -9,10 +9,10 @@ import {
   closeLadybugDb,
   getLadybugConn,
   initLadybugDb,
-} from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { exportArtifact } from "../../src/sync/sync.js";
-import { pullLatestState } from "../../src/sync/pull.js";
+} from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { exportArtifact } from "../../dist/sync/sync.js";
+import { pullLatestState } from "../../dist/sync/pull.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

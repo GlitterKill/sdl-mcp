@@ -14,7 +14,7 @@ describe("Native parser chaos", () => {
     addonPath: string,
     envOverrides: Record<string, string> = {},
   ): unknown => {
-    const proc = spawnSync(process.execPath, ["--import", "tsx", runner], {
+    const proc = spawnSync(process.execPath, [runner], {
       env: {
         ...process.env,
         SDL_MCP_NATIVE_ADDON_PATH: addonPath,

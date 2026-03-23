@@ -5,8 +5,8 @@ import { tmpdir } from "os";
 import { join } from "path";
 import {
   parseIndexOptions,
-} from "../../src/cli/argParsing.js";
-import type { CLIOptions } from "../../src/cli/types.js";
+} from "../../dist/cli/argParsing.js";
+import type { CLIOptions } from "../../dist/cli/types.js";
 
 describe("CLI index command", () => {
   const global: CLIOptions = {};
@@ -134,7 +134,7 @@ describe("CLI index command", () => {
       );
 
       const { indexCommand } = await import(
-        "../../src/cli/commands/index.js"
+        "../../dist/cli/commands/index.js"
       );
 
       let exitCode: number | undefined;
@@ -160,7 +160,7 @@ describe("CLI index command", () => {
         console.error = origError;
         console.log = origLog;
         process.exit = originalExit;
-        const { closeLadybugDb } = await import("../../src/db/ladybug.js");
+        const { closeLadybugDb } = await import("../../dist/db/ladybug.js");
         await closeLadybugDb();
       }
 
@@ -194,7 +194,7 @@ describe("CLI index command", () => {
       );
 
       const { indexCommand } = await import(
-        "../../src/cli/commands/index.js"
+        "../../dist/cli/commands/index.js"
       );
 
       let exitCode: number | undefined;
@@ -217,7 +217,7 @@ describe("CLI index command", () => {
         console.error = origError;
         console.log = origLog;
         process.exit = originalExit;
-        const { closeLadybugDb } = await import("../../src/db/ladybug.js");
+        const { closeLadybugDb } = await import("../../dist/db/ladybug.js");
         await closeLadybugDb();
       }
 
@@ -243,9 +243,9 @@ describe("CLI index command", () => {
         }),
       );
 
-      const { closeLadybugDb } = await import("../../src/db/ladybug.js");
+      const { closeLadybugDb } = await import("../../dist/db/ladybug.js");
       const { indexCommand } = await import(
-        "../../src/cli/commands/index.js"
+        "../../dist/cli/commands/index.js"
       );
 
       let stdoutOutput = "";

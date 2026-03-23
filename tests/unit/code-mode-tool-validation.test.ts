@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { registerCodeModeTools } from "../../src/code-mode/index.js";
+import { registerCodeModeTools } from "../../dist/code-mode/index.js";
 
 describe("code-mode tool validation", () => {
   it("throws a validation error for semantically invalid sdl.chain requests", async () => {

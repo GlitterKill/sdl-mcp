@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
-import { createSchema } from "../../src/db/ladybug-schema.js";
-import { querySingle } from "../../src/db/ladybug-core.js";
+import { createSchema } from "../../dist/db/ladybug-schema.js";
+import { querySingle } from "../../dist/db/ladybug-core.js";
 import {
   upsertRepo,
   upsertFile,
@@ -24,7 +24,7 @@ import {
   getRepoMemories,
   flagMemoriesStale,
   type MemoryRow,
-} from "../../src/db/ladybug-queries.js";
+} from "../../dist/db/ladybug-queries.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

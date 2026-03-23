@@ -13,8 +13,8 @@ import {
   parseSummaryOptions,
   parseHealthOptions,
   parseToolDispatchOptions,
-} from "../../src/cli/argParsing.js";
-import type { CLIOptions } from "../../src/cli/types.js";
+} from "../../dist/cli/argParsing.js";
+import type { CLIOptions } from "../../dist/cli/types.js";
 
 /**
  * Verifies parser behavior and preserves entrypoint-level coverage for the

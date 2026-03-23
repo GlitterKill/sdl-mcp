@@ -4,8 +4,8 @@ import type { SymbolCard } from "../../dist/domain/types.js";
 import {
   buildPayloadCardsAndRefs,
   toSliceSymbolCard,
-} from "../../src/graph/slice.js";
-import { toCompactGraphSliceV2 } from "../../src/mcp/tools/slice.js";
+} from "../../dist/graph/slice.js";
+import { toCompactGraphSliceV2 } from "../../dist/mcp/tools/slice.js";
 
 describe("slice card wire format", () => {
   const fullCard: SymbolCard = {

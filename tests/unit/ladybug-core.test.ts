@@ -16,7 +16,7 @@ import {
   withTransaction,
   getPreparedStatement,
   isConnectionPoisoned,
-} from "../../src/db/ladybug-core.js";
+} from "../../dist/db/ladybug-core.js";
 
 describe("toNumber", () => {
   it("returns number as-is", () => {

@@ -53,13 +53,13 @@ async function cleanupTestDb(
 describe("LadybugDB search text queries", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
-  let schema: typeof import("../../src/db/ladybug-schema.js");
-  let queries: typeof import("../../src/db/ladybug-queries.js");
+  let schema: typeof import("../../dist/db/ladybug-schema.js");
+  let queries: typeof import("../../dist/db/ladybug-queries.js");
 
   beforeEach(async () => {
     ({ db, conn } = await createTestDb());
-    schema = await import("../../src/db/ladybug-schema.js");
-    queries = await import("../../src/db/ladybug-queries.js");
+    schema = await import("../../dist/db/ladybug-schema.js");
+    queries = await import("../../dist/db/ladybug-queries.js");
     await schema.createSchema(conn as unknown as import("kuzu").Connection);
 
     await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {

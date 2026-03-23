@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 
-import { RepoStatusResponseSchema } from "../../src/mcp/tools.js";
+import { RepoStatusResponseSchema } from "../../dist/mcp/tools.js";
 
 describe("repo status health fields", () => {
   it("requires health fields on repo status response", () => {

@@ -8,11 +8,11 @@ import {
   closeLadybugDb,
   getLadybugConn,
   initLadybugDb,
-} from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { evaluateRequest } from "../../src/code/gate.js";
-import { handleCodeNeedWindow } from "../../src/mcp/tools/code.js";
-import { PolicyEngine } from "../../src/policy/engine.js";
+} from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { evaluateRequest } from "../../dist/code/gate.js";
+import { handleCodeNeedWindow } from "../../dist/mcp/tools/code.js";
+import { PolicyEngine } from "../../dist/policy/engine.js";
 
 describe("code.needWindow policy remediation", () => {
   // DB is set up once per suite to avoid Windows heap-corruption on multiple LadybugDB close/reopen cycles.

@@ -4,7 +4,7 @@ import assert from "node:assert";
 import {
   isRustEngineAvailable,
   traceProcessesRust,
-} from "../../src/indexer/rustIndexer.js";
+} from "../../dist/indexer/rustIndexer.js";
 
 describe("traceProcessesRust wrapper", () => {
   it("returns null when native addon is unavailable", () => {

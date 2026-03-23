@@ -6,8 +6,8 @@ import {
   parseServeOptions,
   parseSummaryOptions,
   parseHealthOptions,
-} from "../../src/cli/argParsing.js";
-import type { CLIOptions } from "../../src/cli/types.js";
+} from "../../dist/cli/argParsing.js";
+import type { CLIOptions } from "../../dist/cli/types.js";
 
 describe("CLI arg parsing", () => {
   const global: CLIOptions = {};

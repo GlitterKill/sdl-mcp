@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { ReconcileQueue } from "../../src/live-index/reconcile-queue.js";
-import { ReconcileWorker } from "../../src/live-index/reconcile-worker.js";
+import { ReconcileQueue } from "../../dist/live-index/reconcile-queue.js";
+import { ReconcileWorker } from "../../dist/live-index/reconcile-worker.js";
 
 describe("ReconcileWorker", () => {
   it("processes a re-enqueued file again within the same drain", async () => {

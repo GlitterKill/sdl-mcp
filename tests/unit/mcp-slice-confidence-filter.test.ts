@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildSlice } from "../../src/graph/slice.js";
-import { createSchema } from "../../src/db/ladybug-schema.js";
-import { SliceBuildRequestSchema } from "../../src/mcp/tools.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
+import { buildSlice } from "../../dist/graph/slice.js";
+import { createSchema } from "../../dist/db/ladybug-schema.js";
+import { SliceBuildRequestSchema } from "../../dist/mcp/tools.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

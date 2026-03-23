@@ -57,8 +57,8 @@ describe("CLI doctor command - LadybugDB", () => {
     writeFileSync(configPath, JSON.stringify(config));
 
     const { initLadybugDb, closeLadybugDb } =
-      await import("../../src/db/ladybug.js");
-    const { doctorCommand } = await import("../../src/cli/commands/doctor.js");
+      await import("../../dist/db/ladybug.js");
+    const { doctorCommand } = await import("../../dist/cli/commands/doctor.js");
     await initLadybugDb(ladybugPath);
 
     let output = "";
@@ -92,7 +92,7 @@ describe("CLI doctor command - LadybugDB", () => {
     };
     writeFileSync(configPath, JSON.stringify(config));
 
-    const { doctorCommand } = await import("../../src/cli/commands/doctor.js");
+    const { doctorCommand } = await import("../../dist/cli/commands/doctor.js");
 
     let output = "";
     const originalLog = console.log;
@@ -123,7 +123,7 @@ describe("CLI doctor command - LadybugDB", () => {
     };
     writeFileSync(configPath, JSON.stringify(config));
 
-    const { doctorCommand } = await import("../../src/cli/commands/doctor.js");
+    const { doctorCommand } = await import("../../dist/cli/commands/doctor.js");
 
     let output = "";
     const originalLog = console.log;

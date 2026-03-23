@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 
-import { resolveParserWorkerPoolSize } from "../../src/indexer/indexer.js";
+import { resolveParserWorkerPoolSize } from "../../dist/indexer/indexer.js";
 
 describe("resolveParserWorkerPoolSize", () => {
   it("caps default pool size by concurrency and file count", () => {

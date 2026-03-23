@@ -22,7 +22,7 @@ import {
   PrefetchConfigSchema,
   TracingConfigSchema,
   ParallelScorerConfigSchema,
-} from "../../src/config/types.js";
+} from "../../dist/config/types.js";
 
 // ---------------------------------------------------------------------------
 // IndexingConfigSchema boolean defaults

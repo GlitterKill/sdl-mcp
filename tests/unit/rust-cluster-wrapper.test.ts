@@ -4,7 +4,7 @@ import assert from "node:assert";
 import {
   computeClustersRust,
   isRustEngineAvailable,
-} from "../../src/indexer/rustIndexer.js";
+} from "../../dist/indexer/rustIndexer.js";
 
 describe("computeClustersRust wrapper", () => {
   it("returns null when native addon is unavailable", () => {

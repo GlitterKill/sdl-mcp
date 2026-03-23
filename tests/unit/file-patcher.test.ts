@@ -4,10 +4,11 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { indexRepo } from "../../src/indexer/indexer.js";
-import { patchSavedFile } from "../../src/live-index/file-patcher.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { indexRepo } from "../../dist/indexer/indexer.js";
+import { loadBuiltInAdapters } from "../../dist/indexer/adapter/registry.js";
+import { patchSavedFile } from "../../dist/live-index/file-patcher.js";
 
 describe("patchSavedFile", () => {
   const repoId = "file-patcher-repo";
@@ -48,8 +49,10 @@ describe("patchSavedFile", () => {
     process.env.SDL_CONFIG = configPath;
     delete process.env.SDL_CONFIG_PATH;
 
-    await closeLadybugDb();
+    process.env.SDL_GRAPH_DB_PATH = dbPath;
+    try { await closeLadybugDb(); } catch { /* may already be closed */ }
     await initLadybugDb(dbPath);
+    loadBuiltInAdapters();
     const conn = await getLadybugConn();
     const now = "2026-03-07T12:00:00.000Z";
     await ladybugDb.upsertRepo(conn, {

@@ -12,7 +12,7 @@ import {
   logger,
   setConsoleMirroring,
   type LogLevel,
-} from "../../src/util/logger.js";
+} from "../../dist/util/logger.js";
 
 describe("Logger", () => {
   afterEach(() => {

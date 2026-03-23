@@ -4,12 +4,12 @@ import { describe, it } from "node:test";
 import type {
   EdgeRow,
   SymbolReferenceRow,
-} from "../../src/db/ladybug-queries.js";
+} from "../../dist/db/ladybug-queries.js";
 import {
   insertEdges,
   insertSymbolReferences,
   withTransaction,
-} from "../../src/db/ladybug-queries.js";
+} from "../../dist/db/ladybug-queries.js";
 
 class FakeQueryResult {
   close(): void {}

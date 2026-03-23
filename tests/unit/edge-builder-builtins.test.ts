@@ -4,7 +4,7 @@ import {
   BUILTIN_IDENTIFIERS,
   BUILTIN_CONSTRUCTORS,
   isBuiltinCall,
-} from "../../src/indexer/edge-builder/builtins.js";
+} from "../../dist/indexer/edge-builder/builtins.js";
 
 describe("BUILTIN_IDENTIFIERS", () => {
   it("contains expected Array prototype members", () => {

@@ -2,8 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 import type { Connection } from "kuzu";
 
-import { NotFoundError } from "../../src/mcp/errors.js";
-import { resolveSymbolId } from "../../src/util/resolve-symbol-id.js";
+import { NotFoundError } from "../../dist/mcp/errors.js";
+import { resolveSymbolId } from "../../dist/util/resolve-symbol-id.js";
 
 interface CapturedCall {
   statement: unknown;

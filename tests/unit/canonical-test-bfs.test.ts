@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { computeCanonicalTest } from "../../src/graph/metrics.js";
-import type { Graph } from "../../src/graph/metrics.js";
-import type { SymbolRow, EdgeRow } from "../../src/db/ladybug-queries.js";
+import { computeCanonicalTest } from "../../dist/graph/metrics.js";
+import type { Graph } from "../../dist/graph/metrics.js";
+import type { SymbolRow, EdgeRow } from "../../dist/db/ladybug-queries.js";
 
 // ---------------------------------------------------------------------------
 // Minimal mock helpers

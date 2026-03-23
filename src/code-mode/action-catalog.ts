@@ -95,11 +95,11 @@ function unwrapZod(s: z.ZodType): z.ZodType {
   if (!def) return s;
 
   // ZodEffects (transform, refine, preprocess)
-  if (def.typeName === "ZodEffects" && def.schema) {
+  if (def.type === "effects" && def.schema) {
     return unwrapZod(def.schema as z.ZodType);
   }
   // ZodPipeline
-  if (def.typeName === "ZodPipeline" && def.in) {
+  if (def.type === "pipeline" && def.in) {
     return unwrapZod(def.in as z.ZodType);
   }
   return s;
@@ -119,7 +119,7 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
     >;
     if (!def) break;
 
-    if (def.typeName === "ZodDefault") {
+    if (def.type === "default") {
       required = false;
       hasDefault = true;
       defaultValue = typeof def.defaultValue === "function"
@@ -128,12 +128,12 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
       current = def.innerType as z.ZodType;
       continue;
     }
-    if (def.typeName === "ZodOptional") {
+    if (def.type === "optional") {
       required = false;
       current = def.innerType as z.ZodType;
       continue;
     }
-    if (def.typeName === "ZodNullable") {
+    if (def.type === "nullable") {
       current = def.innerType as z.ZodType;
       continue;
     }
@@ -152,8 +152,8 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
     string,
     unknown
   >;
-  if (def?.typeName === "ZodEnum" && Array.isArray(def.values)) {
-    field.enumValues = def.values as string[];
+  if (def?.type === "enum" && (current as any).options) {
+    field.enumValues = (current as any).options as string[];
   }
 
   return field;
@@ -164,26 +164,26 @@ function resolveTypeName(schema: z.ZodType): string {
     string,
     unknown
   >;
-  if (!def?.typeName) return "unknown";
+  if (!def?.type) return "unknown";
 
-  switch (def.typeName) {
-    case "ZodString":
+  switch (def.type) {
+    case "string":
       return "string";
-    case "ZodNumber":
+    case "number":
       return "number";
-    case "ZodBoolean":
+    case "boolean":
       return "boolean";
-    case "ZodArray":
-      return `${resolveTypeName(def.type as z.ZodType)}[]`;
-    case "ZodObject":
+    case "array":
+      return `${resolveTypeName((def.element ?? def.innerType) as z.ZodType)}[]`;
+    case "object":
       return "object";
-    case "ZodRecord":
+    case "record":
       return "Record<string, unknown>";
-    case "ZodEnum":
-      return `enum(${(def.values as string[]).join("|")})`;
-    case "ZodLiteral":
+    case "enum":
+      return `enum(${((schema as any).options ?? Object.keys(def.entries ?? {})).join("|")})`;
+    case "literal":
       return `literal(${JSON.stringify(def.value)})`;
-    case "ZodUnion":
+    case "union":
       return (def.options as z.ZodType[])
         .map((o) => resolveTypeName(o))
         .join(" | ");

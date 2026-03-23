@@ -65,9 +65,9 @@ describe("CLI health command", { concurrency: 1 }, () => {
   it("exits with error when no repository is configured", async () => {
     const { configPath, ladybugPath } = makeConfig("empty", []);
 
-    const { healthCommand } = await import("../../src/cli/commands/health.js");
+    const { healthCommand } = await import("../../dist/cli/commands/health.js");
     const { initLadybugDb, closeLadybugDb } = await import(
-      "../../src/db/ladybug.js"
+      "../../dist/db/ladybug.js"
     );
 
     await initLadybugDb(ladybugPath);
@@ -113,9 +113,9 @@ describe("CLI health command", { concurrency: 1 }, () => {
       { repoId: "test-repo", rootPath: tempDir },
     ]);
 
-    const { healthCommand } = await import("../../src/cli/commands/health.js");
+    const { healthCommand } = await import("../../dist/cli/commands/health.js");
     const { initLadybugDb, closeLadybugDb } = await import(
-      "../../src/db/ladybug.js"
+      "../../dist/db/ladybug.js"
     );
 
     await initLadybugDb(ladybugPath);
@@ -167,9 +167,9 @@ describe("CLI health command", { concurrency: 1 }, () => {
       { repoId: "badge-repo", rootPath: tempDir },
     ]);
 
-    const { healthCommand } = await import("../../src/cli/commands/health.js");
+    const { healthCommand } = await import("../../dist/cli/commands/health.js");
     const { initLadybugDb, closeLadybugDb } = await import(
-      "../../src/db/ladybug.js"
+      "../../dist/db/ladybug.js"
     );
 
     await initLadybugDb(ladybugPath);

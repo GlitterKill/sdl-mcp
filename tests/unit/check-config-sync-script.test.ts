@@ -12,7 +12,7 @@ describe("check-config-sync script", () => {
   it("uses the built config output when src/config/types.js is not checked in", () => {
     const result = spawnSync(
       process.execPath,
-      ["--import", "tsx", "scripts/check-config-sync.ts"],
+      ["--experimental-strip-types", "scripts/check-config-sync.ts"],
       {
         cwd: repoRoot,
         encoding: "utf8",

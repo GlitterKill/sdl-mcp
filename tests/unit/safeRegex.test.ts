@@ -4,7 +4,7 @@ import {
   safeCompileRegex,
   globToSafeRegex,
   isReDoSRisk,
-} from "../../src/util/safeRegex.js";
+} from "../../dist/util/safeRegex.js";
 
 test("isReDoSRisk detects nested quantifiers (a+)+", () => {
   assert.strictEqual(isReDoSRisk("(a+)+"), true);

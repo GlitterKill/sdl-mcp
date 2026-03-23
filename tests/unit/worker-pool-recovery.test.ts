@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { ParserWorkerPool } from "../../src/indexer/workerPool.js";
+import { ParserWorkerPool } from "../../dist/indexer/workerPool.js";
 
 describe("ParserWorkerPool", () => {
   it("can be instantiated with default pool size", async (t) => {

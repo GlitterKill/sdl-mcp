@@ -15,9 +15,9 @@ import {
   transferSummariesFromNeighbors,
   type SummaryTransferResult,
   type SummaryTransferOptions,
-} from "../../src/indexer/summary-transfer.js";
-import { resetAnnIndexManager } from "../../src/indexer/ann-index.js";
-import type { EmbeddingProvider } from "../../src/indexer/embeddings.js";
+} from "../../dist/indexer/summary-transfer.js";
+import { resetAnnIndexManager } from "../../dist/indexer/ann-index.js";
+import type { EmbeddingProvider } from "../../dist/indexer/embeddings.js";
 
 /**
  * Minimal mock EmbeddingProvider that satisfies the interface.

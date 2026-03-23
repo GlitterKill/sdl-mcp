@@ -10,17 +10,17 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeLadybugDb, initLadybugDb } from "../../src/db/ladybug.js";
-import { indexRepo } from "../../src/indexer/indexer.js";
-import { handleBufferPush, handleBufferStatus } from "../../src/mcp/tools/buffer.js";
-import { handleSymbolSearch } from "../../src/mcp/tools/symbol.js";
+import { closeLadybugDb, initLadybugDb } from "../../dist/db/ladybug.js";
+import { indexRepo } from "../../dist/indexer/indexer.js";
+import { handleBufferPush, handleBufferStatus } from "../../dist/mcp/tools/buffer.js";
+import { handleSymbolSearch } from "../../dist/mcp/tools/symbol.js";
 import {
   getDefaultOverlayStore,
   resetDefaultLiveIndexCoordinator,
   waitForDefaultLiveIndexIdle,
-} from "../../src/live-index/coordinator.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { getLadybugConn } from "../../src/db/ladybug.js";
+} from "../../dist/live-index/coordinator.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { getLadybugConn } from "../../dist/db/ladybug.js";
 
 describe("live index end-to-end flow", () => {
   const repoId = "live-index-e2e-repo";

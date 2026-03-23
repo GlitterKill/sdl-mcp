@@ -18,13 +18,13 @@ import {
   trainPrefetchModel,
   type PrefetchModel,
   type ToolTraceEvent,
-} from "../../src/graph/prefetch-model.js";
+} from "../../dist/graph/prefetch-model.js";
 import {
   configurePrefetch,
   getPrefetchStats,
   prefetchSliceFrontier,
   consumePrefetchedKey,
-} from "../../src/graph/prefetch.js";
+} from "../../dist/graph/prefetch.js";
 
 describe("prefetch model integration", () => {
   beforeEach(() => {

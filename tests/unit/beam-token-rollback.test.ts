@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { rollbackAcceptedNodeFromSlice } from "../../src/graph/slice/beam-search-engine.js";
+import { rollbackAcceptedNodeFromSlice } from "../../dist/graph/slice/beam-search-engine.js";
 
 describe("beam search token rollback", () => {
   it("reverts acceptance bookkeeping when a node is rolled back", () => {

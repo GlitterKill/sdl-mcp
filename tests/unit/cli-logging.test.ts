@@ -21,7 +21,7 @@ describe("CLI logging", () => {
   describe("configureLogger", () => {
     it("sets the log level and format", async () => {
       const { configureLogger, logger } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       // Set to error level - debug and info should be suppressed
@@ -57,7 +57,7 @@ describe("CLI logging", () => {
 
     it("allows debug messages at debug level", async () => {
       const { configureLogger, logger } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       configureLogger("debug", "pretty");
@@ -82,7 +82,7 @@ describe("CLI logging", () => {
 
     it("suppresses debug at info level", async () => {
       const { configureLogger, logger } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       configureLogger("info", "pretty");
@@ -104,7 +104,7 @@ describe("CLI logging", () => {
 
     it("suppresses debug and info at warn level", async () => {
       const { configureLogger, logger } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       configureLogger("warn", "pretty");
@@ -129,7 +129,7 @@ describe("CLI logging", () => {
   describe("pretty format", () => {
     it("includes timestamp, level, and message", async () => {
       const { configureLogger, logger } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       configureLogger("info", "pretty");
@@ -156,7 +156,7 @@ describe("CLI logging", () => {
 
     it("includes meta data in pretty format", async () => {
       const { configureLogger, logger } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       configureLogger("info", "pretty");
@@ -173,7 +173,7 @@ describe("CLI logging", () => {
 
     it("includes requestId in pretty format when present", async () => {
       const { configureLogger, logger } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       configureLogger("info", "pretty");
@@ -192,7 +192,7 @@ describe("CLI logging", () => {
   describe("json format", () => {
     it("outputs valid JSON", async () => {
       const { configureLogger, logger } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       configureLogger("info", "json");
@@ -218,7 +218,7 @@ describe("CLI logging", () => {
 
     it("includes meta fields in JSON output", async () => {
       const { configureLogger, logger } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       configureLogger("info", "json");
@@ -237,7 +237,7 @@ describe("CLI logging", () => {
 
     it("includes requestId in JSON output", async () => {
       const { configureLogger, logger } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       configureLogger("info", "json");
@@ -257,7 +257,7 @@ describe("CLI logging", () => {
   describe("generateRequestId", () => {
     it("generates unique request IDs", async () => {
       const { generateRequestId } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       const id1 = generateRequestId();
@@ -270,7 +270,7 @@ describe("CLI logging", () => {
 
     it("includes timestamp component", async () => {
       const { generateRequestId } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       const id = generateRequestId();
@@ -287,7 +287,7 @@ describe("CLI logging", () => {
   describe("log level ordering", () => {
     it("debug < info < warn < error", async () => {
       const { configureLogger, logger } = await import(
-        "../../src/cli/logging.js"
+        "../../dist/cli/logging.js"
       );
 
       const levels = ["debug", "info", "warn", "error"] as const;

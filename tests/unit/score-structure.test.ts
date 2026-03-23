@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { scoreSymbolWithMetrics } from "../../src/graph/score.js";
+import { scoreSymbolWithMetrics } from "../../dist/graph/score.js";
 
 describe("scoreSymbolWithMetrics structural specificity", () => {
   it("de-prioritizes broad aggregator files versus domain files", () => {

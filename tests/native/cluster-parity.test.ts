@@ -11,7 +11,7 @@ import { computeClustersTS } from "../../dist/graph/cluster.js";
 import {
   computeClustersRust,
   isRustEngineAvailable,
-} from "../../src/indexer/rustIndexer.js";
+} from "../../dist/indexer/rustIndexer.js";
 
 const REPO_ID = "test-native-cluster-parity-repo";
 

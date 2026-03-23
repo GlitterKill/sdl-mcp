@@ -5,13 +5,13 @@ import {
   CODE_THIN_SCHEMA,
   REPO_THIN_SCHEMA,
   AGENT_THIN_SCHEMA,
-} from "../../src/gateway/thin-schemas.js";
+} from "../../dist/gateway/thin-schemas.js";
 import {
   QUERY_ACTIONS,
   CODE_ACTIONS,
   REPO_ACTIONS,
   AGENT_ACTIONS,
-} from "../../src/gateway/schemas.js";
+} from "../../dist/gateway/schemas.js";
 
 function assertGatewaySchema(
   schema: Record<string, unknown>,

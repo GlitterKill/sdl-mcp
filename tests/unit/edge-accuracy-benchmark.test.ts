@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { evaluateEdgeAccuracySuite } from "../../src/benchmark/edgeAccuracy.js";
+import { evaluateEdgeAccuracySuite } from "../../dist/benchmark/edgeAccuracy.js";
 
 describe("edge-accuracy benchmark suite", () => {
   it("produces per-language precision/recall/f1 scores", () => {

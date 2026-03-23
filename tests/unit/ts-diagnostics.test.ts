@@ -3,7 +3,7 @@ import assert from "node:assert";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { diagnosticsManager } from "../../src/ts/diagnostics.js";
+import { diagnosticsManager } from "../../dist/ts/diagnostics.js";
 
 /**
  * Tests for src/ts/diagnostics.ts — TypeScript diagnostics manager.

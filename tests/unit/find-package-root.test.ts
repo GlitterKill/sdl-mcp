@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-import { findPackageRoot } from "../../src/util/findPackageRoot.js";
+import { findPackageRoot } from "../../dist/util/findPackageRoot.js";
 
 describe("findPackageRoot", () => {
   const tempDirs: string[] = [];

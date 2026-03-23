@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   routeLiveIndexApiRequest,
   type LiveIndexApiRequest,
-} from "../../src/cli/transport/http.js";
+} from "../../dist/cli/transport/http.js";
 
 describe("live index HTTP routing", () => {
   it("routes buffer updates to the live index coordinator", async () => {

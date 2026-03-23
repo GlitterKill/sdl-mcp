@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { OverlayStore } from "../../src/live-index/overlay-store.js";
+import { OverlayStore } from "../../dist/live-index/overlay-store.js";
 
 describe("OverlayStore", () => {
   it("keeps the newest buffer version per file", () => {

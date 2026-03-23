@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { Executor } from "../../../src/agent/executor.js";
-import type { GateEvaluator } from "../../../src/agent/executor.js";
-import type { AgentTask } from "../../../src/agent/types.js";
-import { PolicyEngine } from "../../../src/policy/engine.js";
+import { Executor } from "../../../dist/agent/executor.js";
+import type { GateEvaluator } from "../../../dist/agent/executor.js";
+import type { AgentTask } from "../../../dist/agent/types.js";
+import { PolicyEngine } from "../../../dist/policy/engine.js";
 
 describe("executor raw rung", () => {
   it("captures bounded code-window evidence via evaluateRequest", async () => {

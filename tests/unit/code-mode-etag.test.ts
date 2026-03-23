@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { ChainEtagCache } from "../../src/code-mode/etag-cache.js";
+import { ChainEtagCache } from "../../dist/code-mode/etag-cache.js";
 
 describe("code-mode etag cache", () => {
   it("extractEtags captures etag from symbolGetCard result", () => {

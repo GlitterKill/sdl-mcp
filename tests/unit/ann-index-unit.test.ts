@@ -5,7 +5,7 @@ import {
   DEFAULT_ANN_CONFIG,
   HnswIndex,
   type AnnConfig,
-} from "../../src/indexer/ann-index.js";
+} from "../../dist/indexer/ann-index.js";
 
 describe("HnswIndex", () => {
   it("starts empty with default constructor", () => {

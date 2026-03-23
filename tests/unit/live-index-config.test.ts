@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { AppConfigSchema, LiveIndexConfigSchema } from "../../src/config/types.js";
+import { AppConfigSchema, LiveIndexConfigSchema } from "../../dist/config/types.js";
 
 describe("live index config", () => {
   it("provides safe defaults for live indexing", () => {

@@ -90,7 +90,7 @@ describe("release publish lockfile guards", () => {
     );
   });
 
-  it("bootstraps the publish job on Node 20 with registry URL for trusted publishing", () => {
+  it("bootstraps the publish job on Node 24 with registry URL for trusted publishing", () => {
     const workflow = readSource(".github/workflows/release-publish.yml");
     const publishJob = workflow.match(/publish:\s*[\s\S]*$/)?.[0] ?? "";
 
@@ -100,8 +100,8 @@ describe("release publish lockfile guards", () => {
     );
     assert.match(
       publishJob,
-      /name:\s*Setup Node\.js[\s\S]*node-version:\s*20\.x[\s\S]*registry-url:\s*https:\/\/registry\.npmjs\.org/s,
-      "publish job should use the Node 20 bootstrap path with npm registry URL for trusted publishing",
+      /name:\s*Setup Node\.js[\s\S]*node-version:\s*24\.x[\s\S]*registry-url:\s*https:\/\/registry\.npmjs\.org/s,
+      "publish job should use the Node 24 bootstrap path with npm registry URL for trusted publishing",
     );
   });
 });

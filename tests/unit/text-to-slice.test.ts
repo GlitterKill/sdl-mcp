@@ -9,11 +9,11 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { SliceBuildRequestSchema } from "../../src/mcp/tools.js";
+import { SliceBuildRequestSchema } from "../../dist/mcp/tools.js";
 import {
   computeStartNodeLimits,
-} from "../../src/graph/slice/start-node-resolver.js";
-import { TASK_TEXT_START_NODE_MAX } from "../../src/config/constants.js";
+} from "../../dist/graph/slice/start-node-resolver.js";
+import { TASK_TEXT_START_NODE_MAX } from "../../dist/config/constants.js";
 
 describe("Text-to-Slice: SliceBuildRequestSchema validation", () => {
   it("schema accepts taskText without entrySymbols", () => {

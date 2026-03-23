@@ -5,7 +5,7 @@ import {
   CODE_DESCRIPTION,
   REPO_DESCRIPTION,
   AGENT_DESCRIPTION,
-} from "../../src/gateway/descriptions.js";
+} from "../../dist/gateway/descriptions.js";
 
 /**
  * Tests for src/gateway/descriptions.ts — compact tool descriptions for gateway tools.

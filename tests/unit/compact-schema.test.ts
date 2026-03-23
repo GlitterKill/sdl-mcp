@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { z } from "zod";
-import { buildCompactJsonSchema } from "../../src/gateway/compact-schema.js";
+import { buildCompactJsonSchema } from "../../dist/gateway/compact-schema.js";
 
 describe("Compact JSON Schema builder", () => {
   it("preserves description fields", () => {

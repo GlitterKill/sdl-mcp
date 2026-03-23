@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 
-import type { ExtractedCall } from "../../src/indexer/treesitter/extractCalls.js";
-import { resolveCallTarget } from "../../src/indexer/edge-builder/call-resolution.js";
+import type { ExtractedCall } from "../../dist/indexer/treesitter/extractCalls.js";
+import { resolveCallTarget } from "../../dist/indexer/edge-builder/call-resolution.js";
 
 function makeCall(overrides: Partial<ExtractedCall> = {}): ExtractedCall {
   return {

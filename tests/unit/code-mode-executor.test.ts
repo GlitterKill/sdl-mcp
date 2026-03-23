@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { executeChain } from "../../src/code-mode/chain-executor.js";
-import type { ParsedChainRequest } from "../../src/code-mode/chain-parser.js";
-import type { CodeModeConfig } from "../../src/config/types.js";
+import { executeChain } from "../../dist/code-mode/chain-executor.js";
+import type { ParsedChainRequest } from "../../dist/code-mode/chain-parser.js";
+import type { CodeModeConfig } from "../../dist/config/types.js";
 import { z } from "zod";
 
 // Default test config

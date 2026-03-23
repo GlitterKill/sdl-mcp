@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 
-import { extractConfigEdgesFromTree } from "../../src/indexer/configEdges.js";
+import { extractConfigEdgesFromTree } from "../../dist/indexer/configEdges.js";
 
 describe("config edge extraction", () => {
   it("skips express route traversal for non-js files", () => {

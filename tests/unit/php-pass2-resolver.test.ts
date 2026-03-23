@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { PhpPass2Resolver } from "../../src/indexer/pass2/resolvers/php-pass2-resolver.js";
+import { PhpPass2Resolver } from "../../dist/indexer/pass2/resolvers/php-pass2-resolver.js";
 
 describe("PhpPass2Resolver", () => {
   it("supports php and phtml files when language is php", () => {

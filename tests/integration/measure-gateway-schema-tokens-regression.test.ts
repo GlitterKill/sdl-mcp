@@ -12,7 +12,7 @@ describe("measure-gateway-schema-tokens regression", () => {
   it("runs successfully after createMCPServer became async", () => {
     const result = spawnSync(
       process.execPath,
-      ["--import", "tsx", "scripts/measure-gateway-schema-tokens.ts"],
+      ["--experimental-strip-types", "scripts/measure-gateway-schema-tokens.ts"],
       {
         cwd: repoRoot,
         encoding: "utf8",

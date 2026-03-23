@@ -15,10 +15,10 @@ import {
   closeLadybugDb,
   getLadybugConn,
   initLadybugDb,
-} from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { indexRepo } from "../../src/indexer/indexer.js";
-import { handleSymbolSearch } from "../../src/mcp/tools/symbol.js";
+} from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { indexRepo } from "../../dist/indexer/indexer.js";
+import { handleSymbolSearch } from "../../dist/mcp/tools/symbol.js";
 
 /**
  * MCP tool-level regression test for language indexing reliability.
@@ -161,7 +161,7 @@ describe("MCP Tool Language Regressions", () => {
     // Kotlin grammar may not be available on all platforms.
     // Probe by attempting to load the grammar before asserting on search results.
     const { getParser } =
-      await import("../../src/indexer/treesitter/grammarLoader.js");
+      await import("../../dist/indexer/treesitter/grammarLoader.js");
     const parser = getParser("kotlin");
     if (!parser) {
       // Grammar not available on this platform — skip with clear diagnostic

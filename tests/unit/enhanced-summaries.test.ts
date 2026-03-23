@@ -9,7 +9,7 @@ import {
   generateSummary,
   getSummaryQuality,
   classifySummarySource,
-} from "../../src/indexer/summaries.js";
+} from "../../dist/indexer/summaries.js";
 
 /**
  * Minimal ExtractedSymbol-compatible fixture builder.

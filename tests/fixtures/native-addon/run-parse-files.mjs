@@ -1,4 +1,4 @@
-import { parseFilesRust } from "../../../src/indexer/rustIndexer.js";
+import { parseFilesRust } from "../../../dist/indexer/rustIndexer.js";
 
 const filePath = process.env.TEST_FILE_PATH ?? "src/foo.ts";
 

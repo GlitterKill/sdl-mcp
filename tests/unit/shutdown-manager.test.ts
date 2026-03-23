@@ -3,7 +3,7 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { ShutdownManager } from "../../src/util/shutdown.js";
+import { ShutdownManager } from "../../dist/util/shutdown.js";
 
 describe("ShutdownManager", () => {
   it("starts with isShuttingDown = false", () => {

@@ -5,17 +5,17 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { clearAllCaches } from "../../src/graph/cache.js";
-import { clearSnapshotCache } from "../../src/live-index/overlay-reader.js";
+import { clearAllCaches } from "../../dist/graph/cache.js";
+import { clearSnapshotCache } from "../../dist/live-index/overlay-reader.js";
 import {
   closeLadybugDb,
   getLadybugConn,
   initLadybugDb,
-} from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { buildCardForSymbol } from "../../src/services/card-builder.js";
-import { DatabaseError } from "../../src/domain/errors.js";
-import { PolicyEngine } from "../../src/policy/engine.js";
+} from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { buildCardForSymbol } from "../../dist/services/card-builder.js";
+import { DatabaseError } from "../../dist/domain/errors.js";
+import { PolicyEngine } from "../../dist/policy/engine.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

@@ -6,7 +6,7 @@ import {
   compilePatterns,
   redactSecrets,
   shouldRedactFile,
-} from "../../src/code/redact.js";
+} from "../../dist/code/redact.js";
 
 describe("redact compilePatterns", () => {
   it("compiles valid custom patterns", () => {

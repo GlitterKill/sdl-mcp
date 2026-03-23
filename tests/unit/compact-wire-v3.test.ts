@@ -6,18 +6,18 @@ import {
   decodeCompactGraphSliceV3ToV2,
   decodeCompactEdgesV2ToV1,
   decodeCompactEdgesV3ToV1,
-} from "../../src/mcp/tools/slice.js";
+} from "../../dist/mcp/tools/slice.js";
 import {
   SliceBuildRequestSchema,
   CompactGraphSliceV2Schema,
   CompactGraphSliceV3Schema,
   CompactGroupedEdgeV3Schema,
-} from "../../src/mcp/tools.js";
-import type { GraphSlice, CompressedEdge } from "../../src/mcp/types.js";
+} from "../../dist/mcp/tools.js";
+import type { GraphSlice, CompressedEdge } from "../../dist/mcp/types.js";
 import type {
   CompactGraphSliceV3,
   CompactGroupedEdgeV3,
-} from "../../src/mcp/tools.js";
+} from "../../dist/mcp/tools.js";
 
 const SYM1_FULL =
   "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2";

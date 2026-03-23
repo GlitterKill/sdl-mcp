@@ -5,8 +5,8 @@ import {
   getAdapterForExtension,
   loadBuiltInAdapters,
   resetRegistry,
-} from "../../src/indexer/adapter/registry.js";
-import { clearCache as clearTypeScriptCache } from "../../src/indexer/adapter/typescript.js";
+} from "../../dist/indexer/adapter/registry.js";
+import { clearCache as clearTypeScriptCache } from "../../dist/indexer/adapter/typescript.js";
 
 describe("adapter cache reset", () => {
   beforeEach(() => {

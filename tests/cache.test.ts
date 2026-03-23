@@ -10,7 +10,7 @@ import {
   clearAllCaches,
   resetAllCacheStats,
   makeSymbolCardCacheKey,
-} from "../src/graph/cache.js";
+} from "../dist/graph/cache.js";
 
 describe("LRU Cache", () => {
   describe("Basic cache operations", () => {

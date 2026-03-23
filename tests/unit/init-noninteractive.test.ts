@@ -7,7 +7,7 @@ import {
   detectLanguagesFromRepo,
   detectRepoId,
   mergeIgnorePatterns,
-} from "../../src/cli/commands/init.js";
+} from "../../dist/cli/commands/init.js";
 
 describe("init non-interactive helpers", () => {
   it("detects languages from repository file extensions", () => {

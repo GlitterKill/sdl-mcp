@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 // @ts-expect-error — vscode extension source has no type declarations
-import { createLiveSyncClient } from "../../sdl-mcp-vscode/src/live-sync.js";
+import { createLiveSyncClient } from "../../sdl-mcp-vscode/dist/live-sync.js";
 
 describe("VS Code live buffer sync client", () => {
   it("posts buffer updates to the live buffer endpoint", async () => {

@@ -4,9 +4,9 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { buildDependencyFrontier } from "../../src/live-index/dependency-frontier.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { buildDependencyFrontier } from "../../dist/live-index/dependency-frontier.js";
 
 describe("buildDependencyFrontier", () => {
   const dbPath = join(tmpdir(), ".lbug-dependency-frontier-test-db.lbug");

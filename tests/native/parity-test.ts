@@ -5,12 +5,12 @@
  * Run with: npm run test:native-parity
  */
 
-import { hashContent, generateSymbolId } from "../../src/util/hashing.js";
+import { hashContent, generateSymbolId } from "../../dist/util/hashing.js";
 import {
   isRustEngineAvailable,
   hashContentRust,
   generateSymbolIdRust,
-} from "../../src/indexer/rustIndexer.js";
+} from "../../dist/indexer/rustIndexer.js";
 
 let passed = 0;
 let failed = 0;

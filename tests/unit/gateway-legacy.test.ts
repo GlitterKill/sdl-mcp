@@ -34,7 +34,7 @@ describe("Gateway legacy tool registration", () => {
 
   // Dynamic import to avoid top-level side-effects
   async function loadLegacy() {
-    return await import("../../src/gateway/legacy.js");
+    return await import("../../dist/gateway/legacy.js");
   }
 
   it("registers all 30 legacy tools", async () => {

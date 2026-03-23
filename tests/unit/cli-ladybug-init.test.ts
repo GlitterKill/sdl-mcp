@@ -40,7 +40,7 @@ describe("CLI init command - LadybugDB", () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
     const expectedLadybugPath = join(tempDir, "sdl-mcp-graph.lbug");
 
-    const { initCommand } = await import("../../src/cli/commands/init.js");
+    const { initCommand } = await import("../../dist/cli/commands/init.js");
 
     await initCommand({
       config: configPath,
@@ -72,7 +72,7 @@ describe("CLI init command - LadybugDB", () => {
   it("includes graphDatabase section in generated config", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
 
-    const { initCommand } = await import("../../src/cli/commands/init.js");
+    const { initCommand } = await import("../../dist/cli/commands/init.js");
 
     await initCommand({
       config: configPath,
@@ -99,7 +99,7 @@ describe("CLI init command - LadybugDB", () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
     const expectedLadybugPath = join(tempDir, "sdl-mcp-graph.lbug");
 
-    const { initCommand } = await import("../../src/cli/commands/init.js");
+    const { initCommand } = await import("../../dist/cli/commands/init.js");
 
     await initCommand({
       config: configPath,

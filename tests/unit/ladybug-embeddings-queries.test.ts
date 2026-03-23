@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
-import { createSchema } from "../../src/db/ladybug-schema.js";
+import { createSchema } from "../../dist/db/ladybug-schema.js";
 import {
   upsertSymbolEmbedding,
   getSymbolEmbedding,
@@ -25,8 +25,8 @@ import {
   type SummaryCacheRow,
   type SyncArtifactRow,
   type SymbolReferenceRow,
-} from "../../src/db/ladybug-embeddings.js";
-import { upsertRepo, upsertFile } from "../../src/db/ladybug-queries.js";
+} from "../../dist/db/ladybug-embeddings.js";
+import { upsertRepo, upsertFile } from "../../dist/db/ladybug-queries.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

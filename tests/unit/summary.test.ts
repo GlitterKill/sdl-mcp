@@ -4,7 +4,7 @@ import {
   buildContextSummary,
   detectSummaryScope,
   renderContextSummary,
-} from "../../src/mcp/summary.js";
+} from "../../dist/mcp/summary.js";
 
 describe("context summary", () => {
   it("auto-detects summary scope from query patterns", () => {

@@ -6,11 +6,11 @@ import type {
   EdgeRow,
   FileRow,
   SymbolRow,
-} from "../../src/db/ladybug-queries.js";
+} from "../../dist/db/ladybug-queries.js";
 import {
   getDefaultOverlayStore,
   resetDefaultLiveIndexCoordinator,
-} from "../../src/live-index/coordinator.js";
+} from "../../dist/live-index/coordinator.js";
 import {
   getOverlaySnapshot,
   clearSnapshotCache,
@@ -18,7 +18,7 @@ import {
   mergeEdgeMapWithOverlay,
   mergeSymbolRowsWithOverlay,
   type OverlaySnapshot,
-} from "../../src/live-index/overlay-reader.js";
+} from "../../dist/live-index/overlay-reader.js";
 
 const repoId = "overlay-repo";
 const filePath = "src/overlay.ts";

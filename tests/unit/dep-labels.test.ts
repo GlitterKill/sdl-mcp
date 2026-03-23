@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { isOpaqueSymbolIdRef, pickDepLabel } from "../../src/util/depLabels.js";
+import { isOpaqueSymbolIdRef, pickDepLabel } from "../../dist/util/depLabels.js";
 
 describe("dep label helpers", () => {
   it("detects opaque 64-char hash symbol references", () => {

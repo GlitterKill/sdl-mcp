@@ -18,8 +18,8 @@ import {
   removePidfile,
   resolvePidfilePath,
   writePidfile,
-} from "../../src/util/pidfile.js";
-import { PIDFILE_NAME } from "../../src/config/constants.js";
+} from "../../dist/util/pidfile.js";
+import { PIDFILE_NAME } from "../../dist/config/constants.js";
 
 function escapeForRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

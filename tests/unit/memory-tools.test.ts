@@ -20,15 +20,15 @@ import {
   closeLadybugDb,
   getLadybugConn,
   initLadybugDb,
-} from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { DatabaseError } from "../../src/domain/errors.js";
+} from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { DatabaseError } from "../../dist/domain/errors.js";
 import {
   handleMemoryStore,
   handleMemoryQuery,
   handleMemoryRemove,
   handleMemorySurface,
-} from "../../src/mcp/tools/memory.js";
+} from "../../dist/mcp/tools/memory.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

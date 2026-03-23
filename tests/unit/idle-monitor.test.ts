@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { OverlayStore } from "../../src/live-index/overlay-store.js";
-import { IdleMonitor } from "../../src/live-index/idle-monitor.js";
+import { OverlayStore } from "../../dist/live-index/overlay-store.js";
+import { IdleMonitor } from "../../dist/live-index/idle-monitor.js";
 
 describe("IdleMonitor", () => {
   it("checkpoints repos that are quiet and have clean overlay entries", async () => {

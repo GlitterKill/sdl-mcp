@@ -4,7 +4,7 @@ import {
   resolveRefs,
   resolveRef,
   RefResolutionError,
-} from "../../src/code-mode/ref-resolver.js";
+} from "../../dist/code-mode/ref-resolver.js";
 
 describe("code-mode ref resolver", () => {
   it("$0 resolves to entire result object", () => {

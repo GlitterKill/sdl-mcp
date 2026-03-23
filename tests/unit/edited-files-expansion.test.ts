@@ -18,9 +18,9 @@ import {
   type SliceBuildRequestBase,
   START_NODE_SOURCE_PRIORITY,
   START_NODE_SOURCE_SCORE,
-} from "../../src/graph/slice/start-node-resolver.js";
-import type { Graph } from "../../src/graph/buildGraph.js";
-import type { SymbolRow, EdgeRow } from "../../src/db/schema.js";
+} from "../../dist/graph/slice/start-node-resolver.js";
+import type { Graph } from "../../dist/graph/buildGraph.js";
+import type { SymbolRow, EdgeRow } from "../../dist/db/schema.js";
 
 // ---------------------------------------------------------------------------
 // Helpers to build in-memory Graph fixtures (no DB required)

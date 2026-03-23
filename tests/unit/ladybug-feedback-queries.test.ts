@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
-import { createSchema } from "../../src/db/ladybug-schema.js";
+import { createSchema } from "../../dist/db/ladybug-schema.js";
 import {
   insertAuditEvent,
   getAuditEvents,
@@ -16,7 +16,7 @@ import {
   getAggregatedFeedback,
   type AuditRow,
   type AgentFeedbackRow,
-} from "../../src/db/ladybug-feedback.js";
+} from "../../dist/db/ladybug-feedback.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

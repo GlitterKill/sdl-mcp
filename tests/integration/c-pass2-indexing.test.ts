@@ -14,10 +14,10 @@ import {
   closeLadybugDb,
   getLadybugConn,
   initLadybugDb,
-} from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { indexRepo } from "../../src/indexer/indexer.js";
-import { CPass2Resolver } from "../../src/indexer/pass2/resolvers/c-pass2-resolver.js";
+} from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { indexRepo } from "../../dist/indexer/indexer.js";
+import { CPass2Resolver } from "../../dist/indexer/pass2/resolvers/c-pass2-resolver.js";
 
 const REPO_ID = "test-c-pass2-repo";
 

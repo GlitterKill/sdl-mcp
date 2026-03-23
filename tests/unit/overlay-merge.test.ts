@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mergeSearchResults } from "../../src/live-index/overlay-merge.js";
+import { mergeSearchResults } from "../../dist/live-index/overlay-merge.js";
 
 describe("mergeSearchResults", () => {
   it("prefers overlay rows over durable rows with the same symbol id", () => {

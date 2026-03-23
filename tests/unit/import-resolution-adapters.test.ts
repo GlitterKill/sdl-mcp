@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
-import { resolveImportCandidatePaths } from "../../src/indexer/import-resolution/registry.js";
+import { resolveImportCandidatePaths } from "../../dist/indexer/import-resolution/registry.js";
 
 const tempDirs: string[] = [];
 

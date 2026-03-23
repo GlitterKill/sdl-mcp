@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { OverlayStore } from "../../src/live-index/overlay-store.js";
-import { CheckpointService } from "../../src/live-index/checkpoint-service.js";
+import { OverlayStore } from "../../dist/live-index/overlay-store.js";
+import { CheckpointService } from "../../dist/live-index/checkpoint-service.js";
 
 describe("CheckpointService", () => {
   it("evicts clean drafts after a successful checkpoint and records status", async () => {

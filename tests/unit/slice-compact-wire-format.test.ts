@@ -3,8 +3,8 @@ import assert from "node:assert";
 import {
   toCompactGraphSlice,
   toCompactGraphSliceV2,
-} from "../../src/mcp/tools/slice.js";
-import { SliceBuildRequestSchema } from "../../src/mcp/tools.js";
+} from "../../dist/mcp/tools/slice.js";
+import { SliceBuildRequestSchema } from "../../dist/mcp/tools.js";
 
 describe("slice compact wire format v1", () => {
   it("serializes a standard slice to abbreviated compact keys", () => {

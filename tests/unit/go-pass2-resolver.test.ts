@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { GoPass2Resolver } from "../../src/indexer/pass2/resolvers/go-pass2-resolver.js";
+import { GoPass2Resolver } from "../../dist/indexer/pass2/resolvers/go-pass2-resolver.js";
 
 describe("GoPass2Resolver", () => {
   it("supports go files only", () => {

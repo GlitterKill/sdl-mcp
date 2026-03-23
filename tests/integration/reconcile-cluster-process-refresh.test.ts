@@ -10,11 +10,11 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../src/db/ladybug.js";
-import * as ladybugDb from "../../src/db/ladybug-queries.js";
-import { indexRepo } from "../../src/indexer/indexer.js";
-import { ReconcileQueue } from "../../src/live-index/reconcile-queue.js";
-import { ReconcileWorker } from "../../src/live-index/reconcile-worker.js";
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { indexRepo } from "../../dist/indexer/indexer.js";
+import { ReconcileQueue } from "../../dist/live-index/reconcile-queue.js";
+import { ReconcileWorker } from "../../dist/live-index/reconcile-worker.js";
 
 describe("reconcile derived-data refresh", () => {
   const repoId = "reconcile-derived-data-repo";

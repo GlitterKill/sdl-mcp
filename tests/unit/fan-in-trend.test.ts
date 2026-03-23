@@ -11,7 +11,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { FAN_IN_AMPLIFIER_THRESHOLD } from "../../src/config/constants.js";
+import { FAN_IN_AMPLIFIER_THRESHOLD } from "../../dist/config/constants.js";
 
 // ============================================================================
 // Pure helpers extracted from blastRadius.ts logic (no DB dependency)

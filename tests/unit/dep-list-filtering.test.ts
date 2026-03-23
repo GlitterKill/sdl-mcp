@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { filterDepsBySliceSymbolSet } from "../../src/graph/slice.js";
+import { filterDepsBySliceSymbolSet } from "../../dist/graph/slice.js";
 
 describe("dep-list relevance filtering", () => {
   it("keeps only deps whose target symbol is in the slice symbol set", () => {

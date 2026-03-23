@@ -5,19 +5,25 @@ import {
   createDefaultPass2ResolverRegistry,
   createPass2ResolverRegistry,
   toPass2Target,
-} from "../../src/indexer/pass2/registry.js";
+} from "../../dist/indexer/pass2/registry.js";
 import type {
   Pass2Resolver,
   Pass2ResolverContext,
   Pass2Target,
   Pass2ResolverResult,
-} from "../../src/indexer/pass2/types.js";
+} from "../../dist/indexer/pass2/types.js";
 
 class FakeResolver implements Pass2Resolver {
+  id: string;
+  private supportsTarget: (target: Pass2Target) => boolean;
+
   constructor(
-    readonly id: string,
-    private readonly supportsTarget: (target: Pass2Target) => boolean,
-  ) {}
+    id: string,
+    supportsTarget: (target: Pass2Target) => boolean,
+  ) {
+    this.id = id;
+    this.supportsTarget = supportsTarget;
+  }
 
   supports(target: Pass2Target): boolean {
     return this.supportsTarget(target);

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { parseToolArgs, buildParseArgsOptions } from "../../src/cli/commands/tool-arg-parser.js";
-import type { ActionDefinition, ActionArgDef } from "../../src/cli/commands/tool-actions.js";
+import { parseToolArgs, buildParseArgsOptions } from "../../dist/cli/commands/tool-arg-parser.js";
+import type { ActionDefinition, ActionArgDef } from "../../dist/cli/commands/tool-actions.js";
 
 describe("cli-tool-arg-parser", () => {
   const mockDef: ActionDefinition = {
