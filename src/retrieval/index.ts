@@ -40,9 +40,14 @@ export {
   showIndexes,
   checkIndexHealth,
   ensureIndexes,
+  ensureEntityIndexes,
+  ENTITY_FTS_INDEX_NAMES,
+  FILESUMMARY_VECTOR_INDEX_NAMES,
+  FILESUMMARY_EMBEDDING_PROPERTIES,
 } from "./index-lifecycle.js";
 export type {
   IndexInfo,
   IndexHealthResult,
   IndexEnsureResult,
+  EntityIndexHealth,
 } from "./index-lifecycle.js";

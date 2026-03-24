@@ -8,14 +8,14 @@
  * are nullable by default except PRIMARY KEY.
  *
  * Node tables: Repo, File, Symbol, Version, SymbolVersion, Metrics,
- *              Cluster, Process, SliceHandle, CardHash, Audit,
+ *              Cluster, Process, FileSummary, SliceHandle, CardHash, Audit,
  *              AgentFeedback, SymbolEmbedding, SummaryCache, SyncArtifact,
  *              SymbolReference, Memory, UsageSnapshot, SchemaVersion
  *
  * Rel tables: FILE_IN_REPO, SYMBOL_IN_FILE, SYMBOL_IN_REPO, DEPENDS_ON,
  *             VERSION_OF_REPO, BELONGS_TO_CLUSTER, PARTICIPATES_IN,
  *             CLUSTER_IN_REPO, PROCESS_IN_REPO, HAS_MEMORY, MEMORY_OF,
- *             MEMORY_OF_FILE
+ *             MEMORY_OF_FILE, FILE_SUMMARY_IN_REPO, SUMMARY_OF_FILE, FILE_SUMMARY_IN_REPO, SUMMARY_OF_FILE
  */
 
 import type { Connection } from "kuzu";
@@ -111,7 +111,22 @@ const NODE_TABLES: string[] = [
     symbolCount INT32 DEFAULT 0,
     cohesionScore DOUBLE DEFAULT 0.0,
     versionId STRING,
-    createdAt STRING
+    createdAt STRING,
+    searchText STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS FileSummary (
+    fileId STRING PRIMARY KEY,
+    repoId STRING,
+    summary STRING,
+    searchText STRING,
+    updatedAt STRING,
+    embeddingMiniLM STRING,
+    embeddingMiniLMCardHash STRING,
+    embeddingMiniLMUpdatedAt STRING,
+    embeddingNomic STRING,
+    embeddingNomicCardHash STRING,
+    embeddingNomicUpdatedAt STRING
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS Process (
@@ -121,7 +136,8 @@ const NODE_TABLES: string[] = [
     label STRING,
     depth INT32 DEFAULT 0,
     versionId STRING,
-    createdAt STRING
+    createdAt STRING,
+    searchText STRING
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS SliceHandle (
@@ -325,6 +341,14 @@ const REL_TABLES: string[] = [
   `CREATE REL TABLE IF NOT EXISTS MEMORY_OF_FILE (
     FROM Memory TO File
   )`,
+
+  `CREATE REL TABLE IF NOT EXISTS FILE_SUMMARY_IN_REPO (
+    FROM FileSummary TO Repo
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS SUMMARY_OF_FILE (
+    FROM FileSummary TO File
+  )`,
 ];
 
 async function execDdl(conn: Connection, ddl: string): Promise<void> {
@@ -350,6 +374,7 @@ const INDEXES: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_audit_repoId ON Audit(repoId)`,
   `CREATE INDEX IF NOT EXISTS idx_agentfeedback_repoId ON AgentFeedback(repoId)`,
   `CREATE INDEX IF NOT EXISTS idx_symbolversion_symbolId ON SymbolVersion(symbolId)`,
+  `CREATE INDEX IF NOT EXISTS idx_filesummary_repoId ON FileSummary(repoId)`,
 ];
 
 export async function createSchema(conn: Connection): Promise<void> {

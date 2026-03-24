@@ -28,6 +28,13 @@ export interface IndexInfo {
   status: "healthy" | "unknown";
 }
 
+export interface EntityIndexHealth {
+  indexName: string;
+  table: string;
+  exists: boolean;
+  healthy: boolean;
+}
+
 export interface IndexHealthResult {
   fts: {
     exists: boolean;
@@ -40,6 +47,8 @@ export interface IndexHealthResult {
     healthy: boolean;
     indexName: string | null;
   }>;
+  /** FTS and vector index health for non-Symbol entity tables (Stage 3). */
+  entityIndexes?: EntityIndexHealth[];
 }
 
 export interface IndexEnsureResult {
@@ -53,27 +62,32 @@ export interface IndexEnsureResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Create an FTS index on Symbol.searchText.
+ * Create an FTS index on <tableName>.searchText.
  *
  * Uses the Kuzu `CREATE_FTS_INDEX` stored procedure.  Returns true on success,
  * false if the extension is unavailable or the call fails.
+ *
+ * @param conn - Kuzu connection
+ * @param tableName - Node table name (e.g. 'Symbol', 'Memory', 'Cluster')
+ * @param indexName - Name for the new index
  */
 export async function createFtsIndex(
   conn: Connection,
+  tableName: string,
   indexName: string,
 ): Promise<boolean> {
   try {
     // Kuzu FTS extension syntax: CALL CREATE_FTS_INDEX(tableName, indexName, propertyNames)
     await exec(
       conn,
-      `CALL CREATE_FTS_INDEX('Symbol', $indexName, ['searchText'])`,
-      { indexName },
+      `CALL CREATE_FTS_INDEX($tableName, $indexName, ['searchText'])`,
+      { tableName, indexName },
     );
-    logger.info(`[index-lifecycle] FTS index '${indexName}' created on Symbol.searchText`);
+    logger.info(`[index-lifecycle] FTS index '${indexName}' created on ${tableName}.searchText`);
     return true;
   } catch (err) {
     logger.warn(
-      `[index-lifecycle] FTS index '${indexName}' creation failed (extension may be unavailable): ${
+      `[index-lifecycle] FTS index '${indexName}' on ${tableName} creation failed (extension may be unavailable): ${
         err instanceof Error ? err.message : String(err)
       }`,
     );
@@ -92,13 +106,15 @@ export async function createFtsIndex(
  * success, false if the extension is unavailable or the call fails.
  *
  * @param conn - Kuzu connection
- * @param propertyName - Symbol node property that holds the embedding vector
+ * @param tableName - Node table name (e.g. 'Symbol', 'FileSummary')
+ * @param propertyName - Node property that holds the embedding vector
  * @param indexName - Name for the new index
  * @param dimension - Vector dimensionality (must match embedding model)
  * @param efs - HNSW ef_construction parameter (default 200)
  */
 export async function createVectorIndex(
   conn: Connection,
+  tableName: string,
   propertyName: string,
   indexName: string,
   dimension: number,
@@ -108,16 +124,16 @@ export async function createVectorIndex(
     // Kuzu vector index syntax: CALL CREATE_VECTOR_INDEX(tableName, indexName, propertyName, dimension, efs)
     await exec(
       conn,
-      `CALL CREATE_VECTOR_INDEX('Symbol', $indexName, $propertyName, $dimension, $efs)`,
-      { indexName, propertyName, dimension, efs },
+      `CALL CREATE_VECTOR_INDEX($tableName, $indexName, $propertyName, $dimension, $efs)`,
+      { tableName, indexName, propertyName, dimension, efs },
     );
     logger.info(
-      `[index-lifecycle] Vector index '${indexName}' created on Symbol.${propertyName} (dim=${dimension}, efs=${efs})`,
+      `[index-lifecycle] Vector index '${indexName}' created on ${tableName}.${propertyName} (dim=${dimension}, efs=${efs})`,
     );
     return true;
   } catch (err) {
     logger.warn(
-      `[index-lifecycle] Vector index '${indexName}' creation failed (extension may be unavailable): ${
+      `[index-lifecycle] Vector index '${indexName}' on ${tableName} creation failed (extension may be unavailable): ${
         err instanceof Error ? err.message : String(err)
       }`,
     );
@@ -178,6 +194,30 @@ export async function showIndexes(conn: Connection): Promise<IndexInfo[]> {
 
 /** Expected FTS index name when not overridden by config. */
 const DEFAULT_FTS_INDEX_NAME = "symbol_search_text_v1";
+
+// ---------------------------------------------------------------------------
+// Entity FTS + vector index name constants (Stage 3)
+// ---------------------------------------------------------------------------
+
+/** FTS index names for non-Symbol entity tables. */
+export const ENTITY_FTS_INDEX_NAMES = {
+  memory: "memory_search_text_v1",
+  cluster: "cluster_search_text_v1",
+  process: "process_search_text_v1",
+  fileSummary: "filesummary_search_text_v1",
+} as const;
+
+/** Vector index names for FileSummary embedding properties. */
+export const FILESUMMARY_VECTOR_INDEX_NAMES = {
+  miniLM: "filesummary_vec_minilm_l6_v2",
+  nomic: "filesummary_vec_nomic_embed_v15",
+} as const;
+
+/** FileSummary embedding property names for vector indexing. */
+export const FILESUMMARY_EMBEDDING_PROPERTIES = {
+  miniLM: { property: "embeddingMiniLM", dimension: 384 },
+  nomic: { property: "embeddingNomic", dimension: 768 },
+} as const;
 
 /**
  * Check whether the expected FTS and vector indexes exist and are healthy.
@@ -258,7 +298,7 @@ export async function ensureIndexes(
         logger.debug(`[index-lifecycle] FTS index '${ftsIndexName}' already exists, skipping`);
         result.skipped.push(ftsIndexName);
       } else {
-        const ok = await createFtsIndex(conn, ftsIndexName);
+        const ok = await createFtsIndex(conn, 'Symbol', ftsIndexName);
         if (ok) {
           result.created.push(ftsIndexName);
         } else {
@@ -313,6 +353,7 @@ export async function ensureIndexes(
 
         const ok = await createVectorIndex(
           conn,
+          'Symbol',
           propName,
           indexName,
           modelInfo.dimension,
@@ -331,6 +372,95 @@ export async function ensureIndexes(
 
   logger.info(
     `[index-lifecycle] ensureIndexes complete — created: [${result.created.join(", ")}], skipped: [${result.skipped.join(", ")}], failed: [${result.failed.join(", ")}]`,
+  );
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Entity index ensure (Stage 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Idempotently create FTS indexes for Memory, Cluster, Process, FileSummary
+ * tables and vector indexes for FileSummary embedding properties.
+ *
+ * Called from startup after ensureIndexes() completes.  Fails gracefully when
+ * the FTS or vector extension is unavailable.
+ *
+ * @returns Structured result listing which indexes were created, skipped, or failed.
+ */
+export async function ensureEntityIndexes(
+  conn: Connection,
+): Promise<IndexEnsureResult> {
+  const result: IndexEnsureResult = { created: [], skipped: [], failed: [] };
+
+  const caps = getExtensionCapabilities();
+  const existing = await showIndexes(conn);
+  const existingNames = new Set(existing.map((i) => i.name));
+
+  // ------------------------------------------------------------------
+  // FTS indexes for entity tables
+  // ------------------------------------------------------------------
+  const ftsTables: Array<{ table: string; indexName: string }> = [
+    { table: "Memory",      indexName: ENTITY_FTS_INDEX_NAMES.memory },
+    { table: "Cluster",     indexName: ENTITY_FTS_INDEX_NAMES.cluster },
+    { table: "Process",     indexName: ENTITY_FTS_INDEX_NAMES.process },
+    { table: "FileSummary", indexName: ENTITY_FTS_INDEX_NAMES.fileSummary },
+  ];
+
+  if (caps.fts) {
+    for (const { table, indexName } of ftsTables) {
+      if (existingNames.has(indexName)) {
+        logger.debug(`[index-lifecycle] Entity FTS index '${indexName}' already exists, skipping`);
+        result.skipped.push(indexName);
+      } else {
+        const ok = await createFtsIndex(conn, table, indexName);
+        if (ok) {
+          result.created.push(indexName);
+        } else {
+          result.failed.push(indexName);
+        }
+      }
+    }
+  } else {
+    logger.debug("[index-lifecycle] Skipping entity FTS indexes — extension unavailable");
+    for (const { indexName } of ftsTables) {
+      result.skipped.push(indexName);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Vector indexes for FileSummary
+  // ------------------------------------------------------------------
+  const vectorEntries = Object.entries(FILESUMMARY_EMBEDDING_PROPERTIES) as Array<
+    [keyof typeof FILESUMMARY_EMBEDDING_PROPERTIES, { property: string; dimension: number }]
+  >;
+
+  if (caps.vector) {
+    for (const [key, { property, dimension }] of vectorEntries) {
+      const indexName = FILESUMMARY_VECTOR_INDEX_NAMES[key];
+      if (existingNames.has(indexName)) {
+        logger.debug(`[index-lifecycle] FileSummary vector index '${indexName}' already exists, skipping`);
+        result.skipped.push(indexName);
+      } else {
+        const ok = await createVectorIndex(conn, "FileSummary", property, indexName, dimension);
+        if (ok) {
+          result.created.push(indexName);
+        } else {
+          result.failed.push(indexName);
+        }
+      }
+    }
+  } else {
+    logger.debug("[index-lifecycle] Skipping FileSummary vector indexes — extension unavailable");
+    for (const [key] of vectorEntries) {
+      result.skipped.push(FILESUMMARY_VECTOR_INDEX_NAMES[key]);
+    }
+  }
+
+  logger.info(
+    `[index-lifecycle] ensureEntityIndexes complete — created: [${result.created.join(", ")}], skipped: [${result.skipped.join(", ")}], failed: [${result.failed.join(", ")}]`,
   );
 
   return result;
