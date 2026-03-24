@@ -12,6 +12,7 @@ import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { ValidationError } from "../domain/errors.js";
 import { logger } from "../util/logger.js";
+import { entitySearch } from "../retrieval/index.js";
 
 const HANDLED_EVIDENCE_TYPES = new Set([
   "symbolCard", "skeleton", "hotPath", "codeWindow", "diagnostic", "searchResult",
@@ -40,7 +41,46 @@ export class Orchestrator {
 
     try {
       const path = this.planner.plan(task);
-      const context = this.planner.selectContext(task);
+      let context = this.planner.selectContext(task);
+
+      // When no explicit focusSymbols/focusPaths were provided, use entity retrieval
+      // to seed the context with relevant symbols, clusters, and processes.
+      const hasExplicitContext = context.length > 0;
+      if (!hasExplicitContext && task.taskText) {
+        try {
+          const entityResult = await entitySearch({
+            repoId: task.repoId,
+            query: task.taskText,
+            limit: 20,
+            entityTypes: ["symbol", "cluster", "process"],
+            includeEvidence: false,
+          });
+          if (entityResult.results.length > 0) {
+            const symbolIds = entityResult.results
+              .filter((r) => r.entityType === "symbol")
+              .map((r) => `symbol:${r.entityId}`);
+            const clusterIds = entityResult.results
+              .filter((r) => r.entityType === "cluster")
+              .map((r) => `cluster:${r.entityId}`);
+            const processIds = entityResult.results
+              .filter((r) => r.entityType === "process")
+              .map((r) => `process:${r.entityId}`);
+            context = [...symbolIds, ...clusterIds, ...processIds];
+            logger.debug("Entity retrieval seeded agent context", {
+              repoId: task.repoId,
+              symbolCount: symbolIds.length,
+              clusterCount: clusterIds.length,
+              processCount: processIds.length,
+            });
+          }
+        } catch (err) {
+          logger.debug(
+            "Entity retrieval for agent context failed; proceeding with empty context",
+            { repoId: task.repoId, error: err },
+          );
+        }
+      }
+
       const { expandedContext, clusterExpandedCount } =
         await this.expandContextForClusters(context);
 

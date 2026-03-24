@@ -825,6 +825,12 @@ export interface ContextSummary {
   riskAreas: ContextSummaryRiskArea[];
   filesTouched: ContextSummaryFileTouch[];
   metadata: ContextSummaryMetadata;
+  /** Cluster labels surfaced by entity retrieval for this query (optional). */
+  relatedClusters?: string[];
+  /** Process labels surfaced by entity retrieval for this query (optional). */
+  relatedProcesses?: string[];
+  /** File paths surfaced by entity retrieval for this query (optional). */
+  relatedFiles?: string[];
 }
 
 export interface HealthComponents {

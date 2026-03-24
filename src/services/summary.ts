@@ -6,6 +6,8 @@ import { estimateTokens, tokenize } from "../util/tokenize.js";
 import { TASK_TEXT_STOP_WORDS } from "../graph/slice/start-node-resolver.js";
 import { logger } from "../util/logger.js";
 import { SYMBOL_CARD_MAX_PROCESSES } from "../config/constants.js";
+import { entitySearch } from "../retrieval/index.js";
+import type { EntitySearchResultItem } from "../retrieval/index.js";
 import type {
   ContextSummary,
   ContextSummaryDependency,
@@ -341,7 +343,7 @@ export async function generateContextSummary(args: {
     evictSummaryCache();
   }
 
-  return buildContextSummary({
+  const summary = buildContextSummary({
     repoId: args.repoId,
     query,
     scope,
@@ -352,6 +354,44 @@ export async function generateContextSummary(args: {
     riskAreas: seed.riskAreas,
     filesTouched: seed.filesTouched,
   });
+
+  // Enrich summary with entity retrieval results for clusters, processes, and files
+  try {
+    const entityResult = await entitySearch({
+      repoId: args.repoId,
+      query,
+      limit: 15,
+      entityTypes: ["cluster", "process", "fileSummary"],
+      includeEvidence: false,
+    });
+    if (entityResult.results.length > 0) {
+      const clusterIds = entityResult.results
+        .filter((r: EntitySearchResultItem) => r.entityType === "cluster")
+        .map((r: EntitySearchResultItem) => r.entityId);
+      const processIds = entityResult.results
+        .filter((r: EntitySearchResultItem) => r.entityType === "process")
+        .map((r: EntitySearchResultItem) => r.entityId);
+      const fileIds = entityResult.results
+        .filter((r: EntitySearchResultItem) => r.entityType === "fileSummary")
+        .map((r: EntitySearchResultItem) => r.entityId);
+      if (clusterIds.length > 0) {
+        summary.relatedClusters = clusterIds;
+      }
+      if (processIds.length > 0) {
+        summary.relatedProcesses = processIds;
+      }
+      if (fileIds.length > 0) {
+        summary.relatedFiles = fileIds;
+      }
+    }
+  } catch (err) {
+    logger.debug(
+      "Entity retrieval enrichment for context summary failed; continuing without it",
+      { repoId: args.repoId, error: err },
+    );
+  }
+
+  return summary;
 }
 
 export function renderContextSummary(

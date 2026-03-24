@@ -18,6 +18,7 @@ import type {
 } from "../types.js";
 import { buildSlice } from "../../graph/slice.js";
 import type { RetrievalSource } from "../../retrieval/types.js";
+import { entitySearch } from "../../retrieval/index.js";
 import {
   type SliceErrorResponse,
   sliceErrorToResponse,
@@ -58,6 +59,7 @@ import type { ToolContext } from "../../server.js";
 import {
   safeJsonParseOptional,
   safeJsonParseOrThrow,
+  safeJsonParse,
   StringArraySchema,
   SignatureSchema,
   ConfigObjectSchema,
@@ -75,6 +77,7 @@ import {
   normalizeVisibility,
 } from "./slice-wire-format.js";
 import { surfaceRelevantMemories } from "../../memory/surface.js";
+import type { SurfacedMemory } from "../../domain/types.js";
 
 export {
   toCompactGraphSliceV1,
@@ -446,6 +449,52 @@ async function handleSliceBuildInternal(
           repoId,
           error: err,
         });
+      }
+
+      // Boost memory surfacing with entity retrieval when taskText is provided
+      if (taskText) {
+        try {
+          const entityResult = await entitySearch({
+            repoId,
+            query: taskText,
+            limit: 10,
+            entityTypes: ["memory"],
+            includeEvidence: false,
+          });
+          if (entityResult.results.length > 0) {
+            const existingIds = new Set(
+              (slice.memories ?? []).map((m) => m.memoryId),
+            );
+            const newMemoryIds = entityResult.results
+              .map((r) => r.entityId)
+              .filter((id) => !existingIds.has(id));
+            if (newMemoryIds.length > 0) {
+              const additionalMemories = await Promise.all(
+                newMemoryIds.map((id) => ladybugDb.getMemory(conn, id)),
+              );
+              const validMemories: SurfacedMemory[] = additionalMemories
+                .filter((m): m is NonNullable<typeof m> => m !== null && !m.deleted)
+                .map((m) => ({
+                  memoryId: m.memoryId,
+                  type: m.type as SurfacedMemory["type"],
+                  title: m.title,
+                  content: m.content,
+                  confidence: m.confidence,
+                  stale: m.stale,
+                  linkedSymbols: [],
+                  tags: safeJsonParse(m.tagsJson, StringArraySchema, []),
+                }));
+              if (validMemories.length > 0) {
+                slice.memories = [...(slice.memories ?? []), ...validMemories];
+              }
+            }
+          }
+        } catch (err) {
+          logger.debug(
+            "Entity-search memory boost failed; continuing without it",
+            { repoId, error: err },
+          );
+        }
       }
     }
 
