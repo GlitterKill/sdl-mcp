@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "Symbol Delta Ledger MCP Server - Cards-first code context for polyglot repositories",
   "type": "module",
   "main": "dist/main.js",
@@ -94,7 +94,7 @@
     "@opentelemetry/sdk-trace-base": "^1.30.0",
     "@opentelemetry/sdk-trace-node": "^1.30.0",
     "fast-glob": "^3.3.3",
-    "tree-sitter": "0.25.0",
+    "tree-sitter": "npm:@keqingmoe/tree-sitter@0.26.2",
     "tree-sitter-bash": "0.25.1",
     "tree-sitter-c": "0.24.1",
     "tree-sitter-c-sharp": "0.23.1",
