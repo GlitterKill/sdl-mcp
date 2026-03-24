@@ -19,6 +19,12 @@
 
 ---
 
+
+ ###  **NOTE TO ALL USERS**
+ Please stick with using the v0.9.2 release for now while I am refactoring some things.  v0.9.2 is stable.  It is likely that if you copy the repo to install, it will not work correctly for you until this refactor is complete.<br/>
+
+ 
+
 <br/>
 
 ## What's the problem?
