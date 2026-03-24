@@ -55,6 +55,9 @@ export * from "./ladybug-feedback.js";
 // Symbol embeddings, summary cache, sync artifacts, symbol references
 export * from "./ladybug-embeddings.js";
 
+// Model-aware Symbol node embedding helpers (replaces SymbolEmbedding table access)
+export * from "./ladybug-symbol-embeddings.js";
+
 // Tool policy & tsconfig hash operations
 export * from "./ladybug-config.js";
 

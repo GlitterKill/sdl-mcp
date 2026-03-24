@@ -8,6 +8,11 @@ import {
 } from "./embeddings-local.js";
 import { getModelInfo } from "./model-registry.js";
 import type { IndexProgress } from "./indexer.js";
+import {
+  getSymbolEmbeddingFromNode,
+  setSymbolEmbeddingOnNode,
+  getSymbolEmbeddingsFromNodes,
+} from "../db/ladybug-symbol-embeddings.js";
 
 /** Legacy dimension constant — only used by MockEmbeddingProvider */
 export const EMBEDDING_DIMENSION = 64;
@@ -314,47 +319,31 @@ export async function refreshSymbolEmbeddings(params: {
     }
 
     const cardHash = buildCardHash(symbol, text);
-    const existing = await ladybugDb.getSymbolEmbedding(conn, symbol.symbolId);
     let storageModel = provider.isMockFallback?.()
       ? "mock-fallback"
       : modelName;
-    if (
-      existing &&
-      existing.model === storageModel &&
-      existing.cardHash === cardHash
-    ) {
-      skipped += 1;
-      continue;
-    }
-    if (
-      existing &&
-      existing.model === modelName &&
-      existing.cardHash === cardHash
-    ) {
+    const existing = await getSymbolEmbeddingFromNode(conn, symbol.symbolId, storageModel);
+    if (existing && existing.cardHash === cardHash) {
       skipped += 1;
       continue;
     }
 
     const [vector] = await provider.embed([text]);
     storageModel = provider.isMockFallback?.() ? "mock-fallback" : modelName;
-    if (
-      existing &&
-      existing.model === storageModel &&
-      existing.cardHash === cardHash
-    ) {
+    // Re-check after embed in case provider changed fallback status
+    const existingAfterEmbed = await getSymbolEmbeddingFromNode(conn, symbol.symbolId, storageModel);
+    if (existingAfterEmbed && existingAfterEmbed.cardHash === cardHash) {
       skipped += 1;
       continue;
     }
     await withWriteConn(async (wConn) => {
-      await ladybugDb.upsertSymbolEmbedding(wConn, {
-        symbolId: symbol.symbolId,
-        model: storageModel,
-        embeddingVector: toFloat16Blob(vector),
-        version: "v1",
+      await setSymbolEmbeddingOnNode(
+        wConn,
+        symbol.symbolId,
+        storageModel,
+        toFloat16Blob(vector),
         cardHash,
-        createdAt: existing?.createdAt ?? new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
+      );
     });
     embedded += 1;
   }
@@ -386,20 +375,14 @@ export async function rerankByEmbeddings(params: {
     : params.model;
 
   const conn = await getLadybugConn();
-  const embeddingMap = await ladybugDb.getSymbolEmbeddings(
+  const embeddingMap = await getSymbolEmbeddingsFromNodes(
     conn,
     params.symbols.map((item) => item.symbol.symbolId),
+    expectedModel,
   );
 
-  const wrongModel: string[] = [];
-  for (const [symbolId, row] of embeddingMap) {
-    if (row.model !== expectedModel) {
-      wrongModel.push(symbolId);
-    }
-  }
-  for (const id of wrongModel) {
-    embeddingMap.delete(id);
-  }
+  // Model filtering is implicit: getSymbolEmbeddingsFromNodes reads
+  // from the model-specific Symbol node property.
 
   // Validate cardHash freshness — stale embeddings (e.g., text construction
   // changed due to model switch while both fall back to mock-fallback) should
@@ -462,16 +445,13 @@ export async function rerankByEmbeddings(params: {
       model: params.model,
       symbols: missing,
     });
-    const refreshed = await ladybugDb.getSymbolEmbeddings(
+    const refreshed = await getSymbolEmbeddingsFromNodes(
       conn,
       missing.map((symbol) => symbol.symbolId),
+      expectedModel,
     );
     for (const [key, value] of refreshed) {
-      // Only merge rows matching expectedModel — the refresh provider may
-      // have made a different fallback decision than the query provider.
-      if (value.model === expectedModel) {
-        embeddingMap.set(key, value);
-      }
+      embeddingMap.set(key, value);
     }
   }
 
@@ -481,7 +461,7 @@ export async function rerankByEmbeddings(params: {
       const semanticScore = embeddingRow
         ? cosineSimilarity(
             queryEmbedding,
-            fromFloat16Blob(embeddingRow.embeddingVector),
+            fromFloat16Blob(embeddingRow.vector),
           )
         : 0;
       const finalScore =

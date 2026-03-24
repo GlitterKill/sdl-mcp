@@ -22,6 +22,7 @@ export interface SymbolEmbeddingRow {
   updatedAt: string;
 }
 
+/** @deprecated Use setSymbolEmbeddingOnNode from ladybug-symbol-embeddings.ts instead. */
 export async function upsertSymbolEmbedding(
   conn: Connection,
   row: SymbolEmbeddingRow,
@@ -47,6 +48,7 @@ export async function upsertSymbolEmbedding(
   );
 }
 
+/** @deprecated Use getSymbolEmbeddingFromNode from ladybug-symbol-embeddings.ts instead. */
 export async function getSymbolEmbedding(
   conn: Connection,
   symbolId: string,
@@ -66,6 +68,7 @@ export async function getSymbolEmbedding(
   return row ?? null;
 }
 
+/** @deprecated Use getSymbolEmbeddingsFromNodes from ladybug-symbol-embeddings.ts instead. */
 export async function getSymbolEmbeddings(
   conn: Connection,
   symbolIds: string[],
@@ -94,6 +97,7 @@ export async function getSymbolEmbeddings(
   return result;
 }
 
+/** @deprecated SymbolEmbedding table is being replaced by Symbol node properties. */
 export async function countSymbolEmbeddings(
   conn: Connection,
   repoId: string,
@@ -108,6 +112,7 @@ export async function countSymbolEmbeddings(
   return row ? toNumber(row.cnt) : 0;
 }
 
+/** @deprecated SymbolEmbedding table is being replaced by Symbol node properties. */
 export async function deleteSymbolEmbeddings(
   conn: Connection,
   symbolIds: string[],
