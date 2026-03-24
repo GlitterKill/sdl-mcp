@@ -17,6 +17,30 @@ import {
 } from "./ladybug-core.js";
 import { resetJoinHintCache } from "./ladybug-edges.js";
 
+// ---------------------------------------------------------------------------
+// Extension Capabilities
+// ---------------------------------------------------------------------------
+// Track which Kuzu extensions (fts, vector) loaded successfully.
+// INSTALL is attempted once per pool initialization; LOAD is attempted per
+// connection. Failures are best-effort — they never block DB initialization.
+// ---------------------------------------------------------------------------
+
+/** Names of Kuzu extensions managed by this module. */
+const MANAGED_EXTENSIONS = ["fts", "vector"] as const;
+
+interface ExtensionCapabilities {
+  fts: boolean;
+  vector: boolean;
+}
+
+const extensionCapabilities: ExtensionCapabilities = {
+  fts: false,
+  vector: false,
+};
+
+// Set to true once INSTALL has been attempted for the pool lifetime.
+let extensionsInstallAttempted = false;
+
 // Local interface for optional thread-count method on LadybugDB connections
 interface LadybugConnectionWithThreads {
   setMaxNumThreadForExec(n: number): Promise<void>;
@@ -275,6 +299,50 @@ async function getHealthyConnection(
 }
 
 /**
+ * Attempt to INSTALL extensions once per pool lifetime (best-effort).
+ * Called during pool initialization with the write connection.
+ */
+async function installExtensionsOnce(conn: LadybugConnection): Promise<void> {
+  if (extensionsInstallAttempted) return;
+  extensionsInstallAttempted = true;
+
+  for (const ext of MANAGED_EXTENSIONS) {
+    try {
+      await conn.query(`INSTALL ${ext}`);
+      logger.debug(`Kuzu extension installed`, { extension: ext });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.debug(`Kuzu extension INSTALL skipped (best-effort)`, {
+        extension: ext,
+        reason: msg,
+      });
+    }
+  }
+}
+
+/**
+ * Attempt to LOAD extensions on a connection (best-effort, per-session).
+ * Updates extensionCapabilities for each extension that loads successfully.
+ */
+async function loadExtensionsOnConnection(
+  conn: LadybugConnection,
+): Promise<void> {
+  for (const ext of MANAGED_EXTENSIONS) {
+    try {
+      await conn.query(`LOAD EXTENSION ${ext}`);
+      extensionCapabilities[ext] = true;
+      logger.debug(`Kuzu extension loaded`, { extension: ext });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.debug(`Kuzu extension LOAD skipped (best-effort)`, {
+        extension: ext,
+        reason: msg,
+      });
+    }
+  }
+}
+
+/**
  * Get a read connection from the pool (round-robin).
  * This is the primary function for read-only queries.
  * Backward-compatible: this is what getLadybugConn() returns.
@@ -314,6 +382,13 @@ export async function getLadybugReadConn(): Promise<LadybugConnection> {
           maxConcurrency: 1,
           queueTimeoutMs: writeQueueTimeoutMs,
         });
+
+        // Step: attempt INSTALL once, then LOAD on write + all read conns.
+        // Best-effort — failures must not prevent pool initialization.
+        await installExtensionsOnce(localWriteConn);
+        for (const c of [localWriteConn, ...localReadPool]) {
+          await loadExtensionsOnConnection(c);
+        }
 
         // Publish all refs atomically — no concurrent caller can see
         // partial state because no `await` between these assignments.
@@ -631,4 +706,13 @@ export function isLadybugAvailable(): boolean {
 
 export function getLadybugDbPath(): string | null {
   return currentDbPath;
+}
+
+/**
+ * Return which Kuzu extensions loaded successfully on the current connection pool.
+ * Returns { fts: false, vector: false } if the pool has not been initialized
+ * or if extensions are unavailable on this platform.
+ */
+export function getExtensionCapabilities(): ExtensionCapabilities {
+  return { ...extensionCapabilities };
 }

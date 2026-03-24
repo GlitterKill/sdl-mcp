@@ -24,6 +24,7 @@ import {
   getLadybugDbPath,
   initLadybugDb,
   isLadybugAvailable,
+  getExtensionCapabilities,
 } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
@@ -47,6 +48,7 @@ const DOCTOR_CHECKS = [
     check: checkCallResolutionCapabilities,
   },
   { name: "Graph database (Ladybug)", check: checkLadybugDb },
+  { name: "DB extension capabilities (fts/vector)", check: checkLadybugExtensions },
   { name: "Semantic embedding models", check: checkSemanticModels },
   { name: "Runtime execution", check: checkRuntimeExecution },
 ];
@@ -637,6 +639,49 @@ async function checkLadybugDb(
     await closeLadybugDb();
   }
 }
+async function checkLadybugExtensions(
+  _options: DoctorOptions,
+): Promise<Omit<DoctorResult, "name">> {
+  if (!isLadybugAvailable()) {
+    return {
+      status: "warn",
+      message: "Graph database driver not available — skipping extension check",
+    };
+  }
+
+  const caps = getExtensionCapabilities();
+
+  const loaded: string[] = [];
+  const missing: string[] = [];
+  for (const [ext, available] of Object.entries(caps) as [string, boolean][]) {
+    if (available) {
+      loaded.push(ext);
+    } else {
+      missing.push(ext);
+    }
+  }
+
+  if (loaded.length === 0) {
+    return {
+      status: "warn",
+      message:
+        `No Kuzu extensions loaded (fts=${caps.fts}, vector=${caps.vector}). ` +
+        "Full-text search and vector similarity will not be available. " +
+        "Extensions are installed automatically when the DB is first opened.",
+    };
+  }
+
+  const parts: string[] = [];
+  if (loaded.length > 0) parts.push(`loaded: ${loaded.join(", ")}`);
+  if (missing.length > 0) parts.push(`unavailable: ${missing.join(", ")}`);
+
+  const status = missing.length > 0 ? "warn" : "pass";
+  return {
+    status,
+    message: `Kuzu extensions — ${parts.join("; ")}`,
+  };
+}
+
 async function checkSemanticModels(
   options: DoctorOptions,
 ): Promise<Omit<DoctorResult, "name">> {
