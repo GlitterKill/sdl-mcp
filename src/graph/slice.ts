@@ -471,6 +471,9 @@ function buildCallResolution(
   };
 }
 
+// PERF: These queries are sequential due to data dependencies between symbol
+// rows, edges, metrics, files, etc. Consider parallelizing independent queries
+// (e.g., metrics + files) if profiling shows this as a bottleneck.
 async function loadSymbolCards(
   conn: Connection,
   symbolIds: SymbolId[],

@@ -123,12 +123,11 @@ export function identifiersExistInWindow(
     );
     identifierRegexCache.set(cacheKey, regex);
     if (identifierRegexCache.size > REGEX_CACHE_MAX_SIZE) {
-      const keysToDelete = Array.from(identifierRegexCache.keys()).slice(
-        0,
-        REGEX_CACHE_EVICT_COUNT,
-      );
-      for (const key of keysToDelete) {
+      let count = 0;
+      for (const key of identifierRegexCache.keys()) {
+        if (count >= REGEX_CACHE_EVICT_COUNT) break;
         identifierRegexCache.delete(key);
+        count++;
       }
     }
   }

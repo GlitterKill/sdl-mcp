@@ -48,6 +48,31 @@ export function logGraphTelemetry(event: GraphTelemetryEvent): void {
 
 let lastLoadStats: GraphLoadStats | null = null;
 
+/**
+ * Build a Cypher variable-length path clause like `-[:REL_TYPE*min..max]->`.
+ *
+ * WHY interpolation is required: Kuzu (LadybugDB) does not support
+ * parameterized values inside variable-length path bounds (`*min..max`).
+ * Parameters like `$minHops` are rejected by the parser in that position.
+ * We therefore validate and clamp the integers here before interpolating.
+ */
+function buildVariableLengthPathClause(
+  minHops: number,
+  maxHops: number,
+  relType: string,
+  direction: "in" | "out" | "both" = "both",
+): string {
+  assertSafeInt(minHops, "minHops");
+  assertSafeInt(maxHops, "maxHops");
+  const safeMin = Math.max(0, Math.min(minHops, 50));
+  const safeMax = Math.max(safeMin, Math.min(maxHops, 50));
+  const pattern = `[:${relType}*${safeMin}..${safeMax}]`;
+  if (direction === "out") return `-${pattern}->`;
+  if (direction === "in") return `<-${pattern}-`;
+  return `-${pattern}-`;
+}
+
+
 export function getLastLoadStats(): GraphLoadStats | null {
   return lastLoadStats;
 }
@@ -145,14 +170,13 @@ export async function getPath(
     return [fromSymbol];
   }
 
-  assertSafeInt(maxHops, "maxHops");
-  const safeMaxHops = Math.max(1, Math.min(maxHops, 50));
+  const pathClause = buildVariableLengthPathClause(1, maxHops, "DEPENDS_ON", "out");
 
   const row = await querySingle<{ pathNodes: unknown }>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol {symbolId: $fromSymbol})
      MATCH (r)<-[:SYMBOL_IN_REPO]-(b:Symbol {symbolId: $toSymbol})
-     MATCH p = (a)-[:DEPENDS_ON*1..${safeMaxHops}]->(b)
+     MATCH p = (a)${pathClause}(b)
      RETURN nodes(p) AS pathNodes
      ORDER BY length(p)
      LIMIT 1`,
@@ -206,18 +230,10 @@ export async function loadNeighborhood(
     return { repoId, symbolIds: new Set(), edges: [] };
   }
 
-  assertSafeInt(maxHops, "maxHops");
   assertSafeInt(maxSymbols, "maxSymbols");
-
-  const safeMaxHops = Math.max(0, Math.min(maxHops, 20));
   const safeMaxSymbols = Math.max(1, Math.min(maxSymbols, 100_000));
 
-  const relPattern =
-    direction === "out"
-      ? `-[:DEPENDS_ON*0..${safeMaxHops}]->`
-      : direction === "in"
-        ? `<-[:DEPENDS_ON*0..${safeMaxHops}]-`
-        : `-[:DEPENDS_ON*0..${safeMaxHops}]-`;
+  const relPattern = buildVariableLengthPathClause(0, Math.min(maxHops, 20), "DEPENDS_ON", direction);
 
   const symbolRows = await queryAll<{ symbolId: SymbolId }>(
     conn,

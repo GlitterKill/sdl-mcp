@@ -10,6 +10,7 @@ import {
   toBoolean,
   toNumber,
   assertSafeInt,
+  withTransaction,
 } from "./ladybug-core.js";
 
 export interface MemoryRow {
@@ -198,10 +199,13 @@ export async function queryMemories(
       ? "ORDER BY confidence DESC"
       : "ORDER BY updatedAt DESC";
 
+  // Over-fetch with a generous LIMIT to bound DB work before JS-side tag filtering
+  const overFetchLimit = safeLimit * 5;
   const cypher = `${matchClause}
      ${whereClause}
      RETURN DISTINCT ${MEMORY_RETURN_FIELDS}
-     ${orderBy}`;
+     ${orderBy}
+     LIMIT ${overFetchLimit}`;
 
   let rows = await queryAll<Record<string, unknown>>(conn, cypher, params);
 
@@ -275,27 +279,29 @@ export async function deleteMemoryEdges(
   conn: Connection,
   memoryId: string,
 ): Promise<void> {
-  // Delete HAS_MEMORY edges (Repo->Memory)
-  await exec(
-    conn,
-    `MATCH (r:Repo)-[e:HAS_MEMORY]->(m:Memory {memoryId: $memoryId})
-     DELETE e`,
-    { memoryId },
-  );
-  // Delete MEMORY_OF edges (Memory->Symbol)
-  await exec(
-    conn,
-    `MATCH (m:Memory {memoryId: $memoryId})-[e:MEMORY_OF]->(s:Symbol)
-     DELETE e`,
-    { memoryId },
-  );
-  // Delete MEMORY_OF_FILE edges (Memory->File)
-  await exec(
-    conn,
-    `MATCH (m:Memory {memoryId: $memoryId})-[e:MEMORY_OF_FILE]->(f:File)
-     DELETE e`,
-    { memoryId },
-  );
+  await withTransaction(conn, async (txConn) => {
+    // Delete HAS_MEMORY edges (Repo->Memory)
+    await exec(
+      txConn,
+      `MATCH (r:Repo)-[e:HAS_MEMORY]->(m:Memory {memoryId: $memoryId})
+       DELETE e`,
+      { memoryId },
+    );
+    // Delete MEMORY_OF edges (Memory->Symbol)
+    await exec(
+      txConn,
+      `MATCH (m:Memory {memoryId: $memoryId})-[e:MEMORY_OF]->(s:Symbol)
+       DELETE e`,
+      { memoryId },
+    );
+    // Delete MEMORY_OF_FILE edges (Memory->File)
+    await exec(
+      txConn,
+      `MATCH (m:Memory {memoryId: $memoryId})-[e:MEMORY_OF_FILE]->(f:File)
+       DELETE e`,
+      { memoryId },
+    );
+  });
 }
 
 export async function getMemoriesForSymbols(
@@ -311,8 +317,9 @@ export async function getMemoriesForSymbols(
      WHERE s.symbolId IN $symbolIds AND m.deleted = false
      RETURN ${MEMORY_RETURN_FIELDS},
             s.symbolId AS linkedSymbolId
-     ORDER BY confidence DESC`,
-    { symbolIds },
+     ORDER BY confidence DESC
+     LIMIT $limit`,
+    { symbolIds, limit },
   );
 
   return rows.slice(0, limit).map((row) => ({
@@ -333,8 +340,9 @@ export async function getRepoMemories(
     `MATCH (r:Repo {repoId: $repoId})-[:HAS_MEMORY]->(m:Memory)
      WHERE m.deleted = false
      RETURN ${MEMORY_RETURN_FIELDS}
-     ORDER BY updatedAt DESC`,
-    { repoId },
+     ORDER BY updatedAt DESC
+     LIMIT $limit`,
+    { repoId, limit },
   );
 
   return rows.slice(0, limit).map(toMemoryRow);

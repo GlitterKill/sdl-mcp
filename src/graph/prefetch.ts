@@ -48,6 +48,8 @@ export interface PrefetchStats {
 }
 
 const queue: PrefetchTask[] = [];
+const MAX_PREFETCH_ENTRIES_PER_REPO = 500;
+const PREFETCH_STALE_MS = 5 * 60_000;
 const prefetchedKeysByRepo = new Map<string, Map<string, number>>();
 const statsByRepo = new Map<string, PrefetchStats>();
 let running = false;
@@ -169,6 +171,15 @@ function markPrefetched(repoId: string, key: string): void {
   const map = prefetchedKeysByRepo.get(repoId) ?? new Map<string, number>();
   map.set(key, Date.now());
   prefetchedKeysByRepo.set(repoId, map);
+  // Evict stale entries when the map exceeds the threshold
+  if (map.size > MAX_PREFETCH_ENTRIES_PER_REPO) {
+    const now = Date.now();
+    for (const [k, createdAt] of map) {
+      if (now - createdAt > PREFETCH_STALE_MS) {
+        map.delete(k);
+      }
+    }
+  }
 }
 
 export function configurePrefetch(options: {

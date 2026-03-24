@@ -144,9 +144,7 @@ export async function deleteRepo(
     // Clean up orphaned SymbolVersion nodes for the deleted versions
     const versionIds = versionRows.map((r) => r.versionId);
     if (versionIds.length > 0) {
-      for (const vid of versionIds) {
-        await exec(txConn, `MATCH (sv:SymbolVersion {versionId: $vid}) DELETE sv`, { vid });
-      }
+      await exec(txConn, `MATCH (sv:SymbolVersion) WHERE sv.versionId IN $versionIds DELETE sv`, { versionIds });
     }
 
     // Clean up Cluster nodes (delete all edge types before nodes)

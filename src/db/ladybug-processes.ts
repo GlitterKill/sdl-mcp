@@ -83,6 +83,11 @@ export async function upsertProcessStep(
   );
 }
 
+/**
+ * Upserts process steps in a loop because Kuzu does not support UNWIND
+ * for parameterized batch MERGE. Wrapped in a transaction to amortize
+ * commit overhead.
+ */
 export async function upsertProcessStepsBatch(
   conn: Connection,
   steps: Array<{

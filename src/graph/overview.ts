@@ -153,6 +153,7 @@ function estimateDirectorySummaryTokens(summary: DirectorySummary): number {
  * long enough to coalesce concurrent bursts of identical requests.
  */
 const OVERVIEW_CACHE_TTL_MS = 5_000;
+const MAX_OVERVIEW_CACHE_ENTRIES = 20;
 
 interface OverviewCacheEntry {
   result: RepoOverview;
@@ -215,6 +216,18 @@ export async function buildRepoOverview(
       result,
       expiresAt: Date.now() + OVERVIEW_CACHE_TTL_MS,
     });
+    // Evict oldest entry if cache exceeds limit
+    if (overviewCache.size > MAX_OVERVIEW_CACHE_ENTRIES) {
+      let oldestKey: string | null = null;
+      let oldestExpiry = Infinity;
+      for (const [key, entry] of overviewCache) {
+        if (key !== cacheKey && entry.expiresAt < oldestExpiry) {
+          oldestExpiry = entry.expiresAt;
+          oldestKey = key;
+        }
+      }
+      if (oldestKey !== null) overviewCache.delete(oldestKey);
+    }
     return result;
   } finally {
     overviewInflight.delete(cacheKey);

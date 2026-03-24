@@ -1,3 +1,4 @@
+// Input validated by server.ts dispatch before reaching handlers
 import {
   type CodeNeedWindowRequest,
   CodeNeedWindowResponse,

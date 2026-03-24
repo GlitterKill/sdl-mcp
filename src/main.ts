@@ -24,6 +24,7 @@ import {
 import {
   enableFileLogging,
   getLogFilePath,
+  logger,
   shutdownLogger,
 } from "./util/logger.js";
 import { ensureConfiguredReposRegistered } from "./startup/bootstrap.js";
@@ -38,14 +39,17 @@ if (!getLogFilePath()) {
 // MCP servers must use stderr for logging - stdout is reserved for JSON-RPC
 const log = (msg: string) => process.stderr.write(`[sdl-mcp] ${msg}\n`);
 
-// Catch uncaught errors to see what's crashing the server
+// Catch uncaught errors — sanitize stderr output, log full details to file, then exit.
 process.on("uncaughtException", (error) => {
-  process.stderr.write(`[sdl-mcp] UNCAUGHT EXCEPTION: ${error}\n`);
-  process.stderr.write(`[sdl-mcp] Stack: ${error.stack}\n`);
+  process.stderr.write(`[sdl-mcp] Fatal uncaught exception: ${error instanceof Error ? error.message : String(error)}\n`);
+  logger.error("Uncaught exception", { error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
+  process.exit(1);
 });
 
 process.on("unhandledRejection", (reason) => {
-  process.stderr.write(`[sdl-mcp] UNHANDLED REJECTION: ${reason}\n`);
+  const message = reason instanceof Error ? reason.message : String(reason);
+  process.stderr.write(`[sdl-mcp] Unhandled rejection: ${message}\n`);
+  logger.error("Unhandled rejection", { error: message, stack: reason instanceof Error ? reason.stack : undefined });
 });
 
 async function main(): Promise<void> {

@@ -237,6 +237,7 @@ const GraphSliceSchema = z.object({
       unknown: z.number().int().min(0),
     })
     .optional(),
+  staleSymbols: z.array(z.string()).optional(),
   memories: z.array(SurfacedMemorySchema).optional(),
 });
 
@@ -332,6 +333,7 @@ const CompactGraphSliceSchema = z.object({
   f: z.array(CompactFrontierItemSchema).optional(),
   t: CompactSliceTruncationSchema.optional(),
   staleSymbols: z.array(z.string()).optional(),
+  memories: z.array(SurfacedMemorySchema).optional(),
 });
 
 // ============================================================================
@@ -404,6 +406,7 @@ const CompactGraphSliceV2Schema = z.object({
   f: z.array(CompactFrontierItemV2Schema).optional(),
   t: CompactSliceTruncationSchema.optional(),
   staleSymbols: z.array(z.string()).optional(),
+  memories: z.array(SurfacedMemorySchema).optional(),
 });
 
 // ============================================================================
@@ -432,6 +435,7 @@ const CompactGraphSliceV3Schema = z.object({
   f: z.array(CompactFrontierItemV2Schema).optional(),
   t: CompactSliceTruncationSchema.optional(),
   staleSymbols: z.array(z.string()).optional(),
+  memories: z.array(SurfacedMemorySchema).optional(),
 });
 
 export {
@@ -792,7 +796,7 @@ const SymbolSearchResultSchema = z.object({
 export const SymbolSearchRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   query: z.string().min(1).max(1000),
-  kinds: z.array(z.string()).optional(),
+  kinds: z.array(SymbolKindEnumSchema).optional(),
   limit: z.number().int().min(1).max(SYMBOL_SEARCH_MAX_RESULTS).optional(),
   semantic: z.boolean().optional(),
 });
@@ -858,6 +862,7 @@ export const SymbolGetCardsRequestSchema = z.object({
   includeResolutionMetadata: z.boolean().optional(),
   knownEtags: z
     .record(z.string(), z.string())
+    .refine(obj => Object.keys(obj).length <= 1000, { message: "knownEtags exceeds maximum of 1000 entries" })
     .optional()
     .describe(
       "Map of symbolId → known ETag. Matching symbols return notModified instead of full card.",
@@ -913,7 +918,9 @@ export const SliceBuildRequestSchema = z.object({
   failingTestPath: z.string().max(500).optional(),
   editedFiles: z.array(z.string()).max(100).optional(),
   entrySymbols: z.array(z.string()).max(100).optional(),
-  knownCardEtags: z.record(z.string(), z.string()).optional(),
+  knownCardEtags: z.record(z.string(), z.string())
+    .refine(obj => Object.keys(obj).length <= 1000, { message: "knownCardEtags exceeds maximum of 1000 entries" })
+    .optional(),
   cardDetail: CardDetailLevelSchema.optional(),
   adaptiveDetail: z.boolean().optional(),
   wireFormat: SliceBuildWireFormatSchema.optional(),
@@ -982,6 +989,15 @@ export const SliceRefreshResponseSchema = z.object({
   lease: SliceLeaseSchema.optional(),
 });
 
+const SliceErrorResponseSchema = z.object({
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    type: z.string(),
+    repoId: z.string().optional(),
+  }),
+});
+
 export const SliceBuildResponseSchema = z.union([
   z.object({
     sliceHandle: z.string(),
@@ -996,6 +1012,7 @@ export const SliceBuildResponseSchema = z.union([
     ]),
   }),
   NotModifiedResponseSchema,
+  SliceErrorResponseSchema,
 ]);
 
 export const DeltaGetRequestSchema = z.object({
@@ -1425,24 +1442,23 @@ export type SymbolRef = z.infer<typeof SymbolRefSchema>;
 export type SymbolGetCardRequest = z.infer<typeof SymbolGetCardRequestSchema>;
 export type SymbolGetCardResponse = z.infer<typeof SymbolGetCardResponseSchema>;
 export type SymbolGetCardsRequest = z.infer<typeof SymbolGetCardsRequestSchema>;
-export type SymbolGetCardsResponse = {
-  cards: Array<
-    import("./types.js").CardWithETag | import("./types.js").NotModifiedResponse
-  >;
-  partial?: boolean;
-  succeeded?: string[];
-  failed?: string[];
-  failures?: Array<{
-    input: string;
-    message: string;
-    code?: string;
-    classification?: string;
-    retryable?: boolean;
-    fallbackTools?: string[];
-    fallbackRationale?: string;
-    candidates?: Array<Record<string, unknown>>;
-  }>;
-};
+export const SymbolGetCardsResponseSchema = z.object({
+  cards: z.array(z.union([CardWithETagSchema, NotModifiedResponseSchema])),
+  partial: z.boolean().optional(),
+  succeeded: z.array(z.string()).optional(),
+  failed: z.array(z.string()).optional(),
+  failures: z.array(z.object({
+    input: z.string(),
+    message: z.string(),
+    code: z.string().optional(),
+    classification: z.string().optional(),
+    retryable: z.boolean().optional(),
+    fallbackTools: z.array(z.string()).optional(),
+    fallbackRationale: z.string().optional(),
+    candidates: z.array(z.record(z.string(), z.unknown())).optional(),
+  })).optional(),
+});
+export type SymbolGetCardsResponse = z.infer<typeof SymbolGetCardsResponseSchema>;
 export type SliceBuildRequest = z.infer<typeof SliceBuildRequestSchema>;
 export type SliceBuildResponse = z.infer<typeof SliceBuildResponseSchema>;
 export type SliceBuildWireFormat = z.infer<typeof SliceBuildWireFormatSchema>;
@@ -1845,6 +1861,14 @@ export const RuntimeExecuteRequestSchema = z.object({
     .boolean()
     .default(true)
     .describe("Whether to persist full output as a gzip artifact"),
+  outputMode: z
+    .enum(["minimal", "summary", "intent"])
+    .default("minimal")
+    .describe(
+      "Response verbosity: 'minimal' returns only status/exitCode/duration/artifactHandle (~50 tokens); " +
+        "'summary' returns head+tail output excerpts (legacy behavior); " +
+        "'intent' returns only queryTerms-matched excerpts, no head/tail summary",
+    ),
 });
 
 export const RuntimeExecuteExcerptSchema = z.object({
@@ -1884,6 +1908,47 @@ export type RuntimeExecuteRequest = z.infer<typeof RuntimeExecuteRequestSchema>;
 export type RuntimeExecuteResponse = z.infer<
   typeof RuntimeExecuteResponseSchema
 >;
+
+// Runtime Query Output Schemas
+// ============================================================================
+
+export const RuntimeQueryOutputRequestSchema = z.object({
+  artifactHandle: z.string().min(1).describe("Artifact handle from a previous runtime.execute call"),
+  queryTerms: z
+    .array(z.string())
+    .min(1)
+    .max(RUNTIME_MAX_QUERY_TERMS)
+    .describe("Keywords to search for in stored output"),
+  maxExcerpts: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .default(10)
+    .describe("Maximum number of excerpt windows to return"),
+  contextLines: z
+    .number()
+    .int()
+    .min(0)
+    .max(10)
+    .default(3)
+    .describe("Lines of context around each match"),
+  stream: z
+    .enum(["stdout", "stderr", "both"])
+    .default("both")
+    .describe("Which output stream(s) to search"),
+});
+
+export const RuntimeQueryOutputResponseSchema = z.object({
+  artifactHandle: z.string(),
+  excerpts: z.array(RuntimeExecuteExcerptSchema),
+  totalLines: z.number().int().describe("Total lines in stored output"),
+  totalBytes: z.number().int().describe("Total bytes in stored output"),
+  searchedStreams: z.array(z.enum(["stdout", "stderr"])),
+});
+
+export type RuntimeQueryOutputRequest = z.infer<typeof RuntimeQueryOutputRequestSchema>;
+export type RuntimeQueryOutputResponse = z.infer<typeof RuntimeQueryOutputResponseSchema>;
 
 // ============================================================================
 // Memory Schemas

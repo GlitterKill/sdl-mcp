@@ -152,6 +152,10 @@ export function toCompactGraphSliceV1(slice: GraphSlice): CompactGraphSlice {
     compact.staleSymbols = slice.staleSymbols;
   }
 
+  if (slice.memories && slice.memories.length > 0) {
+    compact.memories = slice.memories;
+  }
+
   return compact;
 }
 
@@ -303,6 +307,10 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
 
   if (slice.staleSymbols && slice.staleSymbols.length > 0) {
     compact.staleSymbols = slice.staleSymbols;
+  }
+
+  if (slice.memories && slice.memories.length > 0) {
+    compact.memories = slice.memories;
   }
 
   return compact;
@@ -462,6 +470,10 @@ export function toCompactGraphSliceV3(slice: GraphSlice): CompactGraphSliceV3 {
 
   if (slice.staleSymbols && slice.staleSymbols.length > 0) {
     compact.staleSymbols = slice.staleSymbols;
+  }
+
+  if (slice.memories && slice.memories.length > 0) {
+    compact.memories = slice.memories;
   }
 
   return compact;

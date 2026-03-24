@@ -52,7 +52,8 @@ const DEFAULT_REDACTION_PATTERNS: RedactionPattern[] = [
 ];
 
 export function generateArtifactId(repoId: string): string {
-  return `runtime-${repoId}-${Date.now()}-${crypto.randomBytes(8).toString("hex")}`;
+  const safeRepoId = repoId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `runtime-${safeRepoId}-${Date.now()}-${crypto.randomBytes(8).toString("hex")}`;
 }
 
 export function getArtifactBaseDir(configBaseDir?: string | null): string {
@@ -282,6 +283,16 @@ export async function readArtifactManifest(
   artifactHandle: string,
   baseDir?: string | null,
 ): Promise<ArtifactManifest | null> {
+  if (
+    !artifactHandle ||
+    artifactHandle.includes("..") ||
+    artifactHandle.includes("/") ||
+    artifactHandle.includes("\\") ||
+    /^[A-Za-z]:/.test(artifactHandle)
+  ) {
+    return null;
+  }
+
   const manifestPath = join(
     getArtifactBaseDir(baseDir),
     artifactHandle,
@@ -304,4 +315,143 @@ export async function readArtifactManifest(
     });
     throw error;
   }
+}
+
+import { gunzip } from "zlib";
+
+const gunzipAsync = promisify(gunzip);
+
+/**
+ * Read and decompress artifact content by handle.
+ */
+export async function readArtifactContent(
+  artifactHandle: string,
+  baseDir?: string | null,
+  stream: "stdout" | "stderr" | "both" = "both",
+): Promise<{ stdout: string | null; stderr: string | null; totalBytes: number }> {
+  if (/[\/\\]/.test(artifactHandle)) {
+    throw new Error("Invalid artifact handle: path traversal detected");
+  }
+
+  const artifactBaseDir = getArtifactBaseDir(baseDir);
+  const artifactDir = join(artifactBaseDir, artifactHandle);
+
+  let stdout: string | null = null;
+  let stderr: string | null = null;
+  let totalBytes = 0;
+
+  if (stream === "stdout" || stream === "both") {
+    try {
+      const compressed = await readFile(join(artifactDir, "stdout.gz"));
+      const decompressed = await gunzipAsync(compressed);
+      stdout = decompressed.toString("utf-8");
+      totalBytes += decompressed.length;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+  }
+
+  if (stream === "stderr" || stream === "both") {
+    try {
+      const compressed = await readFile(join(artifactDir, "stderr.gz"));
+      const decompressed = await gunzipAsync(compressed);
+      stderr = decompressed.toString("utf-8");
+      totalBytes += decompressed.length;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+  }
+
+  return { stdout, stderr, totalBytes };
+}
+
+/**
+ * Search artifact content for query terms and return focused excerpts.
+ */
+export async function queryArtifactContent(
+  artifactHandle: string,
+  queryTerms: string[],
+  options: {
+    baseDir?: string | null;
+    maxExcerpts?: number;
+    contextLines?: number;
+    stream?: "stdout" | "stderr" | "both";
+    maxLineLength?: number;
+  } = {},
+): Promise<{
+  excerpts: Array<{
+    lineStart: number;
+    lineEnd: number;
+    content: string;
+    source: "stdout" | "stderr";
+  }>;
+  totalLines: number;
+  totalBytes: number;
+  searchedStreams: Array<"stdout" | "stderr">;
+}> {
+  const maxExcerpts = options.maxExcerpts ?? 10;
+  const contextLines = options.contextLines ?? 3;
+  const maxLineLength = options.maxLineLength ?? 500;
+  const streamFilter = options.stream ?? "both";
+
+  const { stdout, stderr, totalBytes } = await readArtifactContent(
+    artifactHandle,
+    options.baseDir,
+    streamFilter,
+  );
+
+  const excerpts: Array<{
+    lineStart: number;
+    lineEnd: number;
+    content: string;
+    source: "stdout" | "stderr";
+  }> = [];
+  const lowerTerms = queryTerms.map((t) => t.toLowerCase());
+  const searchedStreams: Array<"stdout" | "stderr"> = [];
+  let totalLines = 0;
+
+  const truncLine = (line: string): string => {
+    if (line.length <= maxLineLength) return line;
+    return (
+      line.slice(0, maxLineLength) +
+      "\u2026 (+" + (line.length - maxLineLength) + ")"
+    );
+  };
+
+  const searchStream = (
+    content: string | null,
+    source: "stdout" | "stderr",
+  ) => {
+    if (!content) return;
+    searchedStreams.push(source);
+    const lines = content.split("\n");
+    totalLines += lines.length;
+
+    for (
+      let i = 0;
+      i < lines.length && excerpts.length < maxExcerpts;
+      i++
+    ) {
+      const lower = lines[i].toLowerCase();
+      if (lowerTerms.some((t) => lower.includes(t))) {
+        const start = Math.max(0, i - contextLines);
+        const end = Math.min(lines.length - 1, i + contextLines);
+        excerpts.push({
+          lineStart: start + 1,
+          lineEnd: end + 1,
+          content: lines
+            .slice(start, end + 1)
+            .map(truncLine)
+            .join("\n"),
+          source,
+        });
+        i = end;
+      }
+    }
+  };
+
+  searchStream(stdout, "stdout");
+  searchStream(stderr, "stderr");
+
+  return { excerpts, totalLines, totalBytes, searchedStreams };
 }

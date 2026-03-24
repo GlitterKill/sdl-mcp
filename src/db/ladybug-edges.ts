@@ -4,6 +4,7 @@
  */
 import type { Connection } from "kuzu";
 import { exec, queryAll, querySingle, toNumber, withTransaction } from "./ladybug-core.js";
+import { logger } from "../util/logger.js";
 
 // Promise-based singleton for join hint support detection.
 // Used by getEdgesToSymbols and getCallersOfSymbols to avoid
@@ -17,7 +18,8 @@ async function detectJoinHintSupport(conn: Connection): Promise<boolean> {
   try {
     await queryAll(conn, `MATCH (a:Symbol)-[d:DEPENDS_ON]->(b:Symbol) WITH a, d, b HINT (b JOIN (d JOIN a)) RETURN a.symbolId LIMIT 0`, {});
     return true;
-  } catch {
+  } catch (err) {
+    logger.warn("Join hint support detection failed", { error: String(err) });
     return false;
   }
 }
@@ -120,6 +122,11 @@ export async function insertEdge(conn: Connection, edge: EdgeRow): Promise<void>
   );
 }
 
+/**
+ * Upserts edges in a loop because Kuzu does not support UNWIND for
+ * parameterized batch MERGE. Wrapped in a transaction to amortize
+ * commit overhead.
+ */
 export async function insertEdges(
   conn: Connection,
   edges: EdgeRow[],
@@ -610,33 +617,40 @@ export async function deleteEdgesByFileId(
   conn: Connection,
   fileId: string,
 ): Promise<void> {
-  const symbolRows = await queryAll<{ symbolId: string }>(
-    conn,
-    `MATCH (f:File {fileId: $fileId})<-[:SYMBOL_IN_FILE]-(s:Symbol)
-     RETURN s.symbolId AS symbolId`,
-    { fileId },
-  );
+  await withTransaction(conn, async (txConn) => {
+    const symbolRows = await queryAll<{ symbolId: string }>(
+      txConn,
+      `MATCH (f:File {fileId: $fileId})<-[:SYMBOL_IN_FILE]-(s:Symbol)
+       RETURN s.symbolId AS symbolId`,
+      { fileId },
+    );
 
-  const symbolIds = symbolRows.map((r) => r.symbolId);
-  if (symbolIds.length === 0) return;
+    const symbolIds = symbolRows.map((r) => r.symbolId);
+    if (symbolIds.length === 0) return;
 
-  await exec(
-    conn,
-    `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
-     WHERE s.symbolId IN $symbolIds
-     DELETE d`,
-    { symbolIds },
-  );
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE d`,
+      { symbolIds },
+    );
 
-  await exec(
-    conn,
-    `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
-     WHERE s.symbolId IN $symbolIds
-     DELETE d`,
-    { symbolIds },
-  );
+    await exec(
+      txConn,
+      `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE d`,
+      { symbolIds },
+    );
+  });
 }
 
+/**
+ * Deletes outgoing DEPENDS_ON edges of a specific type for given symbols.
+ * NOTE: Callers should wrap this in a transaction if followed by edge insertions
+ * to ensure atomic delete+insert behavior.
+ */
 export async function deleteOutgoingEdgesByTypeForSymbols(
   conn: Connection,
   symbolIds: string[],

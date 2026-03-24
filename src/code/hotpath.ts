@@ -106,9 +106,10 @@ function findLinesMatchingIdentifiers(
       }
     }
 
-    Array.from(node.children).forEach((child) => {
-      walk(child);
-    });
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i);
+      if (child) walk(child);
+    }
   }
 
   walk(tree.rootNode);

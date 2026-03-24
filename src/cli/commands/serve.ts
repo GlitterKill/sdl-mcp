@@ -31,6 +31,7 @@ import {
 import {
   enableFileLogging,
   getLogFilePath,
+  logger,
   shutdownLogger,
 } from "../../util/logger.js";
 import { configureToolDispatchLimiter } from "../../mcp/dispatch-limiter.js";
@@ -45,14 +46,17 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     enableFileLogging();
   }
 
-  // Catch uncaught errors to prevent silent crashes (parity with main.ts)
+  // Catch uncaught errors — sanitize stderr output, log full details to file, then exit.
   process.on("uncaughtException", (error) => {
-    process.stderr.write(`[sdl-mcp] UNCAUGHT EXCEPTION: ${error}\n`);
-    process.stderr.write(`[sdl-mcp] Stack: ${error.stack}\n`);
+    process.stderr.write(`[sdl-mcp] Fatal uncaught exception: ${error instanceof Error ? error.message : String(error)}\n`);
+    logger.error("Uncaught exception", { error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
+    process.exit(1);
   });
 
   process.on("unhandledRejection", (reason) => {
-    process.stderr.write(`[sdl-mcp] UNHANDLED REJECTION: ${reason}\n`);
+    const message = reason instanceof Error ? reason.message : String(reason);
+    process.stderr.write(`[sdl-mcp] Unhandled rejection: ${message}\n`);
+    logger.error("Unhandled rejection", { error: message, stack: reason instanceof Error ? reason.stack : undefined });
   });
 
   const configPath = activateCliConfigPath(options.config);

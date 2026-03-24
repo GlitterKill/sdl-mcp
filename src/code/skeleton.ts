@@ -133,17 +133,17 @@ export function extractSkeletonFromNode(
 
   // Root containers: process children
   if (ROOT_CONTAINER_TYPES.has(nodeType)) {
-    let result = "";
+    const parts: string[] = [];
     // First pass: imports
     for (const child of node.children) {
       if (VERBATIM_TYPES.has(child.type) || child.type === "export_statement") {
-        result += extractSkeletonFromNode(
+        parts.push(extractSkeletonFromNode(
           child,
           content,
           includeIdentifiers,
           depth,
           exportedOnly,
-        );
+        ));
       }
     }
     // Second pass: non-imports
@@ -153,17 +153,17 @@ export function extractSkeletonFromNode(
           !VERBATIM_TYPES.has(child.type) &&
           child.type !== "export_statement"
         ) {
-          result += extractSkeletonFromNode(
+          parts.push(extractSkeletonFromNode(
             child,
             content,
             includeIdentifiers,
             depth,
             exportedOnly,
-          );
+          ));
         }
       }
     }
-    return result;
+    return parts.join("");
   }
 
   // Verbatim types: render as-is
@@ -178,18 +178,18 @@ export function extractSkeletonFromNode(
 
   // Export statement (JS/TS)
   if (nodeType === "export_statement") {
-    let result = "export ";
+    const parts: string[] = ["export "];
     for (const child of node.children) {
       if (child.type !== "export") {
-        result += extractSkeletonFromNode(
+        parts.push(extractSkeletonFromNode(
           child,
           content,
           includeIdentifiers,
           depth,
-        );
+        ));
       }
     }
-    return result;
+    return parts.join("");
   }
 
   // Variable declaration (JS/TS)
@@ -210,21 +210,21 @@ export function extractSkeletonFromNode(
 
   // Python: decorated_definition — unwrap and process the inner definition
   if (nodeType === "decorated_definition") {
-    let result = "";
+    const parts: string[] = [];
     for (const child of node.children) {
       if (child.type === "decorator") {
-        result += child.text + "\n";
+        parts.push(child.text + "\n");
       } else {
-        result += extractSkeletonFromNode(
+        parts.push(extractSkeletonFromNode(
           child,
           content,
           includeIdentifiers,
           depth,
           exportedOnly,
-        );
+        ));
       }
     }
-    return result;
+    return parts.join("");
   }
 
   // Rust: type declarations rendered verbatim
@@ -331,7 +331,7 @@ function extractSkeletonFromBody(
   content: string,
   includeIdentifiers: string[],
 ): string {
-  let result = "";
+  const parts: string[] = [];
   const lines = bodyNode.text.split("\n");
 
   if (lines.length <= 5) {
@@ -361,7 +361,7 @@ function extractSkeletonFromBody(
       );
 
       if (hasImportantIdentifier) {
-        result += child.text.trim() + "\n";
+        parts.push(child.text.trim() + "\n");
         processedStatements++;
       }
     }
@@ -376,13 +376,13 @@ function extractSkeletonFromBody(
         includeIdentifiers.some((id) => childText.includes(id));
 
       if (isReturn || isThrow || hasImportantIdentifier) {
-        result += child.text.trim() + "\n";
+        parts.push(child.text.trim() + "\n");
         processedStatements++;
       }
     }
     // Return/raise/throw statements (when they appear directly, not inside expression_statement)
     else if (RETURN_LIKE_TYPES.has(childType)) {
-      result += child.text.trim() + "\n";
+      parts.push(child.text.trim() + "\n");
       processedStatements++;
     }
     // If statements (language-agnostic)
@@ -420,7 +420,7 @@ function extractSkeletonFromBody(
         }
       }
 
-      result += ifLine + "\n";
+      parts.push(ifLine + "\n");
       processedStatements++;
     }
     // Loop statements (language-agnostic)
@@ -451,7 +451,7 @@ function extractSkeletonFromBody(
         loopLine += " {\n" + bodySkeleton + "}";
       }
 
-      result += loopLine + "\n";
+      parts.push(loopLine + "\n");
       processedStatements++;
     }
     // Try/catch/finally (language-agnostic)
@@ -461,7 +461,7 @@ function extractSkeletonFromBody(
       childType === "except_clause" ||
       childType === "finally_clause"
     ) {
-      result += child.text.trim() + "\n";
+      parts.push(child.text.trim() + "\n");
       processedStatements++;
     }
     // Nested function/class definitions (Python, Go, Rust)
@@ -469,8 +469,8 @@ function extractSkeletonFromBody(
       FUNCTION_LIKE_TYPES.has(childType) ||
       childType === "decorated_definition"
     ) {
-      result +=
-        extractSkeletonFromNode(child, content, includeIdentifiers, 1) + "\n";
+      parts.push(
+        extractSkeletonFromNode(child, content, includeIdentifiers, 1) + "\n");
       processedStatements++;
     }
     // Assignment (Python)
@@ -482,7 +482,7 @@ function extractSkeletonFromBody(
         childText.includes(id),
       );
       if (hasImportantIdentifier) {
-        result += child.text.trim() + "\n";
+        parts.push(child.text.trim() + "\n");
         processedStatements++;
       }
     }
@@ -493,16 +493,20 @@ function extractSkeletonFromBody(
   }
 
   if (processedStatements > 0 && processedStatements < lines.length - 1) {
-    const insertElision = result.lastIndexOf("\n");
+    // Insert elision marker before the last entry
+    const joined = parts.join("");
+    const insertElision = joined.lastIndexOf("\n");
     if (insertElision > 0) {
-      result =
-        result.slice(0, insertElision) +
+      return (
+        joined.slice(0, insertElision) +
         "  // …\n" +
-        result.slice(insertElision + 1);
+        joined.slice(insertElision + 1)
+      );
     }
+    return joined;
   }
 
-  return result;
+  return parts.join("");
 }
 
 export function trimSkeletonToBounds(

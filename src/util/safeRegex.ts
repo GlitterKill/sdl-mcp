@@ -45,6 +45,13 @@ export function isReDoSRisk(pattern: string): boolean {
     }
   }
 
+  // 6. Alternation with overlapping character classes under quantifier
+  //    e.g., (\w|\d)+ where \w includes all \d characters.
+  //    This is a heuristic enhancement and not exhaustive.
+  if (/\([^)]*\\[wWdDsS][^)]*\|[^)]*\\[wWdDsS][^)]*\)[+*{]/.test(pattern)) {
+    return true;
+  }
+
   return false;
 }
 

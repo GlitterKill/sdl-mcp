@@ -33,7 +33,7 @@ export const AGENT_DESCRIPTION =
   `agent.feedback.query(versionId?,limit?,since?) | ` +
   `buffer.push(eventType,filePath,content,version,dirty,timestamp,cursor?,selections?) | ` +
   `buffer.checkpoint(reason?) | buffer.status() | ` +
-  `runtime.execute(runtime,executable?,args?,code?,relativeCwd?,timeoutMs?,queryTerms?,maxResponseLines?,persistOutput?) | ` +
+  `runtime.execute(runtime,executable?,args?,code?,relativeCwd?,timeoutMs?,queryTerms?,maxResponseLines?,persistOutput?,outputMode?) [outputMode defaults to "minimal" ~50 tokens; use "summary" for head+tail, "intent" for queryTerms-only excerpts] | runtime.queryOutput(artifactHandle,queryTerms[],maxExcerpts?,contextLines?,stream?) | ` +
   `memory.store(type,title,content,tags?,confidence?,symbolIds?,fileRelPaths?,memoryId?) | ` +
   `memory.query(query?,types?,tags?,symbolIds?,staleOnly?,limit?,sortBy?) | ` +
   `memory.remove(memoryId,deleteFile?) | memory.surface(symbolIds?,taskType?,limit?)`;

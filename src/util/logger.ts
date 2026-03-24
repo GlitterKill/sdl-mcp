@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, renameSync, statSync } from "fs";
+import { appendFileSync, createWriteStream, mkdirSync, renameSync, statSync, type WriteStream } from "fs";
 import { dirname, join } from "path";
 import { homedir, tmpdir } from "os";
 import {
@@ -29,6 +29,7 @@ let logFileEnabled = false;
 let logFileBytesSinceRotationCheck = 0;
 let consoleMirroringEnabled = false;
 let fallbackUsed = false;
+let logStream: WriteStream | null = null;
 
 function isLogLevel(value: string | undefined): value is LogLevel {
   return value === "debug" || value === "info" || value === "warn" || value === "error";
@@ -93,10 +94,15 @@ function writeToLogFile(msg: string): void {
     const line = msg + "\n";
     logFileBytesSinceRotationCheck += line.length;
     if (logFileBytesSinceRotationCheck >= LOG_ROTATION_CHECK_INTERVAL_BYTES) {
+      logStream?.end();
+      logStream = null;
       rotateLogFile(logFilePath);
       logFileBytesSinceRotationCheck = 0;
     }
-    appendFileSync(logFilePath, line, "utf-8");
+    if (!logStream) {
+      logStream = createWriteStream(logFilePath, { flags: "a" });
+    }
+    logStream.write(line);
   } catch {
     // Logging failures should never crash the server.
   }
@@ -201,6 +207,8 @@ export function enableFileLogging(filePath?: string): void {
 }
 
 export function disableFileLogging(): void {
+  logStream?.end();
+  logStream = null;
   logFileEnabled = false;
   logFilePath = null;
   configuredLogFilePath = null;
@@ -250,11 +258,18 @@ export function configureLoggerFromEnvironment(
 }
 
 export function flushLogger(): void {
-  // appendFileSync flushes writes immediately; this is a stable shutdown hook.
+  // End the write stream to flush pending writes.
+  logStream?.end();
+  logStream = null;
 }
 
 export function shutdownLogger(): void {
   flushLogger();
+}
+
+export function closeLogStream(): void {
+  logStream?.end();
+  logStream = null;
 }
 
 configureLoggerFromEnvironment();

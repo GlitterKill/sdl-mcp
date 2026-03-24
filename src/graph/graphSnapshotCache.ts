@@ -45,6 +45,7 @@ let snapshotTtlMs = 5 * 60_000;
 /** Maximum number of symbols per repo before we skip snapshot caching. */
 let maxSnapshotSymbols = 15_000;
 
+const MAX_CACHED_REPOS = 3;
 const snapshotsByRepo = new Map<RepoId, GraphSnapshot>();
 const loadingPromises = new Map<RepoId, Promise<Graph | null>>();
 
@@ -104,6 +105,21 @@ export function setGraphSnapshot(repoId: RepoId, graph: Graph): void {
     edgeCount: graph.edges.length,
     clusterCount: graph.clusters?.size ?? 0,
   });
+  // Evict oldest snapshot if cache exceeds limit
+  if (snapshotsByRepo.size > MAX_CACHED_REPOS) {
+    let oldestKey: RepoId | null = null;
+    let oldestTime = Infinity;
+    for (const [key, entry] of snapshotsByRepo) {
+      if (key !== repoId && entry.createdAt < oldestTime) {
+        oldestTime = entry.createdAt;
+        oldestKey = key;
+      }
+    }
+    if (oldestKey !== null) {
+      snapshotsByRepo.delete(oldestKey);
+      logger.debug("Evicted oldest graph snapshot", { evictedRepoId: oldestKey });
+    }
+  }
   logger.debug("Graph snapshot cached", {
     repoId,
     symbolCount: graph.symbols.size,

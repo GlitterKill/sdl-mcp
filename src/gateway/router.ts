@@ -35,6 +35,7 @@ import {
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
   RuntimeExecuteRequestSchema,
+  RuntimeQueryOutputRequestSchema,
   MemoryStoreRequestSchema,
   MemoryQueryRequestSchema,
   MemoryRemoveRequestSchema,
@@ -77,6 +78,7 @@ import {
   handleAgentFeedbackQuery,
 } from "../mcp/tools/agent-feedback.js";
 import { handleRuntimeExecute } from "../mcp/tools/runtime.js";
+import { handleRuntimeQueryOutput } from "../mcp/tools/runtime-query.js";
 import {
   handleMemoryStore,
   handleMemoryQuery,
@@ -213,6 +215,10 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
     "runtime.execute": {
       schema: RuntimeExecuteRequestSchema,
       handler: handleRuntimeExecute,
+    },
+    "runtime.queryOutput": {
+      schema: RuntimeQueryOutputRequestSchema,
+      handler: handleRuntimeQueryOutput,
     },
     "memory.store": {
       schema: MemoryStoreRequestSchema,

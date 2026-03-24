@@ -93,7 +93,7 @@ export class ParserWorkerPool {
           this.workers.push(this.createWorker(this.workers.length));
         }
       }
-      logger.error(`Worker ${index} crashed and was replaced`, { error: error instanceof Error ? error.message : String(error) });
+      logger.warn("Worker crashed and was replaced", { originalIndex: index, error: error instanceof Error ? error.message : String(error) });
       this.processQueue();
     });
 

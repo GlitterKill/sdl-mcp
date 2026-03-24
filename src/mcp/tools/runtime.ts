@@ -35,11 +35,9 @@ import { attachRawContext } from "../token-usage.js";
 import { hashContent } from "../../util/hashing.js";
 import { logger } from "../../util/logger.js";
 import {
-  RUNTIME_EXCERPT_HEAD_LINES,
-  RUNTIME_EXCERPT_TAIL_LINES,
-  RUNTIME_EXCERPT_STDERR_TAIL_LINES,
   RUNTIME_MAX_KEYWORD_EXCERPTS,
   RUNTIME_KEYWORD_CONTEXT_LINES,
+  RUNTIME_MAX_LINE_LENGTH,
 } from "../../config/constants.js";
 import { mkdtemp, writeFile, rm } from "fs/promises";
 import { join } from "path";
@@ -61,6 +59,49 @@ function getOrCreateConcurrencyTracker(maxJobs: number): ConcurrencyTracker {
 }
 
 // ============================================================================
+// Line Truncation
+// ============================================================================
+
+function truncateLine(line: string): string {
+  if (line.length <= RUNTIME_MAX_LINE_LENGTH) return line;
+  return line.slice(0, RUNTIME_MAX_LINE_LENGTH) + `… (+${line.length - RUNTIME_MAX_LINE_LENGTH})`;
+}
+
+// ============================================================================
+// Intent-Only Excerpts (for outputMode: "intent")
+// ============================================================================
+
+function generateIntentExcerpts(
+  stdout: string,
+  stderr: string,
+  queryTerms: string[],
+): OutputExcerpt[] {
+  const excerpts: OutputExcerpt[] = [];
+  const lowerTerms = queryTerms.map((t) => t.toLowerCase());
+
+  const searchStream = (lines: string[], source: "stdout" | "stderr") => {
+    for (let i = 0; i < lines.length && excerpts.length < RUNTIME_MAX_KEYWORD_EXCERPTS; i++) {
+      const lower = lines[i].toLowerCase();
+      if (lowerTerms.some((t) => lower.includes(t))) {
+        const start = Math.max(0, i - RUNTIME_KEYWORD_CONTEXT_LINES);
+        const end = Math.min(lines.length - 1, i + RUNTIME_KEYWORD_CONTEXT_LINES);
+        excerpts.push({
+          lineStart: start + 1,
+          lineEnd: end + 1,
+          content: lines.slice(start, end + 1).map(truncateLine).join("\n"),
+          source,
+        });
+        i = end; // skip ahead past context window
+      }
+    }
+  };
+
+  if (stdout) searchStream(stdout.split("\n"), "stdout");
+  if (stderr) searchStream(stderr.split("\n"), "stderr");
+  return excerpts;
+}
+
+// ============================================================================
 // Excerpt Generation
 // ============================================================================
 
@@ -78,15 +119,16 @@ function generateExcerpts(
   const stderrLines = stderr.split("\n");
 
   // Head + tail for stdout summary
-  const headCount = Math.min(RUNTIME_EXCERPT_HEAD_LINES, maxResponseLines / 2);
-  const tailCount = Math.min(RUNTIME_EXCERPT_TAIL_LINES, maxResponseLines / 2);
+  const halfMax = Math.floor(maxResponseLines / 2);
+  const headCount = Math.min(halfMax, stdoutLines.length);
+  const tailCount = Math.min(maxResponseLines - headCount, Math.max(0, stdoutLines.length - headCount));
 
   let stdoutSummary: string;
   if (stdoutLines.length <= headCount + tailCount) {
-    stdoutSummary = stdout;
+    stdoutSummary = stdoutLines.map(truncateLine).join("\n");
   } else {
-    const head = stdoutLines.slice(0, headCount);
-    const tail = stdoutLines.slice(-tailCount);
+    const head = stdoutLines.slice(0, headCount).map(truncateLine);
+    const tail = stdoutLines.slice(-tailCount).map(truncateLine);
     stdoutSummary = [
       ...head,
       `\n... (${stdoutLines.length - headCount - tailCount} lines omitted) ...\n`,
@@ -96,13 +138,13 @@ function generateExcerpts(
 
   // Tail for stderr summary
   const stderrTailCount = Math.min(
-    RUNTIME_EXCERPT_STDERR_TAIL_LINES,
+    Math.floor(maxResponseLines / 4),
     stderrLines.length,
   );
   const stderrSummary =
     stderrLines.length <= stderrTailCount
-      ? stderr
-      : stderrLines.slice(-stderrTailCount).join("\n");
+      ? stderrLines.map(truncateLine).join("\n")
+      : stderrLines.slice(-stderrTailCount).map(truncateLine).join("\n");
 
   // Keyword-matched excerpts
   const excerpts: OutputExcerpt[] = [];
@@ -122,7 +164,7 @@ function generateExcerpts(
             lines.length - 1,
             i + RUNTIME_KEYWORD_CONTEXT_LINES,
           );
-          const content = lines.slice(start, end + 1).join("\n");
+          const content = lines.slice(start, end + 1).map(truncateLine).join("\n");
           excerpts.push({
             lineStart: start + 1,
             lineEnd: end + 1,
@@ -299,12 +341,10 @@ export async function handleRuntimeExecute(
         // Compile failed — return compiler output immediately
         const compileStdout = compileResult.stdout.toString("utf-8");
         const compileStderr = compileResult.stderr.toString("utf-8");
-        const { stdoutSummary, stderrSummary, excerpts } = generateExcerpts(
-          compileStdout,
-          compileStderr,
-          request.maxResponseLines,
-          request.queryTerms,
+        const compileRawTokens = Math.ceil(
+          (compileResult.totalStdoutBytes + compileResult.totalStderrBytes) / 4,
         );
+
         logRuntimeExecution({
           repoId: request.repoId,
           runtime: request.runtime,
@@ -318,7 +358,66 @@ export async function handleRuntimeExecute(
           auditHash: policyDecision.auditHash,
           artifactHandle: null,
         });
-        return {
+
+        if (request.outputMode === "minimal") {
+          const stdoutLineCount = compileStdout ? compileStdout.split("\n").length : 0;
+          const stderrLineCount = compileStderr ? compileStderr.split("\n").length : 0;
+          return attachRawContext({
+            status: compileResult.status,
+            exitCode: compileResult.exitCode,
+            signal: compileResult.signal,
+            durationMs: compileResult.durationMs,
+            stdoutSummary: "",
+            stderrSummary: "",
+            outputLines: stdoutLineCount + stderrLineCount,
+            outputBytes: compileResult.totalStdoutBytes + compileResult.totalStderrBytes,
+            artifactHandle: null,
+            truncation: {
+              stdoutTruncated: compileResult.stdoutTruncated,
+              stderrTruncated: compileResult.stderrTruncated,
+              totalStdoutBytes: compileResult.totalStdoutBytes,
+              totalStderrBytes: compileResult.totalStderrBytes,
+            },
+            policyDecision: {
+              auditHash: policyDecision.auditHash,
+            },
+          }, { rawTokens: compileRawTokens });
+        }
+
+        if (request.outputMode === "intent") {
+          const excerpts: OutputExcerpt[] = [];
+          if (request.queryTerms && request.queryTerms.length > 0) {
+            excerpts.push(...generateIntentExcerpts(compileStdout, compileStderr, request.queryTerms));
+          }
+          return attachRawContext({
+            status: compileResult.status,
+            exitCode: compileResult.exitCode,
+            signal: compileResult.signal,
+            durationMs: compileResult.durationMs,
+            stdoutSummary: "",
+            stderrSummary: "",
+            artifactHandle: null,
+            excerpts: excerpts.length > 0 ? excerpts : undefined,
+            truncation: {
+              stdoutTruncated: compileResult.stdoutTruncated,
+              stderrTruncated: compileResult.stderrTruncated,
+              totalStdoutBytes: compileResult.totalStdoutBytes,
+              totalStderrBytes: compileResult.totalStderrBytes,
+            },
+            policyDecision: {
+              auditHash: policyDecision.auditHash,
+            },
+          }, { rawTokens: compileRawTokens });
+        }
+
+        // "summary" mode — existing behavior
+        const { stdoutSummary, stderrSummary, excerpts } = generateExcerpts(
+          compileStdout,
+          compileStderr,
+          request.maxResponseLines,
+          request.queryTerms,
+        );
+        return attachRawContext({
           status: compileResult.status,
           exitCode: compileResult.exitCode,
           signal: compileResult.signal,
@@ -336,7 +435,7 @@ export async function handleRuntimeExecute(
           policyDecision: {
             auditHash: policyDecision.auditHash,
           },
-        };
+        }, { rawTokens: compileRawTokens });
       }
 
       const compileDurationMs = Date.now() - compileStart;
@@ -385,17 +484,11 @@ export async function handleRuntimeExecute(
       codePath,
     });
 
-    // 10. Generate excerpts
+    // 10. Convert output to strings
     const stdoutStr = result.stdout.toString("utf-8");
     const stderrStr = result.stderr.toString("utf-8");
-    const { stdoutSummary, stderrSummary, excerpts } = generateExcerpts(
-      stdoutStr,
-      stderrStr,
-      request.maxResponseLines,
-      request.queryTerms,
-    );
 
-    // 11. Persist artifact
+    // 11. Persist artifact (all modes)
     let artifactHandle: string | null = null;
     if (
       request.persistOutput &&
@@ -428,7 +521,100 @@ export async function handleRuntimeExecute(
       }
     }
 
-    // 12. Log telemetry
+    // 12. Compute raw token equivalent
+    const rawOutputTokens = Math.ceil(
+      (result.totalStdoutBytes + result.totalStderrBytes) / 4,
+    );
+
+    // 13. Branch on outputMode
+    if (request.outputMode === "minimal") {
+      const stdoutLineCount = stdoutStr ? stdoutStr.split("\n").length : 0;
+      const stderrLineCount = stderrStr ? stderrStr.split("\n").length : 0;
+      logRuntimeExecution({
+        repoId: request.repoId,
+        runtime: request.runtime,
+        executable: cmd.executable,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        stdoutBytes: result.totalStdoutBytes,
+        stderrBytes: result.totalStderrBytes,
+        timedOut: result.status === "timeout",
+        policyDecision: policyDecision.decision,
+        auditHash: policyDecision.auditHash,
+        artifactHandle,
+      });
+      const minimalResponse = {
+        status: result.status,
+        exitCode: result.exitCode,
+        signal: result.signal,
+        durationMs: result.durationMs,
+        stdoutSummary: "",
+        stderrSummary: "",
+        outputLines: stdoutLineCount + stderrLineCount,
+        outputBytes: result.totalStdoutBytes + result.totalStderrBytes,
+        artifactHandle,
+        truncation: {
+          stdoutTruncated: result.stdoutTruncated,
+          stderrTruncated: result.stderrTruncated,
+          totalStdoutBytes: result.totalStdoutBytes,
+          totalStderrBytes: result.totalStderrBytes,
+        },
+        policyDecision: {
+          auditHash: policyDecision.auditHash,
+        },
+      };
+      return attachRawContext(minimalResponse, { rawTokens: rawOutputTokens });
+    }
+
+    if (request.outputMode === "intent") {
+      const excerpts: OutputExcerpt[] = [];
+      if (request.queryTerms && request.queryTerms.length > 0) {
+        excerpts.push(...generateIntentExcerpts(stdoutStr, stderrStr, request.queryTerms));
+      }
+      logRuntimeExecution({
+        repoId: request.repoId,
+        runtime: request.runtime,
+        executable: cmd.executable,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        stdoutBytes: result.totalStdoutBytes,
+        stderrBytes: result.totalStderrBytes,
+        timedOut: result.status === "timeout",
+        policyDecision: policyDecision.decision,
+        auditHash: policyDecision.auditHash,
+        artifactHandle,
+      });
+      const intentResponse = {
+        status: result.status,
+        exitCode: result.exitCode,
+        signal: result.signal,
+        durationMs: result.durationMs,
+        stdoutSummary: "",
+        stderrSummary: "",
+        artifactHandle,
+        excerpts: excerpts.length > 0 ? excerpts : undefined,
+        truncation: {
+          stdoutTruncated: result.stdoutTruncated,
+          stderrTruncated: result.stderrTruncated,
+          totalStdoutBytes: result.totalStdoutBytes,
+          totalStderrBytes: result.totalStderrBytes,
+        },
+        policyDecision: {
+          auditHash: policyDecision.auditHash,
+        },
+      };
+      return attachRawContext(intentResponse, { rawTokens: rawOutputTokens });
+    }
+
+    // "summary" mode — existing behavior
+    const { stdoutSummary, stderrSummary, excerpts } = generateExcerpts(
+      stdoutStr,
+      stderrStr,
+      request.maxResponseLines,
+      request.queryTerms,
+    );
+
+    // 14. Log telemetry
     logRuntimeExecution({
       repoId: request.repoId,
       runtime: request.runtime,
@@ -443,11 +629,7 @@ export async function handleRuntimeExecute(
       artifactHandle,
     });
 
-    // 13. Return response
-    // Raw equivalent = what the agent would consume watching full output
-    const rawOutputTokens = Math.ceil(
-      (result.totalStdoutBytes + result.totalStderrBytes) / 4,
-    );
+    // 15. Return response
     const response = {
       status: result.status,
       exitCode: result.exitCode,

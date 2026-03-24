@@ -2,7 +2,6 @@ import {
   type SliceBuildRequest,
   SliceBuildResponse,
   SliceBuildWireFormat,
-  CompactGraphSliceV2,
   type SliceRefreshRequest,
   SliceRefreshResponse,
   type SliceSpilloverGetRequest,
@@ -481,10 +480,12 @@ async function handleSliceBuildInternal(
       async (span) => {
         const result = await buildSliceWithTracing();
         if ("slice" in result && result.slice) {
-          const sliceData = result.slice as CompactGraphSliceV2;
+          const sliceData = result.slice as Record<string, unknown>;
+          const cards = "c" in sliceData && Array.isArray(sliceData.c) ? sliceData.c : [];
+          const edges = "e" in sliceData && Array.isArray(sliceData.e) ? sliceData.e : [];
           span.setAttributes({
-            "counts.cards": "c" in sliceData ? sliceData.c.length : 0,
-            "counts.edges": "e" in sliceData ? (sliceData.e?.length ?? 0) : 0,
+            "counts.cards": cards.length,
+            "counts.edges": edges.length,
             versionId: result.ledgerVersion,
           });
         }
@@ -752,6 +753,8 @@ export async function handleSliceSpilloverGet(
           SignatureSchema,
         );
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          // safeJsonParseOptional returns unknown; the SignatureSchema Zod validation
+          // above guarantees the shape matches SymbolSignature, so this cast is safe.
           const candidate = parsed as Partial<SymbolSignature>;
           signature = {
             ...candidate,

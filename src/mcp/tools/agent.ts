@@ -22,6 +22,8 @@ export async function handleAgentOrchestrate(
     };
 
     const result = await orchestrator.orchestrate(task);
+    // OrchestrationResult and AgentOrchestrateResponse are structurally identical.
+    // If either type changes, update both to maintain compatibility.
     const response = result as AgentOrchestrateResponse;
     attachRawContext(response, { rawTokens: response.metrics.totalTokens * 3 });
     return response;

@@ -78,6 +78,11 @@ export async function upsertClusterMember(
   );
 }
 
+/**
+ * Upserts cluster members in a loop because Kuzu does not support UNWIND
+ * for parameterized batch MERGE. Wrapped in a transaction to amortize
+ * commit overhead.
+ */
 export async function upsertClusterMembersBatch(
   conn: Connection,
   members: Array<{

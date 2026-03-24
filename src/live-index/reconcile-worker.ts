@@ -68,13 +68,27 @@ export class ReconcileWorker {
     }
   }
 
-  async waitForIdle(): Promise<void> {
+  async waitForIdle(timeoutMs = 30_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
     while (this.pendingDrain) {
+      if (Date.now() > deadline) {
+        logger.warn("waitForIdle timed out waiting for pendingDrain", { timeoutMs });
+        return;
+      }
       await this.pendingDrain;
     }
     if (this.draining) {
       await new Promise<void>((resolve) => {
-        this.idleWaiters.push(resolve);
+        const timer = setTimeout(() => {
+          const idx = this.idleWaiters.indexOf(resolve);
+          if (idx !== -1) this.idleWaiters.splice(idx, 1);
+          logger.warn("waitForIdle timed out waiting for drain completion", { timeoutMs });
+          resolve();
+        }, Math.max(0, deadline - Date.now()));
+        this.idleWaiters.push(() => {
+          clearTimeout(timer);
+          resolve();
+        });
       });
     }
     await this.clusterScheduler.waitForIdle();

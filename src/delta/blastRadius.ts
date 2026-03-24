@@ -162,6 +162,8 @@ export async function computeBlastRadius(
 
   const processDependentsBySymbol = new Map<SymbolId, ProcessDependentMetrics>();
 
+  // TODO: Batch process lookups for all changed symbols in a single query
+  // to reduce O(N) sequential DB round trips per changed symbol.
   try {
     for (const changedSymbolId of changedSet) {
       const processes = await getProcessesForSymbol(conn, changedSymbolId);
@@ -393,13 +395,21 @@ async function runDiagnosticsWithTimeout(
   timeoutMs: number,
 ): Promise<{ suspects: DiagnosticSuspect[] }> {
   const { getDiagnosticsWithSuspects } = await import("../ts/mapping.js");
-  const result = await Promise.race([
-    getDiagnosticsWithSuspects(repoId),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Diagnostics timeout")), timeoutMs),
-    ),
-  ]);
-  return { suspects: result.suspects };
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  try {
+    const result = await Promise.race([
+      getDiagnosticsWithSuspects(repoId),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject(new Error("Diagnostics timeout")),
+          timeoutMs,
+        );
+      }),
+    ]);
+    return { suspects: result.suspects };
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
 }
 
 function applyBudgetedSelection(

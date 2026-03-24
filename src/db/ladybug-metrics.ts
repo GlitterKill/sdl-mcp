@@ -44,7 +44,8 @@ export async function upsertMetrics(
 
 /**
  * Batch-upsert metrics rows within a single transaction to reduce per-row
- * round-trip overhead during full metric refreshes.
+ * round-trip overhead during full metric refreshes. Upserts in a loop
+ * because Kuzu does not support UNWIND for parameterized batch MERGE.
  */
 export async function upsertMetricsBatch(
   conn: Connection,
@@ -77,9 +78,10 @@ export async function upsertMetricsBatch(
 }
 
 /**
- * Batch-update only the canonicalTestJson field on Metrics nodes.
- * Used during incremental indexing to propagate canonical test changes
- * to symbols not in the changed-file set.
+ * Batch-upsert canonical test mappings. Upserts in a loop because Kuzu does
+ * not support UNWIND for parameterized batch MERGE. Wrapped in a transaction
+ * to amortize commit overhead. Used during incremental indexing to propagate
+ * canonical test changes to symbols not in the changed-file set.
  */
 export async function upsertCanonicalTestBatch(
   conn: Connection,

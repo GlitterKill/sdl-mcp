@@ -530,10 +530,15 @@ export async function closeLadybugDb(): Promise<void> {
   // to avoid hanging indefinitely if a write is stuck.
   if (writeLimiter) {
     try {
+      let timeoutHandle: NodeJS.Timeout | undefined;
       await Promise.race([
         writeLimiter.drain(),
-        new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
-      ]);
+        new Promise<void>((resolve) => {
+          timeoutHandle = setTimeout(resolve, 5_000);
+        }),
+      ]).finally(() => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+      });
     } catch {
       // Best-effort drain — proceed with teardown regardless
     }

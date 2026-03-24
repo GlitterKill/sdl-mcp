@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { exec } from "child_process";
-import { readFileSync } from "fs";
+import { readFile } from "node:fs/promises";
 import { join } from "path";
 import { promisify } from "util";
 import { globSync } from "node:fs";
@@ -38,6 +38,7 @@ interface ChurnCache {
 }
 
 const CHURN_CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_METRICS_CACHED_REPOS = 5;
 const churnCacheByRepo = new Map<string, ChurnCache>();
 
 interface TestRefCache {
@@ -77,7 +78,8 @@ async function getCurrentCommitHash(repoRoot: string): Promise<string> {
       cwd: repoRoot,
     });
     return stdout.trim();
-  } catch {
+  } catch (err) {
+    logger.warn("Failed to get current commit hash", { error: String(err) });
     return "";
   }
 }
@@ -100,7 +102,8 @@ async function getChurnByFile(repoRoot: string): Promise<Map<string, number>> {
       churn.set(relPath, (churn.get(relPath) ?? 0) + 1);
     }
     return churn;
-  } catch {
+  } catch (err) {
+    logger.warn("Failed to compute file churn", { error: String(err) });
     return new Map();
   }
 }
@@ -132,6 +135,10 @@ async function getChurnByFileCached(
     churnMap,
     cachedAt: Date.now(),
   });
+  if (churnCacheByRepo.size > MAX_METRICS_CACHED_REPOS) {
+    const firstKey = churnCacheByRepo.keys().next().value;
+    if (firstKey !== undefined) churnCacheByRepo.delete(firstKey);
+  }
   return churnMap;
 }
 
@@ -139,12 +146,12 @@ function computeFileHash(content: string): string {
   return createHash("md5").update(content).digest("hex");
 }
 
-function collectTestRefs(
+async function collectTestRefs(
   repoRoot: string,
   symbols: Array<{ symbolId: string; name: string }>,
   config: RepoConfig,
   _changedTestFiles?: Set<string>,
-): Map<string, Set<string>> {
+): Promise<Map<string, Set<string>>> {
   const extGroup = config.languages.join(",");
   const patterns = [
     `**/*.test.{${extGroup}}`,
@@ -177,25 +184,56 @@ function collectTestRefs(
 
   const cached = testRefCacheByRepo.get(repoRoot);
   const fileHashes = cached?.fileHashes || new Map<string, string>();
+  const CONCURRENCY_LIMIT = 10;
+  const testRefs = new Map<string, Set<string>>();
   const newTestRefs = new Map<string, Set<string>>();
 
-  const testRefs = new Map<string, Set<string>>();
+  // Process test files in chunks to avoid blocking the event loop
+  for (let chunkStart = 0; chunkStart < testFiles.length; chunkStart += CONCURRENCY_LIMIT) {
+    const chunk = testFiles.slice(chunkStart, chunkStart + CONCURRENCY_LIMIT);
+    const results = await Promise.all(
+      chunk.map(async (file) => {
+        try {
+          const content = await readFile(join(repoRoot, file), "utf-8");
+          return { file, content };
+        } catch (err) {
+          logger.debug("Failed to read test file", { file, error: String(err) });
+          return null;
+        }
+      }),
+    );
 
-  for (const file of testFiles) {
-    let content = "";
-    try {
-      content = readFileSync(join(repoRoot, file), "utf-8");
-    } catch {
-      continue;
-    }
+    for (const result of results) {
+      if (!result) continue;
+      const { file, content } = result;
 
-    const hash = computeFileHash(content);
+      const hash = computeFileHash(content);
 
-    if (cached && cached.fileHashes.get(file) === hash) {
-      const cachedFileRefs = cached.testRefs.get(file);
-      if (cachedFileRefs) {
-        for (const ref of cachedFileRefs) {
-          const symbolIds = nameToSymbolIds.get(ref);
+      if (cached && cached.fileHashes.get(file) === hash) {
+        const cachedFileRefs = cached.testRefs.get(file);
+        if (cachedFileRefs) {
+          for (const ref of cachedFileRefs) {
+            const symbolIds = nameToSymbolIds.get(ref);
+            if (symbolIds) {
+              for (const symbolId of symbolIds) {
+                const existing = testRefs.get(symbolId) ?? new Set<string>();
+                existing.add(normalizePath(file));
+                testRefs.set(symbolId, existing);
+              }
+            }
+          }
+          continue;
+        }
+      }
+
+      fileHashes.set(file, hash);
+      const tokens = content.match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
+      const matchedSymbols = new Set<string>();
+
+      for (const token of new Set(tokens)) {
+        if (symbolNames.has(token)) {
+          matchedSymbols.add(token);
+          const symbolIds = nameToSymbolIds.get(token);
           if (symbolIds) {
             for (const symbolId of symbolIds) {
               const existing = testRefs.get(symbolId) ?? new Set<string>();
@@ -204,28 +242,9 @@ function collectTestRefs(
             }
           }
         }
-        continue;
       }
+      newTestRefs.set(file, matchedSymbols);
     }
-
-    fileHashes.set(file, hash);
-    const tokens = content.match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
-    const matchedSymbols = new Set<string>();
-
-    for (const token of new Set(tokens)) {
-      if (symbolNames.has(token)) {
-        matchedSymbols.add(token);
-        const symbolIds = nameToSymbolIds.get(token);
-        if (symbolIds) {
-          for (const symbolId of symbolIds) {
-            const existing = testRefs.get(symbolId) ?? new Set<string>();
-            existing.add(normalizePath(file));
-            testRefs.set(symbolId, existing);
-          }
-        }
-      }
-    }
-    newTestRefs.set(file, matchedSymbols);
   }
 
   testRefCacheByRepo.set(repoRoot, {
@@ -234,6 +253,10 @@ function collectTestRefs(
     testRefs: newTestRefs,
     cachedAt: Date.now(),
   });
+  if (testRefCacheByRepo.size > MAX_METRICS_CACHED_REPOS) {
+    const firstKey = testRefCacheByRepo.keys().next().value;
+    if (firstKey !== undefined) testRefCacheByRepo.delete(firstKey);
+  }
 
   return testRefs;
 }
@@ -250,6 +273,7 @@ export { collectTestRefs };
 
 const MAX_BFS_COST = 12;
 const MAX_BFS_VISITED = 500;
+const MAX_BATCH_BFS_QUEUE = 50000;
 
 /**
  * Edge-type cost for canonical test BFS.
@@ -484,6 +508,10 @@ function batchComputeCanonicalTests(
   }
 
   while (queueHead < queue.length) {
+    if (queue.length > MAX_BATCH_BFS_QUEUE) {
+      logger.warn("Batch BFS queue exceeded limit", { queueSize: queue.length, limit: MAX_BATCH_BFS_QUEUE });
+      break;
+    }
     const {
       symbolId: current,
       distance,
@@ -655,7 +683,7 @@ export async function updateMetricsForRepo(
 
   const fanMetrics = calculateFanMetrics(edges, symbolIds);
   const churnByFile = await getChurnByFileCached(repo.rootPath);
-  const testRefs = collectTestRefs(repo.rootPath, allSymbols, config);
+  const testRefs = await collectTestRefs(repo.rootPath, allSymbols, config);
 
   // Build a lightweight Graph for canonicalTest BFS
   const symbolMap = new Map(allSymbols.map((s) => [s.symbolId, s]));

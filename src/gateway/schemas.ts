@@ -73,7 +73,9 @@ const SymbolGetCardsAction = z
     symbolRefs: z.array(SymbolRefFields).min(1).max(100).optional(),
     minCallConfidence: z.number().min(0).max(1).optional(),
     includeResolutionMetadata: z.boolean().optional(),
-    knownEtags: z.record(z.string(), z.string()).optional(),
+    knownEtags: z.record(z.string(), z.string())
+      .refine(obj => Object.keys(obj).length <= 1000, { message: "knownEtags exceeds maximum of 1000 entries" })
+      .optional(),
   })
   .superRefine((value, ctx) => {
     const provided =
@@ -94,7 +96,9 @@ const SliceBuildAction = z.object({
   failingTestPath: z.string().optional(),
   editedFiles: z.array(z.string()).max(100).optional(),
   entrySymbols: z.array(z.string()).max(100).optional(),
-  knownCardEtags: z.record(z.string(), z.string()).optional(),
+  knownCardEtags: z.record(z.string(), z.string())
+      .refine(obj => Object.keys(obj).length <= 1000, { message: "knownCardEtags exceeds maximum of 1000 entries" })
+      .optional(),
   cardDetail: z
     .enum(["minimal", "signature", "deps", "compact", "full"])
     .optional(),
@@ -345,9 +349,10 @@ const BufferPushAction = z.object({
   filePath: z
     .string()
     .min(1)
-    .refine((p) => !p.includes(".."), {
-      message: "filePath must not contain path traversal sequences",
-    }),
+    .refine(
+      (p) => !p.includes("..") && !/^[\/]/.test(p) && !/^[A-Za-z]:/.test(p),
+      { message: "filePath must be a relative path without traversal sequences" },
+    ),
   content: z.string().max(5_242_880),
   language: z.string().optional(),
   version: z.number().int().min(0),
@@ -401,6 +406,16 @@ const RuntimeExecuteAction = z.object({
     .max(1000)
     .default(RUNTIME_DEFAULT_MAX_RESPONSE_LINES),
   persistOutput: z.boolean().default(true),
+  outputMode: z.enum(["minimal", "summary", "intent"]).default("minimal").optional(),
+});
+
+const RuntimeQueryOutputAction = z.object({
+  action: z.literal("runtime.queryOutput"),
+  artifactHandle: z.string().min(1),
+  queryTerms: z.array(z.string()).min(1).max(10),
+  maxExcerpts: z.number().int().min(1).max(50).default(10).optional(),
+  contextLines: z.number().int().min(0).max(10).default(3).optional(),
+  stream: z.enum(["stdout", "stderr", "both"]).default("both").optional(),
 });
 
 const MemoryTypeGateway = z.enum(["decision", "bugfix", "task_context"]);
@@ -454,6 +469,7 @@ export const AgentGatewaySchema = z
       BufferCheckpointAction,
       BufferStatusAction,
       RuntimeExecuteAction,
+      RuntimeQueryOutputAction,
       MemoryStoreAction,
       MemoryQueryAction,
       MemoryRemoveAction,
@@ -501,6 +517,7 @@ export const AGENT_ACTIONS = [
   "buffer.checkpoint",
   "buffer.status",
   "runtime.execute",
+  "runtime.queryOutput",
   "memory.store",
   "memory.query",
   "memory.remove",

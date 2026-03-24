@@ -701,6 +701,20 @@ export const RUNTIME_SIGKILL_GRACE_MS = 5000;
 export const RUNTIME_DEFAULT_MAX_RESPONSE_LINES = 100;
 
 /**
+ * Maximum characters per output line before truncation.
+ * Prevents single long lines (minified JSON, base64) from dominating token budget.
+ */
+export const RUNTIME_MAX_LINE_LENGTH = 500;
+
+/**
+ * Default output mode for runtime.execute responses.
+ * "minimal" returns only status/exitCode/handle (~50 tokens).
+ * "summary" returns head+tail excerpts (legacy behavior).
+ * "intent" returns only queryTerms-matched excerpts.
+ */
+export const RUNTIME_DEFAULT_OUTPUT_MODE = "minimal";
+
+/**
  * Minimum bytes for runtime config byte limits.
  */
 export const RUNTIME_MIN_BYTES = 1024;

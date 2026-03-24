@@ -459,6 +459,7 @@ export async function watchRepositoryWithIndexer(
       if (activeWatcher) {
         await activeWatcher.close();
       }
+      watcherHealthByRepo.delete(repoId);
     },
   };
 }

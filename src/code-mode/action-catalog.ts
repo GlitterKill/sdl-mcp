@@ -43,6 +43,7 @@ const ACTION_TAGS: Record<string, ActionTag[]> = {
   "buffer.checkpoint": ["buffer"],
   "buffer.status": ["buffer"],
   "runtime.execute": ["runtime"],
+  "runtime.queryOutput": ["runtime"],
   "memory.store": ["memory"],
   "memory.query": ["memory"],
   "memory.remove": ["memory"],
@@ -240,6 +241,7 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "buffer.checkpoint": {},
   "buffer.status": {},
   "runtime.execute": { runtime: "node", args: ["--version"] },
+  "runtime.queryOutput": { artifactHandle: "runtime-myrepo-123-abc", queryTerms: ["error", "failed"] },
   "memory.store": {
     type: "pattern",
     title: "Auth uses JWT",
@@ -311,6 +313,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "buffer.checkpoint": "Request buffer checkpoint",
   "buffer.status": "Get buffer status",
   "runtime.execute": "Execute runtime command",
+  "runtime.queryOutput": "Query stored command output by keywords",
   "memory.store": "Store a development memory",
   "memory.query": "Query memories",
   "memory.remove": "Soft-delete a memory",

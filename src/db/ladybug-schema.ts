@@ -19,7 +19,7 @@
  */
 
 import type { Connection } from "kuzu";
-import { exec } from "./ladybug-core.js";
+import { exec, querySingle } from "./ladybug-core.js";
 import { LADYBUG_SCHEMA_VERSION } from "./migrations/index.js";
 
 const NODE_TABLES: string[] = [
@@ -334,6 +334,9 @@ const INDEXES: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_symbolversion_versionId ON SymbolVersion(versionId)`,
   `CREATE INDEX IF NOT EXISTS idx_usagesnapshot_repoId ON UsageSnapshot(repoId)`,
   `CREATE INDEX IF NOT EXISTS idx_usagesnapshot_timestamp ON UsageSnapshot(timestamp)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_repoId ON Audit(repoId)`,
+  `CREATE INDEX IF NOT EXISTS idx_agentfeedback_repoId ON AgentFeedback(repoId)`,
+  `CREATE INDEX IF NOT EXISTS idx_symbolversion_symbolId ON SymbolVersion(symbolId)`,
 ];
 
 export async function createSchema(conn: Connection): Promise<void> {
@@ -368,22 +371,18 @@ export async function createSchema(conn: Connection): Promise<void> {
 export async function getSchemaVersion(
   conn: Connection,
 ): Promise<number | null> {
-  const result = await conn.query(
+  const row = await querySingle<{ schemaVersion?: unknown }>(
+    conn,
     `MATCH (sv:SchemaVersion {id: 'current'})
      RETURN sv.schemaVersion AS schemaVersion`,
+    {},
   );
-  try {
-    const rows = (await result.getAll()) as Array<{
-      schemaVersion?: unknown;
-    }>;
-    const value = rows[0]?.schemaVersion;
-    if (typeof value === "number") return value;
-    if (typeof value === "bigint") return Number(value);
-    if (typeof value === "string") return Number(value);
-    return null;
-  } finally {
-    result.close();
-  }
+  if (!row) return null;
+  const value = row.schemaVersion;
+  if (typeof value === "number") return value;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string") return Number(value);
+  return null;
 }
 
 export { LADYBUG_SCHEMA_VERSION };

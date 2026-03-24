@@ -77,6 +77,8 @@ type HttpTransportServices = {
   sessionManager?: SessionManager;
 };
 
+const MAX_SESSIONS = 16;
+
 const LOCALHOST_ORIGIN_RE =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
@@ -1023,6 +1025,10 @@ async function handleMcpStreamableRequest(
                 `[sdl-mcp] StreamableHTTP session initialized: ${newSessionId}`,
               );
               registeredSessionId = newSessionId;
+              if (ctx.transports.size >= MAX_SESSIONS) {
+                logger.warn("Transport map at capacity, rejecting new session", { sessionId: newSessionId });
+                return;
+              }
               ctx.transports.set(newSessionId, transport!);
               // Track MCPServer immediately so onclose/reaper can find it
               ctx.mcpServers.set(newSessionId, mcpServer);
@@ -1157,6 +1163,11 @@ async function handleSseConnection(
   try {
     const sseTransport = new SSEServerTransport("/message", res);
     const sseSessionId = sseTransport.sessionId;
+    if (ctx.transports.size >= MAX_SESSIONS) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message: "Too many active sessions" } }));
+      return;
+    }
     ctx.transports.set(sseSessionId, sseTransport);
     // registerSession internally releases the reservation
     ctx.sessionManager.registerSession(sseSessionId, "sse");

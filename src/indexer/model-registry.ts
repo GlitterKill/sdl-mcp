@@ -7,6 +7,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { loadConfig } from "../config/loadConfig.js";
+import { logger } from "../util/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -102,8 +103,10 @@ export function getModelCacheDir(): string {
     if (configCacheDir) {
       return configCacheDir;
     }
-  } catch {
-    // Config may not be available yet (e.g., during init).
+  } catch (err) {
+    logger.warn("Config not available for model registry, using defaults", {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   if (process.platform === "win32") {

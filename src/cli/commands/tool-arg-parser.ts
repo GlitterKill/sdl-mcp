@@ -81,9 +81,10 @@ export function parseToolArgs(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
-  // Start with stdin args if provided
-  if (stdinArgs) {
-    Object.assign(result, stdinArgs);
+  // Start with stdin args if provided (filter prototype-polluting keys)
+  if (stdinArgs && typeof stdinArgs === "object") {
+    const { __proto__: _proto, constructor: _ctor, prototype: _pt, ...safe } = stdinArgs as Record<string, unknown>;
+    Object.assign(result, safe);
   }
 
   // Map CLI flag values to handler fields (flags override stdin)
