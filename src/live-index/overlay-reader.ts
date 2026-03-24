@@ -12,6 +12,8 @@ import {
   getDefaultOverlayStore,
 } from "./coordinator.js";
 import { mergeSearchResults, type OverlaySearchResult } from "./overlay-merge.js";
+import { hybridSearch } from "../retrieval/orchestrator.js";
+import type { RetrievalEvidence } from "../retrieval/types.js";
 import type { DraftOverlayEntry } from "./overlay-store.js";
 
 export interface OverlaySnapshot {
@@ -201,6 +203,109 @@ export async function searchSymbolsWithOverlay(
   }));
 
   return mergeSearchResults(durableSearchRows, overlayRows, query, limit);
+}
+
+/**
+ * Hybrid-aware overlay search. Uses hybrid retrieval (FTS + vector + RRF)
+ * for durable symbols and lexical matching for overlay (draft) symbols.
+ * Overlay symbols take precedence when the same symbolId exists in both.
+ */
+export async function searchSymbolsHybridWithOverlay(
+  conn: Connection,
+  repoId: string,
+  query: string,
+  limit: number,
+  hybridOptions: {
+    ftsTopK?: number;
+    vectorTopK?: number;
+    rrfK?: number;
+    candidateLimit?: number;
+    includeEvidence?: boolean;
+  },
+): Promise<{ rows: OverlaySearchResult[]; evidence?: RetrievalEvidence }> {
+  const snapshot = getOverlaySnapshot(repoId);
+
+  // 1. Run hybrid search for durable symbols
+  const hybridResult = await hybridSearch({
+    repoId,
+    query,
+    // Over-fetch since touched-file filtering removes some results.
+    // The 2x multiplier is a heuristic; revisit if many files are in draft state.
+    limit: limit * 2,
+    ftsEnabled: true,
+    vectorEnabled: true,
+    rrfK: hybridOptions.rrfK,
+    candidateLimit: hybridOptions.candidateLimit,
+    includeEvidence: hybridOptions.includeEvidence,
+  });
+
+  // 2. Hydrate hybrid results — get symbol/file data, filter out touched files
+  const hybridSymbolIds = hybridResult.results.map((r) => r.symbolId);
+  const symbolMap = hybridSymbolIds.length > 0
+    ? await ladybugDb.getSymbolsByIds(conn, hybridSymbolIds)
+    : new Map<string, SymbolRow>();
+  const fileIds = new Set<string>();
+  for (const sym of symbolMap.values()) fileIds.add(sym.fileId);
+  const fileMap = fileIds.size > 0
+    ? await ladybugDb.getFilesByIds(conn, Array.from(fileIds))
+    : new Map<string, FileRow>();
+
+  const durableRows: OverlaySearchResult[] = [];
+  for (const item of hybridResult.results) {
+    const sym = symbolMap.get(item.symbolId);
+    if (!sym) continue;
+    if (snapshot.touchedFileIds.has(sym.fileId)) continue;
+    const file = fileMap.get(sym.fileId);
+    durableRows.push({
+      symbolId: sym.symbolId,
+      name: sym.name,
+      kind: sym.kind,
+      fileId: sym.fileId,
+      filePath: file?.relPath ?? "",
+    });
+  }
+
+  // 3. Collect overlay results (same logic as searchSymbolsWithOverlay)
+  const loweredQuery = query.trim().toLowerCase();
+  const terms = loweredQuery.includes(" ")
+    ? loweredQuery.split(/\s+/).filter((t) => t.length > 0)
+    : [loweredQuery];
+  const isMultiTerm = terms.length > 1;
+
+  const overlayRows: OverlaySearchResult[] = [];
+  for (const symbol of snapshot.symbolsById.values()) {
+    if (symbol.repoId !== repoId) continue;
+    const haystack = [
+      symbol.name,
+      symbol.summary ?? "",
+      symbol.searchText ?? "",
+    ]
+      .join(" ")
+      .toLowerCase();
+    const matchCount = isMultiTerm
+      ? terms.filter((t) => haystack.includes(t)).length
+      : (haystack.includes(loweredQuery) ? 1 : 0);
+    if (matchCount === 0) continue;
+    const file = snapshot.filesById.get(symbol.fileId);
+    if (!file) continue;
+    overlayRows.push({
+      symbolId: symbol.symbolId,
+      name: symbol.name,
+      fileId: symbol.fileId,
+      kind: symbol.kind,
+      filePath: file.relPath,
+      summary: symbol.summary,
+      searchText: symbol.searchText,
+      matchedTermCount: matchCount,
+    });
+  }
+
+  // 4. Merge: use mergeSearchResults for proper interleaving.
+  //    Overlay takes precedence for matching symbolIds.
+  //    Durable results retain their hybrid RRF ordering via the merge sort.
+  const merged = mergeSearchResults(durableRows, overlayRows, query, limit);
+
+  return { rows: merged, evidence: hybridResult.evidence };
 }
 
 export async function getTargetNamesWithOverlay(

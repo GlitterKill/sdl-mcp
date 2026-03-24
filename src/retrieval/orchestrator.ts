@@ -1,24 +1,530 @@
 /**
- * Hybrid retrieval orchestrator (stub).
+ * Hybrid retrieval orchestrator.
  *
- * Stage 0: establishes the function signature and module boundary.
- * Stage 1 will fill in FTS query, vector query, and RRF fusion logic.
+ * Combines FTS (full-text search) and vector retrieval backends, then
+ * fuses results via Reciprocal Rank Fusion (RRF).  Degrades gracefully
+ * when individual backends are unavailable.
  */
 
-import type { HybridSearchOptions, HybridSearchResult } from "./types.js";
+import type { Connection } from "kuzu";
+import { queryAll } from "../db/ladybug-core.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import { loadConfig } from "../config/loadConfig.js";
+import type { SemanticRetrievalConfig } from "../config/types.js";
+import { logger } from "../util/logger.js";
+import { getEmbeddingProvider } from "../indexer/embeddings.js";
+import { EMBEDDING_MODELS } from "./model-mapping.js";
+import { checkRetrievalHealth, shouldFallbackToLegacy } from "./fallback.js";
+import type {
+  HybridSearchOptions,
+  HybridSearchResult,
+  HybridSearchResultItem,
+  RetrievalEvidence,
+  RetrievalSource,
+} from "./types.js";
+
+// ---------------------------------------------------------------------------
+// Internal types
+// ---------------------------------------------------------------------------
+
+/** Raw row returned by Kuzu FTS index query. */
+interface FtsRawRow {
+  /** Flat format: symbolId as direct column */
+  symbolId?: string;
+  /** Nested format: node object with properties */
+  node?: { symbolId?: string; [key: string]: unknown };
+  _node?: { symbolId?: string; [key: string]: unknown };
+  score?: number;
+  _score?: number;
+  [key: string]: unknown;
+}
+
+/** Raw row returned by Kuzu vector index query. */
+interface VectorRawRow {
+  symbolId?: string;
+  node?: { symbolId?: string; [key: string]: unknown };
+  _node?: { symbolId?: string; [key: string]: unknown };
+  score?: number;
+  _score?: number;
+  distance?: number;
+  _distance?: number;
+  [key: string]: unknown;
+}
+
+/** Intermediate per-source ranked list before fusion. */
+interface SourceRanking {
+  source: RetrievalSource;
+  /** symbolId -> 1-based rank */
+  ranks: Map<string, number>;
+  candidateCount: number;
+}
+
+// ---------------------------------------------------------------------------
+// Defaults
+// ---------------------------------------------------------------------------
+
+const DEFAULT_RRF_K = 60;
+const DEFAULT_CANDIDATE_LIMIT = 100;
+const DEFAULT_FTS_TOP_K = 75;
+const DEFAULT_VECTOR_TOP_K = 75;
+const DEFAULT_FTS_INDEX_NAME = "symbol_search_text_v1";
+
+// ---------------------------------------------------------------------------
+// FTS retrieval
+// ---------------------------------------------------------------------------
+
+/**
+ * Query the Kuzu FTS index for symbols matching the query text.
+ *
+ * Returns an empty array (never throws) when the FTS extension or index
+ * is unavailable.
+ */
+async function queryFts(
+  conn: Connection,
+  indexName: string,
+  query: string,
+  topK: number,
+): Promise<FtsRawRow[]> {
+  try {
+    const rows = await queryAll<FtsRawRow>(
+      conn,
+      `CALL QUERY_FTS_INDEX('Symbol', $indexName, $query, $topK)`,
+      { indexName, query, topK },
+    );
+    return rows;
+  } catch (err) {
+    logger.debug(
+      `[hybrid-search] FTS query failed (extension/index may be unavailable): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Vector retrieval
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a model name to the `RetrievalSource` discriminator.
+ */
+function vectorSourceForModel(model: string): RetrievalSource {
+  if (model.includes("MiniLM") || model.includes("minilm")) {
+    return "vector:minilm";
+  }
+  if (model.includes("nomic")) {
+    return "vector:nomic";
+  }
+  // Fallback -- still a vector source, use the first token of the model name.
+  return "vector:minilm"; // Unknown model → default to minilm source label
+}
+
+/**
+ * Query a single Kuzu vector index with the given embedding.
+ *
+ * Returns an empty array (never throws) when the vector extension or
+ * index is unavailable.
+ */
+async function queryVectorIndex(
+  conn: Connection,
+  indexName: string,
+  embedding: number[],
+  topK: number,
+): Promise<{ symbolId: string; score: number }[]> {
+  try {
+    const rows = await queryAll<VectorRawRow>(
+      conn,
+      `CALL QUERY_VECTOR_INDEX('Symbol', $indexName, $queryVector, $topK)`,
+      { indexName, queryVector: embedding, topK },
+    );
+    return rows.map((r) => ({
+      symbolId: r.symbolId ?? r.node?.symbolId ?? r._node?.symbolId ?? "",
+      // Kuzu vector index returns distance; convert to a similarity score.
+      // Lower distance = more similar, so score = 1 / (1 + distance).
+      score:
+        (r.score ?? r._score) != null
+          ? Number(r.score ?? r._score)
+          : (r.distance ?? r._distance) != null
+            ? 1 / (1 + Number(r.distance))
+            : 0,
+    }));
+  } catch (err) {
+    logger.debug(
+      `[hybrid-search] Vector query failed (extension/index may be unavailable): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// RRF fusion
+// ---------------------------------------------------------------------------
+
+/**
+ * Reciprocal Rank Fusion.
+ *
+ * ```
+ * RRF_score(symbol) = SUM(1 / (k + rank_in_source))
+ * ```
+ *
+ * where `k` is a smoothing constant (default 60) and the sum runs over
+ * every source that contains the symbol.
+ */
+function rrfFuse(
+  rankings: SourceRanking[],
+  k: number,
+  limit: number,
+): HybridSearchResultItem[] {
+  /** symbolId -> accumulated RRF score */
+  const scores = new Map<string, number>();
+  /** symbolId -> best (highest individual contribution) source */
+  const bestSource = new Map<string, RetrievalSource>();
+  /** symbolId -> highest single-source RRF contribution */
+  const bestContribution = new Map<string, number>();
+
+  for (const ranking of rankings) {
+    for (const [symbolId, rank] of ranking.ranks) {
+      const contribution = 1 / (k + rank);
+      const prev = scores.get(symbolId) ?? 0;
+      scores.set(symbolId, prev + contribution);
+
+      // Track which source contributed most for the source field.
+      const prevBestContrib = bestContribution.get(symbolId) ?? 0;
+      if (contribution > prevBestContrib) {
+        bestContribution.set(symbolId, contribution);
+        bestSource.set(symbolId, ranking.source);
+      }
+    }
+  }
+
+  // Sort descending by fused score, take top limit.
+  return Array.from(scores.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([symbolId, score]) => ({
+      symbolId,
+      score,
+      source: bestSource.get(symbolId) ?? "fts",
+    }));
+}
+
+// ---------------------------------------------------------------------------
+// Evidence builder
+// ---------------------------------------------------------------------------
+
+function buildEvidence(
+  rankings: SourceRanking[],
+  fusedResults: HybridSearchResultItem[],
+  fusionLatencyMs: number,
+  fallbackReason?: string,
+): RetrievalEvidence {
+  const sources: RetrievalSource[] = rankings.map((r) => r.source);
+  const candidateCountPerSource: Record<string, number> = {};
+  for (const r of rankings) {
+    candidateCountPerSource[r.source] = r.candidateCount;
+  }
+
+  // For each source, find the 1-based positions in the fused list where
+  // that source's candidates appear.
+  const topRanksPerSource: Record<string, number[]> = {};
+  for (const ranking of rankings) {
+    const positions: number[] = [];
+    for (let i = 0; i < fusedResults.length; i++) {
+      if (ranking.ranks.has(fusedResults[i].symbolId)) {
+        positions.push(i + 1); // 1-based
+      }
+    }
+    topRanksPerSource[ranking.source] = positions;
+  }
+
+  return {
+    sources,
+    topRanksPerSource,
+    candidateCountPerSource,
+    fusionLatencyMs,
+    ...(fallbackReason ? { fallbackReason } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Config resolution
+// ---------------------------------------------------------------------------
+
+function resolveConfig(): SemanticRetrievalConfig {
+  try {
+    const appConfig = loadConfig();
+    const retrieval = appConfig.semantic?.retrieval;
+    if (retrieval) {
+      return retrieval;
+    }
+  } catch {
+    // Config may not exist (e.g. in tests). Use defaults.
+    logger.debug("[hybrid-search] Failed to load config; using defaults");
+  }
+  // Defaults matching the Zod schema defaults.
+  return {
+    mode: "legacy",
+    extensionsOptional: true,
+    fts: {
+      enabled: true,
+      indexName: DEFAULT_FTS_INDEX_NAME,
+      topK: DEFAULT_FTS_TOP_K,
+      conjunctive: false,
+    },
+    vector: {
+      enabled: true,
+      topK: DEFAULT_VECTOR_TOP_K,
+      efs: 200,
+      indexes: {
+        "all-MiniLM-L6-v2": { indexName: "symbol_vec_minilm_l6_v2" },
+        "nomic-embed-text-v1.5": { indexName: "symbol_vec_nomic_embed_v15" },
+      },
+    },
+    fusion: { strategy: "rrf", rrfK: DEFAULT_RRF_K },
+    candidateLimit: DEFAULT_CANDIDATE_LIMIT,
+  };
+}
+
+/**
+ * Resolve the embedding provider type from config.
+ */
+function resolveEmbeddingProviderType(): "api" | "local" | "mock" {
+  try {
+    const appConfig = loadConfig();
+    return appConfig.semantic?.provider ?? "local";
+  } catch {
+    return "local";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 /**
  * Execute a hybrid search combining FTS and vector retrieval with RRF fusion.
  *
- * **Stage 0 stub** -- always throws.  Use the legacy search path until
- * Stage 1 provides the real implementation.
+ * The function is self-contained: it reads config, checks backend health,
+ * runs queries against available backends, fuses results, and returns a
+ * deduplicated, scored list.
  *
- * @throws {Error} Always -- hybrid retrieval is not yet implemented.
+ * Errors from individual backends are caught and logged -- the function
+ * degrades gracefully rather than throwing.  If all backends fail it
+ * returns an empty result set with an explanatory fallbackReason.
  */
 export async function hybridSearch(
-  _options: HybridSearchOptions,
+  options: HybridSearchOptions,
 ): Promise<HybridSearchResult> {
-  throw new Error(
-    "Hybrid retrieval not yet implemented \u2014 use legacy search path",
+  const config = resolveConfig();
+  const caps = await checkRetrievalHealth(options.repoId);
+
+  // Honour explicit option overrides, then fall back to config.
+  const ftsEnabled = options.ftsEnabled ?? config.fts.enabled;
+  const vectorEnabled = options.vectorEnabled ?? config.vector.enabled;
+  const rrfK = options.rrfK ?? config.fusion.rrfK ?? DEFAULT_RRF_K;
+  const candidateLimit =
+    options.candidateLimit ?? config.candidateLimit ?? DEFAULT_CANDIDATE_LIMIT;
+  const limit = Math.min(options.limit, candidateLimit);
+
+  // If the system should fall back to legacy, return empty with reason.
+  if (shouldFallbackToLegacy(caps, config)) {
+    logger.debug(
+      "[hybrid-search] Falling back to legacy -- caps or config require it",
+    );
+    return {
+      results: [],
+      ...(options.includeEvidence
+        ? {
+            evidence: buildEvidence([], [], 0, "fallback-to-legacy"),
+          }
+        : {}),
+    };
+  }
+
+  let conn: Connection;
+  try {
+    conn = await getLadybugConn();
+  } catch (err) {
+    logger.warn(
+      `[hybrid-search] Failed to obtain DB connection: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return {
+      results: [],
+      ...(options.includeEvidence
+        ? {
+            evidence: buildEvidence(
+              [],
+              [],
+              0,
+              "db-connection-unavailable",
+            ),
+          }
+        : {}),
+    };
+  }
+
+  const rankings: SourceRanking[] = [];
+  
+  const fusionStart = performance.now();
+
+  // ----- FTS retrieval -----
+  // TODO(Stage 1): Verify Kuzu QUERY_FTS_INDEX return columns against a live
+  // instance.  The extraction below handles both flat (symbolId, score) and
+  // nested (node.symbolId, _node.symbolId) formats defensively.
+  if (ftsEnabled && caps.fts) {
+    const ftsTopK = config.fts.topK ?? DEFAULT_FTS_TOP_K;
+    const ftsIndexName = config.fts.indexName ?? DEFAULT_FTS_INDEX_NAME;
+
+    const ftsRows = await queryFts(conn, ftsIndexName, options.query, ftsTopK);
+
+    if (ftsRows.length > 0) {
+      const ranks = new Map<string, number>();
+      for (let i = 0; i < ftsRows.length; i++) {
+        const sid = ftsRows[i].symbolId ?? ftsRows[i].node?.symbolId ?? ftsRows[i]._node?.symbolId;
+        if (sid && !ranks.has(sid)) {
+          ranks.set(sid, i + 1); // 1-based rank
+        }
+      }
+      rankings.push({
+        source: "fts",
+        ranks,
+        candidateCount: ftsRows.length,
+      });
+    }
+  }
+
+  // ----- Vector retrieval -----
+  // TODO(Stage 1): Same column-format caveat as FTS above applies to
+  // QUERY_VECTOR_INDEX results. Also verify distance vs score semantics.
+  if (vectorEnabled) {
+    const providerType = resolveEmbeddingProviderType();
+    const vectorTopK = config.vector.topK ?? DEFAULT_VECTOR_TOP_K;
+
+    for (const [modelName, modelInfo] of Object.entries(EMBEDDING_MODELS)) {
+      // Check capability for this specific model.
+      const source = vectorSourceForModel(modelName);
+      const capAvailable =
+        (source === "vector:minilm" && caps.vectorMiniLM) ||
+        (source === "vector:nomic" && caps.vectorNomic);
+
+      if (!capAvailable) {
+        logger.debug(
+          `[hybrid-search] Skipping vector model '${modelName}' -- capability unavailable`,
+        );
+        continue;
+      }
+
+      // Resolve the index name from config override or model-mapping default.
+      const configIndexEntry = config.vector.indexes?.[modelName];
+      const indexName = configIndexEntry?.indexName ?? modelInfo.indexName;
+
+      // Obtain an embedding provider and check for mock fallback.
+      let provider;
+      try {
+        provider = getEmbeddingProvider(providerType, modelName);
+      } catch (err) {
+        logger.debug(
+          `[hybrid-search] Failed to get embedding provider for '${modelName}': ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        continue;
+      }
+
+      if (provider.isMockFallback?.()) {
+        logger.debug(
+          `[hybrid-search] Skipping vector model '${modelName}' -- provider is mock fallback`,
+        );
+        continue;
+      }
+
+      // Generate query embedding.
+      let queryEmbedding: number[];
+      try {
+        const embeddings = await provider.embed([options.query]);
+        queryEmbedding = embeddings[0];
+        if (!queryEmbedding || queryEmbedding.length === 0) {
+          logger.debug(
+            `[hybrid-search] Empty embedding returned for model '${modelName}'; skipping`,
+          );
+          continue;
+        }
+      } catch (err) {
+        logger.debug(
+          `[hybrid-search] Embedding generation failed for '${modelName}': ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        continue;
+      }
+
+      // Query the vector index.
+      const vecResults = await queryVectorIndex(
+        conn,
+        indexName,
+        queryEmbedding,
+        vectorTopK,
+      );
+
+      if (vecResults.length > 0) {
+        const ranks = new Map<string, number>();
+        for (let i = 0; i < vecResults.length; i++) {
+          const sid = vecResults[i].symbolId;
+          if (sid && !ranks.has(sid)) {
+            ranks.set(sid, i + 1);
+          }
+        }
+        rankings.push({
+          source,
+          ranks,
+          candidateCount: vecResults.length,
+        });
+      }
+    }
+  }
+
+  // NOTE: fusionLatencyMs measures total retrieval + fusion wall-clock time
+  // (includes FTS queries, embedding generation, vector queries, and RRF fusion).
+  const fusionLatencyMs = Math.round(performance.now() - fusionStart);
+
+  // ----- Handle empty results -----
+  if (rankings.length === 0) {
+    const reason = !ftsEnabled && !vectorEnabled
+      ? "all-backends-disabled"
+      : "all-backends-returned-empty";
+
+    logger.debug(`[hybrid-search] No results from any backend: ${reason}`);
+
+    return {
+      results: [],
+      ...(options.includeEvidence
+        ? { evidence: buildEvidence([], [], fusionLatencyMs, reason) }
+        : {}),
+    };
+  }
+
+  // ----- RRF fusion -----
+  const fusedResults = rrfFuse(rankings, rrfK, limit);
+
+  logger.debug(
+    `[hybrid-search] Fused ${rankings.length} source(s) into ${fusedResults.length} results (${fusionLatencyMs}ms)`,
   );
+
+  return {
+    results: fusedResults,
+    ...(options.includeEvidence
+      ? {
+          evidence: buildEvidence(
+            rankings,
+            fusedResults,
+            fusionLatencyMs,
+          ),
+        }
+      : {}),
+  };
 }

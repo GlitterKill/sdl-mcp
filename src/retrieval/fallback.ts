@@ -6,9 +6,11 @@
  * or the system should fall back to the legacy search path.
  */
 
-import { getExtensionCapabilities } from "../db/ladybug.js";
+import { getExtensionCapabilities, getLadybugConn } from "../db/ladybug.js";
+import { logger } from "../util/logger.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
 import type { RetrievalCapabilities } from "./types.js";
+import { checkIndexHealth } from "./index-lifecycle.js";
 
 // ---------------------------------------------------------------------------
 // Health / capability detection
@@ -18,25 +20,69 @@ import type { RetrievalCapabilities } from "./types.js";
  * Probe the current runtime to determine which retrieval backends are
  * available.
  *
- * For Stage 0 the vector-model checks use the extension capability as a
- * proxy (i.e. "vector extension loaded" implies both MiniLM and Nomic
- * *could* be used).  Stage 1 will refine this to check whether real
- * vector indexes actually exist for each model.
+ * Fast path: if the underlying extension is not loaded the corresponding
+ * index cannot exist, so we short-circuit to `false` without hitting the
+ * database.  When the extension *is* loaded we query the actual FTS and
+ * vector indexes via {@link checkIndexHealth} so the returned capabilities
+ * reflect reality rather than just theoretical availability.
  *
- * @param _repoId - Repository ID (reserved for per-repo index checks in Stage 1).
+ * If the index health check fails for any reason (e.g. the DB is not
+ * initialised yet) we fall back to the extension-based proxy so the
+ * caller still gets a best-effort answer.
+ *
+ * @param _repoId - Repository ID (reserved for future per-repo index scoping).
  */
 export async function checkRetrievalHealth(
   _repoId: string,
 ): Promise<RetrievalCapabilities> {
   const caps = getExtensionCapabilities();
 
-  return {
-    fts: caps.fts,
-    // Stage 0 proxy: if the vector extension loaded, assume both model
-    // indexes *could* exist.  Stage 1 will query for actual indexes.
-    vectorMiniLM: caps.vector,
-    vectorNomic: caps.vector,
-  };
+  // Fast path: if neither extension is loaded, indexes cannot exist.
+  if (!caps.fts && !caps.vector) {
+    return {
+      fts: false,
+      vectorMiniLM: false,
+      vectorNomic: false,
+    };
+  }
+
+  // Extension(s) available — query for real index existence.
+  try {
+    const conn = await getLadybugConn();
+    const health = await checkIndexHealth(conn);
+
+    // Derive per-model vector availability from the health result.
+    let vectorMiniLM = false;
+    let vectorNomic = false;
+
+    for (const v of health.vectors) {
+      if (v.model === "all-MiniLM-L6-v2") {
+        vectorMiniLM = v.exists;
+      } else if (v.model === "nomic-embed-text-v1.5") {
+        vectorNomic = v.exists;
+      }
+    }
+
+    return {
+      fts: health.fts.exists,
+      vectorMiniLM,
+      vectorNomic,
+    };
+  } catch (err) {
+    // Index health check failed — fall back to extension-based proxy
+    // so we don’t block startup or degrade the caller.
+    logger.warn(
+      `[retrieval] checkIndexHealth failed, falling back to extension proxy: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+
+    return {
+      fts: caps.fts,
+      vectorMiniLM: caps.vector,
+      vectorNomic: caps.vector,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------

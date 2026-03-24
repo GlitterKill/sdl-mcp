@@ -24,7 +24,10 @@ import { attachRawContext } from "../token-usage.js";
 import {
   getOverlaySnapshot,
   searchSymbolsWithOverlay,
+  searchSymbolsHybridWithOverlay,
 } from "../../live-index/overlay-reader.js";
+import { checkRetrievalHealth, shouldFallbackToLegacy } from "../../retrieval/index.js";
+import type { RetrievalEvidence } from "../../retrieval/types.js";
 import { logger } from "../../util/logger.js";
 import { rerankByEmbeddings } from "../../indexer/embeddings.js";
 import { buildCardForSymbol } from "../../services/card-builder.js";
@@ -58,12 +61,68 @@ export async function handleSymbolSearch(
     throw new NotFoundError(`Repository not found: ${request.repoId}`);
   }
 
-  const rows = await searchSymbolsWithOverlay(
-    conn,
-    request.repoId,
-    request.query,
-    limit,
-  );
+  // Determine retrieval mode
+  const retrievalConfig = semanticConfig?.retrieval;
+  let useHybrid = false;
+  let retrievalEvidence: RetrievalEvidence | undefined;
+  let fallbackReason: string | undefined;
+
+  if (
+    semanticRequested &&
+    semanticConfig?.enabled === true &&
+    retrievalConfig?.mode === "hybrid"
+  ) {
+    try {
+      // NOTE: checkRetrievalHealth is also called inside hybridSearch().
+      // A future optimisation could pass pre-resolved caps via options.
+      const caps = await checkRetrievalHealth(request.repoId);
+      if (!shouldFallbackToLegacy(caps, retrievalConfig)) {
+        useHybrid = true;
+      } else {
+        fallbackReason = !caps.fts
+          ? "FTS extension unavailable"
+          : "Retrieval health check failed";
+      }
+    } catch (err) {
+      fallbackReason = `Health check error: ${err instanceof Error ? err.message : String(err)}`;
+      logger.warn(`[symbol.search] Hybrid health check failed, using legacy: ${fallbackReason}`);
+    }
+  }
+
+  let rows: Awaited<ReturnType<typeof searchSymbolsWithOverlay>>;
+  let semanticEnabled = false;
+
+  if (useHybrid) {
+    // --- HYBRID PATH: FTS + vector + RRF fusion for durable, lexical for overlay ---
+    try {
+      const { rows: hybridRows, evidence } = await searchSymbolsHybridWithOverlay(
+        conn,
+        request.repoId,
+        request.query,
+        limit,
+        {
+          ftsTopK: retrievalConfig?.fts?.topK,
+          vectorTopK: retrievalConfig?.vector?.topK,
+          rrfK: retrievalConfig?.fusion?.rrfK,
+          candidateLimit: retrievalConfig?.candidateLimit,
+          includeEvidence: request.includeRetrievalEvidence === true,
+        },
+      );
+      rows = hybridRows;
+      retrievalEvidence = evidence;
+      semanticEnabled = true;
+    } catch (err) {
+      // Graceful degradation: fall back to legacy search
+      logger.warn(
+        `[symbol.search] Hybrid search failed, falling back to legacy: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      fallbackReason = `Hybrid search error: ${err instanceof Error ? err.message : String(err)}`;
+      rows = await searchSymbolsWithOverlay(conn, request.repoId, request.query, limit);
+    }
+  } else {
+    // --- LEGACY PATH: lexical search + optional semantic reranking ---
+    rows = await searchSymbolsWithOverlay(conn, request.repoId, request.query, limit);
+  }
 
   let results = rows.map((row) => ({
     symbolId: row.symbolId,
@@ -72,9 +131,9 @@ export async function handleSymbolSearch(
     kind: row.kind as SymbolKind,
   }));
 
-  // Semantic reranking: when requested, enabled in config, and embeddings exist
-  let semanticEnabled = false;
+  // Legacy semantic reranking: only when NOT using hybrid path
   if (
+    !useHybrid &&
     semanticRequested &&
     semanticConfig?.enabled === true &&
     rows.length > 0
@@ -84,8 +143,6 @@ export async function handleSymbolSearch(
       const symbolIds = rows.map((row) => row.symbolId);
       const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
 
-      // Separate into rerank-able (found in durable DB from untouched files)
-      // and non-rerank-able (overlay-only OR from overlay-touched files with stale durable data)
       const lexicalCandidates: {
         symbol: ladybugDb.SymbolRow;
         lexicalScore: number;
@@ -103,7 +160,6 @@ export async function handleSymbolSearch(
             lexicalScore: 1.0 - index / rows.length,
           });
         } else {
-          // Overlay-backed or overlay-only symbols: preserve in original lexical order
           nonRerankableResults.push({
             symbolId: row.symbolId,
             name: row.name,
@@ -126,7 +182,6 @@ export async function handleSymbolSearch(
           model,
         });
 
-        // Rebuild: reranked symbols first, then non-rerank-able in original order
         const filePathMap = new Map(
           rows.map((row) => [row.symbolId, row.filePath]),
         );
@@ -140,8 +195,6 @@ export async function handleSymbolSearch(
           nonRerankableResults.map((row) => [row.symbolId, row]),
         );
 
-        // Reranked symbols first (in semantic relevance order),
-        // then non-rerankable symbols (in original lexical order)
         const mergedResults: typeof results = [
           ...rerankedResults,
           ...rows
@@ -154,7 +207,6 @@ export async function handleSymbolSearch(
         semanticEnabled = true;
       }
     } catch (error) {
-      // Graceful degradation: if semantic reranking fails, return lexical results
       logger.warn(
         `Semantic reranking failed, returning lexical results: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -179,9 +231,35 @@ export async function handleSymbolSearch(
     latencyMs: Date.now() - startedAt,
     candidateCount: rows.length,
     alpha: semanticConfig?.alpha ?? 0.6,
+    retrievalMode: useHybrid ? "hybrid" : "legacy",
+    ...(retrievalEvidence?.candidateCountPerSource && {
+      candidateCountPerSource: retrievalEvidence.candidateCountPerSource,
+    }),
+    ...(retrievalEvidence?.fusionLatencyMs != null && {
+      fusionLatencyMs: retrievalEvidence.fusionLatencyMs,
+    }),
+    ...(fallbackReason && { fallbackReason }),
+    finalResultCount: results.length,
+    ...(semanticRequested && retrievalConfig?.mode === "hybrid" && {
+      ftsAvailable: retrievalEvidence?.sources?.includes("fts") ?? false,
+      vectorAvailable: (retrievalEvidence?.sources?.some((s) => s.startsWith("vector:")) ?? false),
+    }),
   });
 
-  const response = { results };
+  const response: SymbolSearchResponse = { results };
+  if (request.includeRetrievalEvidence) {
+    if (useHybrid && retrievalEvidence) {
+      (response as Record<string, unknown>).retrievalEvidence = results.map((r) => ({
+        symbolId: r.symbolId,
+        retrievalSource: "hybrid" as const,
+      }));
+    } else if (fallbackReason) {
+      (response as Record<string, unknown>).retrievalEvidence = results.map((r) => ({
+        symbolId: r.symbolId,
+        retrievalSource: "legacy" as const,
+      }));
+    }
+  }
   attachRawContext(response, {
     fileIds: [...new Set(rows.map((row) => row.fileId))],
   });

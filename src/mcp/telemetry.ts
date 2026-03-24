@@ -111,6 +111,20 @@ export interface SemanticSearchTelemetryEvent {
   latencyMs: number;
   candidateCount: number;
   alpha: number;
+  /** Retrieval mode used: "legacy" (rerank) or "hybrid" (FTS+vector+RRF) */
+  retrievalMode?: "legacy" | "hybrid";
+  /** Per-source candidate counts before fusion (e.g. { fts: 50, "vector:minilm": 30 }) */
+  candidateCountPerSource?: Record<string, number>;
+  /** Time spent in RRF fusion step (ms) */
+  fusionLatencyMs?: number;
+  /** Whether FTS extension was available */
+  ftsAvailable?: boolean;
+  /** Whether vector extension was available */
+  vectorAvailable?: boolean;
+  /** Reason for falling back to legacy, if applicable */
+  fallbackReason?: string;
+  /** Final result count after fusion and limiting */
+  finalResultCount?: number;
 }
 
 export interface SummaryQualityTelemetryEvent {
@@ -345,7 +359,7 @@ export function logEdgeResolutionTelemetry(
 export function logSemanticSearchTelemetry(
   event: SemanticSearchTelemetryEvent,
 ): void {
-  logger.info("Semantic search", {
+  const fields: Record<string, unknown> = {
     eventType: "semantic_search",
     timestamp: getCurrentTimestamp(),
     repoId: event.repoId,
@@ -353,7 +367,31 @@ export function logSemanticSearchTelemetry(
     latencyMs: event.latencyMs,
     candidateCount: event.candidateCount,
     alpha: event.alpha,
-  });
+  };
+
+  if (event.retrievalMode !== undefined) {
+    fields.retrievalMode = event.retrievalMode;
+  }
+  if (event.candidateCountPerSource !== undefined) {
+    fields.candidateCountPerSource = event.candidateCountPerSource;
+  }
+  if (event.fusionLatencyMs !== undefined) {
+    fields.fusionLatencyMs = event.fusionLatencyMs;
+  }
+  if (event.ftsAvailable !== undefined) {
+    fields.ftsAvailable = event.ftsAvailable;
+  }
+  if (event.vectorAvailable !== undefined) {
+    fields.vectorAvailable = event.vectorAvailable;
+  }
+  if (event.fallbackReason !== undefined) {
+    fields.fallbackReason = event.fallbackReason;
+  }
+  if (event.finalResultCount !== undefined) {
+    fields.finalResultCount = event.finalResultCount;
+  }
+
+  logger.info("Semantic search", fields);
 }
 
 export function logSummaryQualityTelemetry(
