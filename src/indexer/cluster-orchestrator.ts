@@ -1,6 +1,8 @@
 import type { Connection } from "kuzu";
 
 import * as ladybugDb from "../db/ladybug-queries.js";
+import { buildClusterSearchText } from "../db/ladybug-clusters.js";
+import { buildProcessSearchText } from "../db/ladybug-processes.js";
 import { withWriteConn } from "../db/ladybug.js";
 import { logger } from "../util/logger.js";
 import { computeClustersTS } from "../graph/cluster.js";
@@ -110,6 +112,11 @@ export async function computeAndStoreClustersAndProcesses(params: {
         clusterIndex,
       );
 
+      const memberNames = members
+        .map((m) => symbolById.get(m.symbolId)?.name)
+        .filter((n): n is string => Boolean(n));
+      const clusterSearchText = buildClusterSearchText(label, memberNames);
+
       await ladybugDb.upsertCluster(wConn, {
         clusterId,
         repoId,
@@ -118,6 +125,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
         cohesionScore: 0.0,
         versionId,
         createdAt: now,
+        searchText: clusterSearchText,
       });
 
       await ladybugDb.upsertClusterMembersBatch(
@@ -152,16 +160,28 @@ export async function computeAndStoreClustersAndProcesses(params: {
       const lastOrder =
         proc.steps.length > 0 ? proc.steps[proc.steps.length - 1].stepOrder : 0;
 
+      const entryName = symbolById.get(proc.entrySymbolId)?.name ?? "";
+      const procLabel = entryName
+        ? `Process: ${entryName}`
+        : `Process ${clusterIndex + 1}`;
+      const stepNames = proc.steps
+        .map((step) => symbolById.get(step.symbolId)?.name)
+        .filter((n): n is string => Boolean(n));
+      const processSearchText = buildProcessSearchText(
+        procLabel,
+        entryName,
+        stepNames,
+      );
+
       await ladybugDb.upsertProcess(wConn, {
         processId: proc.processId,
         repoId,
         entrySymbolId: proc.entrySymbolId,
-        label: symbolById.get(proc.entrySymbolId)?.name
-          ? `Process: ${symbolById.get(proc.entrySymbolId)!.name}`
-          : `Process ${clusterIndex + 1}`,
+        label: procLabel,
         depth: proc.depth,
         versionId,
         createdAt: now,
+        searchText: processSearchText,
       });
 
       await ladybugDb.upsertProcessStepsBatch(

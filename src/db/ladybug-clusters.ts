@@ -19,6 +19,7 @@ export interface ClusterRow {
   cohesionScore: number;
   versionId: string | null;
   createdAt: string;
+  searchText?: string | null;
 }
 
 export interface ClusterMemberRow {
@@ -46,7 +47,8 @@ export async function upsertCluster(
          c.symbolCount = $symbolCount,
          c.cohesionScore = $cohesionScore,
          c.versionId = $versionId,
-         c.createdAt = $createdAt
+         c.createdAt = $createdAt,
+         c.searchText = $searchText
      MERGE (c)-[:CLUSTER_IN_REPO]->(r)`,
     {
       clusterId: row.clusterId,
@@ -56,8 +58,21 @@ export async function upsertCluster(
       cohesionScore: row.cohesionScore,
       versionId: row.versionId,
       createdAt: row.createdAt,
+      searchText: row.searchText ?? null,
     },
   );
+}
+
+/**
+ * Build a search-friendly text string for a cluster.
+ * Concatenates the label with up to 20 representative member symbol names.
+ */
+export function buildClusterSearchText(
+  label: string,
+  memberSymbolNames: string[],
+): string {
+  const names = memberSymbolNames.slice(0, 20).join(" ");
+  return `cluster: ${label} members: ${names}`.trim();
 }
 
 export async function upsertClusterMember(
@@ -325,6 +340,51 @@ export async function getRelatedClusters(
   );
 
   return results.slice(0, Math.max(1, limit));
+}
+
+/**
+ * Backfill searchText for all clusters in a repo.
+ * Fetches each cluster's members, resolves symbol names, and updates searchText.
+ * Returns the count of clusters updated.
+ */
+export async function backfillClusterSearchText(
+  conn: Connection,
+  repoId: string,
+): Promise<number> {
+  const clusters = await getClustersForRepo(conn, repoId);
+  if (clusters.length === 0) return 0;
+
+  let updated = 0;
+  await withTransaction(conn, async (txConn) => {
+    for (const cluster of clusters) {
+      const members = await getClusterMembers(txConn, cluster.clusterId);
+      const symbolIds = members.map((m) => m.symbolId);
+
+      // Fetch names for the member symbols
+      const nameRows = await queryAll<{ symbolId: string; name: string }>(
+        txConn,
+        `MATCH (s:Symbol)
+         WHERE s.symbolId IN $symbolIds
+         RETURN s.symbolId AS symbolId, s.name AS name`,
+        { symbolIds },
+      );
+      const nameMap = new Map(nameRows.map((r) => [r.symbolId, r.name]));
+      const memberNames = symbolIds
+        .map((id) => nameMap.get(id))
+        .filter((n): n is string => Boolean(n));
+
+      const searchText = buildClusterSearchText(cluster.label, memberNames);
+      await exec(
+        txConn,
+        `MATCH (c:Cluster {clusterId: $clusterId})
+         SET c.searchText = $searchText`,
+        { clusterId: cluster.clusterId, searchText },
+      );
+      updated++;
+    }
+  });
+
+  return updated;
 }
 
 export async function deleteClustersByRepo(

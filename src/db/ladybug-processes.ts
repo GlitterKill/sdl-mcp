@@ -19,6 +19,7 @@ export interface ProcessRow {
   depth: number;
   versionId: string | null;
   createdAt: string;
+  searchText?: string | null;
 }
 
 export interface ProcessStepRow {
@@ -49,7 +50,8 @@ export async function upsertProcess(
          p.label = $label,
          p.depth = $depth,
          p.versionId = $versionId,
-         p.createdAt = $createdAt
+         p.createdAt = $createdAt,
+         p.searchText = $searchText
      MERGE (p)-[:PROCESS_IN_REPO]->(r)`,
     {
       processId: row.processId,
@@ -59,8 +61,22 @@ export async function upsertProcess(
       depth: row.depth,
       versionId: row.versionId,
       createdAt: row.createdAt,
+      searchText: row.searchText ?? null,
     },
   );
+}
+
+/**
+ * Build a search-friendly text string for a process.
+ * Concatenates the label, entry symbol name, and up to 15 step names.
+ */
+export function buildProcessSearchText(
+  label: string,
+  entrySymbolName: string,
+  memberNames: string[],
+): string {
+  const names = memberNames.slice(0, 15).join(" ");
+  return `process: ${label} entry: ${entrySymbolName} steps: ${names}`.trim();
 }
 
 export async function upsertProcessStep(
@@ -299,6 +315,68 @@ export async function getProcessStepsAfterSymbol(
     stepOrder: toNumber(row.stepOrder),
     role: row.role,
   }));
+}
+
+/**
+ * Backfill searchText for all processes in a repo.
+ * Fetches each process's steps, resolves symbol names, and updates searchText.
+ * Returns the count of processes updated.
+ */
+export async function backfillProcessSearchText(
+  conn: Connection,
+  repoId: string,
+): Promise<number> {
+  const rows = await queryAll<{
+    processId: string;
+    label: string;
+    entrySymbolId: string;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:PROCESS_IN_REPO]-(p:Process)
+     RETURN p.processId AS processId,
+            p.label AS label,
+            p.entrySymbolId AS entrySymbolId
+     ORDER BY p.processId`,
+    { repoId },
+  );
+  if (rows.length === 0) return 0;
+
+  let updated = 0;
+  await withTransaction(conn, async (txConn) => {
+    for (const proc of rows) {
+      const steps = await getProcessFlow(txConn, proc.processId);
+      const allSymbolIds = [
+        proc.entrySymbolId,
+        ...steps.map((s) => s.symbolId),
+      ];
+
+      // Fetch names for the entry + step symbols
+      const nameRows = await queryAll<{ symbolId: string; name: string }>(
+        txConn,
+        `MATCH (s:Symbol)
+         WHERE s.symbolId IN $symbolIds
+         RETURN s.symbolId AS symbolId, s.name AS name`,
+        { symbolIds: allSymbolIds },
+      );
+      const nameMap = new Map(nameRows.map((r) => [r.symbolId, r.name]));
+
+      const entryName = nameMap.get(proc.entrySymbolId) ?? proc.entrySymbolId;
+      const stepNames = steps
+        .map((s) => nameMap.get(s.symbolId))
+        .filter((n): n is string => Boolean(n));
+
+      const searchText = buildProcessSearchText(proc.label, entryName, stepNames);
+      await exec(
+        txConn,
+        `MATCH (p:Process {processId: $processId})
+         SET p.searchText = $searchText`,
+        { processId: proc.processId, searchText },
+      );
+      updated++;
+    }
+  });
+
+  return updated;
 }
 
 export async function deleteProcessesByRepo(
