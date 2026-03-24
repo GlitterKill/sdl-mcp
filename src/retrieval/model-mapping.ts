@@ -18,6 +18,8 @@ export interface EmbeddingModelInfo {
   dimension: number;
   /** Prefix used to derive Symbol node property names. */
   propertyPrefix: string;
+  /** Deterministic vector index name for LadybugDB. */
+  indexName: string;
 }
 
 /**
@@ -25,8 +27,8 @@ export interface EmbeddingModelInfo {
  * Add new models here; every other helper derives from this map.
  */
 export const EMBEDDING_MODELS: Readonly<Record<string, EmbeddingModelInfo>> = {
-  "all-MiniLM-L6-v2": { dimension: 384, propertyPrefix: "embeddingMiniLM" },
-  "nomic-embed-text-v1.5": { dimension: 768, propertyPrefix: "embeddingNomic" },
+  "all-MiniLM-L6-v2": { dimension: 384, propertyPrefix: "embeddingMiniLM", indexName: "symbol_vec_minilm_l6_v2" },
+  "nomic-embed-text-v1.5": { dimension: 768, propertyPrefix: "embeddingNomic", indexName: "symbol_vec_nomic_embed_v15" },
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -75,9 +77,9 @@ export function getUpdatedAtPropertyName(model: string): string | null {
  * for unknown models.  Index names are lowercase with underscores to stay
  * compatible with LadybugDB naming rules.
  *
- * @example getVectorIndexName("all-MiniLM-L6-v2") // "symbol_vec_embeddingminilm"
+ * @example getVectorIndexName("all-MiniLM-L6-v2") // "symbol_vec_minilm_l6_v2"
  */
 export function getVectorIndexName(model: string): string | null {
   const info = EMBEDDING_MODELS[model];
-  return info ? `symbol_vec_${info.propertyPrefix.toLowerCase()}` : null;
+  return info ? info.indexName : null;
 }

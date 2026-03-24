@@ -322,6 +322,12 @@ export async function refreshSymbolEmbeddings(params: {
     let storageModel = provider.isMockFallback?.()
       ? "mock-fallback"
       : modelName;
+    // Mock-fallback vectors must not be persisted to Symbol node properties
+    // (the model is not in EMBEDDING_MODELS, so property-name resolution would throw).
+    if (storageModel === "mock-fallback") {
+      skipped += 1;
+      continue;
+    }
     const existing = await getSymbolEmbeddingFromNode(conn, symbol.symbolId, storageModel);
     if (existing && existing.cardHash === cardHash) {
       skipped += 1;
@@ -373,6 +379,16 @@ export async function rerankByEmbeddings(params: {
   const expectedModel = provider.isMockFallback?.()
     ? "mock-fallback"
     : params.model;
+
+  // Mock-fallback model has no Symbol node properties — return with semanticScore=0
+  if (expectedModel === "mock-fallback") {
+    return params.symbols.map((item) => ({
+      symbol: item.symbol,
+      lexicalScore: item.lexicalScore,
+      semanticScore: 0,
+      finalScore: alpha * item.lexicalScore,
+    }));
+  }
 
   const conn = await getLadybugConn();
   const embeddingMap = await getSymbolEmbeddingsFromNodes(

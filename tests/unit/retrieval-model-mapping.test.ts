@@ -115,11 +115,11 @@ describe("getUpdatedAtPropertyName", () => {
 
 describe("getVectorIndexName", () => {
   it("returns 'symbol_vec_embeddingminilm' for all-MiniLM-L6-v2", () => {
-    assert.strictEqual(getVectorIndexName(MINILM), "symbol_vec_embeddingminilm");
+    assert.strictEqual(getVectorIndexName(MINILM), "symbol_vec_minilm_l6_v2");
   });
 
   it("returns 'symbol_vec_embeddingnomic' for nomic-embed-text-v1.5", () => {
-    assert.strictEqual(getVectorIndexName(NOMIC), "symbol_vec_embeddingnomic");
+    assert.strictEqual(getVectorIndexName(NOMIC), "symbol_vec_nomic_embed_v15");
   });
 
   it("returns null for an unknown model", () => {
