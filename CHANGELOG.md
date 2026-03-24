@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-03-24
+
+### Added
+
+- `sdl.runtime.execute`: Added `outputMode` parameter (`"minimal"` | `"summary"` | `"intent"`). Default is `"minimal"` (~50 tokens vs ~570 previously), matching the two-phase execute-then-query pattern for 95%+ token savings on large outputs.
+- New tool `sdl.runtime.queryOutput`: On-demand retrieval and keyword search of stored runtime output artifacts. Enables agents to query specific output content only when needed.
+
+### Fixed
+
+- Fixed `maxResponseLines` parameter in `sdl.runtime.execute` — was silently capped at 40 lines regardless of value.
+- Added per-line truncation (500 chars max) to prevent single long lines from dominating token budget.
+
 ## [0.10.0] - 2026-03-23
 
 ### Breaking
@@ -751,6 +763,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.10.1]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.10.1
+[0.10.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.10.0
 [0.8.5]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.5
 [0.8.4]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.4
 [0.8.3]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.3

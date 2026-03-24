@@ -1,6 +1,6 @@
 # CLI Tool Access
 
-**Access all 30 gateway-routable SDL-MCP tool actions directly from the command line — no MCP server, transport, or SDK required.**
+**Access all 31 gateway-routable SDL-MCP tool actions directly from the command line — no MCP server, transport, or SDK required.**
 
 The `sdl-mcp tool` command invokes MCP tool handlers directly, giving you full access to SDL-MCP's capabilities from shell scripts, CI pipelines, and interactive terminal sessions.
 
@@ -119,6 +119,7 @@ Run `sdl-mcp tool --list` to see all actions grouped by namespace:
 | `memory.remove` | Remove a development memory |
 | `memory.surface` | Auto-surface relevant memories |
 | `runtime.execute` | Execute command in sandboxed subprocess |
+| `runtime.queryOutput` | Search stored runtime output artifacts by keyword |
 
 > **Note:** `buffer.*` actions require a running MCP server with live indexing and will return limited results in CLI mode.
 
@@ -312,8 +313,11 @@ sdl-mcp tool symbol.search --query "" --limit 1000 --output-format json-compact 
 # Batch fetch cards for specific symbols
 sdl-mcp tool symbol.getCards --symbol-ids "sym1,sym2,sym3" --output-format json > cards.json
 
-# Run a sandboxed command
-sdl-mcp tool runtime.execute --runtime shell --code "npm test" --timeout-ms 30000
+# Run a sandboxed command (minimal output mode)
+sdl-mcp tool runtime.execute --runtime shell --code "npm test" --timeout-ms 30000 --output-mode minimal
+
+# Search stored output from a previous execution
+sdl-mcp tool runtime.queryOutput --artifact-handle "runtime-my-repo-1234567890-abc123" --query-terms "FAIL,Error" --max-excerpts 5
 ```
 
 ---
@@ -324,7 +328,7 @@ The CLI tool access feature is composed of four modules:
 
 | Module | File | Responsibility |
 |:-------|:-----|:---------------|
-| **Action Definitions** | `src/cli/commands/tool-actions.ts` | 30 action definitions with arg specs, types, and examples |
+| **Action Definitions** | `src/cli/commands/tool-actions.ts` | 31 action definitions with arg specs, types, and examples |
 | **Arg Parser** | `src/cli/commands/tool-arg-parser.ts` | Flag→field mapping, type coercion, budget merging, required validation |
 | **Dispatcher** | `src/cli/commands/tool-dispatch.ts` | Config/DB init, repoId resolution, handler routing, error handling |
 | **Output Formatter** | `src/cli/commands/tool-output.ts` | JSON, compact JSON, pretty, and table output with action-specific formatting |

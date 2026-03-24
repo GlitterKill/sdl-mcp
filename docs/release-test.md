@@ -666,17 +666,58 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 
 #### sdl.runtime.execute
 
-**Input:**
+**Input (minimal mode — new default):**
 ```json
 {
   "repoId": "test-repo",
-  "command": "echo hello"
+  "runtime": "node",
+  "code": "console.log('hello')",
+  "outputMode": "minimal",
+  "timeoutMs": 10000
 }
 ```
 
-**Expected:** Executes runtime operation.
+**Expected:** Returns compact ~50-token response with status and artifact handle.
 
-- [ ] Returns execution result
+- [ ] Returns `status` ("success" or "error")
+- [ ] Returns `exitCode`
+- [ ] Returns `artifactHandle` (non-null when `persistOutput` is true)
+- [ ] Returns `outputLines` and `outputBytes` counts
+- [ ] Does NOT include `stdoutSummary`/`stderrSummary` in minimal mode
+
+**Input (summary mode — legacy behavior):**
+```json
+{
+  "repoId": "test-repo",
+  "runtime": "node",
+  "code": "console.log('hello')",
+  "outputMode": "summary",
+  "timeoutMs": 10000
+}
+```
+
+**Expected:** Returns head+tail output excerpts.
+
+- [ ] Returns `stdoutSummary` with output content
+- [ ] Returns execution result with summary excerpts
+
+#### sdl.runtime.queryOutput
+
+**Input:**
+```json
+{
+  "artifactHandle": "<handle from sdl.runtime.execute>",
+  "queryTerms": ["hello"],
+  "maxExcerpts": 5,
+  "contextLines": 2
+}
+```
+
+**Expected:** Returns keyword-matched excerpts from stored output artifact.
+
+- [ ] Returns matched excerpts containing "hello"
+- [ ] Respects `maxExcerpts` limit
+- [ ] Includes context lines around matches
 
 #### sdl.pr.risk.analyze
 

@@ -46,6 +46,7 @@ Flat mode, gateway mode, and the CLI `tool` command share the same normalization
     - [sdl.agent.feedback.query](#sdlagentfeedbackquery)
 11. [Runtime Execution](#11-runtime-execution)
     - [sdl.runtime.execute](#sdlruntimeexecute)
+    - [sdl.runtime.queryOutput](#sdlruntimequeryoutput)
 12. [Development Memories](#12-development-memories)
     - [sdl.memory.store](#sdlmemorystore)
     - [sdl.memory.query](#sdlmemoryquery)
@@ -983,8 +984,11 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | `queryTerms` | string[] (max 10) | No | Keywords for excerpt matching in the output |
 | `maxResponseLines` | number (10-1000) | No | Max lines in stdout/stderr summaries (default: 100) |
 | `persistOutput` | boolean | No | Whether to persist full output as a gzip artifact (default: true) |
+| `outputMode` | `"minimal"` \| `"summary"` \| `"intent"` | No | Controls response verbosity. `"minimal"` (default): ~50 tokens with status and artifact handle only. `"summary"`: head+tail output excerpts (legacy behavior). `"intent"`: only `queryTerms`-matched excerpts. |
 
-**Response:**
+**Response (varies by `outputMode`):**
+
+**Common fields (all modes):**
 
 | Field | Type | Description |
 |:------|:-----|:------------|
@@ -992,12 +996,37 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | `exitCode` | number \| null | Process exit code |
 | `signal` | string \| null | Signal that terminated the process (e.g., `"SIGTERM"`) |
 | `durationMs` | number | Execution duration |
+| `artifactHandle` | string \| null | Handle for the persisted artifact (if `persistOutput` was true) |
+| `policyDecision` | object | `{auditHash, deniedReasons}` |
+
+**`outputMode: "minimal"` (default) — adds:**
+
+| Field | Type | Description |
+|:------|:-----|:------------|
+| `outputLines` | number | Total lines captured across stdout+stderr |
+| `outputBytes` | number | Total bytes captured across stdout+stderr |
+
+No `stdoutSummary`, `stderrSummary`, or `excerpts` fields. Use `sdl.runtime.queryOutput` with the `artifactHandle` to retrieve output on demand.
+
+**`outputMode: "summary"` — adds:**
+
+| Field | Type | Description |
+|:------|:-----|:------------|
 | `stdoutSummary` | string | Head + tail of stdout, truncated to `maxResponseLines` |
 | `stderrSummary` | string | Tail of stderr |
-| `artifactHandle` | string \| null | Handle for the persisted artifact (if `persistOutput` was true) |
-| `excerpts` | array | Keyword-matched windows: `{lineStart, lineEnd, content, source: "stdout"|"stderr"}` |
+| `excerpts` | array | Keyword-matched windows: `{lineStart, lineEnd, content, source: "stdout"\|"stderr"}` |
 | `truncation` | object | `{stdoutTruncated, stderrTruncated, totalStdoutBytes, totalStderrBytes}` |
-| `policyDecision` | object | `{auditHash, deniedReasons}` |
+
+**`outputMode: "intent"` — adds:**
+
+| Field | Type | Description |
+|:------|:-----|:------------|
+| `excerpts` | array | Only `queryTerms`-matched windows: `{lineStart, lineEnd, content, source}` |
+| `truncation` | object | `{stdoutTruncated, stderrTruncated, totalStdoutBytes, totalStderrBytes}` |
+
+No `stdoutSummary` or `stderrSummary` — only matched excerpts are returned.
+
+> **Per-line truncation:** All output modes enforce a 500-character per-line cap. Lines exceeding this limit are truncated with a `[truncated]` suffix.
 
 **Default executables by runtime:**
 - `node` → `node` (or `bun` if available)
@@ -1005,6 +1034,36 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 - `shell` → `bash` (Unix) / `cmd.exe` (Windows)
 
 **Use cases:** Running tests, linters, build scripts, or diagnostic commands within SDL-MCP's governance framework.
+
+---
+
+### sdl.runtime.queryOutput
+
+Retrieves and searches stored runtime output artifacts on demand.
+
+**What it does:** Loads a previously persisted runtime artifact (from `sdl.runtime.execute` with `persistOutput: true`) and searches it for matching terms. Returns excerpts with surrounding context lines. This is the companion to `outputMode: "minimal"` — execute first with minimal output, then query the artifact only when you need to inspect the results.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `artifactHandle` | string | Yes | Handle returned by `sdl.runtime.execute` |
+| `queryTerms` | string[] | Yes | Keywords to search for in the output |
+| `maxExcerpts` | integer (1-100) | No | Maximum excerpt windows to return (default: 10) |
+| `contextLines` | integer (0-20) | No | Lines of context around each match (default: 3) |
+| `stream` | `"stdout"` \| `"stderr"` \| `"both"` | No | Which stream(s) to search (default: `"both"`) |
+
+**Response:**
+
+| Field | Type | Description |
+|:------|:-----|:------------|
+| `artifactHandle` | string | Echo of the requested handle |
+| `excerpts` | array | Matched windows: `{lineStart, lineEnd, content, source: "stdout"\|"stderr"}` |
+| `totalLines` | integer | Total lines in the artifact |
+| `totalBytes` | integer | Total bytes in the artifact |
+| `searchedStreams` | string[] | Streams that were searched |
+
+**Use cases:** Inspecting test failures after a minimal execute, searching build logs for specific errors, extracting diagnostic output from long-running commands.
 
 ---
 

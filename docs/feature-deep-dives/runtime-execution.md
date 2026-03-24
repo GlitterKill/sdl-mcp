@@ -103,6 +103,139 @@ This keeps command execution consistent with SDL policy rather than depending on
 
 ---
 
+## Output Modes
+
+`sdl.runtime.execute` supports three output modes via the `outputMode` parameter, controlling how much output is returned in the response:
+
+| Mode | Default | Tokens | What you get |
+|:-----|:--------|:-------|:-------------|
+| `"minimal"` | **Yes** | ~50 | `{status, exitCode, signal, durationMs, outputLines, outputBytes, artifactHandle}` — no stdout/stderr content |
+| `"summary"` | No | ~200-500 | Head + tail output excerpts (legacy default behavior) |
+| `"intent"` | No | Variable | Only `queryTerms`-matched excerpts — no head/tail summary |
+
+### Choosing a mode
+
+- **`minimal`** is the new default. Use it when you only need to know whether a command succeeded. Follow up with `sdl.runtime.queryOutput` to search the persisted artifact on demand.
+- **`summary`** restores the legacy behavior where head + tail excerpts are returned inline. Useful for short commands where you always want to see the output.
+- **`intent`** is ideal when you provide `queryTerms` and only care about matching lines. No head/tail summary is included — only matched excerpts.
+
+### Per-line truncation
+
+All modes now enforce a 500-character per-line cap. Lines exceeding this limit are truncated with a `[truncated]` suffix. This prevents a single long line (e.g., minified JSON) from consuming the entire response budget.
+
+---
+
+## Two-Phase Pattern: Minimal Execute + Query
+
+The recommended workflow for most runtime tasks is a two-phase approach:
+
+1. **Execute with `outputMode: "minimal"`** — run the command and get back a lightweight status response with an `artifactHandle`.
+2. **Query with `sdl.runtime.queryOutput`** — search the persisted output artifact for specific terms, retrieving only relevant excerpts.
+
+This pattern minimizes tokens in the common case (command succeeded, move on) while still providing full output access when needed.
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant SDL as sdl.runtime.execute
+    participant Store as Artifact Store
+    participant Query as sdl.runtime.queryOutput
+
+    Agent->>SDL: execute(outputMode: "minimal")
+    SDL->>Store: persist stdout/stderr (gzip)
+    SDL-->>Agent: {status, exitCode, artifactHandle}
+    Note over Agent: Check exitCode — done if 0
+
+    Agent->>Query: queryOutput(artifactHandle, queryTerms)
+    Query->>Store: search persisted artifact
+    Query-->>Agent: {excerpts: [...]}
+```
+
+### Example: Two-phase test run
+
+**Phase 1 — Execute:**
+
+```json
+{
+  "repoId": "my-repo",
+  "runtime": "node",
+  "args": ["--test", "tests/auth.test.ts"],
+  "outputMode": "minimal",
+  "timeoutMs": 30000
+}
+```
+
+**Response (~50 tokens):**
+
+```json
+{
+  "status": "failure",
+  "exitCode": 1,
+  "signal": null,
+  "durationMs": 4200,
+  "outputLines": 312,
+  "outputBytes": 18400,
+  "artifactHandle": "runtime-my-repo-1774356909696-fc5aa1f22e33e17c"
+}
+```
+
+**Phase 2 — Query (only if needed):**
+
+```json
+{
+  "artifactHandle": "runtime-my-repo-1774356909696-fc5aa1f22e33e17c",
+  "queryTerms": ["FAIL", "Error", "AssertionError"],
+  "maxExcerpts": 5,
+  "contextLines": 3
+}
+```
+
+**Response:**
+
+```json
+{
+  "artifactHandle": "runtime-my-repo-1774356909696-fc5aa1f22e33e17c",
+  "excerpts": [
+    {
+      "lineStart": 45,
+      "lineEnd": 51,
+      "content": "  45| not ok 3 - authenticate() rejects expired tokens\n  46|   ---\n  47|   Error: AssertionError: expected 401 but got 200\n  ...",
+      "source": "stdout"
+    }
+  ],
+  "totalLines": 312,
+  "totalBytes": 18400,
+  "searchedStreams": ["stdout", "stderr"]
+}
+```
+
+---
+
+## sdl.runtime.queryOutput
+
+Retrieves and searches stored runtime output artifacts on demand. Use this after an `outputMode: "minimal"` execution to inspect specific parts of the output without loading it all into context.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|:----------|:-----|:---------|:------------|
+| `artifactHandle` | string | Yes | Handle returned by `sdl.runtime.execute` |
+| `queryTerms` | string[] | Yes | Keywords to search for in the output |
+| `maxExcerpts` | integer | No | Maximum excerpt windows to return (default: 10) |
+| `contextLines` | integer | No | Lines of context around each match (default: 3) |
+| `stream` | `"stdout"` \| `"stderr"` \| `"both"` | No | Which stream(s) to search (default: `"both"`) |
+
+**Response:**
+
+| Field | Type | Description |
+|:------|:-----|:------------|
+| `artifactHandle` | string | Echo of the requested handle |
+| `excerpts` | array | Matched windows: `{lineStart, lineEnd, content, source}` |
+| `totalLines` | integer | Total lines in the artifact |
+| `totalBytes` | integer | Total bytes in the artifact |
+| `searchedStreams` | string[] | Streams that were searched |
+
+
 ## Example
 
 ```json
@@ -110,6 +243,7 @@ This keeps command execution consistent with SDL policy rather than depending on
   "repoId": "my-repo",
   "runtime": "node",
   "args": ["scripts/check.mjs"],
+  "outputMode": "summary",
   "timeoutMs": 30000,
   "queryTerms": ["FAIL", "Error"],
   "maxResponseLines": 100
@@ -160,6 +294,7 @@ sdl-mcp init --client <client> --enforce-agent-tools
 When SDL-MCP is configured for agent enforcement:
 
 - prefer `runtimeExecute` in `sdl.chain` over native shell tools
+- prefer the two-phase pattern: `outputMode: "minimal"` then `sdl.runtime.queryOutput` on demand
 - prefer structured query terms over dumping large output back to the model
 - use `shell` only when a shell is necessary, not as the default runtime
 
@@ -168,6 +303,7 @@ When SDL-MCP is configured for agent enforcement:
 ## Related Docs
 
 - [`sdl.runtime.execute`](../mcp-tools-detailed.md#sdlruntimeexecute)
+- [`sdl.runtime.queryOutput`](../mcp-tools-detailed.md#sdlruntimequeryoutput)
 - [Code Mode](./code-mode.md)
 - [Governance & Policy](./governance-policy.md)
 

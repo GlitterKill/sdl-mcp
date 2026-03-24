@@ -48,7 +48,8 @@ SDL-MCP exposes 30 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway 
 | | `sdl.agent.feedback` | Record which symbols were useful/missing after a task; supports `taskTags` |
 | | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics |
 | **Context** | `sdl.context.summary` | Generate token-bounded summary for non-MCP contexts (clipboard, markdown, JSON) |
-| **Runtime** | `sdl.runtime.execute` | Sandboxed subprocess execution (16 runtimes including `node`, `typescript`, `python`, `shell`, `go`, `rust`, etc.) |
+| **Runtime** | `sdl.runtime.execute` | Sandboxed subprocess execution with `outputMode` (`minimal`, `summary`, `intent`); 16 runtimes including `node`, `typescript`, `python`, `shell`, `go`, `rust`, etc. |
+|| | `sdl.runtime.queryOutput` | On-demand keyword search of stored runtime output artifacts by `artifactHandle` |
 | **Memory** | `sdl.memory.store` | Store or update a development memory with symbol/file links |
 | | `sdl.memory.query` | Search memories by text, type, tags, or linked symbols; `staleOnly` filter |
 | | `sdl.memory.remove` | Soft-delete a memory from graph and optionally from disk |
@@ -154,7 +155,13 @@ Use this order unless task constraints force escalation:
 - `sdl.context.summary`:
   - Set `budget` to cap output tokens. Use `scope: "task"` for multi-symbol summaries, `scope: "symbol"` for single-symbol.
 - `sdl.runtime.execute`:
+  - Use `outputMode: "minimal"` (default) for ~50-token responses with just status and artifact handle.
+  - Use `outputMode: "summary"` for head+tail output excerpts (legacy behavior).
+  - Use `outputMode: "intent"` to return only `queryTerms`-matched excerpts without head/tail summary.
   - Set `timeoutMs` and `maxResponseLines` to bound output. Use `queryTerms` to extract relevant excerpts from long output.
+- `sdl.runtime.queryOutput`:
+  - Use to search stored output artifacts on-demand after a `minimal`-mode execution.
+  - Pass the `artifactHandle` from the execute response plus `queryTerms` to extract relevant excerpts.
 - `sdl.chain` *(Code Mode)*:
   - Set `budget.maxTotalTokens` and `budget.maxSteps` to bound chain execution.
   - Use `onError: "continue"` (default) to let the chain proceed past failures, or `"stop"` to halt on first error.
@@ -183,9 +190,22 @@ Stale buffer pushes (version ≤ current) are rejected automatically.
   - `raw`: `2000`
 - When over budget, planner trims rungs from the end while keeping at least one rung.
 
-### 6) Runtime execution (`sdl.runtime.execute`)
+### 6) Runtime execution (`sdl.runtime.execute` + `sdl.runtime.queryOutput`)
 
 Run commands in a repo-scoped subprocess. Requires `runtime.enabled: true` in config.
+
+**Output modes** control how much data is returned inline:
+
+| Mode | Default? | Tokens | Returns |
+|:-----|:---------|:-------|:--------|
+| `"minimal"` | Yes | ~50 | `{status, exitCode, signal, durationMs, outputLines, outputBytes, artifactHandle}` |
+| `"summary"` | No | ~200-500 | Head+tail output excerpts (legacy behavior) |
+| `"intent"` | No | ~100-300 | Only `queryTerms`-matched excerpts; no head/tail summary |
+
+**Two-phase pattern** (recommended for large output):
+
+1. Execute with `outputMode: "minimal"` to get status + artifact handle at minimal token cost.
+2. If the exit code is non-zero or you need output details, call `sdl.runtime.queryOutput` with the `artifactHandle` and targeted `queryTerms`.
 
 ```json
 {
@@ -193,15 +213,26 @@ Run commands in a repo-scoped subprocess. Requires `runtime.enabled: true` in co
   "runtime": "node",
   "args": ["--test", "tests/auth.test.ts"],
   "timeoutMs": 30000,
+  "outputMode": "minimal"
+}
+```
+
+Then, if needed:
+
+```json
+{
+  "artifactHandle": "<handle from execute response>",
   "queryTerms": ["FAIL", "Error"],
-  "maxResponseLines": 100
+  "maxExcerpts": 5,
+  "contextLines": 3
 }
 ```
 
 - **Runtimes**: 16 supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`. Default allowed: `["node", "python"]`.
 - Use `code` to run inline code or `args` to invoke a file.
-- `queryTerms` extracts only matching lines from output (like a built-in grep).
-- `persistOutput: true` saves full output to an artifact handle for later retrieval.
+- `queryTerms` extracts only matching lines from output (like a built-in grep). In `"intent"` mode, only matched excerpts are returned.
+- `persistOutput: true` (default) saves full output to an artifact handle for later retrieval via `sdl.runtime.queryOutput`.
+- Per-line truncation caps each output line at 500 characters.
 
 ### 7) Context export (`sdl.context.summary`)
 
@@ -269,6 +300,7 @@ Store cross-session knowledge that auto-surfaces in future slice builds:
 - Do not call `sdl.symbol.getCard` N times when `sdl.symbol.getCards` can fetch all N in one call.
 - Do not skip `sdl.agent.feedback` after completing a task — it improves future context quality.
 - Do not call `sdl.runtime.execute` without setting `timeoutMs` — long-running processes will hang.
+- Do not use `outputMode: "summary"` when you only need pass/fail status — use `"minimal"` and query the artifact on failure.
 - Do not ignore `nextBestAction`, `fallbackTools`, or `fallbackRationale` in denied or ambiguous responses — they tell you what to try instead.
 - Do not ignore stale memories surfaced in slices — review and update or remove them.
 - Do not store trivial or ephemeral notes as memories — they add noise to future surfacing.

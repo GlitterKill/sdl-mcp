@@ -903,7 +903,7 @@ Query stored feedback records and aggregated statistics. Useful for offline tuni
 
 ---
 
-## Runtime Execution (1 tool)
+## Runtime Execution (2 tools)
 
 ### `sdl.runtime.execute`
 
@@ -923,14 +923,18 @@ Run a command in a repo-scoped subprocess. Requires `runtime.enabled: true` in c
 | `queryTerms` | `string[]` | No | Filter output to lines matching these terms (max 10) |
 | `maxResponseLines` | `integer` | No | Max output lines returned (10-1,000, default: 100) |
 | `persistOutput` | `boolean` | No | Save full output to an artifact handle (default: true) |
+| `outputMode` | `"minimal"` \| `"summary"` \| `"intent"` | No | Controls response verbosity. `"minimal"` (default): ~50 tokens, status + artifact handle only. `"summary"`: head+tail excerpts (legacy). `"intent"`: only `queryTerms`-matched excerpts. |
 
 Use `code` for inline snippets or `args` for invoking files/commands. `queryTerms` acts like a built-in grep, extracting only matching lines from long output.
 
-**Response includes:**
+**Response** varies by `outputMode`:
 
-- `exitCode`, `stdout`, `stderr`, `truncated`, `durationMs`
-- `artifactHandle` (when `persistOutput: true`) for retrieving full output later
-- `matchedLines` (when `queryTerms` provided)
+- **All modes:** `status`, `exitCode`, `signal`, `durationMs`, `artifactHandle`, `policyDecision`
+- **`"minimal"` (default):** adds `outputLines`, `outputBytes` — no stdout/stderr content. Use `sdl.runtime.queryOutput` to search the artifact.
+- **`"summary"`:** adds `stdoutSummary`, `stderrSummary`, `excerpts`, `truncation` (legacy behavior)
+- **`"intent"`:** adds `excerpts`, `truncation` — only `queryTerms`-matched windows, no head/tail summary
+
+> Per-line truncation: all modes enforce a 500-character per-line cap.
 
 **Example:**
 
@@ -939,9 +943,39 @@ Use `code` for inline snippets or `args` for invoking files/commands. `queryTerm
   "repoId": "my-repo",
   "runtime": "node",
   "args": ["--test", "tests/auth.test.ts"],
-  "timeoutMs": 30000,
+  "outputMode": "minimal",
+  "timeoutMs": 30000
+}
+```
+
+---
+
+### `sdl.runtime.queryOutput`
+
+Retrieve and search stored runtime output artifacts on demand. Companion to `outputMode: "minimal"`.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `artifactHandle` | `string` | Yes | Handle returned by `sdl.runtime.execute` |
+| `queryTerms` | `string[]` | Yes | Keywords to search for in the output |
+| `maxExcerpts` | `integer` | No | Max excerpt windows to return (default: 10) |
+| `contextLines` | `integer` | No | Lines of context around each match (default: 3) |
+| `stream` | `"stdout"` \| `"stderr"` \| `"both"` | No | Which stream(s) to search (default: `"both"`) |
+
+**Response:** `{ artifactHandle, excerpts[], totalLines, totalBytes, searchedStreams[] }`
+
+Each excerpt: `{ lineStart, lineEnd, content, source }`
+
+**Example:**
+
+```json
+{
+  "artifactHandle": "runtime-my-repo-1774356909696-fc5aa1f22e33e17c",
   "queryTerms": ["FAIL", "Error"],
-  "maxResponseLines": 100
+  "maxExcerpts": 5,
+  "contextLines": 3
 }
 ```
 
