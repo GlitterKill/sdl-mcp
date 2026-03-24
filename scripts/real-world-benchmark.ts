@@ -494,7 +494,7 @@ function expandRelevantFiles(
     cwd: repoRoot,
     dot: true,
     onlyFiles: true,
-  });
+  })];
   return new Set(matches.map((p) => normalizePath(p)));
 }
 
