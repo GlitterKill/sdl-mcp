@@ -32,3 +32,16 @@ export {
   checkRetrievalHealth,
   shouldFallbackToLegacy,
 } from "./fallback.js";
+// Index lifecycle
+export {
+  createFtsIndex,
+  createVectorIndex,
+  showIndexes,
+  checkIndexHealth,
+  ensureIndexes,
+} from "./index-lifecycle.js";
+export type {
+  IndexInfo,
+  IndexHealthResult,
+  IndexEnsureResult,
+} from "./index-lifecycle.js";
