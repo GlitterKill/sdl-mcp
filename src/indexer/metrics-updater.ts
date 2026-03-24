@@ -134,5 +134,61 @@ export async function finalizeIndexing({
     }
   }
 
+
+  // Materialise FileSummary nodes for hybrid entity retrieval.
+  try {
+    const conn = await getLadybugConn();
+    const fsResult = await materializeFileSummaries(conn, repoId);
+    logger.info(
+      `FileSummary materialisation: ${fsResult.updated}/${fsResult.total} files updated`,
+    );
+  } catch (error) {
+    logger.warn(`FileSummary materialisation skipped: ${String(error)}`);
+  }
+
   return { summaryStats };
+}
+
+/**
+ * Materialise FileSummary nodes for every file in the repository.
+ *
+ * For each file, this queries its exported symbols, builds a search-friendly
+ * text string, and upserts a FileSummary node in LadybugDB so it can be
+ * retrieved by the hybrid-retrieval pipeline.
+ */
+export async function materializeFileSummaries(
+  conn: import("kuzu").Connection,
+  repoId: string,
+): Promise<{ total: number; updated: number }> {
+  const files = await ladybugDb.getFilesByRepo(conn, repoId);
+  let updated = 0;
+
+  for (const file of files) {
+    try {
+      const symbols = await ladybugDb.getSymbolsByFile(conn, file.fileId);
+      const exportedNames = symbols
+        .filter((s) => s.exported)
+        .map((s) => s.name);
+
+      const searchText = ladybugDb.buildFileSummarySearchText(
+        file.relPath,
+        exportedNames,
+      );
+
+      await ladybugDb.upsertFileSummary(conn, {
+        fileId: file.fileId,
+        repoId,
+        summary: null,
+        searchText,
+        updatedAt: new Date().toISOString(),
+      });
+      updated++;
+    } catch (err) {
+      logger.warn(
+        `materializeFileSummaries: failed for ${file.relPath}: ${String(err)}`,
+      );
+    }
+  }
+
+  return { total: files.length, updated };
 }

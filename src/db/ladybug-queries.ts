@@ -16,7 +16,8 @@
  *   ladybug-embeddings.ts � Symbol embeddings, summary cache, sync artifacts, symbol references
  *   ladybug-config.ts     � Tool policy & tsconfig hash operations
  *   ladybug-clusters.ts   � Cluster operations
- *   ladybug-processes.ts  � Process operations
+ *   ladybug-processes.ts   Process operations
+ *   ladybug-file-summaries.ts FileSummary operations
  */
 
 // Core helpers
@@ -72,3 +73,6 @@ export * from "./ladybug-memory.js";
 
 // Usage snapshot operations
 export * from "./ladybug-usage.js";
+
+// FileSummary operations
+export * from "./ladybug-file-summaries.js";
