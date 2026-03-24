@@ -4,7 +4,7 @@
  * symbols that lack good summaries.
  */
 
-import type { Connection } from "kuzu";
+import type { LadybugConn } from "./indexer-init.js";
 
 import { logger } from "../util/logger.js";
 import type { IndexProgress } from "./indexer.js";
@@ -28,7 +28,7 @@ export interface SummaryTransferResult {
 
 export interface SummaryTransferOptions {
   repoId: string;
-  conn: Connection;
+  conn: LadybugConn;
   embeddingProvider: EmbeddingProvider;
   minSimilarity?: number;            // default 0.7
   maxNeighbors?: number;             // default 5

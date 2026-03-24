@@ -209,6 +209,9 @@ export async function runPass1WithTsEngine(
     totalEdgesCreated: 0, allConfigEdges: [], changedFileIds: new Set(),
     changedPass2FilePaths: new Set(),
   };
+  // SAFETY: nextIndex++ must remain synchronous — no `await` between reading
+  // and incrementing. JavaScript's single-threaded event loop guarantees
+  // atomicity only when there is no yield point between the read and write.
   let nextIndex = 0;
 
   const runWorker = async (): Promise<void> => {

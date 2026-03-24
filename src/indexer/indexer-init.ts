@@ -31,10 +31,6 @@ export interface IndexProgress {
 // Internal types
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Internal types
-// ---------------------------------------------------------------------------
-
 export type LadybugConn = Awaited<ReturnType<typeof getLadybugConn>>;
 
 export interface Pass1Accumulator {
@@ -73,10 +69,6 @@ export interface Pass1Params {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
-
 export function computeFileId(repoId: string, relPath: string): string {
   return `${repoId}:${normalizePath(relPath)}`;
 }
@@ -88,10 +80,6 @@ export function fileIdForPath(
 ): string {
   return existingByPath.get(relPath)?.fileId ?? computeFileId(repoId, relPath);
 }
-
-// ---------------------------------------------------------------------------
-// Pipeline phase helpers
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Pipeline phase helpers

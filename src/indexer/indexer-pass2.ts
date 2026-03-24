@@ -103,12 +103,13 @@ export async function runPass2Resolvers(params: {
   globalPreferredSymbolId: Map<string, string>;
   callResolutionTelemetry: CallResolutionTelemetry;
   onProgress: ((progress: IndexProgress) => void) | undefined;
+  signal?: AbortSignal;
 }): Promise<number> {
   const {
     repoId, repoRoot, mode, pass2EligibleFiles, changedPass2FilePaths,
     supportsPass2FilePath, pass2ResolverRegistry, symbolIndex, tsResolver,
     config, createdCallEdges, globalNameToSymbolIds, globalPreferredSymbolId,
-    callResolutionTelemetry, onProgress,
+    callResolutionTelemetry, onProgress, signal,
   } = params;
 
   const pass2Targets = await resolvePass2Targets({
@@ -125,6 +126,7 @@ export async function runPass2Resolvers(params: {
   let pass2Processed = 0;
 
   for (const fileMeta of pass2Targets) {
+    if (signal?.aborted) break;
     callResolutionTelemetry.pass2FilesProcessed++;
     onProgress?.({
       stage: "pass2",

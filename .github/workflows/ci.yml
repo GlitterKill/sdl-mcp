@@ -73,37 +73,8 @@ jobs:
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Rebuild native addons (tree-sitter)
-        shell: bash
-        run: |
-          # Patch tree-sitter binding.gyp: Node 24 V8 requires C++20 but tree-sitter 0.25.0 hardcodes C++17
-          sed -i.bak 's/c++17/c++20/g' node_modules/tree-sitter/binding.gyp
-          npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
-
-      - name: Verify tree-sitter packages load
-        shell: bash
-        run: |
-          node --input-type=module <<'EOF'
-          const packages = [
-            "tree-sitter",
-            "tree-sitter-bash",
-            "tree-sitter-c",
-            "tree-sitter-c-sharp",
-            "tree-sitter-cpp",
-            "tree-sitter-go",
-            "tree-sitter-java",
-            "tree-sitter-kotlin",
-            "tree-sitter-php",
-            "tree-sitter-python",
-            "tree-sitter-rust",
-            "tree-sitter-typescript",
-          ];
-
-          for (const pkg of packages) {
-            await import(pkg);
-            console.log(`[ok] ${pkg}`);
-          }
-          EOF
+      - name: Setup tree-sitter
+        uses: ./.github/actions/setup-tree-sitter
 
       - name: Setup LadybugDB native binary
         shell: bash
@@ -267,37 +238,8 @@ jobs:
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Rebuild native addons (tree-sitter)
-        shell: bash
-        run: |
-          # Patch tree-sitter binding.gyp: Node 24 V8 requires C++20 but tree-sitter 0.25.0 hardcodes C++17
-          sed -i.bak 's/c++17/c++20/g' node_modules/tree-sitter/binding.gyp
-          npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
-
-      - name: Verify tree-sitter packages load
-        shell: bash
-        run: |
-          node --input-type=module <<'EOF'
-          const packages = [
-            "tree-sitter",
-            "tree-sitter-bash",
-            "tree-sitter-c",
-            "tree-sitter-c-sharp",
-            "tree-sitter-cpp",
-            "tree-sitter-go",
-            "tree-sitter-java",
-            "tree-sitter-kotlin",
-            "tree-sitter-php",
-            "tree-sitter-python",
-            "tree-sitter-rust",
-            "tree-sitter-typescript",
-          ];
-
-          for (const pkg of packages) {
-            await import(pkg);
-            console.log(`[ok] ${pkg}`);
-          }
-          EOF
+      - name: Setup tree-sitter
+        uses: ./.github/actions/setup-tree-sitter
 
       - name: Setup LadybugDB native binary
         shell: bash
@@ -479,37 +421,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Rebuild native addons (tree-sitter)
-        shell: bash
-        run: |
-          # Patch tree-sitter binding.gyp: Node 24 V8 requires C++20 but tree-sitter 0.25.0 hardcodes C++17
-          sed -i.bak 's/c++17/c++20/g' node_modules/tree-sitter/binding.gyp
-          npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
-
-      - name: Verify tree-sitter packages load
-        shell: bash
-        run: |
-          node --input-type=module <<'EOF'
-          const packages = [
-            "tree-sitter",
-            "tree-sitter-bash",
-            "tree-sitter-c",
-            "tree-sitter-c-sharp",
-            "tree-sitter-cpp",
-            "tree-sitter-go",
-            "tree-sitter-java",
-            "tree-sitter-kotlin",
-            "tree-sitter-php",
-            "tree-sitter-python",
-            "tree-sitter-rust",
-            "tree-sitter-typescript",
-          ];
-
-          for (const pkg of packages) {
-            await import(pkg);
-            console.log(`[ok] ${pkg}`);
-          }
-          EOF
+      - name: Setup tree-sitter
+        uses: ./.github/actions/setup-tree-sitter
 
       - name: Setup LadybugDB native binary
         if: matrix.run-tests
@@ -588,37 +501,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Rebuild native addons (tree-sitter)
-        shell: bash
-        run: |
-          # Patch tree-sitter binding.gyp: Node 24 V8 requires C++20 but tree-sitter 0.25.0 hardcodes C++17
-          sed -i.bak 's/c++17/c++20/g' node_modules/tree-sitter/binding.gyp
-          npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
-
-      - name: Verify tree-sitter packages load
-        shell: bash
-        run: |
-          node --input-type=module <<'EOF'
-          const packages = [
-            "tree-sitter",
-            "tree-sitter-bash",
-            "tree-sitter-c",
-            "tree-sitter-c-sharp",
-            "tree-sitter-cpp",
-            "tree-sitter-go",
-            "tree-sitter-java",
-            "tree-sitter-kotlin",
-            "tree-sitter-php",
-            "tree-sitter-python",
-            "tree-sitter-rust",
-            "tree-sitter-typescript",
-          ];
-
-          for (const pkg of packages) {
-            await import(pkg);
-            console.log(`[ok] ${pkg}`);
-          }
-          EOF
+      - name: Setup tree-sitter
+        uses: ./.github/actions/setup-tree-sitter
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -757,37 +641,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Rebuild native addons (tree-sitter)
-        shell: bash
-        run: |
-          # Patch tree-sitter binding.gyp: Node 24 V8 requires C++20 but tree-sitter 0.25.0 hardcodes C++17
-          sed -i.bak 's/c++17/c++20/g' node_modules/tree-sitter/binding.gyp
-          npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
-
-      - name: Verify tree-sitter packages load
-        shell: bash
-        run: |
-          node --input-type=module <<'EOF'
-          const packages = [
-            "tree-sitter",
-            "tree-sitter-bash",
-            "tree-sitter-c",
-            "tree-sitter-c-sharp",
-            "tree-sitter-cpp",
-            "tree-sitter-go",
-            "tree-sitter-java",
-            "tree-sitter-kotlin",
-            "tree-sitter-php",
-            "tree-sitter-python",
-            "tree-sitter-rust",
-            "tree-sitter-typescript",
-          ];
-
-          for (const pkg of packages) {
-            await import(pkg);
-            console.log(`[ok] ${pkg}`);
-          }
-          EOF
+      - name: Setup tree-sitter
+        uses: ./.github/actions/setup-tree-sitter
 
       - name: Setup LadybugDB native binary
         shell: bash
@@ -974,37 +829,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Rebuild native addons (tree-sitter)
-        shell: bash
-        run: |
-          # Patch tree-sitter binding.gyp: Node 24 V8 requires C++20 but tree-sitter 0.25.0 hardcodes C++17
-          sed -i.bak 's/c++17/c++20/g' node_modules/tree-sitter/binding.gyp
-          npm rebuild tree-sitter tree-sitter-bash tree-sitter-c tree-sitter-c-sharp tree-sitter-cpp tree-sitter-go tree-sitter-java tree-sitter-kotlin tree-sitter-php tree-sitter-python tree-sitter-rust tree-sitter-typescript
-
-      - name: Verify tree-sitter packages load
-        shell: bash
-        run: |
-          node --input-type=module <<'EOF'
-          const packages = [
-            "tree-sitter",
-            "tree-sitter-bash",
-            "tree-sitter-c",
-            "tree-sitter-c-sharp",
-            "tree-sitter-cpp",
-            "tree-sitter-go",
-            "tree-sitter-java",
-            "tree-sitter-kotlin",
-            "tree-sitter-php",
-            "tree-sitter-python",
-            "tree-sitter-rust",
-            "tree-sitter-typescript",
-          ];
-
-          for (const pkg of packages) {
-            await import(pkg);
-            console.log(`[ok] ${pkg}`);
-          }
-          EOF
+      - name: Setup tree-sitter
+        uses: ./.github/actions/setup-tree-sitter
 
       - name: Setup LadybugDB native binary
         shell: bash

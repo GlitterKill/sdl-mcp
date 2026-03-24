@@ -302,6 +302,7 @@ async function indexRepoImpl(
       globalPreferredSymbolId,
       callResolutionTelemetry,
       onProgress,
+      signal,
     });
 
     // --- Phase: re-resolve unresolved import edges ---
