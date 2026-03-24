@@ -16,20 +16,20 @@
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { globSync } from "node:fs";
-import { initLadybugDb, getLadybugConn } from "../src/db/ladybug.js";
-import { resolveGraphDbPath } from "../src/db/graph-db-path.js";
+import { initLadybugDb, getLadybugConn } from "../dist/db/ladybug.js";
+import { resolveGraphDbPath } from "../dist/db/graph-db-path.js";
 import type { Connection } from "kuzu";
-import { loadConfig } from "../src/config/loadConfig.js";
-import * as db from "../src/db/ladybug-queries.js";
-import { indexRepo } from "../src/indexer/indexer.js";
-import { buildSlice } from "../src/graph/slice.js";
-import { generateSymbolSkeleton } from "../src/code/skeleton.js";
-import { handleSymbolGetCard } from "../src/mcp/tools/symbol.js";
-import { estimateTokens, tokenize } from "../src/util/tokenize.js";
-import { hashCard } from "../src/util/hashing.js";
-import { normalizePath, getRelativePath } from "../src/util/paths.js";
-import type { SymbolRow } from "../src/db/ladybug-queries.js";
-import type { CardWithETag, GraphSlice, SymbolCard } from "../src/mcp/types.js";
+import { loadConfig } from "../dist/config/loadConfig.js";
+import * as db from "../dist/db/ladybug-queries.js";
+import { indexRepo } from "../dist/indexer/indexer.js";
+import { buildSlice } from "../dist/graph/slice.js";
+import { generateSymbolSkeleton } from "../dist/code/skeleton.js";
+import { handleSymbolGetCard } from "../dist/mcp/tools/symbol.js";
+import { estimateTokens, tokenize } from "../dist/util/tokenize.js";
+import { hashCard } from "../dist/util/hashing.js";
+import { normalizePath, getRelativePath } from "../dist/util/paths.js";
+import type { SymbolRow } from "../dist/db/ladybug-queries.js";
+import type { CardWithETag, GraphSlice, SymbolCard } from "../dist/mcp/types.js";
 
 // ============================================================================
 // Types

@@ -3,7 +3,7 @@
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";
-import { buildMatrixRunEnv } from "../src/benchmark/matrix-runner.js";
+import { buildMatrixRunEnv } from "../dist/benchmark/matrix-runner.js";
 
 interface MatrixRun {
   id: string;
@@ -70,10 +70,7 @@ interface MatrixAggregate {
   }>;
 }
 
-const TSX_BIN =
-  process.platform === "win32"
-    ? resolve("node_modules", ".bin", "tsx.cmd")
-    : resolve("node_modules", ".bin", "tsx");
+const NODE_BIN = process.execPath;
 
 function getArgValue(args: string[], name: string): string | undefined {
   const direct = args.find((arg) => arg.startsWith(`--${name}=`));
@@ -112,7 +109,7 @@ function buildRunCommand(params: {
 }): string {
   const configArg = params.configPath ? ` --config "${params.configPath}"` : "";
   const skipArg = params.skipIndex ? " --skip-index" : "";
-  return `"${TSX_BIN}" scripts/real-world-benchmark.ts --tasks "${params.tasksPath}" --repo-id "${params.repoId}" --out "${params.outPath}"${configArg}${skipArg}`;
+  return `"${NODE_BIN}" scripts/real-world-benchmark.ts --tasks "${params.tasksPath}" --repo-id "${params.repoId}" --out "${params.outPath}"${configArg}${skipArg}`;
 }
 
 function toFamilyStats(family: string, reductions: number[]): FamilyStats {
