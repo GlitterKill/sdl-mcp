@@ -479,7 +479,8 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "default": 0.6
+          "default": 0.6,
+          "description": "@deprecated Use retrieval.fusion.rrfK and the hybrid pipeline instead. Legacy blend weight (0-1) for semantic vs. keyword score. Still honoured in 'legacy' mode; ignored when retrieval.mode is 'hybrid'."
         },
         "provider": {
           "type": "string",
@@ -489,7 +490,7 @@
         "model": {
           "type": "string",
           "enum": ["all-MiniLM-L6-v2", "nomic-embed-text-v1.5"],
-          "default": "nomic-embed-text-v1.5"
+          "default": "all-MiniLM-L6-v2"
         },
         "modelCacheDir": {
           "type": "string",
@@ -532,7 +533,7 @@
         },
         "ann": {
           "type": "object",
-          "description": "HNSW approximate nearest neighbor index configuration for semantic retrieval",
+          "description": "@deprecated Use retrieval.vector for HNSW index configuration instead. Legacy HNSW ANN index settings. Still honoured when retrieval.mode is 'legacy'; ignored when 'hybrid' retrieval is active.",
           "properties": {
             "enabled": {
               "type": "boolean",
@@ -575,13 +576,165 @@
             "efSearch": 50,
             "maxElements": 200000
           }
+        },
+        "retrieval": {
+          "type": "object",
+          "description": "Hybrid retrieval pipeline configuration (FTS + vector fusion). Controls the new two-stage retrieval path that replaces legacy embedding re-ranking.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["legacy", "hybrid"],
+              "default": "legacy",
+              "description": "'legacy' = original semantic-only re-rank path; 'hybrid' = FTS + vector fusion pipeline."
+            },
+            "extensionsOptional": {
+              "type": "boolean",
+              "default": true,
+              "description": "When true, file-extension filtering is optional (not enforced) during retrieval."
+            },
+            "fts": {
+              "type": "object",
+              "description": "Full-text search (FTS) stage configuration.",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Enable the FTS retrieval stage."
+                },
+                "indexName": {
+                  "type": "string",
+                  "default": "symbol_search_text_v1",
+                  "description": "Name of the FTS index to query."
+                },
+                "topK": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 75,
+                  "description": "Maximum candidates to retrieve from FTS before fusion."
+                },
+                "conjunctive": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "When true, require all query terms to match (AND mode). Default is disjunctive (OR mode)."
+                }
+              },
+              "default": {
+                "enabled": true,
+                "indexName": "symbol_search_text_v1",
+                "topK": 75,
+                "conjunctive": false
+              }
+            },
+            "vector": {
+              "type": "object",
+              "description": "Vector (HNSW) retrieval stage configuration.",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Enable the vector retrieval stage."
+                },
+                "topK": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 75,
+                  "description": "Maximum candidates to retrieve from the vector index before fusion."
+                },
+                "efs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 200,
+                  "description": "HNSW efSearch parameter — size of the dynamic candidate list during search."
+                },
+                "indexes": {
+                  "type": "object",
+                  "description": "Per-model HNSW index config keyed by model name.",
+                  "additionalProperties": {
+                    "type": "object",
+                    "required": ["indexName"],
+                    "properties": {
+                      "indexName": {
+                        "type": "string",
+                        "description": "Name of the HNSW index for this model."
+                      }
+                    }
+                  },
+                  "default": {
+                    "all-MiniLM-L6-v2": { "indexName": "symbol_vec_minilm_l6_v2" },
+                    "nomic-embed-text-v1.5": { "indexName": "symbol_vec_nomic_embed_v15" }
+                  }
+                }
+              },
+              "default": {
+                "enabled": true,
+                "topK": 75,
+                "efs": 200,
+                "indexes": {
+                  "all-MiniLM-L6-v2": { "indexName": "symbol_vec_minilm_l6_v2" },
+                  "nomic-embed-text-v1.5": { "indexName": "symbol_vec_nomic_embed_v15" }
+                }
+              }
+            },
+            "fusion": {
+              "type": "object",
+              "description": "Score fusion configuration for combining FTS and vector results.",
+              "properties": {
+                "strategy": {
+                  "type": "string",
+                  "enum": ["rrf"],
+                  "default": "rrf",
+                  "description": "Fusion strategy. 'rrf' = Reciprocal Rank Fusion."
+                },
+                "rrfK": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 60,
+                  "description": "RRF k parameter — controls the influence of rank position. Higher values reduce the impact of top ranks."
+                }
+              },
+              "default": {
+                "strategy": "rrf",
+                "rrfK": 60
+              }
+            },
+            "candidateLimit": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 100,
+              "description": "Maximum candidate symbols to collect from all retrieval stages before fusion re-ranking."
+            }
+          },
+          "default": {
+            "mode": "legacy",
+            "extensionsOptional": true,
+            "fts": {
+              "enabled": true,
+              "indexName": "symbol_search_text_v1",
+              "topK": 75,
+              "conjunctive": false
+            },
+            "vector": {
+              "enabled": true,
+              "topK": 75,
+              "efs": 200,
+              "indexes": {
+                "all-MiniLM-L6-v2": { "indexName": "symbol_vec_minilm_l6_v2" },
+                "nomic-embed-text-v1.5": { "indexName": "symbol_vec_nomic_embed_v15" }
+              }
+            },
+            "fusion": {
+              "strategy": "rrf",
+              "rrfK": 60
+            },
+            "candidateLimit": 100
+          }
         }
       },
       "default": {
         "enabled": true,
         "alpha": 0.6,
         "provider": "local",
-        "model": "nomic-embed-text-v1.5",
+        "model": "all-MiniLM-L6-v2",
         "generateSummaries": false,
         "summaryModel": "claude-haiku-4-5-20251001",
         "summaryMaxConcurrency": 5,

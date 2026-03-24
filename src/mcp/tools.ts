@@ -799,7 +799,19 @@ export const SymbolSearchRequestSchema = z.object({
   kinds: z.array(SymbolKindEnumSchema).optional(),
   limit: z.number().int().min(1).max(SYMBOL_SEARCH_MAX_RESULTS).optional(),
   semantic: z.boolean().optional(),
+  /** When true, include per-result retrieval evidence (FTS score, vector score, fusion rank). */
+  includeRetrievalEvidence: z.boolean().optional(),
 });
+
+export const RetrievalEvidenceItemSchema = z.object({
+  symbolId: z.string(),
+  ftsScore: z.number().optional(),
+  vectorScore: z.number().optional(),
+  fusionRank: z.number().int().optional(),
+  retrievalSource: z.enum(["fts", "vector", "hybrid", "legacy"]).optional(),
+});
+
+export type RetrievalEvidenceItem = z.infer<typeof RetrievalEvidenceItemSchema>;
 
 export const SymbolSearchResponseSchema = z.object({
   repoId: z.string().optional(),
@@ -816,6 +828,8 @@ export const SymbolSearchResponseSchema = z.object({
         .nullable(),
     })
     .optional(),
+  /** Per-result retrieval evidence. Only populated when includeRetrievalEvidence is true. */
+  retrievalEvidence: z.array(RetrievalEvidenceItemSchema).optional(),
 });
 
 const NotModifiedResponseSchema = z.object({
@@ -931,6 +945,8 @@ export const SliceBuildRequestSchema = z.object({
   includeResolutionMetadata: z.boolean().optional(),
   includeMemories: z.boolean().optional(),
   memoryLimit: z.number().int().min(0).max(20).optional(),
+  /** When true, include retrieval evidence in the slice response. */
+  includeRetrievalEvidence: z.boolean().optional(),
 });
 
 const SliceLeaseSchema = z.object({
@@ -1010,6 +1026,8 @@ export const SliceBuildResponseSchema = z.union([
       CompactGraphSliceV2Schema,
       CompactGraphSliceV3Schema,
     ]),
+    /** Per-symbol retrieval evidence. Only populated when includeRetrievalEvidence is true. */
+    retrievalEvidence: z.array(RetrievalEvidenceItemSchema).optional(),
   }),
   NotModifiedResponseSchema,
   SliceErrorResponseSchema,

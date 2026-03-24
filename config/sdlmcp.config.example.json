@@ -94,7 +94,7 @@
     "enabled": true,
     "alpha": 0.6,
     "provider": "local",
-    "model": "nomic-embed-text-v1.5",
+    "model": "all-MiniLM-L6-v2",
     "generateSummaries": false,
     "summaryProvider": null,
     "summaryModel": null,
@@ -108,6 +108,30 @@
       "efConstruction": 200,
       "efSearch": 50,
       "maxElements": 200000
+    },
+    "retrieval": {
+      "mode": "legacy",
+      "extensionsOptional": true,
+      "fts": {
+        "enabled": true,
+        "indexName": "symbol_search_text_v1",
+        "topK": 75,
+        "conjunctive": false
+      },
+      "vector": {
+        "enabled": true,
+        "topK": 75,
+        "efs": 200,
+        "indexes": {
+          "all-MiniLM-L6-v2": { "indexName": "symbol_vec_minilm_l6_v2" },
+          "nomic-embed-text-v1.5": { "indexName": "symbol_vec_nomic_embed_v15" }
+        }
+      },
+      "fusion": {
+        "strategy": "rrf",
+        "rrfK": 60
+      },
+      "candidateLimit": 100
     }
   },
   "prefetch": {
