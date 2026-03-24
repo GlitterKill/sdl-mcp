@@ -22,6 +22,12 @@ import type { Connection } from "kuzu";
 import { exec, querySingle } from "./ladybug-core.js";
 import { LADYBUG_SCHEMA_VERSION } from "./migrations/index.js";
 
+/**
+ * DDL statements for all LadybugDB node tables.
+ * Symbol includes inline embedding columns (embeddingMiniLM*, embeddingNomic*)
+ * for the hybrid-retrieval feature (Stage 0+). SymbolEmbedding is kept during
+ * migration until Stage 1 is verified complete.
+ */
 const NODE_TABLES: string[] = [
   `CREATE NODE TABLE IF NOT EXISTS Repo (
     repoId STRING PRIMARY KEY,
@@ -60,7 +66,13 @@ const NODE_TABLES: string[] = [
     sideEffectsJson STRING,
     roleTagsJson STRING,
     searchText STRING,
-    updatedAt STRING
+    updatedAt STRING,
+    embeddingMiniLM STRING,
+    embeddingMiniLMCardHash STRING,
+    embeddingMiniLMUpdatedAt STRING,
+    embeddingNomic STRING,
+    embeddingNomicCardHash STRING,
+    embeddingNomicUpdatedAt STRING
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS Version (
@@ -152,6 +164,7 @@ const NODE_TABLES: string[] = [
     createdAt STRING
   )`,
 
+  // TODO(hybrid-retrieval): Remove after Stage 1 when SymbolEmbedding migration is verified complete
   `CREATE NODE TABLE IF NOT EXISTS SymbolEmbedding (
     symbolId STRING PRIMARY KEY,
     model STRING,

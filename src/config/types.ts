@@ -220,8 +220,63 @@ export const SUPPORTED_EMBEDDING_MODELS = [
   "nomic-embed-text-v1.5",
 ] as const;
 
+/**
+ * Semantic retrieval configuration for hybrid FTS + vector search.
+ * Controls the new hybrid retrieval pipeline introduced in v0.10.
+ */
+export const SemanticRetrievalFtsConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  indexName: z.string().default("symbol_search_text_v1"),
+  topK: z.number().int().min(1).default(75),
+  conjunctive: z.boolean().default(false),
+});
+
+export const SemanticRetrievalVectorIndexSchema = z.object({
+  indexName: z.string(),
+});
+
+export const SemanticRetrievalVectorConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  topK: z.number().int().min(1).default(75),
+  efs: z.number().int().min(1).default(200),
+  /** Per-model HNSW index config keyed by model name. */
+  indexes: z
+    .record(z.string(), SemanticRetrievalVectorIndexSchema)
+    .default({
+      "all-MiniLM-L6-v2": { indexName: "symbol_vec_minilm_l6_v2" },
+      "nomic-embed-text-v1.5": { indexName: "symbol_vec_nomic_embed_v15" },
+    }),
+});
+
+export const SemanticRetrievalFusionConfigSchema = z.object({
+  strategy: z.enum(["rrf"]).default("rrf"),
+  rrfK: z.number().int().min(1).default(60),
+});
+
+export const SemanticRetrievalConfigSchema = z.object({
+  /** "legacy" = original semantic-only re-rank path; "hybrid" = FTS + vector fusion. */
+  mode: z.enum(["legacy", "hybrid"]).default("legacy"),
+  /** When true, file-extension filtering is optional (not enforced during retrieval). */
+  extensionsOptional: z.boolean().default(true),
+  fts: SemanticRetrievalFtsConfigSchema.optional().default({}),
+  vector: SemanticRetrievalVectorConfigSchema.optional().default({}),
+  fusion: SemanticRetrievalFusionConfigSchema.optional().default({}),
+  /** Maximum candidate symbols to collect before fusion re-ranking. */
+  candidateLimit: z.number().int().min(1).default(100),
+});
+
+export type SemanticRetrievalFtsConfig = z.infer<typeof SemanticRetrievalFtsConfigSchema>;
+export type SemanticRetrievalVectorConfig = z.infer<typeof SemanticRetrievalVectorConfigSchema>;
+export type SemanticRetrievalFusionConfig = z.infer<typeof SemanticRetrievalFusionConfigSchema>;
+export type SemanticRetrievalConfig = z.infer<typeof SemanticRetrievalConfigSchema>;
+
 export const SemanticConfigSchema = z.object({
   enabled: z.boolean().default(true),
+  /**
+   * @deprecated Use `retrieval.fusion.rrfK` and the hybrid pipeline instead.
+   * Legacy blend weight (0–1) for semantic vs. keyword score. Still honoured in
+   * "legacy" mode; ignored when `retrieval.mode` is "hybrid".
+   */
   alpha: z.number().min(0).max(1).default(0.6),
   provider: z.enum(["api", "local", "mock"]).default("local"),
   model: z.string().default("all-MiniLM-L6-v2"),
@@ -238,7 +293,14 @@ export const SemanticConfigSchema = z.object({
   summaryApiBaseUrl: z.string().nullish(),
   summaryMaxConcurrency: z.number().int().min(1).max(20).default(5),
   summaryBatchSize: z.number().int().min(1).max(50).default(20),
+  /**
+   * @deprecated Use `retrieval.vector` for HNSW index configuration instead.
+   * Legacy HNSW ANN index settings. Still honoured when `retrieval.mode` is
+   * "legacy"; ignored when "hybrid" retrieval is active.
+   */
   ann: AnnConfigSchema.optional(),
+  /** Hybrid retrieval pipeline configuration (FTS + vector fusion). */
+  retrieval: SemanticRetrievalConfigSchema.optional(),
 });
 
 export type SemanticConfig = z.infer<typeof SemanticConfigSchema>;

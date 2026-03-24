@@ -1,10 +1,43 @@
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
-import type { SymbolEmbeddingRow } from "../db/ladybug-queries.js";
+import {
+  getSymbolEmbeddingsFromNodes,
+  type SymbolNodeEmbeddingRow,
+} from "../db/ladybug-symbol-embeddings.js";
 import { hashContent } from "../util/hashing.js";
 
 /** @deprecated Use provider.getDimension() instead. Kept for backward compat. */
 export const EMBEDDING_DIMENSION = 64;
+
+/**
+ * Internal embedding row shape used by the ANN index.
+ * Bridges the legacy SymbolEmbeddingRow (embeddingVector field) and the
+ * new SymbolNodeEmbeddingRow (vector field) from the Symbol-node helpers.
+ */
+export interface AnnEmbeddingRow {
+  symbolId: string;
+  model: string;
+  embeddingVector: string;
+  cardHash: string;
+  version?: string;
+}
+
+/** Convert a SymbolNodeEmbeddingRow map into AnnEmbeddingRow[] for the given model. */
+function nodeEmbeddingsToAnnRows(
+  map: Map<string, SymbolNodeEmbeddingRow>,
+  model: string,
+): AnnEmbeddingRow[] {
+  const rows: AnnEmbeddingRow[] = [];
+  for (const [symbolId, row] of map) {
+    rows.push({
+      symbolId,
+      model,
+      embeddingVector: row.vector,
+      cardHash: row.cardHash,
+    });
+  }
+  return rows;
+}
 
 export interface AnnConfig {
   enabled: boolean;
@@ -73,9 +106,9 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / denom;
 }
 
-function computeVersionHash(rows: ladybugDb.SymbolEmbeddingRow[]): string {
+function computeVersionHash(rows: AnnEmbeddingRow[]): string {
   const payload = rows
-    .map((r) => `${r.symbolId}:${r.model}:${r.version}:${r.cardHash}`)
+    .map((r) => `${r.symbolId}:${r.model}:${r.version ?? "v1"}:${r.cardHash}`)
     .sort()
     .join("|");
   return hashContent(payload);
@@ -405,7 +438,7 @@ export class AnnIndexManager {
   async buildIndex(params: {
     repoId: string;
     model: string;
-    embeddingRows?: ladybugDb.SymbolEmbeddingRow[];
+    embeddingRows?: AnnEmbeddingRow[];
   }): Promise<{ indexed: number; skipped: number }> {
     if (this.buildPromise) return this.buildPromise;
     this.buildPromise = this._buildIndexInternal(params);
@@ -419,7 +452,7 @@ export class AnnIndexManager {
   private async _buildIndexInternal(params: {
     repoId: string;
     model: string;
-    embeddingRows?: ladybugDb.SymbolEmbeddingRow[];
+    embeddingRows?: AnnEmbeddingRow[];
   }): Promise<{ indexed: number; skipped: number }> {
     if (!this.config.enabled) {
       return { indexed: 0, skipped: 0 };
@@ -430,17 +463,16 @@ export class AnnIndexManager {
       const allSymbols = await ladybugDb.getSymbolsByRepo(conn, params.repoId);
       const symbolIds = allSymbols.map((s) => s.symbolId);
 
-      let embeddingRows: ladybugDb.SymbolEmbeddingRow[];
+      let embeddingRows: AnnEmbeddingRow[];
       if (params.embeddingRows) {
         embeddingRows = params.embeddingRows;
       } else {
-        const embeddingMap = await ladybugDb.getSymbolEmbeddings(
+        const nodeMap = await getSymbolEmbeddingsFromNodes(
           conn,
           symbolIds,
+          params.model,
         );
-        embeddingRows = Array.from(embeddingMap.values()).filter(
-          (r) => r.model === params.model,
-        );
+        embeddingRows = nodeEmbeddingsToAnnRows(nodeMap, params.model);
       }
 
       const newVersionHash = computeVersionHash(embeddingRows);
@@ -489,7 +521,7 @@ export class AnnIndexManager {
 
   checkStaleness(params: {
     model: string;
-    embeddingRows: SymbolEmbeddingRow[];
+    embeddingRows: AnnEmbeddingRow[];
   }): boolean {
     if (this.state.status !== "ready" || !this.state.index) {
       return true;
@@ -554,14 +586,15 @@ export class AnnIndexManager {
   ): Promise<SearchResult[]> {
     const normalizedQuery = normalizeVector(query);
     const conn = await getLadybugConn();
-    const embeddingMap = await ladybugDb.getSymbolEmbeddings(conn, symbolIds);
+    const model = this.state.model ?? "all-MiniLM-L6-v2";
+    const nodeMap = await getSymbolEmbeddingsFromNodes(conn, symbolIds, model);
 
     const results: SearchResult[] = [];
     for (const symbolId of symbolIds) {
-      const row = embeddingMap.get(symbolId);
+      const row = nodeMap.get(symbolId);
       if (!row) continue;
 
-      const vector = fromFloat16Blob(row.embeddingVector);
+      const vector = fromFloat16Blob(row.vector);
       if (vector.length === 0) continue;
 
       const score = cosineSimilarity(normalizedQuery, vector);
@@ -623,22 +656,25 @@ export function exactCosineSearch(params: {
   query: number[];
   symbolIds: string[];
   k: number;
+  model?: string;
 }): Promise<SearchResult[]> {
   const normalizedQuery = normalizeVector(params.query);
+  const model = params.model ?? "all-MiniLM-L6-v2";
 
   return (async () => {
     const conn = await getLadybugConn();
-    const embeddingMap = await ladybugDb.getSymbolEmbeddings(
+    const nodeMap = await getSymbolEmbeddingsFromNodes(
       conn,
       params.symbolIds,
+      model,
     );
 
     const results: SearchResult[] = [];
     for (const symbolId of params.symbolIds) {
-      const row = embeddingMap.get(symbolId);
+      const row = nodeMap.get(symbolId);
       if (!row) continue;
 
-      const vector = fromFloat16Blob(row.embeddingVector);
+      const vector = fromFloat16Blob(row.vector);
       if (vector.length === 0) continue;
 
       const score = cosineSimilarity(normalizedQuery, vector);
