@@ -12,6 +12,10 @@ export type {
   HybridSearchOptions,
   HybridSearchResultItem,
   HybridSearchResult,
+  EntityType,
+  EntitySearchOptions,
+  EntitySearchResultItem,
+  EntitySearchResult,
 } from "./types.js";
 
 // Model mapping
@@ -25,7 +29,7 @@ export {
 export type { EmbeddingModelInfo } from "./model-mapping.js";
 
 // Orchestrator (stub in Stage 0)
-export { hybridSearch } from "./orchestrator.js";
+export { hybridSearch, entitySearch } from "./orchestrator.js";
 
 // Fallback / health
 export {

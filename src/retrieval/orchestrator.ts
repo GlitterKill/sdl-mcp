@@ -14,6 +14,7 @@ import type { SemanticRetrievalConfig } from "../config/types.js";
 import { logger } from "../util/logger.js";
 import { getEmbeddingProvider } from "../indexer/embeddings.js";
 import { EMBEDDING_MODELS } from "./model-mapping.js";
+import { ENTITY_FTS_INDEX_NAMES } from "./index-lifecycle.js";
 import { checkRetrievalHealth, shouldFallbackToLegacy } from "./fallback.js";
 import type {
   HybridSearchOptions,
@@ -21,6 +22,10 @@ import type {
   HybridSearchResultItem,
   RetrievalEvidence,
   RetrievalSource,
+  EntityType,
+  EntitySearchOptions,
+  EntitySearchResult,
+  EntitySearchResultItem,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -520,6 +525,398 @@ export async function hybridSearch(
     ...(options.includeEvidence
       ? {
           evidence: buildEvidence(
+            rankings,
+            fusedResults,
+            fusionLatencyMs,
+          ),
+        }
+      : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Multi-entity hybrid search (Stage 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * FTS entity types that have a dedicated index in the graph DB.
+ * Maps EntityType -> { tableName, idField } for QUERY_FTS_INDEX calls.
+ */
+const ENTITY_FTS_CONFIG: Record<
+  EntityType,
+  { tableName: string; idField: string }
+> = {
+  symbol:     { tableName: "Symbol",      idField: "symbolId" },
+  memory:     { tableName: "Memory",      idField: "memoryId" },
+  cluster:    { tableName: "Cluster",     idField: "clusterId" },
+  process:    { tableName: "Process",     idField: "processId" },
+  fileSummary:{ tableName: "FileSummary", idField: "fileId" },
+};
+
+/**
+ * Entity types that support vector search, mapped to their FILESUMMARY or
+ * SYMBOL vector index names (model-key -> indexName).
+ * Only Symbol and FileSummary have embedding columns.
+ */
+const ENTITY_VECTOR_CONFIG: Partial<
+  Record<EntityType, Record<string, { indexName: string; idField: string }>>
+> = {
+  symbol: {
+    "all-MiniLM-L6-v2":       { indexName: "symbol_vec_minilm_l6_v2",         idField: "symbolId" },
+    "nomic-embed-text-v1.5":  { indexName: "symbol_vec_nomic_embed_v15",       idField: "symbolId" },
+  },
+  fileSummary: {
+    "all-MiniLM-L6-v2":       { indexName: "filesummary_vec_minilm_l6_v2",    idField: "fileId" },
+    "nomic-embed-text-v1.5":  { indexName: "filesummary_vec_nomic_embed_v15", idField: "fileId" },
+  },
+};
+
+/**
+ * Per-source ranked list for entity search — parallel to SourceRanking but
+ * keyed by entityId (not symbolId) and tagged with the entity type.
+ */
+interface EntitySourceRanking {
+  source: RetrievalSource;
+  entityType: EntityType;
+  /** entityId -> 1-based rank */
+  ranks: Map<string, number>;
+  candidateCount: number;
+}
+
+/**
+ * RRF fusion for multi-entity results.
+ *
+ * Identical algorithm to rrfFuse() but operates on EntitySourceRanking and
+ * returns EntitySearchResultItem[].  The entity-type tag from the ranking
+ * that contributed the best score is carried forward into the result.
+ */
+function rrfFuseEntities(
+  rankings: EntitySourceRanking[],
+  k: number,
+  limit: number,
+): EntitySearchResultItem[] {
+  const scores        = new Map<string, number>();
+  const bestSource    = new Map<string, RetrievalSource>();
+  const bestEntityType = new Map<string, EntityType>();
+  const bestContrib   = new Map<string, number>();
+
+  for (const ranking of rankings) {
+    for (const [entityId, rank] of ranking.ranks) {
+      const contribution = 1 / (k + rank);
+      const prev = scores.get(entityId) ?? 0;
+      scores.set(entityId, prev + contribution);
+
+      const prevBest = bestContrib.get(entityId) ?? 0;
+      if (contribution > prevBest) {
+        bestContrib.set(entityId, contribution);
+        bestSource.set(entityId, ranking.source);
+        bestEntityType.set(entityId, ranking.entityType);
+      }
+    }
+  }
+
+  return Array.from(scores.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([entityId, score]) => ({
+      entityType: bestEntityType.get(entityId) ?? "symbol",
+      entityId,
+      score,
+      source: bestSource.get(entityId) ?? "fts",
+    }));
+}
+
+/**
+ * Build evidence for entity search — parallel to buildEvidence() but uses
+ * entityId as the key to look up ranks in each source ranking.
+ */
+function buildEntityEvidence(
+  rankings: EntitySourceRanking[],
+  fusedResults: EntitySearchResultItem[],
+  fusionLatencyMs: number,
+  fallbackReason?: string,
+): RetrievalEvidence {
+  const sources: RetrievalSource[] = rankings.map((r) => r.source);
+  const candidateCountPerSource: Record<string, number> = {};
+  for (const r of rankings) {
+    // When multiple rankings share the same source (e.g. fts for symbol AND
+    // fts for memory), accumulate counts rather than overwriting.
+    candidateCountPerSource[r.source] =
+      (candidateCountPerSource[r.source] ?? 0) + r.candidateCount;
+  }
+
+  const topRanksPerSource: Record<string, number[]> = {};
+  for (const ranking of rankings) {
+    const positions: number[] = [];
+    for (let i = 0; i < fusedResults.length; i++) {
+      if (ranking.ranks.has(fusedResults[i].entityId)) {
+        positions.push(i + 1); // 1-based
+      }
+    }
+    topRanksPerSource[ranking.source] = positions;
+  }
+
+  return {
+    sources,
+    topRanksPerSource,
+    candidateCountPerSource,
+    fusionLatencyMs,
+    ...(fallbackReason ? { fallbackReason } : {}),
+  };
+}
+
+/**
+ * Multi-entity hybrid search.
+ *
+ * Runs FTS and (where available) vector search across the requested entity
+ * types (Symbol, Memory, Cluster, Process, FileSummary), then fuses results
+ * via Reciprocal Rank Fusion.  Degrades gracefully when individual backends
+ * are unavailable — a failing FTS/vector query for one entity type is caught
+ * and skipped without aborting the rest of the search.
+ *
+ * Backward-compatible note: `entitySearch({ entityTypes: ["symbol"] })`
+ * produces equivalent results to `hybridSearch()` for the symbol dimension.
+ */
+export async function entitySearch(
+  options: EntitySearchOptions,
+): Promise<EntitySearchResult> {
+  const config = resolveConfig();
+  const caps   = await checkRetrievalHealth(options.repoId);
+
+  const ftsEnabled    = options.ftsEnabled    ?? config.fts.enabled;
+  const vectorEnabled = options.vectorEnabled ?? config.vector.enabled;
+  const rrfK          = options.rrfK          ?? config.fusion.rrfK ?? DEFAULT_RRF_K;
+  const candidateLimit =
+    options.candidateLimit ?? config.candidateLimit ?? DEFAULT_CANDIDATE_LIMIT;
+  const limit = Math.min(options.limit, candidateLimit);
+
+  const ALL_ENTITY_TYPES: EntityType[] = [
+    "symbol", "memory", "cluster", "process", "fileSummary",
+  ];
+  const entityTypes = options.entityTypes ?? ALL_ENTITY_TYPES;
+
+  if (shouldFallbackToLegacy(caps, config)) {
+    return {
+      results: [],
+      ...(options.includeEvidence
+        ? { evidence: buildEntityEvidence([], [], 0, "fallback-to-legacy") }
+        : {}),
+    };
+  }
+
+  let conn: Connection;
+  try {
+    conn = await getLadybugConn();
+  } catch (err) {
+    logger.warn(
+      `[entity-search] Failed to obtain DB connection: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return {
+      results: [],
+      ...(options.includeEvidence
+        ? { evidence: buildEntityEvidence([], [], 0, "db-connection-unavailable") }
+        : {}),
+    };
+  }
+
+  const rankings: EntitySourceRanking[] = [];
+  const fusionStart = performance.now();
+
+  // ----- FTS retrieval (per entity type) -----
+  if (ftsEnabled && caps.fts) {
+    const ftsTopK = config.fts.topK ?? DEFAULT_FTS_TOP_K;
+
+    for (const entityType of entityTypes) {
+      const entityCfg = ENTITY_FTS_CONFIG[entityType];
+      // Use the per-entity FTS index name; fall back to the symbol default for
+      // "symbol" so that a config override on config.fts.indexName still applies.
+      const indexName =
+        entityType === "symbol"
+          ? (config.fts.indexName ?? DEFAULT_FTS_INDEX_NAME)
+          : ENTITY_FTS_INDEX_NAMES[entityType as keyof typeof ENTITY_FTS_INDEX_NAMES];
+
+      let ftsRows: FtsRawRow[] = [];
+      try {
+        ftsRows = await queryAll<FtsRawRow>(
+          conn,
+          `CALL QUERY_FTS_INDEX('${entityCfg.tableName}', $indexName, $query, $topK)`,
+          { indexName, query: options.query, topK: ftsTopK },
+        );
+      } catch (err) {
+        logger.debug(
+          `[entity-search] FTS query failed for '${entityType}' (index may be unavailable): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        // Skip this entity type's FTS — continue with others.
+      }
+
+      if (ftsRows.length > 0) {
+        const ranks = new Map<string, number>();
+        for (let i = 0; i < ftsRows.length; i++) {
+          // ID field varies by entity type; fall back through defensive paths.
+          const idVal =
+            (ftsRows[i] as Record<string, unknown>)[entityCfg.idField] as string | undefined
+            ?? ftsRows[i].node?.[entityCfg.idField] as string | undefined
+            ?? ftsRows[i]._node?.[entityCfg.idField] as string | undefined;
+          if (idVal && !ranks.has(idVal)) {
+            ranks.set(idVal, i + 1); // 1-based rank
+          }
+        }
+        rankings.push({ source: "fts", entityType, ranks, candidateCount: ftsRows.length });
+      }
+    }
+  }
+
+  // ----- Vector retrieval (Symbol and FileSummary only) -----
+  if (vectorEnabled) {
+    const providerType = resolveEmbeddingProviderType();
+    const vectorTopK   = config.vector.topK ?? DEFAULT_VECTOR_TOP_K;
+
+    for (const [modelName, modelInfo] of Object.entries(EMBEDDING_MODELS)) {
+      const source = vectorSourceForModel(modelName);
+      const capAvailable =
+        (source === "vector:minilm" && caps.vectorMiniLM) ||
+        (source === "vector:nomic"  && caps.vectorNomic);
+
+      if (!capAvailable) {
+        logger.debug(
+          `[entity-search] Skipping vector model '${modelName}' -- capability unavailable`,
+        );
+        continue;
+      }
+
+      // Obtain a shared query embedding for this model (reuse across entity types).
+      let provider;
+      try {
+        provider = getEmbeddingProvider(providerType, modelName);
+      } catch (err) {
+        logger.debug(
+          `[entity-search] Failed to get embedding provider for '${modelName}': ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        continue;
+      }
+
+      if (provider.isMockFallback?.()) {
+        logger.debug(
+          `[entity-search] Skipping vector model '${modelName}' -- provider is mock fallback`,
+        );
+        continue;
+      }
+
+      let queryEmbedding: number[];
+      try {
+        const embeddings = await provider.embed([options.query]);
+        queryEmbedding = embeddings[0];
+        if (!queryEmbedding || queryEmbedding.length === 0) {
+          logger.debug(
+            `[entity-search] Empty embedding returned for model '${modelName}'; skipping`,
+          );
+          continue;
+        }
+      } catch (err) {
+        logger.debug(
+          `[entity-search] Embedding generation failed for '${modelName}': ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        continue;
+      }
+
+      // Query each entity type that supports this model's vector index.
+      for (const entityType of entityTypes) {
+        const entityVecCfg = ENTITY_VECTOR_CONFIG[entityType]?.[modelName];
+        if (!entityVecCfg) {
+          // This entity type has no vector index for this model.
+          continue;
+        }
+
+        // Resolve the index name from config override or entity-vector config default.
+        const configIndexEntry = config.vector.indexes?.[modelName];
+        const indexName =
+          entityType === "symbol"
+            ? (configIndexEntry?.indexName ?? modelInfo.indexName)
+            : entityVecCfg.indexName;
+
+        let vecRows: { symbolId: string; score: number }[] = [];
+        try {
+          const rawRows = await queryAll<VectorRawRow>(
+            conn,
+            `CALL QUERY_VECTOR_INDEX('${ENTITY_FTS_CONFIG[entityType].tableName}', $indexName, $queryVector, $topK)`,
+            { indexName, queryVector: queryEmbedding, topK: vectorTopK },
+          );
+          vecRows = rawRows.map((r) => {
+            // The id field varies by entity type.
+            const idField = entityVecCfg.idField;
+            const entityId =
+              (r as Record<string, unknown>)[idField] as string | undefined
+              ?? r.node?.[idField] as string | undefined
+              ?? r._node?.[idField] as string | undefined
+              ?? r.symbolId  // legacy fallback for Symbol
+              ?? r.node?.symbolId
+              ?? r._node?.symbolId
+              ?? "";
+            const score =
+              (r.score ?? r._score) != null
+                ? Number(r.score ?? r._score)
+                : (r.distance ?? r._distance) != null
+                  ? 1 / (1 + Number(r.distance ?? r._distance))
+                  : 0;
+            return { symbolId: entityId, score };
+          });
+        } catch (err) {
+          logger.debug(
+            `[entity-search] Vector query failed for '${entityType}' model '${modelName}': ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          continue;
+        }
+
+        if (vecRows.length > 0) {
+          const ranks = new Map<string, number>();
+          for (let i = 0; i < vecRows.length; i++) {
+            const eid = vecRows[i].symbolId; // reusing the mapped field
+            if (eid && !ranks.has(eid)) {
+              ranks.set(eid, i + 1);
+            }
+          }
+          rankings.push({ source, entityType, ranks, candidateCount: vecRows.length });
+        }
+      }
+    }
+  }
+
+  const fusionLatencyMs = Math.round(performance.now() - fusionStart);
+
+  if (rankings.length === 0) {
+    const reason =
+      !ftsEnabled && !vectorEnabled
+        ? "all-backends-disabled"
+        : "all-backends-returned-empty";
+    return {
+      results: [],
+      ...(options.includeEvidence
+        ? { evidence: buildEntityEvidence([], [], fusionLatencyMs, reason) }
+        : {}),
+    };
+  }
+
+  const fusedResults = rrfFuseEntities(rankings, rrfK, limit);
+
+  logger.debug(
+    `[entity-search] Fused ${rankings.length} source(s) into ${fusedResults.length} results (${fusionLatencyMs}ms)`,
+  );
+
+  return {
+    results: fusedResults,
+    ...(options.includeEvidence
+      ? {
+          evidence: buildEntityEvidence(
             rankings,
             fusedResults,
             fusionLatencyMs,

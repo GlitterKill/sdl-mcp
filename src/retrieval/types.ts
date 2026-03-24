@@ -86,3 +86,48 @@ export interface HybridSearchResult {
   results: HybridSearchResultItem[];
   evidence?: RetrievalEvidence;
 }
+
+// ---------------------------------------------------------------------------
+// Entity search types (Stage 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Discriminator for the entity kinds supported by multi-entity hybrid search.
+ * "symbol" corresponds to the existing Symbol node; the rest are Stage 3 additions.
+ */
+export type EntityType =
+  | "symbol"
+  | "memory"
+  | "cluster"
+  | "process"
+  | "fileSummary";
+
+/** A single scored result from multi-entity hybrid search. */
+export interface EntitySearchResultItem {
+  entityType: EntityType;
+  /** The primary-key field of the entity (symbolId / memoryId / clusterId / processId / fileId). */
+  entityId: string;
+  score: number;
+  source: RetrievalSource;
+}
+
+/** Response envelope from the multi-entity hybrid search orchestrator. */
+export interface EntitySearchResult {
+  results: EntitySearchResultItem[];
+  evidence?: RetrievalEvidence;
+}
+
+/** Options for the multi-entity hybrid search orchestrator. */
+export interface EntitySearchOptions {
+  repoId: string;
+  query: string;
+  limit: number;
+  /** Which entity types to search.  Defaults to all supported types. */
+  entityTypes?: EntityType[];
+  ftsEnabled?: boolean;
+  vectorEnabled?: boolean;
+  fusionStrategy?: "rrf";
+  rrfK?: number;
+  candidateLimit?: number;
+  includeEvidence?: boolean;
+}
