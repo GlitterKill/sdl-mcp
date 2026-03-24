@@ -63,6 +63,7 @@ import {
   START_NODE_SOURCE_SCORE,
   TASK_TEXT_STOP_WORDS,
 } from "./slice/start-node-resolver.js";
+import type { RetrievalEvidence, HybridSearchResultItem } from "../retrieval/types.js";
 
 import {
   beamSearch,
@@ -129,6 +130,17 @@ export {
   sliceErr,
 };
 
+/**
+ * Internal result from buildSlice that includes both the slice and any
+ * retrieval evidence gathered during start-node resolution.
+ */
+export interface SliceBuildInternalResult {
+  slice: GraphSlice;
+  retrievalEvidence?: RetrievalEvidence;
+  /** Per-symbol hybrid search items (score + source). Present when hybrid retrieval was used. */
+  hybridSearchItems?: HybridSearchResultItem[];
+}
+
 interface SliceBuildRequest {
   repoId: RepoId;
   versionId: VersionId;
@@ -154,7 +166,7 @@ interface SliceBuildRequest {
 
 export async function buildSlice(
   request: SliceBuildRequest,
-): Promise<GraphSlice> {
+): Promise<SliceBuildInternalResult> {
   const config = loadConfig();
   const cacheConfig = config.cache;
   const cacheEnabled = cacheConfig?.enabled ?? true;
@@ -170,7 +182,10 @@ export async function buildSlice(
   const cacheKey = getSliceCacheKey(request);
   const cached = canUseCache ? getCachedSlice(cacheKey) : null;
   if (cached) {
-    return cached;
+    // Cached slices intentionally omit retrievalEvidence — the evidence describes
+    // the initial hybrid retrieval process, not the slice content. Re-running
+    // retrieval solely for evidence would defeat caching.
+    return { slice: cached };
   }
 
   const sliceConfig = config.slice;
@@ -206,6 +221,7 @@ export async function buildSlice(
     request,
   );
   const startNodes = startNodeResult.startNodes;
+  const { retrievalEvidence, hybridSearchItems } = startNodeResult;
   const startSymbols = startNodes.map((node) => node.symbolId);
 
   let clusterContext:
@@ -389,7 +405,7 @@ export async function buildSlice(
     }
   }
 
-  return slice;
+  return { slice, retrievalEvidence, hybridSearchItems };
 }
 
 function resolveEffectiveDetailLevel(
@@ -939,7 +955,7 @@ export async function buildSliceWithResult(
   request: SliceBuildRequest,
 ): Promise<SliceResult> {
   try {
-    const slice = await buildSlice(request);
+    const { slice } = await buildSlice(request);
 
     if (slice.cards.length === 0) {
       return sliceErr({

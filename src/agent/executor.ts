@@ -19,6 +19,8 @@ import { extractHotPath } from "../code/hotpath.js";
 import { evaluateRequest } from "../code/gate.js";
 import type { CodeWindowRequest } from "../domain/types.js";
 import { logger } from "../util/logger.js";
+import { isHybridRetrievalAvailable } from "../retrieval/fallback.js";
+import { hybridSearch } from "../retrieval/orchestrator.js";
 
 /** Injectable gate evaluator for testability. */
 export type GateEvaluator = typeof evaluateRequest;
@@ -315,17 +317,31 @@ export class Executor {
         task.repoId,
       );
 
-      // Fallback: search by task text if no symbols found
-      if (allSymbols.length === 0) {
-        const conn = await this.getConn();
-        const searchResults = await ladybugDb.searchSymbols(
-          conn,
-          task.repoId,
-          task.taskText,
-          MAX_SEARCH_FALLBACK,
-        );
-        for (const result of searchResults) {
-          allSymbols.push(result.symbolId);
+      // Fallback: use hybrid retrieval when available, otherwise legacy DB search
+      if (allSymbols.length === 0 && task.taskText) {
+        const useHybrid = await isHybridRetrievalAvailable();
+        if (useHybrid) {
+          const hybridResult = await hybridSearch({
+            repoId: task.repoId,
+            query: task.taskText,
+            limit: MAX_SEARCH_FALLBACK,
+            includeEvidence: false,
+          });
+          for (const item of hybridResult.results) {
+            allSymbols.push(item.symbolId);
+          }
+        } else {
+          // Legacy fallback: plain DB text search
+          const conn = await this.getConn();
+          const searchResults = await ladybugDb.searchSymbols(
+            conn,
+            task.repoId,
+            task.taskText,
+            MAX_SEARCH_FALLBACK,
+          );
+          for (const result of searchResults) {
+            allSymbols.push(result.symbolId);
+          }
         }
       }
 

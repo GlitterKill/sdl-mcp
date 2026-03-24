@@ -6,6 +6,7 @@ import {
   SliceRefreshResponse,
   type SliceSpilloverGetRequest,
   SliceSpilloverGetResponse,
+  type RetrievalEvidenceItem,
 } from "../tools.js";
 import type {
   GraphSlice,
@@ -16,6 +17,7 @@ import type {
   SymbolSignature,
 } from "../types.js";
 import { buildSlice } from "../../graph/slice.js";
+import type { RetrievalSource } from "../../retrieval/types.js";
 import {
   type SliceErrorResponse,
   sliceErrorToResponse,
@@ -240,6 +242,7 @@ async function handleSliceBuildInternal(
     includeResolutionMetadata,
     includeMemories,
     memoryLimit,
+    includeRetrievalEvidence,
   } = request;
 
   // Resolve any file::name shorthands in entrySymbols
@@ -390,7 +393,7 @@ async function handleSliceBuildInternal(
       throw error;
     }
 
-    const slice: GraphSlice = await buildSlice(sliceRequest);
+    const { slice, hybridSearchItems } = await buildSlice(sliceRequest);
     const frontierSeeds =
       resolvedEntrySymbols && resolvedEntrySymbols.length > 0
         ? resolvedEntrySymbols
@@ -452,6 +455,28 @@ async function handleSliceBuildInternal(
       ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
     ];
 
+    // Build per-symbol retrieval evidence when requested (before response construction)
+    let evidenceItems: RetrievalEvidenceItem[] | undefined;
+    if (includeRetrievalEvidence && hybridSearchItems && hybridSearchItems.length > 0) {
+      evidenceItems = hybridSearchItems.map((item, index) => {
+        const mapped: RetrievalEvidenceItem = {
+          symbolId: item.symbolId,
+          fusionRank: index + 1,
+          retrievalSource: mapRetrievalSource(item.source),
+        };
+        // Assign score to the appropriate field based on source
+        if (item.source === "fts") {
+          mapped.ftsScore = item.score;
+        } else if (item.source.startsWith("vector:")) {
+          mapped.vectorScore = item.score;
+        } else {
+          // hybrid or legacy — use ftsScore as general score
+          mapped.ftsScore = item.score;
+        }
+        return mapped;
+      });
+    }
+
     const response = {
       sliceHandle: handle,
       ledgerVersion: latestVersion.versionId,
@@ -462,6 +487,7 @@ async function handleSliceBuildInternal(
         requestedWireFormat,
         effectiveWireFormatVersion,
       ),
+      ...(evidenceItems ? { retrievalEvidence: evidenceItems } : {}),
     };
     attachRawContext(response, { fileIds });
     return response;
@@ -830,4 +856,18 @@ export async function handleSliceSpilloverGet(
   };
   attachRawContext(response, { fileIds: [...new Set(spilloverFileIds)] });
   return response;
+}
+
+/**
+ * Map internal RetrievalSource discriminator to the wire-format enum
+ * expected by RetrievalEvidenceItemSchema.
+ */
+function mapRetrievalSource(
+  source: RetrievalSource,
+): "fts" | "vector" | "hybrid" | "legacy" {
+  if (source === "fts") return "fts";
+  if (source.startsWith("vector:")) return "vector";
+  if (source === "legacyFallback") return "legacy";
+  // overlay or unknown → hybrid
+  return "hybrid";
 }

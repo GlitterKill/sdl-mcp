@@ -279,7 +279,7 @@ export async function handleCodeNeedWindow(
       request.repoId,
     );
     if (latestVersion) {
-      const slice = await buildSlice({
+      const { slice } = await buildSlice({
         repoId: request.repoId,
         versionId: latestVersion.versionId,
         ...request.sliceContext,

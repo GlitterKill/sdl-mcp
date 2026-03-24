@@ -129,6 +129,12 @@ export const TASK_TEXT_TOKEN_QUERY_LIMIT = 6;
 export const TASK_TEXT_MIN_TOKEN_LENGTH = 3;
 
 /**
+ * Maximum character length for stack-trace text used as a hybrid retrieval query.
+ * Prevents excessively long queries that would degrade FTS/vector search performance.
+ */
+export const STACK_TRACE_QUERY_MAX_LENGTH = 500;
+
+/**
  * Max promoted first-hop dependencies (call/import) per explicit entry symbol.
  */
 export const ENTRY_FIRST_HOP_MAX_PER_SYMBOL = 4;

@@ -7,7 +7,7 @@
  */
 
 // Slice orchestration
-export { buildSlice } from "./slice.js";
+export { buildSlice, type SliceBuildInternalResult } from "./slice.js";
 
 // Overview
 export { buildRepoOverview, clearOverviewCache } from "./overview.js";

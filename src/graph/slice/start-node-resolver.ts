@@ -20,7 +20,7 @@ import * as ladybugDb from "../../db/ladybug-queries.js";
 import { tokenize } from "../../util/tokenize.js";
 import { isHybridRetrievalAvailable } from "../../retrieval/fallback.js";
 import { hybridSearch } from "../../retrieval/orchestrator.js";
-import type { RetrievalEvidence } from "../../retrieval/types.js";
+import type { RetrievalEvidence, HybridSearchResultItem } from "../../retrieval/types.js";
 import {
   TASK_TEXT_START_NODE_MAX,
   TASK_TEXT_TOKEN_MAX,
@@ -31,6 +31,7 @@ import {
   ENTRY_SIBLING_MIN_SHARED_PREFIX,
   DEFAULT_MAX_CARDS,
   DB_QUERY_LIMIT_DEFAULT,
+  STACK_TRACE_QUERY_MAX_LENGTH,
 } from "../../config/constants.js";
 
 import type { Graph } from "../buildGraph.js";
@@ -52,6 +53,8 @@ export interface ResolvedStartNode {
 export interface StartNodeResolutionResult {
   startNodes: ResolvedStartNode[];
   retrievalEvidence?: RetrievalEvidence;
+  /** Per-symbol hybrid search items (score + source). Present when hybrid retrieval was used. */
+  hybridSearchItems?: HybridSearchResultItem[];
 }
 
 export interface StartNodeLimits {
@@ -447,6 +450,7 @@ export async function resolveStartNodesLadybug(
   // Stage 2: check once whether hybrid retrieval is available for this request.
   const useHybrid = await isHybridRetrievalAvailable();
   let retrievalEvidence: RetrievalEvidence | undefined;
+  let hybridSearchItems: HybridSearchResultItem[] | undefined;
 
   for (const symbolId of explicitEntrySymbols) {
     if (startNodes.size >= limits.maxTotalStartNodes) break;
@@ -482,10 +486,12 @@ export async function resolveStartNodesLadybug(
     if (useHybrid) {
       const hybridResult = await hybridSearch({
         repoId,
-        query: request.stackTrace.slice(0, 500), // Limit query length
+        query: request.stackTrace.slice(0, STACK_TRACE_QUERY_MAX_LENGTH),
         limit: Math.min(20, limits.maxTotalStartNodes - startNodes.size),
         includeEvidence: false,
       });
+      // hybridSearch queries Symbol nodes in the DB — returned symbolIds are valid.
+      // The `as SymbolId` cast is consistent with how other DB query results are used.
       for (const item of hybridResult.results) {
         if (startNodes.size >= limits.maxTotalStartNodes) break;
         addStartNode(item.symbolId as SymbolId, "stackTrace");
@@ -565,6 +571,7 @@ export async function resolveStartNodesLadybug(
         includeEvidence: true,
       });
       retrievalEvidence = hybridResult.evidence;
+      hybridSearchItems = hybridResult.results;
       let taskTextSeedCount = 0;
       for (const item of hybridResult.results) {
         if (taskTextSeedCount >= effectiveTaskTextLimit || startNodes.size >= limits.maxTotalStartNodes) break;
@@ -629,7 +636,7 @@ export async function resolveStartNodesLadybug(
       return a.symbolId.localeCompare(b.symbolId);
     })
     .slice(0, limits.maxTotalStartNodes);
-  return { startNodes: sortedNodes, retrievalEvidence };
+  return { startNodes: sortedNodes, retrievalEvidence, hybridSearchItems };
 }
 
 async function collectEntryFirstHopSymbolsLadybug(
