@@ -18,6 +18,9 @@ import type { Connection } from "kuzu";
 import type { RepoId, SymbolId } from "../../db/schema.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { tokenize } from "../../util/tokenize.js";
+import { isHybridRetrievalAvailable } from "../../retrieval/fallback.js";
+import { hybridSearch } from "../../retrieval/orchestrator.js";
+import type { RetrievalEvidence } from "../../retrieval/types.js";
 import {
   TASK_TEXT_START_NODE_MAX,
   TASK_TEXT_TOKEN_MAX,
@@ -44,6 +47,11 @@ export type StartNodeSource =
 export interface ResolvedStartNode {
   symbolId: SymbolId;
   source: StartNodeSource;
+}
+
+export interface StartNodeResolutionResult {
+  startNodes: ResolvedStartNode[];
+  retrievalEvidence?: RetrievalEvidence;
 }
 
 export interface StartNodeLimits {
@@ -236,7 +244,7 @@ export interface SliceBuildRequestBase {
 export function resolveStartNodes(
   graph: Graph,
   request: SliceBuildRequestBase,
-): ResolvedStartNode[] {
+): StartNodeResolutionResult {
   const startNodes = new Map<SymbolId, StartNodeSource>();
   const explicitEntrySymbols: SymbolId[] = [];
 
@@ -381,20 +389,21 @@ export function resolveStartNodes(
     }
   }
 
-  return Array.from(startNodes.entries())
+  const sortedResult = Array.from(startNodes.entries())
     .sort(
       ([, sourceA], [, sourceB]) =>
         START_NODE_SOURCE_PRIORITY[sourceA] -
         START_NODE_SOURCE_PRIORITY[sourceB],
     )
     .map(([symbolId, source]) => ({ symbolId, source }));
+  return { startNodes: sortedResult };
 }
 
 export async function resolveStartNodesLadybug(
   conn: Connection,
   repoId: RepoId,
   request: SliceBuildRequestBase,
-): Promise<ResolvedStartNode[]> {
+): Promise<StartNodeResolutionResult> {
   const startNodes = new Map<SymbolId, StartNodeSource>();
   const explicitEntrySymbols: SymbolId[] = [];
 
@@ -435,6 +444,10 @@ export async function resolveStartNodesLadybug(
     ? limits.maxTaskTextStartNodes * 2
     : limits.maxTaskTextStartNodes;
 
+  // Stage 2: check once whether hybrid retrieval is available for this request.
+  const useHybrid = await isHybridRetrievalAvailable();
+  let retrievalEvidence: RetrievalEvidence | undefined;
+
   for (const symbolId of explicitEntrySymbols) {
     if (startNodes.size >= limits.maxTotalStartNodes) break;
     const firstHopSymbols = await collectEntryFirstHopSymbolsLadybug(
@@ -465,6 +478,20 @@ export async function resolveStartNodesLadybug(
   }
 
   if (request.stackTrace) {
+    // Stage 2: try hybrid retrieval for stack trace context first
+    if (useHybrid) {
+      const hybridResult = await hybridSearch({
+        repoId,
+        query: request.stackTrace.slice(0, 500), // Limit query length
+        limit: Math.min(20, limits.maxTotalStartNodes - startNodes.size),
+        includeEvidence: false,
+      });
+      for (const item of hybridResult.results) {
+        if (startNodes.size >= limits.maxTotalStartNodes) break;
+        addStartNode(item.symbolId as SymbolId, "stackTrace");
+      }
+    }
+    // Keep existing stackTrace resolution as additional source (not else - both paths contribute)
     const stackSymbols = await extractSymbolsFromStackTraceLadybug(
       conn,
       repoId,
@@ -477,6 +504,20 @@ export async function resolveStartNodesLadybug(
   }
 
   if (request.failingTestPath) {
+    // Stage 2: try hybrid retrieval for failing test context first
+    if (useHybrid) {
+      const hybridResult = await hybridSearch({
+        repoId,
+        query: request.failingTestPath,
+        limit: Math.min(15, limits.maxTotalStartNodes - startNodes.size),
+        includeEvidence: false,
+      });
+      for (const item of hybridResult.results) {
+        if (startNodes.size >= limits.maxTotalStartNodes) break;
+        addStartNode(item.symbolId as SymbolId, "failingTestPath");
+      }
+    }
+    // Keep existing failingTestPath resolution as additional source (not else - both paths contribute)
     const fileSymbols = await getSymbolsByPathLadybug(
       conn,
       repoId,
@@ -515,50 +556,71 @@ export async function resolveStartNodesLadybug(
   }
 
   if (request.taskText) {
-    const taskTokens = collectTaskTextSeedTokens(request.taskText);
-    let taskTextSeedCount = 0;
-    for (const token of taskTokens) {
-      if (
-        taskTextSeedCount >= effectiveTaskTextLimit ||
-        startNodes.size >= limits.maxTotalStartNodes
-      ) {
-        break;
-      }
-      const remaining = effectiveTaskTextLimit - taskTextSeedCount;
-      const perTokenLimit = Math.max(
-        1,
-        Math.min(
-          DB_QUERY_LIMIT_DEFAULT,
-          TASK_TEXT_TOKEN_QUERY_LIMIT,
-          remaining,
-        ),
-      );
-
-      const results = await ladybugDb.searchSymbolsLite(
-        conn,
+    if (useHybrid) {
+      // Stage 2: single hybrid retrieval call replaces token-by-token fan-out
+      const hybridResult = await hybridSearch({
         repoId,
-        token,
-        perTokenLimit,
-      );
-
-      for (const result of results) {
+        query: request.taskText,
+        limit: effectiveTaskTextLimit,
+        includeEvidence: true,
+      });
+      retrievalEvidence = hybridResult.evidence;
+      let taskTextSeedCount = 0;
+      for (const item of hybridResult.results) {
+        if (taskTextSeedCount >= effectiveTaskTextLimit || startNodes.size >= limits.maxTotalStartNodes) break;
+        if (startNodes.has(item.symbolId as SymbolId)) continue;
+        addStartNode(item.symbolId as SymbolId, "taskText");
+        if (startNodes.has(item.symbolId as SymbolId)) {
+          taskTextSeedCount++;
+        }
+      }
+    } else {
+      // Legacy fallback: token-by-token searchSymbolsLite fan-out
+      const taskTokens = collectTaskTextSeedTokens(request.taskText);
+      let taskTextSeedCount = 0;
+      for (const token of taskTokens) {
         if (
           taskTextSeedCount >= effectiveTaskTextLimit ||
           startNodes.size >= limits.maxTotalStartNodes
         ) {
           break;
         }
-        const symbolId = result.symbolId;
-        if (startNodes.has(symbolId)) continue;
-        addStartNode(symbolId, "taskText");
-        if (startNodes.has(symbolId)) {
-          taskTextSeedCount++;
+        const remaining = effectiveTaskTextLimit - taskTextSeedCount;
+        const perTokenLimit = Math.max(
+          1,
+          Math.min(
+            DB_QUERY_LIMIT_DEFAULT,
+            TASK_TEXT_TOKEN_QUERY_LIMIT,
+            remaining,
+          ),
+        );
+
+        const results = await ladybugDb.searchSymbolsLite(
+          conn,
+          repoId,
+          token,
+          perTokenLimit,
+        );
+
+        for (const result of results) {
+          if (
+            taskTextSeedCount >= effectiveTaskTextLimit ||
+            startNodes.size >= limits.maxTotalStartNodes
+          ) {
+            break;
+          }
+          const symbolId = result.symbolId;
+          if (startNodes.has(symbolId)) continue;
+          addStartNode(symbolId, "taskText");
+          if (startNodes.has(symbolId)) {
+            taskTextSeedCount++;
+          }
         }
       }
     }
   }
 
-  return Array.from(startNodes.entries())
+  const sortedNodes = Array.from(startNodes.entries())
     .map(([symbolId, source]) => ({ symbolId, source }))
     .sort((a, b) => {
       const pa = START_NODE_SOURCE_PRIORITY[a.source];
@@ -567,6 +629,7 @@ export async function resolveStartNodesLadybug(
       return a.symbolId.localeCompare(b.symbolId);
     })
     .slice(0, limits.maxTotalStartNodes);
+  return { startNodes: sortedNodes, retrievalEvidence };
 }
 
 async function collectEntryFirstHopSymbolsLadybug(

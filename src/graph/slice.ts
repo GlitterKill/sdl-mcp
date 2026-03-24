@@ -57,6 +57,7 @@ import {
   resolveStartNodesLadybug,
   type StartNodeSource,
   type ResolvedStartNode,
+  type StartNodeResolutionResult,
   type StartNodeLimits,
   START_NODE_SOURCE_PRIORITY,
   START_NODE_SOURCE_SCORE,
@@ -109,6 +110,7 @@ import { safeJsonParse, safeJsonParseOptional, StringArraySchema, SignatureSchem
 export {
   type StartNodeSource,
   type ResolvedStartNode,
+  type StartNodeResolutionResult,
   type StartNodeLimits,
   START_NODE_SOURCE_PRIORITY,
   START_NODE_SOURCE_SCORE,
@@ -198,11 +200,12 @@ export async function buildSlice(
   // -----------------------------------------------------------------------
   const cachedGraph = getGraphSnapshot(request.repoId);
 
-  const startNodes = await resolveStartNodesLadybug(
+  const startNodeResult = await resolveStartNodesLadybug(
     conn,
     request.repoId,
     request,
   );
+  const startNodes = startNodeResult.startNodes;
   const startSymbols = startNodes.map((node) => node.symbolId);
 
   let clusterContext:

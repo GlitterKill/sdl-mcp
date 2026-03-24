@@ -31,6 +31,7 @@ export { hybridSearch } from "./orchestrator.js";
 export {
   checkRetrievalHealth,
   shouldFallbackToLegacy,
+  isHybridRetrievalAvailable,
 } from "./fallback.js";
 // Index lifecycle
 export {

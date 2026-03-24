@@ -9,6 +9,7 @@
 export {
   type StartNodeSource,
   type ResolvedStartNode,
+  type StartNodeResolutionResult,
   type StartNodeLimits,
   type SliceBuildRequestBase,
   START_NODE_SOURCE_PRIORITY,

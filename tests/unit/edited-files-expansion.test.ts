@@ -109,7 +109,7 @@ describe("getCallersOfSymbols — empty input guard", () => {
     }
 
     if (result !== undefined) {
-      assert.ok(Array.isArray(result), "resolveStartNodes should return an array");
+      assert.ok(result && Array.isArray(result.startNodes), "resolveStartNodes should return an object with startNodes array");
     }
   });
 });
@@ -151,7 +151,7 @@ describe("editedFiles auto-expansion — resolveStartNodes", () => {
 
     if (result !== undefined) {
       // sym-known should be present as entrySymbol
-      const ids = result.map((n) => n.symbolId);
+      const ids = result.startNodes.map((n) => n.symbolId);
       assert.ok(ids.includes("sym-known"), "entrySymbol should still be resolved");
       // No extra node for the unknown path
       assert.ok(

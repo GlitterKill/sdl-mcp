@@ -8,6 +8,7 @@
 
 import { getExtensionCapabilities, getLadybugConn } from "../db/ladybug.js";
 import { logger } from "../util/logger.js";
+import { loadConfig } from "../config/loadConfig.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
 import type { RetrievalCapabilities } from "./types.js";
 import { checkIndexHealth } from "./index-lifecycle.js";
@@ -33,7 +34,7 @@ import { checkIndexHealth } from "./index-lifecycle.js";
  * @param _repoId - Repository ID (reserved for future per-repo index scoping).
  */
 export async function checkRetrievalHealth(
-  _repoId: string,
+  _repoId?: string,
 ): Promise<RetrievalCapabilities> {
   const caps = getExtensionCapabilities();
 
@@ -70,7 +71,7 @@ export async function checkRetrievalHealth(
     };
   } catch (err) {
     // Index health check failed — fall back to extension-based proxy
-    // so we don’t block startup or degrade the caller.
+    // so we don't block startup or degrade the caller.
     logger.warn(
       `[retrieval] checkIndexHealth failed, falling back to extension proxy: ${
         err instanceof Error ? err.message : String(err)
@@ -100,13 +101,22 @@ export async function checkRetrievalHealth(
  *
  * Returns `false` (use hybrid) when mode is `"hybrid"` and at least the
  * FTS capability is present (vector is optional for a degraded hybrid run).
+ *
+ * When `health` is provided and the configured mode is `"legacy"`, the
+ * function can auto-flip to hybrid if infrastructure is healthy (FTS +
+ * at least one real-model vector index).
  */
 export function shouldFallbackToLegacy(
   caps: RetrievalCapabilities,
   config: SemanticRetrievalConfig,
+  health?: RetrievalCapabilities,
 ): boolean {
-  // Explicit legacy mode -- always fall back.
+  // Explicit legacy mode -- always fall back unless health shows auto-flip is viable.
   if (config.mode === "legacy") {
+    // Auto-flip: if health data shows FTS + at least one vector index, promote to hybrid.
+    if (health && health.fts && (health.vectorMiniLM || health.vectorNomic)) {
+      return false;
+    }
     return true;
   }
 
@@ -119,4 +129,38 @@ export function shouldFallbackToLegacy(
   // Hybrid mode with at least FTS available -- proceed with hybrid.
   // (Missing vector backends will simply contribute zero candidates.)
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-flip detection for Stage 2
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether hybrid retrieval infrastructure is healthy enough to use.
+ * Used by Stage 2 start-node resolution to decide between hybrid and legacy paths.
+ * Auto-promotes from legacy to hybrid when:
+ * - semantic.enabled is true
+ * - FTS index exists
+ * - At least one real-model vector index exists
+ */
+export async function isHybridRetrievalAvailable(): Promise<boolean> {
+  try {
+    const config = loadConfig();
+    const semanticConfig = config.semantic;
+    if (!semanticConfig?.enabled) return false;
+
+    const retrievalConfig = semanticConfig.retrieval;
+
+    // Explicit hybrid mode — just check basic capabilities.
+    if (retrievalConfig?.mode === "hybrid") {
+      const caps = getExtensionCapabilities();
+      return caps.fts;
+    }
+
+    // Legacy mode (default) — auto-promote when infrastructure is healthy.
+    const health = await checkRetrievalHealth();
+    return health.fts && (health.vectorMiniLM || health.vectorNomic);
+  } catch {
+    return false;
+  }
 }
