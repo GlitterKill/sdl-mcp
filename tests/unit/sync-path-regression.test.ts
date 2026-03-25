@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -18,13 +19,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("sync path regressions", () => {
-  const dbPath = join(tmpdir(), ".lbug-sync-path-regression-db");
-  const repoRoot = join(__dirname, ".tmp-sync-repo-root");
+  let dbPath = "";
+  let repoRoot = "";
   const workspaceSyncDir = join(process.cwd(), ".sdl-sync");
   const repoId = "sync-path-regression-repo";
   const fileId = "sync-path-file";
 
   beforeEach(async () => {
+    const runId = randomUUID();
+    dbPath = join(tmpdir(), `.lbug-sync-path-regression-db-${runId}`);
+    repoRoot = join(__dirname, `.tmp-sync-repo-root-${runId}`);
     if (existsSync(dbPath)) {
       rmSync(dbPath, { recursive: true, force: true });
     }

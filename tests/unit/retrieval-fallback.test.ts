@@ -25,7 +25,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { RetrievalCapabilities } from "../../src/retrieval/types.js";
+import type { RetrievalCapabilities } from "../../dist/retrieval/types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers — inline re-implementation of shouldFallbackToLegacy logic

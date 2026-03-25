@@ -493,6 +493,49 @@ const runtimeExecute: ActionDefinition = {
   ],
 };
 
+const runtimeQueryOutput: ActionDefinition = {
+  action: "runtime.queryOutput",
+  namespace: "agent",
+  description: "Query a persisted runtime artifact for matching output excerpts",
+  args: [
+    { ...REPO_ID_ARG },
+    {
+      flag: "--artifact-handle",
+      field: "artifactHandle",
+      type: "string",
+      required: true,
+      description: "Artifact handle returned by runtime.execute",
+    },
+    {
+      flag: "--query-terms",
+      field: "queryTerms",
+      type: "string[]",
+      description: "Comma-separated keywords to search for",
+    },
+    {
+      flag: "--max-excerpts",
+      field: "maxExcerpts",
+      type: "number",
+      description: "Maximum number of excerpts to return",
+    },
+    {
+      flag: "--context-lines",
+      field: "contextLines",
+      type: "number",
+      description: "Context lines to include around matches",
+    },
+    {
+      flag: "--stream",
+      field: "stream",
+      type: "string",
+      description: "Artifact stream to query: stdout|stderr|both",
+    },
+  ],
+  examples: [
+    'sdl-mcp tool runtime.queryOutput --repo-id my-repo --artifact-handle "runtime-myrepo-123-abc" --query-terms "error,failed"',
+  ],
+};
+
 const usageStats: ActionDefinition = {
   action: "usage.stats",
   namespace: "repo",
@@ -619,7 +662,7 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   indexRefresh, policyGet, policySet, usageStats,
   // Agent
   agentOrchestrate, agentFeedback, agentFeedbackQuery,
-  bufferPush, bufferCheckpoint, bufferStatus, runtimeExecute,
+  bufferPush, bufferCheckpoint, bufferStatus, runtimeExecute, runtimeQueryOutput,
   memoryStore, memoryQuery, memoryRemove, memorySurface,
 ];
 

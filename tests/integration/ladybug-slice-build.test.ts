@@ -167,7 +167,7 @@ describe("LadybugDB Slice Build (integration)", () => {
         },
       ]);
 
-      const result = await slice.buildSlice({
+      const { slice: result } = await slice.buildSlice({
         repoId: "repo",
         versionId: "v1",
         conn: kConn,

@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import {
   mergeFeedbackBoosts,
   type FeedbackBoostResult,
-} from "../../src/retrieval/feedback-boost.js";
+} from "../../dist/retrieval/feedback-boost.js";
 
 describe("mergeFeedbackBoosts", () => {
   it("boosts symbols mentioned as useful in matching feedback", () => {

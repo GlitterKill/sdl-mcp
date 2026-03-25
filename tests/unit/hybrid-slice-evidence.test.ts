@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { RetrievalSource } from "../../src/retrieval/types.js";
+import type { RetrievalSource } from "../../dist/retrieval/types.js";
 
 // ---------------------------------------------------------------------------
 // Inline re-implementation of mapRetrievalSource

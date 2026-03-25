@@ -84,7 +84,7 @@ describe("upsertAgentFeedback stores searchText", () => {
     const conn = await getLadybugConn();
     await exec(conn, `MERGE (r:Repo {repoId: 'test-repo'}) SET r.rootPath = '/tmp', r.createdAt = '2026-01-01'`);
     await exec(conn, `MERGE (v:Version {versionId: 'v1'}) SET v.createdAt = '2026-01-01'`);
-    await exec(conn, `MATCH (r:Repo {repoId: 'test-repo'}), (v:Version {versionId: 'v1'}) MERGE (r)-[:VERSION_OF_REPO]->(v)`);
+    await exec(conn, `MATCH (r:Repo {repoId: 'test-repo'}), (v:Version {versionId: 'v1'}) MERGE (v)-[:VERSION_OF_REPO]->(r)`);
   });
 
   after(async () => {

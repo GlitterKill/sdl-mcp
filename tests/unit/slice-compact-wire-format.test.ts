@@ -159,7 +159,7 @@ describe("slice compact wire format v2", () => {
     const compact = toCompactGraphSliceV2(slice as any);
 
     assert.strictEqual(compact.wf, "compact");
-    assert.ok(!("wv" in compact), "v2 should omit wv (inferred from wf:compact)");
+    assert.strictEqual(compact.wv, 2);
     assert.ok(!("rid" in compact), "v2 should omit rid");
     assert.strictEqual(compact.vid, "v1");
     assert.deepStrictEqual(compact.b, { mc: 20, mt: 12000 });

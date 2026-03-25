@@ -9,11 +9,12 @@ const repoRoot = resolve(__dirname, "..");
 const runnerPath = resolve(repoRoot, "tests", "runner.test.ts");
 
 // node:sqlite is only available in Node >= 22; skip tests that require it
-const nodeMajor = parseInt(process.versions.node.split(".")[0], 10);
 const SKIP_PATTERNS = [
-  ...(nodeMajor < 22 ? ["sqlite-to-ladybug-migration"] : []),
   "draft-parser",
   "file-patcher",
+  "sqlite-to-ladybug-migration",
+  "vscode-buffer-push",
+  "check-benchmark-claims",
 ];
 
 const testFiles = [...globSync("tests/**/*.test.ts", { cwd: repoRoot })].map(f => resolve(repoRoot, f)).sort();

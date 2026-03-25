@@ -83,7 +83,7 @@ export class ParserWorkerPool {
       if (workerIdx !== -1) {
         const wq = this.workers[workerIdx];
         if (wq.currentTask) {
-          wq.currentTask.reject(error);
+          wq.currentTask.reject(error instanceof Error ? error : new Error(String(error)));
           wq.currentTask = undefined;
           wq.busy = false;
         }

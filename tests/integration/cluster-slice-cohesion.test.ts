@@ -168,7 +168,7 @@ describe("cluster-aware slice cohesion (integration)", () => {
 
   it("boosts same-cluster symbols into the slice frontier", async () => {
     const conn = await getLadybugConn();
-    const slice = await buildSlice({
+    const { slice } = await buildSlice({
       repoId: REPO_ID,
       versionId: "v1",
       conn,

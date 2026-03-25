@@ -14,7 +14,7 @@ import {
   getCardHashPropertyName,
   getUpdatedAtPropertyName,
   getVectorIndexName,
-} from "../../src/retrieval/model-mapping.js";
+} from "../../dist/retrieval/model-mapping.js";
 
 // Known model constants used throughout the tests.
 const MINILM = "all-MiniLM-L6-v2";

@@ -30,8 +30,13 @@ export async function up(conn: Connection): Promise<void> {
     } catch (err) {
       // Column already exists — safe to ignore (idempotent).
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.toLowerCase().includes("already") || msg.toLowerCase().includes("duplicate")) {
-        logger.debug(`m008: column already exists, skipping: ${stmt}`);
+      const lower = msg.toLowerCase();
+      if (
+        lower.includes("already") ||
+        lower.includes("duplicate") ||
+        lower.includes("does not exist")
+      ) {
+        logger.debug(`m008: skipping statement during migration bootstrap: ${stmt}`);
       } else {
         throw err;
       }

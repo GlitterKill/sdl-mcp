@@ -97,20 +97,36 @@ describe("executor escalation", () => {
       new PolicyEngine({ defaultDenyRaw: false }),
       mockGate,
     );
+    const noEvidenceError = new Error("forced empty rung");
+    const testExecutor = executor as unknown as {
+      executeCardRung: (task: AgentTask, context: string[]) => Promise<void>;
+      executeSkeletonRung: (task: AgentTask, context: string[]) => Promise<void>;
+      executeHotPathRung: (task: AgentTask, context: string[]) => Promise<void>;
+    };
+    testExecutor.executeCardRung = async () => {
+      throw noEvidenceError;
+    };
+    testExecutor.executeSkeletonRung = async () => {
+      throw noEvidenceError;
+    };
+    testExecutor.executeHotPathRung = async () => {
+      throw noEvidenceError;
+    };
+
     const task: AgentTask = {
       taskType: "debug",
       taskText: "Investigate issue",
       repoId: "test-repo",
     };
 
-    // Start with just "card" rung and no context — card rung will find nothing,
-    // triggering escalation to skeleton, then hotPath, then raw
+    // Start with just "card" rung. Each non-raw rung is forced to fail without
+    // recording evidence so escalation is driven purely by the ladder logic.
     const result = await executor.execute(task, ["card"], []);
 
-    // Should have more than 1 action due to escalation
-    assert.ok(
-      result.actions.length > 1,
-      `Expected escalation to add rungs, got ${result.actions.length} action(s): ${result.actions.map((a) => a.type).join(", ")}`,
+    assert.deepStrictEqual(
+      result.actions.map((action) => action.type),
+      ["getCard", "getSkeleton", "getHotPath"],
+      `Expected rung escalation through hotPath, got ${result.actions.map((a) => a.type).join(", ")}`,
     );
   });
 

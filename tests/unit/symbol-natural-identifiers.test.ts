@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { clearAllCaches } from "../../dist/graph/cache.js";
 import {
@@ -23,18 +24,21 @@ import { errorToMcpResponse } from "../../dist/mcp/errors.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(tmpdir(), ".lbug-symbol-natural-identifiers-test-db.lbug");
-
 describe("symbol natural identifiers", () => {
+  let testDbPath = "";
   beforeEach(async () => {
     clearAllCaches();
-    for (const p of [TEST_DB_PATH, TEST_DB_PATH + ".wal", TEST_DB_PATH + ".lock"]) {
+    testDbPath = join(
+      tmpdir(),
+      `.lbug-symbol-natural-identifiers-test-db-${randomUUID()}.lbug`,
+    );
+    for (const p of [testDbPath, testDbPath + ".wal", testDbPath + ".lock"]) {
       if (existsSync(p)) rmSync(p, { force: true });
     }
-    mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
+    mkdirSync(dirname(testDbPath), { recursive: true });
 
     await closeLadybugDb();
-    await initLadybugDb(TEST_DB_PATH);
+    await initLadybugDb(testDbPath);
     const conn = await getLadybugConn();
     const now = "2026-03-20T12:00:00.000Z";
 
@@ -121,7 +125,7 @@ describe("symbol natural identifiers", () => {
   afterEach(async () => {
     clearAllCaches();
     await closeLadybugDb();
-    for (const p of [TEST_DB_PATH, TEST_DB_PATH + ".wal", TEST_DB_PATH + ".lock"]) {
+    for (const p of [testDbPath, testDbPath + ".wal", testDbPath + ".lock"]) {
       if (existsSync(p)) rmSync(p, { force: true });
     }
   });

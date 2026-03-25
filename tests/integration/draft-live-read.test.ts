@@ -208,7 +208,7 @@ describe("draft live reads", () => {
     });
     await waitForDefaultLiveIndexIdle();
 
-    const slice = await buildSlice({
+    const { slice } = await buildSlice({
       repoId: REPO_ID,
       versionId: latestVersionId,
       entrySymbols: [durableAlpha.symbolId],
@@ -225,7 +225,7 @@ describe("draft live reads", () => {
   });
 
   it("bypasses cached slices when a draft overlay is present", async () => {
-    const initialSlice = await buildSlice({
+    const { slice: initialSlice } = await buildSlice({
       repoId: REPO_ID,
       versionId: latestVersionId,
       entrySymbols: [durableAlpha.symbolId],
@@ -258,7 +258,7 @@ describe("draft live reads", () => {
     });
     await waitForDefaultLiveIndexIdle();
 
-    const draftSlice = await buildSlice({
+    const { slice: draftSlice } = await buildSlice({
       repoId: REPO_ID,
       versionId: latestVersionId,
       entrySymbols: [durableAlpha.symbolId],

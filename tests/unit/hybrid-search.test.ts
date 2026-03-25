@@ -132,10 +132,10 @@ describe("RRF fusion", () => {
 // ---------------------------------------------------------------------------
 
 describe("model mapping", async () => {
-  let modelMapping: typeof import("../../src/retrieval/model-mapping.js");
+  let modelMapping: typeof import("../../dist/retrieval/model-mapping.js");
 
   before(async () => {
-    modelMapping = await import("../../src/retrieval/model-mapping.js");
+    modelMapping = await import("../../dist/retrieval/model-mapping.js");
   });
 
   it("returns correct property names for MiniLM", () => {

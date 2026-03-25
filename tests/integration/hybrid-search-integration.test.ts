@@ -22,10 +22,10 @@ const repoRoot = path.resolve(import.meta.dirname, "../..");
 // ---------------------------------------------------------------------------
 
 describe("hybrid search config integration", async () => {
-  let configTypes: typeof import("../../src/config/types.js");
+  let configTypes: typeof import("../../dist/config/types.js");
 
   before(async () => {
-    configTypes = await import("../../src/config/types.js");
+    configTypes = await import("../../dist/config/types.js");
   });
 
   it("SemanticRetrievalConfigSchema parses hybrid mode with defaults", () => {
@@ -109,10 +109,10 @@ describe("hybrid search config integration", async () => {
 // ---------------------------------------------------------------------------
 
 describe("SymbolSearch schema retrieval evidence", async () => {
-  let toolSchemas: typeof import("../../src/mcp/tools.js");
+  let toolSchemas: typeof import("../../dist/mcp/tools.js");
 
   before(async () => {
-    toolSchemas = await import("../../src/mcp/tools.js");
+    toolSchemas = await import("../../dist/mcp/tools.js");
   });
 
   it("SymbolSearchRequestSchema accepts includeRetrievalEvidence", () => {

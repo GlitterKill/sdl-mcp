@@ -253,6 +253,7 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
       runtime: "node",
       args: ["-e", "console.log('hello-runtime')"],
       persistOutput: false,
+      outputMode: "summary",
     });
 
     assert.notStrictEqual(

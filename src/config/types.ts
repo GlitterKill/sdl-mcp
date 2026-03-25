@@ -258,9 +258,9 @@ export const SemanticRetrievalConfigSchema = z.object({
   mode: z.enum(["legacy", "hybrid"]).default("legacy"),
   /** When true, file-extension filtering is optional (not enforced during retrieval). */
   extensionsOptional: z.boolean().default(true),
-  fts: SemanticRetrievalFtsConfigSchema.optional().default({}),
-  vector: SemanticRetrievalVectorConfigSchema.optional().default({}),
-  fusion: SemanticRetrievalFusionConfigSchema.optional().default({}),
+  fts: SemanticRetrievalFtsConfigSchema.optional().default(() => SemanticRetrievalFtsConfigSchema.parse({})),
+  vector: SemanticRetrievalVectorConfigSchema.optional().default(() => SemanticRetrievalVectorConfigSchema.parse({})),
+  fusion: SemanticRetrievalFusionConfigSchema.optional().default(() => SemanticRetrievalFusionConfigSchema.parse({})),
   /** Maximum candidate symbols to collect before fusion re-ranking. */
   candidateLimit: z.number().int().min(1).default(100),
 });

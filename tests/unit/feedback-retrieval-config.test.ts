@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { EntityType } from "../../src/retrieval/types.js";
+import type { EntityType } from "../../dist/retrieval/types.js";
 
 const orchestratorSrc = readFileSync(
   join(process.cwd(), "src/retrieval/orchestrator.ts"),

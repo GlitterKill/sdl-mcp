@@ -159,7 +159,7 @@ describe("Semantic Embedding Pipeline", () => {
     assert.strictEqual(embeddings[1].length, 64);
   });
 
-  it("refreshSymbolEmbeddings creates embeddings for all symbols", async () => {
+  it("refreshSymbolEmbeddings skips persistence for mock-fallback embeddings", async () => {
     const result = await refreshSymbolEmbeddings({
       repoId,
       provider: "mock",
@@ -167,33 +167,34 @@ describe("Semantic Embedding Pipeline", () => {
       symbols,
     });
 
-    assert.strictEqual(result.embedded, 3);
-    assert.strictEqual(result.skipped, 0);
+    assert.strictEqual(result.embedded, 0);
+    assert.strictEqual(result.skipped, 3);
 
-    // Verify embeddings exist in DB
-    // Mock provider now correctly stores as "mock-fallback" so embeddings
-    // are not confused with real model vectors on provider switch.
+    // Mock fallback vectors are intentionally not persisted to Symbol node
+    // properties because they do not map to a supported embedding model.
     const conn = await getLadybugConn();
     for (const sym of symbols) {
       const embedding = await ladybugDb.getSymbolEmbedding(conn, sym.symbolId);
-      assert.ok(embedding, `Embedding should exist for ${sym.symbolId}`);
-      assert.strictEqual(embedding.model, "mock-fallback");
-      assert.ok(embedding.embeddingVector.length > 0);
+      assert.strictEqual(
+        embedding,
+        null,
+        `Mock fallback embedding should not persist for ${sym.symbolId}`,
+      );
     }
   });
 
-  it("refreshSymbolEmbeddings skips unchanged symbols", async () => {
-    // First run — embeds all
+  it("refreshSymbolEmbeddings continues to skip mock-fallback vectors across runs", async () => {
+    // First run: mock fallback vectors are not persisted.
     const first = await refreshSymbolEmbeddings({
       repoId,
       provider: "mock",
       model: "all-MiniLM-L6-v2",
       symbols,
     });
-    assert.strictEqual(first.embedded, 3);
-    assert.strictEqual(first.skipped, 0);
+    assert.strictEqual(first.embedded, 0);
+    assert.strictEqual(first.skipped, 3);
 
-    // Second run with same symbols — should skip all
+    // Second run with the same inputs should behave identically.
     const second = await refreshSymbolEmbeddings({
       repoId,
       provider: "mock",
@@ -243,7 +244,7 @@ describe("Semantic Embedding Pipeline", () => {
     }
   });
 
-  it("countSymbolEmbeddings returns correct count", async () => {
+  it("countSymbolEmbeddings remains zero for mock-fallback vectors", async () => {
     const conn = await getLadybugConn();
 
     // Before embedding
@@ -259,7 +260,7 @@ describe("Semantic Embedding Pipeline", () => {
     });
 
     const countAfter = await ladybugDb.countSymbolEmbeddings(conn, repoId);
-    assert.strictEqual(countAfter, 3);
+    assert.strictEqual(countAfter, 0);
   });
 
   it("rerankByEmbeddings handles missing embeddings by generating on-the-fly", async () => {
@@ -322,7 +323,7 @@ describe("Semantic Embedding Pipeline", () => {
     }
   });
 
-  it("alpha=0 makes final score equal to semantic score", async () => {
+  it("alpha=0 still returns lexical scores when legacy semantic rerank is disabled", async () => {
     await refreshSymbolEmbeddings({
       repoId,
       provider: "mock",
@@ -344,9 +345,18 @@ describe("Semantic Embedding Pipeline", () => {
     });
 
     for (let i = 0; i < reranked.length; i++) {
+      const candidate = candidates.find(
+        (c) => c.symbol.symbolId === reranked[i].symbol.symbolId,
+      );
+      assert.ok(candidate);
+      assert.strictEqual(
+        reranked[i].semanticScore,
+        0,
+        "Semantic score should stay zero when legacy rerank maintenance mode is off",
+      );
       assert.ok(
-        Math.abs(reranked[i].finalScore - reranked[i].semanticScore) < 0.001,
-        `With alpha=0, finalScore should equal semanticScore`,
+        Math.abs(reranked[i].finalScore - candidate.lexicalScore) < 0.001,
+        "Final score should remain lexical when legacy rerank maintenance mode is off",
       );
     }
   });

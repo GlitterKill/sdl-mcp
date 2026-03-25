@@ -175,7 +175,7 @@ describe("slice confidence-aware filtering", () => {
       },
     ]);
 
-    const slice = await buildSlice({
+    const { slice } = await buildSlice({
       repoId: "repo",
       versionId: "v1",
       conn,

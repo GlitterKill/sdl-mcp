@@ -3,6 +3,7 @@
  * using $defs/$ref to minimize token count in tools/list responses.
  */
 import { z } from "zod";
+import { toJSONSchema } from "zod/v4";
 
 /**
  * Build a compact JSON Schema from a Zod schema by:
@@ -15,7 +16,10 @@ import { z } from "zod";
 export function zodSchemaToJsonSchema(
   schema: z.ZodType,
 ): Record<string, unknown> {
-  const jsonSchema = z.toJSONSchema(schema) as Record<string, unknown>;
+  // v3 compat schemas are structurally compatible with v4 toJSONSchema
+  const jsonSchema = toJSONSchema(
+    schema as unknown as Parameters<typeof toJSONSchema>[0],
+  ) as Record<string, unknown>;
   // Remove $schema key for compact MCP tool responses
   delete jsonSchema["$schema"];
   return jsonSchema;

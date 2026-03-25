@@ -302,7 +302,7 @@ describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
     assert.ok(hasCall(query.symbolId, transform.symbolId));
     assert.ok(hasCall(transform.symbolId, cache.symbolId));
 
-    const slice = await buildSlice({
+    const { slice } = await buildSlice({
       repoId: REPO_ID,
       versionId: full.versionId,
       conn,

@@ -21,32 +21,34 @@ describe("semantic pipeline regressions", () => {
     const cardHashIdx = fnBody.indexOf(
       "const cardHash = buildCardHash(symbol, text);",
     );
-    const existingIdx = fnBody.indexOf(
-      "const existing = await ladybugDb.getSymbolEmbedding(conn, symbol.symbolId);",
-    );
     const storageModelIdx = fnBody.indexOf("let storageModel =");
-    const storageModelCheckIdx = fnBody.indexOf("existing.model === storageModel");
+    const existingIdx = fnBody.indexOf(
+      "const existing = await getSymbolEmbeddingFromNode(conn, symbol.symbolId, storageModel);",
+    );
     const embedIdx = fnBody.indexOf("const [vector] = await provider.embed([text]);");
+    const existingAfterEmbedIdx = fnBody.indexOf(
+      "const existingAfterEmbed = await getSymbolEmbeddingFromNode(conn, symbol.symbolId, storageModel);",
+    );
 
     assert.ok(
       cardHashIdx !== -1 &&
         existingIdx !== -1 &&
         storageModelIdx !== -1 &&
-        storageModelCheckIdx !== -1 &&
-        embedIdx !== -1,
-      "refreshSymbolEmbeddings should compute cardHash, read cache, derive storageModel, and embed text",
+        embedIdx !== -1 &&
+        existingAfterEmbedIdx !== -1,
+      "refreshSymbolEmbeddings should compute cardHash, derive storageModel, read cache, and re-check after embedding",
     );
     assert.ok(
-      existingIdx > cardHashIdx,
-      "refreshSymbolEmbeddings should read cached embedding after cardHash is computed",
+      storageModelIdx > cardHashIdx,
+      "refreshSymbolEmbeddings should derive storageModel after cardHash is computed",
     );
     assert.ok(
-      storageModelIdx > existingIdx && storageModelIdx < embedIdx,
-      "refreshSymbolEmbeddings should derive storageModel before embedding",
+      existingIdx > storageModelIdx && existingIdx < embedIdx,
+      "refreshSymbolEmbeddings should read cached embedding after deriving storageModel and before embedding",
     );
     assert.ok(
-      storageModelCheckIdx > existingIdx && storageModelCheckIdx < embedIdx,
-      "refreshSymbolEmbeddings should check cache using storageModel before embedding",
+      existingAfterEmbedIdx > embedIdx,
+      "refreshSymbolEmbeddings should re-check storage after embedding in case the provider changed fallback status",
     );
     assert.ok(
       embedIdx > existingIdx,
@@ -55,7 +57,7 @@ describe("semantic pipeline regressions", () => {
 
     assert.match(
       fnBody,
-      /if\s*\(\s*existing\s*&&\s*existing\.model === storageModel\s*&&\s*existing\.cardHash === cardHash\s*\)\s*\{\s*skipped \+= 1;\s*continue;\s*\}/s,
+      /if\s*\(\s*existing\s*&&\s*existing\.cardHash === cardHash\s*\)\s*\{\s*skipped \+= 1;\s*continue;\s*\}/s,
       "refreshSymbolEmbeddings should skip unchanged symbols before embedding work",
     );
   });

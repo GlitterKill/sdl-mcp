@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import { join, dirname } from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,11 +18,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 describe("Sync Artifact Model", () => {
-  const graphDbPath = join(tmpdir(), ".lbug-sync-artifact-test-db");
-  const syncDir = join(__dirname, ".tmp-sync-artifacts");
+  let graphDbPath = "";
+  let syncDir = "";
   const repoId = "test-repo-sync";
 
   beforeEach(async () => {
+    const runId = randomUUID();
+    graphDbPath = join(tmpdir(), `.lbug-sync-artifact-test-db-${runId}`);
+    syncDir = join(__dirname, `.tmp-sync-artifacts-${runId}`);
     if (existsSync(graphDbPath)) {
       rmSync(graphDbPath, { recursive: true, force: true });
     }

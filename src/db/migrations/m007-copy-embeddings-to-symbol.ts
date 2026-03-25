@@ -55,11 +55,24 @@ export async function up(conn: Connection): Promise<void> {
   // ------------------------------------------------------------------
   // 2. Read all SymbolEmbedding nodes.
   // ------------------------------------------------------------------
-  const rows = await queryAll<EmbeddingRow>(
-    conn,
-    `MATCH (se:SymbolEmbedding) RETURN se.*`,
-    {},
-  );
+  let rows: EmbeddingRow[];
+  try {
+    rows = await queryAll<EmbeddingRow>(
+      conn,
+      `MATCH (se:SymbolEmbedding) RETURN se.*`,
+      {},
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      message.includes("Table SymbolEmbedding does not exist") ||
+      message.includes("Node table SymbolEmbedding does not exist")
+    ) {
+      logger.info("m007: SymbolEmbedding table absent in source DB; skipping migration", {});
+      return;
+    }
+    throw error;
+  }
 
   if (rows.length === 0) {
     logger.info("m007: no SymbolEmbedding nodes found — nothing to migrate", {});

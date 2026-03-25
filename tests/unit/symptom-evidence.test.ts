@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { classifySymptomType } from "../../src/retrieval/evidence.js";
+import { classifySymptomType } from "../../dist/retrieval/evidence.js";
 
 describe("classifySymptomType", () => {
   it("returns stackTrace when stackTrace is provided", () => {

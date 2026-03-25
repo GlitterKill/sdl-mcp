@@ -173,7 +173,16 @@ export async function deleteRepo(
     await exec(txConn, `MATCH (s:SyncArtifact {repoId: $repoId}) DELETE s`, { repoId });
 
     // Clean up FileSummary nodes and edges
-    await exec(txConn, `MATCH (fs:FileSummary)-[e]-() WHERE fs.repoId = $repoId DELETE e`, { repoId });
+    await exec(
+      txConn,
+      `MATCH (src)-[e]->(fs:FileSummary) WHERE fs.repoId = $repoId DELETE e`,
+      { repoId },
+    );
+    await exec(
+      txConn,
+      `MATCH (fs:FileSummary)-[e]->(dst) WHERE fs.repoId = $repoId DELETE e`,
+      { repoId },
+    );
     await exec(txConn, `MATCH (fs:FileSummary) WHERE fs.repoId = $repoId DELETE fs`, { repoId });
 
     // Clean up UsageSnapshot nodes

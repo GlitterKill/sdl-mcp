@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { IndexHealthResult } from "../../src/retrieval/index-lifecycle.js";
+import type { IndexHealthResult } from "../../dist/retrieval/index-lifecycle.js";
 
 // ---------------------------------------------------------------------------
 // Source text fixture

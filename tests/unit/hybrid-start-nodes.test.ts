@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { RetrievalCapabilities } from "../../src/retrieval/types.js";
+import type { RetrievalCapabilities } from "../../dist/retrieval/types.js";
 
 // ---------------------------------------------------------------------------
 // Minimal types (mirrors config/types.ts SemanticRetrievalConfig shape)

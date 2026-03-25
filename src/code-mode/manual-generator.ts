@@ -27,6 +27,7 @@ export const FN_NAME_MAP: Record<string, string> = {
   bufferCheckpoint: "buffer.checkpoint",
   bufferStatus: "buffer.status",
   runtimeExecute: "runtime.execute",
+  runtimeQueryOutput: "runtime.queryOutput",
   memoryStore: "memory.store",
   memoryQuery: "memory.query",
   memoryRemove: "memory.remove",
@@ -105,12 +106,14 @@ function agentFeedbackQuery(p: { limit?: number }): { records: object[] }
 function bufferPush(p: { file: string; content: string }): { accepted: boolean }
 /** Request buffer checkpoint */
 function bufferCheckpoint(): { checkpointed: boolean }
-/** Get buffer status */
-function bufferStatus(): { status: object }
-/** Execute runtime command */
-function runtimeExecute(p: { runtime: string; args?: string[]; code?: string }): { stdout: string; exitCode: number }
+  /** Get buffer status */
+  function bufferStatus(): { status: object }
+  /** Execute runtime command */
+  function runtimeExecute(p: { runtime: string; args?: string[]; code?: string }): { stdout: string; exitCode: number }
+  /** Query stored runtime output by keywords */
+  function runtimeQueryOutput(p: { artifactHandle: string; queryTerms?: string[]; maxLines?: number }): { excerpts: object[] }
 
-// === Usage ===
+  // === Usage ===
 /** Get cumulative token savings statistics */
 function usageStats(p: { scope?: "session" | "history" | "both"; since?: string; limit?: number }): { totalSdlTokens: number; totalSavedTokens: number; savingsPercent: number }`;
 

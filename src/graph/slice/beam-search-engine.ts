@@ -1302,7 +1302,7 @@ class ParallelScorerPool {
         const worker = new Worker(workerPath);
 
         worker.on("error", (err) => {
-          logger.warn("Parallel scorer worker error", { error: err.message });
+          logger.warn("Parallel scorer worker error", { error: err instanceof Error ? err.message : String(err) });
           this.failed = true;
         });
 

@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import {
   SemanticConfigSchema,
   SemanticRetrievalConfigSchema,
-} from "../../src/config/types.js";
+} from "../../dist/config/types.js";
 
 // ---------------------------------------------------------------------------
 // SemanticRetrievalConfigSchema
@@ -107,7 +107,7 @@ describe("SemanticRetrievalConfigSchema", () => {
   it("rejects unknown mode values", () => {
     assert.throws(
       () => SemanticRetrievalConfigSchema.parse({ mode: "turbo" }),
-      /invalid_enum_value|Invalid enum value/i,
+      /invalid_enum_value|invalid_value|Invalid enum value|Invalid option/i,
     );
   });
 });
