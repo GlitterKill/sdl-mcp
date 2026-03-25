@@ -375,13 +375,13 @@ export async function generateContextSummary(args: {
         .filter((r: EntitySearchResultItem) => r.entityType === "fileSummary")
         .map((r: EntitySearchResultItem) => r.entityId);
       if (clusterIds.length > 0) {
-        summary.relatedClusters = clusterIds;
+        summary.relatedClusterIds = clusterIds;
       }
       if (processIds.length > 0) {
-        summary.relatedProcesses = processIds;
+        summary.relatedProcessIds = processIds;
       }
       if (fileIds.length > 0) {
-        summary.relatedFiles = fileIds;
+        summary.relatedFileIds = fileIds;
       }
     }
   } catch (err) {

@@ -310,7 +310,7 @@ export async function searchSymbolsHybridWithOverlay(
     // This never blocks the search path — the result will be used on subsequent calls.
     getOverlayEmbeddingCache()
       .computeAndCacheSymbol(symbol)
-      .catch(() => {});
+      .catch((err) => { logger.debug(`[overlay-embedding-cache] Fire-and-forget embed failed for ${symbol.symbolId}: ${err instanceof Error ? err.message : String(err)}`); });
   }
 
   // 4. Merge: use mergeSearchResults for proper interleaving.

@@ -42,7 +42,11 @@ export async function upsertFileSummary(
 ): Promise<void> {
   await exec(
     conn,
-    `MATCH (r:Repo {repoId: $repoId})
+    `// Note: Leading MATCH clauses mean this is a silent no-op if Repo or File
+    // nodes are missing. This is acceptable because callers (materializeFileSummaries)
+    // iterate files that just came from the DB, so missing nodes indicate a race
+    // condition that will self-correct on the next index refresh.
+    MATCH (r:Repo {repoId: $repoId})
      MATCH (f:File {fileId: $fileId})
      MERGE (fs:FileSummary {fileId: $fileId})
      SET fs.repoId = $repoId,
