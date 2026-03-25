@@ -640,6 +640,7 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 | [Semantic Embeddings Setup](./docs/feature-deep-dives/semantic-embeddings-setup.md) | Dependencies, model installation, provider configuration, tier-by-tier setup |
 | [Code Mode](./docs/feature-deep-dives/code-mode.md) | Tool chaining (sdl.chain), action discovery, manual reference, one-call workflows |
 | [Development Memories](./docs/feature-deep-dives/development-memories.md) | Graph-backed cross-session memory, file sync, staleness detection, auto-surfacing |
+| [Token Savings Meter](./docs/feature-deep-dives/token-savings-meter.md) | Per-call meter, session summaries, lifetime tracking, `sdl.usage.stats` |
 
 <br/>
 

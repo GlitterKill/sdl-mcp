@@ -61,6 +61,7 @@ Use this page as the entry point for SDL-MCP documentation.
 - [Tool Gateway](./feature-deep-dives/tool-gateway.md)
 - [Code Mode](./feature-deep-dives/code-mode.md)
 - [Runtime Execution](./feature-deep-dives/runtime-execution.md)
+- [Token Savings Meter](./feature-deep-dives/token-savings-meter.md)
 
 ## Advanced and Supporting Docs
 
