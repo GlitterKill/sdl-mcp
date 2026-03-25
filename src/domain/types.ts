@@ -128,14 +128,24 @@ export function normalizeCardDetailLevel(
 ): CardDetailLevel {
   if (!level) return "deps";
   if (level === "compact") return "deps";
-  return level as CardDetailLevel;
+  // Validate against known values
+  const validLevels: readonly string[] = ["minimal", "signature", "deps", "full"];
+  if (validLevels.includes(level)) {
+    return level as CardDetailLevel;
+  }
+  return "deps"; // safe fallback for unknown values
 }
 
 export function legacyDetailLevelToWire(
   level: CardDetailLevel | LegacyCardDetailLevel | undefined,
 ): CardDetailLevel {
   if (!level) return "compact";
-  return level as CardDetailLevel;
+  // Validate against known values
+  const validLevels: readonly string[] = ["minimal", "signature", "deps", "compact", "full"];
+  if (validLevels.includes(level)) {
+    return level as CardDetailLevel;
+  }
+  return "compact"; // safe fallback for unknown values
 }
 
 export function isLegacyDetailLevel(
@@ -217,7 +227,7 @@ export interface SliceBudget {
 
 export interface SliceBuildInput {
   repoId: RepoId;
-  taskText: string;
+  taskText?: string;
   stackTrace?: string;
   failingTestPath?: string;
   editedFiles?: string[];

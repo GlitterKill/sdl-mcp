@@ -133,6 +133,7 @@ export function setGraphSnapshot(repoId: RepoId, graph: Graph): void {
  */
 export function invalidateGraphSnapshot(repoId: RepoId): void {
   snapshotsByRepo.delete(repoId);
+  loadingPromises.delete(repoId);
 }
 
 /**
@@ -140,6 +141,7 @@ export function invalidateGraphSnapshot(repoId: RepoId): void {
  */
 export function clearGraphSnapshots(): void {
   snapshotsByRepo.clear();
+  loadingPromises.clear();
 }
 
 /**

@@ -392,7 +392,7 @@ const CompactEdgeV2Schema = z.tuple([
 
 const CompactGraphSliceV2Schema = z.object({
   wf: z.literal("compact"),
-  wv: z.literal(2).optional(),
+  wv: z.literal(2),
   rid: z.string().optional(),
   vid: z.string(),
   b: CompactSliceBudgetSchema,
@@ -444,28 +444,38 @@ export {
   CompactGraphSliceV2Schema,
 };
 
-const DeltaSymbolChangeSchema = z.object({
-  symbolId: z.string(),
-  changeType: z.enum(["added", "removed", "modified"]),
-  signatureDiff: z
-    .object({
-      before: z.string().optional(),
-      after: z.string().optional(),
-    })
-    .optional(),
-  invariantDiff: z
-    .object({
-      added: z.array(z.string()),
-      removed: z.array(z.string()),
-    })
-    .optional(),
-  sideEffectDiff: z
-    .object({
-      added: z.array(z.string()),
-      removed: z.array(z.string()),
-    })
-    .optional(),
-});
+const DeltaSymbolChangeSchema = z.discriminatedUnion("changeType", [
+  z.object({
+    symbolId: z.string(),
+    changeType: z.literal("added"),
+  }),
+  z.object({
+    symbolId: z.string(),
+    changeType: z.literal("removed"),
+  }),
+  z.object({
+    symbolId: z.string(),
+    changeType: z.literal("modified"),
+    signatureDiff: z
+      .object({
+        before: z.string().optional(),
+        after: z.string().optional(),
+      })
+      .optional(),
+    invariantDiff: z
+      .object({
+        added: z.array(z.string()),
+        removed: z.array(z.string()),
+      })
+      .optional(),
+    sideEffectDiff: z
+      .object({
+        added: z.array(z.string()),
+        removed: z.array(z.string()),
+      })
+      .optional(),
+  }),
+]);
 
 const FanInTrendSchema = z.object({
   previous: z.number().int().min(0),
@@ -983,16 +993,62 @@ const DeltaPackWithGovernanceSchema = DeltaPackSchema.extend({
     .optional(),
   spilloverHandle: z.string().optional(),
   changedSymbols: z.array(
-    DeltaSymbolChangeSchema.extend({
-      tiers: z
-        .object({
-          interfaceStable: z.boolean(),
-          behaviorStable: z.boolean(),
-          sideEffectsStable: z.boolean(),
-          riskScore: z.number(),
-        })
-        .optional(),
-    }),
+    z.discriminatedUnion("changeType", [
+      z.object({
+        symbolId: z.string(),
+        changeType: z.literal("added"),
+        tiers: z
+          .object({
+            interfaceStable: z.boolean(),
+            behaviorStable: z.boolean(),
+            sideEffectsStable: z.boolean(),
+            riskScore: z.number(),
+          })
+          .optional(),
+      }),
+      z.object({
+        symbolId: z.string(),
+        changeType: z.literal("removed"),
+        tiers: z
+          .object({
+            interfaceStable: z.boolean(),
+            behaviorStable: z.boolean(),
+            sideEffectsStable: z.boolean(),
+            riskScore: z.number(),
+          })
+          .optional(),
+      }),
+      z.object({
+        symbolId: z.string(),
+        changeType: z.literal("modified"),
+        signatureDiff: z
+          .object({
+            before: z.string().optional(),
+            after: z.string().optional(),
+          })
+          .optional(),
+        invariantDiff: z
+          .object({
+            added: z.array(z.string()),
+            removed: z.array(z.string()),
+          })
+          .optional(),
+        sideEffectDiff: z
+          .object({
+            added: z.array(z.string()),
+            removed: z.array(z.string()),
+          })
+          .optional(),
+        tiers: z
+          .object({
+            interfaceStable: z.boolean(),
+            behaviorStable: z.boolean(),
+            sideEffectsStable: z.boolean(),
+            riskScore: z.number(),
+          })
+          .optional(),
+      }),
+    ]),
   ),
 });
 

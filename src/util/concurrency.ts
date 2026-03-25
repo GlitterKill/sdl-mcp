@@ -87,6 +87,7 @@ export class ConcurrencyLimiter {
             new Error(`ConcurrencyLimiter queue timeout after ${timeout}ms`),
           );
         }, timeout);
+        timeoutHandle.unref();
       }
 
       this.queue.push(item);
@@ -121,6 +122,7 @@ export class ConcurrencyLimiter {
               timedOut = true;
               reject(new Error(`Task timeout after ${timeoutMs}ms`));
             }, timeoutMs);
+            timeoutHandle.unref();
           }),
         ]);
 

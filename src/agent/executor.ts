@@ -22,6 +22,7 @@ import { logger } from "../util/logger.js";
 import { isHybridRetrievalAvailable } from "../retrieval/fallback.js";
 import { hybridSearch } from "../retrieval/orchestrator.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
+import { randomUUID } from "node:crypto";
 
 /** Injectable gate evaluator for testability. */
 export type GateEvaluator = typeof evaluateRequest;
@@ -736,7 +737,7 @@ export class Executor {
   }
 
   private generateActionId(): string {
-    return `action-${this.actions.length}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    return `action-${this.actions.length}-${Date.now()}-${randomUUID().slice(0, 8)}`;
   }
 
   /**

@@ -84,6 +84,12 @@ export class CheckpointService {
           }
 
           const checkpointedAt = this.now();
+          // Re-check dirty flag: the draft may have been dirtied by a new buffer push
+          // between candidate listing and this removal
+          const currentDraft = this.overlayStore.getDraft(input.repoId, draft.filePath);
+          if (currentDraft?.dirty) {
+            continue; // Skip — a newer version arrived; do not remove
+          }
           // M3 optimization: removeDraft directly, lastCheckpointAt tracked in status
           this.overlayStore.removeDraft(input.repoId, draft.filePath);
           checkpointedFiles += 1;

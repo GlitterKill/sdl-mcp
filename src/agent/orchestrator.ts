@@ -15,6 +15,7 @@ import { logger } from "../util/logger.js";
 import { entitySearch } from "../retrieval/index.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
 import { classifySymptomType } from "../retrieval/evidence.js";
+import { randomUUID } from "node:crypto";
 
 const HANDLED_EVIDENCE_TYPES = new Set([
   "symbolCard", "skeleton", "hotPath", "codeWindow", "diagnostic", "searchResult",
@@ -173,7 +174,7 @@ export class Orchestrator {
   }
 
   private generateTaskId(): string {
-    return `task-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    return `task-${Date.now()}-${randomUUID().slice(0, 8)}`;
   }
 
   private generateSummary(
@@ -349,8 +350,9 @@ export class Orchestrator {
         return { expandedContext: context, clusterExpandedCount: 0 };
       }
 
+      const cappedClusterIds = Array.from(clusterIds).slice(0, 10);
       const memberLists = await Promise.all(
-        Array.from(clusterIds).map((clusterId) =>
+        cappedClusterIds.map((clusterId) =>
           ladybugDb.getClusterMembers(conn, clusterId),
         ),
       );

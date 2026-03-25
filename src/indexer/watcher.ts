@@ -70,7 +70,8 @@ type ChokidarModule = { watch: (paths: string | string[], options?: Record<strin
 async function loadChokidar(): Promise<ChokidarModule | null> {
   try {
     return await import("chokidar");
-  } catch {
+  } catch (err) {
+    logger.debug("[sdl-mcp] chokidar not available: " + (err instanceof Error ? err.message : String(err)));
     return null;
   }
 }
@@ -233,7 +234,7 @@ export async function watchRepositoryWithIndexer(
     logger.warn(message);
     watcherErrors.push(`${new Date().toISOString()} - ${message}`);
     if (watcherErrors.length > WATCHER_ERROR_MAX_COUNT) {
-      watcherErrors.shift();
+      watcherErrors.splice(0, watcherErrors.length - WATCHER_ERROR_MAX_COUNT);
     }
     if (health.errors >= WATCHER_ERROR_MAX_COUNT && !health.stale) {
       health.stale = true;

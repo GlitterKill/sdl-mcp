@@ -51,6 +51,16 @@ function resolvePropertyNames(model: string): {
     );
   }
 
+  // Validate property names before they are interpolated into Cypher queries
+  const SAFE_PROP = /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/;
+  for (const [label, value] of Object.entries({ vectorProp, cardHashProp, updatedAtProp })) {
+    if (!SAFE_PROP.test(value)) {
+      throw new Error(
+        `Unsafe Cypher property name for ${label}: "${value}"`,
+      );
+    }
+  }
+
   return { vectorProp, cardHashProp, updatedAtProp };
 }
 

@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "path";
 import { promisify } from "util";
@@ -13,7 +13,7 @@ import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
 import { safeJsonParse, ConfigObjectSchema } from "../util/safeJson.js";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // Avoid flakiness when multiple updates happen within the same millisecond.
 // Some environments (and our unit tests) assume `updatedAt` changes on each update.
@@ -74,7 +74,7 @@ function calculateFanMetrics(
 
 async function getCurrentCommitHash(repoRoot: string): Promise<string> {
   try {
-    const { stdout } = await execAsync("git rev-parse HEAD", {
+    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
       cwd: repoRoot,
     });
     return stdout.trim();
@@ -86,8 +86,9 @@ async function getCurrentCommitHash(repoRoot: string): Promise<string> {
 
 async function getChurnByFile(repoRoot: string): Promise<Map<string, number>> {
   try {
-    const { stdout } = await execAsync(
-      "git log --since=30.days --name-only --pretty=format:",
+    const { stdout } = await execFileAsync(
+      "git",
+      ["log", "--since=30.days", "--name-only", "--pretty=format:"],
       {
         cwd: repoRoot,
         maxBuffer: 10 * 1024 * 1024,

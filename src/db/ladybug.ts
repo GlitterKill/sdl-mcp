@@ -91,6 +91,9 @@ let writeConn: LadybugConnection | null = null;
 let writeLimiter: ConcurrencyLimiter | null = null;
 let writeQueueTimeoutMs = 30_000;
 
+// Per-slot recycling guard: prevents concurrent recycling of the same pool slot (TOCTOU).
+const recyclingSlots = new Set<number>();
+
 // Initialization mutex: prevents concurrent callers from double-initializing
 // the DB instance or connection pool across async boundaries.
 let dbInitPromise: Promise<LadybugDatabase> | null = null;
@@ -440,26 +443,35 @@ export async function recycleReadConnection(
   const idx = readPool.indexOf(unhealthyConn);
   if (idx === -1) return;
 
-  const db = await getLadybugDb();
-
-  // Re-validate after await: pool may have been closed or the connection
-  // may have been recycled by a concurrent caller (H6 TOCTOU guard).
-  if (readPool.length === 0 || readPool[idx] !== unhealthyConn) return;
-
-  try {
-    await unhealthyConn.close();
-  } catch {
-    // Best-effort close of broken connection
-  }
-
-  // Re-validate again: closeLadybugDb() may have run during the close await
-  if (readPool.length === 0) return;
+  // Per-slot recycling guard: if another caller is already recycling this
+  // slot, bail out to prevent double-close / double-create races.
+  if (recyclingSlots.has(idx)) return;
+  recyclingSlots.add(idx);
 
   try {
-    readPool[idx] = await createConnection(db);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`Failed to recreate read connection [${idx}]: ${msg}`);
+    const db = await getLadybugDb();
+
+    // Re-validate after await: pool may have been closed or the connection
+    // may have been recycled by a concurrent caller (H6 TOCTOU guard).
+    if (readPool.length === 0 || readPool[idx] !== unhealthyConn) return;
+
+    try {
+      await unhealthyConn.close();
+    } catch {
+      // Best-effort close of broken connection
+    }
+
+    // Re-validate again: closeLadybugDb() may have run during the close await
+    if (readPool.length === 0) return;
+
+    try {
+      readPool[idx] = await createConnection(db);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`Failed to recreate read connection [${idx}]: ${msg}`);
+    }
+  } finally {
+    recyclingSlots.delete(idx);
   }
 }
 
@@ -610,6 +622,7 @@ export async function closeLadybugDb(): Promise<void> {
         writeLimiter.drain(),
         new Promise<void>((resolve) => {
           timeoutHandle = setTimeout(resolve, 5_000);
+          timeoutHandle.unref();
         }),
       ]).finally(() => {
         if (timeoutHandle) clearTimeout(timeoutHandle);
@@ -626,8 +639,15 @@ export async function closeLadybugDb(): Promise<void> {
     writeLimiter = null;
   }
 
-  // Close read pool
-  for (const conn of readPool) {
+  // Synchronously capture and clear the read pool so concurrent readers
+  // immediately see "not initialized" instead of accessing closing connections.
+  const poolSnapshot = [...readPool];
+  readPool.length = 0;
+  readPoolIndex = 0;
+  recyclingSlots.clear();
+
+  // Close captured read connections
+  for (const conn of poolSnapshot) {
     try {
       await conn.close();
     } catch (err) {
@@ -636,8 +656,6 @@ export async function closeLadybugDb(): Promise<void> {
       });
     }
   }
-  readPool.length = 0;
-  readPoolIndex = 0;
 
   // Close write connection
   if (writeConn) {

@@ -85,7 +85,12 @@ export function applyRedaction(
       continue;
     }
     try {
+      const VALID_FLAGS = /^[gimsuvdy]*$/;
       const flags = customPattern.flags ?? "g";
+      if (!VALID_FLAGS.test(flags)) {
+        logger.warn("Invalid regex flags in redaction pattern; skipping", { flags });
+        continue;
+      }
       const regex = new RegExp(customPattern.pattern, flags);
       const replacement = `[REDACTED:${customPattern.name ?? "custom"}]`;
       redacted = redacted.replace(regex, replacement);
@@ -329,7 +334,13 @@ export async function readArtifactContent(
   baseDir?: string | null,
   stream: "stdout" | "stderr" | "both" = "both",
 ): Promise<{ stdout: string | null; stderr: string | null; totalBytes: number }> {
-  if (/[\/\\]/.test(artifactHandle)) {
+  if (
+    !artifactHandle ||
+    artifactHandle.includes("..") ||
+    artifactHandle.includes("/") ||
+    artifactHandle.includes("\\") ||
+    /^[A-Za-z]:/.test(artifactHandle)
+  ) {
     throw new Error("Invalid artifact handle: path traversal detected");
   }
 

@@ -134,6 +134,7 @@ export async function execute(
     await writeFile(tempCodePath, request.codePath, "utf8");
   }
 
+  try {
   const stdoutChunks: Buffer[] = [];
   const stderrChunks: Buffer[] = [];
 
@@ -147,6 +148,7 @@ export async function execute(
     cwd: request.cwd,
     env: request.env,
     stdio: ["ignore", "pipe", "pipe"],
+    shell: false,
     detached: !IS_WINDOWS,
     windowsHide: true,
   });
@@ -235,10 +237,6 @@ export async function execute(
     });
   }
 
-  if (tempWorkspaceDir) {
-    await cleanupTempWorkspace(tempWorkspaceDir);
-  }
-
   return {
     status: cancelled
       ? "cancelled"
@@ -257,6 +255,11 @@ export async function execute(
     totalStdoutBytes,
     totalStderrBytes,
   };
+  } finally {
+    if (tempWorkspaceDir) {
+      await cleanupTempWorkspace(tempWorkspaceDir);
+    }
+  }
 }
 
 export function createConcurrencyTracker(maxJobs: number): ConcurrencyTracker {

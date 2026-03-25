@@ -77,8 +77,12 @@ export class IdleMonitor {
           continue;
         }
 
-        await this.options.checkpointRepo({ repoId, reason: "idle" });
-        triggered.push(repoId);
+        try {
+          await this.options.checkpointRepo({ repoId, reason: "idle" });
+          triggered.push(repoId);
+        } catch (err) {
+          logger.warn("[IdleMonitor] checkpointRepo failed for " + repoId + ": " + (err instanceof Error ? err.message : String(err)));
+        }
       }
 
       return triggered;

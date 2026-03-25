@@ -78,7 +78,14 @@ export class OverlayStore {
       parseError: null,
       lastParseAt: parsedAt,
     };
-    this.getRepo(repoId).set(toStoreKey(filePath), updated);
+    // Re-check version right before writing to guard against concurrent upsertDraft
+    const repo = this.getRepo(repoId);
+    const key = toStoreKey(filePath);
+    const currentEntry = repo.get(key);
+    if (!currentEntry || currentEntry.version !== version) {
+      return null; // Version changed since we started; abort
+    }
+    repo.set(key, updated);
     this.bumpVersion(repoId);
     return updated;
   }
@@ -100,7 +107,14 @@ export class OverlayStore {
       parseError,
       lastParseAt: parsedAt,
     };
-    this.getRepo(repoId).set(toStoreKey(filePath), updated);
+    // Re-check version right before writing to guard against concurrent upsertDraft
+    const repo = this.getRepo(repoId);
+    const key = toStoreKey(filePath);
+    const currentEntry = repo.get(key);
+    if (!currentEntry || currentEntry.version !== version) {
+      return null; // Version changed since we started; abort
+    }
+    repo.set(key, updated);
     this.bumpVersion(repoId);
     return updated;
   }

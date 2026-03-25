@@ -30,6 +30,8 @@ type SummarySeed = {
 };
 
 const summarySeedCache = new Map<string, SummarySeed>();
+/** Tracks the last-seen indexVersion per repoId to invalidate stale cache entries. */
+const summarySeedVersions = new Map<string, string>();
 
 function toSignature(
   signatureJson: string | null,
@@ -335,6 +337,13 @@ export async function generateContextSummary(args: {
   const indexVersion = latestVersion?.versionId ?? "0";
   const scope = args.scope ?? detectSummaryScope(query);
   const cacheKey = `${args.repoId}:${indexVersion}:${query.toLowerCase()}`;
+
+  // Invalidate cache when index version changes for this repo
+  const lastVersion = summarySeedVersions.get(args.repoId);
+  if (lastVersion && lastVersion !== indexVersion) {
+    summarySeedCache.clear();
+  }
+  summarySeedVersions.set(args.repoId, indexVersion);
 
   let seed = summarySeedCache.get(cacheKey);
   if (!seed) {

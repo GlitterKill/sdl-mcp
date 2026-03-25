@@ -74,6 +74,10 @@ export async function computeBlastRadius(
   const maxResults = options?.maxResults ?? 20;
   const repoId = options?.repoId;
 
+  if (!repoId) {
+    throw new Error("repoId is required for blast radius computation");
+  }
+
   if (maxHops <= 0) {
     logger.warn("Invalid maxHops value, using default of 3", { maxHops });
     maxHops = 3;
@@ -416,6 +420,7 @@ function applyBudgetedSelection(
   blastRadius: BlastRadiusItem[],
   budget: SliceBudget,
   symbolsById: Map<string, { name: string; signatureJson: string | null; summary: string | null }>,
+  _depth = 0,
 ): { trimmedSet: TrimmedSet; spilloverHandle: SpilloverHandle | null } {
   const maxCards = budget.maxCards ?? DEFAULT_MAX_CARDS;
   const maxTokens = budget.maxEstimatedTokens ?? DEFAULT_MAX_TOKENS_SLICE;
@@ -429,10 +434,14 @@ function applyBudgetedSelection(
       usingMaxCards: effectiveMaxCards,
       usingMaxTokens: effectiveMaxTokens,
     });
+    if (_depth > 0) {
+      throw new Error("Budget defaults also invalid");
+    }
     return applyBudgetedSelection(
       blastRadius,
       { maxCards: effectiveMaxCards, maxEstimatedTokens: effectiveMaxTokens },
       symbolsById,
+      _depth + 1,
     );
   }
 

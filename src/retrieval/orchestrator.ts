@@ -735,6 +735,7 @@ export async function entitySearch(
 
     for (const entityType of entityTypes) {
       const entityCfg = ENTITY_FTS_CONFIG[entityType];
+      if (!entityCfg) continue; // skip unknown entity types
       // Use the per-entity FTS index name; fall back to the symbol default for
       // "symbol" so that a config override on config.fts.indexName still applies.
       const indexName =
@@ -848,10 +849,12 @@ export async function entitySearch(
             : entityVecCfg.indexName;
 
         let vecRows: { symbolId: string; score: number }[] = [];
+        const entityFtsCfg = ENTITY_FTS_CONFIG[entityType];
+        if (!entityFtsCfg) continue; // skip unknown entity types in vector path
         try {
           const rawRows = await queryAll<VectorRawRow>(
             conn,
-            `CALL QUERY_VECTOR_INDEX('${ENTITY_FTS_CONFIG[entityType].tableName}', $indexName, $queryVector, $topK)`,
+            `CALL QUERY_VECTOR_INDEX('${entityFtsCfg.tableName}', $indexName, $queryVector, $topK)`,
             { indexName, queryVector: queryEmbedding, topK: vectorTopK },
           );
           vecRows = rawRows.map((r) => {

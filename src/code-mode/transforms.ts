@@ -93,8 +93,11 @@ function compareValues(
   if (b === undefined || b === null) return 1;
 
   switch (type) {
-    case "number":
-      return Number(a) - Number(b);
+    case "number": {
+      const na = Number(a), nb = Number(b);
+      if (Number.isNaN(na) || Number.isNaN(nb)) return 0;
+      return na - nb;
+    }
     case "date":
       return new Date(String(a)).getTime() - new Date(String(b)).getTime();
     case "boolean":
@@ -187,14 +190,26 @@ function matchesClause(
       return fieldVal === clause.value;
     case "ne":
       return fieldVal !== clause.value;
-    case "gt":
-      return Number(fieldVal) > Number(clause.value);
-    case "gte":
-      return Number(fieldVal) >= Number(clause.value);
-    case "lt":
-      return Number(fieldVal) < Number(clause.value);
-    case "lte":
-      return Number(fieldVal) <= Number(clause.value);
+    case "gt": {
+      const nf = Number(fieldVal), nv = Number(clause.value);
+      if (Number.isNaN(nf) || Number.isNaN(nv)) return false;
+      return nf > nv;
+    }
+    case "gte": {
+      const nf = Number(fieldVal), nv = Number(clause.value);
+      if (Number.isNaN(nf) || Number.isNaN(nv)) return false;
+      return nf >= nv;
+    }
+    case "lt": {
+      const nf = Number(fieldVal), nv = Number(clause.value);
+      if (Number.isNaN(nf) || Number.isNaN(nv)) return false;
+      return nf < nv;
+    }
+    case "lte": {
+      const nf = Number(fieldVal), nv = Number(clause.value);
+      if (Number.isNaN(nf) || Number.isNaN(nv)) return false;
+      return nf <= nv;
+    }
     case "contains":
       if (typeof fieldVal === "string" && typeof clause.value === "string") {
         return fieldVal.includes(clause.value);

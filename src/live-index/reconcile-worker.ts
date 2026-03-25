@@ -129,20 +129,24 @@ export class ReconcileWorker {
             seenFiles.add(fileKey);
             iterations++;
 
-            const patched = await this.patchSavedFileFn({
-              repoId: claimed.repoId,
-              filePath,
-            });
-            if (
-              patched.frontier.dependentFilePaths.length > 0 ||
-              patched.frontier.importedFilePaths.length > 0 ||
-              patched.frontier.invalidations.length > 0
-            ) {
-              this.queue.enqueue(
-                claimed.repoId,
-                patched.frontier,
-                new Date().toISOString(),
-              );
+            try {
+              const patched = await this.patchSavedFileFn({
+                repoId: claimed.repoId,
+                filePath,
+              });
+              if (
+                patched.frontier.dependentFilePaths.length > 0 ||
+                patched.frontier.importedFilePaths.length > 0 ||
+                patched.frontier.invalidations.length > 0
+              ) {
+                this.queue.enqueue(
+                  claimed.repoId,
+                  patched.frontier,
+                  new Date().toISOString(),
+                );
+              }
+            } catch (fileError) {
+              logger.warn("[ReconcileWorker] Failed to patch file " + filePath + " in " + claimed.repoId + ": " + (fileError instanceof Error ? fileError.message : String(fileError)));
             }
           }
 
@@ -161,6 +165,10 @@ export class ReconcileWorker {
       }
     } finally {
       this.draining = false;
+      // Check for items enqueued during drain teardown
+      if (this.queue.peekNext()) {
+        this.ensureDraining();
+      }
       const waiters = this.idleWaiters.splice(0);
       for (const resolve of waiters) {
         resolve();

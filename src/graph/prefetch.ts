@@ -48,6 +48,7 @@ export interface PrefetchStats {
 }
 
 const queue: PrefetchTask[] = [];
+const MAX_PREFETCH_QUEUE_SIZE = 200;
 const MAX_PREFETCH_ENTRIES_PER_REPO = 500;
 const PREFETCH_STALE_MS = 5 * 60_000;
 const prefetchedKeysByRepo = new Map<string, Map<string, number>>();
@@ -197,6 +198,25 @@ export function enqueuePrefetchTask(task: PrefetchTask): void {
   if (!enabled) {
     return;
   }
+  if (queue.length >= MAX_PREFETCH_QUEUE_SIZE) {
+    // Drop the lowest-priority task to make room — but only if the incoming
+    // task has strictly higher priority than the current lowest.
+    queue.sort((a, b) => b.priority - a.priority);
+    const lowestPriorityTask = queue[queue.length - 1];
+    if (lowestPriorityTask && task.priority <= lowestPriorityTask.priority) {
+      // Incoming task is lower or equal priority; discard it instead
+      return;
+    }
+    const dropped = queue.pop();
+    if (dropped) {
+      logger.debug("[prefetch] Queue full, dropped lowest-priority task", {
+        droppedKey: dropped.key,
+        droppedPriority: dropped.priority,
+        newTaskKey: task.key,
+        newTaskPriority: task.priority,
+      });
+    }
+  }
   queue.push(task);
   const stats = getOrCreateStats(task.repoId);
   stats.queueDepth = queue.length;
@@ -332,6 +352,17 @@ export function consumePrefetchedKey(
     recordStrategyMetrics(strategy, false, 0);
   }
   return false;
+}
+
+export function shutdownPrefetch(): void {
+  enabled = false;
+  queue.length = 0;
+  for (const stats of statsByRepo.values()) {
+    stats.enabled = false;
+    stats.queueDepth = 0;
+    stats.running = false;
+  }
+  logger.debug("[prefetch] Shutdown complete, queue cleared");
 }
 
 export function getPrefetchStats(repoId: string): PrefetchStats {

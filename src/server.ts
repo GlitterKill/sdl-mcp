@@ -403,8 +403,11 @@ export class MCPServer {
       try {
         const { persistUsageSnapshot } = await import("./db/ladybug-usage.js");
         await persistUsageSnapshot(tokenAccumulator.getSnapshot());
-      } catch {
-        // Non-critical — don't block shutdown
+      } catch (err) {
+        // Non-critical — don't block shutdown, but log for debugging
+        process.stderr.write(
+          "[sdl-mcp] Failed to persist usage snapshot: " + (err instanceof Error ? err.message : String(err)) + "\n",
+        );
       }
     }
     await this.server.close();

@@ -398,11 +398,11 @@ export function mergeIgnorePatterns(repoRoot: string): string[] {
 }
 
 async function loadClientTemplate(client: ClientType): Promise<unknown> {
-  const templatePath = resolve(
-    __dirname,
-    "../../../templates",
-    `${client}.json`,
-  );
+  const templatesDir = resolve(__dirname, "../../../templates");
+  const templatePath = resolve(templatesDir, `${client}.json`);
+  if (!templatePath.startsWith(templatesDir)) {
+    throw new Error("Template path traversal detected");
+  }
   try {
     const content = readFileSync(templatePath, "utf-8");
     return JSON.parse(content);

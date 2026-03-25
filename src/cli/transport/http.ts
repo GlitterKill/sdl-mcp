@@ -1279,7 +1279,7 @@ export async function setupHttpTransport(
     );
   } else {
     authToken = generateAuthToken();
-    console.error(`[sdl-mcp] HTTP auth token: ${authToken}`);
+    console.error(`[sdl-mcp] HTTP auth token: ${authToken.slice(0, 8)}...`);
     console.error(
       "[sdl-mcp] Include header: Authorization: Bearer <token> for /mcp and /api/* endpoints",
     );

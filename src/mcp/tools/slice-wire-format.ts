@@ -191,6 +191,7 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
 
   const compact: CompactGraphSliceV2 = {
     wf: "compact",
+    wv: 2,
     vid: slice.versionId,
     b: {
       mc: slice.budget.maxCards,

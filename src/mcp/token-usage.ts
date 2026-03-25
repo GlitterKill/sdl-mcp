@@ -72,13 +72,13 @@ export async function computeTokenUsage(
 }
 
 /**
- * Attach a _rawContext hint to a handler result via mutation.
- * Returns the same object so it can be used inline at return sites
- * without conflicting with the handler's declared return type.
+ * Attach a _rawContext hint to a handler result by cloning.
+ * Returns a shallow copy so the original object is not mutated,
+ * preventing cache pollution when results are reused.
  */
 export function attachRawContext<T>(result: T, hint: RawContextHint): T {
   if (result && typeof result === "object") {
-    (result as Record<string, unknown>)._rawContext = hint;
+    return { ...result, _rawContext: hint } as T;
   }
   return result;
 }
