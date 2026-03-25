@@ -20,10 +20,8 @@
 ---
 
 
- ###  **NOTE TO ALL USERS**
- Please stick with using the v0.9.3 release for now while I am refactoring some things.  v0.9.2 is stable.  It is likely that if you copy the repo to install, it will not work correctly for you until this refactor is complete.<br/>
 
- 
+
 
 <br/>
 
@@ -60,8 +58,8 @@ SDL-MCP fixes this. It indexes your codebase into a searchable **symbol graph** 
           ┌──────────┼──────────┐
           │          │          │
           ▼          ▼          ▼
-      29 MCP      10 CLI    HTTP API
-       Tools     Commands   + Graph UI
+      35 MCP      13 CLI    HTTP API
+       Tools     Commands   (dev/network)
           │
           ▼
     AI Coding Agent
@@ -317,7 +315,7 @@ The feedback loop (`sdl.agent.feedback`) records which symbols were useful and w
 
 ### Sandboxed Runtime Execution
 
-Run tests, linters, and scripts through SDL-MCP's governance layer instead of uncontrolled shell access. Three runtimes (Node.js, Python, Shell), code-mode or args-mode, smart output summarization with keyword-matched excerpts, and gzip artifact persistence.
+Run tests, linters, and scripts through SDL-MCP's governance layer instead of uncontrolled shell access. 16 runtimes (Node.js, Python, Go, Java, Rust, Shell, and more), code-mode or args-mode, smart output summarization with keyword-matched excerpts, and gzip artifact persistence.
 
 **Why it matters:**
 - Run tests, linters, and scripts **under governance** instead of uncontrolled shell access
@@ -364,7 +362,7 @@ Memories are **automatically surfaced** inside graph slices — when an agent bu
 
 ### CLI Tool Access — No MCP Server Required
 
-Access all 30 tool actions directly from the command line with `sdl-mcp tool`. No MCP server, transport, or SDK — just your terminal.
+Access all 35 tool actions directly from the command line with `sdl-mcp tool`. No MCP server, transport, or SDK — just your terminal.
 
 ```bash
 # Search for symbols
@@ -391,10 +389,10 @@ Features include typed argument coercion (string, number, boolean, string[], jso
 
 ### Tool Gateway — 81% Token Reduction
 
-The tool gateway consolidates all 30 MCP tools into **4 namespace-scoped tools** (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`), reducing `tools/list` overhead from **~3,742 tokens to ~713 tokens** — an **81% reduction**.
+The tool gateway consolidates all 35 MCP tools into **4 namespace-scoped tools** (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`), reducing `tools/list` overhead from **~3,742 tokens to ~713 tokens** — an **81% reduction**.
 
 ```
-  Before:  30 tools × full JSON Schema = ~3,742 tokens at conversation start
+  Before:  35 tools × full JSON Schema = ~3,742 tokens at conversation start
   After:    4 tools × thin schema       = ~713 tokens at conversation start
                                           ─────────────
                                           ~3,029 tokens saved per conversation
@@ -404,7 +402,7 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 
 **Why it matters:**
 - **81% token reduction** in `tools/list` overhead (~3,742 → ~713 tokens per conversation)
-- 30 tools consolidated into 4 namespace-scoped tools for simpler agent selection
+- 35 tools consolidated into 4 namespace-scoped tools for simpler agent selection
 - Fewer tool choices means faster and more accurate tool dispatch by the agent
 - Backward-compatible: legacy flat tool names optionally emitted alongside
 
@@ -416,7 +414,7 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 
 <br/>
 
-## All 30 MCP Tools at a Glance
+## All 35 MCP Tools at a Glance
 
 <table>
 <tr><th>Category</th><th>Tool</th><th>One-Line Description</th></tr>
@@ -473,6 +471,15 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 <tr><td><code>sdl.memory.query</code></td><td>Search memories by text, type, tags, or linked symbols</td></tr>
 <tr><td><code>sdl.memory.remove</code></td><td>Soft-delete a memory from graph and optionally from disk</td></tr>
 <tr><td><code>sdl.memory.surface</code></td><td>Auto-surface relevant memories for a task context</td></tr>
+
+<tr><td rowspan="2"><strong>Code Mode</strong></td>
+    <td><code>sdl.chain</code></td><td>Multi-step tool chaining with budget tracking and ETag caching</td></tr>
+<tr><td><code>sdl.manual</code></td><td>Self-documentation — query usage guide, action schemas, output format reference</td></tr>
+
+<tr><td rowspan="3"><strong>Meta</strong></td>
+    <td><code>sdl.info</code></td><td>Runtime diagnostics — version, Node.js, platform, database, config paths</td></tr>
+<tr><td><code>sdl.usage.stats</code></td><td>Session and lifetime token savings statistics</td></tr>
+<tr><td><code>sdl.action.search</code></td><td>Search SDL action catalog to discover the right tool for a task</td></tr>
 </table>
 
 [Complete MCP Tools Reference (detailed parameters & responses) →](./docs/mcp-tools-detailed.md)
@@ -491,9 +498,11 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 | `sdl-mcp doctor` | Validate runtime, config, DB, grammars, repo access |
 | `sdl-mcp index` | Index repositories (with optional `--watch` mode) |
 | `sdl-mcp serve` | Start MCP server (`--stdio` or `--http`) |
-| `sdl-mcp tool` | Access all 30 MCP tool actions directly ([docs](./docs/feature-deep-dives/cli-tool-access.md)) |
+| `sdl-mcp tool` | Access all 35 MCP tool actions directly ([docs](./docs/feature-deep-dives/cli-tool-access.md)) |
+| `sdl-mcp info` | Runtime diagnostics — version, Node.js, platform, database, config |
 | `sdl-mcp summary` | Generate copy/paste context summaries from the CLI |
 | `sdl-mcp health` | Compute composite health score with badge/JSON output |
+| `sdl-mcp benchmark` | Run CI regression benchmarks |
 | `sdl-mcp export` | Export sync artifact |
 | `sdl-mcp import` | Import sync artifact |
 | `sdl-mcp pull` | Pull by version/commit with fallback |
@@ -548,17 +557,69 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 
 <br/>
 
+## System Architecture
+
+```
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                        MCP Clients                                  │
+  │  Claude Code · Claude Desktop · Cursor · Windsurf · Codex · Gemini │
+  └──────────────────────────┬──────────────────────────────────────────┘
+                             │ stdio / HTTP
+  ┌──────────────────────────▼──────────────────────────────────────────┐
+  │                      Tool Gateway                                    │
+  │  4 namespace-scoped tools (sdl.query, sdl.code, sdl.repo, sdl.agent) │
+  │  ← Thin JSON schemas → Double Zod validation → Handler dispatch      │
+  └───────┬────────┬────────┬────────┬────────┬────────┬────────────────┘
+          │        │        │        │        │        │
+  ┌───────▼──┐ ┌───▼───┐ ┌─▼──┐ ┌──▼──┐ ┌──▼───┐ ┌──▼──────┐
+  │ Symbols  │ │Slices │ │Code│ │Delta│ │Agent │ │ Memory  │
+  │ search   │ │build  │ │gate│ │diff │ │orch. │ │ store   │
+  │ getCard  │ │refresh│ │skel│ │blast│ │feedbk│ │ query   │
+  │ getCards │ │spill. │ │hot │ │risk │ │chain │ │ surface │
+  └────┬─────┘ └───┬───┘ └─┬──┘ └──┬──┘ └──┬───┘ └──┬─────┘
+       │           │       │       │       │        │
+  ┌────▼───────────▼───────▼───────▼───────▼────────▼───────┐
+  │                    Policy Engine                          │
+  │  Proof-of-need gating · Token budgets · Audit logging     │
+  └──────────────────────────┬──────────────────────────────┘
+                             │
+  ┌──────────────────────────▼──────────────────────────────┐
+  │                   LadybugDB (Graph)                      │
+  │  Symbols · Edges · Files · Versions · Clusters ·         │
+  │  Processes · Memories · Metrics                           │
+  └──────────────────────────▲──────────────────────────────┘
+                             │
+  ┌──────────────────────────┴──────────────────────────────┐
+  │                  Indexer Pipeline                         │
+  │  ┌─────────────────┐    ┌────────────────────────────┐   │
+  │  │  Rust (napi-rs)  │ or │  Tree-sitter (TS fallback) │   │
+  │  │  default engine  │    │  11 language grammars       │   │
+  │  └────────┬────────┘    └──────────┬─────────────────┘   │
+  │           │  Pass 1: Symbols + Imports + Calls            │
+  │           │  Pass 2: Cross-file call resolution            │
+  │           │  Semantic: Embeddings + LLM summaries          │
+  └───────────┴──────────────────────────────────────────────┘
+```
+
+[Full Architecture Documentation →](./docs/architecture.md)
+
+<br/>
+
+---
+
+<br/>
+
 ## Documentation
 
 | Document | Description |
 |:---------|:------------|
 | [Getting Started](./docs/getting-started.md) | Installation, 5-minute setup, MCP client config |
-| [MCP Tools Reference](./docs/mcp-tools-detailed.md) | Detailed docs for all 30 tools (parameters, responses, examples) |
+| [MCP Tools Reference](./docs/mcp-tools-detailed.md) | Detailed docs for all 35 tools (parameters, responses, examples) |
 | [CLI Reference](./docs/cli-reference.md) | All CLI commands and options |
 | [Configuration Reference](./docs/configuration-reference.md) | Every config option with defaults and guidance |
 | [Agent Workflows](./docs/agent-workflows.md) | Workflow instructions for CLAUDE.md / AGENTS.md |
-| [Architecture](./docs/ARCHITECTURE.md) | Tech stack, data flow, component diagram |
-| [Iris Gate Ladder](./docs/IRIS_GATE_LADDER.md) | Context escalation methodology |
+| [Architecture](./docs/architecture.md) | Tech stack, data flow, component diagram |
+| [Iris Gate Ladder](./docs/feature-deep-dives/iris-gate-ladder.md) | Context escalation methodology |
 | [Troubleshooting](./docs/troubleshooting.md) | Common issues and fixes |
 
 ### Feature Deep Dives
@@ -573,10 +634,11 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 | [Agent Orchestration](./docs/feature-deep-dives/agent-orchestration.md) | Autopilot mode, feedback loops, portable context summaries |
 | [Indexing & Languages](./docs/feature-deep-dives/indexing-languages.md) | Rust/TS engines, two-pass architecture, 12-language support |
 | [Runtime Execution](./docs/feature-deep-dives/runtime-execution.md) | Sandboxed subprocess execution with governance |
-| [CLI Tool Access](./docs/feature-deep-dives/cli-tool-access.md) | Direct CLI access to all 29 actions, output formats, stdin piping, scripting |
-| [Tool Gateway](./docs/feature-deep-dives/tool-gateway.md) | 30→4 tool consolidation, 81% token reduction, thin schemas, migration guide |
+| [CLI Tool Access](./docs/feature-deep-dives/cli-tool-access.md) | Direct CLI access to all tool actions, output formats, stdin piping, scripting |
+| [Tool Gateway](./docs/feature-deep-dives/tool-gateway.md) | 35→4 tool consolidation, token reduction, thin schemas, migration guide |
 | [Semantic Engine](./docs/feature-deep-dives/semantic-engine.md) | Pass-2 call resolution, embedding search, LLM summaries, confidence scoring |
 | [Semantic Embeddings Setup](./docs/feature-deep-dives/semantic-embeddings-setup.md) | Dependencies, model installation, provider configuration, tier-by-tier setup |
+| [Code Mode](./docs/feature-deep-dives/code-mode.md) | Tool chaining (sdl.chain), action discovery, manual reference, one-call workflows |
 | [Development Memories](./docs/feature-deep-dives/development-memories.md) | Graph-backed cross-session memory, file sync, staleness detection, auto-surfacing |
 
 <br/>

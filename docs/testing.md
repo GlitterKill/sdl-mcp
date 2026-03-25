@@ -45,11 +45,26 @@ SDL-MCP uses a **dist-first** testing strategy to ensure tests validate the ship
 ### Test Layers
 
 ```
-Integration Tests (multi-language end-to-end)
-  |
-Unit Tests (individual adapters and extractors)
-  |
-Golden File Tests (fixture output validation)
+  ┌──────────────────────────────────────────────────────────┐
+  │  Stress Tests                                             │
+  │  Concurrent clients, session limits, large repos          │
+  ├──────────────────────────────────────────────────────────┤
+  │  Integration Tests (multi-language end-to-end)            │
+  │  Adapter harness, MCP server E2E, CLI tool dispatch       │
+  ├──────────────────────────────────────────────────────────┤
+  │  Golden File Tests (fixture output validation)            │
+  │  MCP response snapshots, deterministic IR output          │
+  ├──────────────────────────────────────────────────────────┤
+  │  Unit Tests (individual adapters and extractors)          │
+  │  Symbol extraction, import resolution, call detection     │
+  ├──────────────────────────────────────────────────────────┤
+  │  Property Tests (invariant checking)                      │
+  │  Randomized inputs, edge cases, schema contracts          │
+  └──────────────────────────────────────────────────────────┘
+              │
+              ▼
+  Runner: node:test + --experimental-strip-types
+  CI: ubuntu + windows × Node 22.x + 24.x
 ```
 
 ---
@@ -755,7 +770,7 @@ afterEach(() => {
 
 1. Reproduce locally in a Linux container:
    ```bash
-   docker run -it node:20 bash
+   docker run -it node:24 bash
    ```
 2. Add platform checks in tests if needed
 3. Use `fs.constants` for cross-platform file operations

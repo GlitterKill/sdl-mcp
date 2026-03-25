@@ -909,5 +909,5 @@ Test with each supported client:
 
 **Tested By:** _______________
 **Date:** _______________
-**Version:** 0.9.2
+**Version:** 0.10.0
 **Result:** PASS / FAIL

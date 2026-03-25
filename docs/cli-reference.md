@@ -16,6 +16,33 @@
 </details>
 </div>
 
+## Architecture
+
+```
+  Command Line
+      │
+      ▼
+  ┌───────────────────────────────────────────────┐
+  │  CLI Parser (Commander.js)                     │
+  │  Global options: --config, --log-level, --help │
+  └───────────┬───────────────────────────────────┘
+              │
+  ┌───────────▼───────────────────────────────────┐
+  │  Command Router                                │
+  ├─────────────────┬─────────────────────────────┤
+  │ init   doctor   │ index  serve   tool          │
+  │ info   version  │ export import  pull          │
+  │ health summary  │ benchmark:ci                 │
+  └─────────────────┴──────────┬──────────────────┘
+                               │ (tool command)
+                               ▼
+  ┌────────────────────────────────────────────────┐
+  │  Tool Dispatch (same as MCP server)             │
+  │  Zod validation → Handler → Formatted output   │
+  │  Formats: json | json-compact | pretty | table  │
+  └────────────────────────────────────────────────┘
+```
+
 ## Run Without Installing (npx)
 
 If you do not want a global install, run commands through `npx`:
@@ -235,7 +262,7 @@ Key options:
 
 ### `sdl-mcp tool <action> [args]`
 
-Direct MCP tool invocation from the CLI. Supports all 30 gateway-routable SDL actions and reuses the same validation and normalization path as the MCP server.
+Direct MCP tool invocation from the CLI. Supports all 31 gateway-routable SDL actions and reuses the same validation and normalization path as the MCP server.
 
 ```bash
 sdl-mcp tool repo.status --repo-id my-repo

@@ -267,7 +267,7 @@ Example uses:
     "enabled": true,
     // Default: ["node", "python"]. Add more as needed from the 16 supported runtimes.
     "allowedRuntimes": ["node", "python", "shell"],
-    "maxDurationMs": 30000,
+    "maxDurationMs": 600000,
     "maxConcurrentJobs": 2,
     "maxStdoutBytes": 1048576,
     "maxStderrBytes": 262144,

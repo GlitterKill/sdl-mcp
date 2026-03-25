@@ -433,7 +433,7 @@ SDL_LOG_LEVEL=debug sdl-mcp serve 2>&1 | grep "Plugin loaded"
 
 ```dockerfile
 # Dockerfile for isolated execution
-FROM node:20-slim
+FROM node:24-slim
 
 # Create non-root user
 RUN useradd -r -s /bin/false sdl-mcp

@@ -796,7 +796,7 @@ Controls the gateway tool registration mode.
 
 Gateway mode groups tools into 4 namespace tools (`sdl_repo`, `sdl_symbol`, `sdl_code`, `sdl_agent`) plus `sdl.action.search` and `sdl.info`. When `emitLegacyTools` is `true` (default), the flat tool names are also registered for backwards compatibility.
 
-> **When to change:** Set `emitLegacyTools: false` to reduce the tool list from 36 to 6 tools (gateway-only mode). Set `enabled: false` to use flat-only mode (32 tools).
+> **When to change:** Set `emitLegacyTools: false` to reduce the tool list from 37 to 6 tools (gateway-only mode). Set `enabled: false` to use flat-only mode (33 tools).
 
 ---
 
@@ -876,6 +876,7 @@ Three modes:
 | `SDL_CONSOLE_LOGGING`            | Set to `true` to mirror log lines to stderr in addition to file logging        |
 | `SDL_LOG_FORMAT`                 | Log format: `json`, `text`                                                     |
 | `ANTHROPIC_API_KEY`              | Fallback API key for `semantic.generateSummaries`                              |
+| `SDL_MCP_DISABLE_NATIVE_ADDON`  | Set to `1` to force TypeScript fallback engine (skip native Rust addon)        |
 
 SDL-MCP expands `${VAR_NAME}` references inside JSON config values at load time.
 

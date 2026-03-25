@@ -18,9 +18,36 @@
 
 This page defines practical workflows for coding agents using SDL-MCP.
 
+## Workflow Overview
+
+```
+  Agent Task
+      │
+      ▼
+  ┌───────────────┐     ┌──────────────┐     ┌───────────────┐
+  │ 1. Establish   │────▶│ 2. Discover  │────▶│ 3. Understand │
+  │    State       │     │    Symbols   │     │    Context    │
+  │                │     │              │     │               │
+  │ repo.status    │     │ symbol.search│     │ symbol.getCard│
+  │ index.refresh  │     │ repo.overview│     │ slice.build   │
+  │ policy.get     │     │              │     │ memory.surface│
+  └───────────────┘     └──────────────┘     └───────┬───────┘
+                                                      │
+      ┌───────────────────────────────────────────────┘
+      ▼
+  ┌───────────────┐     ┌──────────────┐     ┌───────────────┐
+  │ 4. Read Code   │────▶│ 5. Execute   │────▶│ 6. Record     │
+  │    (escalate)  │     │    & Verify   │     │    Feedback   │
+  │                │     │              │     │               │
+  │ getSkeleton    │     │ runtime.exec │     │ agent.feedback│
+  │ getHotPath     │     │ queryOutput  │     │ memory.store  │
+  │ needWindow     │     │              │     │ usage.stats   │
+  └───────────────┘     └──────────────┘     └───────────────┘
+```
+
 ## Complete Tool Reference
 
-SDL-MCP exposes 30 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway tools) across 13 categories. Every workflow on this page uses tools from this table.
+SDL-MCP exposes 31 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway tools) across 14 categories. Every workflow on this page uses tools from this table.
 
 | Category | Tool | Purpose |
 |:---------|:-----|:--------|
@@ -49,7 +76,7 @@ SDL-MCP exposes 30 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway 
 | | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics |
 | **Context** | `sdl.context.summary` | Generate token-bounded summary for non-MCP contexts (clipboard, markdown, JSON) |
 | **Runtime** | `sdl.runtime.execute` | Sandboxed subprocess execution with `outputMode` (`minimal`, `summary`, `intent`); 16 runtimes including `node`, `typescript`, `python`, `shell`, `go`, `rust`, etc. |
-|| | `sdl.runtime.queryOutput` | On-demand keyword search of stored runtime output artifacts by `artifactHandle` |
+| | `sdl.runtime.queryOutput` | On-demand keyword search of stored runtime output artifacts by `artifactHandle` |
 | **Memory** | `sdl.memory.store` | Store or update a development memory with symbol/file links |
 | | `sdl.memory.query` | Search memories by text, type, tags, or linked symbols; `staleOnly` filter |
 | | `sdl.memory.remove` | Soft-delete a memory from graph and optionally from disk |
@@ -67,7 +94,7 @@ SDL-MCP exposes 30 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway 
 Copy this block into `AGENTS.md` for token-efficient SDL-MCP usage on the current codebase/tooling. Replace `[repoid]` with your repo's ID.
 
 ```md
-## SDL-MCP Token-Efficient Protocol (v0.9)
+## SDL-MCP Token-Efficient Protocol (v0.10)
 
 - Repository ID: `[repoid]`
 - MCP Server: `sdl-mcp`

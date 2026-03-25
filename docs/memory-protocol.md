@@ -1,5 +1,27 @@
 # SDL-MCP Memory Protocol
 
+## Architecture
+
+```
+  Agent Session                     SDL-MCP Memory System
+  ─────────────                     ──────────────────────
+  sdl.memory.store ──────────────▶ ┌─────────────────────────────┐
+                                   │   Memory Node (LadybugDB)   │
+                                   │   ├── HAS_MEMORY ◀── Repo   │
+                                   │   ├── MEMORY_OF ──▶ Symbol  │
+  sdl.memory.query ──────────────▶ │   └── MEMORY_OF_FILE ──▶ F  │
+                                   └──────────┬──────────────────┘
+  sdl.memory.surface ────────────▶            │
+                                              ▼
+  sdl.memory.remove ─────────────▶ ┌─────────────────────────────┐
+                                   │  .sdl-memory/ (file sync)    │
+  sdl.slice.build ─── auto ──────▶ │  YAML frontmatter + markdown │
+    (surfaces relevant memories)   │  version-controlled / shared  │
+                                   └─────────────────────────────┘
+  sdl.repo.status ─── auto ──────▶
+    (includes relevant memories)
+```
+
 ## When to Store Memories
 
 Store via `sdl.memory.store` at these checkpoints:
@@ -55,6 +77,21 @@ sdl.memory.store({
   confidence: 0.95
 })
 ```
+
+## Other Memory Tools
+
+- **`sdl.memory.query`** — Search memories by text, type, tags, or linked symbols. Use `staleOnly: true` to find memories that need review after symbol changes.
+- **`sdl.memory.remove`** — Soft-delete a memory from the graph and optionally from disk.
+
+## File Sync (`.sdl-memory/`)
+
+Memories are dual-stored: in the LadybugDB graph (for fast querying) and as markdown files in `<repo-root>/.sdl-memory/` (for version control and team sharing). Files are organized by type (`decisions/`, `bugfixes/`, `task_context/`) with YAML frontmatter + markdown content. Changes to `.sdl-memory/` files are imported into the graph during `sdl.index.refresh`.
+
+See [Development Memories deep dive](./feature-deep-dives/development-memories.md) for full details.
+
+## Examples
+
+After fixing a bug (see above).
 
 After an architectural decision:
 

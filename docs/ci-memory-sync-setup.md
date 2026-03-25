@@ -24,7 +24,7 @@ This guide provides step-by-step instructions for setting up CI Memory Sync in y
 
 Before starting, ensure you have:
 
-- [ ] Node.js >= 20.0.0 installed
+- [ ] Node.js >= 24.0.0 installed
 - [ ] Git repository initialized
 - [ ] SDL-MCP installed locally
 - [ ] GitHub Actions enabled for your repository
@@ -40,9 +40,9 @@ sdl-mcp version
 npx --yes sdl-mcp@latest version
 
 # Expected output:
-# SDL-MCP version: 0.9.2
+# SDL-MCP version: 0.10.0
 # Environment:
-#   Node.js: v20.11.0
+#   Node.js: v24.x.x
 #   Platform: linux/win32
 ```
 
@@ -170,7 +170,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node-version: [20.x]
+        node-version: [24.x]
 
     steps:
       - name: Checkout code
@@ -259,7 +259,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node-version: [20.x]
+        node-version: [24.x]
 
     steps:
       - name: Checkout code
@@ -416,7 +416,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20.x
+          node-version: 24.x
           cache: "npm"
 
       - name: Install dependencies

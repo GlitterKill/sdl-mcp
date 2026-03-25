@@ -1,14 +1,14 @@
 # Tool Gateway
 
-**Reduce MCP tool registration overhead by collapsing the 30 legacy action tools into 4 namespace-scoped gateway tools, while keeping `sdl.action.search` and `sdl.info` available as universal discovery and diagnostics surfaces.**
+**Reduce MCP tool registration overhead by collapsing the 31 legacy action tools into 4 namespace-scoped gateway tools, while keeping `sdl.action.search` and `sdl.info` available as universal discovery and diagnostics surfaces.**
 
-The tool gateway consolidates the 30 legacy action tools into 4 typed proxy tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`). Each gateway tool accepts an `action` field that routes the call to the appropriate handler and then applies the original per-tool validation. `sdl.action.search` and `sdl.info` stay registered outside the gateway so discovery and environment diagnostics remain available in every mode.
+The tool gateway consolidates the 31 legacy action tools into 4 typed proxy tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`). Each gateway tool accepts an `action` field that routes the call to the appropriate handler and then applies the original per-tool validation. `sdl.action.search` and `sdl.info` stay registered outside the gateway so discovery and environment diagnostics remain available in every mode.
 
 ---
 
 ## The Problem
 
-When an MCP client connects, it calls `tools/list` to discover available tools. The response includes tool names, descriptions, and JSON schemas. Registering 30 legacy action tools separately is expensive, especially once titles, richer descriptions, and action-specific schema metadata are included.
+When an MCP client connects, it calls `tools/list` to discover available tools. The response includes tool names, descriptions, and JSON schemas. Registering 31 legacy action tools separately is expensive, especially once titles, richer descriptions, and action-specific schema metadata are included.
 
 ```
 Without gateway:
@@ -19,7 +19,7 @@ With gateway:
   tools/list → 6 tools
   = 4 gateway tools + sdl.action.search + sdl.info
 
-The gateway measurement script still compares the core 30 legacy tools against the 4 gateway tools, because those are the surfaces being consolidated. The two universal tools are present in both modes.
+The gateway measurement script compares the core 31 legacy tools against the 4 gateway tools, because those are the surfaces being consolidated. The two universal tools are present in both modes.
 ```
 
 This matters because:

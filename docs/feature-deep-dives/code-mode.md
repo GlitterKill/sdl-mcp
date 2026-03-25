@@ -212,3 +212,14 @@ For SDL-first agents:
 5. `runtimeExecute` inside `sdl.chain` for repo-local build, test, lint, or diagnostics
 
 This is the intended path for enforced agent setups where SDL-MCP should replace token-heavy default tools whenever possible.
+
+---
+
+## Related Docs
+
+- [Tool Gateway](./tool-gateway.md)
+- [Runtime Execution](./runtime-execution.md)
+- [Agent Orchestration](./agent-orchestration.md)
+- [Governance & Policy](./governance-policy.md)
+
+[Back to README](../../README.md)

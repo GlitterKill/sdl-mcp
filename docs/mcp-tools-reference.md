@@ -18,7 +18,7 @@
 
 Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
 
-- `30` gateway-routable SDL actions
+- `31` gateway-routable SDL actions
 - `2` universal tools: `sdl.action.search` and `sdl.info`
 - optional Code Mode tools: `sdl.manual` and `sdl.chain`
 

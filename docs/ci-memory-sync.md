@@ -59,7 +59,7 @@ graph LR
 
 ### Prerequisites
 
-- Node.js >= 20.0.0
+- Node.js >= 24.0.0
 - Git repository with proper `.github/workflows/ci.yml`
 - SDL-MCP installed and configured
 - Write permissions for `data/` and `.sdl-sync/` directories
@@ -90,7 +90,7 @@ sync-memory:
   strategy:
     matrix:
       os: [ubuntu-latest, windows-latest]
-      node-version: [20.x]
+      node-version: [24.x]
 ```
 
 **Key Settings:**
@@ -98,7 +98,7 @@ sync-memory:
 - `needs: [tests, native-build]`: Only runs after both jobs succeed
 - `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`: Only on main merges
 - `matrix.os: [ubuntu-latest, windows-latest]`: Cross-platform validation
-- `matrix.node-version: [20.x]`: Single Node.js version for consistency
+- `matrix.node-version: [24.x]`: Single Node.js version for consistency
 
 ### Artifact Storage
 

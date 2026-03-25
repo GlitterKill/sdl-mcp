@@ -100,9 +100,9 @@ Startup is sequenced (not parallel) — the DB must be ready before tools regist
 
 All MCP tools flow through a single dispatch path in `src/server.ts`. The exact surface is configuration-dependent:
 
-- Flat mode: 32 tools (`30` flat tools + `sdl.action.search` + `sdl.info`)
+- Flat mode: 33 tools (`31` flat tools + `sdl.action.search` + `sdl.info`)
 - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
-- Gateway + legacy mode: 36 tools (`4` gateway tools + `30` legacy flat tools + `sdl.action.search` + `sdl.info`)
+- Gateway + legacy mode: 37 tools (`4` gateway tools + `31` legacy flat tools + `sdl.action.search` + `sdl.info`)
 - Code Mode adds `sdl.manual` and `sdl.chain`, or can run in exclusive mode with just `sdl.action.search`, `sdl.info`, `sdl.manual`, and `sdl.chain`
 
 Before strict Zod validation, requests also pass through a shared normalization layer. Flat and gateway calls therefore accept the same canonical camelCase fields plus common aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, and `spillover_handle`.
@@ -287,6 +287,8 @@ Each module owns a specific domain of queries:
 | `ladybug-metrics.ts` | Fan-in/out, churn, test refs |
 | `ladybug-feedback.ts` | Agent feedback, audit events |
 | `ladybug-slices.ts` | Slice handles, lease expiry |
+| `ladybug-memories.ts` | Memory nodes, symbol/file links, staleness |
+| `ladybug-usage.ts` | Token usage tracking, savings metrics |
 
 ---
 
@@ -561,11 +563,52 @@ See [Development Memories deep dive](./feature-deep-dives/development-memories.m
 
 ---
 
+## Sandboxed Runtime Execution
+
+`sdl.runtime.execute` runs repo-scoped commands under SDL-MCP governance instead of uncontrolled shell access. 16 runtimes are supported (Node, Python, Go, Java, Rust, C, C++, C#, Kotlin, PHP, Ruby, Perl, R, Elixir, Shell, TypeScript).
+
+```
+  Request → runtime.enabled? → allowed runtime? → valid executable?
+                                                         │
+                                              ┌──────────┴──────────┐
+                                              │ CWD jailed to repo  │
+                                              │ Env scrubbed        │
+                                              │ Timeout enforced    │
+                                              │ Concurrency limited │
+                                              └──────────┬──────────┘
+                                                         │
+                                                         ▼
+                                              ┌────────────────────┐
+                                              │ Output captured    │
+                                              │ Persisted as gzip  │
+                                              │ artifactHandle     │
+                                              └────────────────────┘
+```
+
+The `outputMode` parameter controls response verbosity:
+- **`minimal`** (default): ~50 tokens — just status + artifact handle
+- **`summary`**: ~200-500 tokens — head + tail excerpts
+- **`intent`**: variable — only `queryTerms`-matched excerpts
+
+`sdl.runtime.queryOutput` enables on-demand keyword search of stored artifacts without loading full output into context.
+
+See [Runtime Execution deep dive](./feature-deep-dives/runtime-execution.md).
+
+---
+
+## Token Usage Tracking
+
+SDL-MCP tracks per-call and cumulative token savings via sideband `_tokenUsage` metadata. Each tool response includes a savings comparison (SDL tokens vs. raw-file equivalent). `sdl.usage.stats` returns session and lifetime statistics from LadybugDB.
+
+MCP logging notifications emit per-call savings meters and end-of-task session summaries.
+
+---
+
 ## Error Handling
 
-**Typed errors** (`src/mcp/errors.ts`):
+**Typed errors** (`src/domain/errors.ts`):
 - `ConfigError`, `DatabaseError`, `ValidationError`, `IndexError`, `PolicyError`, `NotFoundError`
-- `errorToMcpResponse()` converts any error to MCP-safe JSON
+- `errorToMcpResponse()` (in `src/mcp/errors.ts`) converts any error to MCP-safe JSON
 
 **Policy denials** include actionable guidance:
 ```
@@ -708,7 +751,7 @@ graph TD
     C --> J[MCP Tool Layer]
 
     subgraph Tool Registration Modes
-        J1[Flat Mode: 32 tools]
+        J1[Flat Mode: 33 tools]
         J2[Gateway Mode: 6 tools]
         J3[Code Mode adds manual and chain]
     end
@@ -748,9 +791,9 @@ graph TD
 
 Registration-mode counts in the current implementation:
 
-- Flat mode: 32 tools
+- Flat mode: 33 tools
 - Gateway-only mode: 6 tools
-- Gateway + legacy mode: 36 tools
+- Gateway + legacy mode: 37 tools
 - Code Mode adds `sdl.manual` and `sdl.chain`
 
 [Back to README](../README.md)

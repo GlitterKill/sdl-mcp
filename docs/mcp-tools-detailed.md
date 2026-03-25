@@ -132,6 +132,7 @@ Returns the current indexing state and health metrics for a registered repositor
 | Parameter | Type | Required | Description |
 |:----------|:-----|:---------|:------------|
 | `repoId` | string | Yes | Repository identifier |
+| `surfaceMemories` | boolean | No | Include relevant development memories in the response (default: `true`) |
 
 **Response:**
 
@@ -150,6 +151,7 @@ Returns the current indexing state and health metrics for a registered repositor
 | `watcherNote` | string | Guidance when watcher is inactive |
 | `prefetchStats` | object | Predictive prefetch metrics: `enabled`, `queueDepth`, `running`, `completed`, `cancelled`, `cacheHits`, `cacheMisses`, `wastedPrefetch`, `hitRate`, `wasteRate`, `avgLatencyReductionMs`, `lastRunAt` |
 | `liveIndexStatus` | object | Live editor buffer state: `enabled`, `pendingBuffers`, `dirtyBuffers`, `parseQueueDepth`, `checkpointPending`, `lastBufferEventAt`, `lastCheckpointAt`, `lastCheckpointResult`, `reconcileQueueDepth`, etc. |
+| `memories` | array \| null | Relevant development memories auto-surfaced for this repo (when `surfaceMemories` is true) |
 
 **Typical use:** Call this first in any session to understand the state of the index before doing deeper queries.
 
@@ -956,7 +958,7 @@ Queries stored feedback records and aggregated statistics for offline tuning pip
 
 Runs code in a sandboxed, policy-gated subprocess scoped to a registered repository.
 
-**What it does:** Executes a command using one of three supported runtimes (Node.js, Python, or Shell) within the repository's directory. The execution is fully governed:
+**What it does:** Executes a command using one of 16 supported runtimes (Node.js, TypeScript, Python, Shell, Go, Java, Kotlin, Rust, C, C++, C#, Ruby, PHP, Perl, R, Elixir) within the repository's directory. The execution is fully governed:
 
 1. **Disabled by default** — `runtime.enabled` must be set to `true` in the config.
 2. **Policy evaluation** — The policy engine checks whether the requested runtime, executable, CWD, and timeout are allowed.
@@ -966,7 +968,7 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 6. **Code mode** — Inline code strings are written to a temp file, executed, then cleaned up.
 7. **Concurrency limiting** — A configurable `maxConcurrentJobs` cap prevents resource exhaustion.
 8. **Timeout enforcement** — Hard timeout with process-tree kill.
-9. **Output handling** — Stdout/stderr are captured with configurable byte limits. The response includes head+tail summaries (not the full output) plus keyword-matched excerpt windows.
+9. **Output handling** — Stdout/stderr are captured with configurable byte limits and persisted as gzip artifacts. The `outputMode` parameter (`"minimal"`, `"summary"`, `"intent"`) controls how much output is returned inline. Use `sdl.runtime.queryOutput` to search artifacts on demand.
 10. **Artifact persistence** — Full output can be persisted as gzip artifacts with SHA-256 hashing, TTL, and size limits.
 11. **Audit trail** — Every execution is logged with the policy audit hash, duration, exit code, and byte counts.
 
@@ -1028,10 +1030,18 @@ No `stdoutSummary` or `stderrSummary` — only matched excerpts are returned.
 
 > **Per-line truncation:** All output modes enforce a 500-character per-line cap. Lines exceeding this limit are truncated with a `[truncated]` suffix.
 
-**Default executables by runtime:**
+**Default executables by runtime (common examples):**
 - `node` → `node` (or `bun` if available)
+- `typescript` → `tsx` / `ts-node`
 - `python` → `python3` (Unix) / `python` (Windows)
 - `shell` → `bash` (Unix) / `cmd.exe` (Windows)
+- `go` → `go run`
+- `rust` → `rustc` then execute
+- `java` → `javac` then `java`
+- `c` / `cpp` → `gcc`/`g++` (Unix) / `cl` (Windows) then execute
+- `csharp` → `dotnet-script` / `csc`
+
+See [Runtime Execution deep dive](../feature-deep-dives/runtime-execution.md) for the complete 16-runtime list.
 
 **Use cases:** Running tests, linters, build scripts, or diagnostic commands within SDL-MCP's governance framework.
 

@@ -27,6 +27,25 @@ The sync artifact system enables CI-produced memory artifacts to be exported, im
 
 ## Architecture
 
+```
+  CI/CD Pipeline                          Consumer
+  ──────────────                          ────────
+  ┌──────────┐     gzip artifact          ┌──────────┐
+  │  sdl-mcp  │ ──── export ────────────▶ │  Storage  │
+  │   index   │     (commit SHA,          │  (local/  │
+  │   +       │      branch,              │  remote)  │
+  │  export   │      version)             └────┬─────┘
+  └──────────┘                                 │
+                                               │ pull / import
+                                               ▼
+                                          ┌──────────┐
+                                          │  sdl-mcp  │
+                                          │  import   │
+                                          │  (restore │
+                                          │   state)  │
+                                          └──────────┘
+```
+
 ### Core Components
 
 - **SyncArtifact**: Stores compressed indexed state with metadata

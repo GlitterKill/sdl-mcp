@@ -66,7 +66,7 @@ The CLI tool dispatcher bypasses the MCP server/transport layer entirely. Instea
 
 ---
 
-## All 30 Actions
+## All 31 Actions
 
 Run `sdl-mcp tool --list` to see all actions grouped by namespace:
 
