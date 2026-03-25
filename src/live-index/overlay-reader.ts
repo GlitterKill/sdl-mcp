@@ -16,6 +16,7 @@ import { hybridSearch } from "../retrieval/orchestrator.js";
 import type { RetrievalEvidence } from "../retrieval/types.js";
 import type { DraftOverlayEntry } from "./overlay-store.js";
 import { getOverlayEmbeddingCache } from "./overlay-embedding-cache.js";
+import { logger } from "../util/logger.js";
 
 export interface OverlaySnapshot {
   repoId: string;
@@ -53,6 +54,7 @@ function draftEntriesWithParse(repoId: string): DraftOverlayEntry[] {
     .filter((entry) => entry.parseResult !== null);
 }
 
+const MAX_SNAPSHOT_CACHE_SIZE = 50;
 const snapshotCache = new Map<string, { version: number; snapshot: OverlaySnapshot }>();
 
 export function getOverlaySnapshot(repoId: string): OverlaySnapshot {
@@ -94,6 +96,10 @@ export function getOverlaySnapshot(repoId: string): OverlaySnapshot {
     filesById,
     outgoingEdgesBySymbolId,
   };
+  if (snapshotCache.size >= MAX_SNAPSHOT_CACHE_SIZE) {
+    const oldest = snapshotCache.keys().next().value;
+    if (oldest !== undefined) snapshotCache.delete(oldest);
+  }
   snapshotCache.set(repoId, { version: currentVersion, snapshot });
   return snapshot;
 }

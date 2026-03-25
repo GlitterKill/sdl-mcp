@@ -86,8 +86,12 @@ export class MinHeap<
     return sorted;
   }
 
-  /** @deprecated Use `drain()` — this method is destructive and the name does not indicate it. */
-  toArray(): T[] {
+  /**
+   * Extract all items from the heap in sorted order.
+   * WARNING: This is destructive - the heap will be empty after this call.
+   * Time complexity: O(n log n)
+   */
+  drainSorted(): T[] {
     const sorted: T[] = [];
     while (!this.isEmpty()) {
       sorted.push(this.extractMin()!);

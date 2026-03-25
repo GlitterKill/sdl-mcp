@@ -15,6 +15,7 @@ import type {
 } from "../treesitter/extractCalls.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
 import { logger } from "../../util/logger.js";
+import { findEnclosingSymbol as findEnclosingSymbolUtil } from "../treesitter/symbolUtils.js";
 
 class CppAdapter implements LanguageAdapter {
   languageId = "cpp";
@@ -41,8 +42,12 @@ class CppAdapter implements LanguageAdapter {
         bufferSize: 1024 * 1024,
       });
 
-      if (!tree || tree.rootNode.hasError) {
+      if (!tree) {
         return null;
+      }
+
+      if (tree.rootNode.hasError) {
+        logger.warn("Syntax errors detected in C++ file - attempting partial extraction", { filePath });
       }
 
       return tree;
@@ -438,7 +443,7 @@ class CppAdapter implements LanguageAdapter {
   extractCalls(
     tree: Tree,
     _content: string,
-    filePath: string,
+    _filePath: string,
     extractedSymbols: ExtractedSymbol[],
   ): ExtractedCall[] {
     const calls: ExtractedCall[] = [];
@@ -449,34 +454,6 @@ class CppAdapter implements LanguageAdapter {
       const shortName = symbol.name.split("::").pop() || symbol.name;
       symbolMap.set(shortName, symbol);
       symbolMap.set(symbol.name, symbol);
-    }
-
-    function findEnclosingSymbol(node: Parser.SyntaxNode): string {
-      let current: Parser.SyntaxNode | null = node;
-
-      while (current) {
-        const range = {
-          startLine: current.startPosition.row + 1,
-          startCol: current.startPosition.column,
-          endLine: current.endPosition.row + 1,
-          endCol: current.endPosition.column,
-        };
-
-        for (const symbol of extractedSymbols) {
-          if (
-            range.startLine >= symbol.range.startLine &&
-            range.startCol >= symbol.range.startCol &&
-            range.endLine <= symbol.range.endLine &&
-            range.endCol <= symbol.range.endCol
-          ) {
-            return symbol.nodeId;
-          }
-        }
-
-        current = current.parent;
-      }
-
-      return `${filePath}:root`;
     }
 
     function extractRange(node: Parser.SyntaxNode) {
@@ -544,7 +521,7 @@ class CppAdapter implements LanguageAdapter {
           }
         }
 
-        const callerNodeId = findEnclosingSymbol(node);
+        const callerNodeId = findEnclosingSymbolUtil(node, extractedSymbols);
 
         calls.push({
           callerNodeId,
@@ -583,7 +560,7 @@ class CppAdapter implements LanguageAdapter {
           }
         }
 
-        const callerNodeId = findEnclosingSymbol(node);
+        const callerNodeId = findEnclosingSymbolUtil(node, extractedSymbols);
 
         calls.push({
           callerNodeId,

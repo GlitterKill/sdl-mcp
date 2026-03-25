@@ -187,7 +187,7 @@ export const SYMBOL_TOKEN_MAX = 200;
 /**
  * Estimated number of characters per token for rough token counting.
  */
-export const TOKENS_PER_CHAR_ESTIMATE = 4;
+export const CHARS_PER_TOKEN_ESTIMATE = 4;
 
 // ============================================================================
 // File & Content Limits
@@ -254,6 +254,12 @@ export const WATCH_POLL_INTERVAL_MS = 100;
  * Maximum number of TypeScript errors to report before truncating.
  */
 export const TS_DIAGNOSTICS_MAX_ERRORS = 50;
+
+/**
+ * Maximum number of cached TypeScript LanguageService instances.
+ * Each instance holds a full AST in memory; cap prevents unbounded growth.
+ */
+export const TS_DIAGNOSTICS_MAX_CACHE = 5;
 
 /**
  * Maximum number of watcher errors to accumulate before truncating.

@@ -636,11 +636,7 @@ export async function handleSliceRefresh(
     const lease = createLease(latestVersion.versionId);
     const newHandleRow: ladybugDb.SliceHandleRow = {
       ...handleRow,
-      handle: sliceHandle,
-      createdAt: new Date().toISOString(),
       expiresAt: lease.expiresAt,
-      minVersion: handleRow.maxVersion,
-      maxVersion: latestVersion.versionId,
     };
     await withWriteConn(async (wConn) => {
       await ladybugDb.upsertSliceHandle(wConn, newHandleRow);

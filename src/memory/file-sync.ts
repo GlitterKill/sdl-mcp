@@ -31,16 +31,24 @@ export interface MemoryFileData {
 
 /** Map memory type to subdirectory name */
 export function typeToDir(type: string): string {
+  let dir: string;
   switch (type) {
     case "decision":
-      return "decisions";
+      dir = "decisions";
+      break;
     case "bugfix":
-      return "bugfixes";
+      dir = "bugfixes";
+      break;
     case "task_context":
-      return "task_context";
+      dir = "task_context";
+      break;
     default:
-      throw new Error(`Unknown memory type: ${type}`);
+      throw new Error(`Unknown memory type for directory mapping: ${type}`);
   }
+  if (dir.includes('/') || dir.includes('\\') || dir.includes('..')) {
+    throw new Error(`Invalid memory type for directory: ${type}`);
+  }
+  return dir;
 }
 
 /** Serialize a string array to YAML inline format: [a, b, c] */

@@ -172,6 +172,13 @@ export async function deleteRepo(
     // Clean up SyncArtifact nodes
     await exec(txConn, `MATCH (s:SyncArtifact {repoId: $repoId}) DELETE s`, { repoId });
 
+    // Clean up FileSummary nodes and edges
+    await exec(txConn, `MATCH (fs:FileSummary)-[e]-() WHERE fs.repoId = $repoId DELETE e`, { repoId });
+    await exec(txConn, `MATCH (fs:FileSummary) WHERE fs.repoId = $repoId DELETE fs`, { repoId });
+
+    // Clean up UsageSnapshot nodes
+    await exec(txConn, `MATCH (u:UsageSnapshot) WHERE u.repoId = $repoId DELETE u`, { repoId });
+
     await exec(
       txConn,
       `MATCH (r:Repo {repoId: $repoId})
@@ -406,7 +413,23 @@ async function _deleteFilesByIdsInner(
     { fileIds: uniqueFileIds },
   );
 
-  // Step 7: Batch-delete FILE_IN_REPO rels and File nodes
+  // Step 7a: Clean up FileSummary relationships and nodes for deleted files
+  await exec(
+    conn,
+    `MATCH (fs:FileSummary)-[r:SUMMARY_OF_FILE]->(f:File)
+     WHERE f.fileId IN $fileIds
+     DELETE r`,
+    { fileIds: uniqueFileIds },
+  );
+  await exec(
+    conn,
+    `MATCH (fs:FileSummary)
+     WHERE fs.fileId IN $fileIds
+     DELETE fs`,
+    { fileIds: uniqueFileIds },
+  );
+
+  // Step 7b: Batch-delete FILE_IN_REPO rels and File nodes
   await exec(
     conn,
     `MATCH (f:File)-[r:FILE_IN_REPO]->(:Repo)

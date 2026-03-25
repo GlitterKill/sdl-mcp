@@ -64,8 +64,10 @@ export class IdleMonitor {
         if (!stats.lastBufferEventAt) {
           continue;
         }
+        const eventTime = Date.parse(stats.lastBufferEventAt);
+        if (isNaN(eventTime)) continue;
         if (
-          nowMs - Date.parse(stats.lastBufferEventAt) < this.quietPeriodMs
+          nowMs - eventTime < this.quietPeriodMs
         ) {
           continue;
         }

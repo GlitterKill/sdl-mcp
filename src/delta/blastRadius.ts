@@ -137,7 +137,7 @@ export async function computeBlastRadius(
       const relPath = symbol ? filesMap.get(symbol.fileId)?.relPath : null;
       const testProximity = relPath && isTestFile(relPath) ? 1 : 0;
 
-      const normalizedDistance = 1 - distance / safeMaxHops;
+      const normalizedDistance = Math.max(0, 1 - distance / safeMaxHops);
       const normalizedFanIn = Math.min(1, Math.log(fanIn + 1) / Math.log(100));
       const rank =
         0.6 * normalizedDistance +

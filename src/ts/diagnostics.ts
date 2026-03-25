@@ -4,7 +4,7 @@ import * as path from "path";
 import * as ts from "typescript";
 import type { RepoConfig } from "../config/types.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
-import { TS_DIAGNOSTICS_MAX_ERRORS } from "../config/constants.js";
+import { TS_DIAGNOSTICS_MAX_ERRORS, TS_DIAGNOSTICS_MAX_CACHE } from "../config/constants.js";
 import { globToSafeRegex } from "../util/safeRegex.js";
 import { logger } from "../util/logger.js";
 
@@ -95,6 +95,24 @@ class DiagnosticsManager {
       projectRoot,
     };
 
+    // Evict oldest entry if cache is at capacity
+    if (this.servicesCache.size >= TS_DIAGNOSTICS_MAX_CACHE && !this.servicesCache.has(cacheKey)) {
+      let oldestKey: string | undefined;
+      let oldestTime = Infinity;
+      for (const [key, entry] of this.servicesCache) {
+        if (entry.cachedAt < oldestTime) {
+          oldestTime = entry.cachedAt;
+          oldestKey = key;
+        }
+      }
+      if (oldestKey) {
+        const evicted = this.servicesCache.get(oldestKey);
+        if (evicted?.instance.service.dispose) {
+          evicted.instance.service.dispose();
+        }
+        this.servicesCache.delete(oldestKey);
+      }
+    }
     this.servicesCache.set(cacheKey, { instance, cachedAt: Date.now() });
     return instance;
   }

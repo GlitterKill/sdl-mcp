@@ -30,6 +30,7 @@ let logFileBytesSinceRotationCheck = 0;
 let consoleMirroringEnabled = false;
 let fallbackUsed = false;
 let logStream: WriteStream | null = null;
+let logWriteErrorCount = 0;
 
 function isLogLevel(value: string | undefined): value is LogLevel {
   return value === "debug" || value === "info" || value === "warn" || value === "error";
@@ -92,7 +93,7 @@ function writeToLogFile(msg: string): void {
 
   try {
     const line = msg + "\n";
-    logFileBytesSinceRotationCheck += line.length;
+    logFileBytesSinceRotationCheck += Buffer.byteLength(line, "utf-8");
     if (logFileBytesSinceRotationCheck >= LOG_ROTATION_CHECK_INTERVAL_BYTES) {
       logStream?.end();
       logStream = null;
@@ -103,8 +104,11 @@ function writeToLogFile(msg: string): void {
       logStream = createWriteStream(logFilePath, { flags: "a" });
     }
     logStream.write(line);
-  } catch {
-    // Logging failures should never crash the server.
+  } catch (err) {
+    logWriteErrorCount++;
+    if (logWriteErrorCount === 1 || logWriteErrorCount % 100 === 0) {
+      process.stderr.write(`[sdl-mcp] Log file write failed (count: ${logWriteErrorCount}): ${err}\n`);
+    }
   }
 }
 

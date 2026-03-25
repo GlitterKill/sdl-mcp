@@ -29,7 +29,7 @@ import {
   SLICE_SCORE_THRESHOLD,
   MAX_FRONTIER,
   SYMBOL_TOKEN_BASE,
-  TOKENS_PER_CHAR_ESTIMATE,
+  CHARS_PER_TOKEN_ESTIMATE,
   SYMBOL_TOKEN_ADDITIONAL_MAX,
 } from "../../config/constants.js";
 import { logger } from "../../util/logger.js";
@@ -119,15 +119,15 @@ function estimateCardTokensLadybug(
 ): number {
   let tokens = SYMBOL_TOKEN_BASE;
 
-  tokens += symbol.name.length / TOKENS_PER_CHAR_ESTIMATE;
+  tokens += symbol.name.length / CHARS_PER_TOKEN_ESTIMATE;
 
   if (symbol.signatureJson) {
-    tokens += symbol.signatureJson.length / TOKENS_PER_CHAR_ESTIMATE;
+    tokens += symbol.signatureJson.length / CHARS_PER_TOKEN_ESTIMATE;
   }
 
   if (symbol.summary) {
     tokens += Math.min(
-      symbol.summary.length / TOKENS_PER_CHAR_ESTIMATE,
+      symbol.summary.length / CHARS_PER_TOKEN_ESTIMATE,
       SYMBOL_TOKEN_ADDITIONAL_MAX,
     );
   }
@@ -1226,15 +1226,15 @@ export function estimateCardTokens(symbolId: SymbolId, graph: Graph): number {
 
   let tokens = SYMBOL_TOKEN_BASE;
 
-  tokens += symbol.name.length / TOKENS_PER_CHAR_ESTIMATE;
+  tokens += symbol.name.length / CHARS_PER_TOKEN_ESTIMATE;
 
   if (symbol.signature_json) {
-    tokens += symbol.signature_json.length / TOKENS_PER_CHAR_ESTIMATE;
+    tokens += symbol.signature_json.length / CHARS_PER_TOKEN_ESTIMATE;
   }
 
   if (symbol.summary) {
     tokens += Math.min(
-      symbol.summary.length / TOKENS_PER_CHAR_ESTIMATE,
+      symbol.summary.length / CHARS_PER_TOKEN_ESTIMATE,
       SYMBOL_TOKEN_ADDITIONAL_MAX,
     );
   }

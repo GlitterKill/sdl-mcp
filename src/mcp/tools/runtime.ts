@@ -48,13 +48,13 @@ import { tmpdir } from "os";
 // ============================================================================
 
 let concurrencyTracker: ConcurrencyTracker | undefined;
-let trackerMaxJobs: number | undefined;
 
 function getOrCreateConcurrencyTracker(maxJobs: number): ConcurrencyTracker {
-  if (!concurrencyTracker || trackerMaxJobs !== maxJobs) {
+  if (!concurrencyTracker) {
     concurrencyTracker = createConcurrencyTracker(maxJobs);
-    trackerMaxJobs = maxJobs;
   }
+  // Don't replace tracker while slots are active - just use existing one
+  // The limit change will take effect when server restarts
   return concurrencyTracker;
 }
 

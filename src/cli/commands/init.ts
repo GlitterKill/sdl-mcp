@@ -414,7 +414,11 @@ async function loadClientTemplate(client: ClientType): Promise<unknown> {
 }
 
 function loadTextTemplate(templateName: string): string {
-  const templatePath = resolve(__dirname, "../../../templates", templateName);
+  const templatesDir = resolve(__dirname, "../../../templates");
+  const templatePath = resolve(templatesDir, templateName);
+  if (!templatePath.startsWith(templatesDir)) {
+    throw new Error("Template path traversal detected");
+  }
   return readFileSync(templatePath, "utf-8");
 }
 
@@ -469,13 +473,18 @@ function writeGeneratedAsset(
   }
 }
 
+function shellEscape(s: string): string {
+  return s.replaceAll("'", "'\\''");
+}
+
 function buildClaudeReadHook(pidfilePath: string): string {
+  const safePath = shellEscape(pidfilePath);
   const blocked = SDL_SOURCE_EXTENSIONS.map((ext) => `'${ext}'`).join(" ");
   return `#!/bin/sh
 set -eu
 
 # Only enforce when SDL-MCP server is running (PID file exists)
-if [ ! -f '${pidfilePath}' ]; then
+if [ ! -f '${safePath}' ]; then
   exit 0
 fi
 
@@ -504,12 +513,13 @@ done
 }
 
 function buildClaudeRuntimeHook(pidfilePath: string): string {
+  const safePath = shellEscape(pidfilePath);
   const prefixes = SDL_RUNTIME_REDIRECT_PREFIXES.map((prefix) => `'${prefix}'`).join(" ");
   return `#!/bin/sh
 set -eu
 
 # Only enforce when SDL-MCP server is running (PID file exists)
-if [ ! -f '${pidfilePath}' ]; then
+if [ ! -f '${safePath}' ]; then
   exit 0
 fi
 

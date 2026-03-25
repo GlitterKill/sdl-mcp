@@ -24,6 +24,9 @@ import type {
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
 
+/** Maximum allowed size of decompressed artifact data (100MB). */
+const MAX_DECOMPRESSED_SIZE = 100 * 1024 * 1024;
+
 export async function exportArtifact(
   options: SyncExportOptions,
 ): Promise<SyncExportResult> {
@@ -242,6 +245,9 @@ export async function importArtifact(
 
   const compressed = Buffer.from(artifact.compressed_data, "base64");
   const decompressed = await gunzipAsync(compressed);
+  if (decompressed.length > MAX_DECOMPRESSED_SIZE) {
+    throw new IndexError(`Decompressed artifact exceeds maximum size of ${MAX_DECOMPRESSED_SIZE} bytes (${decompressed.length} bytes)`);
+  }
   let state: SyncIndexState;
   try {
     state = JSON.parse(decompressed.toString("utf-8"));
@@ -400,6 +406,9 @@ export function getArtifactMetadata(
 
     const compressed = Buffer.from(artifact.compressed_data, "base64");
     const decompressed = gunzipSync(compressed);
+    if (decompressed.length > MAX_DECOMPRESSED_SIZE) {
+      throw new IndexError(`Decompressed artifact exceeds maximum size of ${MAX_DECOMPRESSED_SIZE} bytes (${decompressed.length} bytes)`);
+    }
     let state: SyncIndexState;
     try {
       state = JSON.parse(decompressed.toString("utf-8"));

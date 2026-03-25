@@ -48,8 +48,9 @@ process.on("uncaughtException", (error) => {
 
 process.on("unhandledRejection", (reason) => {
   const message = reason instanceof Error ? reason.message : String(reason);
-  process.stderr.write(`[sdl-mcp] Unhandled rejection: ${message}\n`);
+  process.stderr.write(`[sdl-mcp] Fatal unhandled rejection: ${message}\n`);
   logger.error("Unhandled rejection", { error: message, stack: reason instanceof Error ? reason.stack : undefined });
+  process.exit(1);
 });
 
 async function main(): Promise<void> {

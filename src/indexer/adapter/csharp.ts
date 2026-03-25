@@ -42,8 +42,12 @@ class CSharpAdapter implements LanguageAdapter {
         bufferSize: 1024 * 1024,
       });
 
-      if (!tree || tree.rootNode.hasError) {
+      if (!tree) {
         return null;
+      }
+
+      if (tree.rootNode.hasError) {
+        logger.warn("Syntax errors detected in C# file - attempting partial extraction", { filePath });
       }
 
       return tree;

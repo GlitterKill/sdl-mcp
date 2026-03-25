@@ -7,6 +7,9 @@ const REF_PATTERN_SINGLE = /^\$(\d+)((?:\.[a-zA-Z_]\w*|\[\d+\])*)$/;
 /** Regex for splitting a path string into named-field and numeric-index segments. */
 const SEGMENT_RE = /\.([a-zA-Z_]\w*)|\[(\d+)\]/g;
 
+/** Property names that must never be navigated to prevent prototype pollution. */
+const BLOCKED_PROPS = new Set(["__proto__", "constructor", "prototype"]);
+
 export class RefResolutionError extends Error {
   constructor(message: string) {
     super(message);
@@ -86,6 +89,11 @@ export function resolveRef(ref: string, priorResults: unknown[]): unknown {
         );
       }
       const obj = current as Record<string, unknown>;
+      if (BLOCKED_PROPS.has(seg)) {
+        throw new RefResolutionError(
+          `Access to property '${seg}' is blocked in reference '${ref}'`,
+        );
+      }
       if (!(seg in obj)) {
         throw new RefResolutionError(
           `Field '${seg}' does not exist in reference '${ref}'`,

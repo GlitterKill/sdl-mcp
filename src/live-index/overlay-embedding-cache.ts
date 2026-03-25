@@ -10,6 +10,8 @@ interface CachedEmbedding {
   updatedAt: string;
 }
 
+const MAX_EMBEDDING_CACHE_ENTRIES = 500;
+
 /**
  * In-memory cache for draft symbol embeddings. Lazily populated —
  * embeddings are computed on first access, never on push.
@@ -54,6 +56,10 @@ class OverlayEmbeddingCache {
         if (!modelCache) {
           modelCache = new Map();
           this.cache.set(symbolId, modelCache);
+          if (this.cache.size > MAX_EMBEDDING_CACHE_ENTRIES) {
+            const oldest = this.cache.keys().next().value;
+            if (oldest !== undefined) this.cache.delete(oldest);
+          }
         }
         modelCache.set(modelName, {
           model: modelName,

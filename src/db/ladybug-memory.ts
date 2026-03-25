@@ -12,6 +12,7 @@ import {
   assertSafeInt,
   withTransaction,
 } from "./ladybug-core.js";
+import { safeJsonParse, StringArraySchema } from "../util/safeJson.js";
 
 export interface MemoryRow {
   memoryId: string;
@@ -201,23 +202,20 @@ export async function queryMemories(
 
   // Over-fetch with a generous LIMIT to bound DB work before JS-side tag filtering
   const overFetchLimit = safeLimit * 5;
+  params.overFetchLimit = overFetchLimit;
   const cypher = `${matchClause}
      ${whereClause}
      RETURN DISTINCT ${MEMORY_RETURN_FIELDS}
      ${orderBy}
-     LIMIT ${overFetchLimit}`;
+     LIMIT $overFetchLimit`;
 
   let rows = await queryAll<Record<string, unknown>>(conn, cypher, params);
 
   // Post-filter tags at application level for exact array-element matching
   if (options.tags && options.tags.length > 0) {
     rows = rows.filter((row) => {
-      try {
-        const memTags: string[] = JSON.parse((row.tagsJson as string) || "[]");
-        return options.tags!.some((t) => memTags.includes(t));
-      } catch {
-        return false;
-      }
+      const memTags = safeJsonParse(row.tagsJson as string, StringArraySchema, []);
+      return options.tags!.some((t) => memTags.includes(t));
     });
   }
 
