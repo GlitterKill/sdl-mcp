@@ -5,6 +5,8 @@ export interface OverlaySearchResult extends SearchSymbolLiteRow {
   summary?: string | null;
   searchText?: string | null;
   matchedTermCount?: number;
+  /** True for symbols that exist only in the draft overlay (no durable DB record). */
+  overlayOnly?: boolean;
 }
 
 function filePenalty(filePath: string): number {
@@ -92,7 +94,7 @@ export function mergeSearchResults(
     merged.set(row.symbolId, row);
   }
 
-  return Array.from(merged.values())
+  const sorted = Array.from(merged.values())
     .sort((left, right) => {
       const rankCompare = compareRank(
         searchRank(left, query),
@@ -102,6 +104,13 @@ export function mergeSearchResults(
         return rankCompare;
       }
       return left.name.localeCompare(right.name) || left.filePath.localeCompare(right.filePath);
-    })
-    .slice(0, limit);
+    });
+
+  // Overlay-only hits must never be dropped by fusion truncation.
+  // Partition: regular items fill up to (limit - overlayOnlyCount) slots;
+  // overlay-only items are always appended regardless of rank.
+  const overlayOnlyItems = sorted.filter((r) => r.overlayOnly);
+  const regularItems = sorted.filter((r) => !r.overlayOnly);
+  const regularSlice = regularItems.slice(0, Math.max(0, limit - overlayOnlyItems.length));
+  return [...regularSlice, ...overlayOnlyItems];
 }

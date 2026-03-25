@@ -265,6 +265,9 @@ export async function searchSymbolsHybridWithOverlay(
     });
   }
 
+  // Build a set of durable symbolIds so we can mark overlay-only hits below.
+  const durableSymbolIdSet = new Set(durableRows.map((r) => r.symbolId));
+
   // 3. Collect overlay results (same logic as searchSymbolsWithOverlay)
   const loweredQuery = query.trim().toLowerCase();
   const terms = loweredQuery.includes(" ")
@@ -297,15 +300,28 @@ export async function searchSymbolsHybridWithOverlay(
       summary: symbol.summary,
       searchText: symbol.searchText,
       matchedTermCount: matchCount,
+      // Overlay-only: no durable DB record for this symbolId
+      overlayOnly: !durableSymbolIdSet.has(symbol.symbolId),
     });
   }
 
   // 4. Merge: use mergeSearchResults for proper interleaving.
   //    Overlay takes precedence for matching symbolIds.
   //    Durable results retain their hybrid RRF ordering via the merge sort.
+  //    Overlay-only hits are preserved regardless of score (see mergeSearchResults).
   const merged = mergeSearchResults(durableRows, overlayRows, query, limit);
 
-  return { rows: merged, evidence: hybridResult.evidence };
+  // 5. Update evidence with overlay-only candidate count.
+  const overlayOnlyCount = overlayRows.filter((r) => r.overlayOnly).length;
+  const evidence = hybridResult.evidence;
+  if (evidence && overlayOnlyCount > 0) {
+    evidence.candidateCountPerSource = {
+      ...evidence.candidateCountPerSource,
+      overlay: overlayOnlyCount,
+    };
+  }
+
+  return { rows: merged, evidence };
 }
 
 export async function getTargetNamesWithOverlay(
