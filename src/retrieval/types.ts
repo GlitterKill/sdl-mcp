@@ -44,6 +44,19 @@ export interface RetrievalEvidence {
 
   /** Number of raw candidates each source produced before fusion. */
   candidateCountPerSource: Record<string, number>;
+
+  /** Symptom type classification when task text is the primary input. */
+  symptomType?: "stackTrace" | "failingTest" | "taskText" | "editedFiles";
+
+  /** Feedback-derived boost information. */
+  feedbackBoosts?: {
+    /** Number of matching prior feedback rows. */
+    feedbackMatchCount: number;
+    /** Number of symbols boosted from feedback. */
+    symbolsBoosted: number;
+    /** IDs of feedback rows that contributed boosts. */
+    feedbackIds: string[];
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -100,7 +113,8 @@ export type EntityType =
   | "memory"
   | "cluster"
   | "process"
-  | "fileSummary";
+  | "fileSummary"
+  | "agentFeedback";
 
 /** A single scored result from multi-entity hybrid search. */
 export interface EntitySearchResultItem {

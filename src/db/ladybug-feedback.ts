@@ -106,6 +106,35 @@ export interface AgentFeedbackRow {
   createdAt: string;
 }
 
+/**
+ * Build searchText for an AgentFeedback row by concatenating
+ * human-readable fields. Used for FTS indexing.
+ */
+export function buildFeedbackSearchText(row: {
+  taskType?: string | null;
+  taskText?: string | null;
+  taskTagsJson?: string | null;
+  usefulSymbolsJson?: string | null;
+  missingSymbolsJson?: string | null;
+}): string {
+  const parts: string[] = [];
+  if (row.taskType) parts.push(row.taskType);
+  if (row.taskText) parts.push(row.taskText);
+  if (row.taskTagsJson) {
+    const tags = safeJsonParse<string[]>(row.taskTagsJson, StringArraySchema, []);
+    if (tags.length) parts.push(tags.join(" "));
+  }
+  if (row.usefulSymbolsJson) {
+    const symbols = safeJsonParse<string[]>(row.usefulSymbolsJson, StringArraySchema, []);
+    if (symbols.length) parts.push(symbols.join(" "));
+  }
+  if (row.missingSymbolsJson) {
+    const symbols = safeJsonParse<string[]>(row.missingSymbolsJson, StringArraySchema, []);
+    if (symbols.length) parts.push(symbols.join(" "));
+  }
+  return parts.join(" ");
+}
+
 export async function upsertAgentFeedback(
   conn: Connection,
   row: AgentFeedbackRow,
@@ -121,7 +150,8 @@ export async function upsertAgentFeedback(
          f.taskTagsJson = $taskTagsJson,
          f.taskType = $taskType,
          f.taskText = $taskText,
-         f.createdAt = $createdAt`,
+         f.createdAt = $createdAt,
+         f.searchText = $searchText`,
     {
       feedbackId: row.feedbackId,
       repoId: row.repoId,
@@ -133,6 +163,13 @@ export async function upsertAgentFeedback(
       taskType: row.taskType,
       taskText: row.taskText,
       createdAt: row.createdAt,
+      searchText: buildFeedbackSearchText({
+        taskType: row.taskType,
+        taskText: row.taskText,
+        taskTagsJson: row.taskTagsJson,
+        usefulSymbolsJson: row.usefulSymbolsJson,
+        missingSymbolsJson: row.missingSymbolsJson,
+      }),
     },
   );
 }

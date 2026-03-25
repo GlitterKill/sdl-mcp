@@ -5,6 +5,8 @@ import {
   type SymbolNodeEmbeddingRow,
 } from "../db/ladybug-symbol-embeddings.js";
 import { hashContent } from "../util/hashing.js";
+import { LEGACY_ANN_MAINTENANCE_MODE } from "../config/constants.js";
+import { logger } from "../util/logger.js";
 
 /** @deprecated Use provider.getDimension() instead. Kept for backward compat. */
 export const EMBEDDING_DIMENSION = 64;
@@ -440,6 +442,10 @@ export class AnnIndexManager {
     model: string;
     embeddingRows?: AnnEmbeddingRow[];
   }): Promise<{ indexed: number; skipped: number }> {
+    if (!LEGACY_ANN_MAINTENANCE_MODE) {
+      logger.debug("[ann-index] ANN index build skipped \u2014 legacy maintenance mode is off");
+      return { indexed: 0, skipped: 0 };
+    }
     if (this.buildPromise) return this.buildPromise;
     this.buildPromise = this._buildIndexInternal(params);
     try {

@@ -21,6 +21,7 @@ import type { CodeWindowRequest } from "../domain/types.js";
 import { logger } from "../util/logger.js";
 import { isHybridRetrievalAvailable } from "../retrieval/fallback.js";
 import { hybridSearch } from "../retrieval/orchestrator.js";
+import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
 
 /** Injectable gate evaluator for testability. */
 export type GateEvaluator = typeof evaluateRequest;
@@ -341,6 +342,40 @@ export class Executor {
           );
           for (const result of searchResults) {
             allSymbols.push(result.symbolId);
+          }
+        }
+
+        // Feedback-aware boosting: reorder search results by score + boost
+        if (task.taskText && allSymbols.length > 0) {
+          try {
+            const feedbackConn = await this.getConn();
+            const { boosts } = await queryFeedbackBoosts(feedbackConn, {
+              repoId: task.repoId,
+              query: task.taskText,
+              limit: 5,
+            });
+            if (boosts.size > 0) {
+              // Move boosted symbols to the front of allSymbols
+              const boosted: string[] = [];
+              const unboosted: string[] = [];
+              for (const symbolId of allSymbols) {
+                if (boosts.has(symbolId)) {
+                  boosted.push(symbolId);
+                } else {
+                  unboosted.push(symbolId);
+                }
+              }
+              // Sort boosted by boost value (descending)
+              boosted.sort((a, b) => (boosts.get(b) ?? 0) - (boosts.get(a) ?? 0));
+              allSymbols.length = 0;
+              allSymbols.push(...boosted, ...unboosted);
+              logger.debug("Feedback boost reordered executor card search results", {
+                boostedCount: boosted.length,
+                totalCount: allSymbols.length,
+              });
+            }
+          } catch (err) {
+            logger.debug(`[executor] Feedback boost reorder failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
           }
         }
       }

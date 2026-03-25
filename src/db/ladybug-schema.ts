@@ -9,7 +9,8 @@
  *
  * Node tables: Repo, File, Symbol, Version, SymbolVersion, Metrics,
  *              Cluster, Process, FileSummary, SliceHandle, CardHash, Audit,
- *              AgentFeedback, SymbolEmbedding, SummaryCache, SyncArtifact,
+ *              AgentFeedback (with searchText + embedding columns),
+ *              SymbolEmbedding, SummaryCache, SyncArtifact,
  *              SymbolReference, Memory, UsageSnapshot, SchemaVersion
  *
  * Rel tables: FILE_IN_REPO, SYMBOL_IN_FILE, SYMBOL_IN_REPO, DEPENDS_ON,
@@ -177,7 +178,14 @@ const NODE_TABLES: string[] = [
     taskTagsJson STRING,
     taskType STRING,
     taskText STRING,
-    createdAt STRING
+    createdAt STRING,
+    searchText STRING,
+    embeddingMiniLM STRING,
+    embeddingMiniLMCardHash STRING,
+    embeddingMiniLMUpdatedAt STRING,
+    embeddingNomic STRING,
+    embeddingNomicCardHash STRING,
+    embeddingNomicUpdatedAt STRING
   )`,
 
   // TODO(hybrid-retrieval): Remove after Stage 1 when SymbolEmbedding migration is verified complete

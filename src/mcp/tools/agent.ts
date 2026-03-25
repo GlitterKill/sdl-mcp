@@ -24,6 +24,7 @@ export async function handleAgentOrchestrate(
     const result = await orchestrator.orchestrate(task);
     // OrchestrationResult and AgentOrchestrateResponse are structurally identical.
     // If either type changes, update both to maintain compatibility.
+    // retrievalEvidence (with symptomType) passes through this cast automatically.
     const response = result as AgentOrchestrateResponse;
     attachRawContext(response, { rawTokens: response.metrics.totalTokens * 3 });
     return response;

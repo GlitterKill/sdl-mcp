@@ -14,6 +14,8 @@ import {
   getSymbolEmbeddingsFromNodes,
 } from "../db/ladybug-symbol-embeddings.js";
 
+import { LEGACY_ANN_MAINTENANCE_MODE } from "../config/constants.js";
+
 /** Legacy dimension constant — only used by MockEmbeddingProvider */
 export const EMBEDDING_DIMENSION = 64;
 
@@ -367,6 +369,11 @@ export async function rerankByEmbeddings(params: {
 }): Promise<EmbeddingScoredSymbol[]> {
   if (params.symbols.length === 0) {
     return [];
+  }
+
+  if (!LEGACY_ANN_MAINTENANCE_MODE) {
+    logger.debug("[embeddings] Legacy rerank skipped \u2014 maintenance mode is off");
+    return params.symbols.map((r) => ({ ...r, semanticScore: 0, finalScore: r.lexicalScore }));
   }
 
   const alpha = Math.max(0, Math.min(1, params.alpha));

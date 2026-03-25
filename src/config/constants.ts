@@ -754,3 +754,14 @@ export const POLICY_PRIORITY_RUNTIME_TIMEOUT_CAP = 80;
  * Priority for runtime concurrency-cap policy rule.
  */
 export const POLICY_PRIORITY_RUNTIME_CONCURRENCY_CAP = 70;
+
+/**
+ * When true, legacy ANN index and semantic reranking are available.
+ * When false (default), hybrid retrieval is the only active path.
+ *
+ * @deprecated Stage 4: Legacy ANN/rerank code is deprecated.
+ * Set this to true only for rollback scenarios during the hybrid
+ * retrieval transition. Will be removed after two consecutive
+ * benchmark runs confirm hybrid stability.
+ */
+export const LEGACY_ANN_MAINTENANCE_MODE = false;

@@ -19,6 +19,7 @@ import type { RepoId, SymbolId } from "../../db/schema.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { tokenize } from "../../util/tokenize.js";
 import { isHybridRetrievalAvailable } from "../../retrieval/fallback.js";
+import { logger } from "../../util/logger.js";
 import { hybridSearch } from "../../retrieval/orchestrator.js";
 import type { RetrievalEvidence, HybridSearchResultItem } from "../../retrieval/types.js";
 import {
@@ -627,12 +628,41 @@ export async function resolveStartNodesLadybug(
     }
   }
 
+  // Feedback-aware boosting: query prior feedback for similar tasks
+  // and boost symbols that were historically useful.
+  // Boosted symbols get a fractional priority adjustment so they sort
+  // earlier within their source-priority tier.
+  const feedbackBoostMap = new Map<string, number>();
+  if (request.taskText) {
+    try {
+      const { queryFeedbackBoosts } = await import("../../retrieval/feedback-boost.js");
+      const { boosts } = await queryFeedbackBoosts(conn, {
+        repoId,
+        query: request.taskText,
+        limit: 10,
+      });
+      if (boosts.size > 0) {
+        for (const [symbolId, boost] of boosts) {
+          if (startNodes.has(symbolId)) {
+            feedbackBoostMap.set(symbolId, boost);
+          }
+        }
+      }
+    } catch (err) {
+      logger.debug(`[start-node-resolver] Feedback boost failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   const sortedNodes = Array.from(startNodes.entries())
     .map(([symbolId, source]) => ({ symbolId, source }))
     .sort((a, b) => {
       const pa = START_NODE_SOURCE_PRIORITY[a.source];
       const pb = START_NODE_SOURCE_PRIORITY[b.source];
       if (pa !== pb) return pa - pb;
+      // Within the same source priority tier, boosted symbols come first
+      const boostA = feedbackBoostMap.get(a.symbolId) ?? 0;
+      const boostB = feedbackBoostMap.get(b.symbolId) ?? 0;
+      if (boostA !== boostB) return boostB - boostA; // Higher boost = earlier
       return a.symbolId.localeCompare(b.symbolId);
     })
     .slice(0, limits.maxTotalStartNodes);

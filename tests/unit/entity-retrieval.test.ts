@@ -30,8 +30,9 @@ describe("EntityType – type surface", () => {
       "cluster",
       "process",
       "fileSummary",
+      "agentFeedback",
     ];
-    assert.equal(allTypes.length, 5, "EntityType union should have 5 members");
+    assert.equal(allTypes.length, 6, "EntityType union should have 6 members");
   });
 
   it("should distinguish symbol from other entity types", () => {

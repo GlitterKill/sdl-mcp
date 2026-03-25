@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "description": "Benchmark tasks for symptom-first retrieval workflows",
+  "tasks": [
+    {
+      "id": "symptom-bug-report-auth",
+      "category": "bug-report",
+      "difficulty": "medium",
+      "title": "Authentication Bug Report",
+      "description": "User reports: 'Login fails with 500 error after session timeout. Only happens when refreshToken is expired and user clicks remember-me checkbox.'",
+      "inputs": {
+        "taskText": "Login fails with 500 error after session timeout. Only happens when refreshToken is expired and user clicks remember-me checkbox.",
+        "expectedSymbols": ["handleLogin", "refreshSession", "validateToken"]
+      }
+    },
+    {
+      "id": "symptom-stack-trace-index",
+      "category": "stack-trace",
+      "difficulty": "hard",
+      "title": "Stack Trace — Indexing Crash",
+      "description": "Indexer crashes on large TypeScript file with deeply nested generics",
+      "inputs": {
+        "stackTrace": "TypeError: Cannot read properties of undefined (reading 'kind')\n    at extractSymbols (src/indexer/treesitter/extractSymbols.ts:142:35)\n    at processFile (src/indexer/file-scanner.ts:89:20)\n    at indexRepo (src/indexer/index-repo.ts:67:12)",
+        "expectedSymbols": ["extractSymbols", "processFile", "indexRepo"]
+      }
+    },
+    {
+      "id": "symptom-stack-trace-slice",
+      "category": "stack-trace",
+      "difficulty": "medium",
+      "title": "Stack Trace — Slice Build OOM",
+      "description": "Slice build runs out of memory on repos with >5000 symbols",
+      "inputs": {
+        "stackTrace": "RangeError: Maximum call stack size exceeded\n    at beamSearch (src/graph/slice/beam-search.ts:45:10)\n    at buildSlice (src/graph/slice.ts:167:22)",
+        "expectedSymbols": ["beamSearch", "buildSlice"]
+      }
+    },
+    {
+      "id": "symptom-pr-description",
+      "category": "pr-description",
+      "difficulty": "easy",
+      "title": "PR Description — Add Caching",
+      "description": "PR: 'Add LRU cache for symbol card lookups to reduce DB round-trips during slice building'",
+      "inputs": {
+        "taskText": "Add LRU cache for symbol card lookups to reduce DB round-trips during slice building. Changes to graph/slice.ts and db/ladybug-queries.ts.",
+        "editedFiles": ["src/graph/slice.ts", "src/db/ladybug-queries.ts"],
+        "expectedSymbols": ["buildSlice", "getSymbolById"]
+      }
+    },
+    {
+      "id": "symptom-bug-report-config",
+      "category": "bug-report",
+      "difficulty": "easy",
+      "title": "Bug Report — Config Not Loading",
+      "description": "User reports: 'SDL-MCP ignores my config file when SDL_CONFIG env var is set to a relative path'",
+      "inputs": {
+        "taskText": "SDL-MCP ignores my config file when SDL_CONFIG env var is set to a relative path. Config loading should resolve relative paths against cwd.",
+        "expectedSymbols": ["loadConfig", "resolveConfigPath"]
+      }
+    }
+  ]
+}

@@ -205,6 +205,7 @@ export const ENTITY_FTS_INDEX_NAMES = {
   cluster: "cluster_search_text_v1",
   process: "process_search_text_v1",
   fileSummary: "filesummary_search_text_v1",
+  agentFeedback: "agentfeedback_search_text_v1",
 } as const;
 
 /** Vector index names for FileSummary embedding properties. */
@@ -215,6 +216,18 @@ export const FILESUMMARY_VECTOR_INDEX_NAMES = {
 
 /** FileSummary embedding property names for vector indexing. */
 export const FILESUMMARY_EMBEDDING_PROPERTIES = {
+  miniLM: { property: "embeddingMiniLM", dimension: 384 },
+  nomic: { property: "embeddingNomic", dimension: 768 },
+} as const;
+
+/** Vector index names for AgentFeedback embedding properties. */
+export const AGENTFEEDBACK_VECTOR_INDEX_NAMES = {
+  miniLM: "agentfeedback_vec_minilm_l6_v2",
+  nomic: "agentfeedback_vec_nomic_embed_v15",
+} as const;
+
+/** AgentFeedback embedding property names for vector indexing. */
+export const AGENTFEEDBACK_EMBEDDING_PROPERTIES = {
   miniLM: { property: "embeddingMiniLM", dimension: 384 },
   nomic: { property: "embeddingNomic", dimension: 768 },
 } as const;
@@ -382,8 +395,9 @@ export async function ensureIndexes(
 // ---------------------------------------------------------------------------
 
 /**
- * Idempotently create FTS indexes for Memory, Cluster, Process, FileSummary
- * tables and vector indexes for FileSummary embedding properties.
+ * Idempotently create FTS indexes for Memory, Cluster, Process, FileSummary,
+ * AgentFeedback tables and vector indexes for FileSummary and AgentFeedback
+ * embedding properties.
  *
  * Called from startup after ensureIndexes() completes.  Fails gracefully when
  * the FTS or vector extension is unavailable.
@@ -407,6 +421,7 @@ export async function ensureEntityIndexes(
     { table: "Cluster",     indexName: ENTITY_FTS_INDEX_NAMES.cluster },
     { table: "Process",     indexName: ENTITY_FTS_INDEX_NAMES.process },
     { table: "FileSummary", indexName: ENTITY_FTS_INDEX_NAMES.fileSummary },
+    { table: "AgentFeedback", indexName: ENTITY_FTS_INDEX_NAMES.agentFeedback },
   ];
 
   if (caps.fts) {
@@ -456,6 +471,35 @@ export async function ensureEntityIndexes(
     logger.debug("[index-lifecycle] Skipping FileSummary vector indexes — extension unavailable");
     for (const [key] of vectorEntries) {
       result.skipped.push(FILESUMMARY_VECTOR_INDEX_NAMES[key]);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Vector indexes for AgentFeedback
+  // ------------------------------------------------------------------
+  const afVectorEntries = Object.entries(AGENTFEEDBACK_EMBEDDING_PROPERTIES) as Array<
+    [keyof typeof AGENTFEEDBACK_EMBEDDING_PROPERTIES, { property: string; dimension: number }]
+  >;
+
+  if (caps.vector) {
+    for (const [key, { property, dimension }] of afVectorEntries) {
+      const indexName = AGENTFEEDBACK_VECTOR_INDEX_NAMES[key];
+      if (existingNames.has(indexName)) {
+        logger.debug(`[index-lifecycle] AgentFeedback vector index '${indexName}' already exists, skipping`);
+        result.skipped.push(indexName);
+      } else {
+        const ok = await createVectorIndex(conn, "AgentFeedback", property, indexName, dimension);
+        if (ok) {
+          result.created.push(indexName);
+        } else {
+          result.failed.push(indexName);
+        }
+      }
+    }
+  } else {
+    logger.debug("[index-lifecycle] Skipping AgentFeedback vector indexes — extension unavailable");
+    for (const [key] of afVectorEntries) {
+      result.skipped.push(AGENTFEEDBACK_VECTOR_INDEX_NAMES[key]);
     }
   }
 

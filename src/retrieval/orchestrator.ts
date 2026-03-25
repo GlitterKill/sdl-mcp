@@ -551,12 +551,13 @@ const ENTITY_FTS_CONFIG: Record<
   cluster:    { tableName: "Cluster",     idField: "clusterId" },
   process:    { tableName: "Process",     idField: "processId" },
   fileSummary:{ tableName: "FileSummary", idField: "fileId" },
+  agentFeedback: { tableName: "AgentFeedback", idField: "feedbackId" },
 };
 
 /**
  * Entity types that support vector search, mapped to their FILESUMMARY or
  * SYMBOL vector index names (model-key -> indexName).
- * Only Symbol and FileSummary have embedding columns.
+ * Symbol, FileSummary, and AgentFeedback have embedding columns.
  */
 const ENTITY_VECTOR_CONFIG: Partial<
   Record<EntityType, Record<string, { indexName: string; idField: string }>>
@@ -568,6 +569,10 @@ const ENTITY_VECTOR_CONFIG: Partial<
   fileSummary: {
     "all-MiniLM-L6-v2":       { indexName: "filesummary_vec_minilm_l6_v2",    idField: "fileId" },
     "nomic-embed-text-v1.5":  { indexName: "filesummary_vec_nomic_embed_v15", idField: "fileId" },
+  },
+  agentFeedback: {
+    "all-MiniLM-L6-v2":       { indexName: "agentfeedback_vec_minilm_l6_v2",    idField: "feedbackId" },
+    "nomic-embed-text-v1.5":  { indexName: "agentfeedback_vec_nomic_embed_v15", idField: "feedbackId" },
   },
 };
 

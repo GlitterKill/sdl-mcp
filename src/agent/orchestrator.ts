@@ -13,6 +13,8 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import { ValidationError } from "../domain/errors.js";
 import { logger } from "../util/logger.js";
 import { entitySearch } from "../retrieval/index.js";
+import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
+import { classifySymptomType } from "../retrieval/evidence.js";
 
 const HANDLED_EVIDENCE_TYPES = new Set([
   "symbolCard", "skeleton", "hotPath", "codeWindow", "diagnostic", "searchResult",
@@ -81,6 +83,35 @@ export class Orchestrator {
         }
       }
 
+      // Feedback-aware boosting: query prior feedback for similar tasks
+      // and add historically useful symbols to the context.
+      if (task.taskText) {
+        try {
+          const conn = await getLadybugConn();
+          const { boosts } = await queryFeedbackBoosts(conn, {
+            repoId: task.repoId,
+            query: task.taskText,
+            limit: 10,
+          });
+
+          if (boosts.size > 0) {
+            // Add boosted symbols not already in context
+            for (const [symbolId] of boosts) {
+              const contextKey = `symbol:${symbolId}`;
+              if (!context.includes(contextKey)) {
+                context.push(contextKey);
+              }
+            }
+            logger.debug("Feedback boost added symbols to agent context", {
+              repoId: task.repoId,
+              symbolsBoosted: boosts.size,
+            });
+          }
+        } catch (err) {
+          logger.debug(`[orchestrator] Feedback boost failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
       const { expandedContext, clusterExpandedCount } =
         await this.expandContextForClusters(context);
 
@@ -107,6 +138,15 @@ export class Orchestrator {
         metrics,
         answer: this.generateAnswer(task, evidence, success),
         nextBestAction,
+        retrievalEvidence: {
+          // The orchestrator only has taskText available (no stackTrace,
+          // failingTestPath, or editedFiles), so symptomType will always be
+          // "taskText" here. This is by design — richer classification is
+          // available in slice.build where all input fields exist.
+          symptomType: classifySymptomType({
+            taskText: task.taskText,
+          }),
+        },
       };
     } catch (error) {
       return this.createErrorResult(

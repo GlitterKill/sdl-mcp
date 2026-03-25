@@ -30,6 +30,7 @@ import { checkRetrievalHealth, shouldFallbackToLegacy } from "../../retrieval/in
 import type { RetrievalEvidence } from "../../retrieval/types.js";
 import { logger } from "../../util/logger.js";
 import { rerankByEmbeddings } from "../../indexer/embeddings.js";
+import { LEGACY_ANN_MAINTENANCE_MODE } from "../../config/constants.js";
 import { buildCardForSymbol } from "../../services/card-builder.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 import {
@@ -134,6 +135,7 @@ export async function handleSymbolSearch(
   // Legacy semantic reranking: only when NOT using hybrid path
   if (
     !useHybrid &&
+    LEGACY_ANN_MAINTENANCE_MODE &&
     semanticRequested &&
     semanticConfig?.enabled === true &&
     rows.length > 0
@@ -232,6 +234,11 @@ export async function handleSymbolSearch(
     candidateCount: rows.length,
     alpha: semanticConfig?.alpha ?? 0.6,
     retrievalMode: useHybrid ? "hybrid" : "legacy",
+    retrievalType: useHybrid
+      ? "hybrid"
+      : semanticEnabled
+        ? "legacy-rerank"
+        : "lexical-only",
     ...(retrievalEvidence?.candidateCountPerSource && {
       candidateCountPerSource: retrievalEvidence.candidateCountPerSource,
     }),

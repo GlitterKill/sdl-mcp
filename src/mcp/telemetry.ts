@@ -125,6 +125,16 @@ export interface SemanticSearchTelemetryEvent {
   fallbackReason?: string;
   /** Final result count after fusion and limiting */
   finalResultCount?: number;
+
+  /**
+   * Normalized retrieval type for dashboards.
+   * Replaces the legacy "semantic rerank" terminology.
+   * Values: "hybrid" (FTS+vector+RRF), "legacy-rerank", "lexical-only"
+   */
+  retrievalType?: "hybrid" | "legacy-rerank" | "lexical-only";
+
+  /** Number of symbols boosted by prior feedback. */
+  feedbackBoostedCount?: number;
 }
 
 export interface SummaryQualityTelemetryEvent {
@@ -389,6 +399,12 @@ export function logSemanticSearchTelemetry(
   }
   if (event.finalResultCount !== undefined) {
     fields.finalResultCount = event.finalResultCount;
+  }
+  if (event.retrievalType !== undefined) {
+    fields.retrievalType = event.retrievalType;
+  }
+  if (event.feedbackBoostedCount !== undefined) {
+    fields.feedbackBoostedCount = event.feedbackBoostedCount;
   }
 
   logger.info("Semantic search", fields);

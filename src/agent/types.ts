@@ -82,6 +82,16 @@ export interface OrchestrationResult {
   metrics: ExecutionMetrics;
   answer?: string;
   nextBestAction?: string;
+  /** Retrieval evidence with symptom classification. */
+  retrievalEvidence?: {
+    symptomType?: "stackTrace" | "failingTest" | "taskText" | "editedFiles";
+    sources?: string[];
+    feedbackBoosts?: {
+      feedbackMatchCount: number;
+      symbolsBoosted: number;
+      feedbackIds: string[];
+    };
+  };
 }
 
 export interface ExecutionMetrics {

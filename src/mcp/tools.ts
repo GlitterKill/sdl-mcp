@@ -1028,6 +1028,8 @@ export const SliceBuildResponseSchema = z.union([
     ]),
     /** Per-symbol retrieval evidence. Only populated when includeRetrievalEvidence is true. */
     retrievalEvidence: z.array(RetrievalEvidenceItemSchema).optional(),
+    /** Symptom type classification. Only populated when includeRetrievalEvidence is true. */
+    symptomType: z.enum(["stackTrace", "failingTest", "taskText", "editedFiles"]).optional(),
   }),
   NotModifiedResponseSchema,
   SliceErrorResponseSchema,
@@ -1693,6 +1695,16 @@ export const AgentOrchestrateResponseSchema = z.object({
     .describe(
       "Suggested next action based on execution results and policy decisions",
     ),
+  /** Retrieval evidence with symptom classification. */
+  retrievalEvidence: z.object({
+    symptomType: z.enum(["stackTrace", "failingTest", "taskText", "editedFiles"]).optional(),
+    sources: z.array(z.string()).optional(),
+    feedbackBoosts: z.object({
+      feedbackMatchCount: z.number(),
+      symbolsBoosted: z.number(),
+      feedbackIds: z.array(z.string()),
+    }).optional(),
+  }).optional(),
 });
 
 export type AgentOrchestrateRequest = z.infer<

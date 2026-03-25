@@ -18,6 +18,7 @@ import type {
 } from "../types.js";
 import { buildSlice } from "../../graph/slice.js";
 import type { RetrievalSource } from "../../retrieval/types.js";
+import { classifySymptomType } from "../../retrieval/evidence.js";
 import { entitySearch } from "../../retrieval/index.js";
 import {
   type SliceErrorResponse,
@@ -537,6 +538,12 @@ async function handleSliceBuildInternal(
         effectiveWireFormatVersion,
       ),
       ...(evidenceItems ? { retrievalEvidence: evidenceItems } : {}),
+      ...(includeRetrievalEvidence ? { symptomType: classifySymptomType({
+        stackTrace,
+        failingTestPath,
+        editedFiles,
+        taskText,
+      }) } : {}),
     };
     attachRawContext(response, { fileIds });
     return response;

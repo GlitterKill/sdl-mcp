@@ -17,6 +17,8 @@ import {
 } from "./embeddings.js";
 import { splitCamelCase, isNameOnlySummary } from "./summaries.js";
 
+import { LEGACY_ANN_MAINTENANCE_MODE } from "../config/constants.js";
+
 export interface SummaryTransferResult {
   transferred: number;
   directTransfers: number;
@@ -66,6 +68,11 @@ export async function transferSummariesFromNeighbors(
     noNeighbor: 0,
     rejected: 0,
   };
+
+  if (!LEGACY_ANN_MAINTENANCE_MODE) {
+    logger.debug("[summary-transfer] ANN-based summary transfer skipped \u2014 legacy maintenance mode is off");
+    return result;
+  }
 
   // Gate: ANN index must be ready
   const annManager = getAnnIndexManager();
