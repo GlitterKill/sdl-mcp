@@ -49,11 +49,11 @@ describe("prefetch pipeline", () => {
     assert.strictEqual(stats.enabled, true);
   });
 
-  it("serve command default resolves to enabled (enabled ?? true is true)", () => {
-    // Simulate the serve.ts default: config.prefetch?.enabled ?? true
+  it("serve command default resolves to disabled when config key is absent", () => {
+    // Simulate the serve.ts default: config.prefetch?.enabled ?? false
     const configPrefetchEnabled: boolean | undefined = undefined;
-    const resolvedEnabled = configPrefetchEnabled ?? true;
-    assert.strictEqual(resolvedEnabled, true);
+    const resolvedEnabled = configPrefetchEnabled ?? false;
+    assert.strictEqual(resolvedEnabled, false);
   });
 
   it("trains lightweight model from tool traces", () => {

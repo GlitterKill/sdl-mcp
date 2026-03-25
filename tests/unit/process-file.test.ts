@@ -1,6 +1,11 @@
-import { describe, it, before } from "node:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
 
+import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import {
   isTestFile,
   createEmptyProcessFileResult,
@@ -10,7 +15,10 @@ import {
   getAdapterForExtension,
   loadBuiltInAdapters,
 } from "../../dist/indexer/adapter/registry.js";
-import type { ProcessFileParams } from "../../dist/indexer/parser/process-file.js";
+import {
+  processFile,
+  type ProcessFileParams,
+} from "../../dist/indexer/parser/process-file.js";
 
 describe("process-file helpers — isTestFile", () => {
   const languages = ["ts", "tsx", "js", "jsx"];
@@ -71,6 +79,104 @@ describe("process-file helpers — createEmptyProcessFileResult", () => {
     assert.strictEqual(result.changed, false);
     assert.deepStrictEqual(result.configEdges, []);
     assert.deepStrictEqual(result.pass2HintPaths, []);
+  });
+});
+
+describe("process-file — binary skip cleanup", () => {
+  const repoId = "binary-skip-repo";
+  const graphDbPath = mkdtempSync(join(tmpdir(), "sdl-binary-skip-db-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "sdl-binary-skip-repo-"));
+  const relPath = "src/binary.ts";
+  const fileId = `${repoId}:${relPath}`;
+  const filePath = join(repoRoot, "src", "binary.ts");
+  const now = "2026-03-25T12:00:00.000Z";
+
+  before(async () => {
+    mkdirSync(join(repoRoot, "src"), { recursive: true });
+    writeFileSync(filePath, Buffer.from([0x61, 0x00, 0x62]));
+
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
+
+    await ladybugDb.upsertRepo(conn, {
+      repoId,
+      rootPath: repoRoot,
+      configJson: JSON.stringify({
+        repoId,
+        rootPath: repoRoot,
+        ignore: [],
+        languages: ["ts"],
+        maxFileBytes: 2_000_000,
+        includeNodeModulesTypes: true,
+      }),
+      createdAt: now,
+    });
+
+    await ladybugDb.upsertFile(conn, {
+      fileId,
+      repoId,
+      relPath,
+      contentHash: "old-hash",
+      language: "ts",
+      byteSize: 3,
+      lastIndexedAt: now,
+    });
+
+    await ladybugDb.upsertSymbol(conn, {
+      symbolId: `${fileId}:stale-symbol`,
+      repoId,
+      fileId,
+      kind: "function",
+      name: "staleSymbol",
+      exported: true,
+      visibility: null,
+      language: "ts",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 1,
+      rangeEndCol: 10,
+      astFingerprint: "stale-fingerprint",
+      signatureJson: null,
+      summary: null,
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: now,
+    });
+  });
+
+  after(async () => {
+    await closeLadybugDb();
+    rmSync(graphDbPath, { recursive: true, force: true });
+    rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  it("persists skipped binary files and clears stale symbols", async () => {
+    const result = await processFile({
+      repoId,
+      repoRoot,
+      fileMeta: {
+        path: relPath,
+        size: 3,
+        mtime: Date.now(),
+      },
+      languages: ["ts"],
+      mode: "incremental",
+      existingFile: {
+        fileId,
+        contentHash: "old-hash",
+        lastIndexedAt: null,
+      },
+    });
+
+    assert.strictEqual(result.changed, true);
+
+    const conn = await getLadybugConn();
+    const file = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
+    assert.ok(file, "Expected skipped file metadata to be persisted");
+
+    const symbols = await ladybugDb.getSymbolsByFile(conn, fileId);
+    assert.deepStrictEqual(symbols, []);
   });
 });
 

@@ -349,7 +349,7 @@ class JavaAdapter extends BaseAdapter {
           isExternal:
             !specifier.startsWith("java.") &&
             !specifier.startsWith("javax.") &&
-            !specifier.startsWith("com."),
+            !specifier.startsWith("jdk."),
           imports: isWildcard ? ["*"] : [specifier.split(".").pop() || ""],
           isReExport: false,
         };

@@ -1428,6 +1428,7 @@ class ParallelScorerPool {
           ),
         );
       }, 5000);
+      timeout.unref();
 
       const handler = (msg: ScoreWorkerOutput) => {
         clearTimeout(timeout);

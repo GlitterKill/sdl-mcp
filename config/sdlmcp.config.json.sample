@@ -37,7 +37,7 @@
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,
     "requireIdentifiers": true,
-    "allowBreakGlass": true
+    "allowBreakGlass": false
   },
   "redaction": {
     "enabled": true,

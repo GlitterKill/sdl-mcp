@@ -288,7 +288,7 @@ export async function watchRepositoryWithIndexer(
             const errMsg = err instanceof Error ? err.message : String(err);
             recordWatcherError(`[sdl-mcp] reindexWithRetry failed: ${errMsg}`);
           });
-        }, delay);
+        }, delay).unref();
       } else {
         // All retry attempts exhausted; decrement pending so stale detection stays accurate
         health.pendingChanges = Math.max(0, health.pendingChanges - 1);
@@ -305,17 +305,16 @@ export async function watchRepositoryWithIndexer(
     } else {
       health.pendingChanges += 1;
     }
-    pending.set(
-      filePath,
-      setTimeout(() => {
-        pending.delete(filePath);
-        updateQueueDepth();
-        void reindexWithRetry(filePath).catch((err: unknown) => {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          recordWatcherError(`[sdl-mcp] reindexWithRetry failed: ${errMsg}`);
-        });
-      }, debounceMs),
-    );
+    const debounceTimer = setTimeout(() => {
+      pending.delete(filePath);
+      updateQueueDepth();
+      void reindexWithRetry(filePath).catch((err: unknown) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        recordWatcherError(`[sdl-mcp] reindexWithRetry failed: ${errMsg}`);
+      });
+    }, debounceMs);
+    debounceTimer.unref();
+    pending.set(filePath, debounceTimer);
     updateQueueDepth();
   };
 

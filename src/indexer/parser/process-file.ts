@@ -127,11 +127,31 @@ export async function processFile(params: ProcessFileParams): Promise<{
       }
       throw readError;
     }
+
     const contentHash = hashContent(content);
     const ext = fileMeta.path.split(".").pop() || "";
     const extWithDot = `.${ext}`;
     const relPath = normalizePath(fileMeta.path);
     const fileId = existingFile?.fileId ?? `${repoId}:${relPath}`;
+
+    // Skip binary files (files containing null bytes) after we have enough
+    // file metadata to persist the skipped state and clear stale symbols.
+    if (content.includes("\0")) {
+      logger.debug(`Skipping binary file: ${fileMeta.path}`);
+      await withWriteConn(async (wConn) => {
+        await persistSkippedFile({
+          conn: wConn,
+          existingFileId: existingFile?.fileId,
+          fileId,
+          repoId,
+          relPath,
+          contentHash,
+          language: ext,
+          byteSize: fileMeta.size,
+        });
+      });
+      return createEmptyProcessFileResult(true);
+    }
 
     if (
       mode === "incremental" &&
@@ -194,7 +214,6 @@ export async function processFile(params: ProcessFileParams): Promise<{
     let tree: ReturnType<typeof adapter.parse> = null;
 
     try {
-      // eslint-disable-line no-useless-catch -- tree.delete() in outer finally
       if (workerPool) {
         try {
           const result = await workerPool.parse(filePath, content, extWithDot);

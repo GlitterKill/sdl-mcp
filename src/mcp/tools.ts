@@ -1252,7 +1252,7 @@ const PolicyConfigSchema = z.object({
   maxWindowLines: z.number().int().min(1).default(DEFAULT_MAX_WINDOW_LINES),
   maxWindowTokens: z.number().int().min(1).default(DEFAULT_MAX_WINDOW_TOKENS),
   requireIdentifiers: z.boolean().default(true),
-  allowBreakGlass: z.boolean().default(true),
+  allowBreakGlass: z.boolean().default(false),
 });
 
 export const PolicyGetRequestSchema = z.object({

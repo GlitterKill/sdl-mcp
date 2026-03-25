@@ -132,7 +132,7 @@
         "allowBreakGlass": {
           "type": "boolean",
           "description": "Allow break-glass mode to override policy temporarily",
-          "default": true
+          "default": false
         },
         "defaultMinCallConfidence": {
           "type": "number",
@@ -754,7 +754,7 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "default": true
+          "default": false
         },
         "maxBudgetPercent": {
           "type": "integer",
@@ -769,7 +769,7 @@
         }
       },
       "default": {
-        "enabled": true,
+        "enabled": false,
         "maxBudgetPercent": 20,
         "warmTopN": 50
       }
@@ -956,6 +956,12 @@
           "minimum": 1,
           "maximum": 8,
           "default": 2
+        },
+        "envAllowlist": {
+          "type": "array",
+          "description": "Environment variable names to pass through to sandboxed subprocesses",
+          "items": { "type": "string" },
+          "default": []
         }
       },
       "default": {
@@ -963,7 +969,23 @@
         "allowedRuntimes": ["node", "python"],
         "allowedExecutables": [],
         "maxDurationMs": 30000,
-        "maxConcurrentJobs": 2
+        "maxConcurrentJobs": 2,
+        "envAllowlist": []
+      }
+    },
+    "security": {
+      "type": "object",
+      "description": "Access control configuration",
+      "properties": {
+        "allowedRepoRoots": {
+          "type": "array",
+          "description": "Whitelist of allowed repository root path prefixes. Empty array allows any path.",
+          "items": { "type": "string" },
+          "default": []
+        }
+      },
+      "default": {
+        "allowedRepoRoots": []
       }
     },
     "gateway": {

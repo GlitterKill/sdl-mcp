@@ -204,6 +204,7 @@ export async function execute(
       killProcessTree(child.pid);
     }
   }, request.timeoutMs);
+  timer.unref();
 
   let cancelled = false;
   const onAbort = () => {

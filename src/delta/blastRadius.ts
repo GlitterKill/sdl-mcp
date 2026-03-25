@@ -408,6 +408,7 @@ async function runDiagnosticsWithTimeout(
           () => reject(new Error("Diagnostics timeout")),
           timeoutMs,
         );
+        timeoutHandle.unref();
       }),
     ]);
     return { suspects: result.suspects };
