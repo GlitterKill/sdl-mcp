@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { readFile, stat } from "fs/promises";
 
-import Parser from "tree-sitter";
+import type Parser from "tree-sitter";
 
 import type { RepoId, SymbolId } from "../db/schema.js";
 import type { Range, SkeletonOp, SkeletonIR } from "../domain/types.js";
@@ -19,7 +19,7 @@ import { getParser as getGrammarParser } from "../indexer/treesitter/grammarLoad
 import { logger } from "../util/logger.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
-import { tsParser, tsxParser } from "./ts-parsers.js";
+import { getTsParser, getTsxParser } from "./ts-parsers.js";
 
 export interface SkeletonResult {
   skeleton: string;
@@ -600,7 +600,7 @@ export function parseFile(
     let parser: Parser | null = null;
 
     if (isTS || isTSX || isJS || isJSX) {
-      parser = isTS || isJS ? tsParser : tsxParser;
+      parser = isTS || isJS ? getTsParser() : getTsxParser();
     } else {
       // All other languages: use the shared grammarLoader
       const language = EXTENSION_TO_LANGUAGE[extension];

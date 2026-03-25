@@ -4,25 +4,25 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 
-describe("ts-parsers shared instances", () => {
-  it("exports tsParser as a Parser instance", () => {
+describe("ts-parsers lazy instances", () => {
+  it("getTsParser returns a Parser instance", () => {
     const Parser = require("tree-sitter");
-    const { tsParser } = require("../../dist/code/ts-parsers.js");
+    const { getTsParser } = require("../../dist/code/ts-parsers.js");
 
-    assert.ok(tsParser instanceof Parser);
+    assert.ok(getTsParser() instanceof Parser);
   });
 
-  it("exports tsxParser as a Parser instance", () => {
+  it("getTsxParser returns a Parser instance", () => {
     const Parser = require("tree-sitter");
-    const { tsxParser } = require("../../dist/code/ts-parsers.js");
+    const { getTsxParser } = require("../../dist/code/ts-parsers.js");
 
-    assert.ok(tsxParser instanceof Parser);
+    assert.ok(getTsxParser() instanceof Parser);
   });
 
-  it("tsParser parses valid TypeScript", () => {
-    const { tsParser } = require("../../dist/code/ts-parsers.js");
+  it("getTsParser() parses valid TypeScript", () => {
+    const { getTsParser } = require("../../dist/code/ts-parsers.js");
 
-    const tree = tsParser.parse(
+    const tree = getTsParser().parse(
       "type UserId = string; const id: UserId = 'x';",
     );
 
@@ -30,10 +30,10 @@ describe("ts-parsers shared instances", () => {
     assert.strictEqual(tree.rootNode.hasError, false);
   });
 
-  it("tsxParser parses valid TSX", () => {
-    const { tsxParser } = require("../../dist/code/ts-parsers.js");
+  it("getTsxParser() parses valid TSX", () => {
+    const { getTsxParser } = require("../../dist/code/ts-parsers.js");
 
-    const tree = tsxParser.parse(
+    const tree = getTsxParser().parse(
       "export const Card = () => <div className='x'>ok</div>;",
     );
 
@@ -41,19 +41,19 @@ describe("ts-parsers shared instances", () => {
     assert.strictEqual(tree.rootNode.hasError, false);
   });
 
-  it("tsxParser parses plain TypeScript too", () => {
-    const { tsxParser } = require("../../dist/code/ts-parsers.js");
+  it("getTsxParser() parses plain TypeScript too", () => {
+    const { getTsxParser } = require("../../dist/code/ts-parsers.js");
 
-    const tree = tsxParser.parse("interface Config { retries: number; }");
+    const tree = getTsxParser().parse("interface Config { retries: number; }");
 
     assert.ok(tree);
     assert.strictEqual(tree.rootNode.hasError, false);
   });
 
-  it("tsParser reports error on TSX JSX syntax", () => {
-    const { tsParser } = require("../../dist/code/ts-parsers.js");
+  it("getTsParser() reports error on TSX JSX syntax", () => {
+    const { getTsParser } = require("../../dist/code/ts-parsers.js");
 
-    const tree = tsParser.parse("const view = <div />;");
+    const tree = getTsParser().parse("const view = <div />;");
 
     assert.ok(tree);
     assert.strictEqual(tree.rootNode.hasError, true);
