@@ -149,6 +149,7 @@ export async function searchSymbolsWithOverlay(
   const snapshot = getOverlaySnapshot(repoId);
   const durableRows = (await ladybugDb.searchSymbolsLite(conn, repoId, query, limit * 2))
     .filter((row) => !snapshot.touchedFileIds.has(row.fileId));
+  const durableSymbolIds = new Set(durableRows.map((row) => row.symbolId));
   const durableFileMap = await ladybugDb.getFilesByIds(
     conn,
     Array.from(new Set(durableRows.map((row) => row.fileId))),
@@ -194,6 +195,7 @@ export async function searchSymbolsWithOverlay(
       summary: symbol.summary,
       searchText: symbol.searchText,
       matchedTermCount: matchCount,
+      overlayOnly: !durableSymbolIds.has(symbol.symbolId),
     });
   }
 
