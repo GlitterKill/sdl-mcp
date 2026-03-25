@@ -15,6 +15,7 @@ import { mergeSearchResults, type OverlaySearchResult } from "./overlay-merge.js
 import { hybridSearch } from "../retrieval/orchestrator.js";
 import type { RetrievalEvidence } from "../retrieval/types.js";
 import type { DraftOverlayEntry } from "./overlay-store.js";
+import { getOverlayEmbeddingCache } from "./overlay-embedding-cache.js";
 
 export interface OverlaySnapshot {
   repoId: string;
@@ -305,6 +306,11 @@ export async function searchSymbolsHybridWithOverlay(
       // Overlay-only: no durable DB record for this symbolId
       overlayOnly: !durableSymbolIdSet.has(symbol.symbolId),
     });
+    // Fire-and-forget: lazily populate the embedding cache for this overlay symbol.
+    // This never blocks the search path — the result will be used on subsequent calls.
+    getOverlayEmbeddingCache()
+      .computeAndCacheSymbol(symbol)
+      .catch(() => {});
   }
 
   // 4. Merge: use mergeSearchResults for proper interleaving.

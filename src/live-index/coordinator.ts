@@ -16,6 +16,7 @@ import {
   type LiveStatus,
 } from "./types.js";
 import { IndexError } from "../domain/errors.js";
+import { getOverlayEmbeddingCache } from "./overlay-embedding-cache.js";
 
 export interface InMemoryLiveIndexCoordinatorOptions {
   enabled?: boolean;
@@ -78,6 +79,11 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
             payload.version,
             parseResult,
             parsedAt,
+          );
+          // Invalidate embedding cache for freshly-parsed symbols so stale
+          // embeddings from the previous parse version do not persist.
+          getOverlayEmbeddingCache().invalidateMany(
+            parseResult.symbols.map((s) => s.symbolId),
           );
         } catch (error) {
           this.overlayStore.setParseFailure(
@@ -150,6 +156,14 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
       };
     }
 
+    // Invalidate overlay embedding cache for any symbols in this file's previous draft.
+    {
+      const prevDraft = this.overlayStore.getDraft(input.repoId, input.filePath);
+      if (prevDraft?.parseResult) {
+        const staleIds = prevDraft.parseResult.symbols.map((s) => s.symbolId);
+        getOverlayEmbeddingCache().invalidateMany(staleIds);
+      }
+    }
     this.overlayStore.upsertDraft(input);
     if (input.eventType === "save" && !input.dirty) {
       const patched = await patchSavedFile({
