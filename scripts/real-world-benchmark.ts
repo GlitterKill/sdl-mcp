@@ -16,12 +16,17 @@
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { globSync } from "node:fs";
-import { initLadybugDb, getLadybugConn } from "../dist/db/ladybug.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../dist/db/ladybug.js";
 import { resolveGraphDbPath } from "../dist/db/graph-db-path.js";
 import type { Connection } from "kuzu";
 import { loadConfig } from "../dist/config/loadConfig.js";
 import * as db from "../dist/db/ladybug-queries.js";
 import { indexRepo } from "../dist/indexer/indexer.js";
+import { unwrapSliceBuildResult } from "../dist/benchmark/slice-build-result.js";
 import { buildSlice } from "../dist/graph/slice.js";
 import { generateSymbolSkeleton } from "../dist/code/skeleton.js";
 import { handleSymbolGetCard } from "../dist/mcp/tools/symbol.js";
@@ -1468,7 +1473,7 @@ async function runCompletionPass(
     };
 
     const sliceStart = performance.now();
-    const slice = await buildSlice({
+    const sliceResult = await buildSlice({
       repoId,
       versionId,
       entrySymbols: uniqueLimit(
@@ -1480,6 +1485,7 @@ async function runCompletionPass(
       cardDetail: "compact",
       budget: completionSliceBudget,
     });
+    const slice = unwrapSliceBuildResult(sliceResult);
     const sliceBuildTimeMs = performance.now() - sliceStart;
     sdlState.slicesBuilt += 1;
     sdlState.sliceBuildTimeMs += sliceBuildTimeMs;
@@ -1806,7 +1812,7 @@ async function runSdlStep(
 
     const sliceStart = performance.now();
     const knownCardEtags = Object.fromEntries(state.cardEtags.entries());
-    slice = await buildSlice({
+    const sliceResult = await buildSlice({
       repoId,
       versionId,
       entrySymbols: entrySymbolIds,
@@ -1815,6 +1821,7 @@ async function runSdlStep(
       cardDetail: "compact",
       budget: sliceBudget,
     });
+    slice = unwrapSliceBuildResult(sliceResult);
     sliceBuildTimeMs = performance.now() - sliceStart;
 
     sliceCards = slice.cards.length;
@@ -2654,9 +2661,13 @@ async function runBenchmark(): Promise<void> {
   printHeader("BENCHMARK COMPLETE");
 }
 
-runBenchmark().catch((error) => {
+try {
+  await runBenchmark();
+} catch (error) {
   console.error(
     `Benchmark failed: ${error instanceof Error ? error.stack : String(error)}`,
   );
-  process.exit(1);
-});
+  process.exitCode = 1;
+} finally {
+  await closeLadybugDb();
+}
