@@ -122,16 +122,6 @@ const ENFORCED_ALLOWED_RUNTIMES = [
   "shell",
 ] as const;
 
-const ENFORCED_CODE_MODE_CONFIG = {
-  enabled: true,
-  exclusive: true,
-  maxChainSteps: 20,
-  maxChainTokens: 50_000,
-  maxChainDurationMs: 60_000,
-  ladderValidation: "warn" as const,
-  etagCaching: true,
-};
-
 const ENFORCED_RUNTIME_CONFIG = {
   enabled: true,
   allowedRuntimes: [...ENFORCED_ALLOWED_RUNTIMES],
@@ -580,19 +570,20 @@ function buildClaudeExploreAgent(repoId: string): string {
   return `---
 name: explore-sdl
 description: Explore indexed source code in ${repoId} with SDL-MCP instead of native Read.
-tools: Grep, Glob, mcp__sdl-mcp__*
+tools: Grep, Glob, Bash, mcp__sdl-mcp__*
 disallowedTools: Read
 model: inherit
 ---
 
 Use SDL-MCP for source code understanding in this repository.
 
-- Start with \`mcp__sdl-mcp__sdl.repo.status\`.
-- Use \`mcp__sdl-mcp__sdl.action.search\` when the right action is unclear.
-- Use \`mcp__sdl-mcp__sdl.manual\` with focused \`query\` or \`actions\`.
-- Prefer \`mcp__sdl-mcp__sdl.chain\` for multi-step workflows.
-- Use \`mcp__sdl-mcp__sdl.symbol.getCard\` or \`mcp__sdl-mcp__sdl.symbol.getCards\` with \`symbolRef\` / \`symbolRefs\` when the exact \`symbolId\` is unknown.
-- Use SDL runtime via \`runtimeExecute\` in \`sdl.chain\` for repo-local commands.
+- Start with \`sdl.repo.status\` to check repo state.
+- Use \`sdl.action.search\` when the right action is unclear.
+- Use \`sdl.manual\` with focused \`query\` or \`actions\` for targeted reference.
+- Prefer \`sdl.chain\` for multi-step workflows in a single round trip.
+- Use \`symbolRef\` / \`symbolRefs\` when you know a symbol name but not the canonical \`symbolId\`.
+- Follow the Context Ladder: search -> getCard/getCards -> slice.build -> getSkeleton -> getHotPath -> needWindow (last resort).
+- Use \`runtimeExecute\` in \`sdl.chain\` for repo-local commands with \`outputMode: "minimal"\` (default). Use \`runtimeQueryOutput\` with the \`artifactHandle\` to retrieve output on demand.
 - Follow \`nextBestAction\`, \`fallbackTools\`, \`fallbackRationale\`, and candidate guidance from SDL responses instead of retrying native tools.
 - Do not use native \`Read\` for indexed source files.
 - If you need a non-code file, ask the parent session to read it directly.

@@ -163,8 +163,10 @@ Then run manual refreshes with `sdl-mcp index` until the underlying issue is fix
 #### Database incompatible after upgrade
 
 - Symptom: error "not compatible with the current graph engine" on startup
-- Cause: LadybugDB schema version changed between SDL-MCP releases; in-place migration is not supported
-- Resolution: delete the `.lbug` database directory and re-run `sdl-mcp index` to rebuild from source
+- Cause: LadybugDB schema version changed between SDL-MCP releases in a way the current build cannot migrate automatically
+- Resolution:
+  - restart SDL-MCP once to allow any pending forward migrations to run
+  - if the database is still reported as incompatible, delete the `.lbug` database directory and re-run `sdl-mcp index` to rebuild from source
 
 ### Semantic / Embedding Setup Issues
 

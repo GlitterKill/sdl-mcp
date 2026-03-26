@@ -74,6 +74,61 @@ async function createV4Database(dbPath: string): Promise<void> {
   await db.close();
 }
 
+async function createV8DatabaseWithoutSummaryMetadata(
+  dbPath: string,
+): Promise<void> {
+  const kuzu = await import("kuzu");
+
+  const db = new kuzu.Database(dbPath);
+  const conn = new kuzu.Connection(db);
+
+  const ddl = [
+    `CREATE NODE TABLE IF NOT EXISTS Repo (repoId STRING PRIMARY KEY, rootPath STRING, configJson STRING, createdAt STRING)`,
+    `CREATE NODE TABLE IF NOT EXISTS File (fileId STRING PRIMARY KEY, relPath STRING, contentHash STRING, language STRING, byteSize INT64, lastIndexedAt STRING, directory STRING)`,
+    `CREATE NODE TABLE IF NOT EXISTS Symbol (symbolId STRING PRIMARY KEY, kind STRING, name STRING, exported BOOLEAN, visibility STRING, language STRING, rangeStartLine INT64, rangeStartCol INT64, rangeEndLine INT64, rangeEndCol INT64, astFingerprint STRING, signatureJson STRING, summary STRING, invariantsJson STRING, sideEffectsJson STRING, roleTagsJson STRING, searchText STRING, updatedAt STRING, embeddingMiniLM STRING, embeddingMiniLMCardHash STRING, embeddingMiniLMUpdatedAt STRING, embeddingNomic STRING, embeddingNomicCardHash STRING, embeddingNomicUpdatedAt STRING)`,
+    `CREATE NODE TABLE IF NOT EXISTS Cluster (clusterId STRING PRIMARY KEY, repoId STRING, label STRING, symbolCount INT32 DEFAULT 0, cohesionScore DOUBLE DEFAULT 0.0, versionId STRING, createdAt STRING, searchText STRING)`,
+    `CREATE NODE TABLE IF NOT EXISTS Process (processId STRING PRIMARY KEY, repoId STRING, entrySymbolId STRING, label STRING, depth INT32 DEFAULT 0, versionId STRING, createdAt STRING, searchText STRING)`,
+    `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (id STRING PRIMARY KEY, schemaVersion INT64, createdAt STRING, updatedAt STRING)`,
+    `CREATE REL TABLE IF NOT EXISTS FILE_IN_REPO (FROM File TO Repo)`,
+    `CREATE REL TABLE IF NOT EXISTS SYMBOL_IN_FILE (FROM Symbol TO File)`,
+    `CREATE REL TABLE IF NOT EXISTS SYMBOL_IN_REPO (FROM Symbol TO Repo)`,
+  ];
+
+  for (const stmt of ddl) {
+    closeResult(await conn.query(stmt));
+  }
+
+  const now = new Date().toISOString();
+  closeResult(
+    await conn.query(
+      `CREATE (r:Repo {repoId: 'repo-1', rootPath: '/repo', configJson: '{}', createdAt: '${now}'})`,
+    ),
+  );
+  closeResult(
+    await conn.query(
+      `CREATE (f:File {fileId: 'file-1', relPath: 'src/example.ts', contentHash: 'hash-1', language: 'typescript', byteSize: 42, lastIndexedAt: '${now}', directory: 'src'})`,
+    ),
+  );
+  closeResult(
+    await conn.query(
+      `CREATE (s:Symbol {symbolId: 'sym-1', kind: 'function', name: 'exampleFn', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 3, rangeEndCol: 1, astFingerprint: 'fp-1', signatureJson: '{}', summary: 'Example summary', invariantsJson: null, sideEffectsJson: null, roleTagsJson: '[]', searchText: 'exampleFn Example summary', updatedAt: '${now}', embeddingMiniLM: null, embeddingMiniLMCardHash: null, embeddingMiniLMUpdatedAt: null, embeddingNomic: null, embeddingNomicCardHash: null, embeddingNomicUpdatedAt: null})`,
+    ),
+  );
+  closeResult(
+    await conn.query(
+      `MATCH (f:File {fileId: 'file-1'}), (r:Repo {repoId: 'repo-1'}), (s:Symbol {symbolId: 'sym-1'}) CREATE (f)-[:FILE_IN_REPO]->(r), (s)-[:SYMBOL_IN_FILE]->(f), (s)-[:SYMBOL_IN_REPO]->(r)`,
+    ),
+  );
+  closeResult(
+    await conn.query(
+      `CREATE (sv:SchemaVersion {id: 'current', schemaVersion: 8, createdAt: '${now}', updatedAt: '${now}'})`,
+    ),
+  );
+
+  await conn.close();
+  await db.close();
+}
+
 describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
   const testRoot = join(
     tmpdir(),
@@ -136,6 +191,30 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     const conn = await getLadybugConn();
     const version = await getSchemaVersion(conn);
     assert.strictEqual(version, LADYBUG_SCHEMA_VERSION);
+  });
+
+  it("upgrades old v8 DBs that are missing Symbol summary metadata columns", async () => {
+    mkdirSync(testRoot, { recursive: true });
+    const dbPath = join(testRoot, "v8-summary-metadata.lbug");
+
+    await createV8DatabaseWithoutSummaryMetadata(dbPath);
+    await initLadybugDb(dbPath);
+
+    const conn = await getLadybugConn();
+    const result = await conn.query(
+      `MATCH (s:Symbol {symbolId: 'sym-1'})
+       RETURN s.summaryQuality AS summaryQuality, s.summarySource AS summarySource`,
+    );
+    const qr = Array.isArray(result) ? result[0] : result;
+    const rows = (await qr.getAll()) as Array<{
+      summaryQuality: unknown;
+      summarySource: unknown;
+    }>;
+    qr.close();
+
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].summaryQuality, 0);
+    assert.strictEqual(rows[0].summarySource, "unknown");
   });
 
   it("best-effort: DB newer than code logs warning but does not throw", async () => {

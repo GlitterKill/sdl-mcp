@@ -12,9 +12,10 @@ import * as m005 from "./m005-add-memory-system.js";
 import * as m006 from "./m006-add-usage-snapshot.js";
 import * as m007 from "./m007-copy-embeddings-to-symbol.js";
 import * as m008 from "./m008-add-entity-searchtext.js";
+import * as m009 from "./m009-add-symbol-summary-metadata.js";
 
 /** Ordered list of all migrations. Must be sorted by version ascending. */
-export const migrations: Migration[] = [m005, m006, m007, m008];
+export const migrations: Migration[] = [m005, m006, m007, m008, m009];
 
 // --- Registry validation (runs at import time) ---
 function validateMigrations(migs: Migration[]): void {
