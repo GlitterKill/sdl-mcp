@@ -159,6 +159,19 @@ describe("Gateway schemas", () => {
       });
       assert.strictEqual(result.success, true);
     });
+
+    it("rejects partial policy.set budgetCaps patches", () => {
+      const result = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "policy.set",
+        policyPatch: {
+          budgetCaps: {
+            maxCards: 10,
+          },
+        },
+      });
+      assert.strictEqual(result.success, false);
+    });
   });
 
   describe("AgentGatewaySchema", () => {

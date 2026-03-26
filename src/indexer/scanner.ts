@@ -9,6 +9,8 @@ export interface ScanRepoForIndexResult {
   files: FileMetadata[];
   existingByPath: Map<string, ladybugDb.FileRow>;
   removedFiles: number;
+  /** True when incremental mode can short-circuit: no removed files and all scanned file mtimes match DB. */
+  allFilesUnchanged: boolean;
 }
 
 export async function scanRepoForIndex(params: {
@@ -43,5 +45,13 @@ export async function scanRepoForIndex(params: {
     });
   }
 
-  return { files, existingByPath, removedFiles };
+  // Check if all files have unchanged mtimes (enables fast early-exit in indexer)
+  const allFilesUnchanged = removedFiles === 0 && files.every((f) => {
+    const existing = existingByPath.get(f.path);
+    if (!existing?.lastIndexedAt) return false;
+    const lastIndexedMs = new Date(existing.lastIndexedAt).getTime();
+    return f.mtime <= lastIndexedMs;
+  });
+
+  return { files, existingByPath, removedFiles, allFilesUnchanged };
 }

@@ -1,5 +1,5 @@
 import { ChainRequestSchema, type ChainBudget } from "./types.js";
-import { FN_NAME_MAP } from "./manual-generator.js";
+import { FN_NAME_MAP, ACTION_TO_FN } from "./manual-generator.js";
 import { isInternalTransform } from "./transforms.js";
 
 export interface ParsedChainStep {
@@ -75,8 +75,15 @@ export function parseChainRequest(
 
     const isTransform = isInternalTransform(step.fn);
 
+    // Normalize dot-notation (e.g., "repo.status") to camelCase (e.g., "repoStatus")
+    let resolvedFn = step.fn;
+    if (!isTransform && !(resolvedFn in FN_NAME_MAP)) {
+      const mapped = ACTION_TO_FN[resolvedFn];
+      if (mapped) resolvedFn = mapped;
+    }
+
     // Validate fn exists in FN_NAME_MAP or is an internal transform
-    if (!isTransform && !(step.fn in FN_NAME_MAP)) {
+    if (!isTransform && !(resolvedFn in FN_NAME_MAP)) {
       errors.push(
         `Unknown function '${step.fn}' in step ${i}. Available: ${Object.keys(FN_NAME_MAP).join(", ")}, dataPick, dataMap, dataFilter, dataSort, dataTemplate`,
       );
@@ -92,8 +99,8 @@ export function parseChainRequest(
     }
 
     parsedSteps.push({
-      fn: step.fn,
-      action: isTransform ? step.fn : FN_NAME_MAP[step.fn],
+      fn: resolvedFn,
+      action: isTransform ? step.fn : FN_NAME_MAP[resolvedFn],
       args: step.args,
       internal: isTransform,
     });

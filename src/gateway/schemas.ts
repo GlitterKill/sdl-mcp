@@ -273,6 +273,22 @@ const PolicySetAction = z.object({
       .optional(),
     requireIdentifiers: z.boolean().optional(),
     allowBreakGlass: z.boolean().optional(),
+    defaultMinCallConfidence: z.number().min(0).max(1).optional(),
+    defaultDenyRaw: z.boolean().optional(),
+    budgetCaps: z
+      .object({
+        maxCards: z.number().int().min(1).optional(),
+        maxEstimatedTokens: z.number().int().min(1).optional(),
+      })
+      .refine(
+        (caps) =>
+          caps.maxCards !== undefined && caps.maxEstimatedTokens !== undefined,
+        {
+          message:
+            "budgetCaps patch must include both maxCards and maxEstimatedTokens",
+        },
+      )
+      .optional(),
   }),
 });
 
@@ -352,6 +368,10 @@ const BufferPushAction = z.object({
     .refine(
       (p) => !p.includes("..") && !/^[\/]/.test(p) && !/^[A-Za-z]:/.test(p),
       { message: "filePath must be a relative path without traversal sequences" },
+    )
+    .refine(
+      (p) => !p.includes("\0"),
+      { message: "filePath must not contain null bytes" },
     ),
   content: z.string().max(5_242_880),
   language: z.string().optional(),

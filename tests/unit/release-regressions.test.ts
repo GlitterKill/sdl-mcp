@@ -361,4 +361,14 @@ describe("release regression guards", () => {
       "policy.set should persist only repo overrides",
     );
   });
+
+  it("does not short-circuit no-change incremental indexing before shared finalization", () => {
+    const source = readSource("src/indexer/indexer.ts");
+
+    assert.doesNotMatch(
+      source,
+      /if \(mode === "incremental" && allFilesUnchanged\) \{[\s\S]*?return \{/s,
+      "indexRepoImpl should not return early for no-change incremental runs",
+    );
+  });
 });
