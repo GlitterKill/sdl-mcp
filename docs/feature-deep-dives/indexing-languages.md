@@ -212,26 +212,33 @@ Each symbol card includes its process participation with role and depth.
 
 SDL-MCP can generate 1–3 sentence semantic summaries for every symbol using an LLM provider. Summaries are cached in the graph database and surfaced in symbol cards, improving both human readability and embedding quality.
 
-#### Three Quality Tiers
+#### Four Quality Tiers
 
-The summary system interacts with the embedding pipeline to create three distinct quality tiers:
+The summary system interacts with the embedding pipeline to create four distinct quality tiers:
 
 ```
- Tier     Embedding Model          Summary Source        Cost
- ─────    ──────────────────────   ───────────────────   ──────────
- Low      all-MiniLM-L6-v2         None (raw text)       Free
-          384-dim, ~22 MB                                 (bundled)
+ Tier       Embedding Model          Summary Source              Cost
+ ─────      ──────────────────────   ─────────────────────────   ──────────
+ Low        all-MiniLM-L6-v2         Heuristic (basic)           Free
+            384-dim, ~22 MB                                      (bundled)
 
- Medium   nomic-embed-text-v1.5    None (raw text)         Free
-          768-dim, ~138 MB                                (download)
+ Medium     nomic-embed-text-v1.5    Heuristic (basic)           Free
+            768-dim, ~138 MB                                     (download)
 
- High     either model             LLM-generated          API cost
-          + summaries              (1-3 sentences)        (~$2/1M tok)
+ Enhanced   either model             Enhanced heuristics +       Free
+ (1.5)      + semantic: true         NN summary transfer         (requires
+                                                                 embeddings)
+
+ High       either model             LLM-generated               API cost
+            + summaries              (1-3 sentences)             (~$2/1M tok)
 ```
 
-- **Low** — default. Embeds raw symbol text (name + kind + signature) with a general-purpose model. No API calls.
-- **Medium** — swaps in a higher-quality text model with longer context (8192 tokens). Still no LLM calls.
-- **High** — adds LLM-generated summaries to either embedding model. Both are text models that benefit from summaries. Produces the best results because the LLM distills code meaning into plain English that embedding models handle well.
+- **Low** — default. Embeds raw symbol text (name + kind + signature) with a general-purpose model. Enhanced per-kind heuristic summaries are always generated (class, interface, type, enum, variable, constructor), but no embedding-based enrichment.
+- **Medium** — swaps in a higher-quality text model with longer context (8192 tokens). Same heuristic summaries as Low.
+- **Enhanced (Tier 1.5)** — when `semantic.enabled: true`, the NN summary transfer module runs automatically after indexing. It uses the ANN embedding index to find well-documented neighbor symbols and propagates their documentation patterns to undocumented symbols. Direct transfers (similarity >= 0.85, quality 0.6) copy the summary verbatim; adapted transfers (similarity 0.7-0.85, quality 0.5) extract the verb/pattern and apply it to the target name. No API calls — fully offline.
+- **High** — adds LLM-generated summaries (quality 0.8) to either embedding model. The quality-gated filter skips symbols that already have `summaryQuality >= 0.8` (e.g., from JSDoc), avoiding redundant API calls. Produces the best results because the LLM distills code meaning into plain English that embedding models handle well.
+
+Each symbol now carries `summaryQuality` (0.0-1.0) and `summarySource` fields tracking provenance: `jsdoc` (1.0), `llm` (0.8), `nn-direct` (0.6), `nn-adapted` (0.5), `heuristic-typed` (0.4), `heuristic-fallback` (0.3).
 
 #### Three Providers
 

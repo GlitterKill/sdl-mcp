@@ -634,7 +634,7 @@ Controls semantic search reranking, embedding generation, and LLM-powered symbol
 | Field                   | Type      | Default                       | Range                            | Description                                              |
 | ----------------------- | --------- | ----------------------------- | -------------------------------- | -------------------------------------------------------- |
 | `enabled`               | `boolean` | `true`                        | —                                | Enable semantic reranking in symbol search               |
-| `alpha`                 | `number`  | `0.6`                         | 0.0-1.0                          | Lexical/semantic blend (0=pure lexical, 1=pure semantic) |
+| `alpha`                 | `number`  | `0.6`                         | 0.0-1.0                          | **Deprecated** — use `retrieval.fusion.rrfK` instead. Legacy lexical/semantic blend weight |
 | `provider`              | `string`  | `"local"`                     | `"api"` \| `"local"` \| `"mock"` | Embedding provider                                       |
 | `model`                 | `string`  | `"all-MiniLM-L6-v2"`          | —                                | Embedding model identifier                               |
 | `generateSummaries`     | `boolean` | `false`                       | —                                | Generate LLM summaries during indexing                   |
@@ -645,7 +645,50 @@ Controls semantic search reranking, embedding generation, and LLM-powered symbol
 | `summaryBatchSize`      | `integer` | `20`                          | 1-50                             | Symbols per LLM batch request                            |
 | `modelCacheDir`         | `string?` | `null`                        | —                                | Override directory for downloaded ONNX model files       |
 
-#### `semantic.ann` (nested, optional)
+#### `semantic.retrieval` (nested, optional)
+
+Hybrid retrieval configuration. Replaces legacy alpha-blending with FTS + vector search fused via Reciprocal Rank Fusion (RRF).
+
+| Field                | Type      | Default    | Range                  | Description                                      |
+| -------------------- | --------- | ---------- | ---------------------- | ------------------------------------------------ |
+| `mode`               | `string`  | `"legacy"` | `"legacy"` \| `"hybrid"` | Retrieval strategy (`hybrid` recommended)       |
+| `extensionsOptional` | `boolean` | `true`     | —                      | Allow graceful fallback when extensions unavailable |
+| `candidateLimit`     | `integer` | `100`      | 10-1000                | Max candidates after fusion                      |
+
+#### `semantic.retrieval.fts` (nested, optional)
+
+Full-text search stage configuration.
+
+| Field         | Type      | Default                    | Range | Description                            |
+| ------------- | --------- | -------------------------- | ----- | -------------------------------------- |
+| `enabled`     | `boolean` | `true`                     | —     | Enable FTS retrieval                   |
+| `indexName`   | `string`  | `"symbol_search_text_v1"`  | —     | FTS index name on Symbol.searchText    |
+| `topK`        | `integer` | `75`                       | 1-500 | Max FTS candidates                     |
+| `conjunctive` | `boolean` | `false`                    | —     | `true` = AND all terms; `false` = OR   |
+
+#### `semantic.retrieval.vector` (nested, optional)
+
+Vector search stage configuration. Uses native Ladybug vector indexes on Symbol embedding properties.
+
+| Field     | Type      | Default | Range   | Description                              |
+| --------- | --------- | ------- | ------- | ---------------------------------------- |
+| `enabled` | `boolean` | `true`  | —       | Enable vector retrieval                  |
+| `topK`    | `integer` | `75`    | 1-500   | Max candidates per model                 |
+| `efs`     | `integer` | `200`   | 8-1000  | Query-time accuracy parameter            |
+| `indexes` | `object`  | —       | —       | Per-model index name overrides (optional)|
+
+#### `semantic.retrieval.fusion` (nested, optional)
+
+Fusion strategy for combining FTS and vector candidates.
+
+| Field      | Type      | Default | Range  | Description                              |
+| ---------- | --------- | ------- | ------ | ---------------------------------------- |
+| `strategy` | `string`  | `"rrf"` | `"rrf"` | Fusion algorithm (Reciprocal Rank Fusion)|
+| `rrfK`     | `integer` | `60`    | 1-1000 | RRF smoothing constant (higher = more uniform ranking) |
+
+#### `semantic.ann` (nested, optional, **deprecated**)
+
+> **Deprecated**: Use `semantic.retrieval.vector` instead. The legacy HNSW sidecar index is retained for backward compatibility but native Ladybug vector indexes are preferred.
 
 HNSW approximate nearest neighbor index for faster semantic retrieval on large repos.
 
@@ -661,8 +704,8 @@ HNSW approximate nearest neighbor index for faster semantic retrieval on large r
 >
 > - **Use semantic search in production:** Set `provider: "api"` or `provider: "local"` (with `onnxruntime-node` installed). The `"mock"` provider returns deterministic results for testing only.
 > - **Generate summaries:** Set `generateSummaries: true` and provide an API key. Use `summaryApiBaseUrl` for local LLMs (e.g., Ollama at `http://localhost:11434/v1`).
-> - **Large repos (>10k symbols):** Enable `ann` for faster semantic search.
-> - **Tune relevance:** Adjust `alpha` — lower for exact-match-heavy workflows, higher for natural-language queries.
+> - **Enable hybrid retrieval:** Set `retrieval.mode: "hybrid"` for best search quality. Falls back automatically if extensions are unavailable.
+> - **Tune relevance (legacy):** Adjust `alpha` — lower for exact-match-heavy workflows, higher for natural-language queries. Note: `alpha` is deprecated when using hybrid retrieval.
 
 ---
 

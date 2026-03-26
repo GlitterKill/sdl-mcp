@@ -65,12 +65,15 @@ SDL-MCP follows a **hexagonal / ports-and-adapters** design. Each module has a c
                        │       LadybugDB (Graph DB)       │
                        │  Symbols, Edges, Files, Repos,   │
                        │  Clusters, Processes, Versions,   │
-                       │  Embeddings, Summaries, Feedback  │
+                       │  Embeddings, Summaries, Feedback, │
+                       │  FileSummaries, Memories          │
+                       │  FTS + Vector Indexes             │
                        └──────────────────────────────────┘
 ```
 
 - **Indexer** produces pure domain objects (symbols, edges) — owns all writes
 - **Graph** reads from DB to build slices — no mutations
+- **Retrieval** (`src/retrieval/`) orchestrates hybrid search (FTS + vector + RRF fusion), with automatic fallback to legacy. Provides the start-node discovery engine for `slice.build` and `symbol.search`.
 - **Delta** reads version pairs, computes diffs on demand — no mutations
 - **Code** reads file content and applies policy gating — no mutations
 - **DB** owns all persistence (queries + mutations separated by module)
@@ -255,12 +258,14 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 |:-----------|:-----------|
 | **Repo** | repoId, rootPath, configJson, createdAt |
 | **File** | fileId, repoId, relPath, byteSize, contentHash |
-| **Symbol** | symbolId, repoId, fileId, kind, name, exported, signatureJson, summary, etag |
+| **Symbol** | symbolId, repoId, fileId, kind, name, exported, signatureJson, summary, summaryQuality, summarySource, etag, embeddingMiniLM, embeddingNomic |
 | **Version** | versionId, repoId, timestamp, indexedAt |
-| **Cluster** | clusterId, label, memberCount |
-| **Process** | processId, label, repoId |
+| **Cluster** | clusterId, label, memberCount, searchText |
+| **Process** | processId, label, repoId, searchText |
+| **FileSummary** | fileId, repoId, summary, searchText, embeddingMiniLM, embeddingNomic |
 | **SummaryCache** | symbolId, summary, provider, model, cardHash, costUsd |
 | **SliceHandle** | handle, createdAt, expiresAt, minVersion, maxVersion |
+| **AgentFeedback** | feedbackId, repoId, taskText, taskType, searchText, embeddingMiniLM, embeddingNomic |
 
 | Edge Table | From → To | Key Fields |
 |:-----------|:----------|:-----------|
@@ -283,11 +288,13 @@ Each module owns a specific domain of queries:
 | `ladybug-versions.ts` | Version chain, timestamp tracking |
 | `ladybug-clusters.ts` | Cluster membership, label queries |
 | `ladybug-processes.ts` | Process steps, role queries |
-| `ladybug-embeddings.ts` | Vector storage, nearest-neighbor queries |
+| `ladybug-embeddings.ts` | **Deprecated** — legacy SymbolEmbedding node queries |
+| `ladybug-symbol-embeddings.ts` | Inline embedding properties on Symbol nodes (replacement for ladybug-embeddings.ts) |
 | `ladybug-metrics.ts` | Fan-in/out, churn, test refs |
-| `ladybug-feedback.ts` | Agent feedback, audit events |
+| `ladybug-feedback.ts` | Agent feedback, audit events, searchText + embeddings for retrieval boosting |
 | `ladybug-slices.ts` | Slice handles, lease expiry |
 | `ladybug-memories.ts` | Memory nodes, symbol/file links, staleness |
+| `ladybug-file-summaries.ts` | FileSummary nodes — file-level summaries with searchText and embeddings |
 | `ladybug-usage.ts` | Token usage tracking, savings metrics |
 
 ---
@@ -303,9 +310,10 @@ The slice builder (`src/graph/slice.ts`) constructs task-scoped context subgraph
   ┌──────────────────────────┐
   │  Start-Node Resolver     │     Resolves entry symbols from:
   │  (start-node-resolver.ts)│     - explicit symbolIds
-  │                          │     - taskText full-text search
+  │                          │     - hybrid retrieval (FTS + vector + RRF)
   └──────────┬───────────────┘     - stackTrace parsing
              │                     - editedFiles lookup
+             │                     - legacy: token-by-token searchSymbolsLite
              ▼
   ┌──────────────────────────┐
   │  Beam-Search Engine      │     BFS with weighted edges:

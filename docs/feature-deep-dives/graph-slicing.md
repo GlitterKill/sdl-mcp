@@ -108,19 +108,47 @@ stateDiagram-v2
 
 ### Auto-Discovery Mode
 
-You don't even need to know symbol IDs. Pass a `taskText` string and SDL-MCP will:
+You don't even need to know symbol IDs. Pass a `taskText` string (or `stackTrace`, `failingTestPath`, `editedFiles`) and SDL-MCP will automatically discover the best entry symbols:
 
-1. Full-text search for matching symbols
-2. Score and rank them
-3. Build the slice automatically
+**With hybrid retrieval** (when `semantic.retrieval.mode: "hybrid"` and indexes are healthy):
+1. Run a single hybrid search (FTS + vector + RRF fusion) on the task text
+2. Score and rank candidates across all retrieval sources
+3. Build the slice from the top-ranked seeds
+
+**Legacy fallback** (when hybrid is unavailable):
+1. Token-by-token `searchSymbolsLite` fan-out across the task text
+2. Score and rank individual matches
+3. Build the slice from the top-ranked seeds
+
+The hybrid path produces better start-node quality because it understands *meaning* (via vector search) not just token overlap, and it runs a single efficient query instead of per-token fan-out.
 
 ```json
 {
   "repoId": "my-app",
   "taskText": "fix the authentication timeout bug",
-  "budget": { "maxCards": 30, "maxEstimatedTokens": 4000 }
+  "budget": { "maxCards": 30, "maxEstimatedTokens": 4000 },
+  "includeRetrievalEvidence": true
 }
 ```
+
+When `includeRetrievalEvidence: true` is set, the slice response includes evidence showing how seeds were discovered:
+
+```json
+{
+  "retrievalEvidence": {
+    "mode": "hybrid",
+    "symptomType": "taskText",
+    "candidateCountPerSource": {
+      "fts": 28,
+      "vector:all-MiniLM-L6-v2": 24
+    },
+    "fusionLatencyMs": 8,
+    "fallbackReason": null
+  }
+}
+```
+
+The `symptomType` field classifies the input: `"taskText"`, `"stackTrace"`, `"failingTest"`, or `"editedFiles"`.
 
 ---
 

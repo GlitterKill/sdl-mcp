@@ -24,11 +24,29 @@ SDL-MCP's semantic system has three layers — **embedding models**, **LLM summa
 │   │ Bundled       │   │ Downloaded    │   │ No deps needed    │    │
 │   └───────────────┘   └───────────────┘   └───────────────────┘    │
 │                                                                     │
-│   Optional LLM Summaries (enrich embedding input text):             │
+│   Summary Pipeline (4 tiers, enriches embedding input text):        │
+│   ┌─────────────────────────────────────────────────────────────┐   │
+│   │ Tier 1: Enhanced Heuristics (always on, per-kind patterns)  │   │
+│   │ Tier 1.5: NN Transfer (uses ANN index to propagate docs)   │   │
+│   │ Tier 2: LLM Summaries (optional, quality-gated >= 0.8)     │   │
+│   │ Quality tracked: summaryQuality (0.0-1.0) + summarySource  │   │
+│   └─────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+│   LLM Providers (for Tier 2 only):                                  │
 │   ┌───────────────┐   ┌───────────────┐   ┌───────────────────┐    │
 │   │ Anthropic API │   │ Ollama/Local  │   │ Mock              │    │
-│   │ Claude Haiku  │   │ gpt-4o-mini   │   │ Heuristic text    │    │
+│   │ Claude Haiku  │   │ gpt-4o-mini   │   │ Deterministic     │    │
 │   └───────────────┘   └───────────────┘   └───────────────────┘    │
+│                                                                     │
+│   Hybrid Retrieval Pipeline (query-time):                           │
+│   ┌─────────────────────────────────────────────────────────────┐   │
+│   │ FTS Index (Symbol.searchText)                                │   │
+│   │     +                                                        │   │
+│   │ Vector Index (Symbol.embeddingMiniLM / embeddingNomic)       │   │
+│   │     ↓                                                        │   │
+│   │ Reciprocal Rank Fusion (RRF) → ranked results                │   │
+│   │ Auto-fallback to legacy alpha-blending if unavailable        │   │
+│   └─────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -53,7 +71,9 @@ SDL-MCP's semantic system has three layers — **embedding models**, **LLM summa
 
 ### Tier 1: Low (Free, Bundled — Default)
 
-The default configuration. Uses the bundled MiniLM model with raw symbol text. No LLM summaries.
+The default configuration. Uses the bundled MiniLM model with symbol text enriched by enhanced per-kind heuristic summaries. No LLM summaries.
+
+Enhanced heuristics are always active, generating pattern-matched summaries for all symbol kinds (class, interface, type, enum, variable, constructor) in addition to the existing typed function/method summaries. When `semantic.enabled: true`, NN summary transfer also runs automatically, propagating documentation from well-documented neighbors to undocumented symbols via embedding similarity.
 
 **Step 1 — Install ONNX dependencies:**
 
@@ -193,7 +213,9 @@ Same natural-language format as MiniLM — both are text models. The Nomic model
 
 ### Tier 3: High (API Tokens Required)
 
-Adds LLM-generated natural-language summaries to either embedding model. Both MiniLM and Nomic are text models that benefit equally from summaries. For maximum quality, pair summaries with `nomic-embed-text-v1.5`. Produces the highest quality semantic search results because the LLM distills code meaning into plain English that embedding models handle well.
+Adds LLM-generated natural-language summaries (quality 0.8) to either embedding model. Both MiniLM and Nomic are text models that benefit equally from summaries. For maximum quality, pair summaries with `nomic-embed-text-v1.5`. Produces the highest quality semantic search results because the LLM distills code meaning into plain English that embedding models handle well.
+
+The LLM stage is quality-gated: symbols that already have `summaryQuality >= 0.8` (e.g., from JSDoc extraction) are automatically skipped, avoiding redundant API calls. In practice, this means well-documented codebases spend less on LLM summaries while undocumented symbols get the most attention.
 
 Choose one of three LLM providers:
 
@@ -418,7 +440,70 @@ Adjust `semantic.alpha` in config:
 
 ---
 
-## ANN Index Configuration
+## Hybrid Retrieval Setup
+
+Hybrid retrieval replaces the legacy alpha-blending search with native Ladybug FTS + vector indexes fused via Reciprocal Rank Fusion (RRF). It is controlled by `semantic.retrieval.mode`.
+
+### Enabling Hybrid Retrieval
+
+```jsonc
+{
+  "semantic": {
+    "enabled": true,
+    "retrieval": {
+      "mode": "hybrid",              // "hybrid" or "legacy" (default: "legacy")
+      "fts": {
+        "enabled": true,             // Full-text search on Symbol.searchText
+        "indexName": "symbol_search_text_v1",
+        "topK": 75,                  // Max FTS candidates
+        "conjunctive": false         // true = AND all terms; false = OR
+      },
+      "vector": {
+        "enabled": true,             // Vector search on inline embeddings
+        "topK": 75,                  // Max candidates per model
+        "efs": 200                   // Query-time accuracy parameter
+      },
+      "fusion": {
+        "strategy": "rrf",          // Reciprocal Rank Fusion
+        "rrfK": 60                   // Smoothing constant (higher = more uniform)
+      },
+      "candidateLimit": 100          // Max candidates after fusion
+    }
+  }
+}
+```
+
+### How It Works
+
+1. **FTS and vector indexes are created automatically** on DB init when `semantic.enabled: true`. The FTS extension indexes `Symbol.searchText`; vector indexes cover `Symbol.embeddingMiniLM` and `Symbol.embeddingNomic`.
+2. **At query time**, FTS and vector searches run in parallel. Each source produces a ranked candidate list.
+3. **RRF fuses** the rank lists: `score(d) = Σ 1/(k + rank_i(d))` — symbols ranked highly by multiple sources rise to the top.
+4. **If extensions are unavailable** (e.g., `fts` or `vector` not loaded), the system automatically falls back to the legacy alpha-blending path and records the fallback reason in telemetry.
+
+### Extension Requirements
+
+Hybrid retrieval requires the Ladybug `fts` and `vector` extensions. These are loaded best-effort on DB connection — if they're unavailable, hybrid search falls back to legacy automatically. Run `sdl-mcp doctor` to check extension status:
+
+```
+Retrieval extensions ...................... PASS
+  fts: loaded
+  vector: loaded
+  FTS index: symbol_search_text_v1 (healthy)
+  Vector index: symbol_embedding_minilm_v1 (healthy)
+  Vector index: symbol_embedding_nomic_v1 (healthy)
+```
+
+### Migration from SymbolEmbedding
+
+Prior to hybrid retrieval, embeddings were stored in a separate `SymbolEmbedding` node table. Migration m007 automatically copies embeddings to inline Symbol properties (`embeddingMiniLM`, `embeddingNomic`) on DB init. Mock-fallback rows are skipped. The old `SymbolEmbedding` table is deprecated but retained for backward compatibility.
+
+> **Deprecation notice**: `semantic.alpha` is deprecated in favor of `semantic.retrieval.fusion`. `semantic.ann` is deprecated in favor of `semantic.retrieval.vector`. Both legacy configs remain functional.
+
+---
+
+## ANN Index Configuration (Legacy)
+
+> **Note**: The HNSW sidecar index is the legacy vector search mechanism. For new setups, use `semantic.retrieval.vector` instead, which uses native Ladybug vector indexes. The legacy ANN config is retained for backward compatibility.
 
 The HNSW (Hierarchical Navigable Small World) index accelerates nearest-neighbor search over embedding vectors. It's built lazily during indexing and rebuilt incrementally as embeddings change.
 
@@ -449,7 +534,22 @@ For most repositories (< 50K symbols), the defaults are fine.
 
 ## Embedding Vector Storage
 
-Vectors are stored in the graph database using Float16 compression:
+Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB:
+
+```
+  Symbol node properties:
+  ┌──────────────────────────────────────────────────────────┐
+  │  embeddingMiniLM          FLOAT[384]   ← MiniLM vector   │
+  │  embeddingMiniLMCardHash  STRING       ← freshness key   │
+  │  embeddingMiniLMUpdatedAt STRING       ← last refresh    │
+  │                                                          │
+  │  embeddingNomic           FLOAT[768]   ← Nomic vector    │
+  │  embeddingNomicCardHash   STRING       ← freshness key   │
+  │  embeddingNomicUpdatedAt  STRING       ← last refresh    │
+  └──────────────────────────────────────────────────────────┘
+```
+
+Vectors are compressed using Float16 quantization:
 
 ```
 Original:    [0.0234, -0.1567, 0.8901, ...]   (float64, 3072 bytes for 384-dim)

@@ -320,9 +320,9 @@ Returns the current state of the live editor buffer system for a repository.
 
 ### sdl.symbol.search
 
-Searches the symbol graph by name, with optional semantic reranking via local embeddings.
+Searches the symbol graph by name, with optional semantic reranking or hybrid retrieval.
 
-**What it does:** Performs a text search across all symbol names in the repository. Returns matching symbols with their IDs, names, file paths, and kinds. When `semantic: true` is specified and the semantic subsystem is configured, results are reranked using embedding similarity (blending lexical and semantic scores with a configurable alpha weight). The tool also triggers predictive prefetch of cards for the top 5 results, anticipating follow-up `getCard` calls.
+**What it does:** Performs a text search across all symbol names in the repository. Returns matching symbols with their IDs, names, file paths, and kinds. When `semantic: true` is specified, the retrieval path depends on the configured mode: with `semantic.retrieval.mode: "hybrid"`, results are found via FTS + vector search fused with Reciprocal Rank Fusion (RRF); with legacy mode, results are reranked using embedding similarity (alpha-blended lexical + semantic scores). Falls back to legacy automatically if hybrid indexes are unavailable. The tool also triggers predictive prefetch of cards for the top 5 results, anticipating follow-up `getCard` calls.
 
 **Parameters:**
 
@@ -332,7 +332,8 @@ Searches the symbol graph by name, with optional semantic reranking via local em
 | `query` | string | Yes | Search query (matched against symbol names) |
 | `kinds` | string[] | No | Filter by symbol kind (e.g., `["function", "class"]`). Valid kinds: `function`, `class`, `interface`, `type`, `module`, `method`, `constructor`, `variable` |
 | `limit` | number (1-1000) | No | Maximum results to return (default: 50) |
-| `semantic` | boolean | No | Enable semantic reranking using embeddings |
+| `semantic` | boolean | No | Enable semantic reranking / hybrid retrieval |
+| `includeRetrievalEvidence` | boolean | No | Include retrieval evidence in response (sources used, candidate counts, fusion latency, fallback reason) |
 
 **Response:**
 
@@ -340,6 +341,8 @@ Searches the symbol graph by name, with optional semantic reranking via local em
 |:------|:-----|:------------|
 | `results` | array | Each result: `{symbolId, name, file, kind}` where kind is one of `function`, `class`, `interface`, `type`, `module`, `method`, `constructor`, `variable` |
 | `truncation` | object | Present if results were truncated: `{truncated, droppedCount, howToResume}` |
+| `retrievalEvidence` | object | Present when `includeRetrievalEvidence: true`. Contains `{mode, ftsAvailable, vectorAvailable, candidateCountPerSource, fusionLatencyMs, fallbackReason}` |
+| `retrievalMode` | string | `"hybrid"` or `"legacy"` — indicates which retrieval path was used |
 
 **Token guidance:** Start with `limit: 5-20`. Only increase if the initial results don't contain what you need.
 
@@ -471,7 +474,7 @@ Supports three wire format versions for encoding efficiency:
 | Parameter | Type | Required | Description |
 |:----------|:-----|:---------|:------------|
 | `repoId` | string | Yes | Repository identifier |
-| `taskText` | string | No | Natural language task description. Can be used *alone* (without `entrySymbols`) to auto-discover relevant symbols via full-text search. |
+| `taskText` | string | No | Natural language task description. Can be used *alone* (without `entrySymbols`) to auto-discover relevant symbols via hybrid retrieval (FTS + vector + RRF) or legacy full-text search. |
 | `stackTrace` | string | No | Stack trace for debugging tasks |
 | `failingTestPath` | string | No | Path to a failing test file |
 | `editedFiles` | string[] (max 100) | No | Recently edited file paths |
@@ -485,6 +488,7 @@ Supports three wire format versions for encoding efficiency:
 | `minConfidence` | number (0-1) | No | Drop edges below this confidence (default: 0.5) |
 | `minCallConfidence` | number (0-1) | No | Filter call edges specifically |
 | `includeResolutionMetadata` | boolean | No | Include call resolution details on cards |
+| `includeRetrievalEvidence` | boolean | No | Include retrieval evidence showing how start-node seeds were discovered (sources, candidate counts, symptom type, fusion latency) |
 
 **Response:**
 
@@ -495,6 +499,7 @@ Supports three wire format versions for encoding efficiency:
 | `lease` | object | `{expiresAt, minVersion, maxVersion}` — slice validity window |
 | `sliceEtag` | object | `{handle, version, sliceHash}` for conditional refresh |
 | `slice` | object | The graph slice containing `cards`, `cardRefs`, `edges`, `frontier`, `truncation`, `symbolIndex`, `budget`, `startSymbols`, `confidenceDistribution` |
+| `retrievalEvidence` | object | Present when `includeRetrievalEvidence: true`. Contains `{mode, symptomType, candidateCountPerSource, fusionLatencyMs, fallbackReason}`. `symptomType` classifies the input: `"taskText"`, `"stackTrace"`, `"failingTest"`, or `"editedFiles"`. |
 
 **Token guidance:**
 - Set `budget: {maxCards: 30, maxEstimatedTokens: 4000}` as a starting point.

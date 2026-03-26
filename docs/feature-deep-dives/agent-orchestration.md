@@ -114,7 +114,7 @@ If your budget is 800 tokens, the planner might select `card → card → skelet
 
 ## Feedback Loop
 
-After using a slice, agents can report which symbols were useful and which were missing via `sdl.agent.feedback`. This data is stored and aggregated to improve future slice relevance.
+After using a slice, agents can report which symbols were useful and which were missing via `sdl.agent.feedback`. This data is stored, aggregated, and **actively used to boost future retrieval**.
 
 ```
   After task completion:
@@ -136,10 +136,36 @@ After using a slice, agents can report which symbols were useful and which were 
   │  topMissing:                │
   │    errorHandler (5 reports) │  ← should be prioritized
   │    retryLogic (3 reports)   │     in future slices
+  └─────────────┬───────────────┘
+                │
+                ▼
+  ┌─────────────────────────────┐
+  │  Feedback-Aware Boosting    │
+  │                             │
+  │  On next hybrid retrieval:  │
+  │  • Query prior feedback via │
+  │    FTS/vector on searchText │
+  │  • Boost historically useful│
+  │    symbols before RRF fusion│
+  │  • Surface missing symbols  │
+  │    as "previously missed"   │
   └─────────────────────────────┘
 ```
 
 Query aggregated feedback via `sdl.agent.feedback.query` to understand which symbols are consistently valuable and which are consistently missing from slices.
+
+### Feedback-Aware Retrieval Boosting
+
+Agent feedback is not just passive data collection — it actively improves retrieval quality. Each `AgentFeedback` record stores `searchText` (concatenated from task text, type, and tags) plus embedding vectors (`embeddingMiniLM`, `embeddingNomic`), enabling FTS and vector search over prior feedback.
+
+During hybrid retrieval for a new task, the `feedback-boost.ts` module:
+
+1. Queries prior feedback by FTS/vector similarity to the current task text
+2. Identifies symbols that were historically useful for similar tasks
+3. Boosts those symbols' retrieval scores before final RRF fusion
+4. Surfaces symbols that were consistently reported as "missing" from prior slices
+
+This creates a **learning loop**: agents provide feedback → feedback improves retrieval → better slices → more accurate feedback. Over time, the retrieval system adapts to the specific patterns and priorities of your codebase and development workflow.
 
 ---
 

@@ -28,18 +28,18 @@ This document covers all three in depth, with architecture diagrams, configurati
   │                    SDL-MCP Semantic Engine                        │
   │                                                                   │
   │  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────┐  │
-  │  │   Pass-2 Call    │  │    Embedding     │  │  LLM Summary    │  │
-  │  │   Resolution     │  │    Search        │  │  Generation     │  │
+  │  │   Pass-2 Call    │  │    Embedding     │  │    Summary      │  │
+  │  │   Resolution     │  │    Search        │  │    Pipeline     │  │
   │  │                  │  │                  │  │                 │  │
   │  │ "Who calls whom, │  │ "Find what you   │  │ "What does this │  │
   │  │  and how sure    │  │  mean, not just  │  │  symbol actually│  │
   │  │  are we?"        │  │  what you typed" │  │  do?"           │  │
   │  │                  │  │                  │  │                 │  │
-  │  │ 11 language      │  │ Local ONNX or    │  │ Claude Haiku,   │  │
-  │  │ resolvers        │  │ API embeddings   │  │ Ollama, or mock │  │
-  │  │                  │  │                  │  │                 │  │
-  │  │ Confidence:      │  │ Alpha-blended    │  │ Cached with     │  │
-  │  │ 0.0 - 1.0        │  │ lexical+semantic │  │ content hash    │  │
+  │  │ 11 language      │  │ Local ONNX or    │  │ 4-tier pipeline:│  │
+  │  │ resolvers        │  │ API embeddings   │  │ heuristic → NN  │  │
+  │  │                  │  │                  │  │ transfer → LLM  │  │
+  │  │ Confidence:      │  │ Alpha-blended    │  │ Quality-tracked │  │
+  │  │ 0.0 - 1.0        │  │ lexical+semantic │  │ (0.0 - 1.0)     │  │
   │  └────────┬─────────┘  └────────┬─────────┘  └────────┬────────┘  │
   │           │                     │                      │          │
   │           ▼                     ▼                      ▼          │
@@ -71,16 +71,18 @@ flowchart TD
         P2c --> Rerank["Reranked results"]
     end
 
-    subgraph "Pillar 3: LLM Summaries"
-        P3["Claude Haiku / Ollama / Mock"]
-        P3a["1-3 sentence descriptions"]
-        P3b["Cached with content hash"]
-        P3 --> P3a --> P3b
+    subgraph "Pillar 3: Summary Pipeline"
+        P3["4-tier summary generation"]
+        P3a["Heuristic (per-kind patterns)"]
+        P3b["NN transfer (embedding neighbors)"]
+        P3c["LLM (Claude Haiku / Ollama)"]
+        P3d["Quality-tracked (0.0-1.0)"]
+        P3 --> P3a --> P3b --> P3c --> P3d
     end
 
     Conf --> Cards["Symbol Cards & Slices"]
     Rerank --> Cards
-    P3b --> Cards
+    P3d --> Cards
 
     style Cards fill:#d4edda,stroke:#28a745
 ```
@@ -89,7 +91,7 @@ flowchart TD
 |:-------|:----------|:-------|:--------------|
 | **Pass-2 Resolution** | Every index (full & incremental) | Confidence-scored call edges | Always on |
 | **Embedding Search** | On `sdl.symbol.search` with `semantic: true` | Reranked search results | Enabled, opt-in per query |
-| **LLM Summaries** | At index time (if configured) | 1-3 sentence symbol descriptions | Off by default |
+| **Summary Pipeline** | Every index (heuristics + NN transfer); LLM if configured | Quality-scored summaries (0.3-1.0) | Heuristics always on; NN transfer when `semantic.enabled`; LLM off by default |
 
 ---
 
@@ -299,7 +301,66 @@ Both `sdl.symbol.getCard` and `sdl.slice.build` accept a `minCallConfidence` par
 
 Standard symbol search is lexical: searching for `"validate"` matches `validateToken`, `validateInput`, `isValid`, etc. — ranked by string similarity. But what if you search for `"check auth credentials"`? Lexical search finds nothing. Semantic search finds `validateToken`, `authenticate`, `verifyPassword` — because it understands *meaning*.
 
-### How It Works
+### How It Works: Hybrid Retrieval
+
+SDL-MCP supports two retrieval modes, controlled by `semantic.retrieval.mode`:
+
+- **`hybrid`** — FTS + vector search fused via Reciprocal Rank Fusion (recommended)
+- **`legacy`** — alpha-blended lexical + embedding rerank (original architecture)
+
+When `semantic.retrieval.mode` is `"hybrid"` and the required database extensions are healthy, searches follow the hybrid path. If extensions or indexes are unavailable, the system automatically falls back to the legacy path.
+
+#### Hybrid Retrieval Pipeline
+
+```
+  User Query: "check auth credentials"
+       │
+       ▼
+  ┌──────────────────────────────────────────────────────┐
+  │  1. Full-Text Search (FTS)                           │
+  │     Ladybug FTS index on Symbol.searchText           │
+  │     → authenticate, AuthService, checkPermissions    │
+  │     Ranked by FTS relevance score                    │
+  └─────────────────────┬────────────────────────────────┘
+                        │
+                        │  (runs in parallel)
+                        │
+  ┌──────────────────────────────────────────────────────┐
+  │  2. Vector Search (per real model)                   │
+  │     Embed query → search Ladybug vector index        │
+  │                                                      │
+  │     MiniLM (384-dim):                                │
+  │       validateToken  (0.91), authenticate (0.87)     │
+  │     Nomic (768-dim):                                 │
+  │       validateToken  (0.93), verifyPassword (0.85)   │
+  │                                                      │
+  │     One query embedding generated per real model      │
+  └─────────────────────┬────────────────────────────────┘
+                        │
+                        ▼
+  ┌──────────────────────────────────────────────────────┐
+  │  3. Reciprocal Rank Fusion (RRF)                     │
+  │                                                      │
+  │  score(d) = Σ  1 / (k + rank_i(d))                  │
+  │             sources                                  │
+  │                                                      │
+  │  With k = 60 (default):                              │
+  │  Each source contributes a rank-based score.         │
+  │  Symbols ranked highly by multiple sources rise      │
+  │  to the top, even if no single source ranked them #1 │
+  │                                                      │
+  │  Sources: fts, vector:minilm, vector:nomic           │
+  │                                                      │
+  │  Result: validateToken rises to #1                   │
+  │  (top-ranked in both FTS and vector search)          │
+  └──────────────────────────────────────────────────────┘
+```
+
+RRF is more robust than alpha-blending because it fuses *rank positions* rather than raw scores, making it insensitive to score distribution differences between FTS and vector backends.
+
+#### Legacy Pipeline (Alpha Blending)
+
+The legacy path is retained as a fallback and can be explicitly selected via `semantic.retrieval.mode: "legacy"`:
 
 ```
   User Query: "check auth credentials"
@@ -307,44 +368,55 @@ Standard symbol search is lexical: searching for `"validate"` matches `validateT
        ▼
   ┌──────────────────────────────────────────────────────┐
   │  1. Lexical Search (always runs first)               │
-  │     → authenticate, AuthService, checkPermissions,   │
-  │       validateToken, ...                             │
   │     Ranked by string similarity                      │
   └─────────────────────┬────────────────────────────────┘
                         │
                         ▼  (if semantic: true)
   ┌──────────────────────────────────────────────────────┐
-  │  2. Embed Query                                      │
-  │     "check auth credentials" → [0.12, -0.34, ...]   │
-  │     384-dim vector (MiniLM) or 768-dim (Nomic)       │
-  └─────────────────────┬────────────────────────────────┘
-                        │
-                        ▼
-  ┌──────────────────────────────────────────────────────┐
-  │  3. Embed Each Symbol                                │
-  │     "authenticate (function): Validates JWT token    │
-  │      and attaches user to request"                   │
-  │      → [0.15, -0.31, ...]                            │
-  │                                                      │
-  │  4. Cosine Similarity                                │
+  │  2. Embed Query + Cosine Similarity                  │
   │     sim(query, authenticate) = 0.87                  │
-  │     sim(query, checkPermissions) = 0.62              │
   │     sim(query, validateToken) = 0.91                 │
   └─────────────────────┬────────────────────────────────┘
                         │
                         ▼
   ┌──────────────────────────────────────────────────────┐
-  │  5. Alpha Blending                                   │
+  │  3. Alpha Blending (deprecated)                      │
   │                                                      │
   │  finalScore = α × lexicalScore + (1-α) × semantic    │
   │                                                      │
   │  With α = 0.6 (default):                             │
   │  60% lexical weight + 40% semantic weight            │
-  │                                                      │
-  │  Result: validateToken rises to #1                   │
-  │  (high semantic match + decent lexical match)        │
   └──────────────────────────────────────────────────────┘
 ```
+
+> **Deprecation notice**: `semantic.alpha` is deprecated in favor of `semantic.retrieval.fusion`. The legacy alpha-blending path remains functional but is no longer the recommended default.
+
+#### Automatic Fallback
+
+The hybrid retrieval system performs health checks before each search. If the Ladybug `fts` or `vector` extensions are unavailable, or if indexes are unhealthy, it automatically falls back to the legacy path and records the fallback reason in telemetry. This ensures `symbol.search` and `slice.build` remain functional in all environments.
+
+#### Retrieval Evidence
+
+When `includeRetrievalEvidence: true` is passed to `symbol.search` or `slice.build`, the response includes detailed evidence about how results were retrieved:
+
+```json
+{
+  "retrievalEvidence": {
+    "mode": "hybrid",
+    "ftsAvailable": true,
+    "vectorAvailable": true,
+    "candidateCountPerSource": {
+      "fts": 42,
+      "vector:all-MiniLM-L6-v2": 38,
+      "vector:nomic-embed-text-v1.5": 35
+    },
+    "fusionLatencyMs": 12,
+    "fallbackReason": null
+  }
+}
+```
+
+If a fallback occurred, `mode` is `"legacy"` and `fallbackReason` explains why (e.g., `"fts extension not loaded"`, `"vector index unhealthy"`).
 
 ### Two Embedding Models
 
@@ -404,45 +476,68 @@ The local provider uses `onnxruntime-node` and `tokenizers` (optional dependenci
 
 ### Embedding Storage
 
-Embeddings are stored in LadybugDB as compressed vectors:
+Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB. Each model gets its own set of properties:
 
 ```
-  Float32 → multiply by 10,000 → round to Int16 → base64 encode
-
-  Storage savings: ~50% vs raw float32
-  Precision loss: negligible for cosine similarity
+  Symbol node properties:
+  ┌──────────────────────────────────────────────────────────┐
+  │  embeddingMiniLM          FLOAT[384]   ← MiniLM vector   │
+  │  embeddingMiniLMCardHash  STRING       ← freshness key   │
+  │  embeddingMiniLMUpdatedAt STRING       ← last refresh    │
+  │                                                          │
+  │  embeddingNomic           FLOAT[768]   ← Nomic vector    │
+  │  embeddingNomicCardHash   STRING       ← freshness key   │
+  │  embeddingNomicUpdatedAt  STRING       ← last refresh    │
+  └──────────────────────────────────────────────────────────┘
 ```
 
-Each embedding is tagged with a `cardHash` (SHA-256 of the symbol data + text format used). When the symbol changes or the text format changes, the embedding is automatically refreshed.
+Vectors are compressed for storage: `Float32 → multiply by 10,000 → round to Int16 → base64 encode` (~50% savings vs raw float32, negligible precision loss for cosine similarity).
 
-### ANN Index (Approximate Nearest Neighbor)
+Each embedding is tagged with a `cardHash` (SHA-256 of the symbol data + text format used). When the symbol changes or the text format changes, the embedding is automatically refreshed during indexing.
 
-For repos with thousands of symbols, SDL-MCP builds an HNSW index for fast vector similarity search:
+> **Migration note**: Prior to the hybrid retrieval rollout, embeddings were stored in a separate `SymbolEmbedding` node table. Migration m007 automatically copies embeddings to the inline Symbol properties. The old `SymbolEmbedding` table is deprecated and will be removed in a future release.
+
+### Vector Indexes
+
+Hybrid retrieval uses native Ladybug vector indexes for fast approximate nearest-neighbor search at query time:
 
 ```
-  Configuration:
+  Native Ladybug Vector Indexes:
+  ┌─────────────────────────────────────────────────────────┐
+  │  Index: symbol_embedding_minilm_v1                       │
+  │  Property: Symbol.embeddingMiniLM                        │
+  │  Dimensions: 384                                         │
+  │  Created automatically on DB init when semantic.enabled  │
+  │                                                          │
+  │  Index: symbol_embedding_nomic_v1                        │
+  │  Property: Symbol.embeddingNomic                         │
+  │  Dimensions: 768                                         │
+  │  Created automatically on DB init when semantic.enabled  │
+  └─────────────────────────────────────────────────────────┘
+
+  Configuration (via semantic.retrieval.vector):
   ┌──────────────────────────────┐
-  │  ann.enabled:       true     │ ← builds index after embeddings
-  │  ann.m:             16       │ ← HNSW graph connectivity
-  │  ann.efConstruction: 200     │ ← build-time accuracy
-  │  ann.efSearch:       50      │ ← query-time accuracy
-  │  ann.maxElements:    200000  │ ← max symbols indexed
+  │  vector.enabled:     true    │ ← enable vector search
+  │  vector.topK:        75      │ ← candidates per model
+  │  vector.efs:         200     │ ← query-time accuracy
   └──────────────────────────────┘
 ```
 
+> **Deprecation notice**: The previous `semantic.ann` config (HNSW sidecar indexes via `ann-index.ts`) is deprecated in favor of `semantic.retrieval.vector`. The legacy ANN config remains functional but the native Ladybug vector indexes provide better integration and require no separate sidecar management.
+
 ### Live Overlay Handling
 
-When files have unsaved edits (via the live buffer system), their symbols may not have embeddings yet. The search flow handles this:
+When files have unsaved edits (via the live buffer system), their symbols may not have embeddings or vector index entries yet. Both hybrid and legacy search flows handle this:
 
-1. **Durable symbols** (saved, indexed): reranked using embeddings
-2. **Overlay symbols** (unsaved edits): keep original lexical ranking
-3. **Merged result**: reranked durable symbols first, then overlay symbols in original order
+1. **Durable symbols** (saved, indexed): retrieved via hybrid FTS + vector search (or legacy reranking)
+2. **Overlay symbols** (unsaved edits): retrieved via lexical overlay search, keeping original ranking
+3. **Merged result**: hybrid/reranked durable symbols first, then overlay symbols in original order — overlay symbols are never suppressed by fusion
 
-This ensures unsaved code always appears in results, just without semantic boosting.
+This ensures unsaved code always appears in results, just without hybrid retrieval boosting.
 
 ---
 
-## LLM Symbol Summaries
+## Symbol Summary Pipeline
 
 ### What They Are
 
@@ -463,12 +558,100 @@ These summaries serve two purposes:
 1. **For agents**: instant understanding without reading code (Rung 1 of the Iris Gate Ladder)
 2. **For embeddings**: richer text input for the MiniLM model, producing better semantic search results
 
-### Generation Pipeline
+### Summary Quality Scoring
+
+Every symbol carries a `summaryQuality` (0.0-1.0) score and a `summarySource` field tracking provenance. Higher quality means the summary is more trustworthy and informative.
+
+```
+  Source                     Quality    summarySource           When
+  ─────────────────────────  ────────   ─────────────────────   ──────────────────────────
+  JSDoc / doc comment        1.0        "jsdoc"                 Extracted from code comments
+  LLM-generated              0.8        "llm"                   API call (Claude Haiku, Ollama)
+  NN direct transfer         0.6        "nn-direct:<symbolId>"  Neighbor similarity >= 0.85
+  NN adapted transfer        0.5        "nn-adapted:<symbolId>" Neighbor similarity 0.70-0.85
+  Heuristic (typed)          0.4        "heuristic-typed"       Functions/methods with param types
+  Heuristic (fallback)       0.3        "heuristic-fallback"    Pattern-matched from name/kind
+  No summary                 0.0        "unknown"               No information available
+```
+
+Quality scores flow through the pipeline — each stage only overwrites if it can produce a higher-quality summary. The LLM stage uses quality gating: symbols with `summaryQuality >= 0.8` (e.g., from JSDoc) are skipped, avoiding redundant API calls.
+
+### Enhanced Heuristic Generation (Tier 1.5)
+
+The heuristic summary engine generates pattern-matched summaries for **all symbol kinds**, not just functions. These run automatically during every index — no configuration required.
+
+```
+  Symbol Kind      Pattern                         Example Output
+  ─────────────    ─────────────────────────────   ──────────────────────────────────
+  function/method  Typed params + return type       "Validates token using string"
+  class            Role suffix (Provider, Factory)  "Implements the provider pattern for auth"
+  class            Generic type parameters           "Generic cache class parameterized by K, V"
+  interface        I-prefix (IUserService)           "Contract for user service"
+  interface        Suffix (Props, Options, Config)   "Props definition for button"
+  type             Suffix + generics                 "Result type for query"
+  enum             Name expansion                    "Enumeration of log level values"
+  variable         SCREAMING_SNAKE_CASE              "Constant defining max retries"
+  variable         Schema/Validator suffix            "Validation schema for user"
+  constructor      Typed parameters                  "Constructs from string and number"
+```
+
+Both the TypeScript and Rust indexing engines implement these generators with identical output, ensuring consistent summaries regardless of which engine is used.
+
+### NN Summary Transfer
+
+When `semantic.enabled: true`, the NN (nearest-neighbor) summary transfer module runs after metrics computation and before LLM generation. It uses the existing ONNX embedding model and ANN index to propagate documentation from well-documented symbols to undocumented neighbors.
+
+```
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  NN Summary Transfer Pipeline                                    │
+  │                                                                  │
+  │  1. Gather candidates: symbols with no summary or quality < 0.5  │
+  │  2. For each candidate:                                          │
+  │     a. Embed the symbol text                                     │
+  │     b. Search ANN index for nearest neighbors (max 5)            │
+  │     c. Filter: same kind, has good summary, similarity >= 0.7    │
+  │     d. Pick best neighbor by similarity score                    │
+  │                                                                  │
+  │  3. Transfer decision:                                           │
+  │     ┌─────────────────────────────────────────────────────────┐  │
+  │     │  Similarity >= 0.85  →  Direct transfer (quality 0.6)   │  │
+  │     │    Copy summary verbatim                                │  │
+  │     │                                                         │  │
+  │     │  Similarity 0.70-0.85  →  Adapted transfer (quality 0.5)│  │
+  │     │    Extract verb/pattern, apply to target name            │  │
+  │     └─────────────────────────────────────────────────────────┘  │
+  │                                                                  │
+  │  4. Quality validation: embed the transferred summary and check  │
+  │     cosine similarity to the candidate (reject if < 0.5)         │
+  │                                                                  │
+  │  5. Write to DB with quality score and source tracking            │
+  └──────────────────────────────────────────────────────────────────┘
+```
+
+**Adapted transfer example:**
+A well-documented function `validateToken` with summary "Validates JWT signature and checks expiration" can donate its verb pattern to a neighbor `validateSession`. The adapted summary becomes "Validates session" — not perfect, but far better than no summary at all (quality 0.5 vs 0.0).
+
+**Pipeline integration point:**
+```
+  1. updateMetricsForRepo(...)
+  2. NN summary transfer    ← runs here (uses previous run's ANN index)
+  3. LLM summary generation (quality-gated: skips quality >= 0.8)
+  4. refreshSymbolEmbeddings(...)
+  5. buildAnnIndex(...)
+```
+
+### LLM Generation Pipeline
 
 ```
   Indexing completes (pass-1 + pass-2)
        │
        ▼
+  ┌──────────────────────────────────────────────────────┐
+  │  Quality gate: skip symbols with summaryQuality ≥ 0.8│
+  │  (JSDoc-documented symbols don't need LLM summaries) │
+  └─────────────────────┬────────────────────────────────┘
+                        │
+                        ▼
   ┌──────────────────────────────────────────────────────┐
   │  For each symbol without a fresh cached summary:     │
   │                                                      │
@@ -669,7 +852,7 @@ sdl.symbol.search({
 })
 # Result: checkPermissions, AuthChecker  (string matches only)
 
-# Semantic search
+# Semantic search (uses hybrid retrieval when available)
 sdl.symbol.search({
   repoId: "my-app",
   query: "check auth credentials",
@@ -677,6 +860,10 @@ sdl.symbol.search({
 })
 # Result: validateToken, authenticate, verifyPassword
 #         (understands meaning, not just string matching)
+#
+# With hybrid retrieval enabled, this query runs FTS + vector
+# search in parallel and fuses results via RRF. Falls back to
+# legacy alpha-blending if extensions are unavailable.
 ```
 
 ### Example 2: Inspecting Call Resolution
@@ -786,6 +973,69 @@ sdl.repo.status({ repoId: "my-app" })
 # - Heavy use of dynamic dispatch (eval, Proxy, reflection)
 # - Missing type information (plain JS without JSDoc)
 # - Unusual import patterns not covered by resolvers
+```
+
+### Example 7: Hybrid Retrieval with Evidence
+
+```bash
+# Search with retrieval evidence to see how results were found
+sdl.symbol.search({
+  repoId: "my-app",
+  query: "check auth credentials",
+  semantic: true,
+  includeRetrievalEvidence: true
+})
+
+# Response includes per-result evidence:
+# {
+#   "symbols": [...],
+#   "retrievalEvidence": {
+#     "mode": "hybrid",
+#     "ftsAvailable": true,
+#     "vectorAvailable": true,
+#     "candidateCountPerSource": {
+#       "fts": 42,
+#       "vector:all-MiniLM-L6-v2": 38,
+#       "vector:nomic-embed-text-v1.5": 35
+#     },
+#     "fusionLatencyMs": 12,
+#     "fallbackReason": null
+#   }
+# }
+#
+# If hybrid is unavailable, mode is "legacy" with a fallbackReason:
+# "fallbackReason": "vector extension not loaded"
+```
+
+### Example 8: Configuring Hybrid Retrieval
+
+```jsonc
+{
+  "semantic": {
+    "enabled": true,
+    "provider": "local",
+    "model": "nomic-embed-text-v1.5",
+
+    // Hybrid retrieval replaces alpha-blending
+    "retrieval": {
+      "mode": "hybrid",           // "hybrid" or "legacy"
+      "fts": {
+        "enabled": true,          // Full-text search on Symbol.searchText
+        "topK": 75                // Max FTS candidates
+      },
+      "vector": {
+        "enabled": true,          // Vector search on Symbol embeddings
+        "topK": 75,               // Max vector candidates per model
+        "efs": 200                // Query-time accuracy parameter
+      },
+      "fusion": {
+        "strategy": "rrf",       // Reciprocal Rank Fusion
+        "rrfK": 60               // RRF smoothing constant
+      },
+      "candidateLimit": 100       // Max candidates after fusion
+    }
+  }
+}
 ```
 
 ---

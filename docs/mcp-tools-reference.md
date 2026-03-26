@@ -301,11 +301,12 @@ Search symbols by name or summary text.
 | `query` | `string` | Yes | Search query (min length: 1) |
 | `kinds` | `string[]` | No | Filter by symbol kind (e.g., `["function", "class"]`) |
 | `limit` | `integer` | No | Max results (1-1000, default: 50) |
-| `semantic` | `boolean` | No | Enable semantic reranking via embeddings |
+| `semantic` | `boolean` | No | Enable semantic reranking / hybrid retrieval |
+| `includeRetrievalEvidence` | `boolean` | No | Include retrieval evidence (sources, candidate counts, latency, fallback reason) |
 
-When semantic mode is enabled, lexical candidates are reranked by embeddings. If the embedding provider is unavailable, the tool falls back to lexical-only results.
+When semantic mode is enabled, the retrieval path depends on `semantic.retrieval.mode`: `"hybrid"` uses FTS + vector search with RRF fusion; `"legacy"` uses alpha-blended lexical + embedding reranking. Falls back to legacy automatically if hybrid indexes are unavailable.
 
-**Response:** `{ results: [{ symbolId, name, file, kind }], truncation? }`
+**Response:** `{ results: [{ symbolId, name, file, kind }], retrievalMode?, retrievalEvidence?, truncation? }`
 
 **Examples:**
 
@@ -453,7 +454,7 @@ Build a task-scoped graph slice. `taskText` alone is sufficient — it triggers 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `repoId` | `string` | Yes | Repository identifier |
-| `taskText` | `string` | No | Natural language task description (auto-discovers symbols) |
+| `taskText` | `string` | No | Natural language task description (auto-discovers symbols via hybrid retrieval or legacy full-text search) |
 | `entrySymbols` | `string[]` | No | Symbol IDs to start the slice from |
 | `editedFiles` | `string[]` | No | Files whose symbols (+ callers) are forced into the slice |
 | `stackTrace` | `string` | No | Stack trace to bias toward call-path symbols |
@@ -469,8 +470,9 @@ Build a task-scoped graph slice. `taskText` alone is sufficient — it triggers 
 | `includeResolutionMetadata` | `boolean` | No | Include call resolution metadata in edge data |
 | `includeMemories` | `boolean` | No | Include related development memories in the response |
 | `memoryLimit` | `integer` | No | Max memories to include (default: 5) |
+| `includeRetrievalEvidence` | `boolean` | No | Include retrieval evidence (sources, candidate counts, symptom type, fusion latency, fallback reason) |
 
-**Response:** `{ sliceHandle, ledgerVersion, lease, sliceEtag?, slice }` or `{ notModified }`.
+**Response:** `{ sliceHandle, ledgerVersion, lease, sliceEtag?, slice, retrievalEvidence? }` or `{ notModified }`.
 
 The slice contains `symbolIndex`, `cards`, optional `cardRefs` (for ETag matches), `edges`, optional `frontier`, and optional `truncation` with resume info. Slice cards may include cluster/process metadata (`card.cluster`, `card.processes`) when available.
 
