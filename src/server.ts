@@ -449,7 +449,7 @@ function extractStringField(args: unknown, field: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- z.ZodType has `any` in its generic parameters
+ 
 function convertSchema(
   schema: z.ZodType,
   compact = false,

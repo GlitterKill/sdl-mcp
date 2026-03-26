@@ -17,7 +17,7 @@ async function findNearestGoMod(
   let currentDir = resolve(repoRoot, dirname(importerRelPath));
   const repoRootAbs = resolve(repoRoot);
 
-  // eslint-disable-next-line no-constant-condition
+   
   while (true) {
     const candidate = join(currentDir, "go.mod");
     if (await existsAsync(candidate)) {

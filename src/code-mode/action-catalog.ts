@@ -153,8 +153,8 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
     string,
     unknown
   >;
-  if (def?.type === "enum" && (current as any).options) {
-    field.enumValues = (current as any).options as string[];
+  if (def?.type === "enum" && (current as unknown as Record<string, unknown>).options) {
+    field.enumValues = (current as unknown as Record<string, unknown>).options as string[];
   }
 
   return field;
@@ -181,7 +181,7 @@ function resolveTypeName(schema: z.ZodType): string {
     case "record":
       return "Record<string, unknown>";
     case "enum":
-      return `enum(${((schema as any).options ?? Object.keys(def.entries ?? {})).join("|")})`;
+      return `enum(${(((schema as unknown as Record<string, unknown>).options as string[] | undefined) ?? Object.keys((def.entries ?? {}) as Record<string, unknown>)).join("|")})`;
     case "literal":
       return `literal(${JSON.stringify(def.value)})`;
     case "union":
@@ -240,7 +240,7 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "buffer.push": { file: "src/main.ts", content: "// updated" },
   "buffer.checkpoint": {},
   "buffer.status": {},
-  "runtime.execute": { runtime: "node", args: ["--version"] },
+  "runtime.execute": { runtime: "node", args: ["--version"], outputMode: "summary" },
   "runtime.queryOutput": { artifactHandle: "runtime-myrepo-123-abc", queryTerms: ["error", "failed"] },
   "memory.store": {
     type: "pattern",
@@ -476,8 +476,13 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
   },
   "runtime.execute": {
     prerequisites: ["repo.status", "policy.get"],
-    recommendedNextActions: ["context.summary"],
+    recommendedNextActions: ["runtime.queryOutput", "context.summary"],
     fallbacks: ["code.getSkeleton"],
+  },
+  "runtime.queryOutput": {
+    prerequisites: ["runtime.execute"],
+    recommendedNextActions: ["context.summary"],
+    fallbacks: ["runtime.execute"],
   },
   "memory.store": {
     prerequisites: ["symbol.getCard", "slice.build"],

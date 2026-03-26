@@ -152,7 +152,7 @@ async function checkConfigReadable(
     });
 
     return { status: "pass", message: configPath };
-  } catch (error) {
+  } catch {
     return {
       status: "fail",
       message: `Cannot read config: ${configPath}`,

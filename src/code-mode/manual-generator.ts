@@ -109,9 +109,10 @@ function bufferCheckpoint(): { checkpointed: boolean }
   /** Get buffer status */
   function bufferStatus(): { status: object }
   /** Execute runtime command */
-  function runtimeExecute(p: { runtime: string; args?: string[]; code?: string }): { stdout: string; exitCode: number }
+  function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string }
+  // outputMode defaults to "minimal" (~50 tokens); use "summary" for head+tail, "intent" for queryTerms-only excerpts
   /** Query stored runtime output by keywords */
-  function runtimeQueryOutput(p: { artifactHandle: string; queryTerms?: string[]; maxLines?: number }): { excerpts: object[] }
+  function runtimeQueryOutput(p: { artifactHandle: string; queryTerms: string[]; maxExcerpts?: number; contextLines?: number; stream?: "stdout"|"stderr"|"both" }): { excerpts: object[] }
 
   // === Usage ===
 /** Get cumulative token savings statistics */

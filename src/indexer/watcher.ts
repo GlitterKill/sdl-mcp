@@ -23,7 +23,7 @@ import type { IndexWatchHandle, WatcherHealth } from "./indexer.js";
 import { logger } from "../util/logger.js";
 
 // Local interface for chokidar FSWatcher to avoid 'as any' casts
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 interface ChokidarWatcher {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on(event: string, fn: (...args: any[]) => void): this;

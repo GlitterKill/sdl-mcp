@@ -119,7 +119,7 @@ export function createTsCallResolver(
     programCache.set(repoRoot, buildProgram(fileNames, compilerOptions));
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+   
   let program = programCache.get(repoRoot)!;
   let checker = program.getTypeChecker();
 

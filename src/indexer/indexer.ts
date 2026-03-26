@@ -110,7 +110,7 @@ export async function indexRepo(
   // LadybugDB write conflicts and race conditions during rapid watcher events.
   // Loop-and-recheck: after awaiting a lock, another caller may have set a new
   // one before we proceed. Re-check until no lock exists.
-  // eslint-disable-next-line no-constant-condition
+   
   while (true) {
     const existing = indexLocks.get(repoId);
     if (!existing) break;

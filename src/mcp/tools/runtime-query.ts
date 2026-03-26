@@ -53,5 +53,5 @@ export async function handleRuntimeQueryOutput(
   const rawTokens = Math.ceil(totalBytes / 4);
   return attachRawContext(response, {
     rawTokens,
-  }) as RuntimeQueryOutputResponse;
+  });
 }

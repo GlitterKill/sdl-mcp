@@ -252,6 +252,7 @@ export function loadBaselineMetrics(
   }
 
   const content = readFileSync(baselinePath, "utf-8");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let baseline: any;
   try {
     baseline = JSON.parse(content);

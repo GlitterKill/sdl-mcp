@@ -96,7 +96,7 @@ const CardDetailLevelSchema = z.enum([
   "full",
 ]);
 
-const LegacyCardDetailLevelSchema = z.enum(["compact", "full"]);
+const _LegacyCardDetailLevelSchema = z.enum(["compact", "full"]);
 
 const SymbolClusterInfoSchema = z.object({
   clusterId: z.string(),
@@ -1540,7 +1540,7 @@ export type SliceBuildResponse = z.infer<typeof SliceBuildResponseSchema>;
 export type SliceBuildWireFormat = z.infer<typeof SliceBuildWireFormatSchema>;
 export type CardDetailLevelSchemaType = z.infer<typeof CardDetailLevelSchema>;
 export type LegacyCardDetailLevelSchemaType = z.infer<
-  typeof LegacyCardDetailLevelSchema
+  typeof _LegacyCardDetailLevelSchema
 >;
 export type CompactGraphSlice = z.infer<typeof CompactGraphSliceSchema>;
 export type CompactGraphSliceV2 = z.infer<typeof CompactGraphSliceV2Schema>;

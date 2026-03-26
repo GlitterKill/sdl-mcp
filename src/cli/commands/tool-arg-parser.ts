@@ -83,7 +83,7 @@ export function parseToolArgs(
 
   // Start with stdin args if provided (filter prototype-polluting keys)
   if (stdinArgs && typeof stdinArgs === "object") {
-    const { __proto__: _proto, constructor: _ctor, prototype: _pt, ...safe } = stdinArgs as Record<string, unknown>;
+    const { __proto__: _proto, constructor: _ctor, prototype: _pt, ...safe } = stdinArgs;
     Object.assign(result, safe);
   }
 

@@ -215,7 +215,7 @@ export async function runPass1WithTsEngine(
   let nextIndex = 0;
 
   const runWorker = async (): Promise<void> => {
-    // eslint-disable-next-line no-constant-condition
+     
     while (true) {
       if (params.signal?.aborted) return;
       const index = nextIndex++;

@@ -190,27 +190,27 @@ describe("release regression guards", () => {
 
     assert.match(
       source,
-      /const symbolId = extracted\.symbolId;\s*const astFingerprint = extracted\.astFingerprint;/,
+      /astFingerprint:\s*extracted\.astFingerprint,\s*symbolId:\s*extracted\.symbolId,/,
       "Rust pass-1 should use native symbol identity instead of regenerating",
     );
   });
 
   it("keeps native enrichment metadata compatible across legacy, TS, and sync paths", () => {
-    const rustSource = readSource("src/indexer/parser/rust-process-file.ts");
-    const tsSource = readSource("src/indexer/parser/process-file.ts");
+    const buildRowsSource = readSource("src/indexer/parser/build-rows.ts");
+
     const syncTypesSource = readSource("src/sync/types.ts");
     const syncSource = readSource("src/sync/sync.ts");
 
     assert.match(
-      rustSource,
+      buildRowsSource,
       /const\s+nativeRoleTagsJson\s*=\s*typeof detail\.nativeRoleTagsJson === "string"\s*\?\s*detail\.nativeRoleTagsJson\.trim\(\)\s*:\s*"";\s*const\s+nativeSearchText\s*=\s*typeof detail\.nativeSearchText === "string"\s*\?\s*detail\.nativeSearchText\.trim\(\)\s*:\s*"";/s,
-      "Rust path should tolerate older native addons that omit enrichment fields",
+      "Shared build-rows should tolerate older native addons that omit enrichment fields",
     );
 
     assert.match(
-      tsSource,
+      buildRowsSource,
       /roleTagsJson,\s*searchText,\s*updatedAt:/s,
-      "TypeScript parsing path should also persist derived search metadata",
+      "Shared build-rows should persist derived search metadata for both TS and Rust paths",
     );
 
     assert.match(

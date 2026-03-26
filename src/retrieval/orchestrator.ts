@@ -741,7 +741,7 @@ export async function entitySearch(
       const indexName =
         entityType === "symbol"
           ? (config.fts.indexName ?? DEFAULT_FTS_INDEX_NAME)
-          : ENTITY_FTS_INDEX_NAMES[entityType as keyof typeof ENTITY_FTS_INDEX_NAMES];
+          : ENTITY_FTS_INDEX_NAMES[entityType];
 
       let ftsRows: FtsRawRow[] = [];
       try {

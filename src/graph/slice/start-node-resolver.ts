@@ -495,7 +495,7 @@ export async function resolveStartNodesLadybug(
       // The `as SymbolId` cast is consistent with how other DB query results are used.
       for (const item of hybridResult.results) {
         if (startNodes.size >= limits.maxTotalStartNodes) break;
-        addStartNode(item.symbolId as SymbolId, "stackTrace");
+        addStartNode(item.symbolId, "stackTrace");
       }
     }
     // Keep existing stackTrace resolution as additional source (not else - both paths contribute)
@@ -521,7 +521,7 @@ export async function resolveStartNodesLadybug(
       });
       for (const item of hybridResult.results) {
         if (startNodes.size >= limits.maxTotalStartNodes) break;
-        addStartNode(item.symbolId as SymbolId, "failingTestPath");
+        addStartNode(item.symbolId, "failingTestPath");
       }
     }
     // Keep existing failingTestPath resolution as additional source (not else - both paths contribute)
@@ -576,9 +576,9 @@ export async function resolveStartNodesLadybug(
       let taskTextSeedCount = 0;
       for (const item of hybridResult.results) {
         if (taskTextSeedCount >= effectiveTaskTextLimit || startNodes.size >= limits.maxTotalStartNodes) break;
-        if (startNodes.has(item.symbolId as SymbolId)) continue;
-        addStartNode(item.symbolId as SymbolId, "taskText");
-        if (startNodes.has(item.symbolId as SymbolId)) {
+        if (startNodes.has(item.symbolId)) continue;
+        addStartNode(item.symbolId, "taskText");
+        if (startNodes.has(item.symbolId)) {
           taskTextSeedCount++;
         }
       }
