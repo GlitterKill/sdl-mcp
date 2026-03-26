@@ -69,23 +69,23 @@ describe("config surface sync", () => {
   });
 
   it("keeps prefetch defaults aligned across config and generated schema", () => {
-    assert.strictEqual(PrefetchConfigSchema.parse({}).enabled, false);
+    assert.strictEqual(PrefetchConfigSchema.parse({}).enabled, true);
 
     const schema = JSON.parse(
       readFileSync(resolve(repoRoot, "config/sdlmcp.config.schema.json"), "utf8"),
     );
-    assert.strictEqual(schema.properties.prefetch.properties.enabled.default, false);
-    assert.strictEqual(schema.properties.prefetch.default.enabled, false);
+    assert.strictEqual(schema.properties.prefetch.properties.enabled.default, true);
+    assert.strictEqual(schema.properties.prefetch.default.enabled, true);
 
     const sample = JSON.parse(
       readFileSync(resolve(repoRoot, "config/sdlmcp.config.json.sample"), "utf8"),
     );
-    assert.strictEqual(sample.prefetch.enabled, false);
+    assert.strictEqual(sample.prefetch.enabled, true);
 
     const serveSource = readFileSync(
       resolve(repoRoot, "src/cli/commands/serve.ts"),
       "utf8",
     );
-    assert.match(serveSource, /config\.prefetch\?\.enabled \?\? false/);
+    assert.match(serveSource, /config\.prefetch\?\.enabled \?\? true/);
   });
 });

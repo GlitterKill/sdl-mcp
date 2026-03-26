@@ -244,9 +244,9 @@ describe("SemanticConfigSchema defaults", () => {
 // ---------------------------------------------------------------------------
 
 describe("PrefetchConfigSchema defaults", () => {
-  it("PrefetchConfigSchema.enabled defaults to false", () => {
+  it("PrefetchConfigSchema.enabled defaults to true", () => {
     const result = PrefetchConfigSchema.parse({});
-    assert.strictEqual(result.enabled, false);
+    assert.strictEqual(result.enabled, true);
   });
 });
 
@@ -255,9 +255,9 @@ describe("PrefetchConfigSchema defaults", () => {
 // ---------------------------------------------------------------------------
 
 describe("TracingConfigSchema defaults", () => {
-  it("TracingConfigSchema.enabled defaults to false", () => {
+  it("TracingConfigSchema.enabled defaults to true", () => {
     const result = TracingConfigSchema.parse({});
-    assert.strictEqual(result.enabled, false);
+    assert.strictEqual(result.enabled, true);
   });
 
   it("TracingConfigSchema.serviceName defaults to 'sdl-mcp'", () => {
@@ -271,8 +271,8 @@ describe("TracingConfigSchema defaults", () => {
 // ---------------------------------------------------------------------------
 
 describe("ParallelScorerConfigSchema defaults", () => {
-  it("ParallelScorerConfigSchema.enabled defaults to false", () => {
+  it("ParallelScorerConfigSchema.enabled defaults to true", () => {
     const result = ParallelScorerConfigSchema.parse({});
-    assert.strictEqual(result.enabled, false);
+    assert.strictEqual(result.enabled, true);
   });
 });

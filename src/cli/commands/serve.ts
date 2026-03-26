@@ -102,10 +102,10 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   });
 
   configurePrefetch({
-    enabled: config.prefetch?.enabled ?? false,
+    enabled: config.prefetch?.enabled ?? true,
     maxBudgetPercent: config.prefetch?.maxBudgetPercent ?? 20,
   });
-  if (config.prefetch?.enabled ?? false) {
+  if (config.prefetch?.enabled ?? true) {
     for (const repo of config.repos) {
       warmPrefetchOnServeStart(repo.repoId, config.prefetch?.warmTopN ?? 50);
     }

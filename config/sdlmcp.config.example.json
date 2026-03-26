@@ -43,8 +43,7 @@
     "maxWindowTokens": 1400,
     "requireIdentifiers": true,
     "allowBreakGlass": false,
-    "defaultDenyRaw": true,
-    "defaultMinCallConfidence": null
+    "defaultDenyRaw": true
   },
   "redaction": {
     "enabled": true,
@@ -129,8 +128,12 @@
         "topK": 75,
         "efs": 200,
         "indexes": {
-          "all-MiniLM-L6-v2": { "indexName": "symbol_vec_minilm_l6_v2" },
-          "nomic-embed-text-v1.5": { "indexName": "symbol_vec_nomic_embed_v15" }
+          "all-MiniLM-L6-v2": {
+            "indexName": "symbol_vec_minilm_l6_v2"
+          },
+          "nomic-embed-text-v1.5": {
+            "indexName": "symbol_vec_nomic_embed_v15"
+          }
         }
       },
       "fusion": {
@@ -166,7 +169,10 @@
   },
   "runtime": {
     "enabled": false,
-    "allowedRuntimes": ["node", "python"],
+    "allowedRuntimes": [
+      "node",
+      "python"
+    ],
     "allowedExecutables": [],
     "maxDurationMs": 30000,
     "maxStdoutBytes": 1048576,
