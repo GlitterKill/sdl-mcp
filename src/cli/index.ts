@@ -130,7 +130,10 @@ async function main(): Promise<void> {
     }
 
     case "info": {
-      const options = { ...global } as InfoOptions;
+      const options: InfoOptions = {
+        ...global,
+        jsonOutput: values.json === true,
+      };
       await infoCommand(options);
       break;
     }

@@ -16,6 +16,11 @@ function printList(title: string, values: string[]): void {
 export async function infoCommand(options: InfoOptions): Promise<void> {
   const report = await collectInfoReport(options);
 
+  if (options.jsonOutput) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    return;
+  }
+
   console.log(`SDL-MCP version: ${report.version}`);
   console.log("");
   console.log("Runtime:");

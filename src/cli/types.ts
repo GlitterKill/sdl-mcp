@@ -26,7 +26,9 @@ export interface InitOptions extends CLIOptions {
 
 export interface DoctorOptions extends CLIOptions {}
 
-export interface InfoOptions extends CLIOptions {}
+export interface InfoOptions extends CLIOptions {
+  jsonOutput?: boolean;
+}
 
 export interface IndexOptions extends CLIOptions {
   watch?: boolean;
