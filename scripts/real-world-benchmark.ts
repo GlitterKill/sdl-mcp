@@ -693,9 +693,9 @@ function collectCandidateFiles(
   const ancillaryPatterns = ["config/**/*.json"];
   const patterns = [...codePatterns, ...ancillaryPatterns];
 
-  return [...globSync(patterns, {
+  return globSync(patterns, {
     cwd: repoRoot,
-    ignore,
+    ignore: exclude,
     dot: true,
     onlyFiles: true,
     absolute: true,
