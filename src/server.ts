@@ -61,6 +61,23 @@ interface ToolDefinition {
   presentation: ToolPresentation;
 }
 
+export function attachDisplayFooter(result: unknown, footerText: string): unknown {
+  if (!footerText || !result || typeof result !== "object" || Array.isArray(result)) {
+    return result;
+  }
+
+  const obj = result as Record<string, unknown>;
+  const existingFooter = typeof obj._displayFooter === "string" ? obj._displayFooter : "";
+  const mergedFooter = existingFooter
+    ? `${existingFooter}\n\n${footerText}`
+    : footerText;
+
+  return {
+    ...obj,
+    _displayFooter: mergedFooter,
+  };
+}
+
 export class MCPServer {
   private server: Server;
   private tools: Map<string, ToolDefinition> = new Map();
@@ -308,11 +325,25 @@ export class MCPServer {
               repoId,
               symbolId,
             });
+            const footerLines: string[] = [];
+            if (capturedUsage && capturedUsage.rawEquivalent > 0) {
+              footerLines.push(
+                `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens ${capturedUsage.meter}`,
+              );
+            }
+            if (capturedSummary) {
+              footerLines.push(capturedSummary);
+            }
+            const primaryPayload = attachDisplayFooter(
+              finalResult,
+              footerLines.join("\n\n"),
+            );
+
             // Wrap result in MCP content format
             const contentBlocks: Array<{ type: string; text: string }> = [
               {
                 type: "text",
-                text: JSON.stringify(finalResult, null, 2),
+                text: JSON.stringify(primaryPayload, null, 2),
               },
             ];
 

@@ -92,7 +92,7 @@ Every tool call that retrieves code context shows its savings inline.
    ████████░░ 84%
    ```
 
-4. **Server appends content block** — The tool response includes a compact savings line:
+4. **Server injects first-block footer + appends content block** — The tool response now includes a `_displayFooter` field inside the first JSON content block (for clients that only render `content[0]`), and still appends a compact savings line as a separate content block:
 
    ```
    📊 1.2k / 65.0k tokens ████████░░ 98%
