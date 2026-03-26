@@ -324,6 +324,8 @@ export async function readArtifactManifest(
 
 import { gunzip } from "zlib";
 
+
+const MAX_ARTIFACT_DECOMPRESS_SIZE = 50 * 1024 * 1024; // 50 MB
 const gunzipAsync = promisify(gunzip);
 
 /**
@@ -355,6 +357,9 @@ export async function readArtifactContent(
     try {
       const compressed = await readFile(join(artifactDir, "stdout.gz"));
       const decompressed = await gunzipAsync(compressed);
+      if (decompressed.length > MAX_ARTIFACT_DECOMPRESS_SIZE) {
+        throw new Error(`Decompressed artifact exceeds size limit (${decompressed.length} bytes)`);
+      }
       stdout = decompressed.toString("utf-8");
       totalBytes += decompressed.length;
     } catch (err) {
@@ -366,6 +371,9 @@ export async function readArtifactContent(
     try {
       const compressed = await readFile(join(artifactDir, "stderr.gz"));
       const decompressed = await gunzipAsync(compressed);
+      if (decompressed.length > MAX_ARTIFACT_DECOMPRESS_SIZE) {
+        throw new Error(`Decompressed artifact exceeds size limit (${decompressed.length} bytes)`);
+      }
       stderr = decompressed.toString("utf-8");
       totalBytes += decompressed.length;
     } catch (err) {

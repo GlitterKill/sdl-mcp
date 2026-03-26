@@ -705,7 +705,12 @@ export async function generateSymbolSkeleton(
     return null;
   }
 
-  const content = (await readFile(filePath, "utf-8")).replace(/\r\n/g, "\n");
+  let content: string;
+  try {
+    content = (await readFile(filePath, "utf-8")).replace(/\r\n/g, "\n");
+  } catch {
+    return null;
+  }
   const tree = parseFile(content, `.${extension}`);
 
   if (!tree) {
@@ -803,7 +808,12 @@ export async function generateFileSkeleton(
     return null;
   }
 
-  const content = (await readFile(absPath, "utf-8")).replace(/\r\n/g, "\n");
+  let content: string;
+  try {
+    content = (await readFile(absPath, "utf-8")).replace(/\r\n/g, "\n");
+  } catch {
+    return null;
+  }
   const tree = parseFile(content, `.${extension}`);
 
   if (!tree) {
@@ -1142,7 +1152,12 @@ export async function generateSkeletonIR(
     return null;
   }
 
-  const content = (await readFile(filePath, "utf-8")).replace(/\r\n/g, "\n");
+  let content: string;
+  try {
+    content = (await readFile(filePath, "utf-8")).replace(/\r\n/g, "\n");
+  } catch {
+    return null;
+  }
   const tree = parseFile(content, `.${extension}`);
 
   if (!tree) {

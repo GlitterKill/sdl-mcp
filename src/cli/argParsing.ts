@@ -13,7 +13,7 @@ export type ParsedOptionValues = Record<string, unknown>;
 function parsePort(portValue: unknown): number {
   const portStr = String(portValue);
   const port = parseInt(portStr, 10);
-  if (isNaN(port) || port < 1 || port > 65535) {
+  if (Number.isNaN(port) || port < 1 || port > 65535) {
     throw new Error("--port must be a number between 1 and 65535");
   }
   return port;

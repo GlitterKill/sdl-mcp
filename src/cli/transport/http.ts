@@ -1311,7 +1311,7 @@ export async function setupHttpTransport(
     const transport = transports.get(sessionId);
     if (opts?.closeTransport && transport) {
       if ("close" in transport && typeof transport.close === "function") {
-        void (transport.close as () => Promise<void>)();
+        void (transport.close as () => Promise<void>)().catch(() => {});
       }
     }
     transports.delete(sessionId);

@@ -4,6 +4,13 @@ import type { RuntimeDescriptor, RuntimeDetectionResult } from "./types.js";
 
 // ── Table types ──────────────────────────────────────────────
 
+/** Escape a single argument for cmd.exe /c to prevent metacharacter injection */
+function cmdEscape(arg: string): string {
+  // Double-quote the argument; escape chars that cmd.exe interprets
+  const escaped = arg.replace(/[()%!^"<>&|]/g, (ch) => "^" + ch);
+  return '"' + escaped + '"';
+}
+
 interface PlatformCandidates {
   win32: string[];
   unix: string[];
@@ -297,7 +304,7 @@ function createDescriptor(entry: RuntimeTableEntry): RuntimeDescriptor {
           const cmd = opts.executable ?? "cmd.exe";
           return opts.codePath
             ? { executable: cmd, args: ["/c", opts.codePath, ...args] }
-            : { executable: cmd, args: ["/c", ...args] };
+            : { executable: cmd, args: ["/c", args.map(cmdEscape).join(" ")] };
         }
         const sh = opts.executable ?? "bash";
         return opts.codePath

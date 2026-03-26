@@ -1,3 +1,5 @@
+const MAX_ETAG_CACHE_SIZE = 2000;
+
 export class ChainEtagCache {
   private cache: Map<string, string> = new Map();
 
@@ -42,6 +44,7 @@ export class ChainEtagCache {
         const symbolId = (card as Record<string, unknown>).symbolId;
         if (typeof symbolId === "string") {
           this.cache.set(symbolId, etag);
+          this.evictIfNeeded();
         }
       }
     } else if (action === "symbol.getCards") {
@@ -56,11 +59,19 @@ export class ChainEtagCache {
               const symbolId = (card as Record<string, unknown>).symbolId;
               if (typeof symbolId === "string") {
                 this.cache.set(symbolId, etag);
+                this.evictIfNeeded();
               }
             }
           }
         }
       }
+    }
+  }
+
+  private evictIfNeeded(): void {
+    if (this.cache.size > MAX_ETAG_CACHE_SIZE) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest !== undefined) this.cache.delete(oldest);
     }
   }
 
@@ -73,6 +84,7 @@ export class ChainEtagCache {
   seed(cache: Record<string, string>): void {
     for (const [key, value] of Object.entries(cache)) {
       this.cache.set(key, value);
+      this.evictIfNeeded();
     }
   }
 }

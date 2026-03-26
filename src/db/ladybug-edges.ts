@@ -105,7 +105,7 @@ export async function insertEdge(conn: Connection, edge: EdgeRow): Promise<void>
          d.resolverId = $resolverId,
          d.resolutionPhase = $resolutionPhase,
          d.provenance = $provenance,
-         d.createdAt = $createdAt`,
+         d.createdAt = CASE WHEN d.createdAt IS NOT NULL THEN d.createdAt ELSE $createdAt END`,
     {
       repoId: edge.repoId,
       fromSymbolId: edge.fromSymbolId,

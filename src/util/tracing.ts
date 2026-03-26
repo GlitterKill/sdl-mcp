@@ -215,7 +215,7 @@ export function runInSpanContext<T>(span: Span, fn: () => T): T {
 
 export function resetTracingForTest(): void {
   if (provider) {
-    void provider.forceFlush();
+    void provider.forceFlush().catch(() => {});
   }
   tracer = null;
   provider = null;

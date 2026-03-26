@@ -150,9 +150,12 @@ export class OverlayStore {
     );
   }
 
-  markSaved(repoId: string, filePath: string, savedAt: string): DraftOverlayEntry | null {
+  markSaved(repoId: string, filePath: string, savedAt: string, expectedVersion?: number): DraftOverlayEntry | null {
     const entry = this.getDraft(repoId, filePath);
     if (!entry) {
+      return null;
+    }
+    if (expectedVersion !== undefined && entry.version !== expectedVersion) {
       return null;
     }
 

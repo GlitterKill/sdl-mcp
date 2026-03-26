@@ -27,6 +27,7 @@ import {
 import { createTsCallResolver } from "./ts/tsParser.js";
 import { ParserWorkerPool } from "./workerPool.js";
 import { invalidateGraphSnapshot } from "../graph/graphSnapshotCache.js";
+import { clearSliceCache } from "../graph/sliceCache.js";
 import { clearOverviewCache } from "../graph/overview.js";
 import { clearFingerprintCollisionLog } from "./fingerprints.js";
 import {
@@ -415,6 +416,7 @@ async function indexRepoImpl(
 
     invalidateGraphSnapshot(repoId);
     clearOverviewCache();
+    clearSliceCache();
     clearFingerprintCollisionLog();
     return result;
   } finally {

@@ -115,6 +115,38 @@ export function validatePathWithinRoot(root: string, target: string): string {
   return absoluteTarget;
 }
 
+/**
+ * Async variant that follows symlinks before validation.
+ * Use this when the caller can await and symlink escape must be prevented.
+ */
+export async function validatePathWithinRootAsync(
+  root: string,
+  target: string,
+): Promise<string> {
+  const absoluteTarget = validatePathWithinRoot(root, target);
+  let realTarget: string;
+  let realRoot: string;
+  try {
+    const { realpath } = await import("node:fs/promises");
+    realTarget = await realpath(absoluteTarget);
+    realRoot = await realpath(root);
+  } catch {
+    return absoluteTarget;
+  }
+  const normalizedRealTarget = normalizePath(realTarget);
+  const normalizedRealRoot = normalizePath(realRoot);
+  const useWindows = isWindowsPathLike(normalizedRealRoot);
+  const cmpTarget = useWindows ? normalizedRealTarget.toLowerCase() : normalizedRealTarget;
+  const cmpRoot = useWindows ? normalizedRealRoot.toLowerCase() : normalizedRealRoot;
+  const prefix = cmpRoot.endsWith("/") ? cmpRoot : cmpRoot + "/";
+  if (cmpTarget !== cmpRoot && !cmpTarget.startsWith(prefix)) {
+    throw new ValidationError(
+      "Symlink escape detected: " + target + " resolves outside repository root",
+    );
+  }
+  return absoluteTarget;
+}
+
 export function getAbsolutePathFromRepoRoot(
   repoRoot: string,
   relPath: string,

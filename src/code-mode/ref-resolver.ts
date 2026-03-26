@@ -124,7 +124,7 @@ export function resolveRefs(
   priorResults: unknown[],
 ): Record<string, unknown> {
   // Deep-clone to avoid mutating the original
-  const cloned = JSON.parse(JSON.stringify(args)) as Record<string, unknown>;
+  const cloned = structuredClone(args) as Record<string, unknown>;
 
   function resolveValue(value: unknown): unknown {
     if (typeof value === "string") {

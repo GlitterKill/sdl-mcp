@@ -243,13 +243,7 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
       kind: symbol.kind as SymbolKind,
       signature: toSignature(symbol.signatureJson, symbol.name),
       summary: symbol.summary ?? `${symbol.kind} ${symbol.name}`,
-      cluster: clustersMap.get(symbol.symbolId)
-        ? {
-            clusterId: clustersMap.get(symbol.symbolId)!.clusterId,
-            label: clustersMap.get(symbol.symbolId)!.label,
-            memberCount: clustersMap.get(symbol.symbolId)!.symbolCount,
-          }
-        : undefined,
+      cluster: (() => {          const ci = clustersMap.get(symbol.symbolId);          return ci ? { clusterId: ci.clusterId, label: ci.label, memberCount: ci.symbolCount } : undefined;        })(),
       processes: processesMap.get(symbol.symbolId)?.length
         ? processesMap
             .get(symbol.symbolId)!
@@ -341,7 +335,12 @@ export async function generateContextSummary(args: {
   // Invalidate cache when index version changes for this repo
   const lastVersion = summarySeedVersions.get(args.repoId);
   if (lastVersion && lastVersion !== indexVersion) {
-    summarySeedCache.clear();
+    // Invalidate only entries for this repo (not all repos)
+    for (const key of summarySeedCache.keys()) {
+      if (key.startsWith(args.repoId + ":")) {
+        summarySeedCache.delete(key);
+      }
+    }
   }
   summarySeedVersions.set(args.repoId, indexVersion);
 

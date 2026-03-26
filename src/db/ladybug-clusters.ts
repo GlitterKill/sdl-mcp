@@ -370,7 +370,7 @@ export async function backfillClusterSearchText(
       );
       const nameMap = new Map(nameRows.map((r) => [r.symbolId, r.name]));
       const memberNames = symbolIds
-        .map((id) => nameMap.get(id))
+        .map((id) => nameMap.get(id) ?? id)
         .filter((n): n is string => Boolean(n));
 
       const searchText = buildClusterSearchText(cluster.label, memberNames);

@@ -151,7 +151,7 @@ async function queryVectorIndex(
         (r.score ?? r._score) != null
           ? Number(r.score ?? r._score)
           : (r.distance ?? r._distance) != null
-            ? 1 / (1 + Number(r.distance))
+            ? 1 / (1 + Number(r.distance ?? r._distance))
             : 0,
     }));
   } catch (err) {

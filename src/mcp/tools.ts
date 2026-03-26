@@ -1197,6 +1197,12 @@ export const GetSkeletonRequestSchema = z
       .refine((p) => !p.includes(".."), {
         message: "Path traversal (..) is not allowed",
       })
+      .refine((p) => !/^[/\]/.test(p) && !/^[a-zA-Z]:/.test(p), {
+        message: "filePath must be relative",
+      })
+      .refine((p) => !p.includes(" "), {
+        message: "filePath must not contain null bytes",
+      })
       .optional(),
     exportedOnly: z.boolean().optional(),
     maxLines: z.number().int().min(1).optional(),

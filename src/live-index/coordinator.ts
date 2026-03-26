@@ -198,6 +198,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
         input.repoId,
         input.filePath,
         input.timestamp,
+        input.version,
       );
       if (patched) {
         await this.checkpointService.checkpointRepo(

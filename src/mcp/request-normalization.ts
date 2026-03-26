@@ -44,6 +44,7 @@ export function normalizeToolArguments(args: unknown): unknown {
   const source = args as Record<string, unknown>;
 
   for (const [key, value] of Object.entries(source)) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
     const normalizedKey = normalizeKey(key);
     if (!(normalizedKey in normalized)) {
       normalized[normalizedKey] = value;

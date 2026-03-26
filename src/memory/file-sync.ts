@@ -220,7 +220,7 @@ export function parseMemoryFileContent(raw: string): MemoryFileData | null {
     title,
     content: bodyContent,
     tags: parseYamlArray(fields.get("tags") ?? "[]"),
-    confidence: isNaN(confidence) ? 0.8 : confidence,
+    confidence: Number.isNaN(confidence) ? 0.8 : confidence,
     symbols: parseYamlArray(fields.get("symbols") ?? "[]"),
     files: parseYamlArray(fields.get("files") ?? "[]"),
     createdAt,

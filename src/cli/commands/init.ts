@@ -326,7 +326,7 @@ function promptForLanguages(): Promise<LanguageType[]> {
     const selectedIndices = answer
       .split(",")
       .map((s) => parseInt(s.trim(), 10))
-      .filter((n) => !isNaN(n) && n > 0 && n <= VALID_LANGUAGES.length);
+      .filter((n) => !Number.isNaN(n) && n > 0 && n <= VALID_LANGUAGES.length);
 
     if (selectedIndices.length === 0) {
       console.log("No languages selected, defaulting to all languages");

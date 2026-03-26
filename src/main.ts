@@ -29,6 +29,7 @@ import {
 } from "./util/logger.js";
 import { ensureConfiguredReposRegistered } from "./startup/bootstrap.js";
 
+import { resetScorerPool } from "./graph/slice/beam-search-engine.js";
 // Enable file logging by default for the direct MCP entry point so crash
 // evidence is always persisted. The SDL_LOG_FILE env var auto-enables in
 // logger.ts as well, but this ensures a log file exists even without it.
@@ -144,6 +145,7 @@ async function main(): Promise<void> {
       idleMonitor.stop();
     });
     shutdownMgr.addCleanup("server", () => server.stop());
+    shutdownMgr.addCleanup("scorerPool", () => resetScorerPool());
     shutdownMgr.addCleanup("db", () => closeLadybugDb());
     shutdownMgr.addCleanup("logger", () => shutdownLogger());
     shutdownMgr.addCleanup("watchers", async () => {

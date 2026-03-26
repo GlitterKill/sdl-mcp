@@ -1599,7 +1599,8 @@ export async function beamSearchAsync(
 
         st.visited.add(neighborId);
         const neighborScore = -scored.score;
-        const edge = edgeByTarget.get(neighborId)!;
+        const edge = edgeByTarget.get(neighborId);
+        if (!edge) continue;
 
         insertCandidateIntoFrontier(
           st,
