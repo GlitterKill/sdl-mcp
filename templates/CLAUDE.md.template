@@ -18,6 +18,13 @@ Use SDL-MCP as the default path for repository `{{REPO_ID}}`.
 - If a hook denies `Read` or `Bash`, switch to SDL-MCP immediately and do not retry the denied native tool.
 - Use the `explore-sdl` subagent for codebase exploration instead of the built-in `Explore` agent.
 
+## Runtime Execution
+
+- Use `runtimeExecute` inside `sdl.chain` with `outputMode: "minimal"` (default) for ~50-token responses.
+- If you need output details after a minimal-mode execution, call `runtimeQueryOutput` with the `artifactHandle` and targeted `queryTerms`.
+- Set `timeoutMs` on all runtime executions to prevent hangs.
+- Supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`.
+
 ## Indexed Source Extensions
 
 | Language | Extensions |

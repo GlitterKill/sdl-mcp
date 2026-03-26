@@ -45,7 +45,7 @@ Ladybug storage is file-based. If `graphDatabase.path` is omitted, SDL-MCP defau
 
 ## Annotated Full Configuration
 
-Below is every option with inline commentary. JSON does not support comments, so this is JSONC for illustration — remove comments before using as a config file.
+Below is every option with inline commentary. JSON does not support comments, so this is JSONC for illustration — remove comments before using as a config file. All values shown are the defaults.
 
 ```jsonc
 {
@@ -73,7 +73,7 @@ Below is every option with inline commentary. JSON does not support comments, so
 
       // File extensions to index. Only include languages present in your repo for faster indexing.
       // Supported: ts, tsx, js, jsx, py, go, java, cs, c, cpp, php, rs, kt, sh
-      "languages": ["ts", "tsx", "js", "jsx"],
+      "languages": ["ts", "tsx", "js", "jsx", "py", "go", "java", "cs", "c", "cpp", "php", "rs", "kt", "sh"],
 
       // Files larger than this (bytes) are skipped. Default: 2000000 (2MB).
       "maxFileBytes": 2000000,
@@ -102,7 +102,7 @@ Below is every option with inline commentary. JSON does not support comments, so
   // If omitted, SDL-MCP defaults to <configDir>/sdl-mcp-graph.lbug.
   // Supports ${VAR_NAME} environment variable expansion.
   "graphDatabase": {
-    "path": "./data/sdl-mcp-graph.lbug",
+    "path": null,
   },
 
   // Deprecated legacy database file path (v0.7.x). Only used by the one-time
@@ -125,6 +125,17 @@ Below is every option with inline commentary. JSON does not support comments, so
 
     // Allow break-glass override to bypass policy denials (logged in audit trail).
     "allowBreakGlass": false,
+
+    // Default deny for raw code windows (subjects needWindow to proof-of-need gating).
+    "defaultDenyRaw": true,
+
+    // Optional server-side budget defaults applied when the client does not supply them.
+    "budgetCaps": null,
+    // Example: { "maxCards": 60, "maxEstimatedTokens": 12000 }
+
+    // Optional default minCallConfidence for symbol-card and slice call-edge filtering.
+    // Leave null to keep call-edge filtering request-driven only.
+    "defaultMinCallConfidence": null,
   },
 
   // ──────────────────────────────────────────────────────────
@@ -170,6 +181,18 @@ Below is every option with inline commentary. JSON does not support comments, so
     // Lower = faster incremental updates but more reindex calls during rapid edits.
     // Higher = fewer redundant calls but slower responsiveness.
     "watchDebounceMs": 300,
+  },
+
+  // ──────────────────────────────────────────────────────────
+  // LIVE INDEX — editor buffer overlay for draft-aware intelligence
+  // ──────────────────────────────────────────────────────────
+  "liveIndex": {
+    "enabled": true,               // Enable live overlay for unsaved buffers
+    "debounceMs": 75,              // Parse delay after buffer update (25-5000)
+    "idleCheckpointMs": 15000,     // Auto-checkpoint after idle (1000-300000)
+    "maxDraftFiles": 200,          // Max concurrent draft files (1-10000)
+    "reconcileConcurrency": 1,     // Concurrent overlay→DB merge jobs (1-8)
+    "clusterRefreshThreshold": 25, // Reconciled symbols before cluster refresh (1-1000)
   },
 
   // ──────────────────────────────────────────────────────────
@@ -254,8 +277,9 @@ Below is every option with inline commentary. JSON does not support comments, so
     // When enabled, lexical results are reranked by embedding similarity.
     "enabled": true,
 
-    // Lexical/semantic blend ratio (0.0 = pure lexical, 1.0 = pure semantic).
-    // 0.6 gives semantic signals priority while preserving exact-match recall.
+    // @deprecated — use retrieval.fusion.rrfK instead.
+    // Legacy lexical/semantic blend ratio (0.0 = pure lexical, 1.0 = pure semantic).
+    // Still honoured in "legacy" retrieval mode; ignored when retrieval.mode is "hybrid".
     "alpha": 0.6,
 
     // Embedding provider: "local" (onnxruntime-node, default), "api" (remote), "mock" (deterministic).
@@ -266,13 +290,22 @@ Below is every option with inline commentary. JSON does not support comments, so
     // Embedding model identifier. Used by "api" and "local" providers.
     "model": "all-MiniLM-L6-v2",
 
+    // Override directory for downloaded ONNX model files. Defaults to platform-specific cache.
+    "modelCacheDir": null,
+
     // Generate LLM-powered symbol summaries during indexing.
     // Requires an API key (summaryApiKey or ANTHROPIC_API_KEY env var).
     // Summaries are cached as SummaryCache graph nodes in LadybugDB.
     "generateSummaries": false,
 
-    // LLM model for summary generation. Supports Anthropic Claude or OpenAI-compatible APIs.
-    "summaryModel": "claude-haiku-4-5-20251001",
+    // Summary LLM backend, independent from the embedding provider.
+    // "api" = Anthropic, "local" = OpenAI-compatible (Ollama), "mock" = deterministic.
+    // Defaults to the embedding "provider" value when null.
+    "summaryProvider": null,
+
+    // LLM model for summary generation. Defaults per-provider:
+    // "api" uses "claude-haiku-4-5-20251001", "local" uses "gpt-4o-mini".
+    "summaryModel": null,
 
     // API key for the summary LLM provider. Falls back to ANTHROPIC_API_KEY env var.
     "summaryApiKey": null,
@@ -290,24 +323,53 @@ Below is every option with inline commentary. JSON does not support comments, so
     // Larger batches reduce API calls but need larger context windows.
     "summaryBatchSize": 20,
 
-    // HNSW approximate nearest neighbor index for faster semantic retrieval.
+    // @deprecated — use retrieval.vector instead.
+    // Legacy HNSW ANN sidecar index. Still honoured in "legacy" retrieval mode;
+    // ignored when retrieval.mode is "hybrid" (native Ladybug vector indexes preferred).
     "ann": {
-      // Enable the HNSW ANN index. Enabled by default for faster semantic retrieval.
       "enabled": true,
+      "m": 16,              // Bi-directional links per HNSW node (4-64)
+      "efConstruction": 200, // Candidate list during build (16-500)
+      "efSearch": 50,        // Candidate list during search (8-256)
+      "maxElements": 200000, // Max elements in index (1000-1000000)
+    },
 
-      // Bi-directional links per HNSW node (4-64). Higher = better recall, more memory.
-      "m": 16,
+    // Hybrid retrieval pipeline configuration (FTS + vector fusion).
+    // Replaces legacy embedding re-ranking with a two-stage pipeline.
+    "retrieval": {
+      // "legacy" = original semantic-only re-rank; "hybrid" = FTS + vector fusion pipeline.
+      "mode": "legacy",
 
-      // Dynamic candidate list size during index construction (16-500).
-      // Higher = better index quality, slower build.
-      "efConstruction": 200,
+      // When true, file-extension filtering is optional (not enforced) during retrieval.
+      "extensionsOptional": true,
 
-      // Dynamic candidate list size during search (8-256).
-      // Higher = better recall, slower queries.
-      "efSearch": 50,
+      // Full-text search stage configuration.
+      "fts": {
+        "enabled": true,
+        "indexName": "symbol_search_text_v1", // FTS index name on Symbol.searchText
+        "topK": 75,                           // Max FTS candidates before fusion (1-500)
+        "conjunctive": false,                 // true = AND all terms; false = OR
+      },
 
-      // Maximum elements in the ANN index (1000-1000000).
-      "maxElements": 200000,
+      // Vector (HNSW) retrieval stage using native Ladybug vector indexes.
+      "vector": {
+        "enabled": true,
+        "topK": 75,       // Max candidates per model (1-500)
+        "efs": 200,        // Query-time accuracy (efSearch) (8-1000)
+        "indexes": {       // Per-model index name overrides
+          "all-MiniLM-L6-v2": { "indexName": "symbol_vec_minilm_l6_v2" },
+          "nomic-embed-text-v1.5": { "indexName": "symbol_vec_nomic_embed_v15" },
+        },
+      },
+
+      // Score fusion for combining FTS and vector results.
+      "fusion": {
+        "strategy": "rrf",  // Reciprocal Rank Fusion
+        "rrfK": 60,         // RRF smoothing constant (1-1000)
+      },
+
+      // Max candidate symbols after fusion re-ranking (10-1000).
+      "candidateLimit": 100,
     },
   },
 
@@ -317,7 +379,7 @@ Below is every option with inline commentary. JSON does not support comments, so
   "prefetch": {
     // Enable background prefetch queue during serve.
     // Predicts likely next requests and pre-computes results.
-    "enabled": false,
+    "enabled": true,
 
     // Cap for prefetch resource usage as % of configured budget (1-100).
     "maxBudgetPercent": 20,
@@ -331,7 +393,7 @@ Below is every option with inline commentary. JSON does not support comments, so
   // ──────────────────────────────────────────────────────────
   "tracing": {
     // Enable OpenTelemetry tracing for tool calls and indexing operations.
-    "enabled": false,
+    "enabled": true,
 
     // Service name attached to all trace spans.
     "serviceName": "sdl-mcp",
@@ -348,25 +410,12 @@ Below is every option with inline commentary. JSON does not support comments, so
   },
 
   // ──────────────────────────────────────────────────────────
-  // HTTP AUTH — bearer-token authentication for HTTP transport
-  // ──────────────────────────────────────────────────────────
-  "httpAuth": {
-    // Enable bearer-token authentication for /mcp and /api/* endpoints.
-    // Set false to disable auth entirely (trusted local environments).
-    "enabled": true,
-
-    // Static bearer token. When null, a random token is generated at startup.
-    // Set a fixed value for shared dev servers or CI pipelines.
-    "token": null,
-  },
-
-  // ──────────────────────────────────────────────────────────
   // PARALLEL SCORER — worker-thread beam search acceleration
   // ──────────────────────────────────────────────────────────
   "parallelScorer": {
     // Enable parallel scoring using worker threads for slice.build.
-    // Can improve slice performance on multi-core machines with large graphs.
-    "enabled": false,
+    // Improves slice performance on multi-core machines with large graphs.
+    "enabled": true,
 
     // Number of worker threads (1-8). Defaults to CPU-count heuristic if unset.
     "poolSize": null,
@@ -388,18 +437,6 @@ Below is every option with inline commentary. JSON does not support comments, so
   },
 
   // ──────────────────────────────────────────────────────────
-  // LIVE INDEX — editor buffer overlay for draft-aware intelligence
-  // ──────────────────────────────────────────────────────────
-  "liveIndex": {
-    "enabled": true,               // Enable live overlay for unsaved buffers
-    "debounceMs": 75,              // Parse delay after buffer update (25-5000)
-    "idleCheckpointMs": 15000,     // Auto-checkpoint after idle (1000-300000)
-    "maxDraftFiles": 200,          // Max concurrent draft files (1-10000)
-    "reconcileConcurrency": 1,     // Concurrent overlay→DB merge jobs (1-8)
-    "clusterRefreshThreshold": 25, // Reconciled symbols before cluster refresh (1-1000)
-  },
-
-  // ──────────────────────────────────────────────────────────
   // RUNTIME — sandboxed command execution via sdl.runtime.execute
   // ──────────────────────────────────────────────────────────
   "runtime": {
@@ -413,8 +450,29 @@ Below is every option with inline commentary. JSON does not support comments, so
     // Additional executables beyond the runtime defaults (e.g., ["bun", "deno"]).
     "allowedExecutables": [],
 
+    // Default execution timeout in milliseconds (100-600000).
+    "maxDurationMs": 30000,
+
+    // Max stdout capture size in bytes. Default: 1048576 (1 MB).
+    "maxStdoutBytes": 1048576,
+
+    // Max stderr capture size in bytes. Default: 262144 (256 KB).
+    "maxStderrBytes": 262144,
+
+    // Max persisted artifact size in bytes. Default: 10485760 (10 MB).
+    "maxArtifactBytes": 10485760,
+
+    // Hours to retain output artifacts before cleanup. Default: 24.
+    "artifactTtlHours": 24,
+
+    // Max concurrent runtime executions (1-8). Default: 2.
+    "maxConcurrentJobs": 2,
+
     // Environment variables passed through to subprocesses.
     "envAllowlist": [],
+
+    // Override directory for runtime output artifacts. Auto-detected if null.
+    "artifactBaseDir": null,
   },
 
   // ──────────────────────────────────────────────────────────
@@ -426,11 +484,24 @@ Below is every option with inline commentary. JSON does not support comments, so
   },
 
   // ──────────────────────────────────────────────────────────
+  // HTTP AUTH — bearer-token authentication for HTTP transport
+  // ──────────────────────────────────────────────────────────
+  "httpAuth": {
+    // Disabled by default. Enable for shared dev servers or production HTTP transport.
+    // Has no effect on stdio transport.
+    "enabled": false,
+
+    // Static bearer token. When null, a random token is generated at startup.
+    // Set a fixed value for shared dev servers or CI pipelines.
+    "token": null,
+  },
+
+  // ──────────────────────────────────────────────────────────
   // CODE MODE — sdl.manual + sdl.chain tool chaining
   // ──────────────────────────────────────────────────────────
   "codeMode": {
-    "enabled": false,           // Enable Code Mode tools
-    "exclusive": false,         // When true, suppress all other tools
+    "enabled": true,            // Enable Code Mode tools (sdl.action.search, sdl.manual, sdl.chain)
+    "exclusive": true,          // Suppress gateway and legacy tools — only register code-mode tools + discovery
     "maxChainSteps": 20,        // Max steps per chain (1-50)
     "maxChainTokens": 50000,    // Max tokens per chain (100-500000)
     "maxChainDurationMs": 60000,// Max chain duration in ms (1000-300000)
@@ -502,13 +573,13 @@ Controls the proof-of-need gating system for raw code access via `sdl.code.needW
 
 | Field                      | Type      | Default | Description                                                                           |
 | -------------------------- | --------- | ------- | ------------------------------------------------------------------------------------- |
-| `maxWindowLines`           | `integer` | `180`   | Max lines per code window (min: 1)                                                    |
-| `maxWindowTokens`          | `integer` | `1400`  | Max tokens per code window (min: 1)                                                   |
-| `requireIdentifiers`       | `boolean` | `true`  | Require `identifiersToFind` in needWindow calls                                       |
-| `allowBreakGlass`          | `boolean` | `false` | Allow emergency override of policy denials                                            |
-| `defaultDenyRaw`           | `boolean` | `true`  | Default deny for raw code windows (subjects needWindow to proof-of-need gating)       |
-| `budgetCaps`               | `object?` | —       | Optional server-side budget defaults: `{ maxCards, maxEstimatedTokens }`              |
-| `defaultMinCallConfidence` | `number?` | —       | Optional server-side default for `symbol.getCard` / `slice.build` call-edge filtering |
+| `maxWindowLines`           | `integer` | `180`   | Min: 1      | Max lines per code window                                                             |
+| `maxWindowTokens`          | `integer` | `1400`  | Min: 1      | Max tokens per code window                                                            |
+| `requireIdentifiers`       | `boolean` | `true`  | —           | Require `identifiersToFind` in needWindow calls                                       |
+| `allowBreakGlass`          | `boolean` | `false` | —           | Allow emergency override of policy denials                                            |
+| `defaultDenyRaw`           | `boolean` | `true`  | —           | Default deny for raw code windows (subjects needWindow to proof-of-need gating)       |
+| `budgetCaps`               | `object?` | `null`  | —           | Optional server-side budget defaults: `{ maxCards, maxEstimatedTokens }`              |
+| `defaultMinCallConfidence` | `number?` | `null`  | 0.0-1.0     | Optional server-side default for `symbol.getCard` / `slice.build` call-edge filtering |
 
 Requests exceeding `maxWindowLines` or `maxWindowTokens` are silently clamped (not rejected). Policy can also be changed at runtime via `sdl.policy.set`.
 
@@ -715,13 +786,13 @@ Predictive background warming of likely-needed results during `sdl-mcp serve`.
 
 | Field              | Type      | Default | Range  | Description                            |
 | ------------------ | --------- | ------- | ------ | -------------------------------------- |
-| `enabled`          | `boolean` | `false` | —      | Toggle prefetch queue                  |
+| `enabled`          | `boolean` | `true`  | —      | Toggle prefetch queue                  |
 | `maxBudgetPercent` | `integer` | `20`    | 1-100  | Resource cap as % of configured budget |
 | `warmTopN`         | `integer` | `50`    | min: 1 | Symbols warmed on startup              |
 
 Prefetch metrics are exposed in `sdl.repo.status` under `prefetchStats` (queue depth, hit/waste rates, latency reduction).
 
-> **When to change:** Disable in CI or batch-only workflows. Increase `warmTopN` for repos where you frequently access many symbols. Lower `maxBudgetPercent` on constrained systems.
+> **When to change:** Disable (`enabled: false`) in CI or batch-only workflows. Increase `warmTopN` for repos where you frequently access many symbols. Lower `maxBudgetPercent` on constrained systems.
 
 ---
 
@@ -731,13 +802,13 @@ OpenTelemetry observability for tool calls, indexing, and internal operations.
 
 | Field          | Type      | Default     | Range                                 | Description                                |
 | -------------- | --------- | ----------- | ------------------------------------- | ------------------------------------------ |
-| `enabled`      | `boolean` | `false`     | —                                     | Enable tracing                             |
+| `enabled`      | `boolean` | `true`      | —                                     | Enable tracing                             |
 | `serviceName`  | `string`  | `"sdl-mcp"` | —                                     | Service name for trace spans               |
 | `exporterType` | `string`  | `"console"` | `"console"` \| `"otlp"` \| `"memory"` | Trace exporter                             |
 | `otlpEndpoint` | `string?` | —           | —                                     | OTLP collector URL (required for `"otlp"`) |
 | `sampleRate`   | `number`  | `1.0`       | 0.0-1.0                               | Sampling rate (1.0 = trace everything)     |
 
-> **When to change:** Enable for production monitoring or debugging performance issues. Use `exporterType: "otlp"` with a Jaeger/Zipkin collector. Lower `sampleRate` under heavy load.
+> **When to change:** Disable (`enabled: false`) if trace output is not needed. Use `exporterType: "otlp"` with a Jaeger/Zipkin collector for production monitoring. Lower `sampleRate` under heavy load.
 
 ---
 
@@ -747,11 +818,11 @@ Worker-thread acceleration for beam search scoring in `sdl.slice.build`.
 
 | Field          | Type       | Default | Range | Description                           |
 | -------------- | ---------- | ------- | ----- | ------------------------------------- |
-| `enabled`      | `boolean`  | `false` | —     | Enable parallel scoring               |
+| `enabled`      | `boolean`  | `true`  | —     | Enable parallel scoring               |
 | `poolSize`     | `integer?` | Auto    | 1-8   | Worker thread count                   |
 | `minBatchSize` | `integer?` | Auto    | 1-100 | Min candidates to trigger parallelism |
 
-> **When to change:** Enable on multi-core machines where slice building is a bottleneck. Most useful for repos with >5k symbols and large slices.
+> **When to change:** Disable (`enabled: false`) on single-core or memory-constrained systems. Most useful for repos with >5k symbols and large slices.
 
 ---
 
@@ -807,12 +878,12 @@ Controls the sandboxed runtime execution engine (`sdl.runtime.execute`).
 | `enabled`            | `boolean`  | `false`              | —             | Enable runtime execution (must be `true` to use `sdl.runtime.execute`) |
 | `allowedRuntimes`    | `string[]` | `["node", "python"]` | See note      | Runtimes permitted for execution                    |
 | `allowedExecutables` | `string[]` | `[]`                 | —             | Additional executable names allowed (whitelist)     |
-| `maxDurationMs`      | `integer`  | See constants        | 100-300000    | Default execution timeout (ms)                      |
-| `maxStdoutBytes`     | `integer`  | See constants        | min: 1024     | Max stdout capture size (bytes)                     |
-| `maxStderrBytes`     | `integer`  | See constants        | min: 1024     | Max stderr capture size (bytes)                     |
-| `maxArtifactBytes`   | `integer`  | See constants        | min: 1024     | Max persisted artifact size (bytes)                 |
-| `artifactTtlHours`   | `integer`  | See constants        | min: 1        | Hours to retain output artifacts                    |
-| `maxConcurrentJobs`  | `integer`  | See constants        | 1-max         | Max concurrent runtime executions                   |
+| `maxDurationMs`      | `integer`  | `30000`              | 100-600000    | Default execution timeout (ms)                      |
+| `maxStdoutBytes`     | `integer`  | `1048576` (1 MB)     | min: 1024     | Max stdout capture size (bytes)                     |
+| `maxStderrBytes`     | `integer`  | `262144` (256 KB)    | min: 1024     | Max stderr capture size (bytes)                     |
+| `maxArtifactBytes`   | `integer`  | `10485760` (10 MB)   | min: 1024     | Max persisted artifact size (bytes)                 |
+| `artifactTtlHours`   | `integer`  | `24`                 | min: 1        | Hours to retain output artifacts                    |
+| `maxConcurrentJobs`  | `integer`  | `2`                  | 1-8           | Max concurrent runtime executions                   |
 | `envAllowlist`       | `string[]` | `[]`                 | —             | Environment variables passed through to subprocesses |
 | `artifactBaseDir`    | `string?`  | Auto                 | —             | Override directory for runtime output artifacts     |
 
@@ -849,8 +920,8 @@ Controls Code Mode tools (`sdl.manual` and `sdl.chain`).
 
 | Field               | Type      | Default  | Range        | Description                                                |
 | -------------------- | --------- | -------- | ------------ | ---------------------------------------------------------- |
-| `enabled`            | `boolean` | `false`  | —            | Enable Code Mode tools (sdl.manual + sdl.chain)            |
-| `exclusive`          | `boolean` | `false`  | —            | When true, suppress gateway and legacy tools — only register code-mode tools + discovery |
+| `enabled`            | `boolean` | `true`   | —            | Enable Code Mode tools (sdl.manual + sdl.chain)            |
+| `exclusive`          | `boolean` | `true`   | —            | When true, suppress gateway and legacy tools — only register code-mode tools + discovery |
 | `maxChainSteps`      | `integer` | `20`     | 1-50         | Maximum steps allowed in a single chain                    |
 | `maxChainTokens`     | `integer` | `50000`  | 100-500000   | Maximum total estimated tokens for chain results           |
 | `maxChainDurationMs` | `integer` | `60000`  | 1000-300000  | Maximum wall-clock duration for a chain (ms)               |
@@ -859,7 +930,8 @@ Controls Code Mode tools (`sdl.manual` and `sdl.chain`).
 
 > **When to change:**
 >
-> - **Minimal tool surface:** Set `enabled: true` + `exclusive: true` for a 4-tool-only surface (action.search, info, manual, chain).
+> - **Full tool surface:** Set `exclusive: false` to expose gateway and legacy tools alongside code-mode tools.
+> - **Disable code mode:** Set `enabled: false` to remove sdl.manual, sdl.chain, and sdl.action.search tools entirely.
 > - **Strict ladder enforcement:** Set `ladderValidation: "enforce"` to reject chains that skip context ladder rungs.
 > - **Long chains:** Increase `maxChainSteps` and `maxChainTokens` for complex multi-step lookups.
 > - **Performance:** `etagCaching` is recommended to stay `true` — it automatically avoids resending unchanged cards.
@@ -886,22 +958,22 @@ Controls bearer-token authentication for the HTTP transport (`sdl-mcp serve --ht
 
 | Field     | Type      | Default | Description                                                                 |
 | --------- | --------- | ------- | --------------------------------------------------------------------------- |
-| `enabled` | `boolean` | `true`  | Enable bearer-token authentication for `/mcp` and `/api/*` endpoints        |
+| `enabled` | `boolean` | `false` | Enable bearer-token authentication for `/mcp` and `/api/*` endpoints        |
 | `token`   | `string?` | `null`  | Static bearer token. When `null`, a random token is generated at startup.   |
 
 Three modes:
 
 | Configuration                              | Behavior                                                                 |
 | ------------------------------------------ | ------------------------------------------------------------------------ |
-| Omitted / `{ "enabled": true }`            | Random token generated at startup, printed to stderr (default behavior)  |
+| Omitted / `{ "enabled": false }`           | Auth disabled entirely — all requests accepted without a token (default) |
+| `{ "enabled": true }`                      | Random token generated at startup, printed to stderr                     |
 | `{ "enabled": true, "token": "my-token" }` | Static token from config — no random generation, token not printed       |
-| `{ "enabled": false }`                     | Auth disabled entirely — all requests accepted without a token           |
 
 > **When to change:**
 >
-> - **Shared dev servers:** Set a static `token` so all agents can use the same credential without reading stderr.
-> - **Trusted local environment:** Set `enabled: false` to skip auth entirely.
-> - **Production / CI:** Leave default (random per-instance token) or set a static token via config with restricted file permissions.
+> - **Shared dev servers / production:** Set `enabled: true` with a static `token` so all agents can use the same credential.
+> - **CI pipelines:** Set `enabled: true` to prevent unauthorized access to the HTTP transport.
+> - **Local development:** Leave default (`enabled: false`) for frictionless stdio and HTTP access.
 
 ---
 
@@ -978,6 +1050,8 @@ Minimal resources, no background processes.
     "maxWindowTokens": 1000
   },
   "prefetch": { "enabled": false },
+  "tracing": { "enabled": false },
+  "parallelScorer": { "enabled": false },
   "diagnostics": { "scope": "workspace" },
   "cache": { "enabled": false }
 }

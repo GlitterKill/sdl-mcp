@@ -997,10 +997,36 @@ export async function initCommand(options: InitOptions): Promise<void> {
         config: 0.8,
       },
     },
+    prefetch: {
+      enabled: true,
+      maxBudgetPercent: 20,
+      warmTopN: 50,
+    },
+    tracing: {
+      enabled: true,
+      serviceName: "sdl-mcp",
+      exporterType: "console" as const,
+      sampleRate: 1.0,
+    },
+    parallelScorer: {
+      enabled: true,
+    },
+    httpAuth: {
+      enabled: false,
+      token: null,
+    },
+    codeMode: {
+      enabled: true,
+      exclusive: true,
+      maxChainSteps: 20,
+      maxChainTokens: 50_000,
+      maxChainDurationMs: 60_000,
+      ladderValidation: "warn" as const,
+      etagCaching: true,
+    },
     ...(options.enforceAgentTools
       ? {
           runtime: ENFORCED_RUNTIME_CONFIG,
-          codeMode: ENFORCED_CODE_MODE_CONFIG,
         }
       : {}),
   };

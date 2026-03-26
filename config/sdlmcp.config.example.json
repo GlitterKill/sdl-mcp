@@ -35,11 +35,16 @@
       "workspaceGlobs": null
     }
   ],
+  "graphDatabase": {
+    "path": "./data/sdl-mcp-graph.lbug"
+  },
   "policy": {
     "maxWindowLines": 180,
     "maxWindowTokens": 1400,
     "requireIdentifiers": true,
-    "allowBreakGlass": false
+    "allowBreakGlass": false,
+    "defaultDenyRaw": true,
+    "defaultMinCallConfidence": null
   },
   "redaction": {
     "enabled": true,
@@ -95,6 +100,7 @@
     "alpha": 0.6,
     "provider": "local",
     "model": "all-MiniLM-L6-v2",
+    "modelCacheDir": null,
     "generateSummaries": false,
     "summaryProvider": null,
     "summaryModel": null,
@@ -140,19 +146,16 @@
     "warmTopN": 50
   },
   "tracing": {
-    "enabled": false,
+    "enabled": true,
     "serviceName": "sdl-mcp",
     "exporterType": "console",
     "otlpEndpoint": null,
     "sampleRate": 1
   },
   "parallelScorer": {
-    "enabled": false,
+    "enabled": true,
     "poolSize": null,
     "minBatchSize": null
-  },
-  "graphDatabase": {
-    "path": "./data/sdl-mcp-graph.lbug"
   },
   "concurrency": {
     "maxSessions": 8,
@@ -161,17 +164,37 @@
     "writeQueueTimeoutMs": 30000,
     "toolQueueTimeoutMs": 30000
   },
-  "httpAuth": {
+  "runtime": {
+    "enabled": false,
+    "allowedRuntimes": ["node", "python"],
+    "allowedExecutables": [],
+    "maxDurationMs": 30000,
+    "maxStdoutBytes": 1048576,
+    "maxStderrBytes": 262144,
+    "maxArtifactBytes": 10485760,
+    "artifactTtlHours": 24,
+    "maxConcurrentJobs": 2,
+    "envAllowlist": [],
+    "artifactBaseDir": null
+  },
+  "gateway": {
     "enabled": true,
+    "emitLegacyTools": true
+  },
+  "httpAuth": {
+    "enabled": false,
     "token": null
   },
   "codeMode": {
-    "enabled": false,
-    "exclusive": false,
+    "enabled": true,
+    "exclusive": true,
     "maxChainSteps": 20,
     "maxChainTokens": 50000,
     "maxChainDurationMs": 60000,
     "ladderValidation": "warn",
     "etagCaching": true
+  },
+  "security": {
+    "allowedRepoRoots": []
   }
 }

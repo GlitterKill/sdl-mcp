@@ -93,6 +93,7 @@
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/sdk-trace-base": "^2.6.0",
     "@opentelemetry/sdk-trace-node": "^2.6.0",
+    "sdl-mcp": "file:sdl-mcp-0.10.0.tgz",
     "tree-sitter": "npm:@keqingmoe/tree-sitter@0.26.2",
     "tree-sitter-bash": "0.25.1",
     "tree-sitter-c": "0.24.1",
@@ -112,7 +113,8 @@
     "@hono/node-server": "1.19.11",
     "flatted": "3.4.2",
     "hono": "4.12.7",
-    "tar": "7.5.12"
+    "tar": "7.5.12",
+    "tree-sitter": "$tree-sitter"
   },
   "optionalDependencies": {
     "chokidar": "^5.0.0",

@@ -754,7 +754,7 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "default": false
+          "default": true
         },
         "maxBudgetPercent": {
           "type": "integer",
@@ -769,7 +769,7 @@
         }
       },
       "default": {
-        "enabled": false,
+        "enabled": true,
         "maxBudgetPercent": 20,
         "warmTopN": 50
       }
@@ -781,7 +781,7 @@
         "enabled": {
           "type": "boolean",
           "description": "Enable OpenTelemetry tracing",
-          "default": false
+          "default": true
         },
         "serviceName": {
           "type": "string",
@@ -807,7 +807,7 @@
         }
       },
       "default": {
-        "enabled": false,
+        "enabled": true,
         "serviceName": "sdl-mcp",
         "exporterType": "console",
         "sampleRate": 1
@@ -820,7 +820,7 @@
         "enabled": {
           "type": "boolean",
           "description": "Enable parallel scoring using worker threads",
-          "default": false
+          "default": true
         },
         "poolSize": {
           "type": "integer",
@@ -836,7 +836,7 @@
         }
       },
       "default": {
-        "enabled": false
+        "enabled": true
       }
     },
     "graphDatabase": {
@@ -1015,7 +1015,7 @@
         "enabled": {
           "type": "boolean",
           "description": "Enable bearer-token authentication for /mcp and /api/* endpoints",
-          "default": true
+          "default": false
         },
         "token": {
           "type": ["string", "null"],
@@ -1025,7 +1025,7 @@
         }
       },
       "default": {
-        "enabled": true,
+        "enabled": false,
         "token": null
       }
     },
@@ -1036,12 +1036,12 @@
         "enabled": {
           "type": "boolean",
           "description": "Enable Code Mode tools (sdl.manual + sdl.chain)",
-          "default": false
+          "default": true
         },
         "exclusive": {
           "type": "boolean",
           "description": "When true, suppress gateway and legacy tools — only register code-mode tools",
-          "default": false
+          "default": true
         },
         "maxChainSteps": {
           "type": "integer",
@@ -1077,7 +1077,8 @@
         }
       },
       "default": {
-        "enabled": false
+        "enabled": true,
+        "exclusive": true
       }
     }
   }

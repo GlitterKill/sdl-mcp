@@ -47,7 +47,7 @@ This page defines practical workflows for coding agents using SDL-MCP.
 
 ## Complete Tool Reference
 
-SDL-MCP exposes 31 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway tools) across 14 categories. Every workflow on this page uses tools from this table.
+SDL-MCP exposes 32 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway tools) across 14 categories. Every workflow on this page uses tools from this table.
 
 | Category | Tool | Purpose |
 |:---------|:-----|:--------|

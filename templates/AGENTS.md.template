@@ -44,6 +44,14 @@
 - Natural identifier lookup: `sdl.symbol.getCard` / `sdl.symbol.getCards` with `symbolRef` / `symbolRefs`
 - Direct code access: only after cards, slices, skeletons, or hot paths are insufficient
 
+### Runtime Execution
+
+Use `runtimeExecute` inside `sdl.chain` for repo-local commands:
+
+- **`outputMode: "minimal"`** (default): Returns ~50 tokens with status, exit code, and an `artifactHandle`. Use this for 95%+ of executions.
+- **`runtimeQueryOutput`**: If the exit code is non-zero or you need details, query the stored artifact with targeted `queryTerms` (e.g., `["FAIL", "Error"]`).
+- Always set `timeoutMs` to prevent hangs.
+
 ### Runtime Defaults
 
 The enforced agent profile expects these SDL runtimes to be enabled:
@@ -76,7 +84,8 @@ The enforced agent profile expects these SDL runtimes to be enabled:
         "repoId": "{{REPO_ID}}",
         "runtime": "typescript",
         "args": ["scripts/check.ts"],
-        "timeoutMs": 30000
+        "timeoutMs": 30000,
+        "outputMode": "minimal"
       }
     }
   ]

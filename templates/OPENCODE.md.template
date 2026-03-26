@@ -17,6 +17,12 @@ Use SDL-MCP as the primary tool surface for repository `{{REPO_ID}}`.
 - Do not use native `bash` for repo-local build, test, lint, or diagnostic commands when SDL runtime is enabled.
 - If a permission rule or plugin blocks `read` or `bash`, switch to SDL-MCP immediately.
 
+## Runtime Execution
+
+- Use `runtimeExecute` with `outputMode: "minimal"` (default) for ~50-token responses.
+- Use `runtimeQueryOutput` with the `artifactHandle` to retrieve output details on demand.
+- Always set `timeoutMs` to prevent hangs.
+
 ## Recommended Runtimes
 
 - `node`

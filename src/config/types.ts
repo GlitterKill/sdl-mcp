@@ -306,7 +306,7 @@ export const SemanticConfigSchema = z.object({
 export type SemanticConfig = z.infer<typeof SemanticConfigSchema>;
 
 export const PrefetchConfigSchema = z.object({
-  enabled: z.boolean().default(false),
+  enabled: z.boolean().default(true),
   maxBudgetPercent: z.number().int().min(1).max(100).default(20),
   warmTopN: z.number().int().min(1).default(50),
 });
@@ -314,7 +314,7 @@ export const PrefetchConfigSchema = z.object({
 export type PrefetchConfig = z.infer<typeof PrefetchConfigSchema>;
 
 export const TracingConfigSchema = z.object({
-  enabled: z.boolean().default(false),
+  enabled: z.boolean().default(true),
   serviceName: z.string().default("sdl-mcp"),
   exporterType: z.enum(["console", "otlp", "memory"]).default("console"),
   otlpEndpoint: z.string().nullish(),
@@ -324,7 +324,7 @@ export const TracingConfigSchema = z.object({
 export type TracingConfig = z.infer<typeof TracingConfigSchema>;
 
 export const ParallelScorerConfigSchema = z.object({
-  enabled: z.boolean().default(false),
+  enabled: z.boolean().default(true),
   poolSize: z.number().int().min(1).max(8).nullish(),
   minBatchSize: z.number().int().min(1).max(100).nullish(),
 });
@@ -398,9 +398,9 @@ export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
 
 export const CodeModeConfigSchema = z.object({
   /** Enable Code Mode tools (sdl.manual + sdl.chain) */
-  enabled: z.boolean().default(false),
+  enabled: z.boolean().default(true),
   /** When true, suppress gateway and legacy tools — only register code-mode tools */
-  exclusive: z.boolean().default(false),
+  exclusive: z.boolean().default(true),
   /** Maximum steps allowed in a single chain */
   maxChainSteps: z.number().int().min(1).max(50).default(20),
   /** Maximum total estimated tokens for a chain's results */
@@ -417,7 +417,7 @@ export type CodeModeConfig = z.infer<typeof CodeModeConfigSchema>;
 
 export const HttpAuthConfigSchema = z.object({
   /** Enable bearer-token authentication for HTTP transport endpoints. */
-  enabled: z.boolean().default(true),
+  enabled: z.boolean().default(false),
   /** Static bearer token. When null/omitted a random token is generated at startup. */
   token: z.string().min(1).nullish().default(null),
 });

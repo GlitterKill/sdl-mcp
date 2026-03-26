@@ -18,6 +18,12 @@ Use SDL-MCP as the default workflow for repository `{{REPO_ID}}`.
 - Do not use native shell tools for repo-local build, test, lint, or diagnostic workflows when SDL runtime is enabled.
 - If SDL-MCP is unavailable, state that explicitly before falling back.
 
+## Runtime Execution
+
+- Use `runtimeExecute` with `outputMode: "minimal"` (default) for ~50-token responses.
+- Use `runtimeQueryOutput` with the `artifactHandle` to retrieve output details on demand.
+- Always set `timeoutMs` to prevent hangs.
+
 ## Recommended Runtimes
 
 - `node`
