@@ -268,6 +268,25 @@ export async function executeChain(
 
   const totalDurationMs = Date.now() - startTime;
 
+  // Aggregate _rawContext from individual step results for the token meter
+  const aggregatedFileIds = new Set<string>();
+  let aggregatedRawTokens = 0;
+  for (const pr of priorResults) {
+    if (pr && typeof pr === "object") {
+      const rc = (pr as Record<string, unknown>)._rawContext as
+        | { fileIds?: string[]; rawTokens?: number }
+        | undefined;
+      if (rc) {
+        if (rc.fileIds) {
+          for (const fid of rc.fileIds) aggregatedFileIds.add(fid);
+        }
+        if (rc.rawTokens) {
+          aggregatedRawTokens += rc.rawTokens;
+        }
+      }
+    }
+  }
+
   const response: ChainResponse = {
     results: stepResults,
     totalTokens: budgetState.tokensUsed,
@@ -276,6 +295,14 @@ export async function executeChain(
     ladderWarnings: ladderWarnings.length > 0 ? ladderWarnings : undefined,
     etagCache: hasEtags ? etagCacheState : undefined,
   };
+
+  // Attach aggregate _rawContext so the server's token meter can fire
+  if (aggregatedFileIds.size > 0 || aggregatedRawTokens > 0) {
+    (response as unknown as Record<string, unknown>)._rawContext = {
+      ...(aggregatedFileIds.size > 0 ? { fileIds: Array.from(aggregatedFileIds) } : {}),
+      ...(aggregatedRawTokens > 0 ? { rawTokens: aggregatedRawTokens } : {}),
+    };
+  }
 
   // Attach trace only when requested
   if (traceOpts && traceSteps.length > 0) {
