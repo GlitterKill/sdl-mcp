@@ -432,6 +432,13 @@ async function _deleteFilesByIdsInner(
   );
   await exec(
     conn,
+    `MATCH (fs:FileSummary)-[r:FILE_SUMMARY_IN_REPO]->(:Repo)
+     WHERE fs.fileId IN $fileIds
+     DELETE r`,
+    { fileIds: uniqueFileIds },
+  );
+  await exec(
+    conn,
     `MATCH (fs:FileSummary)
      WHERE fs.fileId IN $fileIds
      DELETE fs`,
