@@ -5,40 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.10.1] - 2026-03-24
-
-### Added
-
-- `sdl.runtime.execute`: Added `outputMode` parameter (`"minimal"` | `"summary"` | `"intent"`). Default is `"minimal"` (~50 tokens vs ~570 previously), matching the two-phase execute-then-query pattern for 95%+ token savings on large outputs.
-- New tool `sdl.runtime.queryOutput`: On-demand retrieval and keyword search of stored runtime output artifacts. Enables agents to query specific output content only when needed.
-
-### Fixed
-
-- Fixed `maxResponseLines` parameter in `sdl.runtime.execute` — was silently capped at 40 lines regardless of value.
-- Added per-line truncation (500 chars max) to prevent single long lines from dominating token budget.
-
-## [0.10.0] - 2026-03-23
+## [0.10.0] - 2026-03-26
 
 ### Breaking
 
-- **Minimum Node.js version raised from 20 to 24** — Node 20 and 22 are no longer supported as runtime targets
-- TypeScript compilation target upgraded from ES2022 to ES2024
+- Minimum Node.js version raised from 20 to 24. Node 20 and 22 are no longer supported runtime targets.
+- TypeScript compilation target upgraded from ES2022 to ES2024.
 
 ### Added
 
-- AbortSignal propagation to beam search engine and indexer for cancellation support
-  - Slice builds combine user cancellation with a 30-second hard timeout via `AbortSignal.any()`
-  - Indexer file-processing loops check for abort between files
-- CI test matrix expanded to Node 22.x and 24.x (ubuntu + windows)
+- `sdl.runtime.execute` now supports `outputMode` (`"minimal"` | `"summary"` | `"intent"`), enabling two-phase execute-then-query flows with significantly lower token usage for large command output.
+- New tool `sdl.runtime.queryOutput` for on-demand retrieval and keyword filtering of stored runtime output artifacts.
+- Hybrid retrieval stack across Stages 0-3:
+  - New `src/retrieval/` subsystem and model-aware retrieval pipeline.
+  - Kuzu FTS/vector extension and index lifecycle helpers.
+  - Schema updates for inline embedding columns on `Symbol` plus migration `m007`.
+  - New Stage 3 entity retrieval primitives (`searchText` on `Cluster`/`Process`, `FileSummary` node + indexes + persistence wiring).
+- Embedding-augmented heuristic summaries (Tier 1.5).
+- `sdl-mcp info --json` for machine-readable diagnostics output.
+- CI test matrix expanded to Node 22.x and 24.x (ubuntu + windows).
 
 ### Changed
 
-- Replaced `tsx` dev dependency with Node 24's native `--experimental-strip-types` across all 18 package.json scripts and the test runner
-- All CI workflows (ci, release-publish, publish-native, publish-ladybug) updated from Node 20.x to 24.x
+- Replaced `tsx` with Node 24 native `--experimental-strip-types` across development and test scripts.
+- All CI workflows (ci, release-publish, publish-native, publish-ladybug) updated from Node 20.x to 24.x.
+- Hybrid retrieval now powers start-node resolution in slice building and is integrated into `slice.build`, context summaries, and agent planning.
+- Overlay parity was expanded so draft-only symbols are retained by fusion and served consistently across hybrid and non-hybrid search paths.
+- Additional build/runtime maintenance improvements were applied (incremental build enablement, type scoping cleanup, lazy-loading adjustments, and parser/indexer modularization hardening).
 
-### Removed
+### Fixed
 
-- `tsx` dev dependency (replaced by native type stripping)
+- `sdl.runtime.execute` `maxResponseLines` now honors requested values (instead of effectively capping around 40 lines).
+- Added per-line truncation guards (500 chars max) so single long lines do not dominate response budgets.
+- Retrieval/overlay correctness fixes: mock fallback guard, vector index naming consistency, `overlayOnly` behavior in non-hybrid search, and fusion retention for overlay-only hits.
+- Node 24 migration and CI stabilization fixes, including tree-sitter compatibility updates and post-migration test hardening.
+- Token savings meter follow-up fixes and schema drift/code hardening fixes across the release window.
 
 ## [0.9.2] - 2026-03-22
 
@@ -763,7 +764,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
-[0.10.1]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.10.1
 [0.10.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.10.0
 [0.8.5]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.5
 [0.8.4]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.8.4
