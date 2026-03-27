@@ -77,6 +77,17 @@ export function classifyBranchStatus(branchName, statusLine) {
   };
 }
 
+export function findSelfTarballDependencies(packageJson) {
+  const dependencySpec = packageJson.dependencies?.["sdl-mcp"];
+  if (typeof dependencySpec !== "string") {
+    return [];
+  }
+
+  return /^file:.*\.tgz$/i.test(dependencySpec)
+    ? [`dependencies.sdl-mcp (${dependencySpec})`]
+    : [];
+}
+
 export function getRequiredPackEntries() {
   return [
     "package.json",
@@ -195,6 +206,13 @@ async function main() {
   );
   if (mismatches.length > 0) {
     fail(`version mismatch detected: ${mismatches.join(", ")}`);
+  }
+
+  const selfTarballDeps = findSelfTarballDependencies(pkg);
+  if (selfTarballDeps.length > 0) {
+    fail(
+      `invalid self tarball dependency detected: ${selfTarballDeps.join(", ")}`,
+    );
   }
 
   if (!hasChangelogEntry(changelog, pkg.version)) {

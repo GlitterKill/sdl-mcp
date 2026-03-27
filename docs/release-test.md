@@ -29,6 +29,7 @@ npm run prepare-release
 `prepare-release` hard-fails on:
 
 - version mismatch
+- invalid self tarball dependency in `package.json` (for example `dependencies.sdl-mcp: "file:*.tgz"`)
 - published-version collision
 - missing changelog entry
 - build, lint, typecheck, or test failures

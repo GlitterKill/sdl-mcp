@@ -47,6 +47,19 @@ describe("prepare-release helpers", () => {
     );
 
     assert.deepStrictEqual(
+      helpers.findSelfTarballDependencies({
+        dependencies: { "sdl-mcp": "file:sdl-mcp-0.10.0.tgz" },
+      }),
+      ["dependencies.sdl-mcp (file:sdl-mcp-0.10.0.tgz)"],
+    );
+    assert.deepStrictEqual(
+      helpers.findSelfTarballDependencies({
+        dependencies: { "sdl-mcp": "^0.10.0" },
+      }),
+      [],
+    );
+
+    assert.deepStrictEqual(
       helpers.findMissingPackEntries(
         helpers.getRequiredPackEntries().map((path) => ({ path })),
       ),
