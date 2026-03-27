@@ -340,7 +340,7 @@ Avoid enabling this unless you genuinely need raw code -- it can double the toke
 
 **Action statuses**: `pending`, `inProgress`, `completed`, `failed`
 
-**`cacheHits`** counts policy denials/downgrades that were cached. High counts indicate frequent policy enforcement.
+**`cacheHits`** counts repeated symbol card lookups that were served from cache across execution rungs. High counts indicate efficient reuse of previously fetched cards.
 
 ---
 
@@ -468,7 +468,7 @@ Requires `allowBreakGlass: true` in policy configuration. All break-glass uses a
 - Use `explain` tasks for quick understanding (card-only path).
 - Avoid `requireDiagnostics` unless needed -- it adds a raw rung.
 - Set realistic budgets to prevent unnecessary rungs.
-- `cacheHits` in metrics tracks policy denial caching. High counts suggest you should adjust your approach rather than repeatedly hitting policy limits.
+- `cacheHits` in metrics tracks repeated symbol card lookups served from cache. High counts indicate efficient card reuse across rungs.
 
 ---
 

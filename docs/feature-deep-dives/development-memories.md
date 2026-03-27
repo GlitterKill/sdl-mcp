@@ -332,7 +332,7 @@ Results are deduplicated, scored, and returned in descending rank order.
 
 ## Automatic Slice Integration
 
-When `sdl.slice.build` or `sdl.repo.status` is called, memories are **automatically surfaced** alongside the response. No extra tool call is required. `repo.status` surfaces memories by default (`surfaceMemories: true`) to give agents immediate session context.
+When `sdl.slice.build` or `sdl.repo.status` is called, memories are **automatically surfaced** alongside the response. No extra tool call is required. `repo.status` only surfaces memories when `surfaceMemories: true` is explicitly passed, keeping the default response lightweight.
 
 **How it works:**
 

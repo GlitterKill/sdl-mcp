@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tool inventory generation: `scripts/generate-tool-inventory.ts` produces `docs/generated/tool-inventory.json` and `tool-inventory.md` from source truth. `scripts/check-tool-inventory.ts` enforces sync. npm scripts: `docs:tools:generate`, `docs:tools:check`.
+
 - `sdl.runtime.execute` now supports `outputMode` (`"minimal"` | `"summary"` | `"intent"`), enabling two-phase execute-then-query flows with significantly lower token usage for large command output.
 - New tool `sdl.runtime.queryOutput` for on-demand retrieval and keyword filtering of stored runtime output artifacts.
 - Hybrid retrieval stack across Stages 0-3:
@@ -26,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI test matrix expanded to Node 22.x and 24.x (ubuntu + windows).
 
 ### Changed
+
+- **Breaking behavior**: `repo.status` `surfaceMemories` now defaults to `false`. Pass `surfaceMemories: true` explicitly when memories are needed.
+- Agent executor `cacheHits` metric now reports real cache hit counts instead of placeholder zeros.
+- Telemetry: tools with `totalTokens` response fields (e.g., `sdl.chain`) are now counted in `usage.stats` with neutral savings (zero inflation).
+- Decomposed `src/mcp/tools/index.ts` into declarative `tool-descriptors.ts` with `ToolDescriptor` interface and `buildFlatToolDescriptors()` factory (370 -> 78 lines).
 
 - Replaced `tsx` with Node 24 native `--experimental-strip-types` across development and test scripts.
 - All CI workflows (ci, release-publish, publish-native, publish-ladybug) updated from Node 20.x to 24.x.

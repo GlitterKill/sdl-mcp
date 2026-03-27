@@ -1,0 +1,62 @@
+{
+  "generatedAt": "2026-03-27T11:15:43.670Z",
+  "counts": {
+    "flatTools": 31,
+    "universalTools": 2,
+    "codeModeTools": 3,
+    "gatewayTools": 4,
+    "flatModeTotal": 33,
+    "gatewayModeTotal": 6,
+    "gatewayLegacyModeTotal": 37,
+    "codeModeExclusiveTotal": 3,
+    "allUniqueActions": 34
+  },
+  "flatToolNames": [
+    "sdl.agent.feedback",
+    "sdl.agent.feedback.query",
+    "sdl.agent.orchestrate",
+    "sdl.buffer.checkpoint",
+    "sdl.buffer.push",
+    "sdl.buffer.status",
+    "sdl.code.getHotPath",
+    "sdl.code.getSkeleton",
+    "sdl.code.needWindow",
+    "sdl.context.summary",
+    "sdl.delta.get",
+    "sdl.index.refresh",
+    "sdl.memory.query",
+    "sdl.memory.remove",
+    "sdl.memory.store",
+    "sdl.memory.surface",
+    "sdl.policy.get",
+    "sdl.policy.set",
+    "sdl.pr.risk.analyze",
+    "sdl.repo.overview",
+    "sdl.repo.register",
+    "sdl.repo.status",
+    "sdl.runtime.execute",
+    "sdl.runtime.queryOutput",
+    "sdl.slice.build",
+    "sdl.slice.refresh",
+    "sdl.slice.spillover.get",
+    "sdl.symbol.getCard",
+    "sdl.symbol.getCards",
+    "sdl.symbol.search",
+    "sdl.usage.stats"
+  ],
+  "universalToolNames": [
+    "sdl.action.search",
+    "sdl.info"
+  ],
+  "codeModeToolNames": [
+    "sdl.action.search",
+    "sdl.chain",
+    "sdl.manual"
+  ],
+  "gatewayToolNames": [
+    "sdl.agent",
+    "sdl.code",
+    "sdl.query",
+    "sdl.repo"
+  ]
+}

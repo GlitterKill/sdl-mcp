@@ -591,7 +591,7 @@ export const RepoRegisterResponseSchema = z.object({
 
 export const RepoStatusRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  surfaceMemories: z.boolean().optional().default(true),
+  surfaceMemories: z.boolean().optional().default(false),
 });
 
 export const RepoStatusResponseSchema = z.object({

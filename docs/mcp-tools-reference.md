@@ -101,7 +101,7 @@ Get status for one repository including latest version, indexed files/symbols, t
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `repoId` | `string` | Yes | Repository identifier |
-| `surfaceMemories` | `boolean` | No | Include relevant development memories (default: `true`) |
+| `surfaceMemories` | `boolean` | No | Include relevant development memories (default: `false`) |
 
 **Response includes:**
 

@@ -132,7 +132,7 @@ Returns the current indexing state and health metrics for a registered repositor
 | Parameter | Type | Required | Description |
 |:----------|:-----|:---------|:------------|
 | `repoId` | string | Yes | Repository identifier |
-| `surfaceMemories` | boolean | No | Include relevant development memories in the response (default: `true`) |
+| `surfaceMemories` | boolean | No | Include relevant development memories in the response (default: `false`) |
 
 **Response:**
 

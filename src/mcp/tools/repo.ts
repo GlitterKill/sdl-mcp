@@ -332,9 +332,9 @@ export async function handleRepoStatus(
       queueDepth: prefetchStats.queueDepth,
     });
 
-    // Surface relevant memories if enabled (default: true)
+    // Surface relevant memories if enabled (default: false)
     let memories: Awaited<ReturnType<typeof surfaceRelevantMemories>> | undefined;
-    if (surfaceMemories !== false) {
+    if (surfaceMemories === true) {
       try {
         memories = await surfaceRelevantMemories(conn, { repoId, limit: DEFAULT_MEMORY_SURFACE_LIMIT });
         if (memories.length === 0) memories = undefined;

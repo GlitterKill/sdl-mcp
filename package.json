@@ -67,6 +67,8 @@
     "inspector": "npx @modelcontextprotocol/inspector node dist/main.js",
     "test:native-parity": "node tests/native/parity-test.ts",
     "check:config-sync": "node scripts/check-config-sync.ts",
+    "docs:tools:generate": "node --experimental-strip-types scripts/generate-tool-inventory.ts",
+    "docs:tools:check": "node --experimental-strip-types scripts/check-tool-inventory.ts",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck",
     "spike:ladybug": "node scripts/ladybug-spike.ts",
     "test:stress": "npm run build && npx tsc --rootDir tests/stress --outDir dist/tests/stress --module nodenext tests/stress/run-stress.ts && node --max-old-space-size=4096 dist/tests/stress/run-stress.js --skip-build",

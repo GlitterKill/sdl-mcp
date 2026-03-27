@@ -85,6 +85,7 @@ export class Executor {
   private policyDecisions: Map<string, PolicyDecision> = new Map();
   private gateEvaluator: GateEvaluator;
   private connPromise: ReturnType<typeof getLadybugConn> | null = null;
+  private cardCache = new Set<string>();
 
   constructor(policyEngine?: PolicyEngine, gateEvaluator?: GateEvaluator) {
     this.evidenceCapture = new EvidenceCapture();
@@ -96,7 +97,7 @@ export class Executor {
       totalActions: 0,
       successfulActions: 0,
       failedActions: 0,
-      cacheHits: 0, // TODO: Not yet implemented
+      cacheHits: 0,
     };
   }
 
@@ -392,6 +393,12 @@ export class Executor {
         );
 
         for (const [, sym] of symbolMap) {
+          // Track cache hits for repeated symbol lookups
+          if (this.cardCache.has(sym.symbolId)) {
+            this.metrics.cacheHits++;
+          } else {
+            this.cardCache.add(sym.symbolId);
+          }
           const parts: string[] = [`${sym.kind} ${sym.name}`];
           if (sym.signatureJson) {
             try {

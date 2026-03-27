@@ -243,6 +243,17 @@ export class MCPServer {
                 } catch {
                   // Non-critical — don't break tool dispatch
                 }
+              } else if (
+                shouldAttachUsage(request.params.name) &&
+                typeof r.totalTokens === "number" &&
+                r.totalTokens > 0
+              ) {
+                // Neutral accounting: count the call but model zero savings
+                tokenAccumulator.recordUsage(
+                  request.params.name,
+                  r.totalTokens,
+                  r.totalTokens,
+                );
               }
 
               // Send human-readable tool call summary to user (MCP logging)
