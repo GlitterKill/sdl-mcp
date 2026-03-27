@@ -7,6 +7,7 @@ This document defines what SDL-MCP token-reduction claims are currently supporte
 - SDL-MCP achieves `>=50%` capped token reduction across the benchmarked use-case families in the current matrix.
 - Claim scope is limited to the benchmark matrix (`benchmarks/real-world/matrix.json`) and configured repos.
 - Do not claim universal performance for all coding-agent tasks outside this measured scope.
+- Claims should be generated with `--mode realism` unless explicitly labeled as benchmark-efficient sensitivity runs.
 
 ## Claim Gates
 
@@ -16,14 +17,16 @@ Use `scripts/check-benchmark-claims.ts` on matrix aggregate output with:
 - family `p25(capped reduction) >= 40%`
 - minimum per-task capped reduction `>= 20%`
 
+Default profile:
+- `--profile realism` enforces the claim gates above.
+- `--profile efficient` is for benchmark-efficient sensitivity runs (`p50>=45`, `p25>=35`, task floor `>=0`).
+
 Command:
 
 ```bash
 node --experimental-strip-types scripts/check-benchmark-claims.ts \
   --in benchmarks/real-world/runs/coverage-matrix/aggregate.json \
-  --min-family-p50 50 \
-  --min-family-p25 40 \
-  --min-task-floor 20
+  --profile realism
 ```
 
 ## Reproducibility

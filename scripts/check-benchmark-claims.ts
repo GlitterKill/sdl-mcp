@@ -18,6 +18,32 @@ interface AggregatePayload {
   families?: FamilyStats[];
 }
 
+type ClaimProfile = "realism" | "efficient" | "smoke";
+
+interface ClaimThresholds {
+  minFamilyP50: number;
+  minFamilyP25: number;
+  minTaskFloor: number;
+}
+
+const CLAIM_PROFILE_THRESHOLDS: Record<ClaimProfile, ClaimThresholds> = {
+  realism: {
+    minFamilyP50: 50,
+    minFamilyP25: 40,
+    minTaskFloor: 20,
+  },
+  efficient: {
+    minFamilyP50: 45,
+    minFamilyP25: 35,
+    minTaskFloor: 0,
+  },
+  smoke: {
+    minFamilyP50: 30,
+    minFamilyP25: 20,
+    minTaskFloor: 5,
+  },
+};
+
 function getArgValue(args: string[], name: string): string | undefined {
   const direct = args.find((arg) => arg.startsWith(`--${name}=`));
   if (direct) return direct.slice(name.length + 3);
@@ -35,6 +61,23 @@ function parseNumberArg(
   if (!raw) return fallback;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function resolveProfile(raw: string | undefined): ClaimProfile {
+  if (!raw) return "realism";
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "realism") return "realism";
+  if (
+    normalized === "efficient" ||
+    normalized === "benchmark-efficient" ||
+    normalized === "efficiency"
+  ) {
+    return "efficient";
+  }
+  if (normalized === "smoke") return "smoke";
+  throw new Error(
+    `Invalid --profile "${raw}". Supported values: realism, efficient, smoke.`,
+  );
 }
 
 export function evaluateBenchmarkClaims(params: {
@@ -93,9 +136,23 @@ function main(): void {
     throw new Error(`Aggregate file not found: ${inPath}`);
   }
 
-  const minFamilyP50 = parseNumberArg(args, "min-family-p50", 50);
-  const minFamilyP25 = parseNumberArg(args, "min-family-p25", 40);
-  const minTaskFloor = parseNumberArg(args, "min-task-floor", 20);
+  const profile = resolveProfile(getArgValue(args, "profile"));
+  const defaults = CLAIM_PROFILE_THRESHOLDS[profile];
+  const minFamilyP50 = parseNumberArg(
+    args,
+    "min-family-p50",
+    defaults.minFamilyP50,
+  );
+  const minFamilyP25 = parseNumberArg(
+    args,
+    "min-family-p25",
+    defaults.minFamilyP25,
+  );
+  const minTaskFloor = parseNumberArg(
+    args,
+    "min-task-floor",
+    defaults.minTaskFloor,
+  );
 
   const aggregate = JSON.parse(readFileSync(inPath, "utf-8")) as AggregatePayload;
   const evaluation = evaluateBenchmarkClaims({
@@ -114,7 +171,7 @@ function main(): void {
   }
 
   console.log(
-    `[claims-check] PASS (family p50>=${minFamilyP50}, family p25>=${minFamilyP25}, min task>=${minTaskFloor})`,
+    `[claims-check] PASS profile=${profile} (family p50>=${minFamilyP50}, family p25>=${minFamilyP25}, min task>=${minTaskFloor})`,
   );
 }
 

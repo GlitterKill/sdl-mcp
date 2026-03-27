@@ -123,3 +123,6 @@ fix_prRisk.js
 tests.tap
 claude-code-mcp-config.json
 opencode-mcp-config.json
+docs/plans/observability-dashboard-v1-plan.md
+.gitignore
+LEGACY-CLEANUP-PLAN.md

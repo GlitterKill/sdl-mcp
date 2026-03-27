@@ -14,7 +14,7 @@
  */
 
 import { readFileSync, writeFileSync } from "fs";
-import { resolve } from "path";
+import { isAbsolute, resolve } from "path";
 import { globSync } from "node:fs";
 import {
   closeLadybugDb,
@@ -269,7 +269,10 @@ interface BenchmarkSummary {
     medium: number;
     hard: number;
   };
+  mode: BenchmarkMode;
 }
+
+type BenchmarkMode = "realism" | "efficient";
 
 interface BaselineState {
   openedFiles: Set<string>;
@@ -462,6 +465,50 @@ function getNpmOutPath(): string | undefined {
   if (!raw) return undefined;
   if (isTruthyOrFalsyToken(raw)) return undefined;
   return raw;
+}
+
+function resolveBenchmarkMode(raw: string | undefined): BenchmarkMode {
+  if (!raw) return "realism";
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "realism" || normalized === "default") return "realism";
+  if (
+    normalized === "efficient" ||
+    normalized === "benchmark-efficient" ||
+    normalized === "efficiency"
+  ) {
+    return "efficient";
+  }
+
+  throw new Error(
+    `Invalid --mode "${raw}". Supported values: realism, efficient.`,
+  );
+}
+
+function applyBenchmarkModeDefaults(
+  defaults: BenchmarkDefaults,
+  mode: BenchmarkMode,
+): BenchmarkDefaults {
+  if (mode === "realism") {
+    return defaults;
+  }
+
+  return {
+    ...defaults,
+    sdl: {
+      ...defaults.sdl,
+      maxSearchResultsPerTerm: Math.min(defaults.sdl.maxSearchResultsPerTerm, 5),
+      maxEntrySymbols: Math.min(defaults.sdl.maxEntrySymbols, 3),
+      maxCardsPerStep: Math.min(defaults.sdl.maxCardsPerStep, 4),
+      maxCards: Math.min(defaults.sdl.maxCards, 8),
+      maxTokens: Math.min(defaults.sdl.maxTokens, 2000),
+      skeletonMaxLines: Math.min(defaults.sdl.skeletonMaxLines, 80),
+      skeletonMaxTokens: Math.min(defaults.sdl.skeletonMaxTokens, 900),
+    },
+  };
+}
+
+function getSliceCardDetailForMode(mode: BenchmarkMode): "compact" | "minimal" {
+  return mode === "efficient" ? "minimal" : "compact";
 }
 
 function printHeader(title: string): void {
@@ -698,13 +745,20 @@ function collectCandidateFiles(
   const ancillaryPatterns = ["config/**/*.json"];
   const patterns = [...codePatterns, ...ancillaryPatterns];
 
-  return globSync(patterns, {
+  const matches = globSync(patterns, {
     cwd: repoRoot,
-    ignore: exclude,
+    exclude,
     dot: true,
     onlyFiles: true,
-    absolute: true,
   });
+
+  return Array.from(
+    new Set(
+      matches.map((matched) =>
+        isAbsolute(matched) ? matched : resolve(repoRoot, matched),
+      ),
+    ),
+  );
 }
 
 function buildCorpus(repoRoot: string, absPaths: string[]): CorpusFile[] {
@@ -1308,6 +1362,7 @@ async function runCompletionPass(
   repoId: string,
   task: WorkflowTask,
   defaults: BenchmarkDefaults,
+  mode: BenchmarkMode,
   relevantFiles: Set<string>,
   relevantSymbols: Set<string>,
   corpusByRelPath: Map<string, CorpusFile>,
@@ -1430,7 +1485,7 @@ async function runCompletionPass(
       sdlAddedCards += 1;
     }
     sdlState.cardEtags.set(chosen.symbolId, card.etag);
-    applyCardContext(conn, sdlState, card);
+    await applyCardContext(conn, sdlState, card);
   }
 
   const sdlSymbolHitsAfterCards = collectSdlSymbolHits(
@@ -1473,6 +1528,7 @@ async function runCompletionPass(
     };
 
     const sliceStart = performance.now();
+    const sliceCardDetail = getSliceCardDetailForMode(mode);
     const sliceResult = await buildSlice({
       repoId,
       versionId,
@@ -1482,7 +1538,7 @@ async function runCompletionPass(
       ),
       taskText: `${task.title}\n${task.description}\nCompletion pass: continue until required context is reached.`,
       knownCardEtags,
-      cardDetail: "compact",
+      cardDetail: sliceCardDetail,
       budget: completionSliceBudget,
     });
     const slice = unwrapSliceBuildResult(sliceResult);
@@ -1563,7 +1619,7 @@ async function runCompletionPass(
       sdlAddedCards += 1;
     }
     sdlState.cardEtags.set(representativeSymbolId, card.etag);
-    applyCardContext(conn, sdlState, card);
+    await applyCardContext(conn, sdlState, card);
   }
 
   // Final safety net: in real workflows agents may open raw files when needed.
@@ -1624,6 +1680,7 @@ async function runSdlStep(
   task: WorkflowTask,
   step: WorkflowStep,
   defaults: BenchmarkDefaults,
+  mode: BenchmarkMode,
   state: SdlState,
 ): Promise<{
   searchHits: number;
@@ -1812,13 +1869,14 @@ async function runSdlStep(
 
     const sliceStart = performance.now();
     const knownCardEtags = Object.fromEntries(state.cardEtags.entries());
+    const sliceCardDetail = getSliceCardDetailForMode(mode);
     const sliceResult = await buildSlice({
       repoId,
       versionId,
       entrySymbols: entrySymbolIds,
       taskText: `${task.title}\n${task.description}\n${step.goal}\n${step.prompt}`,
       knownCardEtags,
-      cardDetail: "compact",
+      cardDetail: sliceCardDetail,
       budget: sliceBudget,
     });
     slice = unwrapSliceBuildResult(sliceResult);
@@ -2177,6 +2235,7 @@ function printSummary(summary: BenchmarkSummary): void {
   console.log("  " + "-".repeat(68));
   console.log(`
   Tasks run:                  ${summary.taskCount}
+  Benchmark mode:             ${summary.mode}
   SDL-MCP wins:               ${summary.sdlWins}
   Traditional wins:           ${summary.traditionalWins}
   Ties:                       ${summary.ties}
@@ -2233,10 +2292,14 @@ async function runBenchmark(): Promise<void> {
   const outPath =
     getArgValue(args, "out") ?? getFallbackOutPath(args) ?? getNpmOutPath();
   const skipIndex = getFlagEnabled(args, "skip-index");
+  const mode = resolveBenchmarkMode(
+    getArgValue(args, "mode") ?? getNpmConfigValue("mode"),
+  );
 
   const taskFileRaw = readFileSync(tasksPath, "utf-8");
   const parsed = JSON.parse(taskFileRaw) as TaskFile;
   const normalized = normalizeTaskFile(parsed);
+  const defaults = applyBenchmarkModeDefaults(normalized.defaults, mode);
 
   const config = loadConfig(configPath);
   const resolvedConfigPath = configPath
@@ -2286,8 +2349,12 @@ async function runBenchmark(): Promise<void> {
   const results: TaskResult[] = [];
 
   printHeader("SDL-MCP REAL-WORLD WORKFLOW BENCHMARK");
+  const modeLabel =
+    mode === "realism"
+      ? "realism-first (no per-task budget/query tuning)"
+      : "benchmark-efficient (tighter ladder budgets)";
   console.log(`
-  Benchmark Mode: realism-first (no per-task budget/query tuning)
+  Benchmark Mode: ${modeLabel}
   SDL ladder:     symbol search -> cards -> slice -> skeletons
   Completion:     continue retrieval until task target context is reached
   Scoring:        weighted composite (token, coverage, efficiency, precision)
@@ -2357,7 +2424,7 @@ async function runBenchmark(): Promise<void> {
       const baselineStep = runBaselineStep(
         task,
         step,
-        normalized.defaults,
+        defaults,
         corpus,
         baselineState,
       );
@@ -2367,7 +2434,8 @@ async function runBenchmark(): Promise<void> {
         repoConfig.repoId,
         task,
         step,
-        normalized.defaults,
+        defaults,
+        mode,
         sdlState,
       );
 
@@ -2445,7 +2513,8 @@ async function runBenchmark(): Promise<void> {
       conn,
       repoConfig.repoId,
       task,
-      normalized.defaults,
+      defaults,
+      mode,
       relevantFiles,
       relevantSymbols,
       corpusByRelPath,
@@ -2509,12 +2578,12 @@ async function runBenchmark(): Promise<void> {
     const { compositeScore, scoreBreakdown } = computeCompositeScore(
       baselineMetrics,
       sdlMetrics,
-      normalized.defaults.scoring,
+      defaults.scoring,
     );
     const winner: "SDL-MCP" | "Traditional" | "Tie" =
-      compositeScore > normalized.defaults.scoring.thresholds.sdlWin
+      compositeScore > defaults.scoring.thresholds.sdlWin
         ? "SDL-MCP"
-        : compositeScore < normalized.defaults.scoring.thresholds.traditionalWin
+        : compositeScore < defaults.scoring.thresholds.traditionalWin
           ? "Traditional"
           : "Tie";
 
@@ -2637,6 +2706,7 @@ async function runBenchmark(): Promise<void> {
       extraContextValues.reduce((sum, value) => sum + value, 0) /
       Math.max(1, extraContextValues.length),
     difficultyBreakdown,
+    mode,
   };
 
   printSummary(summary);
@@ -2649,7 +2719,8 @@ async function runBenchmark(): Promise<void> {
       generatedAt: new Date().toISOString(),
       repoId: repoConfig.repoId,
       rootPath: repoConfig.rootPath,
-      defaults: normalized.defaults,
+      defaults,
+      mode,
       summary,
       tasks: results,
     };

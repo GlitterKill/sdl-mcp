@@ -24,13 +24,24 @@ interface BenchmarkTask {
   tags?: string[];
   comparison: {
     tokenReductionPct: number;
+    contextCoverageGainPct: number;
+    fileCoverageGainPct: number;
+    symbolCoverageGainPct: number;
+    precisionGainPct: number;
+    recallGainPct: number;
   };
 }
 
 interface BenchmarkRunPayload {
   summary: {
+    mode?: string;
     taskCount: number;
     avgTokenReductionPct: number;
+    avgContextCoverageGainPct: number;
+    avgFileCoverageGainPct: number;
+    avgSymbolCoverageGainPct: number;
+    avgPrecisionGainPct: number;
+    avgRecallGainPct: number;
   };
   tasks: BenchmarkTask[];
 }
@@ -39,6 +50,11 @@ interface FamilyStats {
   family: string;
   taskCount: number;
   avgTokenReductionPct: number;
+  avgContextCoverageGainPct: number;
+  avgFileCoverageGainPct: number;
+  avgSymbolCoverageGainPct: number;
+  avgPrecisionGainPct: number;
+  avgRecallGainPct: number;
   p25TokenReductionPct: number;
   p50TokenReductionPct: number;
   minTokenReductionPct: number;
@@ -53,11 +69,17 @@ interface MatrixAggregate {
   taskCount: number;
   overall: {
     avgTokenReductionPct: number;
+    avgContextCoverageGainPct: number;
+    avgFileCoverageGainPct: number;
+    avgSymbolCoverageGainPct: number;
+    avgPrecisionGainPct: number;
+    avgRecallGainPct: number;
     p25TokenReductionPct: number;
     p50TokenReductionPct: number;
     minTokenReductionPct: number;
     maxTokenReductionPct: number;
   };
+  mode: "realism" | "efficient";
   families: FamilyStats[];
   runs: Array<{
     id: string;
@@ -67,10 +89,16 @@ interface MatrixAggregate {
     outPath: string;
     taskCount: number;
     avgTokenReductionPct: number;
+    avgContextCoverageGainPct: number;
+    avgFileCoverageGainPct: number;
+    avgSymbolCoverageGainPct: number;
+    avgPrecisionGainPct: number;
+    avgRecallGainPct: number;
   }>;
 }
 
 const NODE_BIN = process.execPath;
+type BenchmarkMode = "realism" | "efficient";
 
 function getArgValue(args: string[], name: string): string | undefined {
   const direct = args.find((arg) => arg.startsWith(`--${name}=`));
@@ -82,6 +110,22 @@ function getArgValue(args: string[], name: string): string | undefined {
 
 function getFlag(args: string[], name: string): boolean {
   return args.includes(`--${name}`);
+}
+
+function resolveBenchmarkMode(raw: string | undefined): BenchmarkMode {
+  if (!raw) return "realism";
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "realism" || normalized === "default") return "realism";
+  if (
+    normalized === "efficient" ||
+    normalized === "benchmark-efficient" ||
+    normalized === "efficiency"
+  ) {
+    return "efficient";
+  }
+  throw new Error(
+    `Invalid --mode "${raw}". Supported values: realism, efficient.`,
+  );
 }
 
 function percentile(values: number[], p: number): number {
@@ -106,17 +150,36 @@ function buildRunCommand(params: {
   repoId: string;
   outPath: string;
   skipIndex: boolean;
+  mode: BenchmarkMode;
 }): string {
   const configArg = params.configPath ? ` --config "${params.configPath}"` : "";
   const skipArg = params.skipIndex ? " --skip-index" : "";
-  return `"${NODE_BIN}" scripts/real-world-benchmark.ts --tasks "${params.tasksPath}" --repo-id "${params.repoId}" --out "${params.outPath}"${configArg}${skipArg}`;
+  return `"${NODE_BIN}" scripts/real-world-benchmark.ts --tasks "${params.tasksPath}" --repo-id "${params.repoId}" --out "${params.outPath}" --mode "${params.mode}"${configArg}${skipArg}`;
 }
 
-function toFamilyStats(family: string, reductions: number[]): FamilyStats {
+interface FamilyAggregates {
+  reductions: number[];
+  contextCoverageGains: number[];
+  fileCoverageGains: number[];
+  symbolCoverageGains: number[];
+  precisionGains: number[];
+  recallGains: number[];
+}
+
+function toFamilyStats(
+  family: string,
+  aggregates: FamilyAggregates,
+): FamilyStats {
+  const reductions = aggregates.reductions;
   return {
     family,
     taskCount: reductions.length,
     avgTokenReductionPct: average(reductions),
+    avgContextCoverageGainPct: average(aggregates.contextCoverageGains),
+    avgFileCoverageGainPct: average(aggregates.fileCoverageGains),
+    avgSymbolCoverageGainPct: average(aggregates.symbolCoverageGains),
+    avgPrecisionGainPct: average(aggregates.precisionGains),
+    avgRecallGainPct: average(aggregates.recallGains),
     p25TokenReductionPct: percentile(reductions, 25),
     p50TokenReductionPct: percentile(reductions, 50),
     minTokenReductionPct: Math.min(...reductions),
@@ -138,6 +201,7 @@ function main(): void {
   const limitRunsRaw = getArgValue(args, "limit-runs");
   const limitRuns = limitRunsRaw ? Number(limitRunsRaw) : Number.POSITIVE_INFINITY;
   const forceSkipIndex = getFlag(args, "skip-index");
+  const mode = resolveBenchmarkMode(getArgValue(args, "mode"));
 
   if (!existsSync(matrixPath)) {
     throw new Error(`Matrix file not found: ${matrixPath}`);
@@ -158,12 +222,19 @@ function main(): void {
   mkdirSync(runOutDir, { recursive: true });
 
   const indexedRepos = new Set<string>();
-  const familyToReductions = new Map<string, number[]>();
+  const familyAggregates = new Map<string, FamilyAggregates>();
   const allReductions: number[] = [];
+  const allContextCoverageGains: number[] = [];
+  const allFileCoverageGains: number[] = [];
+  const allSymbolCoverageGains: number[] = [];
+  const allPrecisionGains: number[] = [];
+  const allRecallGains: number[] = [];
   const runSummaries: MatrixAggregate["runs"] = [];
   const failedRuns: string[] = [];
 
-  console.log(`[matrix] executing ${selectedRuns.length} run(s) from ${matrixPath}`);
+  console.log(
+    `[matrix] executing ${selectedRuns.length} run(s) from ${matrixPath} (mode=${mode})`,
+  );
 
   for (const run of selectedRuns) {
     const resolvedTasksPath = resolve(dirname(matrixPath), run.tasks);
@@ -179,6 +250,7 @@ function main(): void {
       repoId: run.repoId,
       outPath: runOutPath,
       skipIndex,
+      mode,
     });
 
     console.log(
@@ -203,11 +275,42 @@ function main(): void {
     ) as BenchmarkRunPayload;
 
     const reductions = payload.tasks.map((task) => task.comparison.tokenReductionPct);
-    allReductions.push(...reductions);
+    const contextCoverageGains = payload.tasks.map(
+      (task) => task.comparison.contextCoverageGainPct,
+    );
+    const fileCoverageGains = payload.tasks.map(
+      (task) => task.comparison.fileCoverageGainPct,
+    );
+    const symbolCoverageGains = payload.tasks.map(
+      (task) => task.comparison.symbolCoverageGainPct,
+    );
+    const precisionGains = payload.tasks.map(
+      (task) => task.comparison.precisionGainPct,
+    );
+    const recallGains = payload.tasks.map((task) => task.comparison.recallGainPct);
 
-    const familyReductions = familyToReductions.get(run.family) ?? [];
-    familyReductions.push(...reductions);
-    familyToReductions.set(run.family, familyReductions);
+    allReductions.push(...reductions);
+    allContextCoverageGains.push(...contextCoverageGains);
+    allFileCoverageGains.push(...fileCoverageGains);
+    allSymbolCoverageGains.push(...symbolCoverageGains);
+    allPrecisionGains.push(...precisionGains);
+    allRecallGains.push(...recallGains);
+
+    const familyState = familyAggregates.get(run.family) ?? {
+      reductions: [],
+      contextCoverageGains: [],
+      fileCoverageGains: [],
+      symbolCoverageGains: [],
+      precisionGains: [],
+      recallGains: [],
+    };
+    familyState.reductions.push(...reductions);
+    familyState.contextCoverageGains.push(...contextCoverageGains);
+    familyState.fileCoverageGains.push(...fileCoverageGains);
+    familyState.symbolCoverageGains.push(...symbolCoverageGains);
+    familyState.precisionGains.push(...precisionGains);
+    familyState.recallGains.push(...recallGains);
+    familyAggregates.set(run.family, familyState);
 
     runSummaries.push({
       id: run.id,
@@ -217,21 +320,32 @@ function main(): void {
       outPath: runOutPath,
       taskCount: payload.summary.taskCount,
       avgTokenReductionPct: payload.summary.avgTokenReductionPct,
+      avgContextCoverageGainPct: payload.summary.avgContextCoverageGainPct,
+      avgFileCoverageGainPct: payload.summary.avgFileCoverageGainPct,
+      avgSymbolCoverageGainPct: payload.summary.avgSymbolCoverageGainPct,
+      avgPrecisionGainPct: payload.summary.avgPrecisionGainPct,
+      avgRecallGainPct: payload.summary.avgRecallGainPct,
     });
   }
 
-  const families = Array.from(familyToReductions.entries())
-    .map(([family, reductions]) => toFamilyStats(family, reductions))
+  const families = Array.from(familyAggregates.entries())
+    .map(([family, aggregates]) => toFamilyStats(family, aggregates))
     .sort((a, b) => a.family.localeCompare(b.family));
 
   const aggregate: MatrixAggregate = {
     generatedAt: new Date().toISOString(),
     matrixPath,
     configPath,
+    mode,
     runCount: runSummaries.length,
     taskCount: allReductions.length,
     overall: {
       avgTokenReductionPct: average(allReductions),
+      avgContextCoverageGainPct: average(allContextCoverageGains),
+      avgFileCoverageGainPct: average(allFileCoverageGains),
+      avgSymbolCoverageGainPct: average(allSymbolCoverageGains),
+      avgPrecisionGainPct: average(allPrecisionGains),
+      avgRecallGainPct: average(allRecallGains),
       p25TokenReductionPct: percentile(allReductions, 25),
       p50TokenReductionPct: percentile(allReductions, 50),
       minTokenReductionPct: allReductions.length > 0 ? Math.min(...allReductions) : 0,
@@ -247,6 +361,9 @@ function main(): void {
   console.log(`\n[matrix] aggregate written: ${aggregatePath}`);
   console.log(
     `[matrix] overall avg=${aggregate.overall.avgTokenReductionPct.toFixed(1)}% p50=${aggregate.overall.p50TokenReductionPct.toFixed(1)}% tasks=${aggregate.taskCount}`,
+  );
+  console.log(
+    `[matrix] context/file/symbol gains=${aggregate.overall.avgContextCoverageGainPct.toFixed(1)}%/${aggregate.overall.avgFileCoverageGainPct.toFixed(1)}%/${aggregate.overall.avgSymbolCoverageGainPct.toFixed(1)}%`,
   );
 
   if (failedRuns.length > 0) {

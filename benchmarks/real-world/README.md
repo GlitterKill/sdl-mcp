@@ -57,6 +57,9 @@ npm run benchmark:real -- --tasks benchmarks/real-world/tasks.json
 # Use specific repo config entry
 npm run benchmark:real -- --repo-id my-repo
 
+# Run in benchmark-efficient mode (tighter SDL budgets + minimal slice cards)
+npm run benchmark:real -- --repo-id my-repo --mode efficient
+
 # Skip re-indexing for faster iteration
 npm run benchmark:real -- --skip-index
 
@@ -66,8 +69,14 @@ npm run benchmark:real -- --out benchmarks/real-world/results.json
 # Run matrix benchmark across task packs/repo targets
 npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir benchmarks/real-world/runs/coverage-matrix
 
+# Run matrix in benchmark-efficient mode (for optimization comparisons)
+npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir benchmarks/real-world/runs/coverage-matrix-efficient --mode efficient
+
 # Validate claim thresholds from matrix aggregate
-node --experimental-strip-types scripts/check-benchmark-claims.ts --in benchmarks/real-world/runs/coverage-matrix/aggregate.json
+node --experimental-strip-types scripts/check-benchmark-claims.ts --in benchmarks/real-world/runs/coverage-matrix/aggregate.json --profile realism
+
+# Validate benchmark-efficient sensitivity thresholds
+node --experimental-strip-types scripts/check-benchmark-claims.ts --in benchmarks/real-world/runs/coverage-matrix-efficient/aggregate.json --profile efficient
 ```
 
 ## Benchmark Policy
@@ -81,6 +90,14 @@ The benchmark runner enforces realism-first behavior:
 - baseline file-open token cost is capped per file to model partial human/agent reads
 - report token reduction against both capped and uncapped baseline token totals
 - completion pass is applied to both approaches so benchmarks compare fully-completed tasks (not early stopping states)
+- corpus file discovery honors repo ignore globs via `globSync(..., { exclude })`
+
+### Benchmark Modes
+
+- `--mode realism` (default): realism-first benchmark policy and configured defaults.
+- `--mode efficient`: fixed tighter SDL budgets and `cardDetail: "minimal"` for optimization sensitivity runs.
+
+Use the same mode for all runs in a comparison set.
 
 If SDL loses a task, the report includes per-task loss reasons and server-focused
 improvement suggestions.
@@ -170,8 +187,16 @@ Console output includes:
 JSON output (`--out`) includes:
 
 - benchmark metadata
+- benchmark mode (`realism` or `efficient`)
 - defaults used
 - per-task step telemetry
 - token and coverage metrics (natural and post-completion)
 - weighted composite score and dual-baseline reductions
 - per-loss analysis and suggestions
+
+Matrix aggregate output (`benchmark:matrix`) also includes:
+
+- mode used for the full run
+- overall average token reduction plus p25/p50/min/max
+- overall average context/file/symbol/precision/recall gains
+- per-family aggregates for the same metrics
