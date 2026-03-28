@@ -33,19 +33,20 @@ export const FN_NAME_MAP: Record<string, string> = {
   memoryRemove: "memory.remove",
   memorySurface: "memory.surface",
   usageStats: "usage.stats",
+  fileRead: "file.read",
 };
 
 export const ACTION_TO_FN: Record<string, string> = Object.fromEntries(
   Object.entries(FN_NAME_MAP).map(([fn, action]) => [action, fn]),
 );
 
-const MANUAL_TEMPLATE = `// SDL-MCP API — use with sdl.chain tool
+const MANUAL_TEMPLATE = `// SDL-MCP API — use sdl.agent.orchestrate for context retrieval, sdl.chain for multi-step operations
 // repoId is set in the chain envelope, not per-step.
-// Reference prior step results with $N (e.g., $0.symbols[0].symbolId).
+// Reference prior step results with $N (e.g., $0.results[0].symbolId).
 
 // === Query ===
 /** Search symbols by name/pattern */
-function symbolSearch(p: { query: string; kinds?: string[]; limit?: number; semantic?: boolean }): { symbols: { symbolId: string; name: string; kind: string; file: string }[] }
+function symbolSearch(p: { query: string; kinds?: string[]; limit?: number; semantic?: boolean }): { results: { symbolId: string; name: string; kind: string; file: string }[] }
 /** Get symbol card (metadata, deps, metrics) */
 function symbolGetCard(p: { symbolId: string; ifNoneMatch?: string }): { card: { symbolId: string; name: string; kind: string; signature: string; summary: string; deps: object }; etag: string } | { notModified: true }
 /** Batch-fetch symbol cards */
@@ -53,11 +54,11 @@ function symbolGetCards(p: { symbolIds: string[]; knownEtags?: Record<string,str
 /** Build dependency graph slice */
 function sliceBuild(p: { taskText?: string; entrySymbols?: string[]; budget?: { maxCards?: number; maxEstimatedTokens?: number } }): { handle: string; cards: object[]; spilloverCount: number }
 /** Refresh existing slice (delta only) */
-function sliceRefresh(p: { sliceHandle: string }): { added: object[]; removed: string[]; changed: object[] }
+function sliceRefresh(p: { sliceHandle: string; knownVersion?: string }): { added: object[]; removed: string[]; changed: object[] }
 /** Fetch spillover page */
 function sliceSpilloverGet(p: { spilloverHandle: string; page?: number; pageSize?: number }): { cards: object[]; hasMore: boolean }
 /** Get delta between versions */
-function deltaGet(p: { fromVersion?: number; toVersion?: number; includeBlastRadius?: boolean }): { changed: object[]; blastRadius?: object[] }
+function deltaGet(p: { fromVersion?: string; toVersion?: string; includeBlastRadius?: boolean }): { changed: object[]; blastRadius?: object[] }
 /** Generate context summary */
 function contextSummary(p: { symbolId?: string; file?: string; taskQuery?: string; maxTokens?: number }): { summary: string; tokens: number }
 /** Analyze PR risk */
@@ -83,7 +84,7 @@ function indexRefresh(p: { mode?: "full" | "incremental" }): { indexed: number; 
 /** Get policy config */
 function policyGet(): { policy: object }
 /** Set policy config */
-function policySet(p: { maxWindowLines?: number; maxWindowTokens?: number; requireIdentifiers?: boolean }): { policy: object }
+function policySet(p: { policyPatch: { maxWindowLines?: number; maxWindowTokens?: number; requireIdentifiers?: boolean; allowBreakGlass?: boolean; defaultDenyRaw?: boolean } }): { policy: object }
 
 // === Memory ===
 /** Store a development memory */
@@ -97,13 +98,13 @@ function memorySurface(p: { symbolIds?: string[]; fileIds?: string[]; taskText?:
 
 // === Agent ===
 /** Orchestrate multi-rung context retrieval */
-function agentOrchestrate(p: { taskText: string; focusSymbols?: string[]; budget?: { maxTokens?: number } }): { evidence: object[] }
+function agentOrchestrate(p: { taskType: "debug" | "review" | "implement" | "explain"; taskText: string; focusSymbols?: string[]; budget?: { maxTokens?: number } }): { evidence: object[] }
 /** Record agent feedback */
-function agentFeedback(p: { useful: string[]; missing: string[]; taskText: string }): { recorded: boolean }
+function agentFeedback(p: { versionId: string; sliceHandle: string; usefulSymbols: string[]; missingSymbols?: string[]; rating?: string; comment?: string }): { recorded: boolean }
 /** Query feedback records */
 function agentFeedbackQuery(p: { limit?: number }): { records: object[] }
 /** Push buffer update */
-function bufferPush(p: { file: string; content: string }): { accepted: boolean }
+function bufferPush(p: { eventType: "open"|"change"|"save"|"close"|"checkpoint"; filePath: string; version: number; dirty: boolean; timestamp: string; content?: string }): { accepted: boolean }
 /** Request buffer checkpoint */
 function bufferCheckpoint(): { checkpointed: boolean }
   /** Get buffer status */
@@ -116,7 +117,11 @@ function bufferCheckpoint(): { checkpointed: boolean }
 
   // === Usage ===
 /** Get cumulative token savings statistics */
-function usageStats(p: { scope?: "session" | "history" | "both"; since?: string; limit?: number }): { totalSdlTokens: number; totalSavedTokens: number; savingsPercent: number }`;
+function usageStats(p: { scope?: "session" | "history" | "both"; since?: string; limit?: number }): { totalSdlTokens: number; totalSavedTokens: number; savingsPercent: number }
+
+// === File ===
+/** Read non-indexed file content (templates, configs, docs) */
+function fileRead(p: { filePath: string; maxBytes?: number; offset?: number; limit?: number; search?: string; searchContext?: number; jsonPath?: string }): { content: string; bytes: number; totalLines: number; returnedLines: number; truncated: boolean; matchCount?: number; extractedPath?: string }`;
 
 export function generateManual(_liveIndex?: LiveIndexCoordinator): string {
   // Validate FN_NAME_MAP covers all actions

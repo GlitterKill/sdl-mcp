@@ -1,5 +1,5 @@
 import type { GraphSlice, CardDetailLevel } from "../domain/types.js";
-import type { RepoId, VersionId, SymbolId } from "../db/schema.js";
+import type { RepoId, VersionId, SymbolId } from "../domain/types.js";
 
 interface SliceBuildRequest {
   repoId: RepoId;

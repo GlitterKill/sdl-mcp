@@ -10,12 +10,34 @@
 1. Call `sdl.repo.status` at the start of each task.
 2. If you are not sure which SDL action to use, call `sdl.action.search`.
 3. Use `sdl.manual` with `query` or `actions` to load only the relevant subset.
-4. Use `sdl.chain` for any workflow that would otherwise require multiple SDL calls.
-5. Use `runtimeExecute` inside `sdl.chain` for repo-local tests, builds, lint, and diagnostics.
-6. Use `symbolRef` or `symbolRefs` when you know a symbol name but not the canonical `symbolId`.
-7. If SDL returns `nextBestAction`, `fallbackTools`, `fallbackRationale`, or candidate matches, follow that guidance instead of retrying native tools.
+4. Use `sdl.agent.orchestrate` for code context retrieval (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration).
+5. Use `sdl.chain` for multi-step operations (runtime execution, data transforms, batch mutations) — not for context retrieval.
+6. Use `runtimeExecute` inside `sdl.chain` for repo-local tests, builds, lint, and diagnostics.
+7. Use `symbolRef` or `symbolRefs` when you know a symbol name but not the canonical `symbolId`.
+8. If SDL returns `nextBestAction`, `fallbackTools`, `fallbackRationale`, or candidate matches, follow that guidance instead of retrying native tools.
 
-### Do Not Use Default Tools For Indexed Code
+### Conditional Enforcement
+
+All SDL-MCP enforcement is **conditional** on the server being active (PID file exists).
+When SDL-MCP is not running, all native tools (Read, Bash, Explore) work normally with no restrictions.
+
+## Non-Indexed File Access
+
+- Use `file.read` inside `sdl.chain` for reading non-indexed files (templates, configs, docs) with minimal overhead.
+- Native `Read` is allowed for non-indexed file types even when SDL-MCP is active.
+- Only indexed source extensions (.ts, .js, .py, .go, .rs, etc.) are redirected to SDL tools.
+
+### file.read — Token-Efficient Modes
+
+Avoid reading entire files. Use targeted modes:
+
+- **Line range**: `{ "fn": "file.read", "args": { "filePath": "config/app.yaml", "offset": 10, "limit": 20 } }`
+- **Search**: `{ "fn": "file.read", "args": { "filePath": "docs/guide.md", "search": "authentication", "searchContext": 3 } }`
+- **JSON path**: `{ "fn": "file.read", "args": { "filePath": "package.json", "jsonPath": "dependencies" } }`
+
+Prefer `search` or `jsonPath` over full reads. Use `offset`/`limit` when you know the line range.
+
+## Do Not Use Default Tools For Indexed Code
 
 - Do not use native file-read tools for indexed source code when SDL-MCP can answer the question.
 - Do not use native shell tools for repo-local build, test, lint, or diagnostic commands when SDL runtime is enabled.
@@ -38,8 +60,9 @@
 
 ### Preferred SDL Patterns
 
-- Discovery: `sdl.action.search` -> `sdl.manual(query|actions)`
-- Multi-step context: `sdl.chain`
+- Discovery: `sdl.action.search` (use `query: "*"` to list all) -> `sdl.manual(query|actions)`
+- Context retrieval: `sdl.agent.orchestrate` with `contextMode: "precise"` or `"broad"`
+- Multi-step operations: `sdl.chain` (runtime execution, data transforms, batch mutations)
 - Repo-local execution: `sdl.chain` + `runtimeExecute`
 - Natural identifier lookup: `sdl.symbol.getCard` / `sdl.symbol.getCards` with `symbolRef` / `symbolRefs`
 - Direct code access: only after cards, slices, skeletons, or hot paths are insufficient
@@ -49,7 +72,8 @@
 Use `runtimeExecute` inside `sdl.chain` for repo-local commands:
 
 - **`outputMode: "minimal"`** (default): Returns ~50 tokens with status, exit code, and an `artifactHandle`. Use this for 95%+ of executions.
-- **`runtimeQueryOutput`**: If the exit code is non-zero or you need details, query the stored artifact with targeted `queryTerms` (e.g., `["FAIL", "Error"]`).
+- **Parameters**: Use `args` (e.g. `["-e", "console.log('hi')"]`) or `code` (inline string). There is no `command` field — unknown fields are rejected by strict validation.
+- **`runtimeQueryOutput`**: If the exit code is non-zero or you need details, query the stored artifact with `queryTerms` (e.g., `["FAIL", "Error"]`).
 - Always set `timeoutMs` to prevent hangs.
 
 ### Runtime Defaults
@@ -62,6 +86,11 @@ The enforced agent profile expects these SDL runtimes to be enabled:
 - `ruby`
 - `php`
 - `shell`
+
+### Version Defaults
+
+- `delta.get`: `fromVersion` and `toVersion` are optional — omit them to auto-resolve (latest and previous).
+- `slice.refresh`: `knownVersion` is optional — defaults to the slice handle's stored version.
 
 ### Example
 

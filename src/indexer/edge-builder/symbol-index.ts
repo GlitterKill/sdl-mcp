@@ -1,4 +1,4 @@
-import type { SymbolKind } from "../../db/schema.js";
+import type { SymbolKind } from "../../domain/types.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { normalizePath } from "../../util/paths.js";

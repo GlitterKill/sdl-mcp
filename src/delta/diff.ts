@@ -1,7 +1,7 @@
 import type { Connection } from "kuzu";
 import { IndexError } from "../domain/errors.js";
 
-import type { VersionId } from "../db/schema.js";
+import type { VersionId } from "../domain/types.js";
 import type {
   DeltaPack,
   DeltaSymbolChange,

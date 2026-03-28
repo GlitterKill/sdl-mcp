@@ -18,7 +18,7 @@
 
 Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
 
-- `31` gateway-routable SDL actions
+- `32` SDL action tools (`31` gateway-routable + `1` flat-only)
 - `2` universal tools: `sdl.action.search` and `sdl.info`
 - optional Code Mode tools: `sdl.manual` and `sdl.chain`
 
@@ -786,7 +786,12 @@ Update policy configuration for a repository. Accepts a partial patch — only s
 
 ### `sdl.agent.orchestrate`
 
-Orchestrate automated task execution with rung path selection and evidence capture. The planner selects an optimal path through the context ladder (card -> skeleton -> hotPath -> raw) based on the task type and budget.
+Orchestrate automated task execution with rung path selection and evidence capture. The planner selects an optimal path through the context ladder (card -> skeleton -> hotPath -> raw) based on the task type, budget, and context mode.
+
+**Context modes:**
+
+- **`"precise"`** — Returns minimal, chain-efficient context. Adaptive symbol selection (1 symbol per rung), stripped response envelope (no `actionsTaken`, `summary`, `answer`, `nextBestAction`). Designed to beat manual `sdl.chain` on token efficiency.
+- **`"broad"`** (default) — Returns richer surrounding context with adaptive selection based on task relevance. Full response envelope with diagnostics.
 
 **Parameters:**
 
@@ -810,28 +815,46 @@ Orchestrate automated task execution with rung path selection and evidence captu
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `contextMode` | `"precise" \| "broad"` | Context breadth. `"precise"` returns minimal context; `"broad"` (default) returns richer surrounding context |
 | `focusSymbols` | `string[]` | Symbol IDs to focus on |
 | `focusPaths` | `string[]` | File paths to focus on |
 | `includeTests` | `boolean` | Include test files in analysis |
 | `requireDiagnostics` | `boolean` | Include diagnostic info (may add a raw rung) |
 
-**Response includes:**
+**Response:**
 
-- `taskId`, `taskType`, `success`, `summary`, `error?`, `answer?`, `nextBestAction?`
-- `path` — rungs selected, estimatedTokens, estimatedDurationMs, reasoning
-- `actionsTaken` — array of actions with id, type, status, input, output, error, timestamp, durationMs, evidence
-- `finalEvidence` — array of evidence items (type, reference, summary, timestamp)
-- `metrics` — totalDurationMs, totalTokens, totalActions, successfulActions, failedActions, cacheHits
+In **broad** mode (default): `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics`, `summary`, `answer`, `actionsTaken`, `nextBestAction?`, `retrievalEvidence?`
+
+In **precise** mode: `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics` — envelope fields stripped for token efficiency.
 
 Planner token estimates: card ~50, skeleton ~200, hotPath ~500, raw ~2000. When over budget, the planner trims rungs from the end while keeping at least one.
 
-**Example:**
+**Precise mode rung strategies:**
+
+| Task Type | Precise Rungs | Broad Rungs |
+|-----------|--------------|-------------|
+| `debug` | card + hotPath | card + skeleton + hotPath |
+| `explain` | card + skeleton | card + skeleton |
+| `review` | card | card + skeleton |
+| `implement` | card + skeleton | card + skeleton + hotPath |
+
+**Examples:**
 
 ```json
 {
   "repoId": "my-repo",
   "taskType": "debug",
-  "taskText": "find root cause of auth timeout",
+  "taskText": "check NaN handling in normalizeEdgeConfidence",
+  "budget": { "maxTokens": 4000 },
+  "options": { "contextMode": "precise", "focusPaths": ["src/graph/slice/beam-search-engine.ts"] }
+}
+```
+
+```json
+{
+  "repoId": "my-repo",
+  "taskType": "debug",
+  "taskText": "investigate auth timeout across the pipeline",
   "budget": { "maxTokens": 4000, "maxActions": 12 },
   "options": { "includeTests": true, "focusPaths": ["src/auth/"] }
 }
@@ -902,6 +925,32 @@ Query stored feedback records and aggregated statistics. Useful for offline tuni
 ```json
 { "repoId": "my-repo", "since": "2026-01-01T00:00:00Z", "limit": 100 }
 ```
+
+---
+
+## File Access (1 tool)
+
+### `sdl.file.read`
+
+Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional line range, regex search, or JSON path extraction. Returns content directly without runtime execution overhead.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `filePath` | `string` | Yes | Path relative to repo root |
+| `maxBytes` | `number` | No | Max bytes to read (default 512KB) |
+| `offset` | `number` | No | Start line (0-based) |
+| `limit` | `number` | No | Max lines to return |
+| `search` | `string` | No | Regex pattern (case-insensitive) |
+| `searchContext` | `number` | No | Context lines around matches (default 2) |
+| `jsonPath` | `string` | No | Dot-separated key path for JSON/YAML extraction |
+
+**Blocked extensions:** Indexed source files (.ts, .js, .py, .go, .rs, etc.) are rejected with guidance to use SDL code tools.
+
+**Modes:**
+- **Line range**: `offset` + `limit` — returns numbered lines
+- **Search**: `search` — returns matching lines with context, matches prefixed with `>`
+- **JSON path**: `jsonPath` — parses JSON and returns extracted subtree
+- **Full read**: no params — returns entire file (subject to `maxBytes`)
 
 ---
 

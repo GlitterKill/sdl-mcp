@@ -8,7 +8,7 @@ import {
   type SymbolRef,
 } from "../tools.js";
 import { SYMBOL_SEARCH_DEFAULT_LIMIT } from "../../config/constants.js";
-import type { SymbolKind } from "../../db/schema.js";
+import type { SymbolKind } from "../../domain/types.js";
 import type { NotModifiedResponse } from "../types.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
@@ -22,15 +22,12 @@ import { loadConfig } from "../../config/loadConfig.js";
 import { logSemanticSearchTelemetry } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
 import {
-  getOverlaySnapshot,
   searchSymbolsWithOverlay,
   searchSymbolsHybridWithOverlay,
 } from "../../live-index/overlay-reader.js";
 import { checkRetrievalHealth, shouldFallbackToLegacy } from "../../retrieval/index.js";
 import type { RetrievalEvidence } from "../../retrieval/types.js";
 import { logger } from "../../util/logger.js";
-import { rerankByEmbeddings } from "../../indexer/embeddings.js";
-import { LEGACY_ANN_MAINTENANCE_MODE } from "../../config/constants.js";
 import { buildCardForSymbol } from "../../services/card-builder.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 import {
@@ -131,89 +128,6 @@ export async function handleSymbolSearch(
     file: row.filePath,
     kind: row.kind as SymbolKind,
   }));
-
-  // Legacy semantic reranking: only when NOT using hybrid path
-  if (
-    !useHybrid &&
-    LEGACY_ANN_MAINTENANCE_MODE &&
-    semanticRequested &&
-    semanticConfig?.enabled === true &&
-    rows.length > 0
-  ) {
-    try {
-      const overlaySnapshot = getOverlaySnapshot(request.repoId);
-      const symbolIds = rows.map((row) => row.symbolId);
-      const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
-
-      const lexicalCandidates: {
-        symbol: ladybugDb.SymbolRow;
-        lexicalScore: number;
-      }[] = [];
-      const nonRerankableResults: typeof results = [];
-      const rerankableSymbolIds = new Set<string>();
-
-      rows.forEach((row, index) => {
-        const symbol = symbolMap.get(row.symbolId);
-        const isOverlayBacked = overlaySnapshot.touchedFileIds.has(row.fileId);
-        if (symbol && !isOverlayBacked) {
-          rerankableSymbolIds.add(row.symbolId);
-          lexicalCandidates.push({
-            symbol,
-            lexicalScore: 1.0 - index / rows.length,
-          });
-        } else {
-          nonRerankableResults.push({
-            symbolId: row.symbolId,
-            name: row.name,
-            file: row.filePath,
-            kind: row.kind as SymbolKind,
-          });
-        }
-      });
-
-      if (lexicalCandidates.length > 0) {
-        const alpha = semanticConfig?.alpha ?? 0.6;
-        const provider = semanticConfig?.provider ?? "local";
-        const model = semanticConfig?.model ?? "all-MiniLM-L6-v2";
-
-        const reranked = await rerankByEmbeddings({
-          query: request.query,
-          symbols: lexicalCandidates,
-          provider,
-          alpha,
-          model,
-        });
-
-        const filePathMap = new Map(
-          rows.map((row) => [row.symbolId, row.filePath]),
-        );
-        const rerankedResults = reranked.map((item) => ({
-          symbolId: item.symbol.symbolId,
-          name: item.symbol.name,
-          file: filePathMap.get(item.symbol.symbolId) ?? "",
-          kind: item.symbol.kind as SymbolKind,
-        }));
-        const nonRerankableById = new Map(
-          nonRerankableResults.map((row) => [row.symbolId, row]),
-        );
-
-        const mergedResults: typeof results = [
-          ...rerankedResults,
-          ...rows
-            .filter((row) => !rerankableSymbolIds.has(row.symbolId))
-            .map((row) => nonRerankableById.get(row.symbolId))
-            .filter((r): r is NonNullable<typeof r> => r != null),
-        ];
-
-        results = mergedResults.slice(0, limit);
-        semanticEnabled = true;
-      }
-    } catch (error) {
-      logger.warn(
-        `Semantic reranking failed, returning lexical results: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
 
   // Filter by kinds if specified (after semantic reranking, so it applies to both paths)
   if (request.kinds && request.kinds.length > 0) {

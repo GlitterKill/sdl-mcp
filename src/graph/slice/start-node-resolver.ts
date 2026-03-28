@@ -15,7 +15,7 @@
 
 import type { Connection } from "kuzu";
 
-import type { RepoId, SymbolId } from "../../db/schema.js";
+import type { RepoId, SymbolId } from "../../domain/types.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { tokenize } from "../../util/tokenize.js";
 import { isHybridRetrievalAvailable } from "../../retrieval/fallback.js";

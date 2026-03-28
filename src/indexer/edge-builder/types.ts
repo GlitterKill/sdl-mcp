@@ -1,4 +1,4 @@
-import type { SymbolKind } from "../../db/schema.js";
+import type { SymbolKind } from "../../domain/types.js";
 
 import type { ResolvedCall } from "../ts/tsParser.js";
 

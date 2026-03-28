@@ -11,11 +11,10 @@ describe("semantic pipeline regressions", () => {
   it("checks embedding cache before invoking provider embed", () => {
     const source = readSource("src/indexer/embeddings.ts");
     const fnStart = source.indexOf("export async function refreshSymbolEmbeddings(");
-    const fnEnd = source.indexOf(
-      "export async function rerankByEmbeddings(",
-      fnStart,
-    );
-    assert.ok(fnStart !== -1 && fnEnd !== -1 && fnEnd > fnStart);
+    // refreshSymbolEmbeddings is now the last exported function;
+    // use EOF as the end boundary
+    const fnEnd = source.length;
+    assert.ok(fnStart !== -1);
 
     const fnBody = source.slice(fnStart, fnEnd);
     const cardHashIdx = fnBody.indexOf(
@@ -62,7 +61,7 @@ describe("semantic pipeline regressions", () => {
     );
   });
 
-  it("does not gate semantic reranking on pre-existing embedding row count", () => {
+  it("uses hybrid search path instead of legacy rerank", () => {
     const source = readSource("src/mcp/tools/symbol.ts");
     const fnStart = source.indexOf("export async function handleSymbolSearch(");
     const fnEnd = source.indexOf(
@@ -74,17 +73,17 @@ describe("semantic pipeline regressions", () => {
     const fnBody = source.slice(fnStart, fnEnd);
     assert.match(
       fnBody,
-      /rerankByEmbeddings\(\{/,
-      "handleSymbolSearch should still call rerankByEmbeddings for semantic requests",
+      /searchSymbolsHybridWithOverlay/,
+      "handleSymbolSearch should use hybrid search",
     );
-    assert.doesNotMatch(
+    assert.match(
       fnBody,
-      /embeddingCount\s*>\s*0/,
-      "handleSymbolSearch should allow semantic reranking to warm a cold embedding cache",
+      /useHybrid/,
+      "handleSymbolSearch should have useHybrid flag",
     );
   });
 
-  it("preserves overlay lexical positions when semantic reranking is partial", () => {
+  it("hybrid search handles overlay and durable results", () => {
     const source = readSource("src/mcp/tools/symbol.ts");
     const fnStart = source.indexOf("export async function handleSymbolSearch(");
     const fnEnd = source.indexOf(
@@ -96,20 +95,13 @@ describe("semantic pipeline regressions", () => {
     const fnBody = source.slice(fnStart, fnEnd);
     assert.match(
       fnBody,
-      /const rerankableSymbolIds = new Set/,
-      "handleSymbolSearch should track rerankable lexical slots",
-    );
-    // New behavior: reranked items come first in semantic relevance order,
-    // then non-rerankable items in original lexical order
-    assert.match(
-      fnBody,
-      /\.\.\.rerankedResults/,
-      "handleSymbolSearch should place reranked results first",
+      /searchSymbolsWithOverlay/,
+      "handleSymbolSearch should use overlay search for legacy path",
     );
     assert.match(
       fnBody,
-      /!rerankableSymbolIds\.has\(row\.symbolId\)/,
-      "handleSymbolSearch should filter out rerankable symbols from the non-reranked tail",
+      /searchSymbolsHybridWithOverlay/,
+      "handleSymbolSearch should use hybrid overlay search for hybrid path",
     );
   });
 

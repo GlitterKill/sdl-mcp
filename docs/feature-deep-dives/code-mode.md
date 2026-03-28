@@ -85,7 +85,7 @@ When you pass `includeSchemas` or `includeExamples`, `sdl.manual` preserves the 
 
 ### `sdl.chain`
 
-Use this for any multi-step workflow that would otherwise require multiple SDL calls.
+Use this for multi-step operations (runtime execution, data transforms, batch mutations) that would otherwise require multiple SDL calls. For code context retrieval, prefer `sdl.agent.orchestrate` — it is more token-efficient and automatically selects the right context ladder rungs.
 
 Example:
 
@@ -206,12 +206,13 @@ Chains still honor SDL-MCP’s escalation model. Code Mode does not bypass polic
 For SDL-first agents:
 
 1. `sdl.repo.status`
-2. `sdl.action.search`
-3. `sdl.manual(query|actions)`
-4. `sdl.chain`
-5. `runtimeExecute` inside `sdl.chain` for repo-local build, test, lint, or diagnostics
+2. `sdl.agent.orchestrate` for code context retrieval (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration)
+3. `sdl.action.search` when the right action is unclear
+4. `sdl.manual(query|actions)` for API reference
+5. `sdl.chain` for multi-step operations (runtime execution, data transforms, batch mutations)
+6. `runtimeExecute` inside `sdl.chain` for repo-local build, test, lint, or diagnostics
 
-This is the intended path for enforced agent setups where SDL-MCP should replace token-heavy default tools whenever possible.
+This is the intended path for enforced agent setups where SDL-MCP should replace token-heavy default tools whenever possible. Context retrieval always goes through orchestrate; chain is reserved for non-context operations.
 
 ---
 

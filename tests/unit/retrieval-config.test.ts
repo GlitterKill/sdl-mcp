@@ -24,7 +24,7 @@ describe("SemanticRetrievalConfigSchema", () => {
   it("default config parses correctly with all retrieval defaults", () => {
     const result = SemanticRetrievalConfigSchema.parse({});
 
-    assert.strictEqual(result.mode, "legacy");
+    assert.strictEqual(result.mode, "hybrid");
     assert.strictEqual(result.extensionsOptional, true);
     assert.strictEqual(result.candidateLimit, 100);
     assert.ok(result.fts !== undefined, "fts sub-config should be present");

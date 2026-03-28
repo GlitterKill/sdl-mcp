@@ -90,12 +90,19 @@ flowchart TD
 
 ### Task Types
 
-| Type | Rung Strategy | Use Case |
-|:-----|:-------------|:---------|
-| `debug` | card → skeleton → hotPath → raw | Tracing bugs through call chains |
-| `review` | card → skeleton | Understanding changes for code review |
-| `implement` | card → skeleton → hotPath | Learning patterns before writing new code |
-| `explain` | card → skeleton | Generating explanations for documentation |
+| Type | Broad Rungs (default) | Precise Rungs | Use Case |
+|:-----|:---------------------|:-------------|:---------|
+| `debug` | card → skeleton → hotPath → raw | card → hotPath | Tracing bugs through call chains |
+| `review` | card → skeleton | card | Understanding changes for code review |
+| `implement` | card → skeleton → hotPath | card → skeleton | Learning patterns before writing new code |
+| `explain` | card → skeleton | card → skeleton | Generating explanations for documentation |
+
+### Context Modes
+
+The `contextMode` option controls context breadth and token efficiency:
+
+- **`"precise"`** — Returns minimal context matching or beating manual `sdl.chain` efficiency. Adaptive selection caps at 1 symbol per rung, uses aggressive relevance scoring (threshold = 60% of top score), and strips the response envelope (`actionsTaken`, `summary`, `answer`, `nextBestAction`). Use for targeted lookups like "what does X do?" or "check NaN handling in Y".
+- **`"broad"`** (default) — Returns richer surrounding context with adaptive selection (threshold = 40% of top score, up to 20 cards). Full response envelope with diagnostics, synthesized answer, and next-best-action guidance. Use for investigation tasks like "understand the auth pipeline" or "review changes in module X".
 
 ### Budget Controls
 
@@ -270,6 +277,25 @@ Adds a `raw` rung to debug tasks (subject to policy gating):
 
 Avoid enabling this unless you genuinely need raw code -- it can double the token cost of a debug task.
 
+### contextMode
+
+Controls context breadth and token efficiency:
+
+```json
+{
+  "options": {
+    "contextMode": "precise"
+  }
+}
+```
+
+| Mode | Symbol Selection | Rungs | Response Envelope | Best For |
+|:-----|:----------------|:------|:-----------------|:---------|
+| `"precise"` | 1 per rung (aggressive threshold) | Minimal per task type | Stripped (evidence + metrics only) | Targeted lookups, token-sensitive contexts |
+| `"broad"` (default) | Adaptive (up to 20 cards) | Full per task type | Complete (diagnostics, answer, next action) | Investigation, exploration, debugging |
+
+In precise mode, the orchestrator uses task-text-derived identifiers to score and rank all symbols in the focus files, then selects only the highest-scoring symbol for each rung. File-level skeletons are skipped entirely. This produces responses that are 50-70% smaller than manual `sdl.chain` calls for the same query.
+
 ---
 
 ## Response Structure
@@ -334,7 +360,7 @@ Avoid enabling this unless you genuinely need raw code -- it can double the toke
 | `success` | `true` if all actions completed without errors |
 | `error` | Error message if execution failed; `null` otherwise |
 | `metrics` | Execution stats: duration, tokens, action counts, cache hits |
-| `nextBestAction` | Suggested follow-up: `requestSkeleton`, `requestHotPath`, `refineRequest`, or `null` |
+| `nextBestAction` | Suggested follow-up: `requestSkeleton`, `requestHotPath`, `refineRequest`, or `null` (broad only) |
 
 **Action types**: `getCard`, `getSkeleton`, `getHotPath`, `needWindow`, `search`, `analyze`
 
@@ -342,20 +368,48 @@ Avoid enabling this unless you genuinely need raw code -- it can double the toke
 
 **`cacheHits`** counts repeated symbol card lookups that were served from cache across execution rungs. High counts indicate efficient reuse of previously fetched cards.
 
+**Precise mode response:** Only `taskId`, `taskType`, `success`, `path`, `finalEvidence`, and `metrics` are returned. `actionsTaken` is `[]`, `summary` is `""`, and `answer`/`nextBestAction`/`retrievalEvidence` are omitted.
+
 ---
 
 ## Usage Patterns
 
-### Quick Explanation
+### Precise Lookup (recommended for targeted questions)
 
-Card-only path (~50 tokens). Best for "what does X do?" questions.
+Minimal context — 1 card + 1 skeleton, smaller than manual `sdl.chain`. Use for "what does X do?" or "check Y for bugs".
 
 ```json
 {
   "repoId": "my-repo",
   "taskType": "explain",
-  "taskText": "What does this function do?",
-  "options": { "focusSymbols": ["utils:processData"] }
+  "taskText": "What does processData do and what are its parameters?",
+  "options": { "contextMode": "precise", "focusSymbols": ["utils:processData"] }
+}
+```
+
+### Precise Debug
+
+1 card + 1 hotPath targeting the exact symbol. Fastest debug path.
+
+```json
+{
+  "repoId": "my-repo",
+  "taskType": "debug",
+  "taskText": "Check NaN handling in normalizeEdgeConfidence",
+  "options": { "contextMode": "precise", "focusPaths": ["src/graph/slice/beam-search-engine.ts"] }
+}
+```
+
+### Broad Exploration (default)
+
+Richer context with multiple related symbols. Best for understanding modules or tracing flows.
+
+```json
+{
+  "repoId": "my-repo",
+  "taskType": "explain",
+  "taskText": "Understand the authentication pipeline",
+  "options": { "focusPaths": ["src/auth/"] }
 }
 ```
 
@@ -484,8 +538,9 @@ Requires `allowBreakGlass: true` in policy configuration. All break-glass uses a
 
 ---
 
-## Related Tools
+## Related
 
+- [Orchestrator Context Modes](./orchestrator-context-modes.md) - Deep dive on precise vs broad modes, adaptive symbol ranking, benchmarks
 - [`sdl.agent.orchestrate`](../mcp-tools-detailed.md#sdlagentorchestrate) - Autonomous task execution
 - [`sdl.agent.feedback`](../mcp-tools-detailed.md#sdlagentfeedback) - Record feedback
 - [`sdl.agent.feedback.query`](../mcp-tools-detailed.md#sdlagentfeedbackquery) - Query aggregated feedback

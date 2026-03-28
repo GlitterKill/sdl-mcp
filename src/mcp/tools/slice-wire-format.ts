@@ -6,7 +6,7 @@ import type {
   CompactGroupedEdgeV3,
   SliceBuildWireFormat,
 } from "../tools.js";
-import type { Visibility } from "../../db/schema.js";
+import type { Visibility } from "../../domain/types.js";
 import {
   AST_FINGERPRINT_COMPACT_WIRE_LENGTH,
   SYMBOL_ID_COMPACT_WIRE_LENGTH,

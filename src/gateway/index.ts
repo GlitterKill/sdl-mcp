@@ -5,6 +5,7 @@
 import type { MCPServer, ToolContext } from "../server.js";
 import type { LiveIndexCoordinator } from "../live-index/types.js";
 import type { GatewayConfig } from "../config/types.js";
+import { logger } from "../util/logger.js";
 import {
   QueryGatewaySchema,
   CodeGatewaySchema,
@@ -97,6 +98,7 @@ export function registerGatewayTools(
   );
 
   if (config.emitLegacyTools) {
+    logger.warn("gateway.emitLegacyTools is enabled. Legacy tool aliases are deprecated and will be removed in a future version. Use the namespaced gateway tools (sdl.query, sdl.code, sdl.repo, sdl.agent) instead.");
     registerLegacyTools(server, services);
   }
 }

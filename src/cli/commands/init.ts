@@ -534,11 +534,44 @@ done
 `;
 }
 
+function buildClaudeExploreHook(pidfilePath: string): string {
+  const safePath = shellEscape(pidfilePath);
+  return `#!/bin/sh
+set -eu
+
+# Only enforce when SDL-MCP server is running (PID file exists)
+if [ ! -f '${safePath}' ]; then
+  exit 0
+fi
+
+payload="$(cat)"
+tool_name="$(printf '%s' "$payload" | python -c "import json,sys; data=json.load(sys.stdin); print(data.get('tool_name',''))")"
+
+if [ "$tool_name" != "Task" ]; then
+  exit 0
+fi
+
+task_type="$(printf '%s' "$payload" | python -c "import json,sys; data=json.load(sys.stdin); tool_input=data.get('tool_input') or {}; print(tool_input.get('subagent_type') or tool_input.get('description') or '')")"
+
+case "$task_type" in
+  *[Ee]xplore*)
+    python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Use the explore-sdl subagent instead of the built-in Explore agent when SDL-MCP is active. The explore-sdl agent uses SDL-MCP tools for efficient source code understanding.'}}))"
+    exit 0
+    ;;
+esac
+`;
+}
+
 function buildClaudeSettings(): string {
+  // Permissions are broad — hooks handle conditional enforcement when SDL-MCP is active.
+  // When SDL-MCP is not running (no PID file), all native tools work normally.
   const settings = {
     permissions: {
-      deny: ["Task(Explore)"],
-      allow: ["Read(**.md)", "Read(**.json)", "mcp__sdl-mcp__*"],
+      allow: [
+        "Read",
+        "Bash",
+        "mcp__sdl-mcp__*",
+      ],
     },
     hooks: {
       PreToolUse: [
@@ -557,6 +590,15 @@ function buildClaudeSettings(): string {
             {
               type: "command",
               command: ".claude/hooks/force-sdl-runtime.sh",
+            },
+          ],
+        },
+        {
+          matcher: "Task",
+          hooks: [
+            {
+              type: "command",
+              command: ".claude/hooks/force-sdl-explore.sh",
             },
           ],
         },
@@ -714,6 +756,11 @@ function buildEnforcementAssets(
       {
         path: join(repoRoot, ".claude", "hooks", "force-sdl-mcp.sh"),
         content: buildClaudeReadHook(pidfilePath),
+        executable: true,
+      },
+      {
+        path: join(repoRoot, ".claude", "hooks", "force-sdl-explore.sh"),
+        content: buildClaudeExploreHook(pidfilePath),
         executable: true,
       },
       {

@@ -255,7 +255,7 @@ export const SemanticRetrievalFusionConfigSchema = z.object({
 
 export const SemanticRetrievalConfigSchema = z.object({
   /** "legacy" = original semantic-only re-rank path; "hybrid" = FTS + vector fusion. */
-  mode: z.enum(["legacy", "hybrid"]).default("legacy"),
+  mode: z.enum(["legacy", "hybrid"]).default("hybrid"),
   /** When true, file-extension filtering is optional (not enforced during retrieval). */
   extensionsOptional: z.boolean().default(true),
   fts: SemanticRetrievalFtsConfigSchema.optional().default(() => SemanticRetrievalFtsConfigSchema.parse({})),
@@ -391,7 +391,7 @@ export type RuntimeConfig = z.infer<typeof RuntimeConfigSchema>;
 
 export const GatewayConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  emitLegacyTools: z.boolean().default(true),
+  emitLegacyTools: z.boolean().default(false),
 });
 
 export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;

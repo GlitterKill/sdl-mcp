@@ -12,7 +12,7 @@
 
 import type { Connection } from "kuzu";
 
-import type { RepoId, SymbolId, VersionId, EdgeType } from "../db/schema.js";
+import type { RepoId, SymbolId, VersionId, EdgeType } from "../domain/types.js";
 import type {
   SliceBudget,
   GraphSlice,

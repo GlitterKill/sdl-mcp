@@ -34,6 +34,11 @@ export class Planner {
   }
 
   private planDebug(task: AgentTask, options: TaskOptions): RungPath {
+    // Precise mode: card + hotPath only (skip skeleton — hotpath gives the code).
+    if (options.contextMode === 'precise') {
+      return this.buildRungPath(['card', 'hotPath'], task, 'Precise debug: card + hotPath');
+    }
+
     const rungs: RungType[] = ["card", "skeleton", "hotPath"];
 
     if (options.requireDiagnostics) {
@@ -48,6 +53,10 @@ export class Planner {
   }
 
   private planReview(task: AgentTask, options: TaskOptions): RungPath {
+    if (options.contextMode === 'precise') {
+      return this.buildRungPath(['card'], task, 'Precise review: card only');
+    }
+
     const rungs: RungType[] = ["card", "skeleton"];
 
     if (
@@ -69,6 +78,10 @@ export class Planner {
   }
 
   private planImplement(task: AgentTask, options: TaskOptions): RungPath {
+    if (options.contextMode === 'precise') {
+      return this.buildRungPath(['card', 'skeleton'], task, 'Precise implement: card + skeleton');
+    }
+
     const rungs: RungType[] = ["card", "skeleton"];
 
     if (
@@ -86,6 +99,12 @@ export class Planner {
   }
 
   private planExplain(task: AgentTask, options: TaskOptions): RungPath {
+    // Precise mode: card + skeleton — skeleton shows control flow which is
+    // essential for understanding how a symbol works.
+    if (options.contextMode === 'precise') {
+      return this.buildRungPath(['card', 'skeleton'], task, 'Precise explain: card + skeleton');
+    }
+
     const rungs: RungType[] = ["card"];
 
     if (

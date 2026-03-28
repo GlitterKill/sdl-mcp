@@ -7,7 +7,7 @@
  * @module graph/slice/slice-serializer
  */
 
-import type { SymbolId, EdgeType } from "../../db/schema.js";
+import type { SymbolId, EdgeType } from "../../domain/types.js";
 import type {
   SymbolCard,
   SliceSymbolCard,

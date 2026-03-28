@@ -28,7 +28,7 @@ import * as crypto from "crypto";
 import { computeDelta } from "../../delta/diff.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
-import type { SymbolKind } from "../../db/schema.js";
+import type { SymbolKind } from "../../domain/types.js";
 import {
   PolicyEngine,
   type PolicyRequestContext,
@@ -593,7 +593,7 @@ export async function handleSliceRefresh(
   args: unknown,
 ): Promise<SliceRefreshResponse> {
   const request = args as SliceRefreshRequest;
-  const { sliceHandle, knownVersion } = request;
+  const { sliceHandle } = request;
 
   const conn = await getLadybugConn();
   const handleRow = await ladybugDb.getSliceHandle(conn, sliceHandle);
@@ -607,6 +607,9 @@ export async function handleSliceRefresh(
   if (!handleRow) {
     throw new NotFoundError(`Slice handle not found: ${sliceHandle}`);
   }
+
+  // Default knownVersion to the slice handle's maxVersion when not provided
+  const knownVersion = request.knownVersion ?? handleRow.maxVersion ?? handleRow.minVersion ?? "";
 
   const now = new Date();
   if (new Date(handleRow.expiresAt) < now) {

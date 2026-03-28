@@ -103,11 +103,6 @@
         }
       }
     },
-    "dbPath": {
-      "type": "string",
-      "description": "Deprecated legacy SQLite database path (v0.7.x). Only used by the one-time SQLite→LadybugDB migration script in v0.8.",
-      "minLength": 1
-    },
     "policy": {
       "type": "object",
       "description": "Code access policy settings",
@@ -475,13 +470,6 @@
           "description": "Enable semantic reranking in symbol search",
           "default": true
         },
-        "alpha": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0.6,
-          "description": "@deprecated Use retrieval.fusion.rrfK and the hybrid pipeline instead. Legacy blend weight (0-1) for semantic vs. keyword score. Still honoured in 'legacy' mode; ignored when retrieval.mode is 'hybrid'."
-        },
         "provider": {
           "type": "string",
           "enum": ["api", "local", "mock"],
@@ -531,52 +519,6 @@
           "maximum": 50,
           "default": 20
         },
-        "ann": {
-          "type": "object",
-          "description": "@deprecated Use retrieval.vector for HNSW index configuration instead. Legacy HNSW ANN index settings. Still honoured when retrieval.mode is 'legacy'; ignored when 'hybrid' retrieval is active.",
-          "properties": {
-            "enabled": {
-              "type": "boolean",
-              "description": "Enable HNSW ANN index for faster semantic retrieval",
-              "default": true
-            },
-            "m": {
-              "type": "integer",
-              "description": "Number of bi-directional links per node in HNSW graph",
-              "minimum": 4,
-              "maximum": 64,
-              "default": 16
-            },
-            "efConstruction": {
-              "type": "integer",
-              "description": "Size of dynamic candidate list during index construction",
-              "minimum": 16,
-              "maximum": 500,
-              "default": 200
-            },
-            "efSearch": {
-              "type": "integer",
-              "description": "Size of dynamic candidate list during search",
-              "minimum": 8,
-              "maximum": 256,
-              "default": 50
-            },
-            "maxElements": {
-              "type": "integer",
-              "description": "Maximum number of elements in the ANN index",
-              "minimum": 1000,
-              "maximum": 1000000,
-              "default": 200000
-            }
-          },
-          "default": {
-            "enabled": true,
-            "m": 16,
-            "efConstruction": 200,
-            "efSearch": 50,
-            "maxElements": 200000
-          }
-        },
         "retrieval": {
           "type": "object",
           "description": "Hybrid retrieval pipeline configuration (FTS + vector fusion). Controls the new two-stage retrieval path that replaces legacy embedding re-ranking.",
@@ -584,7 +526,7 @@
             "mode": {
               "type": "string",
               "enum": ["legacy", "hybrid"],
-              "default": "legacy",
+              "default": "hybrid",
               "description": "'legacy' = original semantic-only re-rank path; 'hybrid' = FTS + vector fusion pipeline."
             },
             "extensionsOptional": {
@@ -705,7 +647,7 @@
             }
           },
           "default": {
-            "mode": "legacy",
+            "mode": "hybrid",
             "extensionsOptional": true,
             "fts": {
               "enabled": true,
@@ -732,20 +674,12 @@
       },
       "default": {
         "enabled": true,
-        "alpha": 0.6,
         "provider": "local",
         "model": "all-MiniLM-L6-v2",
         "generateSummaries": false,
         "summaryModel": "claude-haiku-4-5-20251001",
         "summaryMaxConcurrency": 5,
-        "summaryBatchSize": 20,
-        "ann": {
-          "enabled": true,
-          "m": 16,
-          "efConstruction": 200,
-          "efSearch": 50,
-          "maxElements": 200000
-        }
+        "summaryBatchSize": 20
       }
     },
     "prefetch": {
@@ -999,13 +933,13 @@
         },
         "emitLegacyTools": {
           "type": "boolean",
-          "description": "When gateway is enabled, also register the 25 legacy tool names for backward compatibility",
-          "default": true
+          "description": "When gateway is enabled, also register the 25 legacy tool names for backward compatibility. Deprecated: will be removed in a future version.",
+          "default": false
         }
       },
       "default": {
         "enabled": true,
-        "emitLegacyTools": true
+        "emitLegacyTools": false
       }
     },
     "httpAuth": {

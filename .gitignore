@@ -126,3 +126,4 @@ opencode-mcp-config.json
 docs/plans/observability-dashboard-v1-plan.md
 .gitignore
 LEGACY-CLEANUP-PLAN.md
+scripts/apply-orchestrate-fix.mjs

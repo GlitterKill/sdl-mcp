@@ -34,29 +34,25 @@ interface MinimalRetrievalConfig {
  * Inline mirror of shouldFallbackToLegacy for unit testing.
  *
  * Returns true (use legacy) when:
- *  - mode is "legacy" AND no health data shows auto-flip is viable
+ *  - mode is "legacy"
  *  - mode is "hybrid" but FTS is unavailable
  *
  * Returns false (use hybrid) when:
  *  - mode is "hybrid" and FTS is available
- *  - mode is "legacy" but health shows FTS + at least one vector index
+ *
+ * Note: auto-flip from legacy to hybrid is now handled by
+ * isHybridRetrievalAvailable() separately, not by shouldFallbackToLegacy.
  */
 function shouldFallbackToLegacy(
   caps: RetrievalCapabilities,
   config: MinimalRetrievalConfig,
-  health?: RetrievalCapabilities,
 ): boolean {
-  // Explicit legacy mode -- always fall back unless health shows auto-flip is viable.
+  // Explicit legacy mode -- always fall back.
   if (config.mode === "legacy") {
-    // Auto-flip: if health data shows FTS + at least one vector index, promote to hybrid.
-    if (health && health.fts && (health.vectorMiniLM || health.vectorNomic)) {
-      return false;
-    }
     return true;
   }
 
-  // Hybrid mode requested but FTS is unavailable -- cannot run the
-  // minimum viable hybrid pipeline.
+  // Hybrid mode requested but FTS is unavailable.
   if (!caps.fts) {
     return true;
   }
@@ -173,84 +169,29 @@ describe("isHybridRetrievalAvailable — logic", () => {
 // shouldFallbackToLegacy — auto-flip tests (Stage 2 addition)
 // ---------------------------------------------------------------------------
 
-describe("shouldFallbackToLegacy — auto-flip (Stage 2)", () => {
-  it("auto-flips from legacy to hybrid when health shows FTS + vectorMiniLM", () => {
+describe("shouldFallbackToLegacy — no auto-flip (Stage 2)", () => {
+  it("returns true when mode is legacy (no auto-flip in shouldFallbackToLegacy)", () => {
     const caps = makeCaps({ fts: true, vectorMiniLM: true });
     const config: MinimalRetrievalConfig = { mode: "legacy" };
-    const health: RetrievalCapabilities = {
-      fts: true,
-      vectorMiniLM: true,
-      vectorNomic: false,
-    };
-    assert.strictEqual(shouldFallbackToLegacy(caps, config, health), false);
+    assert.strictEqual(shouldFallbackToLegacy(caps, config), true);
   });
 
-  it("auto-flips from legacy to hybrid when health shows FTS + vectorNomic", () => {
-    const caps = makeCaps();
-    const config: MinimalRetrievalConfig = { mode: "legacy" };
-    const health: RetrievalCapabilities = {
-      fts: true,
-      vectorMiniLM: false,
-      vectorNomic: true,
-    };
-    assert.strictEqual(shouldFallbackToLegacy(caps, config, health), false);
-  });
-
-  it("stays legacy when health provided but FTS is unavailable", () => {
-    const caps = makeCaps({ fts: false });
-    const config: MinimalRetrievalConfig = { mode: "legacy" };
-    const health: RetrievalCapabilities = {
-      fts: false,
-      vectorMiniLM: true,
-      vectorNomic: true,
-    };
-    assert.strictEqual(shouldFallbackToLegacy(caps, config, health), true);
-  });
-
-  it("stays legacy when health provided but no vector indexes", () => {
-    const caps = makeCaps();
-    const config: MinimalRetrievalConfig = { mode: "legacy" };
-    const health: RetrievalCapabilities = {
-      fts: true,
-      vectorMiniLM: false,
-      vectorNomic: false,
-    };
-    assert.strictEqual(shouldFallbackToLegacy(caps, config, health), true);
-  });
-
-  it("stays legacy without health parameter (no auto-flip data)", () => {
+  it("returns true when mode is legacy, regardless of full capabilities", () => {
     const caps = makeCaps({ fts: true, vectorMiniLM: true, vectorNomic: true });
     const config: MinimalRetrievalConfig = { mode: "legacy" };
     assert.strictEqual(shouldFallbackToLegacy(caps, config), true);
   });
 
-  it("stays legacy when health is undefined even with full capabilities", () => {
-    const caps = makeCaps();
-    const config: MinimalRetrievalConfig = { mode: "legacy" };
-    assert.strictEqual(shouldFallbackToLegacy(caps, config, undefined), true);
-  });
-
-  it("hybrid mode ignores health parameter and uses caps.fts", () => {
+  it("returns false when mode is hybrid and FTS is available", () => {
     const caps = makeCaps({ fts: true });
     const config: MinimalRetrievalConfig = { mode: "hybrid" };
-    const health: RetrievalCapabilities = {
-      fts: false,
-      vectorMiniLM: false,
-      vectorNomic: false,
-    };
-    // health is irrelevant for hybrid mode — caps.fts is what matters
-    assert.strictEqual(shouldFallbackToLegacy(caps, config, health), false);
+    assert.strictEqual(shouldFallbackToLegacy(caps, config), false);
   });
 
-  it("hybrid mode falls back when caps.fts is false, even with healthy infrastructure", () => {
+  it("returns true when mode is hybrid but FTS is unavailable", () => {
     const caps = makeCaps({ fts: false });
     const config: MinimalRetrievalConfig = { mode: "hybrid" };
-    const health: RetrievalCapabilities = {
-      fts: true,
-      vectorMiniLM: true,
-      vectorNomic: true,
-    };
-    assert.strictEqual(shouldFallbackToLegacy(caps, config, health), true);
+    assert.strictEqual(shouldFallbackToLegacy(caps, config), true);
   });
 });
 
@@ -264,17 +205,25 @@ describe("shouldFallbackToLegacy — source verification (Stage 2)", () => {
     "utf8",
   );
 
-  it("shouldFallbackToLegacy accepts optional health parameter", () => {
+  it("shouldFallbackToLegacy takes caps and config parameters", () => {
     assert.ok(
-      src.includes("health?: RetrievalCapabilities"),
-      "shouldFallbackToLegacy should accept an optional health parameter",
+      src.includes("caps: RetrievalCapabilities"),
+      "shouldFallbackToLegacy should accept a caps parameter",
+    );
+    assert.ok(
+      src.includes("config: SemanticRetrievalConfig"),
+      "shouldFallbackToLegacy should accept a config parameter",
     );
   });
 
-  it("shouldFallbackToLegacy has auto-flip condition", () => {
+  it("shouldFallbackToLegacy checks mode and fts", () => {
     assert.ok(
-      src.includes("health && health.fts && (health.vectorMiniLM || health.vectorNomic)"),
-      "should check health for auto-flip when in legacy mode",
+      src.includes('config.mode === "legacy"'),
+      "should check for legacy mode",
+    );
+    assert.ok(
+      src.includes("!caps.fts"),
+      "should check FTS availability",
     );
   });
 

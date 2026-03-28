@@ -83,7 +83,7 @@ export function registerCodeModeTools(
     query: z.string().min(1).optional(),
     actions: z.array(z.string().min(1)).optional(),
     format: z.enum(["typescript", "markdown", "json"]).default("typescript"),
-    includeSchemas: z.boolean().default(false),
+    includeSchemas: z.boolean().default(true),
     includeExamples: z.boolean().default(false),
   });
 

@@ -1,4 +1,4 @@
-import type { EdgeResolutionStrategy } from "../db/schema.js";
+import type { EdgeResolutionStrategy } from "../domain/types.js";
 
 export interface CalibrationInput {
   isResolved: boolean;

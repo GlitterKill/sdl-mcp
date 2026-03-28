@@ -53,6 +53,7 @@ Use this page as the entry point for SDL-MCP documentation.
 - [Live Indexing](./feature-deep-dives/live-indexing.md)
 - [Governance & Policy](./feature-deep-dives/governance-policy.md)
 - [Agent Orchestration](./feature-deep-dives/agent-orchestration.md)
+- [Orchestrator Context Modes](./feature-deep-dives/orchestrator-context-modes.md)
 - [Indexing & Languages](./feature-deep-dives/indexing-languages.md)
 - [Semantic Engine](./feature-deep-dives/semantic-engine.md)
 - [Semantic Embeddings Setup](./feature-deep-dives/semantic-embeddings-setup.md)
@@ -93,9 +94,9 @@ Use this page as the entry point for SDL-MCP documentation.
   - Runtime: execute, queryOutput
   - Usage: stats
   - Universal: `sdl.action.search` and `sdl.info`
-  - Default flat mode: 33 tools (`31` flat tools + `sdl.action.search` + `sdl.info`)
+  - Default flat mode: 34 tools (`32` flat tools + `sdl.action.search` + `sdl.info`)
   - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
-  - Gateway + legacy mode: 37 tools (`4` gateway + `31` legacy flat + `sdl.action.search` + `sdl.info`)
+  - Gateway + legacy mode: 38 tools (`4` gateway + `32` legacy flat + `sdl.action.search` + `sdl.info`)
   - Code Mode (optional): adds `sdl.manual` and `sdl.chain`, or can run exclusive with `sdl.action.search`, `sdl.info`, `sdl.manual`, and `sdl.chain`
 - **Semantic features**: optional semantic reranking, LLM-generated symbol summaries (Anthropic/Ollama/mock)
 - **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP

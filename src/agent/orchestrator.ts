@@ -126,6 +126,23 @@ export class Orchestrator {
       const metrics = executor.getMetrics();
       const nextBestAction = executor.getNextBestAction();
 
+      // Precise mode: strip envelope, return only evidence + minimal metadata.
+      // This minimizes token burn — the LLM only needs the context, not diagnostics.
+      const isPrecise = task.options?.contextMode === 'precise';
+
+      if (isPrecise) {
+        return {
+          taskId,
+          taskType: task.taskType,
+          actionsTaken: [],
+          path,
+          finalEvidence: evidence,
+          summary: '',
+          success,
+          metrics,
+        };
+      }
+
       return {
         taskId,
         taskType: task.taskType,

@@ -7,9 +7,31 @@ Use SDL-MCP as the default path for repository `{{REPO_ID}}`.
 1. Start with `sdl.repo.status`.
 2. Use `sdl.action.search` when the correct SDL action is unclear.
 3. Use `sdl.manual(query|actions|format)` for focused reference instead of loading the full manual.
-4. Use `sdl.chain` for multi-step lookups and `runtimeExecute` inside `sdl.chain` for repo-local commands.
-5. Use `symbolRef` or `symbolRefs` when you know a symbol name but not the canonical `symbolId`.
-6. Follow `nextBestAction`, `fallbackTools`, `fallbackRationale`, and ranked candidates from SDL responses instead of retrying blocked native tools.
+4. Use `sdl.agent.orchestrate` for code context retrieval (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration).
+5. Use `sdl.chain` for multi-step operations (runtime execution, data transforms, batch mutations) — not for context retrieval.
+6. Use `symbolRef` or `symbolRefs` when you know a symbol name but not the canonical `symbolId`.
+7. Follow `nextBestAction`, `fallbackTools`, `fallbackRationale`, and ranked candidates from SDL responses instead of retrying blocked native tools.
+
+## Conditional Enforcement
+
+All SDL-MCP enforcement is **conditional** on the server being active (PID file exists).
+When SDL-MCP is not running, all native tools (Read, Bash, Explore) work normally with no restrictions.
+
+## Non-Indexed File Access
+
+- Use `file.read` inside `sdl.chain` for reading non-indexed files (templates, configs, docs) with minimal overhead.
+- Native `Read` is allowed for non-indexed file types even when SDL-MCP is active.
+- Only indexed source extensions (.ts, .js, .py, .go, .rs, etc.) are redirected to SDL tools.
+
+### file.read — Token-Efficient Modes
+
+Avoid reading entire files. Use targeted modes:
+
+- **Line range**: `{ "fn": "file.read", "args": { "filePath": "config/app.yaml", "offset": 10, "limit": 20 } }`
+- **Search**: `{ "fn": "file.read", "args": { "filePath": "docs/guide.md", "search": "authentication", "searchContext": 3 } }`
+- **JSON path**: `{ "fn": "file.read", "args": { "filePath": "package.json", "jsonPath": "dependencies" } }`
+
+Prefer `search` or `jsonPath` over full reads. Use `offset`/`limit` when you know the line range.
 
 ## Native Tool Restrictions
 
@@ -21,9 +43,11 @@ Use SDL-MCP as the default path for repository `{{REPO_ID}}`.
 ## Runtime Execution
 
 - Use `runtimeExecute` inside `sdl.chain` with `outputMode: "minimal"` (default) for ~50-token responses.
+- **Parameters**: Use `args` (string array, e.g. `["-e", "console.log('hi'"]`) or `code` (inline string written to temp file). There is no `command` field — unknown fields are rejected.
 - If you need output details after a minimal-mode execution, call `runtimeQueryOutput` with the `artifactHandle` and targeted `queryTerms`.
 - Set `timeoutMs` on all runtime executions to prevent hangs.
-- Supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`.
+- `delta.get` and `slice.refresh` have optional version parameters — omit them to auto-resolve to latest.
+- Supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`.
 
 ## Indexed Source Extensions
 
@@ -42,7 +66,8 @@ Use SDL-MCP as the default path for repository `{{REPO_ID}}`.
 
 ## Preferred Examples
 
-- Discovery: `sdl.action.search({ query: "auth tests" })`
+- Discovery: `sdl.action.search({ query: "auth tests" })` (use `query: "*"` to list all actions)
 - Focused manual: `sdl.manual({ actions: ["symbol.search", "slice.build"] })`
 - Natural lookup: `sdl.symbol.getCard({ repoId: "{{REPO_ID}}", symbolRef: { name: "handleRequest", file: "src/server.ts" } })`
-- Runtime execution: `sdl.chain(... runtimeExecute ...)`
+- Context retrieval: `sdl.agent.orchestrate({ taskType: "explain", taskText: "...", options: { contextMode: "precise", focusPaths: ["..."] } })`
+- Multi-step operations: `sdl.chain(... runtimeExecute ...)`

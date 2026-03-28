@@ -1,5 +1,5 @@
 import type { EdgeRow, SymbolRow } from "../../db/ladybug-queries.js";
-import type { SymbolKind } from "../../db/schema.js";
+import type { SymbolKind } from "../../domain/types.js";
 import {
   addToSymbolIndex,
   isBuiltinCall,

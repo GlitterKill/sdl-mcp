@@ -49,9 +49,9 @@ describe("hybrid search config integration", async () => {
     assert.equal(result.fusion.rrfK, 60);
   });
 
-  it("SemanticRetrievalConfigSchema defaults to legacy mode", () => {
+  it("SemanticRetrievalConfigSchema defaults to hybrid mode", () => {
     const result = configTypes.SemanticRetrievalConfigSchema.parse({});
-    assert.equal(result.mode, "legacy");
+    assert.equal(result.mode, "hybrid");
   });
 
   it("SemanticConfigSchema accepts retrieval sub-config", () => {
@@ -173,10 +173,10 @@ describe("Stage 1 wiring verification", () => {
     assert.ok(src.includes("LEGACY PATH"), "missing legacy path comment");
   });
 
-  it("handleSymbolSearch preserves legacy rerank path", () => {
+  it("handleSymbolSearch has hybrid-only search path", () => {
     const src = fs.readFileSync(path.join(repoRoot, "src/mcp/tools/symbol.ts"), "utf8");
-    assert.ok(src.includes("rerankByEmbeddings"), "legacy rerank removed");
-    assert.ok(src.includes("!useHybrid"), "legacy path not guarded by !useHybrid");
+    assert.ok(src.includes("searchSymbolsHybridWithOverlay"), "should import hybrid overlay search");
+    assert.ok(src.includes("useHybrid"), "should have hybrid mode flag");
   });
 
   it("handleSymbolSearch populates retrievalEvidence", () => {

@@ -26,7 +26,17 @@ export async function handleAgentOrchestrate(
     // If either type changes, update both to maintain compatibility.
     // retrievalEvidence (with symptomType) passes through this cast automatically.
     const response = result as AgentOrchestrateResponse;
-    attachRawContext(response, { rawTokens: response.metrics.totalTokens * 3 });
+
+    // Token meter: use focusPaths as fileIds for accurate raw-equivalent sizing.
+    // Falls back to planner estimate * 3 when no paths are available.
+    const focusPaths = request.options?.focusPaths;
+    const fileIds = focusPaths?.length
+      ? focusPaths.map((p) => request.repoId + ":" + p)
+      : undefined;
+    attachRawContext(response, fileIds
+      ? { fileIds }
+      : { rawTokens: response.metrics.totalTokens * 3 },
+    );
     return response;
   } catch (error) {
     if (error instanceof ZodError) {

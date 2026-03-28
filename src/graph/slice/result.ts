@@ -1,4 +1,4 @@
-import type { RepoId, SymbolId } from "../../db/schema.js";
+import type { RepoId, SymbolId } from "../../domain/types.js";
 import type { SliceBudget, GraphSlice } from "../../domain/types.js";
 
 export type SliceError =

@@ -45,6 +45,7 @@ import {
   MemoryRemoveRequestSchema,
   MemorySurfaceRequestSchema,
   UsageStatsRequestSchema,
+  FileReadRequestSchema,
 } from "../tools.js";
 
 import {
@@ -91,6 +92,7 @@ import {
   handleMemorySurface,
 } from "./memory.js";
 import { handleUsageStats } from "./usage.js";
+import { handleFileRead } from "./file-read.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -275,7 +277,7 @@ export function buildFlatToolDescriptors(
     {
       name: "sdl.agent.orchestrate",
       description:
-        "Orchestrate agent task execution with automated rung path selection and evidence capture",
+        "Orchestrate agent task execution with automated rung path selection, adaptive symbol relevance ranking, and contextMode (precise/broad) for token-efficient context retrieval",
       schema: AgentOrchestrateRequestSchema,
       handler: handleAgentOrchestrate,
     },
@@ -349,6 +351,13 @@ export function buildFlatToolDescriptors(
         "Get cumulative token savings statistics for the current session and/or historical sessions",
       schema: UsageStatsRequestSchema,
       handler: handleUsageStats,
+    },
+    {
+      name: "sdl.file.read",
+      description:
+        "Read non-indexed files (templates, configs, docs) with optional line range, search, or JSON path extraction",
+      schema: FileReadRequestSchema,
+      handler: handleFileRead,
     },
   ];
 }

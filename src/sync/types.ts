@@ -1,4 +1,4 @@
-import type { VersionId, RepoId } from "../db/schema.js";
+import type { VersionId, RepoId } from "../domain/types.js";
 
 export interface SyncArtifact {
   artifact_id: string;

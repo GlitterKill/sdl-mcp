@@ -14,7 +14,7 @@ import {
 } from "./edge-builder.js";
 import type { ConfigEdge } from "./configEdges.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
-import type { SymbolKind } from "../db/schema.js";
+import type { SymbolKind } from "../domain/types.js";
 import type { RepoConfig } from "../config/types.js";
 import type { FileMetadata } from "./fileScanner.js";
 import {

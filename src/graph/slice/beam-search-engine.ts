@@ -14,15 +14,8 @@ import { Worker } from "worker_threads";
 
 import type { Connection } from "kuzu";
 
-import type {
-  EdgeRow,
-  EdgeType,
-  FileRow,
-  MetricsRow,
-  RepoId,
-  SymbolId,
-  SymbolRow,
-} from "../../db/schema.js";
+import type { EdgeType, RepoId, SymbolId } from "../../domain/types.js";
+import type { EdgeRow, FileRow, MetricsRow, SymbolRow } from "../../db/schema.js";
 import type { SliceBudget } from "../../domain/types.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import {

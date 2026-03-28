@@ -34,7 +34,7 @@ describe("config surface sync", () => {
     assert.strictEqual(schema.properties.policy.default.allowBreakGlass, false);
 
     const sample = JSON.parse(
-      readFileSync(resolve(repoRoot, "config/sdlmcp.config.json.sample"), "utf8"),
+      readFileSync(resolve(repoRoot, "config/sdlmcp.config.example.json"), "utf8"),
     );
     assert.strictEqual(sample.policy.allowBreakGlass, false);
 
@@ -78,7 +78,7 @@ describe("config surface sync", () => {
     assert.strictEqual(schema.properties.prefetch.default.enabled, true);
 
     const sample = JSON.parse(
-      readFileSync(resolve(repoRoot, "config/sdlmcp.config.json.sample"), "utf8"),
+      readFileSync(resolve(repoRoot, "config/sdlmcp.config.example.json"), "utf8"),
     );
     assert.strictEqual(sample.prefetch.enabled, true);
 

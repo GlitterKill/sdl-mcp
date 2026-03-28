@@ -1,5 +1,3 @@
-// Domain primitives are canonical in domain/types.ts — imported and re-exported
-// here so existing importers of db/schema.ts need no changes.
 import type {
   RepoId,
   SymbolId,
@@ -10,16 +8,7 @@ import type {
   Visibility,
 } from "../domain/types.js";
 
-export type {
-  RepoId,
-  SymbolId,
-  VersionId,
-  EdgeType,
-  EdgeResolutionStrategy,
-  SymbolKind,
-  Visibility,
-};
-
+/** @deprecated Use LadybugDB query types instead. */
 export interface RepoRow {
   repo_id: RepoId;
   root_path: string;
@@ -27,6 +16,7 @@ export interface RepoRow {
   created_at: string;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface FileRow {
   file_id: number;
   repo_id: RepoId;
@@ -38,6 +28,7 @@ export interface FileRow {
   directory: string;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface SymbolRow {
   symbol_id: SymbolId;
   repo_id: RepoId;
@@ -64,6 +55,7 @@ export interface SymbolRow {
   updated_at: string;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface EdgeRow {
   /** Auto-generated ID - only present when reading from DB */
   edge_id?: number;
@@ -103,6 +95,7 @@ export interface SymbolEmbeddingRow {
   updated_at: string;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface VersionRow {
   version_id: VersionId;
   repo_id: RepoId;
@@ -112,6 +105,7 @@ export interface VersionRow {
   version_hash: string | null;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface SymbolVersionRow {
   version_id: VersionId;
   symbol_id: SymbolId;
@@ -124,6 +118,7 @@ export interface SymbolVersionRow {
   search_text?: string | null;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface MetricsRow {
   symbol_id: SymbolId;
   fan_in: number;
@@ -134,6 +129,7 @@ export interface MetricsRow {
   updated_at: string;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface AuditRow {
   event_id: number;
   timestamp: string;
@@ -144,6 +140,7 @@ export interface AuditRow {
   details_json: string;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface SliceHandleRow {
   handle: string;
   repo_id: RepoId;
@@ -155,24 +152,28 @@ export interface SliceHandleRow {
   spillover_ref: string | null;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface CardHashRow {
   card_hash: string;
   card_blob: string;
   created_at: string;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface ToolPolicyHashRow {
   policy_hash: string;
   policy_blob: string;
   created_at: string;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface TsconfigHashRow {
   tsconfig_hash: string;
   tsconfig_blob: string;
   created_at: string;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface SymbolReferenceRow {
   ref_id: number;
   repo_id: string;
@@ -182,6 +183,7 @@ export interface SymbolReferenceRow {
   created_at: string;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface SyncArtifactRow {
   artifact_id: string;
   repo_id: RepoId;
@@ -194,6 +196,7 @@ export interface SyncArtifactRow {
   size_bytes: number;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface AgentFeedbackRow {
   feedback_id: number;
   repo_id: RepoId;
@@ -207,6 +210,7 @@ export interface AgentFeedbackRow {
   created_at: string;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface SymbolFeedbackWeightRow {
   symbol_id: SymbolId;
   repo_id: RepoId;
@@ -216,6 +220,7 @@ export interface SymbolFeedbackWeightRow {
   updated_at: string;
 }
 
+/** @deprecated Use LadybugDB query types instead. */
 export interface SymbolSummaryCacheRow {
   symbol_id: string;
   summary: string;

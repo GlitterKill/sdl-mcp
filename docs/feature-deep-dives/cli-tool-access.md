@@ -1,6 +1,6 @@
 # CLI Tool Access
 
-**Access all 31 gateway-routable SDL-MCP tool actions directly from the command line — no MCP server, transport, or SDK required.**
+**Access all 32 SDL-MCP tool actions directly from the command line — no MCP server, transport, or SDK required.**
 
 The `sdl-mcp tool` command invokes MCP tool handlers directly, giving you full access to SDL-MCP's capabilities from shell scripts, CI pipelines, and interactive terminal sessions.
 
@@ -108,7 +108,7 @@ Run `sdl-mcp tool --list` to see all actions grouped by namespace:
 
 | Action | Description |
 |:-------|:------------|
-| `agent.orchestrate` | Autonomous task execution with budget control |
+| `agent.orchestrate` | Autonomous task execution with budget control and `contextMode` (`precise`/`broad`) |
 | `agent.feedback` | Record which symbols were useful/missing |
 | `agent.feedback.query` | Query aggregated feedback statistics |
 | `buffer.push` | Push editor buffer updates (limited in CLI) |
@@ -328,7 +328,7 @@ The CLI tool access feature is composed of four modules:
 
 | Module | File | Responsibility |
 |:-------|:-----|:---------------|
-| **Action Definitions** | `src/cli/commands/tool-actions.ts` | 31 action definitions with arg specs, types, and examples |
+| **Action Definitions** | `src/cli/commands/tool-actions.ts` | 32 action definitions with arg specs, types, and examples |
 | **Arg Parser** | `src/cli/commands/tool-arg-parser.ts` | Flag→field mapping, type coercion, budget merging, required validation |
 | **Dispatcher** | `src/cli/commands/tool-dispatch.ts` | Config/DB init, repoId resolution, handler routing, error handling |
 | **Output Formatter** | `src/cli/commands/tool-output.ts` | JSON, compact JSON, pretty, and table output with action-specific formatting |

@@ -47,7 +47,7 @@ This page defines practical workflows for coding agents using SDL-MCP.
 
 ## Complete Tool Reference
 
-SDL-MCP exposes 32 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway tools) across 14 categories. Every workflow on this page uses tools from this table.
+SDL-MCP exposes 33 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway tools) across 14 categories. Every workflow on this page uses tools from this table.
 
 | Category | Tool | Purpose |
 |:---------|:-----|:--------|
@@ -75,6 +75,7 @@ SDL-MCP exposes 32 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway 
 | | `sdl.agent.feedback` | Record which symbols were useful/missing after a task; supports `taskTags` |
 | | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics |
 | **Context** | `sdl.context.summary` | Generate token-bounded summary for non-MCP contexts (clipboard, markdown, JSON) |
+| **File** | `sdl.file.read` | Read non-indexed files with line range, search, or JSON path extraction |
 | **Runtime** | `sdl.runtime.execute` | Sandboxed subprocess execution with `outputMode` (`minimal`, `summary`, `intent`); 16 runtimes including `node`, `typescript`, `python`, `shell`, `go`, `rust`, etc. |
 | | `sdl.runtime.queryOutput` | On-demand keyword search of stored runtime output artifacts by `artifactHandle` |
 | **Memory** | `sdl.memory.store` | Store or update a development memory with symbol/file links |
@@ -150,7 +151,8 @@ Use this order unless task constraints force escalation:
 - **Live editing**: `buffer.push` as files change (with cursor/selection tracking) → `buffer.checkpoint` to persist → search/card/slice now reflect draft state.
 - **Context export**: `context.summary` with `format: "clipboard"` to produce a summary for non-MCP tools.
 - **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `python`, or `shell`) to run tests and capture structured output.
-- **Multi-step chain** *(Code Mode)*: `sdl.action.search` -> focused `sdl.manual` -> `sdl.chain` for multi-step context or runtime workflows in one round trip.
+- **Context retrieval** *(recommended)*: `sdl.agent.orchestrate` with `contextMode: "precise"` for targeted lookups or `"broad"` for investigation. More token-efficient than manual chain-based context.
+- **Multi-step operations** *(Code Mode)*: `sdl.chain` for runtime execution, data transforms, and batch mutations. Do not use chain for context retrieval — use orchestrate instead.
 
 ### 3) Token controls by tool
 
@@ -208,14 +210,17 @@ Stale buffer pushes (version ≤ current) are rejected automatically.
 
 - Always provide a budget (`maxTokens`, `maxActions`, optionally `maxDurationMs`).
 - Always scope with `focusSymbols` and/or `focusPaths`.
+- Use `contextMode: "precise"` for targeted lookups (1 symbol, minimal tokens — beats manual chain). Use `"broad"` (default) for investigation tasks needing surrounding context.
 - Avoid `requireDiagnostics` unless needed; it can add a raw rung.
 - Task types: `"debug"`, `"review"`, `"implement"`, `"explain"`.
+- Precise mode plans fewer rungs per task type: debug = card + hotPath, explain = card + skeleton, review = card, implement = card + skeleton.
 - Planner token estimates are approximately:
   - `card`: `50`
   - `skeleton`: `200`
   - `hotPath`: `500`
   - `raw`: `2000`
 - When over budget, planner trims rungs from the end while keeping at least one rung.
+- Precise mode strips the response envelope (`actionsTaken`, `summary`, `answer`, `nextBestAction`) to minimize token burn. Only `finalEvidence`, `metrics`, and `path` are returned.
 
 ### 6) Runtime execution (`sdl.runtime.execute` + `sdl.runtime.queryOutput`)
 
@@ -285,7 +290,7 @@ Chain guidance:
 - `onError`: `"continue"` (default, skip failed steps) or `"stop"` (halt on first error).
 - The chain enforces the same context-ladder escalation rules as individual tools.
 - Cross-step ETag caching is automatic — no need to pass ETags manually between steps.
-- Use chains for multi-step lookups, data shaping, and runtime execution in high-latency environments or CI pipelines. Do not use for single actions.
+- Use chains for multi-step operations: runtime execution, data shaping, batch mutations, and CI pipelines. Do not use for context retrieval (use `sdl.agent.orchestrate` instead). Do not use for single actions.
 
 ### 9) Feedback loop (`sdl.agent.feedback`)
 
@@ -331,6 +336,7 @@ Store cross-session knowledge that auto-surfaces in future slice builds:
 - Do not ignore `nextBestAction`, `fallbackTools`, or `fallbackRationale` in denied or ambiguous responses — they tell you what to try instead.
 - Do not ignore stale memories surfaced in slices — review and update or remove them.
 - Do not store trivial or ephemeral notes as memories — they add noise to future surfacing.
+- Do not use `sdl.chain` for context retrieval — use `sdl.agent.orchestrate` with `contextMode: "precise"` or `"broad"` instead. Chain is for multi-step operations (runtime, data transforms, mutations).
 - Do not use `sdl.chain` for a single action — it adds overhead. Use the direct tool instead.
 - Do not hardcode step indices in `$N` references without checking the actual step order in your chain.
 ```

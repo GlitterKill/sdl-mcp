@@ -27,7 +27,7 @@ SDL-MCP's semantic system has three layers — **embedding models**, **LLM summa
 │   Summary Pipeline (4 tiers, enriches embedding input text):        │
 │   ┌─────────────────────────────────────────────────────────────┐   │
 │   │ Tier 1: Enhanced Heuristics (always on, per-kind patterns)  │   │
-│   │ Tier 1.5: NN Transfer (uses ANN index to propagate docs)   │   │
+│   │ Tier 1.5: NN Transfer (uses vector similarity to propagate) │   │
 │   │ Tier 2: LLM Summaries (optional, quality-gated >= 0.8)     │   │
 │   │ Quality tracked: summaryQuality (0.0-1.0) + summarySource  │   │
 │   └─────────────────────────────────────────────────────────────┘   │
@@ -94,7 +94,6 @@ Semantic embedding models .................. PASS
   onnxruntime-node: 1.24.x
   tokenizers: available
   model: all-MiniLM-L6-v2 (384d, files present)
-  ANN index: enabled
 ```
 
 **Step 3 — Config (optional — this is the default):**
@@ -198,7 +197,6 @@ Semantic embedding models .................. PASS
   onnxruntime-node: 1.24.x
   tokenizers: available
   model: nomic-embed-text-v1.5 (768d, files present)
-  ANN index: enabled
 ```
 
 **How text is constructed for Nomic:**
@@ -451,7 +449,7 @@ Hybrid retrieval replaces the legacy alpha-blending search with native Ladybug F
   "semantic": {
     "enabled": true,
     "retrieval": {
-      "mode": "hybrid",              // "hybrid" or "legacy" (default: "legacy")
+      "mode": "hybrid",              // "hybrid" (default) or "legacy"
       "fts": {
         "enabled": true,             // Full-text search on Symbol.searchText
         "indexName": "symbol_search_text_v1",

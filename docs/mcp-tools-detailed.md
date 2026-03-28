@@ -876,9 +876,11 @@ The planner estimates token costs per rung (`card: ~50`, `skeleton: ~200`, `hotP
 | `taskType` | `"debug"` \| `"review"` \| `"implement"` \| `"explain"` | Yes | Type of task |
 | `taskText` | string | Yes | Task description or prompt |
 | `budget` | object | No | `{maxTokens, maxActions, maxDurationMs}` |
-| `options` | object | No | `{focusSymbols: string[], focusPaths: string[], includeTests: boolean, requireDiagnostics: boolean}` |
+| `options` | object | No | `{contextMode?, focusSymbols?, focusPaths?, includeTests?, requireDiagnostics?}` |
 
-**Response:**
+`options.contextMode`: `"precise"` returns minimal, chain-efficient context (1 symbol per rung, stripped envelope). `"broad"` (default) returns richer surrounding context with full diagnostics.
+
+**Response (broad mode):**
 
 | Field | Type | Description |
 |:------|:-----|:------------|
@@ -894,7 +896,11 @@ The planner estimates token costs per rung (`card: ~50`, `skeleton: ~200`, `hotP
 | `answer` | string | Synthesized answer based on evidence |
 | `nextBestAction` | string | Suggested follow-up action |
 
+**Response (precise mode):** Only `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics`. Envelope fields stripped for token efficiency.
+
 **Notes:**
+- Use `contextMode: "precise"` for targeted lookups — more token-efficient than manual `sdl.chain`.
+- Use `contextMode: "broad"` (default) for investigation and exploration.
 - Always provide `budget` and scope with `focusSymbols`/`focusPaths`.
 - Avoid `requireDiagnostics` unless needed — it can force a raw code rung.
 

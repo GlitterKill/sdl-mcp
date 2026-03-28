@@ -2,6 +2,7 @@ import { existsSync, statSync } from "fs";
 import { basename, dirname, extname, resolve } from "path";
 
 import type { AppConfig } from "../config/types.js";
+import { logger } from "../util/logger.js";
 
 export const DEFAULT_GRAPH_DB_FILENAME = "sdl-mcp-graph.lbug";
 const LEGACY_GRAPH_DB_DIRNAME = "sdl-mcp-graph";
@@ -76,6 +77,9 @@ export function resolveGraphDbPath(
   }
 
   const envPath = process.env.SDL_GRAPH_DB_PATH ?? process.env.SDL_DB_PATH;
+  if (!process.env.SDL_GRAPH_DB_PATH && process.env.SDL_DB_PATH) {
+    logger.warn("SDL_DB_PATH is deprecated. Use SDL_GRAPH_DB_PATH instead.");
+  }
   if (envPath && envPath.trim()) {
     return normalizeGraphDbPath(envPath, "auto");
   }

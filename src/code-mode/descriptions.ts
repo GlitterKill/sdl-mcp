@@ -4,7 +4,7 @@ export const MANUAL_DESCRIPTION =
   "to learn the API before using sdl.chain.";
 
 export const CHAIN_DESCRIPTION =
-  "Execute a chain of SDL-MCP operations in a single round-trip. Each step calls " +
+  "Execute a chain of SDL-MCP operations in a single round-trip. Best for multi-step operations (runtime execution, data transforms, batch mutations) — for code context retrieval, prefer sdl.agent.orchestrate. Each step calls " +
   "a function from the API manual or an internal transform (dataPick, dataMap, " +
   "dataFilter, dataSort, dataTemplate). Use $N references (e.g., $0.symbols[0].symbolId) " +
   "to pass results between steps. Includes budget tracking, context-ladder validation, " +

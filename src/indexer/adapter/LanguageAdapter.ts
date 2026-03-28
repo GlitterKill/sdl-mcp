@@ -4,7 +4,7 @@ import type {
   ExtractedCall,
 } from "../treesitter/extractCalls.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
-import type { EdgeResolutionStrategy } from "../../db/schema.js";
+import type { EdgeResolutionStrategy } from "../../domain/types.js";
 
 export interface CallResolutionContext {
   call: ExtractedCall;

@@ -12,7 +12,7 @@
  * - Token efficiency metrics
  */
 
-import type { RepoId, SymbolKind } from "../db/schema.js";
+import type { RepoId, SymbolKind } from "../domain/types.js";
 import type {
   RepoOverview,
   RepoOverviewRequest,

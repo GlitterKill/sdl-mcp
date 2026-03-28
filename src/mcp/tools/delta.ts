@@ -46,12 +46,28 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
   });
 
   const executeDelta = async () => {
+    // Resolve version defaults when not provided
+    const resolveConn = await getLadybugConn();
+    let toVersion = validated.toVersion;
+    let fromVersion = validated.fromVersion;
+    if (!toVersion) {
+      const latest = await ladybugDb.getLatestVersion(resolveConn, validated.repoId);
+      if (!latest) {
+        throw new IndexError("No versions found. Run indexing first.");
+      }
+      toVersion = latest.versionId;
+    }
+    if (!fromVersion) {
+      const versions = await ladybugDb.getVersionsByRepo(resolveConn, validated.repoId, 2);
+      fromVersion = versions.length >= 2 ? versions[1].versionId : toVersion;
+    }
+
     let delta;
     try {
       delta = await computeDelta(
         validated.repoId,
-        validated.fromVersion,
-        validated.toVersion,
+        fromVersion,
+        toVersion,
       );
     } catch (error) {
       const message =

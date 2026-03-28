@@ -11,10 +11,8 @@ import type { IndexProgress } from "./indexer.js";
 import {
   getSymbolEmbeddingFromNode,
   setSymbolEmbeddingOnNode,
-  getSymbolEmbeddingsFromNodes,
 } from "../db/ladybug-symbol-embeddings.js";
 
-import { LEGACY_ANN_MAINTENANCE_MODE } from "../config/constants.js";
 
 /** Legacy dimension constant — only used by MockEmbeddingProvider */
 export const EMBEDDING_DIMENSION = 64;
@@ -173,23 +171,6 @@ function toFloat16Blob(vector: number[]): string {
     ints[i] = Math.max(-32767, Math.min(32767, Math.round(vector[i] * 10000)));
   }
   return Buffer.from(ints.buffer).toString("base64");
-}
-
-function fromFloat16Blob(blob: string): number[] {
-  if (!blob) {
-    return [];
-  }
-  const buffer = Buffer.from(blob, "base64");
-  const view = new Int16Array(
-    buffer.buffer,
-    buffer.byteOffset,
-    buffer.byteLength / 2,
-  );
-  const vector = new Array<number>(view.length);
-  for (let i = 0; i < view.length; i++) {
-    vector[i] = view[i] / 10000;
-  }
-  return normalizeVector(vector);
 }
 
 function buildCardHash(
@@ -358,143 +339,4 @@ export async function refreshSymbolEmbeddings(params: {
 
   params.onProgress?.({ stage: "embeddings", current: symbols.length, total: symbols.length });
   return { embedded, skipped };
-}
-
-export async function rerankByEmbeddings(params: {
-  query: string;
-  symbols: Array<{ symbol: ladybugDb.SymbolRow; lexicalScore: number }>;
-  provider: "api" | "local" | "mock";
-  alpha: number;
-  model: string;
-}): Promise<EmbeddingScoredSymbol[]> {
-  if (params.symbols.length === 0) {
-    return [];
-  }
-
-  if (!LEGACY_ANN_MAINTENANCE_MODE) {
-    logger.debug("[embeddings] Legacy rerank skipped \u2014 maintenance mode is off");
-    return params.symbols.map((r) => ({ ...r, semanticScore: 0, finalScore: r.lexicalScore }));
-  }
-
-  const alpha = Math.max(0, Math.min(1, params.alpha));
-  const provider = getEmbeddingProvider(params.provider, params.model);
-  const queryEmbedding = (await provider.embed([params.query]))[0];
-
-  // After embedding the query, determine the actual model used.
-  // If the provider fell back to mock, the query embedding is 64-dim mock vectors,
-  // so we must only compare against other mock-fallback embeddings.
-  const expectedModel = provider.isMockFallback?.()
-    ? "mock-fallback"
-    : params.model;
-
-  // Mock-fallback model has no Symbol node properties — return with semanticScore=0
-  if (expectedModel === "mock-fallback") {
-    return params.symbols.map((item) => ({
-      symbol: item.symbol,
-      lexicalScore: item.lexicalScore,
-      semanticScore: 0,
-      finalScore: alpha * item.lexicalScore,
-    }));
-  }
-
-  const conn = await getLadybugConn();
-  const embeddingMap = await getSymbolEmbeddingsFromNodes(
-    conn,
-    params.symbols.map((item) => item.symbol.symbolId),
-    expectedModel,
-  );
-
-  // Model filtering is implicit: getSymbolEmbeddingsFromNodes reads
-  // from the model-specific Symbol node property.
-
-  // Validate cardHash freshness — stale embeddings (e.g., text construction
-  // changed due to model switch while both fall back to mock-fallback) should
-  // be treated as missing and refreshed on demand.
-  const symbolById = new Map(
-    params.symbols.map((item) => [item.symbol.symbolId, item.symbol]),
-  );
-  const summaryCacheForRerank = await ladybugDb.getSummaryCaches(conn, [
-    ...embeddingMap.keys(),
-  ]);
-  const staleHash: string[] = [];
-  for (const [symbolId, row] of embeddingMap) {
-    const sym = symbolById.get(symbolId);
-    if (!sym) continue;
-    let text: string;
-    {
-      const cachedSummary = summaryCacheForRerank.get(symbolId);
-      const hasLLMSummary =
-        cachedSummary &&
-        cachedSummary.provider !== "mock" &&
-        cachedSummary.cardHash ===
-          hashContent(
-            [
-              sym.name,
-              sym.kind ?? "",
-              parseSignatureText(sym.signatureJson) ?? "",
-              sym.astFingerprint ?? "",
-              cachedSummary.provider,
-              cachedSummary.model,
-            ].join("|"),
-          );
-      if (hasLLMSummary) {
-        text = `${sym.name} (${sym.kind}): ${cachedSummary.summary}`;
-      } else if (cachedSummary && cachedSummary.provider !== "mock") {
-        const parts = [`${sym.name} (${sym.kind})`];
-        const signatureText = parseSignatureText(sym.signatureJson);
-        if (signatureText) parts.push(signatureText);
-        text = parts.join("\n");
-      } else {
-        text = buildRawEmbeddingText(sym);
-      }
-    }
-    const expectedHash = buildCardHash(sym, text);
-    if (row.cardHash !== expectedHash) {
-      staleHash.push(symbolId);
-    }
-  }
-  for (const id of staleHash) {
-    embeddingMap.delete(id);
-  }
-
-  const missing = params.symbols
-    .map((item) => item.symbol)
-    .filter((symbol) => !embeddingMap.has(symbol.symbolId));
-
-  if (missing.length > 0) {
-    await refreshSymbolEmbeddings({
-      repoId: missing[0].repoId,
-      provider: params.provider,
-      model: params.model,
-      symbols: missing,
-    });
-    const refreshed = await getSymbolEmbeddingsFromNodes(
-      conn,
-      missing.map((symbol) => symbol.symbolId),
-      expectedModel,
-    );
-    for (const [key, value] of refreshed) {
-      embeddingMap.set(key, value);
-    }
-  }
-
-  return params.symbols
-    .map((item) => {
-      const embeddingRow = embeddingMap.get(item.symbol.symbolId);
-      const semanticScore = embeddingRow
-        ? cosineSimilarity(
-            queryEmbedding,
-            fromFloat16Blob(embeddingRow.vector),
-          )
-        : 0;
-      const finalScore =
-        alpha * item.lexicalScore + (1 - alpha) * semanticScore;
-      return {
-        symbol: item.symbol,
-        lexicalScore: item.lexicalScore,
-        semanticScore,
-        finalScore,
-      };
-    })
-    .sort((a, b) => b.finalScore - a.finalScore);
 }

@@ -973,7 +973,7 @@ const SliceEtagSchema = z.object({
 
 export const SliceRefreshRequestSchema = z.object({
   sliceHandle: z.string(),
-  knownVersion: z.string(),
+  knownVersion: z.string().optional().describe("Known version. Defaults to the slice handle's maxVersion."),
 });
 
 const DeltaPackWithGovernanceSchema = DeltaPackSchema.extend({
@@ -1093,8 +1093,8 @@ export const SliceBuildResponseSchema = z.union([
 
 export const DeltaGetRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  fromVersion: z.string(),
-  toVersion: z.string(),
+  fromVersion: z.string().optional().describe("Start version. Defaults to previous version."),
+  toVersion: z.string().optional().describe("End version. Defaults to latest version."),
   budget: SliceBudgetSchema.optional(),
 });
 
@@ -1691,6 +1691,10 @@ export const AgentOrchestrateRequestSchema = z.object({
         .boolean()
         .optional()
         .describe("Whether to require diagnostic information"),
+      contextMode: z
+        .enum(["precise", "broad"])
+        .optional()
+        .describe("Context breadth: precise returns minimal chain-efficient context, broad returns richer surrounding context. Default: broad"),
     })
     .optional()
     .describe("Task-specific options"),
@@ -1961,7 +1965,7 @@ export const RuntimeExecuteRequestSchema = z.object({
         "'summary' returns head+tail output excerpts (legacy behavior); " +
         "'intent' returns only queryTerms-matched excerpts, no head/tail summary",
     ),
-});
+}).strict();
 
 export const RuntimeExecuteExcerptSchema = z.object({
   lineStart: z.number().int(),
@@ -2184,3 +2188,32 @@ export const UsageStatsResponseSchema = z.object({
 
 export type UsageStatsRequest = z.infer<typeof UsageStatsRequestSchema>;
 export type UsageStatsResponse = z.infer<typeof UsageStatsResponseSchema>;
+
+// ============================================================================
+// File Read Schemas
+// ============================================================================
+
+export const FileReadRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  filePath: z.string().min(1).describe("File path relative to repo root. Only non-indexed file types allowed."),
+  maxBytes: z.number().int().min(1).max(512 * 1024).optional().describe("Max bytes to read. Default 512KB."),
+  offset: z.number().int().min(0).optional().describe("Start reading from this line number (0-based). Omit for beginning of file."),
+  limit: z.number().int().min(1).max(5000).optional().describe("Max lines to return. Omit for no line limit (maxBytes still applies)."),
+  search: z.string().max(500).optional().describe("Return only lines matching this regex pattern (case-insensitive). Includes context lines."),
+  searchContext: z.number().int().min(0).max(20).default(2).describe("Lines of context around each search match. Default 2."),
+  jsonPath: z.string().max(200).optional().describe("For JSON/YAML files: dot-separated key path to extract (e.g. 'server.port' or 'dependencies')."),
+});
+
+export type FileReadRequest = z.infer<typeof FileReadRequestSchema>;
+
+export interface FileReadResponse {
+  filePath: string;
+  content: string;
+  bytes: number;
+  totalLines: number;
+  returnedLines: number;
+  truncated: boolean;
+  truncatedAt?: number;
+  matchCount?: number;
+  extractedPath?: string;
+}

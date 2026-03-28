@@ -12,7 +12,7 @@
  */
 
 import type { Connection } from "kuzu";
-import type { RepoId, SymbolId, EdgeType } from "../db/schema.js";
+import type { RepoId, SymbolId, EdgeType } from "../domain/types.js";
 import type { Graph } from "./buildGraph.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";

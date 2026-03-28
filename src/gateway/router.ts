@@ -41,6 +41,7 @@ import {
   MemoryRemoveRequestSchema,
   MemorySurfaceRequestSchema,
   UsageStatsRequestSchema,
+  FileReadRequestSchema,
 } from "../mcp/tools.js";
 import {
   handleSymbolSearch,
@@ -86,6 +87,7 @@ import {
   handleMemorySurface,
 } from "../mcp/tools/memory.js";
 import { handleUsageStats } from "../mcp/tools/usage.js";
+import { handleFileRead } from "../mcp/tools/file-read.js";
 import type { z } from "zod";
 import { normalizeToolArguments } from "../mcp/request-normalization.js";
 
@@ -185,6 +187,10 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
     "usage.stats": {
       schema: UsageStatsRequestSchema,
       handler: handleUsageStats,
+    },
+    "file.read": {
+      schema: FileReadRequestSchema,
+      handler: handleFileRead,
     },
 
     // === Agent actions ===

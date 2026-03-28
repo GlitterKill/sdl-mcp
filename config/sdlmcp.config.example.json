@@ -96,7 +96,6 @@
   },
   "semantic": {
     "enabled": true,
-    "alpha": 0.6,
     "provider": "local",
     "model": "all-MiniLM-L6-v2",
     "modelCacheDir": null,
@@ -107,15 +106,8 @@
     "summaryApiBaseUrl": null,
     "summaryMaxConcurrency": 5,
     "summaryBatchSize": 20,
-    "ann": {
-      "enabled": true,
-      "m": 16,
-      "efConstruction": 200,
-      "efSearch": 50,
-      "maxElements": 200000
-    },
     "retrieval": {
-      "mode": "legacy",
+      "mode": "hybrid",
       "extensionsOptional": true,
       "fts": {
         "enabled": true,
@@ -185,7 +177,7 @@
   },
   "gateway": {
     "enabled": true,
-    "emitLegacyTools": true
+    "emitLegacyTools": false
   },
   "httpAuth": {
     "enabled": false,

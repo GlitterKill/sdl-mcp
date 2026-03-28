@@ -1,6 +1,6 @@
 import * as crypto from "crypto";
 import type { Connection } from "kuzu";
-import type { RepoId, SymbolId } from "../db/schema.js";
+import type { RepoId, SymbolId } from "../domain/types.js";
 import {
   batchComputeFanInOut,
   batchGetFanInAtVersion,

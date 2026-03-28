@@ -300,6 +300,17 @@ const UsageStatsAction = z.object({
   persist: z.boolean().optional(),
 });
 
+const FileReadAction = z.object({
+  action: z.literal("file.read"),
+  filePath: z.string().min(1),
+  maxBytes: z.number().int().min(1).max(512 * 1024).optional(),
+  offset: z.number().int().min(0).optional(),
+  limit: z.number().int().min(1).max(5000).optional(),
+  search: z.string().max(500).optional(),
+  searchContext: z.number().int().min(0).max(20).optional(),
+  jsonPath: z.string().max(200).optional(),
+});
+
 export const RepoGatewaySchema = z
   .object({
     repoId: z.string().min(1),
@@ -313,6 +324,7 @@ export const RepoGatewaySchema = z
       PolicyGetAction,
       PolicySetAction,
       UsageStatsAction,
+      FileReadAction,
     ]),
   );
 
@@ -527,6 +539,7 @@ export const REPO_ACTIONS = [
   "policy.get",
   "policy.set",
   "usage.stats",
+  "file.read",
 ] as const;
 
 export const AGENT_ACTIONS = [

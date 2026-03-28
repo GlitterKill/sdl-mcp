@@ -49,6 +49,7 @@ const ACTION_TAGS: Record<string, ActionTag[]> = {
   "memory.remove": ["memory"],
   "memory.surface": ["memory"],
   "usage.stats": ["query"],
+  "file.read": ["repo"],
 };
 
 // --- Schema Introspection ---
@@ -260,6 +261,7 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "memory.remove": { memoryId: "<memoryId>" },
   "memory.surface": { taskText: "fix auth bug", limit: 5 },
   "usage.stats": { scope: "both", since: "2026-03-01T00:00:00Z" },
+  "file.read": { filePath: "config/sdlmcp.config.example.json" },
 };
 
 // --- ActionDescriptor ---
@@ -327,6 +329,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "memory.remove": "Soft-delete a memory",
   "memory.surface": "Auto-surface relevant memories",
   "usage.stats": "Get cumulative token savings statistics",
+  "file.read": "Read non-indexed file content (templates, configs, docs)",
 };
 
 const TRANSFORM_DESCRIPTIONS: Record<string, string> = {
@@ -517,6 +520,11 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     recommendedNextActions: [],
     fallbacks: ["policy.get"],
   },
+  "file.read": {
+    prerequisites: ["repo.status"],
+    recommendedNextActions: ["context.summary"],
+    fallbacks: ["runtime.execute"],
+  },
 };
 
 export function getActionMetadata(action: string): ActionMetadata {
@@ -647,6 +655,12 @@ export function rankCatalog(
 ): ActionDescriptor[] {
   const q = query.toLowerCase();
   const terms = q.split(/\s+/).filter(Boolean);
+
+
+  // Wildcard or empty query returns all actions sorted alphabetically
+  if (terms.length === 0 || (terms.length === 1 && terms[0] === "*")) {
+    return [...catalog].sort((a, b) => a.action.localeCompare(b.action));
+  }
 
   const scored = catalog.map((desc) => {
     let score = 0;

@@ -1,4 +1,4 @@
-import type { SymbolId, VersionId } from "../db/schema.js";
+import type { SymbolId, VersionId } from "../domain/types.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import { hashContent } from "../util/hashing.js";

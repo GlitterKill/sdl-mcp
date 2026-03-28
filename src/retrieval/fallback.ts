@@ -109,14 +109,9 @@ export async function checkRetrievalHealth(
 export function shouldFallbackToLegacy(
   caps: RetrievalCapabilities,
   config: SemanticRetrievalConfig,
-  health?: RetrievalCapabilities,
 ): boolean {
-  // Explicit legacy mode -- always fall back unless health shows auto-flip is viable.
+  // Explicit legacy mode -- always use legacy path.
   if (config.mode === "legacy") {
-    // Auto-flip: if health data shows FTS + at least one vector index, promote to hybrid.
-    if (health && health.fts && (health.vectorMiniLM || health.vectorNomic)) {
-      return false;
-    }
     return true;
   }
 
@@ -157,7 +152,7 @@ export async function isHybridRetrievalAvailable(): Promise<boolean> {
       return caps.fts;
     }
 
-    // Legacy mode (default) — auto-promote when infrastructure is healthy.
+    // Legacy mode — auto-promote when infrastructure is healthy.
     const health = await checkRetrievalHealth();
     return health.fts && (health.vectorMiniLM || health.vectorNomic);
   } catch {

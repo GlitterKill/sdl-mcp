@@ -3,7 +3,7 @@ import { readFile, stat } from "fs/promises";
 
 import type Parser from "tree-sitter";
 
-import type { RepoId, SymbolId } from "../db/schema.js";
+import type { RepoId, SymbolId } from "../domain/types.js";
 import type { Range, SkeletonOp, SkeletonIR } from "../domain/types.js";
 import {
   DEFAULT_MAX_LINES_SKELETON,

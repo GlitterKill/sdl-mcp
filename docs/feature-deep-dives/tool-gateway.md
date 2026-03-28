@@ -1,25 +1,25 @@
 # Tool Gateway
 
-**Reduce MCP tool registration overhead by collapsing the 31 legacy action tools into 4 namespace-scoped gateway tools, while keeping `sdl.action.search` and `sdl.info` available as universal discovery and diagnostics surfaces.**
+**Reduce MCP tool registration overhead by collapsing 31 of the 32 action tools into 4 namespace-scoped gateway tools, while keeping `sdl.action.search` and `sdl.info` available as universal discovery and diagnostics surfaces.**
 
-The tool gateway consolidates the 31 legacy action tools into 4 typed proxy tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`). Each gateway tool accepts an `action` field that routes the call to the appropriate handler and then applies the original per-tool validation. `sdl.action.search` and `sdl.info` stay registered outside the gateway so discovery and environment diagnostics remain available in every mode.
+The tool gateway consolidates 31 of the 32 action tools into 4 typed proxy tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`). `sdl.file.read` is flat-only and not gateway-routed. Each gateway tool accepts an `action` field that routes the call to the appropriate handler and then applies the original per-tool validation. `sdl.action.search` and `sdl.info` stay registered outside the gateway so discovery and environment diagnostics remain available in every mode.
 
 ---
 
 ## The Problem
 
-When an MCP client connects, it calls `tools/list` to discover available tools. The response includes tool names, descriptions, and JSON schemas. Registering 31 legacy action tools separately is expensive, especially once titles, richer descriptions, and action-specific schema metadata are included.
+When an MCP client connects, it calls `tools/list` to discover available tools. The response includes tool names, descriptions, and JSON schemas. Registering 32 action tools separately is expensive, especially once titles, richer descriptions, and action-specific schema metadata are included.
 
 ```
 Without gateway:
-  tools/list → 33 tools
-  = 31 action tools + sdl.action.search + sdl.info
+  tools/list → 34 tools
+  = 32 action tools + sdl.action.search + sdl.info
 
 With gateway:
   tools/list → 6 tools
   = 4 gateway tools + sdl.action.search + sdl.info
 
-The gateway measurement script compares the core 31 legacy tools against the 4 gateway tools, because those are the surfaces being consolidated. The two universal tools are present in both modes.
+The gateway measurement script compares the 31 gateway-routable tools against the 4 gateway tools, because those are the surfaces being consolidated. `sdl.file.read` is flat-only. The two universal tools are present in both modes.
 ```
 
 This matters because:
@@ -250,8 +250,8 @@ Gateway mode is controlled in your SDL-MCP config file:
   "gateway": {
     // Enable gateway mode (default: true)
     "enabled": true,
-    // Also emit the 31 flat tool names for backward compat (default: true)
-    "emitLegacyTools": true
+    // Also emit the 32 flat tool names for backward compat (default: false, deprecated)
+    "emitLegacyTools": false
   }
 }
 ```
@@ -260,9 +260,9 @@ Gateway mode is controlled in your SDL-MCP config file:
 
 | `enabled` | `emitLegacyTools` | Tools Registered | Use Case |
 |:---------:|:-----------------:|:----------------:|:---------|
-| `true` | `true` | 37 (4 gateway + 31 action + 2 universal) | Migration period — agents can use either style |
+| `true` | `true` | 38 (4 gateway + 32 action + 2 universal) | Migration period — agents can use either style |
 | `true` | `false` | 6 (4 gateway + 2 universal) | Maximum registration savings |
-| `false` | — | 33 (31 flat + 2 universal) | Backward compatibility, legacy agents |
+| `false` | — | 34 (32 flat + 2 universal) | Backward compatibility, legacy agents |
 
 Legacy tools include a deprecation notice in their description:
 ```
@@ -303,7 +303,7 @@ export function registerGatewayTools(server, services, config) {
   server.registerTool("sdl.agent", AGENT_DESCRIPTION, AgentGatewaySchema,
     handler, AGENT_THIN_SCHEMA);
 
-  // Optional: also register 31 flat tool names
+  // Optional: also register 32 flat tool names
   if (config.emitLegacyTools) {
     registerLegacyTools(server, services);
   }
@@ -363,7 +363,7 @@ See [CLI Tool Access](./cli-tool-access.md) for full CLI documentation.
 
 If your agent configuration currently uses the flat tool names (e.g., `sdl.symbol.search`), you have two options:
 
-1. **Do nothing** — Set `emitLegacyTools: true` (the default) and both flat and gateway tools are available
+1. **Keep legacy tools** — Set `emitLegacyTools: true` in your config and both flat and gateway tools are available (note: legacy tools are deprecated)
 2. **Switch to gateway** — Update your agent instructions to use `sdl.query` with `action: "symbol.search"` instead of `sdl.symbol.search`
 
 ### For Agent Instruction Authors
@@ -392,7 +392,7 @@ If you need backward compatibility with older MCP clients:
 }
 ```
 
-This registers the 31 flat tools plus the universal `sdl.action.search` and `sdl.info` surfaces.
+This registers the 32 flat tools plus the universal `sdl.action.search` and `sdl.info` surfaces.
 
 ---
 
@@ -408,9 +408,9 @@ Output:
 ```
 === SDL-MCP Gateway Schema Token Measurement ===
 
-Flat mode:    31 tools, ~4350 tokens (~17400 chars)
+Flat mode:    32 tools, ~4550 tokens (~18200 chars)
 Gateway mode: 4 tools, ~725 tokens (~2900 chars)
-Hybrid mode:  33 tools
+Hybrid mode:  34 tools
 
 Gateway is ~17% of flat mode
 Estimated savings: ~3525 tokens per tools/list call
@@ -422,6 +422,6 @@ Estimated savings: ~3525 tokens per tools/list call
 
 ## What's Next: Code Mode
 
-Gateway mode optimizes **tool registration** overhead. **Code Mode** takes optimization further by eliminating **per-operation round-trip** overhead — batching entire context retrieval pipelines into a single tool call with `$N` inter-step references.
+Gateway mode optimizes **tool registration** overhead. For context retrieval, `sdl.agent.orchestrate` provides the most token-efficient path with automatic rung selection and adaptive symbol ranking (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration). **Code Mode** (`sdl.chain`) complements orchestrate by batching multi-step operations (runtime execution, data transforms, batch mutations) into a single tool call with `$N` inter-step references.
 
 [Code Mode Deep Dive →](./code-mode.md)

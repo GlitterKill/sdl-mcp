@@ -523,7 +523,7 @@ Hybrid retrieval uses native Ladybug vector indexes for fast approximate nearest
   └──────────────────────────────┘
 ```
 
-> **Deprecation notice**: The previous `semantic.ann` config (HNSW sidecar indexes via `ann-index.ts`) is deprecated in favor of `semantic.retrieval.vector`. The legacy ANN config remains functional but the native Ladybug vector indexes provide better integration and require no separate sidecar management.
+> **Removed in v0.10.1**: The previous `semantic.ann` config (HNSW sidecar indexes via `ann-index.ts`) has been removed. Use `semantic.retrieval.vector` for native Ladybug vector indexes instead. Legacy `semantic.ann` config keys are silently ignored for backward compatibility.
 
 ### Live Overlay Handling
 
@@ -599,7 +599,7 @@ Both the TypeScript and Rust indexing engines implement these generators with id
 
 ### NN Summary Transfer
 
-When `semantic.enabled: true`, the NN (nearest-neighbor) summary transfer module runs after metrics computation and before LLM generation. It uses the existing ONNX embedding model and ANN index to propagate documentation from well-documented symbols to undocumented neighbors.
+When `semantic.enabled: true`, the NN (nearest-neighbor) summary transfer module runs after metrics computation and before LLM generation. It uses the existing ONNX embedding model and vector similarity search to propagate documentation from well-documented symbols to undocumented neighbors.
 
 ```
   ┌──────────────────────────────────────────────────────────────────┐
@@ -608,7 +608,7 @@ When `semantic.enabled: true`, the NN (nearest-neighbor) summary transfer module
   │  1. Gather candidates: symbols with no summary or quality < 0.5  │
   │  2. For each candidate:                                          │
   │     a. Embed the symbol text                                     │
-  │     b. Search ANN index for nearest neighbors (max 5)            │
+  │     b. Search vector index for nearest neighbors (max 5)            │
   │     c. Filter: same kind, has good summary, similarity >= 0.7    │
   │     d. Pick best neighbor by similarity score                    │
   │                                                                  │
@@ -634,10 +634,9 @@ A well-documented function `validateToken` with summary "Validates JWT signature
 **Pipeline integration point:**
 ```
   1. updateMetricsForRepo(...)
-  2. NN summary transfer    ← runs here (uses previous run's ANN index)
+  2. NN summary transfer    ← runs here (uses vector similarity search)
   3. LLM summary generation (quality-gated: skips quality >= 0.8)
   4. refreshSymbolEmbeddings(...)
-  5. buildAnnIndex(...)
 ```
 
 ### LLM Generation Pipeline

@@ -1,4 +1,4 @@
-import type { RepoId } from "../db/schema.js";
+import type { RepoId } from "../domain/types.js";
 import { RepoConfigSchema } from "../config/types.js";
 import type { Diagnostic, DiagnosticSummary } from "./diagnostics.js";
 import { diagnosticsManager } from "./diagnostics.js";

@@ -23,6 +23,9 @@ export interface TaskOptions {
   focusPaths?: string[];
   includeTests?: boolean;
   requireDiagnostics?: boolean;
+  /** Controls context breadth. "precise" returns minimal, chain-efficient context.
+   *  "broad" returns richer surrounding context. Default: "broad". */
+  contextMode?: "precise" | "broad";
 }
 
 export interface RungPath {

@@ -126,7 +126,7 @@ Different tools estimate the raw alternative differently:
 | `symbol.search` | Sum of file byte sizes across all result files |
 | `symbol.getCard` | File byte size of the symbol's source file |
 | `slice.build` | Sum of file byte sizes across all files referenced by slice cards |
-| `agent.orchestrate` | 3x multiplier on the orchestrator's total token usage |
+| `agent.orchestrate` | Actual file byte sizes from `focusPaths` when available; falls back to 3x multiplier on planner token estimates |
 | `runtime.execute` | Raw output byte count |
 
 File byte sizes are converted to token estimates using `BYTES_PER_TOKEN = 4` (1 token ≈ 4 bytes). SDL response sizes use a structural-aware estimator: JSON syntax characters count as 1 token each, prose characters use `CHARS_PER_TOKEN = 3.5`.

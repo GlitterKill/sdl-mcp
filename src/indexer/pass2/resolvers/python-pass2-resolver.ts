@@ -3,7 +3,7 @@ import { join } from "path";
 import { getLadybugConn, withWriteConn } from "../../../db/ladybug.js";
 import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
-import type { SymbolKind } from "../../../db/schema.js";
+import type { SymbolKind } from "../../../domain/types.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
 import { logger } from "../../../util/logger.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";

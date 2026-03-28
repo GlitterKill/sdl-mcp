@@ -1,6 +1,6 @@
 import { readFile, stat } from "fs/promises";
 
-import type { RepoId, SymbolId } from "../db/schema.js";
+import type { RepoId, SymbolId } from "../domain/types.js";
 import type { CodeWindowResponse, Range } from "../domain/types.js";
 import {
   MAX_FILE_BYTES,

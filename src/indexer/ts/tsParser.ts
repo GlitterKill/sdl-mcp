@@ -1,7 +1,7 @@
 import path from "path";
 import { globSync } from "node:fs";
 import ts from "typescript";
-import type { SymbolKind } from "../../db/schema.js";
+import type { SymbolKind } from "../../domain/types.js";
 import { normalizePath } from "../../util/paths.js";
 import type { FileMetadata } from "../fileScanner.js";
 

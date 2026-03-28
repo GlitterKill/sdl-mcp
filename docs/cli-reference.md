@@ -262,7 +262,7 @@ Key options:
 
 ### `sdl-mcp tool <action> [args]`
 
-Direct MCP tool invocation from the CLI. Supports all 31 gateway-routable SDL actions and reuses the same validation and normalization path as the MCP server.
+Direct MCP tool invocation from the CLI. Supports all 32 SDL action tools and reuses the same validation and normalization path as the MCP server.
 
 ```bash
 sdl-mcp tool repo.status --repo-id my-repo

@@ -338,7 +338,7 @@ Below is every option with inline commentary. JSON does not support comments, so
     // Replaces legacy embedding re-ranking with a two-stage pipeline.
     "retrieval": {
       // "legacy" = original semantic-only re-rank; "hybrid" = FTS + vector fusion pipeline.
-      "mode": "legacy",
+      "mode": "hybrid",
 
       // When true, file-extension filtering is optional (not enforced) during retrieval.
       "extensionsOptional": true,
@@ -480,7 +480,7 @@ Below is every option with inline commentary. JSON does not support comments, so
   // ──────────────────────────────────────────────────────────
   "gateway": {
     "enabled": true,          // Enable gateway-mode tool registration
-    "emitLegacyTools": true,  // Also emit flat tool names for backwards compatibility
+    "emitLegacyTools": false,  // Legacy tool aliases (deprecated)
   },
 
   // ──────────────────────────────────────────────────────────
@@ -722,7 +722,7 @@ Hybrid retrieval configuration. Replaces legacy alpha-blending with FTS + vector
 
 | Field                | Type      | Default    | Range                  | Description                                      |
 | -------------------- | --------- | ---------- | ---------------------- | ------------------------------------------------ |
-| `mode`               | `string`  | `"legacy"` | `"legacy"` \| `"hybrid"` | Retrieval strategy (`hybrid` recommended)       |
+| `mode`               | `string`  | `"hybrid"` | `"legacy"` \| `"hybrid"` | Retrieval strategy                              |
 | `extensionsOptional` | `boolean` | `true`     | —                      | Allow graceful fallback when extensions unavailable |
 | `candidateLimit`     | `integer` | `100`      | 10-1000                | Max candidates after fusion                      |
 
@@ -757,19 +757,9 @@ Fusion strategy for combining FTS and vector candidates.
 | `strategy` | `string`  | `"rrf"` | `"rrf"` | Fusion algorithm (Reciprocal Rank Fusion)|
 | `rrfK`     | `integer` | `60`    | 1-1000 | RRF smoothing constant (higher = more uniform ranking) |
 
-#### `semantic.ann` (nested, optional, **deprecated**)
+#### `semantic.ann` (removed)
 
-> **Deprecated**: Use `semantic.retrieval.vector` instead. The legacy HNSW sidecar index is retained for backward compatibility but native Ladybug vector indexes are preferred.
-
-HNSW approximate nearest neighbor index for faster semantic retrieval on large repos.
-
-| Field            | Type      | Default  | Range        | Description                       |
-| ---------------- | --------- | -------- | ------------ | --------------------------------- |
-| `enabled`        | `boolean` | `true`   | —            | Enable HNSW ANN index             |
-| `m`              | `integer` | `16`     | 4-64         | Bi-directional links per node     |
-| `efConstruction` | `integer` | `200`    | 16-500       | Candidate list size during build  |
-| `efSearch`       | `integer` | `50`     | 8-256        | Candidate list size during search |
-| `maxElements`    | `integer` | `200000` | 1000-1000000 | Max elements in index             |
+> **Removed in v0.10.1**: The HNSW sidecar index (`ann-index.ts`) has been deleted. Use `semantic.retrieval.vector` for native Ladybug vector indexes instead. Legacy `semantic.ann` config keys are silently ignored for backward compatibility.
 
 > **When to change:**
 >
@@ -906,11 +896,11 @@ Controls the gateway tool registration mode.
 | Field            | Type      | Default | Description                                                |
 | ---------------- | --------- | ------- | ---------------------------------------------------------- |
 | `enabled`        | `boolean` | `true`  | Enable gateway-mode tool registration (namespace-scoped)   |
-| `emitLegacyTools`| `boolean` | `true`  | Also emit flat (legacy) tools alongside gateway tools      |
+| `emitLegacyTools`| `boolean` | `false` | Also emit flat (legacy) tools alongside gateway tools (deprecated) |
 
-Gateway mode groups tools into 4 namespace tools (`sdl_repo`, `sdl_symbol`, `sdl_code`, `sdl_agent`) plus `sdl.action.search` and `sdl.info`. When `emitLegacyTools` is `true` (default), the flat tool names are also registered for backwards compatibility.
+Gateway mode groups tools into 4 namespace tools (`sdl_repo`, `sdl_symbol`, `sdl_code`, `sdl_agent`) plus `sdl.action.search` and `sdl.info`. When `emitLegacyTools` is `true`, the flat tool names are also registered for backwards compatibility. Legacy tool aliases are deprecated and will be removed in a future version.
 
-> **When to change:** Set `emitLegacyTools: false` to reduce the tool list from 37 to 6 tools (gateway-only mode). Set `enabled: false` to use flat-only mode (33 tools).
+> **When to change:** Set `emitLegacyTools: false` to reduce the tool list from 38 to 6 tools (gateway-only mode). Set `enabled: false` to use flat-only mode (34 tools).
 
 ---
 

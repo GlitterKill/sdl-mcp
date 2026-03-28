@@ -307,6 +307,72 @@ export class Executor {
     return { symbolIds, filePaths };
   }
 
+  /**
+   * Select the top symbols based on relevance scores with adaptive cutoff.
+   * For precise queries (1-2 high-scoring symbols), returns only those.
+   * For broad queries (many similar scores), returns more context.
+   */
+  private async selectTopSymbols(
+    symbolIds: string[],
+    task: AgentTask,
+    maxCount: number,
+  ): Promise<string[]> {
+    if (!task.taskText || symbolIds.length === 0) {
+      return symbolIds.slice(0, maxCount);
+    }
+
+    const identifiers = this.extractIdentifiersFromTask(task);
+    if (identifiers.length === 0) return symbolIds.slice(0, maxCount);
+
+    const conn = await this.getConn();
+    const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
+
+    const identifierSet = new Set(identifiers.map((id) => id.toLowerCase()));
+    const taskTextLower = task.taskText.toLowerCase();
+
+    const scored: Array<{ symbolId: string; score: number }> = [];
+    for (const symbolId of symbolIds) {
+      const sym = symbolMap.get(symbolId);
+      if (!sym) { scored.push({ symbolId, score: 0 }); continue; }
+      let score = 0;
+      const nameLower = sym.name.toLowerCase();
+      if (nameLower.length >= 3 && taskTextLower.includes(nameLower)) score += 10;
+      if (identifierSet.has(nameLower)) score += 8;
+      // Only check partial overlap for names 3+ chars (avoid matching 'i', 'r', etc.)
+      if (nameLower.length >= 3) {
+        for (const id of identifiers) {
+          if (id.length < 3) continue;
+          const idLower = id.toLowerCase();
+          if (nameLower.includes(idLower) || idLower.includes(nameLower)) { score += 3; break; }
+        }
+      }
+      if (sym.summary) {
+        const summaryLower = sym.summary.toLowerCase();
+        for (const id of identifiers) {
+          if (summaryLower.includes(id.toLowerCase())) { score += 2; break; }
+        }
+      }
+      if (sym.exported) score += 1;
+      scored.push({ symbolId, score });
+    }
+    scored.sort((a, b) => b.score - a.score);
+
+    const topScore = scored[0]?.score ?? 0;
+    const isPrecise = task.options?.contextMode === 'precise';
+
+    // Precise: aggressive threshold (60% of top), hard cap at 3 symbols.
+    // Broad: generous threshold (40% of top), use caller's maxCount.
+    const threshold = isPrecise
+      ? Math.max(5, topScore * 0.6)
+      : Math.max(3, topScore * 0.4);
+    const effectiveMax = isPrecise ? 1 : maxCount;
+    const relevant = scored.filter((s) => s.score >= threshold);
+    const count = Math.max(1, Math.min(relevant.length, effectiveMax));
+
+    logger.debug('Adaptive symbol selection', { total: scored.length, topScore, threshold, selected: count, contextMode: isPrecise ? 'precise' : 'broad' });
+    return scored.slice(0, count).map((s) => s.symbolId);
+  }
+
   private async executeCardRung(
     task: AgentTask,
     context: string[],
@@ -315,10 +381,14 @@ export class Executor {
     const startTime = Date.now();
 
     try {
-      const { symbolIds: allSymbols } = await this.resolveContextToSymbols(
+      const { symbolIds: rawSymbols } = await this.resolveContextToSymbols(
         context,
         task.repoId,
       );
+
+      const allSymbols = rawSymbols.length > 0 && task.taskText
+        ? await this.selectTopSymbols(rawSymbols, task, MAX_CARD_SYMBOLS)
+        : rawSymbols.slice(0, MAX_CARD_SYMBOLS);
 
       // Fallback: use hybrid retrieval when available, otherwise legacy DB search
       if (allSymbols.length === 0 && task.taskText) {
@@ -389,10 +459,13 @@ export class Executor {
         const conn = await this.getConn();
         const symbolMap = await ladybugDb.getSymbolsByIds(
           conn,
-          allSymbols.slice(0, MAX_CARD_SYMBOLS),
+          allSymbols,
         );
 
-        for (const [, sym] of symbolMap) {
+        // Iterate in ranked order to preserve relevance in evidence
+        for (const symbolId of allSymbols) {
+          const sym = symbolMap.get(symbolId);
+          if (!sym) continue;
           // Track cache hits for repeated symbol lookups
           if (this.cardCache.has(sym.symbolId)) {
             this.metrics.cacheHits++;
@@ -450,15 +523,19 @@ export class Executor {
     const startTime = Date.now();
 
     try {
-      const { symbolIds, filePaths } = await this.resolveContextToSymbols(
+      const { symbolIds: rawSkeletonSymbols, filePaths } = await this.resolveContextToSymbols(
         context,
         task.repoId,
       );
 
+      const symbolIds = rawSkeletonSymbols.length > 0 && task.taskText
+        ? await this.selectTopSymbols(rawSkeletonSymbols, task, MAX_SKELETON_SYMBOLS)
+        : rawSkeletonSymbols.slice(0, MAX_SKELETON_SYMBOLS);
+
       let processedCount = 0;
 
       // Generate skeletons for symbol IDs
-      for (const symbolId of symbolIds.slice(0, MAX_SKELETON_SYMBOLS)) {
+      for (const symbolId of symbolIds) {
         try {
           const result = await generateSkeletonIR(
             task.repoId,
@@ -480,8 +557,13 @@ export class Executor {
         }
       }
 
-      // Generate file-level skeletons for file paths
-      for (const filePath of filePaths.slice(0, MAX_SKELETON_SYMBOLS)) {
+      // Precise: skip file-level skeletons (symbol skeletons suffice).
+      // Broad: 1 file skeleton if symbol skeletons exist, full count otherwise.
+      const isPreciseSkeleton = task.options?.contextMode === 'precise';
+      const maxFileSks = isPreciseSkeleton
+        ? 0
+        : processedCount > 0 ? 1 : MAX_SKELETON_SYMBOLS;
+      for (const filePath of filePaths.slice(0, maxFileSks)) {
         try {
           const result = await generateFileSkeleton(
             task.repoId,
@@ -535,17 +617,20 @@ export class Executor {
     const startTime = Date.now();
 
     try {
-      const { symbolIds: symbols } = await this.resolveContextToSymbols(
+      const { symbolIds: rawHotpathSymbols } = await this.resolveContextToSymbols(
         context,
         task.repoId,
       );
 
-      // Extract identifiers from task text for hot-path search
+      const symbols = rawHotpathSymbols.length > 0 && task.taskText
+        ? await this.selectTopSymbols(rawHotpathSymbols, task, MAX_HOTPATH_SYMBOLS)
+        : rawHotpathSymbols.slice(0, MAX_HOTPATH_SYMBOLS);
+
       const identifiers = this.extractIdentifiersFromTask(task);
 
       let processedCount = 0;
 
-      for (const symbolId of symbols.slice(0, MAX_HOTPATH_SYMBOLS)) {
+      for (const symbolId of symbols) {
         try {
           const result = await extractHotPath(
             task.repoId,

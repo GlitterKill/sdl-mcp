@@ -9,7 +9,7 @@
  */
 
 import type { SymbolCard } from "../domain/types.js";
-import type { VersionId, SymbolId, RepoId } from "../db/schema.js";
+import type { VersionId, SymbolId, RepoId } from "../domain/types.js";
 
 interface CacheEntry<T> {
   value: T;
