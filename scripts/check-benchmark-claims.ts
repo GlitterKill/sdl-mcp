@@ -132,6 +132,10 @@ function main(): void {
     throw new Error("Missing required argument: --in <aggregate.json path>");
   }
   const inPath = resolve(inPathRaw);
+  const projectRoot = resolve(new URL("..", import.meta.url).pathname.replace(/^/([A-Za-z]:)/, "$1"));
+  if (!inPath.startsWith(projectRoot)) {
+    throw new Error(`--in path must be within project directory: ${inPath}`);
+  }
   if (!existsSync(inPath)) {
     throw new Error(`Aggregate file not found: ${inPath}`);
   }

@@ -71,7 +71,6 @@ function main(): void {
   let descriptorsSource: string;
   let codeModeSource: string;
   let gatewaySource: string;
-  let toolsIndexSource: string;
 
   try {
     descriptorsSource = readFileSync(DESCRIPTORS_PATH, "utf-8");
@@ -134,8 +133,8 @@ function main(): void {
   const codeModeExclusiveTotal = codeModeToolCount;
 
   // All unique action names across flat + code-mode (deduplicating sdl.action.search)
-  const allActionNames = new Set([...flatToolNames, ...codeModeToolNames]);
-  const allUniqueActions = allActionNames.size;
+  const allFlatAndCodeModeNames = new Set([...flatToolNames, ...codeModeToolNames]);
+  const allFlatAndCodeModeActions = allFlatAndCodeModeNames.size;
 
   // --- Build JSON output ---
   const inventory = {
@@ -149,7 +148,7 @@ function main(): void {
       gatewayModeTotal,
       gatewayLegacyModeTotal,
       codeModeExclusiveTotal,
-      allUniqueActions,
+      allFlatAndCodeModeActions,
     },
     flatToolNames,
     universalToolNames,
@@ -178,7 +177,7 @@ function main(): void {
   console.log(`  Gateway mode:              ${gatewayModeTotal} (universal + gateway)`);
   console.log(`  Gateway + legacy mode:     ${gatewayLegacyModeTotal} (universal + gateway + flat)`);
   console.log(`  Code-mode exclusive:       ${codeModeExclusiveTotal}`);
-  console.log(`  All unique actions:        ${allUniqueActions}`);
+  console.log(`  All flat + code-mode actions:        ${allFlatAndCodeModeActions}`);
   console.log("");
   console.log(`Written:`);
   console.log(`  ${OUT_JSON}`);
@@ -214,7 +213,7 @@ function buildMarkdown(inventory: {
   lines.push(`| Gateway | ${inventory.counts.gatewayModeTotal} | ${inventory.counts.universalTools} universal + ${inventory.counts.gatewayTools} gateway |`);
   lines.push(`| Gateway + legacy | ${inventory.counts.gatewayLegacyModeTotal} | ${inventory.counts.universalTools} universal + ${inventory.counts.gatewayTools} gateway + ${inventory.counts.flatTools} flat |`);
   lines.push(`| Code-mode exclusive | ${inventory.counts.codeModeExclusiveTotal} | ${inventory.counts.codeModeTools} code-mode tools only |`);
-  lines.push(`| All unique actions | ${inventory.counts.allUniqueActions} | flat + code-mode unique |`);
+  lines.push(`| All unique actions | ${inventory.counts.allFlatAndCodeModeActions} | flat + code-mode unique |`);
   lines.push("");
 
   lines.push("## Universal Tools");

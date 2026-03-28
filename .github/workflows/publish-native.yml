@@ -162,8 +162,9 @@ jobs:
               cp "${src_file}" "native/npm/${npm_dir}/${node_file}"
               echo "  Copied ${src_file} -> native/npm/${npm_dir}/${node_file}"
             else
-              echo "  WARNING: No .node file found in ${src_dir}"
+              echo "  ERROR: No .node file found in ${src_dir}"
               ls -la "${src_dir}" || true
+              exit 1
             fi
           done
 

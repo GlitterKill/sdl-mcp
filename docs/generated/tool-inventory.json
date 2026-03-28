@@ -9,7 +9,7 @@
     "gatewayModeTotal": 6,
     "gatewayLegacyModeTotal": 37,
     "codeModeExclusiveTotal": 3,
-    "allUniqueActions": 34
+    "allFlatAndCodeModeActions": 34
   },
   "flatToolNames": [
     "sdl.agent.feedback",

@@ -2,7 +2,7 @@
   "repos": [
     {
       "repoId": "zod-oss",
-      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp/.tmp/external-benchmarks/zod-oss",
+      "rootPath": ".tmp/external-benchmarks/zod-oss",
       "languages": [
         "ts",
         "tsx",
@@ -19,7 +19,7 @@
     },
     {
       "repoId": "preact-oss",
-      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp/.tmp/external-benchmarks/preact-oss",
+      "rootPath": ".tmp/external-benchmarks/preact-oss",
       "languages": [
         "ts",
         "tsx",
@@ -39,7 +39,7 @@
     },
     {
       "repoId": "flask-oss",
-      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp/.tmp/external-benchmarks/flask-oss",
+      "rootPath": ".tmp/external-benchmarks/flask-oss",
       "languages": [
         "py"
       ],
@@ -56,7 +56,7 @@
     },
     {
       "repoId": "ansible-lint-oss",
-      "rootPath": "F:/Claude/projects/sdl-mcp/sdl-mcp/.tmp/external-benchmarks/ansible-lint-oss",
+      "rootPath": ".tmp/external-benchmarks/ansible-lint-oss",
       "languages": [
         "py",
         "sh"

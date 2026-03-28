@@ -775,13 +775,14 @@ export class Executor {
   reset(): void {
     this.evidenceCapture.reset();
     this.actions = [];
+    this.cardCache = new Set<string>();
     this.metrics = {
       totalDurationMs: 0,
       totalTokens: 0,
       totalActions: 0,
       successfulActions: 0,
       failedActions: 0,
-      cacheHits: 0, // TODO: Not yet implemented
+      cacheHits: 0,
     };
     this.startTime = 0;
     this.policyDecisions.clear();

@@ -100,6 +100,9 @@ jobs:
       - name: Check config sync (types.ts vs types.js defaults)
         run: npm run check:config-sync
 
+      - name: Check tool inventory sync
+        run: npm run docs:tools:check
+
       - name: Security audit
         run: npm audit --audit-level=moderate
 
@@ -335,14 +338,17 @@ jobs:
         run: |
           node -e "
             const fs = require('fs');
+            const path = require('path');
             const base = JSON.parse(fs.readFileSync('config/sdlmcp.config.json', 'utf8'));
             const ext = JSON.parse(fs.readFileSync('benchmarks/real-world/external-repos.config.json', 'utf8'));
-            const merged = { ...base, repos: [...(base.repos || []), ...(ext.repos || [])] };
+            const cwd = process.cwd();
+            const resolved = (ext.repos || []).map(r => ({ ...r, rootPath: path.resolve(cwd, r.rootPath) }));
+            const merged = { ...base, repos: [...(base.repos || []), ...resolved] };
             fs.writeFileSync('benchmarks/real-world/benchmark.config.json', JSON.stringify(merged, null, 2) + '\\n');
           "
       - name: Run benchmark matrix smoke
         if: matrix.os == 'ubuntu-latest'
-        run: npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-smoke --limit-runs 2 --skip-index
+        run: npm run benchmark:matrix -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-smoke --limit-runs 2 --skip-index
 
       - name: Validate benchmark matrix smoke claims
         if: matrix.os == 'ubuntu-latest'
@@ -570,14 +576,17 @@ jobs:
         run: |
           node -e "
             const fs = require('fs');
+            const path = require('path');
             const base = JSON.parse(fs.readFileSync('config/sdlmcp.config.json', 'utf8'));
             const ext = JSON.parse(fs.readFileSync('benchmarks/real-world/external-repos.config.json', 'utf8'));
-            const merged = { ...base, repos: [...(base.repos || []), ...(ext.repos || [])] };
+            const cwd = process.cwd();
+            const resolved = (ext.repos || []).map(r => ({ ...r, rootPath: path.resolve(cwd, r.rootPath) }));
+            const merged = { ...base, repos: [...(base.repos || []), ...resolved] };
             fs.writeFileSync('benchmarks/real-world/benchmark.config.json', JSON.stringify(merged, null, 2) + '\\n');
           "
 
       - name: Run full benchmark matrix
-        run: npm run benchmark:matrix -- -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-nightly
+        run: npm run benchmark:matrix -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-nightly
 
       - name: Validate matrix benchmark claims
         run: node --experimental-strip-types scripts/check-benchmark-claims.ts --in .benchmark/matrix-nightly/aggregate.json --min-family-p50 50 --min-family-p25 35 --min-task-floor 20
@@ -706,8 +715,8 @@ jobs:
           echo "Exporting sync artifact for CI..."
           START_TIME=$(date +%s%3N)
           node dist/cli/index.js export \
-            --commit-sha ${{ steps.git-info.outputs.sha }} \
-            --branch ${{ steps.git-info.outputs.branch }} \
+            --commit-sha "${{ steps.git-info.outputs.sha }}" \
+            --branch "${{ steps.git-info.outputs.branch }}" \
             --output ./ci-artifacts/sync-${{ runner.os }}-${{ github.sha }}.sdl-artifact.json
           END_TIME=$(date +%s%3N)
           DURATION=$((END_TIME - START_TIME))
@@ -759,9 +768,11 @@ jobs:
           echo "=== CI Sync Metrics (${{ runner.os }}) ==="
           echo "Commit SHA: ${{ steps.git-info.outputs.sha }}"
           echo "Branch: ${{ steps.git-info.outputs.branch }}"
-          echo "Index Duration: ${{ steps.index.outputs.duration_ms }}ms"
-          echo "Export Duration: ${{ steps.export.outputs.duration_ms }}ms"
-          TOTAL_DURATION=$((${{ steps.index.outputs.duration_ms }} + ${{ steps.export.outputs.duration_ms }}))
+          INDEX_DUR="${{ steps.index.outputs.duration_ms }}"
+          EXPORT_DUR="${{ steps.export.outputs.duration_ms }}"
+          echo "Index Duration: ${INDEX_DUR:-0}ms"
+          echo "Export Duration: ${EXPORT_DUR:-0}ms"
+          TOTAL_DURATION=$((${INDEX_DUR:-0} + ${EXPORT_DUR:-0}))
           echo "Total Sync Duration: ${TOTAL_DURATION}ms"
 
       - name: Validate sync performance budget (non-blocking)
@@ -779,8 +790,10 @@ jobs:
             MAX_TOTAL_MS=820000
           fi
 
-          INDEX_MS=${{ steps.index.outputs.duration_ms }}
-          EXPORT_MS=${{ steps.export.outputs.duration_ms }}
+          INDEX_MS="${{ steps.index.outputs.duration_ms }}"
+          INDEX_MS="${INDEX_MS:-0}"
+          EXPORT_MS="${{ steps.export.outputs.duration_ms }}"
+          EXPORT_MS="${EXPORT_MS:-0}"
           TOTAL_MS=$((INDEX_MS + EXPORT_MS))
           BUDGET_WARN=false
 

@@ -150,6 +150,13 @@ export function buildFlatToolDescriptors(
       handler: handleIndexRefresh,
     },
     {
+      name: "sdl.repo.overview",
+      description:
+        "Get token-efficient codebase overview with directory summaries and hotspots",
+      schema: RepoOverviewRequestSchema,
+      handler: handleRepoOverview,
+    },
+    {
       name: "sdl.buffer.push",
       description: "Push editor buffer updates for live draft indexing",
       schema: BufferPushRequestSchema,
@@ -257,13 +264,6 @@ export function buildFlatToolDescriptors(
         "Update policy configuration for a repository",
       schema: PolicySetRequestSchema,
       handler: handlePolicySet,
-    },
-    {
-      name: "sdl.repo.overview",
-      description:
-        "Get token-efficient codebase overview with directory summaries and hotspots",
-      schema: RepoOverviewRequestSchema,
-      handler: handleRepoOverview,
     },
     {
       name: "sdl.pr.risk.analyze",

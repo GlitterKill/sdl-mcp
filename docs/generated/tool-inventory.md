@@ -12,7 +12,7 @@
 | Gateway | 6 | 2 universal + 4 gateway |
 | Gateway + legacy | 37 | 2 universal + 4 gateway + 31 flat |
 | Code-mode exclusive | 3 | 3 code-mode tools only |
-| All unique actions | 34 | flat + code-mode unique |
+| All flat + code-mode actions | 34 | flat + code-mode unique |
 
 ## Universal Tools
 

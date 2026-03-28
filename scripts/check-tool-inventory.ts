@@ -108,28 +108,28 @@ function main(): void {
   const gatewayModeTotal = universalToolCount + gatewayToolCount;
   const gatewayLegacyModeTotal = universalToolCount + gatewayToolCount + flatToolCount;
   const codeModeExclusiveTotal = codeModeToolCount;
-  const allActionNames = new Set([...flatToolNames, ...codeModeToolNames]);
-  const allUniqueActions = allActionNames.size;
+  const allFlatAndCodeModeNames = new Set([...flatToolNames, ...codeModeToolNames]);
+  const allFlatAndCodeModeActions = allFlatAndCodeModeNames.size;
 
   // Compare
   const drifts: string[] = [];
 
-  function checkCount(label: string, expected: number, actual: number): void {
-    if (expected !== actual) {
-      drifts.push(`  ${label}: inventory=${actual}, source=${expected}`);
+  function checkCount(label: string, fromSource: number, fromInventory: number): void {
+    if (fromSource !== fromInventory) {
+      drifts.push(`  ${label}: inventory=${fromInventory}, source=${fromSource}`);
     }
   }
 
-  function checkNames(label: string, expected: string[], actual: string[]): void {
-    const expectedSet = new Set(expected);
-    const actualSet = new Set(actual);
-    for (const name of expected) {
-      if (!actualSet.has(name)) {
+  function checkNames(label: string, fromSource: string[], fromInventory: string[]): void {
+    const sourceSet = new Set(fromSource);
+    const inventorySet = new Set(fromInventory);
+    for (const name of fromSource) {
+      if (!inventorySet.has(name)) {
         drifts.push(`  ${label}: missing from inventory: ${name}`);
       }
     }
-    for (const name of actual) {
-      if (!expectedSet.has(name)) {
+    for (const name of fromInventory) {
+      if (!sourceSet.has(name)) {
         drifts.push(`  ${label}: extra in inventory (removed from source?): ${name}`);
       }
     }
@@ -143,7 +143,7 @@ function main(): void {
   checkCount("gatewayModeTotal", gatewayModeTotal, committed.counts.gatewayModeTotal);
   checkCount("gatewayLegacyModeTotal", gatewayLegacyModeTotal, committed.counts.gatewayLegacyModeTotal);
   checkCount("codeModeExclusiveTotal", codeModeExclusiveTotal, committed.counts.codeModeExclusiveTotal);
-  checkCount("allUniqueActions", allUniqueActions, committed.counts.allUniqueActions);
+  checkCount("allFlatAndCodeModeActions", allFlatAndCodeModeActions, committed.counts.allFlatAndCodeModeActions);
 
   checkNames("flatToolNames", flatToolNames, committed.flatToolNames ?? []);
   checkNames("universalToolNames", universalToolNames, committed.universalToolNames ?? []);
