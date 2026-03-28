@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.10.1] - 2026-03-27
 
+### Changed
+
+- **Breaking behavior**: `repo.status` `surfaceMemories` default flipped from `true` to `false`. Agents must now pass `surfaceMemories: true` explicitly to surface development memories.
+- Decomposed `src/mcp/tools/index.ts` hotspot (370 lines) into declarative `tool-descriptors.ts` with `ToolDescriptor` interface and `buildFlatToolDescriptors()` factory (78 lines). Also registers previously missing `sdl.runtime.queryOutput` in flat mode.
+- Benchmark suite rewritten: `scripts/benchmark.ts` converted from stale SQLite-era direct-DB benchmark to a replay-trace-based synthetic benchmark. Real-world benchmark scripts (`real-world-benchmark.ts`, `real-world-benchmark-matrix.ts`) hardened with proper path resolution, error handling, and CI argument forwarding fixes.
+
+### Added
+
+- Auto-generated tool inventory with drift enforcement: `scripts/generate-tool-inventory.ts` produces `docs/generated/tool-inventory.json` and `tool-inventory.md` from source. `scripts/check-tool-inventory.ts` enforces sync. New npm scripts: `docs:tools:generate`, `docs:tools:check`. CI step added.
+- Agent executor `cacheHits` metric now tracks real cache hit counts via a per-session `cardCache` Set (previously was always zero).
+- Telemetry: neutral accounting for `sdl.chain` and other tools that report `totalTokens` without `_tokenUsage` — calls are now counted in `usage.stats` with zero savings inflation.
+- `scripts/prepare-release.mjs` release preparation helper.
+- Unit tests for tool descriptors, neutral savings accounting, agent executor cache hits, repo status memory default, and prepare-release script.
+
+### Fixed
+
+- `FileSummary` relationship cleanup: `_deleteFilesByIdsInner` now removes `FILE_SUMMARY_IN_REPO` edges before deleting orphaned `FileSummary` nodes, preventing dangling relationships during incremental re-indexing.
+- CI fixes: benchmark matrix argument forwarding (removed extraneous `--` separator), external repo path resolution (`path.resolve` for relative paths), `publish-native` workflow fails on missing `.node` files instead of warning, shell variable quoting for sync metrics and export commands.
+- Removed stale `sdl-mcp` self-reference from `package.json` dependencies.
+- `tree-sitter-kotlin` version constraint loosened to `^0.3.8` for broader compatibility.
+
 ## [0.10.0] - 2026-03-26
 
 ### Breaking
