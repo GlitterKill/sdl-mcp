@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Symbol Delta Ledger MCP Server - Cards-first code context for polyglot repositories",
   "type": "module",
   "main": "dist/main.js",
