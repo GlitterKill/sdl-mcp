@@ -572,6 +572,62 @@ const usageStats: ActionDefinition = {
   ],
 };
 
+
+const fileRead: ActionDefinition = {
+  action: "file.read",
+  namespace: "repo",
+  description: "Read non-indexed file content from a registered repository",
+  args: [
+    { ...REPO_ID_ARG },
+    {
+      flag: "--file-path",
+      field: "filePath",
+      type: "string",
+      description: "File path relative to repo root (non-indexed file types only)",
+      required: true,
+    },
+    {
+      flag: "--max-bytes",
+      field: "maxBytes",
+      type: "number",
+      description: "Max bytes to read (default 512KB)",
+    },
+    {
+      flag: "--offset",
+      field: "offset",
+      type: "number",
+      description: "Start reading from this line number (0-based)",
+    },
+    {
+      flag: "--limit",
+      field: "limit",
+      type: "number",
+      description: "Max lines to return",
+    },
+    {
+      flag: "--search",
+      field: "search",
+      type: "string",
+      description: "Return only lines matching this regex pattern (case-insensitive)",
+    },
+    {
+      flag: "--search-context",
+      field: "searchContext",
+      type: "number",
+      description: "Lines of context around each search match (default 2)",
+    },
+    {
+      flag: "--json-path",
+      field: "jsonPath",
+      type: "string",
+      description: "For JSON/YAML files: dot-separated key path to extract",
+    },
+  ],
+  examples: [
+    'sdl-mcp tool file.read --repo-id my-repo --file-path "config/settings.json"',
+  ],
+};
+
 const memoryStore: ActionDefinition = {
   action: "memory.store",
   namespace: "agent",
@@ -659,7 +715,7 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   codeNeedWindow, codeGetSkeleton, codeGetHotPath,
   // Repo
   repoRegister, repoStatus, repoOverview,
-  indexRefresh, policyGet, policySet, usageStats,
+  indexRefresh, policyGet, policySet, usageStats, fileRead,
   // Agent
   agentOrchestrate, agentFeedback, agentFeedbackQuery,
   bufferPush, bufferCheckpoint, bufferStatus, runtimeExecute, runtimeQueryOutput,

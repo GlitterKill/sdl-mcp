@@ -179,8 +179,8 @@ Chains still honor SDL-MCP’s escalation model. Code Mode does not bypass polic
 ```json
 {
   "codeMode": {
-    "enabled": false,
-    "exclusive": false,
+    "enabled": true,
+    "exclusive": true,
     "maxChainSteps": 20,
     "maxChainTokens": 50000,
     "maxChainDurationMs": 60000,

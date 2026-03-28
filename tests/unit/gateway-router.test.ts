@@ -4,10 +4,10 @@ import { createActionMap, routeGatewayCall } from "../../dist/gateway/router.js"
 
 describe("Gateway router", () => {
   describe("createActionMap", () => {
-    it("contains all 31 actions", () => {
+    it("contains all 32 actions", () => {
       const map = createActionMap();
       const actions = Object.keys(map);
-      assert.strictEqual(actions.length, 31);
+      assert.strictEqual(actions.length, 32);
     });
 
     it("each entry has schema and handler", () => {
@@ -43,6 +43,7 @@ describe("Gateway router", () => {
         "policy.get",
         "policy.set",
         "usage.stats",
+        "file.read",
         "agent.orchestrate",
         "agent.feedback",
         "agent.feedback.query",
@@ -50,6 +51,7 @@ describe("Gateway router", () => {
         "buffer.checkpoint",
         "buffer.status",
         "runtime.execute",
+        "runtime.queryOutput",
         "memory.store",
         "memory.query",
         "memory.remove",

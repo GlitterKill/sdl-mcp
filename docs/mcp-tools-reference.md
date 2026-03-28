@@ -936,13 +936,14 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
+| `repoId` | `string` | Yes | Repository identifier |
 | `filePath` | `string` | Yes | Path relative to repo root |
 | `maxBytes` | `number` | No | Max bytes to read (default 512KB) |
 | `offset` | `number` | No | Start line (0-based) |
 | `limit` | `number` | No | Max lines to return |
 | `search` | `string` | No | Regex pattern (case-insensitive) |
 | `searchContext` | `number` | No | Context lines around matches (default 2) |
-| `jsonPath` | `string` | No | Dot-separated key path for JSON/YAML extraction |
+| `jsonPath` | `string` | No | Dot-separated key path for JSON extraction (YAML accepted only if JSON-compatible) |
 
 **Blocked extensions:** Indexed source files (.ts, .js, .py, .go, .rs, etc.) are rejected with guidance to use SDL code tools.
 

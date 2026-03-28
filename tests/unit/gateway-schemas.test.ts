@@ -220,16 +220,16 @@ describe("Gateway schemas", () => {
       assert.strictEqual(CODE_ACTIONS.length, 3);
     });
 
-    it("REPO_ACTIONS has 7 actions", () => {
-      assert.strictEqual(REPO_ACTIONS.length, 7);
+    it("REPO_ACTIONS has 8 actions", () => {
+      assert.strictEqual(REPO_ACTIONS.length, 8);
     });
 
     it("AGENT_ACTIONS has 12 actions", () => {
       assert.strictEqual(AGENT_ACTIONS.length, 12);
     });
 
-    it("ALL_ACTIONS has 31 total actions", () => {
-      assert.strictEqual(ALL_ACTIONS.length, 31);
+    it("ALL_ACTIONS has 32 total actions", () => {
+      assert.strictEqual(ALL_ACTIONS.length, 32);
     });
   });
 });

@@ -31,30 +31,32 @@ Flat mode, gateway mode, and the CLI `tool` command share the same normalization
    - [sdl.code.getSkeleton](#sdlcodegetskeleton)
    - [sdl.code.getHotPath](#sdlcodegethotpath)
    - [sdl.code.needWindow](#sdlcodeneedwindow)
-6. [Delta & Change Tracking](#6-delta--change-tracking)
+6. [File Access](#6-file-access)
+   - [sdl.file.read](#sdlfileread)
+7. [Delta & Change Tracking](#7-delta--change-tracking)
    - [sdl.delta.get](#sdldeltaget)
-7. [Policy Management](#7-policy-management)
+8. [Policy Management](#8-policy-management)
    - [sdl.policy.get](#sdlpolicyget)
    - [sdl.policy.set](#sdlpolicyset)
-8. [PR & Risk Analysis](#8-pr--risk-analysis)
+9. [PR & Risk Analysis](#9-pr--risk-analysis)
    - [sdl.pr.risk.analyze](#sdlprriskanalyze)
-9. [Context Summary](#9-context-summary)
-   - [sdl.context.summary](#sdlcontextsummary)
-10. [Agent & Automation](#10-agent--automation)
+10. [Context Summary](#10-context-summary)
+    - [sdl.context.summary](#sdlcontextsummary)
+11. [Agent & Automation](#11-agent--automation)
     - [sdl.agent.orchestrate](#sdlagentorchestrate)
     - [sdl.agent.feedback](#sdlagentfeedback)
     - [sdl.agent.feedback.query](#sdlagentfeedbackquery)
-11. [Runtime Execution](#11-runtime-execution)
+12. [Runtime Execution](#12-runtime-execution)
     - [sdl.runtime.execute](#sdlruntimeexecute)
     - [sdl.runtime.queryOutput](#sdlruntimequeryoutput)
-12. [Development Memories](#12-development-memories)
+13. [Development Memories](#13-development-memories)
     - [sdl.memory.store](#sdlmemorystore)
     - [sdl.memory.query](#sdlmemoryquery)
     - [sdl.memory.remove](#sdlmemoryremove)
     - [sdl.memory.surface](#sdlmemorysurface)
-13. [Usage Statistics](#13-usage-statistics)
+14. [Usage Statistics](#14-usage-statistics)
     - [sdl.usage.stats](#sdlusagestats)
-14. [Code Mode Tools](#14-code-mode-tools)
+15. [Code Mode Tools](#15-code-mode-tools)
     - [sdl.chain](#sdlchain)
     - [sdl.action.search](#sdlactionsearch)
     - [sdl.manual](#sdlmanual)
@@ -684,7 +686,57 @@ If denied, the response includes `whyDenied` reasons and a `nextBestAction` sugg
 
 ---
 
-## 6. Delta & Change Tracking
+## 6. File Access
+
+### sdl.file.read
+
+Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional line range, regex search, or JSON path extraction.
+
+**What it does:** Reads files that are NOT indexed source code (i.e., not `.ts`, `.js`, `.py`, `.go`, `.rs`, `.java`, `.cs`, `.cpp`, `.c`, `.h`, `.php`, `.kt`, `.sh`, etc.). For indexed source files, the tool returns an error directing you to use `sdl.symbol.getCard`, `sdl.code.getSkeleton`, or `sdl.code.getHotPath` instead. The file path is resolved relative to the registered repository root and validated against path traversal attacks.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|:----------|:-----|:---------|:--------|:------------|
+| `repoId` | string | Yes | — | Repository identifier |
+| `filePath` | string | Yes | — | Path relative to repo root |
+| `maxBytes` | number | No | 524288 (512KB) | Max bytes to return before truncation |
+| `offset` | number | No | 0 | Start line (0-based) for line range mode |
+| `limit` | number | No | all | Max lines to return in line range mode |
+| `search` | string | No | — | Regex pattern for search mode (case-insensitive) |
+| `searchContext` | number | No | 2 | Lines of context around each match in search mode |
+| `jsonPath` | string | No | — | Dot-separated key path for JSON/YAML extraction (e.g., `"scripts.build"`, `"items.0.name"`) |
+
+**Modes** (mutually exclusive, checked in priority order):
+
+1. **JSON path extraction** (`jsonPath` set): Parses the file as JSON and returns the subtree at the given path. Array indexing via numeric segments is supported. YAML files are accepted only if they are JSON-compatible (no comments, anchors, or unquoted strings); use `search` mode for complex YAML.
+2. **Regex search** (`search` set): Returns matching lines with `searchContext` lines of surrounding context. Matches are prefixed with `>`. Ranges are merged to avoid duplicate output.
+3. **Line range** (`offset` and/or `limit` set): Returns numbered lines in the given range.
+4. **Full read** (no mode params): Returns the entire file, truncated at `maxBytes` if necessary.
+
+**Response:**
+
+| Field | Type | Description |
+|:------|:-----|:------------|
+| `filePath` | string | Normalized relative path |
+| `content` | string | File content (formatted per mode) |
+| `bytes` | number | Total file size in bytes |
+| `totalLines` | number | Total line count in the file |
+| `returnedLines` | number | Lines returned in this response |
+| `truncated` | boolean | Whether content was truncated |
+| `truncatedAt` | number | Byte offset of truncation (only if truncated) |
+| `matchCount` | number | Number of regex matches (search mode only) |
+| `extractedPath` | string | JSON path that was extracted (jsonPath mode only) |
+
+**Blocked extensions:** `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyw`, `.go`, `.java`, `.cs`, `.c`, `.h`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.php`, `.phtml`, `.rs`, `.kt`, `.kts`, `.sh`, `.bash`, `.zsh`. Use SDL code tools for these.
+
+**Security:** The file path is resolved against the repository root and validated with `validatePathWithinRoot()` to prevent path traversal. Files exceeding `maxBytes` are truncated.
+
+**Token cost:** Variable, depends on file size and mode. JSON path extraction is typically cheapest.
+
+---
+
+## 7. Delta & Change Tracking
 
 ### sdl.delta.get
 
@@ -714,7 +766,7 @@ Computes a semantic diff between two ledger versions, including blast radius ana
 
 ---
 
-## 7. Policy Management
+## 8. Policy Management
 
 ### sdl.policy.get
 
@@ -767,7 +819,7 @@ Updates policy settings for a repository.
 
 ---
 
-## 8. PR & Risk Analysis
+## 9. PR & Risk Analysis
 
 ### sdl.pr.risk.analyze
 
@@ -801,7 +853,7 @@ Analyzes the risk of a code change between two versions, computing a risk score,
 
 ---
 
-## 9. Context Summary
+## 10. Context Summary
 
 ### sdl.context.summary
 
@@ -854,7 +906,7 @@ Results are cached by `repoId + indexVersion + query` to avoid redundant graph q
 
 ---
 
-## 10. Agent & Automation
+## 11. Agent & Automation
 
 ### sdl.agent.orchestrate
 
@@ -963,7 +1015,7 @@ Queries stored feedback records and aggregated statistics for offline tuning pip
 
 ---
 
-## 11. Runtime Execution
+## 12. Runtime Execution
 
 ### sdl.runtime.execute
 
@@ -1088,7 +1140,7 @@ Retrieves and searches stored runtime output artifacts on demand.
 
 ---
 
-## 12. Development Memories
+## 13. Development Memories
 
 ### sdl.memory.store
 
@@ -1170,7 +1222,7 @@ Auto-surfaces memories relevant to a set of symbols or task type. Memories are r
 
 ---
 
-## 13. Usage Statistics
+## 14. Usage Statistics
 
 ### sdl.usage.stats
 
@@ -1192,7 +1244,7 @@ Returns cumulative token usage statistics and savings metrics.
 
 ---
 
-## 14. Code Mode Tools
+## 15. Code Mode Tools
 
 ### sdl.chain
 
@@ -1241,7 +1293,7 @@ Searches the SDL action catalog for matching actions. Use this as the first disc
 
 ### sdl.manual
 
-Returns the SDL-MCP API manual — a compact reference listing all available functions, their parameters, and return types. Call once per session to learn the API before using `sdl.chain`.
+Returns the SDL-MCP API manual — a compact reference listing all available functions, their parameters, and return types. Use for focused API reference before calling `sdl.agent.orchestrate` (context retrieval) or `sdl.chain` (multi-step operations).
 
 **Parameters:**
 

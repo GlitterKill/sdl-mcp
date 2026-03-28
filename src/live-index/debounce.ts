@@ -57,6 +57,7 @@ export function createDebouncedJobScheduler<T>(options: SchedulerOptions<T>) {
         }
       })();
     }, options.delayMs);
+    timer.unref();
 
     jobs.set(key, {
       timer,
@@ -92,6 +93,11 @@ export function createDebouncedJobScheduler<T>(options: SchedulerOptions<T>) {
   async function waitForIdle(): Promise<void> {
     const activeJobs = Array.from(jobs.values());
     if (activeJobs.length === 0) return;
+
+    // Ref timers so the process stays alive while explicitly waiting
+    for (const job of activeJobs) {
+      job.timer.ref();
+    }
     
     // We use allSettled because some jobs might be cancelled/resolved early
     // or might fail, and we just want to wait until the queue is empty.

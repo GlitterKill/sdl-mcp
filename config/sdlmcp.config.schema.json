@@ -134,13 +134,19 @@
           "description": "Optional default minCallConfidence for symbol-card and slice call-edge filtering",
           "minimum": 0,
           "maximum": 1
+        },
+        "defaultDenyRaw": {
+          "type": "boolean",
+          "description": "Default deny for raw code windows — subjects needWindow requests to proof-of-need gating (symbol in slice, identifiers provided, reason given)",
+          "default": true
         }
       },
       "default": {
         "maxWindowLines": 180,
         "maxWindowTokens": 1400,
         "requireIdentifiers": true,
-        "allowBreakGlass": false
+        "allowBreakGlass": false,
+        "defaultDenyRaw": true
       }
     },
     "redaction": {
@@ -518,6 +524,17 @@
           "minimum": 1,
           "maximum": 50,
           "default": 20
+        },
+        "ann": {
+          "type": "object",
+          "description": "Deprecated — removed in v0.10.1. Silently ignored. Use retrieval.vector instead.",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "m": { "type": "integer" },
+            "efConstruction": { "type": "integer" },
+            "efSearch": { "type": "integer" },
+            "maxElements": { "type": "integer" }
+          }
         },
         "retrieval": {
           "type": "object",

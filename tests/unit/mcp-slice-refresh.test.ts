@@ -73,11 +73,11 @@ describe("SliceRefreshRequestSchema validation", () => {
     assert.strictEqual(parsed.success, false);
   });
 
-  it("rejects missing knownVersion", () => {
+  it("accepts missing knownVersion (optional)", () => {
     const parsed = SliceRefreshRequestSchema.safeParse({
       sliceHandle: "abc123handle",
     });
-    assert.strictEqual(parsed.success, false);
+    assert.strictEqual(parsed.success, true);
   });
 
   it("rejects empty object", () => {

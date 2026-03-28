@@ -323,9 +323,9 @@ Below is every option with inline commentary. JSON does not support comments, so
     // Larger batches reduce API calls but need larger context windows.
     "summaryBatchSize": 20,
 
-    // @deprecated — use retrieval.vector instead.
-    // Legacy HNSW ANN sidecar index. Still honoured in "legacy" retrieval mode;
-    // ignored when retrieval.mode is "hybrid" (native Ladybug vector indexes preferred).
+    // @deprecated — Removed in v0.10.1. Use retrieval.vector instead.
+    // Legacy HNSW ANN sidecar index config. Silently ignored; retained only for
+    // backward-compatible config parsing.
     "ann": {
       "enabled": true,
       "m": 16,              // Bi-directional links per HNSW node (4-64)
@@ -1059,8 +1059,7 @@ Full semantic search with local Ollama for summaries.
     "generateSummaries": true,
     "summaryApiBaseUrl": "http://localhost:11434/v1",
     "summaryModel": "llama3",
-    "summaryMaxConcurrency": 3,
-    "ann": { "enabled": true }
+    "summaryMaxConcurrency": 3
   }
 }
 ```

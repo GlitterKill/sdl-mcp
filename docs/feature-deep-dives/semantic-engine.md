@@ -769,14 +769,9 @@ Both supported embedding models (`all-MiniLM-L6-v2` and `nomic-embed-text-v1.5`)
     "summaryMaxConcurrency": 5,       // 1-20, parallel batch workers
     "summaryBatchSize": 20,           // 1-50, symbols per batch
 
-    // ── ANN Index ──
-    "ann": {
-      "enabled": true,            // Build HNSW index after embedding
-      "m": 16,                    // Graph connectivity parameter
-      "efConstruction": 200,      // Build-time accuracy
-      "efSearch": 50,             // Query-time accuracy
-      "maxElements": 200000       // Maximum symbols to index
-    }
+    // ── ANN Index (Removed in v0.10.1 — silently ignored) ──
+    // "ann": { "enabled": true, "m": 16, ... }
+    // Use retrieval.vector instead for HNSW index configuration.
   }
 }
 ```

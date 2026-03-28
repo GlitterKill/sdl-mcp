@@ -495,38 +495,13 @@ Retrieval extensions ...................... PASS
 
 Prior to hybrid retrieval, embeddings were stored in a separate `SymbolEmbedding` node table. Migration m007 automatically copies embeddings to inline Symbol properties (`embeddingMiniLM`, `embeddingNomic`) on DB init. Mock-fallback rows are skipped. The old `SymbolEmbedding` table is deprecated but retained for backward compatibility.
 
-> **Deprecation notice**: `semantic.alpha` is deprecated in favor of `semantic.retrieval.fusion`. `semantic.ann` is deprecated in favor of `semantic.retrieval.vector`. Both legacy configs remain functional.
+> **Removed in v0.10.1**: `semantic.alpha` is deprecated in favor of `semantic.retrieval.fusion`. `semantic.ann` has been removed — any existing config is silently ignored. Use `semantic.retrieval.vector` instead.
 
 ---
 
-## ANN Index Configuration (Legacy)
+## ANN Index Configuration (Removed)
 
-> **Note**: The HNSW sidecar index is the legacy vector search mechanism. For new setups, use `semantic.retrieval.vector` instead, which uses native Ladybug vector indexes. The legacy ANN config is retained for backward compatibility.
-
-The HNSW (Hierarchical Navigable Small World) index accelerates nearest-neighbor search over embedding vectors. It's built lazily during indexing and rebuilt incrementally as embeddings change.
-
-```jsonc
-{
-  "semantic": {
-    "ann": {
-      "enabled": true,          // Default: true
-      "m": 16,                  // Connectivity parameter (4-64, default: 16)
-      "efConstruction": 200,    // Build quality (16-500, default: 200)
-      "efSearch": 50,           // Search quality (8-256, default: 50)
-      "maxElements": 200000     // Max vectors (1K-1M, default: 200K)
-    }
-  }
-}
-```
-
-| Parameter | Effect of increasing | Trade-off |
-|:----------|:--------------------|:----------|
-| `m` | Better recall, more memory | Memory per vector |
-| `efConstruction` | Higher index quality | Slower index build |
-| `efSearch` | Better search accuracy | Slower search queries |
-| `maxElements` | Support more symbols | More memory reserved |
-
-For most repositories (< 50K symbols), the defaults are fine.
+> **Removed in v0.10.1**: The HNSW sidecar index (`ann-index.ts`) and its `semantic.ann` configuration have been removed. All vector search now uses native Ladybug vector indexes via `semantic.retrieval.vector`. Any existing `semantic.ann` config is silently ignored.
 
 ---
 
@@ -686,14 +661,9 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
     "summaryMaxConcurrency": 5,                     // Parallel summary requests (1-20)
     "summaryBatchSize": 20,                         // Symbols per batch (1-50)
 
-    // ── ANN Index ───────────────────────────────────────────────
-    "ann": {
-      "enabled": true,                              // Enable HNSW index
-      "m": 16,                                      // Connectivity (4-64)
-      "efConstruction": 200,                        // Build quality (16-500)
-      "efSearch": 50,                               // Search quality (8-256)
-      "maxElements": 200000                         // Max vectors (1K-1M)
-    }
+    // ── ANN Index (Removed in v0.10.1 — silently ignored) ──
+    // "ann": { "enabled": true, "m": 16, ... }
+    // Use retrieval.vector instead for HNSW index configuration.
   }
 }
 ```

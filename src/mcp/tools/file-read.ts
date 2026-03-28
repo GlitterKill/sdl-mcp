@@ -1,6 +1,6 @@
 import { resolve } from "path";
 import { readFile } from "fs/promises";
-import { existsSync } from "fs";
+import { existsSync, realpathSync } from "fs";
 import { FileReadRequestSchema, type FileReadResponse } from "../tools.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
@@ -22,10 +22,13 @@ const MAX_FILE_SIZE_BYTES = 512 * 1024; // 512KB
  * Extract a value from a parsed object using a dot-separated key path.
  * Supports array indexing via numeric segments (e.g. "items.0.name").
  */
+const BLOCKED_PATH_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
 function extractByPath(obj: unknown, keyPath: string): unknown {
   const segments = keyPath.split(".");
   let current: unknown = obj;
   for (const seg of segments) {
+    if (BLOCKED_PATH_SEGMENTS.has(seg)) return undefined;
     if (current == null || typeof current !== "object") return undefined;
     const asRecord = current as Record<string, unknown>;
     // Support numeric array indexing
@@ -49,6 +52,9 @@ function searchLines(
   pattern: string,
   contextLines: number,
 ): { content: string; matchCount: number; returnedLines: number } {
+  if (pattern.length > 500) {
+    throw new ValidationError("Search pattern too long (max 500 characters)");
+  }
   let regex: RegExp;
   try {
     regex = new RegExp(pattern, "i");
@@ -79,12 +85,13 @@ function searchLines(
     }
   }
 
+  const matchSet = new Set(matchIndices);
   const outputParts: string[] = [];
   let returnedLines = 0;
   for (let r = 0; r < ranges.length; r++) {
     const [start, end] = ranges[r];
     for (let i = start; i <= end; i++) {
-      const prefix = matchIndices.includes(i) ? ">" : " ";
+      const prefix = matchSet.has(i) ? ">" : " ";
       outputParts.push(`${prefix}${i + 1}: ${lines[i]}`);
       returnedLines++;
     }
@@ -114,6 +121,12 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
 
   // Security: ensure path is within repo root
   validatePathWithinRoot(absPath, rootPath);
+
+  // Security: resolve symlinks and re-validate to prevent symlink escape
+  if (existsSync(absPath)) {
+    const realAbsPath = realpathSync(absPath);
+    validatePathWithinRoot(realAbsPath, rootPath);
+  }
 
   // Check extension — block indexed source files
   const dotIndex = filePath.lastIndexOf(".");
@@ -201,7 +214,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
     const searchLimit = request.limit ?? lines.length;
     const rangedLines = lines.slice(searchOffset, searchOffset + searchLimit);
 
-    const result = searchLines(rangedLines, request.search, request.searchContext ?? 2);
+    const result = searchLines(rangedLines, request.search, Math.min(request.searchContext ?? 2, 50));
     return {
       filePath,
       content: result.content,
