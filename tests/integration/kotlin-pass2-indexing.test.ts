@@ -17,6 +17,7 @@ import {
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
+import { KotlinAdapter } from "../../dist/indexer/adapter/kotlin.js";
 
 const REPO_ID = "test-kotlin-pass2-repo";
 
@@ -30,7 +31,7 @@ function writeRepoFile(
   writeFileSync(fullPath, content, "utf8");
 }
 
-describe("Kotlin pass2 indexing", () => {
+describe("Kotlin pass2 indexing", { skip: (() => { const a = new KotlinAdapter(); return !a.getParser() ? "tree-sitter-kotlin grammar not available on this platform" : false; })() }, () => {
   const graphDbPath = join(tmpdir(), ".lbug-kotlin-pass2-test-db.lbug");
   const configPath = join(tmpdir(), "sdl-kotlin-pass2-config.json");
   const prevSDL_CONFIG = process.env.SDL_CONFIG;

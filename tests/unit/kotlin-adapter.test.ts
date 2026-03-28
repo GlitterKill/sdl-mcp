@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { KotlinAdapter } from "../../dist/indexer/adapter/kotlin.js";
 
-describe("Kotlin Adapter", () => {
+describe("Kotlin Adapter", { skip: (() => { const a = new KotlinAdapter(); return !a.getParser() ? "tree-sitter-kotlin grammar not available on this platform" : false; })() }, () => {
   const adapter = new KotlinAdapter();
 
   describe("ML-C2.1: Symbol Extraction", () => {
