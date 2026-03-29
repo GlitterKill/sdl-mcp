@@ -608,7 +608,7 @@ function buildClaudeSettings(): string {
   return JSON.stringify(settings, null, 2);
 }
 
-function buildClaudeExploreAgent(repoId: string): string {
+function buildClaudeExploreAgent(_repoId: string): string {
   const exts = SDL_SOURCE_EXTENSIONS.map((e) => `\`${e}\``).join(", ");
   return `---
 name: explore-sdl
