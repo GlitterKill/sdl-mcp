@@ -319,7 +319,8 @@ export async function runLimitStress(
         if (
           baseP95 &&
           baseP95 > 0 &&
-          metrics.p95 > baseP95 * DEFAULT_THRESHOLDS.mixedP95MultiplierWarn
+          metrics.p95 > baseP95 * DEFAULT_THRESHOLDS.mixedP95MultiplierWarn &&
+          metrics.p95 - baseP95 > DEFAULT_THRESHOLDS.minWarnDeltaMs
         ) {
           warnings.push(
             `${tool} P95 ${metrics.p95}ms > ${DEFAULT_THRESHOLDS.mixedP95MultiplierWarn}x baseline (${baseP95}ms)`,
@@ -348,12 +349,15 @@ export async function runLimitStress(
       .map(([id, m]) => ({ id, p95: m.p95, count: m.count, errRate: m.errorRate }))
       .sort((a, b) => b.p95 - a.p95);
 
-    if (clientP95s.length > 0) {
-      const slowest = clientP95s[0];
-      const fastest = clientP95s[clientP95s.length - 1];
+    // Exclude the writer client from imbalance detection — it runs
+    // index.refresh (~500ms+) which is structurally slower than reads.
+    const readerP95s = clientP95s.filter((c) => !c.id.includes("writer"));
+    if (readerP95s.length > 1) {
+      const slowest = readerP95s[0];
+      const fastest = readerP95s[readerP95s.length - 1];
       if (slowest.p95 > fastest.p95 * 3 && fastest.p95 > 0) {
         warnings.push(
-          `Load imbalance: slowest client ${slowest.id} P95=${slowest.p95}ms vs fastest ${fastest.id} P95=${fastest.p95}ms`,
+          `Load imbalance: slowest reader ${slowest.id} P95=${slowest.p95}ms vs fastest ${fastest.id} P95=${fastest.p95}ms`,
         );
       }
     }

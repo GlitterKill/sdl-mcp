@@ -272,7 +272,8 @@ export async function runSemanticTools(
           if (
             baseP95 &&
             baseP95 > 0 &&
-            metrics.p95 > baseP95 * DEFAULT_THRESHOLDS.readerP95MultiplierWarn
+            metrics.p95 > baseP95 * DEFAULT_THRESHOLDS.readerP95MultiplierWarn &&
+            metrics.p95 - baseP95 > DEFAULT_THRESHOLDS.minWarnDeltaMs
           ) {
             allWarnings.push(
               `Round ${clientCount}: ${tool} P95 ${metrics.p95}ms > ${DEFAULT_THRESHOLDS.readerP95MultiplierWarn}x baseline (${baseP95}ms)`,

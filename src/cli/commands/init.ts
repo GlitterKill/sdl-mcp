@@ -495,7 +495,7 @@ ext=".\${ext##*.}"
 
 for blocked_ext in ${blocked}; do
   if [ "$ext" = "$blocked_ext" ]; then
-    python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Use SDL-MCP tools instead of native Read for indexed source code. Start with sdl.repo.status, then use sdl.action.search, focused sdl.manual, and sdl.chain. Use symbolRef when the symbol name is known but the ID is not, and follow SDL fallback guidance when present. Read is only allowed for non-indexed file types.'}}))"
+    python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Use SDL-MCP tools instead of native Read for indexed source code. Start with sdl.repo.status, then use sdl.agent.orchestrate for context retrieval or sdl.action.search to find the right tool. Use symbolRef when the symbol name is known but the ID is not, and follow SDL fallback guidance when present. Read is only allowed for non-indexed file types.'}}))"
     exit 0
   fi
 done
@@ -609,38 +609,125 @@ function buildClaudeSettings(): string {
 }
 
 function buildClaudeExploreAgent(repoId: string): string {
+  const exts = SDL_SOURCE_EXTENSIONS.map((e) => `\`${e}\``).join(", ");
   return `---
 name: explore-sdl
-description: Explore indexed source code in ${repoId} with SDL-MCP instead of native Read.
-tools: Grep, Glob, Bash, mcp__sdl-mcp__*
-disallowedTools: Read
+description: Codebase exploration agent that uses SDL-MCP tools for source code understanding instead of native Read. Use this instead of the built-in Explore agent.
+tools:
+  - Grep
+  - Glob
+  - Bash
+  - mcp__sdl-mcp__*
+disallowedTools:
+  - Read
 model: inherit
 ---
 
-Use SDL-MCP for source code understanding in this repository.
+# Explore SDL — Codebase Exploration via SDL-MCP
 
-- Start with \`sdl.repo.status\` to check repo state.
-- Use \`sdl.action.search\` when the right action is unclear.
-- Use \`sdl.manual\` with focused \`query\` or \`actions\` for targeted reference.
-- Prefer \`sdl.chain\` for multi-step workflows in a single round trip.
-- Use \`symbolRef\` / \`symbolRefs\` when you know a symbol name but not the canonical \`symbolId\`.
-- Follow the Context Ladder: search -> getCard/getCards -> slice.build -> getSkeleton -> getHotPath -> needWindow (last resort).
-- Use \`runtimeExecute\` in \`sdl.chain\` for repo-local commands with \`outputMode: "minimal"\` (default). Use \`runtimeQueryOutput\` with the \`artifactHandle\` to retrieve output on demand.
-- Follow \`nextBestAction\`, \`fallbackTools\`, \`fallbackRationale\`, and candidate guidance from SDL responses instead of retrying native tools.
-- Do not use native \`Read\` for indexed source files.
-- If you need a non-code file, ask the parent session to read it directly.
+You are a codebase exploration agent. Your job is to answer questions about the codebase using SDL-MCP tools for all source code understanding.
+
+## Rules
+
+1. **NEVER use the native \`Read\` tool for source code files.** Source code extensions include: ${exts}.
+
+2. **Start with \`sdl.repo.status\`** to understand the repository state.
+
+3. **Use \`sdl.action.search\`** when you are not sure which SDL action to use for a task.
+
+4. **Use \`sdl.manual\`** with \`query\` or \`actions\` to load a focused reference for specific tools.
+
+5. **Use \`sdl.agent.orchestrate\`** for code context retrieval:
+   - \`contextMode: "precise"\` — targeted symbol/file lookups.
+   - \`contextMode: "broad"\` — exploratory codebase understanding.
+   - Provide \`focusSymbols\` and/or \`focusPaths\` to scope the retrieval.
+   - Always set a budget (\`maxTokens\`, \`maxActions\`).
+
+6. **Use \`sdl.chain\`** for multi-step operations (runtime execution, data transforms, batch mutations) — not for context retrieval.
+
+7. **Use \`symbolRef\` or \`symbolRefs\`** when you know a symbol name but not the canonical \`symbolId\`. SDL-MCP will resolve the best match.
+
+8. **Follow the Context Ladder** — escalate only when needed:
+   - \`sdl.symbol.search\` — Find symbols by name/pattern. Add \`semantic: true\` for conceptual queries.
+   - \`sdl.symbol.getCard\` / \`sdl.symbol.getCards\` — Get symbol metadata, signature, dependencies.
+   - \`sdl.slice.build\` — Get related symbols for a task. Use \`taskText\` for auto-discovery.
+   - \`sdl.code.getSkeleton\` — See control flow structure (signatures + elided bodies).
+   - \`sdl.code.getHotPath\` — Find specific identifiers in code.
+   - \`sdl.code.needWindow\` — Full code (last resort, requires justification and \`identifiersToFind\`).
+
+9. **Use SDL runtime for repo-local commands** via \`runtimeExecute\` in \`sdl.chain\`:
+   - Use \`outputMode: "minimal"\` (default) for ~50-token responses with status + artifact handle.
+   - If you need output details, call \`runtimeQueryOutput\` with the \`artifactHandle\` and targeted \`queryTerms\`.
+   - Always set \`timeoutMs\` to prevent hangs.
+
+10. **Follow SDL fallback guidance** — when a request is denied or ambiguous, use the \`nextBestAction\`, \`fallbackTools\`, \`fallbackRationale\`, and ranked candidates from the response instead of retrying native tools.
+
+11. **You may use \`Grep\` and \`Glob\`** for file discovery and pattern matching. These are permitted because they help locate files without reading their full contents.
+
+12. **For non-code files** (\`.md\`, \`.json\`, \`.yaml\`, \`.toml\`, \`.xml\`, \`.sql\`, \`.css\`, \`.html\`, \`.txt\`, config files, lock files), use \`file.read\` inside \`sdl.chain\`. Prefer targeted modes over full reads:
+   - **Line range**: \`{ "fn": "file.read", "args": { "filePath": "docs/guide.md", "offset": 10, "limit": 20 } }\`
+   - **Search**: \`{ "fn": "file.read", "args": { "filePath": "docs/guide.md", "search": "authentication", "searchContext": 3 } }\`
+   - **JSON path**: \`{ "fn": "file.read", "args": { "filePath": "package.json", "jsonPath": "dependencies" } }\`
+
+## Workflow
+
+1. Use \`sdl.repo.status\` to check repo state and health
+2. Use \`Glob\` to find relevant files by pattern
+3. Use \`Grep\` to search for keywords across the codebase
+4. Use \`sdl.action.search\` if you're unsure which SDL tool fits
+5. Use \`sdl.agent.orchestrate\` with appropriate \`contextMode\` for code understanding tasks
+6. Use \`sdl.symbol.search\` to find specific symbols
+7. Use \`sdl.symbol.getCard\` / \`sdl.symbol.getCards\` to understand what symbols do
+8. Use \`sdl.slice.build\` to map relationships between symbols
+9. Use \`sdl.code.getSkeleton\` / \`sdl.code.getHotPath\` only when deeper understanding is needed
+10. Use \`sdl.code.needWindow\` only as a last resort with clear justification
+11. Use \`sdl.chain\` for runtime execution and multi-step operations
 `;
 }
 
 function buildClaudePrompt(repoId: string): string {
   return `Use SDL-MCP as the default path for repository ${repoId}.
 
+## Required Workflow
+
+1. Start with sdl.repo.status.
+2. Use sdl.action.search when the correct SDL action is unclear.
+3. Use sdl.manual(query|actions|format) for focused reference instead of loading the full manual.
+4. Use sdl.agent.orchestrate for code context retrieval (contextMode: "precise" for targeted lookups, "broad" for exploration).
+5. Use sdl.chain for multi-step operations (runtime execution, data transforms, batch mutations) — not for context retrieval.
+6. Use symbolRef / symbolRefs when you know a symbol name but not the canonical symbolId.
+7. Follow nextBestAction, fallbackTools, fallbackRationale, and candidate guidance from SDL responses instead of retrying blocked native tools.
+
+## Native Tool Restrictions
+
 - Never use native Read for indexed source-code extensions: ${SDL_SOURCE_EXTENSIONS.join(", ")}.
-- Start with sdl.repo.status, then use sdl.action.search, focused sdl.manual, and sdl.chain.
-- Use symbolRef / symbolRefs when you know a symbol name but not the canonical symbolId.
-- Use runtimeExecute inside sdl.chain for repo-local test, build, lint, and diagnostic commands.
-- Follow nextBestAction, fallbackTools, fallbackRationale, and candidate guidance from SDL responses instead of retrying blocked native tools.
+- Never use native Bash for repo-local test, build, lint, or diagnostic commands when SDL runtime can execute them.
 - If native Read or Bash is denied by a hook, switch to SDL-MCP immediately and do not retry the denied tool.
+- Use the explore-sdl subagent for codebase exploration instead of the built-in Explore agent.
+- Native Read is allowed for non-indexed file types (Markdown, JSON, YAML, TOML, config) even when SDL-MCP is active.
+
+## Conditional Enforcement
+
+All SDL-MCP enforcement is conditional on the server being active (PID file exists). When SDL-MCP is not running, all native tools work normally with no restrictions.
+
+## Context Retrieval
+
+Use sdl.agent.orchestrate — not sdl.chain — for code understanding tasks:
+- contextMode: "precise" — targeted symbol/file lookups
+- contextMode: "broad" — exploratory codebase understanding
+Provide focusSymbols and/or focusPaths to scope the retrieval. Always set a budget (maxTokens, maxActions).
+
+## Runtime Execution
+
+- Use runtimeExecute inside sdl.chain with outputMode: "minimal" (default) for ~50-token responses.
+- Parameters: use args (string array) or code (inline string). There is no command field.
+- Use runtimeQueryOutput with artifactHandle and queryTerms to retrieve output details after minimal-mode execution.
+- Set timeoutMs on all runtime executions to prevent hangs.
+
+## Non-Indexed File Access
+
+- Use file.read inside sdl.chain for reading non-indexed files with targeted modes (search, jsonPath, offset/limit).
+- Prefer search or jsonPath over full reads.
 `;
 }
 

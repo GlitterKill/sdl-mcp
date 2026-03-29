@@ -197,6 +197,8 @@ export interface PassFailThresholds {
   readerP95MultiplierWarn: number;
   mixedP95MultiplierWarn: number;
   memoryGrowthWarnMB: number;
+  /** Minimum absolute P95 increase (ms) required to emit a warning */
+  minWarnDeltaMs: number;
 }
 
 export const DEFAULT_THRESHOLDS: PassFailThresholds = {
@@ -204,6 +206,8 @@ export const DEFAULT_THRESHOLDS: PassFailThresholds = {
   readerP95MultiplierWarn: 3,
   mixedP95MultiplierWarn: 5,
   memoryGrowthWarnMB: 200,
+  /** Minimum absolute P95 delta (ms) to trigger a warning — suppresses noise from fast tools */
+  minWarnDeltaMs: 25,
 };
 
 // ---------------------------------------------------------------------------

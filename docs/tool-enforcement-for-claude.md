@@ -31,10 +31,11 @@ The generated files steer Claude toward:
 1. `sdl.repo.status`
 2. `sdl.action.search`
 3. focused `sdl.manual`
-4. `sdl.chain`
-5. `runtimeExecute` inside `sdl.chain`
+4. `sdl.agent.orchestrate` for code context retrieval (`contextMode: "precise"` or `"broad"`)
+5. `sdl.chain` for multi-step operations (runtime execution, data transforms, batch mutations)
+6. `runtimeExecute` inside `sdl.chain` for repo-local commands
 
-They also teach Claude to use `symbolRef` / `symbolRefs` when it knows a symbol name but not the canonical ID, and to follow SDL fallback guidance instead of retrying blocked native tools.
+They also teach Claude to use `symbolRef` / `symbolRefs` when it knows a symbol name but not the canonical ID, and to follow SDL fallback guidance instead of retrying blocked native tools. Enforcement is conditional on the SDL-MCP server being active.
 
 ---
 
@@ -84,19 +85,21 @@ Non-indexed files such as Markdown, JSON, YAML, TOML, and similar config or docu
 For code understanding:
 
 1. `sdl.repo.status`
-2. `sdl.action.search`
-3. `sdl.manual(query|actions|format)`
-4. `sdl.chain`
+2. `sdl.action.search` (when the correct SDL action is unclear)
+3. `sdl.manual(query|actions|format)` for focused reference
+4. `sdl.agent.orchestrate` with `contextMode: "precise"` for targeted lookups or `"broad"` for exploration
+5. Provide `focusSymbols` and/or `focusPaths` to scope retrieval; always set a budget
 
 For symbol lookup:
 
 - use `symbolRef` or `symbolRefs` when the symbol name is known but the exact `symbolId` is not
 - if SDL returns ranked candidates or fallback guidance, refine the SDL request instead of retrying native `Read`
 
-For repo-local execution:
+For multi-step operations:
 
-- use `runtimeExecute` inside `sdl.chain`
-- prefer `node`, `typescript`, `python`, `ruby`, `php`, and `shell`
+- use `sdl.chain` for runtime execution, data transforms, and batch mutations
+- use `runtimeExecute` inside `sdl.chain` with `outputMode: "minimal"` for repo-local commands
+- supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`
 
 Do not retry denied native `Read` or `Bash` calls. Switch to SDL-MCP immediately and follow the SDL response guidance fields when present.
 

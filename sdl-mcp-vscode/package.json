@@ -2,7 +2,7 @@
   "name": "sdl-mcp-vscode",
   "displayName": "SDL MCP",
   "description": "Inline SDL-MCP insights for VSCode/Cursor.",
-  "version": "0.10.0",
+  "version": "0.10.2",
   "publisher": "sdl-mcp",
   "engines": {
     "vscode": "^1.90.0"
