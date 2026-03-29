@@ -775,7 +775,7 @@ export const EnforceSDL: Plugin = async () => {
         const loweredPath = rawPath.toLowerCase();
         if (BLOCKED_EXTENSIONS.some((ext) => loweredPath.endsWith(ext))) {
           throw new Error(
-            "Use SDL-MCP tools for indexed source code. Start with sdl.repo.status, then use sdl.action.search, focused sdl.manual, and sdl.chain. Use symbolRef when the symbol name is known but the ID is not."
+            "Use SDL-MCP tools for indexed source code. Start with sdl.repo.status, then use sdl.agent.orchestrate for context retrieval or sdl.action.search to find the right tool. Use symbolRef when the symbol name is known but the ID is not."
           );
         }
       }
@@ -784,7 +784,7 @@ export const EnforceSDL: Plugin = async () => {
         const command = String(output.args.command ?? "").trim().toLowerCase();
         if (REDIRECT_PREFIXES.some((prefix) => command === prefix || command.startsWith(\`\${prefix} \`))) {
           throw new Error(
-            "Run repo-local build, test, lint, and diagnostic commands through SDL runtime using sdl.chain + runtimeExecute instead of native bash."
+            "Run repo-local build, test, lint, and diagnostic commands through SDL runtime. Use runtimeExecute inside sdl.chain with outputMode: "minimal" instead of native bash."
           );
         }
       }
