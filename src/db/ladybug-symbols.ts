@@ -1080,8 +1080,17 @@ export async function searchSymbolsLite(
   }
 
   // Sort by match count descending, then by name
+  const lt = query.trim().toLowerCase();
   return Array.from(matchCounts.values())
-    .sort((a, b) => b.count - a.count || a.row.name.localeCompare(b.row.name))
+    .sort((a, b) => {
+      const aExact = a.row.name.toLowerCase() === lt ? 0 : 1;
+      const bExact = b.row.name.toLowerCase() === lt ? 0 : 1;
+      if (aExact !== bExact) return aExact - bExact;
+      const aPrefix = a.row.name.toLowerCase().startsWith(lt) ? 0 : 1;
+      const bPrefix = b.row.name.toLowerCase().startsWith(lt) ? 0 : 1;
+      if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+      return b.count - a.count || a.row.name.localeCompare(b.row.name);
+    })
     .map((entry) => entry.row)
     .slice(0, safeLimit);
 }

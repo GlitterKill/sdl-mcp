@@ -302,6 +302,8 @@ export interface ActionDescriptor {
   recommendedNextActions: string[];
   /** Fallback actions when this action is unavailable or denied */
   fallbacks: string[];
+  /** Required parameter names (always populated, excludes repoId) */
+  requiredParams: string[];
   /** Schema summary (if requested) */
   schemaSummary?: SchemaSummary;
   /** Example args (if requested) */
@@ -322,7 +324,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "symbol.getCards": "Batch-fetch symbol cards",
   "slice.build": "Build dependency graph slice",
   "slice.refresh": "Refresh existing slice (delta only)",
-  "slice.spillover.get": "Fetch spillover page",
+  "slice.spillover.get": "Fetch spillover page (requires spilloverHandle from slice.build spillover response)",
   "delta.get": "Get delta between versions",
   "context.summary": "Generate context summary",
   "pr.risk.analyze": "Analyze PR risk",
@@ -637,24 +639,45 @@ function buildBaseCatalogFromMap(actionMap: ReturnType<typeof createActionMap>):
     const fn = ACTION_TO_FN[action];
     if (!fn) continue;
 
+    // Always extract required params (cheap, just field names)
+    const entry = actionMap[action];
+    let requiredParams: string[] = [];
+    if (entry) {
+      const summary = zodToSchemaSummary(entry.schema);
+      requiredParams = summary.fields
+        .filter((f) => f.required && f.name !== "repoId")
+        .map((f) => f.name);
+    }
+
     catalog.push({
       action,
       fn,
       description: ACTION_DESCRIPTIONS[action] ?? "",
       tags: ACTION_TAGS[action] ?? [],
       kind: "gateway",
+      requiredParams,
       ...getActionMetadata(action),
     });
   }
 
   // Internal transforms
   for (const [fn, transform] of Object.entries(INTERNAL_TRANSFORMS)) {
+    // Always extract required params for transforms too
+    let transformRequiredParams: string[] = [];
+    if (transform.schema) {
+      const summary = zodToSchemaSummary(transform.schema);
+      transformRequiredParams = summary.fields
+        .filter((f) => f.required && f.name !== "repoId")
+        .map((f) => f.name);
+    }
+
     catalog.push({
       action: fn, // transforms use fn as action name
       fn,
       description: TRANSFORM_DESCRIPTIONS[fn] ?? transform.description,
       tags: ["transform"],
       kind: "internal",
+      requiredParams: transformRequiredParams,
       ...EMPTY_METADATA,
     });
   }

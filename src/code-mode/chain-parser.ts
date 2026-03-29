@@ -8,6 +8,7 @@ export interface ParsedChainStep {
   args: Record<string, unknown>;
   /** Whether this step is an internal transform (not routed through gateway) */
   internal: boolean;
+  maxResponseTokens?: number;
 }
 
 export interface ParsedChainRequest {
@@ -15,6 +16,7 @@ export interface ParsedChainRequest {
   steps: ParsedChainStep[];
   budget?: ChainBudget;
   onError: "continue" | "stop";
+  defaultMaxResponseTokens?: number;
 }
 
 /**
@@ -66,7 +68,7 @@ export function parseChainRequest(
     return { ok: false, errors };
   }
 
-  const { repoId, steps, budget, onError } = parsed.data;
+  const { repoId, steps, budget, onError, defaultMaxResponseTokens } = parsed.data;
   const errors: string[] = [];
   const parsedSteps: ParsedChainStep[] = [];
 
@@ -103,6 +105,7 @@ export function parseChainRequest(
       action: isTransform ? step.fn : FN_NAME_MAP[resolvedFn],
       args: step.args,
       internal: isTransform,
+      maxResponseTokens: step.maxResponseTokens,
     });
   }
 
@@ -112,6 +115,6 @@ export function parseChainRequest(
 
   return {
     ok: true,
-    request: { repoId, steps: parsedSteps, budget, onError },
+    request: { repoId, steps: parsedSteps, budget, onError, defaultMaxResponseTokens },
   };
 }

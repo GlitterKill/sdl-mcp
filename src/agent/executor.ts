@@ -125,6 +125,24 @@ export class Executor {
       const rung = mutableRungs[i];
       const evidenceBefore = this.evidenceCapture.getAllEvidence().length;
 
+      // Skip higher rungs if no evidence was collected from prior rungs
+      if (
+        (rung === "skeleton" || rung === "hotPath" || rung === "raw") &&
+        evidenceBefore === 0
+      ) {
+        this.actions.push({
+          id: `action-${i}-${Date.now()}-skipped`,
+          type: rung === "skeleton" ? "getSkeleton" : rung === "hotPath" ? "getHotPath" : "needWindow",
+          status: "failed" as const,
+          input: { context: [] },
+          output: { reason: `Skipped ${rung} rung: no symbols resolved from previous rungs` },
+          timestamp: Date.now(),
+          durationMs: 0,
+          evidence: [],
+        });
+        continue;
+      }
+
       await this.executeRung(task, rung, context);
 
       // Track estimated tokens consumed by this rung

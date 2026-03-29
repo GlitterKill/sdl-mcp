@@ -20,6 +20,138 @@ const VISIBILITY_VALUES: readonly Visibility[] = [
   "internal",
 ] as const;
 
+
+// --- Agent wire format types ---
+
+export interface AgentWireCard {
+  name: string;
+  kind: string;
+  file: string;
+  lines: { start: number; end: number };
+  exported: boolean;
+  signature?: string;
+  summary?: string;
+  imports: Array<{ name: string; confidence?: number }>;
+  calls: Array<{ name: string; confidence?: number }>;
+}
+
+export interface AgentWireEdge {
+  from: string;
+  to: string;
+  type: string;
+  confidence: number;
+}
+
+export interface AgentWireSlice {
+  wireFormat: "agent";
+  version: string;
+  budget: { maxCards: number; maxTokens: number };
+  seedSymbols: string[];
+  cards: AgentWireCard[];
+  edges: AgentWireEdge[];
+  memories?: Array<{ memoryId: string; type: string; title: string; tags: string[] }>;
+  frontier?: Array<{ name: string; file: string; why: string }>;
+  truncation?: { truncated: boolean; totalAvailable: number; included: number };
+}
+
+function flattenSignature(sig: Record<string, unknown> | undefined): string | undefined {
+  if (!sig) return undefined;
+  const params = sig.params as Array<{ name: string; type?: string }> | undefined;
+  if (!params || params.length === 0) {
+    const name = sig.name as string | undefined;
+    return name ?? undefined;
+  }
+  return "(" + params.map((p) => p.name + (p.type ?? "")).join(", ") + ")";
+}
+
+export function toAgentGraphSlice(slice: GraphSlice): AgentWireSlice {
+  // Build symbolId -> card name map
+  const idToName = new Map<string, string>();
+  const idToFile = new Map<string, string>();
+  for (const card of slice.cards) {
+    idToName.set(card.symbolId, card.name);
+    idToFile.set(card.symbolId, card.file);
+  }
+
+  const cardSymbolIds = new Set(slice.cards.map((c) => c.symbolId));
+
+  // Build cards
+  const cards: AgentWireCard[] = slice.cards.map((card) => ({
+    name: card.name,
+    kind: card.kind,
+    file: card.file,
+    lines: { start: card.range.startLine, end: card.range.endLine },
+    exported: card.exported ?? false,
+    signature: flattenSignature(card.signature as Record<string, unknown> | undefined),
+    summary: card.summary ?? undefined,
+    imports: (card.deps?.imports ?? []).map((dep) => ({
+      name: idToName.get(dep.symbolId) ?? dep.symbolId,
+      ...(dep.confidence != null && dep.confidence !== 1 ? { confidence: dep.confidence } : {}),
+    })),
+    calls: (card.deps?.calls ?? []).map((dep) => ({
+      name: idToName.get(dep.symbolId) ?? dep.symbolId,
+      ...(dep.confidence != null && dep.confidence !== 1 ? { confidence: dep.confidence } : {}),
+    })),
+  }));
+
+  // Build edges with readable names
+  const edges: AgentWireEdge[] = (slice.edges ?? []).map(([fromIdx, toIdx, type, weight]) => ({
+    from: slice.cards[fromIdx]?.name ?? String(fromIdx),
+    to: slice.cards[toIdx]?.name ?? String(toIdx),
+    type: String(type),
+    confidence: weight,
+  }));
+
+  // Filter memories to only those with linkedSymbols in the slice
+  const filteredMemories = (slice.memories ?? [])
+    .filter((m) => m.linkedSymbols.some((sid) => cardSymbolIds.has(sid)))
+    .map((m) => ({
+      memoryId: m.memoryId,
+      type: m.type,
+      title: m.title,
+      tags: m.tags,
+    }));
+
+  // Build seed symbols using names
+  const seedSymbols = (slice.startSymbols ?? []).map(
+    (sid) => idToName.get(sid) ?? sid,
+  );
+
+  const result: AgentWireSlice = {
+    wireFormat: "agent",
+    version: slice.versionId,
+    budget: {
+      maxCards: slice.budget.maxCards,
+      maxTokens: slice.budget.maxEstimatedTokens,
+    },
+    seedSymbols,
+    cards,
+    edges,
+  };
+
+  if (filteredMemories.length > 0) {
+    result.memories = filteredMemories;
+  }
+
+  if (slice.frontier && slice.frontier.length > 0) {
+    result.frontier = slice.frontier.map((item) => ({
+      name: idToName.get(item.symbolId) ?? item.symbolId,
+      file: idToFile.get(item.symbolId) ?? "",
+      why: item.why,
+    }));
+  }
+
+  if (slice.truncation) {
+    result.truncation = {
+      truncated: slice.truncation.truncated,
+      totalAvailable: slice.truncation.droppedCards + slice.cards.length,
+      included: slice.cards.length,
+    };
+  }
+
+  return result;
+}
+
 export function normalizeVisibility(
   value: string | null,
 ): Visibility | undefined {
@@ -33,7 +165,10 @@ export function serializeSliceForWireFormat(
   slice: GraphSlice,
   wireFormat: SliceBuildWireFormat,
   wireFormatVersion?: number,
-): GraphSlice | CompactGraphSlice | CompactGraphSliceV2 | CompactGraphSliceV3 {
+): GraphSlice | CompactGraphSlice | CompactGraphSliceV2 | CompactGraphSliceV3 | AgentWireSlice {
+  if (wireFormat === "agent") {
+    return toAgentGraphSlice(slice);
+  }
   if (wireFormat === "compact") {
     if (wireFormatVersion === 1) {
       return toCompactGraphSliceV1(slice);
@@ -516,6 +651,8 @@ export function decodeCompactGraphSliceV3ToV2(
     e: v2Edges,
     f: v3.f,
     t: v3.t,
+    ...(v3.staleSymbols && v3.staleSymbols.length > 0 ? { staleSymbols: v3.staleSymbols } : {}),
+    ...(v3.memories && v3.memories.length > 0 ? { memories: v3.memories } : {}),
   };
 }
 

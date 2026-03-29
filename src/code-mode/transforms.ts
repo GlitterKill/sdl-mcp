@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getContinuation } from "./chain-truncation.js";
 
 // --- Path Navigation (reuses ref-resolver's dot/bracket model without $N prefix) ---
 
@@ -98,8 +99,12 @@ function compareValues(
       if (Number.isNaN(na) || Number.isNaN(nb)) return 0;
       return na - nb;
     }
-    case "date":
-      return new Date(String(a)).getTime() - new Date(String(b)).getTime();
+    case "date": {
+      const da = new Date(String(a)).getTime();
+      const db = new Date(String(b)).getTime();
+      if (Number.isNaN(da) || Number.isNaN(db)) return 0;
+      return da - db;
+    }
     case "boolean":
       return (a ? 1 : 0) - (b ? 1 : 0);
     case "string":
@@ -132,13 +137,15 @@ const DataFilterSchema = z.object({
   mode: z.enum(["all", "any"]).default("all"),
 });
 
+const SortSpecSchema = z.object({
+  path: z.string().min(1),
+  direction: z.enum(["asc", "desc"]).default("asc"),
+  type: z.enum(["string", "number", "date", "boolean"]).default("string"),
+});
+
 const DataSortSchema = z.object({
   input: z.array(z.unknown()),
-  by: z.object({
-    path: z.string().min(1),
-    direction: z.enum(["asc", "desc"]).default("asc"),
-    type: z.enum(["string", "number", "date", "boolean"]).default("string"),
-  }),
+  by: z.union([SortSpecSchema, z.array(SortSpecSchema).min(1)]),
 });
 
 const DataTemplateSchema = z.object({
@@ -243,13 +250,18 @@ function execDataFilter(args: unknown): unknown {
 function execDataSort(args: unknown): unknown {
   const parsed = DataSortSchema.parse(args);
   const { input, by } = parsed;
+  const specs = Array.isArray(by) ? by : [by];
 
   const sorted = [...input];
   sorted.sort((a, b) => {
-    const va = navigatePath(a, by.path);
-    const vb = navigatePath(b, by.path);
-    const cmp = compareValues(va, vb, by.type);
-    return by.direction === "desc" ? -cmp : cmp;
+    for (const spec of specs) {
+      const va = navigatePath(a, spec.path);
+      const vb = navigatePath(b, spec.path);
+      const cmp = compareValues(va, vb, spec.type);
+      const directed = spec.direction === "desc" ? -cmp : cmp;
+      if (directed !== 0) return directed;
+    }
+    return 0;
   });
   return sorted;
 }
@@ -291,6 +303,12 @@ export const INTERNAL_TRANSFORM_NAMES = [
 
 export type InternalTransformName = (typeof INTERNAL_TRANSFORM_NAMES)[number];
 
+const ChainContinuationGetSchema = z.object({
+  handle: z.string().min(1),
+  offset: z.number().int().min(0).optional(),
+  limit: z.number().int().min(1).max(1000).optional(),
+});
+
 export const INTERNAL_TRANSFORMS: Record<string, InternalTransformEntry> = {
   dataPick: {
     schema: DataPickSchema,
@@ -316,6 +334,17 @@ export const INTERNAL_TRANSFORMS: Record<string, InternalTransformEntry> = {
     schema: DataTemplateSchema,
     handler: execDataTemplate,
     description: "Render template strings from object(s)",
+  },
+  chainContinuationGet: {
+    schema: ChainContinuationGetSchema,
+    handler: (args: unknown) => {
+      const parsed = ChainContinuationGetSchema.parse(args);
+      const result = getContinuation(parsed.handle, parsed.offset, parsed.limit);
+      if (!result) throw new TransformError("Continuation handle expired or not found");
+      return result;
+    },
+    description:
+      "Retrieve continuation data from a truncated step result. Use the continuationHandle from truncatedResponse.",
   },
 };
 

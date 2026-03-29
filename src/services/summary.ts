@@ -80,6 +80,7 @@ function evictSummaryCache(): void {
 }
 
 export function detectSummaryScope(query: string): ContextSummaryScope {
+  const repoTerms = ["overview", "architecture", "project", "codebase", "repo", "repository", "structure", "summary"];
   const q = query.trim().toLowerCase();
   if (!q) return "task";
 
@@ -90,6 +91,9 @@ export function detectSummaryScope(query: string): ContextSummaryScope {
   ) {
     return "file";
   }
+
+  // Repo-level scope for broad project queries
+  if (repoTerms.some((t) => q.split(/[^a-z0-9]+/).includes(t))) return "repo";
 
   const tokens = tokenize(q);
   const taskHints = new Set([

@@ -11,6 +11,32 @@ import type { ParsedChainRequest } from "./chain-parser.js";
 import type { CodeModeConfig } from "../config/types.js";
 import { buildCatalog, type ActionDescriptor } from "./action-catalog.js";
 import { estimateTokens } from "../util/tokenize.js";
+import { truncateStepResult } from "./chain-truncation.js";
+
+
+/**
+ * Apply per-step token truncation if configured.
+ * Mutates stepResult in place if truncation occurs.
+ */
+function applyStepTruncation(
+  stepResult: ChainStepResult,
+  step: { maxResponseTokens?: number },
+  defaultMaxResponseTokens: number | undefined,
+): void {
+  const maxRespTokens = step.maxResponseTokens ?? defaultMaxResponseTokens;
+  if (maxRespTokens != null && stepResult.status === "ok" && stepResult.result != null) {
+    const truncation = truncateStepResult(stepResult.result, maxRespTokens);
+    if (truncation.handle) {
+      stepResult.result = truncation.truncated;
+      stepResult.tokens = truncation.keptTokens;
+      stepResult.truncatedResponse = {
+        originalTokens: truncation.originalTokens,
+        keptTokens: truncation.keptTokens,
+        continuationHandle: truncation.handle,
+      };
+    }
+  }
+}
 
 /**
  * Execute a parsed chain request sequentially, resolving $N references,
@@ -136,6 +162,7 @@ export async function executeChain(
           durationMs: stepDuration,
           status: "ok",
         };
+        applyStepTruncation(stepResult, step, request.defaultMaxResponseTokens);
         stepResults.push(stepResult);
 
         if (traceOpts) {
@@ -143,6 +170,7 @@ export async function executeChain(
         }
       } catch (err) {
         const stepDuration = Date.now() - stepStart;
+        budget.record(0, stepDuration);
         const errorMsg =
           err instanceof TransformError
             ? err.message
@@ -202,20 +230,23 @@ export async function executeChain(
         }
 
         priorResults.push(result);
-        stepResults.push({
+        const gwStepResult: ChainStepResult = {
           stepIndex: i,
           fn: step.fn,
           result,
           tokens,
           durationMs: stepDuration,
           status: "ok",
-        });
+        };
+        applyStepTruncation(gwStepResult, step, request.defaultMaxResponseTokens);
+        stepResults.push(gwStepResult);
 
         if (traceOpts) {
           traceSteps.push(buildTraceStep(i, step.fn, step.action, "gateway", "ok", stepDuration, tokens, traceOpts, traceCatalog, resolvedArgs, result));
         }
       } catch (err) {
         const stepDuration = Date.now() - stepStart;
+        budget.record(0, stepDuration);
         const errorMsg =
           err instanceof Error
             ? err.message

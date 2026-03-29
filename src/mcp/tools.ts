@@ -211,7 +211,7 @@ const SurfacedMemorySchema = z.object({
   tags: z.array(z.string()),
 });
 
-const SliceBuildWireFormatSchema = z.enum(["standard", "compact"]);
+const SliceBuildWireFormatSchema = z.enum(["standard", "compact", "agent"]);
 const SliceBuildWireFormatVersionSchema = z.union([
   z.literal(1),
   z.literal(2),
@@ -1095,6 +1095,14 @@ export const SliceBuildResponseSchema = z.union([
       CompactGraphSliceSchema,
       CompactGraphSliceV2Schema,
       CompactGraphSliceV3Schema,
+      z.object({
+        wireFormat: z.literal("agent"),
+        version: z.string(),
+        budget: z.object({ maxCards: z.number(), maxTokens: z.number() }),
+        seedSymbols: z.array(z.string()),
+        cards: z.array(z.unknown()),
+        edges: z.array(z.unknown()),
+      }),
     ]),
     /** Per-symbol retrieval evidence. Only populated when includeRetrievalEvidence is true. */
     retrievalEvidence: z.array(RetrievalEvidenceItemSchema).optional(),
@@ -1430,7 +1438,7 @@ export const RepoOverviewResponseSchema = z.object({
 // Context Summary Schemas
 // ============================================================================
 
-const ContextSummaryScopeSchema = z.enum(["symbol", "file", "task"]);
+const ContextSummaryScopeSchema = z.enum(["symbol", "file", "task", "repo"]);
 const ContextSummaryFormatSchema = z.enum(["markdown", "json", "clipboard"]);
 
 const ContextSummarySymbolSchema = z.object({

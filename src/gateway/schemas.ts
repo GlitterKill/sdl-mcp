@@ -103,7 +103,7 @@ const SliceBuildAction = z.object({
     .enum(["minimal", "signature", "deps", "compact", "full"])
     .optional(),
   adaptiveDetail: z.boolean().optional(),
-  wireFormat: z.enum(["standard", "compact"]).optional(),
+  wireFormat: z.enum(["standard", "compact", "agent"]).optional(),
   wireFormatVersion: z
     .union([z.literal(1), z.literal(2), z.literal(3)])
     .optional(),
@@ -138,7 +138,7 @@ const ContextSummaryAction = z.object({
   query: z.string().min(1),
   budget: z.number().int().min(1).optional(),
   format: z.enum(["markdown", "json", "clipboard"]).optional(),
-  scope: z.enum(["symbol", "file", "task"]).optional(),
+  scope: z.enum(["symbol", "file", "task", "repo"]).optional(),
 });
 
 const PRRiskAnalyzeAction = z.object({
@@ -349,6 +349,7 @@ const AgentOrchestrateAction = z.object({
       focusPaths: z.array(z.string()).optional(),
       includeTests: z.boolean().optional(),
       requireDiagnostics: z.boolean().optional(),
+    contextMode: z.enum(["precise", "broad"]).optional(),
     })
     .optional(),
 });

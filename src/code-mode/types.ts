@@ -7,6 +7,8 @@ export const ChainStepSchema = z.object({
   fn: z.string().min(1),
   /** Arguments for the function. May contain $N references as string values. */
   args: z.record(z.string(), z.unknown()).default({}),
+  /** Max tokens for this step's response. Truncates with continuation handle if exceeded. */
+  maxResponseTokens: z.number().int().min(50).max(100_000).optional(),
 });
 
 export const ChainBudgetSchema = z.object({
@@ -40,6 +42,8 @@ export const ChainRequestSchema = z.object({
   budget: ChainBudgetSchema.optional(),
   /** Error handling policy: continue to next step or stop chain */
   onError: z.enum(["continue", "stop"]).default("continue"),
+  /** Default max tokens per step response (overridden by per-step maxResponseTokens) */
+  defaultMaxResponseTokens: z.number().int().min(50).max(100_000).optional(),
   /** Opt-in execution trace for debugging */
   trace: ChainTraceOptionsSchema.optional(),
 });
@@ -67,6 +71,12 @@ export interface ChainStepResult {
   status: ChainStepStatus;
   /** Error message if status is "error" */
   error?: string;
+  /** Present when step result was truncated due to maxResponseTokens */
+  truncatedResponse?: {
+    originalTokens: number;
+    keptTokens: number;
+    continuationHandle: string;
+  };
 }
 
 export type ChainTraceOptions = z.infer<typeof ChainTraceOptionsSchema>;

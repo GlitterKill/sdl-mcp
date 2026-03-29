@@ -795,7 +795,7 @@ export interface RepoOverviewRequest {
   maxExportsPerDirectory?: number;
 }
 
-export type ContextSummaryScope = "symbol" | "file" | "task";
+export type ContextSummaryScope = "symbol" | "file" | "task" | "repo";
 export type ContextSummaryFormat = "markdown" | "json" | "clipboard";
 
 export interface ContextSummarySymbol {

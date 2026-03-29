@@ -19,7 +19,7 @@ describe("code-mode action catalog", () => {
       const transforms = catalog.filter((d) => d.kind === "internal");
 
       assert.ok(gatewayActions.length >= 29, `expected at least 29 gateway actions, got ${gatewayActions.length}`);
-      assert.strictEqual(transforms.length, 5, "should have 5 internal transforms");
+      assert.strictEqual(transforms.length, 6, "should have 6 internal transforms");
     });
 
     it("each descriptor has action, fn, description, tags, kind", () => {
@@ -113,7 +113,7 @@ describe("code-mode action catalog", () => {
       invalidateCatalog();
       const catalog = buildCatalog();
       const ranked = rankCatalog(catalog, "transform");
-      assert.ok(ranked.length >= 5, "should match all 5 transforms");
+      assert.ok(ranked.length >= 6, "should match all 6 transforms");
     });
   });
 
