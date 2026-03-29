@@ -245,6 +245,15 @@ function renderTypescript(catalog: ActionDescriptor[]): string {
     } else {
       lines.push(`function ${desc.fn}(p: object): object`);
     }
+    // Render subFields as inline comments for discoverability
+    if (desc.schemaSummary) {
+      for (const f of desc.schemaSummary.fields) {
+        if (f.subFields && f.subFields.length > 0) {
+          const subParams = f.subFields.map((sf) => `${sf.name}${sf.required ? "" : "?"}: ${sf.type}`).join("; ");
+          lines.push(`//   ${f.name} shape: { ${subParams} }`);
+        }
+      }
+    }
     if (desc.example) {
       lines.push(`// Example: ${desc.fn}(${JSON.stringify(desc.example)})`);
     }
@@ -289,6 +298,22 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
         lines.push(
           `| ${f.name} | ${f.type} | ${f.required ? "yes" : "no"} | ${def} |`,
         );
+      }
+      // Render subField details for nested objects
+      for (const f of desc.schemaSummary.fields) {
+        if (f.subFields && f.subFields.length > 0) {
+          lines.push("");
+          lines.push(`**${f.name}** shape:`);
+          lines.push("");
+          lines.push("| Field | Type | Required | Default |");
+          lines.push("|-------|------|----------|---------|");
+          for (const sf of f.subFields) {
+            const sfDef = sf.default !== undefined ? JSON.stringify(sf.default) : "";
+            lines.push(
+              `| ${sf.name} | ${sf.type} | ${sf.required ? "yes" : "no"} | ${sfDef} |`,
+            );
+          }
+        }
       }
     }
 

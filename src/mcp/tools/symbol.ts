@@ -167,7 +167,7 @@ export async function handleSymbolSearch(
     }),
   });
 
-  const response: SymbolSearchResponse = { results };
+  const response: SymbolSearchResponse = { results, symbols: results };
   if (request.includeRetrievalEvidence) {
     if (useHybrid && retrievalEvidence) {
       (response as Record<string, unknown>).retrievalEvidence = results.map((r) => ({

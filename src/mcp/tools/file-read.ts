@@ -120,12 +120,12 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
   const absPath = resolve(rootPath, filePath);
 
   // Security: ensure path is within repo root
-  validatePathWithinRoot(absPath, rootPath);
+  validatePathWithinRoot(rootPath, absPath);
 
   // Security: resolve symlinks and re-validate to prevent symlink escape
   if (existsSync(absPath)) {
     const realAbsPath = realpathSync(absPath);
-    validatePathWithinRoot(realAbsPath, rootPath);
+    validatePathWithinRoot(rootPath, realAbsPath);
   }
 
   // Check extension — block indexed source files

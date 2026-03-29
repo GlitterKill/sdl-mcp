@@ -6,8 +6,16 @@ import { logger } from "../../util/logger.js";
 import { PRRiskAnalysisRequestSchema } from "../tools.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { getLadybugConn } from "../../db/ladybug.js";
+import { getSymbolsByIds } from "../../db/ladybug-symbols.js";
+import { getFilesByIds } from "../../db/ladybug-repos.js";
 import type { BlastRadiusItem } from "../types.js";
 import { IndexError } from "../errors.js";
+
+const MAX_CHANGED_SYMBOLS_IN_RESPONSE = 100;
+const MAX_BLAST_RADIUS_IN_RESPONSE = 50;
+const MAX_FINDINGS = 20;
+const MAX_RECOMMENDED_TESTS = 20;
+const MAX_EVIDENCE_ITEMS = 20;
 
 type ComputedDeltaWithTiers = Awaited<ReturnType<typeof computeDeltaWithTiers>>;
 type ChangedSymbol = ComputedDeltaWithTiers["changedSymbols"][number];
@@ -86,6 +94,71 @@ export async function handlePRRiskAnalysis(args: unknown) {
     };
   }
 
+  // --- Enrich symbols with name/kind/file metadata ---
+  const allSymbolIds = [
+    ...changedSymbolIds,
+    ...blastRadiusItems.map((item: BlastRadiusItem) => item.symbolId),
+  ];
+  const uniqueSymbolIds = [...new Set(allSymbolIds)];
+  const symbolMap = await getSymbolsByIds(conn, uniqueSymbolIds);
+
+  // Collect fileIds from the symbol map so we can resolve relPaths
+  const fileIdSet = new Set<string>();
+  for (const row of symbolMap.values()) {
+    if (row.fileId) fileIdSet.add(row.fileId);
+  }
+  const fileMap = fileIdSet.size > 0
+    ? await getFilesByIds(conn, [...fileIdSet])
+    : new Map<string, { relPath: string }>();
+
+  // Helper to enrich a symbolId with name, kind, file
+  const enrichSymbol = (symbolId: string) => {
+    const sym = symbolMap.get(symbolId);
+    if (!sym) return { symbolId };
+    const file = sym.fileId ? fileMap.get(sym.fileId) : undefined;
+    return {
+      symbolId,
+      name: sym.name,
+      kind: sym.kind,
+      file: file?.relPath ?? undefined,
+    };
+  };
+
+  // --- Enrich and truncate changedSymbols ---
+  const totalChangedSymbols = delta.changedSymbols.length;
+  const truncatedChangedSymbols = delta.changedSymbols
+    .slice(0, MAX_CHANGED_SYMBOLS_IN_RESPONSE)
+    .map((c: ChangedSymbol) => ({
+      ...enrichSymbol(c.symbolId),
+      changeType: c.changeType,
+      tiers: c.tiers,
+    }));
+
+  // --- Enrich and truncate blastRadius ---
+  const totalBlastRadius = blastRadiusItems.length;
+  const truncatedBlastRadius = blastRadiusItems
+    .slice(0, MAX_BLAST_RADIUS_IN_RESPONSE)
+    .map((item: BlastRadiusItem) => ({
+      ...enrichSymbol(item.symbolId),
+      reason: item.reason,
+      distance: item.distance,
+      rank: item.rank,
+      signal: item.signal,
+      fanInTrend: item.fanInTrend,
+    }));
+
+  // --- Truncate findings ---
+  const totalFindings = findings.length;
+  const truncatedFindings = findings.slice(0, MAX_FINDINGS);
+
+  // --- Truncate recommendedTests ---
+  const totalRecommendedTests = recommendedTests.length;
+  const truncatedRecommendedTests = recommendedTests.slice(0, MAX_RECOMMENDED_TESTS);
+
+  // --- Truncate evidence ---
+  const totalEvidence = evidence.length;
+  const truncatedEvidence = evidence.slice(0, MAX_EVIDENCE_ITEMS);
+
   const response = {
     analysis: {
       repoId: delta.repoId,
@@ -93,12 +166,34 @@ export async function handlePRRiskAnalysis(args: unknown) {
       toVersion: delta.toVersion,
       riskScore,
       riskLevel: getRiskLevel(riskScore),
-      findings,
+      changedSymbols: {
+        items: truncatedChangedSymbols,
+        totalCount: totalChangedSymbols,
+        truncated: totalChangedSymbols > MAX_CHANGED_SYMBOLS_IN_RESPONSE,
+      },
+      blastRadius: {
+        items: truncatedBlastRadius,
+        totalCount: totalBlastRadius,
+        truncated: totalBlastRadius > MAX_BLAST_RADIUS_IN_RESPONSE,
+      },
+      findings: {
+        items: truncatedFindings,
+        totalCount: totalFindings,
+        truncated: totalFindings > MAX_FINDINGS,
+      },
+      evidence: {
+        items: truncatedEvidence,
+        totalCount: totalEvidence,
+        truncated: totalEvidence > MAX_EVIDENCE_ITEMS,
+      },
+      recommendedTests: {
+        items: truncatedRecommendedTests,
+        totalCount: totalRecommendedTests,
+        truncated: totalRecommendedTests > MAX_RECOMMENDED_TESTS,
+      },
       impactedSymbols,
-      evidence,
-      recommendedTests,
-      changedSymbolsCount: delta.changedSymbols.length,
-      blastRadiusCount: blastRadiusItems.length,
+      changedSymbolsCount: totalChangedSymbols,
+      blastRadiusCount: totalBlastRadius,
     },
     escalationRequired,
     policyDecision,
@@ -108,7 +203,7 @@ export async function handlePRRiskAnalysis(args: unknown) {
     repoId: validated.repoId,
     riskScore,
     riskLevel: response.analysis.riskLevel,
-    findingsCount: findings.length,
+    findingsCount: totalFindings,
   });
 
   return response;

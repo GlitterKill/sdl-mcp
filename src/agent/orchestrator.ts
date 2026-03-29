@@ -126,18 +126,22 @@ export class Orchestrator {
       const metrics = executor.getMetrics();
       const nextBestAction = executor.getNextBestAction();
 
-      // Precise mode: strip envelope, return only evidence + minimal metadata.
-      // This minimizes token burn — the LLM only needs the context, not diagnostics.
+      // Precise mode: return evidence + lightweight metadata.
+      // actionsTaken and summary are always populated — they are the most
+      // useful fields for agent consumers.  Only answer, nextBestAction,
+      // and retrievalEvidence are stripped in precise mode.
       const isPrecise = task.options?.contextMode === 'precise';
 
       if (isPrecise) {
         return {
           taskId,
           taskType: task.taskType,
-          actionsTaken: [],
+          actionsTaken: actions,
           path,
           finalEvidence: evidence,
-          summary: '',
+          summary: this.generateSummary(task, actions, evidence, success, {
+            clusterExpandedCount,
+          }),
           success,
           metrics,
         };
@@ -202,14 +206,42 @@ export class Orchestrator {
     extra: { clusterExpandedCount: number } = { clusterExpandedCount: 0 },
   ): string {
     const status = success ? "completed successfully" : "completed with errors";
-    const actionCount = actions.length;
-    const evidenceCount = evidence.length;
     const clusterNote =
       extra.clusterExpandedCount > 0
         ? ` (expanded ${extra.clusterExpandedCount} symbols via cluster analysis)`
         : "";
 
-    return `Task "${task.taskType}" ${status}. Executed ${actionCount} action(s), collected ${evidenceCount} evidence item(s).${clusterNote}`;
+    const parts: string[] = [
+      `Task "${task.taskType}" ${status}. Executed ${actions.length} action(s), collected ${evidence.length} evidence item(s).${clusterNote}`,
+    ];
+
+    // Append per-action details: rung, symbol/file, tokens, duration
+    if (actions.length > 0) {
+      const actionLines = actions.map((a) => {
+        const sym = typeof a.input?.context === "object" && Array.isArray(a.input.context)
+          ? (a.input.context as string[]).slice(0, 3).join(", ")
+          : undefined;
+        const ref = sym ? ` [${sym}]` : "";
+        return `- ${a.type} (${a.status}, ${a.durationMs}ms)${ref}`;
+      });
+      parts.push("Actions: " + actionLines.join("; "));
+    }
+
+    // Build a readable paragraph from evidence summaries
+    if (evidence.length > 0) {
+      const seen = new Set<string>();
+      const snippets: string[] = [];
+      for (const e of evidence) {
+        if (!e.summary || seen.has(e.summary)) continue;
+        seen.add(e.summary);
+        snippets.push(e.summary);
+      }
+      if (snippets.length > 0) {
+        parts.push("Findings: " + snippets.join(". "));
+      }
+    }
+
+    return parts.join(" ");
   }
 
   private generateAnswer(

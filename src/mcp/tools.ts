@@ -448,14 +448,23 @@ const DeltaSymbolChangeSchema = z.discriminatedUnion("changeType", [
   z.object({
     symbolId: z.string(),
     changeType: z.literal("added"),
+    name: z.string().optional(),
+    kind: z.string().optional(),
+    file: z.string().optional(),
   }),
   z.object({
     symbolId: z.string(),
     changeType: z.literal("removed"),
+    name: z.string().optional(),
+    kind: z.string().optional(),
+    file: z.string().optional(),
   }),
   z.object({
     symbolId: z.string(),
     changeType: z.literal("modified"),
+    name: z.string().optional(),
+    kind: z.string().optional(),
+    file: z.string().optional(),
     signatureDiff: z
       .object({
         before: z.string().optional(),
@@ -486,6 +495,9 @@ const FanInTrendSchema = z.object({
 
 const BlastRadiusItemSchema = z.object({
   symbolId: z.string(),
+  name: z.string().optional(),
+  kind: z.string().optional(),
+  file: z.string().optional(),
   reason: z.string().optional(),
   distance: z.number(),
   rank: z.number(),
@@ -826,6 +838,8 @@ export type RetrievalEvidenceItem = z.infer<typeof RetrievalEvidenceItemSchema>;
 export const SymbolSearchResponseSchema = z.object({
   repoId: z.string().optional(),
   results: z.array(SymbolSearchResultSchema),
+  /** Alias for `results` — agents commonly expect `$0.symbols[0].symbolId` in chain refs. */
+  symbols: z.array(SymbolSearchResultSchema).optional(),
   truncation: z
     .object({
       truncated: z.boolean(),
@@ -1108,6 +1122,7 @@ const AmplifierSummaryItemSchema = z.object({
 export const DeltaGetResponseSchema = z.object({
   delta: DeltaPackSchema,
   amplifiers: z.array(AmplifierSummaryItemSchema),
+  blastRadiusTruncated: z.boolean().optional(),
 });
 
 export const SliceSpilloverGetRequestSchema = z.object({
@@ -1980,6 +1995,10 @@ export const RuntimeExecuteResponseSchema = z.object({
   signal: z.string().nullable(),
   durationMs: z.number().int(),
   stdoutSummary: z.string().describe("Head + tail, truncated"),
+  stdoutPreview: z
+    .string()
+    .optional()
+    .describe("First 3 lines / 200 chars of stdout (minimal mode only)"),
   stderrSummary: z.string().describe("Tail, truncated"),
   artifactHandle: z.string().nullable(),
   excerpts: z

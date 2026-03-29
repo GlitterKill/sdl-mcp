@@ -1250,7 +1250,7 @@ Returns cumulative token usage statistics and savings metrics.
 
 Executes a chain of SDL-MCP operations in a single round-trip with budget tracking and cross-step result passing.
 
-**What it does:** Takes an array of steps, each calling an action from the API manual or an internal transform (`dataPick`, `dataMap`, `dataFilter`, `dataSort`, `dataTemplate`). Results flow between steps via `$N` references (e.g., `$0.symbols[0].symbolId`). Includes budget tracking, context-ladder validation, cross-step ETag caching, and optional execution tracing.
+**What it does:** Takes an array of steps, each calling an action from the API manual or an internal transform (`dataPick`, `dataMap`, `dataFilter`, `dataSort`, `dataTemplate`). Results flow between steps via `$N` references (e.g., `$0.results[0].symbolId` or `$0.symbols[0].symbolId`). Includes budget tracking, context-ladder validation, cross-step ETag caching, and optional execution tracing.
 
 **Parameters:**
 

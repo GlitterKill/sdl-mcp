@@ -472,5 +472,23 @@ export async function queryArtifactContent(
   searchStream(stdout, "stdout");
   searchStream(stderr, "stderr");
 
+  // Fallback: if no keyword matches found, return first lines of output
+  if (excerpts.length === 0) {
+    const fallbackStream = (streamContent: string | null, source: "stdout" | "stderr"): void => {
+      if (!streamContent) return;
+      const lines = streamContent.split("\n");
+      if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) return;
+      const end = Math.min(lines.length - 1, maxExcerpts - 1);
+      excerpts.push({
+        lineStart: 1,
+        lineEnd: end + 1,
+        content: lines.slice(0, end + 1).map(truncLine).join("\n"),
+        source,
+      });
+    };
+    fallbackStream(stdout, "stdout");
+    if (excerpts.length === 0) fallbackStream(stderr, "stderr");
+  }
+
   return { excerpts, totalLines, totalBytes, searchedStreams };
 }

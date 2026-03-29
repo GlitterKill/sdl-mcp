@@ -60,6 +60,25 @@ const ROOT_CONTAINER_TYPES = new Set([
 ]);
 
 /**
+ * Node types that are import statements across languages.
+ * Separated from VERBATIM_TYPES so file-mode skeleton with exportedOnly
+ * can collapse imports into a summary line.
+ */
+const IMPORT_TYPES = new Set([
+  // JS/TS
+  "import_statement",
+  // Python
+  "import_from_statement",
+  // Go, Java, Kotlin, C#
+  "import_declaration",
+  // Rust
+  "use_declaration",
+  // C/C++
+  "preproc_include",
+  "preproc_def",
+]);
+
+/**
  * Node types that are rendered verbatim (imports, type declarations).
  */
 const VERBATIM_TYPES = new Set([
@@ -134,20 +153,64 @@ export function extractSkeletonFromNode(
   // Root containers: process children
   if (ROOT_CONTAINER_TYPES.has(nodeType)) {
     const parts: string[] = [];
-    // First pass: imports
-    for (const child of node.children) {
-      if (VERBATIM_TYPES.has(child.type) || child.type === "export_statement") {
-        parts.push(extractSkeletonFromNode(
-          child,
-          content,
-          includeIdentifiers,
-          depth,
-          exportedOnly,
-        ));
+
+    if (exportedOnly) {
+      // Collapse imports into a summary line instead of showing them verbatim
+      const importCount = node.children.filter(
+        (c) => IMPORT_TYPES.has(c.type),
+      ).length;
+      if (importCount > 0) {
+        parts.push(`// ${importCount} import${importCount > 1 ? "s" : ""}\n`);
       }
-    }
-    // Second pass: non-imports
-    if (!exportedOnly) {
+
+      // Collect exported symbols (export_statement nodes)
+      const exportParts: string[] = [];
+      for (const child of node.children) {
+        if (child.type === "export_statement") {
+          exportParts.push(extractSkeletonFromNode(
+            child,
+            content,
+            includeIdentifiers,
+            depth,
+            exportedOnly,
+          ));
+        }
+      }
+
+      if (exportParts.length > 0) {
+        // File has exports — show them
+        parts.push(...exportParts);
+      } else {
+        // Fallback: no exports found (e.g., entry-point files).
+        // Show all top-level signatures so the skeleton is still useful.
+        for (const child of node.children) {
+          if (IMPORT_TYPES.has(child.type)) {
+            continue; // Already summarized above
+          }
+          parts.push(extractSkeletonFromNode(
+            child,
+            content,
+            includeIdentifiers,
+            depth,
+            false, // Process children fully in fallback mode
+          ));
+        }
+      }
+    } else {
+      // Non-exported mode: show everything (original behavior)
+      // First pass: imports + verbatim types + export statements
+      for (const child of node.children) {
+        if (VERBATIM_TYPES.has(child.type) || child.type === "export_statement") {
+          parts.push(extractSkeletonFromNode(
+            child,
+            content,
+            includeIdentifiers,
+            depth,
+            exportedOnly,
+          ));
+        }
+      }
+      // Second pass: everything else
       for (const child of node.children) {
         if (
           !VERBATIM_TYPES.has(child.type) &&
@@ -163,6 +226,7 @@ export function extractSkeletonFromNode(
         }
       }
     }
+
     return parts.join("");
   }
 

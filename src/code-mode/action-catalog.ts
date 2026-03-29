@@ -61,6 +61,7 @@ export interface SchemaSummaryField {
   default?: unknown;
   enumValues?: string[];
   description?: string;
+  subFields?: SchemaSummaryField[];
 }
 
 export interface SchemaSummary {
@@ -156,6 +157,24 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
   >;
   if (def?.type === "enum" && (current as unknown as Record<string, unknown>).options) {
     field.enumValues = (current as unknown as Record<string, unknown>).options as string[];
+  }
+
+
+  // Extract subFields for nested ZodObject fields (e.g., dataSort.by)
+  if (def?.type === "object" && typeof (current as unknown as Record<string, unknown>).shape === "object") {
+    const nestedShape = (current as unknown as Record<string, unknown>).shape as Record<string, z.ZodType>;
+    field.subFields = Object.entries(nestedShape).map(([subName, subSchema]) => describeField(subName, subSchema));
+  }
+  // Extract subFields for array-of-objects (e.g., dataFilter.clauses)
+  if (def?.type === "array") {
+    const elemType = (def.element ?? def.innerType) as z.ZodType | undefined;
+    if (elemType) {
+      const elemDef = (elemType as unknown as Record<string, unknown>)._def as Record<string, unknown> | undefined;
+      if (elemDef?.type === "object" && typeof (elemType as unknown as Record<string, unknown>).shape === "object") {
+        const nestedShape = (elemType as unknown as Record<string, unknown>).shape as Record<string, z.ZodType>;
+        field.subFields = Object.entries(nestedShape).map(([subName, subSchema]) => describeField(subName, subSchema));
+      }
+    }
   }
 
   return field;
@@ -333,26 +352,31 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
 };
 
 const TRANSFORM_DESCRIPTIONS: Record<string, string> = {
-  dataPick: "Project fields from an object",
-  dataMap: "Project fields from each element of an array",
-  dataFilter: "Filter array elements by clauses",
-  dataSort: "Sort array elements by a field",
-  dataTemplate: "Render template strings from object(s)",
+  dataPick:
+    "Project fields from an object. fields is {outputKey: \"inputKey\"} (Record, NOT array). First param is input, not source.",
+  dataMap:
+    "Project fields from each element of an array. fields is {outputKey: \"inputKey\"} (Record, NOT array). First param is input, not source.",
+  dataFilter:
+    "Filter array elements by clauses. Each clause: {path, op, value}. ops: eq|ne|gt|gte|lt|lte|contains|in|exists. mode: \"all\"|\"any\" (default \"all\").",
+  dataSort:
+    "Sort array elements. by: {path: string, direction: \"asc\"|\"desc\", type?: \"string\"|\"number\"|\"date\"|\"boolean\"}. NOT field/order.",
+  dataTemplate:
+    "Render {{mustache}} template strings from object or array. joinWith (default '\\n') joins array results.",
 };
 
 const TRANSFORM_EXAMPLES: Record<string, Record<string, unknown>> = {
   dataPick: { input: "$0", fields: { name: "name", file: "file" } },
-  dataMap: { input: "$0.symbols", fields: { id: "symbolId", name: "name" } },
+  dataMap: { input: "$0.results", fields: { id: "symbolId", name: "name", file: "file" } },
   dataFilter: {
-    input: "$0.symbols",
+    input: "$0.results",
     clauses: [{ path: "kind", op: "eq", value: "function" }],
   },
   dataSort: {
-    input: "$0.symbols",
+    input: "$0.results",
     by: { path: "name", direction: "asc" },
   },
   dataTemplate: {
-    input: "$0.symbols",
+    input: "$0.results",
     template: "{{name}} ({{kind}}) in {{file}}",
     joinWith: "\n",
   },

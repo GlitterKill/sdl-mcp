@@ -68,6 +68,21 @@ function truncateLine(line: string): string {
 }
 
 // ============================================================================
+// Stdout Preview (for minimal mode)
+// ============================================================================
+
+const PREVIEW_MAX_LINES = 3;
+const PREVIEW_MAX_CHARS = 200;
+
+function buildStdoutPreview(stdout: string): string {
+  if (!stdout) return "";
+  const lines = stdout.split("\n");
+  const firstLines = lines.slice(0, PREVIEW_MAX_LINES).join("\n");
+  if (firstLines.length <= PREVIEW_MAX_CHARS) return firstLines;
+  return firstLines.slice(0, PREVIEW_MAX_CHARS) + "…";
+}
+
+// ============================================================================
 // Intent-Only Excerpts (for outputMode: "intent")
 // ============================================================================
 
@@ -179,6 +194,22 @@ function generateExcerpts(
 
     searchStream(stdoutLines, "stdout");
     searchStream(stderrLines, "stderr");
+
+    // Fallback: if no keyword matches found, return first lines of output
+    if (excerpts.length === 0) {
+      const fallbackLines = (lines: string[], source: "stdout" | "stderr"): void => {
+        if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) return;
+        const end = Math.min(lines.length - 1, RUNTIME_MAX_KEYWORD_EXCERPTS - 1);
+        excerpts.push({
+          lineStart: 1,
+          lineEnd: end + 1,
+          content: lines.slice(0, end + 1).map(truncateLine).join("\n"),
+          source,
+        });
+      };
+      fallbackLines(stdoutLines, "stdout");
+      if (excerpts.length === 0) fallbackLines(stderrLines, "stderr");
+    }
   }
 
   return { stdoutSummary, stderrSummary, excerpts };
@@ -368,6 +399,7 @@ export async function handleRuntimeExecute(
             signal: compileResult.signal,
             durationMs: compileResult.durationMs,
             stdoutSummary: "",
+            stdoutPreview: buildStdoutPreview(compileStdout),
             stderrSummary: "",
             outputLines: stdoutLineCount + stderrLineCount,
             outputBytes: compileResult.totalStdoutBytes + compileResult.totalStderrBytes,
@@ -549,6 +581,7 @@ export async function handleRuntimeExecute(
         signal: result.signal,
         durationMs: result.durationMs,
         stdoutSummary: "",
+        stdoutPreview: buildStdoutPreview(stdoutStr),
         stderrSummary: "",
         outputLines: stdoutLineCount + stderrLineCount,
         outputBytes: result.totalStdoutBytes + result.totalStderrBytes,

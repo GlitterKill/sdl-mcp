@@ -20,6 +20,7 @@ import type {
 
 const DEFAULT_SUMMARY_BUDGET = 2000;
 const SUMMARY_MAX_RESULTS = 60;
+const SUMMARY_EXPANSION_DEPTH = 20;
 const SUMMARY_CACHE_MAX = 128;
 
 type SummarySeed = {
@@ -183,18 +184,35 @@ export function buildContextSummary(input: {
 
 async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
   const conn = await getLadybugConn();
-  const results = await ladybugDb.searchSymbolsLite(
+
+  // Always perform both full-phrase and per-token searches, then merge.
+  // Full-phrase search alone often fails for natural-language queries
+  // (e.g. "How does the indexing pipeline work?") because the full string
+  // rarely appears as a substring in symbol names or summaries.
+  const seen = new Set<string>();
+  const merged: ladybugDb.SearchSymbolLiteRow[] = [];
+
+  // Phase 1: full-phrase search (exact hits rank highest)
+  const phraseResults = await ladybugDb.searchSymbolsLite(
     conn,
     repoId,
     query,
     SUMMARY_MAX_RESULTS,
   );
-  if (results.length === 0) {
-    const tokenResults: ladybugDb.SearchSymbolLiteRow[] = [];
-    const seen = new Set<string>();
-    const tokens = tokenize(query).filter((token) => token.length >= 3 && !TASK_TEXT_STOP_WORDS.has(token));
+  for (const row of phraseResults) {
+    if (!seen.has(row.symbolId)) {
+      seen.add(row.symbolId);
+      merged.push(row);
+    }
+  }
+
+  // Phase 2: per-token search (catches relevant symbols the phrase missed)
+  const tokens = tokenize(query).filter(
+    (token) => token.length >= 3 && !TASK_TEXT_STOP_WORDS.has(token),
+  );
+  if (tokens.length > 0) {
     const perTokenLimit = Math.max(
-      5,
+      10,
       Math.floor(SUMMARY_MAX_RESULTS / Math.max(1, tokens.length)),
     );
     for (const token of tokens) {
@@ -205,26 +223,44 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
         perTokenLimit,
       );
       for (const row of partial) {
-        if (seen.has(row.symbolId)) continue;
-        seen.add(row.symbolId);
-        tokenResults.push(row);
+        if (!seen.has(row.symbolId)) {
+          seen.add(row.symbolId);
+          merged.push(row);
+        }
       }
     }
-    results.push(...tokenResults.slice(0, SUMMARY_MAX_RESULTS));
   }
+
+  const results = merged.slice(0, SUMMARY_MAX_RESULTS);
   const symbolIds = results.map((row) => row.symbolId);
   const symbolIdSet = new Set(symbolIds);
-  const symbolsMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
+
+  // Phase 3: 1-hop edge expansion — follow outbound edges from search hits
+  // to discover closely-related symbols that the text search missed.
+  // This populates the dependency graph with meaningful connections.
+  const searchEdges = await ladybugDb.getEdgesFromSymbolsForSlice(conn, symbolIds);
+  const expansionIds: string[] = [];
+  for (const edges of searchEdges.values()) {
+    for (const edge of edges) {
+      if (!symbolIdSet.has(edge.toSymbolId) && expansionIds.length < SUMMARY_EXPANSION_DEPTH) {
+        expansionIds.push(edge.toSymbolId);
+        symbolIdSet.add(edge.toSymbolId);
+      }
+    }
+  }
+  const allSymbolIds = [...symbolIds, ...expansionIds];
+
+  const symbolsMap = await ladybugDb.getSymbolsByIds(conn, allSymbolIds);
 
   const fileIds = new Set<string>();
   for (const symbol of symbolsMap.values()) {
     fileIds.add(symbol.fileId);
   }
   const filesMap = await ladybugDb.getFilesByIds(conn, [...fileIds]);
-  const metricsMap = await ladybugDb.getMetricsBySymbolIds(conn, symbolIds);
-  const edgesMap = await ladybugDb.getEdgesFromSymbolsForSlice(conn, symbolIds);
-  const clustersMap = await ladybugDb.getClustersForSymbols(conn, symbolIds);
-  const processesMap = await ladybugDb.getProcessesForSymbols(conn, symbolIds);
+  const metricsMap = await ladybugDb.getMetricsBySymbolIds(conn, allSymbolIds);
+  const edgesMap = await ladybugDb.getEdgesFromSymbolsForSlice(conn, allSymbolIds);
+  const clustersMap = await ladybugDb.getClustersForSymbols(conn, allSymbolIds);
+  const processesMap = await ladybugDb.getProcessesForSymbols(conn, allSymbolIds);
 
   const keySymbols: ContextSummarySymbol[] = [];
   const fileCounts = new Map<string, number>();
@@ -266,7 +302,7 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
 
     const metrics = metricsMap.get(symbol.symbolId);
     const reasons: string[] = [];
-    if (metrics && metrics.fanIn >= 15) {
+    if (metrics && metrics.fanIn >= 5) {
       reasons.push("high fan-in");
     }
     if (metrics && metrics.churn30d > 0) {
@@ -293,6 +329,21 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
       });
     }
   }
+
+  // Sort keySymbols by relevance: highest fan-in and most connections first.
+  // This ensures the most important symbols appear first in the summary.
+  keySymbols.sort((a, b) => {
+    const metricsA = metricsMap.get(a.symbolId);
+    const metricsB = metricsMap.get(b.symbolId);
+    const fanInA = metricsA?.fanIn ?? 0;
+    const fanInB = metricsB?.fanIn ?? 0;
+    const edgesA = (edgesMap.get(a.symbolId) ?? []).length;
+    const edgesB = (edgesMap.get(b.symbolId) ?? []).length;
+    // Primary: higher fan-in first; secondary: more outgoing edges first
+    const scoreA = fanInA * 3 + edgesA;
+    const scoreB = fanInB * 3 + edgesB;
+    return scoreB - scoreA || a.name.localeCompare(b.name);
+  });
 
   const filesTouched = [...fileCounts.entries()]
     .map(([file, symbolCount]) => ({ file, symbolCount }))

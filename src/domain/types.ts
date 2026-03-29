@@ -286,10 +286,13 @@ export interface GraphSlice {
  * to `signatureDiff`, `invariantDiff`, and `sideEffectDiff` at compile time.
  */
 export type DeltaSymbolChange =
-  | { symbolId: SymbolId; changeType: "added" | "removed" }
+  | { symbolId: SymbolId; changeType: "added" | "removed"; name?: string; kind?: string; file?: string }
   | {
       symbolId: SymbolId;
       changeType: "modified";
+      name?: string;
+      kind?: string;
+      file?: string;
       signatureDiff?: { before?: string; after?: string };
       invariantDiff?: { added: string[]; removed: string[] };
       sideEffectDiff?: { added: string[]; removed: string[] };
@@ -297,6 +300,9 @@ export type DeltaSymbolChange =
 
 export interface BlastRadiusItem {
   symbolId: SymbolId;
+  name?: string;
+  kind?: string;
+  file?: string;
   reason?: string;
   distance: number;
   rank: number;

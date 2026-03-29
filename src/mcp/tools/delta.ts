@@ -27,6 +27,9 @@ import {
 import { attachRawContext } from "../token-usage.js";
 import { IndexError } from "../errors.js";
 
+/** Hard cap on blast-radius items returned to the caller. */
+const MAX_BLAST_RADIUS_ITEMS = 50;
+
 /**
  * Handles delta pack requests.
  * Computes and returns changes between two ledger versions with blast radius analysis.
@@ -133,7 +136,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     }
 
     const maxChanges = config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS;
-    const maxBlastRadius = config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS;
+    const maxBlastRadius = MAX_BLAST_RADIUS_ITEMS;
 
     const changedSymbolsTruncation = truncateArray(delta.changedSymbols, {
       maxItems: maxChanges,
@@ -168,6 +171,53 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       };
     }
 
+    // Collect all symbol IDs for enrichment (changed + blast radius)
+    const blastRadiusSymbolIds = delta.blastRadius.map((item) => item.symbolId);
+    const allSymbolIds = [
+      ...new Set([...changedSymbolIds, ...blastRadiusSymbolIds]),
+    ];
+
+    const symbolMap = await ladybugDb.getSymbolsByIds(conn, allSymbolIds);
+
+    // Build fileId-to-relPath map for enrichment
+    const allFileIds = [
+      ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
+    ];
+    const fileMap = await ladybugDb.getFilesByIds(conn, allFileIds);
+
+    // Enrich changedSymbols with human-readable fields
+    delta.changedSymbols = delta.changedSymbols.map((change) => {
+      const sym = symbolMap.get(change.symbolId);
+      if (!sym) return change;
+      const file = fileMap.get(sym.fileId);
+      return {
+        ...change,
+        name: sym.name,
+        kind: sym.kind,
+        file: file?.relPath ?? undefined,
+      };
+    });
+
+    // Enrich blastRadius with human-readable fields
+    delta.blastRadius = delta.blastRadius.map((item) => {
+      const sym = symbolMap.get(item.symbolId);
+      if (!sym) return item;
+      const file = fileMap.get(sym.fileId);
+      return {
+        ...item,
+        name: sym.name,
+        kind: sym.kind,
+        file: file?.relPath ?? undefined,
+      };
+    });
+
+    // Apply MAX_BLAST_RADIUS_ITEMS hard cap
+    let blastRadiusTruncatedFlag = false;
+    if (delta.blastRadius.length > MAX_BLAST_RADIUS_ITEMS) {
+      delta.blastRadius = delta.blastRadius.slice(0, MAX_BLAST_RADIUS_ITEMS);
+      blastRadiusTruncatedFlag = true;
+    }
+
     const amplifiers = delta.blastRadius
       .filter((item) => item.fanInTrend?.isAmplifier)
       .map((item) => ({
@@ -177,14 +227,14 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
         current: item.fanInTrend!.current,
       }));
 
-    const symbolMap = await ladybugDb.getSymbolsByIds(conn, changedSymbolIds);
-    const fileIds = [
-      ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
-    ];
+    const fileIds = allFileIds;
 
-    const response = { delta, amplifiers };
+    const response: Record<string, unknown> = { delta, amplifiers };
+    if (blastRadiusTruncatedFlag) {
+      response.blastRadiusTruncated = true;
+    }
     attachRawContext(response, { fileIds });
-    return response;
+    return response as DeltaGetResponse;
   };
 
   if (isTracingEnabled()) {

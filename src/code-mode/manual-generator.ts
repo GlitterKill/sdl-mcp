@@ -42,11 +42,11 @@ export const ACTION_TO_FN: Record<string, string> = Object.fromEntries(
 
 const MANUAL_TEMPLATE = `// SDL-MCP API — use sdl.agent.orchestrate for context retrieval, sdl.chain for multi-step operations
 // repoId is set in the chain envelope, not per-step.
-// Reference prior step results with $N (e.g., $0.results[0].symbolId).
+// Reference prior step results with $N (e.g., $0.results[0].symbolId or $0.symbols[0].symbolId).
 
 // === Query ===
 /** Search symbols by name/pattern */
-function symbolSearch(p: { query: string; kinds?: string[]; limit?: number; semantic?: boolean }): { results: { symbolId: string; name: string; kind: string; file: string }[] }
+function symbolSearch(p: { query: string; kinds?: string[]; limit?: number; semantic?: boolean }): { results: { symbolId: string; name: string; kind: string; file: string }[]; symbols: /* alias for results */ object[] }
 /** Get symbol card (metadata, deps, metrics) */
 function symbolGetCard(p: { symbolId: string; ifNoneMatch?: string }): { card: { symbolId: string; name: string; kind: string; signature: string; summary: string; deps: object }; etag: string } | { notModified: true }
 /** Batch-fetch symbol cards */
@@ -121,7 +121,28 @@ function usageStats(p: { scope?: "session" | "history" | "both"; since?: string;
 
 // === File ===
 /** Read non-indexed file content (templates, configs, docs) */
-function fileRead(p: { filePath: string; maxBytes?: number; offset?: number; limit?: number; search?: string; searchContext?: number; jsonPath?: string }): { content: string; bytes: number; totalLines: number; returnedLines: number; truncated: boolean; matchCount?: number; extractedPath?: string }`;
+function fileRead(p: { filePath: string; maxBytes?: number; offset?: number; limit?: number; search?: string; searchContext?: number; jsonPath?: string }): { content: string; bytes: number; totalLines: number; returnedLines: number; truncated: boolean; matchCount?: number; extractedPath?: string }
+
+// === Data Transforms (use inside sdl.chain steps) ===
+// These are internal transforms, NOT gateway actions. Use as chain step fn names.
+// IMPORTANT: 'fields' is Record<string, string> (object mapping outputKey -> inputKey), NOT an array.
+// IMPORTANT: First param is always 'input', NOT 'source'.
+/** Project fields from an object */
+function dataPick(p: { input: unknown; fields: Record<string, string> }): object
+// Example: dataPick({"input":"$0","fields":{"name":"name","file":"file"}})
+/** Project fields from each element of an array */
+function dataMap(p: { input: unknown[]; fields: Record<string, string> }): object[]
+// Example: dataMap({"input":"$0.results","fields":{"id":"symbolId","name":"name","file":"file"}})
+/** Filter array elements by clauses */
+function dataFilter(p: { input: unknown[]; clauses: Array<{path: string; op: "eq"|"ne"|"gt"|"gte"|"lt"|"lte"|"contains"|"in"|"exists"; value?: unknown}>; mode?: "all"|"any" }): object[]
+// Example: dataFilter({"input":"$0.results","clauses":[{"path":"kind","op":"eq","value":"function"}]})
+/** Sort array elements by a field. Uses 'by' (NOT field/order) */
+function dataSort(p: { input: unknown[]; by: {path: string; direction?: "asc"|"desc"; type?: "string"|"number"|"date"|"boolean"} }): object[]
+// Example: dataSort({"input":"$0.results","by":{"path":"name","direction":"asc"}})
+/** Render {{mustache}} template strings from object(s) */
+function dataTemplate(p: { input: Record<string, unknown> | unknown[]; template: string; joinWith?: string }): { text: string }
+// Example: dataTemplate({"input":"$0.results","template":"{{name}} ({{kind}}) in {{file}}","joinWith":"\n"})
+`;
 
 export function generateManual(_liveIndex?: LiveIndexCoordinator): string {
   // Validate FN_NAME_MAP covers all actions
