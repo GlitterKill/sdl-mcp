@@ -375,19 +375,19 @@ const policySet: ActionDefinition = {
 // Agent actions (7)
 // ---------------------------------------------------------------------------
 
-const agentOrchestrate: ActionDefinition = {
-  action: "agent.orchestrate",
+const agentContext: ActionDefinition = {
+  action: "agent.context",
   namespace: "agent",
-  description: "Orchestrate agent task execution with automated rung selection",
+  description: "Retrieve multi-rung task context for explain, debug, review, or implement work",
   args: [
     { ...REPO_ID_ARG },
     { flag: "--task-type", field: "taskType", type: "string", required: true, description: "Task type: debug|review|implement|explain" },
     { flag: "--task-text", field: "taskText", type: "string", required: true, description: "Task description" },
     { flag: "--budget", field: "budget", type: "json", description: 'JSON budget, e.g. \'{"maxTokens":5000}\'' },
-    { flag: "--options", field: "options", type: "json", description: 'JSON options, e.g. \'{"includeTests":true}\'' },
+    { flag: "--options", field: "options", type: "json", description: 'JSON options, e.g. \'{"contextMode":"precise","includeTests":true}\'' },
   ],
   examples: [
-    'sdl-mcp tool agent.orchestrate --repo-id my-repo --task-type debug --task-text "fix auth bug"',
+    'sdl-mcp tool agent.context --repo-id my-repo --task-type debug --task-text "fix auth bug"',
   ],
 };
 
@@ -717,7 +717,7 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   repoRegister, repoStatus, repoOverview,
   indexRefresh, policyGet, policySet, usageStats, fileRead,
   // Agent
-  agentOrchestrate, agentFeedback, agentFeedbackQuery,
+  agentContext, agentFeedback, agentFeedbackQuery,
   bufferPush, bufferCheckpoint, bufferStatus, runtimeExecute, runtimeQueryOutput,
   memoryStore, memoryQuery, memoryRemove, memorySurface,
 ];

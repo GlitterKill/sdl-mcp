@@ -20,7 +20,7 @@ export const FN_NAME_MAP: Record<string, string> = {
   indexRefresh: "index.refresh",
   policyGet: "policy.get",
   policySet: "policy.set",
-  agentOrchestrate: "agent.orchestrate",
+  agentContext: "agent.context",
   agentFeedback: "agent.feedback",
   agentFeedbackQuery: "agent.feedback.query",
   bufferPush: "buffer.push",
@@ -40,8 +40,8 @@ export const ACTION_TO_FN: Record<string, string> = Object.fromEntries(
   Object.entries(FN_NAME_MAP).map(([fn, action]) => [action, fn]),
 );
 
-const MANUAL_TEMPLATE = `// SDL-MCP API — use sdl.agent.orchestrate for context retrieval, sdl.chain for multi-step operations
-// repoId is set in the chain envelope, not per-step.
+const MANUAL_TEMPLATE = `// SDL-MCP API - use sdl.context for context retrieval, sdl.workflow for multi-step operations
+// repoId is set in the workflow envelope, not per-step.
 // Reference prior step results with $N (e.g., $0.results[0].symbolId or $0.symbols[0].symbolId).
 
 // === Query ===
@@ -96,9 +96,9 @@ function memoryRemove(p: { memoryId: string }): { removed: boolean }
 /** Auto-surface relevant memories */
 function memorySurface(p: { symbolIds?: string[]; fileIds?: string[]; taskText?: string; limit?: number }): { memories: object[] }
 
-// === Agent ===
-/** Orchestrate multi-rung context retrieval */
-function agentOrchestrate(p: { taskType: "debug" | "review" | "implement" | "explain"; taskText: string; focusSymbols?: string[]; budget?: { maxTokens?: number } }): { evidence: object[] }
+// === Context / Agent ===
+/** Retrieve multi-rung task context */
+function agentContext(p: { taskType: "debug" | "review" | "implement" | "explain"; taskText: string; budget?: { maxTokens?: number; maxActions?: number; maxDurationMs?: number }; options?: { focusSymbols?: string[]; focusPaths?: string[]; includeTests?: boolean; requireDiagnostics?: boolean; contextMode?: "precise"|"broad" } }): { evidence: object[] }
 /** Record agent feedback */
 function agentFeedback(p: { versionId: string; sliceHandle: string; usefulSymbols: string[]; missingSymbols?: string[]; rating?: string; comment?: string }): { recorded: boolean }
 /** Query feedback records */
@@ -107,15 +107,15 @@ function agentFeedbackQuery(p: { limit?: number }): { records: object[] }
 function bufferPush(p: { eventType: "open"|"change"|"save"|"close"|"checkpoint"; filePath: string; version: number; dirty: boolean; timestamp: string; content?: string }): { accepted: boolean }
 /** Request buffer checkpoint */
 function bufferCheckpoint(): { checkpointed: boolean }
-  /** Get buffer status */
-  function bufferStatus(): { status: object }
-  /** Execute runtime command */
-  function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string }
-  // outputMode defaults to "minimal" (~50 tokens); use "summary" for head+tail, "intent" for queryTerms-only excerpts
-  /** Query stored runtime output by keywords */
-  function runtimeQueryOutput(p: { artifactHandle: string; queryTerms: string[]; maxExcerpts?: number; contextLines?: number; stream?: "stdout"|"stderr"|"both" }): { excerpts: object[] }
+/** Get buffer status */
+function bufferStatus(): { status: object }
+/** Execute runtime command */
+function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string }
+// outputMode defaults to "minimal" (~50 tokens); use "summary" for head+tail, "intent" for queryTerms-only excerpts
+/** Query stored runtime output by keywords */
+function runtimeQueryOutput(p: { artifactHandle: string; queryTerms: string[]; maxExcerpts?: number; contextLines?: number; stream?: "stdout"|"stderr"|"both" }): { excerpts: object[] }
 
-  // === Usage ===
+// === Usage ===
 /** Get cumulative token savings statistics */
 function usageStats(p: { scope?: "session" | "history" | "both"; since?: string; limit?: number }): { totalSdlTokens: number; totalSavedTokens: number; savingsPercent: number }
 
@@ -123,8 +123,8 @@ function usageStats(p: { scope?: "session" | "history" | "both"; since?: string;
 /** Read non-indexed file content (templates, configs, docs) */
 function fileRead(p: { filePath: string; maxBytes?: number; offset?: number; limit?: number; search?: string; searchContext?: number; jsonPath?: string }): { content: string; bytes: number; totalLines: number; returnedLines: number; truncated: boolean; matchCount?: number; extractedPath?: string }
 
-// === Data Transforms (use inside sdl.chain steps) ===
-// These are internal transforms, NOT gateway actions. Use as chain step fn names.
+// === Data Transforms (use inside sdl.workflow steps) ===
+// These are internal transforms, NOT gateway actions. Use as workflow step fn names.
 // IMPORTANT: 'fields' is Record<string, string> (object mapping outputKey -> inputKey), NOT an array.
 // IMPORTANT: First param is always 'input', NOT 'source'.
 /** Project fields from an object */
@@ -141,11 +141,10 @@ function dataSort(p: { input: unknown[]; by: {path: string; direction?: "asc"|"d
 // Example: dataSort({"input":"$0.results","by":{"path":"name","direction":"asc"}})
 /** Render {{mustache}} template strings from object(s) */
 function dataTemplate(p: { input: Record<string, unknown> | unknown[]; template: string; joinWith?: string }): { text: string }
-// Example: dataTemplate({"input":"$0.results","template":"{{name}} ({{kind}}) in {{file}}","joinWith":"\n"})
+// Example: dataTemplate({"input":"$0.results","template":"{{name}} ({{kind}}) in {{file}}","joinWith":"\\n"})
 `;
 
 export function generateManual(_liveIndex?: LiveIndexCoordinator): string {
-  // Validate FN_NAME_MAP covers all actions
   const actionMap = createActionMap(_liveIndex);
   const actionKeys = Object.keys(actionMap);
   const mappedActions = Object.values(FN_NAME_MAP);

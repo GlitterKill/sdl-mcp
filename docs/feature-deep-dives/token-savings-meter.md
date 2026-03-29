@@ -126,7 +126,7 @@ Different tools estimate the raw alternative differently:
 | `symbol.search` | Sum of file byte sizes across all result files |
 | `symbol.getCard` | File byte size of the symbol's source file |
 | `slice.build` | Sum of file byte sizes across all files referenced by slice cards |
-| `agent.orchestrate` | Actual file byte sizes from `focusPaths` when available; falls back to 3x multiplier on planner token estimates |
+| `agent.context` | Actual file byte sizes from `focusPaths` when available; falls back to 3x multiplier on planner token estimates |
 | `runtime.execute` | Raw output byte count |
 
 File byte sizes are converted to token estimates using `BYTES_PER_TOKEN = 4` (1 token ≈ 4 bytes). SDL response sizes use a structural-aware estimator: JSON syntax characters count as 1 token each, prose characters use `CHARS_PER_TOKEN = 3.5`.
@@ -381,7 +381,7 @@ flowchart TD
 - [Iris Gate Ladder](./iris-gate-ladder.md) — the four-rung context escalation that drives savings
 - [Tool Gateway](./tool-gateway.md) — 81% reduction in `tools/list` overhead
 - [Governance & Policy](./governance-policy.md) — proof-of-need gating that prevents wasteful raw reads
-- [Agent Orchestration](./agent-orchestration.md) — autonomous task execution with budget control
+- [Agent Context](./agent-context.md) — task-shaped context retrieval with budget control
 - [MCP Tools Reference](../mcp-tools-reference.md#sdlusagestats) — `sdl.usage.stats` parameter details
 
 [Back to README](../../README.md)

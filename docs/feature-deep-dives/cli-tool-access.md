@@ -108,7 +108,7 @@ Run `sdl-mcp tool --list` to see all actions grouped by namespace:
 
 | Action | Description |
 |:-------|:------------|
-| `agent.orchestrate` | Autonomous task execution with budget control and `contextMode` (`precise`/`broad`) |
+| `agent.context` | Task-shaped context retrieval with budget control and `contextMode` (`precise`/`broad`) |
 | `agent.feedback` | Record which symbols were useful/missing |
 | `agent.feedback.query` | Query aggregated feedback statistics |
 | `buffer.push` | Push editor buffer updates (limited in CLI) |

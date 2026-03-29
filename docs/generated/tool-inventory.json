@@ -1,20 +1,20 @@
 {
-  "generatedAt": "2026-03-28T14:07:45.712Z",
+  "generatedAt": "2026-03-29T18:53:21.981Z",
   "counts": {
     "flatTools": 32,
     "universalTools": 2,
-    "codeModeTools": 3,
+    "codeModeTools": 4,
     "gatewayTools": 4,
     "flatModeTotal": 34,
     "gatewayModeTotal": 6,
     "gatewayLegacyModeTotal": 38,
-    "codeModeExclusiveTotal": 3,
-    "allFlatAndCodeModeActions": 35
+    "codeModeExclusiveTotal": 4,
+    "allFlatAndCodeModeActions": 36
   },
   "flatToolNames": [
+    "sdl.agent.context",
     "sdl.agent.feedback",
     "sdl.agent.feedback.query",
-    "sdl.agent.orchestrate",
     "sdl.buffer.checkpoint",
     "sdl.buffer.push",
     "sdl.buffer.status",
@@ -51,8 +51,9 @@
   ],
   "codeModeToolNames": [
     "sdl.action.search",
-    "sdl.chain",
-    "sdl.manual"
+    "sdl.context",
+    "sdl.manual",
+    "sdl.workflow"
   ],
   "gatewayToolNames": [
     "sdl.agent",

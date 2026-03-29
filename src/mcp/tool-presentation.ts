@@ -9,7 +9,6 @@ const TITLE_SEGMENT_MAP: Record<string, string> = {
   action: "Action",
   agent: "Agent",
   buffer: "Buffer",
-  chain: "Chain",
   code: "Code",
   context: "Context",
   delta: "Delta",
@@ -23,7 +22,6 @@ const TITLE_SEGMENT_MAP: Record<string, string> = {
   manual: "Manual",
   memory: "Memory",
   needwindow: "Need Window",
-  orchestrate: "Orchestrate",
   policy: "Policy",
   pr: "PR",
   query: "Query",
@@ -42,6 +40,7 @@ const TITLE_SEGMENT_MAP: Record<string, string> = {
   symbol: "Symbol",
   tool: "Tool",
   usage: "Usage",
+  workflow: "Workflow",
 };
 
 function toTitleCase(segment: string): string {

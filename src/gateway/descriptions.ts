@@ -28,7 +28,7 @@ export const REPO_DESCRIPTION =
 
 export const AGENT_DESCRIPTION =
   `sdl.agent - Agentic + live-edit operations. Pass { repoId, action, ...params }.` +
-  `\nActions: agent.orchestrate(taskType,taskText,budget?,options?{contextMode?,focusPaths?,...}) | ` +
+  `\nActions: agent.context(taskType,taskText,budget?,options?{contextMode?,focusPaths?,...}) | ` +
   `agent.feedback(versionId,sliceHandle,usefulSymbols[],missingSymbols?,taskType?,taskText?) | ` +
   `agent.feedback.query(versionId?,limit?,since?) | ` +
   `buffer.push(eventType,filePath,content,version,dirty,timestamp,cursor?,selections?) | ` +

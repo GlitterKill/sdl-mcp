@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import { registerCodeModeTools } from "../../dist/code-mode/index.js";
 
 describe("code-mode tool validation", () => {
-  it("throws a validation error for semantically invalid sdl.chain requests", async () => {
-    let chainHandler: ((args: unknown) => Promise<unknown>) | null = null;
+  it("throws a validation error for semantically invalid sdl.workflow requests", async () => {
+    let workflowHandler: ((args: unknown) => Promise<unknown>) | null = null;
     const fakeServer = {
       registerTool(
         name: string,
@@ -13,8 +13,8 @@ describe("code-mode tool validation", () => {
         _schema: unknown,
         handler: (args: unknown) => Promise<unknown>,
       ) {
-        if (name === "sdl.chain") {
-          chainHandler = handler;
+        if (name === "sdl.workflow") {
+          workflowHandler = handler;
         }
       },
     };
@@ -25,18 +25,18 @@ describe("code-mode tool validation", () => {
       {
         enabled: true,
         exclusive: false,
-        maxChainSteps: 20,
-        maxChainTokens: 50_000,
-        maxChainDurationMs: 30_000,
+        maxWorkflowSteps: 20,
+        maxWorkflowTokens: 50_000,
+        maxWorkflowDurationMs: 30_000,
         ladderValidation: "warn",
         etagCaching: true,
       },
     );
 
-    assert.ok(chainHandler);
+    assert.ok(workflowHandler);
     await assert.rejects(
       () =>
-        chainHandler?.({
+        workflowHandler?.({
           repoId: "demo-repo",
           steps: [{ fn: "notARealFunction", args: {} }],
         }),
@@ -48,7 +48,7 @@ describe("code-mode tool validation", () => {
         };
         assert.strictEqual(validationError.code, "VALIDATION_ERROR");
         assert.ok(
-          validationError.message?.includes("Invalid sdl.chain request"),
+          validationError.message?.includes("Invalid sdl.workflow request"),
         );
         assert.ok(
           validationError.details?.some((detail) =>

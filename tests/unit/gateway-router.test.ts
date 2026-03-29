@@ -44,7 +44,7 @@ describe("Gateway router", () => {
         "policy.set",
         "usage.stats",
         "file.read",
-        "agent.orchestrate",
+        "agent.context",
         "agent.feedback",
         "agent.feedback.query",
         "buffer.push",

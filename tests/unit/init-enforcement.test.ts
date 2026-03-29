@@ -54,9 +54,9 @@ describe("init agent enforcement", () => {
     assert.deepStrictEqual(config.codeMode, {
       enabled: true,
       exclusive: true,
-      maxChainSteps: 20,
-      maxChainTokens: 50000,
-      maxChainDurationMs: 60000,
+      maxWorkflowSteps: 20,
+      maxWorkflowTokens: 50000,
+      maxWorkflowDurationMs: 60000,
       ladderValidation: "warn",
       etagCaching: true,
     });

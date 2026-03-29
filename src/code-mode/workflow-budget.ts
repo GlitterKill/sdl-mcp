@@ -1,5 +1,5 @@
 import { estimateTokens } from "../util/tokenize.js";
-import type { ChainBudget } from "./types.js";
+import type { WorkflowBudget } from "./types.js";
 
 function minNullable(a: number | null, b: number | null): number | null {
   if (a === null) return b;
@@ -7,7 +7,7 @@ function minNullable(a: number | null, b: number | null): number | null {
   return Math.min(a, b);
 }
 
-export class ChainBudgetTracker {
+export class WorkflowBudgetTracker {
   private tokensUsed = 0;
   private stepsExecuted = 0;
   private readonly startTime: number;
@@ -16,7 +16,7 @@ export class ChainBudgetTracker {
   private readonly maxDurationMs: number | null;
 
   constructor(
-    budget?: ChainBudget,
+    budget?: WorkflowBudget,
     configDefaults?: {
       maxSteps: number;
       maxTokens: number;
@@ -25,36 +25,37 @@ export class ChainBudgetTracker {
   ) {
     this.startTime = Date.now();
 
-    // Resolve budget: request budget can only be MORE restrictive than config
-    // Take the minimum of request and config for each limit
-    const reqTokens = budget?.maxTotalTokens ?? null;
-    const reqSteps = budget?.maxSteps ?? null;
-    const reqDuration = budget?.maxDurationMs ?? null;
-    const cfgTokens = configDefaults?.maxTokens ?? null;
-    const cfgSteps = configDefaults?.maxSteps ?? null;
-    const cfgDuration = configDefaults?.maxDurationMs ?? null;
+    // Request budget can only tighten the configured workflow limits.
+    const requestTokens = budget?.maxTotalTokens ?? null;
+    const requestSteps = budget?.maxSteps ?? null;
+    const requestDuration = budget?.maxDurationMs ?? null;
+    const configTokens = configDefaults?.maxTokens ?? null;
+    const configSteps = configDefaults?.maxSteps ?? null;
+    const configDuration = configDefaults?.maxDurationMs ?? null;
 
-    this.maxTokens = minNullable(reqTokens, cfgTokens);
-    this.maxSteps = minNullable(reqSteps, cfgSteps);
-    this.maxDurationMs = minNullable(reqDuration, cfgDuration);
+    this.maxTokens = minNullable(requestTokens, configTokens);
+    this.maxSteps = minNullable(requestSteps, configSteps);
+    this.maxDurationMs = minNullable(requestDuration, configDuration);
   }
 
   record(stepTokens: number, _stepDurationMs: number): void {
     this.tokensUsed += stepTokens;
     this.stepsExecuted += 1;
-    // _stepDurationMs is tracked per-step but total is derived from wall clock
   }
 
   shouldContinue(): boolean {
-    if (this.maxTokens !== null && this.tokensUsed >= this.maxTokens)
+    if (this.maxTokens !== null && this.tokensUsed >= this.maxTokens) {
       return false;
-    if (this.maxSteps !== null && this.stepsExecuted >= this.maxSteps)
+    }
+    if (this.maxSteps !== null && this.stepsExecuted >= this.maxSteps) {
       return false;
+    }
     if (
-      this.maxDurationMs !== null &&
-      Date.now() - this.startTime >= this.maxDurationMs
-    )
+      this.maxDurationMs !== null
+      && Date.now() - this.startTime >= this.maxDurationMs
+    ) {
       return false;
+    }
     return true;
   }
 

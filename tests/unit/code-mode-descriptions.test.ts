@@ -2,19 +2,21 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 import {
   MANUAL_DESCRIPTION,
-  CHAIN_DESCRIPTION,
+  WORKFLOW_DESCRIPTION,
+  CONTEXT_DESCRIPTION,
   ACTION_SEARCH_DESCRIPTION,
 } from "../../dist/code-mode/descriptions.js";
 
 /**
  * Tests for src/code-mode/descriptions.ts — description constants
- * for the code-mode tools (manual, chain, action search).
+ * for the code-mode tools (manual, workflow, context, action search).
  */
 
 describe("Code-mode descriptions", () => {
   const descriptions = [
     { name: "MANUAL_DESCRIPTION", value: MANUAL_DESCRIPTION },
-    { name: "CHAIN_DESCRIPTION", value: CHAIN_DESCRIPTION },
+    { name: "WORKFLOW_DESCRIPTION", value: WORKFLOW_DESCRIPTION },
+    { name: "CONTEXT_DESCRIPTION", value: CONTEXT_DESCRIPTION },
     { name: "ACTION_SEARCH_DESCRIPTION", value: ACTION_SEARCH_DESCRIPTION },
   ];
 
@@ -42,28 +44,33 @@ describe("Code-mode descriptions", () => {
     assert.ok(MANUAL_DESCRIPTION.includes("manual"));
   });
 
-  it("MANUAL_DESCRIPTION mentions sdl.chain", () => {
-    assert.ok(MANUAL_DESCRIPTION.includes("sdl.chain"));
+  it("MANUAL_DESCRIPTION mentions sdl.workflow", () => {
+    assert.ok(MANUAL_DESCRIPTION.includes("sdl.workflow"));
   });
 
-  it("CHAIN_DESCRIPTION mentions chain of operations", () => {
-    assert.ok(CHAIN_DESCRIPTION.includes("chain"));
+  it("WORKFLOW_DESCRIPTION mentions workflow operations", () => {
+    assert.ok(WORKFLOW_DESCRIPTION.includes("workflow"));
   });
 
-  it("CHAIN_DESCRIPTION mentions $N references", () => {
-    assert.ok(CHAIN_DESCRIPTION.includes("$N"));
+  it("WORKFLOW_DESCRIPTION mentions $N references", () => {
+    assert.ok(WORKFLOW_DESCRIPTION.includes("$N"));
   });
 
-  it("CHAIN_DESCRIPTION mentions budget tracking", () => {
-    assert.ok(CHAIN_DESCRIPTION.includes("budget"));
+  it("WORKFLOW_DESCRIPTION mentions budget tracking", () => {
+    assert.ok(WORKFLOW_DESCRIPTION.includes("budget"));
   });
 
-  it("CHAIN_DESCRIPTION mentions transforms", () => {
-    assert.ok(CHAIN_DESCRIPTION.includes("dataPick"));
-    assert.ok(CHAIN_DESCRIPTION.includes("dataMap"));
-    assert.ok(CHAIN_DESCRIPTION.includes("dataFilter"));
-    assert.ok(CHAIN_DESCRIPTION.includes("dataSort"));
-    assert.ok(CHAIN_DESCRIPTION.includes("dataTemplate"));
+  it("WORKFLOW_DESCRIPTION mentions transforms", () => {
+    assert.ok(WORKFLOW_DESCRIPTION.includes("dataPick"));
+    assert.ok(WORKFLOW_DESCRIPTION.includes("dataMap"));
+    assert.ok(WORKFLOW_DESCRIPTION.includes("dataFilter"));
+    assert.ok(WORKFLOW_DESCRIPTION.includes("dataSort"));
+    assert.ok(WORKFLOW_DESCRIPTION.includes("dataTemplate"));
+  });
+
+  it("CONTEXT_DESCRIPTION mentions sdl.agent.context and context retrieval", () => {
+    assert.ok(CONTEXT_DESCRIPTION.includes("sdl.agent.context"));
+    assert.ok(CONTEXT_DESCRIPTION.includes("context"));
   });
 
   it("ACTION_SEARCH_DESCRIPTION mentions search and ranked matches", () => {

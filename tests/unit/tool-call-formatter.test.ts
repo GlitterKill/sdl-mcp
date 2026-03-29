@@ -206,10 +206,10 @@ describe("formatToolCallForUser", () => {
     assert.ok(result.includes("health 85/100"));
   });
 
-  // --- chain ---
+  // --- workflow ---
 
-  it("formats chain results", () => {
-    const result = formatToolCallForUser("sdl.chain", {}, {
+  it("formats workflow results", () => {
+    const result = formatToolCallForUser("sdl.workflow", {}, {
       results: [
         { status: "ok" },
         { status: "ok" },

@@ -75,7 +75,7 @@ describe("Gateway legacy tool registration", () => {
       "sdl.repo.overview",
       "sdl.usage.stats",
       "sdl.pr.risk.analyze",
-      "sdl.agent.orchestrate",
+      "sdl.agent.context",
       "sdl.context.summary",
       "sdl.agent.feedback",
       "sdl.agent.feedback.query",

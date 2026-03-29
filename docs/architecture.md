@@ -106,7 +106,7 @@ All MCP tools flow through a single dispatch path in `src/server.ts`. The exact 
 - Flat mode: 34 tools (`32` flat tools + `sdl.action.search` + `sdl.info`)
 - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
 - Gateway + legacy mode: 38 tools (`4` gateway tools + `32` legacy flat tools + `sdl.action.search` + `sdl.info`)
-- Code Mode adds `sdl.manual` and `sdl.chain`, or can run in exclusive mode with just `sdl.action.search`, `sdl.info`, `sdl.manual`, and `sdl.chain`
+- Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, or can run in exclusive mode with just `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow`
 
 Before strict Zod validation, requests also pass through a shared normalization layer. Flat and gateway calls therefore accept the same canonical camelCase fields plus common aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, and `spillover_handle`.
 
@@ -644,7 +644,7 @@ Current command/tool registration notes:
 
 - CLI commands: 13 (`init`, `doctor`, `info`, `index`, `serve`, `version`, `export`, `import`, `pull`, `benchmark:ci`, `summary`, `health`, `tool`)
 - Gateway mode keeps `sdl.action.search` and `sdl.info` outside the 4 namespace tools
-- Code Mode adds `sdl.manual` and `sdl.chain`, or can run exclusive with the 4-tool discovery/diagnostics surface
+- Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow`
 
 ```
 src/
@@ -684,8 +684,9 @@ src/
 │   ├── gate.ts                Proof-of-need gating
 │   └── windows.ts             Raw code extraction
 ├── code-mode/
-│   ├── chain-*.ts             Multi-step tool chaining (sdl.chain)
+│   ├── workflow-*.ts          Multi-step operations engine (sdl.workflow)
 │   ├── manual-generator.ts    Self-documentation (sdl.manual)
+│   ├── descriptions.ts        Shared routing guidance for sdl.context vs sdl.workflow
 │   ├── action-catalog.ts      Action discovery (sdl.action.search)
 │   └── ladder-validator.ts    Context ladder validation
 ├── gateway/
@@ -693,7 +694,7 @@ src/
 │   ├── thin-schemas.ts        Compact gateway schemas
 │   └── compact-schema.ts      Schema size optimization
 ├── agent/
-│   ├── orchestrator.ts        Autopilot planning + execution
+│   ├── context-engine.ts      Task-shaped context planning + execution
 │   ├── planner.ts             Rung selection + budget allocation
 │   └── evidence.ts            Evidence collection
 ├── policy/
@@ -761,7 +762,7 @@ graph TD
     subgraph Tool Registration Modes
         J1[Flat Mode: 34 tools]
         J2[Gateway Mode: 6 tools]
-        J3[Code Mode adds manual and chain]
+        J3[Code Mode adds manual, context, and workflow]
     end
     J --- J1
     J --- J2
@@ -776,8 +777,8 @@ graph TD
     J --> N[Delta + Blast Radius]
     N --> |Changed symbols + impact| L
 
-    J --> O[Agent Orchestration]
-    O --> |Autonomous rung planning| L
+    J --> O[Agent Context]
+    O --> |Task-shaped rung planning| L
 
     J --> U[Runtime Execution]
     U --> |Sandboxed code execution| L
@@ -802,6 +803,6 @@ Registration-mode counts in the current implementation:
 - Flat mode: 34 tools
 - Gateway-only mode: 6 tools
 - Gateway + legacy mode: 38 tools
-- Code Mode adds `sdl.manual` and `sdl.chain`
+- Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`
 
 [Back to README](../README.md)

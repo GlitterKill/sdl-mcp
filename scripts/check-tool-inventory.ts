@@ -23,6 +23,7 @@ const ROOT = resolve(__dirname, "..");
 const DESCRIPTORS_PATH = resolve(ROOT, "src", "mcp", "tools", "tool-descriptors.ts");
 const CODE_MODE_PATH = resolve(ROOT, "src", "code-mode", "index.ts");
 const GATEWAY_PATH = resolve(ROOT, "src", "gateway", "index.ts");
+const TOOLS_INDEX_PATH = resolve(ROOT, "src", "mcp", "tools", "index.ts");
 const INVENTORY_PATH = resolve(ROOT, "docs", "generated", "tool-inventory.json");
 
 // ---------------------------------------------------------------------------
@@ -47,6 +48,10 @@ function extractRegisteredToolNames(source: string): string[] {
     names.push(m[1]);
   }
   return names;
+}
+
+function normalizeToolNames(names: string[]): string[] {
+  return [...new Set(names)].sort();
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +79,7 @@ function main(): void {
   let descriptorsSource: string;
   let codeModeSource: string;
   let gatewaySource: string;
+  let toolsIndexSource: string;
 
   try {
     descriptorsSource = readFileSync(DESCRIPTORS_PATH, "utf-8");
@@ -93,11 +99,20 @@ function main(): void {
     console.error(`ERROR: Could not read ${GATEWAY_PATH}`);
     process.exit(1);
   }
+  try {
+    toolsIndexSource = readFileSync(TOOLS_INDEX_PATH, "utf-8");
+  } catch {
+    console.error(`ERROR: Could not read ${TOOLS_INDEX_PATH}`);
+    process.exit(1);
+  }
 
-  const flatToolNames = extractFlatToolNames(descriptorsSource).sort();
-  const universalToolNames = ["sdl.info", "sdl.action.search"].sort();
-  const codeModeToolNames = extractRegisteredToolNames(codeModeSource).sort();
-  const gatewayToolNames = extractRegisteredToolNames(gatewaySource).sort();
+  const flatToolNames = normalizeToolNames(extractFlatToolNames(descriptorsSource));
+  const universalToolNames = normalizeToolNames([
+    "sdl.action.search",
+    ...extractRegisteredToolNames(toolsIndexSource),
+  ]);
+  const codeModeToolNames = normalizeToolNames(extractRegisteredToolNames(codeModeSource));
+  const gatewayToolNames = normalizeToolNames(extractRegisteredToolNames(gatewaySource));
 
   const flatToolCount = flatToolNames.length;
   const universalToolCount = universalToolNames.length;

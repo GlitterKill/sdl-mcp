@@ -175,10 +175,10 @@ describe("Gateway schemas", () => {
   });
 
   describe("AgentGatewaySchema", () => {
-    it("validates agent.orchestrate action", () => {
+    it("validates agent.context action", () => {
       const result = AgentGatewaySchema.safeParse({
         repoId: "test-repo",
-        action: "agent.orchestrate",
+        action: "agent.context",
         taskType: "debug",
         taskText: "Fix login bug",
       });

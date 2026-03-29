@@ -1376,6 +1376,24 @@ export async function setupHttpTransport(
         const pathname = url.pathname;
 
         // ---------------------------------------------------------------
+        // OAuth discovery endpoints (RFC 9728 / RFC 8414)
+        // Claude Code probes these before connecting. Return proper
+        // JSON 404 so the client knows no OAuth is required instead
+        // of failing on a non-JSON body parse error.
+        // See: https://github.com/anthropics/claude-code/issues/34008
+        // ---------------------------------------------------------------
+        if (
+          req.method === "GET" &&
+          (pathname === "/.well-known/oauth-authorization-server" ||
+            pathname === "/.well-known/oauth-protected-resource")
+        ) {
+          json(res, 404, {
+            error: "OAuth discovery not supported — this server does not require authentication",
+          });
+          return;
+        }
+
+        // ---------------------------------------------------------------
         // Auth check for /mcp and /api/* endpoints (H3)
         // Skip for health, UI, and OPTIONS preflight.
         // ---------------------------------------------------------------
@@ -1456,14 +1474,13 @@ export async function setupHttpTransport(
           return;
         }
 
-        res.writeHead(404);
-        res.end("Not found");
+        json(res, 404, { error: "Not found" });
       })().catch((error) => {
         console.error(`[sdl-mcp] HTTP transport error: ${String(error)}`);
         if (!res.headersSent) {
-          res.writeHead(500);
+          res.writeHead(500, { "Content-Type": "application/json" });
         }
-        res.end("Internal server error");
+        res.end(JSON.stringify({ error: "Internal server error" }));
       });
     },
   );

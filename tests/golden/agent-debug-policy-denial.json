@@ -1,7 +1,7 @@
 {
   "name": "agent-debug-policy-denial",
   "description": "Debug task that attempts raw code access but is denied by policy",
-  "tool": "sdl.agent.orchestrate",
+  "tool": "sdl.agent.context",
   "request": {
     "repoId": "test-repo",
     "taskType": "debug",

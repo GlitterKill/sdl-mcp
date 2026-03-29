@@ -1,10 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { ChainEtagCache } from "../../dist/code-mode/etag-cache.js";
+import { WorkflowEtagCache } from "../../dist/code-mode/etag-cache.js";
 
 describe("code-mode etag cache", () => {
   it("extractEtags captures etag from symbolGetCard result", () => {
-    const cache = new ChainEtagCache();
+    const cache = new WorkflowEtagCache();
     cache.extractEtags("symbol.getCard", {
       card: { symbolId: "sym1", name: "test" },
       etag: "etag-abc",
@@ -13,7 +13,7 @@ describe("code-mode etag cache", () => {
   });
 
   it("injectEtags adds ifNoneMatch for known symbolId", () => {
-    const cache = new ChainEtagCache();
+    const cache = new WorkflowEtagCache();
     cache.extractEtags("symbol.getCard", {
       card: { symbolId: "sym1", name: "test" },
       etag: "etag-abc",
@@ -24,7 +24,7 @@ describe("code-mode etag cache", () => {
   });
 
   it("pre-existing ifNoneMatch is NOT overwritten", () => {
-    const cache = new ChainEtagCache();
+    const cache = new WorkflowEtagCache();
     cache.extractEtags("symbol.getCard", {
       card: { symbolId: "sym1", name: "test" },
       etag: "etag-abc",
@@ -38,7 +38,7 @@ describe("code-mode etag cache", () => {
   });
 
   it("getCache returns all accumulated pairs", () => {
-    const cache = new ChainEtagCache();
+    const cache = new WorkflowEtagCache();
     cache.extractEtags("symbol.getCard", {
       card: { symbolId: "sym1" },
       etag: "e1",
@@ -53,8 +53,8 @@ describe("code-mode etag cache", () => {
     assert.strictEqual(state["sym2"], "e2");
   });
 
-  it("seed() pre-populates cache from prior chain", () => {
-    const cache = new ChainEtagCache();
+  it("seed() pre-populates cache from prior workflow", () => {
+    const cache = new WorkflowEtagCache();
     cache.seed({ sym1: "e1", sym2: "e2" });
     const args: Record<string, unknown> = { symbolId: "sym1" };
     cache.injectEtags("symbol.getCard", args);
@@ -62,7 +62,7 @@ describe("code-mode etag cache", () => {
   });
 
   it("non-card actions are ignored", () => {
-    const cache = new ChainEtagCache();
+    const cache = new WorkflowEtagCache();
     cache.extractEtags("slice.build", { handle: "h1", cards: [] });
     assert.deepStrictEqual(cache.getCache(), {});
     const args: Record<string, unknown> = { symbolId: "sym1" };
@@ -71,7 +71,7 @@ describe("code-mode etag cache", () => {
   });
 
   it("symbolGetCards batch: multiple ETags extracted", () => {
-    const cache = new ChainEtagCache();
+    const cache = new WorkflowEtagCache();
     cache.extractEtags("symbol.getCards", {
       cards: [
         { card: { symbolId: "sym1" }, etag: "e1" },
@@ -83,7 +83,7 @@ describe("code-mode etag cache", () => {
   });
 
   it("symbolGetCards batch: knownEtags built from cache", () => {
-    const cache = new ChainEtagCache();
+    const cache = new WorkflowEtagCache();
     cache.seed({ sym1: "e1", sym3: "e3" });
     const args: Record<string, unknown> = {
       symbolIds: ["sym1", "sym2", "sym3"],

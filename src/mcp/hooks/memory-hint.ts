@@ -71,15 +71,15 @@ function detectPatterns(session: SessionTracker, toolName: string, args: unknown
     };
   }
 
-  // Pattern: agent.orchestrate with implement task completes
-  if (toolName === "sdl.agent.orchestrate" && !session.hintsSent.has("feature_complete")) {
-    const orchestrateArgs = args as Record<string, unknown> | null;
-    if (orchestrateArgs?.taskType === "implement") {
+  // Pattern: agent.context with implement task completes
+  if (toolName === "sdl.agent.context" && !session.hintsSent.has("feature_complete")) {
+    const contextArgs = args as Record<string, unknown> | null;
+    if (contextArgs?.taskType === "implement") {
       session.hintsSent.add("feature_complete");
       return {
         suggestedType: "decision",
         message:
-          "Feature implementation completed via orchestrate. Consider capturing architectural decisions and design trade-offs via sdl.memory.store.",
+          "Feature implementation completed via context retrieval. Consider capturing architectural decisions and design trade-offs via sdl.memory.store.",
         pattern: "feature_complete",
       };
     }

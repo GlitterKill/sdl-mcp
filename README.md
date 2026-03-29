@@ -296,20 +296,20 @@ The sandboxed runtime execution tool (`sdl.runtime.execute`) has its own governa
 
 ---
 
-### Agent Orchestration — Autopilot Mode
+### Agent Context — Task-Shaped Retrieval
 
-`sdl.agent.orchestrate` is an autonomous task engine. Give it a task type (`debug`, `review`, `implement`, `explain`), a description, and a budget — it plans the optimal Iris Gate path, executes it, collects evidence, and returns a synthesized answer.
+`sdl.agent.context` is SDL-MCP's task-shaped context engine. Give it a task type (`debug`, `review`, `implement`, `explain`), a description, and a budget — it selects the right Iris Gate rungs, collects evidence, and returns context tuned to the job. In Code Mode, `sdl.context` provides the same retrieval surface without dropping into `sdl.workflow`.
 
 The feedback loop (`sdl.agent.feedback`) records which symbols were useful and which were missing, improving future slice quality.
 
 `sdl.context.summary` generates portable, token-bounded context briefings in markdown, JSON, or clipboard format for use outside MCP environments.
 
 **Why it matters:**
-- Autonomous task execution plans the **optimal Iris Gate path** within a token budget
+- Task-shaped context retrieval plans the **right Iris Gate path** within a token budget
 - Feedback loop records what was useful/missing, improving future slice quality
 - Portable context summaries export findings for use outside MCP environments
 
-[Agent Orchestration Deep Dive →](./docs/feature-deep-dives/agent-orchestration.md)
+[Agent Context Deep Dive →](./docs/feature-deep-dives/agent-context.md) · [Context Modes →](./docs/feature-deep-dives/context-modes.md)
 
 ---
 
@@ -458,7 +458,7 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
     <td><code>sdl.context.summary</code></td><td>Token-bounded portable briefing (markdown/JSON/clipboard)</td></tr>
 
 <tr><td rowspan="3"><strong>Agent</strong></td>
-    <td><code>sdl.agent.orchestrate</code></td><td>Autonomous task execution with budget control</td></tr>
+    <td><code>sdl.agent.context</code></td><td>Task-shaped context retrieval with budget-controlled rung planning</td></tr>
 <tr><td><code>sdl.agent.feedback</code></td><td>Record which symbols were useful or missing</td></tr>
 <tr><td><code>sdl.agent.feedback.query</code></td><td>Query aggregated feedback statistics</td></tr>
 
@@ -472,8 +472,9 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 <tr><td><code>sdl.memory.remove</code></td><td>Soft-delete a memory from graph and optionally from disk</td></tr>
 <tr><td><code>sdl.memory.surface</code></td><td>Auto-surface relevant memories for a task context</td></tr>
 
-<tr><td rowspan="2"><strong>Code Mode</strong></td>
-    <td><code>sdl.chain</code></td><td>Multi-step tool chaining with budget tracking and ETag caching</td></tr>
+<tr><td rowspan="3"><strong>Code Mode</strong></td>
+    <td><code>sdl.context</code></td><td>Code Mode task-shaped context retrieval for explain/debug/review/implement work</td></tr>
+<tr><td><code>sdl.workflow</code></td><td>Multi-step operations with budget tracking, ETag caching, and transforms</td></tr>
 <tr><td><code>sdl.manual</code></td><td>Self-documentation — query usage guide, action schemas, output format reference</td></tr>
 
 <tr><td rowspan="3"><strong>Meta</strong></td>
@@ -631,14 +632,15 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 | [Delta & Blast Radius](./docs/feature-deep-dives/delta-blast-radius.md) | Semantic diffs, ranked impact analysis, PR risk scoring |
 | [Live Indexing](./docs/feature-deep-dives/live-indexing.md) | Real-time editor buffer integration and overlay architecture |
 | [Governance & Policy](./docs/feature-deep-dives/governance-policy.md) | Proof-of-need gating, audit logging, runtime sandboxing |
-| [Agent Orchestration](./docs/feature-deep-dives/agent-orchestration.md) | Autopilot mode, feedback loops, portable context summaries |
+| [Agent Context](./docs/feature-deep-dives/agent-context.md) | Task-shaped context retrieval, feedback loops, portable context summaries |
+| [Context Modes](./docs/feature-deep-dives/context-modes.md) | Precise vs broad retrieval, adaptive symbol ranking, benchmark trade-offs |
 | [Indexing & Languages](./docs/feature-deep-dives/indexing-languages.md) | Rust/TS engines, two-pass architecture, 12-language support |
 | [Runtime Execution](./docs/feature-deep-dives/runtime-execution.md) | Sandboxed subprocess execution with governance |
 | [CLI Tool Access](./docs/feature-deep-dives/cli-tool-access.md) | Direct CLI access to all tool actions, output formats, stdin piping, scripting |
 | [Tool Gateway](./docs/feature-deep-dives/tool-gateway.md) | 35→4 tool consolidation, token reduction, thin schemas, migration guide |
 | [Semantic Engine](./docs/feature-deep-dives/semantic-engine.md) | Pass-2 call resolution, embedding search, LLM summaries, confidence scoring |
 | [Semantic Embeddings Setup](./docs/feature-deep-dives/semantic-embeddings-setup.md) | Dependencies, model installation, provider configuration, tier-by-tier setup |
-| [Code Mode](./docs/feature-deep-dives/code-mode.md) | Tool chaining (sdl.chain), action discovery, manual reference, one-call workflows |
+| [Code Mode](./docs/feature-deep-dives/code-mode.md) | `sdl.context`, `sdl.workflow`, action discovery, manual reference, one-call workflows |
 | [Development Memories](./docs/feature-deep-dives/development-memories.md) | Graph-backed cross-session memory, file sync, staleness detection, auto-surfacing |
 | [Token Savings Meter](./docs/feature-deep-dives/token-savings-meter.md) | Per-call meter, session summaries, lifetime tracking, `sdl.usage.stats` |
 

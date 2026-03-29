@@ -1,25 +1,33 @@
-import type { MCPServer, ToolContext } from "../server.js";
+import { z } from "zod";
 import type { CodeModeConfig } from "../config/types.js";
+import { ValidationError } from "../domain/errors.js";
 import type { ToolServices } from "../gateway/index.js";
 import { createActionMap, type ActionMap } from "../gateway/router.js";
-import { getManualCached, FN_NAME_MAP } from "./manual-generator.js";
-import { parseChainRequest } from "./chain-parser.js";
-import { executeChain } from "./chain-executor.js";
-import { ChainRequestSchema, ChainTraceOptionsSchema } from "./types.js";
 import {
-  MANUAL_DESCRIPTION,
-  CHAIN_DESCRIPTION,
-  ACTION_SEARCH_DESCRIPTION,
-} from "./descriptions.js";
+  AgentContextRequestSchema,
+} from "../mcp/tools.js";
+import { handleAgentContext } from "../mcp/tools/context.js";
+import type { MCPServer, ToolContext } from "../server.js";
 import { estimateTokens } from "../util/tokenize.js";
 import {
   buildCatalog,
   rankCatalog,
   type ActionDescriptor,
 } from "./action-catalog.js";
+import {
+  ACTION_SEARCH_DESCRIPTION,
+  CONTEXT_DESCRIPTION,
+  MANUAL_DESCRIPTION,
+  WORKFLOW_DESCRIPTION,
+} from "./descriptions.js";
 import { INTERNAL_TRANSFORM_NAMES } from "./transforms.js";
-import { ValidationError } from "../domain/errors.js";
-import { z } from "zod";
+import { executeWorkflow } from "./workflow-executor.js";
+import { getManualCached, FN_NAME_MAP } from "./manual-generator.js";
+import { parseWorkflowRequest } from "./workflow-parser.js";
+import {
+  WorkflowRequestSchema,
+  WorkflowTraceOptionsSchema,
+} from "./types.js";
 
 export const ActionSearchRequestSchema = z.object({
   query: z.string().min(1),
@@ -65,7 +73,7 @@ export function registerActionSearchTool(
 }
 
 /**
- * Register Code Mode tools (sdl.manual + sdl.chain) on the MCP server.
+ * Register Code Mode tools (sdl.manual + sdl.workflow + sdl.context) on the MCP server.
  *
  * @param prebuiltActionMap Optional pre-built action map to avoid duplicate creation
  *   when code-mode is registered alongside gateway.
@@ -78,7 +86,6 @@ export function registerCodeModeTools(
 ): void {
   const actionMap = prebuiltActionMap ?? createActionMap(services.liveIndex);
 
-  // --- sdl.manual - enhanced with query/actions/format/schema/example filtering ---
   const ManualRequestSchema = z.object({
     query: z.string().min(1).optional(),
     actions: z.array(z.string().min(1)).optional(),
@@ -97,13 +104,12 @@ export function registerCodeModeTools(
       const includeSchemas = args.includeSchemas;
       const includeExamples = args.includeExamples;
 
-      // Default behavior: no query, no actions filter - return legacy manual
       if (
-        !args.query &&
-        !args.actions &&
-        format === "typescript" &&
-        !includeSchemas &&
-        !includeExamples
+        !args.query
+        && !args.actions
+        && format === "typescript"
+        && !includeSchemas
+        && !includeExamples
       ) {
         const manual = getManualCached(services.liveIndex);
         return { manual, tokenEstimate: estimateTokens(manual) };
@@ -120,11 +126,13 @@ export function registerCodeModeTools(
           ...Object.keys(FN_NAME_MAP),
           ...Object.values(FN_NAME_MAP),
           ...INTERNAL_TRANSFORM_NAMES,
-          // Meta-tools not in the gateway action map
-          "chain", "manual", "info", "action.search",
+          "workflow",
+          "context",
+          "manual",
+          "action.search",
         ]);
 
-        const unknowns = args.actions.filter((a) => !validNames.has(a));
+        const unknowns = args.actions.filter((action) => !validNames.has(action));
         if (unknowns.length > 0) {
           return {
             error: "UNKNOWN_ACTIONS",
@@ -135,7 +143,7 @@ export function registerCodeModeTools(
 
         const filtered: ActionDescriptor[] = [];
         for (const name of args.actions) {
-          const match = catalog.find((d) => d.action === name || d.fn === name);
+          const match = catalog.find((entry) => entry.action === name || entry.fn === name);
           if (match && !filtered.includes(match)) {
             filtered.push(match);
           }
@@ -172,25 +180,24 @@ export function registerCodeModeTools(
     },
   );
 
-  // --- sdl.chain - execute a chain of operations in a single round-trip ---
   server.registerTool(
-    "sdl.chain",
-    CHAIN_DESCRIPTION,
-    ChainRequestSchema,
+    "sdl.workflow",
+    WORKFLOW_DESCRIPTION,
+    WorkflowRequestSchema,
     async (rawArgs: unknown, context?: ToolContext) => {
-      const parsed = parseChainRequest(rawArgs);
+      const parsed = parseWorkflowRequest(rawArgs);
       if (!parsed.ok) {
-        const error = new ValidationError("Invalid sdl.chain request");
+        const error = new ValidationError("Invalid sdl.workflow request");
         Object.assign(error, { details: parsed.errors });
         throw error;
       }
 
-      const rawObj = rawArgs as Record<string, unknown>;
-      const traceOpts = rawObj.trace
-        ? ChainTraceOptionsSchema.parse(rawObj.trace)
+      const rawObject = rawArgs as Record<string, unknown>;
+      const traceOpts = rawObject.trace
+        ? WorkflowTraceOptionsSchema.parse(rawObject.trace)
         : undefined;
 
-      return executeChain(parsed.request, actionMap, config, context, traceOpts);
+      return executeWorkflow(parsed.request, actionMap, config, context, traceOpts);
     },
     {
       type: "object",
@@ -216,46 +223,71 @@ export function registerCodeModeTools(
       additionalProperties: false,
     },
   );
+
+  server.registerTool(
+    "sdl.context",
+    CONTEXT_DESCRIPTION,
+    AgentContextRequestSchema,
+    async (rawArgs: unknown) => handleAgentContext(rawArgs),
+    {
+      type: "object",
+      properties: {
+        repoId: { type: "string", minLength: 1 },
+        taskType: {
+          type: "string",
+          enum: ["debug", "review", "implement", "explain"],
+        },
+        taskText: { type: "string", minLength: 1 },
+        budget: { type: "object" },
+        options: { type: "object" },
+      },
+      required: ["repoId", "taskType", "taskText"],
+      additionalProperties: false,
+    },
+  );
 }
 
 function renderTypescript(catalog: ActionDescriptor[]): string {
   const lines: string[] = [
-    "// SDL-MCP API - use with sdl.chain tool",
-    "// repoId is set in the chain envelope, not per-step.",
+    "// SDL-MCP API - use with sdl.workflow for multi-step operations",
+    "// Prefer sdl.context for explain/debug/review/implement context retrieval.",
+    "// repoId is set in the workflow envelope, not per-step.",
     "// Reference prior step results with $N (e.g., $0.symbols[0].symbolId).",
     "",
   ];
 
-  for (const desc of catalog) {
-    lines.push(`/** ${desc.description} */`);
-    if (desc.prerequisites.length > 0) {
-      lines.push(`// Prerequisites: ${desc.prerequisites.join(", ")}`);
+  for (const descriptor of catalog) {
+    lines.push(`/** ${descriptor.description} */`);
+    if (descriptor.prerequisites.length > 0) {
+      lines.push(`// Prerequisites: ${descriptor.prerequisites.join(", ")}`);
     }
-    if (desc.recommendedNextActions.length > 0) {
-      lines.push(`// Next: ${desc.recommendedNextActions.join(", ")}`);
+    if (descriptor.recommendedNextActions.length > 0) {
+      lines.push(`// Next: ${descriptor.recommendedNextActions.join(", ")}`);
     }
-    if (desc.fallbacks.length > 0) {
-      lines.push(`// Fallbacks: ${desc.fallbacks.join(", ")}`);
+    if (descriptor.fallbacks.length > 0) {
+      lines.push(`// Fallbacks: ${descriptor.fallbacks.join(", ")}`);
     }
-    if (desc.schemaSummary) {
-      const params = desc.schemaSummary.fields
-        .map((f) => `${f.name}${f.required ? "" : "?"}: ${f.type}`)
+    if (descriptor.schemaSummary) {
+      const params = descriptor.schemaSummary.fields
+        .map((field) => `${field.name}${field.required ? "" : "?"}: ${field.type}`)
         .join("; ");
-      lines.push(`function ${desc.fn}(p: { ${params} }): object`);
+      lines.push(`function ${descriptor.fn}(p: { ${params} }): object`);
     } else {
-      lines.push(`function ${desc.fn}(p: object): object`);
+      lines.push(`function ${descriptor.fn}(p: object): object`);
     }
-    // Render subFields as inline comments for discoverability
-    if (desc.schemaSummary) {
-      for (const f of desc.schemaSummary.fields) {
-        if (f.subFields && f.subFields.length > 0) {
-          const subParams = f.subFields.map((sf) => `${sf.name}${sf.required ? "" : "?"}: ${sf.type}`).join("; ");
-          lines.push(`//   ${f.name} shape: { ${subParams} }`);
+    if (descriptor.schemaSummary) {
+      for (const field of descriptor.schemaSummary.fields) {
+        if (field.subFields && field.subFields.length > 0) {
+          const subParams = field.subFields
+            .map((subField) =>
+              `${subField.name}${subField.required ? "" : "?"}: ${subField.type}`)
+            .join("; ");
+          lines.push(`//   ${field.name} shape: { ${subParams} }`);
         }
       }
     }
-    if (desc.example) {
-      lines.push(`// Example: ${desc.fn}(${JSON.stringify(desc.example)})`);
+    if (descriptor.example) {
+      lines.push(`// Example: ${descriptor.fn}(${JSON.stringify(descriptor.example)})`);
     }
   }
 
@@ -266,61 +298,62 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
   const lines: string[] = [
     "# SDL-MCP API Reference",
     "",
-    "Use with `sdl.chain` tool. `repoId` is set in the chain envelope.",
+    "Use with `sdl.workflow` for multi-step operations. Prefer `sdl.context` for context retrieval.",
     "",
   ];
 
-  for (const desc of catalog) {
-    lines.push(`## \`${desc.fn}\` (\`${desc.action}\`)`);
+  for (const descriptor of catalog) {
+    lines.push(`## \`${descriptor.fn}\` (\`${descriptor.action}\`)`);
     lines.push("");
-    lines.push(desc.description);
+    lines.push(descriptor.description);
     lines.push("");
-    lines.push(`- **Kind**: ${desc.kind}`);
-    lines.push(`- **Tags**: ${desc.tags.join(", ")}`);
-    if (desc.prerequisites.length > 0) {
-      lines.push(`- **Prerequisites**: ${desc.prerequisites.join(", ")}`);
+    lines.push(`- **Kind**: ${descriptor.kind}`);
+    lines.push(`- **Tags**: ${descriptor.tags.join(", ")}`);
+    if (descriptor.prerequisites.length > 0) {
+      lines.push(`- **Prerequisites**: ${descriptor.prerequisites.join(", ")}`);
     }
-    if (desc.recommendedNextActions.length > 0) {
-      lines.push(
-        `- **Recommended next**: ${desc.recommendedNextActions.join(", ")}`,
-      );
+    if (descriptor.recommendedNextActions.length > 0) {
+      lines.push(`- **Recommended next**: ${descriptor.recommendedNextActions.join(", ")}`);
     }
-    if (desc.fallbacks.length > 0) {
-      lines.push(`- **Fallbacks**: ${desc.fallbacks.join(", ")}`);
+    if (descriptor.fallbacks.length > 0) {
+      lines.push(`- **Fallbacks**: ${descriptor.fallbacks.join(", ")}`);
     }
 
-    if (desc.schemaSummary) {
+    if (descriptor.schemaSummary) {
       lines.push("");
       lines.push("| Parameter | Type | Required | Default |");
       lines.push("|-----------|------|----------|---------|");
-      for (const f of desc.schemaSummary.fields) {
-        const def = f.default !== undefined ? JSON.stringify(f.default) : "";
+      for (const field of descriptor.schemaSummary.fields) {
+        const defaultValue = field.default !== undefined
+          ? JSON.stringify(field.default)
+          : "";
         lines.push(
-          `| ${f.name} | ${f.type} | ${f.required ? "yes" : "no"} | ${def} |`,
+          `| ${field.name} | ${field.type} | ${field.required ? "yes" : "no"} | ${defaultValue} |`,
         );
       }
-      // Render subField details for nested objects
-      for (const f of desc.schemaSummary.fields) {
-        if (f.subFields && f.subFields.length > 0) {
+      for (const field of descriptor.schemaSummary.fields) {
+        if (field.subFields && field.subFields.length > 0) {
           lines.push("");
-          lines.push(`**${f.name}** shape:`);
+          lines.push(`**${field.name}** shape:`);
           lines.push("");
           lines.push("| Field | Type | Required | Default |");
           lines.push("|-------|------|----------|---------|");
-          for (const sf of f.subFields) {
-            const sfDef = sf.default !== undefined ? JSON.stringify(sf.default) : "";
+          for (const subField of field.subFields) {
+            const defaultValue = subField.default !== undefined
+              ? JSON.stringify(subField.default)
+              : "";
             lines.push(
-              `| ${sf.name} | ${sf.type} | ${sf.required ? "yes" : "no"} | ${sfDef} |`,
+              `| ${subField.name} | ${subField.type} | ${subField.required ? "yes" : "no"} | ${defaultValue} |`,
             );
           }
         }
       }
     }
 
-    if (desc.example) {
+    if (descriptor.example) {
       lines.push("");
       lines.push("```json");
-      lines.push(JSON.stringify(desc.example, null, 2));
+      lines.push(JSON.stringify(descriptor.example, null, 2));
       lines.push("```");
     }
 

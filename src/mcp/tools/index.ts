@@ -26,6 +26,12 @@ export function registerTools(
   // Universal discovery surface
   registerActionSearchTool(server, services);
 
+  // Code Mode exclusive: register action search plus code-mode tools only
+  if (codeModeConfig?.enabled && codeModeConfig?.exclusive) {
+    registerCodeModeTools(server, services, codeModeConfig);
+    return;
+  }
+
   server.registerTool(
     "sdl.info",
     "Get unified SDL-MCP runtime, config, logging, Ladybug, and native-addon status.",
@@ -34,12 +40,6 @@ export function registerTools(
     undefined,
     { title: "SDL Info" },
   );
-
-  // Code Mode exclusive: register action search plus code-mode tools only
-  if (codeModeConfig?.enabled && codeModeConfig?.exclusive) {
-    registerCodeModeTools(server, services, codeModeConfig);
-    return;
-  }
 
   if (gatewayConfig?.enabled) {
     server.gatewayMode = true;

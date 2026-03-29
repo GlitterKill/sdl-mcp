@@ -1,8 +1,11 @@
-import { ChainRequestSchema, type ChainBudget } from "./types.js";
-import { FN_NAME_MAP, ACTION_TO_FN } from "./manual-generator.js";
+import {
+  WorkflowRequestSchema,
+  type WorkflowBudget,
+} from "./types.js";
+import { ACTION_TO_FN, FN_NAME_MAP } from "./manual-generator.js";
 import { isInternalTransform } from "./transforms.js";
 
-export interface ParsedChainStep {
+export interface ParsedWorkflowStep {
   fn: string; // original camelCase name
   action: string; // dot-notation action name (e.g., "symbol.search")
   args: Record<string, unknown>;
@@ -11,10 +14,10 @@ export interface ParsedChainStep {
   maxResponseTokens?: number;
 }
 
-export interface ParsedChainRequest {
+export interface ParsedWorkflowRequest {
   repoId: string;
-  steps: ParsedChainStep[];
-  budget?: ChainBudget;
+  steps: ParsedWorkflowStep[];
+  budget?: WorkflowBudget;
   onError: "continue" | "stop";
   defaultMaxResponseTokens?: number;
 }
@@ -25,13 +28,13 @@ export interface ParsedChainRequest {
  */
 function findRefsInArgs(args: Record<string, unknown>): number[] {
   const refs = new Set<number>();
-  const REF_RE = /\$(\d+)/g;
+  const refPattern = /\$(\d+)/g;
 
   function walkValue(value: unknown): void {
     if (typeof value === "string") {
       let match: RegExpExecArray | null;
-      REF_RE.lastIndex = 0;
-      while ((match = REF_RE.exec(value)) !== null) {
+      refPattern.lastIndex = 0;
+      while ((match = refPattern.exec(value)) !== null) {
         refs.add(parseInt(match[1], 10));
       }
     } else if (Array.isArray(value)) {
@@ -39,8 +42,8 @@ function findRefsInArgs(args: Record<string, unknown>): number[] {
         walkValue(item);
       }
     } else if (value !== null && typeof value === "object") {
-      for (const v of Object.values(value as Record<string, unknown>)) {
-        walkValue(v);
+      for (const nestedValue of Object.values(value as Record<string, unknown>)) {
+        walkValue(nestedValue);
       }
     }
   }
@@ -50,15 +53,17 @@ function findRefsInArgs(args: Record<string, unknown>): number[] {
 }
 
 /**
- * Parses and validates a raw chain request.
+ * Parses and validates a raw workflow request.
  *
  * Returns `{ ok: true; request }` on success, or `{ ok: false; errors }` if
  * Zod validation fails or any step references an out-of-range $N index.
  */
-export function parseChainRequest(
+export function parseWorkflowRequest(
   raw: unknown,
-): { ok: true; request: ParsedChainRequest } | { ok: false; errors: string[] } {
-  const parsed = ChainRequestSchema.safeParse(raw);
+):
+  | { ok: true; request: ParsedWorkflowRequest }
+  | { ok: false; errors: string[] } {
+  const parsed = WorkflowRequestSchema.safeParse(raw);
 
   if (!parsed.success) {
     const errors = parsed.error.issues.map((issue) => {
@@ -70,29 +75,28 @@ export function parseChainRequest(
 
   const { repoId, steps, budget, onError, defaultMaxResponseTokens } = parsed.data;
   const errors: string[] = [];
-  const parsedSteps: ParsedChainStep[] = [];
+  const parsedSteps: ParsedWorkflowStep[] = [];
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
-
     const isTransform = isInternalTransform(step.fn);
 
     // Normalize dot-notation (e.g., "repo.status") to camelCase (e.g., "repoStatus")
     let resolvedFn = step.fn;
     if (!isTransform && !(resolvedFn in FN_NAME_MAP)) {
       const mapped = ACTION_TO_FN[resolvedFn];
-      if (mapped) resolvedFn = mapped;
+      if (mapped) {
+        resolvedFn = mapped;
+      }
     }
 
-    // Validate fn exists in FN_NAME_MAP or is an internal transform
     if (!isTransform && !(resolvedFn in FN_NAME_MAP)) {
       errors.push(
-        `Unknown function '${step.fn}' in step ${i}. Available: ${Object.keys(FN_NAME_MAP).join(", ")}, dataPick, dataMap, dataFilter, dataSort, dataTemplate`,
+        `Unknown function '${step.fn}' in step ${i}. Available: ${Object.keys(FN_NAME_MAP).join(", ")}, dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet`,
       );
       continue;
     }
 
-    // Validate all $N references refer to already-executed steps
     const refs = findRefsInArgs(step.args);
     for (const ref of refs) {
       if (ref >= i) {
@@ -115,6 +119,12 @@ export function parseChainRequest(
 
   return {
     ok: true,
-    request: { repoId, steps: parsedSteps, budget, onError, defaultMaxResponseTokens },
+    request: {
+      repoId,
+      steps: parsedSteps,
+      budget,
+      onError,
+      defaultMaxResponseTokens,
+    },
   };
 }

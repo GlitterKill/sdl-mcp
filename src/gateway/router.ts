@@ -31,7 +31,7 @@ import {
   BufferPushRequestSchema,
   BufferCheckpointRequestSchema,
   BufferStatusRequestSchema,
-  AgentOrchestrateRequestSchema,
+  AgentContextRequestSchema,
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
   RuntimeExecuteRequestSchema,
@@ -73,7 +73,7 @@ import {
   handleBufferCheckpoint,
   handleBufferStatus,
 } from "../mcp/tools/buffer.js";
-import { handleAgentOrchestrate } from "../mcp/tools/agent.js";
+import { handleAgentContext } from "../mcp/tools/context.js";
 import {
   handleAgentFeedback,
   handleAgentFeedbackQuery,
@@ -194,9 +194,9 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
     },
 
     // === Agent actions ===
-    "agent.orchestrate": {
-      schema: AgentOrchestrateRequestSchema,
-      handler: handleAgentOrchestrate,
+    "agent.context": {
+      schema: AgentContextRequestSchema,
+      handler: handleAgentContext,
     },
     "agent.feedback": {
       schema: AgentFeedbackRequestSchema,

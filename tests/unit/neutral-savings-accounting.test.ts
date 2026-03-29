@@ -3,7 +3,7 @@ import assert from "node:assert";
 
 /**
  * T4: Validates that the token accumulator correctly handles neutral savings
- * (sdlTokens === rawEquivalent), which is used by sdl.chain and other tools
+ * (sdlTokens === rawEquivalent), which is used by sdl.workflow and other tools
  * that report totalTokens. The server.ts dispatch loop calls:
  *   tokenAccumulator.recordUsage(name, totalTokens, totalTokens)
  * to count the call without inflating savings.
@@ -16,7 +16,7 @@ describe("TokenAccumulator neutral savings accounting", () => {
     const acc = new TokenAccumulator();
 
     // Neutral accounting: both values are equal
-    acc.recordUsage("sdl.chain", 500, 500);
+    acc.recordUsage("sdl.workflow", 500, 500);
 
     const snapshot = acc.getSnapshot();
     assert.strictEqual(snapshot.totalSdlTokens, 500);
@@ -34,8 +34,8 @@ describe("TokenAccumulator neutral savings accounting", () => {
 
     // Real savings call: 100 SDL tokens vs 400 raw
     acc.recordUsage("sdl.symbol.getCard", 100, 400);
-    // Neutral call: 500 SDL tokens vs 500 raw (e.g., sdl.chain)
-    acc.recordUsage("sdl.chain", 500, 500);
+    // Neutral call: 500 SDL tokens vs 500 raw (e.g., sdl.workflow)
+    acc.recordUsage("sdl.workflow", 500, 500);
 
     const snapshot = acc.getSnapshot();
     assert.strictEqual(snapshot.totalSdlTokens, 600);
@@ -50,13 +50,13 @@ describe("TokenAccumulator neutral savings accounting", () => {
     );
     const acc = new TokenAccumulator();
 
-    acc.recordUsage("sdl.chain", 200, 200);
+    acc.recordUsage("sdl.workflow", 200, 200);
 
     const snapshot = acc.getSnapshot();
     const chainEntry = snapshot.toolBreakdown.find(
-      (e: { tool: string }) => e.tool === "sdl.chain",
+      (e: { tool: string }) => e.tool === "sdl.workflow",
     );
-    assert.ok(chainEntry, "sdl.chain should appear in breakdown");
+    assert.ok(chainEntry, "sdl.workflow should appear in breakdown");
     assert.strictEqual(chainEntry.savedTokens, 0, "chain should show 0 saved tokens");
     assert.strictEqual(chainEntry.callCount, 1);
     assert.strictEqual(chainEntry.sdlTokens, 200);

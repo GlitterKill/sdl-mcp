@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { executeChain } from "../../dist/code-mode/chain-executor.js";
-import type { ParsedChainRequest } from "../../dist/code-mode/chain-parser.js";
+import { executeWorkflow } from "../../dist/code-mode/workflow-executor.js";
+import type { ParsedWorkflowRequest } from "../../dist/code-mode/workflow-parser.js";
 import type { CodeModeConfig } from "../../dist/config/types.js";
 import { z } from "zod";
 
@@ -9,9 +9,9 @@ import { z } from "zod";
 const testConfig: CodeModeConfig = {
   enabled: true,
   exclusive: false,
-  maxChainSteps: 20,
-  maxChainTokens: 50000,
-  maxChainDurationMs: 60000,
+  maxWorkflowSteps: 20,
+  maxWorkflowTokens: 50000,
+  maxWorkflowDurationMs: 60000,
   ladderValidation: "warn",
   etagCaching: true,
 };
@@ -83,16 +83,16 @@ function createMockActionMap() {
   };
 }
 
-describe("code-mode chain executor", () => {
+describe("code-mode workflow executor", () => {
   it("single-step chain returns one result with status ok", async () => {
-    const request: ParsedChainRequest = {
+    const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [
         { fn: "testEcho", action: "test.echo", args: { message: "hello" } },
       ],
       onError: "continue",
     };
-    const result = await executeChain(
+    const result = await executeWorkflow(
       request,
       createMockActionMap(),
       testConfig,
@@ -102,7 +102,7 @@ describe("code-mode chain executor", () => {
   });
 
   it("multi-step chain with $N refs resolves correctly", async () => {
-    const request: ParsedChainRequest = {
+    const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [
         { fn: "testAdd", action: "test.add", args: { a: 2, b: 3 } },
@@ -110,7 +110,7 @@ describe("code-mode chain executor", () => {
       ],
       onError: "continue",
     };
-    const result = await executeChain(
+    const result = await executeWorkflow(
       request,
       createMockActionMap(),
       testConfig,
@@ -124,7 +124,7 @@ describe("code-mode chain executor", () => {
   });
 
   it("budget token limit truncates remaining steps as budget_exceeded", async () => {
-    const request: ParsedChainRequest = {
+    const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [
         { fn: "testEcho", action: "test.echo", args: { message: "a" } },
@@ -134,7 +134,7 @@ describe("code-mode chain executor", () => {
       budget: { maxTotalTokens: 1 }, // Very low budget — first step exhausts it
       onError: "continue",
     };
-    const result = await executeChain(
+    const result = await executeWorkflow(
       request,
       createMockActionMap(),
       testConfig,
@@ -144,7 +144,7 @@ describe("code-mode chain executor", () => {
   });
 
   it("budget step limit truncates remaining steps", async () => {
-    const request: ParsedChainRequest = {
+    const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [
         { fn: "testEcho", action: "test.echo", args: {} },
@@ -154,7 +154,7 @@ describe("code-mode chain executor", () => {
       budget: { maxSteps: 1 },
       onError: "continue",
     };
-    const result = await executeChain(
+    const result = await executeWorkflow(
       request,
       createMockActionMap(),
       testConfig,
@@ -166,7 +166,7 @@ describe("code-mode chain executor", () => {
   });
 
   it("error with onError=continue marks step as error and continues", async () => {
-    const request: ParsedChainRequest = {
+    const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [
         { fn: "testFail", action: "test.fail", args: {} },
@@ -174,7 +174,7 @@ describe("code-mode chain executor", () => {
       ],
       onError: "continue",
     };
-    const result = await executeChain(
+    const result = await executeWorkflow(
       request,
       createMockActionMap(),
       testConfig,
@@ -184,7 +184,7 @@ describe("code-mode chain executor", () => {
   });
 
   it("error with onError=stop halts chain", async () => {
-    const request: ParsedChainRequest = {
+    const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [
         { fn: "testFail", action: "test.fail", args: {} },
@@ -192,7 +192,7 @@ describe("code-mode chain executor", () => {
       ],
       onError: "stop",
     };
-    const result = await executeChain(
+    const result = await executeWorkflow(
       request,
       createMockActionMap(),
       testConfig,
@@ -202,7 +202,7 @@ describe("code-mode chain executor", () => {
   });
 
   it("results array length matches input steps length", async () => {
-    const request: ParsedChainRequest = {
+    const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [
         { fn: "testEcho", action: "test.echo", args: {} },
@@ -210,7 +210,7 @@ describe("code-mode chain executor", () => {
       ],
       onError: "continue",
     };
-    const result = await executeChain(
+    const result = await executeWorkflow(
       request,
       createMockActionMap(),
       testConfig,
@@ -219,7 +219,7 @@ describe("code-mode chain executor", () => {
   });
 
   it("totalTokens accumulates across steps", async () => {
-    const request: ParsedChainRequest = {
+    const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [
         { fn: "testEcho", action: "test.echo", args: { message: "hello" } },
@@ -227,7 +227,7 @@ describe("code-mode chain executor", () => {
       ],
       onError: "continue",
     };
-    const result = await executeChain(
+    const result = await executeWorkflow(
       request,
       createMockActionMap(),
       testConfig,
@@ -236,12 +236,12 @@ describe("code-mode chain executor", () => {
   });
 
   it("durationMs reflects wall-clock time", async () => {
-    const request: ParsedChainRequest = {
+    const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [{ fn: "testSlow", action: "test.slow", args: {} }],
       onError: "continue",
     };
-    const result = await executeChain(
+    const result = await executeWorkflow(
       request,
       createMockActionMap(),
       testConfig,

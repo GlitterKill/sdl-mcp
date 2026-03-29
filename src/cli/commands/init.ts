@@ -495,7 +495,7 @@ ext=".\${ext##*.}"
 
 for blocked_ext in ${blocked}; do
   if [ "$ext" = "$blocked_ext" ]; then
-    python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Use SDL-MCP tools instead of native Read for indexed source code. Start with sdl.repo.status, then use sdl.agent.orchestrate for context retrieval or sdl.action.search to find the right tool. Use symbolRef when the symbol name is known but the ID is not, and follow SDL fallback guidance when present. Read is only allowed for non-indexed file types.'}}))"
+    python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Use SDL-MCP tools instead of native Read for indexed source code. Start with sdl.repo.status, then use sdl.context or sdl.agent.context for context retrieval, or sdl.action.search to find the right tool. Use symbolRef when the symbol name is known but the ID is not, and follow SDL fallback guidance when present. Read is only allowed for non-indexed file types.'}}))"
     exit 0
   fi
 done
@@ -526,7 +526,7 @@ trimmed="$(printf '%s' "$command" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:spac
 for prefix in ${prefixes}; do
   case "$trimmed" in
     "$prefix"|"$prefix "*) 
-      python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Run repo-local test/build/lint commands through SDL runtime instead of native Bash. Use sdl.chain with runtimeExecute so command execution stays in SDL-MCP and avoids redundant token spend.'}}))"
+      python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Run repo-local test/build/lint commands through SDL runtime instead of native Bash. Use sdl.workflow with runtimeExecute so command execution stays in SDL-MCP and avoids redundant token spend.'}}))"
       exit 0
       ;;
   esac
@@ -637,13 +637,13 @@ You are a codebase exploration agent. Your job is to answer questions about the 
 
 4. **Use \`sdl.manual\`** with \`query\` or \`actions\` to load a focused reference for specific tools.
 
-5. **Use \`sdl.agent.orchestrate\`** for code context retrieval:
+5. **Use \`sdl.context\`** for Code Mode context retrieval, or \`sdl.agent.context\` on the agent surface:
    - \`contextMode: "precise"\` — targeted symbol/file lookups.
    - \`contextMode: "broad"\` — exploratory codebase understanding.
    - Provide \`focusSymbols\` and/or \`focusPaths\` to scope the retrieval.
    - Always set a budget (\`maxTokens\`, \`maxActions\`).
 
-6. **Use \`sdl.chain\`** for multi-step operations (runtime execution, data transforms, batch mutations) — not for context retrieval.
+6. **Use \`sdl.workflow\`** for multi-step operations (runtime execution, data transforms, batch mutations) — not for context retrieval.
 
 7. **Use \`symbolRef\` or \`symbolRefs\`** when you know a symbol name but not the canonical \`symbolId\`. SDL-MCP will resolve the best match.
 
@@ -655,7 +655,7 @@ You are a codebase exploration agent. Your job is to answer questions about the 
    - \`sdl.code.getHotPath\` — Find specific identifiers in code.
    - \`sdl.code.needWindow\` — Full code (last resort, requires justification and \`identifiersToFind\`).
 
-9. **Use SDL runtime for repo-local commands** via \`runtimeExecute\` in \`sdl.chain\`:
+9. **Use SDL runtime for repo-local commands** via \`runtimeExecute\` in \`sdl.workflow\`:
    - Use \`outputMode: "minimal"\` (default) for ~50-token responses with status + artifact handle.
    - If you need output details, call \`runtimeQueryOutput\` with the \`artifactHandle\` and targeted \`queryTerms\`.
    - Always set \`timeoutMs\` to prevent hangs.
@@ -664,7 +664,7 @@ You are a codebase exploration agent. Your job is to answer questions about the 
 
 11. **You may use \`Grep\` and \`Glob\`** for file discovery and pattern matching. These are permitted because they help locate files without reading their full contents.
 
-12. **For non-code files** (\`.md\`, \`.json\`, \`.yaml\`, \`.toml\`, \`.xml\`, \`.sql\`, \`.css\`, \`.html\`, \`.txt\`, config files, lock files), use \`file.read\` inside \`sdl.chain\`. Prefer targeted modes over full reads:
+12. **For non-code files** (\`.md\`, \`.json\`, \`.yaml\`, \`.toml\`, \`.xml\`, \`.sql\`, \`.css\`, \`.html\`, \`.txt\`, config files, lock files), use \`file.read\` inside \`sdl.workflow\`. Prefer targeted modes over full reads:
    - **Line range**: \`{ "fn": "file.read", "args": { "filePath": "docs/guide.md", "offset": 10, "limit": 20 } }\`
    - **Search**: \`{ "fn": "file.read", "args": { "filePath": "docs/guide.md", "search": "authentication", "searchContext": 3 } }\`
    - **JSON path**: \`{ "fn": "file.read", "args": { "filePath": "package.json", "jsonPath": "dependencies" } }\`
@@ -675,13 +675,13 @@ You are a codebase exploration agent. Your job is to answer questions about the 
 2. Use \`Glob\` to find relevant files by pattern
 3. Use \`Grep\` to search for keywords across the codebase
 4. Use \`sdl.action.search\` if you're unsure which SDL tool fits
-5. Use \`sdl.agent.orchestrate\` with appropriate \`contextMode\` for code understanding tasks
+5. Use \`sdl.context\` or \`sdl.agent.context\` with appropriate \`contextMode\` for code understanding tasks
 6. Use \`sdl.symbol.search\` to find specific symbols
 7. Use \`sdl.symbol.getCard\` / \`sdl.symbol.getCards\` to understand what symbols do
 8. Use \`sdl.slice.build\` to map relationships between symbols
 9. Use \`sdl.code.getSkeleton\` / \`sdl.code.getHotPath\` only when deeper understanding is needed
 10. Use \`sdl.code.needWindow\` only as a last resort with clear justification
-11. Use \`sdl.chain\` for runtime execution and multi-step operations
+11. Use \`sdl.workflow\` for runtime execution and multi-step operations
 `;
 }
 
@@ -693,8 +693,8 @@ function buildClaudePrompt(repoId: string): string {
 1. Start with sdl.repo.status.
 2. Use sdl.action.search when the correct SDL action is unclear.
 3. Use sdl.manual(query|actions|format) for focused reference instead of loading the full manual.
-4. Use sdl.agent.orchestrate for code context retrieval (contextMode: "precise" for targeted lookups, "broad" for exploration).
-5. Use sdl.chain for multi-step operations (runtime execution, data transforms, batch mutations) — not for context retrieval.
+4. Use sdl.context for Code Mode context retrieval, or sdl.agent.context on the agent action surface (contextMode: "precise" for targeted lookups, "broad" for exploration).
+5. Use sdl.workflow for multi-step operations (runtime execution, data transforms, batch mutations) - not for context retrieval.
 6. Use symbolRef / symbolRefs when you know a symbol name but not the canonical symbolId.
 7. Follow nextBestAction, fallbackTools, fallbackRationale, and candidate guidance from SDL responses instead of retrying blocked native tools.
 
@@ -712,21 +712,21 @@ All SDL-MCP enforcement is conditional on the server being active (PID file exis
 
 ## Context Retrieval
 
-Use sdl.agent.orchestrate — not sdl.chain — for code understanding tasks:
+Use sdl.context - not sdl.workflow - for Code Mode understanding tasks. On the agent action surface, use sdl.agent.context:
 - contextMode: "precise" — targeted symbol/file lookups
 - contextMode: "broad" — exploratory codebase understanding
 Provide focusSymbols and/or focusPaths to scope the retrieval. Always set a budget (maxTokens, maxActions).
 
 ## Runtime Execution
 
-- Use runtimeExecute inside sdl.chain with outputMode: "minimal" (default) for ~50-token responses.
+- Use runtimeExecute inside sdl.workflow with outputMode: "minimal" (default) for ~50-token responses.
 - Parameters: use args (string array) or code (inline string). There is no command field.
 - Use runtimeQueryOutput with artifactHandle and queryTerms to retrieve output details after minimal-mode execution.
 - Set timeoutMs on all runtime executions to prevent hangs.
 
 ## Non-Indexed File Access
 
-- Use file.read inside sdl.chain for reading non-indexed files with targeted modes (search, jsonPath, offset/limit).
+- Use file.read inside sdl.workflow for reading non-indexed files with targeted modes (search, jsonPath, offset/limit).
 - Prefer search or jsonPath over full reads.
 `;
 }
@@ -775,7 +775,7 @@ export const EnforceSDL: Plugin = async () => {
         const loweredPath = rawPath.toLowerCase();
         if (BLOCKED_EXTENSIONS.some((ext) => loweredPath.endsWith(ext))) {
           throw new Error(
-            "Use SDL-MCP tools for indexed source code. Start with sdl.repo.status, then use sdl.agent.orchestrate for context retrieval or sdl.action.search to find the right tool. Use symbolRef when the symbol name is known but the ID is not."
+            "Use SDL-MCP tools for indexed source code. Start with sdl.repo.status, then use sdl.context or sdl.agent.context for context retrieval, or sdl.action.search to find the right tool. Use symbolRef when the symbol name is known but the ID is not."
           );
         }
       }
@@ -784,7 +784,7 @@ export const EnforceSDL: Plugin = async () => {
         const command = String(output.args.command ?? "").trim().toLowerCase();
         if (REDIRECT_PREFIXES.some((prefix) => command === prefix || command.startsWith(\`\${prefix} \`))) {
           throw new Error(
-            "Run repo-local build, test, lint, and diagnostic commands through SDL runtime. Use runtimeExecute inside sdl.chain with outputMode: "minimal" instead of native bash."
+            "Run repo-local build, test, lint, and diagnostic commands through SDL runtime. Use runtimeExecute inside sdl.workflow with outputMode: 'minimal' instead of native bash."
           );
         }
       }
@@ -1143,9 +1143,9 @@ export async function initCommand(options: InitOptions): Promise<void> {
     codeMode: {
       enabled: true,
       exclusive: true,
-      maxChainSteps: 20,
-      maxChainTokens: 50_000,
-      maxChainDurationMs: 60_000,
+      maxWorkflowSteps: 20,
+      maxWorkflowTokens: 50_000,
+      maxWorkflowDurationMs: 60_000,
       ladderValidation: "warn" as const,
       etagCaching: true,
     },

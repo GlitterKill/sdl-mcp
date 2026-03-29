@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getContinuation } from "./chain-truncation.js";
+import { getContinuation } from "./workflow-truncation.js";
 
 // --- Path Navigation (reuses ref-resolver's dot/bracket model without $N prefix) ---
 
@@ -299,11 +299,12 @@ export const INTERNAL_TRANSFORM_NAMES = [
   "dataFilter",
   "dataSort",
   "dataTemplate",
+  "workflowContinuationGet",
 ] as const;
 
 export type InternalTransformName = (typeof INTERNAL_TRANSFORM_NAMES)[number];
 
-const ChainContinuationGetSchema = z.object({
+const WorkflowContinuationGetSchema = z.object({
   handle: z.string().min(1),
   offset: z.number().int().min(0).optional(),
   limit: z.number().int().min(1).max(1000).optional(),
@@ -335,10 +336,10 @@ export const INTERNAL_TRANSFORMS: Record<string, InternalTransformEntry> = {
     handler: execDataTemplate,
     description: "Render template strings from object(s)",
   },
-  chainContinuationGet: {
-    schema: ChainContinuationGetSchema,
+  workflowContinuationGet: {
+    schema: WorkflowContinuationGetSchema,
     handler: (args: unknown) => {
-      const parsed = ChainContinuationGetSchema.parse(args);
+      const parsed = WorkflowContinuationGetSchema.parse(args);
       const result = getContinuation(parsed.handle, parsed.offset, parsed.limit);
       if (!result) throw new TransformError("Continuation handle expired or not found");
       return result;

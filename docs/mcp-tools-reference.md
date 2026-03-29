@@ -20,7 +20,7 @@ Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
 
 - `32` SDL action tools (`31` gateway-routable + `1` flat-only)
 - `2` universal tools: `sdl.action.search` and `sdl.info`
-- optional Code Mode tools: `sdl.manual` and `sdl.chain`
+- optional Code Mode tools: `sdl.manual`, `sdl.context`, and `sdl.workflow`
 
 Flat mode, gateway mode, and the CLI `tool` command all route into the same handler layer.
 
@@ -55,7 +55,7 @@ Return unified runtime, config, logging, Ladybug, and native-addon status.
 
 ### `sdl.action.search`
 
-Search the SDL action catalog and return the best matching actions, examples, and schema summaries. Use this to discover the right SDL action before calling `sdl.manual`, `sdl.chain`, or the direct flat or gateway tool surfaces.
+Search the SDL action catalog and return the best matching actions, examples, and schema summaries. Use this to discover the right SDL action before calling `sdl.manual`, `sdl.context`, `sdl.workflow`, or the direct flat or gateway tool surfaces.
 
 See the [Code Mode deep dive](./feature-deep-dives/code-mode.md) for end-to-end discovery and chaining workflows.
 
@@ -782,15 +782,15 @@ Update policy configuration for a repository. Accepts a partial patch — only s
 
 ---
 
-## Agent Orchestration and Feedback (3 tools)
+## Agent Context and Feedback (3 tools)
 
-### `sdl.agent.orchestrate`
+### `sdl.agent.context`
 
-Orchestrate automated task execution with rung path selection and evidence capture. The planner selects an optimal path through the context ladder (card -> skeleton -> hotPath -> raw) based on the task type, budget, and context mode.
+Retrieve task-shaped code context with rung path selection and evidence capture. The planner selects an optimal path through the context ladder (card -> skeleton -> hotPath -> raw) based on the task type, budget, and context mode.
 
 **Context modes:**
 
-- **`"precise"`** — Returns minimal, chain-efficient context. Adaptive symbol selection (1 symbol per rung), stripped response envelope (no `actionsTaken`, `summary`, `answer`, `nextBestAction`). Designed to beat manual `sdl.chain` on token efficiency.
+- **`"precise"`** — Returns minimal, chain-efficient context. Adaptive symbol selection (1 symbol per rung), stripped response envelope (no `actionsTaken`, `summary`, `answer`, `nextBestAction`). Designed to beat manual `sdl.workflow` on token efficiency.
 - **`"broad"`** (default) — Returns richer surrounding context with adaptive selection based on task relevance. Full response envelope with diagnostics.
 
 **Parameters:**
@@ -828,6 +828,8 @@ In **broad** mode (default): `taskId`, `taskType`, `success`, `path`, `finalEvid
 In **precise** mode: `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics` — envelope fields stripped for token efficiency.
 
 Planner token estimates: card ~50, skeleton ~200, hotPath ~500, raw ~2000. When over budget, the planner trims rungs from the end while keeping at least one.
+
+When Code Mode is enabled, `sdl.context` accepts the same task envelope and should be preferred over `sdl.workflow` for `debug`, `review`, `implement`, and `explain` retrieval.
 
 **Precise mode rung strategies:**
 
@@ -1189,6 +1191,28 @@ Get cumulative token usage statistics and savings metrics for the current sessio
 
 ---
 
+## Code Mode (3 tools)
+
+### `sdl.context`
+
+Retrieve task-shaped context inside Code Mode. Parameters and response shape mirror `sdl.agent.context`.
+
+Use `sdl.context` first for `debug`, `review`, `implement`, and `explain` requests when you are already operating through the Code Mode surfaces.
+
+### `sdl.workflow`
+
+Execute a multi-step workflow of SDL-MCP actions and internal transforms in one round trip.
+
+Use this for runtime execution, data shaping, batch mutations, and reusable multi-step pipelines. Do not use it for context retrieval; route that work to `sdl.context` or `sdl.agent.context`.
+
+### `sdl.manual`
+
+Return a compact API reference for the SDL action surface.
+
+Use this before `sdl.context` or `sdl.workflow` when the model needs a narrow, typed subset of the API instead of the full tool surface.
+
+---
+
 ## Tool-Usage Pattern for Agents
 
 Use tools in this order for most tasks:
@@ -1196,19 +1220,21 @@ Use tools in this order for most tasks:
 1. `sdl.repo.status` — check repo state and version
 2. `sdl.repo.overview` — understand codebase structure (start with `level: "stats"`)
 3. `sdl.symbol.search` — find relevant symbols (start with tight limits)
-4. `sdl.symbol.getCard` / `sdl.symbol.getCards` — understand what symbols do
-5. `sdl.slice.build` — get related symbols for a task (auto-surfaces relevant memories)
-6. `sdl.code.getSkeleton` — see code structure without full bodies
-7. `sdl.code.getHotPath` — find specific identifiers in code
-8. `sdl.code.needWindow` — raw code only when necessary
-9. `sdl.agent.feedback` — record which symbols were useful after completing a task
-10. `sdl.memory.store` — persist important decisions, bugfixes, or context for future sessions
+4. `sdl.agent.context` / `sdl.context` — get task-shaped context first for explain/debug/review/implement work
+5. `sdl.symbol.getCard` / `sdl.symbol.getCards` — understand what symbols do
+6. `sdl.slice.build` — get related symbols for a task (auto-surfaces relevant memories)
+7. `sdl.code.getSkeleton` — see code structure without full bodies
+8. `sdl.code.getHotPath` — find specific identifiers in code
+9. `sdl.code.needWindow` — raw code only when necessary
+10. `sdl.agent.feedback` — record which symbols were useful after completing a task
+11. `sdl.memory.store` — persist important decisions, bugfixes, or context for future sessions
 
 ### Task-Specific Workflows
 
 | Task | Workflow |
 |------|----------|
-| **Debug** | search -> card -> slice.build -> hotPath -> needWindow (if still ambiguous) |
+| **Explain / Debug / Review** | `sdl.agent.context` or `sdl.context` first -> direct ladder follow-up only if still ambiguous |
+| **Debug (manual)** | search -> card -> slice.build -> hotPath -> needWindow (if still ambiguous) |
 | **Debug (auto)** | slice.build with `taskText` + `stackTrace` -> hotPath -> needWindow with `sliceContext` |
 | **Feature** | repo.overview -> search -> card -> slice.build (use `editedFiles` for impact) |
 | **PR Review** | delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols |

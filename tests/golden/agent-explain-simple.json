@@ -1,7 +1,7 @@
 {
   "name": "agent-explain-simple",
   "description": "Simple explain task that only uses card rung",
-  "tool": "sdl.agent.orchestrate",
+  "tool": "sdl.agent.context",
   "request": {
     "repoId": "test-repo",
     "taskType": "explain",

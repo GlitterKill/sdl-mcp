@@ -528,9 +528,9 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 - [ ] Returns memories array
 - [ ] Relevance scores included
 
-### 2.9 Agent & Orchestration Tools
+### 2.9 Agent Context & Code Mode Tools
 
-#### sdl.agent.orchestrate
+#### sdl.agent.context
 
 **Input:**
 ```json
@@ -542,7 +542,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 }
 ```
 
-**Expected:** Returns orchestrated context retrieval results.
+**Expected:** Returns task-shaped context retrieval results.
 
 - [ ] Returns taskId
 - [ ] Returns actionsTaken array
@@ -555,7 +555,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 ```json
 {
   "repoId": "test-repo",
-  "taskId": "<taskId-from-orchestrate>",
+  "taskId": "<taskId-from-context>",
   "rating": "positive",
   "comment": "Helpful context"
 }
@@ -591,19 +591,38 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 
 - [ ] Returns summary text
 
-#### sdl.chain
+#### sdl.context
+
+**Input:**
+```json
+{
+  "repoId": "test-repo",
+  "taskType": "review",
+  "taskText": "Review the MCP server request routing",
+  "budget": { "maxTokens": 1500, "maxActions": 4 }
+}
+```
+
+**Expected:** Returns Code Mode task-shaped context retrieval results.
+
+- [ ] Returns taskId
+- [ ] Returns path with rungs
+- [ ] Returns finalEvidence
+- [ ] Returns metrics
+
+#### sdl.workflow
 
 **Input:**
 ```json
 {
   "repoId": "test-repo",
   "steps": [
-    { "tool": "sdl.symbol.search", "args": { "query": "MCPServer", "limit": 5 } }
+    { "fn": "symbolSearch", "args": { "query": "MCPServer", "limit": 5 } }
   ]
 }
 ```
 
-**Expected:** Executes multi-step tool chain with budget tracking.
+**Expected:** Executes a multi-step workflow with budget tracking.
 
 - [ ] Returns step results
 - [ ] Budget tracking included

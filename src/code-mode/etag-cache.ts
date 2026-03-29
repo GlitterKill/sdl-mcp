@@ -1,16 +1,16 @@
 const MAX_ETAG_CACHE_SIZE = 2000;
 
-export class ChainEtagCache {
+export class WorkflowEtagCache {
   private cache: Map<string, string> = new Map();
 
-  /** Inject ifNoneMatch into card request args if we have a cached ETag */
+  /** Inject ifNoneMatch into card request args if we have a cached ETag. */
   injectEtags(action: string, args: Record<string, unknown>): void {
     if (action === "symbol.getCard") {
       const symbolId = args.symbolId;
       if (
-        typeof symbolId === "string" &&
-        this.cache.has(symbolId) &&
-        !args.ifNoneMatch
+        typeof symbolId === "string"
+        && this.cache.has(symbolId)
+        && !args.ifNoneMatch
       ) {
         args.ifNoneMatch = this.cache.get(symbolId);
       }
@@ -32,14 +32,14 @@ export class ChainEtagCache {
     }
   }
 
-  /** Extract ETags from card response results */
+  /** Extract ETags from card response results. */
   extractEtags(action: string, result: unknown): void {
     if (!result || typeof result !== "object") return;
-    const r = result as Record<string, unknown>;
+    const record = result as Record<string, unknown>;
 
     if (action === "symbol.getCard") {
-      const etag = r.etag;
-      const card = r.card;
+      const etag = record.etag;
+      const card = record.card;
       if (typeof etag === "string" && card && typeof card === "object") {
         const symbolId = (card as Record<string, unknown>).symbolId;
         if (typeof symbolId === "string") {
@@ -48,13 +48,13 @@ export class ChainEtagCache {
         }
       }
     } else if (action === "symbol.getCards") {
-      const cards = r.cards;
+      const cards = record.cards;
       if (Array.isArray(cards)) {
         for (const entry of cards) {
           if (entry && typeof entry === "object") {
-            const e = entry as Record<string, unknown>;
-            const card = e.card ?? e;
-            const etag = e.etag;
+            const item = entry as Record<string, unknown>;
+            const card = item.card ?? item;
+            const etag = item.etag;
             if (typeof etag === "string" && card && typeof card === "object") {
               const symbolId = (card as Record<string, unknown>).symbolId;
               if (typeof symbolId === "string") {
@@ -71,16 +71,18 @@ export class ChainEtagCache {
   private evictIfNeeded(): void {
     if (this.cache.size > MAX_ETAG_CACHE_SIZE) {
       const oldest = this.cache.keys().next().value;
-      if (oldest !== undefined) this.cache.delete(oldest);
+      if (oldest !== undefined) {
+        this.cache.delete(oldest);
+      }
     }
   }
 
-  /** Get the current cache state (for returning in ChainResponse) */
+  /** Get the current cache state for returning in WorkflowResponse. */
   getCache(): Record<string, string> {
     return Object.fromEntries(this.cache);
   }
 
-  /** Pre-seed from a prior chain's etagCache */
+  /** Pre-seed from a prior workflow etagCache. */
   seed(cache: Record<string, string>): void {
     for (const [key, value] of Object.entries(cache)) {
       this.cache.set(key, value);

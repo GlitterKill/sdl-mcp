@@ -34,7 +34,7 @@ import {
   PolicyGetRequestSchema,
   PolicySetRequestSchema,
   PRRiskAnalysisRequestSchema,
-  AgentOrchestrateRequestSchema,
+  AgentContextRequestSchema,
   ContextSummaryRequestSchema,
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
@@ -77,7 +77,7 @@ import {
 } from "./code.js";
 import { handlePolicyGet, handlePolicySet } from "./policy.js";
 import { handlePRRiskAnalysis } from "./prRisk.js";
-import { handleAgentOrchestrate } from "./agent.js";
+import { handleAgentContext } from "./context.js";
 import { handleContextSummary } from "./summary.js";
 import {
   handleAgentFeedback,
@@ -275,11 +275,11 @@ export function buildFlatToolDescriptors(
       handler: handlePRRiskAnalysis,
     },
     {
-      name: "sdl.agent.orchestrate",
+      name: "sdl.agent.context",
       description:
-        "Orchestrate agent task execution with automated rung path selection, adaptive symbol relevance ranking, and contextMode (precise/broad) for token-efficient context retrieval",
-      schema: AgentOrchestrateRequestSchema,
-      handler: handleAgentOrchestrate,
+        "Retrieve task-shaped context with automated rung path selection, adaptive symbol relevance ranking, and contextMode (precise/broad) for token-efficient context retrieval",
+      schema: AgentContextRequestSchema,
+      handler: handleAgentContext,
     },
     {
       name: "sdl.context.summary",

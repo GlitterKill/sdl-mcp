@@ -1,11 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { validateLadder } from "../../dist/code-mode/ladder-validator.js";
-import type { ParsedChainStep } from "../../dist/code-mode/chain-parser.js";
+import type { ParsedWorkflowStep } from "../../dist/code-mode/workflow-parser.js";
 
 describe("code-mode ladder validator", () => {
   it("correct order produces no warnings", () => {
-    const steps: ParsedChainStep[] = [
+    const steps: ParsedWorkflowStep[] = [
       { fn: "symbolSearch", action: "symbol.search", args: { query: "test" } },
       {
         fn: "symbolGetCard",
@@ -28,7 +28,7 @@ describe("code-mode ladder validator", () => {
   });
 
   it("skip card to needWindow produces warning", () => {
-    const steps: ParsedChainStep[] = [
+    const steps: ParsedWorkflowStep[] = [
       {
         fn: "symbolGetCard",
         action: "symbol.getCard",
@@ -47,7 +47,7 @@ describe("code-mode ladder validator", () => {
   });
 
   it("two symbols tracked independently", () => {
-    const steps: ParsedChainStep[] = [
+    const steps: ParsedWorkflowStep[] = [
       {
         fn: "symbolGetCard",
         action: "symbol.getCard",
@@ -65,7 +65,7 @@ describe("code-mode ladder validator", () => {
   });
 
   it("non-ladder actions produce no warnings", () => {
-    const steps: ParsedChainStep[] = [
+    const steps: ParsedWorkflowStep[] = [
       {
         fn: "memoryStore",
         action: "memory.store",
@@ -84,7 +84,7 @@ describe("code-mode ladder validator", () => {
   });
 
   it("mode off returns empty array", () => {
-    const steps: ParsedChainStep[] = [
+    const steps: ParsedWorkflowStep[] = [
       {
         fn: "codeNeedWindow",
         action: "code.needWindow",
@@ -96,7 +96,7 @@ describe("code-mode ladder validator", () => {
   });
 
   it("mode warn returns warning strings", () => {
-    const steps: ParsedChainStep[] = [
+    const steps: ParsedWorkflowStep[] = [
       {
         fn: "symbolGetCard",
         action: "symbol.getCard",
@@ -115,7 +115,7 @@ describe("code-mode ladder validator", () => {
   });
 
   it("search to card to needWindow skipping skeleton produces warning", () => {
-    const steps: ParsedChainStep[] = [
+    const steps: ParsedWorkflowStep[] = [
       { fn: "symbolSearch", action: "symbol.search", args: { query: "test" } },
       {
         fn: "symbolGetCard",
@@ -133,7 +133,7 @@ describe("code-mode ladder validator", () => {
   });
 
   it("steps without symbolId in args are neutral", () => {
-    const steps: ParsedChainStep[] = [
+    const steps: ParsedWorkflowStep[] = [
       { fn: "repoOverview", action: "repo.overview", args: { level: "stats" } },
     ];
     const warnings = validateLadder(steps, [null], "warn");

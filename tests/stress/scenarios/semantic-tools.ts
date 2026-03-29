@@ -5,7 +5,7 @@
  *   - sdl.symbol.search with `semantic: true` (embedding rerank / graceful fallback)
  *   - sdl.symbol.getCards (batch card fetch)
  *   - sdl.context.summary (token-bounded summaries)
- *   - sdl.agent.orchestrate (autopilot with tight budget)
+ *   - sdl.agent.context (autopilot with tight budget)
  *   - sdl.agent.feedback + feedback.query (feedback loop)
  *
  * Escalates from 3→N concurrent clients, each running the full semantic workflow.
@@ -54,7 +54,7 @@ const ITERATIONS_PER_CLIENT = 2;
  *   1. Semantic search (semantic: true)
  *   2. Batch getCards for top results
  *   3. Context summary
- *   4. Agent orchestrate (explain, tight budget)
+ *   4. Agent context (explain, tight budget)
  *   5. Agent feedback (record useful symbols)
  *   6. Agent feedback query
  */
@@ -100,9 +100,9 @@ async function runSemanticWorkflow(
       scope: "task",
     });
 
-    // 4. Agent orchestrate with tight budget
-    const orchestrateResult = await client.callToolParsed(
-      "sdl.agent.orchestrate",
+    // 4. Agent context with tight budget
+    const contextResult = await client.callToolParsed(
+      "sdl.agent.context",
       {
         repoId: "stress-fixtures",
         taskType: "explain",
@@ -119,8 +119,8 @@ async function runSemanticWorkflow(
     );
 
     // 5. Agent feedback — record useful symbols from the workflow
-    const sliceHandle = orchestrateResult?.sliceHandle as string | undefined;
-    const versionId = orchestrateResult?.versionId as string | undefined;
+    const sliceHandle = contextResult?.sliceHandle as string | undefined;
+    const versionId = contextResult?.versionId as string | undefined;
     if (sliceHandle && versionId && topSymbolIds.length > 0) {
       await client.callToolParsed("sdl.agent.feedback", {
         repoId: "stress-fixtures",

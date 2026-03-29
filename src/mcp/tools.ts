@@ -1223,7 +1223,7 @@ export const GetSkeletonRequestSchema = z
       .refine((p) => !/^[/\]/.test(p) && !/^[a-zA-Z]:/.test(p), {
         message: "filePath must be relative",
       })
-      .refine((p) => !p.includes(" "), {
+      .refine((p) => !p.includes("\0"), {
         message: "filePath must not contain null bytes",
       })
       .optional(),
@@ -1672,7 +1672,7 @@ export type PRRiskAnalysisResponse = z.infer<
   typeof PRRiskAnalysisResponseSchema
 >;
 
-export const AgentOrchestrateRequestSchema = z.object({
+export const AgentContextRequestSchema = z.object({
   repoId: z
     .string()
     .min(1)
@@ -1717,13 +1717,13 @@ export const AgentOrchestrateRequestSchema = z.object({
       contextMode: z
         .enum(["precise", "broad"])
         .optional()
-        .describe("Context breadth: precise returns minimal chain-efficient context, broad returns richer surrounding context. Default: broad"),
+        .describe("Context breadth: precise returns minimal workflow-efficient context, broad returns richer surrounding context. Default: broad"),
     })
     .optional()
     .describe("Task-specific options"),
 });
 
-export const AgentOrchestrateResponseSchema = z.object({
+export const AgentContextResponseSchema = z.object({
   taskId: z.string().describe("Unique task identifier"),
   taskType: z
     .enum(["debug", "review", "implement", "explain"])
@@ -1796,11 +1796,11 @@ export const AgentOrchestrateResponseSchema = z.object({
   }).optional(),
 });
 
-export type AgentOrchestrateRequest = z.infer<
-  typeof AgentOrchestrateRequestSchema
+export type AgentContextRequest = z.infer<
+  typeof AgentContextRequestSchema
 >;
-export type AgentOrchestrateResponse = z.infer<
-  typeof AgentOrchestrateResponseSchema
+export type AgentContextResponse = z.infer<
+  typeof AgentContextResponseSchema
 >;
 
 // ============================================================================

@@ -52,8 +52,8 @@ Use this page as the entry point for SDL-MCP documentation.
 - [Delta & Blast Radius](./feature-deep-dives/delta-blast-radius.md)
 - [Live Indexing](./feature-deep-dives/live-indexing.md)
 - [Governance & Policy](./feature-deep-dives/governance-policy.md)
-- [Agent Orchestration](./feature-deep-dives/agent-orchestration.md)
-- [Orchestrator Context Modes](./feature-deep-dives/orchestrator-context-modes.md)
+- [Agent Context](./feature-deep-dives/agent-context.md)
+- [Context Modes](./feature-deep-dives/context-modes.md)
 - [Indexing & Languages](./feature-deep-dives/indexing-languages.md)
 - [Semantic Engine](./feature-deep-dives/semantic-engine.md)
 - [Semantic Embeddings Setup](./feature-deep-dives/semantic-embeddings-setup.md)
@@ -88,7 +88,8 @@ Use this page as the entry point for SDL-MCP documentation.
   - Core: repo register/status/overview, index refresh, symbol search/getCard/getCards, slice build/refresh/spillover, delta get, PR risk analyze
   - Code access: getSkeleton, getHotPath, needWindow (Iris Gate Ladder)
   - Policy: get/set
-  - Agent: orchestrate, feedback, feedback.query, context summary
+  - Agent: context, feedback, feedback.query
+  - Context export: context summary
   - Memory: store, query, remove, surface
   - Buffer: push, checkpoint, status
   - Runtime: execute, queryOutput
@@ -97,7 +98,7 @@ Use this page as the entry point for SDL-MCP documentation.
   - Default flat mode: 34 tools (`32` flat tools + `sdl.action.search` + `sdl.info`)
   - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
   - Gateway + legacy mode: 38 tools (`4` gateway + `32` legacy flat + `sdl.action.search` + `sdl.info`)
-  - Code Mode (optional): adds `sdl.manual` and `sdl.chain`, or can run exclusive with `sdl.action.search`, `sdl.info`, `sdl.manual`, and `sdl.chain`
+  - Code Mode (optional): adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow`
 - **Semantic features**: optional semantic reranking, LLM-generated symbol summaries (Anthropic/Ollama/mock)
 - **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
 - **Native addon**: Rust via napi-rs for multi-threaded indexing (default engine, TS fallback)

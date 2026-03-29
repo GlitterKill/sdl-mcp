@@ -384,8 +384,8 @@ const VALIDATORS: Record<string, ValidatorFn> = {
   // Agent
   // -------------------------------------------------------------------------
 
-  "sdl.agent.orchestrate": (_args, result) => {
-    const tool = "sdl.agent.orchestrate";
+  "sdl.agent.context": (_args, result) => {
+    const tool = "sdl.agent.context";
     return [
       checkNonEmptyString(tool, "taskId present", result.taskId),
       checkExists(tool, "actionsTaken array", result.actionsTaken),
@@ -539,7 +539,7 @@ const SAMPLE_EXTRACTORS: Record<string, SampleExtractorFn> = {
     ),
   }),
 
-  "sdl.agent.orchestrate": (result) => {
+  "sdl.agent.context": (result) => {
     const actions = result.actionsTaken as unknown[] | undefined;
     return {
       actionCount: String(actions?.length ?? 0),

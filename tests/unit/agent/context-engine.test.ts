@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
-import { Orchestrator } from "../../../dist/agent/orchestrator.js";
+import { ContextEngine } from "../../../dist/agent/context-engine.js";
 import { Planner } from "../../../dist/agent/planner.js";
 import { Executor } from "../../../dist/agent/executor.js";
 import type {
@@ -40,10 +40,10 @@ afterEach(() => {
   mock.restoreAll();
 });
 
-describe("Orchestrator", () => {
+describe("ContextEngine", () => {
   it("constructs and can plan a valid task", async () => {
-    const orchestrator = new Orchestrator();
-    const planned = await orchestrator.plan(createTask());
+    const engine = new ContextEngine();
+    const planned = await engine.plan(createTask());
 
     assert.equal(planned.task.taskType, "debug");
     assert.ok(planned.path.rungs.length > 0);
@@ -63,8 +63,8 @@ describe("Orchestrator", () => {
     }));
     const planMock = mock.method(Planner.prototype, "plan", () => expectedPath);
 
-    const orchestrator = new Orchestrator();
-    const planned = await orchestrator.plan(
+    const engine = new ContextEngine();
+    const planned = await engine.plan(
       createTask({ taskType: "explain" }),
     );
 
@@ -112,8 +112,8 @@ describe("Orchestrator", () => {
     mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
     mock.method(Executor.prototype, "getNextBestAction", () => "none");
 
-    const orchestrator = new Orchestrator();
-    const result = await orchestrator.orchestrate(createTask());
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(createTask());
 
     assert.equal(executeMock.mock.callCount(), 1);
     assert.equal(result.success, true);
@@ -134,8 +134,8 @@ describe("Orchestrator", () => {
     mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
     mock.method(Executor.prototype, "getNextBestAction", () => undefined);
 
-    const orchestrator = new Orchestrator();
-    const result = await orchestrator.orchestrate(
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(
       createTask({
         options: { requireDiagnostics: true },
         budget: {
@@ -153,8 +153,8 @@ describe("Orchestrator", () => {
   });
 
   it("returns validation errors before planning/execution", async () => {
-    const orchestrator = new Orchestrator();
-    const result = await orchestrator.orchestrate(
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(
       createTask({
         budget: { maxActions: -1 },
       }),
@@ -172,8 +172,8 @@ describe("Orchestrator", () => {
       throw new Error("planner exploded");
     });
 
-    const orchestrator = new Orchestrator();
-    const result = await orchestrator.orchestrate(createTask());
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(createTask());
 
     assert.equal(result.success, false);
     assert.equal(result.path.rungs.length, 0);
@@ -210,8 +210,8 @@ describe("Orchestrator", () => {
     }));
     mock.method(Executor.prototype, "getNextBestAction", () => "refineRequest");
 
-    const orchestrator = new Orchestrator();
-    const result = await orchestrator.orchestrate(createTask());
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(createTask());
 
     assert.equal(result.success, false);
     assert.equal(result.actionsTaken.length, 1);
@@ -244,8 +244,8 @@ describe("Orchestrator", () => {
     }));
     mock.method(Executor.prototype, "getNextBestAction", () => undefined);
 
-    const orchestrator = new Orchestrator();
-    const result = await orchestrator.orchestrate(createTask());
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(createTask());
 
     assert.equal(result.success, true);
     assert.deepEqual(result.path.rungs, []);
@@ -271,8 +271,8 @@ describe("Orchestrator", () => {
     mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
     mock.method(Executor.prototype, "getNextBestAction", () => undefined);
 
-    const orchestrator = new Orchestrator();
-    const result = await orchestrator.orchestrate(createTask());
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(createTask());
 
     assert.equal(result.success, true);
     assert.ok(!result.summary.includes("expanded"));
@@ -294,8 +294,8 @@ describe("Orchestrator", () => {
     mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
     mock.method(Executor.prototype, "getNextBestAction", () => undefined);
 
-    const orchestrator = new Orchestrator();
-    const result = await orchestrator.orchestrate(createTask());
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(createTask());
 
     assert.equal(result.success, true);
   });

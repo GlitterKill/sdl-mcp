@@ -4,9 +4,9 @@ import {
   truncateStepResult,
   getContinuation,
   clearContinuationStore,
-} from "../../dist/code-mode/chain-truncation.js";
+} from "../../dist/code-mode/workflow-truncation.js";
 
-describe("chain-truncation", () => {
+describe("workflow-truncation", () => {
   beforeEach(() => {
     clearContinuationStore();
   });

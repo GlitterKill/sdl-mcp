@@ -8,7 +8,7 @@
 
 `sdl.runtime.execute` lets agents run repo-scoped commands under SDL-MCP policy instead of falling back to unrestricted shell access.
 
-This is the preferred execution path for SDL-enforced agent workflows. In Code Mode, agents should normally call it through `runtimeExecute` inside `sdl.chain`.
+This is the preferred execution path for SDL-enforced agent workflows. In Code Mode, agents should normally call it through `runtimeExecute` inside `sdl.workflow`.
 
 ---
 
@@ -293,7 +293,7 @@ sdl-mcp init --client <client> --enforce-agent-tools
 
 When SDL-MCP is configured for agent enforcement:
 
-- prefer `runtimeExecute` in `sdl.chain` over native shell tools
+- prefer `runtimeExecute` in `sdl.workflow` over native shell tools
 - prefer the two-phase pattern: `outputMode: "minimal"` then `sdl.runtime.queryOutput` on demand
 - prefer structured query terms over dumping large output back to the model
 - use `shell` only when a shell is necessary, not as the default runtime

@@ -42,8 +42,8 @@ Flat mode, gateway mode, and the CLI `tool` command share the same normalization
    - [sdl.pr.risk.analyze](#sdlprriskanalyze)
 10. [Context Summary](#10-context-summary)
     - [sdl.context.summary](#sdlcontextsummary)
-11. [Agent & Automation](#11-agent--automation)
-    - [sdl.agent.orchestrate](#sdlagentorchestrate)
+11. [Agent Context & Feedback](#11-agent-context--feedback)
+    - [sdl.agent.context](#sdlagentcontext)
     - [sdl.agent.feedback](#sdlagentfeedback)
     - [sdl.agent.feedback.query](#sdlagentfeedbackquery)
 12. [Runtime Execution](#12-runtime-execution)
@@ -57,7 +57,8 @@ Flat mode, gateway mode, and the CLI `tool` command share the same normalization
 14. [Usage Statistics](#14-usage-statistics)
     - [sdl.usage.stats](#sdlusagestats)
 15. [Code Mode Tools](#15-code-mode-tools)
-    - [sdl.chain](#sdlchain)
+    - [sdl.context](#sdlcontext)
+    - [sdl.workflow](#sdlworkflow)
     - [sdl.action.search](#sdlactionsearch)
     - [sdl.manual](#sdlmanual)
 
@@ -906,19 +907,21 @@ Results are cached by `repoId + indexVersion + query` to avoid redundant graph q
 
 ---
 
-## 11. Agent & Automation
+## 11. Agent Context & Feedback
 
-### sdl.agent.orchestrate
+### sdl.agent.context
 
-Autonomous task execution engine that selects the optimal Iris Gate Ladder path and collects evidence.
+Task-shaped context engine that selects the optimal Iris Gate Ladder path and collects evidence.
 
-**What it does:** Given a task type (`debug`, `review`, `implement`, `explain`) and a text description, the orchestrator:
+**What it does:** Given a task type (`debug`, `review`, `implement`, `explain`) and a text description, the context engine:
 
 1. Plans a **rung path** (e.g., `card → skeleton → hotPath`) based on the task type, budget constraints, and available evidence.
 2. Executes each rung in sequence, collecting evidence at each step.
 3. Returns the full execution trace: actions taken, evidence collected, metrics, and optionally a synthesized answer.
 
 The planner estimates token costs per rung (`card: ~50`, `skeleton: ~200`, `hotPath: ~500`, `raw: ~2000`) and trims rungs from the end when the budget is tight.
+
+When Code Mode is enabled, `sdl.context` accepts the same task envelope and should be preferred over `sdl.workflow` for retrieval.
 
 **Parameters:**
 
@@ -951,7 +954,7 @@ The planner estimates token costs per rung (`card: ~50`, `skeleton: ~200`, `hotP
 **Response (precise mode):** Only `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics`. Envelope fields stripped for token efficiency.
 
 **Notes:**
-- Use `contextMode: "precise"` for targeted lookups — more token-efficient than manual `sdl.chain`.
+- Use `contextMode: "precise"` for targeted lookups — more token-efficient than manual `sdl.workflow`.
 - Use `contextMode: "broad"` (default) for investigation and exploration.
 - Always provide `budget` and scope with `focusSymbols`/`focusPaths`.
 - Avoid `requireDiagnostics` unless needed — it can force a raw code rung.
@@ -1246,9 +1249,21 @@ Returns cumulative token usage statistics and savings metrics.
 
 ## 15. Code Mode Tools
 
-### sdl.chain
+### sdl.context
 
-Executes a chain of SDL-MCP operations in a single round-trip with budget tracking and cross-step result passing.
+Retrieves task-shaped code context inside Code Mode.
+
+**What it does:** Mirrors `sdl.agent.context` but lives alongside `sdl.manual` and `sdl.workflow`. Use it first for `explain`, `debug`, `review`, and most `implement` requests when you are already operating through the Code Mode surfaces.
+
+**Parameters:** Same as `sdl.agent.context`.
+
+**Response:** Same as `sdl.agent.context`.
+
+---
+
+### sdl.workflow
+
+Executes a workflow of SDL-MCP operations in a single round-trip with budget tracking and cross-step result passing.
 
 **What it does:** Takes an array of steps, each calling an action from the API manual or an internal transform (`dataPick`, `dataMap`, `dataFilter`, `dataSort`, `dataTemplate`). Results flow between steps via `$N` references (e.g., `$0.results[0].symbolId` or `$0.symbols[0].symbolId`). Includes budget tracking, context-ladder validation, cross-step ETag caching, and optional execution tracing.
 
@@ -1257,8 +1272,8 @@ Executes a chain of SDL-MCP operations in a single round-trip with budget tracki
 | Parameter | Type | Required | Description |
 |:----------|:-----|:---------|:------------|
 | `repoId` | string | Yes | Repository scope for all steps |
-| `steps` | array (min 1) | Yes | Chain steps: `[{ fn, args? }]` |
-| `budget` | object | No | Budget constraints for the chain |
+| `steps` | array (min 1) | Yes | Workflow steps: `[{ fn, args? }]` |
+| `budget` | object | No | Budget constraints for the workflow |
 | `onError` | `"continue"` \| `"stop"` | No | Error handling mode |
 | `trace` | object | No | Enable execution tracing |
 
@@ -1293,7 +1308,7 @@ Searches the SDL action catalog for matching actions. Use this as the first disc
 
 ### sdl.manual
 
-Returns the SDL-MCP API manual — a compact reference listing all available functions, their parameters, and return types. Use for focused API reference before calling `sdl.agent.orchestrate` (context retrieval) or `sdl.chain` (multi-step operations).
+Returns the SDL-MCP API manual — a compact reference listing all available functions, their parameters, and return types. Use for focused API reference before calling `sdl.agent.context` / `sdl.context` (context retrieval) or `sdl.workflow` (multi-step operations).
 
 **Parameters:**
 

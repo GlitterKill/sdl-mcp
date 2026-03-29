@@ -112,9 +112,9 @@ describe("MCP tool registration", () => {
     registerTools(server as any, {}, undefined, {
       enabled: true,
       exclusive: false,
-      maxChainSteps: 20,
-      maxChainTokens: 50000,
-      maxChainDurationMs: 30000,
+      maxWorkflowSteps: 20,
+      maxWorkflowTokens: 50000,
+      maxWorkflowDurationMs: 30000,
       ladderValidation: "warn",
       etagCaching: true,
     });
@@ -139,8 +139,12 @@ describe("MCP tool registration", () => {
       "expected sdl.action.search to be registered alongside flat tools",
     );
     assert.ok(
-      names.includes("sdl.chain"),
-      "expected sdl.chain to be registered alongside flat tools",
+      names.includes("sdl.workflow"),
+      "expected sdl.workflow to be registered alongside flat tools",
+    );
+    assert.ok(
+      names.includes("sdl.context"),
+      "expected sdl.context to be registered alongside flat tools",
     );
   });
 
@@ -150,9 +154,9 @@ describe("MCP tool registration", () => {
     registerTools(server as any, {}, undefined, {
       enabled: true,
       exclusive: true,
-      maxChainSteps: 20,
-      maxChainTokens: 50000,
-      maxChainDurationMs: 30000,
+      maxWorkflowSteps: 20,
+      maxWorkflowTokens: 50000,
+      maxWorkflowDurationMs: 30000,
       ladderValidation: "warn",
       etagCaching: true,
     });
@@ -163,16 +167,20 @@ describe("MCP tool registration", () => {
       "expected sdl.manual in exclusive mode",
     );
     assert.ok(
-      names.includes("sdl.info"),
-      "expected sdl.info in exclusive mode",
+      names.includes("sdl.workflow"),
+      "expected sdl.workflow in exclusive mode",
     );
     assert.ok(
-      names.includes("sdl.chain"),
-      "expected sdl.chain in exclusive mode",
+      names.includes("sdl.context"),
+      "expected sdl.context in exclusive mode",
     );
     assert.ok(
       names.includes("sdl.action.search"),
       "expected sdl.action.search in exclusive mode",
+    );
+    assert.ok(
+      !names.includes("sdl.info"),
+      "sdl.info should NOT be registered in exclusive mode",
     );
     assert.strictEqual(
       names.length,
@@ -197,9 +205,9 @@ describe("MCP tool registration", () => {
       {
         enabled: true,
         exclusive: false,
-        maxChainSteps: 20,
-        maxChainTokens: 50000,
-        maxChainDurationMs: 30000,
+        maxWorkflowSteps: 20,
+        maxWorkflowTokens: 50000,
+        maxWorkflowDurationMs: 30000,
         ladderValidation: "warn",
         etagCaching: true,
       },
@@ -221,8 +229,12 @@ describe("MCP tool registration", () => {
       "expected sdl.action.search alongside gateway",
     );
     assert.ok(
-      names.includes("sdl.chain"),
-      "expected sdl.chain alongside gateway",
+      names.includes("sdl.workflow"),
+      "expected sdl.workflow alongside gateway",
+    );
+    assert.ok(
+      names.includes("sdl.context"),
+      "expected sdl.context alongside gateway",
     );
   });
 
@@ -236,8 +248,12 @@ describe("MCP tool registration", () => {
       "sdl.manual should NOT be registered without codeModeConfig",
     );
     assert.ok(
-      !names.includes("sdl.chain"),
-      "sdl.chain should NOT be registered without codeModeConfig",
+      !names.includes("sdl.workflow"),
+      "sdl.workflow should NOT be registered without codeModeConfig",
+    );
+    assert.ok(
+      !names.includes("sdl.context"),
+      "sdl.context should NOT be registered without codeModeConfig",
     );
     assert.ok(
       names.includes("sdl.action.search"),
@@ -257,9 +273,9 @@ describe("MCP tool registration", () => {
     registerTools(server as any, {}, undefined, {
       enabled: false,
       exclusive: false,
-      maxChainSteps: 20,
-      maxChainTokens: 50000,
-      maxChainDurationMs: 30000,
+      maxWorkflowSteps: 20,
+      maxWorkflowTokens: 50000,
+      maxWorkflowDurationMs: 30000,
       ladderValidation: "warn",
       etagCaching: true,
     });
@@ -269,8 +285,12 @@ describe("MCP tool registration", () => {
       "sdl.manual should NOT be registered when enabled=false",
     );
     assert.ok(
-      !names.includes("sdl.chain"),
-      "sdl.chain should NOT be registered when enabled=false",
+      !names.includes("sdl.workflow"),
+      "sdl.workflow should NOT be registered when enabled=false",
+    );
+    assert.ok(
+      !names.includes("sdl.context"),
+      "sdl.context should NOT be registered when enabled=false",
     );
     assert.ok(
       names.includes("sdl.action.search"),

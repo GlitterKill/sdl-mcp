@@ -1,7 +1,7 @@
 {
   "name": "agent-implement-focus-symbols",
   "description": "Implement task with focused symbol scope",
-  "tool": "sdl.agent.orchestrate",
+  "tool": "sdl.agent.context",
   "request": {
     "repoId": "test-repo",
     "taskType": "implement",

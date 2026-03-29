@@ -8,6 +8,30 @@ import {
 
 describe("sdl.action.search behavior", () => {
   describe("query matching via rankCatalog", () => {
+    it("prefers context for explain/debug/review-style queries", () => {
+      invalidateCatalog();
+      const catalog = buildCatalog();
+      const ranked = rankCatalog(catalog, "explain debug review auth failure");
+      const topActions = ranked.slice(0, 5).map((d) => d.action);
+      assert.strictEqual(
+        ranked[0]?.action,
+        "context",
+        `expected context first for explain/debug/review query, got ${topActions.join(", ")}`,
+      );
+    });
+
+    it("prefers workflow for execute/runtime/transform-style queries", () => {
+      invalidateCatalog();
+      const catalog = buildCatalog();
+      const ranked = rankCatalog(catalog, "execute runtime transform pipeline");
+      const topActions = ranked.slice(0, 5).map((d) => d.action);
+      assert.strictEqual(
+        ranked[0]?.action,
+        "workflow",
+        `expected workflow first for execute/runtime/transform query, got ${topActions.join(", ")}`,
+      );
+    });
+
     it("returns results for a broad query like 'symbol'", () => {
       invalidateCatalog();
       const catalog = buildCatalog();
@@ -190,19 +214,21 @@ describe("sdl.action.search behavior", () => {
         assert.ok(desc.description, `description should be set for ${desc.action}`);
         assert.ok(Array.isArray(desc.tags), `tags should be an array for ${desc.action}`);
         assert.ok(
-          desc.kind === "gateway" || desc.kind === "internal",
-          `kind should be gateway or internal for ${desc.action}`,
+          desc.kind === "gateway" || desc.kind === "internal" || desc.kind === "meta",
+          `kind should be gateway, internal, or meta for ${desc.action}`,
         );
       }
     });
 
-    it("catalog contains both gateway and internal actions", () => {
+    it("catalog contains gateway, internal, and meta actions", () => {
       invalidateCatalog();
       const catalog = buildCatalog();
       const gateway = catalog.filter((d) => d.kind === "gateway");
       const internal = catalog.filter((d) => d.kind === "internal");
+      const meta = catalog.filter((d) => d.kind === "meta");
       assert.ok(gateway.length > 0, "should have gateway actions");
       assert.ok(internal.length > 0, "should have internal actions");
+      assert.ok(meta.length > 0, "should have meta actions");
     });
   });
 });

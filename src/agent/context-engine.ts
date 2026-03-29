@@ -2,7 +2,7 @@ import type {
   AgentTask,
   Evidence,
   Action,
-  OrchestrationResult,
+  ContextResult,
   PlannedExecution,
 } from "./types.js";
 import { Planner } from "./planner.js";
@@ -21,7 +21,7 @@ const HANDLED_EVIDENCE_TYPES = new Set([
   "symbolCard", "skeleton", "hotPath", "codeWindow", "diagnostic", "searchResult",
 ]);
 
-export class Orchestrator {
+export class ContextEngine {
   private planner: Planner;
   private policyEngine: PolicyEngine;
 
@@ -30,7 +30,7 @@ export class Orchestrator {
     this.policyEngine = new PolicyEngine();
   }
 
-  async orchestrate(task: AgentTask): Promise<OrchestrationResult> {
+  async buildContext(task: AgentTask): Promise<ContextResult> {
     const taskId = this.generateTaskId();
 
     const validation = this.planner.validateTask(task);
@@ -69,7 +69,7 @@ export class Orchestrator {
               .filter((r) => r.entityType === "process")
               .map((r) => `process:${r.entityId}`);
             context = [...symbolIds, ...clusterIds, ...processIds];
-            logger.debug("Entity retrieval seeded agent context", {
+            logger.debug("Entity retrieval seeded task context", {
               repoId: task.repoId,
               symbolCount: symbolIds.length,
               clusterCount: clusterIds.length,
@@ -78,7 +78,7 @@ export class Orchestrator {
           }
         } catch (err) {
           logger.debug(
-            "Entity retrieval for agent context failed; proceeding with empty context",
+            "Entity retrieval for task context failed; proceeding with empty context",
             { repoId: task.repoId, error: err },
           );
         }
@@ -103,13 +103,15 @@ export class Orchestrator {
                 context.push(contextKey);
               }
             }
-            logger.debug("Feedback boost added symbols to agent context", {
+            logger.debug("Feedback boost added symbols to task context", {
               repoId: task.repoId,
               symbolsBoosted: boosts.size,
             });
           }
         } catch (err) {
-          logger.debug(`[orchestrator] Feedback boost failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+          logger.debug(
+            `[context-engine] Feedback boost failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 
@@ -161,7 +163,7 @@ export class Orchestrator {
         answer: this.generateAnswer(task, evidence, success),
         nextBestAction,
         retrievalEvidence: {
-          // The orchestrator only has taskText available (no stackTrace,
+          // The context tool only has taskText available (no stackTrace,
           // failingTestPath, or editedFiles), so symptomType will always be
           // "taskText" here. This is by design — richer classification is
           // available in slice.build where all input fields exist.
@@ -345,7 +347,7 @@ export class Orchestrator {
     taskId: string,
     task: AgentTask,
     error: string,
-  ): OrchestrationResult {
+  ): ContextResult {
     return {
       taskId,
       taskType: task.taskType,
@@ -435,4 +437,4 @@ export class Orchestrator {
   }
 }
 
-export const orchestrator = new Orchestrator();
+export const contextEngine = new ContextEngine();

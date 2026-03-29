@@ -113,17 +113,17 @@ describe("friction-fixes", () => {
     });
   });
 
-  describe("chainContinuationGet transform", () => {
+  describe("workflowContinuationGet transform", () => {
     it("is registered as an internal transform", () => {
       const catalog = buildCatalog();
-      const cont = catalog.find((a) => a.fn === "chainContinuationGet");
-      assert.ok(cont, "chainContinuationGet should be in catalog");
+      const cont = catalog.find((a) => a.fn === "workflowContinuationGet");
+      assert.ok(cont, "workflowContinuationGet should be in catalog");
       assert.equal(cont.kind, "internal");
     });
 
     it("errors on invalid handle", () => {
       assert.throws(
-        () => executeTransform("chainContinuationGet", { handle: "nonexistent" }),
+        () => executeTransform("workflowContinuationGet", { handle: "nonexistent" }),
         /expired or not found/,
       );
     });

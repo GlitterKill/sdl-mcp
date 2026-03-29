@@ -17,9 +17,14 @@ describe("code-mode action catalog", () => {
 
       const gatewayActions = catalog.filter((d) => d.kind === "gateway");
       const transforms = catalog.filter((d) => d.kind === "internal");
+      const metaTools = catalog.filter((d) => d.kind === "meta");
 
       assert.ok(gatewayActions.length >= 29, `expected at least 29 gateway actions, got ${gatewayActions.length}`);
       assert.strictEqual(transforms.length, 6, "should have 6 internal transforms");
+      assert.deepStrictEqual(
+        metaTools.map((d) => d.action).sort(),
+        ["action.search", "context", "manual", "workflow"],
+      );
     });
 
     it("each descriptor has action, fn, description, tags, kind", () => {
@@ -30,7 +35,9 @@ describe("code-mode action catalog", () => {
         assert.ok(desc.fn, `fn should be set for ${desc.action}`);
         assert.ok(desc.description, `description should be set for ${desc.fn}`);
         assert.ok(Array.isArray(desc.tags), `tags should be an array for ${desc.fn}`);
-        assert.ok(desc.kind === "gateway" || desc.kind === "internal");
+        assert.ok(
+          desc.kind === "gateway" || desc.kind === "internal" || desc.kind === "meta",
+        );
       }
     });
 
@@ -114,6 +121,28 @@ describe("code-mode action catalog", () => {
       const catalog = buildCatalog();
       const ranked = rankCatalog(catalog, "transform");
       assert.ok(ranked.length >= 6, "should match all 6 transforms");
+    });
+
+    it("routes explain/debug/review prompts to context before workflow", () => {
+      invalidateCatalog();
+      const catalog = buildCatalog();
+      const ranked = rankCatalog(catalog, "debug review auth flow");
+      assert.strictEqual(
+        ranked[0]?.action,
+        "context",
+        `expected context first, got ${ranked.slice(0, 5).map((d) => d.action).join(", ")}`,
+      );
+    });
+
+    it("routes execute/runtime/transform prompts to workflow before context", () => {
+      invalidateCatalog();
+      const catalog = buildCatalog();
+      const ranked = rankCatalog(catalog, "execute runtime pipeline transform");
+      assert.strictEqual(
+        ranked[0]?.action,
+        "workflow",
+        `expected workflow first, got ${ranked.slice(0, 5).map((d) => d.action).join(", ")}`,
+      );
     });
   });
 

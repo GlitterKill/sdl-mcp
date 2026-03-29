@@ -48,7 +48,7 @@ This matters because:
 │  sdl.code.needWindow  sdl.policy.get                 │
 │  sdl.code.getSkeleton sdl.policy.set                 │
 │  sdl.code.getHotPath  sdl.pr.risk.analyze            │
-│  sdl.agent.orchestrate sdl.context.summary           │
+│  sdl.agent.context sdl.context.summary           │
 │  sdl.agent.feedback   sdl.agent.feedback.query       │
 │  sdl.runtime.execute  sdl.memory.store               │
 │  sdl.runtime.queryOutput sdl.memory.query             │
@@ -124,7 +124,7 @@ The 31 action tools are organized into 4 namespaces:
 | `sdl.query` | 9 | Read-only intelligence: symbol search/cards, slices, deltas, summaries, PR risk |
 | `sdl.code` | 3 | Gated code access: needWindow, skeleton, hotPath |
 | `sdl.repo` | 7 | Repository lifecycle: register, status, overview, index, policy, usage stats |
-| `sdl.agent` | 12 | Agentic ops: orchestrate, feedback, buffers, runtime, runtime.queryOutput, memory |
+| `sdl.agent` | 12 | Agentic ops: context, feedback, buffers, runtime, runtime.queryOutput, memory |
 
 Outside the gateway, SDL-MCP always keeps:
 
@@ -422,6 +422,6 @@ Estimated savings: ~3525 tokens per tools/list call
 
 ## What's Next: Code Mode
 
-Gateway mode optimizes **tool registration** overhead. For context retrieval, `sdl.agent.orchestrate` provides the most token-efficient path with automatic rung selection and adaptive symbol ranking (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration). **Code Mode** (`sdl.chain`) complements orchestrate by batching multi-step operations (runtime execution, data transforms, batch mutations) into a single tool call with `$N` inter-step references.
+Gateway mode optimizes **tool registration** overhead. For context retrieval, `sdl.agent.context` provides the most token-efficient path with automatic rung selection and adaptive symbol ranking (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration). In Code Mode, `sdl.context` provides the same retrieval surface, while `sdl.workflow` is reserved for multi-step operations such as runtime execution, data transforms, and batch mutations.
 
 [Code Mode Deep Dive →](./code-mode.md)

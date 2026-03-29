@@ -1,4 +1,4 @@
-import type { ParsedChainStep } from "./chain-parser.js";
+import type { ParsedWorkflowStep } from "./workflow-parser.js";
 
 const RUNG_ORDER: Record<string, number> = {
   "symbol.search": 0,
@@ -11,7 +11,7 @@ const RUNG_ORDER: Record<string, number> = {
 };
 
 export function validateLadder(
-  steps: ParsedChainStep[],
+  steps: ParsedWorkflowStep[],
   _priorResults: unknown[],
   mode: "off" | "warn" | "enforce",
 ): string[] {

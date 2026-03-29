@@ -1,31 +1,44 @@
 import { routeGatewayCall, type ActionMap } from "../gateway/router.js";
 import type { ToolContext } from "../server.js";
-import { resolveRefs } from "./ref-resolver.js";
-import { RefResolutionError } from "./ref-resolver.js";
-import { ChainBudgetTracker } from "./chain-budget.js";
-import { validateLadder } from "./ladder-validator.js";
-import { ChainEtagCache } from "./etag-cache.js";
-import { executeTransform, TransformError } from "./transforms.js";
-import type { ChainResponse, ChainStepResult, ChainTraceOptions, ChainTraceStep } from "./types.js";
-import type { ParsedChainRequest } from "./chain-parser.js";
 import type { CodeModeConfig } from "../config/types.js";
-import { buildCatalog, type ActionDescriptor } from "./action-catalog.js";
 import { estimateTokens } from "../util/tokenize.js";
-import { truncateStepResult } from "./chain-truncation.js";
-
+import { buildCatalog, type ActionDescriptor } from "./action-catalog.js";
+import { WorkflowEtagCache } from "./etag-cache.js";
+import { validateLadder } from "./ladder-validator.js";
+import {
+  resolveRefs,
+  RefResolutionError,
+} from "./ref-resolver.js";
+import {
+  executeTransform,
+  TransformError,
+} from "./transforms.js";
+import { truncateStepResult } from "./workflow-truncation.js";
+import {
+  type WorkflowResponse,
+  type WorkflowStepResult,
+  type WorkflowTraceOptions,
+  type WorkflowTraceStep,
+} from "./types.js";
+import type { ParsedWorkflowRequest } from "./workflow-parser.js";
+import { WorkflowBudgetTracker } from "./workflow-budget.js";
 
 /**
  * Apply per-step token truncation if configured.
  * Mutates stepResult in place if truncation occurs.
  */
 function applyStepTruncation(
-  stepResult: ChainStepResult,
+  stepResult: WorkflowStepResult,
   step: { maxResponseTokens?: number },
   defaultMaxResponseTokens: number | undefined,
 ): void {
-  const maxRespTokens = step.maxResponseTokens ?? defaultMaxResponseTokens;
-  if (maxRespTokens != null && stepResult.status === "ok" && stepResult.result != null) {
-    const truncation = truncateStepResult(stepResult.result, maxRespTokens);
+  const maxResponseTokens = step.maxResponseTokens ?? defaultMaxResponseTokens;
+  if (
+    maxResponseTokens != null
+    && stepResult.status === "ok"
+    && stepResult.result != null
+  ) {
+    const truncation = truncateStepResult(stepResult.result, maxResponseTokens);
     if (truncation.handle) {
       stepResult.result = truncation.truncated;
       stepResult.tokens = truncation.keptTokens;
@@ -39,37 +52,39 @@ function applyStepTruncation(
 }
 
 /**
- * Execute a parsed chain request sequentially, resolving $N references,
+ * Execute a parsed workflow request sequentially, resolving $N references,
  * tracking budget, validating the context ladder, and caching ETags.
  */
-export async function executeChain(
-  request: ParsedChainRequest,
+export async function executeWorkflow(
+  request: ParsedWorkflowRequest,
   actionMap: ActionMap,
   config: CodeModeConfig,
   context?: ToolContext,
-  traceOpts?: ChainTraceOptions,
-): Promise<ChainResponse> {
-  const budget = new ChainBudgetTracker(request.budget, {
-    maxSteps: config.maxChainSteps,
-    maxTokens: config.maxChainTokens,
-    maxDurationMs: config.maxChainDurationMs,
+  traceOpts?: WorkflowTraceOptions,
+): Promise<WorkflowResponse> {
+  const budget = new WorkflowBudgetTracker(request.budget, {
+    maxSteps: config.maxWorkflowSteps,
+    maxTokens: config.maxWorkflowTokens,
+    maxDurationMs: config.maxWorkflowDurationMs,
   });
 
-  const etagCache = config.etagCaching ? new ChainEtagCache() : null;
+  const etagCache = config.etagCaching ? new WorkflowEtagCache() : null;
   const priorResults: unknown[] = [];
-  const stepResults: ChainStepResult[] = [];
-  const traceSteps: ChainTraceStep[] = [];
+  const stepResults: WorkflowStepResult[] = [];
+  const traceSteps: WorkflowTraceStep[] = [];
   const startTime = Date.now();
 
-  // Pre-build enriched catalog once if trace needs schemas/examples
-  const traceCatalog = traceOpts && (traceOpts.includeSchemas || traceOpts.includeExamples)
-    ? buildCatalog({ includeSchemas: traceOpts.includeSchemas, includeExamples: traceOpts.includeExamples })
+  const traceCatalog = traceOpts
+    && (traceOpts.includeSchemas || traceOpts.includeExamples)
+    ? buildCatalog({
+      includeSchemas: traceOpts.includeSchemas,
+      includeExamples: traceOpts.includeExamples,
+    })
     : null;
 
   for (let i = 0; i < request.steps.length; i++) {
     const step = request.steps[i];
 
-    // Check for client disconnect (AbortSignal) between steps
     if (context?.signal?.aborted) {
       for (let j = i; j < request.steps.length; j++) {
         stepResults.push({
@@ -79,16 +94,14 @@ export async function executeChain(
           tokens: 0,
           durationMs: 0,
           status: "skipped",
-          error: "Chain aborted: client disconnected",
+          error: "Workflow aborted: client disconnected",
         });
         priorResults.push(null);
       }
       break;
     }
 
-    // Check budget before executing
     if (!budget.shouldContinue()) {
-      // Mark this step and all remaining as budget_exceeded
       for (let j = i; j < request.steps.length; j++) {
         stepResults.push({
           stepIndex: j,
@@ -103,15 +116,13 @@ export async function executeChain(
       break;
     }
 
-    // Resolve $N refs in step args
     let resolvedArgs: Record<string, unknown>;
     try {
       resolvedArgs = resolveRefs(step.args, priorResults);
-    } catch (err) {
-      const errorMsg =
-        err instanceof RefResolutionError
-          ? err.message
-          : `Ref resolution failed: ${String(err)}`;
+    } catch (error) {
+      const errorMessage = error instanceof RefResolutionError
+        ? error.message
+        : `Ref resolution failed: ${String(error)}`;
       stepResults.push({
         stepIndex: i,
         fn: step.fn,
@@ -119,12 +130,11 @@ export async function executeChain(
         tokens: 0,
         durationMs: 0,
         status: "error",
-        error: errorMsg,
+        error: errorMessage,
       });
       priorResults.push(null);
 
       if (request.onError === "stop") {
-        // Mark remaining as skipped
         for (let j = i + 1; j < request.steps.length; j++) {
           stepResults.push({
             stepIndex: j,
@@ -141,20 +151,18 @@ export async function executeChain(
       continue;
     }
 
-    // Execute internal transform or gateway step
     const stepStart = Date.now();
 
     if (step.internal) {
-      // Internal transform — execute directly, bypass gateway
       try {
         const result = executeTransform(step.fn, resolvedArgs);
         const stepDuration = Date.now() - stepStart;
-        const tokens = ChainBudgetTracker.estimateResultTokens(result);
+        const tokens = WorkflowBudgetTracker.estimateResultTokens(result);
 
         budget.record(tokens, stepDuration);
         priorResults.push(result);
 
-        const stepResult: ChainStepResult = {
+        const stepResult: WorkflowStepResult = {
           stepIndex: i,
           fn: step.fn,
           result,
@@ -162,19 +170,36 @@ export async function executeChain(
           durationMs: stepDuration,
           status: "ok",
         };
-        applyStepTruncation(stepResult, step, request.defaultMaxResponseTokens);
+        applyStepTruncation(
+          stepResult,
+          step,
+          request.defaultMaxResponseTokens,
+        );
         stepResults.push(stepResult);
 
         if (traceOpts) {
-          traceSteps.push(buildTraceStep(i, step.fn, step.fn, "internal", "ok", stepDuration, tokens, traceOpts, traceCatalog, resolvedArgs, result));
+          traceSteps.push(
+            buildTraceStep(
+              i,
+              step.fn,
+              step.fn,
+              "internal",
+              "ok",
+              stepDuration,
+              tokens,
+              traceOpts,
+              traceCatalog,
+              resolvedArgs,
+              result,
+            ),
+          );
         }
-      } catch (err) {
+      } catch (error) {
         const stepDuration = Date.now() - stepStart;
         budget.record(0, stepDuration);
-        const errorMsg =
-          err instanceof TransformError
-            ? err.message
-            : `Transform failed: ${String(err)}`;
+        const errorMessage = error instanceof TransformError
+          ? error.message
+          : `Transform failed: ${String(error)}`;
 
         stepResults.push({
           stepIndex: i,
@@ -183,12 +208,27 @@ export async function executeChain(
           tokens: 0,
           durationMs: stepDuration,
           status: "error",
-          error: errorMsg,
+          error: errorMessage,
         });
         priorResults.push(null);
 
         if (traceOpts) {
-          traceSteps.push(buildTraceStep(i, step.fn, step.fn, "internal", "error", stepDuration, 0, traceOpts, traceCatalog, resolvedArgs, null, errorMsg));
+          traceSteps.push(
+            buildTraceStep(
+              i,
+              step.fn,
+              step.fn,
+              "internal",
+              "error",
+              stepDuration,
+              0,
+              traceOpts,
+              traceCatalog,
+              resolvedArgs,
+              null,
+              errorMessage,
+            ),
+          );
         }
 
         if (request.onError === "stop") {
@@ -207,7 +247,6 @@ export async function executeChain(
         }
       }
     } else {
-      // Gateway step — inject ETags, route through gateway
       if (etagCache) {
         etagCache.injectEtags(step.action, resolvedArgs);
       }
@@ -221,7 +260,7 @@ export async function executeChain(
       try {
         const result = await routeGatewayCall(gatewayArgs, actionMap, context);
         const stepDuration = Date.now() - stepStart;
-        const tokens = ChainBudgetTracker.estimateResultTokens(result);
+        const tokens = WorkflowBudgetTracker.estimateResultTokens(result);
 
         budget.record(tokens, stepDuration);
 
@@ -230,7 +269,7 @@ export async function executeChain(
         }
 
         priorResults.push(result);
-        const gwStepResult: ChainStepResult = {
+        const stepResult: WorkflowStepResult = {
           stepIndex: i,
           fn: step.fn,
           result,
@@ -238,19 +277,36 @@ export async function executeChain(
           durationMs: stepDuration,
           status: "ok",
         };
-        applyStepTruncation(gwStepResult, step, request.defaultMaxResponseTokens);
-        stepResults.push(gwStepResult);
+        applyStepTruncation(
+          stepResult,
+          step,
+          request.defaultMaxResponseTokens,
+        );
+        stepResults.push(stepResult);
 
         if (traceOpts) {
-          traceSteps.push(buildTraceStep(i, step.fn, step.action, "gateway", "ok", stepDuration, tokens, traceOpts, traceCatalog, resolvedArgs, result));
+          traceSteps.push(
+            buildTraceStep(
+              i,
+              step.fn,
+              step.action,
+              "gateway",
+              "ok",
+              stepDuration,
+              tokens,
+              traceOpts,
+              traceCatalog,
+              resolvedArgs,
+              result,
+            ),
+          );
         }
-      } catch (err) {
+      } catch (error) {
         const stepDuration = Date.now() - stepStart;
         budget.record(0, stepDuration);
-        const errorMsg =
-          err instanceof Error
-            ? err.message
-            : `Step execution failed: ${String(err)}`;
+        const errorMessage = error instanceof Error
+          ? error.message
+          : `Step execution failed: ${String(error)}`;
 
         stepResults.push({
           stepIndex: i,
@@ -259,12 +315,27 @@ export async function executeChain(
           tokens: 0,
           durationMs: stepDuration,
           status: "error",
-          error: errorMsg,
+          error: errorMessage,
         });
         priorResults.push(null);
 
         if (traceOpts) {
-          traceSteps.push(buildTraceStep(i, step.fn, step.action, "gateway", "error", stepDuration, 0, traceOpts, traceCatalog, resolvedArgs, null, errorMsg));
+          traceSteps.push(
+            buildTraceStep(
+              i,
+              step.fn,
+              step.action,
+              "gateway",
+              "error",
+              stepDuration,
+              0,
+              traceOpts,
+              traceCatalog,
+              resolvedArgs,
+              null,
+              errorMessage,
+            ),
+          );
         }
 
         if (request.onError === "stop") {
@@ -285,7 +356,6 @@ export async function executeChain(
     }
   }
 
-  // Run ladder validation
   const ladderWarnings = validateLadder(
     request.steps,
     priorResults,
@@ -294,31 +364,31 @@ export async function executeChain(
 
   const budgetState = budget.state();
   const etagCacheState = etagCache?.getCache();
-  const hasEtags =
-    etagCacheState !== undefined && Object.keys(etagCacheState).length > 0;
-
+  const hasEtags = etagCacheState !== undefined
+    && Object.keys(etagCacheState).length > 0;
   const totalDurationMs = Date.now() - startTime;
 
-  // Aggregate _rawContext from individual step results for the token meter
   const aggregatedFileIds = new Set<string>();
   let aggregatedRawTokens = 0;
-  for (const pr of priorResults) {
-    if (pr && typeof pr === "object") {
-      const rc = (pr as Record<string, unknown>)._rawContext as
+  for (const priorResult of priorResults) {
+    if (priorResult && typeof priorResult === "object") {
+      const rawContext = (priorResult as Record<string, unknown>)._rawContext as
         | { fileIds?: string[]; rawTokens?: number }
         | undefined;
-      if (rc) {
-        if (rc.fileIds) {
-          for (const fid of rc.fileIds) aggregatedFileIds.add(fid);
+      if (rawContext) {
+        if (rawContext.fileIds) {
+          for (const fileId of rawContext.fileIds) {
+            aggregatedFileIds.add(fileId);
+          }
         }
-        if (rc.rawTokens) {
-          aggregatedRawTokens += rc.rawTokens;
+        if (rawContext.rawTokens) {
+          aggregatedRawTokens += rawContext.rawTokens;
         }
       }
     }
   }
 
-  const response: ChainResponse = {
+  const response: WorkflowResponse = {
     results: stepResults,
     totalTokens: budgetState.tokensUsed,
     durationMs: totalDurationMs,
@@ -327,22 +397,25 @@ export async function executeChain(
     etagCache: hasEtags ? etagCacheState : undefined,
   };
 
-  // Attach aggregate _rawContext so the server's token meter can fire
   if (aggregatedFileIds.size > 0 || aggregatedRawTokens > 0) {
     (response as unknown as Record<string, unknown>)._rawContext = {
-      ...(aggregatedFileIds.size > 0 ? { fileIds: Array.from(aggregatedFileIds) } : {}),
+      ...(aggregatedFileIds.size > 0
+        ? { fileIds: Array.from(aggregatedFileIds) }
+        : {}),
       ...(aggregatedRawTokens > 0 ? { rawTokens: aggregatedRawTokens } : {}),
     };
   }
 
-  // Attach trace only when requested
   if (traceOpts && traceSteps.length > 0) {
     response.trace = {
       steps: traceSteps,
       totals: {
         durationMs: totalDurationMs,
         tokens: budgetState.tokensUsed,
-        stepsExecuted: stepResults.filter((s) => s.status === "ok" || s.status === "error").length,
+        stepsExecuted: stepResults.filter(
+          (stepResult) =>
+            stepResult.status === "ok" || stepResult.status === "error",
+        ).length,
       },
     };
   }
@@ -356,12 +429,13 @@ const DEFAULT_MAX_PREVIEW_TOKENS = 200;
 
 function truncatePreview(value: unknown, maxTokens: number): string {
   const json = JSON.stringify(value);
-  const est = estimateTokens(json);
-  if (est <= maxTokens) return json;
+  const estimatedTokens = estimateTokens(json);
+  if (estimatedTokens <= maxTokens) {
+    return json;
+  }
 
-  // Truncate deterministically by character count approximation (4 chars per token)
   const maxChars = maxTokens * 4;
-  return json.slice(0, maxChars) + "…";
+  return json.slice(0, maxChars) + "...";
 }
 
 function buildTraceStep(
@@ -372,16 +446,16 @@ function buildTraceStep(
   status: string,
   durationMs: number,
   tokens: number,
-  opts: ChainTraceOptions,
+  opts: WorkflowTraceOptions,
   catalog: ActionDescriptor[] | null,
   resolvedArgs?: Record<string, unknown>,
   result?: unknown,
   error?: string,
-): ChainTraceStep {
-  const maxPreview = opts.maxPreviewTokens ?? DEFAULT_MAX_PREVIEW_TOKENS;
+): WorkflowTraceStep {
+  const maxPreviewTokens = opts.maxPreviewTokens ?? DEFAULT_MAX_PREVIEW_TOKENS;
   const level = opts.level ?? "summary";
 
-  const step: ChainTraceStep = {
+  const traceStep: WorkflowTraceStep = {
     stepIndex,
     fn,
     action,
@@ -390,33 +464,36 @@ function buildTraceStep(
     durationMs,
     tokens,
     summary: error
-      ? `${fn}: error — ${error}`
+      ? `${fn}: error - ${error}`
       : `${fn}: ${tokens} tokens in ${durationMs}ms`,
   };
 
   if (level === "verbose") {
     if (opts.includeResolvedArgs && resolvedArgs !== undefined) {
-      step.resolvedArgsPreview = truncatePreview(resolvedArgs, maxPreview);
+      traceStep.resolvedArgsPreview = truncatePreview(
+        resolvedArgs,
+        maxPreviewTokens,
+      );
     }
 
     if (result !== undefined && result !== null) {
-      step.resultPreview = truncatePreview(result, maxPreview);
+      traceStep.resultPreview = truncatePreview(result, maxPreviewTokens);
     }
 
     if (catalog) {
-      const desc = catalog.find(
-        (d) => d.fn === fn || d.action === action,
+      const descriptor = catalog.find(
+        (entry) => entry.fn === fn || entry.action === action,
       );
-      if (desc) {
-        if (opts.includeSchemas && desc.schemaSummary) {
-          step.schemaSummary = desc.schemaSummary;
+      if (descriptor) {
+        if (opts.includeSchemas && descriptor.schemaSummary) {
+          traceStep.schemaSummary = descriptor.schemaSummary;
         }
-        if (opts.includeExamples && desc.example) {
-          step.example = desc.example;
+        if (opts.includeExamples && descriptor.example) {
+          traceStep.example = descriptor.example;
         }
       }
     }
   }
 
-  return step;
+  return traceStep;
 }

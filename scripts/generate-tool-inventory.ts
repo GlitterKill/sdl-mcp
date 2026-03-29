@@ -62,6 +62,10 @@ function extractRegisteredToolNames(source: string): string[] {
   return names;
 }
 
+function normalizeToolNames(names: string[]): string[] {
+  return [...new Set(names)].sort();
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -71,6 +75,7 @@ function main(): void {
   let descriptorsSource: string;
   let codeModeSource: string;
   let gatewaySource: string;
+  let toolsIndexSource: string;
 
   try {
     descriptorsSource = readFileSync(DESCRIPTORS_PATH, "utf-8");
@@ -98,25 +103,32 @@ function main(): void {
   }
 
   // --- Flat tools (from tool-descriptors.ts) ---
-  const flatToolNames = extractFlatToolNames(descriptorsSource).sort();
+  const flatToolNames = normalizeToolNames(extractFlatToolNames(descriptorsSource));
   const flatToolCount = flatToolNames.length;
 
-  // --- Universal tools (registered in tools/index.ts, always present) ---
-  // sdl.info is registered in tools/index.ts via registerTool
-  // sdl.action.search is registered via registerActionSearchTool (imported from code-mode)
-  const universalToolNames = ["sdl.info", "sdl.action.search"].sort();
+  // --- Universal tools (shared outside Code Mode exclusive) ---
+  // sdl.info is registered directly in tools/index.ts via registerTool.
+  // sdl.action.search is registered via registerActionSearchTool.
+  const universalToolNames = normalizeToolNames([
+    "sdl.action.search",
+    ...extractRegisteredToolNames(toolsIndexSource),
+  ]);
   const universalToolCount = universalToolNames.length;
 
   // --- Code-mode tools (registered in code-mode/index.ts) ---
-  const codeModeRegistered = extractRegisteredToolNames(codeModeSource).sort();
-  // The code-mode file registers: sdl.action.search, sdl.manual, sdl.chain
-  const codeModeToolNames = codeModeRegistered.length > 0 ? codeModeRegistered : ["sdl.chain", "sdl.manual", "sdl.action.search"];
+  const codeModeRegistered = normalizeToolNames(extractRegisteredToolNames(codeModeSource));
+  // The code-mode file registers: sdl.action.search, sdl.manual, sdl.workflow, sdl.context
+  const codeModeToolNames = codeModeRegistered.length > 0
+    ? codeModeRegistered
+    : normalizeToolNames(["sdl.action.search", "sdl.context", "sdl.manual", "sdl.workflow"]);
   const codeModeToolCount = codeModeToolNames.length;
 
   // --- Gateway tools (registered in gateway/index.ts) ---
-  const gatewayRegistered = extractRegisteredToolNames(gatewaySource).sort();
+  const gatewayRegistered = normalizeToolNames(extractRegisteredToolNames(gatewaySource));
   // The gateway file registers: sdl.query, sdl.code, sdl.repo, sdl.agent
-  const gatewayToolNames = gatewayRegistered.length > 0 ? gatewayRegistered : ["sdl.query", "sdl.code", "sdl.repo", "sdl.agent"];
+  const gatewayToolNames = gatewayRegistered.length > 0
+    ? gatewayRegistered
+    : normalizeToolNames(["sdl.query", "sdl.code", "sdl.repo", "sdl.agent"]);
   const gatewayToolCount = gatewayToolNames.length;
 
   // --- Compute totals ---
@@ -152,8 +164,8 @@ function main(): void {
     },
     flatToolNames,
     universalToolNames,
-    codeModeToolNames: [...codeModeToolNames].sort(),
-    gatewayToolNames: [...gatewayToolNames].sort(),
+    codeModeToolNames,
+    gatewayToolNames,
   };
 
   // --- Write outputs ---
@@ -212,13 +224,13 @@ function buildMarkdown(inventory: {
   lines.push(`| Flat (default) | ${inventory.counts.flatModeTotal} | ${inventory.counts.universalTools} universal + ${inventory.counts.flatTools} flat |`);
   lines.push(`| Gateway | ${inventory.counts.gatewayModeTotal} | ${inventory.counts.universalTools} universal + ${inventory.counts.gatewayTools} gateway |`);
   lines.push(`| Gateway + legacy | ${inventory.counts.gatewayLegacyModeTotal} | ${inventory.counts.universalTools} universal + ${inventory.counts.gatewayTools} gateway + ${inventory.counts.flatTools} flat |`);
-  lines.push(`| Code-mode exclusive | ${inventory.counts.codeModeExclusiveTotal} | ${inventory.counts.codeModeTools} code-mode tools only |`);
+  lines.push(`| Code Mode exclusive | ${inventory.counts.codeModeExclusiveTotal} | ${inventory.counts.codeModeTools} Code Mode tools only (no \`sdl.info\`) |`);
   lines.push(`| All unique actions | ${inventory.counts.allFlatAndCodeModeActions} | flat + code-mode unique |`);
   lines.push("");
 
   lines.push("## Universal Tools");
   lines.push("");
-  lines.push("Always registered regardless of mode.");
+  lines.push("Shared outside Code Mode exclusive. `sdl.action.search` is still available in exclusive mode via Code Mode registration; `sdl.info` is not.");
   lines.push("");
   for (const name of inventory.universalToolNames) {
     lines.push(`- \`${name}\``);
@@ -236,7 +248,7 @@ function buildMarkdown(inventory: {
 
   lines.push(`## Code-Mode Tools (${inventory.codeModeToolNames.length})`);
   lines.push("");
-  lines.push("Registered when code-mode is enabled.");
+  lines.push("Registered when Code Mode is enabled. In exclusive mode, this is the full Code Mode surface.");
   lines.push("");
   for (const name of inventory.codeModeToolNames) {
     lines.push(`- \`${name}\``);

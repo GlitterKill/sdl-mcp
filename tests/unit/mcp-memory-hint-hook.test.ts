@@ -105,7 +105,7 @@ describe("Memory hint hook", () => {
     const result: Record<string, unknown> = {};
 
     await hook(
-      "sdl.agent.orchestrate",
+      "sdl.agent.context",
       { taskType: "implement" },
       result,
       makeContext("session-feat"),
@@ -122,7 +122,7 @@ describe("Memory hint hook", () => {
     const result: Record<string, unknown> = {};
 
     await hook(
-      "sdl.agent.orchestrate",
+      "sdl.agent.context",
       { taskType: "debug" },
       result,
       makeContext("session-no-feat"),

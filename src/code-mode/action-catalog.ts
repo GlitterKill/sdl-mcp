@@ -15,7 +15,8 @@ export type ActionTag =
   | "buffer"
   | "runtime"
   | "memory"
-  | "transform";
+  | "transform"
+  | "meta";
 
 const ACTION_TAGS: Record<string, ActionTag[]> = {
   "symbol.search": ["query"],
@@ -36,7 +37,7 @@ const ACTION_TAGS: Record<string, ActionTag[]> = {
   "index.refresh": ["repo"],
   "policy.get": ["policy"],
   "policy.set": ["policy"],
-  "agent.orchestrate": ["agent"],
+  "agent.context": ["agent"],
   "agent.feedback": ["agent"],
   "agent.feedback.query": ["agent"],
   "buffer.push": ["buffer"],
@@ -50,6 +51,13 @@ const ACTION_TAGS: Record<string, ActionTag[]> = {
   "memory.surface": ["memory"],
   "usage.stats": ["query"],
   "file.read": ["repo"],
+};
+
+const META_TOOL_TAGS: Record<string, ActionTag[]> = {
+  "action.search": ["meta"],
+  manual: ["meta"],
+  context: ["meta", "agent"],
+  workflow: ["meta", "runtime", "transform"],
 };
 
 // --- Schema Introspection ---
@@ -246,10 +254,14 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "index.refresh": { mode: "incremental" },
   "policy.get": {},
   "policy.set": { policyPatch: { maxWindowLines: 200 } },
-  "agent.orchestrate": {
+  "agent.context": {
+    taskType: "explain",
     taskText: "understand the auth flow",
-    focusSymbols: ["<symbolId>"],
     budget: { maxTokens: 5000 },
+    options: {
+      contextMode: "precise",
+      focusSymbols: ["<symbolId>"],
+    },
   },
   "agent.feedback": {
     versionId: "<versionId>",
@@ -288,14 +300,14 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
 export interface ActionDescriptor {
   /** Dot-notation action name (e.g., "symbol.search") */
   action: string;
-  /** CamelCase fn name for use in sdl.chain (e.g., "symbolSearch") */
+  /** CamelCase fn name for use in sdl.workflow (e.g., "symbolSearch") */
   fn: string;
   /** Human-readable description */
   description: string;
   /** Category tags */
   tags: ActionTag[];
-  /** Whether this is a gateway action or internal transform */
-  kind: "gateway" | "internal";
+  /** Whether this is a gateway action, internal transform, or top-level Code Mode meta tool */
+  kind: "gateway" | "internal" | "meta";
   /** Prior actions that usually improve this action's inputs */
   prerequisites: string[];
   /** Likely next actions after this action succeeds */
@@ -337,7 +349,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "index.refresh": "Refresh index",
   "policy.get": "Get policy config",
   "policy.set": "Set policy config (policyPatch wrapper: maxWindowLines, maxWindowTokens, requireIdentifiers, allowBreakGlass, defaultMinCallConfidence, defaultDenyRaw, budgetCaps)",
-  "agent.orchestrate": "Orchestrate multi-rung context retrieval",
+  "agent.context": "Retrieve multi-rung task context for explain, debug, review, implement, understand, or investigate tasks",
   "agent.feedback": "Record agent feedback",
   "agent.feedback.query": "Query feedback records",
   "buffer.push": "Push buffer update",
@@ -351,6 +363,17 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "memory.surface": "Auto-surface relevant memories",
   "usage.stats": "Get cumulative token savings statistics",
   "file.read": "Read non-indexed file content (templates, configs, docs)",
+};
+
+const META_TOOL_DESCRIPTIONS: Record<string, string> = {
+  "action.search":
+    "Search the SDL-MCP catalog before choosing a tool. Best starting point when you are unsure whether to use context or workflow.",
+  manual:
+    "Load the focused SDL-MCP manual after discovery. Use this before composing workflow steps.",
+  context:
+    "Preferred first tool for explain, debug, review, implement, understand, or investigate prompts. Retrieves task-shaped code context directly and should be chosen before workflow for context retrieval.",
+  workflow:
+    "Preferred first tool for execute, runtime, transform, batch, or pipeline prompts. Runs multi-step workflows with $N result piping, runtime execution, data transforms, and batch mutations.",
 };
 
 const TRANSFORM_DESCRIPTIONS: Record<string, string> = {
@@ -383,6 +406,43 @@ const TRANSFORM_EXAMPLES: Record<string, Record<string, unknown>> = {
     joinWith: "\n",
   },
 };
+
+const META_TOOL_EXAMPLES: Record<string, Record<string, unknown>> = {
+  "action.search": { query: "debug auth flow", limit: 5 },
+  manual: { query: "runtime execute workflow", format: "markdown" },
+  context: {
+    repoId: "<repoId>",
+    taskType: "debug",
+    taskText: "explain the auth failure path",
+    options: { contextMode: "precise", focusPaths: ["src/auth.ts"] },
+  },
+  workflow: {
+    repoId: "<repoId>",
+    steps: [
+      { fn: "repoStatus" },
+      { fn: "runtimeExecute", args: { runtime: "node", args: ["--version"] } },
+    ],
+  },
+};
+
+const CONTEXT_DISCOVERY_TERMS = new Set([
+  "context",
+  "debug",
+  "review",
+  "explain",
+  "understand",
+  "investigate",
+  "implement",
+]);
+
+const WORKFLOW_DISCOVERY_TERMS = new Set([
+  "workflow",
+  "execute",
+  "runtime",
+  "transform",
+  "batch",
+  "pipeline",
+]);
 
 const EMPTY_METADATA: ActionMetadata = {
   prerequisites: [],
@@ -481,13 +541,13 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     recommendedNextActions: ["code.needWindow"],
     fallbacks: ["policy.get"],
   },
-  "agent.orchestrate": {
+  "agent.context": {
     prerequisites: ["repo.status", "repo.overview"],
     recommendedNextActions: ["agent.feedback"],
     fallbacks: ["slice.build", "context.summary"],
   },
   "agent.feedback": {
-    prerequisites: ["slice.build", "agent.orchestrate"],
+    prerequisites: ["slice.build", "agent.context"],
     recommendedNextActions: ["agent.feedback.query"],
     fallbacks: [],
   },
@@ -551,6 +611,26 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     recommendedNextActions: ["context.summary"],
     fallbacks: ["runtime.execute"],
   },
+  context: {
+    prerequisites: ["action.search"],
+    recommendedNextActions: ["agent.feedback", "context.summary"],
+    fallbacks: ["agent.context", "slice.build"],
+  },
+  workflow: {
+    prerequisites: ["action.search", "manual"],
+    recommendedNextActions: ["runtime.execute", "runtime.queryOutput"],
+    fallbacks: ["manual"],
+  },
+  manual: {
+    prerequisites: ["action.search"],
+    recommendedNextActions: ["context", "workflow"],
+    fallbacks: [],
+  },
+  "action.search": {
+    prerequisites: [],
+    recommendedNextActions: ["context", "workflow", "manual"],
+    fallbacks: [],
+  },
 };
 
 export function getActionMetadata(action: string): ActionMetadata {
@@ -611,7 +691,7 @@ export function buildCatalog(opts?: {
         if (entry) {
           result.schemaSummary = zodToSchemaSummary(entry.schema);
         }
-      } else {
+      } else if (desc.kind === "internal") {
         const transform = INTERNAL_TRANSFORMS[desc.fn];
         if (transform) {
           result.schemaSummary = zodToSchemaSummary(transform.schema);
@@ -622,8 +702,10 @@ export function buildCatalog(opts?: {
     if (includeExamples) {
       if (desc.kind === "gateway") {
         result.example = EXAMPLE_REGISTRY[desc.action];
-      } else {
+      } else if (desc.kind === "internal") {
         result.example = TRANSFORM_EXAMPLES[desc.fn];
+      } else {
+        result.example = META_TOOL_EXAMPLES[desc.action];
       }
     }
 
@@ -682,6 +764,19 @@ function buildBaseCatalogFromMap(actionMap: ReturnType<typeof createActionMap>):
     });
   }
 
+  // Top-level Code Mode meta tools
+  for (const action of ["action.search", "manual", "context", "workflow"]) {
+    catalog.push({
+      action,
+      fn: action,
+      description: META_TOOL_DESCRIPTIONS[action] ?? "",
+      tags: META_TOOL_TAGS[action] ?? ["meta"],
+      kind: "meta",
+      requiredParams: [],
+      ...getActionMetadata(action),
+    });
+  }
+
   return catalog;
 }
 
@@ -737,6 +832,23 @@ export function rankCatalog(
         score += 5;
       } else if (metadataStr.includes(term)) {
         score += 4;
+      }
+    }
+
+    if (desc.kind === "meta") {
+      const matchingContextTerms = terms.filter((term) =>
+        CONTEXT_DISCOVERY_TERMS.has(term),
+      ).length;
+      const matchingWorkflowTerms = terms.filter((term) =>
+        WORKFLOW_DISCOVERY_TERMS.has(term),
+      ).length;
+
+      if (desc.action === "context" && matchingContextTerms > 0) {
+        score += 60 + matchingContextTerms * 10;
+      }
+
+      if (desc.action === "workflow" && matchingWorkflowTerms > 0) {
+        score += 60 + matchingWorkflowTerms * 10;
       }
     }
 

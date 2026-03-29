@@ -1,7 +1,7 @@
 {
   "name": "agent-mixed-multiple-rungs",
   "description": "Mixed task that exercises all rungs in sequence",
-  "tool": "sdl.agent.orchestrate",
+  "tool": "sdl.agent.context",
   "request": {
     "repoId": "test-repo",
     "taskType": "debug",

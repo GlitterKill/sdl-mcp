@@ -26,7 +26,7 @@ import {
   PolicySetRequestSchema,
   UsageStatsRequestSchema,
   PRRiskAnalysisRequestSchema,
-  AgentOrchestrateRequestSchema,
+  AgentContextRequestSchema,
   ContextSummaryRequestSchema,
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
@@ -66,7 +66,7 @@ import {
 import { handlePolicyGet, handlePolicySet } from "../mcp/tools/policy.js";
 import { handleUsageStats } from "../mcp/tools/usage.js";
 import { handlePRRiskAnalysis } from "../mcp/tools/prRisk.js";
-import { handleAgentOrchestrate } from "../mcp/tools/agent.js";
+import { handleAgentContext } from "../mcp/tools/context.js";
 import { handleContextSummary } from "../mcp/tools/summary.js";
 import {
   handleAgentFeedback,
@@ -223,10 +223,10 @@ export function registerLegacyTools(
     handlePRRiskAnalysis,
   );
   server.registerTool(
-    "sdl.agent.orchestrate",
-    dep("sdl.agent", "Orchestrate agent task execution"),
-    AgentOrchestrateRequestSchema,
-    handleAgentOrchestrate,
+    "sdl.agent.context",
+    dep("sdl.agent", "Retrieve task-shaped agent context"),
+    AgentContextRequestSchema,
+    handleAgentContext,
   );
   server.registerTool(
     "sdl.context.summary",

@@ -1,32 +1,33 @@
 # Code Mode
 
-**Use SDL-MCP Code Mode to reduce tool-list overhead, collapse multi-step workflows into one round trip, and keep code understanding inside SDL instead of falling back to token-heavy native tools.**
+**Use SDL-MCP Code Mode to keep discovery, context retrieval, and multi-step execution inside SDL instead of falling back to token-heavy native tools.**
 
-Code Mode exposes three complementary tools plus the always-available diagnostics tool:
+Code Mode is built around one clear separation of responsibility:
 
-- `sdl.action.search` for discovery
-- `sdl.manual` for focused reference
-- `sdl.chain` for execution
-- `sdl.info` is always available alongside Code Mode for environment diagnostics
+- `sdl.action.search` is the universal discovery surface.
+- `sdl.manual` loads a compact API subset.
+- `sdl.context` handles task-shaped code understanding.
+- `sdl.workflow` handles multi-step operations.
 
-Together they let agents discover the right SDL action, load only the relevant interface details, and execute a full lookup or runtime workflow in one call.
+If you remember only one rule, make it this one: use `sdl.context` first for `explain`, `debug`, `review`, and most `implement` requests. Use `sdl.workflow` only when the work is genuinely procedural.
 
 ---
 
-## What It Solves
+## What Code Mode Solves
 
-Without Code Mode, agents often spend tokens on:
+Without Code Mode, agents waste tokens on:
 
 - large tool lists
 - repeated schema exposure
-- multiple round trips for sequential lookups
-- native shell and file tools that SDL could replace
+- serial context gathering
+- native shell and file calls that SDL could answer directly
 
-Code Mode keeps those workflows inside SDL-MCP:
+Code Mode keeps those flows inside SDL-MCP:
 
-1. Discover the right action with `sdl.action.search`
-2. Load only the relevant API subset with `sdl.manual`
-3. Execute the workflow with `sdl.chain`
+1. discover the right surface with `sdl.action.search`
+2. load a narrow API slice with `sdl.manual`
+3. route understanding work to `sdl.context`
+4. route execution pipelines to `sdl.workflow`
 
 ---
 
@@ -36,71 +37,60 @@ Code Mode keeps those workflows inside SDL-MCP:
 
 Use this first when the right SDL action is unclear.
 
-Example:
-
-```json
-{
-  "query": "find auth symbol and inspect code structure",
-  "limit": 5,
-  "includeSchemas": true
-}
-```
-
-This returns a ranked subset of actions, with optional schema and example metadata.
-
-Each ranked action can include:
-
-- `action` and `description`
-- `tags`
-- `schemaSummary`
-- `example`
-- `prerequisites`
-- `recommendedNextActions`
-- `fallbacks`
-
-Code Mode uses the same metadata model that now powers gateway descriptions and manual output, so discovery, reference, and execution all point the agent toward the same next-step ladder.
+It returns ranked actions with optional schema summaries, examples, prerequisites, and recommended next steps.
 
 ### `sdl.manual`
 
-Use this when you already know the rough area and want a compact manual instead of the full API surface.
+Use this when you know the rough area and want a compact manual instead of the full API surface.
 
-Supported patterns:
+Supported filters:
 
-- `query` to filter by text
-- `actions` to request an exact subset
-- `format` to choose `typescript`, `markdown`, or `json`
+- `query` for text filtering
+- `actions` for an exact subset
+- `format` for `typescript`, `markdown`, or `json`
 - `includeSchemas` / `includeExamples` for richer output
 
-Example:
+### `sdl.context`
 
-```json
-{
-  "actions": ["symbol.search", "symbol.getCard", "slice.build"],
-  "format": "typescript",
-  "includeExamples": true
-}
-```
+Use this for task-shaped context retrieval inside Code Mode.
 
-When you pass `includeSchemas` or `includeExamples`, `sdl.manual` preserves the same discovery hints from `sdl.action.search` instead of expanding into the full API surface.
+It mirrors `sdl.agent.context`, but it sits next to `sdl.manual` and `sdl.workflow` so an agent can stay on the Code Mode surface after discovery. Start here for:
 
-### `sdl.chain`
+- `explain`
+- `debug`
+- `review`
+- `implement` when the immediate need is understanding existing code
 
-Use this for multi-step operations (runtime execution, data transforms, batch mutations) that would otherwise require multiple SDL calls. For code context retrieval, prefer `sdl.agent.orchestrate` — it is more token-efficient and automatically selects the right context ladder rungs.
+### `sdl.workflow`
 
-Example:
+Use this for multi-step operations that would otherwise require multiple SDL calls.
 
-```json
-{
-  "repoId": "my-repo",
-  "steps": [
-    { "fn": "symbolSearch", "args": { "query": "handleAuth", "limit": 3 } },
-    { "fn": "symbolGetCard", "args": { "symbolId": "$0.symbols[0].symbolId" } },
-    { "fn": "codeSkeleton", "args": { "symbolId": "$1.card.symbolId" } }
-  ],
-  "budget": { "maxTotalTokens": 4000 },
-  "onError": "continue"
-}
-```
+Good fits:
+
+- `runtimeExecute` pipelines
+- data transforms
+- batch mutations
+- reusable multi-step lookup and shaping flows
+
+Bad fits:
+
+- single actions
+- explain/debug/review context retrieval
+- “figure out what this code does” questions
+
+---
+
+## Routing Guide
+
+| Request shape | Start with | Why |
+|:--------------|:-----------|:----|
+| Explain a symbol or module | `sdl.context` | Returns task-shaped evidence without hand-building the ladder |
+| Debug a bug or trace behavior | `sdl.context` | Chooses `card`, `skeleton`, `hotPath`, and raw follow-ups only when needed |
+| Review code or inspect risk | `sdl.context` | Gives compact review-oriented evidence first |
+| Learn a pattern before implementing | `sdl.context` | Gets structural context with less overhead than a workflow |
+| Run tests, lint, or diagnostics | `sdl.workflow` | Best for `runtimeExecute` plus follow-up parsing |
+| Shape or filter previous results | `sdl.workflow` | Internal transforms avoid wasting model tokens |
+| Batch multiple dependent operations | `sdl.workflow` | `$N` references keep everything in one round trip |
 
 ---
 
@@ -110,45 +100,50 @@ Example:
 flowchart TD
     Agent["Agent"]
 
-    subgraph "Code Mode Tools"
-        AS["sdl.action.search<br/>Discovery: find the right action"]
-        MN["sdl.manual<br/>Reference: load API subset"]
-        CH["sdl.chain<br/>Execution: multi-step pipeline"]
+    subgraph "Universal + Code Mode Surface"
+        AS["sdl.action.search<br/>Discovery"]
+        MN["sdl.manual<br/>Reference"]
+        CTX["sdl.context<br/>Task-shaped context"]
+        WF["sdl.workflow<br/>Multi-step operations"]
     end
 
-    Agent -->|"1. What action do I need?"| AS
-    AS -->|"ranked actions + schemas"| Agent
-    Agent -->|"2. Show me the interface"| MN
+    Agent -->|"1. What should I use?"| AS
+    AS -->|"ranked actions + hints"| Agent
+    Agent -->|"2. Show me the narrow API"| MN
     MN -->|"compact manual"| Agent
-    Agent -->|"3. Execute workflow"| CH
+    Agent -->|"3a. Understand code"| CTX
+    Agent -->|"3b. Execute a pipeline"| WF
 
-    subgraph "sdl.chain Execution"
-        S1["Step 0: symbolSearch<br/>args: query='handleAuth'"]
-        S2["Step 1: symbolGetCard<br/>args: symbolId=$0.symbols[0].symbolId"]
-        S3["Step 2: codeSkeleton<br/>args: symbolId=$1.card.symbolId"]
-        S1 -->|"$0 result"| S2
-        S2 -->|"$1 result"| S3
+    subgraph "sdl.workflow Example"
+        S1["Step 0: symbolSearch"]
+        S2["Step 1: runtimeExecute"]
+        S3["Step 2: dataTemplate"]
+        S1 -->|"$0"| S2
+        S2 -->|"$1"| S3
     end
 
-    CH --> S1
-    S3 -->|"combined results<br/>+ budget tracking"| Agent
+    WF --> S1
+    CTX -->|"finalEvidence + metrics"| Agent
+    S3 -->|"step results + budget + traces"| Agent
 
     style AS fill:#cce5ff,stroke:#004085
     style MN fill:#fff3cd,stroke:#ffc107
-    style CH fill:#d4edda,stroke:#28a745
+    style CTX fill:#d4edda,stroke:#28a745
+    style WF fill:#f8d7da,stroke:#721c24
 ```
 
 ---
 
-## Current Features
+## Workflow Anatomy
 
-### Result piping
+`sdl.workflow` executes sequential steps that reference earlier results through `$N.path` expressions.
 
-Use `$N.path` references to feed step results into later steps.
+Each step has:
 
-### Internal transforms
+- `fn`: action or internal transform name
+- `args`: arguments object
 
-`sdl.chain` supports chain-only data shaping without opening a general-purpose VM. Use internal transform steps such as:
+Internal transforms include:
 
 - `dataPick`
 - `dataMap`
@@ -156,21 +151,12 @@ Use `$N.path` references to feed step results into later steps.
 - `dataSort`
 - `dataTemplate`
 
-These are useful for fetch-shape-summarize workflows where the model would otherwise waste tokens interpreting raw payloads.
+The workflow engine also provides:
 
-### Traces
-
-`sdl.chain` supports opt-in traces for debugging and prompt construction. Trace output can include:
-
-- per-step summaries
-- resolved argument previews
-- schema summaries
-- examples
-- bounded result previews
-
-### Context ladder validation
-
-Chains still honor SDL-MCP’s escalation model. Code Mode does not bypass policy or proof-of-need gating.
+- budget tracking
+- context-ladder validation
+- cross-step ETag caching
+- optional execution traces
 
 ---
 
@@ -181,9 +167,9 @@ Chains still honor SDL-MCP’s escalation model. Code Mode does not bypass polic
   "codeMode": {
     "enabled": true,
     "exclusive": true,
-    "maxChainSteps": 20,
-    "maxChainTokens": 50000,
-    "maxChainDurationMs": 60000,
+    "maxWorkflowSteps": 20,
+    "maxWorkflowTokens": 50000,
+    "maxWorkflowDurationMs": 60000,
     "ladderValidation": "warn",
     "etagCaching": true
   }
@@ -195,32 +181,33 @@ Chains still honor SDL-MCP’s escalation model. Code Mode does not bypass polic
 | Mode | Registered tools |
 |:-----|:-----------------|
 | Disabled | Base flat or gateway tools, plus universal `sdl.action.search` and `sdl.info` |
-| Enabled + gateway | Gateway tools plus `sdl.action.search`, `sdl.info`, `sdl.manual`, `sdl.chain` |
-| Enabled + flat | Flat tools plus `sdl.action.search`, `sdl.info`, `sdl.manual`, `sdl.chain` |
-| Exclusive | `sdl.action.search`, `sdl.info`, `sdl.manual`, `sdl.chain` only |
+| Enabled + gateway | Gateway tools plus `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow` |
+| Enabled + flat | Flat tools plus `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow` |
+| Exclusive | `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow` only |
 
 ---
 
-## Recommended Agent Workflow
+## Recommended Agent Flow
 
 For SDL-first agents:
 
 1. `sdl.repo.status`
-2. `sdl.agent.orchestrate` for code context retrieval (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration)
-3. `sdl.action.search` when the right action is unclear
-4. `sdl.manual(query|actions)` for API reference
-5. `sdl.chain` for multi-step operations (runtime execution, data transforms, batch mutations)
-6. `runtimeExecute` inside `sdl.chain` for repo-local build, test, lint, or diagnostics
+2. `sdl.action.search` when the right surface is unclear
+3. `sdl.manual(query|actions)` when a compact API slice helps
+4. `sdl.context` for explain/debug/review/implement context retrieval
+5. `sdl.workflow` for runtime execution, data shaping, batch mutations, and other procedural pipelines
+6. `runtimeExecute` inside `sdl.workflow` for repo-local build, test, lint, or diagnostics
 
-This is the intended path for enforced agent setups where SDL-MCP should replace token-heavy default tools whenever possible. Context retrieval always goes through orchestrate; chain is reserved for non-context operations.
+This is the intended path for enforced agent setups where SDL-MCP replaces token-heavy default tools whenever possible.
 
 ---
 
 ## Related Docs
 
-- [Tool Gateway](./tool-gateway.md)
+- [Agent Context](./agent-context.md)
+- [Context Modes](./context-modes.md)
 - [Runtime Execution](./runtime-execution.md)
-- [Agent Orchestration](./agent-orchestration.md)
+- [Tool Gateway](./tool-gateway.md)
 - [Governance & Policy](./governance-policy.md)
 
 [Back to README](../../README.md)

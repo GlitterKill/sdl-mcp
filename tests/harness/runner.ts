@@ -100,7 +100,7 @@ const ALWAYS_REGISTERED_TOOLS = [
   "sdl.memory.query",
   "sdl.memory.remove",
   "sdl.memory.surface",
-  "sdl.agent.orchestrate",
+  "sdl.agent.context",
   "sdl.agent.feedback",
   "sdl.agent.feedback.query",
   "sdl.buffer.push",

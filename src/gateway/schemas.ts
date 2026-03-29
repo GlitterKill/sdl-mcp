@@ -332,8 +332,8 @@ export const RepoGatewaySchema = z
 // sdl.agent — Agentic + live-edit operations
 // ============================================================================
 
-const AgentOrchestrateAction = z.object({
-  action: z.literal("agent.orchestrate"),
+const AgentContextAction = z.object({
+  action: z.literal("agent.context"),
   taskType: z.enum(["debug", "review", "implement", "explain"]),
   taskText: z.string(),
   budget: z
@@ -495,7 +495,7 @@ export const AgentGatewaySchema = z
   })
   .and(
     z.discriminatedUnion("action", [
-      AgentOrchestrateAction,
+      AgentContextAction,
       AgentFeedbackAction,
       AgentFeedbackQueryAction,
       BufferPushAction,
@@ -544,7 +544,7 @@ export const REPO_ACTIONS = [
 ] as const;
 
 export const AGENT_ACTIONS = [
-  "agent.orchestrate",
+  "agent.context",
   "agent.feedback",
   "agent.feedback.query",
   "buffer.push",

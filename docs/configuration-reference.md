@@ -497,16 +497,16 @@ Below is every option with inline commentary. JSON does not support comments, so
   },
 
   // ──────────────────────────────────────────────────────────
-  // CODE MODE — sdl.manual + sdl.chain tool chaining
+  // CODE MODE — sdl.manual + sdl.context + sdl.workflow
   // ──────────────────────────────────────────────────────────
   "codeMode": {
-    "enabled": true,            // Enable Code Mode tools (sdl.action.search, sdl.manual, sdl.chain)
+    "enabled": true,            // Enable Code Mode tools (sdl.action.search, sdl.manual, sdl.context, sdl.workflow)
     "exclusive": true,          // Suppress gateway and legacy tools — only register code-mode tools + discovery
-    "maxChainSteps": 20,        // Max steps per chain (1-50)
-    "maxChainTokens": 50000,    // Max tokens per chain (100-500000)
-    "maxChainDurationMs": 60000,// Max chain duration in ms (1000-300000)
+    "maxWorkflowSteps": 20,     // Max steps per workflow (1-50)
+    "maxWorkflowTokens": 50000, // Max tokens per workflow (100-500000)
+    "maxWorkflowDurationMs": 60000,// Max workflow duration in ms (1000-300000)
     "ladderValidation": "warn", // off | warn | enforce
-    "etagCaching": true,        // Auto-inject ETags within chains
+    "etagCaching": true,        // Auto-inject ETags within workflows
   },
 
   // ──────────────────────────────────────────────────────────
@@ -906,24 +906,24 @@ Gateway mode groups tools into 4 namespace tools (`sdl_repo`, `sdl_symbol`, `sdl
 
 ### `codeMode` (optional)
 
-Controls Code Mode tools (`sdl.manual` and `sdl.chain`).
+Controls Code Mode tools (`sdl.manual`, `sdl.context`, and `sdl.workflow`).
 
 | Field               | Type      | Default  | Range        | Description                                                |
 | -------------------- | --------- | -------- | ------------ | ---------------------------------------------------------- |
-| `enabled`            | `boolean` | `true`   | —            | Enable Code Mode tools (sdl.manual + sdl.chain)            |
+| `enabled`            | `boolean` | `true`   | —            | Enable Code Mode tools (`sdl.manual` + `sdl.context` + `sdl.workflow`) |
 | `exclusive`          | `boolean` | `true`   | —            | When true, suppress gateway and legacy tools — only register code-mode tools + discovery |
-| `maxChainSteps`      | `integer` | `20`     | 1-50         | Maximum steps allowed in a single chain                    |
-| `maxChainTokens`     | `integer` | `50000`  | 100-500000   | Maximum total estimated tokens for chain results           |
-| `maxChainDurationMs` | `integer` | `60000`  | 1000-300000  | Maximum wall-clock duration for a chain (ms)               |
+| `maxWorkflowSteps`      | `integer` | `20`     | 1-50         | Maximum steps allowed in a single workflow                 |
+| `maxWorkflowTokens`     | `integer` | `50000`  | 100-500000   | Maximum total estimated tokens for workflow results        |
+| `maxWorkflowDurationMs` | `integer` | `60000`  | 1000-300000  | Maximum wall-clock duration for a workflow (ms)            |
 | `ladderValidation`   | `string`  | `"warn"` | `"off"` \| `"warn"` \| `"enforce"` | Context ladder validation mode |
-| `etagCaching`        | `boolean` | `true`   | —            | Auto-inject ifNoneMatch ETags for repeated card requests within a chain |
+| `etagCaching`        | `boolean` | `true`   | —            | Auto-inject ifNoneMatch ETags for repeated card requests within a workflow |
 
 > **When to change:**
 >
 > - **Full tool surface:** Set `exclusive: false` to expose gateway and legacy tools alongside code-mode tools.
-> - **Disable code mode:** Set `enabled: false` to remove sdl.manual, sdl.chain, and sdl.action.search tools entirely.
-> - **Strict ladder enforcement:** Set `ladderValidation: "enforce"` to reject chains that skip context ladder rungs.
-> - **Long chains:** Increase `maxChainSteps` and `maxChainTokens` for complex multi-step lookups.
+> - **Disable code mode:** Set `enabled: false` to remove `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.action.search`.
+> - **Strict ladder enforcement:** Set `ladderValidation: "enforce"` to reject workflows that skip context ladder rungs.
+> - **Long workflows:** Increase `maxWorkflowSteps` and `maxWorkflowTokens` for complex multi-step lookups.
 > - **Performance:** `etagCaching` is recommended to stay `true` — it automatically avoids resending unchanged cards.
 
 ---
