@@ -2111,6 +2111,7 @@ export const MemoryQueryResponseSchema = z.object({
   repoId: z.string(),
   memories: z.array(SurfacedMemorySchema),
   total: z.number().int().min(0),
+  hasMore: z.boolean().optional(),
 });
 
 export const MemoryRemoveRequestSchema = z.object({

@@ -464,6 +464,9 @@ export async function handleCodeNeedWindow(
   }
 
   if (gateResult.approved) {
+    if (request.expectedLines <= 0) {
+      throw new ValidationError("expectedLines must be a positive integer");
+    }
     const granularity = request.granularity ?? "symbol";
 
     const filePath = getAbsolutePathFromRepoRoot(repo.rootPath, file.relPath);
@@ -551,7 +554,7 @@ export async function handleCodeNeedWindow(
       ? {
           truncated: true,
           droppedCount:
-            windowResult.originalLines - redactedCode.split("\n").length,
+            windowResult.originalLines - windowResult.code.split("\n").length,
           howToResume: {
             type: "cursor" as const,
             value: windowResult.actualRange.endLine,

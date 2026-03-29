@@ -425,6 +425,7 @@ export async function handleSymbolGetCards(
       minCallConfidence,
       includeResolutionMetadata,
     });
+
     cards = built.cards;
     fileIds = [...new Set(Array.from(built.symbolMap.values()).map((symbol) => symbol.fileId))];
   }

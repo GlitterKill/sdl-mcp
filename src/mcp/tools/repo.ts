@@ -178,7 +178,7 @@ export async function handleRepoRegister(
   await withWriteConn(async (wConn) => {
     await ladybugDb.upsertRepo(wConn, {
       repoId,
-      rootPath: normalizedRoot,
+      rootPath: resolvedRoot,
       configJson: JSON.stringify(config),
       createdAt: existingRepo?.createdAt ?? new Date().toISOString(),
     });

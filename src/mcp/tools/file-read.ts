@@ -1,5 +1,5 @@
 import { resolve } from "path";
-import { readFile } from "fs/promises";
+import { readFile, stat } from "fs/promises";
 import { existsSync, realpathSync } from "fs";
 import { FileReadRequestSchema, type FileReadResponse } from "../tools.js";
 import { getLadybugConn } from "../../db/ladybug.js";
@@ -142,6 +142,15 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
   }
 
   const maxBytes = request.maxBytes ?? MAX_FILE_SIZE_BYTES;
+
+  // Check file size before reading to prevent excessive memory allocation
+  const fileStat = await stat(absPath);
+  if (fileStat.size > maxBytes * 4) {
+    throw new ValidationError(
+      `File size ${fileStat.size} bytes exceeds safe read limit. Use offset/limit parameters to read a portion.`,
+    );
+  }
+
   const rawContent = await readFile(absPath, "utf-8");
   const totalBytes = Buffer.byteLength(rawContent, "utf-8");
   const lines = rawContent.split(/\r?\n/);

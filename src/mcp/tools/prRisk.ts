@@ -331,7 +331,7 @@ function computeOverallRiskScore(
   if (delta.changedSymbols.length > 0) {
     const avgChangeRisk =
       delta.changedSymbols.reduce((sum: number, c: ChangedSymbol) => {
-        const risk = c.tiers?.riskScore ?? 100;
+        const risk = Math.min(100, c.tiers?.riskScore ?? 50);
         return sum + risk;
       }, 0) / delta.changedSymbols.length;
     totalRisk += avgChangeRisk * riskWeights.changedSymbols;
@@ -341,7 +341,7 @@ function computeOverallRiskScore(
   if (blastRadiusItems.length > 0) {
     const avgBlastRadiusScore =
       blastRadiusItems.reduce((sum: number, item: BlastRadiusItem) => {
-        return sum + (item.rank ?? 0) * 100;
+        return sum + Math.min(1, item.rank ?? 0) * 100;
       }, 0) / blastRadiusItems.length;
     totalRisk += avgBlastRadiusScore * riskWeights.blastRadius;
     weightSum += riskWeights.blastRadius;
@@ -367,7 +367,7 @@ function computeOverallRiskScore(
     weightSum += riskWeights.sideEffects;
   }
 
-  return weightSum > 0 ? Math.round(totalRisk / weightSum) : 0;
+  return weightSum > 0 ? Math.min(100, Math.round(totalRisk / weightSum)) : 0;
 }
 
 function getRiskLevel(riskScore: number): "low" | "medium" | "high" {

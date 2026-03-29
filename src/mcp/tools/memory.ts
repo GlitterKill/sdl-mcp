@@ -301,6 +301,7 @@ export async function handleMemoryQuery(
     repoId,
     memories,
     total: memories.length,
+    hasMore: memories.length === limit,
   };
 }
 

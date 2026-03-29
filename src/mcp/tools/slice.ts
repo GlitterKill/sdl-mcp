@@ -115,12 +115,17 @@ function generateSliceHandle(): SliceHandle {
  * @internal
  */
 function generateSliceHash(slice: GraphSlice): string {
+  const cardFingerprint = crypto
+    .createHash("sha256")
+    .update(slice.cards.map((c) => c.symbolId).sort().join(","))
+    .digest("hex");
   const canonical = JSON.stringify({
     repoId: slice.repoId,
     versionId: slice.versionId,
     startSymbols: [...slice.startSymbols].sort(),
     budget: slice.budget,
     cardCount: slice.cards.length,
+    cardFingerprint,
   });
   return crypto.createHash("sha256").update(canonical).digest("hex");
 }
@@ -216,6 +221,14 @@ export async function handleSliceBuild(
       return sliceErrorToResponse({
         type: "policy_denied",
         reason: error.message.replace("Policy denied slice request: ", ""),
+      });
+    }
+
+    // AbortError from context cancellation or timeout
+    if (error instanceof Error && error.name === "AbortError") {
+      return sliceErrorToResponse({
+        type: "no_version",
+        repoId: parsed?.repoId ?? "unknown",
       });
     }
 
@@ -761,8 +774,8 @@ export async function handleSliceSpilloverGet(
     `spillover data for handle: ${spilloverHandle}`,
   );
 
-  const startIndex = cursor ? parseInt(cursor, 10) : 0;
-  if (Number.isNaN(startIndex) || startIndex < 0) {
+  const startIndex = cursor ? Number(cursor) : 0;
+  if (!Number.isInteger(startIndex) || startIndex < 0) {
     throw new ValidationError(
       `Invalid cursor value: ${cursor} must be a non-negative integer`,
     );

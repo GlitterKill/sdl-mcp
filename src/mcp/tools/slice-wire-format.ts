@@ -104,7 +104,10 @@ export function toAgentGraphSlice(slice: GraphSlice): AgentWireSlice {
 
   // Filter memories to only those with linkedSymbols in the slice
   const filteredMemories = (slice.memories ?? [])
-    .filter((m) => m.linkedSymbols.some((sid) => cardSymbolIds.has(sid)))
+    .filter((m) =>
+      m.linkedSymbols.length === 0 ||
+      m.linkedSymbols.some((sid) => cardSymbolIds.has(sid)),
+    )
     .map((m) => ({
       memoryId: m.memoryId,
       type: m.type,

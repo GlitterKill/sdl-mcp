@@ -39,7 +39,7 @@ import {
   RUNTIME_KEYWORD_CONTEXT_LINES,
   RUNTIME_MAX_LINE_LENGTH,
 } from "../../config/constants.js";
-import { mkdtemp, writeFile, rm } from "fs/promises";
+import { access, mkdtemp, writeFile, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -77,7 +77,10 @@ const PREVIEW_MAX_CHARS = 200;
 function buildStdoutPreview(stdout: string): string {
   if (!stdout) return "";
   const lines = stdout.split("\n");
-  const firstLines = lines.slice(0, PREVIEW_MAX_LINES).join("\n");
+  const firstLines = lines
+    .slice(0, PREVIEW_MAX_LINES)
+    .map((l) => l.slice(0, PREVIEW_MAX_CHARS))
+    .join("\n");
   if (firstLines.length <= PREVIEW_MAX_CHARS) return firstLines;
   return firstLines.slice(0, PREVIEW_MAX_CHARS) + "…";
 }
@@ -328,7 +331,18 @@ export async function handleRuntimeExecute(
 
   try {
     // 5. Resolve CWD
-    const cwd = await resolveAndValidateCwd(repo.rootPath, request.relativeCwd);
+    let cwd: string;
+    try {
+      cwd = await resolveAndValidateCwd(repo.rootPath, request.relativeCwd);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        throw new RuntimePolicyDeniedError(
+          `Working directory does not exist: ${request.relativeCwd || "(repo root)"}`,
+        );
+      }
+      throw err;
+    }
 
     // 6. Handle code mode — write to temp file
     let codePath: string | undefined;
@@ -496,6 +510,13 @@ export async function handleRuntimeExecute(
 
       // Derive output binary path and replace cmd/codePath for execution phase
       const outBinary = codePath.replace(/\.[^.]+$/, "") + (process.platform === "win32" ? ".exe" : "");
+      try {
+        await access(outBinary);
+      } catch {
+        throw new RuntimePolicyDeniedError(
+          `Compile succeeded but output binary not found at expected path: ${outBinary}`,
+        );
+      }
       cmd = { executable: outBinary, args: request.args };
       codePath = undefined;
       effectiveTimeoutMs = remainingMs;
