@@ -60,6 +60,14 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   });
 
   const configPath = activateCliConfigPath(options.config);
+  const configSource = options.config
+    ? "--config flag"
+    : process.env.SDL_CONFIG
+      ? "SDL_CONFIG"
+      : process.env.SDL_CONFIG_PATH
+        ? "SDL_CONFIG_PATH"
+        : "auto-discovery";
+  console.error(`[sdl-mcp] Config: ${configPath} (${configSource})`);
   const config = loadConfig(configPath);
 
   configureLogger(options.logLevel ?? "info", options.logFormat ?? "pretty");
@@ -88,7 +96,16 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   }
 
   const graphDbPath = await initGraphDb(config, configPath);
-  console.error(`Graph database initialized at ${graphDbPath}`);
+  const graphDbSource = process.env.SDL_GRAPH_DB_DIR
+    ? "SDL_GRAPH_DB_DIR"
+    : process.env.SDL_GRAPH_DB_PATH
+      ? "SDL_GRAPH_DB_PATH"
+      : process.env.SDL_DB_PATH
+        ? "SDL_DB_PATH (deprecated)"
+        : config.graphDatabase?.path
+          ? "config"
+          : "default (beside config)";
+  console.error(`[sdl-mcp] Graph DB: ${graphDbPath} (${graphDbSource})`);
 
   // Check for an existing live server process (stale PIDs are auto-cleaned).
   const existing = findExistingProcess(graphDbPath);
