@@ -349,7 +349,7 @@ export type ConcurrencyConfig = z.infer<typeof ConcurrencyConfigSchema>;
 
 export const RuntimeConfigSchema = z.object({
   enabled: z.boolean().default(false),
-  allowedRuntimes: z.array(z.enum(RUNTIME_NAMES)).default(["node", "python"]),
+  allowedRuntimes: z.array(z.enum(RUNTIME_NAMES)).default(["node", "typescript", "python", "shell"]),
   allowedExecutables: z.array(z.string()).default([]),
   maxDurationMs: z
     .number()

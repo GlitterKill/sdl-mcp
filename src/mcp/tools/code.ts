@@ -265,6 +265,7 @@ export async function handleCodeNeedWindow(
     maxWindowTokens: validatedPolicy.maxWindowTokens,
     requireIdentifiers: validatedPolicy.requireIdentifiers,
     allowBreakGlass: validatedPolicy.allowBreakGlass,
+    defaultDenyRaw: validatedPolicy.defaultDenyRaw,
     budgetCaps: sliceBudgetDefaults,
   });
 
@@ -303,7 +304,7 @@ export async function handleCodeNeedWindow(
   // Evaluate policy first so break-glass can flow into the gate
   const policyDecision = policyEngine.evaluate(policyContext);
   const isBreakGlass = policyDecision.decision === "approve" &&
-    (policyDecision.evidenceUsed ?? []).some((e) => e.type === "break-glass");
+    (policyDecision.evidenceUsed ?? []).some((e) => e.type === "break-glass-triggered");
 
   const gateResult = await evaluateRequest(request, { ...context, breakGlass: isBreakGlass });
   const suggestedNextRequest = !gateResult.approved

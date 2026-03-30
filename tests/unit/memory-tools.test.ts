@@ -296,24 +296,17 @@ describe("handleMemoryStore", () => {
     assert.strictEqual(updated.memoryId, created.memoryId);
   });
 
-  it("update mode: throws DatabaseError when provided memoryId not found", async () => {
-    await assert.rejects(
-      () =>
-        handleMemoryStore({
-          repoId: REPO_ID,
-          type: "decision",
-          title: "Test",
-          content: "Content",
-          memoryId: "nonexistent-memory-id",
-        }),
-      (err: unknown) => {
-        assert.ok(err instanceof DatabaseError);
-        assert.ok(
-          (err as DatabaseError).message.includes("nonexistent-memory-id"),
-        );
-        return true;
-      },
-    );
+  it("upsert mode: creates memory when provided memoryId not found", async () => {
+    const result = await handleMemoryStore({
+      repoId: REPO_ID,
+      type: "decision",
+      title: "Test",
+      content: "Content",
+      memoryId: "nonexistent-memory-id",
+    });
+    assert.ok(result.ok, "Should succeed as create");
+    assert.strictEqual(result.memoryId, "nonexistent-memory-id", "Should use provided memoryId");
+    assert.strictEqual(result.created, true, "Should be marked as created");
   });
 });
 

@@ -321,6 +321,7 @@ async function handleSliceBuildInternal(
       maxWindowTokens: mergedPolicy.maxWindowTokens,
       requireIdentifiers: mergedPolicy.requireIdentifiers,
       allowBreakGlass: mergedPolicy.allowBreakGlass,
+      defaultDenyRaw: mergedPolicy.defaultDenyRaw,
       budgetCaps: sliceBudgetDefaults,
     });
 

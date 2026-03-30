@@ -795,7 +795,7 @@ async function checkRuntimeExecution(
     const { detectAllRuntimes } = await import("../../runtime/runtimes.js");
     const detections = await detectAllRuntimes();
 
-    const allowed = new Set(runtimeConfig.allowedRuntimes ?? ["node", "python"]);
+    const allowed = new Set(runtimeConfig.allowedRuntimes ?? ["node", "typescript", "python", "shell"]);
     const available: string[] = [];
     const unavailable: string[] = [];
     const details: string[] = [];

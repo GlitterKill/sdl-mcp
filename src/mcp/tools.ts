@@ -704,13 +704,17 @@ export const IndexRefreshRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   mode: z.enum(["full", "incremental"]),
   reason: z.string().optional(),
+  async: z.boolean().optional().describe("If true, return immediately with operationId and run indexing in background"),
 });
 
 export const IndexRefreshResponseSchema = z.object({
   ok: z.boolean(),
   repoId: z.string().min(1),
-  versionId: z.string(),
-  changedFiles: z.number().int(),
+  versionId: z.string().optional(),
+  changedFiles: z.number().int().optional(),
+  async: z.boolean().optional(),
+  operationId: z.string().optional(),
+  message: z.string().optional(),
 });
 
 const BufferSelectionSchema = z.object({
@@ -1290,6 +1294,12 @@ const PolicyConfigSchema = z.object({
   maxWindowTokens: z.number().int().min(1).default(DEFAULT_MAX_WINDOW_TOKENS),
   requireIdentifiers: z.boolean().default(true),
   allowBreakGlass: z.boolean().default(false),
+  defaultMinCallConfidence: z.number().min(0).max(1).optional(),
+  defaultDenyRaw: z.boolean().default(true),
+  budgetCaps: z.object({
+    maxCards: z.number().int().min(1).default(300),
+    maxEstimatedTokens: z.number().int().min(100).default(12000),
+  }).optional(),
 });
 
 export const PolicyGetRequestSchema = z.object({

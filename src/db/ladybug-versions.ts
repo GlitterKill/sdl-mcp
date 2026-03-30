@@ -38,7 +38,7 @@ export async function createVersion(
 ): Promise<void> {
   await exec(
     conn,
-    `MATCH (r:Repo {repoId: $repoId})
+    `MERGE (r:Repo {repoId: $repoId})
      MERGE (v:Version {versionId: $versionId})
      SET v.createdAt = $createdAt,
          v.reason = $reason,

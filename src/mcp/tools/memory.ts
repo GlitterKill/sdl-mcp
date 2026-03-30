@@ -69,17 +69,15 @@ export async function handleMemoryStore(
 
   const now = new Date().toISOString();
 
-  // Update mode
+  // Upsert: update if exists, fall through to create with provided ID if not
   if (providedMemoryId) {
     const existing = await ladybugDb.getMemory(conn, providedMemoryId);
-    if (!existing) {
-      throw new DatabaseError(`Memory ${providedMemoryId} not found`);
-    }
-    if (existing.repoId !== repoId) {
+    if (existing && existing.repoId !== repoId) {
       throw new ValidationError(
         `Memory ${providedMemoryId} belongs to a different repository`,
       );
     }
+    if (existing) {
 
     const contentHash = computeContentHash(repoId, type, title, content);
     const searchText = title + " " + content;
@@ -149,25 +147,28 @@ export async function handleMemoryStore(
       created: false,
       deduplicated: false,
     };
+    } // end if (existing) — when !existing, fall through to create path
   }
 
-  // Create mode — check dedup first
+  // Create mode — check dedup first (skip when caller provided explicit ID)
   const contentHash = computeContentHash(repoId, type, title, content);
-  const existingByHash = await ladybugDb.getMemoryByContentHash(
-    conn,
-    contentHash,
-  );
-  if (existingByHash) {
+  if (!providedMemoryId) {
+    const existingByHash = await ladybugDb.getMemoryByContentHash(
+      conn,
+      contentHash,
+    );
+    if (existingByHash) {
     return {
       ok: true,
       memoryId: existingByHash.memoryId,
       created: false,
       deduplicated: true,
     };
+    }
   }
 
-  // Generate new memory
-  const memoryId = generateMemoryId();
+  // Generate or reuse provided ID
+  const memoryId = providedMemoryId ?? generateMemoryId();
   const searchText = title + " " + content;
 
   const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);

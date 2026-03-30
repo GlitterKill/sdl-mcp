@@ -410,12 +410,12 @@ export class Executor {
     const topScore = scored[0]?.score ?? 0;
     const isPrecise = task.options?.contextMode === 'precise';
 
-    // Precise: aggressive threshold (60% of top), hard cap at 3 symbols.
+    // Precise: aggressive threshold (60% of top), cap at 5 symbols.
     // Broad: generous threshold (40% of top), use caller's maxCount.
     const threshold = isPrecise
       ? Math.max(5, topScore * 0.6)
       : Math.max(3, topScore * 0.4);
-    const effectiveMax = isPrecise ? 1 : maxCount;
+    const effectiveMax = isPrecise ? Math.min(5, maxCount) : maxCount;
     const relevant = scored.filter((s) => s.score >= threshold);
     const count = Math.max(1, Math.min(relevant.length, effectiveMax));
 
