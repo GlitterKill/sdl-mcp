@@ -36,6 +36,26 @@ import {
 } from "../../util/resolve-symbol-ref.js";
 import { DatabaseError, NotFoundError, ValidationError } from "../errors.js";
 
+/**
+ * Sort search results by exact match priority: exact name > starts-with > other.
+ * Exported for testability.
+ */
+export function sortByExactMatch<T extends { name: string }>(
+  results: T[],
+  query: string,
+): T[] {
+  const queryLower = query.toLowerCase();
+  return [...results].sort((a, b) => {
+    const aExact = a.name.toLowerCase() === queryLower ? 1 : 0;
+    const bExact = b.name.toLowerCase() === queryLower ? 1 : 0;
+    if (aExact !== bExact) return bExact - aExact;
+    // Secondary: prefer starts-with matches
+    const aPrefix = a.name.toLowerCase().startsWith(queryLower) ? 1 : 0;
+    const bPrefix = b.name.toLowerCase().startsWith(queryLower) ? 1 : 0;
+    return bPrefix - aPrefix;
+  });
+}
+
 export async function handleSymbolSearch(
   args: unknown,
 ): Promise<SymbolSearchResponse> {
@@ -128,6 +148,9 @@ export async function handleSymbolSearch(
     file: row.filePath,
     kind: row.kind as SymbolKind,
   }));
+
+  // Prioritize exact name matches over fuzzy/partial matches
+  results = sortByExactMatch(results, request.query);
 
   // Filter by kinds if specified (after semantic reranking, so it applies to both paths)
   if (request.kinds && request.kinds.length > 0) {

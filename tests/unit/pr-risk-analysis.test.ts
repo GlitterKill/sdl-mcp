@@ -148,7 +148,7 @@ describe("PR Risk Analysis Tool", () => {
     );
   });
 
-  it("returns findings array with severity levels", async () => {
+  it("returns findings collection with severity levels", async () => {
     const request = {
       repoId,
       fromVersion: "v1",
@@ -157,8 +157,16 @@ describe("PR Risk Analysis Tool", () => {
 
     const response = await handlePRRiskAnalysis(request);
 
-    assert.ok(Array.isArray(response.analysis.findings), "Expected findings array");
-    response.analysis.findings.forEach((finding: any) => {
+    assert.ok(
+      response.analysis.findings &&
+        typeof response.analysis.findings === "object",
+      "Expected findings collection",
+    );
+    assert.ok(
+      Array.isArray(response.analysis.findings.items),
+      "Expected findings.items array",
+    );
+    response.analysis.findings.items.forEach((finding: any) => {
       assert.ok(
         ["low", "medium", "high"].includes(finding.severity),
         `Expected finding severity to be one of: low, medium, high, got: ${finding.severity}`,
@@ -178,15 +186,23 @@ describe("PR Risk Analysis Tool", () => {
     assert.ok(Array.isArray(response.analysis.impactedSymbols));
   });
 
-  it("returns evidence array", async () => {
+  it("returns evidence collection", async () => {
     const response = await handlePRRiskAnalysis({
       repoId,
       fromVersion: "v1",
       toVersion: "v2",
     });
 
-    assert.ok(Array.isArray(response.analysis.evidence));
-    response.analysis.evidence.forEach((evidence: any) => {
+    assert.ok(
+      response.analysis.evidence &&
+        typeof response.analysis.evidence === "object",
+      "Expected evidence collection",
+    );
+    assert.ok(
+      Array.isArray(response.analysis.evidence.items),
+      "Expected evidence.items array",
+    );
+    response.analysis.evidence.items.forEach((evidence: any) => {
       assert.ok(typeof evidence.type === "string");
       assert.ok(typeof evidence.description === "string");
     });

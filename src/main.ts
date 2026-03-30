@@ -38,26 +38,39 @@ if (!getLogFilePath()) {
 }
 
 // MCP servers must use stderr for logging - stdout is reserved for JSON-RPC
+// Module-level reference so uncaughtException can trigger graceful shutdown.
+let activeShutdownMgr: ShutdownManager | null = null;
+
 const log = (msg: string) => process.stderr.write(`[sdl-mcp] ${msg}\n`);
 
 // Catch uncaught errors — sanitize stderr output, log full details to file, then exit.
 process.on("uncaughtException", (error) => {
   process.stderr.write(`[sdl-mcp] Fatal uncaught exception: ${error instanceof Error ? error.message : String(error)}\n`);
   logger.error("Uncaught exception", { error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
-  process.exit(1);
+  if (activeShutdownMgr) {
+    const deadline = setTimeout(() => process.exit(1), 5_000).unref();
+    void activeShutdownMgr.shutdown("uncaught exception").finally(() => {
+      clearTimeout(deadline);
+      process.exit(1);
+    });
+  } else {
+    process.exit(1);
+  }
 });
 
 process.on("unhandledRejection", (reason) => {
   const message = reason instanceof Error ? reason.message : String(reason);
-  process.stderr.write(`[sdl-mcp] Fatal unhandled rejection: ${message}\n`);
+  process.stderr.write(`[sdl-mcp] Unhandled rejection: ${message}\n`);
   logger.error("Unhandled rejection", { error: message, stack: reason instanceof Error ? reason.stack : undefined });
-  process.exit(1);
+  // Do NOT process.exit here — a stray unhandled rejection (e.g. from a
+  // fire-and-forget notification or audit write) should not kill the server.
 });
 
 async function main(): Promise<void> {
   const server = new MCPServer();
   const watchers: Array<{ close: () => Promise<void> }> = [];
   const shutdownMgr = new ShutdownManager({ log });
+  activeShutdownMgr = shutdownMgr;
 
   try {
     log("Loading configuration...");
@@ -170,6 +183,12 @@ async function main(): Promise<void> {
     }
 
     log("Starting MCP server...");
+    // Detect transport close so the server does not hang as a zombie (C3).
+    server.getServer().onclose = () => {
+      log("MCP transport closed, initiating shutdown...");
+      void shutdownMgr.shutdown("transport closed");
+    };
+
     await server.start();
 
     log("SDL-MCP server running...");

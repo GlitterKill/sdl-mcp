@@ -165,10 +165,6 @@ export class ReconcileWorker {
       }
     } finally {
       this.draining = false;
-      // Check for items enqueued during drain teardown
-      if (this.queue.peekNext()) {
-        this.ensureDraining();
-      }
       const waiters = this.idleWaiters.splice(0);
       for (const resolve of waiters) {
         resolve();

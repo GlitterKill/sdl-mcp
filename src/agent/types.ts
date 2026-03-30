@@ -26,6 +26,9 @@ export interface TaskOptions {
   /** Controls context breadth. "precise" returns minimal, workflow-efficient context.
    *  "broad" returns richer surrounding context. Default: "broad". */
   contextMode?: "precise" | "broad";
+  /** Explicit search terms for symbol resolution fallback.
+   *  When provided, these are used instead of extracting identifiers from taskText. */
+  searchTerms?: string[];
 }
 
 export interface RungPath {

@@ -34,7 +34,7 @@ const MAX_SKELETON_SYMBOLS = 5;
 const MAX_HOTPATH_SYMBOLS = 5;
 const MAX_RAW_SYMBOLS = 3;
 const MAX_SEARCH_FALLBACK = 10;
-const MAX_IDENTIFIERS = 10;
+export const MAX_IDENTIFIERS = 10;
 const MAX_ESCALATIONS = 2;
 
 /** Map rung types to action type strings for error reporting. */
@@ -62,7 +62,7 @@ const RUNG_TOKEN_ESTIMATES: Record<RungType, number> = {
  * identifier extraction. Includes both natural-language noise words and
  * tool-specific jargon that would produce low-value hot-path matches.
  */
-const STOP_WORDS = new Set([
+export const IDENTIFIER_STOP_WORDS = new Set([
   "the", "and", "for", "that", "this", "with", "from", "are", "was",
   "have", "has", "had", "does", "did", "will", "would", "could",
   "should", "need", "use", "used", "using", "make", "find", "found",
@@ -75,6 +75,33 @@ const STOP_WORDS = new Set([
   "interface", "async", "await", "new", "true", "false", "null",
 ]);
 
+
+
+/**
+ * Extract potential code identifiers from free text.
+ * Exported for testability; the Executor class method delegates to this
+ * plus evidence-based augmentation.
+ */
+export function extractIdentifiersFromText(text: string): string[] {
+  const bounded = text.slice(0, 2000);
+
+  // Specific code-identifier patterns (high priority)
+  const camelCase = bounded.match(/[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*/g) ?? [];
+  const pascalCase = bounded.match(/[A-Z][a-z]+[A-Z][a-zA-Z0-9]*/g) ?? [];
+  const singlePascal = (bounded.match(/\b[A-Z][a-z]{5,}[a-zA-Z0-9]*\b/g) ?? [])
+    .filter((w) => !IDENTIFIER_STOP_WORDS.has(w.toLowerCase()));
+  const snakeCase = bounded.match(/[a-zA-Z][a-zA-Z0-9]*_[a-zA-Z0-9_]+/g) ?? [];
+
+  const primary = [...new Set([...camelCase, ...pascalCase, ...singlePascal, ...snakeCase])];
+
+  // Generic word tokens (low priority — fill remaining slots only)
+  const words = (bounded.match(/[a-zA-Z_][a-zA-Z0-9_]{2,}/g) ?? [])
+    .filter((w) => !IDENTIFIER_STOP_WORDS.has(w.toLowerCase()));
+  const primarySet = new Set(primary);
+  const secondary = [...new Set(words)].filter((w) => !primarySet.has(w));
+
+  return [...primary, ...secondary].slice(0, MAX_IDENTIFIERS);
+}
 
 export class Executor {
   private evidenceCapture: EvidenceCapture;
@@ -124,24 +151,6 @@ export class Executor {
     for (let i = 0; i < mutableRungs.length; i++) {
       const rung = mutableRungs[i];
       const evidenceBefore = this.evidenceCapture.getAllEvidence().length;
-
-      // Skip higher rungs if no evidence was collected from prior rungs
-      if (
-        (rung === "skeleton" || rung === "hotPath" || rung === "raw") &&
-        evidenceBefore === 0
-      ) {
-        this.actions.push({
-          id: `action-${i}-${Date.now()}-skipped`,
-          type: rung === "skeleton" ? "getSkeleton" : rung === "hotPath" ? "getHotPath" : "needWindow",
-          status: "failed" as const,
-          input: { context: [] },
-          output: { reason: `Skipped ${rung} rung: no symbols resolved from previous rungs` },
-          timestamp: Date.now(),
-          durationMs: 0,
-          evidence: [],
-        });
-        continue;
-      }
 
       await this.executeRung(task, rung, context);
 
@@ -404,35 +413,85 @@ export class Executor {
         task.repoId,
       );
 
-      const allSymbols = rawSymbols.length > 0 && task.taskText
+      let allSymbols = rawSymbols.length > 0 && task.taskText
         ? await this.selectTopSymbols(rawSymbols, task, MAX_CARD_SYMBOLS)
         : rawSymbols.slice(0, MAX_CARD_SYMBOLS);
 
-      // Fallback: use hybrid retrieval when available, otherwise legacy DB search
+      // Fallback: identifier-based search with per-term resolution
       if (allSymbols.length === 0 && task.taskText) {
+        // 1. Determine search terms: explicit searchTerms option > extracted identifiers
+        const searchTerms = task.options?.searchTerms?.length
+          ? task.options.searchTerms.slice(0, 5)
+          : this.extractIdentifiersFromTask(task).slice(0, 5);
+
+        const seen = new Set<string>();
         const useHybrid = await isHybridRetrievalAvailable();
-        if (useHybrid) {
-          const hybridResult = await hybridSearch({
-            repoId: task.repoId,
-            query: task.taskText,
-            limit: MAX_SEARCH_FALLBACK,
-            includeEvidence: false,
+
+        // 2. Search for each identifier individually and combine results
+        for (const term of searchTerms) {
+          if (useHybrid) {
+            const hybridResult = await hybridSearch({
+              repoId: task.repoId,
+              query: term,
+              limit: Math.ceil(MAX_SEARCH_FALLBACK / Math.max(searchTerms.length, 1)),
+              includeEvidence: false,
+            });
+            for (const item of hybridResult.results) {
+              if (!seen.has(item.symbolId)) {
+                seen.add(item.symbolId);
+                allSymbols.push(item.symbolId);
+              }
+            }
+          } else {
+            const conn = await this.getConn();
+            const searchResults = await ladybugDb.searchSymbols(
+              conn,
+              task.repoId,
+              term,
+              Math.ceil(MAX_SEARCH_FALLBACK / Math.max(searchTerms.length, 1)),
+            );
+            for (const result of searchResults) {
+              if (!seen.has(result.symbolId)) {
+                seen.add(result.symbolId);
+                allSymbols.push(result.symbolId);
+              }
+            }
+          }
+        }
+
+        // 3. If individual identifier searches found nothing, fall back to full taskText
+        if (allSymbols.length === 0) {
+          if (useHybrid) {
+            const hybridResult = await hybridSearch({
+              repoId: task.repoId,
+              query: task.taskText,
+              limit: MAX_SEARCH_FALLBACK,
+              includeEvidence: false,
+            });
+            for (const item of hybridResult.results) {
+              allSymbols.push(item.symbolId);
+            }
+          } else {
+            const conn = await this.getConn();
+            const searchResults = await ladybugDb.searchSymbols(
+              conn,
+              task.repoId,
+              task.taskText,
+              MAX_SEARCH_FALLBACK,
+            );
+            for (const result of searchResults) {
+              allSymbols.push(result.symbolId);
+            }
+          }
+          logger.debug("Fallback: full taskText search used (no identifier matches)", {
+            taskText: task.taskText.slice(0, 100),
+            resultCount: allSymbols.length,
           });
-          for (const item of hybridResult.results) {
-            allSymbols.push(item.symbolId);
-          }
         } else {
-          // Legacy fallback: plain DB text search
-          const conn = await this.getConn();
-          const searchResults = await ladybugDb.searchSymbols(
-            conn,
-            task.repoId,
-            task.taskText,
-            MAX_SEARCH_FALLBACK,
-          );
-          for (const result of searchResults) {
-            allSymbols.push(result.symbolId);
-          }
+          logger.debug("Identifier-based search resolved symbols", {
+            searchTerms,
+            resultCount: allSymbols.length,
+          });
         }
 
         // Feedback-aware boosting: reorder search results by score + boost
@@ -802,46 +861,16 @@ export class Executor {
    * Extract potential identifiers from task text for hot-path searching.
    */
   private extractIdentifiersFromTask(task: AgentTask): string[] {
-    const identifiers: string[] = [];
+    const identifiers = extractIdentifiersFromText(task.taskText);
 
-    // Bound input length to avoid slow regex on very long task text
-    const text = task.taskText.slice(0, 2000);
-
-    // Prefer camelCase/PascalCase words (likely code identifiers).
-    // camelCase regex: lowercase→uppercase transition (e.g. handleRequest).
-    // Multi-segment PascalCase: Uppercase→lowercase→Uppercase (e.g. IndexError).
-    const camelCase = text.match(/[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*/g) ?? [];
-    const pascalCase = text.match(/[A-Z][a-z]+[A-Z][a-zA-Z0-9]*/g) ?? [];
-    identifiers.push(...camelCase, ...pascalCase);
-
-    // Single-word PascalCase names (6+ chars to reduce false positives on
-    // common English words like "The", "When"). Catches class names like
-    // Executor, Planner, Parser that the multi-segment regex misses.
-    const singlePascal = text.match(/\b[A-Z][a-z]{5,}[a-zA-Z0-9]*\b/g) ?? [];
-    identifiers.push(
-      ...singlePascal.filter((w) => !STOP_WORDS.has(w.toLowerCase())),
-    );
-
-    // Also grab snake_case identifiers
-    const snakeCase = text.match(/[a-zA-Z][a-zA-Z0-9]*_[a-zA-Z0-9_]+/g) ?? [];
-    identifiers.push(...snakeCase);
-
-    // Use symbol names from evidence already captured (card rung runs first)
+    // Augment with symbol names from evidence already captured (card rung runs first)
     const cardEvidence = this.evidenceCapture.getEvidenceByType("symbolCard");
     for (const e of cardEvidence.slice(0, 5)) {
-      // Extract the symbol name from evidence summary (format: "kind name | ...")
       const nameMatch = e.summary.match(/^\w+\s+(\w+)/);
       if (nameMatch) {
         identifiers.push(nameMatch[1]);
       }
     }
-
-    // Always run fallback to catch remaining identifiers (3+ chars, not common).
-    // Deduplication via Set at the end ensures no bloat from overlapping passes.
-    const words = text.match(/[a-zA-Z_][a-zA-Z0-9_]{2,}/g) ?? [];
-    identifiers.push(
-      ...words.filter((w) => !STOP_WORDS.has(w.toLowerCase())),
-    );
 
     return [...new Set(identifiers)].slice(0, MAX_IDENTIFIERS);
   }

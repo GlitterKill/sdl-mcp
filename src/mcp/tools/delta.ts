@@ -92,10 +92,17 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     prefetchDeltaBlastRadius(validated.repoId, changedSymbolIds);
 
     const config = loadConfig();
-    const budget = validated.budget ?? {
+    const rawBudget = validated.budget ?? {
       maxCards: config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS,
       maxEstimatedTokens:
         config.slice?.defaultMaxTokens ?? DEFAULT_MAX_TOKENS_SLICE,
+    };
+
+    // Hard cap to prevent unbounded responses
+    const budget = {
+      ...rawBudget,
+      maxCards: Math.min(rawBudget.maxCards ?? DEFAULT_MAX_CARDS, 100),
+      maxEstimatedTokens: Math.min(rawBudget.maxEstimatedTokens ?? DEFAULT_MAX_TOKENS_SLICE, 20000),
     };
     const governorOptions = {
       repoId: validated.repoId,

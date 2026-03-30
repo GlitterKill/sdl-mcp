@@ -880,8 +880,12 @@ async function handleRestRequest(
       });
 
       const sendEvent = (event: string, data: unknown): void => {
-        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        if (!res.destroyed && !clientDisconnected) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       };
+
+      // H4: Detect client disconnect to avoid writing to closed stream.
+      let clientDisconnected = false;
+      req.on("close", () => { clientDisconnected = true; });
 
       try {
         const result = await indexRepo(
@@ -1027,6 +1031,7 @@ async function handleMcpStreamableRequest(
               registeredSessionId = newSessionId;
               if (ctx.transports.size >= MAX_SESSIONS) {
                 logger.warn("Transport map at capacity, rejecting new session", { sessionId: newSessionId });
+                void mcpServer.stop(); // H2: prevent MCPServer leak
                 return;
               }
               ctx.transports.set(newSessionId, transport!);
@@ -1185,7 +1190,7 @@ async function handleSseConnection(
     });
     ctx.mcpServers.set(sseSessionId, mcpServer);
 
-    void mcpServer
+    await mcpServer
       .getServer()
       .connect(sseTransport)
       .catch((error) => {
@@ -1485,10 +1490,26 @@ export async function setupHttpTransport(
     },
   );
 
+  // C4: Handle malformed client requests to prevent socket accumulation.
+  httpServer.on("clientError", (_err, socket) => {
+    if (socket.writable) {
+      socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+    }
+  });
+
+  // H3: Prevent slow/abandoned connections from accumulating.
+  httpServer.requestTimeout = 120_000; // 2 minutes
+  httpServer.headersTimeout = 30_000; // 30 seconds
+  httpServer.keepAliveTimeout = 30_000; // 30 seconds
+
   const boundPort = await new Promise<number>((resolve_, reject_) => {
     httpServer.once("error", reject_);
     httpServer.listen(port, host, () => {
       httpServer.removeListener("error", reject_);
+      // C5: Install persistent error handler for runtime errors (EMFILE, etc.).
+      httpServer.on("error", (err) => {
+        console.error(`[sdl-mcp] HTTP server runtime error: ${err.message}`);
+      });
       const addr = httpServer.address();
       const actualPort = addr && typeof addr === "object" ? addr.port : port;
       console.error(`HTTP server listening on http://${host}:${actualPort}`);

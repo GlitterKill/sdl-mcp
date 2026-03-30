@@ -386,6 +386,7 @@ export async function handleCodeNeedWindow(
           howToResume: {
             type: "cursor" as const,
             value: skeletonResult.skeletonLinesConsumed ?? skeletonResult.actualRange.endLine,
+            parameter: "skeletonOffset",
           },
         }
       : undefined;
@@ -399,6 +400,7 @@ export async function handleCodeNeedWindow(
       whyApproved: ["Policy approved (downgraded to skeleton)"],
       estimatedTokens: skeletonResult.estimatedTokens,
       downgradedFrom: "raw-code",
+      downgradeGuidance: "Raw code access was downgraded to skeleton by policy. To get full code: (1) set policy.allowBreakGlass=true via sdl.policy.set, then retry with breakGlass in sliceContext, or (2) use sdl.code.getHotPath with specific identifiersToFind for targeted access.",
       truncation: skeletonTruncation,
     };
 
@@ -434,11 +436,7 @@ export async function handleCodeNeedWindow(
     const hotpathTruncation = hotpathResult.truncated
       ? {
           truncated: true,
-          droppedCount: Math.max(
-            0,
-            (symbolRange.endLine - symbolRange.startLine + 1) -
-            (hotpathResult.actualRange.endLine - hotpathResult.actualRange.startLine + 1),
-          ),
+          droppedCount: 0, // hot-path excerpts don't track original line counts
           howToResume: {
             type: "cursor" as const,
             value: hotpathResult.actualRange.endLine,
@@ -455,6 +453,7 @@ export async function handleCodeNeedWindow(
       whyApproved: ["Policy approved (downgraded to hotpath)"],
       estimatedTokens: hotpathResult.estimatedTokens,
       downgradedFrom: "raw-code",
+      downgradeGuidance: "Raw code access was downgraded to hot-path by policy. To get full code: (1) set policy.allowBreakGlass=true via sdl.policy.set, or (2) request a skeleton via sdl.code.getSkeleton for broader code structure.",
       matchedIdentifiers: hotpathResult.matchedIdentifiers,
       matchedLineNumbers: hotpathResult.matchedLineNumbers,
       truncation: hotpathTruncation,
@@ -672,6 +671,7 @@ export async function handleGetSkeleton(
           howToResume: {
             type: "cursor" as const,
             value: result.skeletonLinesConsumed ?? result.actualRange.endLine,
+            parameter: "skeletonOffset",
           },
         }
       : undefined;
@@ -717,6 +717,7 @@ export async function handleGetSkeleton(
           howToResume: {
             type: "cursor" as const,
             value: result.skeletonLinesConsumed ?? result.actualRange.endLine,
+            parameter: "skeletonOffset",
           },
         }
       : undefined;
@@ -814,6 +815,11 @@ export async function handleGetHotPath(
       ) ?? null)
     : null;
 
+  // Report which identifiers were requested but not found
+  const missedIdentifiers = request.identifiersToFind.filter(
+    (id) => !result.matchedIdentifiers.includes(id),
+  );
+
   const response = {
     excerpt: result.excerpt,
     file: fileData?.relPath ?? "",
@@ -821,6 +827,7 @@ export async function handleGetHotPath(
     estimatedTokens: result.estimatedTokens,
     matchedIdentifiers: result.matchedIdentifiers,
     matchedLineNumbers: result.matchedLineNumbers,
+    ...(missedIdentifiers.length > 0 ? { missedIdentifiers } : {}),
     truncated: result.truncated,
   };
   if (symbol) {

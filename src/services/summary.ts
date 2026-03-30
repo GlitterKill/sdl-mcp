@@ -334,18 +334,37 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
     }
   }
 
-  // Sort keySymbols by relevance: highest fan-in and most connections first.
-  // This ensures the most important symbols appear first in the summary.
+  // Sort keySymbols by query relevance (primary) then structural importance (secondary).
+  // This ensures symbols matching the query rank above high-fan-in but irrelevant symbols.
+  const queryTokensLower = tokenize(query)
+    .filter((t) => t.length >= 3 && !TASK_TEXT_STOP_WORDS.has(t))
+    .map((t) => t.toLowerCase());
   keySymbols.sort((a, b) => {
+    // Query relevance: name/summary match against query tokens
+    const nameLowerA = a.name.toLowerCase();
+    const nameLowerB = b.name.toLowerCase();
+    const summaryLowerA = (a.summary ?? "").toLowerCase();
+    const summaryLowerB = (b.summary ?? "").toLowerCase();
+    let relevanceA = 0;
+    let relevanceB = 0;
+    for (const token of queryTokensLower) {
+      if (nameLowerA.includes(token)) relevanceA += 10;
+      else if (summaryLowerA.includes(token)) relevanceA += 3;
+      if (nameLowerB.includes(token)) relevanceB += 10;
+      else if (summaryLowerB.includes(token)) relevanceB += 3;
+    }
+    // Structural importance: fan-in + edge count
     const metricsA = metricsMap.get(a.symbolId);
     const metricsB = metricsMap.get(b.symbolId);
     const fanInA = metricsA?.fanIn ?? 0;
     const fanInB = metricsB?.fanIn ?? 0;
     const edgesA = (edgesMap.get(a.symbolId) ?? []).length;
     const edgesB = (edgesMap.get(b.symbolId) ?? []).length;
-    // Primary: higher fan-in first; secondary: more outgoing edges first
-    const scoreA = fanInA * 3 + edgesA;
-    const scoreB = fanInB * 3 + edgesB;
+    const structuralA = fanInA * 3 + edgesA;
+    const structuralB = fanInB * 3 + edgesB;
+    // Combined: relevance is primary (weighted 5x), structural is secondary
+    const scoreA = relevanceA * 5 + structuralA;
+    const scoreB = relevanceB * 5 + structuralB;
     return scoreB - scoreA || a.name.localeCompare(b.name);
   });
 
@@ -401,7 +420,12 @@ export async function generateContextSummary(args: {
 
   let seed = summarySeedCache.get(cacheKey);
   if (!seed) {
-    seed = await buildSeed(args.repoId, query);
+    seed = await Promise.race([
+      buildSeed(args.repoId, query),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("buildSeed timed out after 30s")), 30_000).unref(),
+      ),
+    ]);
     summarySeedCache.set(cacheKey, seed);
     evictSummaryCache();
   }

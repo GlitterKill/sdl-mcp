@@ -262,6 +262,8 @@ async function handleSliceBuildInternal(
     includeRetrievalEvidence,
   } = request;
 
+  const shouldIncludeMemories = includeMemories === true;
+
   // Resolve any file::name shorthands in entrySymbols
   let resolvedEntrySymbols = entrySymbols;
   if (entrySymbols && entrySymbols.length > 0) {
@@ -445,8 +447,8 @@ async function handleSliceBuildInternal(
     // from the current version. Assign explicitly to signal feature is active.
     slice.staleSymbols = [];
 
-    // Surface relevant memories if enabled (default: true)
-    if (includeMemories !== false) {
+    // Surface relevant memories if enabled (default: false)
+    if (shouldIncludeMemories) {
       try {
         const sliceSymbolIds = slice.cards.map((c) => c.symbolId);
         const memories = await surfaceRelevantMemories(conn, {

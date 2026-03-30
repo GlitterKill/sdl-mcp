@@ -115,24 +115,28 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     const existing = this.overlayStore.getDraft(input.repoId, input.filePath);
     const warnings: string[] = [];
 
-    if (existing && input.version <= existing.version) {
-      warnings.push("Ignored stale buffer update.");
+    // Close events are lifecycle signals — always accept them regardless of version
+    if (input.eventType === "close" && !input.dirty) {
+      if (existing && input.version !== existing.version) {
+        warnings.push(`Close event version ${input.version} does not match draft version ${existing.version}.`);
+      }
+      this.overlayStore.removeDraft(input.repoId, input.filePath);
       return {
-        accepted: false,
+        accepted: true,
         repoId: input.repoId,
-        overlayVersion: existing.version,
+        overlayVersion: input.version,
         parseScheduled: false,
         checkpointScheduled: false,
         warnings,
       };
     }
 
-    if (input.eventType === "close" && !input.dirty) {
-      this.overlayStore.removeDraft(input.repoId, input.filePath);
+    if (existing && input.version <= existing.version) {
+      warnings.push("Ignored stale buffer update.");
       return {
-        accepted: true,
+        accepted: false,
         repoId: input.repoId,
-        overlayVersion: input.version,
+        overlayVersion: existing.version,
         parseScheduled: false,
         checkpointScheduled: false,
         warnings,

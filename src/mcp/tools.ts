@@ -1185,12 +1185,14 @@ const CodeWindowResponseApprovedSchema = z.object({
         .object({
           type: z.enum(["cursor", "token"]),
           value: z.union([z.string(), z.number()]),
+          parameter: z.string().optional(),
         })
         .nullable(),
     })
     .optional(),
   matchedIdentifiers: z.array(z.string()).optional(),
   matchedLineNumbers: z.array(z.number().int()).optional(),
+  downgradeGuidance: z.string().optional(),
 });
 
 const CodeWindowResponseDeniedSchema = z.object({
@@ -1252,6 +1254,7 @@ export const GetSkeletonResponseSchema = z.object({
         .object({
           type: z.enum(["cursor", "token"]),
           value: z.union([z.string(), z.number()]),
+          parameter: z.string().optional(),
         })
         .nullable(),
     })
@@ -1274,6 +1277,7 @@ export const GetHotPathResponseSchema = z.object({
   estimatedTokens: z.number().int(),
   matchedIdentifiers: z.array(z.string()),
   matchedLineNumbers: z.array(z.number().int()),
+  missedIdentifiers: z.array(z.string()).optional(),
   truncated: z.boolean(),
 });
 

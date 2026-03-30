@@ -45,6 +45,7 @@ describe("dist stdio smoke", () => {
         ...process.env,
         NODE_ENV: "test",
         SDL_GRAPH_DB_PATH: join(tempDir, "graph.lbug"),
+        SDL_CONFIG: join(process.cwd(), "config", "sdlmcp.config.example.json"),
       },
     });
 

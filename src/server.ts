@@ -98,6 +98,14 @@ export class MCPServer {
       },
     );
 
+    // Surface transport-level errors (malformed JSON-RPC, write failures,
+    // notification handler exceptions) instead of silently swallowing them.
+    this.server.onerror = (error) => {
+      process.stderr.write(
+        `[sdl-mcp] MCP protocol error: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    };
+
     this.setupHandlers();
   }
 
@@ -228,21 +236,17 @@ export class MCPServer {
                   usage.rawEquivalent,
                 );
                 // Send per-call savings notification to user (MCP logging)
-                try {
-                  await toolContext.sendNotification({
-                    method: "notifications/message",
-                    params: {
-                      level: "info",
-                      logger: "sdl-mcp",
-                      data: renderUserNotificationLine(
-                        usage.sdlTokens,
-                        usage.rawEquivalent,
-                      ),
-                    },
-                  });
-                } catch {
-                  // Non-critical — don't break tool dispatch
-                }
+                void toolContext.sendNotification({
+                  method: "notifications/message",
+                  params: {
+                    level: "info",
+                    logger: "sdl-mcp",
+                    data: renderUserNotificationLine(
+                      usage.sdlTokens,
+                      usage.rawEquivalent,
+                    ),
+                  },
+                  }).catch(() => { /* non-critical */ });
               } else if (
                 shouldAttachUsage(request.params.name) &&
                 typeof r.totalTokens === "number" &&
@@ -263,18 +267,14 @@ export class MCPServer {
                 r,
               );
               if (userDisplay) {
-                try {
-                  await toolContext.sendNotification({
-                    method: "notifications/message",
-                    params: {
-                      level: "info",
-                      logger: "sdl-mcp",
-                      data: userDisplay,
-                    },
-                  });
-                } catch {
-                  // Non-critical
-                }
+                void toolContext.sendNotification({
+                  method: "notifications/message",
+                  params: {
+                    level: "info",
+                    logger: "sdl-mcp",
+                    data: userDisplay,
+                  },
+                  }).catch(() => { /* non-critical */ });
               }
 
               // Capture token usage before stripping internal fields
@@ -298,18 +298,14 @@ export class MCPServer {
             ) {
               const summary = (finalResult as Record<string, unknown>).formattedSummary;
               if (typeof summary === "string") {
-                try {
-                  await toolContext.sendNotification({
-                    method: "notifications/message",
-                    params: {
-                      level: "info",
-                      logger: "sdl-mcp",
-                      data: summary,
-                    },
-                  });
-                } catch {
-                  // Non-critical
-                }
+                void toolContext.sendNotification({
+                  method: "notifications/message",
+                  params: {
+                    level: "info",
+                    logger: "sdl-mcp",
+                    data: summary,
+                  },
+                  }).catch(() => { /* non-critical */ });
                 // Strip from tool response — summary is for the user, not the LLM
                 capturedSummary = summary;
                 delete (finalResult as Record<string, unknown>).formattedSummary;
@@ -319,7 +315,12 @@ export class MCPServer {
             // Run post-dispatch hooks (non-critical)
             for (const hook of this.postDispatchHooks) {
               try {
-                await hook(request.params.name, parseResult.data, finalResult, toolContext);
+                await Promise.race([
+                  hook(request.params.name, parseResult.data, finalResult, toolContext),
+                  new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Post-dispatch hook timed out")), 5_000).unref(),
+                  ),
+                ]);
               } catch (err) {
                 process.stderr.write(
                   `[sdl-mcp] Post-dispatch hook failed for tool ${request.params.name}: ${err instanceof Error ? err.message : String(err)}
