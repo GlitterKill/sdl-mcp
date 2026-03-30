@@ -64,8 +64,26 @@ function computeRelevance(name: string, query: string): number {
   const nl = name.toLowerCase();
   const ql = query.toLowerCase();
   if (nl === ql) return 1.0;
+  // Support glob wildcards: build*Slice matches buildSlice, buildGraphSlice
+  if (ql.includes("*") || ql.includes("?")) {
+    const escaped = ql.replace(/[.+^{}()|[\]]/g, "\\" + "&");
+    const pattern = escaped.replace(/\*/g, ".*").replace(/\?/g, ".");
+    try {
+      if (new RegExp("^" + pattern + "$", "i").test(nl)) return 0.9;
+      if (new RegExp(pattern, "i").test(nl)) return 0.75;
+    } catch { /* invalid pattern, fall through */ }
+  }
   if (nl.startsWith(ql)) return 0.85;
   if (nl.includes(ql)) return 0.7;
+  // CamelCase-aware: split both query and name into constituent parts
+  const splitCamel = (s: string) => s.replace(/([a-z])([A-Z])/g, (_, a: string, b: string) => a + " " + b).split(/[\s_]+/).map(w => w.toLowerCase()).filter(w => w.length >= 2);
+  const queryParts = splitCamel(query);
+  const nameParts = splitCamel(name);
+  if (queryParts.length >= 2 && nameParts.length >= 2) {
+    const matchCount = queryParts.filter(qp => nameParts.some(np => np.includes(qp) || qp.includes(np))).length;
+    if (matchCount === queryParts.length) return 0.8;
+    if (matchCount > 0) return 0.3 + 0.3 * (matchCount / queryParts.length);
+  }
   // Check if query words appear in the name (multi-word queries)
   const queryWords = ql.split(/[\s_]+/).filter(w => w.length >= 3);
   if (queryWords.length > 1) {
@@ -75,7 +93,7 @@ function computeRelevance(name: string, query: string): number {
   // Check if name appears in query
   if (nl.length >= 3 && ql.includes(nl)) return 0.5;
   // Weak: individual word overlap
-  const nameWords = nl.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(/[\s_]+/).filter(w => w.length >= 3);
+  const nameWords = nl.replace(/([a-z])([A-Z])/g, (_, a, b) => a + " " + b).toLowerCase().split(/[\s_]+/).filter(w => w.length >= 3);
   const overlap = nameWords.filter(w => ql.includes(w)).length;
   if (overlap > 0) return 0.1 + 0.15 * (overlap / Math.max(nameWords.length, 1));
   return 0.05;

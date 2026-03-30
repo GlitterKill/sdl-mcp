@@ -282,6 +282,41 @@ export async function getFileByRepoPath(
   };
 }
 
+/**
+ * Find files under a directory prefix (e.g. "src/code/").
+ * Returns up to `limit` files whose relPath starts with the given prefix.
+ */
+export async function getFilesByPrefix(
+  conn: Connection,
+  repoId: string,
+  prefix: string,
+  limit: number = 50,
+): Promise<FileRow[]> {
+  const normalizedPrefix = normalizePath(prefix);
+  const safeLimitVal = Math.max(1, Math.min(limit, 200));
+  const rows = await queryAll<Omit<FileRow, "repoId">>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
+     WHERE f.relPath STARTS WITH $prefix
+     RETURN f.fileId AS fileId,
+            f.relPath AS relPath,
+            f.contentHash AS contentHash,
+            f.language AS language,
+            f.byteSize AS byteSize,
+            f.lastIndexedAt AS lastIndexedAt,
+            f.directory AS directory
+     LIMIT $lim`,
+    { repoId, prefix: normalizedPrefix, lim: safeLimitVal },
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    repoId,
+    byteSize: toNumber(row.byteSize),
+    lastIndexedAt: row.lastIndexedAt ?? null,
+  }));
+}
+
 export async function deleteFilesByIds(
   conn: Connection,
   fileIds: string[],

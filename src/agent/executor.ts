@@ -46,10 +46,10 @@ const RUNG_TO_ACTION_TYPE: Record<RungType, Action["type"]> = {
 };
 
 /**
- * Per-rung token estimates matching planner values (src/agent/planner.ts).
- * Used for coarse-grained runtime budget enforcement between rungs.
+ * Per-rung token estimates used as fallback when actual token counting
+ * is unavailable. Actual evidence-based tokens are preferred (see execute()).
  */
-const RUNG_TOKEN_ESTIMATES: Record<RungType, number> = {
+const RUNG_TOKEN_FALLBACK_ESTIMATES: Record<RungType, number> = {
   card: 50,
   skeleton: 200,
   hotPath: 500,
@@ -154,8 +154,16 @@ export class Executor {
 
       await this.executeRung(task, rung, context);
 
-      // Track estimated tokens consumed by this rung
-      this.metrics.totalTokens += RUNG_TOKEN_ESTIMATES[rung] ?? 0;
+      // Track tokens: use actual evidence-based count when available,
+      // fall back to static estimates otherwise
+      const rungEvidence = this.evidenceCapture.getAllEvidence();
+      const actualTokens = rungEvidence.length > evidenceBefore
+        ? rungEvidence.slice(evidenceBefore).reduce((sum, e) => {
+            const tokenMatch = e.summary.match(/~(\d+) tokens/);
+            return sum + (tokenMatch ? parseInt(tokenMatch[1], 10) : RUNG_TOKEN_FALLBACK_ESTIMATES[rung] ?? 0);
+          }, 0)
+        : RUNG_TOKEN_FALLBACK_ESTIMATES[rung] ?? 0;
+      this.metrics.totalTokens += actualTokens;
 
       const evidenceAfter = this.evidenceCapture.getAllEvidence().length;
 
@@ -281,6 +289,7 @@ export class Executor {
 
   /**
    * Resolve file: context entries to symbol IDs by querying the DB.
+   * Supports both exact file paths and directory prefixes (e.g. "src/code/").
    */
   private async resolveFileSymbols(
     filePaths: string[],
@@ -291,10 +300,24 @@ export class Executor {
     const results = await Promise.all(
       filePaths.map(async (relPath) => {
         try {
+          // Try exact file match first
           const file = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
           if (file) {
             const symbols = await ladybugDb.getSymbolsByFile(conn, file.fileId);
             return symbols.slice(0, 50).map((sym) => sym.symbolId);
+          }
+
+          // If exact match fails, treat as directory prefix and find files under it
+          const normalizedPrefix = relPath.endsWith("/") ? relPath : relPath + "/";
+          const filesUnderDir = await ladybugDb.getFilesByPrefix(conn, repoId, normalizedPrefix);
+          if (filesUnderDir.length > 0) {
+            const symbolResults = await Promise.all(
+              filesUnderDir.slice(0, 20).map(async (f) => {
+                const symbols = await ladybugDb.getSymbolsByFile(conn, f.fileId);
+                return symbols.slice(0, 10).map((sym) => sym.symbolId);
+              }),
+            );
+            return symbolResults.flat();
           }
         } catch (err) {
           logger.debug("Failed to resolve symbols for file", {

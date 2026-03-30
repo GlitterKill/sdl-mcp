@@ -45,6 +45,19 @@ import {
 import type { ToolContext } from "../../server.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 
+// Health snapshot cache with 30s TTL to avoid expensive recomputation
+const healthSnapshotCache = new Map<string, { snapshot: Awaited<ReturnType<typeof getRepoHealthSnapshot>>; cachedAt: number }>();
+const HEALTH_CACHE_TTL_MS = 30_000;
+
+async function getCachedHealthSnapshot(repoId: string) {
+  const cached = healthSnapshotCache.get(repoId);
+  if (cached && Date.now() - cached.cachedAt < HEALTH_CACHE_TTL_MS) {
+    return cached.snapshot;
+  }
+  const snapshot = await getRepoHealthSnapshot(repoId);
+  healthSnapshotCache.set(repoId, { snapshot, cachedAt: Date.now() });
+  return snapshot;
+}
 const SUPPORTED_LANGUAGES = [...LanguageSchema.options];
 
 /**
@@ -296,11 +309,13 @@ export async function handleRepoStatus(
       throw new DatabaseError(`Repository ${repoId} not found`);
     }
 
-    const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
-    const filesIndexed = await ladybugDb.getFileCount(conn, repoId);
-    const symbolsIndexed = await ladybugDb.getSymbolCount(conn, repoId);
-    const lastIndexedAt = await ladybugDb.getLastIndexedAt(conn, repoId);
-    const health = await getRepoHealthSnapshot(repoId);
+    const [latestVersion, filesIndexed, symbolsIndexed, lastIndexedAt, health] = await Promise.all([
+      ladybugDb.getLatestVersion(conn, repoId),
+      ladybugDb.getFileCount(conn, repoId),
+      ladybugDb.getSymbolCount(conn, repoId),
+      ladybugDb.getLastIndexedAt(conn, repoId),
+      getCachedHealthSnapshot(repoId),
+    ]);
     const watcherHealth = getWatcherHealth(repoId);
     const prefetchStats = getPrefetchStats(repoId);
     const liveIndexStatus = await getDefaultLiveIndexCoordinator()

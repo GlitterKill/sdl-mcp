@@ -22,6 +22,7 @@ import {
 } from "./types.js";
 import type { ParsedWorkflowRequest } from "./workflow-parser.js";
 import { WorkflowBudgetTracker } from "./workflow-budget.js";
+import { tokenAccumulator } from "../mcp/token-accumulator.js";
 
 /**
  * Apply per-step token truncation if configured.
@@ -263,6 +264,8 @@ export async function executeWorkflow(
         const tokens = WorkflowBudgetTracker.estimateResultTokens(result);
 
         budget.record(tokens, stepDuration);
+        // Record usage for session-level token tracking
+        tokenAccumulator.recordUsage(step.fn, tokens, 0);
 
         if (etagCache) {
           etagCache.extractEtags(step.action, result);

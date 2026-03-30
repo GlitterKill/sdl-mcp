@@ -28,7 +28,7 @@ import { attachRawContext } from "../token-usage.js";
 import { IndexError } from "../errors.js";
 
 /** Default max changed symbols for delta responses (tighter than slice default). */
-const DEFAULT_DELTA_MAX_CARDS = 30;
+const DEFAULT_DELTA_MAX_CARDS = 15;
 /** Default max tokens for delta responses (tighter than slice default). */
 const DEFAULT_DELTA_MAX_TOKENS = 8000;
 /** Hard cap on blast-radius items returned to the caller. */
@@ -131,19 +131,27 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       const spilloverHandle = governorResult.spilloverHandle;
       delta.spilloverHandle = spilloverHandle;
 
-      const handleRow = await getSliceHandle(
-        conn,
-        spilloverHandle,
-      );
-      if (handleRow) {
-        await withWriteConn(async (wConn) => {
-          await updateSliceHandleSpillover(
-            wConn,
-            spilloverHandle,
-            JSON.stringify(governorResult.trimmedSet.droppedSymbols),
-          );
-        });
-      }
+      await withWriteConn(async (wConn) => {
+        // Ensure the handle exists so slice.spillover.get can retrieve it
+        const handleRow = await getSliceHandle(conn, spilloverHandle);
+        if (!handleRow) {
+          await ladybugDb.upsertSliceHandle(wConn, {
+            handle: spilloverHandle,
+            repoId: validated.repoId,
+            createdAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+            minVersion: null,
+            maxVersion: validated.toVersion ?? null,
+            sliceHash: spilloverHandle,
+            spilloverRef: null,
+          });
+        }
+        await updateSliceHandleSpillover(
+          wConn,
+          spilloverHandle,
+          JSON.stringify(governorResult.trimmedSet.droppedSymbols),
+        );
+      })
     }
 
     const maxChanges = config.slice?.defaultMaxCards ?? DEFAULT_DELTA_MAX_CARDS;

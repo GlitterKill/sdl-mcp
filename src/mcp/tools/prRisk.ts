@@ -11,11 +11,11 @@ import { getFilesByIds } from "../../db/ladybug-repos.js";
 import type { BlastRadiusItem } from "../types.js";
 import { IndexError } from "../errors.js";
 
-const MAX_CHANGED_SYMBOLS_IN_RESPONSE = 100;
-const MAX_BLAST_RADIUS_IN_RESPONSE = 50;
-const MAX_FINDINGS = 20;
-const MAX_RECOMMENDED_TESTS = 20;
-const MAX_EVIDENCE_ITEMS = 20;
+const MAX_CHANGED_SYMBOLS_IN_RESPONSE = 30;
+const MAX_BLAST_RADIUS_IN_RESPONSE = 20;
+const MAX_FINDINGS = 10;
+const MAX_RECOMMENDED_TESTS = 10;
+const MAX_EVIDENCE_ITEMS = 5;
 
 type ComputedDeltaWithTiers = Awaited<ReturnType<typeof computeDeltaWithTiers>>;
 type ChangedSymbol = ComputedDeltaWithTiers["changedSymbols"][number];
@@ -66,10 +66,6 @@ export async function handlePRRiskAnalysis(args: unknown) {
   const findings = generateFindings(delta, blastRadiusItems);
 
   const riskScore = computeOverallRiskScore(delta, blastRadiusItems);
-
-  const impactedSymbols = blastRadiusItems.map(
-    (item: BlastRadiusItem) => item.symbolId,
-  );
 
   const evidence = collectEvidence(delta, blastRadiusItems);
 
@@ -191,7 +187,6 @@ export async function handlePRRiskAnalysis(args: unknown) {
         totalCount: totalRecommendedTests,
         truncated: totalRecommendedTests > MAX_RECOMMENDED_TESTS,
       },
-      impactedSymbols,
       changedSymbolsCount: totalChangedSymbols,
       blastRadiusCount: totalBlastRadius,
     },

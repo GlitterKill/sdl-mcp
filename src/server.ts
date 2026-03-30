@@ -180,14 +180,18 @@ export class MCPServer {
             normalizedArgs,
           );
           if (!parseResult.success) {
-            const validationError = {
-              error: {
-                message: "Invalid tool arguments",
-                code: "VALIDATION_ERROR",
-                details: parseResult.error.issues.map((issue) => ({
+            const issueDetails = parseResult.error.issues.map((issue) => ({
                   path: issue.path.join("."),
                   message: issue.message,
-                })),
+                }));
+            const humanLines = issueDetails.map((d) =>
+              d.path ? `  - ${d.path}: ${d.message}` : `  - ${d.message}`,
+            );
+            const validationError = {
+              error: {
+                message: `Invalid tool arguments:\n${humanLines.join("\n")}`,
+                code: "VALIDATION_ERROR",
+                details: issueDetails,
               },
             };
             process.stderr.write(
@@ -206,7 +210,7 @@ export class MCPServer {
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify(validationError, null, 2),
+                  text: validationError.error.message,
                 },
               ],
               isError: true,

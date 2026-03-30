@@ -875,7 +875,7 @@ export interface WatcherHealth {
 // Agent Memory Types
 // ============================================================================
 
-export type MemoryType = "decision" | "bugfix" | "task_context";
+export type MemoryType = "decision" | "bugfix" | "task_context" | "pattern" | "convention" | "architecture" | "performance" | "security";
 
 export interface SurfacedMemory {
   memoryId: string;

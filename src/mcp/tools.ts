@@ -198,7 +198,7 @@ const SliceTruncationSchema = z.object({
     .nullable(),
 });
 
-const MemoryTypeSchema = z.enum(["decision", "bugfix", "task_context"]);
+const MemoryTypeSchema = z.enum(["decision", "bugfix", "task_context", "pattern", "convention", "architecture", "performance", "security"]);
 
 const SurfacedMemorySchema = z.object({
   memoryId: z.string(),
