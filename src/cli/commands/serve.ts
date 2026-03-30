@@ -8,6 +8,7 @@ import { configureLogger } from "../logging.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
 import { closeLadybugDb, configurePool } from "../../db/ladybug.js";
+import { persistUsageSnapshot } from "../../db/ladybug-usage.js";
 import {
   configurePrefetch,
   warmPrefetchOnServeStart,
@@ -36,6 +37,7 @@ import {
 } from "../../util/logger.js";
 import { configureToolDispatchLimiter } from "../../mcp/dispatch-limiter.js";
 import { SessionManager } from "../../mcp/session-manager.js";
+import { tokenAccumulator } from "../../mcp/token-accumulator.js";
 import { ensureConfiguredReposRegistered } from "../../startup/bootstrap.js";
 
 export async function serveCommand(options: ServeOptions): Promise<void> {
@@ -218,6 +220,22 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   if (stdioServer) {
     shutdownMgr.addCleanup("server", () => stdioServer.stop());
   }
+  // Persist token usage BEFORE closing the DB — MCPServer.stop() runs during
+  // httpServer cleanup (registered later, executes later), so the DB would
+  // already be closed by that point.  Doing it here guarantees availability.
+  shutdownMgr.addCleanup("persistUsage", async () => {
+    try {
+      if (tokenAccumulator.hasUsage) {
+        await persistUsageSnapshot(tokenAccumulator.getSnapshot());
+      }
+    } catch (err) {
+      // Non-critical — don't block shutdown
+      console.error(
+        "[sdl-mcp] Failed to persist usage snapshot: " +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+  });
   shutdownMgr.addCleanup("db", () => closeLadybugDb());
   shutdownMgr.addCleanup("logger", () => shutdownLogger());
   shutdownMgr.addCleanup("watchers", async () => {

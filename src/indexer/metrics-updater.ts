@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 
 import type { AppConfig } from "../config/types.js";
+import { withTransaction } from "../db/ladybug-core.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { updateMetricsForRepo } from "../graph/metrics.js";
@@ -126,6 +127,16 @@ export async function materializeFileSummaries(
   const files = await ladybugDb.getFilesByRepo(conn, repoId);
   let updated = 0;
 
+  // Collect all upserts, then batch-write via the serialized write connection
+  // to avoid writing on a read-pool connection (which can crash Kuzu).
+  const upserts: Array<{
+    fileId: string;
+    repoId: string;
+    summary: string | null;
+    searchText: string | null;
+    updatedAt: string;
+  }> = [];
+
   for (const file of files) {
     try {
       const symbols = await ladybugDb.getSymbolsByFile(conn, file.fileId);
@@ -138,19 +149,29 @@ export async function materializeFileSummaries(
         exportedNames,
       );
 
-      await ladybugDb.upsertFileSummary(conn, {
+      upserts.push({
         fileId: file.fileId,
         repoId,
         summary: null,
         searchText,
         updatedAt: new Date().toISOString(),
       });
-      updated++;
     } catch (err) {
       logger.warn(
         `materializeFileSummaries: failed for ${file.relPath}: ${String(err)}`,
       );
     }
+  }
+
+  if (upserts.length > 0) {
+    await withWriteConn(async (wConn) => {
+      await withTransaction(wConn, async (txConn) => {
+        for (const params of upserts) {
+          await ladybugDb.upsertFileSummary(txConn, params);
+          updated++;
+        }
+      });
+    });
   }
 
   return { total: files.length, updated };

@@ -269,10 +269,19 @@ async function indexRepoImpl(
       changedPass2FilePaths,
     } = pass1Acc;
     let { totalEdgesCreated } = pass1Acc;
+    // Refresh read connection after Pass 1 writes so subsequent reads observe
+    // the latest committed state and avoid stale pages on the long-lived conn.
+    let freshConn = await getLadybugConn();
 
     // --- Phase: refresh symbol index from DB (Pass 1 → Pass 2 bridge) ---
 
-    await refreshSymbolIndexFromDb(conn, repoId, symbolIndex, globalNameToSymbolIds, globalPreferredSymbolId);
+    await refreshSymbolIndexFromDb(
+      freshConn,
+      repoId,
+      symbolIndex,
+      globalNameToSymbolIds,
+      globalPreferredSymbolId,
+    );
 
     // --- Phase: Pass 2 — cross-file call resolution ---
 
@@ -343,7 +352,9 @@ async function indexRepoImpl(
     // --- Phase: version management ---
 
     const versionReason = mode === "full" ? "Full index" : "Incremental index";
-    const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
+    // Pass 2 + edge finalization perform many writes; refresh again before reads.
+    freshConn = await getLadybugConn();
+    const latestVersion = await ladybugDb.getLatestVersion(freshConn, repoId);
     let versionId: string;
     if (changedFiles === 0 && mode === "incremental") {
       versionId = latestVersion ? latestVersion.versionId : `v${Date.now()}`;
@@ -379,10 +390,12 @@ async function indexRepoImpl(
 
     let clustersComputed = 0;
     let processesTraced = 0;
+    // Refresh read connection again after version/metrics writes.
+    freshConn = await getLadybugConn();
     if (!(mode === "incremental" && changedFiles === 0)) {
       try {
         const result = await computeAndStoreClustersAndProcesses({
-          conn,
+          conn: freshConn,
           repoId,
           versionId,
         });
@@ -398,7 +411,7 @@ async function indexRepoImpl(
 
     // --- Phase: memory management (staleness flagging + file import) ---
 
-    await flagStaleMemoriesForChangedFiles(conn, repoId, changedFileIds, versionId);
+    await flagStaleMemoriesForChangedFiles(freshConn, repoId, changedFileIds, versionId);
     await importMemoryFilesFromDisk(repoRow.rootPath, repoId, versionId);
 
     const result: IndexResult = {
