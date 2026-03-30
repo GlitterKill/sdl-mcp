@@ -561,8 +561,7 @@ async function handleSliceBuildInternal(
         taskText,
       }) } : {}),
     };
-    attachRawContext(response, { fileIds });
-    return response;
+    return attachRawContext(response, { fileIds });
   };
 
   if (isTracingEnabled()) {
@@ -702,7 +701,7 @@ export async function handleSliceRefresh(
   if (delta && delta.changedSymbols.length > 0) {
     const changedIds = delta.changedSymbols.map((c) => c.symbolId);
     const symbolMap = await ladybugDb.getSymbolsByIds(conn, changedIds);
-    attachRawContext(response, {
+    return attachRawContext(response, {
       fileIds: [
         ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
       ],
@@ -925,8 +924,7 @@ export async function handleSliceSpilloverGet(
     hasMore,
     symbols,
   };
-  attachRawContext(response, { fileIds: [...new Set(spilloverFileIds)] });
-  return response;
+  return attachRawContext(response, { fileIds: [...new Set(spilloverFileIds)] });
 }
 
 /**

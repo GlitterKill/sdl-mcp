@@ -28,11 +28,10 @@ export async function handleAgentContext(
     const fileIds = focusPaths?.length
       ? focusPaths.map((path) => `${request.repoId}:${path}`)
       : undefined;
-    attachRawContext(
+    return attachRawContext(
       response,
       fileIds ? { fileIds } : { rawTokens: response.metrics.totalTokens * 3 },
     );
-    return response;
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(

@@ -46,7 +46,7 @@ export class ContextEngine {
 
     try {
       const path = this.planner.plan(task);
-      let context = this.planner.selectContext(task);
+      let context = await this.planner.selectContext(task);
 
       // When no explicit focusSymbols/focusPaths were provided, use entity retrieval
       // to seed the context with relevant symbols, clusters, and processes.
@@ -147,7 +147,7 @@ export class ContextEngine {
       }
 
       const { expandedContext, clusterExpandedCount } =
-        await this.expandContextForClusters(context);
+        await this.expandContextForClusters(context, task.taskText);
 
       const executor = new Executor(this.policyEngine);
       const { actions, evidence, success } = await executor.execute(
@@ -425,6 +425,7 @@ export class ContextEngine {
 
   private async expandContextForClusters(
     context: string[],
+    taskText?: string,
   ): Promise<{ expandedContext: string[]; clusterExpandedCount: number }> {
     const symbolIds = context
       .filter((c) => c.startsWith("symbol:"))
@@ -456,19 +457,58 @@ export class ContextEngine {
         ),
       );
 
+      // Build task keyword set for relevance filtering
+      const taskKeywords = new Set<string>();
+      if (taskText) {
+        for (const word of taskText.toLowerCase().split(/\W+/)) {
+          if (word.length >= 3) taskKeywords.add(word);
+        }
+      }
+
+      // Collect all candidate member symbolIds to fetch names for filtering
+      const candidateIds: string[] = [];
       const already = new Set(context);
+      for (const members of memberLists) {
+        for (const m of members) {
+          const ref = `symbol:${m.symbolId}`;
+          if (already.has(ref)) continue;
+          candidateIds.push(m.symbolId);
+        }
+      }
+
+      // If we have task keywords, fetch symbol names for relevance filtering
+      let nameMap: Map<string, { name: string; kind: string }> | null = null;
+      if (taskKeywords.size > 0 && candidateIds.length > 0) {
+        nameMap = await ladybugDb.getSymbolsByIdsLite(conn, candidateIds);
+      }
+
       const additional: string[] = [];
 
       for (const members of memberLists) {
         for (const m of members) {
           const ref = `symbol:${m.symbolId}`;
           if (already.has(ref)) continue;
+
+          // When task keywords are available, only add members whose name
+          // has at least one overlapping keyword with the task text.
+          if (nameMap && taskKeywords.size > 0) {
+            const info = nameMap.get(m.symbolId);
+            if (info) {
+              const nameLower = info.name.toLowerCase();
+              const isRelevant = Array.from(taskKeywords).some(
+                (kw) => nameLower.includes(kw) || kw.includes(nameLower),
+              );
+              if (!isRelevant) continue;
+            } else {
+              // Symbol not in nameMap and keywords exist — skip (relevance unknown)
+              continue;
+            }
+          }
+
           additional.push(ref);
           already.add(ref);
         }
-        // Outer loop break is sufficient — inner loop processes all members
-        // of each cluster before checking the cap.
-        if (additional.length >= 20) break;
+        if (additional.length >= 10) break;
       }
 
       return {

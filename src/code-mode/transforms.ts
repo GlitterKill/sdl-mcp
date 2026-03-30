@@ -158,10 +158,16 @@ const DataTemplateSchema = z.object({
 
 function execDataPick(args: unknown): unknown {
   const parsed = DataPickSchema.parse(args);
-  const { input, fields } = parsed;
+  let { input } = parsed;
+  const { fields } = parsed;
 
-  if (input === null || input === undefined || typeof input !== "object") {
-    throw new TransformError("dataPick: input must be an object");
+  if (input === null || input === undefined) {
+    throw new TransformError("dataPick: input must not be null or undefined");
+  }
+
+  // Wrap scalar values so they can be accessed via the "value" key
+  if (typeof input !== "object") {
+    input = { value: input };
   }
 
   const result: Record<string, unknown> = {};

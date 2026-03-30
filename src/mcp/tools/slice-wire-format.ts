@@ -459,12 +459,12 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
     vid: "versionId",
     b: "budget (mc=maxCards, mt=maxTokens)",
     ss: "seedSymbols (first 16 chars of symbolId)",
-    si: "sliceSymbolIds",
-    fp: "filePaths",
+    si: "sliceSymbolIds — access: $N.slice.si[0]",
+    fp: "filePaths — access: $N.slice.fp[0]",
     et: "edgeTypes",
-    c: "cards (fi=fileIndex, r=range, k=kind, n=name, x=exported, d=deps, sig=signature, sum=summary, dl=detailLevel)",
-    e: "edges [sourceCardIndex, targetCardIndex, edgeTypeIndex, confidence]",
-    f: "frontier (ci=cardIndex, s=score, w=why: c=call/i=import)",
+    c: "cards — access: $N.slice.c[0].n (name), .k (kind), .x (exported), .sum (summary), .sig (signature), .fi (fileIndex→fp), .r (range [startLine,startCol,endLine,endCol]), .d (deps: .i imports, .c calls), .dl (detailLevel)",
+    e: "edges [sourceCardIndex, targetCardIndex, edgeTypeIndex, confidence] — access: $N.slice.e[0]",
+    f: "frontier — access: $N.slice.f[0].s (score), .w (why: c=call/i=import), .ci (cardIndex, -1=not in slice)",
     t: "truncation (tr=truncated, dc=droppedCards, de=droppedEdges, res=resumeInfo)",
   };
 

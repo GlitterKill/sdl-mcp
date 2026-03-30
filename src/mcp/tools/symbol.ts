@@ -107,7 +107,7 @@ export async function handleSymbolSearch(
   const startedAt = Date.now();
   const request = args as SymbolSearchRequest;
   const requestedLimit = request.limit ?? SYMBOL_SEARCH_DEFAULT_LIMIT;
-  const limit = (request.kinds && request.kinds.length > 0) ? requestedLimit * 3 : requestedLimit;
+  const limit = (request.kinds && request.kinds.length > 0) ? requestedLimit * 10 : requestedLimit;
   const config = loadConfig();
   const semanticConfig = config.semantic;
   const semanticRequested = request.semantic === true;
@@ -181,11 +181,11 @@ export async function handleSymbolSearch(
         `[symbol.search] Hybrid search failed, falling back to legacy: ${err instanceof Error ? err.message : String(err)}`,
       );
       fallbackReason = `Hybrid search error: ${err instanceof Error ? err.message : String(err)}`;
-      rows = await searchSymbolsWithOverlay(conn, request.repoId, request.query, limit);
+      rows = await searchSymbolsWithOverlay(conn, request.repoId, request.query, limit, request.kinds);
     }
   } else {
     // --- LEGACY PATH: lexical search + optional semantic reranking ---
-    rows = await searchSymbolsWithOverlay(conn, request.repoId, request.query, limit);
+    rows = await searchSymbolsWithOverlay(conn, request.repoId, request.query, limit, request.kinds);
   }
 
   let results = rows.map((row) => ({
@@ -260,10 +260,9 @@ export async function handleSymbolSearch(
       }));
     }
   }
-  attachRawContext(response, {
+  return attachRawContext(response, {
     fileIds: [...new Set(rows.map((row) => row.fileId))],
   });
-  return response;
 }
 
 interface SymbolResolutionFailure {
@@ -444,10 +443,9 @@ export async function handleSymbolGetCard(
 
   const response = { card: result };
   const symbol = await ladybugDb.getSymbol(conn, symbolId);
-  if (symbol) {
-    attachRawContext(response, { fileIds: [symbol.fileId] });
-  }
-  return response;
+  return symbol
+    ? attachRawContext(response, { fileIds: [symbol.fileId] })
+    : response;
 }
 
 export async function handleSymbolGetCards(
@@ -478,8 +476,7 @@ export async function handleSymbolGetCards(
     });
     const fileIds = [...new Set(Array.from(symbolMap.values()).map((symbol) => symbol.fileId))];
     const response = { cards };
-    attachRawContext(response, { fileIds });
-    return response;
+    return attachRawContext(response, { fileIds });
   }
 
   const resolvedSymbolIds: string[] = [];
@@ -516,6 +513,5 @@ export async function handleSymbolGetCards(
     response.failed = failures.map((failure) => failure.input);
     response.failures = failures;
   }
-  attachRawContext(response, { fileIds });
-  return response;
+  return attachRawContext(response, { fileIds });
 }

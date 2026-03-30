@@ -152,9 +152,10 @@ export async function searchSymbolsWithOverlay(
   repoId: string,
   query: string,
   limit: number,
+  kinds?: string[],
 ): Promise<Array<OverlaySearchResult>> {
   const snapshot = getOverlaySnapshot(repoId);
-  const durableRows = (await ladybugDb.searchSymbolsLite(conn, repoId, query, limit * 2))
+  const durableRows = (await ladybugDb.searchSymbolsLite(conn, repoId, query, limit * 2, kinds))
     .filter((row) => !snapshot.touchedFileIds.has(row.fileId));
   const durableSymbolIds = new Set(durableRows.map((row) => row.symbolId));
   const durableFileMap = await ladybugDb.getFilesByIds(

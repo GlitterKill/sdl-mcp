@@ -298,6 +298,7 @@ export async function handleCodeNeedWindow(
     identifiersToFind: request.identifiersToFind,
     reason: request.reason,
     sliceContext: context.slice,
+    expectedLines: request.expectedLines,
     symbolData: legacySymbol,
   };
 
@@ -687,10 +688,9 @@ export async function handleGetSkeleton(
       truncation: skeletonTruncation,
     };
 
-    if (symbol) {
-      attachRawContext(response, { fileIds: [symbol.fileId] });
-    }
-    return response;
+    return symbol
+      ? attachRawContext(response, { fileIds: [symbol.fileId] })
+      : response;
   } else if (request.file) {
     const result = await generateFileSkeleton(
       request.repoId,
@@ -739,10 +739,9 @@ export async function handleGetSkeleton(
       request.repoId,
       request.file,
     );
-    if (fileRow) {
-      attachRawContext(response, { fileIds: [fileRow.fileId] });
-    }
-    return response;
+    return fileRow
+      ? attachRawContext(response, { fileIds: [fileRow.fileId] })
+      : response;
   }
 
   throw new ValidationError("Either symbolId or file must be provided");
@@ -831,8 +830,7 @@ export async function handleGetHotPath(
     ...(missedIdentifiers.length > 0 ? { missedIdentifiers } : {}),
     truncated: result.truncated,
   };
-  if (symbol) {
-    attachRawContext(response, { fileIds: [symbol.fileId] });
-  }
-  return response;
+  return symbol
+    ? attachRawContext(response, { fileIds: [symbol.fileId] })
+    : response;
 }

@@ -52,9 +52,12 @@ export function registerActionSearchTool(
         includeExamples: args.includeExamples,
       });
 
-      const ranked = rankCatalog(catalog, args.query).slice(0, args.limit);
+      const allRanked = rankCatalog(catalog, args.query);
+      const ranked = allRanked.slice(0, args.limit);
       return {
         actions: ranked,
+        total: allRanked.length,
+        hasMore: allRanked.length > args.limit,
         tokenEstimate: estimateTokens(JSON.stringify(ranked)),
       };
     },

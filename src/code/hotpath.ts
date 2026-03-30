@@ -69,7 +69,7 @@ function findLinesMatchingIdentifiers(
   }
 
   function walk(node: Parser.SyntaxNode) {
-    if (node.type === "identifier") {
+    if (node.type === "identifier" || node.type === "property_identifier") {
       if (identifierSet.has(node.text)) {
         recordMatch(node.text, node.startPosition.row + 1);
       }
@@ -274,10 +274,26 @@ export async function extractHotPath(
       identifiersToFind,
     );
 
+    // Filter matched lines to symbol range so we don't return unrelated code
+    const symStart = symbol.rangeStartLine ?? 1;
+    const symEnd = symbol.rangeEndLine ?? lines.length;
+    const rangeFilteredLines = new Set<number>();
+    matchedLines.forEach((line) => {
+      if (line >= symStart && line <= symEnd) {
+        rangeFilteredLines.add(line);
+      }
+    });
+
+    // If no identifiers matched within symbol range, use symbol start as anchor
+    // so the excerpt centers on the symbol body instead of the file start
+    const effectiveMatchedLines = rangeFilteredLines.size > 0
+      ? rangeFilteredLines
+      : new Set<number>([symStart]);
+
     const { excerpt, matchedLineNumbers, truncated, actualRange } =
       buildHotPathExcerpt(
         lines,
-        matchedLines,
+        effectiveMatchedLines,
         contextLines,
         maxLines,
         maxTokens,

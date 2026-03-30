@@ -1,4 +1,7 @@
 import type { AgentTask, RungPath, RungType, TaskOptions } from "./types.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import { searchSymbols } from "../db/ladybug-queries.js";
+import { logger } from "../util/logger.js";
 
 const DEFAULT_TOKEN_ESTIMATES: Record<string, number> = {
   card: 50,
@@ -204,14 +207,31 @@ export class Planner {
     }
   }
 
-  selectContext(task: AgentTask): string[] {
+  async selectContext(task: AgentTask): Promise<string[]> {
     const options = task.options ?? {};
     const context: string[] = [];
 
     if (options.focusSymbols && options.focusSymbols.length > 0) {
-      context.push(
-        ...options.focusSymbols.map((symbolId) => `symbol:${symbolId}`),
-      );
+      for (const sym of options.focusSymbols) {
+        // Detect whether the value looks like a symbolId (hex hash, >= 16 chars)
+        // or a human-readable symbol name that needs resolution.
+        if (/^[0-9a-f]{16,}$/i.test(sym)) {
+          context.push(`symbol:${sym}`);
+        } else {
+          // Resolve name to symbolId via search
+          try {
+            const conn = await getLadybugConn();
+            const results = await searchSymbols(conn, task.repoId, sym, 1);
+            if (results.length > 0) {
+              context.push(`symbol:${results[0].symbolId}`);
+            } else {
+              logger.debug("focusSymbol name resolution found no match", { name: sym, repoId: task.repoId });
+            }
+          } catch {
+            // If resolution fails, skip this symbol silently
+          }
+        }
+      }
     }
 
     if (options.focusPaths && options.focusPaths.length > 0) {

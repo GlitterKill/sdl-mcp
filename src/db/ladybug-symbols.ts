@@ -860,13 +860,15 @@ async function searchSymbolsSingleTerm(
   conn: Connection,
   repoId: string,
   term: string,
+  kinds?: string[],
 ): Promise<SearchSymbolsRawRow[]> {
   return queryAll<SearchSymbolsRawRow>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
-     WHERE lower(s.name) CONTAINS lower($query)
+     WHERE (lower(s.name) CONTAINS lower($query)
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
-        OR lower(coalesce(s.searchText, '')) CONTAINS lower($query)
+        OR lower(coalesce(s.searchText, '')) CONTAINS lower($query))
+     ${kinds && kinds.length > 0 ? 'AND s.kind IN $kinds' : ''}
      WITH s, f,
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
@@ -917,7 +919,7 @@ async function searchSymbolsSingleTerm(
             s.updatedAt AS updatedAt
      ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
      LIMIT $limit`,
-    { repoId, query: term, queryPadded: ` ${term.toLowerCase()} `, queryStart: `${term.toLowerCase()} `, queryEnd: ` ${term.toLowerCase()}`, limit: 200 },
+    { repoId, query: term, queryPadded: ` ${term.toLowerCase()} `, queryStart: `${term.toLowerCase()} `, queryEnd: ` ${term.toLowerCase()}`, limit: 200, ...(kinds && kinds.length > 0 && { kinds }) },
   );
 }
 
@@ -926,6 +928,7 @@ export async function searchSymbols(
   repoId: string,
   query: string,
   limit: number,
+  kinds?: string[],
 ): Promise<SymbolRow[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
@@ -937,13 +940,13 @@ export async function searchSymbols(
 
   // Single-term: use existing behavior
   if (terms.length <= 1) {
-    const rows = await searchSymbolsSingleTerm(conn, repoId, trimmed);
+    const rows = await searchSymbolsSingleTerm(conn, repoId, trimmed, kinds);
     return rows.slice(0, safeLimit).map((row) => mapSearchSymbolRow(row, repoId));
   }
 
   // Multi-term: run per-term queries, merge with match-count ranking
   const perTermResults = await Promise.all(
-    terms.map((term) => searchSymbolsSingleTerm(conn, repoId, term)),
+    terms.map((term) => searchSymbolsSingleTerm(conn, repoId, term, kinds)),
   );
 
   const matchCounts = new Map<string, { row: SearchSymbolsRawRow; count: number }>();
@@ -995,13 +998,15 @@ async function searchSymbolsLiteSingleTerm(
   conn: Connection,
   repoId: string,
   term: string,
+  kinds?: string[],
 ): Promise<SearchSymbolLiteRow[]> {
   return queryAll<SearchSymbolLiteRow>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
-     WHERE lower(s.name) CONTAINS lower($query)
+     WHERE (lower(s.name) CONTAINS lower($query)
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
-        OR lower(coalesce(s.searchText, '')) CONTAINS lower($query)
+        OR lower(coalesce(s.searchText, '')) CONTAINS lower($query))
+     ${kinds && kinds.length > 0 ? 'AND s.kind IN $kinds' : ''}
      WITH s, f,
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
@@ -1037,7 +1042,7 @@ async function searchSymbolsLiteSingleTerm(
             s.kind AS kind
      ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
      LIMIT $limit`,
-    { repoId, query: term, queryPadded: ` ${term.toLowerCase()} `, queryStart: `${term.toLowerCase()} `, queryEnd: ` ${term.toLowerCase()}`, limit: 200 },
+    { repoId, query: term, queryPadded: ` ${term.toLowerCase()} `, queryStart: `${term.toLowerCase()} `, queryEnd: ` ${term.toLowerCase()}`, limit: 200, ...(kinds && kinds.length > 0 && { kinds }) },
   );
 }
 
@@ -1046,6 +1051,7 @@ export async function searchSymbolsLite(
   repoId: string,
   query: string,
   limit: number,
+  kinds?: string[],
 ): Promise<SearchSymbolLiteRow[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
@@ -1057,13 +1063,13 @@ export async function searchSymbolsLite(
 
   // Single-term: use existing behavior
   if (terms.length <= 1) {
-    const rows = await searchSymbolsLiteSingleTerm(conn, repoId, trimmed);
+    const rows = await searchSymbolsLiteSingleTerm(conn, repoId, trimmed, kinds);
     return rows.slice(0, safeLimit);
   }
 
   // Multi-term: run per-term queries, merge with match-count ranking
   const perTermResults = await Promise.all(
-    terms.map((term) => searchSymbolsLiteSingleTerm(conn, repoId, term)),
+    terms.map((term) => searchSymbolsLiteSingleTerm(conn, repoId, term, kinds)),
   );
 
   // Count how many terms each symbol matched

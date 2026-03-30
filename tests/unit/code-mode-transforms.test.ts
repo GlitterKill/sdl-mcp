@@ -46,11 +46,9 @@ describe("code-mode transforms", () => {
       assert.deepStrictEqual(result, { missing: undefined });
     });
 
-    it("throws on non-object input", () => {
-      assert.throws(
-        () => executeTransform("dataPick", { input: "not an object", fields: { a: "b" } }),
-        TransformError,
-      );
+    it("wraps scalar input under 'value' key", () => {
+      const result = executeTransform("dataPick", { input: "hello", fields: { v: "value" } });
+      assert.deepStrictEqual(result, { v: "hello" });
     });
   });
 

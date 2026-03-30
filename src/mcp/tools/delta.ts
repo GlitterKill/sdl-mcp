@@ -252,8 +252,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     if (blastRadiusTruncatedFlag) {
       response.blastRadiusTruncated = true;
     }
-    attachRawContext(response, { fileIds });
-    return response as DeltaGetResponse;
+    return attachRawContext(response, { fileIds }) as DeltaGetResponse;
   };
 
   if (isTracingEnabled()) {
