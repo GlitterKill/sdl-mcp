@@ -5,6 +5,8 @@ import {
   PAGE_SIZE_MAX,
   DEFAULT_MAX_WINDOW_LINES,
   DEFAULT_MAX_WINDOW_TOKENS,
+  DEFAULT_MAX_CARDS,
+  DEFAULT_MAX_TOKENS_SLICE,
   RUNTIME_MIN_TIMEOUT_MS,
   RUNTIME_MAX_TIMEOUT_MS,
   RUNTIME_MAX_ARG_COUNT,
@@ -1297,8 +1299,8 @@ const PolicyConfigSchema = z.object({
   defaultMinCallConfidence: z.number().min(0).max(1).optional(),
   defaultDenyRaw: z.boolean().default(true),
   budgetCaps: z.object({
-    maxCards: z.number().int().min(1).default(300),
-    maxEstimatedTokens: z.number().int().min(100).default(12000),
+    maxCards: z.number().int().min(1).default(DEFAULT_MAX_CARDS),
+    maxEstimatedTokens: z.number().int().min(100).default(DEFAULT_MAX_TOKENS_SLICE),
   }).optional(),
 });
 
