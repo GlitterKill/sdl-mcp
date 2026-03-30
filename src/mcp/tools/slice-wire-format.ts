@@ -452,6 +452,22 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
     compact.memories = slice.memories;
   }
 
+  // Always include legend for compact wire format readability
+  compact._legend = {
+    wf: "wireFormat",
+    wv: "wireFormatVersion",
+    vid: "versionId",
+    b: "budget (mc=maxCards, mt=maxTokens)",
+    ss: "seedSymbols (first 16 chars of symbolId)",
+    si: "sliceSymbolIds",
+    fp: "filePaths",
+    et: "edgeTypes",
+    c: "cards (fi=fileIndex, r=range, k=kind, n=name, x=exported, d=deps, sig=signature, sum=summary, dl=detailLevel)",
+    e: "edges [sourceCardIndex, targetCardIndex, edgeTypeIndex, confidence]",
+    f: "frontier (ci=cardIndex, s=score, w=why: c=call/i=import)",
+    t: "truncation (tr=truncated, dc=droppedCards, de=droppedEdges, res=resumeInfo)",
+  };
+
   return compact;
 }
 

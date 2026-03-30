@@ -264,8 +264,12 @@ export async function executeWorkflow(
         const tokens = WorkflowBudgetTracker.estimateResultTokens(result);
 
         budget.record(tokens, stepDuration);
-        // Record usage for session-level token tracking
-        tokenAccumulator.recordUsage(step.fn, tokens, 0);
+        // Record usage for session-level token tracking (per-step attribution)
+        const rawCtx = (result && typeof result === "object")
+          ? (result as Record<string, unknown>)._rawContext as { rawTokens?: number } | undefined
+          : undefined;
+        const rawEquivalent = rawCtx?.rawTokens ?? tokens;
+        tokenAccumulator.recordUsage(step.fn, tokens, rawEquivalent);
 
         if (etagCache) {
           etagCache.extractEtags(step.action, result);

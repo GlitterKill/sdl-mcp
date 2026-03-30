@@ -407,6 +407,7 @@ const CompactGraphSliceV2Schema = z.object({
   t: CompactSliceTruncationSchema.optional(),
   staleSymbols: z.array(z.string()).optional(),
   memories: z.array(SurfacedMemorySchema).optional(),
+  _legend: z.record(z.string(), z.string()).optional(),
 });
 
 // ============================================================================
@@ -855,6 +856,8 @@ export const SymbolSearchResponseSchema = z.object({
     .optional(),
   /** Per-result retrieval evidence. Only populated when includeRetrievalEvidence is true. */
   retrievalEvidence: z.array(RetrievalEvidenceItemSchema).optional(),
+  /** Whether any result had a high-confidence exact match (relevance >= 0.85). */
+  exactMatchFound: z.boolean().optional(),
 });
 
 const NotModifiedResponseSchema = z.object({

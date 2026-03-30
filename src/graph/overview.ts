@@ -291,7 +291,7 @@ async function buildRepoOverviewImpl(
   // Find entry points (scoped to directoryFilter when set)
   const allEntryPoints = findEntryPoints(files);
   const entryPoints = directoryFilter?.length
-    ? allEntryPoints.filter(ep => directoryFilter.some(d => ep === d || ep.startsWith(d.endsWith("/") ? d : d + "/")))
+    ? allEntryPoints.filter(ep => directoryFilter.some(d => { const nd = d.endsWith("/") ? d.slice(0, -1) : d; return ep === nd || ep.startsWith(nd + "/"); }))
     : allEntryPoints;
 
   // Calculate token metrics
@@ -504,7 +504,8 @@ async function buildDirectorySummaries(
           const regex = globToSafeRegex(pattern);
           return regex.test(agg.directory);
         }
-        return agg.directory.startsWith(pattern);
+        const normalizedPattern = pattern.endsWith("/") ? pattern.slice(0, -1) : pattern;
+        return agg.directory === normalizedPattern || agg.directory.startsWith(normalizedPattern + "/");
       });
       if (!matches) continue;
     }

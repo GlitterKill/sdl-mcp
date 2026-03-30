@@ -103,6 +103,8 @@ function generateTypedFunctionSummary(symbol: ExtractedSymbol): string | null {
     .slice(1)
     .map((w) => w.toLowerCase())
     .join(" ");
+  // When verb already contains the subject direction (e.g. "Converts to"),
+  // join without extra space between verb and subject
   let summary = subject ? `${verb} ${subject}` : verb;
 
   if (typedParams.length > 0) {
@@ -527,6 +529,54 @@ function verbify(word: string): string {
     get: "Gets", set: "Sets", is: "Checks if", has: "Checks for",
     can: "Checks if can", should: "Determines if should",
     do: "Does", run: "Runs", go: "Goes",
+    to: "Converts to", from: "Creates from", on: "Handles",
+    with: "Processes with", for: "Computes for", by: "Groups by",
+    parse: "Parses", create: "Creates", make: "Makes",
+    build: "Builds", find: "Finds", load: "Loads",
+    save: "Saves", read: "Reads", write: "Writes",
+    delete: "Deletes", remove: "Removes", add: "Adds",
+    update: "Updates", check: "Checks", validate: "Validates",
+    format: "Formats", render: "Renders", handle: "Handles",
+    process: "Processes", compute: "Computes", calculate: "Calculates",
+    resolve: "Resolves", normalize: "Normalizes", transform: "Transforms",
+    convert: "Converts", extract: "Extracts", generate: "Generates",
+    initialize: "Initializes", configure: "Configures", register: "Registers",
+    emit: "Emits", dispatch: "Dispatches", notify: "Notifies",
+    fetch: "Fetches", query: "Queries", search: "Searches",
+    sort: "Sorts", filter: "Filters", merge: "Merges",
+    split: "Splits", join: "Joins", map: "Maps",
+    reduce: "Reduces", aggregate: "Aggregates", collect: "Collects",
+    serialize: "Serializes", deserialize: "Deserializes",
+    encode: "Encodes", decode: "Decodes",
+    encrypt: "Encrypts", decrypt: "Decrypts",
+    compress: "Compresses", decompress: "Decompresses",
+    log: "Logs", warn: "Logs warning for", debug: "Debugs",
+    test: "Tests", assert: "Asserts", verify: "Verifies",
+    ensure: "Ensures", require: "Requires",
+    apply: "Applies", execute: "Executes", invoke: "Invokes",
+    start: "Starts", stop: "Stops", reset: "Resets",
+    open: "Opens", close: "Closes", connect: "Connects",
+    send: "Sends", receive: "Receives", listen: "Listens",
+    publish: "Publishes", subscribe: "Subscribes",
+    attach: "Attaches", detach: "Detaches",
+    mount: "Mounts", unmount: "Unmounts",
+    enable: "Enables", disable: "Disables",
+    show: "Shows", hide: "Hides",
+    lock: "Locks", unlock: "Unlocks",
+    wrap: "Wraps", unwrap: "Unwraps",
+    clear: "Clears", flush: "Flushes", drain: "Drains",
+    push: "Pushes", pop: "Pops", shift: "Shifts",
+    put: "Puts", throw: "Throws", catch: "Catches",
+    try: "Tries", retry: "Retries",
+    clone: "Clones", copy: "Copies",
+    compare: "Compares", diff: "Diffs",
+    match: "Matches", select: "Selects",
+    inject: "Injects", provide: "Provides",
+    use: "Uses", implement: "Implements", extend: "Extends",
+    override: "Overrides", replace: "Replaces",
+    insert: "Inserts", append: "Appends", prepend: "Prepends",
+    trim: "Trims", strip: "Strips", clean: "Cleans",
+    beam: "Performs beam", default: "Defaults",
   };
   if (irregulars[lower]) return irregulars[lower];
   if (lower.endsWith("fy")) return capitalize(lower.slice(0, -1)) + "ies";

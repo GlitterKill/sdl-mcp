@@ -106,7 +106,8 @@ export async function handleSymbolSearch(
 ): Promise<SymbolSearchResponse> {
   const startedAt = Date.now();
   const request = args as SymbolSearchRequest;
-  const limit = request.limit ?? SYMBOL_SEARCH_DEFAULT_LIMIT;
+  const requestedLimit = request.limit ?? SYMBOL_SEARCH_DEFAULT_LIMIT;
+  const limit = (request.kinds && request.kinds.length > 0) ? requestedLimit * 3 : requestedLimit;
   const config = loadConfig();
   const semanticConfig = config.semantic;
   const semanticRequested = request.semantic === true;
@@ -201,6 +202,8 @@ export async function handleSymbolSearch(
   if (request.kinds && request.kinds.length > 0) {
     const kindsSet = new Set(request.kinds);
     results = results.filter((r) => kindsSet.has(r.kind));
+    // Trim back to requested limit after kind filtering
+    results = results.slice(0, requestedLimit);
   }
 
   // Prefetch cards for top search results (anticipating getCard calls)
@@ -241,8 +244,9 @@ export async function handleSymbolSearch(
     relevance: computeRelevance(r.name, request.query),
   }));
   const relevant = scoredResults.filter(r => r.relevance >= MIN_RELEVANCE_THRESHOLD);
+  const hasExactMatch = relevant.some(r => r.relevance >= 0.85);
   // Keep `symbols` alias for backward compatibility (agents use $0.symbols[0].symbolId)
-  const response: SymbolSearchResponse = { results: relevant, symbols: relevant };
+  const response: SymbolSearchResponse = { results: relevant, symbols: relevant, exactMatchFound: hasExactMatch };
   if (request.includeRetrievalEvidence) {
     if (useHybrid && retrievalEvidence) {
       (response as Record<string, unknown>).retrievalEvidence = relevant.map((r) => ({

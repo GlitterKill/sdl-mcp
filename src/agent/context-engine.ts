@@ -301,6 +301,23 @@ export class ContextEngine {
     const taskLabel = task.taskType.charAt(0).toUpperCase() + task.taskType.slice(1);
     const sections: string[] = [`# ${taskLabel} Results`];
 
+    // Add task question as context
+    if (task.taskText) {
+      sections.push(`> **Query:** ${task.taskText}`);
+    }
+
+    // Synthesize brief intro
+    const cardCount = evidence.filter(e => e.type === "symbolCard").length;
+    const skeletonCount = evidence.filter(e => e.type === "skeleton").length;
+    const hotPathCount = evidence.filter(e => e.type === "hotPath").length;
+    const introParts: string[] = [];
+    if (cardCount > 0) introParts.push(`${cardCount} symbol(s)`);
+    if (skeletonCount > 0) introParts.push(`${skeletonCount} skeleton(s)`);
+    if (hotPathCount > 0) introParts.push(`${hotPathCount} hot path(s)`);
+    if (introParts.length > 0) {
+      sections.push(`Found ${introParts.join(", ")} relevant to this ${task.taskType} task.`);
+    }
+
     if (!success) {
       sections.push(
         "> **Note:** Task completed with errors. Some rungs failed \u2014 see Diagnostics below.",
