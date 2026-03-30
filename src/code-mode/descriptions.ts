@@ -9,7 +9,7 @@ export const WORKFLOW_DESCRIPTION =
   + "- for code context retrieval, prefer sdl.context or sdl.agent.context. Each "
   + "step calls a function from the API manual or an internal transform "
   + "(dataPick, dataMap, dataFilter, dataSort, dataTemplate). Use $N references "
-  + "(e.g., $0.results[0].symbolId or $0.symbols[0].symbolId) to pass results "
+  + "(e.g., $0.results[0].symbolId) to pass results "
   + "between steps. Includes budget tracking, context-ladder validation, "
   + "cross-step ETag caching, and opt-in execution tracing.";
 

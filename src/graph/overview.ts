@@ -288,8 +288,11 @@ async function buildRepoOverviewImpl(
   // Identify architectural layers from directory structure
   const layers = identifyArchitecturalLayers(directorySummaries);
 
-  // Find entry points
-  const entryPoints = findEntryPoints(files);
+  // Find entry points (scoped to directoryFilter when set)
+  const allEntryPoints = findEntryPoints(files);
+  const entryPoints = directoryFilter?.length
+    ? allEntryPoints.filter(ep => directoryFilter.some(d => ep === d || ep.startsWith(d.endsWith("/") ? d : d + "/")))
+    : allEntryPoints;
 
   // Calculate token metrics
   const fullCardsEstimate = stats.symbolCount * SYMBOL_TOKEN_MAX;
@@ -317,7 +320,8 @@ async function buildRepoOverviewImpl(
     },
   };
 
-  if (clusterStats.totalClusters > 0) {
+  // Skip global cluster/process stats when scoped to specific directories
+  if (clusterStats.totalClusters > 0 && !directoryFilter?.length) {
     overview.clusters = {
       totalClusters: clusterStats.totalClusters,
       averageClusterSize:
@@ -326,7 +330,7 @@ async function buildRepoOverviewImpl(
     };
   }
 
-  if (processStats.totalProcesses > 0) {
+  if (processStats.totalProcesses > 0 && !directoryFilter?.length) {
     overview.processes = {
       totalProcesses: processStats.totalProcesses,
       averageDepth: Math.round(processStats.averageDepth * 10) / 10,

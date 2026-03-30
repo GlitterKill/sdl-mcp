@@ -13,6 +13,8 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import { ValidationError } from "../domain/errors.js";
 import { logger } from "../util/logger.js";
 import { entitySearch } from "../retrieval/index.js";
+import { extractIdentifiersFromText } from "./executor.js";
+import { searchSymbols } from "../db/ladybug-queries.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
 import { classifySymptomType } from "../retrieval/evidence.js";
 import { randomUUID } from "node:crypto";
@@ -81,6 +83,35 @@ export class ContextEngine {
             "Entity retrieval for task context failed; proceeding with empty context",
             { repoId: task.repoId, error: err },
           );
+        }
+
+        // FP1: Keyword fallback when entity search returns empty context
+        if (context.length === 0) {
+          try {
+            const conn = await getLadybugConn();
+            const terms = extractIdentifiersFromText(task.taskText);
+            const seen = new Set();
+            for (const term of terms.slice(0, 5)) {
+              const results = await searchSymbols(conn, task.repoId, term, 5);
+              for (const r of results) {
+                if (!seen.has(r.symbolId)) {
+                  seen.add(r.symbolId);
+                  context.push(`symbol:${r.symbolId}`);
+                }
+              }
+            }
+            if (context.length > 0) {
+              logger.debug("Keyword fallback seeded task context", {
+                repoId: task.repoId,
+                terms: terms.slice(0, 5),
+                symbolCount: context.length,
+              });
+            }
+          } catch (err) {
+            logger.debug("Keyword fallback for context seeding failed (non-fatal)", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
       }
 

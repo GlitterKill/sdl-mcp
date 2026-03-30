@@ -42,11 +42,11 @@ export const ACTION_TO_FN: Record<string, string> = Object.fromEntries(
 
 const MANUAL_TEMPLATE = `// SDL-MCP API - use sdl.context for context retrieval, sdl.workflow for multi-step operations
 // repoId is set in the workflow envelope, not per-step.
-// Reference prior step results with $N (e.g., $0.results[0].symbolId or $0.symbols[0].symbolId).
+// Reference prior step results with $N (e.g., $0.results[0].symbolId).
 
 // === Query ===
 /** Search symbols by name/pattern */
-function symbolSearch(p: { query: string; kinds?: string[]; limit?: number; semantic?: boolean }): { results: { symbolId: string; name: string; kind: string; file: string }[]; symbols: /* alias for results */ object[] }
+function symbolSearch(p: { query: string; kinds?: string[]; limit?: number; semantic?: boolean }): { results: { symbolId: string; name: string; kind: string; file: string; relevance?: number }[] }
 /** Get symbol card (metadata, deps, metrics) */
 function symbolGetCard(p: { symbolId: string; ifNoneMatch?: string }): { card: { symbolId: string; name: string; kind: string; signature: string; summary: string; deps: object }; etag: string } | { notModified: true }
 /** Batch-fetch symbol cards */
@@ -142,6 +142,17 @@ function dataSort(p: { input: unknown[]; by: {path: string; direction?: "asc"|"d
 /** Render {{mustache}} template strings from object(s) */
 function dataTemplate(p: { input: Record<string, unknown> | unknown[]; template: string; joinWith?: string }): { text: string }
 // Example: dataTemplate({"input":"$0.results","template":"{{name}} ({{kind}}) in {{file}}","joinWith":"\\n"})
+
+// === Compact Wire Format Decode Guide (sliceBuild with wireFormat: "compact") ===
+// Top-level: wf=wireFormat, wv=wireVersion, vid=versionId, b={mc=maxCards, mt=maxTokens}
+// ss=seedSymbols(truncated IDs), si=symbolIndex(truncated IDs), fp=filePaths, et=edgeTypes
+// Card (c[]): fi=fileIndex(into fp), r=[startLine,startCol,endLine,endCol], k=kind, n=name
+//   x=exported, d={i=imports[], c=calls[]}, sig=signature, sum=summary, inv=invariants
+//   se=sideEffects, m={fi=fanIn,fo=fanOut,ch=churn30d,t=testRefs}, dl=detailLevel
+// Edge (e[]): [fromCardIdx, toCardIdx, edgeTypeIdx, weight]
+// Frontier (f[]): ci=cardIndex(-1=not in slice), s=score, w=why(c=call,i=import,e=entry)
+// Truncation (t): tr=truncated, dc=droppedCards, de=droppedEdges, res={t=type, v=value}
+// CardRef (cr[]): ci=cardIndex, e=etag, dl=detailLevel (used with knownCardEtags)
 `;
 
 export function generateManual(_liveIndex?: LiveIndexCoordinator): string {

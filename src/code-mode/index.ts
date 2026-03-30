@@ -252,7 +252,7 @@ function renderTypescript(catalog: ActionDescriptor[]): string {
     "// SDL-MCP API - use with sdl.workflow for multi-step operations",
     "// Prefer sdl.context for explain/debug/review/implement context retrieval.",
     "// repoId is set in the workflow envelope, not per-step.",
-    "// Reference prior step results with $N (e.g., $0.symbols[0].symbolId).",
+    "// Reference prior step results with $N (e.g., $0.results[0].symbolId).",
     "",
   ];
 

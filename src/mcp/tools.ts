@@ -813,6 +813,7 @@ const SymbolSearchResultSchema = z.object({
     "constructor",
     "variable",
   ]),
+  relevance: z.number().min(0).max(1).optional(),
 });
 
 export const SymbolSearchRequestSchema = z.object({

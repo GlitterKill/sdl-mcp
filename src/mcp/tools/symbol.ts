@@ -56,6 +56,33 @@ export function sortByExactMatch<T extends { name: string }>(
   });
 }
 
+/**
+ * Compute a relevance score (0-1) for how well a result name matches the query.
+ * Used to filter out spurious fuzzy matches.
+ */
+function computeRelevance(name: string, query: string): number {
+  const nl = name.toLowerCase();
+  const ql = query.toLowerCase();
+  if (nl === ql) return 1.0;
+  if (nl.startsWith(ql)) return 0.85;
+  if (nl.includes(ql)) return 0.7;
+  // Check if query words appear in the name (multi-word queries)
+  const queryWords = ql.split(/[\s_]+/).filter(w => w.length >= 3);
+  if (queryWords.length > 1) {
+    const matchCount = queryWords.filter(w => nl.includes(w)).length;
+    if (matchCount > 0) return 0.3 + 0.3 * (matchCount / queryWords.length);
+  }
+  // Check if name appears in query
+  if (nl.length >= 3 && ql.includes(nl)) return 0.5;
+  // Weak: individual word overlap
+  const nameWords = nl.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(/[\s_]+/).filter(w => w.length >= 3);
+  const overlap = nameWords.filter(w => ql.includes(w)).length;
+  if (overlap > 0) return 0.1 + 0.15 * (overlap / Math.max(nameWords.length, 1));
+  return 0.05;
+}
+
+const MIN_RELEVANCE_THRESHOLD = 0.15;
+
 export async function handleSymbolSearch(
   args: unknown,
 ): Promise<SymbolSearchResponse> {
@@ -190,15 +217,22 @@ export async function handleSymbolSearch(
     }),
   });
 
-  const response: SymbolSearchResponse = { results, symbols: results };
+  // FP2: Add relevance scoring and filter out spurious matches
+  const scoredResults = results.map(r => ({
+    ...r,
+    relevance: computeRelevance(r.name, request.query),
+  }));
+  const relevant = scoredResults.filter(r => r.relevance >= MIN_RELEVANCE_THRESHOLD);
+  // Keep `symbols` alias for backward compatibility (agents use $0.symbols[0].symbolId)
+  const response: SymbolSearchResponse = { results: relevant, symbols: relevant };
   if (request.includeRetrievalEvidence) {
     if (useHybrid && retrievalEvidence) {
-      (response as Record<string, unknown>).retrievalEvidence = results.map((r) => ({
+      (response as Record<string, unknown>).retrievalEvidence = relevant.map((r) => ({
         symbolId: r.symbolId,
         retrievalSource: "hybrid" as const,
       }));
     } else if (fallbackReason) {
-      (response as Record<string, unknown>).retrievalEvidence = results.map((r) => ({
+      (response as Record<string, unknown>).retrievalEvidence = relevant.map((r) => ({
         symbolId: r.symbolId,
         retrievalSource: "legacy" as const,
       }));

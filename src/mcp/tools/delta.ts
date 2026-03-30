@@ -27,6 +27,10 @@ import {
 import { attachRawContext } from "../token-usage.js";
 import { IndexError } from "../errors.js";
 
+/** Default max changed symbols for delta responses (tighter than slice default). */
+const DEFAULT_DELTA_MAX_CARDS = 30;
+/** Default max tokens for delta responses (tighter than slice default). */
+const DEFAULT_DELTA_MAX_TOKENS = 8000;
 /** Hard cap on blast-radius items returned to the caller. */
 const MAX_BLAST_RADIUS_ITEMS = 50;
 
@@ -93,9 +97,9 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
 
     const config = loadConfig();
     const rawBudget = validated.budget ?? {
-      maxCards: config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS,
+      maxCards: config.slice?.defaultMaxCards ?? DEFAULT_DELTA_MAX_CARDS,
       maxEstimatedTokens:
-        config.slice?.defaultMaxTokens ?? DEFAULT_MAX_TOKENS_SLICE,
+        config.slice?.defaultMaxTokens ?? DEFAULT_DELTA_MAX_TOKENS,
     };
 
     // Hard cap to prevent unbounded responses
@@ -142,7 +146,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       }
     }
 
-    const maxChanges = config.slice?.defaultMaxCards ?? DEFAULT_MAX_CARDS;
+    const maxChanges = config.slice?.defaultMaxCards ?? DEFAULT_DELTA_MAX_CARDS;
     const maxBlastRadius = MAX_BLAST_RADIUS_ITEMS;
 
     const changedSymbolsTruncation = truncateArray(delta.changedSymbols, {
