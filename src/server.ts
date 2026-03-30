@@ -445,18 +445,8 @@ export class MCPServer {
   }
 
   async stop(): Promise<void> {
-    // Persist session usage snapshot before shutdown
-    if (tokenAccumulator.hasUsage) {
-      try {
-        const { persistUsageSnapshot } = await import("./db/ladybug-usage.js");
-        await persistUsageSnapshot(tokenAccumulator.getSnapshot());
-      } catch (err) {
-        // Non-critical — don't block shutdown, but log for debugging
-        process.stderr.write(
-          "[sdl-mcp] Failed to persist usage snapshot: " + (err instanceof Error ? err.message : String(err)) + "\n",
-        );
-      }
-    }
+    // Usage persistence is handled by the ShutdownManager's "persistUsage"
+    // cleanup (registered in serve.ts) which runs while the DB is still open.
     await this.server.close();
   }
 
