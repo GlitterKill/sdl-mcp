@@ -123,7 +123,8 @@ async function buildOverlayCardForSymbol(
         .map((targetId) =>
           pickDepLabel(targetId, targetNamesById.get(targetId)?.name),
         )
-        .filter((label): label is string => Boolean(label)),
+        .filter((label): label is string => Boolean(label))
+        .filter((label) => !label.startsWith("unresolved:")),
       SYMBOL_CARD_MAX_DEPS_PER_KIND,
     ),
   };
@@ -211,7 +212,7 @@ async function buildOverlayCardForSymbol(
               )
             : undefined,
           canonicalTest: metrics.canonicalTestJson
-            ? parseJson(metrics.canonicalTestJson)
+            ? (() => { const ct = parseJson(metrics.canonicalTestJson); return ct && typeof ct === "object" && ct !== null && "proximity" in ct && "file" in ct && (ct as { proximity: number }).proximity >= 0.5 ? (ct as SymbolMetrics["canonicalTest"]) : undefined; })()
             : undefined,
         }
       : undefined,
@@ -409,7 +410,8 @@ export async function buildCardForSymbol(
         .map((targetId) =>
           pickDepLabel(targetId, targetNamesById.get(targetId)?.name),
         )
-        .filter((label): label is string => Boolean(label)),
+        .filter((label): label is string => Boolean(label))
+        .filter((label) => !label.startsWith("unresolved:")),
       SYMBOL_CARD_MAX_DEPS_PER_KIND,
     ),
   };
@@ -447,7 +449,7 @@ export async function buildCardForSymbol(
             )
           : undefined,
         canonicalTest: metrics.canonicalTestJson
-          ? parseJson(metrics.canonicalTestJson)
+          ? (() => { const ct = parseJson(metrics.canonicalTestJson); return ct && typeof ct === "object" && ct !== null && "proximity" in ct && "file" in ct && (ct as { proximity: number }).proximity >= 0.5 ? (ct as SymbolMetrics["canonicalTest"]) : undefined; })()
           : undefined,
       }
     : undefined;

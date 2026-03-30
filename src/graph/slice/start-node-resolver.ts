@@ -628,6 +628,24 @@ export async function resolveStartNodesLadybug(
     }
   }
 
+  // Fallback: if taskText was provided but no start nodes were found from it,
+  // retry with individual words from the raw taskText (skip stop-word filter)
+  // so that common programming terms like "error" can still seed the slice.
+  if (request.taskText && startNodes.size === 0) {
+    const rawWords = request.taskText
+      .toLowerCase()
+      .split(/[\s,;:!?()]+/)
+      .filter((w) => w.length >= TASK_TEXT_MIN_TOKEN_LENGTH && /[a-z]/.test(w));
+    for (const word of rawWords) {
+      if (startNodes.size >= limits.maxTotalStartNodes) break;
+      const results = await ladybugDb.searchSymbolsLite(conn, repoId, word, 5);
+      for (const result of results) {
+        if (startNodes.size >= limits.maxTotalStartNodes) break;
+        addStartNode(result.symbolId, "taskText");
+      }
+    }
+  }
+
   // Feedback-aware boosting: query prior feedback for similar tasks
   // and boost symbols that were historically useful.
   // Boosted symbols get a fractional priority adjustment so they sort

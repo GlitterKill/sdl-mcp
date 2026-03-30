@@ -235,6 +235,34 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
     }
   }
 
+  // Phase 2b: file-path keyword matching — find files whose names contain
+  // query tokens, then add exported symbols from those files.
+  if (merged.length < 5) {
+    try {
+      const allFiles = await ladybugDb.getFilesByRepoLite(conn, repoId);
+      const pathTokens = tokenize(query).filter((t) => t.length >= 3);
+      const matchingFiles = allFiles.filter((f) =>
+        pathTokens.some((token) => {
+          const pathLower = f.relPath.toLowerCase();
+          const fileName = pathLower.split("/").pop() ?? "";
+          return fileName.includes(token) || token.includes(fileName.replace(/\.[^.]+$/, ""));
+        }),
+      ).slice(0, 5);
+      if (matchingFiles.length > 0) {
+        const fileIds = matchingFiles.map((f) => f.fileId);
+        for (const fileId of fileIds) {
+          const syms = await ladybugDb.getSymbolIdsByFile(conn, fileId);
+          for (const symId of syms) {
+            if (!seen.has(symId) && merged.length < SUMMARY_MAX_RESULTS) {
+              seen.add(symId);
+              merged.push({ symbolId: symId, name: "", filePath: "", kind: "function", fileId: "" } as unknown as ladybugDb.SearchSymbolLiteRow);
+            }
+          }
+        }
+      }
+    } catch { /* graceful degradation */ }
+  }
+
   const results = merged.slice(0, SUMMARY_MAX_RESULTS);
   const symbolIds = results.map((row) => row.symbolId);
   const symbolIdSet = new Set(symbolIds);

@@ -274,7 +274,7 @@ export class ContextEngine {
       }
     }
 
-    return parts.join(" ");
+    return parts.join("\n\n");
   }
 
   private generateAnswer(

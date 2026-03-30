@@ -285,7 +285,12 @@ export function generateDenialGuidance(
   // Build nextBestAction based on the primary denial reason
   let nextBestAction: NextBestActionCallable;
 
-  const symbolName = symbol?.name ?? request.symbolId;
+  // Use the symbol name from the hint if available; if the hint is from a
+  // different symbol (stale context), fall back to the symbolId to avoid
+  // confusing rationale messages that reference the wrong function.
+  const symbolName = (symbol && symbol.symbol_id === request.symbolId)
+    ? symbol.name
+    : request.symbolId;
 
   if (tooBroad) {
     // Window too large — suggest skeleton which shows control flow cheaply

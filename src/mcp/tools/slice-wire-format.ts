@@ -12,6 +12,14 @@ import {
   SYMBOL_ID_COMPACT_WIRE_LENGTH,
 } from "../../config/constants.js";
 
+/** Track whether compact legend has been sent this session (reset on server restart). */
+let legendSentThisSession = false;
+
+/** Reset the legend flag — call when a new MCP session starts. */
+export function resetCompactLegendFlag(): void {
+  legendSentThisSession = false;
+}
+
 const VISIBILITY_VALUES: readonly Visibility[] = [
   "public",
   "protected",
@@ -452,8 +460,10 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
     compact.memories = slice.memories;
   }
 
-  // Always include legend for compact wire format readability
-  compact._legend = {
+  // Include legend only on the first compact response per session to save ~200 tokens
+  if (!legendSentThisSession) {
+    legendSentThisSession = true;
+    compact._legend = {
     wf: "wireFormat",
     wv: "wireFormatVersion",
     vid: "versionId",
@@ -467,6 +477,7 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
     f: "frontier — access: $N.slice.f[0].s (score), .w (why: c=call/i=import), .ci (cardIndex, -1=not in slice)",
     t: "truncation (tr=truncated, dc=droppedCards, de=droppedEdges, res=resumeInfo)",
   };
+  }
 
   return compact;
 }

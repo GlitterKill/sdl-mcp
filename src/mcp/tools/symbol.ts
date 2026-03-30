@@ -244,7 +244,7 @@ export async function handleSymbolSearch(
     relevance: computeRelevance(r.name, request.query),
   }));
   const relevant = scoredResults.filter(r => r.relevance >= MIN_RELEVANCE_THRESHOLD);
-  const hasExactMatch = relevant.some(r => r.relevance >= 0.85);
+  const hasExactMatch = relevant.some(r => r.name.toLowerCase() === request.query.toLowerCase());
   // Keep `symbols` alias for backward compatibility (agents use $0.symbols[0].symbolId)
   const response: SymbolSearchResponse = { results: relevant, symbols: relevant, exactMatchFound: hasExactMatch };
   if (request.includeRetrievalEvidence) {

@@ -1,6 +1,6 @@
 import type { AgentTask, RungPath, RungType, TaskOptions } from "./types.js";
 import { getLadybugConn } from "../db/ladybug.js";
-import { searchSymbols } from "../db/ladybug-queries.js";
+import { searchSymbols, getFilesByPrefix } from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 
 const DEFAULT_TOKEN_ESTIMATES: Record<string, number> = {
@@ -235,9 +235,30 @@ export class Planner {
     }
 
     if (options.focusPaths && options.focusPaths.length > 0) {
-      context.push(
-        ...options.focusPaths.map((filePath) => `file:${filePath}`),
-      );
+      // Expand directory paths to their constituent files so the executor
+      // processes multiple symbols instead of treating a directory as a single
+      // opaque file reference (which would yield only ~1 symbol card).
+      for (const filePath of options.focusPaths) {
+        const normalizedPath = filePath.replace(/\\/g, "/");
+        const isDirectory = normalizedPath.endsWith("/") || !normalizedPath.split("/").pop()?.includes(".");
+        if (isDirectory) {
+          try {
+            const dirConn = await getLadybugConn();
+            const dirPrefix = normalizedPath.endsWith("/") ? normalizedPath : normalizedPath + "/";
+            const filesInDir = await getFilesByPrefix(dirConn, task.repoId, dirPrefix, 20);
+            if (filesInDir.length > 0) {
+              context.push(...filesInDir.map((f) => `file:${f.relPath}`));
+            } else {
+              // Fallback: pass as-is and let the executor try
+              context.push(`file:${filePath}`);
+            }
+          } catch {
+            context.push(`file:${filePath}`);
+          }
+        } else {
+          context.push(`file:${filePath}`);
+        }
+      }
     }
 
     return context;

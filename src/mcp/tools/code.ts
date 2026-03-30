@@ -489,23 +489,19 @@ export async function handleCodeNeedWindow(
       maxTokens,
     );
 
+    // The gate already verified identifiers exist in the full symbol body.
+    // If the truncated window doesn't contain them, approve anyway but note
+    // which identifiers fell outside the visible range so the caller can
+    // request a larger window or use getHotPath for the missing ones.
+    let missedInWindow: string[] | undefined;
     if (
       validatedPolicy.requireIdentifiers &&
       request.identifiersToFind.length > 0 &&
       !identifiersExistInWindow(windowResult.code, request.identifiersToFind)
     ) {
-      const whyDenied = ["Identifiers not found in code window"];
-      logCodeWindowDecision({
-        symbolId: request.symbolId,
-        approved: false,
-        reason: whyDenied,
-      });
-      return {
-        approved: false,
-        whyDenied,
-        suggestedNextRequest,
-        nextBestAction: gateNextBestAction,
-      };
+      missedInWindow = request.identifiersToFind.filter(
+        (id) => !identifiersExistInWindow(windowResult.code, [id]),
+      );
     }
 
     const redactionConfig = appConfig.redaction;
@@ -528,6 +524,11 @@ export async function handleCodeNeedWindow(
 
     // Surface warnings when code is empty despite approval
     const warnings: string[] = [];
+    if (missedInWindow && missedInWindow.length > 0) {
+      warnings.push(
+        `Identifiers not in visible range (window truncated to ${maxLines} lines): ${missedInWindow.join(", ")}. Use sdl.code.getHotPath to find them.`,
+      );
+    }
     if (redactedCode === "" && windowResult.emptyReason) {
       switch (windowResult.emptyReason) {
         case "file-too-large":

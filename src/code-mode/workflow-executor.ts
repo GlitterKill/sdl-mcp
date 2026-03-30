@@ -23,6 +23,8 @@ import {
 import type { ParsedWorkflowRequest } from "./workflow-parser.js";
 import { WorkflowBudgetTracker } from "./workflow-budget.js";
 import { tokenAccumulator } from "../mcp/token-accumulator.js";
+import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 
 /**
  * Apply per-step token truncation if configured.
@@ -266,9 +268,25 @@ export async function executeWorkflow(
         budget.record(tokens, stepDuration);
         // Record usage for session-level token tracking (per-step attribution)
         const rawCtx = (result && typeof result === "object")
-          ? (result as Record<string, unknown>)._rawContext as { rawTokens?: number } | undefined
+          ? (result as Record<string, unknown>)._rawContext as { fileIds?: string[]; rawTokens?: number } | undefined
           : undefined;
-        const rawEquivalent = rawCtx?.rawTokens ?? tokens;
+        let rawEquivalent = rawCtx?.rawTokens ?? tokens;
+        // When rawTokens is not explicitly set but fileIds are available,
+        // estimate raw equivalent from file byte sizes so per-step
+        // savings are correctly attributed (not just to the workflow envelope).
+        if (!rawCtx?.rawTokens && rawCtx?.fileIds && rawCtx.fileIds.length > 0) {
+          try {
+            const usageConn = await getLadybugConn();
+            const files = await ladybugDb.getFilesByIds(usageConn, rawCtx.fileIds);
+            let estimatedRaw = 0;
+            for (const file of files.values()) {
+              estimatedRaw += Math.ceil(file.byteSize / 4); // ~4 bytes per token
+            }
+            if (estimatedRaw > tokens) {
+              rawEquivalent = estimatedRaw;
+            }
+          } catch { /* graceful degradation: keep rawEquivalent = tokens */ }
+        }
         tokenAccumulator.recordUsage(step.fn, tokens, rawEquivalent);
 
         if (etagCache) {
