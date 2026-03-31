@@ -145,16 +145,16 @@ describe("generateSummary", () => {
     assert.ok(result!.includes("Transforms"), "Expected transform-based summary, got: " + result);
   });
 
-  it("returns heuristic summary for class without JSDoc", () => {
+  it("returns null for class without JSDoc or role suffix", () => {
     const symbol = makeSymbol({ name: "MyWidget", kind: "class" });
     const result = generateSummary(symbol as any, "class MyWidget {}");
-    assert.strictEqual(result, "Class encapsulating my widget behavior");
+    assert.strictEqual(result, null);
   });
 
-  it("returns heuristic summary for interface without JSDoc", () => {
+  it("returns null for interface without JSDoc or suffix pattern", () => {
     const symbol = makeSymbol({ name: "SymbolCard", kind: "interface" });
     const result = generateSummary(symbol as any, "interface SymbolCard {}");
-    assert.strictEqual(result, "Interface defining symbol card contract");
+    assert.strictEqual(result, null);
   });
 
   it("returns heuristic summary for constant variable without JSDoc", () => {

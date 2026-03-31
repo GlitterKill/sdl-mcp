@@ -103,6 +103,10 @@ export function mergeSearchResults(
       if (rankCompare !== 0) {
         return rankCompare;
       }
+      // Deterministic tiebreaker: prefer src/ over tests/, then name, then path
+      const leftIsTest = (left.filePath.startsWith("tests/") || left.filePath.includes("/tests/")) ? 1 : 0;
+      const rightIsTest = (right.filePath.startsWith("tests/") || right.filePath.includes("/tests/")) ? 1 : 0;
+      if (leftIsTest !== rightIsTest) return leftIsTest - rightIsTest;
       return left.name.localeCompare(right.name) || left.filePath.localeCompare(right.filePath);
     });
 

@@ -342,7 +342,7 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
 
     const metrics = metricsMap.get(symbol.symbolId);
     const reasons: string[] = [];
-    if (metrics && metrics.fanIn >= 5) {
+    if (metrics && metrics.fanIn >= 3) {
       reasons.push("high fan-in");
     }
     if (metrics && metrics.churn30d > 0) {

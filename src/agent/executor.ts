@@ -24,6 +24,8 @@ import { hybridSearch } from "../retrieval/orchestrator.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
 import { randomUUID } from "node:crypto";
 
+
+const BEHAVIORAL_KINDS = new Set(['function', 'method', 'class', 'constructor']);
 /** Injectable gate evaluator for testability. */
 export type GateEvaluator = typeof evaluateRequest;
 
@@ -304,7 +306,10 @@ export class Executor {
           const file = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
           if (file) {
             const symbols = await ladybugDb.getSymbolsByFile(conn, file.fileId);
-            return symbols.slice(0, 50).map((sym) => sym.symbolId);
+            // Prefer behavioral symbols (functions/methods/classes) over variables for explain tasks
+            const behavioral = symbols.filter((s) => BEHAVIORAL_KINDS.has(s.kind));
+            const preferred = behavioral.length > 0 ? behavioral : symbols;
+            return preferred.slice(0, 50).map((sym) => sym.symbolId);
           }
 
           // If exact match fails, treat as directory prefix and find files under it
@@ -314,7 +319,8 @@ export class Executor {
             const symbolResults = await Promise.all(
               filesUnderDir.slice(0, 20).map(async (f) => {
                 const symbols = await ladybugDb.getSymbolsByFile(conn, f.fileId);
-                return symbols.slice(0, 10).map((sym) => sym.symbolId);
+                const beh = symbols.filter((s) => BEHAVIORAL_KINDS.has(s.kind));
+                return (beh.length > 0 ? beh : symbols).slice(0, 10).map((sym) => sym.symbolId);
               }),
             );
             return symbolResults.flat();

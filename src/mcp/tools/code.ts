@@ -1,4 +1,6 @@
 // Input validated by server.ts dispatch before reaching handlers
+import { readFile, stat } from "fs/promises";
+
 import {
   type CodeNeedWindowRequest,
   CodeNeedWindowResponse,
@@ -13,6 +15,7 @@ import {
   DEFAULT_CONTEXT_LINES,
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
+  MAX_FILE_BYTES,
 } from "../../config/constants.js";
 import { evaluateRequest, GateContext } from "../../code/gate.js";
 import { extractWindow, identifiersExistInWindow } from "../../code/windows.js";
@@ -39,7 +42,7 @@ import { NotFoundError, ValidationError, IndexError } from "../errors.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { buildSlice } from "../../graph/slice.js";
-import { getAbsolutePathFromRepoRoot } from "../../util/paths.js";
+import { getAbsolutePathFromRepoRoot, normalizePath } from "../../util/paths.js";
 import {
   generateSymbolSkeleton,
   generateFileSkeleton,
@@ -53,6 +56,8 @@ import { consumePrefetchedKey } from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { toLegacySymbolRow } from "./symbol-utils.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
+import { getOverlaySnapshot } from "../../live-index/overlay-reader.js";
+
 
 function buildPolicyNextBestAction(params: {
   request: CodeNeedWindowRequest;
@@ -214,9 +219,14 @@ export async function handleCodeNeedWindow(
   });
   consumePrefetchedKey(request.repoId, `card:${request.symbolId}`);
 
-  const symbol = await ladybugDb.getSymbol(conn, request.symbolId);
+  let symbol = await ladybugDb.getSymbol(conn, request.symbolId);
   if (!symbol) {
-    throw new NotFoundError(`Symbol not found: ${request.symbolId}`);
+    // Fallback: check overlay for recently-parsed symbols not yet in durable DB
+    const overlaySnap = getOverlaySnapshot(request.repoId);
+    symbol = overlaySnap?.symbolsById.get(request.symbolId) ?? null;
+    if (!symbol) {
+      throw new NotFoundError(`Symbol not found: ${request.symbolId}`);
+    }
   }
 
   if (symbol.repoId !== request.repoId) {
@@ -481,10 +491,69 @@ export async function handleCodeNeedWindow(
       ? Math.min(request.maxTokens, validatedPolicy.maxWindowTokens)
       : validatedPolicy.maxWindowTokens;
 
+    // Pre-scan: if identifiers would be outside the default window (first
+    // maxLines of symbol), shift the range to center on identifier locations.
+    let effectiveRange = symbolRange;
+    let effectiveGranularity = granularity;
+    if (
+      request.identifiersToFind.length > 0 &&
+      granularity === "symbol" &&
+      (symbolRange.endLine - symbolRange.startLine + 1) > maxLines
+    ) {
+      try {
+        const resolvedPath = normalizePath(filePath);
+        const fileStat = await stat(resolvedPath);
+        if (fileStat.size <= MAX_FILE_BYTES) {
+          const fileContent = await readFile(resolvedPath, "utf-8");
+          const fileLines = fileContent.replaceAll("\r\n", "\n").split("\n");
+          const idLineNumbers: number[] = [];
+          for (
+            let ln = symbolRange.startLine;
+            ln <= Math.min(symbolRange.endLine, fileLines.length);
+            ln++
+          ) {
+            const line = fileLines[ln - 1];
+            if (
+              line &&
+              request.identifiersToFind.some((id) => line.includes(id))
+            ) {
+              idLineNumbers.push(ln);
+            }
+          }
+          if (
+            idLineNumbers.length > 0 &&
+            idLineNumbers[idLineNumbers.length - 1] >=
+              symbolRange.startLine + maxLines
+          ) {
+            const medianLine =
+              idLineNumbers[Math.floor(idLineNumbers.length / 2)];
+            const halfWindow = Math.floor(maxLines / 2);
+            const centeredStart = Math.max(
+              symbolRange.startLine,
+              medianLine - halfWindow,
+            );
+            const centeredEnd = Math.min(
+              symbolRange.endLine,
+              centeredStart + maxLines - 1,
+            );
+            effectiveRange = {
+              startLine: centeredStart,
+              startCol: 0,
+              endLine: centeredEnd,
+              endCol: symbolRange.endCol,
+            };
+            effectiveGranularity = "fileWindow";
+          }
+        }
+      } catch {
+        // Pre-scan failed — fall back to default behavior
+      }
+    }
+
     const windowResult = await extractWindow(
       filePath,
-      symbolRange,
-      granularity,
+      effectiveRange,
+      effectiveGranularity,
       maxLines,
       maxTokens,
     );

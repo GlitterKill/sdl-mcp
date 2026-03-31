@@ -11,7 +11,6 @@ import {
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import {
   DEFAULT_MAX_CARDS,
-  DEFAULT_MAX_TOKENS_SLICE,
 } from "../../config/constants.js";
 import {
   prefetchDeltaBlastRadius,
@@ -69,6 +68,10 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       fromVersion = versions.length >= 2 ? versions[1].versionId : toVersion;
     }
 
+    
+    const singleVersionHint = fromVersion === toVersion
+      ? "Only one ledger version exists — delta is empty. Run index.refresh after making changes to create a new version."
+      : undefined;
     let delta;
     try {
       delta = await computeDelta(
@@ -97,7 +100,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
 
     const config = loadConfig();
     const rawBudget = validated.budget ?? {
-      maxCards: config.slice?.defaultMaxCards ?? DEFAULT_DELTA_MAX_CARDS,
+      maxCards: DEFAULT_DELTA_MAX_CARDS,
       maxEstimatedTokens:
         config.slice?.defaultMaxTokens ?? DEFAULT_DELTA_MAX_TOKENS,
     };
@@ -106,7 +109,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     const budget = {
       ...rawBudget,
       maxCards: Math.min(rawBudget.maxCards ?? DEFAULT_MAX_CARDS, 100),
-      maxEstimatedTokens: Math.min(rawBudget.maxEstimatedTokens ?? DEFAULT_MAX_TOKENS_SLICE, 20000),
+      maxEstimatedTokens: Math.min(rawBudget.maxEstimatedTokens ?? DEFAULT_DELTA_MAX_TOKENS, 20000),
     };
     const governorOptions = {
       repoId: validated.repoId,
@@ -154,7 +157,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       })
     }
 
-    const maxChanges = config.slice?.defaultMaxCards ?? DEFAULT_DELTA_MAX_CARDS;
+    const maxChanges = DEFAULT_DELTA_MAX_CARDS;
     const maxBlastRadius = MAX_BLAST_RADIUS_ITEMS;
 
     const changedSymbolsTruncation = truncateArray(delta.changedSymbols, {
@@ -248,7 +251,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
 
     const fileIds = allFileIds;
 
-    const response: Record<string, unknown> = { delta, amplifiers };
+    const response: Record<string, unknown> = { delta, ...(singleVersionHint ? { hint: singleVersionHint } : {}), amplifiers };
     if (blastRadiusTruncatedFlag) {
       response.blastRadiusTruncated = true;
     }

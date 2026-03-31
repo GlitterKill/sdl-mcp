@@ -103,7 +103,7 @@ function computeRelevance(name: string, query: string): number {
   return 0.05;
 }
 
-const MIN_RELEVANCE_THRESHOLD = 0.15;
+const MIN_RELEVANCE_THRESHOLD = 0.3;
 
 export async function handleSymbolSearch(
   args: unknown,

@@ -44,6 +44,8 @@ export const WorkflowRequestSchema = z.object({
   onError: z.enum(["continue", "stop"]).default("continue"),
   /** Default max tokens per step response (overridden by per-step maxResponseTokens) */
   defaultMaxResponseTokens: z.number().int().min(50).max(100_000).optional(),
+  /** When true, intermediate step results are stripped to save tokens */
+  onlyFinalResult: z.boolean().optional(),
   /** Opt-in execution trace for debugging */
   trace: WorkflowTraceOptionsSchema.optional(),
 });

@@ -961,8 +961,24 @@ export async function searchSymbols(
     }
   }
 
+  const lowerTrimmed = trimmed.toLowerCase();
   return Array.from(matchCounts.values())
-    .sort((a, b) => b.count - a.count || a.row.name.localeCompare(b.row.name))
+    .sort((a, b) => {
+      // Exact name match first
+      const aExact = a.row.name.toLowerCase() === lowerTrimmed ? 0 : 1;
+      const bExact = b.row.name.toLowerCase() === lowerTrimmed ? 0 : 1;
+      if (aExact !== bExact) return aExact - bExact;
+      // Name starts with full query
+      const aPrefix = a.row.name.toLowerCase().startsWith(lowerTrimmed) ? 0 : 1;
+      const bPrefix = b.row.name.toLowerCase().startsWith(lowerTrimmed) ? 0 : 1;
+      if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+      // Name contains full query
+      const aContains = a.row.name.toLowerCase().includes(lowerTrimmed) ? 0 : 1;
+      const bContains = b.row.name.toLowerCase().includes(lowerTrimmed) ? 0 : 1;
+      if (aContains !== bContains) return aContains - bContains;
+      // More terms matched = better
+      return b.count - a.count || a.row.name.localeCompare(b.row.name);
+    })
     .map((entry) => mapSearchSymbolRow(entry.row, repoId))
     .slice(0, safeLimit);
 }
@@ -1085,16 +1101,23 @@ export async function searchSymbolsLite(
     }
   }
 
-  // Sort by match count descending, then by name
+  // Sort by match count descending, with compound name match tiebreakers
   const lt = query.trim().toLowerCase();
   return Array.from(matchCounts.values())
     .sort((a, b) => {
+      // Exact name match first
       const aExact = a.row.name.toLowerCase() === lt ? 0 : 1;
       const bExact = b.row.name.toLowerCase() === lt ? 0 : 1;
       if (aExact !== bExact) return aExact - bExact;
+      // Name starts with full query
       const aPrefix = a.row.name.toLowerCase().startsWith(lt) ? 0 : 1;
       const bPrefix = b.row.name.toLowerCase().startsWith(lt) ? 0 : 1;
       if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+      // Name contains full query
+      const aContains = a.row.name.toLowerCase().includes(lt) ? 0 : 1;
+      const bContains = b.row.name.toLowerCase().includes(lt) ? 0 : 1;
+      if (aContains !== bContains) return aContains - bContains;
+      // More terms matched = better
       return b.count - a.count || a.row.name.localeCompare(b.row.name);
     })
     .map((entry) => entry.row)

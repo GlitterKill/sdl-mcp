@@ -56,8 +56,8 @@ describe("generateSummary behavioral improvements", () => {
   });
 
   it("detects iteration patterns in function body", () => {
-    const body = "function processItems(items: Item[]) {\n  for (const item of items) {\n    item.process();\n  }\n}";
-    const sym = makeSymbol("processItems", [{ name: "items", type: ": Item[]" }]);
+    const body = "function walkItems(items: Item[]) {\n  for (const item of items) {\n    item.process();\n  }\n}";
+    const sym = makeSymbol("walkItems", [{ name: "items", type: ": Item[]" }]);
     sym.range = { startLine: 1, startCol: 0, endLine: 5, endCol: 1 };
     const summary = generateSummary(sym, body);
     assert.ok(summary, "should not be null");

@@ -298,12 +298,28 @@ function generateBehavioralFunctionSummary(
 ): string | null {
   const signals = analyzeBodyPatterns(symbol, fileContent);
   const words = splitCamelCase(symbol.name);
-  const subject = words
-    .slice(1)
-    .map((w) => w.toLowerCase())
-    .join(" ");
+  const firstWord = words[0]?.toLowerCase() ?? "";
+  const restWords = words.slice(1).map((w) => w.toLowerCase());
 
-  // Template priority (first match wins):
+  // For "handle*" functions, use the rest as a noun phrase describing what's handled
+  const HANDLER_PREFIXES = new Set(["handle", "process", "on"]);
+  const isHandler = HANDLER_PREFIXES.has(firstWord);
+  const subject = restWords.join(" ");
+
+  // 0. Handler pattern — use "Handles X" with behavioral detail suffix
+  if (isHandler && subject) {
+    const details: string[] = [];
+    if (signals.validates) details.push("with validation");
+    if (signals.transforms) details.push("with transformation");
+    if (signals.hasDbIO) details.push("via database");
+    if (signals.hasNetworkIO) details.push("via network");
+    if (signals.hasFileIO) details.push("via filesystem");
+    if (signals.caches) details.push("with caching");
+    const suffix = details.length > 0 ? " " + details.slice(0, 2).join(" and ") : "";
+    return `Handles ${subject}${suffix}`;
+  }
+
+    // Template priority (first match wins):
 
   // 1. Delegation
   if (signals.delegates) {
@@ -404,8 +420,13 @@ function generateClassSummary(symbol: ExtractedSymbol): string | null {
     const base = splitCamelCase(name).join(" ").toLowerCase();
     return `Generic ${base} class parameterized by ${typeParams}`;
   }
-  const words = splitCamelCase(name).join(" ").toLowerCase();
-  return `Class encapsulating ${words} behavior`;
+  // Avoid tautological summary; name alone is better than noise
+  const classParams = symbol.signature?.params;
+  if (classParams && classParams.length > 0) {
+    const paramNames = classParams.map((p) => p.name).join(", ");
+    return `Manages ${splitCamelCase(name).join(" ").toLowerCase()} state (params: ${paramNames})`;
+  }
+  return null;
 }
 
 function generateInterfaceSummary(symbol: ExtractedSymbol): string | null {
@@ -425,8 +446,8 @@ function generateInterfaceSummary(symbol: ExtractedSymbol): string | null {
     const base = splitCamelCase(name).join(" ").toLowerCase();
     return `Generic interface defining ${base} contract for ${typeParams}`;
   }
-  const words = splitCamelCase(name).join(" ").toLowerCase();
-  return `Interface defining ${words} contract`;
+  // Suppress tautological summary; name alone is clearer
+  return null;
 }
 
 function generateTypeSummary(symbol: ExtractedSymbol): string | null {

@@ -20,6 +20,7 @@ export interface ParsedWorkflowRequest {
   budget?: WorkflowBudget;
   onError: "continue" | "stop";
   defaultMaxResponseTokens?: number;
+  onlyFinalResult?: boolean;
 }
 
 /**
@@ -73,7 +74,7 @@ export function parseWorkflowRequest(
     return { ok: false, errors };
   }
 
-  const { repoId, steps, budget, onError, defaultMaxResponseTokens } = parsed.data;
+  const { repoId, steps, budget, onError, defaultMaxResponseTokens, onlyFinalResult } = parsed.data;
   const errors: string[] = [];
   const parsedSteps: ParsedWorkflowStep[] = [];
 
@@ -125,6 +126,7 @@ export function parseWorkflowRequest(
       budget,
       onError,
       defaultMaxResponseTokens,
+      onlyFinalResult,
     },
   };
 }

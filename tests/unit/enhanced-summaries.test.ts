@@ -56,16 +56,16 @@ describe("enhanced heuristic summaries", () => {
       assert.strictEqual(result, "Generic repository class parameterized by T, K");
     });
 
-    it("generates fallback class summary", () => {
+    it("returns null for class without role suffix or generics", () => {
       const symbol = makeSymbol({ name: "UserAccount", kind: "class" });
       const result = generateSummary(symbol as any, "class UserAccount {}");
-      assert.strictEqual(result, "Class encapsulating user account behavior");
+      assert.strictEqual(result, null);
     });
 
-    it("generates fallback class summary for single-word name", () => {
+    it("returns null for single-word class without role suffix", () => {
       const symbol = makeSymbol({ name: "Config", kind: "class" });
       const result = generateSummary(symbol as any, "class Config {}");
-      assert.strictEqual(result, "Class encapsulating config behavior");
+      assert.strictEqual(result, null);
     });
   });
 
@@ -100,10 +100,10 @@ describe("enhanced heuristic summaries", () => {
       assert.strictEqual(result, "Generic interface defining comparable contract for T");
     });
 
-    it("generates fallback interface summary", () => {
+    it("returns null for interface without prefix or suffix pattern", () => {
       const symbol = makeSymbol({ name: "SymbolCard", kind: "interface" });
       const result = generateSummary(symbol as any, "interface SymbolCard {}");
-      assert.strictEqual(result, "Interface defining symbol card contract");
+      assert.strictEqual(result, null);
     });
   });
 

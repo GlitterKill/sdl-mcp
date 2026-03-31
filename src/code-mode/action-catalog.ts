@@ -237,8 +237,8 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   },
   "slice.refresh": { sliceHandle: "<handle>" },
   "slice.spillover.get": { spilloverHandle: "<handle>", pageSize: 20 },
-  "delta.get": { includeBlastRadius: true },
-  "context.summary": { taskQuery: "error handling patterns" },
+  "delta.get": {},
+  "context.summary": { query: "error handling patterns" },
   "pr.risk.analyze": { riskThreshold: 80 },
   "code.getSkeleton": { symbolId: "<symbolId>" },
   "code.getHotPath": {

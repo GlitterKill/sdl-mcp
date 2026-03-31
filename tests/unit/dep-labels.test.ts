@@ -31,18 +31,18 @@ describe("dep label helpers", () => {
     assert.strictEqual(pickDepLabel("unresolved:dynamic:foo"), "unresolved:dynamic:foo");
   });
 
-  it("truncates long target names to DEP_LABEL_MAX_LENGTH (40)", () => {
-    const longName = "thisIsAVeryLongFunctionNameThatExceedsFortyCharacters";
+  it("truncates long target names to DEP_LABEL_MAX_LENGTH (80)", () => {
+    const longName = "thisIsAnExtremelyLongFunctionNameThatDefinitelyExceedsEightyCharactersTriggeringTruncation";
     const result = pickDepLabel("some-id", longName);
-    assert.strictEqual(result?.length, 40);
-    assert.strictEqual(result, longName.slice(0, 40));
+    assert.strictEqual(result?.length, 80);
+    assert.strictEqual(result, longName.slice(0, 80));
   });
 
-  it("truncates long targetId fallbacks to DEP_LABEL_MAX_LENGTH (40)", () => {
-    const longId = "unresolved:dynamic:some/very/long/path/to/module/export";
+  it("truncates long targetId fallbacks to DEP_LABEL_MAX_LENGTH (80)", () => {
+    const longId = "unresolved:dynamic:some/very/long/path/to/a/deeply/nested/module/export/that/exceeds/eighty/characters";
     const result = pickDepLabel(longId);
-    assert.strictEqual(result?.length, 40);
-    assert.strictEqual(result, longId.slice(0, 40));
+    assert.strictEqual(result?.length, 80);
+    assert.strictEqual(result, longId.slice(0, 80));
   });
 
   it("does not truncate names within limit", () => {

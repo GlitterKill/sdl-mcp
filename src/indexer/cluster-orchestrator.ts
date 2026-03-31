@@ -245,8 +245,8 @@ function generateClusterLabel(
     const sorted = [...dirCounts.entries()].sort((a, b) => b[1] - a[1]);
     const topDir = sorted[0][0];
     const topCount = sorted[0][1];
-    // If majority of members share a directory, use it
-    if (topCount >= members.length * 0.5) {
+    // If a significant portion of members share a directory, use it
+    if (topCount >= members.length * 0.35) {
       return topDir;
     }
   }
@@ -267,6 +267,31 @@ function generateClusterLabel(
     }
     if (prefixLen >= 3) {
       return first.slice(0, prefixLen).replace(/[_.]$/, "");
+    }
+  }
+
+  // Strategy 3: Use the most common exported symbol name as the label
+  const exportedNames = members
+    .map((m) => symbolById.get(m.symbolId))
+    .filter((s): s is { name: string; fileId: string } => Boolean(s))
+    .filter((s) => {
+      const file = filesById.get(s.fileId);
+      return file && !file.relPath.startsWith("tests/");
+    })
+    .map((s) => s.name);
+  if (exportedNames.length > 0) {
+    // Pick the most common name, or the first alphabetically as a representative
+    const nameCounts = new Map<string, number>();
+    for (const n of exportedNames) nameCounts.set(n, (nameCounts.get(n) ?? 0) + 1);
+    const sorted = [...nameCounts.entries()].sort((a, b) => b[1] - a[1]);
+    if (sorted.length === 1) {
+      return sorted[0][0];
+    }
+    if (sorted.length === 2) {
+      return `${sorted[0][0]} / ${sorted[1][0]}`;
+    }
+    if (sorted.length >= 3) {
+      return `${sorted[0][0]} + ${sorted.length - 1} related`;
     }
   }
 

@@ -17,11 +17,15 @@ import { extractIdentifiersFromText } from "./executor.js";
 import { searchSymbols } from "../db/ladybug-queries.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
 import { classifySymptomType } from "../retrieval/evidence.js";
+import { estimateTokens } from "../util/tokenize.js";
 import { randomUUID } from "node:crypto";
 
 const HANDLED_EVIDENCE_TYPES = new Set([
   "symbolCard", "skeleton", "hotPath", "codeWindow", "diagnostic", "searchResult",
 ]);
+
+/** Hard safety cap for broad-mode responses regardless of budget. */
+const MAX_CONTEXT_RESPONSE_TOKENS = 50_000;
 
 export class ContextEngine {
   private planner: Planner;
@@ -180,7 +184,7 @@ export class ContextEngine {
         };
       }
 
-      return {
+      const result: ContextResult = {
         taskId,
         taskType: task.taskType,
         actionsTaken: actions,
@@ -203,6 +207,10 @@ export class ContextEngine {
           }),
         },
       };
+
+      // Guard against oversized broad-mode responses that can overflow
+      // MCP response limits (observed 136K+ chars in production).
+      return this.truncateIfOverBudget(result, task.budget?.maxTokens);
     } catch (error) {
       return this.createErrorResult(
         taskId,
@@ -421,6 +429,103 @@ export class ContextEngine {
       answer: `Task execution failed: ${error}`,
       nextBestAction: "retryWithDifferentInputs",
     };
+  }
+
+  /**
+   * Enforce token budget on broad-mode responses.  Progressively trims
+   * answer, finalEvidence, and actionsTaken until the serialized payload
+   * fits within the effective cap (user budget or MAX_CONTEXT_RESPONSE_TOKENS,
+   * whichever is smaller).
+   */
+  private truncateIfOverBudget(
+    result: ContextResult,
+    budgetMaxTokens?: number,
+  ): ContextResult {
+    const effectiveCap = Math.min(
+      budgetMaxTokens ?? MAX_CONTEXT_RESPONSE_TOKENS,
+      MAX_CONTEXT_RESPONSE_TOKENS,
+    );
+
+    const serialized = JSON.stringify(result);
+    const originalTokens = estimateTokens(serialized);
+
+    if (originalTokens <= effectiveCap) {
+      return result;
+    }
+
+    logger.debug("Broad-mode response exceeds token budget; truncating", {
+      originalTokens,
+      effectiveCap,
+    });
+
+    const fieldsAffected: string[] = [];
+
+    // Phase 1: Truncate answer to half the budget
+    if (result.answer) {
+      const halfBudgetChars = Math.floor((effectiveCap / 2) * 3.5); // rough token-to-char
+      if (result.answer.length > halfBudgetChars) {
+        result = {
+          ...result,
+          answer: result.answer.slice(0, halfBudgetChars) + "\n\n[answer truncated]",
+        };
+        fieldsAffected.push("answer");
+      }
+    }
+
+    // Check after phase 1
+    let currentTokens = estimateTokens(JSON.stringify(result));
+    if (currentTokens <= effectiveCap) {
+      result.truncation = { originalTokens, truncatedTokens: currentTokens, fieldsAffected };
+      return result;
+    }
+
+    // Phase 2: Trim finalEvidence — keep first N items that fit
+    if (result.finalEvidence.length > 0) {
+      const targetEvidenceCount = Math.max(
+        1,
+        Math.floor(result.finalEvidence.length * (effectiveCap / currentTokens)),
+      );
+      if (targetEvidenceCount < result.finalEvidence.length) {
+        result = {
+          ...result,
+          finalEvidence: result.finalEvidence.slice(0, targetEvidenceCount),
+        };
+        fieldsAffected.push("finalEvidence");
+      }
+    }
+
+    // Check after phase 2
+    currentTokens = estimateTokens(JSON.stringify(result));
+    if (currentTokens <= effectiveCap) {
+      result.truncation = { originalTokens, truncatedTokens: currentTokens, fieldsAffected };
+      return result;
+    }
+
+    // Phase 3: Trim actionsTaken — keep first N items
+    if (result.actionsTaken.length > 0) {
+      const targetActionCount = Math.max(
+        1,
+        Math.floor(result.actionsTaken.length * (effectiveCap / currentTokens)),
+      );
+      if (targetActionCount < result.actionsTaken.length) {
+        result = {
+          ...result,
+          actionsTaken: result.actionsTaken.slice(0, targetActionCount),
+        };
+        fieldsAffected.push("actionsTaken");
+      }
+    }
+
+    // Phase 4: If still over, aggressively strip answer entirely
+    currentTokens = estimateTokens(JSON.stringify(result));
+    if (currentTokens > effectiveCap && result.answer) {
+      result = { ...result, answer: "[answer removed — response exceeded token budget]" };
+      if (!fieldsAffected.includes("answer")) fieldsAffected.push("answer");
+    }
+
+    const truncatedTokens = estimateTokens(JSON.stringify(result));
+    result.truncation = { originalTokens, truncatedTokens, fieldsAffected };
+    return result;
   }
 
   private async expandContextForClusters(

@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
-import { pathToFileURL } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 
 interface FamilyStats {
   family: string;
@@ -132,7 +132,7 @@ function main(): void {
     throw new Error("Missing required argument: --in <aggregate.json path>");
   }
   const inPath = resolve(inPathRaw);
-  const projectRoot = resolve(new URL("..", import.meta.url).pathname.replace(/^/([A-Za-z]:)/, "$1"));
+  const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
   if (!inPath.startsWith(projectRoot)) {
     throw new Error(`--in path must be within project directory: ${inPath}`);
   }

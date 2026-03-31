@@ -375,7 +375,7 @@ export const SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT = 90;
  * Maximum length for dependency labels in slice cards.
  * Truncates long names to save tokens in wire format.
  */
-export const DEP_LABEL_MAX_LENGTH = 40;
+export const DEP_LABEL_MAX_LENGTH = 80;
 
 /**
  * Default page size for spillover symbol retrieval.

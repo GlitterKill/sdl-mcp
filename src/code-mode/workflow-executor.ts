@@ -445,7 +445,23 @@ export async function executeWorkflow(
     };
   }
 
-  return response;
+  
+  // Strip intermediate step results if onlyFinalResult is requested
+  if (request.onlyFinalResult && response.results.length > 1) {
+    const lastIdx = response.results.length - 1;
+    let strippedTokens = 0;
+    response.results = response.results.map((r, i) => {
+      if (i < lastIdx) {
+        strippedTokens += r.tokens;
+        return { stepIndex: r.stepIndex, fn: r.fn, status: r.status, tokens: 0, durationMs: r.durationMs, result: null };
+      }
+      return r;
+    });
+    // Adjust totalTokens to reflect what's actually in the response
+    response.totalTokens = response.totalTokens - strippedTokens;
+  }
+
+return response;
 }
 
 // --- Trace Helpers ---
