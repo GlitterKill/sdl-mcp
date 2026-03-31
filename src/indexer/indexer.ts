@@ -24,7 +24,7 @@ import { logger } from "../util/logger.js";
 import {
   isRustEngineAvailable,
 } from "./rustIndexer.js";
-import { createTsCallResolver } from "./ts/tsParser.js";
+import { clearTsCallResolverCache, createTsCallResolver } from "./ts/tsParser.js";
 import { ParserWorkerPool } from "./workerPool.js";
 import { invalidateGraphSnapshot } from "../graph/graphSnapshotCache.js";
 import { clearSliceCache } from "../graph/sliceCache.js";
@@ -175,6 +175,16 @@ async function indexRepoImpl(
     fileCount: files.length,
     removedFiles,
   });
+
+  const LARGE_REPO_THRESHOLD = 5000;
+  if (files.length > LARGE_REPO_THRESHOLD) {
+    logger.warn(
+      `Large repository detected (${files.length} files). ` +
+        "If indexing runs out of memory, set " +
+        'NODE_OPTIONS="--max-old-space-size=8192" before running sdl-mcp.',
+      { repoId, fileCount: files.length },
+    );
+  }
 
   onProgress?.({ stage: "parsing", current: 0, total: files.length });
   const appConfig = loadConfig();
@@ -334,6 +344,15 @@ async function indexRepoImpl(
     });
     const changedFiles = changedFilesFromPass1 + removedFiles;
 
+    // --- Phase: release pass2 memory before edge finalization ---
+
+    // Release the TS compiler program cache — it can hold 500MB+ for large repos.
+    clearTsCallResolverCache();
+    tsResolver = null;
+
+    // The allSymbolsByName map from loadExistingSymbolMaps is no longer needed.
+    allSymbolsByName.clear();
+
     // --- Phase: finalize edges (pending calls + config edges) ---
 
     const configEdgeWeight =
@@ -348,6 +367,18 @@ async function indexRepoImpl(
       allConfigEdges,
       configEdgeWeight,
     });
+
+    // --- Phase: release edge-building memory before version/cluster phases ---
+
+    // These accumulators are no longer needed after edge finalization.
+    // Clearing them before cluster computation prevents holding ~3 copies of
+    // all symbols simultaneously (the OOM root cause for 10k+ file repos).
+    pendingCallEdges.length = 0;
+    createdCallEdges.clear();
+    symbolIndex.clear();
+    globalNameToSymbolIds.clear();
+    globalPreferredSymbolId.clear();
+    allConfigEdges.length = 0;
 
     // --- Phase: version management ---
 

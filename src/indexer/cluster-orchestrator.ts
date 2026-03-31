@@ -45,14 +45,15 @@ export async function computeAndStoreClustersAndProcesses(params: {
   const startMs = Date.now();
   const now = new Date().toISOString();
 
-  const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+  // Use lite query — cluster computation only needs symbolId, name, fileId.
+  const symbols = await ladybugDb.getSymbolsByRepoLite(conn, repoId);
   if (symbols.length === 0) {
     return { clustersComputed: 0, processesTraced: 0 };
   }
 
   const symbolIds = symbols.map((s) => s.symbolId).sort();
 
-  const edgesByFrom = await ladybugDb.getEdgesFromSymbolsLite(conn, symbolIds);
+  let edgesByFrom = await ladybugDb.getEdgesFromSymbolsLite(conn, symbolIds);
   const clusterEdges: Array<{ fromSymbolId: string; toSymbolId: string }> = [];
   const callEdges: Array<{ callerId: string; calleeId: string }> = [];
 
@@ -64,6 +65,9 @@ export async function computeAndStoreClustersAndProcesses(params: {
       }
     }
   }
+
+  // Free the DB result map now that edges are extracted into flat arrays.
+  edgesByFrom.clear();
 
   const clustersStartMs = Date.now();
   const clusterAssignments =
@@ -140,6 +144,10 @@ export async function computeAndStoreClustersAndProcesses(params: {
       clusterIndex++;
     }
   });
+
+  // Free cluster-related structures before process tracing.
+  clusterEdges.length = 0;
+  clustersById.clear();
 
   const processesStartMs = Date.now();
   const processes =

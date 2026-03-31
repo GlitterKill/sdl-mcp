@@ -62,6 +62,15 @@ function resolveAliasedSymbol(
   return current;
 }
 
+/**
+ * Release cached TS programs and invalidation sets to free memory.
+ * Call after pass2 resolvers complete and the TS compiler is no longer needed.
+ */
+export function clearTsCallResolverCache(): void {
+  programCache.clear();
+  invalidationSet.clear();
+}
+
 export function createTsCallResolver(
   repoRoot: string,
   files: FileMetadata[],
