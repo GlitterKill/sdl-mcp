@@ -822,7 +822,7 @@ export function splitCamelCase(str: string): string[] {
     // Split camelCase and PascalCase with proper acronym handling
     // "MCPServer" → ["MCP", "Server"], "buildSlice" → ["build", "Slice"]
     const words = segment.match(
-      /[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+/g,
+      /[A-Z]+\d+[A-Z]+(?=[A-Z][a-z]|[^a-zA-Z0-9]|$)|[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+/g,
     );
     if (words) {
       result.push(...words);

@@ -28,11 +28,11 @@ import { attachRawContext } from "../token-usage.js";
 import { IndexError } from "../errors.js";
 
 /** Default max changed symbols for delta responses (tighter than slice default). */
-const DEFAULT_DELTA_MAX_CARDS = 15;
+const DEFAULT_DELTA_MAX_CARDS = 10;
 /** Default max tokens for delta responses (tighter than slice default). */
-const DEFAULT_DELTA_MAX_TOKENS = 8000;
+const DEFAULT_DELTA_MAX_TOKENS = 4000;
 /** Hard cap on blast-radius items returned to the caller. */
-const MAX_BLAST_RADIUS_ITEMS = 50;
+const MAX_BLAST_RADIUS_ITEMS = 25;
 
 /**
  * Handles delta pack requests.

@@ -76,7 +76,11 @@ function computeRelevance(name: string, query: string): number {
   if (nl.startsWith(ql)) return 0.85;
   if (nl.includes(ql)) return 0.7;
   // CamelCase-aware: split both query and name into constituent parts
-  const splitCamel = (s: string) => s.replace(/([a-z])([A-Z])/g, (_, a: string, b: string) => a + " " + b).split(/[\s_]+/).map(w => w.toLowerCase()).filter(w => w.length >= 2);
+  const splitCamel = (s: string) => {
+    // Improved: handles digit-embedded acronyms (E2E, B2B), uppercase runs, digits
+    const words = s.match(/[A-Z]+\d+[A-Z]+(?=[A-Z][a-z]|[^a-zA-Z0-9]|$)|[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|\d+/g);
+    return (words ?? [s]).map(w => w.toLowerCase()).filter(w => w.length >= 2);
+  };
   const queryParts = splitCamel(query);
   const nameParts = splitCamel(name);
   if (queryParts.length >= 2 && nameParts.length >= 2) {
@@ -93,7 +97,7 @@ function computeRelevance(name: string, query: string): number {
   // Check if name appears in query
   if (nl.length >= 3 && ql.includes(nl)) return 0.5;
   // Weak: individual word overlap
-  const nameWords = nl.replace(/([a-z])([A-Z])/g, (_, a, b) => a + " " + b).toLowerCase().split(/[\s_]+/).filter(w => w.length >= 3);
+  const nameWords = (nl.match(/[A-Z]+\d+[A-Z]+(?=[A-Z][a-z]|[^a-zA-Z0-9]|$)|[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|\d+/gi) ?? [nl]).map(w => w.toLowerCase()).filter(w => w.length >= 3);
   const overlap = nameWords.filter(w => ql.includes(w)).length;
   if (overlap > 0) return 0.1 + 0.15 * (overlap / Math.max(nameWords.length, 1));
   return 0.05;

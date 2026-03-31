@@ -561,6 +561,17 @@ export async function handleCodeNeedWindow(
             type: "cursor" as const,
             value: windowResult.actualRange.endLine,
           },
+          suggestedNextCall: {
+            tool: "sdl.code.needWindow",
+            description: "Re-request this symbol with adjusted identifiers. See howToResume.value for the continuation start line.",
+            args: {
+              repoId: request.repoId,
+              symbolId: request.symbolId,
+              reason: request.reason,
+              expectedLines: request.expectedLines,
+              identifiersToFind: request.identifiersToFind,
+            },
+          },
         }
       : undefined;
 

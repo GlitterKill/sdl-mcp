@@ -175,8 +175,17 @@ export async function queryMemories(
   }
 
   if (options.query) {
-    conditions.push("lower(m.searchText) CONTAINS lower($query)");
-    params.query = options.query;
+    // Split query into individual words so "test audit" matches text
+    // containing both words anywhere (not just as a consecutive substring).
+    const queryWords = options.query.trim().split(/\s+/).filter(w => w.length >= 2);
+    if (queryWords.length <= 1) {
+      conditions.push("lower(m.searchText) CONTAINS lower($query)");
+      params.query = options.query;
+    } else {
+      const wordConditions = queryWords.map((_, i) => "lower(m.searchText) CONTAINS lower($qw" + i + ")");
+      conditions.push("(" + wordConditions.join(" AND ") + ")");
+      queryWords.forEach((w, i) => { params["qw" + i] = w; });
+    }
   }
 
   if (options.types && options.types.length > 0) {

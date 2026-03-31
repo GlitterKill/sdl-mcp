@@ -313,7 +313,7 @@ export async function handleRepoStatus(
   args: unknown,
 ): Promise<RepoStatusResponse> {
   const request = args as RepoStatusRequest;
-  const { repoId, surfaceMemories } = request;
+  const { repoId, surfaceMemories, detail = "standard" } = request;
 
   const executeStatus = async () => {
     recordToolTrace({
@@ -328,24 +328,30 @@ export async function handleRepoStatus(
       throw new DatabaseError(`Repository ${repoId} not found`);
     }
 
+        // "minimal" skips health computation entirely (fastest path)
+    const includeHealth = detail !== "minimal";
+    const includeLiveIndex = detail === "full";
+
     const [latestVersion, filesIndexed, symbolsIndexed, lastIndexedAt, health] = await Promise.all([
       ladybugDb.getLatestVersion(conn, repoId),
       ladybugDb.getFileCount(conn, repoId),
       ladybugDb.getSymbolCount(conn, repoId),
       ladybugDb.getLastIndexedAt(conn, repoId),
-      getCachedHealthSnapshot(repoId),
+      includeHealth ? getCachedHealthSnapshot(repoId) : Promise.resolve({ score: 0, components: { freshness: 0, coverage: 0, errorRate: 0, edgeQuality: 0 }, available: false }),
     ]);
-    const watcherHealth = getWatcherHealth(repoId);
-    const prefetchStats = getPrefetchStats(repoId);
-    const liveIndexStatus = await getDefaultLiveIndexCoordinator()
-      .getLiveStatus(repoId)
-      .catch((err) => {
-        logger.warn("Failed to get live index status", {
-          repoId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        return undefined;
-      });
+    const watcherHealth = includeHealth ? getWatcherHealth(repoId) : null;
+    const prefetchStats = includeHealth ? getPrefetchStats(repoId) : null;
+    const liveIndexStatus = includeLiveIndex
+      ? await getDefaultLiveIndexCoordinator()
+        .getLiveStatus(repoId)
+        .catch((err) => {
+          logger.warn("Failed to get live index status", {
+            repoId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return undefined;
+        })
+      : undefined;
     if (watcherHealth) {
       logWatcherHealthTelemetry({
         repoId,
@@ -358,6 +364,7 @@ export async function handleRepoStatus(
         eventsProcessed: watcherHealth.eventsProcessed,
       });
     }
+    if (prefetchStats) {
     logPrefetchTelemetry({
       repoId,
       hitRate: prefetchStats.hitRate,
@@ -365,6 +372,7 @@ export async function handleRepoStatus(
       avgLatencyReductionMs: prefetchStats.avgLatencyReductionMs,
       queueDepth: prefetchStats.queueDepth,
     });
+    }
 
     // Surface relevant memories if enabled (default: false)
     let memories: Awaited<ReturnType<typeof surfaceRelevantMemories>> | undefined;
@@ -395,7 +403,7 @@ export async function handleRepoStatus(
         watcherHealth === null
           ? "Watcher not active. Run 'sdl-mcp serve' or call sdl.index.refresh after edits."
           : undefined,
-      prefetchStats,
+      prefetchStats: prefetchStats ?? undefined,
       liveIndexStatus,
       memories,
     };

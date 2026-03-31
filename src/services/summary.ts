@@ -237,7 +237,7 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
 
   // Phase 2b: file-path keyword matching — find files whose names contain
   // query tokens, then add exported symbols from those files.
-  if (merged.length < 5) {
+  if (merged.length < 10) {
     try {
       const allFiles = await ladybugDb.getFilesByRepoLite(conn, repoId);
       const pathTokens = tokenize(query).filter((t) => t.length >= 3);
@@ -263,6 +263,14 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
     } catch { /* graceful degradation */ }
   }
 
+  // Kind-based boosting: prefer functions/classes/methods over variables/constants
+  // for natural-language questions like "How does X work?"
+  const KIND_BOOST: Record<string, number> = { function: 3, method: 3, class: 2, constructor: 2, interface: 1, type: 1, module: 0, variable: 0 };
+  merged.sort((a, b) => {
+    const boostA = KIND_BOOST[a.kind] ?? 0;
+    const boostB = KIND_BOOST[b.kind] ?? 0;
+    return boostB - boostA; // Higher boost first
+  });
   const results = merged.slice(0, SUMMARY_MAX_RESULTS);
   const symbolIds = results.map((row) => row.symbolId);
   const symbolIdSet = new Set(symbolIds);

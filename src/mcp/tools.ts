@@ -607,6 +607,8 @@ export const RepoRegisterResponseSchema = z.object({
 export const RepoStatusRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   surfaceMemories: z.boolean().optional().default(false),
+  /** "minimal" returns only core counts (fastest). "standard" includes health/watcher/prefetch. "full" adds live-index. */
+  detail: z.enum(["minimal", "standard", "full"]).optional().default("standard"),
 });
 
 export const RepoStatusResponseSchema = z.object({
@@ -616,7 +618,7 @@ export const RepoStatusResponseSchema = z.object({
   filesIndexed: z.number().int(),
   symbolsIndexed: z.number().int(),
   lastIndexedAt: z.string().nullable(),
-  healthScore: z.number().int().min(0).max(100),
+  healthScore: z.number().int().min(0).max(100).optional(),
   healthComponents: z.object({
     freshness: z.number().min(0).max(1),
     coverage: z.number().min(0).max(1),
@@ -624,7 +626,7 @@ export const RepoStatusResponseSchema = z.object({
     edgeQuality: z.number().min(0).max(1),
     callResolution: z.number().min(0).max(1).optional(),
   }),
-  healthAvailable: z.boolean(),
+  healthAvailable: z.boolean().optional(),
   /**
    * Watcher health states:
    * - null: server never started watchers for this repo
@@ -648,7 +650,8 @@ export const RepoStatusResponseSchema = z.object({
     })
     .nullable(),
   watcherNote: z.string().optional(),
-  prefetchStats: z.object({
+  prefetchStats: z
+    .object({
     enabled: z.boolean(),
     queueDepth: z.number().int().min(0),
     running: z.boolean(),
@@ -675,7 +678,7 @@ export const RepoStatusResponseSchema = z.object({
       }),
     ),
     deterministicFallback: z.boolean(),
-  }),
+  }).optional(),
   liveIndexStatus: z
     .object({
       enabled: z.boolean(),
