@@ -31,7 +31,7 @@ import {
 
 export const ActionSearchRequestSchema = z.object({
   query: z.string().min(1),
-  limit: z.number().int().min(1).max(25).default(10),
+  limit: z.number().int().min(1).max(50).default(10),
   includeSchemas: z.boolean().default(false),
   includeExamples: z.boolean().default(false),
 });

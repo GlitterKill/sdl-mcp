@@ -109,9 +109,12 @@ function generateTypedFunctionSummary(symbol: ExtractedSymbol): string | null {
 
   if (typedParams.length > 0) {
     const unique = [...new Set(typedParams)];
-    summary += ` from ${unique.join(" and ")}`;
+    // Only append param types if they add info beyond the function name
+    if (unique.length <= 2) {
+      summary += ` from ${unique.join(" and ")}`;
+    }
   }
-  if (hasReturn) {
+  if (hasReturn && returnType.toLowerCase() !== subject) {
     summary += ` returning ${returnType}`;
   }
   return summary;

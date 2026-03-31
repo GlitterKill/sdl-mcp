@@ -944,7 +944,7 @@ export async function searchSymbols(
     return rows.slice(0, safeLimit).map((row) => mapSearchSymbolRow(row, repoId));
   }
 
-  // Multi-term: run per-term queries, merge with match-count ranking
+  // Multi-term (including camelCase-split): run per-term queries, merge with match-count ranking
   const perTermResults = await Promise.all(
     terms.map((term) => searchSymbolsSingleTerm(conn, repoId, term, kinds)),
   );

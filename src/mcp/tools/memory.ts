@@ -258,7 +258,7 @@ export async function handleMemoryQuery(
     tags,
     symbolIds,
     staleOnly,
-    limit = 20,
+    limit = 10,
     sortBy = "recency",
   } = request;
 

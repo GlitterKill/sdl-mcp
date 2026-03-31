@@ -155,7 +155,7 @@ export async function queryMemories(
     sortBy?: "recency" | "confidence";
   },
 ): Promise<MemoryRow[]> {
-  const safeLimit = options.limit ?? 20;
+  const safeLimit = options.limit ?? 10;
   assertSafeInt(safeLimit, "limit");
 
   const useSymbolFilter = options.symbolIds && options.symbolIds.length > 0;
@@ -175,7 +175,7 @@ export async function queryMemories(
   }
 
   if (options.query) {
-    conditions.push("m.searchText CONTAINS $query");
+    conditions.push("lower(m.searchText) CONTAINS lower($query)");
     params.query = options.query;
   }
 

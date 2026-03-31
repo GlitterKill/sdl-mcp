@@ -210,8 +210,11 @@ function resolveTypeName(schema: z.ZodType): string {
       return "Record<string, unknown>";
     case "enum":
       return `enum(${(((schema as unknown as Record<string, unknown>).options as string[] | undefined) ?? Object.keys((def.entries ?? {}) as Record<string, unknown>)).join("|")})`;
-    case "literal":
-      return `literal(${JSON.stringify(def.value)})`;
+    case "literal": {
+      // Zod v4 stores value in def.values array, v3 in def.value
+      const litVal = def.value !== undefined ? def.value : Array.isArray(def.values) ? (def.values as unknown[])[0] : undefined;
+      return `literal(${JSON.stringify(litVal)})`;
+    }
     case "union":
       return (def.options as z.ZodType[])
         .map((o) => resolveTypeName(o))

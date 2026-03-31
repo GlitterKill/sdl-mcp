@@ -76,9 +76,15 @@ export async function computeTokenUsage(
  * Returns a shallow copy so the original object is not mutated,
  * preventing cache pollution when results are reused.
  */
+const MAX_RAW_CONTEXT_FILE_IDS = 10;
+
 export function attachRawContext<T>(result: T, hint: RawContextHint): T {
   if (result && typeof result === "object") {
-    return { ...result, _rawContext: hint } as T;
+    // Cap fileIds to avoid response bloat in workflow step results
+    const bounded = hint.fileIds && hint.fileIds.length > MAX_RAW_CONTEXT_FILE_IDS
+      ? { ...hint, fileIds: hint.fileIds.slice(0, MAX_RAW_CONTEXT_FILE_IDS) }
+      : hint;
+    return { ...result, _rawContext: bounded } as T;
   }
   return result;
 }

@@ -846,7 +846,7 @@ export type RetrievalEvidenceItem = z.infer<typeof RetrievalEvidenceItemSchema>;
 export const SymbolSearchResponseSchema = z.object({
   repoId: z.string().optional(),
   results: z.array(SymbolSearchResultSchema),
-  /** Alias for `results` — agents commonly expect `$0.symbols[0].symbolId` in chain refs. */
+  /** @deprecated Use results instead. Removed to reduce response size. */
   symbols: z.array(SymbolSearchResultSchema).optional(),
   truncation: z
     .object({

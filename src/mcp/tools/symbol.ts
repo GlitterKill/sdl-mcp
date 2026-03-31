@@ -63,7 +63,7 @@ export function sortByExactMatch<T extends { name: string }>(
 function computeRelevance(name: string, query: string): number {
   const nl = name.toLowerCase();
   const ql = query.toLowerCase();
-  if (nl === ql) return 1.0;
+  if (nl === ql) return 1;
   // Support glob wildcards: build*Slice matches buildSlice, buildGraphSlice
   if (ql.includes("*") || ql.includes("?")) {
     const escaped = ql.replace(/[.+^{}()|[\]]/g, "\\" + "&");
@@ -241,12 +241,12 @@ export async function handleSymbolSearch(
   // FP2: Add relevance scoring and filter out spurious matches
   const scoredResults = results.map(r => ({
     ...r,
-    relevance: computeRelevance(r.name, request.query),
+    relevance: Math.round(computeRelevance(r.name, request.query) * 100) / 100,
   }));
   const relevant = scoredResults.filter(r => r.relevance >= MIN_RELEVANCE_THRESHOLD);
   const hasExactMatch = relevant.some(r => r.name.toLowerCase() === request.query.toLowerCase());
-  // Keep `symbols` alias for backward compatibility (agents use $0.symbols[0].symbolId)
-  const response: SymbolSearchResponse = { results: relevant, symbols: relevant, exactMatchFound: hasExactMatch };
+  // symbols alias removed — use results (symbols was an exact duplicate wasting tokens)
+  const response: SymbolSearchResponse = { results: relevant, exactMatchFound: hasExactMatch };
   if (request.includeRetrievalEvidence) {
     if (useHybrid && retrievalEvidence) {
       (response as Record<string, unknown>).retrievalEvidence = relevant.map((r) => ({
