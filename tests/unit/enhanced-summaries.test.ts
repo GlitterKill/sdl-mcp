@@ -188,7 +188,7 @@ describe("enhanced heuristic summaries", () => {
         },
       });
       const result = generateSummary(symbol as any, "constructor(name: string, age: number) {}");
-      assert.strictEqual(result, "Constructs from string and number");
+      assert.strictEqual(result, null);
     });
 
     it("returns null for constructor with no params", () => {
@@ -233,6 +233,10 @@ describe("enhanced heuristic summaries", () => {
       assert.strictEqual(getSummaryQuality("test", "nn-adapted"), 0.5);
     });
 
+    it("returns 0.55 for heuristic-body source", () => {
+      assert.strictEqual(getSummaryQuality("test", "heuristic-body"), 0.55);
+    });
+
     it("returns 0.4 for heuristic-typed source", () => {
       assert.strictEqual(getSummaryQuality("test", "heuristic-typed"), 0.4);
     });
@@ -265,8 +269,8 @@ describe("enhanced heuristic summaries", () => {
       assert.strictEqual(classifySummarySource("test summary", false, "method"), "heuristic-typed");
     });
 
-    it("classifies heuristic-typed for constructors", () => {
-      assert.strictEqual(classifySummarySource("test summary", false, "constructor"), "heuristic-typed");
+    it("classifies heuristic-fallback for constructors", () => {
+      assert.strictEqual(classifySummarySource("test summary", false, "constructor"), "heuristic-fallback");
     });
 
     it("classifies heuristic-fallback for classes", () => {
@@ -279,6 +283,20 @@ describe("enhanced heuristic summaries", () => {
 
     it("classifies heuristic-fallback for types", () => {
       assert.strictEqual(classifySummarySource("test summary", false, "type"), "heuristic-fallback");
+    });
+
+    it("classifies body-derived summary for functions", () => {
+      assert.strictEqual(
+        classifySummarySource("Delegates to store.get for config", false, "function"),
+        "heuristic-body",
+      );
+    });
+
+    it("classifies body-derived summary for methods", () => {
+      assert.strictEqual(
+        classifySummarySource("Validates input, throws on failure", false, "method"),
+        "heuristic-body",
+      );
     });
 
     it("classifies unknown for null summary", () => {

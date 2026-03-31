@@ -56,6 +56,27 @@ describe("isNameOnlySummary", () => {
   it("handles empty summary", () => {
     assert.strictEqual(isNameOnlySummary("", "foo"), true);
   });
+
+  it("detects name-plus-types tautology via TYPE_NOISE", () => {
+    assert.strictEqual(
+      isNameOnlySummary("Builds tool presentation from string and Partial", "buildToolPresentation"),
+      true,
+    );
+  });
+
+  it("detects name-plus-return-type tautology", () => {
+    assert.strictEqual(
+      isNameOnlySummary("Gets config returning Record", "getConfig"),
+      true,
+    );
+  });
+
+  it("accepts behavioral summary for same function", () => {
+    assert.strictEqual(
+      isNameOnlySummary("Delegates to store.get for config", "getConfig"),
+      false,
+    );
+  });
 });
 
 describe("generateSummary", () => {
@@ -90,7 +111,7 @@ describe("generateSummary", () => {
     assert.strictEqual(result, null);
   });
 
-  it("returns type-based summary when typed params exist", () => {
+  it("returns null for function with empty body (no tautology)", () => {
     const symbol = makeSymbol({
       name: "buildSlice",
       signature: {
@@ -101,11 +122,27 @@ describe("generateSummary", () => {
         returns: ": GraphSlice",
       },
     });
+    // With empty body, behavioral analysis has no signals — returns null instead of tautology
     const result = generateSummary(symbol as any, "function buildSlice() {}");
-    assert.ok(result !== null, "should not be null");
-    assert.ok(result!.includes("Graph"), "should mention Graph type");
-    assert.ok(result!.includes("SliceBudget"), "should mention SliceBudget type");
-    assert.ok(result!.includes("GraphSlice"), "should mention return type");
+    assert.strictEqual(result, null);
+  });
+
+  it("generates behavioral summary when body has detectable patterns", () => {
+    const symbol = makeSymbol({
+      name: "buildSlice",
+      signature: {
+        params: [
+          { name: "graph", type: ": Graph" },
+          { name: "budget", type: ": SliceBudget" },
+        ],
+        returns: ": GraphSlice",
+      },
+    });
+    const body = "function buildSlice(graph, budget) {\n  return graph.nodes.map(n => n.card).filter(c => c.score > 0);\n}";
+    symbol.range = { startLine: 1, startCol: 0, endLine: 3, endCol: 1 };
+    const result = generateSummary(symbol as any, body);
+    assert.ok(result !== null, "should produce behavioral summary");
+    assert.ok(result!.includes("Transforms"), "Expected transform-based summary, got: " + result);
   });
 
   it("returns heuristic summary for class without JSDoc", () => {
@@ -126,7 +163,7 @@ describe("generateSummary", () => {
     assert.strictEqual(result, "Constant defining max size");
   });
 
-  it("deduplicates repeated param types", () => {
+  it("returns null for simple function with no body signals", () => {
     const symbol = makeSymbol({
       name: "merge",
       signature: {
@@ -136,9 +173,8 @@ describe("generateSummary", () => {
         ],
       },
     });
+    // No body signals = null (no tautological type restating)
     const result = generateSummary(symbol as any, "function merge() {}");
-    assert.ok(result !== null);
-    const count = (result!.match(/string/g) || []).length;
-    assert.strictEqual(count, 1, "should deduplicate param types");
+    assert.strictEqual(result, null);
   });
 });

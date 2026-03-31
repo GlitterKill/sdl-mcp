@@ -35,6 +35,393 @@ const SUFFIX_PATTERNS: &[(&str, &str)] = &[
 ];
 
 
+
+/// Maximum lines to scan in a function body for behavioral signals.
+const MAX_BODY_SCAN_LINES: usize = 200;
+
+/// Behavioral signals detected by scanning a function body.
+#[derive(Debug, Default)]
+struct BodySignals {
+    throws: bool,
+    validates: bool,
+    delegates: Option<String>,
+    iterates: bool,
+    is_async: bool,
+    has_network_io: bool,
+    has_file_io: bool,
+    has_db_io: bool,
+    transforms: bool,
+    aggregates: bool,
+    caches: bool,
+    sorts: bool,
+    merges: bool,
+    early_returns: usize,
+    switch_or_chain: bool,
+    recursion: bool,
+    emits_events: bool,
+    registers_listeners: bool,
+}
+
+/// Analyze a function body for behavioral patterns using regex/string matching.
+/// Skips comment lines. Caps scan at MAX_BODY_SCAN_LINES.
+fn analyze_body_patterns(symbol: &NativeParsedSymbol, file_content: &str) -> BodySignals {
+    let mut signals = BodySignals::default();
+
+    let all_lines: Vec<&str> = file_content.lines().collect();
+    let start = symbol.range.start_line as usize;
+    let end = symbol.range.end_line as usize;
+    if start >= all_lines.len() || end > all_lines.len() || start >= end {
+        return signals;
+    }
+
+    // Skip the first line (function signature) and cap at MAX_BODY_SCAN_LINES
+    let body_lines: Vec<&str> = all_lines[start..end.min(all_lines.len())]
+        .iter()
+        .skip(1)
+        .take(MAX_BODY_SCAN_LINES)
+        .copied()
+        .collect();
+    if body_lines.is_empty() {
+        return signals;
+    }
+
+    let mut in_block_comment = false;
+    let mut else_if_count = 0;
+    let mut call_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    let name_pattern = format!(r"\b{}\s*\(", regex::escape(&symbol.name));
+    let name_regex = Regex::new(&name_pattern).ok();
+
+    for raw_line in &body_lines {
+        let line = raw_line.trim();
+
+        // Skip comment lines
+        if in_block_comment {
+            if line.contains("*/") { in_block_comment = false; }
+            continue;
+        }
+        if line.starts_with("/*") {
+            in_block_comment = true;
+            if line.contains("*/") { in_block_comment = false; }
+            continue;
+        }
+        if line.starts_with("//") { continue; }
+        if line.is_empty() { continue; }
+
+        // Throws
+        static RE_THROW: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bthrow\s+").unwrap());
+        if RE_THROW.is_match(line) { signals.throws = true; }
+
+        // Validates: guard clause with throw or early return
+        static RE_IF_BANG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"if\s*\(!").unwrap());
+        static RE_THROW_KW: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bthrow\b").unwrap());
+        static RE_RETURN_KW: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\breturn\b").unwrap());
+        if RE_IF_BANG.is_match(line) && (RE_THROW_KW.is_match(line) || RE_RETURN_KW.is_match(line)) {
+            signals.validates = true;
+        }
+        static RE_IF_THROW_NEW: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"if\s*\(").unwrap());
+        static RE_THROW_NEW: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"throw\s+new\b").unwrap());
+        if RE_IF_THROW_NEW.is_match(line) && RE_THROW_NEW.is_match(line) {
+            signals.validates = true;
+        }
+
+        // Async
+        static RE_AWAIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bawait\s").unwrap());
+        if RE_AWAIT.is_match(line) { signals.is_async = true; }
+
+        // Iteration
+        static RE_ITER: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(\.forEach\s*\(|\.map\s*\(|\.filter\s*\(|\.reduce\s*\(|\bfor\s*\(|\bwhile\s*\(|\bfor\s+of\b|\bfor\s+in\b)").unwrap()
+        });
+        if RE_ITER.is_match(line) { signals.iterates = true; }
+
+        // Transform
+        static RE_TRANSFORM: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(\.map\s*\(|\.flatMap\s*\(|Object\.assign\s*\(|\{\.\.\.|Array\.from\s*\()").unwrap()
+        });
+        if RE_TRANSFORM.is_match(line) { signals.transforms = true; }
+
+        // Aggregation
+        static RE_AGG: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(\.reduce\s*\(|Math\.(min|max|abs)\s*\()").unwrap()
+        });
+        if RE_AGG.is_match(line) { signals.aggregates = true; }
+
+        // Sort
+        static RE_SORT: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(\.sort\s*\(|\.toSorted\s*\()").unwrap()
+        });
+        if RE_SORT.is_match(line) { signals.sorts = true; }
+
+        // Merge
+        static RE_MERGE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(Object\.assign\s*\(|(?i:deepMerge)\s*\(|\{\.\.\.[^,]*,\s*\.\.\.)" ).unwrap()
+        });
+        if RE_MERGE.is_match(line) { signals.merges = true; }
+
+        // Cache
+        static RE_CACHE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(?i)(cache\.(get|set|has)\s*\(|\.memoize\s*\(|new\s+WeakMap|new\s+WeakRef)").unwrap()
+        });
+        if RE_CACHE.is_match(line) { signals.caches = true; }
+
+        // Network I/O
+        static RE_NET: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(\bfetch\s*\(|axios\.|http\.request\s*\(|http\.get\s*\(|http\.post\s*\()").unwrap()
+        });
+        if RE_NET.is_match(line) { signals.has_network_io = true; }
+
+        // File I/O
+        static RE_FILE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(fs\.(readFile|writeFile|appendFile|unlink|mkdir|rmdir|existsSync|readFileSync|writeFileSync)|\b(readFileSync|writeFileSync)\s*\()").unwrap()
+        });
+        if RE_FILE.is_match(line) { signals.has_file_io = true; }
+
+        // DB I/O
+        static RE_DB: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(\b(db|pool|connection|client|conn)\.(query|execute)\s*\()").unwrap()
+        });
+        static RE_SQL: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(?i)\b(SELECT|INSERT|UPDATE|DELETE|MERGE|MATCH|CREATE)\b").unwrap()
+        });
+        if RE_DB.is_match(line) || (line.contains(".query(") && RE_SQL.is_match(line)) {
+            signals.has_db_io = true;
+        }
+
+        // Events emit
+        static RE_EMIT: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(\.emit\s*\(|\.dispatch\s*\(|\.trigger\s*\(|\.publish\s*\()").unwrap()
+        });
+        if RE_EMIT.is_match(line) { signals.emits_events = true; }
+
+        // Event listeners
+        static RE_LISTEN: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r#"(\.on\s*\(\s*['"`]|\.addEventListener\s*\(|\.subscribe\s*\()"#).unwrap()
+        });
+        if RE_LISTEN.is_match(line) { signals.registers_listeners = true; }
+
+        // Early returns
+        static RE_EARLY_RETURN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*return\b").unwrap());
+        if RE_EARLY_RETURN.is_match(raw_line) { signals.early_returns += 1; }
+
+        // Switch
+        static RE_SWITCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bswitch\s*\(").unwrap());
+        if RE_SWITCH.is_match(line) { signals.switch_or_chain = true; }
+
+        // Else-if chain
+        static RE_ELSE_IF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\belse\s+if\b").unwrap());
+        if RE_ELSE_IF.is_match(line) { else_if_count += 1; }
+
+        // Recursion
+        if let Some(ref re) = name_regex {
+            if re.is_match(line) { signals.recursion = true; }
+        }
+
+        // Track call targets for delegation detection
+        static RE_CALL: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(?:this\.)?([a-zA-Z_$][a-zA-Z0-9_$]*(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*)*)\s*\(").unwrap()
+        });
+        static RE_SKIP_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"^(function |const |if |while |for |switch )").unwrap()
+        });
+        if !RE_SKIP_PREFIX.is_match(line) {
+            if let Some(cap) = RE_CALL.captures(line) {
+                let target = cap.get(1).unwrap().as_str().to_string();
+                static SKIP_CALLS: LazyLock<std::collections::HashSet<&str>> = LazyLock::new(|| {
+                    [
+                        "console.log", "console.warn", "console.error",
+                        "Math.min", "Math.max", "Math.abs", "Math.floor", "Math.ceil", "Math.round",
+                        "Array.isArray", "Object.keys", "Object.values", "Object.entries",
+                        "JSON.stringify", "JSON.parse", "String", "Number", "Boolean",
+                        "parseInt", "parseFloat", "Promise.all", "Promise.resolve",
+                    ].into_iter().collect()
+                });
+                if !SKIP_CALLS.contains(target.as_str()) {
+                    *call_counts.entry(target).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+
+    // Switch/chain: flag if >2 else-if branches
+    if else_if_count > 2 { signals.switch_or_chain = true; }
+
+    // Delegation: if one call dominates a short body AND no more-specific
+    // behavioral signal was detected
+    let has_specific_signal =
+        signals.iterates || signals.transforms || signals.aggregates ||
+        signals.sorts || signals.merges || signals.caches ||
+        signals.has_network_io || signals.has_file_io || signals.has_db_io ||
+        signals.emits_events || signals.registers_listeners ||
+        signals.recursion || signals.validates;
+    if !call_counts.is_empty() && body_lines.len() <= 10 && !has_specific_signal {
+        let total_calls: usize = call_counts.values().sum();
+        if let Some((top_target, &top_count)) = call_counts.iter().max_by_key(|(_, v)| *v) {
+            if top_count >= 1 && total_calls <= 3 && top_target != &symbol.name {
+                signals.delegates = Some(top_target.clone());
+            }
+        }
+    }
+
+    signals
+}
+
+/// Build a behavioral summary for a function/method.
+/// Returns None if no behavioral signal is detected (better than a tautology).
+fn generate_behavioral_function_summary(symbol: &NativeParsedSymbol, file_content: &str) -> Option<String> {
+    let signals = analyze_body_patterns(symbol, file_content);
+
+    // Derive subject from name: split camelCase, drop the first word (verb)
+    let words = split_camel_case(&symbol.name);
+    let subject = if words.len() > 1 {
+        words[1..].join(" ").to_lowercase()
+    } else {
+        String::new()
+    };
+    let subject = if subject.is_empty() { None } else { Some(subject) };
+
+    // Template priority (first match wins)
+
+    // 1. Delegation
+    if let Some(ref target) = signals.delegates {
+        return Some(match &subject {
+            Some(s) => format!("Delegates to {} for {}", target, s),
+            None => format!("Delegates to {}", target),
+        });
+    }
+
+    // 2. Validation (but not if recursion/iteration/transform detected)
+    if signals.validates && !signals.iterates && !signals.transforms && !signals.recursion {
+        let throw_clause = if signals.throws { ", throws on failure" } else { "" };
+        return Some(match &subject {
+            Some(s) => format!("Validates {}{}", s, throw_clause),
+            None => format!("Validates input{}", throw_clause),
+        });
+    }
+
+    // 3. Network I/O
+    if signals.has_network_io {
+        return Some(match &subject {
+            Some(s) => format!("Fetches {} via network", s),
+            None => "Performs network request".to_string(),
+        });
+    }
+
+    // 4. File I/O
+    if signals.has_file_io {
+        return Some(match &subject {
+            Some(s) => format!("Reads/writes {} on disk", s),
+            None => "Performs filesystem I/O".to_string(),
+        });
+    }
+
+    // 5. DB I/O
+    if signals.has_db_io {
+        return Some(match &subject {
+            Some(s) => format!("Queries {} from database", s),
+            None => "Performs database query".to_string(),
+        });
+    }
+
+    // 6. Caching
+    if signals.caches {
+        return Some(match &subject {
+            Some(s) => format!("Caches {}", s),
+            None => "Memoizes result".to_string(),
+        });
+    }
+
+    // 7. Event emission
+    if signals.emits_events {
+        return Some(match &subject {
+            Some(s) => format!("Emits {} event", s),
+            None => "Emits event".to_string(),
+        });
+    }
+
+    // 8. Event subscription
+    if signals.registers_listeners {
+        return Some(match &subject {
+            Some(s) => format!("Subscribes to {}", s),
+            None => "Registers event listener".to_string(),
+        });
+    }
+
+    // 9. Aggregation (without transform)
+    if signals.aggregates && !signals.transforms {
+        return Some(match &subject {
+            Some(s) => format!("Aggregates {}", s),
+            None => "Aggregates data".to_string(),
+        });
+    }
+
+    // 10. Transform + iterate
+    if signals.transforms && signals.iterates {
+        return Some(match &subject {
+            Some(s) => format!("Transforms each {}", s),
+            None => "Transforms collection elements".to_string(),
+        });
+    }
+
+    // 11. Transform only
+    if signals.transforms && !signals.iterates {
+        return Some(match &subject {
+            Some(s) => format!("Transforms {}", s),
+            None => "Transforms data".to_string(),
+        });
+    }
+
+    // 12. Sort
+    if signals.sorts {
+        return Some(match &subject {
+            Some(s) => format!("Sorts {}", s),
+            None => "Sorts elements".to_string(),
+        });
+    }
+
+    // 13. Merge
+    if signals.merges {
+        return Some(match &subject {
+            Some(s) => format!("Merges {}", s),
+            None => "Merges data".to_string(),
+        });
+    }
+
+    // 14. Dispatch (switch/chain with many early returns)
+    if signals.switch_or_chain && signals.early_returns > 3 {
+        return Some(match &subject {
+            Some(s) => format!("Dispatches {} across branches", s),
+            None => "Routes by condition".to_string(),
+        });
+    }
+
+    // 15. Recursion
+    if signals.recursion {
+        return Some(match &subject {
+            Some(s) => format!("Recursively processes {}", s),
+            None => "Recursive computation".to_string(),
+        });
+    }
+
+    // 16. Iterate only
+    if signals.iterates && !signals.transforms {
+        return Some(match &subject {
+            Some(s) => format!("Iterates over {}", s),
+            None => "Iterates over elements".to_string(),
+        });
+    }
+
+    // 17. Throws (standalone)
+    if signals.throws {
+        if let Some(ref s) = subject {
+            return Some(format!("Validates {}, throws on failure", s));
+        }
+    }
+
+    // No behavioral signal detected
+    None
+}
+
 /// Generate a one-line summary for a symbol.
 ///
 /// Mirrors TypeScript `generateSummary` in `summaries.ts`.
@@ -66,7 +453,8 @@ pub fn generate_summary(symbol: &NativeParsedSymbol, file_content: &str, languag
     // Dispatch to per-kind generators for non-function/method symbols.
     match symbol.kind.as_str() {
         "function" | "method" => {
-            // Fall through to existing typed function summary logic below
+            return generate_behavioral_function_summary(symbol, file_content)
+                .unwrap_or_default();
         }
         "class" => {
             if let Some(s) = generate_class_summary(symbol) { return s; }
@@ -95,68 +483,8 @@ pub fn generate_summary(symbol: &NativeParsedSymbol, file_content: &str, languag
         _ => return String::new(),
     }
 
-    let has_typed_params = symbol
-        .signature
-        .as_ref()
-        .and_then(|s| s.params.as_ref())
-        .map_or(false, |params| params.iter().any(|p| p.type_name.is_some()));
-
-    let has_return = symbol.kind == "function"
-        && symbol
-            .signature
-            .as_ref()
-            .and_then(|s| s.returns.as_ref())
-            .map_or(false, |r| {
-                let simple = extract_simple_type(r);
-                !simple.is_empty() && simple != "void" && simple != "unknown" && simple != "any"
-            });
-
-    if !has_typed_params && !has_return {
-        return String::new();
-    }
-
-    let name_words = split_camel_case(&symbol.name).join(" ");
-    let capitalized = capitalize_first(&name_words);
-    let mut summary = capitalized;
-
-    // Add typed param context (use type annotations, not param names)
-    if let Some(ref sig) = symbol.signature {
-        if let Some(ref params) = sig.params {
-            let mut unique: Vec<String> = Vec::new();
-            for p in params {
-                if let Some(ref tn) = p.type_name {
-                    let simple = extract_simple_type(tn);
-                    if !simple.is_empty()
-                        && simple != "unknown"
-                        && simple != "any"
-                        && simple != "object"
-                        && simple != "Object"
-                        && !unique.contains(&simple)
-                    {
-                        unique.push(simple);
-                    }
-                }
-            }
-            if !unique.is_empty() {
-                summary.push_str(" from ");
-                summary.push_str(&unique.join(" and "));
-            }
-        }
-
-        // Add return type
-        if symbol.kind == "function" {
-            if let Some(ref returns) = sig.returns {
-                let simple_type = extract_simple_type(returns);
-                if !simple_type.is_empty() && simple_type != "void" && simple_type != "unknown" && simple_type != "any" {
-                    summary.push_str(" returning ");
-                    summary.push_str(&simple_type);
-                }
-            }
-        }
-    }
-
-    summary
 }
+
 
 /// Check whether a symbol has a doc comment (without generating the summary).
 pub fn has_doc_comment(symbol: &NativeParsedSymbol, file_content: &str, language: &str) -> bool {
@@ -475,62 +803,6 @@ fn split_camel_case(s: &str) -> Vec<String> {
     result
 }
 
-fn capitalize_first(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(first) => {
-            let upper: String = first.to_uppercase().collect();
-            upper + chars.as_str()
-        }
-    }
-}
-fn extract_simple_type(type_annotation: &str) -> String {
-    let cleaned = type_annotation.trim_start_matches(':').trim_start();
-
-    // Handle Array<T> -> T[] before generic removal
-    if cleaned.contains("Array<") {
-        static RE_ARRAY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Array<([^>]+)>").unwrap());
-        if let Some(caps) = RE_ARRAY.captures(cleaned) {
-            if let Some(inner) = caps.get(1) {
-                return format!("{}[]", inner.as_str().trim());
-            }
-        }
-    }
-    // Handle T[] syntax
-    if cleaned.ends_with("[]") {
-        return cleaned.to_string();
-    }
-
-    // Remove generics
-    static RE_GENERICS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
-    let cleaned = RE_GENERICS.replace_all(cleaned, "").trim().to_string();
-
-    if cleaned.contains(" | ") {
-        let types: Vec<&str> = cleaned.split(" | ").map(|t| t.trim()).collect();
-        return types.first().unwrap_or(&"").to_string();
-    }
-
-    if cleaned.contains('&') {
-        let types: Vec<&str> = cleaned.split('&').map(|t| t.trim()).collect();
-        return types.first().unwrap_or(&"").to_string();
-    }
-
-    if cleaned.contains("Record<") {
-        return "Object".to_string();
-    }
-
-    if cleaned.contains("Map<") {
-        return "Map".to_string();
-    }
-
-    if cleaned.contains("Set<") {
-        return "Set".to_string();
-    }
-
-    cleaned
-}
-
 fn split_snake_case(name: &str) -> String {
     name.to_lowercase()
         .split('_')
@@ -642,18 +914,9 @@ fn generate_variable_summary(symbol: &NativeParsedSymbol) -> Option<String> {
     None
 }
 
-fn generate_constructor_summary(symbol: &NativeParsedSymbol) -> Option<String> {
-    if let Some(ref sig) = symbol.signature {
-        if let Some(ref params) = sig.params {
-            let typed: Vec<&str> = params.iter()
-                .filter_map(|p| p.type_name.as_deref())
-                .filter(|t| *t != "any" && *t != "unknown")
-                .collect();
-            if typed.is_empty() { return None; }
-            let type_context = typed.join(" and ");
-            return Some(format!("Constructs from {}", type_context));
-        }
-    }
+fn generate_constructor_summary(_symbol: &NativeParsedSymbol) -> Option<String> {
+    // "Constructs from TypeA and TypeB" is pure type restating — return None.
+    // The types are already on the card's signature.
     None
 }
 
@@ -755,7 +1018,7 @@ mod tests {
             NativeSymbolSignatureParam { name: "age".to_string(), type_name: Some("number".to_string()) },
         ]);
         let result = generate_constructor_summary(&s);
-        assert_eq!(result, Some("Constructs from string and number".to_string()));
+        assert_eq!(result, None);
     }
 
     #[test]

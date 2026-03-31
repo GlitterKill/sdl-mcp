@@ -24,8 +24,8 @@ describe("sortByExactMatch", () => {
   });
 });
 
-// Fix #5: Auto-generated summary quality
-describe("generateSummary verbify improvements", () => {
+// Fix #5: Auto-generated summary quality (behavioral summaries)
+describe("generateSummary behavioral improvements", () => {
   const makeSymbol = (name, params, returns) => ({
     name,
     kind: "function",
@@ -37,58 +37,40 @@ describe("generateSummary verbify improvements", () => {
     },
   });
 
-  it("generates Converts to for toXxx functions", () => {
+  it("returns null for functions with empty body (no tautology)", () => {
     const summary = generateSummary(
-      makeSymbol("toAgentGraphSlice", [{ name: "slice", type: ": GraphSlice" }]),
+      makeSymbol("buildSlice", [{ name: "graph", type: ": Graph" }]),
       "",
     );
-    assert.ok(summary, "summary should not be null");
-    assert.ok(summary.startsWith("Converts to"), "Expected Converts to, got: " + summary);
+    // With no body to analyze, behavioral generator returns null (better than tautology)
+    assert.strictEqual(summary, null);
   });
 
-  it("generates Builds for build functions", () => {
-    const summary = generateSummary(
-      makeSymbol("buildToolPresentation", [{ name: "name", type: ": string" }]),
-      "",
-    );
-    assert.ok(summary, "summary should not be null");
-    assert.ok(summary.startsWith("Builds"), "Expected Builds, got: " + summary);
+  it("detects validation patterns in function body", () => {
+    const body = "function validateInput(input: string) {\n  if (!input) throw new Error(\"missing\");\n  return input.trim();\n}";
+    const sym = makeSymbol("validateInput", [{ name: "input", type: ": string" }]);
+    sym.range = { startLine: 1, startCol: 0, endLine: 4, endCol: 1 };
+    const summary = generateSummary(sym, body);
+    assert.ok(summary, "should not be null");
+    assert.ok(summary.startsWith("Validates"), "Expected Validates, got: " + summary);
   });
 
-  it("generates Logs warning for warn functions", () => {
-    const summary = generateSummary(
-      makeSymbol("warnUser", [{ name: "message", type: ": string" }]),
-      "",
-    );
-    assert.ok(summary, "summary should not be null");
-    assert.ok(summary.startsWith("Logs warning for"), "Expected Logs warning for, got: " + summary);
+  it("detects iteration patterns in function body", () => {
+    const body = "function processItems(items: Item[]) {\n  for (const item of items) {\n    item.process();\n  }\n}";
+    const sym = makeSymbol("processItems", [{ name: "items", type: ": Item[]" }]);
+    sym.range = { startLine: 1, startCol: 0, endLine: 5, endCol: 1 };
+    const summary = generateSummary(sym, body);
+    assert.ok(summary, "should not be null");
+    assert.ok(summary.startsWith("Iterates over"), "Expected Iterates over, got: " + summary);
   });
 
-  it("generates Handles for handle functions", () => {
-    const summary = generateSummary(
-      makeSymbol("handleRequest", [{ name: "req", type: ": Request" }]),
-      "",
-    );
-    assert.ok(summary, "summary should not be null");
-    assert.ok(summary.startsWith("Handles"), "Expected Handles, got: " + summary);
-  });
-
-  it("generates Parses for parse functions", () => {
-    const summary = generateSummary(
-      makeSymbol("parseConfig", [{ name: "raw", type: ": string" }]),
-      "",
-    );
-    assert.ok(summary, "summary should not be null");
-    assert.ok(summary.startsWith("Parses"), "Expected Parses, got: " + summary);
-  });
-
-  it("generates Performs beam for beam functions", () => {
-    const summary = generateSummary(
-      makeSymbol("beamSearch", [{ name: "graph", type: ": Graph" }]),
-      "",
-    );
-    assert.ok(summary, "summary should not be null");
-    assert.ok(summary.startsWith("Performs beam"), "Expected Performs beam, got: " + summary);
+  it("detects transform patterns in function body", () => {
+    const body = "function mapItems(items: Item[]) {\n  return items.map(i => i.name);\n}";
+    const sym = makeSymbol("mapItems", [{ name: "items", type: ": Item[]" }]);
+    sym.range = { startLine: 1, startCol: 0, endLine: 3, endCol: 1 };
+    const summary = generateSummary(sym, body);
+    assert.ok(summary, "should not be null");
+    assert.ok(summary.includes("Transforms"), "Expected Transforms, got: " + summary);
   });
 
   it("uses JSDoc when available over heuristic", () => {
