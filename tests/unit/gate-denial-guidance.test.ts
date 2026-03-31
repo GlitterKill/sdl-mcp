@@ -20,7 +20,7 @@ const BASE_POLICY = {
 /** Minimal SymbolRow-compatible object used as symbolHint in tests. */
 function makeSymbol(name: string, params?: Array<{ name: string }>) {
   return {
-    id: "sym-test",
+    symbol_id: "sym-test",
     repo_id: "repo-test",
     file_id: 1,
     name,

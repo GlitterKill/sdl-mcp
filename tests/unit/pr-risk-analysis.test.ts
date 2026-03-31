@@ -176,14 +176,15 @@ describe("PR Risk Analysis Tool", () => {
     });
   });
 
-  it("returns impactedSymbols array", async () => {
+  it("returns changedSymbols with items array", async () => {
     const response = await handlePRRiskAnalysis({
       repoId,
       fromVersion: "v1",
       toVersion: "v2",
     });
 
-    assert.ok(Array.isArray(response.analysis.impactedSymbols));
+    assert.ok(response.analysis.changedSymbols, "Expected changedSymbols in analysis");
+    assert.ok(Array.isArray(response.analysis.changedSymbols.items), "Expected changedSymbols.items array");
   });
 
   it("returns evidence collection", async () => {

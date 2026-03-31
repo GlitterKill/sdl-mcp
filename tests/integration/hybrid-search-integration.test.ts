@@ -182,7 +182,7 @@ describe("Stage 1 wiring verification", () => {
   it("handleSymbolSearch populates retrievalEvidence", () => {
     const src = fs.readFileSync(path.join(repoRoot, "src/mcp/tools/symbol.ts"), "utf8");
     assert.ok(src.includes("includeRetrievalEvidence"), "missing evidence check");
-    assert.ok(src.includes("retrievalEvidence = results.map"), "missing evidence assignment");
+    assert.ok(src.includes("retrievalEvidence = relevant.map"), "missing evidence assignment");
   });
 
   it("handleSymbolSearch logs hybrid telemetry fields", () => {

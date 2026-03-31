@@ -164,15 +164,15 @@ describe("Agent Planner", () => {
   describe("Context Selection", () => {
     it("selects focus symbols from options", async () => {
       const task = createTask("debug", {
-        options: { focusSymbols: ["symbol1", "symbol2", "symbol3"] },
+        options: { focusSymbols: ["a0a1b2c3d4e5f6a7", "b1b2c3d4e5f6a7a8", "c2c3d4e5f6a7a8b9"] },
       });
       const context = await planner.selectContext(task);
 
       assert.strictEqual(context.length, 3);
       assert.deepStrictEqual(context, [
-        "symbol:symbol1",
-        "symbol:symbol2",
-        "symbol:symbol3",
+        "symbol:a0a1b2c3d4e5f6a7",
+        "symbol:b1b2c3d4e5f6a7a8",
+        "symbol:c2c3d4e5f6a7a8b9",
       ]);
     });
 
@@ -189,14 +189,14 @@ describe("Agent Planner", () => {
     it("selects both symbols and paths when provided", async () => {
       const task = createTask("debug", {
         options: {
-          focusSymbols: ["symbol1"],
+          focusSymbols: ["a0a1b2c3d4e5f6a7"],
           focusPaths: ["file1.ts"],
         },
       });
       const context = await planner.selectContext(task);
 
       assert.strictEqual(context.length, 2);
-      assert.deepStrictEqual(context, ["symbol:symbol1", "file:file1.ts"]);
+      assert.deepStrictEqual(context, ["symbol:a0a1b2c3d4e5f6a7", "file:file1.ts"]);
     });
 
     it("returns empty context when no options provided", async () => {
