@@ -375,8 +375,23 @@ export async function handleCodeNeedWindow(
     );
 
     if (!skeletonResult) {
+      // Distinguish between symbol-not-found vs file-not-found for clearer error messages
+      const skConn = await getLadybugConn();
+      const skSymbol = await ladybugDb.getSymbol(skConn, request.symbolId);
+      if (!skSymbol) {
+        throw new NotFoundError(
+          `Symbol not found: ${request.symbolId}. Use sdl.symbol.search to find valid symbol IDs.`,
+        );
+      }
+      const skFiles = await ladybugDb.getFilesByIds(skConn, [skSymbol.fileId]);
+      const skFile = skFiles.get(skSymbol.fileId);
+      if (!skFile) {
+        throw new NotFoundError(
+          `File record missing for symbol ${skSymbol.name} (${request.symbolId}). Try re-indexing with sdl.index.refresh.`,
+        );
+      }
       throw new NotFoundError(
-        `File not found on disk for symbol: ${request.symbolId}`,
+        `File not found on disk: ${skFile.relPath}. The file may have been moved or deleted since last indexing.`,
       );
     }
 
@@ -416,6 +431,21 @@ export async function handleCodeNeedWindow(
       truncation: skeletonTruncation,
     };
 
+    
+    // FP-2: Check for missed identifiers in downgraded responses (matching getHotPath behavior)
+    if (request.identifiersToFind && request.identifiersToFind.length > 0) {
+      const skeletonCode = skeletonResult.skeleton;
+      const missed = request.identifiersToFind.filter(
+        (id) => !skeletonCode.includes(id),
+      );
+      if (missed.length > 0) {
+        Object.assign(response, {
+          missedIdentifiers: missed,
+          missedIdentifierHint:
+            "Identifiers not found in downgraded skeleton. Use sdl.symbol.search to find the symbol containing these identifiers, then call sdl.code.getHotPath on that symbol.",
+        });
+      }
+    }
     return attachRawContext(response, { fileIds: [symbol.fileId] });
   }
 

@@ -224,6 +224,34 @@ export async function buildSlice(
   const { retrievalEvidence, hybridSearchItems } = startNodeResult;
   const startSymbols = startNodes.map((node) => node.symbolId);
 
+  // Validate that at least some entry symbols resolved when explicitly provided
+  if (
+    request.entrySymbols &&
+    request.entrySymbols.length > 0 &&
+    startSymbols.length === 0
+  ) {
+    // Reuse existing conn (already resolved above)
+    // Try to find close matches for the failed entry symbols
+    const suggestions: string[] = [];
+    for (const entryId of request.entrySymbols.slice(0, 3)) {
+      const sym = await ladybugDb.getSymbol(conn, entryId);
+      if (!sym) {
+        suggestions.push(`"${entryId.slice(0, 16)}..." not found`);
+      }
+    }
+    const hint = suggestions.length > 0
+      ? ` (${suggestions.join(", ")})`
+      : "";
+    logger.warn("slice.build: none of the provided entrySymbols resolved to valid symbols", {
+      repoId: request.repoId,
+      entrySymbols: request.entrySymbols,
+    });
+    // Throw an error instead of silently returning an empty slice
+    throw new Error(
+      `None of the provided entrySymbols were found in the index${hint}. Verify symbol IDs with sdl.symbol.search first.`,
+    );
+  }
+
   let clusterContext:
     | { entryClusterIds: string[]; relatedClusterIds: string[] }
     | undefined;

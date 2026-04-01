@@ -364,6 +364,9 @@ function countActiveSignals(signals: BodySignals): number {
   if (signals.registersListeners) count++;
   return count;
 }
+// Built-in method names filtered from delegation summaries to avoid misleading output
+const BUILTIN_DELEGATES = new Set(["test", "has", "get", "set", "push", "pop", "delete", "add", "next", "call", "apply", "bind", "toString", "valueOf", "then", "catch", "finally", "exec", "match", "replace", "split", "join", "includes", "indexOf", "slice", "keys", "values", "entries", "log", "warn", "error", "info", "debug"]);
+
 function generateBehavioralFunctionSummary(
   symbol: ExtractedSymbol,
   fileContent: string,
@@ -426,8 +429,8 @@ function generateBehavioralFunctionSummary(
   }
     // Template priority (first match wins):
 
-  // 1. Delegation
-  if (signals.delegates) {
+  // 1. Delegation (filter out common built-in method names that produce misleading summaries)
+  if (signals.delegates && !BUILTIN_DELEGATES.has(signals.delegates)) {
     return subject
       ? `Delegates to ${signals.delegates} for ${subject}`
       : `Delegates to ${signals.delegates}`;
@@ -506,6 +509,24 @@ function generateBehavioralFunctionSummary(
   // 13. Throws without validation context
   if (signals.throws && subject) {
     return `Validates ${subject}, throws on failure`;
+  }
+
+  // DF-1: For functions with typed params/returns, include type info instead of null
+  if (symbol.signature?.params && symbol.signature.params.length > 0) {
+    const paramTypes = symbol.signature.params
+      .filter(p => p.type && p.type !== ": any" && p.type !== ": unknown")
+      .map(p => `${p.name}${p.type}`)
+      .slice(0, 3);
+    const returnInfo = symbol.signature.returns && symbol.signature.returns !== "void"
+      ? ` → ${symbol.signature.returns}`
+      : "";
+    if (paramTypes.length > 0 || returnInfo) {
+      const desc = subject || words.join(" ").toLowerCase();
+      if (desc && desc.length >= 3) {
+        const paramStr = paramTypes.length > 0 ? ` (${paramTypes.join(", ")})` : "";
+        return `${desc.charAt(0).toUpperCase() + desc.slice(1)}${paramStr}${returnInfo}`;
+      }
+    }
   }
 
   // NO MATCH: return null (better than a tautological name+type restatement)

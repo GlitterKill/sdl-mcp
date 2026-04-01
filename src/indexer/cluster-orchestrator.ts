@@ -318,6 +318,33 @@ function generateClusterLabel(
           return topDir[0];
         }
       }
+      // DF-2: For large clusters, try harder to produce a directory-based label
+      // "supports + 1798 related" is uninformative — use the dominant directory instead
+      const memberFilesFallback = members
+        .map((m) => symbolById.get(m.symbolId))
+        .filter((s): s is { name: string; fileId: string } => Boolean(s))
+        .map((s) => filesById.get(s.fileId)?.relPath ?? "")
+        .filter(Boolean);
+      if (memberFilesFallback.length > 0) {
+        // Count directory occurrences at depth 2 (e.g., src/graph, src/mcp)
+        const depth2Counts = new Map<string, number>();
+        for (const f of memberFilesFallback) {
+          const parts = f.split("/");
+          const d2 = parts.length >= 3 ? parts.slice(0, 3).join("/") : parts.slice(0, -1).join("/");
+          if (d2) depth2Counts.set(d2, (depth2Counts.get(d2) ?? 0) + 1);
+        }
+        const sortedDirs2 = [...depth2Counts.entries()].sort((a, b) => b[1] - a[1]);
+        if (sortedDirs2.length > 0 && sortedDirs2[0][1] >= memberFilesFallback.length * 0.2) {
+          const topDirs = sortedDirs2
+            .filter(([, count]) => count >= memberFilesFallback.length * 0.1)
+            .slice(0, 3)
+            .map(([dir]) => dir);
+          if (topDirs.length <= 2) {
+            return topDirs.join(" + ");
+          }
+          return `${topDirs[0]} + ${topDirs.length - 1} more`;
+        }
+      }
       return `${sorted[0][0]} + ${sorted.length - 1} related`;
     }
   }

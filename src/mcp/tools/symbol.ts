@@ -140,11 +140,15 @@ export function computeRelevance(name: string, query: string): number {
     const matchCount = queryParts.filter(qp => nameParts.some(np => np.includes(qp) || qp.includes(np))).length;
     const ratio = matchCount / queryParts.length;
     if (matchCount === queryParts.length) return 0.8;
-    if (matchCount > 0) {
-      // Scale score more steeply: require majority of subwords to match for a decent score.
-      // For 1/3 match: 0.15 + 0.15*(1/3) = 0.2 (below threshold).
-      // For 2/3 match: 0.15 + 0.15*(2/3) = 0.25, plus trigram boost could push higher.
-      let score = 0.15 + 0.15 * ratio;
+    // Also check reverse: if ALL nameParts appear in queryParts (name is a subset of query)
+    // e.g. query "buildGraphSlice" -> [build,graph,slice], name "buildSlice" -> [build,slice]
+    // nameMatchCount = 2/2 = 1.0 -> score 0.7
+    const nameMatchCount = nameParts.filter(np => queryParts.some(qp => qp.includes(np) || np.includes(qp))).length;
+    const nameRatio = nameMatchCount / nameParts.length;
+    if (nameRatio === 1 && nameParts.length >= 2) return 0.7;
+    if (matchCount > 0 || nameMatchCount > 0) {
+      const bestRatio = Math.max(ratio, nameRatio);
+      let score = 0.15 + 0.25 * bestRatio;
       // Trigram boost: if the overall strings are similar, give a bump
       const triSim = trigramSimilarity(nl, ql);
       score += triSim * 0.35;
@@ -267,6 +271,42 @@ export async function handleSymbolSearch(
 
   // Prioritize exact name matches over fuzzy/partial matches
   results = sortByExactMatch(results, request.query);
+
+  // FP-5: For wildcard queries or when no exact match, sort by importance metrics
+  // This ensures "*" queries return the most important symbols rather than arbitrary order
+  const isWildcard = request.query === "*" || request.query.includes("*") || request.query.includes("?");
+  if (isWildcard && results.length > 1) {
+    // Fetch metrics for top results to sort by importance
+    const topIds = results.slice(0, Math.min(results.length, 100)).map(r => r.symbolId);
+    try {
+      const metrics = await ladybugDb.getMetricsBySymbolIds(conn, topIds);
+      const symbols = await ladybugDb.getSymbolsByIds(conn, topIds);
+      results.sort((a, b) => {
+        const aMetrics = metrics.get(a.symbolId);
+        const bMetrics = metrics.get(b.symbolId);
+        const aSym = symbols.get(a.symbolId);
+        const bSym = symbols.get(b.symbolId);
+        // Exported symbols first
+        const aExported = aSym?.exported ? 1 : 0;
+        const bExported = bSym?.exported ? 1 : 0;
+        if (aExported !== bExported) return bExported - aExported;
+        // Then by fan-in (higher = more important)
+        const aFanIn = aMetrics?.fanIn ?? 0;
+        const bFanIn = bMetrics?.fanIn ?? 0;
+        if (aFanIn !== bFanIn) return bFanIn - aFanIn;
+        // Then by test coverage
+        const aTests = aMetrics?.churn30d ?? 0;
+        const bTests = bMetrics?.churn30d ?? 0;
+        return bTests - aTests;
+      });
+    } catch (sortErr) {
+      // Graceful degradation: keep original order if metrics unavailable
+      logger.debug("wildcard sort: metrics fetch failed, keeping original order", {
+        repoId: request.repoId,
+        error: sortErr instanceof Error ? sortErr.message : String(sortErr),
+      });
+    }
+  }
 
   // Filter by kinds if specified (after semantic reranking, so it applies to both paths)
   if (request.kinds && request.kinds.length > 0) {

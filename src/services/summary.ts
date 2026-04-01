@@ -330,7 +330,34 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
 
     return a.symbolId.localeCompare(b.symbolId);
   });
+
+  // FP-3: Boost symbols whose file path matches query terms for better relevance
+  const queryTermsForPath = tokenize(query).filter(t => !TASK_TEXT_STOP_WORDS.has(t) && t.length >= 3);
+  if (queryTermsForPath.length > 0) {
+    const pathBoost = new Map<string, number>();
+    for (const row of merged) {
+      const sym = mergedSymbolsMap.get(row.symbolId);
+      const file = sym ? mergedFilesMap.get(sym.fileId) : undefined;
+      if (file) {
+        const pathLower = file.relPath.toLowerCase();
+        const pathMatchCount = queryTermsForPath.filter(t => pathLower.includes(t)).length;
+        if (pathMatchCount > 0) {
+          pathBoost.set(row.symbolId, 0.3 * (pathMatchCount / queryTermsForPath.length));
+        }
+      }
+    }
+    if (pathBoost.size > 0) {
+      merged.sort((a, b) => {
+        const aBoost = pathBoost.get(a.symbolId) ?? 0;
+        const bBoost = pathBoost.get(b.symbolId) ?? 0;
+        if (aBoost !== bBoost) return bBoost - aBoost;
+        return 0; // preserve compareTaskScopedCandidates ordering for equal boosts
+      });
+    }
+  }
+
   const results = merged.slice(0, SUMMARY_MAX_RESULTS);
+
   const symbolIds = results.map((row) => row.symbolId);
   const symbolIdSet = new Set(symbolIds);
 
