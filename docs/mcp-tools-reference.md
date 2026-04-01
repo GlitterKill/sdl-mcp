@@ -18,9 +18,9 @@
 
 Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
 
-- `32` SDL action tools (`31` gateway-routable + `1` flat-only)
+- `32` flat SDL action tools (`31` gateway-routable + `1` flat-only)
 - `2` universal tools: `sdl.action.search` and `sdl.info`
-- optional Code Mode tools: `sdl.manual`, `sdl.context`, and `sdl.workflow`
+- optional Code Mode-only tools: `sdl.manual`, `sdl.context`, and `sdl.workflow`
 
 Flat mode, gateway mode, and the CLI `tool` command all route into the same handler layer.
 
@@ -58,6 +58,20 @@ Return unified runtime, config, logging, Ladybug, and native-addon status.
 Search the SDL action catalog and return the best matching actions, examples, and schema summaries. Use this to discover the right SDL action before calling `sdl.manual`, `sdl.context`, `sdl.workflow`, or the direct flat or gateway tool surfaces.
 
 See the [Code Mode deep dive](./feature-deep-dives/code-mode.md) for end-to-end discovery and chaining workflows.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | `string` | Yes | Search query |
+| `limit` | `integer` | No | Max results to return (1-50, default: 10) |
+| `offset` | `integer` | No | Skip the first N ranked results (min: 0) |
+| `includeSchemas` | `boolean` | No | Include compact schema summaries |
+| `includeExamples` | `boolean` | No | Include example calls |
+
+**Response:** `{ actions, total, hasMore, offset, limit, tokenEstimate }`
+
+Use `offset` with `limit` to page through large result sets such as `query: "*"`.
 
 ---
 
@@ -464,7 +478,7 @@ Build a task-scoped graph slice. `taskText` alone is sufficient — it triggers 
 | `knownCardEtags` | `Record<string, string>` | No | ETags for cards already held; unchanged return as `cardRefs` |
 | `cardDetail` | `"minimal" \| "signature" \| "deps" \| "compact" \| "full"` | No | Card detail level (leave unset for mixed) |
 | `adaptiveDetail` | `boolean` | No | Enable adaptive detail level selection |
-| `wireFormat` | `"standard" \| "compact"` | No | Wire format (default: compact) |
+| `wireFormat` | `"standard" \| "readable" \| "compact" \| "agent"` | No | Wire format (default: compact) |
 | `wireFormatVersion` | `1 \| 2 \| 3` | No | Wire format version (default: 2) |
 | `minCallConfidence` | `number` | No | Filter call edges below this confidence threshold (0-1) |
 | `includeResolutionMetadata` | `boolean` | No | Include call resolution metadata in edge data |
@@ -696,9 +710,11 @@ Request raw code for a symbol. This is policy-gated and should be used as a last
 | `maxTokens` | `integer` | No | Max tokens (min: 1, clamped to policy max: 1400) |
 | `sliceContext` | `object` | No | Slice context for approval scoring |
 
-`sliceContext` fields: `taskText` (required), `stackTrace`, `failingTestPath`, `editedFiles`, `entrySymbols`, `budget`.
+`sliceContext` fields: `taskText`, `stackTrace`, `failingTestPath`, `editedFiles`, `entrySymbols`, `budget`.
 
 The `expectedLines` and `maxTokens` values are clamped to the effective policy limits, so requests exceeding policy caps are silently reduced rather than rejected.
+
+Approval can proceed when one or more requested identifiers match the candidate window. Prefer a short list of precise identifiers instead of long all-or-nothing lists.
 
 **Response (approved):** `{ approved: true, symbolId, file, range, code, whyApproved, estimatedTokens, downgradedFrom?, matchedIdentifiers?, matchedLineNumbers?, truncation? }`
 
@@ -1046,7 +1062,7 @@ Store or update a development memory with optional symbol and file links. Memori
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `repoId` | `string` | Yes | Repository identifier |
-| `type` | `"decision" \| "bugfix" \| "task_context"` | Yes | Memory type |
+| `type` | `"decision" \| "bugfix" \| "task_context" \| "pattern" \| "convention" \| "architecture" \| "performance" \| "security"` | Yes | Memory type |
 | `title` | `string` | Yes | Short title (1-120 chars) |
 | `content` | `string` | Yes | Memory content (1-50,000 chars) |
 | `tags` | `string[]` | No | Categorization tags (max 20) |
@@ -1176,6 +1192,7 @@ Get cumulative token usage statistics and savings metrics for the current sessio
 **Response includes:**
 
 - Token usage counters, savings estimates, and compression ratios
+- `savedTokens` and `overallSavingsPercent` may be negative when SDL overhead exceeds the raw-equivalent estimate for that workload
 - Per-tool breakdowns when available
 - Session-scoped and/or historical aggregations depending on `scope`
 
@@ -1191,7 +1208,7 @@ Get cumulative token usage statistics and savings metrics for the current sessio
 
 ---
 
-## Code Mode (3 tools)
+## Code Mode (4 tools)
 
 ### `sdl.context`
 

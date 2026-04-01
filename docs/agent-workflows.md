@@ -20,34 +20,22 @@ This page defines practical workflows for coding agents using SDL-MCP.
 
 ## Workflow Overview
 
-```
-  Agent Task
-      │
-      ▼
-  ┌───────────────┐     ┌──────────────┐     ┌───────────────┐
-  │ 1. Establish   │────▶│ 2. Discover  │────▶│ 3. Understand │
-  │    State       │     │    Symbols   │     │    Context    │
-  │                │     │              │     │               │
-  │ repo.status    │     │ symbol.search│     │ symbol.getCard│
-  │ index.refresh  │     │ repo.overview│     │ slice.build   │
-  │ policy.get     │     │              │     │ memory.surface│
-  └───────────────┘     └──────────────┘     └───────┬───────┘
-                                                      │
-      ┌───────────────────────────────────────────────┘
-      ▼
-  ┌───────────────┐     ┌──────────────┐     ┌───────────────┐
-  │ 4. Read Code   │────▶│ 5. Execute   │────▶│ 6. Record     │
-  │    (escalate)  │     │    & Verify   │     │    Feedback   │
-  │                │     │              │     │               │
-  │ getSkeleton    │     │ runtime.exec │     │ agent.feedback│
-  │ getHotPath     │     │ queryOutput  │     │ memory.store  │
-  │ needWindow     │     │              │     │ usage.stats   │
-  └───────────────┘     └──────────────┘     └───────────────┘
+```mermaid
+flowchart LR
+    Task["Agent task"]
+    State["1. Establish state<br/>repo.status<br/>index.refresh<br/>policy.get"]
+    Discover["2. Discover symbols<br/>symbol.search<br/>repo.overview"]
+    Understand["3. Understand context<br/>symbol.getCard<br/>slice.build<br/>memory.surface"]
+    Read["4. Read code<br/>getSkeleton<br/>getHotPath<br/>needWindow"]
+    Execute["5. Execute and verify<br/>runtime.execute<br/>runtime.queryOutput"]
+    Record["6. Record feedback<br/>agent.feedback<br/>memory.store<br/>usage.stats"]
+
+    Task --> State --> Discover --> Understand --> Read --> Execute --> Record
 ```
 
 ## Complete Tool Reference
 
-SDL-MCP exposes 33 MCP tools in flat mode (plus 3 code-mode tools and 4 gateway tools) across 14 categories. Every workflow on this page uses tools from this table.
+SDL-MCP exposes 34 tools in flat default mode (32 flat tools plus `sdl.action.search` and `sdl.info`). Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, while gateway mode replaces the 32 flat tools with 4 namespace surfaces.
 
 | Category | Tool | Purpose |
 |:---------|:-----|:--------|
@@ -323,7 +311,7 @@ Use `sdl.agent.feedback.query` with `limit` and `since` (ISO timestamp) to revie
 
 Store cross-session knowledge that auto-surfaces in future slice builds:
 
-- **Store**: `sdl.memory.store` with `type` (`"decision"` | `"bugfix"` | `"task_context"`), `title`, `content`, optional `symbolIds`, `fileRelPaths`, `tags`, `confidence`.
+- **Store**: `sdl.memory.store` with `type` (`"decision"` | `"bugfix"` | `"task_context"` | `"pattern"` | `"convention"` | `"architecture"` | `"performance"` | `"security"`), `title`, `content`, optional `symbolIds`, `fileRelPaths`, `tags`, `confidence`.
 - **Query**: `sdl.memory.query` with `query` (text search), `types`, `tags`, `symbolIds`, `staleOnly`, `limit`, `sortBy` (`"recency"` | `"confidence"`).
 - **Surface**: `sdl.memory.surface` with `symbolIds` and/or `taskType` — returns ranked by confidence × recency × symbol overlap.
 - **Remove**: `sdl.memory.remove` with `memoryId`; add `deleteFile: true` to also remove the `.sdl-memory/` file.

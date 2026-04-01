@@ -41,34 +41,20 @@ SDL-MCP is a high-performance codebase indexing and context retrieval server. Th
 
 SDL-MCP follows a **hexagonal / ports-and-adapters** design. Each module has a clear role and no cross-layer mutations:
 
-```
-                       ┌──────────────────────────────────┐
-                       │         MCP Tool Layer           │
-                       │  (tools.ts, server.ts, coord.ts) │
-                       └────────────┬─────────────────────┘
-                                    │
-           ┌────────────────────────┼────────────────────────┐
-           │                        │                        │
-    ┌──────▼──────┐          ┌──────▼──────┐          ┌──────▼──────┐
-    │   Indexer    │          │    Graph    │          │    Code     │
-    │ (write path) │          │ (read path) │          │ (read path) │
-    │              │          │             │          │             │
-    │ Pass-1 + 2   │          │ Slice build │          │ Skeleton    │
-    │ Clusters     │          │ Beam search │          │ Hot-path    │
-    │ Processes    │          │ Spillover   │          │ Windows     │
-    │ Summaries    │          │ Card cache  │          │ Gate/policy │
-    └──────┬──────┘          └──────┬──────┘          └──────┬──────┘
-           │                        │                        │
-           └────────────────────────┼────────────────────────┘
-                                    │
-                       ┌────────────▼─────────────────────┐
-                       │       LadybugDB (Graph DB)       │
-                       │  Symbols, Edges, Files, Repos,   │
-                       │  Clusters, Processes, Versions,   │
-                       │  Embeddings, Summaries, Feedback, │
-                       │  FileSummaries, Memories          │
-                       │  FTS + Vector Indexes             │
-                       └──────────────────────────────────┘
+```mermaid
+flowchart TD
+    Tools["MCP tool layer<br/>tools.ts, server.ts, coord.ts"]
+    Indexer["Indexer<br/>write path<br/>pass-1 + pass-2<br/>clusters, processes, summaries"]
+    Graph["Graph<br/>read path<br/>slice build, beam search, spillover, card cache"]
+    Code["Code<br/>read path<br/>skeleton, hot-path, windows, gate/policy"]
+    DB["LadybugDB<br/>Symbols, edges, files, repos, versions, embeddings, summaries, memories<br/>FTS + vector indexes"]
+
+    Tools --> Indexer
+    Tools --> Graph
+    Tools --> Code
+    Indexer --> DB
+    Graph --> DB
+    Code --> DB
 ```
 
 - **Indexer** produces pure domain objects (symbols, edges) — owns all writes
@@ -110,35 +96,19 @@ All MCP tools flow through a single dispatch path in `src/server.ts`. The exact 
 
 Before strict Zod validation, requests also pass through a shared normalization layer. Flat and gateway calls therefore accept the same canonical camelCase fields plus common aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, and `spillover_handle`.
 
-```
-  Client request
-       │
-       ▼
-  ┌─────────────┐
-  │ Zod schema  │──── Validation error ──── Return isError response
-  │  validate   │
-  └──────┬──────┘
-         │ parsed args
-         ▼
-  ┌─────────────┐
-  │  Dispatch   │     ConcurrencyLimiter (max 8 concurrent handlers)
-  │   limiter   │     30s queue timeout
-  └──────┬──────┘
-         │
-         ▼
-  ┌─────────────┐
-  │   Handler   │     Tool-specific logic
-  │  executes   │     Returns result + optional _rawContext hint
-  └──────┬──────┘
-         │
-         ▼
-  ┌─────────────┐
-  │ Post-process│     1. Compute _tokenUsage from _rawContext
-  │  pipeline   │     2. Strip _rawContext (internal only)
-  └──────┬──────┘     3. logToolCall() telemetry
-         │
-         ▼
-  JSON response wrapped in MCP content format
+```mermaid
+flowchart TD
+    Request["Client request"]
+    Validate["Zod schema validation"]
+    Error["Validation error<br/>return isError response"]
+    Limit["Dispatch limiter<br/>max 8 concurrent handlers<br/>30s queue timeout"]
+    Handler["Tool handler<br/>returns result + optional _rawContext"]
+    Post["Post-process pipeline<br/>compute _tokenUsage<br/>strip _rawContext<br/>logToolCall telemetry"]
+    Response["JSON response wrapped in MCP content format"]
+
+    Request --> Validate
+    Validate -->|ok| Limit --> Handler --> Post --> Response
+    Validate -->|error| Error
 ```
 
 **Sideband system:** Handlers can attach `_rawContext` hints (file IDs or raw token counts). The post-processor computes `_tokenUsage` metadata (SDL tokens vs. raw-file equivalent, savings percentage) and strips internal fields before serialization.
@@ -155,24 +125,14 @@ Indexing happens in two passes plus a finalization stage. Triggered by `sdl-mcp 
 
 Per-file, parallelizable. Each file produces:
 
+```mermaid
+flowchart TD
+    Source["Source file<br/>.ts, .py, .go, ..."] --> Engine["Indexer engine<br/>Rust native or Tree-sitter fallback"]
+    Engine --> Symbols["Symbols<br/>name, kind, range, signature"]
+    Engine --> Imports["Imports<br/>module, alias, source"]
+    Engine --> Calls["Calls<br/>raw identifiers"]
+    Engine --> Fingerprints["Fingerprints<br/>SHA-256 of symbol parts"]
 ```
-  Source file (.ts, .py, .go, ...)
-       │
-       ▼
-  ┌──────────────────┐     Engine selection:
-  │   Indexer Engine  │     - Rust native (default, multi-threaded)
-  │                   │     - Tree-sitter TS (fallback)
-  └──────┬───────────┘
-         │
-    ┌────┼────┬──────────┐
-    ▼    ▼    ▼          ▼
- Symbols Imports Calls  Fingerprints
- (name,  (module, (raw   (SHA-256 of
-  kind,   alias,  ident-  symbol
-  range,  source) ifiers) parts)
-  sig)
-```
-
 **Language adapters** (`src/indexer/adapter/`) — 11 adapters covering 12 languages, each extends `BaseAdapter`:
 - `typescript.ts` (shared by TS/JS), `python.ts`, `go.ts`, `java.ts`, `rust.ts`, `csharp.ts`, `c.ts`, `cpp.ts`, `php.ts`, `kotlin.ts`, `shell.ts`
 
@@ -182,30 +142,10 @@ Per-file, parallelizable. Each file produces:
 
 Sequential, cross-file. Resolves raw call identifiers to specific symbol IDs using the pass-2 resolver registry (`src/indexer/pass2/registry.ts`):
 
+```mermaid
+flowchart TD
+    Raw["Raw call edge<br/>getUserById"] --> Registry["Resolver registry<br/>11 language-specific resolvers<br/>selected by file extension"] --> Resolver["Language resolver<br/>import maps, alias chains, barrel re-exports,<br/>package resolution, inheritance"] --> Resolved["Resolved edge<br/>targetSymbolId: abc123<br/>confidence: 0.92<br/>strategy: import-alias"]
 ```
-  Raw call edge ("getUserById")
-       │
-       ▼
-  ┌───────────────────┐
-  │ Resolver Registry │     11 language-specific resolvers
-  │  (registry.ts)    │     registered by file extension
-  └──────┬────────────┘
-         │
-         ▼
-  ┌───────────────────┐
-  │  Language Resolver │     Import maps, alias chains,
-  │  (e.g., ts, go,   │     barrel re-exports, package
-  │   python, java)    │     resolution, inheritance
-  └──────┬────────────┘
-         │
-         ▼
-  Resolved edge:
-    targetSymbolId: "abc123"
-    confidence: 0.92
-    strategy: "import-alias"
-    provenance: "getUserById → import {getUserById} → src/db/users.ts::getUserById"
-```
-
 11 language-specific resolvers are registered, all performing semantic cross-file analysis. Every resolver builds a repo-wide index (namespace, module, package, or directory-scoped), follows import/use/include/source chains to resolve call targets, handles language-specific patterns (generics, traits, templates, extensions, header pairs), and assigns stratified confidence scores (same-file 0.93 → imports 0.9 → same-scope 0.88–0.92 → fallback 0.45–0.78). TS and JS share one resolver implementation; the remaining 10 languages each have a dedicated resolver (700–1,350 lines).
 
 ### Finalization
@@ -235,21 +175,13 @@ SDL-MCP uses LadybugDB (Kuzu engine, npm alias `kuzu`) as the sole persistence l
 
 **Connection pool:**
 
+```mermaid
+flowchart TD
+    Reads["Read pool<br/>round-robin connections<br/>default 4, configurable 1-8"]
+    Limit["ConcurrencyLimiter(1)"] --> Write["Serialized write connection<br/>withWriteConn(async fn)"]
+    Reads --> DB["LadybugDB"]
+    Write --> DB
 ```
-  ┌─────────────────────────────────────┐
-  │           Connection Pool           │
-  │                                     │
-  │  Read connections (round-robin):    │
-  │    [conn-1] [conn-2] [conn-3] [4]  │
-  │    Default: 4, configurable 1-8     │
-  │                                     │
-  │  Write connection (serialized):     │
-  │    [write-conn] ◄── ConcurrencyLimiter(1)
-  │    All mutations queued through     │
-  │    withWriteConn(async fn)          │
-  └─────────────────────────────────────┘
-```
-
 Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write serialization prevents graph corruption.
 
 ### Graph Schema (Node + Edge Tables)
@@ -303,37 +235,12 @@ Each module owns a specific domain of queries:
 
 The slice builder (`src/graph/slice.ts`) constructs task-scoped context subgraphs bounded by a token budget.
 
+```mermaid
+flowchart TD
+    Entry["Entry symbols<br/>explicit IDs or auto-discovered from taskText"] --> Start["Start-node resolver<br/>explicit IDs, hybrid retrieval, stack traces,<br/>edited files, legacy search"]
+    Start --> Beam["Beam-search engine<br/>weighted BFS<br/>call 1.0, config 0.8, import 0.6<br/>adaptive minConfidence + budget tracking"]
+    Beam --> Serialize["Slice serializer<br/>adaptive detail<br/>in-slice edge filtering<br/>ETag dedup + spillover"]
 ```
-  Entry symbols (explicit IDs or auto-discovered from taskText)
-       │
-       ▼
-  ┌──────────────────────────┐
-  │  Start-Node Resolver     │     Resolves entry symbols from:
-  │  (start-node-resolver.ts)│     - explicit symbolIds
-  │                          │     - hybrid retrieval (FTS + vector + RRF)
-  └──────────┬───────────────┘     - stackTrace parsing
-             │                     - editedFiles lookup
-             │                     - legacy: token-by-token searchSymbolsLite
-             ▼
-  ┌──────────────────────────┐
-  │  Beam-Search Engine      │     BFS with weighted edges:
-  │  (beam-search-engine.ts) │       call: 1.0
-  │                          │       config: 0.8
-  │                          │       import: 0.6
-  │  Adaptive minConfidence  │     Top-K frontier pruning
-  │  Budget tracking         │     Stops at maxCards or maxTokens
-  └──────────┬───────────────┘
-             │
-             ▼
-  ┌──────────────────────────┐
-  │  Slice Serializer        │     Converts to SymbolCards:
-  │  (slice-serializer.ts)   │     - Adaptive detail level
-  │                          │     - Edge filtering (in-slice only)
-  │  Wire format V1/V2/V3    │     - ETag dedup (knownCardEtags)
-  │  Token estimation        │     - Spillover handle for overflow
-  └──────────────────────────┘
-```
-
 **Card detail levels** — the serializer adapts detail based on remaining budget:
 
 | Level | Fields Included | ~Tokens |
@@ -351,21 +258,14 @@ The slice builder (`src/graph/slice.ts`) constructs task-scoped context subgraph
 
 The four-rung escalation ladder controls how much raw code an agent receives:
 
-```
-  Rung 1: Symbol Cards           ~50-135 tokens/symbol
-  ──────────────────────          Always available
-       │ need more?
-       ▼
-  Rung 2: Skeleton IR            ~200 tokens/function
-  ──────────────────────          Signatures + control flow, bodies elided
-       │ need more?
-       ▼
-  Rung 3: Hot-Path Excerpt       ~500 tokens
-  ──────────────────────          Only lines matching requested identifiers
-       │ need more?
-       ▼
-  Rung 4: Full Code Window       variable
-  ──────────────────────          Gated — requires proof-of-need justification
+```mermaid
+flowchart TD
+    R1["Rung 1: Symbol cards<br/>~50-135 tokens per symbol<br/>always available"]
+    R2["Rung 2: Skeleton IR<br/>~200 tokens per function<br/>signatures + control flow"]
+    R3["Rung 3: Hot-path excerpt<br/>~500 tokens<br/>identifier-matched lines only"]
+    R4["Rung 4: Full code window<br/>variable cost<br/>gated by proof-of-need"]
+
+    R1 -->|need more| R2 -->|need more| R3 -->|need more| R4
 ```
 
 ### Skeleton (`src/code/skeleton.ts`)
@@ -376,30 +276,16 @@ Finds lines matching requested identifiers with configurable context lines befor
 
 ### Proof-of-Need Gating (`src/code/gate.ts`)
 
-```
-  needWindow request
-  (symbolId, reason, expectedLines, identifiersToFind)
-       │
-       ▼
-  ┌────────────────────────────────────────────┐
-  │              Policy Engine                  │
-  │                                            │
-  │  Priority 100: Hard caps (180 lines max)   │
-  │  Priority  90: Identifiers required        │
-  │  Priority  80: Budget enforcement          │
-  │  Priority  10: Break-glass override        │
-  │                                            │
-  │  Approval if:                              │
-  │    - Identifiers exist in window range     │
-  │    - Symbol in current slice or frontier    │
-  │    - Utility score > threshold             │
-  │    - Break-glass with audit trail          │
-  │                                            │
-  │  Denial includes:                          │
-  │    - Reason                                │
-  │    - Suggested alternative tool            │
-  │    - NextBestAction (e.g., "try skeleton") │
-  └────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Req["needWindow request<br/>symbolId + reason + expectedLines + identifiersToFind"]
+    Engine["Policy engine<br/>priority 100 hard caps<br/>priority 90 identifiers required<br/>priority 80 budget enforcement<br/>priority 10 break-glass override"]
+    Approve["Approve when one or more identifiers match,<br/>or the symbol is already in slice / frontier,<br/>or utility exceeds threshold,<br/>or break-glass is audited"]
+    Deny["Denial returns reason, suggested alternative tool,<br/>and nextBestAction guidance"]
+
+    Req --> Engine
+    Engine --> Approve
+    Engine --> Deny
 ```
 
 ---
@@ -410,30 +296,12 @@ Finds lines matching requested identifiers with configurable context lines befor
 
 **Delta computation** (`diff.ts`) — compares two version snapshots, producing changed symbols with signature/invariant/side-effect diffs.
 
-**Blast radius** (`blastRadius.ts`) — BFS traversal of reverse dependency edges from changed symbols:
+**Blast radius** (`blastRadius.ts`) ? BFS traversal of reverse dependency edges from changed symbols:
 
+```mermaid
+flowchart TD
+    Changed["Changed symbols"] --> Reverse["Reverse-edge BFS<br/>imports + calls + config"] --> Score["Scoring and ranking<br/>0.6 distance + 0.3 fanIn + 0.1 test proximity<br/>fan-in amplifiers flagged across versions"]
 ```
-  Changed symbols
-       │
-       ▼
-  ┌─────────────────────────────┐
-  │ BFS reverse edge traversal  │     Walks dependents via
-  │ (imports + calls + config)  │     reverse call/import edges
-  └──────────┬──────────────────┘
-             │
-             ▼
-  ┌─────────────────────────────┐
-  │  Scoring & ranking          │
-  │                             │
-  │  score = 0.6 × distance    │     distance: graph hops
-  │        + 0.3 × fanIn       │     fanIn: incoming edges
-  │        + 0.1 × testProx    │     testProx: test file reachability
-  │                             │
-  │  Fan-in amplifiers          │     Symbols with rising fan-in
-  │  across versions            │     flagged for extra attention
-  └─────────────────────────────┘
-```
-
 **PR risk analysis** (`src/mcp/tools/prRisk.ts`) — builds on blast radius to recommend test targets and flag high-risk changes.
 
 ---
@@ -442,38 +310,10 @@ Finds lines matching requested identifiers with configurable context lines befor
 
 The live index system (`src/live-index/`) provides draft-aware code intelligence for unsaved editor buffers.
 
+```mermaid
+flowchart TD
+    Editor["Editor<br/>VSCode, etc."] --> Push["buffer.push<br/>on each keystroke or save"] --> Overlay["Overlay store<br/>content, version, parseResult, dirty flag"] --> Coordinator["Live index coordinator<br/>parse queue, reconcile queue,<br/>checkpoint service, idle monitor"] --> Reads["Merged into reads<br/>search, getCard, slice.build, getSkeleton"]
 ```
-  Editor (VSCode, etc.)
-       │
-       │  buffer.push (on each keystroke/save)
-       ▼
-  ┌──────────────────────────────────────┐
-  │  Overlay Store (in-memory)           │
-  │                                      │
-  │  Per-repo, per-file draft entries:   │
-  │  - content (current buffer text)     │
-  │  - version (monotonic, rejects stale)│
-  │  - parseResult (symbols + edges)     │
-  │  - dirty flag                        │
-  └──────────┬───────────────────────────┘
-             │
-             │  Debounced parse jobs
-             ▼
-  ┌──────────────────────────────────────┐
-  │  Live Index Coordinator              │
-  │  (InMemoryLiveIndexCoordinator)      │
-  │                                      │
-  │  - Parse queue + worker              │
-  │  - Reconcile queue (DB merge)        │
-  │  - Checkpoint service (persist)      │
-  │  - Idle monitor (auto-checkpoint)    │
-  └──────────────────────────────────────┘
-             │
-             ▼
-  Overlay merged into all reads:
-  search, getCard, slice.build, getSkeleton
-```
-
 **Version conflict:** `upsertDraft()` rejects updates where `update.version < existing.version` — prevents out-of-order edits from overwriting newer content.
 
 ---
@@ -488,38 +328,12 @@ Single-session, used by CLI agents (Claude Code, etc.). One MCPServer instance h
 
 Multi-session, per-session server isolation:
 
+```mermaid
+flowchart TD
+    Http["HTTP server<br/>POST /mcp"] --> Sessions["SessionManager<br/>max 8 sessions<br/>reserve, register, idle reaper"] --> Resources["Per-session resources<br/>transport map + MCPServer map"]
+    Http --> Rest["REST endpoints<br/>health, buffer, graph, symbol, UI"]
+    Http --> Events["EventStore<br/>message replay on reconnect<br/>FIFO eviction"]
 ```
-  ┌───────────────────────────────────────────────────────┐
-  │                   HTTP Server                          │
-  │                                                        │
-  │  POST /mcp                                             │
-  │       │                                                │
-  │       ▼                                                │
-  │  ┌──────────────────────────────────────────────────┐  │
-  │  │  SessionManager (max 8 sessions)                 │  │
-  │  │  - reserveSession() → reserves slot              │  │
-  │  │  - registerSession() → transitions to active     │  │
-  │  │  - Idle reaper (5 min timeout, 1 min check)      │  │
-  │  └──────────────────────────────────────────────────┘  │
-  │       │                                                │
-  │       ▼                                                │
-  │  Per-session resources:                                │
-  │    transports: Map<sessionId, Transport>               │
-  │    mcpServers: Map<sessionId, MCPServer>                │
-  │                                                        │
-  │  REST API (non-MCP):                                   │
-  │    /health              → DB health check              │
-  │    /api/repo/:id/buffer → buffer.push                  │
-  │    /api/graph/:id/...   → graph visualization          │
-  │    /api/symbol/:id/...  → symbol lookup                │
-  │    /ui/graph            → static visualization UI      │
-  │                                                        │
-  │  EventStore (in-memory):                               │
-  │    Message replay on reconnect (max 1000 events)       │
-  │    FIFO eviction                                       │
-  └───────────────────────────────────────────────────────┘
-```
-
 Each connected client gets its own `MCPServer` instance, ensuring complete session isolation. The `SessionManager` enforces the 8-session limit and reaps idle connections.
 
 ---
@@ -575,22 +389,14 @@ See [Development Memories deep dive](./feature-deep-dives/development-memories.m
 
 `sdl.runtime.execute` runs repo-scoped commands under SDL-MCP governance instead of uncontrolled shell access. 16 runtimes are supported (Node, Python, Go, Java, Rust, C, C++, C#, Kotlin, PHP, Ruby, Perl, R, Elixir, Shell, TypeScript).
 
-```
-  Request → runtime.enabled? → allowed runtime? → valid executable?
-                                                         │
-                                              ┌──────────┴──────────┐
-                                              │ CWD jailed to repo  │
-                                              │ Env scrubbed        │
-                                              │ Timeout enforced    │
-                                              │ Concurrency limited │
-                                              └──────────┬──────────┘
-                                                         │
-                                                         ▼
-                                              ┌────────────────────┐
-                                              │ Output captured    │
-                                              │ Persisted as gzip  │
-                                              │ artifactHandle     │
-                                              └────────────────────┘
+```mermaid
+flowchart TD
+    Request["runtime.execute request"]
+    Validate["runtime enabled?<br/>allowed runtime?<br/>valid executable?"]
+    Sandbox["repo-jail cwd<br/>environment scrubbing<br/>timeout enforcement<br/>concurrency limits"]
+    Capture["capture stdout/stderr<br/>persist gzip artifact<br/>return artifactHandle"]
+
+    Request --> Validate --> Sandbox --> Capture
 ```
 
 The `outputMode` parameter controls response verbosity:
@@ -646,97 +452,32 @@ Current command/tool registration notes:
 - Gateway mode keeps `sdl.action.search` and `sdl.info` outside the 4 namespace tools
 - Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow`
 
-```
-src/
-├── main.ts                    Server entry point + bootstrap
-├── server.ts                  MCPServer class + tool dispatch
-├── cli/
-│   ├── commands/              CLI commands (13: init, doctor, info, index, serve, version,
-│   │                            export, import, pull, benchmark:ci, summary, health, tool)
-│   └── transport/             stdio + HTTP transport setup
-├── config/
-│   └── types.ts               Zod config schemas
-├── db/
-│   ├── initGraphDb.ts         DB path resolution + initialization
-│   ├── ladybug-schema.ts      Idempotent Cypher DDL
-│   └── ladybug-*.ts           Per-domain query modules (repos, symbols, edges,
-│                                versions, clusters, processes, embeddings,
-│                                metrics, feedback, slices)
-├── domain/
-│   ├── types.ts               Canonical domain types (SymbolCard, GraphSlice, etc.)
-│   └── errors.ts              Typed error hierarchy
-├── indexer/
-│   ├── indexer.ts             Main indexing orchestrator
-│   ├── adapter/               Language adapters (11 adapters, 12 languages)
-│   ├── pass2/                 Cross-file resolvers (11 resolvers)
-│   ├── import-resolution/     Import chain analysis
-│   ├── embeddings.ts          ONNX embedding pipeline
-│   ├── summary-generator.ts   LLM summary providers
-│   └── watcher.ts             File system monitoring (chokidar)
-├── graph/
-│   └── slice/                 Beam search, serializer, start-node resolver
-├── delta/
-│   ├── diff.ts                Version diff computation
-│   └── blastRadius.ts         Impact analysis
-├── code/
-│   ├── skeleton.ts            Deterministic code outline
-│   ├── hotpath.ts             Identifier-filtered excerpts
-│   ├── gate.ts                Proof-of-need gating
-│   └── windows.ts             Raw code extraction
-├── code-mode/
-│   ├── workflow-*.ts          Multi-step operations engine (sdl.workflow)
-│   ├── manual-generator.ts    Self-documentation (sdl.manual)
-│   ├── descriptions.ts        Shared routing guidance for sdl.context vs sdl.workflow
-│   ├── action-catalog.ts      Action discovery (sdl.action.search)
-│   └── ladder-validator.ts    Context ladder validation
-├── gateway/
-│   ├── router.ts              Namespace-scoped tool routing
-│   ├── thin-schemas.ts        Compact gateway schemas
-│   └── compact-schema.ts      Schema size optimization
-├── agent/
-│   ├── context-engine.ts      Task-shaped context planning + execution
-│   ├── planner.ts             Rung selection + budget allocation
-│   └── evidence.ts            Evidence collection
-├── policy/
-│   └── engine.ts              Rule-based decision engine
-├── live-index/
-│   ├── overlay-store.ts       In-memory draft storage
-│   ├── coordinator.ts         Parse queue + reconciliation
-│   ├── checkpoint-service.ts  Persist drafts to DB
-│   └── idle-monitor.ts        Auto-checkpoint on idle
-├── memory/
-│   ├── surface.ts             Auto-surface memories in slices
-│   └── file-sync.ts           .sdl-memory/ file read/write/scan
-├── runtime/
-│   ├── executor.ts            Sandboxed code execution
-│   └── runtimes.ts            Runtime definitions (node, python, shell)
-├── services/
-│   ├── summary.ts             Context summary generation
-│   ├── health.ts              Health check service
-│   └── card-builder.ts        Symbol card construction
-├── sync/
-│   ├── sync.ts                Export/import gzip artifacts
-│   └── pull.ts                Remote artifact pull
-├── startup/
-│   └── bootstrap.ts           Server initialization sequence
-├── benchmark/
-│   ├── threshold.ts           Regression threshold config
-│   └── regression.ts          Regression detection engine
-├── mcp/
-│   ├── tools/                 Handler implementations
-│   ├── errors.ts              Error-to-MCP response conversion
-│   ├── telemetry.ts           Tool call logging
-│   ├── token-usage.ts         Sideband token accounting
-│   ├── session-manager.ts     Multi-session lifecycle
-│   └── dispatch-limiter.ts    Concurrency gate (singleton)
-└── util/
-    ├── paths.ts               Windows path normalization
-    ├── concurrency.ts         Generic ConcurrencyLimiter
-    ├── hashing.ts             SHA-256 utilities
-    └── tokenizer.ts           Token counting utilities
+```mermaid
+flowchart TD
+    Src["src/"] --> Entry["main.ts, server.ts"]
+    Src --> CLI["cli/<br/>commands, transport"]
+    Src --> Config["config/<br/>types.ts"]
+    Src --> DB["db/<br/>schema, init, query modules"]
+    Src --> Domain["domain/<br/>types, errors"]
+    Src --> Indexer["indexer/<br/>adapters, pass2, embeddings, watcher"]
+    Src --> Graph["graph/<br/>slice builder"]
+    Src --> Delta["delta/<br/>diff, blastRadius"]
+    Src --> Code["code/<br/>skeleton, hotpath, gate, windows"]
+    Src --> CodeMode["code-mode/<br/>workflow, manual, action catalog, ladder validator"]
+    Src --> Gateway["gateway/<br/>router, thin-schemas, compact-schema"]
+    Src --> Agent["agent/<br/>context engine, planner, evidence"]
+    Src --> Policy["policy/<br/>engine"]
+    Src --> Live["live-index/<br/>overlay store, coordinator, checkpoint, idle monitor"]
+    Src --> Memory["memory/<br/>surface, file-sync"]
+    Src --> Runtime["runtime/<br/>executor, runtimes"]
+    Src --> Services["services/<br/>summary, health, card-builder"]
+    Src --> Sync["sync/<br/>sync, pull"]
+    Src --> Startup["startup/<br/>bootstrap"]
+    Src --> Benchmark["benchmark/<br/>threshold, regression"]
+    Src --> MCP["mcp/<br/>tools, errors, telemetry, token-usage, session-manager, dispatch-limiter"]
+    Src --> Util["util/<br/>paths, concurrency, hashing, tokenizer"]
 ```
 
----
 
 ## Component Diagram
 

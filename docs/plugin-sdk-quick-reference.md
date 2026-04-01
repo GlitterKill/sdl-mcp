@@ -181,17 +181,17 @@ See [plugin-sdk-security.md](./plugin-sdk-security.md) for complete security gui
 
 ## File Structure
 
-```
-my-plugin/
-├── package.json          # NPM metadata
-├── tsconfig.json         # TypeScript config
-├── index.ts             # Plugin implementation
-├── README.md            # Plugin docs
-├── LICENSE              # License
-└── dist/                # Built output
-    ├── index.js
-    ├── index.d.ts
-    └── index.js.map
+```mermaid
+flowchart TD
+    Root["my-plugin/"] --> Package["package.json<br/>NPM metadata"]
+    Root --> TSConfig["tsconfig.json<br/>TypeScript config"]
+    Root --> Entry["index.ts<br/>Plugin implementation"]
+    Root --> Readme["README.md<br/>Plugin docs"]
+    Root --> License["LICENSE"]
+    Root --> Dist["dist/"]
+    Dist --> JS["index.js"]
+    Dist --> DTS["index.d.ts"]
+    Dist --> Map["index.js.map"]
 ```
 
 ## Testing Guidelines

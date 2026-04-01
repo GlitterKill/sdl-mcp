@@ -14,25 +14,14 @@ The Iris Gate Ladder eliminates this waste. Named after the adjustable aperture 
 
 ## The Four Rungs
 
-```
-Token Cost       What You Get
-   ~100  ┌─────────────────────────────────────────────┐
-         │  RUNG 1: Symbol Cards                       │
-         │  Name, signature, summary, deps, metrics    │
-         │  "What does this function do?"               │
-   ~300  ├─────────────────────────────────────────────┤
-         │  RUNG 2: Skeleton IR                        │
-         │  Signatures + control flow, bodies elided   │
-         │  "What's the shape of this class?"           │
-   ~600  ├─────────────────────────────────────────────┤
-         │  RUNG 3: Hot-Path Excerpt                   │
-         │  Lines matching specific identifiers         │
-         │  "Where is `this.cache` initialized?"        │
- ~2,000  ├─────────────────────────────────────────────┤
-         │  RUNG 4: Raw Code Window (Gated)            │
-         │  Full source, requires justification         │
-         │  "I need to rewrite this error handler"      │
-         └─────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    R1["Rung 1: Symbol cards<br/>~100 tokens<br/>name, signature, summary, deps, metrics"]
+    R2["Rung 2: Skeleton IR<br/>~300 tokens<br/>signatures + control flow, bodies elided"]
+    R3["Rung 3: Hot-path excerpt<br/>~600 tokens<br/>lines matching specific identifiers"]
+    R4["Rung 4: Raw code window<br/>~2,000 tokens<br/>full source, gated by policy"]
+
+    R1 --> R2 --> R3 --> R4
 ```
 
 ### Rung 1: Symbol Cards (`sdl.symbol.getCard`)

@@ -37,36 +37,18 @@ The CLI tool dispatcher bypasses the MCP server/transport layer entirely. Instea
 4. **Normalizes and validates** with the same alias-mapping and Zod schemas
 5. **Formats output** in your choice of format
 
-```
-  sdl-mcp tool symbol.search --query "auth"
-       │
-       ▼
-  ┌─────────────────────┐
-  │ CLI Arg Parser       │  --query → { query: "auth" }
-  │ (type coercion)      │  --limit → number, --tags → string[]
-  └──────────┬──────────┘
-             │
-             ▼
-  ┌─────────────────────┐
-  │ Config + DB Init     │  Same config loading as MCP server
-  │ + repoId resolution  │  Auto-resolves repoId from cwd
-  └──────────┬──────────┘
-             │
-             ▼
-  ┌─────────────────────┐
-  │ Gateway Router       │  Same handler functions
-  │ + Zod Validation     │  Same schemas
-  └──────────┬──────────┘
-             │
-             ▼
-  ┌─────────────────────┐
-  │ Output Formatter     │  json | json-compact | pretty | table
-  └─────────────────────┘
+```mermaid
+flowchart TD
+    Cmd["sdl-mcp tool symbol.search --query auth"]
+    Parse["CLI arg parser<br/>type coercion + aliases"]
+    Init["Config + DB init<br/>same startup path as MCP server"]
+    Route["Action router + Zod validation<br/>same handler functions"]
+    Output["Output formatter<br/>json | json-compact | pretty | table"]
+
+    Cmd --> Parse --> Init --> Route --> Output
 ```
 
----
-
-## All 31 Actions
+## All 32 Actions
 
 Run `sdl-mcp tool --list` to see all actions grouped by namespace:
 

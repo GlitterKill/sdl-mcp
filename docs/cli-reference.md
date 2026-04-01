@@ -18,29 +18,16 @@
 
 ## Architecture
 
-```
-  Command Line
-      │
-      ▼
-  ┌───────────────────────────────────────────────┐
-  │  CLI Parser (Commander.js)                     │
-  │  Global options: --config, --log-level, --help │
-  └───────────┬───────────────────────────────────┘
-              │
-  ┌───────────▼───────────────────────────────────┐
-  │  Command Router                                │
-  ├─────────────────┬─────────────────────────────┤
-  │ init   doctor   │ index  serve   tool          │
-  │ info   version  │ export import  pull          │
-  │ health summary  │ benchmark:ci                 │
-  └─────────────────┴──────────┬──────────────────┘
-                               │ (tool command)
-                               ▼
-  ┌────────────────────────────────────────────────┐
-  │  Tool Dispatch (same as MCP server)             │
-  │  Zod validation → Handler → Formatted output   │
-  │  Formats: json | json-compact | pretty | table  │
-  └────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    CLI["Command line"]
+    Parser["CLI parser<br/>(Commander.js)<br/>Global options: --config, --log-level, --help"]
+    Router["Command router<br/>init, doctor, info, version,<br/>health, summary, index, serve,<br/>tool, export, import, pull, benchmark:ci"]
+    Tool["Tool dispatch<br/>same handler layer as the MCP server"]
+    Format["Validation and output<br/>Zod -> handler -> json | json-compact | pretty | table"]
+
+    CLI --> Parser --> Router
+    Router -->|"tool"| Tool --> Format
 ```
 
 ## Run Without Installing (npx)

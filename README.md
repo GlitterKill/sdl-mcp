@@ -41,29 +41,21 @@ SDL-MCP fixes this. It indexes your codebase into a searchable **symbol graph** 
 
 ## How it works — in 30 seconds
 
-```
-                Your Codebase
-                     │
-              ┌──────┴──────┐
-              │   Indexer    │   Native Rust (fast) or Tree-sitter (universal)
-              │   12 langs   │   TS · JS · Python · Go · Java · C# · C · C++ · PHP · Rust · Kotlin · Shell
-              └──────┬──────┘
-                     │
-                     ▼
-         ┌───────────────────────┐
-         │   Symbol Graph (DB)   │   Functions, classes, interfaces, types, edges, metrics
-         │   LadybugDB (graph)   │   Persisted. Incremental. Versioned.
-         └───────────┬───────────┘
-                     │
-          ┌──────────┼──────────┐
-          │          │          │
-          ▼          ▼          ▼
-      35 MCP      13 CLI    HTTP API
-       Tools     Commands   (dev/network)
-          │
-          ▼
-    AI Coding Agent
-    (Claude Code, Claude Desktop, Cursor, Windsurf, any MCP client)
+```mermaid
+flowchart TD
+    Codebase["Your Codebase"]
+    Indexer["Indexer<br/>12 languages<br/>Rust native or Tree-sitter fallback"]
+    Graph["LadybugDB graph<br/>symbols, edges, metrics, versions"]
+    MCP["34 flat MCP tools<br/>plus optional gateway and code-mode surfaces"]
+    CLI["13 CLI commands"]
+    HTTP["HTTP API and graph UI"]
+    Agent["AI coding agent<br/>Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini"]
+
+    Codebase --> Indexer --> Graph
+    Graph --> MCP
+    Graph --> CLI
+    Graph --> HTTP
+    MCP --> Agent
 ```
 
 1. **Index once** — SDL-MCP parses every symbol in your repo and stores it as a compact metadata record (a "Symbol Card") in a graph database
@@ -105,24 +97,14 @@ Point your MCP client at the server and the agent gains access to all SDL-MCP to
 
 The core innovation. Named after the adjustable aperture that controls light flow in optics, the Iris Gate Ladder lets agents dial their context "aperture" from a pinhole to wide-open.
 
-```
-    Token Cost    What the Agent Sees
-                  ────────────────────────────────────────────────
-         ~100     RUNG 1 ▸ Symbol Card
-                  Name, signature, summary, dependencies, metrics
-                  "What does this function do and what does it call?"
+```mermaid
+flowchart TB
+    R1["~100 tokens<br/>Rung 1: Symbol Card<br/>Name, signature, summary, dependencies, metrics"]
+    R2["~300 tokens<br/>Rung 2: Skeleton IR<br/>Signatures and control flow with bodies elided"]
+    R3["~600 tokens<br/>Rung 3: Hot-Path Excerpt<br/>Identifier-focused lines with context"]
+    R4["~2,000 tokens<br/>Rung 4: Raw Code Window<br/>Policy-gated full source"]
 
-         ~300     RUNG 2 ▸ Skeleton IR
-                  Signatures + control flow, bodies replaced with /* ... */
-                  "What's the shape of this class?"
-
-         ~600     RUNG 3 ▸ Hot-Path Excerpt
-                  Only lines matching specific identifiers + context
-                  "Where exactly is `this.cache` initialized?"
-
-       ~2,000     RUNG 4 ▸ Raw Code Window  Policy-gated
-                  Full source code, requires justification
-                  "I need to rewrite this error handler"
+    R1 --> R2 --> R3 --> R4
 ```
 
 > **Most questions are answered at Rungs 1-2** without ever reading raw code. That's where the token savings come from.
@@ -153,26 +135,21 @@ The core innovation. Named after the adjustable aperture that controls light flo
 
 Every function, class, interface, type, and variable becomes a **Symbol Card**: a compact metadata record (~100 tokens) containing everything an agent needs to *understand* a symbol without reading its code.
 
-```
-  ┌─────────────────────────────────────────────────────────┐
-  │  Symbol Card: validateToken                             │
-  │─────────────────────────────────────────────────────────│
-  │  Kind:       function (exported)                        │
-  │  File:       src/auth/jwt.ts:42-67                      │
-  │  Signature:  (token: string, opts?: ValidateOpts)       │
-  │              → Promise<DecodedToken>                    │
-  │  Summary:    Validates JWT signature and expiration,    │
-  │              returns decoded payload or throws          │
-  │  Invariants: ["throws on expired token"]                │
-  │  Side FX:    ["logs to audit trail"]                    │
-  │  Deps:       calls: [verifySignature, checkExpiry]      │
-  │              imports: [jsonwebtoken, AuditLogger]        │
-  │  Metrics:    fan-in: 12 │ fan-out: 4 │ churn: 3/30d    │
-  │  Cluster:    auth-module (8 members)                    │
-  │  Process:    request-pipeline (intermediate, depth 1)   │
-  │  Test:       auth.test.ts (distance: 1, proximity: 0.9)│
-  │  ETag:       a7f3c2... (for conditional requests)       │
-  └─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    Card["Symbol Card: validateToken"]
+    Kind["Kind: function (exported)"]
+    File["File: src/auth/jwt.ts:42-67"]
+    Signature["Signature: (token: string, opts?: ValidateOpts) -> Promise<DecodedToken>"]
+    Summary["Summary: validates JWT signature and expiration"]
+    Invariants["Invariants: throws on expired token"]
+    SideEffects["Side effects: logs to audit trail"]
+    Deps["Dependencies: verifySignature, checkExpiry, jsonwebtoken, AuditLogger"]
+    Metrics["Metrics: fan-in 12, fan-out 4, churn 3/30d"]
+    Context["Context: auth-module, request-pipeline, auth.test.ts"]
+    ETag["ETag: a7f3c2..."]
+
+    Card --> Kind --> File --> Signature --> Summary --> Invariants --> SideEffects --> Deps --> Metrics --> Context --> ETag
 ```
 
 Cards include **confidence-scored call resolution** (the pass-2 resolver traces imports, aliases, barrel re-exports, and tagged templates to produce accurate dependency edges), **community detection** (cluster membership), and **call-chain tracing** (process participation with entry/intermediate/exit roles).
@@ -191,23 +168,16 @@ Cards include **confidence-scored call resolution** (the pass-2 resolver traces 
 
 Instead of reading files in the same directory, SDL-MCP follows the *dependency graph*. Starting from symbols relevant to your task, it traverses weighted edges (call: 1.0, config: 0.8, import: 0.6), scores each symbol by relevance, and returns the N most important within a token budget.
 
-```
-  "Fix the auth middleware"     →   slice.build
-                                         │
-                                    BFS over graph
-                                         │
-                      ┌──────────────────┼──────────────────┐
-                      ▼                  ▼                  ▼
-                 authenticate      validateToken        JwtConfig
-                      │                  │                  │
-                      ▼                  ▼                  ▼
-                 hashPassword       getUserById         envLoader
-                                                            │
-                                                         ◆ frontier
-                                                    (outside budget)
-
-                 8 cards returned  ·  ~800 tokens
-            vs.  reading 8 files  ·  ~16,000 tokens
+```mermaid
+flowchart TD
+    Task["Task: Fix the auth middleware"] --> Slice["sdl.slice.build"]
+    Slice --> Auth["authenticate"]
+    Slice --> Validate["validateToken"]
+    Slice --> Config["JwtConfig"]
+    Auth --> Hash["hashPassword"]
+    Validate --> User["getUserById"]
+    Config --> Env["envLoader"]
+    Env -. frontier outside budget .-> Frontier["spillover frontier"]
 ```
 
 Slices have handles, leases, refresh (delta-only updates), and spillover (paged overflow). You can also skip the symbol search entirely — pass a `taskText` string and SDL-MCP auto-discovers the relevant entry symbols.
@@ -226,19 +196,28 @@ Slices have handles, leases, refresh (delta-only updates), and spillover (paged 
 
 `git diff` tells you what lines changed. SDL-MCP tells you what that change *means* and who's affected.
 
-```
-  Modified: validateToken() signature
-       │
-       ├── signatureDiff: added `options?: object` parameter
-       ├── invariantDiff: added "throws on expired"
-       └── sideEffectDiff: added "logs to audit trail"
-              │
-              ▼
-       Blast Radius (ranked):
-       1. authenticate()    ← direct caller, distance 1
-       2. refreshSession()  ← direct caller, distance 1
-       3. AuthMiddleware     ← calls authenticate, distance 2
-       4. auth.test.ts      ← test coverage, flagged for re-run
+```mermaid
+flowchart TD
+    Change["Modified validateToken() signature"]
+    Sig["signatureDiff<br/>added options?: object"]
+    Inv["invariantDiff<br/>added throws on expired"]
+    Fx["sideEffectDiff<br/>added logs to audit trail"]
+    Blast["Blast radius"]
+    A1["authenticate()<br/>distance 1"]
+    A2["refreshSession()<br/>distance 1"]
+    A3["AuthMiddleware<br/>distance 2"]
+    A4["auth.test.ts<br/>re-run recommended"]
+
+    Change --> Sig
+    Change --> Inv
+    Change --> Fx
+    Sig --> Blast
+    Inv --> Blast
+    Fx --> Blast
+    Blast --> A1
+    Blast --> A2
+    Blast --> A3
+    Blast --> A4
 ```
 
 **PR risk analysis** (`sdl.pr.risk.analyze`) wraps this into a scored assessment with findings, evidence, and test recommendations. **Fan-in trend analysis** detects "amplifier" symbols whose growing dependency count means changes ripple further over time.
@@ -257,13 +236,13 @@ Slices have handles, leases, refresh (delta-only updates), and spillover (paged 
 
 SDL-MCP doesn't wait for you to save. As you type in your editor, buffer updates are pushed to an in-memory overlay store, parsed in the background, and merged with the durable database. Search, cards, and slices reflect your *current* code, not your last save.
 
-```
-  Editor keystrokes → sdl.buffer.push → Overlay Store → merged reads
-                                              │
-                                         on save / idle
-                                              │
-                                              ▼
-                                        LadybugDB (durable)
+```mermaid
+flowchart LR
+    Editor["Editor keystrokes"] --> Push["sdl.buffer.push"]
+    Push --> Overlay["Overlay store"]
+    Overlay --> Reads["Merged reads<br/>search, cards, slices"]
+    Overlay --> Persist["save / idle checkpoint"]
+    Persist --> DB["LadybugDB durable graph"]
 ```
 
 **Why it matters:**
@@ -331,21 +310,16 @@ Run tests, linters, and scripts through SDL-MCP's governance layer instead of un
 
 Agents forget everything between sessions. SDL-MCP fixes this with a **graph-backed memory system** that lets agents store decisions, bugfix context, and task notes linked directly to the symbols and files they relate to. Memories are stored both in the graph database (for fast querying) and as checked-in markdown files (for version control and team sharing).
 
-```
-  Agent Session 1                              Agent Session 2
-  ─────────────                                ─────────────
-  "Fixed race condition in                     sdl.memory.surface
-   authenticate() — added mutex"                    │
-        │                                      ┌────┴─────┐
-        ▼                                      │ Relevant  │
-   sdl.memory.store                            │ memories  │
-        │                                      │ surfaced  │
-        ├──▶ Graph DB (Memory node)            └────┬─────┘
-        │     ├── MEMORY_OF ──▶ authenticate()      │
-        │     └── HAS_MEMORY ◀── Repo               ▼
-        │                                      "Previous fix: race condition
-        └──▶ .sdl-memory/bugfixes/a1b2c3.md     in authenticate() — mutex added"
-             (YAML frontmatter + markdown)
+```mermaid
+flowchart LR
+    Session1["Agent session 1<br/>records bugfix memory"] --> Store["sdl.memory.store"]
+    Store --> Graph["LadybugDB memory node"]
+    Store --> Files[".sdl-memory/bugfixes/<id>.md"]
+    Graph --> Link1["MEMORY_OF -> authenticate()"]
+    Graph --> Link2["HAS_MEMORY -> repo"]
+    Session2["Agent session 2"] --> Surface["sdl.memory.surface"]
+    Surface --> Graph
+    Graph --> Recall["Relevant memory surfaced<br/>race condition fix in authenticate()"]
 ```
 
 Memories are **automatically surfaced** inside graph slices — when an agent builds a slice touching symbols with linked memories, those memories appear alongside the cards. During re-indexing, memories linked to changed symbols are **flagged as stale**, prompting agents to review and update them. Four MCP tools (`store`, `query`, `remove`, `surface`) provide full CRUD plus intelligent ranking by confidence, recency, and symbol overlap.
@@ -362,7 +336,7 @@ Memories are **automatically surfaced** inside graph slices — when an agent bu
 
 ### CLI Tool Access — No MCP Server Required
 
-Access all 35 tool actions directly from the command line with `sdl-mcp tool`. No MCP server, transport, or SDK — just your terminal.
+Access all 32 flat SDL action tools directly from the command line with `sdl-mcp tool`. No MCP server, transport, or SDK is required.
 
 ```bash
 # Search for symbols
@@ -389,20 +363,19 @@ Features include typed argument coercion (string, number, boolean, string[], jso
 
 ### Tool Gateway — 81% Token Reduction
 
-The tool gateway consolidates all 35 MCP tools into **4 namespace-scoped tools** (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`), reducing `tools/list` overhead from **~3,742 tokens to ~713 tokens** — an **81% reduction**.
+The tool gateway consolidates the 32 flat SDL action tools into **4 namespace-scoped tools** (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`), reducing `tools/list` overhead from the full flat schema surface to a compact gateway surface.
 
-```
-  Before:  35 tools × full JSON Schema = ~3,742 tokens at conversation start
-  After:    4 tools × thin schema       = ~713 tokens at conversation start
-                                          ─────────────
-                                          ~3,029 tokens saved per conversation
+```mermaid
+flowchart LR
+    Before["Flat mode<br/>32 flat action tools<br/>plus universal discovery/info"] --> After["Gateway mode<br/>4 namespace tools<br/>plus universal discovery/info"]
+    After --> Savings["Smaller tools/list payload<br/>lower agent startup overhead"]
 ```
 
 Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "symbol.search", repoId: "x", query: "auth" }`) and routes to the same handlers with double Zod validation. Thin wire schemas in `tools/list` keep the registration compact while full validation happens server-side. Legacy flat tool names are optionally emitted alongside for backward compatibility.
 
 **Why it matters:**
-- **81% token reduction** in `tools/list` overhead (~3,742 → ~713 tokens per conversation)
-- 35 tools consolidated into 4 namespace-scoped tools for simpler agent selection
+- Large reduction in `tools/list` overhead for gateway-first agents
+- 32 flat action tools consolidated into 4 namespace-scoped tools for simpler agent selection
 - Fewer tool choices means faster and more accurate tool dispatch by the agent
 - Backward-compatible: legacy flat tool names optionally emitted alongside
 
@@ -414,7 +387,7 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 
 <br/>
 
-## All 35 MCP Tools at a Glance
+## All 36 Unique Tool Surfaces at a Glance
 
 <table>
 <tr><th>Category</th><th>Tool</th><th>One-Line Description</th></tr>
@@ -560,46 +533,21 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 
 ## System Architecture
 
-```
-  ┌─────────────────────────────────────────────────────────────────────┐
-  │                        MCP Clients                                  │
-  │  Claude Code · Claude Desktop · Cursor · Windsurf · Codex · Gemini │
-  └──────────────────────────┬──────────────────────────────────────────┘
-                             │ stdio / HTTP
-  ┌──────────────────────────▼──────────────────────────────────────────┐
-  │                      Tool Gateway                                    │
-  │  4 namespace-scoped tools (sdl.query, sdl.code, sdl.repo, sdl.agent) │
-  │  ← Thin JSON schemas → Double Zod validation → Handler dispatch      │
-  └───────┬────────┬────────┬────────┬────────┬────────┬────────────────┘
-          │        │        │        │        │        │
-  ┌───────▼──┐ ┌───▼───┐ ┌─▼──┐ ┌──▼──┐ ┌──▼───┐ ┌──▼──────┐
-  │ Symbols  │ │Slices │ │Code│ │Delta│ │Agent │ │ Memory  │
-  │ search   │ │build  │ │gate│ │diff │ │orch. │ │ store   │
-  │ getCard  │ │refresh│ │skel│ │blast│ │feedbk│ │ query   │
-  │ getCards │ │spill. │ │hot │ │risk │ │chain │ │ surface │
-  └────┬─────┘ └───┬───┘ └─┬──┘ └──┬──┘ └──┬───┘ └──┬─────┘
-       │           │       │       │       │        │
-  ┌────▼───────────▼───────▼───────▼───────▼────────▼───────┐
-  │                    Policy Engine                          │
-  │  Proof-of-need gating · Token budgets · Audit logging     │
-  └──────────────────────────┬──────────────────────────────┘
-                             │
-  ┌──────────────────────────▼──────────────────────────────┐
-  │                   LadybugDB (Graph)                      │
-  │  Symbols · Edges · Files · Versions · Clusters ·         │
-  │  Processes · Memories · Metrics                           │
-  └──────────────────────────▲──────────────────────────────┘
-                             │
-  ┌──────────────────────────┴──────────────────────────────┐
-  │                  Indexer Pipeline                         │
-  │  ┌─────────────────┐    ┌────────────────────────────┐   │
-  │  │  Rust (napi-rs)  │ or │  Tree-sitter (TS fallback) │   │
-  │  │  default engine  │    │  11 language grammars       │   │
-  │  └────────┬────────┘    └──────────┬─────────────────┘   │
-  │           │  Pass 1: Symbols + Imports + Calls            │
-  │           │  Pass 2: Cross-file call resolution            │
-  │           │  Semantic: Embeddings + LLM summaries          │
-  └───────────┴──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Clients["MCP clients<br/>Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini"]
+    Gateway["Tool gateway<br/>sdl.query, sdl.code, sdl.repo, sdl.agent"]
+    Flat["Flat tools and optional code-mode surfaces"]
+    Policy["Policy engine<br/>proof-of-need, budgets, audit logging"]
+    Graph["LadybugDB graph<br/>symbols, edges, files, versions, memories"]
+    Indexer["Indexer pipeline<br/>Rust native or Tree-sitter fallback<br/>pass 1, pass 2, semantic enrichment"]
+
+    Clients --> Gateway
+    Clients --> Flat
+    Gateway --> Policy
+    Flat --> Policy
+    Policy --> Graph
+    Indexer --> Graph
 ```
 
 [Full Architecture Documentation →](./docs/architecture.md)
@@ -615,7 +563,7 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 | Document | Description |
 |:---------|:------------|
 | [Getting Started](./docs/getting-started.md) | Installation, 5-minute setup, MCP client config |
-| [MCP Tools Reference](./docs/mcp-tools-detailed.md) | Detailed docs for all 35 tools (parameters, responses, examples) |
+| [MCP Tools Reference](./docs/mcp-tools-detailed.md) | Detailed docs for all 36 unique tool surfaces (parameters, responses, examples) |
 | [CLI Reference](./docs/cli-reference.md) | All CLI commands and options |
 | [Configuration Reference](./docs/configuration-reference.md) | Every config option with defaults and guidance |
 | [Agent Workflows](./docs/agent-workflows.md) | Workflow instructions for CLAUDE.md / AGENTS.md |

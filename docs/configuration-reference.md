@@ -898,7 +898,7 @@ Controls the gateway tool registration mode.
 | `enabled`        | `boolean` | `true`  | Enable gateway-mode tool registration (namespace-scoped)   |
 | `emitLegacyTools`| `boolean` | `false` | Also emit flat (legacy) tools alongside gateway tools (deprecated) |
 
-Gateway mode groups tools into 4 namespace tools (`sdl_repo`, `sdl_symbol`, `sdl_code`, `sdl_agent`) plus `sdl.action.search` and `sdl.info`. When `emitLegacyTools` is `true`, the flat tool names are also registered for backwards compatibility. Legacy tool aliases are deprecated and will be removed in a future version.
+Gateway mode groups tools into 4 namespace tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`) plus `sdl.action.search` and `sdl.info`. When `emitLegacyTools` is `true`, the flat tool names are also registered for backwards compatibility.
 
 > **When to change:** Set `emitLegacyTools: false` to reduce the tool list from 38 to 6 tools (gateway-only mode). Set `enabled: false` to use flat-only mode (34 tools).
 
@@ -921,7 +921,7 @@ Controls Code Mode tools (`sdl.manual`, `sdl.context`, and `sdl.workflow`).
 > **When to change:**
 >
 > - **Full tool surface:** Set `exclusive: false` to expose gateway and legacy tools alongside code-mode tools.
-> - **Disable code mode:** Set `enabled: false` to remove `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.action.search`.
+> - **Disable code mode:** Set `enabled: false` to remove `sdl.manual`, `sdl.context`, and `sdl.workflow`. `sdl.action.search` remains available as a universal discovery tool outside Code Mode exclusive mode.
 > - **Strict ladder enforcement:** Set `ladderValidation: "enforce"` to reject workflows that skip context ladder rungs.
 > - **Long workflows:** Increase `maxWorkflowSteps` and `maxWorkflowTokens` for complex multi-step lookups.
 > - **Performance:** `etagCaching` is recommended to stay `true` — it automatically avoids resending unchanged cards.

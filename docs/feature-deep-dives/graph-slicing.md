@@ -14,35 +14,17 @@ SDL-MCP's graph slicing follows the *dependency graph* instead. Starting from th
 
 ## How Slicing Works
 
-```
-     Your Task: "Fix the auth middleware"
-                    │
-                    ▼
-           ┌──────────────┐
-           │ Entry Symbols │  ← auto-discovered from taskText
-           │ authenticate  │     or explicitly provided
-           │ validateToken │
-           └──────┬───────┘
-                  │
-          BFS / beam search
-          across weighted edges
-                  │
-    ┌─────────────┼─────────────┐
-    │             │             │
-    ▼             ▼             ▼
- ┌──────┐   ┌──────────┐   ┌─────────┐
- │hashPw│   │getUserById│  │JwtConfig│   ← call weight: 1.0
- └──┬───┘   └────┬─────┘   └────┬────┘     import weight: 0.6
-    │            │              │            config weight: 0.8
-    ▼            ▼              ▼
- ┌──────┐   ┌────────┐   ┌──────────┐
- │bcrypt│   │dbQuery │   │envLoader │   ← frontier (just
- └──────┘   └────────┘   └──────────┘     outside the slice)
+```mermaid
+flowchart TD
+    Task["Task: Fix the auth middleware"]
+    Seeds["Entry symbols<br/>authenticate<br/>validateToken"]
+    Search["Weighted BFS / beam search"]
+    Calls["Direct call edges<br/>hashPw<br/>getUserById<br/>JwtConfig"]
+    Frontier["Frontier just outside slice<br/>bcrypt<br/>dbQuery<br/>envLoader"]
+    Slice["Budgeted slice output<br/>8 cards returned (~800 tokens)<br/>instead of ~16k tokens of file reads"]
 
- ═══════════════════════════════════════
-        Token budget reached.
-        8 cards returned (~800 tokens)
-        vs. reading 8 files (~16,000 tokens)
+    Task --> Seeds --> Search --> Calls --> Slice
+    Search --> Frontier
 ```
 
 ### Edge Weights
@@ -73,15 +55,13 @@ Each symbol in the BFS frontier is scored by weighted factors:
 
 Slices aren't one-shot. They have a full lifecycle:
 
+```mermaid
+flowchart LR
+    Build["slice.build"] --> Handle["handle"] --> Refresh["slice.refresh"] --> Delta["delta"] --> Spillover["slice.spillover.get"] --> Overflow["overflow pages"]
+    Handle --> Rebuild["lease expires -> rebuild"]
+    Delta --> NotModified["nothing changed -> notModified"]
+    Overflow --> Done["no more pages -> done"]
 ```
-  slice.build        slice.refresh       slice.spillover.get
-  ──────────►  handle  ──────────►  delta  ──────────►  overflow
-                 │                    │                     │
-                 │   lease expires    │   nothing changed   │   no more pages
-                 ▼                   ▼                     ▼
-              rebuild            notModified              done
-```
-
 1. **Build** (`sdl.slice.build`) — Creates the slice, returns a handle and lease
 2. **Refresh** (`sdl.slice.refresh`) — Returns only what changed since your last version (dramatically cheaper than rebuilding)
 3. **Spillover** (`sdl.slice.spillover.get`) — Pages through symbols that didn't fit in the budget

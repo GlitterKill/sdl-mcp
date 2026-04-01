@@ -18,126 +18,23 @@ SDL-MCP's core value proposition is token efficiency — agents get the code int
 
 ## Architecture
 
+```mermaid
+flowchart TD
+    Handler["Tool handler"]
+    Raw["attachRawContext<br/>fileIds or rawTokens<br/>raw-read cost estimate"]
+    Post["Server dispatch post-handler"]
+    Usage["computeTokenUsage<br/>SDL vs raw-equivalent savings"]
+    Acc["tokenAccumulator.recordUsage<br/>in-memory session totals"]
+    Meter["MCP notification<br/>savings meter"]
+    Summary["MCP notification<br/>tool summary"]
+    Block["Content block<br/>_tokenUsage appended to tool response"]
+    Strip["Strip _rawContext + keep _tokenUsage"]
+
+    Handler --> Raw --> Post --> Usage --> Acc
+    Usage --> Meter
+    Usage --> Summary
+    Usage --> Block --> Strip
 ```
-  Tool Handler
-       │
-       ├── attachRawContext(result, { fileIds | rawTokens })
-       │   "Reading these files raw would cost X tokens"
-       │
-       ▼
-  Server Dispatch (post-handler)
-       │
-       ├── computeTokenUsage(result)
-       │   SDL tokens vs. raw equivalent → savings %
-       │
-       ├── tokenAccumulator.recordUsage()
-       │   In-memory session accumulation
-       │
-       ├── MCP notification: "████████░░ 84%"
-       │   Per-call meter sent to user via notifications/message
-       │
-       ├── MCP notification: tool summary
-       │   Human-readable one-liner (e.g., "symbol.search 'parse' → 12 results")
-       │
-       ├── Content block: "📊 1.2k / 65.0k tokens ████████░░ 98%"
-       │   Appended to the tool response for the agent
-       │
-       └── Strip _rawContext + _tokenUsage
-           Internal fields removed before response reaches the LLM
-       │
-       ▼
-  Server Shutdown / sdl.usage.stats
-       │
-       ├── persistUsageSnapshot() → LadybugDB
-       │   Session totals saved for lifetime tracking
-       │
-       └── renderSessionSummary()
-           Formatted meter display with per-tool breakdown
-```
-
-### Source Files
-
-| File | Purpose |
-|:-----|:--------|
-| `src/mcp/token-usage.ts` | `computeTokenUsage`, `attachRawContext`, `computeSavings` |
-| `src/mcp/savings-meter.ts` | `renderMeter`, `renderOperationMeter`, `renderSessionSummary` |
-| `src/mcp/token-accumulator.ts` | `TokenAccumulator` singleton, session-level tracking |
-| `src/mcp/tool-call-formatter.ts` | Human-readable per-tool summaries |
-| `src/mcp/tools/usage.ts` | `sdl.usage.stats` tool handler |
-| `src/db/ladybug-usage.ts` | LadybugDB persistence for lifetime snapshots |
-| `src/util/tokenize.ts` | Token count estimation |
-
----
-
-## Per-Call Savings Display
-
-Every tool call that retrieves code context shows its savings inline.
-
-### How It Works
-
-1. **Tool handler attaches a raw-context hint** — Each handler knows what the "raw file equivalent" would have been. For example, `code.getSkeleton` knows the agent would otherwise read the entire source file, so it attaches the file's ID:
-
-   ```
-   attachRawContext(result, { fileIds: [symbol.fileId] })
-   ```
-
-2. **Server computes token usage** — After the handler returns, the server calculates:
-   - `sdlTokens`: estimated tokens in the actual SDL response
-   - `rawEquivalent`: estimated tokens if the agent had read the raw files instead
-   - `savingsPercent`: `Math.round((1 - sdlTokens / rawEquivalent) * 100)`
-
-3. **Server sends MCP notification** — A `notifications/message` is sent to the client with the meter:
-
-   ```
-   ████████░░ 84%
-   ```
-
-4. **Server injects first-block footer + appends content block** — The tool response now includes a `_displayFooter` field inside the first JSON content block (for clients that only render `content[0]`), and still appends a compact savings line as a separate content block:
-
-   ```
-   📊 1.2k / 65.0k tokens ████████░░ 98%
-   ```
-
-### The Meter Bar
-
-The meter uses 10 Unicode block characters for universal terminal compatibility:
-
-```
-  0%  ░░░░░░░░░░
- 30%  ███░░░░░░░
- 50%  █████░░░░░
- 84%  ████████░░
-100%  ██████████
-```
-
-- `█` (U+2588 FULL BLOCK) — filled portion
-- `░` (U+2591 LIGHT SHADE) — empty portion
-- Always exactly 10 segments: `filled = Math.floor(percent / 10)`
-
-### Raw Equivalent Estimation
-
-Different tools estimate the raw alternative differently:
-
-| Tool | Raw Equivalent Source |
-|:-----|:--------------------|
-| `code.getSkeleton` | File byte size of the symbol's source file |
-| `code.getHotPath` | File byte size of the symbol's source file |
-| `code.needWindow` | File byte size of the symbol's source file |
-| `symbol.search` | Sum of file byte sizes across all result files |
-| `symbol.getCard` | File byte size of the symbol's source file |
-| `slice.build` | Sum of file byte sizes across all files referenced by slice cards |
-| `agent.context` | Actual file byte sizes from `focusPaths` when available; falls back to 3x multiplier on planner token estimates |
-| `runtime.execute` | Raw output byte count |
-
-File byte sizes are converted to token estimates using `BYTES_PER_TOKEN = 4` (1 token ≈ 4 bytes). SDL response sizes use a structural-aware estimator: JSON syntax characters count as 1 token each, prose characters use `CHARS_PER_TOKEN = 3.5`.
-
-### Tools Excluded from Tracking
-
-Administrative tools that don't retrieve code context are excluded:
-
-`repo.register`, `repo.status`, `repo.overview`, `index.refresh`, `policy.get`, `policy.set`, `agent.feedback`, `agent.feedback.query`, `usage.stats`
-
----
 
 ## Session Savings Summary
 
@@ -152,7 +49,7 @@ A `TokenAccumulator` singleton tracks all savings within the current server sess
 | `totalSdlTokens` | Sum of SDL tokens across all tracked calls |
 | `totalRawEquivalent` | Sum of raw-equivalent tokens across all tracked calls |
 | `totalSavedTokens` | `rawEquivalent - sdlTokens` per call, summed. Negative values mean SDL overhead exceeded the raw equivalent for that workload. |
-| `overallSavingsPercent` | `Math.round((1 - totalSdl / totalRaw) * 100)` |
+| `overallSavingsPercent` | `Math.round((1 - totalSdl / totalRaw) * 100)`; may be negative when SDL overhead exceeds the raw-equivalent estimate |
 | `callCount` | Total tracked tool calls |
 | `toolBreakdown` | Per-tool entry with calls, sdlTokens, rawEquivalent, savedTokens |
 
@@ -306,7 +203,7 @@ Alongside the savings meter, each tool call also sends a human-readable one-line
 | `code.getSkeleton` | `code.getSkeleton → .../server.ts` |
 | `code.needWindow` | `code.needWindow → [approved] L42-120 (~1.2k tokens)` |
 | `slice.build` | `slice.build → 24 cards (handle: a1b2c3d4...)` |
-| `chain` | `chain → 5 steps (4 ok, 1 errors) ~2.5k tokens` |
+| `workflow` | `workflow -> 5 steps (4 ok, 1 errors) ~2.5k tokens` |
 
 These summaries are non-critical — formatting failures are silently caught and never break tool dispatch.
 
@@ -316,20 +213,13 @@ These summaries are non-critical — formatting failures are silently caught and
 
 The server declares `logging: {}` in its MCP capabilities, enabling the `notifications/message` method. Up to three notifications are sent per tool call:
 
-```
-  ┌─── Notification 1: Savings meter ──────────────┐
-  │  ████████░░ 84%                                 │
-  └─────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    N1["Notification 1<br/>savings meter"]
+    N2["Notification 2<br/>tool summary"]
+    N3["Notification 3<br/>usage.stats formatted summary"]
 
-  ┌─── Notification 2: Tool summary ───────────────┐
-  │  symbol.search "parse" → 12 results             │
-  └─────────────────────────────────────────────────┘
-
-  ┌─── Notification 3 (usage.stats only) ──────────┐
-  │  ── Token Savings ─────────────────────────     │
-  │  Session: 42 calls │ 18.5k saved │ ████████░░  │
-  │  ...                                            │
-  └─────────────────────────────────────────────────┘
+    N1 --> N2 --> N3
 ```
 
 All notifications use:

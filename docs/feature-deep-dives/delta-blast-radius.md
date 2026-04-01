@@ -19,33 +19,30 @@ A delta pack contains:
 
 ## Anatomy of a Delta Pack
 
-```
-         Code Change: modified `validateToken()` signature
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-       signatureDiff    invariantDiff    sideEffectDiff
-       ┌────────────┐  ┌─────────────┐  ┌──────────────┐
-       │before:     │  │added:       │  │added:        │
-       │ (token:    │  │ "throws on  │  │ "logs to     │
-       │  string)   │  │  expired"   │  │  audit trail"│
-       │after:      │  │removed:     │  │              │
-       │ (token:    │  │ (none)      │  │              │
-       │  string,   │  └─────────────┘  └──────────────┘
-       │  options?: │
-       │  object)   │
-       └────────────┘
-              │
-              ▼
-      ┌──── Blast Radius ────┐
-      │                      │
-      │  1. authenticate()   │ ← distance: 1, direct caller
-      │  2. refreshSession() │ ← distance: 1, direct caller
-      │  3. AuthMiddleware    │ ← distance: 2, calls authenticate
-      │  4. loginHandler()   │ ← distance: 2, calls authenticate
-      │  5. auth.test.ts     │ ← test file, flagged for re-run
-      │                      │
-      └──────────────────────┘
+```mermaid
+flowchart TD
+    Change["Code change<br/>modified validateToken() signature"]
+    Sig["signatureDiff<br/>token -> token, options?"]
+    Inv["invariantDiff<br/>added throws on expired"]
+    Fx["sideEffectDiff<br/>added audit trail logging"]
+    Blast["Blast radius"]
+    C1["authenticate()<br/>distance 1"]
+    C2["refreshSession()<br/>distance 1"]
+    C3["AuthMiddleware<br/>distance 2"]
+    C4["loginHandler()<br/>distance 2"]
+    T1["auth.test.ts<br/>flag for re-run"]
+
+    Change --> Sig
+    Change --> Inv
+    Change --> Fx
+    Sig --> Blast
+    Inv --> Blast
+    Fx --> Blast
+    Blast --> C1
+    Blast --> C2
+    Blast --> C3
+    Blast --> C4
+    Blast --> T1
 ```
 
 ### Blast Radius Ranking
@@ -130,19 +127,20 @@ flowchart TD
 - **Evidence** supporting each finding
 - **Recommended tests** prioritized by risk, targeting the most impacted symbols
 
-```
-  Risk Score: 72 (HIGH)
+```text
+Risk Score: 72 (HIGH)
 
-  Findings:
-  ├── [HIGH] Signature change on validateToken (fan-in: 12)
-  ├── [MED]  New side effect: audit trail logging
-  └── [LOW]  Invariant addition (non-breaking)
+Findings:
+- [HIGH] Signature change on validateToken (fan-in: 12)
+- [MED]  New side effect: audit trail logging
+- [LOW]  Invariant addition (non-breaking)
 
-  Recommended Tests:
-  ├── [HIGH] Re-run auth.test.ts (direct coverage)
-  ├── [HIGH] Re-run middleware.test.ts (blast radius)
-  └── [MED]  Add test for new options parameter
+Recommended Tests:
+- [HIGH] Re-run auth.test.ts (direct coverage)
+- [HIGH] Re-run middleware.test.ts (blast radius)
+- [MED]  Add test for new options parameter
 ```
+
 
 ### Risk Scoring Formula
 

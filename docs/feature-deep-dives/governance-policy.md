@@ -6,7 +6,7 @@
 
 ## Why Gate Code Access?
 
-Without governance, AI agents default to reading entire files. This wastes tokens, risks exposing sensitive code regions, and creates unpredictable context costs. SDL-MCP's policy engine enforces a "prove you need it" model for raw code access.
+Without governance, AI agents default to reading entire files. This wastes tokens, risks exposing sensitive code regions, and creates unpredictable context costs. SDL-MCP's policy engine enforces a "prove you need it" model for raw code access. Approval can proceed as soon as one or more requested identifiers match the candidate window, so tight identifier lists outperform broad catch-all requests.
 
 ---
 
@@ -14,32 +14,16 @@ Without governance, AI agents default to reading entire files. This wastes token
 
 Every request to `sdl.code.needWindow` (raw code, Rung 4) passes through the policy engine before code is returned:
 
-```
-  Agent Request
-  "I need to read validateToken()"
-       │
-       ▼
-  ┌──────────────────────────────┐
-  │       Policy Engine          │
-  │                              │
-  │  ✓ Identifiers provided?     │──── deny if empty
-  │  ✓ Within line limit?        │──── deny if > maxWindowLines
-  │  ✓ Within token limit?       │──── deny if > maxWindowTokens
-  │  ✓ Identifiers exist?        │──── deny if not in range
-  │  ✓ Symbol in current slice?  │──── more likely to approve
-  │  ✓ Scorer utility check      │──── is the code worth reading?
-  │                              │
-  └──────────┬───────────────────┘
-             │
-      ┌──────┴──────┐
-      │             │
-   APPROVE       DENY
-      │             │
-      ▼             ▼
-  Return code   Return guidance
-  + audit log   + nextBestAction
-                "Try getHotPath
-                 with ['errorCode']"
+```mermaid
+flowchart TD
+    Req["Agent request<br/>I need to read validateToken()"]
+    Policy["Policy engine<br/>identifiers required<br/>line and token caps<br/>identifier match check<br/>slice / frontier boost<br/>utility scoring"]
+    Approve["APPROVE<br/>Return code + audit log"]
+    Deny["DENY<br/>Return guidance + nextBestAction"]
+
+    Req --> Policy
+    Policy --> Approve
+    Policy --> Deny
 ```
 
 ### Configurable Policy Settings

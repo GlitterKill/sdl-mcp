@@ -444,19 +444,26 @@ if (
 
 ## Decision Tree: Pass or Fail?
 
-```
-CI Failed?
-├─ Are all failures in ONE category (e.g., only indexing time)?
-│  ├─ YES: Is the degradation small (<5%) and understood?
-│  │  ├─ YES: Consider updating threshold (get approval)
-│  │  └─ NO: Fix the regression
-│  └─ NO: Multiple categories failing?
-│     └─ Fix the regressions (don't update thresholds)
-├─ Is the degradation due to intentional improvements elsewhere?
-│  ├─ YES: Document trade-off, update thresholds (get approval)
-│  └─ NO: Fix the regression
-└─ Is the failure flaky (inconsistent)?
-   └─ Investigate flakiness, increase smoothing, fix underlying issue
+```mermaid
+flowchart TD
+    Failed["CI failed"] --> OneCategory{"All failures in one category?"}
+    OneCategory -->|Yes| SmallKnown{"Small (<5%) and understood?"}
+    SmallKnown -->|Yes| UpdateThreshold["Consider updating threshold after approval"]
+    SmallKnown -->|No| FixRegression1["Fix the regression"]
+    OneCategory -->|No| MultiFail{"Multiple categories failing?"}
+    MultiFail -->|Yes| FixRegression2["Fix the regressions instead of updating thresholds"]
+    MultiFail -->|No| Intentional{"Intentional improvement elsewhere?"}
+    Intentional -->|Yes| Tradeoff["Document the trade-off and update thresholds after approval"]
+    Intentional -->|No| FixRegression3["Fix the regression"]
+    Tradeoff --> Flaky{"Failure is flaky?"}
+    FixRegression1 --> Flaky
+    FixRegression2 --> Flaky
+    FixRegression3 --> Flaky
+    UpdateThreshold --> Flaky
+    Flaky -->|Yes| Investigate["Investigate flakiness, increase smoothing, fix root cause"]
+    Flaky -->|No| Done["Proceed with the chosen action"]
+
+    style Investigate fill:#fff3cd,stroke:#d39e00
 ```
 
 ## Getting Help

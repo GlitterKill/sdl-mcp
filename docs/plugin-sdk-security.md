@@ -45,28 +45,13 @@ SDL-MCP's plugin system allows external code to run within the indexer process. 
 
 ### Trust Boundaries
 
-```
-┌─────────────────────────────────────────────────────┐
-│               User/System                          │
-│  (Configures which plugins to load)                │
-└────────────────────┬────────────────────────────────┘
-                     │ Trusted Path
-                     │ (Plugin files)
-┌────────────────────▼────────────────────────────────┐
-│              SDL-MCP Host                          │
-│  - Validates manifests                            │
-│  - Checks API versions                            │
-│  - Loads plugin modules                           │
-└────────────────────┬────────────────────────────────┘
-                     │ Plugin Execution
-                     │ (Full process access)
-┌────────────────────▼────────────────────────────────┐
-│              Plugin Code                           │
-│  - Runs with host permissions                      │
-│  - Can access file system                          │
-│  - Can make network requests                       │
-│  - Can execute system commands                     │
-└─────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    User["User / System<br/>configures which plugins to load"] -->|"trusted plugin path"| Host["SDL-MCP Host<br/>validates manifests, checks API versions, loads modules"]
+    Host -->|"plugin execution"| Plugin["Plugin Code<br/>runs with host permissions, file/network/process access"]
+
+    style Host fill:#e7f5ff,stroke:#1971c2
+    style Plugin fill:#fff3cd,stroke:#d39e00
 ```
 
 ### Execution Permissions
@@ -87,22 +72,12 @@ Plugins execute with the same permissions as the SDL-MCP process:
 
 Use a dedicated, protected directory for trusted plugins:
 
-```
-/usr/local/lib/sdl-mcp/plugins/          # Linux/macOS
-├── my-lang-plugin/
-│   └── dist/
-│       └── index.js
-└── another-plugin/
-    └── dist/
-        └── index.js
-
-C:\Program Files\sdl-mcp\plugins\        # Windows
-├── my-lang-plugin\
-│   └── dist\
-│       └── index.js
-└── another-plugin\
-    └── dist\
-        └── index.js
+```mermaid
+flowchart LR
+    Unix["/usr/local/lib/sdl-mcp/plugins/"] --> UnixA["my-lang-plugin/dist/index.js"]
+    Unix --> UnixB["another-plugin/dist/index.js"]
+    Win["C:\\Program Files\\sdl-mcp\\plugins\\"] --> WinA["my-lang-plugin\\dist\\index.js"]
+    Win --> WinB["another-plugin\\dist\\index.js"]
 ```
 
 ### Configuration Best Practices

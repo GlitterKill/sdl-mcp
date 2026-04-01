@@ -27,23 +27,18 @@ The sync artifact system enables CI-produced memory artifacts to be exported, im
 
 ## Architecture
 
-```
-  CI/CD Pipeline                          Consumer
-  ──────────────                          ────────
-  ┌──────────┐     gzip artifact          ┌──────────┐
-  │  sdl-mcp  │ ──── export ────────────▶ │  Storage  │
-  │   index   │     (commit SHA,          │  (local/  │
-  │   +       │      branch,              │  remote)  │
-  │  export   │      version)             └────┬─────┘
-  └──────────┘                                 │
-                                               │ pull / import
-                                               ▼
-                                          ┌──────────┐
-                                          │  sdl-mcp  │
-                                          │  import   │
-                                          │  (restore │
-                                          │   state)  │
-                                          └──────────┘
+```mermaid
+flowchart LR
+    subgraph CI["CI/CD pipeline"]
+        Index["sdl-mcp index"]
+        Export["sdl-mcp export<br/>commit SHA + branch + version"]
+        Index --> Export
+    end
+
+    Storage["Artifact storage<br/>(local or remote)"]
+    Import["Consumer<br/>sdl-mcp import"]
+
+    Export -->|"gzip artifact"| Storage -->|"pull / import"| Import
 ```
 
 ### Core Components

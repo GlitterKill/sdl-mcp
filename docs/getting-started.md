@@ -18,21 +18,14 @@
 
 ## Setup at a Glance
 
-```
-  ┌────────────┐     ┌────────────┐     ┌────────────┐     ┌────────────┐
-  │  Install   │────▶│   Init     │────▶│   Serve    │────▶│  Connect   │
-  │            │     │            │     │            │     │   Agent    │
-  │ npm i -g   │     │ sdl-mcp    │     │ sdl-mcp    │     │            │
-  │ sdl-mcp    │     │ init -y    │     │ serve      │     │ Claude,    │
-  │            │     │ --auto-    │     │ --stdio    │     │ Cursor,    │
-  │            │     │   index    │     │   or       │     │ Windsurf,  │
-  │            │     │            │     │ --http     │     │ etc.       │
-  └────────────┘     └────────────┘     └────────────┘     └────────────┘
-       │                   │                  │
-       ▼                   ▼                  ▼
-    Installs           Creates config,     Starts MCP server
-    Node.js CLI        detects languages,  (stdio or HTTP)
-                       indexes codebase
+```mermaid
+flowchart LR
+    Install["Install<br/>npm install -g sdl-mcp"]
+    Init["Init<br/>sdl-mcp init -y --auto-index"]
+    Serve["Serve<br/>sdl-mcp serve --stdio or --http"]
+    Connect["Connect agent<br/>Claude, Cursor, Windsurf, etc."]
+
+    Install --> Init --> Serve --> Connect
 ```
 
 ## Prerequisites

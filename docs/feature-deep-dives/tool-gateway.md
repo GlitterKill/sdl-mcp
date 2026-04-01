@@ -10,16 +10,13 @@ The tool gateway consolidates 31 of the 32 action tools into 4 typed proxy tools
 
 When an MCP client connects, it calls `tools/list` to discover available tools. The response includes tool names, descriptions, and JSON schemas. Registering 32 action tools separately is expensive, especially once titles, richer descriptions, and action-specific schema metadata are included.
 
-```
-Without gateway:
-  tools/list → 34 tools
-  = 32 action tools + sdl.action.search + sdl.info
+```mermaid
+flowchart LR
+    Flat["Flat mode<br/>34 tools<br/>32 action tools + sdl.action.search + sdl.info"]
+    Compare["Measurement scope<br/>31 gateway-routable flat tools vs 4 gateway tools<br/>sdl.file.read stays flat-only"]
+    Gateway["Gateway mode<br/>6 tools<br/>4 gateway tools + sdl.action.search + sdl.info"]
 
-With gateway:
-  tools/list → 6 tools
-  = 4 gateway tools + sdl.action.search + sdl.info
-
-The gateway measurement script compares the 31 gateway-routable tools against the 4 gateway tools, because those are the surfaces being consolidated. `sdl.file.read` is flat-only. The two universal tools are present in both modes.
+    Flat --> Compare --> Gateway
 ```
 
 This matters because:
@@ -34,51 +31,26 @@ This matters because:
 
 ### Before (Flat Mode)
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    MCP Server                        │
-│                                                      │
-│  sdl.repo.register    sdl.symbol.search              │
-│  sdl.repo.status      sdl.symbol.getCard             │
-│  sdl.repo.overview    sdl.symbol.getCards             │
-│  sdl.index.refresh    sdl.slice.build                │
-│  sdl.buffer.push      sdl.slice.refresh              │
-│  sdl.buffer.checkpoint sdl.slice.spillover.get       │
-│  sdl.buffer.status    sdl.delta.get                  │
-│  sdl.code.needWindow  sdl.policy.get                 │
-│  sdl.code.getSkeleton sdl.policy.set                 │
-│  sdl.code.getHotPath  sdl.pr.risk.analyze            │
-│  sdl.agent.context sdl.context.summary           │
-│  sdl.agent.feedback   sdl.agent.feedback.query       │
-│  sdl.runtime.execute  sdl.memory.store               │
-│  sdl.runtime.queryOutput sdl.memory.query             │
-│  sdl.memory.remove    sdl.memory.surface              │
-│  sdl.usage.stats                                      │
-│                                                      │
-│            31 tools × full JSON schema               │
-│               ~4,000+ tokens total                   │
-└─────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Flat["MCP server<br/>31 gateway-routable flat tools<br/>full per-tool schemas<br/>~4,000+ tokens"]
 ```
 
 ### After (Gateway Mode)
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    MCP Server                        │
-│                                                      │
-│  sdl.query   → 9 actions (symbol.*, slice.*, etc.)    │
-│  sdl.code    → 3 actions (code.*)                     │
-│  sdl.repo    → 7 actions (repo.*, index.*, policy.*,  │
-│                             usage.stats)              │
-│  sdl.agent   → 12 actions (agent.*, buffer.*, runtime,│
-│                             memory.*)                  │
-│                                                      │
-│     4 tools × compact schema + compact desc          │
-│               ~713 tokens total                      │
-└─────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    Gateway["MCP server<br/>4 gateway tools<br/>compact action-aware schemas<br/>~713 tokens"]
+    Query["sdl.query<br/>9 actions"]
+    Code["sdl.code<br/>3 actions"]
+    Repo["sdl.repo<br/>7 actions"]
+    Agent["sdl.agent<br/>12 actions"]
 
----
+    Gateway --> Query
+    Gateway --> Code
+    Gateway --> Repo
+    Gateway --> Agent
+```
 
 ## How It Works
 
@@ -180,32 +152,15 @@ Aliases such as `repo`, `repo_id`, `root_path`, `project_path`, `symbol_id`, `sy
 
 Validation happens in two passes for safety:
 
-```
-Agent Call
-    │
-    ▼
-┌─────────────────────┐
-│ Gateway Schema       │  Discriminated union on `action`
-│ (cheap first-pass)   │  Catches wrong action names, type errors
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Router               │  Extracts action, merges repoId
-│                      │  Looks up handler from ActionMap
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Original Zod Schema  │  Strict second-pass validation
-│ (per-handler)        │  Identical to flat-mode validation
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Handler Function     │  Same handler as flat mode
-│                      │  Zero behavioral difference
-└─────────────────────┘
+```mermaid
+flowchart TD
+    Call["Agent Call"] --> Gateway["Gateway Schema<br/>(cheap first pass)<br/>Discriminated union on action"]
+    Gateway --> Router["Router<br/>Extracts action, merges repoId, looks up handler"]
+    Router --> Zod["Original Zod Schema<br/>(strict second pass)<br/>Matches flat-mode validation"]
+    Zod --> Handler["Handler Function<br/>Same behavior as flat mode"]
+
+    style Gateway fill:#fff3cd,stroke:#d39e00
+    style Zod fill:#d4edda,stroke:#2b8a3e
 ```
 
 ### 4. Compact Action-Aware Schemas
@@ -225,7 +180,7 @@ Measured with the included token measurement script (`scripts/measure-gateway-sc
 | **Flat core action tools** | 31 | ~17,000 | ~4,250 |
 | **Gateway core namespace tools** | 4 | ~2,900 | ~725 |
 | **Gateway-only runtime surface** | 6 | includes universal tools | varies slightly |
-| **Hybrid runtime surface** | 36 | includes universal tools | varies slightly |
+| **Hybrid runtime surface** | 38 | includes universal tools | varies slightly |
 
 | Metric | Value |
 |:-------|:------|

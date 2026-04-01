@@ -23,66 +23,34 @@ This document covers all three in depth, with architecture diagrams, configurati
 
 ## Overview: The Three Pillars
 
-```
-  ┌───────────────────────────────────────────────────────────────────┐
-  │                    SDL-MCP Semantic Engine                        │
-  │                                                                   │
-  │  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────┐  │
-  │  │   Pass-2 Call    │  │    Embedding     │  │    Summary      │  │
-  │  │   Resolution     │  │    Search        │  │    Pipeline     │  │
-  │  │                  │  │                  │  │                 │  │
-  │  │ "Who calls whom, │  │ "Find what you   │  │ "What does this │  │
-  │  │  and how sure    │  │  mean, not just  │  │  symbol actually│  │
-  │  │  are we?"        │  │  what you typed" │  │  do?"           │  │
-  │  │                  │  │                  │  │                 │  │
-  │  │ 11 language      │  │ Local ONNX or    │  │ 4-tier pipeline:│  │
-  │  │ resolvers        │  │ API embeddings   │  │ heuristic → NN  │  │
-  │  │                  │  │                  │  │ transfer → LLM  │  │
-  │  │ Confidence:      │  │ Alpha-blended    │  │ Quality-tracked │  │
-  │  │ 0.0 - 1.0        │  │ lexical+semantic │  │ (0.0 - 1.0)     │  │
-  │  └────────┬─────────┘  └────────┬─────────┘  └────────┬────────┘  │
-  │           │                     │                      │          │
-  │           ▼                     ▼                      ▼          │
-  │  ┌──────────────────────────────────────────────────────────────┐ │
-  │  │                    Symbol Cards & Slices                     │ │
-  │  │  Every card benefits: accurate deps, smart search, summaries│ │
-  │  └──────────────────────────────────────────────────────────────┘ │
-  └───────────────────────────────────────────────────────────────────┘
-```
-
 ```mermaid
 flowchart TD
-    subgraph "Pillar 1: Pass-2 Call Resolution"
-        P1["11 language resolvers"]
-        P1a["Import alias mapping"]
-        P1b["Barrel re-export tracing"]
-        P1c["Scope analysis"]
-        P1 --> P1a & P1b & P1c
-        P1a & P1b & P1c --> Conf["Confidence-scored<br/>call edges (0.0-1.0)"]
+    subgraph P1["Pillar 1: Pass-2 Call Resolution"]
+        Call["Who calls whom, and how sure are we?"]
+        Resolvers["11 language resolvers"]
+        Confidence["Confidence-scored edges
+0.0 - 1.0"]
+        Call --> Resolvers --> Confidence
     end
 
-    subgraph "Pillar 2: Embedding Search"
-        P2["Local ONNX or API embeddings"]
-        P2a["Lexical search (always)"]
-        P2b["Embed query + symbols"]
-        P2c["Alpha-blend scores"]
-        P2 --> P2a & P2b
-        P2a & P2b --> P2c
-        P2c --> Rerank["Reranked results"]
+    subgraph P2["Pillar 2: Embedding Search"]
+        Search["Find what you mean, not just what you typed"]
+        Embeddings["Local ONNX or API embeddings"]
+        Fusion["Hybrid or legacy reranking"]
+        Search --> Embeddings --> Fusion
     end
 
-    subgraph "Pillar 3: Summary Pipeline"
-        P3["4-tier summary generation"]
-        P3a["Heuristic (per-kind patterns)"]
-        P3b["NN transfer (embedding neighbors)"]
-        P3c["LLM (Claude Haiku / Ollama)"]
-        P3d["Quality-tracked (0.0-1.0)"]
-        P3 --> P3a --> P3b --> P3c --> P3d
+    subgraph P3["Pillar 3: Summary Pipeline"]
+        Summary["What does this symbol actually do?"]
+        Stages["Heuristic -> NN transfer -> LLM"]
+        Quality["Quality tracked
+0.0 - 1.0"]
+        Summary --> Stages --> Quality
     end
 
-    Conf --> Cards["Symbol Cards & Slices"]
-    Rerank --> Cards
-    P3d --> Cards
+    Confidence --> Cards["Symbol Cards & Slices"]
+    Fusion --> Cards
+    Quality --> Cards
 
     style Cards fill:#d4edda,stroke:#28a745
 ```
@@ -105,26 +73,20 @@ Pass-2 answers this question by tracing import chains, analyzing scope, and reso
 
 ### Two-Pass Architecture
 
-```
-  PASS 1 (per-file, parallelizable)         PASS 2 (cross-file, sequential)
-  ──────────────────────────────────         ─────────────────────────────────
+```mermaid
+flowchart LR
+    subgraph Pass1["Pass 1 (per-file, parallelizable)"]
+        Parse["Parse AST"] --> Extract["Extract symbols, imports, raw calls, and types"]
+    end
 
-  ┌──────────────┐                           ┌──────────────────────────────┐
-  │  Parse AST   │                           │  For each file with calls:   │
-  │              │                           │                              │
-  │  Extract:    │                           │  1. Re-extract symbols       │
-  │  • symbols   │                           │  2. Map to indexed symbolIds │
-  │  • imports   │  ─────── stored ───────►  │  3. Build import map         │
-  │  • raw calls │  (names only, no IDs)     │  4. For each raw call:       │
-  │  • types     │                           │     • Check import aliases   │
-  │              │                           │     • Check barrel re-exports│
-  │              │                           │     • Check same-file scope  │
-  │              │                           │     • Check namespace imports│
-  │              │                           │     • Check package/module   │
-  │              │                           │     • Check global fallback  │
-  └──────────────┘                           │  5. Score confidence         │
-                                             │  6. Create edge with metadata│
-                                             └──────────────────────────────┘
+    subgraph Pass2["Pass 2 (cross-file, sequential)"]
+        Reextract["Re-extract symbols"] --> Map["Map to indexed symbolIds"]
+        Map --> ImportMap["Build import map"]
+        ImportMap --> Resolve["Resolve raw calls via aliases, re-exports, scopes, namespaces, packages, and fallback rules"]
+        Resolve --> Score["Score confidence and create metadata-rich call edges"]
+    end
+
+    Extract -->|"stored raw call names"| Reextract
 ```
 
 ### 11 Language Resolvers
@@ -150,52 +112,42 @@ The resolver system uses a **registry pattern**. Each language registers a `Pass
 
 Every resolved call edge is tagged with a **strategy** and a **confidence score**:
 
-```
-  Resolution Strategy         Base Confidence    Description
-  ─────────────────────────   ───────────────    ──────────────────────────────────
-  exact                       0.92               Direct match via compiler API,
-                                                 node ID, or unambiguous import
-
-  heuristic                   0.68 - 0.92        Single candidate by name+kind,
-                                                 same-package lookup, receiver
-                                                 type inference
-
-  unresolved                  0.20 - 0.35        Multiple candidates or no match
-                                                 found; placeholder edge created
-```
+| Resolution Strategy | Base Confidence | Description |
+|:--------------------|:----------------|:------------|
+| `exact` | `0.92` | Direct match via compiler API, node ID, or an unambiguous import |
+| `heuristic` | `0.68 - 0.92` | Single candidate by name and kind, same-package lookup, or receiver type inference |
+| `unresolved` | `0.20 - 0.35` | Multiple candidates or no match found; placeholder edge created |
 
 #### Ambiguity Penalty
 
 When multiple candidate symbols match a call, confidence is penalized:
 
+```text
+confidence = max(0, baseline - 0.04 * candidateCount)
 ```
-  confidence = max(0, baseline - 0.04 × candidateCount)
 
-  Examples:
-  ┌──────────────────────────────────────────────────────┐
-  │  1 candidate  →  0.92 (no penalty)                   │
-  │  2 candidates →  0.84 (0.92 - 0.08)                  │
-  │  5 candidates →  0.72 (0.92 - 0.20)                  │
-  │ 10 candidates →  0.52 (0.92 - 0.40, clamped)         │
-  └──────────────────────────────────────────────────────┘
-```
+| Candidates | Result |
+|:-----------|:-------|
+| 1 | `0.92` (no penalty) |
+| 2 | `0.84` (`0.92 - 0.08`) |
+| 5 | `0.72` (`0.92 - 0.20`) |
+| 10 | `0.52` (`0.92 - 0.40`, clamped) |
 
 ### What Gets Stored Per Edge
 
-```
-  ┌─────────────────────────────────────────────────────────────┐
-  │  Edge: buildSlice() ──calls──► getEdgesFrom()              │
-  │─────────────────────────────────────────────────────────────│
-  │  fromSymbolId:    "sha256:abc..."                           │
-  │  toSymbolId:      "sha256:def..."                           │
-  │  edgeType:        "call"                                    │
-  │  weight:          1.0            (0.5 for unresolved)       │
-  │  confidence:      0.92                                      │
-  │  resolution:      "exact"                                   │
-  │  resolverId:      "pass2-ts"                                │
-  │  resolutionPhase: "pass2"                                   │
-  │  provenance:      "call:getEdgesFrom"                       │
-  └─────────────────────────────────────────────────────────────┘
+```json
+{
+  "edge": "buildSlice() -> getEdgesFrom()",
+  "fromSymbolId": "sha256:abc...",
+  "toSymbolId": "sha256:def...",
+  "edgeType": "call",
+  "weight": 1.0,
+  "confidence": 0.92,
+  "resolution": "exact",
+  "resolverId": "pass2-ts",
+  "resolutionPhase": "pass2",
+  "provenance": "call:getEdgesFrom"
+}
 ```
 
 ### TypeScript: Deep Resolution Examples
@@ -273,22 +225,11 @@ When you request a card with `includeResolutionMetadata: true`, the response inc
 
 Both `sdl.symbol.getCard` and `sdl.slice.build` accept a `minCallConfidence` parameter:
 
-```
-  minCallConfidence: 0.5 (default)
-  ───────────────────────────────────────
-  Keeps:  exact (0.92), strong heuristic (0.72+)
-  Drops:  unresolved (0.20-0.35), weak heuristic
-
-  minCallConfidence: 0.8 (precision mode)
-  ───────────────────────────────────────
-  Keeps:  exact (0.92) only
-  Drops:  everything below 0.8
-
-  minCallConfidence: 0.0 (recall mode)
-  ───────────────────────────────────────
-  Keeps:  everything, including unresolved
-```
-
+| Mode | Threshold | Keeps | Drops |
+|:-----|:----------|:------|:------|
+| Default | `0.5` | Exact edges and strong heuristics (`0.72+`) | Unresolved and weak heuristics |
+| Precision | `0.8` | Exact edges only | Everything below `0.8` |
+| Recall | `0.0` | Everything, including unresolved edges | Nothing |
 ### Health Metric: `callResolution`
 
 `sdl.repo.status` includes a `callResolution` health component (0.0-1.0) measuring the percentage of call edges that were resolved above the confidence threshold. A score below 0.6 indicates the pass-2 resolver is struggling with the codebase (e.g., heavy dynamic dispatch, missing type information).
@@ -312,85 +253,34 @@ When `semantic.retrieval.mode` is `"hybrid"` and the required database extension
 
 #### Hybrid Retrieval Pipeline
 
-```
-  User Query: "check auth credentials"
-       │
-       ▼
-  ┌──────────────────────────────────────────────────────┐
-  │  1. Full-Text Search (FTS)                           │
-  │     Ladybug FTS index on Symbol.searchText           │
-  │     → authenticate, AuthService, checkPermissions    │
-  │     Ranked by FTS relevance score                    │
-  └─────────────────────┬────────────────────────────────┘
-                        │
-                        │  (runs in parallel)
-                        │
-  ┌──────────────────────────────────────────────────────┐
-  │  2. Vector Search (per real model)                   │
-  │     Embed query → search Ladybug vector index        │
-  │                                                      │
-  │     MiniLM (384-dim):                                │
-  │       validateToken  (0.91), authenticate (0.87)     │
-  │     Nomic (768-dim):                                 │
-  │       validateToken  (0.93), verifyPassword (0.85)   │
-  │                                                      │
-  │     One query embedding generated per real model      │
-  └─────────────────────┬────────────────────────────────┘
-                        │
-                        ▼
-  ┌──────────────────────────────────────────────────────┐
-  │  3. Reciprocal Rank Fusion (RRF)                     │
-  │                                                      │
-  │  score(d) = Σ  1 / (k + rank_i(d))                  │
-  │             sources                                  │
-  │                                                      │
-  │  With k = 60 (default):                              │
-  │  Each source contributes a rank-based score.         │
-  │  Symbols ranked highly by multiple sources rise      │
-  │  to the top, even if no single source ranked them #1 │
-  │                                                      │
-  │  Sources: fts, vector:minilm, vector:nomic           │
-  │                                                      │
-  │  Result: validateToken rises to #1                   │
-  │  (top-ranked in both FTS and vector search)          │
-  └──────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Query["User Query: check auth credentials"] --> FTS["1. Full-Text Search
+Ladybug FTS on Symbol.searchText"]
+    Query --> Vector["2. Vector Search
+query embedding per real model"]
+    FTS --> RRF["3. Reciprocal Rank Fusion
+rrfK = 60 by default"]
+    Vector --> RRF
+    RRF --> Result["validateToken rises to the top
+when multiple sources agree"]
 ```
 
 RRF is more robust than alpha-blending because it fuses *rank positions* rather than raw scores, making it insensitive to score distribution differences between FTS and vector backends.
-
 #### Legacy Pipeline (Alpha Blending)
 
 The legacy path is retained as a fallback and can be explicitly selected via `semantic.retrieval.mode: "legacy"`:
 
-```
-  User Query: "check auth credentials"
-       │
-       ▼
-  ┌──────────────────────────────────────────────────────┐
-  │  1. Lexical Search (always runs first)               │
-  │     Ranked by string similarity                      │
-  └─────────────────────┬────────────────────────────────┘
-                        │
-                        ▼  (if semantic: true)
-  ┌──────────────────────────────────────────────────────┐
-  │  2. Embed Query + Cosine Similarity                  │
-  │     sim(query, authenticate) = 0.87                  │
-  │     sim(query, validateToken) = 0.91                 │
-  └─────────────────────┬────────────────────────────────┘
-                        │
-                        ▼
-  ┌──────────────────────────────────────────────────────┐
-  │  3. Alpha Blending (deprecated)                      │
-  │                                                      │
-  │  finalScore = α × lexicalScore + (1-α) × semantic    │
-  │                                                      │
-  │  With α = 0.6 (default):                             │
-  │  60% lexical weight + 40% semantic weight            │
-  └──────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Query["User Query: check auth credentials"] --> Lexical["1. Lexical Search<br/>always runs first"]
+    Lexical --> Embed["2. Embed Query + Cosine Similarity<br/>sim(authenticate)=0.87<br/>sim(validateToken)=0.91"]
+    Embed --> Blend["3. Alpha blending (deprecated)<br/>alpha * lexicalScore + (1 - alpha) * semanticScore<br/>60% lexical, 40% semantic by default"]
+
+    style Blend fill:#fff3cd,stroke:#d39e00
 ```
 
 > **Deprecation notice**: `semantic.alpha` is deprecated in favor of `semantic.retrieval.fusion`. The legacy alpha-blending path remains functional but is no longer the recommended default.
-
 #### Automatic Fallback
 
 The hybrid retrieval system performs health checks before each search. If the Ladybug `fts` or `vector` extensions are unavailable, or if indexes are unhealthy, it automatically falls back to the legacy path and records the fallback reason in telemetry. This ensures `symbol.search` and `slice.build` remain functional in all environments.
@@ -422,36 +312,10 @@ If a fallback occurred, `mode` is `"legacy"` and `fallbackReason` explains why (
 
 SDL-MCP ships with two embedding models, each suited to different workflows:
 
-```
-  ┌────────────────────────────────────────────────────────────────┐
-  │                    all-MiniLM-L6-v2 (Default)                  │
-  │────────────────────────────────────────────────────────────────│
-  │  Dimensions:    384                                            │
-  │  Max tokens:    256                                            │
-  │  Size:          ~22 MB (INT8 quantized ONNX)                   │
-  │  Bundled:       YES (included in npm package)                  │
-  │  Training:      General sentence embeddings                    │
-  │  Best for:      Quick setup, small codebases, free tier       │
-  │                                                                │
-  │  Text input:  "validateToken (function): Validates JWT         │
-  │                signature and checks expiration claim"          │
-  │  ▲ Uses LLM summary for rich context                          │
-  └────────────────────────────────────────────────────────────────┘
-
-  ┌────────────────────────────────────────────────────────────────┐
-  │                    nomic-embed-text-v1.5                        │
-  │────────────────────────────────────────────────────────────────│
-  │  Dimensions:    768                                            │
-  │  Max tokens:    8,192                                          │
-  │  Size:          ~138 MB (downloaded on first use)              │
-  │  Bundled:       NO (fetched from HuggingFace)                  │
-  │  Training:      High-quality text embeddings (Matryoshka)      │
-  │  Best for:      Better semantic matching, longer context       │
-  │                                                                │
-  │  Text input:  "validateToken (function): Validates JWT         │
-  │                signature and checks expiration claim"          │
-  │  ▲ Uses same text format as MiniLM, benefits from summaries   │
-  └────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    MiniLM["all-MiniLM-L6-v2<br/>384 dims<br/>256 max tokens<br/>~22 MB INT8<br/>Bundled with npm<br/>Best for quick setup"] --> Shared["Natural-language symbol text<br/>benefits from summaries"]
+    Nomic["nomic-embed-text-v1.5<br/>768 dims<br/>8,192 max tokens<br/>~138 MB download<br/>Best for higher quality"] --> Shared
 ```
 
 **Which should you choose?**
@@ -478,20 +342,13 @@ The local provider uses `onnxruntime-node` and `tokenizers` (optional dependenci
 
 Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB. Each model gets its own set of properties:
 
-```
-  Symbol node properties:
-  ┌──────────────────────────────────────────────────────────┐
-  │  embeddingMiniLM          FLOAT[384]   ← MiniLM vector   │
-  │  embeddingMiniLMCardHash  STRING       ← freshness key   │
-  │  embeddingMiniLMUpdatedAt STRING       ← last refresh    │
-  │                                                          │
-  │  embeddingNomic           FLOAT[768]   ← Nomic vector    │
-  │  embeddingNomicCardHash   STRING       ← freshness key   │
-  │  embeddingNomicUpdatedAt  STRING       ← last refresh    │
-  └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Symbol["Symbol node"] --> MiniLM["embeddingMiniLM<br/>embeddingMiniLMCardHash<br/>embeddingMiniLMUpdatedAt"]
+    Symbol --> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
 ```
 
-Vectors are compressed for storage: `Float32 → multiply by 10,000 → round to Int16 → base64 encode` (~50% savings vs raw float32, negligible precision loss for cosine similarity).
+Vectors are compressed for storage: `Float32 -> multiply by 10,000 -> round to Int16 -> base64 encode` (~50% savings vs raw float32, negligible precision loss for cosine similarity).
 
 Each embedding is tagged with a `cardHash` (SHA-256 of the symbol data + text format used). When the symbol changes or the text format changes, the embedding is automatically refreshed during indexing.
 
@@ -501,26 +358,14 @@ Each embedding is tagged with a `cardHash` (SHA-256 of the symbol data + text fo
 
 Hybrid retrieval uses native Ladybug vector indexes for fast approximate nearest-neighbor search at query time:
 
-```
-  Native Ladybug Vector Indexes:
-  ┌─────────────────────────────────────────────────────────┐
-  │  Index: symbol_embedding_minilm_v1                       │
-  │  Property: Symbol.embeddingMiniLM                        │
-  │  Dimensions: 384                                         │
-  │  Created automatically on DB init when semantic.enabled  │
-  │                                                          │
-  │  Index: symbol_embedding_nomic_v1                        │
-  │  Property: Symbol.embeddingNomic                         │
-  │  Dimensions: 768                                         │
-  │  Created automatically on DB init when semantic.enabled  │
-  └─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Indexes["Native Ladybug Vector Indexes"]
+        MiniLMIndex["symbol_embedding_minilm_v1<br/>Property: Symbol.embeddingMiniLM<br/>Dimensions: 384"]
+        NomicIndex["symbol_embedding_nomic_v1<br/>Property: Symbol.embeddingNomic<br/>Dimensions: 768"]
+    end
 
-  Configuration (via semantic.retrieval.vector):
-  ┌──────────────────────────────┐
-  │  vector.enabled:     true    │ ← enable vector search
-  │  vector.topK:        75      │ ← candidates per model
-  │  vector.efs:         200     │ ← query-time accuracy
-  └──────────────────────────────┘
+    Config["semantic.retrieval.vector<br/>vector.enabled = true<br/>vector.topK = 75<br/>vector.efs = 200"] --> Indexes
 ```
 
 > **Removed in v0.10.1**: The previous `semantic.ann` config (HNSW sidecar indexes via `ann-index.ts`) has been removed. Use `semantic.retrieval.vector` for native Ladybug vector indexes instead. Legacy `semantic.ann` config keys are silently ignored for backward compatibility.
@@ -543,15 +388,9 @@ This ensures unsaved code always appears in results, just without hybrid retriev
 
 A symbol summary is a 1-3 sentence plain-English description of what a symbol does:
 
-```
-  ┌─────────────────────────────────────────────────────────┐
-  │  Symbol: buildGraphSlice                                │
-  │  Kind:   function                                       │
-  │  Summary: "Performs a BFS traversal from entry symbols   │
-  │  across the dependency graph, scoring each node by       │
-  │  relevance and returning the top-N cards within a        │
-  │  configurable token budget."                             │
-  └─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Symbol["buildGraphSlice<br/>function"] --> Summary["Performs a BFS traversal from entry symbols across the dependency graph, scores nodes by relevance, and returns the top cards within a token budget."]
 ```
 
 These summaries serve two purposes:
@@ -562,38 +401,34 @@ These summaries serve two purposes:
 
 Every symbol carries a `summaryQuality` (0.0-1.0) score and a `summarySource` field tracking provenance. Higher quality means the summary is more trustworthy and informative.
 
-```
-  Source                     Quality    summarySource           When
-  ─────────────────────────  ────────   ─────────────────────   ──────────────────────────
-  JSDoc / doc comment        1.0        "jsdoc"                 Extracted from code comments
-  LLM-generated              0.8        "llm"                   API call (Claude Haiku, Ollama)
-  NN direct transfer         0.6        "nn-direct:<symbolId>"  Neighbor similarity >= 0.85
-  NN adapted transfer        0.5        "nn-adapted:<symbolId>" Neighbor similarity 0.70-0.85
-  Heuristic (typed)          0.4        "heuristic-typed"       Functions/methods with param types
-  Heuristic (fallback)       0.3        "heuristic-fallback"    Pattern-matched from name/kind
-  No summary                 0.0        "unknown"               No information available
-```
+| Source | Quality | `summarySource` | When |
+|:-------|:--------|:----------------|:-----|
+| JSDoc / doc comment | `1.0` | `jsdoc` | Extracted from code comments |
+| LLM-generated | `0.8` | `llm` | API call (Claude Haiku, Ollama) |
+| NN direct transfer | `0.6` | `nn-direct:<symbolId>` | Neighbor similarity >= `0.85` |
+| NN adapted transfer | `0.5` | `nn-adapted:<symbolId>` | Neighbor similarity `0.70-0.85` |
+| Heuristic (typed) | `0.4` | `heuristic-typed` | Functions or methods with parameter types |
+| Heuristic (fallback) | `0.3` | `heuristic-fallback` | Pattern-matched from name and kind |
+| No summary | `0.0` | `unknown` | No information available |
 
-Quality scores flow through the pipeline — each stage only overwrites if it can produce a higher-quality summary. The LLM stage uses quality gating: symbols with `summaryQuality >= 0.8` (e.g., from JSDoc) are skipped, avoiding redundant API calls.
+Quality scores flow through the pipeline - each stage only overwrites if it can produce a higher-quality summary. The LLM stage uses quality gating: symbols with `summaryQuality >= 0.8` (for example from JSDoc) are skipped, avoiding redundant API calls.
 
 ### Enhanced Heuristic Generation (Tier 1.5)
 
-The heuristic summary engine generates pattern-matched summaries for **all symbol kinds**, not just functions. These run automatically during every index — no configuration required.
+The heuristic summary engine generates pattern-matched summaries for **all symbol kinds**, not just functions. These run automatically during every index - no configuration required.
 
-```
-  Symbol Kind      Pattern                         Example Output
-  ─────────────    ─────────────────────────────   ──────────────────────────────────
-  function/method  Typed params + return type       "Validates token using string"
-  class            Role suffix (Provider, Factory)  "Implements the provider pattern for auth"
-  class            Generic type parameters           "Generic cache class parameterized by K, V"
-  interface        I-prefix (IUserService)           "Contract for user service"
-  interface        Suffix (Props, Options, Config)   "Props definition for button"
-  type             Suffix + generics                 "Result type for query"
-  enum             Name expansion                    "Enumeration of log level values"
-  variable         SCREAMING_SNAKE_CASE              "Constant defining max retries"
-  variable         Schema/Validator suffix            "Validation schema for user"
-  constructor      Typed parameters                  "Constructs from string and number"
-```
+| Symbol Kind | Pattern | Example Output |
+|:------------|:--------|:---------------|
+| `function` / `method` | Typed params plus return type | `Validates token using string` |
+| `class` | Role suffix such as `Provider` or `Factory` | `Implements the provider pattern for auth` |
+| `class` | Generic type parameters | `Generic cache class parameterized by K, V` |
+| `interface` | `I` prefix like `IUserService` | `Contract for user service` |
+| `interface` | Suffix such as `Props`, `Options`, or `Config` | `Props definition for button` |
+| `type` | Suffix plus generics | `Result type for query` |
+| `enum` | Name expansion | `Enumeration of log level values` |
+| `variable` | `SCREAMING_SNAKE_CASE` | `Constant defining max retries` |
+| `variable` | `Schema` or `Validator` suffix | `Validation schema for user` |
+| `constructor` | Typed parameters | `Constructs from string and number` |
 
 Both the TypeScript and Rust indexing engines implement these generators with identical output, ensuring consistent summaries regardless of which engine is used.
 
@@ -601,86 +436,40 @@ Both the TypeScript and Rust indexing engines implement these generators with id
 
 When `semantic.enabled: true`, the NN (nearest-neighbor) summary transfer module runs after metrics computation and before LLM generation. It uses the existing ONNX embedding model and vector similarity search to propagate documentation from well-documented symbols to undocumented neighbors.
 
-```
-  ┌──────────────────────────────────────────────────────────────────┐
-  │  NN Summary Transfer Pipeline                                    │
-  │                                                                  │
-  │  1. Gather candidates: symbols with no summary or quality < 0.5  │
-  │  2. For each candidate:                                          │
-  │     a. Embed the symbol text                                     │
-  │     b. Search vector index for nearest neighbors (max 5)            │
-  │     c. Filter: same kind, has good summary, similarity >= 0.7    │
-  │     d. Pick best neighbor by similarity score                    │
-  │                                                                  │
-  │  3. Transfer decision:                                           │
-  │     ┌─────────────────────────────────────────────────────────┐  │
-  │     │  Similarity >= 0.85  →  Direct transfer (quality 0.6)   │  │
-  │     │    Copy summary verbatim                                │  │
-  │     │                                                         │  │
-  │     │  Similarity 0.70-0.85  →  Adapted transfer (quality 0.5)│  │
-  │     │    Extract verb/pattern, apply to target name            │  │
-  │     └─────────────────────────────────────────────────────────┘  │
-  │                                                                  │
-  │  4. Quality validation: embed the transferred summary and check  │
-  │     cosine similarity to the candidate (reject if < 0.5)         │
-  │                                                                  │
-  │  5. Write to DB with quality score and source tracking            │
-  └──────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Candidates["1. Gather candidates<br/>summary missing or quality < 0.5"] --> Embed["2a. Embed symbol text"]
+    Embed --> Search["2b. Search vector index<br/>max 5 neighbors"]
+    Search --> Filter["2c. Filter<br/>same kind, has good summary, similarity >= 0.7"]
+    Filter --> Pick["2d. Pick best neighbor"]
+    Pick --> Decision{"3. Similarity threshold"}
+    Decision -->|">= 0.85"| Direct["Direct transfer<br/>quality 0.6"]
+    Decision -->|"0.70 - 0.85"| Adapted["Adapted transfer<br/>quality 0.5"]
+    Direct --> Validate["4. Validate transferred summary<br/>reject if cosine similarity < 0.5"]
+    Adapted --> Validate
+    Validate --> Store["5. Write summary, quality, and source tracking to DB"]
 ```
 
 **Adapted transfer example:**
-A well-documented function `validateToken` with summary "Validates JWT signature and checks expiration" can donate its verb pattern to a neighbor `validateSession`. The adapted summary becomes "Validates session" — not perfect, but far better than no summary at all (quality 0.5 vs 0.0).
+A well-documented function `validateToken` with summary "Validates JWT signature and checks expiration" can donate its verb pattern to a neighbor `validateSession`. The adapted summary becomes "Validates session" - not perfect, but far better than no summary at all (quality 0.5 vs 0.0).
 
 **Pipeline integration point:**
-```
-  1. updateMetricsForRepo(...)
-  2. NN summary transfer    ← runs here (uses vector similarity search)
-  3. LLM summary generation (quality-gated: skips quality >= 0.8)
-  4. refreshSymbolEmbeddings(...)
-```
 
+```text
+1. updateMetricsForRepo(...)
+2. NN summary transfer
+3. LLM summary generation (quality-gated: skips quality >= 0.8)
+4. refreshSymbolEmbeddings(...)
+```
 ### LLM Generation Pipeline
 
+```mermaid
+flowchart TD
+    Indexing["Indexing completes<br/>(pass 1 + pass 2)"] --> Gate["Quality gate<br/>skip symbols with summaryQuality >= 0.8"]
+    Gate --> Prompt["Build LLM prompt<br/>system instruction + kind + name + signature + heuristic hint"]
+    Prompt --> Summary["Generate 1-3 sentence summary<br/>max 256 tokens"]
+    Summary --> Cache["Cache in LadybugDB<br/>keyed by name, kind, signature, fingerprint, provider, model"]
 ```
-  Indexing completes (pass-1 + pass-2)
-       │
-       ▼
-  ┌──────────────────────────────────────────────────────┐
-  │  Quality gate: skip symbols with summaryQuality ≥ 0.8│
-  │  (JSDoc-documented symbols don't need LLM summaries) │
-  └─────────────────────┬────────────────────────────────┘
-                        │
-                        ▼
-  ┌──────────────────────────────────────────────────────┐
-  │  For each symbol without a fresh cached summary:     │
-  │                                                      │
-  │  Input to LLM:                                       │
-  │  ┌────────────────────────────────────────────────┐   │
-  │  │  System: "Write a 1-3 sentence summary of     │   │
-  │  │  what this symbol does. Be specific, not       │   │
-  │  │  generic. Focus on behavior, not structure."   │   │
-  │  │                                                │   │
-  │  │  User:                                         │   │
-  │  │  Kind: function                                │   │
-  │  │  Name: buildGraphSlice                         │   │
-  │  │  Signature: (request: SliceBuildRequest):      │   │
-  │  │    Promise<GraphSlice>  [truncated 400 chars]  │   │
-  │  │  Heuristic hint: Builds a graph slice from     │   │
-  │  │    entry symbols  [truncated 200 chars]        │   │
-  │  └────────────────────────────────────────────────┘   │
-  │                                                      │
-  │  Output: 1-3 sentence summary (max 256 tokens)       │
-  └─────────────────────┬────────────────────────────────┘
-                        │
-                        ▼
-  ┌──────────────────────────────────────────────────────┐
-  │  Cache in LadybugDB:                                 │
-  │  Key: SHA-256(name|kind|signature|fingerprint|       │
-  │                provider|model)                       │
-  │  Value: summary text + provider + model + cost       │
-  └──────────────────────────────────────────────────────┘
-```
-
 ### Three Summary Providers
 
 | Provider | Model (default) | Endpoint | Best For |
@@ -693,24 +482,13 @@ A well-documented function `validateToken` with summary "Validates JWT signature
 
 Summaries are generated in configurable batches with concurrency control:
 
+```mermaid
+flowchart TD
+    Total["500 symbols needing summaries<br/>batchSize = 20<br/>25 total batches"] --> Wave1["Wave 1<br/>B1-B5 in parallel"]
+    Wave1 --> Wave2["Wave 2<br/>B6-B10 after first completions"]
+    Wave2 --> Remaining["Continue until all 25 batches complete"]
+    Remaining --> Time["Approximate time: 3-5 minutes for 500 symbols<br/>Approximate cost: ~$0.50 USD with Claude Haiku"]
 ```
-  500 symbols needing summaries
-  batchSize = 20 → 25 batches
-  maxConcurrency = 5
-
-  ┌─────┬─────┬─────┬─────┬─────┐
-  │ B1  │ B2  │ B3  │ B4  │ B5  │  ← 5 batches run in parallel
-  └──┬──┘  │     │     │     │
-     │     │     │     │     │
-  ┌──┴──┬──┴──┬──┴──┬──┴──┬──┴──┐
-  │ B6  │ B7  │ B8  │ B9  │ B10 │  ← next 5 after first wave completes
-  └─────┴─────┴─────┴─────┴─────┘
-     ...  (continues until all 25 batches done)
-
-  Approximate time: 3-5 minutes for 500 symbols
-  Approximate cost: ~$0.50 USD (Claude Haiku)
-```
-
 ### Cache Invalidation
 
 The cache key is a SHA-256 hash of `name | kind | signature | astFingerprint | provider | model`. This means:
@@ -1038,27 +816,17 @@ sdl.symbol.search({
 
 The real power emerges when all three pillars reinforce each other:
 
-```
-  1. Pass-2 resolves: authenticate() calls validateToken()
-                                           │
-  2. LLM describes: "Validates JWT         │
-     signature and checks expiration"      │
-                                           │
-  3. Agent searches: "token validation"    │
-     Embedding match: validateToken ████████ 0.91
-                      authenticate  █████── 0.72
-                      checkExpiry   ████─── 0.68
-
-  Result: The agent finds validateToken via semantic search,
-          reads its summary to understand it instantly,
-          and sees its resolved call edges to trace the auth flow —
-          all without reading a single line of source code.
+```mermaid
+flowchart TD
+    Pass2["1. Pass-2 resolves
+authenticate() -> validateToken()"] --> Summary["2. LLM summary
+Validates JWT signature and checks expiration"]
+    Summary --> Search["3. Agent searches for token validation
+and semantic ranking surfaces validateToken first"]
+    Search --> Outcome["Agent finds the symbol, understands it from metadata, and traces the auth flow without opening raw source"]
 ```
 
 This is how SDL-MCP achieves 10-50x token savings: the semantic engine provides *understanding* at the metadata level, so raw code is rarely needed.
-
----
-
 ## Related Documentation
 
 - [Symbol Cards & Indexing](./indexing-languages.md) — How symbols are extracted and enriched

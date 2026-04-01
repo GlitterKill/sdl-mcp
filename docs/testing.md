@@ -44,30 +44,16 @@ SDL-MCP uses a **dist-first** testing strategy to ensure tests validate the ship
 
 ### Test Layers
 
-```
-  ┌──────────────────────────────────────────────────────────┐
-  │  Stress Tests                                             │
-  │  Concurrent clients, session limits, large repos          │
-  ├──────────────────────────────────────────────────────────┤
-  │  Integration Tests (multi-language end-to-end)            │
-  │  Adapter harness, MCP server E2E, CLI tool dispatch       │
-  ├──────────────────────────────────────────────────────────┤
-  │  Golden File Tests (fixture output validation)            │
-  │  MCP response snapshots, deterministic IR output          │
-  ├──────────────────────────────────────────────────────────┤
-  │  Unit Tests (individual adapters and extractors)          │
-  │  Symbol extraction, import resolution, call detection     │
-  ├──────────────────────────────────────────────────────────┤
-  │  Property Tests (invariant checking)                      │
-  │  Randomized inputs, edge cases, schema contracts          │
-  └──────────────────────────────────────────────────────────┘
-              │
-              ▼
-  Runner: node:test + --experimental-strip-types
-  CI: ubuntu + windows × Node 22.x + 24.x
-```
+```mermaid
+flowchart TD
+    Stress["Stress Tests<br/>Concurrent clients, session limits, large repos"] --> Integration["Integration Tests<br/>Adapter harness, MCP server E2E, CLI dispatch"]
+    Integration --> Golden["Golden File Tests<br/>Fixture validation and deterministic snapshots"]
+    Golden --> Unit["Unit Tests<br/>Extractors, adapters, import resolution"]
+    Unit --> Property["Property Tests<br/>Randomized invariants and schema contracts"]
+    Property --> Runner["Runner: node:test + --experimental-strip-types<br/>CI: ubuntu + windows x Node 22.x + 24.x"]
 
----
+    style Runner fill:#e7f5ff,stroke:#1971c2
+```
 
 ## Running Tests
 

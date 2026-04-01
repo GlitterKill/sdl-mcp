@@ -14,31 +14,25 @@ AI coding agents are stateless. Every session starts from scratch — the agent 
 
 ## Architecture Overview
 
-```
-                     MCP Tools                     File System
-                  ┌──────────────┐             ┌───────────────────┐
-                  │ memory.store │────────────▶│ .sdl-memory/      │
-                  │ memory.query │             │   decisions/      │
-                  │ memory.remove│             │     a1b2c3.md     │
-                  │ memory.surface│            │   bugfixes/       │
-                  └──────┬───────┘             │     d4e5f6.md     │
-                         │                     │   task_context/   │
-                         ▼                     │     g7h8i9.md     │
-              ┌──────────────────────┐         └───────────────────┘
-              │     LadybugDB        │                  ▲
-              │   (Graph Database)   │                  │
-              │                      │          On index refresh:
-              │  ┌────────┐          │          scanMemoryFiles()
-              │  │ Memory │          │          readMemoryFile()
-              │  │  Node  │          │          upsertMemory()
-              │  └───┬────┘          │
-              │      │               │
-              │  HAS_MEMORY (Repo)   │
-              │  MEMORY_OF (Symbol)  │
-              │  MEMORY_OF_FILE      │
-              └──────────────────────┘
-```
+```mermaid
+flowchart LR
+    Store["memory.store"]
+    Query["memory.query"]
+    Remove["memory.remove"]
+    Surface["memory.surface"]
+    Graph["LadybugDB<br/>Memory node + HAS_MEMORY / MEMORY_OF / MEMORY_OF_FILE"]
+    Files[".sdl-memory/<type>/<id>.md<br/>version-controlled markdown"]
+    Refresh["sdl.index.refresh<br/>scanMemoryFiles -> readMemoryFile -> upsertMemory"]
 
+    Store --> Graph
+    Store --> Files
+    Query --> Graph
+    Remove --> Graph
+    Remove --> Files
+    Surface --> Graph
+    Refresh --> Files
+    Refresh --> Graph
+```
 ### Dual Storage and Auto-Surfacing Flow
 
 ```mermaid
@@ -104,6 +98,11 @@ The graph is the primary store. Files are a durable backup and collaboration mec
 | `decision` | `.sdl-memory/decisions/` | Architectural decisions, design choices, "why we did it this way" |
 | `bugfix` | `.sdl-memory/bugfixes/` | Bug context, root cause analysis, regression notes |
 | `task_context` | `.sdl-memory/task_context/` | In-progress work context, handoff notes between sessions |
+| `pattern` | `.sdl-memory/patterns/` | Reusable implementation patterns that should be repeated |
+| `convention` | `.sdl-memory/conventions/` | Team or repo conventions worth surfacing during edits |
+| `architecture` | `.sdl-memory/architecture/` | Structural decisions that span modules or services |
+| `performance` | `.sdl-memory/performance/` | Performance findings, bottlenecks, and tuning guidance |
+| `security` | `.sdl-memory/security/` | Security-sensitive implementation notes and hardening guidance |
 
 ---
 
@@ -115,7 +114,7 @@ The graph is the primary store. Files are a durable backup and collaboration mec
 Memory {
   memoryId:          STRING  (PRIMARY KEY, 16-char hex)
   repoId:            STRING
-  type:              STRING  ("decision" | "bugfix" | "task_context")
+  type:              STRING  ("decision" | "bugfix" | "task_context" | "pattern" | "convention" | "architecture" | "performance" | "security")
   title:             STRING  (max 120 chars)
   content:           STRING  (max 50,000 chars)
   contentHash:       STRING  (SHA-256 of repoId + type + title + content)
@@ -180,15 +179,26 @@ introduced in v0.7.
 
 ### Directory Structure
 
-```
-<repo-root>/
-└── .sdl-memory/
-    ├── decisions/
-    │   └── a1b2c3d4e5f6g7h8.md
-    ├── bugfixes/
-    │   └── d4e5f6g7h8i9j0k1.md
-    └── task_context/
-        └── l2m3n4o5p6q7r8s9.md
+```mermaid
+flowchart TD
+    Root["<repo-root>/.sdl-memory"]
+    Decisions["decisions/a1b2c3d4e5f6g7h8.md"]
+    Bugfixes["bugfixes/d4e5f6g7h8i9j0k1.md"]
+    TaskContext["task_context/l2m3n4o5p6q7r8s9.md"]
+    Patterns["patterns/<memory>.md"]
+    Conventions["conventions/<memory>.md"]
+    Architecture["architecture/<memory>.md"]
+    Performance["performance/<memory>.md"]
+    Security["security/<memory>.md"]
+
+    Root --> Decisions
+    Root --> Bugfixes
+    Root --> TaskContext
+    Root --> Patterns
+    Root --> Conventions
+    Root --> Architecture
+    Root --> Performance
+    Root --> Security
 ```
 
 ### File Write Semantics
@@ -210,7 +220,7 @@ Store or update a memory with optional symbol and file links.
 | Field | Type | Required | Description |
 |:------|:-----|:---------|:------------|
 | `repoId` | string | yes | Repository ID |
-| `type` | enum | yes | `"decision"`, `"bugfix"`, or `"task_context"` |
+| `type` | enum | yes | `"decision"`, `"bugfix"`, `"task_context"`, `"pattern"`, `"convention"`, `"architecture"`, `"performance"`, or `"security"` |
 | `title` | string | yes | Short title (1–120 chars) |
 | `content` | string | yes | Full memory content (1–50,000 chars) |
 | `tags` | string[] | no | Up to 20 tags for filtering |

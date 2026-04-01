@@ -65,14 +65,14 @@ sdl-mcp index
 
 A minimal plugin has the following structure:
 
-```
-my-plugin/
-├── package.json          # NPM package metadata
-├── tsconfig.json         # TypeScript configuration
-├── index.ts             # Plugin entry point
-├── README.md            # Plugin documentation
-└── dist/                # Compiled output (generated)
-    └── index.js
+```mermaid
+flowchart TD
+    Root["my-plugin/"] --> Package["package.json<br/>NPM package metadata"]
+    Root --> TSConfig["tsconfig.json<br/>TypeScript configuration"]
+    Root --> Entry["index.ts<br/>Plugin entry point"]
+    Root --> Readme["README.md<br/>Plugin documentation"]
+    Root --> Dist["dist/"]
+    Dist --> JS["index.js<br/>Compiled output"]
 ```
 
 ### Required Exports
@@ -336,14 +336,14 @@ ls dist/
 
 Your published plugin should include:
 
-```
-sdl-mcp-my-lang-plugin-1.0.0.tgz
-├── dist/
-│   ├── index.js
-│   └── index.d.ts
-├── package.json
-├── README.md
-└── LICENSE
+```mermaid
+flowchart TD
+    Archive["sdl-mcp-my-lang-plugin-1.0.0.tgz"] --> Dist["dist/"]
+    Dist --> JS["index.js"]
+    Dist --> DTS["index.d.ts"]
+    Archive --> Package["package.json"]
+    Archive --> Readme["README.md"]
+    Archive --> License["LICENSE"]
 ```
 
 ### Files to Include

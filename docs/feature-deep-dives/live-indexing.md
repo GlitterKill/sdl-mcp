@@ -14,35 +14,16 @@ SDL-MCP's live indexing system eliminates this gap. As you type in your editor, 
 
 ## Architecture
 
-```
-  Editor (VSCode, etc.)
-       │
-       │  buffer events: open / change / save / close
-       ▼
-  ┌────────────────────┐
-  │  sdl.buffer.push   │  ← accepts full buffer content + metadata
-  └─────────┬──────────┘
-            │
-            ▼
-  ┌────────────────────┐
-  │   Overlay Store    │  ← in-memory, draft-aware
-  │                    │
-  │  ┌──────────────┐  │
-  │  │ Dirty Buffers│  │  ← unsaved editor content
-  │  │ Parse Queue  │  │  ← background AST parsing
-  │  │ Symbol Cache │  │  ← extracted symbols from drafts
-  │  └──────────────┘  │
-  └─────────┬──────────┘
-            │
-     reads merge overlay     save / checkpoint
-     with durable DB              │
-            │                     ▼
-            ▼              ┌──────────────┐
-  ┌──────────────────┐     │  LadybugDB   │
-  │  MCP Tool Layer  │ ◄── │  (durable)   │
-  │  search / card / │     └──────────────┘
-  │  slice / skeleton│
-  └──────────────────┘
+```mermaid
+flowchart TD
+    Editor["Editor (VSCode, etc.)"] -->|"open / change / save / close"| Push["sdl.buffer.push<br/>full buffer content + metadata"]
+    Push --> Overlay["Overlay Store<br/>dirty buffers, parse queue, symbol cache"]
+    Overlay --> Tools["MCP Tool Layer<br/>search, card, slice, skeleton"]
+    Overlay -->|"save / checkpoint"| DB["LadybugDB<br/>(durable)"]
+    DB --> Tools
+
+    style Overlay fill:#fff3cd,stroke:#d39e00
+    style DB fill:#d4edda,stroke:#2b8a3e
 ```
 
 ### Overlay Merge and Checkpoint Flow

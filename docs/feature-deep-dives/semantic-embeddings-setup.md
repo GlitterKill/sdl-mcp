@@ -10,47 +10,39 @@ SDL-MCP's semantic system has three layers — **embedding models**, **LLM summa
 
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                     Semantic Embedding Pipeline                      │
-│                                                                     │
-│   Symbol Text  ──►  Tokenizer  ──►  ONNX Model  ──►  Embedding     │
-│   Construction      (tokenizers)     (onnxruntime)     Vector       │
-│                                                                     │
-│   ┌───────────────┐   ┌───────────────┐   ┌───────────────────┐    │
-│   │ all-MiniLM    │   │ nomic-embed   │   │ Mock (fallback)   │    │
-│   │ 384-dim       │   │ 768-dim       │   │ 64-dim            │    │
-│   │ ~22 MB        │   │ ~138 MB       │   │ Deterministic     │    │
-│   │ Bundled       │   │ Downloaded    │   │ No deps needed    │    │
-│   └───────────────┘   └───────────────┘   └───────────────────┘    │
-│                                                                     │
-│   Summary Pipeline (4 tiers, enriches embedding input text):        │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │ Tier 1: Enhanced Heuristics (always on, per-kind patterns)  │   │
-│   │ Tier 1.5: NN Transfer (uses vector similarity to propagate) │   │
-│   │ Tier 2: LLM Summaries (optional, quality-gated >= 0.8)     │   │
-│   │ Quality tracked: summaryQuality (0.0-1.0) + summarySource  │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│   LLM Providers (for Tier 2 only):                                  │
-│   ┌───────────────┐   ┌───────────────┐   ┌───────────────────┐    │
-│   │ Anthropic API │   │ Ollama/Local  │   │ Mock              │    │
-│   │ Claude Haiku  │   │ gpt-4o-mini   │   │ Deterministic     │    │
-│   └───────────────┘   └───────────────┘   └───────────────────┘    │
-│                                                                     │
-│   Hybrid Retrieval Pipeline (query-time):                           │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │ FTS Index (Symbol.searchText)                                │   │
-│   │     +                                                        │   │
-│   │ Vector Index (Symbol.embeddingMiniLM / embeddingNomic)       │   │
-│   │     ↓                                                        │   │
-│   │ Reciprocal Rank Fusion (RRF) → ranked results                │   │
-│   │ Auto-fallback to legacy alpha-blending if unavailable        │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    Text["Symbol Text Construction"] --> Tokenizer["Tokenizer<br/>(tokenizers)"] --> Onnx["ONNX Model<br/>(onnxruntime)"] --> Vector["Embedding Vector"]
 
----
+    subgraph Models["Embedding Models"]
+        MiniLM["all-MiniLM-L6-v2<br/>384-dim, ~22 MB, bundled"]
+        Nomic["nomic-embed-text-v1.5<br/>768-dim, ~138 MB, downloaded"]
+        Mock["Mock fallback<br/>64-dim, deterministic"]
+    end
+
+    subgraph Summary["Summary Pipeline"]
+        Tier1["Tier 1: Enhanced heuristics"]
+        Tier15["Tier 1.5: NN transfer"]
+        Tier2["Tier 2: LLM summaries<br/>quality-gated at >= 0.8"]
+    end
+
+    subgraph Providers["Tier 2 Providers"]
+        Anthropic["Anthropic API<br/>Claude Haiku"]
+        Ollama["Ollama / Local<br/>gpt-4o-mini"]
+        MockProvider["Mock"]
+    end
+
+    subgraph Retrieval["Hybrid Retrieval"]
+        FTS["FTS index"] --> RRF["RRF fusion"]
+        VecIndex["Vector index"] --> RRF
+        RRF --> Results["Ranked results"]
+        Fallback["Legacy alpha blending fallback"] --> Results
+    end
+
+    Models --> Onnx
+    Summary --> Text
+    Providers --> Tier2
+```
 
 ## Required vs Optional Dependencies
 
@@ -350,37 +342,19 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 
 ## Model Comparison
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        Embedding Models                          │
-├──────────────────────┬───────────────────────┬───────────────────┤
-│                      │  all-MiniLM-L6-v2     │ nomic-embed-      │
-│                      │  (Default)            │ text-v1.5         │
-├──────────────────────┼───────────────────────┼───────────────────┤
-│ Dimensions           │ 384                   │ 768               │
-│ Max input tokens     │ 256                   │ 8,192             │
-│ ONNX file size       │ ~22 MB (INT8)         │ ~138 MB (INT8)    │
-│ Bundled with npm     │ YES                   │ NO (downloaded)   │
-│ Training data        │ English sentences     │ Diverse text       │
-│ Input format         │ Natural language      │ Natural language   │
-│ Best paired with     │ LLM summaries         │ LLM summaries     │
-│ Disk location        │ <pkg>/models/         │ <cache>/models/   │
-│ HuggingFace source   │ sentence-transformers │ nomic-ai           │
-├──────────────────────┴───────────────────────┴───────────────────┤
-│                                                                  │
-│  "Max input tokens" is the model's context window.               │
-│  Text longer than this is truncated before inference.            │
-│  MiniLM's 256-token limit is why LLM summaries help most —      │
-│  a concise summary fits; raw code bodies get chopped.            │
-│                                                                  │
-│  Nomic's 8,192-token window can ingest entire signatures,       │
-│  doc comments, and moderate function bodies without loss.        │
-│  Both models benefit from summaries, but Nomic + summaries      │
-│  is the highest-quality combination.                             │
-└──────────────────────────────────────────────────────────────────┘
-```
+| Property | `all-MiniLM-L6-v2` | `nomic-embed-text-v1.5` |
+|:---------|:-------------------|:------------------------|
+| Dimensions | 384 | 768 |
+| Max input tokens | 256 | 8,192 |
+| ONNX file size | ~22 MB (INT8) | ~138 MB (INT8) |
+| Bundled with npm | Yes | No, downloaded on demand |
+| Training data | English sentence embeddings | Diverse text embeddings |
+| Input format | Natural-language symbol text | Natural-language symbol text |
+| Best paired with | LLM summaries | LLM summaries |
+| Disk location | `<pkg>/models/` | `<cache>/models/` |
+| Upstream source | `sentence-transformers` | `nomic-ai` |
 
----
+"Max input tokens" is the model context window. MiniLM benefits more from concise summaries because its 256-token window truncates quickly, while Nomic can ingest much longer signatures, comments, and summaries without losing context.
 
 ## Summary Provider Comparison
 
@@ -401,42 +375,33 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 
 ## Semantic Search: How It Works
 
-When you call `sdl.symbol.search` with `semantic: true`:
+When you call `sdl.symbol.search` with `semantic: true` in legacy mode, SDL-MCP combines lexical and embedding scores with alpha blending:
 
-```
-                          Query: "validate authentication token"
-                                      │
-                    ┌─────────────────┼──────────────────┐
-                    ▼                                    ▼
-            Lexical Search                      Embedding Search
-            (BM25-style)                        (Cosine Similarity)
-                    │                                    │
-                    ▼                                    ▼
-            lexicalScore                        semanticScore
-            (0.0 - 1.0)                         (0.0 - 1.0)
-                    │                                    │
-                    └──────────┐    ┌────────────────────┘
-                               ▼    ▼
-                    finalScore = α × lexical + (1-α) × semantic
-                                    │
-                                    │  α = 0.6 (default)
-                                    │  configurable via semantic.alpha
-                                    ▼
-                            Reranked Results
+```mermaid
+flowchart TD
+    Query["Query: validate authentication token"] --> Lexical["Lexical search<br/>BM25-style"]
+    Query --> Semantic["Embedding search<br/>cosine similarity"]
+    Lexical --> LexScore["lexicalScore<br/>0.0 - 1.0"]
+    Semantic --> SemScore["semanticScore<br/>0.0 - 1.0"]
+    LexScore --> Blend["finalScore = alpha * lexical + (1 - alpha) * semantic"]
+    SemScore --> Blend
+    Alpha["alpha = 0.6 default<br/>configurable via semantic.alpha"] --> Blend
+    Blend --> Result["Reranked results"]
 ```
 
 **Alpha blending formula:**
-```
-finalScore = 0.6 × lexicalScore + 0.4 × semanticScore
+
+```text
+finalScore = 0.6 * lexicalScore + 0.4 * semanticScore
 ```
 
 Adjust `semantic.alpha` in config:
-- `0.0` = pure semantic (embedding similarity only)
+- `0.0` = pure semantic
 - `0.5` = balanced
-- `0.6` = default (slight lexical bias — works well in practice)
-- `1.0` = pure lexical (disables semantic reranking)
+- `0.6` = default with slight lexical bias
+- `1.0` = pure lexical
 
----
+Hybrid retrieval is the recommended default; this legacy blending path remains for fallback and explicit compatibility mode.
 
 ## Hybrid Retrieval Setup
 
@@ -509,30 +474,21 @@ Prior to hybrid retrieval, embeddings were stored in a separate `SymbolEmbedding
 
 Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB:
 
-```
-  Symbol node properties:
-  ┌──────────────────────────────────────────────────────────┐
-  │  embeddingMiniLM          FLOAT[384]   ← MiniLM vector   │
-  │  embeddingMiniLMCardHash  STRING       ← freshness key   │
-  │  embeddingMiniLMUpdatedAt STRING       ← last refresh    │
-  │                                                          │
-  │  embeddingNomic           FLOAT[768]   ← Nomic vector    │
-  │  embeddingNomicCardHash   STRING       ← freshness key   │
-  │  embeddingNomicUpdatedAt  STRING       ← last refresh    │
-  └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Symbol["Symbol node"] --> MiniLM["embeddingMiniLM<br/>embeddingMiniLMCardHash<br/>embeddingMiniLMUpdatedAt"]
+    Symbol --> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
 ```
 
 Vectors are compressed using Float16 quantization:
 
-```
-Original:    [0.0234, -0.1567, 0.8901, ...]   (float64, 3072 bytes for 384-dim)
-Quantized:   [234, -1567, 8901, ...]           (int16 × 10000 scale)
-Stored:      Base64(Int16Array)                 (768 bytes for 384-dim)
+```text
+Original:  [0.0234, -0.1567, 0.8901, ...]   (float64, 3072 bytes for 384-dim)
+Quantized: [234, -1567, 8901, ...]          (int16 x 10000 scale)
+Stored:    Base64(Int16Array)               (768 bytes for 384-dim)
 ```
 
-This reduces storage by ~75% with negligible quality loss. Vectors are L2-normalized after decompression.
-
----
+This reduces storage by about 75% with negligible quality loss. Vectors are L2-normalized after decompression.
 
 ## Summary Caching & Invalidation
 

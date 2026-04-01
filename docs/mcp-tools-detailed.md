@@ -485,7 +485,7 @@ Supports three wire format versions for encoding efficiency:
 | `knownCardEtags` | Record<string, string> | No | Map of `symbolId → ETag`. Matching cards return `cardRefs` instead of full cards. |
 | `cardDetail` | `"minimal"` \| `"signature"` \| `"deps"` \| `"compact"` \| `"full"` | No | Detail level for cards in the slice |
 | `adaptiveDetail` | boolean | No | Let the system choose detail level per card based on relevance |
-| `wireFormat` | `"standard"` \| `"compact"` | No | Response encoding (default: `"compact"`) |
+| `wireFormat` | `"standard"` \| `"readable"` \| `"compact"` \| `"agent"` | No | Response encoding (default: `"compact"`) |
 | `wireFormatVersion` | 1 \| 2 \| 3 | No | Compact format version (default: 2) |
 | `budget` | object | No | `{maxCards: 1-500, maxEstimatedTokens: 1-200000}` |
 | `minConfidence` | number (0-1) | No | Drop edges below this confidence (default: 0.5) |
@@ -642,7 +642,7 @@ Requests raw source code for a symbol. This is the most expensive rung of the Ir
 
 **What it does:** Returns the full source code for a symbol's line range. The request must include a justification (`reason`), expected line count, and identifiers the agent expects to find in the code. The policy engine evaluates whether the request should be approved, denied, or downgraded to a skeleton/hot-path.
 
-Approval criteria include: the requested identifiers exist in the range, the symbol is in a current slice or frontier, the scorer utility exceeds the threshold, or the agent invokes break-glass with audit logging.
+Approval criteria include: one or more requested identifiers matching the range, the symbol being in a current slice or frontier, the scorer utility exceeding the threshold, or the agent invoking break-glass with audit logging.
 
 If denied, the response includes `whyDenied` reasons and a `nextBestAction` suggesting an alternative tool and arguments.
 
@@ -657,7 +657,7 @@ If denied, the response includes `whyDenied` reasons and a `nextBestAction` sugg
 | `identifiersToFind` | string[] (max 50) | Yes | Identifiers the agent expects to find (required by policy) |
 | `granularity` | `"symbol"` \| `"block"` \| `"fileWindow"` | No | Scope of the code window |
 | `maxTokens` | number | No | Maximum tokens (policy enforces `<= maxWindowTokens`) |
-| `sliceContext` | object | No | Task context for policy evaluation: `{taskText, stackTrace, failingTestPath, editedFiles, entrySymbols, budget}` |
+| `sliceContext` | object | No | Task context for policy evaluation: `{taskText?, stackTrace?, failingTestPath?, editedFiles?, entrySymbols?, budget?}` |
 
 **Response (approved):**
 
@@ -1156,7 +1156,7 @@ Stores or updates a development memory with optional symbol and file links. Memo
 | Parameter | Type | Required | Description |
 |:----------|:-----|:---------|:------------|
 | `repoId` | string | Yes | Repository identifier |
-| `type` | `"decision"` \| `"bugfix"` \| `"task_context"` | Yes | Memory type |
+| `type` | `"decision"` \| `"bugfix"` \| `"task_context"` \| `"pattern"` \| `"convention"` \| `"architecture"` \| `"performance"` \| `"security"` | Yes | Memory type |
 | `title` | string (1-120 chars) | Yes | Short, scannable title |
 | `content` | string (1-50,000 chars) | Yes | Memory content (include the *why*, not just the *what*) |
 | `tags` | string[] (max 20) | No | Categorization tags |
@@ -1231,7 +1231,7 @@ Auto-surfaces memories relevant to a set of symbols or task type. Memories are r
 
 Returns cumulative token usage statistics and savings metrics.
 
-**What it does:** Tracks how many tokens SDL-MCP has saved compared to raw file reads across all tool calls. Reports per-tool breakdowns, compression ratios, and session/historical aggregations.
+**What it does:** Tracks how many tokens SDL-MCP has saved compared to raw file reads across all tool calls. Reports per-tool breakdowns, compression ratios, and session/historical aggregations. `savedTokens` and `overallSavingsPercent` can be negative when SDL overhead exceeds the raw-equivalent estimate.
 
 **Parameters:**
 
@@ -1298,11 +1298,14 @@ Searches the SDL action catalog for matching actions. Use this as the first disc
 | Parameter | Type | Required | Description |
 |:----------|:-----|:---------|:------------|
 | `query` | string | Yes | Search query |
-| `limit` | number (1-25) | No | Max results |
+| `limit` | number (1-50) | No | Max results |
+| `offset` | number (min: 0) | No | Skip the first N ranked results |
 | `includeSchemas` | boolean | No | Include parameter schema summaries |
 | `includeExamples` | boolean | No | Include usage examples |
 
-**Response:** `{ actions: ActionMatch[], tokenEstimate }`
+**Response:** `{ actions: ActionMatch[], total, hasMore, offset, limit, tokenEstimate }`
+
+Use `offset` with `limit` to page through large result sets such as `query: "*"`.
 
 ---
 
