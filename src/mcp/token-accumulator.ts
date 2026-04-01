@@ -54,7 +54,7 @@ export class TokenAccumulator {
    * Record a single tool call's token usage.
    */
   recordUsage(toolName: string, sdlTokens: number, rawEquivalent: number): void {
-    const saved = Math.max(0, rawEquivalent - sdlTokens);
+    const saved = rawEquivalent - sdlTokens;
 
     this.totalSdlTokens += sdlTokens;
     this.totalRawEquivalent += rawEquivalent;
@@ -81,10 +81,10 @@ export class TokenAccumulator {
    * Return a point-in-time snapshot of cumulative usage.
    */
   getSnapshot(): SessionUsageSnapshot {
-    const totalSaved = Math.max(0, this.totalRawEquivalent - this.totalSdlTokens);
+    const totalSaved = this.totalRawEquivalent - this.totalSdlTokens;
     const savingsPercent =
-      this.totalRawEquivalent > 0 && this.totalSdlTokens < this.totalRawEquivalent
-        ? Math.round((1 - this.totalSdlTokens / this.totalRawEquivalent) * 100)
+      this.totalRawEquivalent > 0
+        ? Math.round((totalSaved / this.totalRawEquivalent) * 100)
         : 0;
 
     // Sort breakdown by savedTokens descending

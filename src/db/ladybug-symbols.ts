@@ -812,6 +812,7 @@ export async function deleteSymbolsByFileId(
 interface SearchSymbolsRawRow {
   symbolId: string;
   fileId: string;
+  file: string;
   kind: string;
   name: string;
   exported: unknown;
@@ -900,6 +901,7 @@ async function searchSymbolsSingleTerm(
           CASE WHEN lower(s.name) CONTAINS lower($query) THEN 0 ELSE 1 END AS nameMatchRank
      RETURN s.symbolId AS symbolId,
             f.fileId AS fileId,
+            f.relPath AS file,
             s.kind AS kind,
             s.name AS name,
             s.exported AS exported,
@@ -977,7 +979,11 @@ export async function searchSymbols(
       const bContains = b.row.name.toLowerCase().includes(lowerTrimmed) ? 0 : 1;
       if (aContains !== bContains) return aContains - bContains;
       // More terms matched = better
-      return b.count - a.count || a.row.name.localeCompare(b.row.name);
+      return b.count - a.count
+        || a.row.name.localeCompare(b.row.name)
+        || (a.row.file.startsWith("tests/") ? 1 : 0)
+          - (b.row.file.startsWith("tests/") ? 1 : 0)
+        || (a.row.exported ? 0 : 1) - (b.row.exported ? 0 : 1);
     })
     .map((entry) => mapSearchSymbolRow(entry.row, repoId))
     .slice(0, safeLimit);
@@ -987,7 +993,9 @@ export interface SearchSymbolLiteRow {
   symbolId: string;
   name: string;
   fileId: string;
+  file: string;
   kind: string;
+  exported: boolean;
 }
 
 /**
@@ -1055,7 +1063,9 @@ async function searchSymbolsLiteSingleTerm(
      RETURN s.symbolId AS symbolId,
             s.name AS name,
             f.fileId AS fileId,
-            s.kind AS kind
+            f.relPath AS file,
+            s.kind AS kind,
+            s.exported AS exported
      ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
      LIMIT $limit`,
     { repoId, query: term, queryPadded: ` ${term.toLowerCase()} `, queryStart: `${term.toLowerCase()} `, queryEnd: ` ${term.toLowerCase()}`, limit: 200, ...(kinds && kinds.length > 0 && { kinds }) },
@@ -1118,7 +1128,11 @@ export async function searchSymbolsLite(
       const bContains = b.row.name.toLowerCase().includes(lt) ? 0 : 1;
       if (aContains !== bContains) return aContains - bContains;
       // More terms matched = better
-      return b.count - a.count || a.row.name.localeCompare(b.row.name);
+      return b.count - a.count
+        || a.row.name.localeCompare(b.row.name)
+        || (a.row.file.startsWith("tests/") ? 1 : 0)
+          - (b.row.file.startsWith("tests/") ? 1 : 0)
+        || (a.row.exported ? 0 : 1) - (b.row.exported ? 0 : 1);
     })
     .map((entry) => entry.row)
     .slice(0, safeLimit);

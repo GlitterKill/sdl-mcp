@@ -1,11 +1,13 @@
 /** Global regex for finding $N references (with optional dot/bracket path) embedded in strings. */
-export const REF_PATTERN = /\$(\d+)((?:\.[a-zA-Z_]\w*|\[\d+\])*)/g;
+export const REF_PATTERN = new RegExp(
+  String.raw`\$\d+(?:(?:\.[a-zA-Z_]\w*)|(?:\[\d+\])|(?:\?\.(?:[a-zA-Z_]\w*|\[\d+\])))*`,
+  "g",
+);
 
 /** Non-global single-match version used inside resolveRef. */
-const REF_PATTERN_SINGLE = /^\$(\d+)((?:\.[a-zA-Z_]\w*|\[\d+\])*)$/;
-
-/** Regex for splitting a path string into named-field and numeric-index segments. */
-const SEGMENT_RE = /\.([a-zA-Z_]\w*)|\[(\d+)\]/g;
+const REF_PATTERN_SINGLE = new RegExp(
+  String.raw`^\$(\d+)((?:(?:\.[a-zA-Z_]\w*)|(?:\[\d+\])|(?:\?\.(?:[a-zA-Z_]\w*|\[\d+\])))*)$`,
+);
 
 /** Property names that must never be navigated to prevent prototype pollution. */
 const BLOCKED_PROPS = new Set(["__proto__", "constructor", "prototype"]);
@@ -15,6 +17,55 @@ export class RefResolutionError extends Error {
     super(message);
     this.name = "RefResolutionError";
   }
+}
+
+interface RefSegment {
+  optional: boolean;
+  value: string | number;
+}
+
+function parseSegments(pathStr: string, ref: string): RefSegment[] {
+  const segments: RefSegment[] = [];
+  let index = 0;
+
+  while (index < pathStr.length) {
+    const optional = pathStr.startsWith("?.", index);
+    if (optional) {
+      index += 2;
+    } else if (pathStr[index] === ".") {
+      index += 1;
+    } else if (pathStr[index] !== "[") {
+      throw new RefResolutionError(`Invalid reference syntax: '${ref}'`);
+    }
+
+    if (pathStr[index] === "[") {
+      const closing = pathStr.indexOf("]", index);
+      if (closing === -1) {
+        throw new RefResolutionError(`Invalid reference syntax: '${ref}'`);
+      }
+      const rawIndex = pathStr.slice(index + 1, closing);
+      if (!/^\d+$/.test(rawIndex)) {
+        throw new RefResolutionError(`Invalid reference syntax: '${ref}'`);
+      }
+      segments.push({ optional, value: parseInt(rawIndex, 10) });
+      index = closing + 1;
+    } else {
+      const match = /^[a-zA-Z_]\w*/.exec(pathStr.slice(index));
+      if (!match) {
+        throw new RefResolutionError(`Invalid reference syntax: '${ref}'`);
+      }
+      segments.push({ optional, value: match[0] });
+      index += match[0].length;
+    }
+
+    if (segments.length > 4) {
+      throw new RefResolutionError(
+        `Reference '${ref}' exceeds the maximum path depth of 4 segments`,
+      );
+    }
+  }
+
+  return segments;
 }
 
 /**
@@ -43,28 +94,16 @@ export function resolveRef(ref: string, priorResults: unknown[]): unknown {
     return priorResults[n];
   }
 
-  // Parse path segments, enforcing the 4-segment maximum
-  const segments: Array<string | number> = [];
-  let segMatch: RegExpExecArray | null;
-  SEGMENT_RE.lastIndex = 0;
-  while ((segMatch = SEGMENT_RE.exec(pathStr)) !== null) {
-    if (segMatch[1] !== undefined) {
-      // Named field: .fieldName
-      segments.push(segMatch[1]);
-    } else {
-      // Array index: [N]
-      segments.push(parseInt(segMatch[2], 10));
-    }
-    if (segments.length > 4) {
-      throw new RefResolutionError(
-        `Reference '${ref}' exceeds the maximum path depth of 4 segments`,
-      );
-    }
-  }
+  const segments = parseSegments(pathStr, ref);
 
   let current: unknown = priorResults[n];
-  for (const seg of segments) {
+  for (const [index, segment] of segments.entries()) {
+    const seg = segment.value;
+    const isLastSegment = index === segments.length - 1;
     if (current === null || current === undefined) {
+      if (segment.optional) {
+        return undefined;
+      }
       throw new RefResolutionError(
         `Cannot navigate into null/undefined at segment '${String(seg)}' in reference '${ref}'`,
       );
@@ -72,18 +111,31 @@ export function resolveRef(ref: string, priorResults: unknown[]): unknown {
 
     if (typeof seg === "number") {
       if (!Array.isArray(current)) {
+        if (segment.optional) {
+          return undefined;
+        }
         throw new RefResolutionError(
           `Expected array at index [${seg}] in reference '${ref}', got ${typeof current}`,
         );
       }
       if (seg >= current.length || seg < 0) {
-        throw new RefResolutionError(
-          `Array index [${seg}] is out of bounds (length ${current.length}) in reference '${ref}'`,
-        );
+        if (segment.optional) {
+          return undefined;
+        }
+        if (isLastSegment) {
+          throw new RefResolutionError(
+            `Array index [${seg}] is out of bounds (length ${current.length}) in reference '${ref}'`,
+          );
+        }
+        current = undefined;
+        continue;
       }
       current = current[seg];
     } else {
       if (typeof current !== "object" || Array.isArray(current)) {
+        if (segment.optional) {
+          return undefined;
+        }
         throw new RefResolutionError(
           `Expected object at field '${seg}' in reference '${ref}', got ${Array.isArray(current) ? "array" : typeof current}`,
         );
@@ -95,9 +147,16 @@ export function resolveRef(ref: string, priorResults: unknown[]): unknown {
         );
       }
       if (!(seg in obj)) {
-        throw new RefResolutionError(
-          `Field '${seg}' does not exist in reference '${ref}'`,
-        );
+        if (segment.optional) {
+          return undefined;
+        }
+        if (isLastSegment) {
+          throw new RefResolutionError(
+            `Field '${seg}' does not exist in reference '${ref}'`,
+          );
+        }
+        current = undefined;
+        continue;
       }
       current = obj[seg];
     }

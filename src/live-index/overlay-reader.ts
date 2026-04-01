@@ -198,7 +198,9 @@ export async function searchSymbolsWithOverlay(
       symbolId: symbol.symbolId,
       name: symbol.name,
       fileId: symbol.fileId,
+      file: file.relPath,
       kind: symbol.kind,
+      exported: symbol.exported,
       filePath: file.relPath,
       summary: symbol.summary,
       searchText: symbol.searchText,
@@ -271,6 +273,8 @@ export async function searchSymbolsHybridWithOverlay(
       name: sym.name,
       kind: sym.kind,
       fileId: sym.fileId,
+      file: file?.relPath ?? "",
+      exported: sym.exported,
       filePath: file?.relPath ?? "",
     });
   }
@@ -305,7 +309,9 @@ export async function searchSymbolsHybridWithOverlay(
       symbolId: symbol.symbolId,
       name: symbol.name,
       fileId: symbol.fileId,
+      file: file.relPath,
       kind: symbol.kind,
+      exported: symbol.exported,
       filePath: file.relPath,
       summary: symbol.summary,
       searchText: symbol.searchText,

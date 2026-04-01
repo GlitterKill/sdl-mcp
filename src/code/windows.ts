@@ -101,11 +101,10 @@ if (REGEX_CACHE_MAX_SIZE < REGEX_CACHE_EVICT_COUNT) {
 
 const identifierRegexCache = new Map<string, RegExp>();
 
-export function identifiersExistInWindow(
-  code: string,
-  identifiers: string[],
-): boolean {
-  if (identifiers.length === 0) return false;
+function getIdentifierRegex(identifiers: string[]): RegExp {
+  if (identifiers.length === 0) {
+    return /$^/g;
+  }
 
   const cacheKey = identifiers.slice().sort().join("|");
   let regex = identifierRegexCache.get(cacheKey);
@@ -132,14 +131,34 @@ export function identifiersExistInWindow(
     }
   }
 
+  return regex;
+}
+
+export function findMatchedIdentifiersInWindow(
+  code: string,
+  identifiers: string[],
+): string[] {
+  if (identifiers.length === 0) return [];
+
+  const regex = getIdentifierRegex(identifiers);
+
   // Reset lastIndex for global regex reuse
   regex.lastIndex = 0;
   const matches = code.match(regex);
 
-  if (!matches) return false;
+  if (!matches) return [];
 
   const found = new Set(matches);
-  return identifiers.every((id) => found.has(id));
+  return identifiers.filter((id) => found.has(id));
+}
+
+export function identifiersExistInWindow(
+  code: string,
+  identifiers: string[],
+): boolean {
+  if (identifiers.length === 0) return false;
+  return findMatchedIdentifiersInWindow(code, identifiers).length
+    === identifiers.length;
 }
 
 export type EmptyReason = "file-too-large" | "io-error" | "token-budget-exceeded";

@@ -177,6 +177,9 @@ export function serializeSliceForWireFormat(
   wireFormat: SliceBuildWireFormat,
   wireFormatVersion?: number,
 ): GraphSlice | CompactGraphSlice | CompactGraphSliceV2 | CompactGraphSliceV3 | AgentWireSlice {
+  if (wireFormat === "readable") {
+    return slice;
+  }
   if (wireFormat === "agent") {
     return toAgentGraphSlice(slice);
   }

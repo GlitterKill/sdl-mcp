@@ -22,7 +22,11 @@ import {
 } from "./descriptions.js";
 import { INTERNAL_TRANSFORM_NAMES } from "./transforms.js";
 import { executeWorkflow } from "./workflow-executor.js";
-import { getManualCached, FN_NAME_MAP } from "./manual-generator.js";
+import {
+  getManualCached,
+  invalidateManualCache,
+  FN_NAME_MAP,
+} from "./manual-generator.js";
 import { parseWorkflowRequest } from "./workflow-parser.js";
 import {
   WorkflowRequestSchema,
@@ -32,6 +36,7 @@ import {
 export const ActionSearchRequestSchema = z.object({
   query: z.string().min(1),
   limit: z.number().int().min(1).max(50).default(10),
+  offset: z.number().int().min(0).optional().describe("Skip first N results"),
   includeSchemas: z.boolean().default(false),
   includeExamples: z.boolean().default(false),
 });
@@ -40,6 +45,7 @@ export function registerActionSearchTool(
   server: MCPServer,
   services: ToolServices,
 ): void {
+  invalidateManualCache();
   server.registerTool(
     "sdl.action.search",
     ACTION_SEARCH_DESCRIPTION,
@@ -53,11 +59,12 @@ export function registerActionSearchTool(
       });
 
       const allRanked = rankCatalog(catalog, args.query);
-      const ranked = allRanked.slice(0, args.limit);
+      const offset = args.offset ?? 0;
+      const ranked = allRanked.slice(offset, offset + args.limit);
       return {
         actions: ranked,
         total: allRanked.length,
-        hasMore: allRanked.length > args.limit,
+        hasMore: allRanked.length > offset + args.limit,
         tokenEstimate: estimateTokens(JSON.stringify(ranked)),
       };
     },
@@ -65,7 +72,8 @@ export function registerActionSearchTool(
       type: "object",
       properties: {
         query: { type: "string", minLength: 1 },
-        limit: { type: "integer", minimum: 1, maximum: 25 },
+        limit: { type: "integer", minimum: 1, maximum: 50 },
+        offset: { type: "integer", minimum: 0 },
         includeSchemas: { type: "boolean" },
         includeExamples: { type: "boolean" },
       },

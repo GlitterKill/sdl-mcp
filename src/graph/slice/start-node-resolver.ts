@@ -23,6 +23,9 @@ import { logger } from "../../util/logger.js";
 import { hybridSearch } from "../../retrieval/orchestrator.js";
 import type { RetrievalEvidence, HybridSearchResultItem } from "../../retrieval/types.js";
 import {
+  compareTaskScopedCandidates,
+} from "../../retrieval/task-query-ranking.js";
+import {
   TASK_TEXT_START_NODE_MAX,
   TASK_TEXT_TOKEN_MAX,
   TASK_TEXT_TOKEN_QUERY_LIMIT,
@@ -684,6 +687,56 @@ export async function resolveStartNodesLadybug(
       return a.symbolId.localeCompare(b.symbolId);
     })
     .slice(0, limits.maxTotalStartNodes);
+  const taskText = request.taskText;
+  if (taskText && sortedNodes.length > 1) {
+    const candidateSymbols = await ladybugDb.getSymbolsByIds(
+      conn,
+      sortedNodes.map((node) => node.symbolId),
+    );
+    const candidateFiles = await ladybugDb.getFilesByIds(
+      conn,
+      Array.from(new Set(
+        Array.from(candidateSymbols.values()).map((symbol) => symbol.fileId),
+      )),
+    );
+
+    sortedNodes.sort((a, b) => {
+      const pa = START_NODE_SOURCE_PRIORITY[a.source];
+      const pb = START_NODE_SOURCE_PRIORITY[b.source];
+      if (pa !== pb) return pa - pb;
+
+      const boostA = feedbackBoostMap.get(a.symbolId) ?? 0;
+      const boostB = feedbackBoostMap.get(b.symbolId) ?? 0;
+      if (boostA !== boostB) return boostB - boostA;
+
+      const symbolA = candidateSymbols.get(a.symbolId);
+      const symbolB = candidateSymbols.get(b.symbolId);
+      const fileA = symbolA ? candidateFiles.get(symbolA.fileId) : undefined;
+      const fileB = symbolB ? candidateFiles.get(symbolB.fileId) : undefined;
+      if (symbolA && symbolB && fileA && fileB) {
+        const scoped = compareTaskScopedCandidates(
+          taskText,
+          {
+            filePath: fileA.relPath,
+            kind: symbolA.kind,
+            exported: symbolA.exported,
+            name: symbolA.name,
+          },
+          {
+            filePath: fileB.relPath,
+            kind: symbolB.kind,
+            exported: symbolB.exported,
+            name: symbolB.name,
+          },
+        );
+        if (scoped !== 0) {
+          return scoped;
+        }
+      }
+
+      return a.symbolId.localeCompare(b.symbolId);
+    });
+  }
   return { startNodes: sortedNodes, retrievalEvidence, hybridSearchItems };
 }
 

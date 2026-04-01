@@ -68,6 +68,27 @@ describe("code-mode ref resolver", () => {
     );
   });
 
+  it("optional field access returns undefined for missing properties", () => {
+    assert.strictEqual(
+      resolveRef("$0.maybe?.symbolId", [{ maybe: {} }]),
+      undefined,
+    );
+  });
+
+  it("optional index access returns undefined for out-of-bounds arrays", () => {
+    assert.strictEqual(
+      resolveRef("$0.arr?.[999]", [{ arr: [1, 2] }]),
+      undefined,
+    );
+  });
+
+  it("optional chaining short-circuits after a missing intermediate index", () => {
+    assert.strictEqual(
+      resolveRef("$0.results[1]?.symbolId", [{ results: [{ symbolId: "sym-0" }] }]),
+      undefined,
+    );
+  });
+
   it("original args object is not mutated (deep clone)", () => {
     const original = { x: "$0.val" };
     const before = JSON.stringify(original);

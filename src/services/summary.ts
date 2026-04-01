@@ -8,6 +8,7 @@ import { logger } from "../util/logger.js";
 import { SYMBOL_CARD_MAX_PROCESSES } from "../config/constants.js";
 import { entitySearch } from "../retrieval/index.js";
 import type { EntitySearchResultItem } from "../retrieval/index.js";
+import { compareTaskScopedCandidates } from "../retrieval/task-query-ranking.js";
 import type {
   ContextSummary,
   ContextSummaryDependency,
@@ -263,13 +264,44 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
     } catch { /* graceful degradation */ }
   }
 
-  // Kind-based boosting: prefer functions/classes/methods over variables/constants
-  // for natural-language questions like "How does X work?"
-  const KIND_BOOST: Record<string, number> = { function: 3, method: 3, class: 2, constructor: 2, interface: 1, type: 1, module: 0, variable: 0 };
+  const mergedSymbolsMap = await ladybugDb.getSymbolsByIds(
+    conn,
+    merged.map((row) => row.symbolId),
+  );
+  const mergedFilesMap = await ladybugDb.getFilesByIds(
+    conn,
+    Array.from(new Set(
+      Array.from(mergedSymbolsMap.values()).map((symbol) => symbol.fileId),
+    )),
+  );
   merged.sort((a, b) => {
-    const boostA = KIND_BOOST[a.kind] ?? 0;
-    const boostB = KIND_BOOST[b.kind] ?? 0;
-    return boostB - boostA; // Higher boost first
+    const symbolA = mergedSymbolsMap.get(a.symbolId);
+    const symbolB = mergedSymbolsMap.get(b.symbolId);
+    const fileA = symbolA ? mergedFilesMap.get(symbolA.fileId) : undefined;
+    const fileB = symbolB ? mergedFilesMap.get(symbolB.fileId) : undefined;
+
+    if (symbolA && symbolB && fileA && fileB) {
+      const scoped = compareTaskScopedCandidates(
+        query,
+        {
+          filePath: fileA.relPath,
+          kind: symbolA.kind,
+          exported: symbolA.exported,
+          name: symbolA.name,
+        },
+        {
+          filePath: fileB.relPath,
+          kind: symbolB.kind,
+          exported: symbolB.exported,
+          name: symbolB.name,
+        },
+      );
+      if (scoped !== 0) {
+        return scoped;
+      }
+    }
+
+    return a.symbolId.localeCompare(b.symbolId);
   });
   const results = merged.slice(0, SUMMARY_MAX_RESULTS);
   const symbolIds = results.map((row) => row.symbolId);

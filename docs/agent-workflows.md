@@ -126,6 +126,7 @@ Use this order unless task constraints force escalation:
 4. `sdl.slice.build` with explicit budget and compact output:
    - Keep `wireFormat: "compact"` (default) and `wireFormatVersion: 2` (default).
    - Use `wireFormatVersion: 3` for grouped edge encoding when slices exceed 50 cards.
+   - Use `wireFormat: "readable"` when debugging slice payloads or developing integrations and the compact legend is getting in the way.
    - Set budget early, for example: `{ "maxCards": 30, "maxEstimatedTokens": 4000 }`.
    - Use `minConfidence` to drop low-trust edges (default `0.5`; adaptive thresholds can tighten to `0.8` and `0.95` as token usage approaches budget).
    - Use `minCallConfidence` to filter low-confidence call edges within slice cards.
@@ -141,6 +142,7 @@ Use this order unless task constraints force escalation:
    - `expectedLines <= 180`
    - `maxTokens <= 1400`
    - Non-empty `identifiersToFind` (required by policy)
+   - Approval can proceed when one or more requested identifiers match the candidate window, so prefer a few precise identifiers over long catch-all lists.
    - Pass `sliceContext` to give the gating engine task context (e.g., `{ taskText, stackTrace, failingTestPath, editedFiles, entrySymbols }`) — this improves approval likelihood for justified requests.
 
 ### 2) Task-specific workflows

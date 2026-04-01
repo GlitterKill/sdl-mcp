@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 import {
   extractWindow,
+  findMatchedIdentifiersInWindow,
   identifiersExistInWindow,
 } from "../../dist/code/windows.js";
 
@@ -68,5 +69,13 @@ describe("identifiersExistInWindow", () => {
   it("should handle regex special characters in identifiers", () => {
     const code = "const $value = 1;";
     assert.strictEqual(identifiersExistInWindow(code, ["$value"]), true);
+  });
+
+  it("returns the subset of identifiers that match member expressions", () => {
+    const code = "return path.posix.normalize(input);";
+    assert.deepStrictEqual(
+      findMatchedIdentifiersInWindow(code, ["normalize", "replace"]),
+      ["normalize"],
+    );
   });
 });

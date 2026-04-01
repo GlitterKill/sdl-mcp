@@ -1,6 +1,9 @@
 import * as score from "../graph/score.js";
 import { loadConfig } from "../config/loadConfig.js";
-import { extractCodeWindow, identifiersExistInWindow } from "./windows.js";
+import {
+  extractCodeWindow,
+  findMatchedIdentifiersInWindow,
+} from "./windows.js";
 import { safeJsonParseOptional, SignatureSchema } from "../util/safeJson.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
@@ -131,12 +134,12 @@ export async function evaluateRequest(
 
   // Policy limits pass - now check approval criteria
   const whyApproved: string[] = [];
-  const identifiersMatch = request.identifiersToFind.length > 0 &&
-    window.approved &&
-    identifiersExistInWindow(window.code, request.identifiersToFind);
+  const matchedIdentifiers = request.identifiersToFind.length > 0 && window.approved
+    ? findMatchedIdentifiersInWindow(window.code, request.identifiersToFind)
+    : [];
 
   if (request.identifiersToFind.length > 0) {
-    if (!identifiersMatch && window.approved) {
+    if (matchedIdentifiers.length === 0 && window.approved) {
       const guidance = generateDenialGuidance(
         request,
         "general",
@@ -151,10 +154,15 @@ export async function evaluateRequest(
       };
     }
 
-    if (identifiersMatch) {
-      whyApproved.push("identifiers-exist");
+    if (matchedIdentifiers.length > 0) {
+      whyApproved.push(
+        matchedIdentifiers.length === request.identifiersToFind.length
+          ? "identifiers-exist"
+          : "identifiers-partially-exist",
+      );
+      const approvedWindow = window as Extract<CodeWindowResponse, { approved: true }>;
       return {
-        ...window,
+        ...approvedWindow,
         whyApproved,
       };
     }

@@ -121,8 +121,8 @@ export async function handleUsageStats(
         tool: e.tool,
         savedTokens: e.savedTokens,
         savingsPercent:
-          e.rawEquivalent > 0 && e.sdlTokens < e.rawEquivalent
-            ? Math.round((1 - e.sdlTokens / e.rawEquivalent) * 100)
+          e.rawEquivalent > 0
+            ? Math.round(((e.rawEquivalent - e.sdlTokens) / e.rawEquivalent) * 100)
             : 0,
       }))
       .sort((a, b) => b.savedTokens - a.savedTokens)

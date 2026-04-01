@@ -39,6 +39,8 @@ Use this first when the right SDL action is unclear.
 
 It returns ranked actions with optional schema summaries, examples, prerequisites, and recommended next steps.
 
+Use `offset` with `limit` to page through large result sets such as `query: "*"`.
+
 ### `sdl.manual`
 
 Use this when you know the rough area and want a compact manual instead of the full API surface.
@@ -137,6 +139,8 @@ flowchart TD
 ## Workflow Anatomy
 
 `sdl.workflow` executes sequential steps that reference earlier results through `$N.path` expressions.
+
+References also support optional chaining such as `$0.results[1]?.symbolId`, which resolves to `undefined` instead of failing when the indexed value is missing.
 
 Each step has:
 

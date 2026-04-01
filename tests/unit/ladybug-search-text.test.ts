@@ -120,7 +120,9 @@ describe("LadybugDB search text queries", () => {
         symbolId: "sym-handler",
         name: "handleLogin",
         fileId: "file-1",
+        file: "src/http.ts",
         kind: "function",
+        exported: true,
       },
     ]);
   });

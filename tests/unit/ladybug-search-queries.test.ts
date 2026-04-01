@@ -99,6 +99,33 @@ describe("LadybugDB Search Queries", () => {
         byteSize: 1,
         lastIndexedAt: null,
       });
+      await queries.upsertFile(conn as unknown as import("kuzu").Connection, {
+        fileId: "file-src-utils",
+        repoId,
+        relPath: "src/util/paths.ts",
+        contentHash: "h3",
+        language: "ts",
+        byteSize: 1,
+        lastIndexedAt: null,
+      });
+      await queries.upsertFile(conn as unknown as import("kuzu").Connection, {
+        fileId: "file-tests-utils",
+        repoId,
+        relPath: "tests/unit/paths.test.ts",
+        contentHash: "h4",
+        language: "ts",
+        byteSize: 1,
+        lastIndexedAt: null,
+      });
+      await queries.upsertFile(conn as unknown as import("kuzu").Connection, {
+        fileId: "file-src-private",
+        repoId,
+        relPath: "src/internal/config.ts",
+        contentHash: "h5",
+        language: "ts",
+        byteSize: 1,
+        lastIndexedAt: null,
+      });
 
       await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
         symbolId: "sym-foo-class",
@@ -204,6 +231,87 @@ describe("LadybugDB Search Queries", () => {
         sideEffectsJson: null,
         updatedAt: "2026-03-04T00:00:00Z",
       });
+
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "sym-normalize-src",
+        repoId,
+        fileId: "file-src-utils",
+        kind: "function",
+        name: "normalizePath",
+        exported: true,
+        visibility: "public",
+        language: "typescript",
+        rangeStartLine: 40,
+        rangeStartCol: 0,
+        rangeEndLine: 45,
+        rangeEndCol: 0,
+        astFingerprint: "f",
+        signatureJson: null,
+        summary: "production normalize path helper",
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "sym-normalize-test",
+        repoId,
+        fileId: "file-tests-utils",
+        kind: "function",
+        name: "normalizePath",
+        exported: true,
+        visibility: "public",
+        language: "typescript",
+        rangeStartLine: 4,
+        rangeStartCol: 0,
+        rangeEndLine: 8,
+        rangeEndCol: 0,
+        astFingerprint: "g",
+        signatureJson: null,
+        summary: "test helper normalize path",
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "sym-resolve-exported",
+        repoId,
+        fileId: "file-core",
+        kind: "function",
+        name: "resolveConfig",
+        exported: true,
+        visibility: "public",
+        language: "typescript",
+        rangeStartLine: 50,
+        rangeStartCol: 0,
+        rangeEndLine: 55,
+        rangeEndCol: 0,
+        astFingerprint: "h",
+        signatureJson: null,
+        summary: "exported config resolver",
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "sym-resolve-private",
+        repoId,
+        fileId: "file-src-private",
+        kind: "function",
+        name: "resolveConfig",
+        exported: false,
+        visibility: "private",
+        language: "typescript",
+        rangeStartLine: 5,
+        rangeStartCol: 0,
+        rangeEndLine: 10,
+        rangeEndCol: 0,
+        astFingerprint: "i",
+        signatureJson: null,
+        summary: "private config resolver",
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
     } catch {
       ladybugAvailable = false;
     }
@@ -274,4 +382,38 @@ describe("LadybugDB Search Queries", () => {
     );
     assert.strictEqual(results.length, 2);
   });
+
+  it(
+    "prefers src symbols over tests for multi-term ties",
+    { skip: !ladybugAvailable },
+    async () => {
+      const results = await queries.searchSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "normalizePath",
+        10,
+        ["function"],
+      );
+
+      assert.equal(results[0]?.symbolId, "sym-normalize-src");
+      assert.equal(results[1]?.symbolId, "sym-normalize-test");
+    },
+  );
+
+  it(
+    "prefers exported symbols over private ones for multi-term ties",
+    { skip: !ladybugAvailable },
+    async () => {
+      const results = await queries.searchSymbolsLite(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "resolveConfig",
+        10,
+        ["function"],
+      );
+
+      assert.equal(results[0]?.symbolId, "sym-resolve-exported");
+      assert.equal(results[1]?.symbolId, "sym-resolve-private");
+    },
+  );
 });

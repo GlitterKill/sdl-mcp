@@ -151,7 +151,7 @@ A `TokenAccumulator` singleton tracks all savings within the current server sess
 | `startedAt` | ISO timestamp when the session began |
 | `totalSdlTokens` | Sum of SDL tokens across all tracked calls |
 | `totalRawEquivalent` | Sum of raw-equivalent tokens across all tracked calls |
-| `totalSavedTokens` | `max(0, rawEquivalent - sdlTokens)` per call, summed |
+| `totalSavedTokens` | `rawEquivalent - sdlTokens` per call, summed. Negative values mean SDL overhead exceeded the raw equivalent for that workload. |
 | `overallSavingsPercent` | `Math.round((1 - totalSdl / totalRaw) * 100)` |
 | `callCount` | Total tracked tool calls |
 | `toolBreakdown` | Per-tool entry with calls, sdlTokens, rawEquivalent, savedTokens |

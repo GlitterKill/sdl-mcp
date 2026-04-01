@@ -132,7 +132,7 @@ const sliceBuild: ActionDefinition = {
     { flag: "--failing-test-path", field: "failingTestPath", type: "string", description: "Path to failing test" },
     { flag: "--card-detail", field: "cardDetail", type: "string", description: "Card detail level: minimal|signature|deps|compact|full" },
     { flag: "--adaptive-detail", field: "adaptiveDetail", type: "boolean", description: "Enable adaptive detail level" },
-    { flag: "--wire-format", field: "wireFormat", type: "string", description: "Wire format: standard|compact" },
+    { flag: "--wire-format", field: "wireFormat", type: "string", description: "Wire format: standard|readable|compact" },
     { flag: "--wire-format-version", field: "wireFormatVersion", type: "number", description: "Wire format version: 1|2|3" },
     { flag: "--max-cards", field: "_budgetMaxCards", type: "number", description: "Budget: max cards (1-500)" },
     { flag: "--max-tokens", field: "_budgetMaxTokens", type: "number", description: "Budget: max estimated tokens (1-200000)" },

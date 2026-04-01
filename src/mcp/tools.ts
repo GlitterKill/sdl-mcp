@@ -213,7 +213,7 @@ const SurfacedMemorySchema = z.object({
   tags: z.array(z.string()),
 });
 
-const SliceBuildWireFormatSchema = z.enum(["standard", "compact", "agent"]);
+const SliceBuildWireFormatSchema = z.enum(["standard", "readable", "compact", "agent"]);
 const SliceBuildWireFormatVersionSchema = z.union([
   z.literal(1),
   z.literal(2),

@@ -61,9 +61,9 @@ function sliceSpilloverGet(p: { spilloverHandle: string; page?: number; pageSize
 /** Get delta between versions */
 function deltaGet(p: { fromVersion?: string; toVersion?: string; includeBlastRadius?: boolean }): { changed: object[]; blastRadius?: object[] }
 /** Generate context summary */
-function contextSummary(p: { symbolId?: string; file?: string; taskQuery?: string; maxTokens?: number }): { summary: string; tokens: number }
+function contextSummary(p: { symbolId?: string; file?: string; query?: string; budget?: number; format?: "markdown"|"json"|"clipboard"; scope?: "symbol"|"file"|"task"|"repo" }): { summary: string; tokens: number }
 /** Analyze PR risk */
-function prRiskAnalyze(p: { riskThreshold?: number }): { riskItems: object[]; summary: string }
+function prRiskAnalyze(p: { fromVersion: string; toVersion: string; riskThreshold?: number }): { riskItems: object[]; summary: string }
 
 // === Code (ladder: card -> skeleton -> hotPath -> needWindow) ===
 /** Get skeleton IR (signatures + control flow) */
@@ -89,7 +89,7 @@ function policySet(p: { policyPatch: { maxWindowLines?: number; maxWindowTokens?
 
 // === Memory ===
 /** Store a development memory */
-function memoryStore(p: { type: string; title: string; content: string; tags?: string[]; symbolIds?: string[]; fileIds?: string[] }): { memoryId: string }
+function memoryStore(p: { type: "decision"|"bugfix"|"task_context"|"pattern"|"convention"|"architecture"|"performance"|"security"; title: string; content: string; tags?: string[]; symbolIds?: string[]; fileRelPaths?: string[] }): { memoryId: string }
 /** Query memories */
 function memoryQuery(p: { query?: string; types?: string[]; tags?: string[]; limit?: number }): { memories: object[] }
 /** Soft-delete a memory */
