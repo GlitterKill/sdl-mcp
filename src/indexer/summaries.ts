@@ -292,6 +292,64 @@ function escapeRegex(s: string): string {
  * Build a summary for a function/method using behavioral analysis of the function body.
  * Falls back to null instead of producing tautological name+type summaries.
  */
+
+/**
+ * Extract a richer subject than just splitting the function name.
+ * Priority: return type > first meaningful param type > camelCase name parts.
+ */
+function extractEnrichedSubject(symbol: ExtractedSymbol): string {
+  // Try return type (strip Promise<> wrapper, generics)
+  const rt = symbol.signature?.returns;
+  if (rt && rt !== "void" && rt !== "unknown" && rt !== "any" && rt !== "undefined") {
+    const promiseMatch = /^Promise<(.+)>/.exec(rt);
+    const inner = promiseMatch ? promiseMatch[1] : rt;
+    const unwrapped = inner
+      .replace(/<[^>]+>/g, "")
+      .replace(/\[\]/g, "")
+      .trim();
+    if (unwrapped && unwrapped.length > 2 && unwrapped.length < 40 && /^[A-Z]/.test(unwrapped)) {
+      return splitCamelCase(unwrapped).join(" ").toLowerCase();
+    }
+  }
+
+  // Try first param type if it's a domain type (PascalCase)
+  const params = symbol.signature?.params ?? [];
+  if (params.length > 0) {
+    const firstType = params[0].type?.replace(/^:\s*/, "").trim();
+    if (firstType && /^[A-Z][a-zA-Z]+/.test(firstType) && firstType.length < 30) {
+      const cleaned = firstType.replace(/<[^>]+>/g, "").replace(/\[\]/g, "");
+      return splitCamelCase(cleaned).join(" ").toLowerCase();
+    }
+  }
+
+  // Fall back to name-based subject
+  const words = splitCamelCase(symbol.name);
+  return words.slice(1).map((w) => w.toLowerCase()).join(" ");
+}
+
+/**
+ * Count how many behavioral signals fired for a function body.
+ */
+function countActiveSignals(signals: BodySignals): number {
+  let count = 0;
+  if (signals.throws) count++;
+  if (signals.validates) count++;
+  if (signals.delegates) count++;
+  if (signals.iterates) count++;
+  if (signals.hasNetworkIO) count++;
+  if (signals.hasFileIO) count++;
+  if (signals.hasDbIO) count++;
+  if (signals.transforms) count++;
+  if (signals.aggregates) count++;
+  if (signals.caches) count++;
+  if (signals.sorts) count++;
+  if (signals.merges) count++;
+  if (signals.switchOrChain) count++;
+  if (signals.recursion) count++;
+  if (signals.emitsEvents) count++;
+  if (signals.registersListeners) count++;
+  return count;
+}
 function generateBehavioralFunctionSummary(
   symbol: ExtractedSymbol,
   fileContent: string,
@@ -304,7 +362,7 @@ function generateBehavioralFunctionSummary(
   // For "handle*" functions, use the rest as a noun phrase describing what's handled
   const HANDLER_PREFIXES = new Set(["handle", "process", "on"]);
   const isHandler = HANDLER_PREFIXES.has(firstWord);
-  const subject = restWords.join(" ");
+  const subject = extractEnrichedSubject(symbol) || restWords.join(" ");
 
   // 0. Handler pattern — use "Handles X" with behavioral detail suffix
   if (isHandler && subject) {
@@ -319,6 +377,39 @@ function generateBehavioralFunctionSummary(
     return `Handles ${subject}${suffix}`;
   }
 
+
+  // Fix A: Multi-signal composite summaries for complex functions
+  // When 3+ behavioral signals fire, combine them instead of picking one
+  const activeCount = countActiveSignals(signals);
+  const bodyLength = (symbol.range.endLine - symbol.range.startLine);
+
+  if (activeCount >= 3 && subject) {
+    const phrases: string[] = [];
+    if (signals.hasDbIO) phrases.push("queries database");
+    if (signals.hasNetworkIO) phrases.push("calls network");
+    if (signals.hasFileIO) phrases.push("accesses filesystem");
+    if (signals.validates) phrases.push("validates input");
+    if (signals.aggregates) phrases.push("aggregates results");
+    if (signals.transforms) phrases.push("transforms data");
+    if (signals.iterates && !signals.transforms) phrases.push("iterates elements");
+    if (signals.sorts) phrases.push("sorts output");
+    if (signals.merges) phrases.push("merges data");
+    if (signals.caches) phrases.push("with caching");
+    if (signals.recursion) phrases.push("recursively");
+    if (signals.switchOrChain) phrases.push("with branching");
+    if (signals.emitsEvents) phrases.push("emits events");
+    if (phrases.length >= 2) {
+      const verb = firstWord || "processes";
+      const capitalVerb = verb.charAt(0).toUpperCase() + verb.slice(1);
+      return `${capitalVerb}s ${subject}: ${phrases.slice(0, 3).join(", ")}`;
+    }
+  }
+
+  // Length gate: functions >100 lines with only 1 generic signal
+  // should return null — the name alone is more honest than a vague summary
+  if (bodyLength > 100 && activeCount <= 1) {
+    return null;
+  }
     // Template priority (first match wins):
 
   // 1. Delegation

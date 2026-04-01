@@ -908,7 +908,10 @@ export async function handleGetHotPath(
     estimatedTokens: result.estimatedTokens,
     matchedIdentifiers: result.matchedIdentifiers,
     matchedLineNumbers: result.matchedLineNumbers,
-    ...(missedIdentifiers.length > 0 ? { missedIdentifiers } : {}),
+    ...(missedIdentifiers.length > 0 ? {
+      missedIdentifiers,
+      missedIdentifierHint: `Identifiers not found in this symbol's excerpt. Use sdl.symbol.search to find the symbol containing these identifiers, then call sdl.code.getHotPath on that symbol.`,
+    } : {}),
     truncated: result.truncated,
   };
   return symbol

@@ -291,6 +291,23 @@ function generateClusterLabel(
       return `${sorted[0][0]} / ${sorted[1][0]}`;
     }
     if (sorted.length >= 3) {
+      // Prefer directory-based label if members share a common directory prefix
+      const memberFiles = members
+        .map((m) => symbolById.get(m.symbolId))
+        .filter((s): s is { name: string; fileId: string } => Boolean(s))
+        .map((s) => filesById.get(s.fileId)?.relPath ?? "")
+        .filter(Boolean);
+      if (memberFiles.length > 0) {
+        const dirs = memberFiles.map((f) => f.split("/").slice(0, -1).join("/"));
+        const dirCounts = new Map<string, number>();
+        for (const d of dirs) {
+          if (d) dirCounts.set(d, (dirCounts.get(d) ?? 0) + 1);
+        }
+        const topDir = [...dirCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+        if (topDir && topDir[1] >= memberFiles.length * 0.5) {
+          return topDir[0];
+        }
+      }
       return `${sorted[0][0]} + ${sorted.length - 1} related`;
     }
   }

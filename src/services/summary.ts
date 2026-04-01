@@ -236,6 +236,33 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
     }
   }
 
+  // Phase 2a: compound token search — adjacent query words often form
+  // camelCase identifiers (e.g. "beam search" -> "beamSearch")
+  if (tokens.length >= 2) {
+    const compoundTokens: string[] = [];
+    for (let i = 0; i < Math.min(tokens.length - 1, 4); i++) {
+      // camelCase: "beam" + "search" -> "beamSearch"
+      const camel = tokens[i] + tokens[i + 1].charAt(0).toUpperCase() + tokens[i + 1].slice(1);
+      compoundTokens.push(camel);
+      // Also try 3-word compounds
+      if (i < tokens.length - 2) {
+        const camel3 = camel + tokens[i + 2].charAt(0).toUpperCase() + tokens[i + 2].slice(1);
+        compoundTokens.push(camel3);
+      }
+    }
+    for (const compound of compoundTokens) {
+      if (compound.length >= 5) {
+        const partial = await ladybugDb.searchSymbolsLite(conn, repoId, compound, 5);
+        for (const row of partial) {
+          if (!seen.has(row.symbolId)) {
+            seen.add(row.symbolId);
+            merged.push(row);
+          }
+        }
+      }
+    }
+  }
+
   // Phase 2b: file-path keyword matching — find files whose names contain
   // query tokens, then add exported symbols from those files.
   if (merged.length < 10) {

@@ -296,9 +296,14 @@ export async function handleSymbolSearch(
   });
 
   // FP2: Add relevance scoring and filter out spurious matches
-  const scoredResults = results.map(r => ({
+  const scoredResults = results.map((r, idx) => ({
     ...r,
-    relevance: Math.round(computeRelevance(r.name, request.query) * 100) / 100,
+    relevance: Math.round(Math.min(1, computeRelevance(r.name, request.query) +
+      // Boost semantic results: top-ranked results from semantic search
+      // are likely relevant even if the name doesn't match the query text
+      (request.semantic && semanticEnabled
+        ? Math.max(0, 0.3 * (1 - idx / Math.max(results.length, 1)))
+        : 0)) * 100) / 100,
   }));
   const relevant = scoredResults.filter(r => r.relevance >= MIN_RELEVANCE_THRESHOLD);
   const hasExactMatch = relevant.some(r => r.name.toLowerCase() === request.query.toLowerCase());

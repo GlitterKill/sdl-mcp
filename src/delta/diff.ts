@@ -78,12 +78,15 @@ export async function computeDelta(
       toRow.sideEffectsJson,
     );
 
-    const isModified =
-      fromRow.astFingerprint !== toRow.astFingerprint ||
-      fromRow.summary !== toRow.summary ||
-      signatureDiff !== undefined ||
+    // Require AST fingerprint change as the primary gate for modification.
+    // Signature/invariant/sideEffect diffs alone (without AST change) are
+    // typically formatting-only changes and should not be reported.
+    const hasAstChange = fromRow.astFingerprint !== toRow.astFingerprint;
+    const hasSummaryChange = fromRow.summary !== toRow.summary;
+    const hasSemanticDiff = signatureDiff !== undefined ||
       invariantDiff !== undefined ||
       sideEffectDiff !== undefined;
+    const isModified = hasAstChange || (hasSummaryChange && hasSemanticDiff);
 
     if (isModified) {
       changedSymbols.push({
@@ -328,12 +331,15 @@ export async function computeDeltaWithTiers(
       toRow.sideEffectsJson,
     );
 
-    const isModified =
-      fromRow.astFingerprint !== toRow.astFingerprint ||
-      fromRow.summary !== toRow.summary ||
-      signatureDiff !== undefined ||
+    // Require AST fingerprint change as the primary gate for modification.
+    // Signature/invariant/sideEffect diffs alone (without AST change) are
+    // typically formatting-only changes and should not be reported.
+    const hasAstChange = fromRow.astFingerprint !== toRow.astFingerprint;
+    const hasSummaryChange = fromRow.summary !== toRow.summary;
+    const hasSemanticDiff = signatureDiff !== undefined ||
       invariantDiff !== undefined ||
       sideEffectDiff !== undefined;
+    const isModified = hasAstChange || (hasSummaryChange && hasSemanticDiff);
 
     if (isModified) {
       const baseChange: DeltaSymbolChange = {

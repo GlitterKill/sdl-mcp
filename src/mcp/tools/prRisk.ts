@@ -304,7 +304,7 @@ function generateFindings(
       type: "removed-symbols",
       severity: "medium" as const,
       message: `${removedSymbols.length} symbol(s) removed`,
-      affectedSymbols: removedSymbols.map((c: ChangedSymbol) => c.symbolId),
+      affectedSymbols: removedSymbols.slice(0, 20).map((c: ChangedSymbol) => c.symbolId),
     });
   }
 
@@ -333,7 +333,7 @@ function generateFindings(
       type: "new-symbols",
       severity: "low" as const,
       message: `${addedSymbols.length} new symbol(s) added`,
-      affectedSymbols: addedSymbols.map((c: ChangedSymbol) => c.symbolId),
+      affectedSymbols: addedSymbols.slice(0, 20).map((c: ChangedSymbol) => c.symbolId),
     });
   }
 
@@ -528,7 +528,7 @@ function generateRecommendedTests(
     tests.push({
       type: "integration-tests",
       description: "Run integration tests for symbols with interface changes",
-      targetSymbols: interfaceBreakingSymbols.map(
+      targetSymbols: interfaceBreakingSymbols.slice(0, 20).map(
         (c: ChangedSymbol) => c.symbolId,
       ),
       priority: "high" as const,

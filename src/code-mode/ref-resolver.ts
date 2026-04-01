@@ -151,8 +151,12 @@ export function resolveRef(ref: string, priorResults: unknown[]): unknown {
           return undefined;
         }
         if (isLastSegment) {
+          const availableKeys = Object.keys(obj).filter(k => !k.startsWith('_')).slice(0, 10);
+          const suggestion = availableKeys.length > 0
+            ? `. Available keys: ${availableKeys.join(', ')}`
+            : '';
           throw new RefResolutionError(
-            `Field '${seg}' does not exist in reference '${ref}'`,
+            `Field '${seg}' does not exist in reference '${ref}'${suggestion}`,
           );
         }
         current = undefined;

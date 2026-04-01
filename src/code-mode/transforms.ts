@@ -15,6 +15,15 @@ function navigatePath(obj: unknown, path: string): unknown {
     return (obj as Record<string, unknown>)[path];
   }
 
+  // Handle .length on arrays and strings
+  if (path.endsWith('.length')) {
+    const parentPath = path.slice(0, -'.length'.length);
+    const parent = parentPath ? navigatePath(obj, parentPath) : obj;
+    if (Array.isArray(parent)) return parent.length;
+    if (typeof parent === 'string') return parent.length;
+    return undefined;
+  }
+
   // Complex path with dots/brackets
   let current: unknown = obj;
   const segments: Array<string | number> = [];
