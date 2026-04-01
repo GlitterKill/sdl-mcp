@@ -71,6 +71,20 @@ export function generateSummary(
 }
 
 /**
+ * Applies isNameOnlySummary as a final quality gate on generated summaries.
+ * Call this wrapper instead of generateSummary directly when you want filtering.
+ */
+export function generateFilteredSummary(
+  symbol: ExtractedSymbol,
+  fileContent: string,
+): string | null {
+  const summary = generateSummary(symbol, fileContent);
+  if (summary === null) return null;
+  if (isNameOnlySummary(summary, symbol.name)) return null;
+  return summary;
+}
+
+/**
  * Behavioral signals extracted from a function body via lightweight regex matching.
  * Used to generate summaries that describe behavior rather than restating the signature.
  */
@@ -630,7 +644,7 @@ export function isNameOnlySummary(
   for (const word of meaningful) {
     if (nameWords.has(word)) overlap++;
   }
-  if (overlap / meaningful.length > 0.8) return true;
+  if (overlap / meaningful.length >= 0.8) return true;
 
   // Detect "name words + type noise" pattern (e.g. "Builds tool from string and Partial")
   const meaningfulWithoutTypes = meaningful.filter(
@@ -642,7 +656,7 @@ export function isNameOnlySummary(
     for (const word of meaningfulWithoutTypes) {
       if (nameWords.has(word)) overlapNoTypes++;
     }
-    if (overlapNoTypes / meaningfulWithoutTypes.length > 0.8) return true;
+    if (overlapNoTypes / meaningfulWithoutTypes.length >= 0.8) return true;
   } else {
     // ALL meaningful words were either name words or type noise
     return true;

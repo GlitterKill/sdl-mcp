@@ -406,6 +406,7 @@ export async function handleRepoStatus(
       healthScore: health.score,
       healthComponents: health.components,
       healthAvailable: health.available,
+      ...(!health.available ? { healthNote: "Health metrics not yet computed. Run sdl.index.refresh to populate." } : {}),
       watcherHealth,
       watcherNote:
         watcherHealth === null

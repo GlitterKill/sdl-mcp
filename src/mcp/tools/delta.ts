@@ -193,6 +193,12 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       };
     }
 
+    // Warn when auto-resolved delta is very large
+    const totalChanges = delta.changedSymbols.length + (changedSymbolsTruncation.droppedCount ?? 0);
+    if (totalChanges > 500 && !validated.fromVersion) {
+      (delta as unknown as Record<string, unknown>).largeDeltaWarning = "This delta spans " + totalChanges + " changes. Narrow the version range with fromVersion/toVersion for targeted results.";
+    }
+
     // Collect all symbol IDs for enrichment (changed + blast radius)
     const blastRadiusSymbolIds = delta.blastRadius.map((item) => item.symbolId);
     const allSymbolIds = [

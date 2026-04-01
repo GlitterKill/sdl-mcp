@@ -7,7 +7,8 @@ import type { RuntimeDescriptor, RuntimeDetectionResult } from "./types.js";
 /** Escape a single argument for cmd.exe /c to prevent metacharacter injection */
 function cmdEscape(arg: string): string {
   // Don't quote simple tokens (shell builtins like echo, dir, set must be unquoted)
-  if (/^[a-zA-Z0-9._-]+$/.test(arg)) return arg;
+  // Include / and : as safe chars (path separators, drive letters) — not cmd.exe metacharacters
+  if (/^[a-zA-Z0-9._/:-]+$/.test(arg)) return arg;
   // Double-quote the argument; escape chars that cmd.exe interprets
   const escaped = arg.replace(/[()%!^"<>&|]/g, (ch) => "^" + ch);
   return '"' + escaped + '"';

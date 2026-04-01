@@ -10,7 +10,7 @@ import {
   classifySummarySource,
   extractInvariants,
   extractSideEffects,
-  generateSummary,
+  generateFilteredSummary,
   getSummaryQuality,
   hasJSDoc,
   isNameOnlySummary,
@@ -120,7 +120,7 @@ export async function buildSymbolAndEdgeRows(
     }
     summary = summary ?? nativeSummaryValue;
     if (summary === null) {
-      summary = generateSummary(extractedSymbol, content);
+      summary = generateFilteredSummary(extractedSymbol, content);
     }
 
     // Summary quality/source metadata

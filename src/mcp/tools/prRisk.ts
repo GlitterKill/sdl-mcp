@@ -16,6 +16,9 @@ const DEFAULT_MAX_BLAST_RADIUS = 20;
 const MAX_FINDINGS = 10;
 const MAX_RECOMMENDED_TESTS = 10;
 const MAX_EVIDENCE_ITEMS = 5;
+const MAX_AFFECTED_SYMBOLS_PER_FINDING = 20;
+/** Hard cap on serialized response size to prevent unbounded output. */
+const MAX_RESPONSE_BYTES = 50_000;
 
 type ComputedDeltaWithTiers = Awaited<ReturnType<typeof computeDeltaWithTiers>>;
 type ChangedSymbol = ComputedDeltaWithTiers["changedSymbols"][number];
@@ -228,6 +231,25 @@ const maxBlastRadius = Math.min(
     policyDecision,
   };
 
+  // Guardrail: cap serialized response size to prevent unbounded output
+  const serialized = JSON.stringify(response);
+  if (serialized.length > MAX_RESPONSE_BYTES) {
+    (response as Record<string, unknown>).truncationWarning = "Response truncated: " + serialized.length + " bytes exceeds " + MAX_RESPONSE_BYTES + " byte cap. Use budget.maxChangedSymbols to narrow scope.";
+    // Aggressively trim to fit
+    if (response.analysis.changedSymbols.items.length > 10) {
+      response.analysis.changedSymbols.items = response.analysis.changedSymbols.items.slice(0, 10);
+      response.analysis.changedSymbols.truncated = true;
+    }
+    if (response.analysis.blastRadius.items.length > 10) {
+      response.analysis.blastRadius.items = response.analysis.blastRadius.items.slice(0, 10);
+      response.analysis.blastRadius.truncated = true;
+    }
+    if (response.analysis.findings.items.length > 5) {
+      response.analysis.findings.items = response.analysis.findings.items.slice(0, 5);
+      response.analysis.findings.truncated = true;
+    }
+  }
+
   logger.info("PR Risk Analysis completed", {
     repoId: validated.repoId,
     riskScore,
@@ -258,7 +280,7 @@ function generateFindings(
       type: "high-risk-changes",
       severity: "high" as const,
       message: `${highRiskChanges.length} changed symbol(s) with high risk score (≥70)`,
-      affectedSymbols: highRiskChanges.map((c: ChangedSymbol) => c.symbolId),
+      affectedSymbols: highRiskChanges.slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING).map((c: ChangedSymbol) => c.symbolId),
       metadata: {
         highRiskCount: highRiskChanges.length,
       },
@@ -274,7 +296,7 @@ function generateFindings(
       type: "interface-breaking-changes",
       severity: "high" as const,
       message: `${interfaceBreakingChanges.length} symbol(s) with interface-breaking changes`,
-      affectedSymbols: interfaceBreakingChanges.map(
+      affectedSymbols: interfaceBreakingChanges.slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING).map(
         (c: ChangedSymbol) => c.symbolId,
       ),
       metadata: {
@@ -292,7 +314,7 @@ function generateFindings(
       type: "side-effect-changes",
       severity: "medium" as const,
       message: `${sideEffectChanges.length} symbol(s) with side effect changes`,
-      affectedSymbols: sideEffectChanges.map((c: ChangedSymbol) => c.symbolId),
+      affectedSymbols: sideEffectChanges.slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING).map((c: ChangedSymbol) => c.symbolId),
     });
   }
 
@@ -304,7 +326,7 @@ function generateFindings(
       type: "removed-symbols",
       severity: "medium" as const,
       message: `${removedSymbols.length} symbol(s) removed`,
-      affectedSymbols: removedSymbols.slice(0, 20).map((c: ChangedSymbol) => c.symbolId),
+      affectedSymbols: removedSymbols.slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING).map((c: ChangedSymbol) => c.symbolId),
     });
   }
 
@@ -316,8 +338,7 @@ function generateFindings(
       type: "large-impact-radius",
       severity: "medium" as const,
       message: `${largeBlastRadius.length} direct dependents may be affected`,
-      affectedSymbols: largeBlastRadius
-        .slice(0, 10)
+      affectedSymbols: largeBlastRadius.slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING)
         .map((item: BlastRadiusItem) => item.symbolId),
       metadata: {
         directDependentCount: largeBlastRadius.length,
@@ -333,7 +354,7 @@ function generateFindings(
       type: "new-symbols",
       severity: "low" as const,
       message: `${addedSymbols.length} new symbol(s) added`,
-      affectedSymbols: addedSymbols.slice(0, 20).map((c: ChangedSymbol) => c.symbolId),
+      affectedSymbols: addedSymbols.slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING).map((c: ChangedSymbol) => c.symbolId),
     });
   }
 
