@@ -442,12 +442,17 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
     const summaryLowerB = (b.summary ?? "").toLowerCase();
     let relevanceA = 0;
     let relevanceB = 0;
+    let nameHitsA = 0, nameHitsB = 0;
     for (const token of queryTokensLower) {
-      if (nameLowerA.includes(token)) relevanceA += 10;
+      if (nameLowerA.includes(token)) { relevanceA += 10; nameHitsA++; }
       else if (summaryLowerA.includes(token)) relevanceA += 3;
-      if (nameLowerB.includes(token)) relevanceB += 10;
+      if (nameLowerB.includes(token)) { relevanceB += 10; nameHitsB++; }
       else if (summaryLowerB.includes(token)) relevanceB += 3;
     }
+    // Bonus for matching ALL query tokens in name (full relevance match)
+    const tokenCount = queryTokensLower.length || 1;
+    if (nameHitsA === tokenCount && tokenCount >= 2) relevanceA += 20;
+    if (nameHitsB === tokenCount && tokenCount >= 2) relevanceB += 20;
     // Structural importance: fan-in + edge count
     const metricsA = metricsMap.get(a.symbolId);
     const metricsB = metricsMap.get(b.symbolId);

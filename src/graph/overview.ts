@@ -493,7 +493,22 @@ async function buildDirectorySummaries(
   const allDirectories = new Set(Array.from(aggregates.keys()));
 
   const sortedAggregates = Array.from(aggregates.values()).sort(
-    (a, b) => b.symbolCount - a.symbolCount,
+    (a, b) => {
+      // Primary: source directories before tests/scripts/other
+      const pathPriority = (dir: string): number => {
+        if (dir.startsWith("src/")) return 3;
+        if (dir.startsWith("packages/")) return 2;
+        if (dir.startsWith("native/")) return 2;
+        if (dir.startsWith("scripts/")) return 1;
+        if (dir.startsWith("tests/")) return 0;
+        return 1;
+      };
+      const priA = pathPriority(a.directory);
+      const priB = pathPriority(b.directory);
+      if (priA !== priB) return priB - priA;
+      // Secondary: by symbol count
+      return b.symbolCount - a.symbolCount;
+    },
   );
 
   for (const agg of sortedAggregates) {

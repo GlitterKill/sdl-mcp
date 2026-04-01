@@ -52,7 +52,18 @@ export function sortByExactMatch<T extends { name: string }>(
     // Secondary: prefer starts-with matches
     const aPrefix = a.name.toLowerCase().startsWith(queryLower) ? 1 : 0;
     const bPrefix = b.name.toLowerCase().startsWith(queryLower) ? 1 : 0;
-    return bPrefix - aPrefix;
+    if (aPrefix !== bPrefix) return bPrefix - aPrefix;
+    // Tiebreaker: prefer source files over test/fixture files
+    const aFile = (a as Record<string, unknown>).file as string | undefined;
+    const bFile = (b as Record<string, unknown>).file as string | undefined;
+    const sourceScore = (f: string | undefined) => {
+      if (!f) return 0;
+      if (f.startsWith('tests/fixtures/')) return -2;
+      if (f.startsWith('tests/')) return -1;
+      if (f.startsWith('src/')) return 1;
+      return 0;
+    };
+    return sourceScore(bFile) - sourceScore(aFile);
   });
 }
 
@@ -120,6 +131,8 @@ export function computeRelevance(name: string, query: string): number {
   }
   if (nl.startsWith(ql)) return 0.85;
   if (nl.includes(ql)) return 0.7;
+  // Query starts with name (e.g., query "evaluatePolicy" starts with name "evaluate")
+  if (ql.startsWith(nl) && nl.length >= 3) return 0.65;
   // CamelCase-aware: split both query and name into constituent subwords
   const queryParts = splitCamelSubwords(query);
   const nameParts = splitCamelSubwords(name);
@@ -311,7 +324,9 @@ export async function handleSymbolSearch(
   // Add suggestion when no relevant results or all results are weak
   const bestRelevance = relevant.length > 0 ? Math.max(...relevant.map(r => r.relevance)) : 0;
   const suggestion = relevant.length === 0
-    ? "No close matches found. Try broader terms or use kinds filter."
+    ? (semanticRequested && !semanticEnabled
+      ? `Semantic search unavailable (${fallbackReason || 'embedding model not loaded'}). Lexical search returned no matches. Try exact symbol names or broader terms.`
+      : "No close matches found. Try broader terms or use kinds filter.")
     : bestRelevance < 0.5
       ? "Results may not be relevant. Try more specific terms, use kinds filter, or try sdl.symbol.search with a wildcard pattern."
       : undefined;

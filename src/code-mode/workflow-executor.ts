@@ -25,6 +25,7 @@ import { WorkflowBudgetTracker } from "./workflow-budget.js";
 import { tokenAccumulator } from "../mcp/token-accumulator.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import { z } from "zod";
 
 /**
  * Apply per-step token truncation if configured.
@@ -329,9 +330,18 @@ export async function executeWorkflow(
       } catch (error) {
         const stepDuration = Date.now() - stepStart;
         budget.record(0, stepDuration);
-        const errorMessage = error instanceof Error
-          ? error.message
-          : `Step execution failed: ${String(error)}`;
+        let errorMessage: string;
+        if (error instanceof z.ZodError) {
+          const lines = error.issues.map((issue) => {
+            const path = issue.path.length > 0 ? issue.path.join(".") + ": " : "";
+            return path + issue.message;
+          });
+          errorMessage = `Invalid arguments: ${lines.join("; ")}`;
+        } else if (error instanceof Error) {
+          errorMessage = error.message;
+        } else {
+          errorMessage = `Step execution failed: ${String(error)}`;
+        }
 
         stepResults.push({
           stepIndex: i,

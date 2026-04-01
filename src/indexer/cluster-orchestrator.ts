@@ -168,9 +168,12 @@ export async function computeAndStoreClustersAndProcesses(params: {
       const lastOrder =
         proc.steps.length > 0 ? proc.steps[proc.steps.length - 1].stepOrder : 0;
 
-      const entryName = symbolById.get(proc.entrySymbolId)?.name ?? "";
+      const entrySymbol = symbolById.get(proc.entrySymbolId);
+      const entryName = entrySymbol?.name ?? "";
+      const entryFile = entrySymbol?.fileId ? filesById.get(entrySymbol.fileId)?.relPath : undefined;
+      const fileHint = entryFile ? entryFile.split("/").slice(-2).join("/") : "";
       const procLabel = entryName
-        ? `Process: ${entryName}`
+        ? (fileHint ? `Process: ${entryName} (${fileHint})` : `Process: ${entryName}`)
         : `Process ${clusterIndex + 1}`;
       const stepNames = proc.steps
         .map((step) => symbolById.get(step.symbolId)?.name)
@@ -303,8 +306,15 @@ function generateClusterLabel(
         for (const d of dirs) {
           if (d) dirCounts.set(d, (dirCounts.get(d) ?? 0) + 1);
         }
-        const topDir = [...dirCounts.entries()].sort((a, b) => b[1] - a[1])[0];
-        if (topDir && topDir[1] >= memberFiles.length * 0.5) {
+        const sortedDirs = [...dirCounts.entries()].sort((a, b) => b[1] - a[1]);
+        const topDir = sortedDirs[0];
+        // For large clusters (>50 members), lower the threshold for directory labels
+        const dirThreshold = members.length > 50 ? 0.3 : 0.5;
+        if (topDir && topDir[1] >= memberFiles.length * dirThreshold) {
+          // Show top 2 directories if the second is also significant
+          if (sortedDirs.length >= 2 && sortedDirs[1][1] >= memberFiles.length * 0.2) {
+            return `${topDir[0]} + ${sortedDirs[1][0]}`;
+          }
           return topDir[0];
         }
       }
