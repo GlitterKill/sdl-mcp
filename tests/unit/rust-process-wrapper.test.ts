@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert";
 
@@ -7,6 +9,19 @@ import {
 } from "../../dist/indexer/rustIndexer.js";
 
 describe("traceProcessesRust wrapper", () => {
+  it("uses trace_multiple in the native wrapper to avoid rebuilding the graph per entry", () => {
+    const source = readFileSync(
+      path.join(process.cwd(), "native/src/lib.rs"),
+      "utf8",
+    );
+
+    assert.match(
+      source,
+      /trace_multiple\(&entry_symbol_ids,\s*&edges\)/,
+      "expected native wrapper to batch entry traces via trace_multiple()",
+    );
+  });
+
   it("returns null when native addon is unavailable", () => {
     if (isRustEngineAvailable()) return;
 

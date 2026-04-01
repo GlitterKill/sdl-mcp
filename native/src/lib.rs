@@ -175,32 +175,33 @@ pub fn trace_processes(
         },
     }));
 
-    let mut processes: Vec<NativeProcess> = Vec::new();
+    tracer
+        .trace_multiple(&entry_symbol_ids, &edges)
+        .into_iter()
+        .map(|trace| {
+            let steps: Vec<NativeProcessStep> = trace
+                .steps
+                .iter()
+                .map(|s| NativeProcessStep {
+                    symbol_id: s.symbol_id.clone(),
+                    step_order: s.step_order,
+                })
+                .collect();
 
-    for entry_symbol_id in entry_symbol_ids {
-        let trace = tracer.trace(&entry_symbol_id, &edges);
-        let steps: Vec<NativeProcessStep> = trace
-            .steps
-            .iter()
-            .map(|s| NativeProcessStep {
-                symbol_id: s.symbol_id.clone(),
-                step_order: s.step_order,
-            })
-            .collect();
+            // Deterministic process IDs (hash-based).
+            let process_id = parse::content_hash::hash_content(&format!(
+                "process:{}",
+                trace.entry_symbol_id,
+            ));
 
-        // Deterministic process IDs (hash-based).
-        let process_id =
-            parse::content_hash::hash_content(&format!("process:{entry_symbol_id}"));
-
-        processes.push(NativeProcess {
-            process_id,
-            entry_symbol_id,
-            steps,
-            depth: trace.depth,
-        });
-    }
-
-    processes
+            NativeProcess {
+                process_id,
+                entry_symbol_id: trace.entry_symbol_id,
+                steps,
+                depth: trace.depth,
+            }
+        })
+        .collect()
 }
 
 fn num_cpus() -> usize {
