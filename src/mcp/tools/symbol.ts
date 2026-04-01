@@ -57,16 +57,61 @@ export function sortByExactMatch<T extends { name: string }>(
 }
 
 /**
+ * Split a camelCase/PascalCase/snake_case identifier into lowercase subwords.
+ * Handles digit-embedded acronyms (E2E, B2B), uppercase runs, and digits.
+ * Exported for testability.
+ */
+export function splitCamelSubwords(s: string): string[] {
+  const words = s.match(/[A-Z]+\d+[A-Z]+(?=[A-Z][a-z]|[^a-zA-Z0-9]|$)|[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|\d+/g);
+  return (words ?? [s]).map(w => w.toLowerCase()).filter(w => w.length >= 2);
+}
+
+/**
+ * Compute trigram (3-character subsequence) similarity between two strings.
+ * Returns a value between 0 and 1.
+ */
+function trigramSimilarity(a: string, b: string): number {
+  if (a.length < 3 || b.length < 3) return 0;
+  const trigrams = (s: string): Set<string> => {
+    const set = new Set<string>();
+    for (let i = 0; i <= s.length - 3; i++) {
+      set.add(s.substring(i, i + 3));
+    }
+    return set;
+  };
+  const tA = trigrams(a);
+  const tB = trigrams(b);
+  let intersection = 0;
+  for (const t of tA) {
+    if (tB.has(t)) intersection++;
+  }
+  const union = tA.size + tB.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/**
  * Compute a relevance score (0-1) for how well a result name matches the query.
  * Used to filter out spurious fuzzy matches.
+ *
+ * Scoring tiers (highest match wins):
+ *  1.0  - exact match (case-insensitive)
+ *  0.9  - glob wildcard full match
+ *  0.85 - prefix match
+ *  0.75 - glob wildcard partial match
+ *  0.7  - substring match
+ *  0.8  - all camelCase subwords match
+ *  0.15-0.6 - partial camelCase subword match (scaled by ratio + trigram boost)
+ *  0.05 - no meaningful match
+ *
+ * Exported for testability.
  */
-function computeRelevance(name: string, query: string): number {
+export function computeRelevance(name: string, query: string): number {
   const nl = name.toLowerCase();
   const ql = query.toLowerCase();
   if (nl === ql) return 1;
   // Support glob wildcards: build*Slice matches buildSlice, buildGraphSlice
   if (ql.includes("*") || ql.includes("?")) {
-    const escaped = ql.replace(/[.+^{}()|[\]]/g, "\\" + "&");
+    const escaped = ql.replace(/[.+^${}()|[\]\\]/g, "\\$&");
     const pattern = escaped.replace(/\*/g, ".*").replace(/\?/g, ".");
     try {
       if (new RegExp("^" + pattern + "$", "i").test(nl)) return 0.9;
@@ -75,18 +120,23 @@ function computeRelevance(name: string, query: string): number {
   }
   if (nl.startsWith(ql)) return 0.85;
   if (nl.includes(ql)) return 0.7;
-  // CamelCase-aware: split both query and name into constituent parts
-  const splitCamel = (s: string) => {
-    // Improved: handles digit-embedded acronyms (E2E, B2B), uppercase runs, digits
-    const words = s.match(/[A-Z]+\d+[A-Z]+(?=[A-Z][a-z]|[^a-zA-Z0-9]|$)|[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|\d+/g);
-    return (words ?? [s]).map(w => w.toLowerCase()).filter(w => w.length >= 2);
-  };
-  const queryParts = splitCamel(query);
-  const nameParts = splitCamel(name);
+  // CamelCase-aware: split both query and name into constituent subwords
+  const queryParts = splitCamelSubwords(query);
+  const nameParts = splitCamelSubwords(name);
   if (queryParts.length >= 2 && nameParts.length >= 2) {
     const matchCount = queryParts.filter(qp => nameParts.some(np => np.includes(qp) || qp.includes(np))).length;
+    const ratio = matchCount / queryParts.length;
     if (matchCount === queryParts.length) return 0.8;
-    if (matchCount > 0) return 0.3 + 0.3 * (matchCount / queryParts.length);
+    if (matchCount > 0) {
+      // Scale score more steeply: require majority of subwords to match for a decent score.
+      // For 1/3 match: 0.15 + 0.15*(1/3) = 0.2 (below threshold).
+      // For 2/3 match: 0.15 + 0.15*(2/3) = 0.25, plus trigram boost could push higher.
+      let score = 0.15 + 0.15 * ratio;
+      // Trigram boost: if the overall strings are similar, give a bump
+      const triSim = trigramSimilarity(nl, ql);
+      score += triSim * 0.35;
+      return Math.min(score, 0.79);
+    }
   }
   // Check if query words appear in the name (multi-word queries)
   const queryWords = ql.split(/[\s_]+/).filter(w => w.length >= 3);
@@ -96,6 +146,9 @@ function computeRelevance(name: string, query: string): number {
   }
   // Check if name appears in query
   if (nl.length >= 3 && ql.includes(nl)) return 0.5;
+  // Trigram similarity as a standalone signal for single-word queries
+  const triSim = trigramSimilarity(nl, ql);
+  if (triSim >= 0.3) return 0.1 + 0.3 * triSim;
   // Weak: individual word overlap
   const nameWords = (nl.match(/[A-Z]+\d+[A-Z]+(?=[A-Z][a-z]|[^a-zA-Z0-9]|$)|[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|\d+/gi) ?? [nl]).map(w => w.toLowerCase()).filter(w => w.length >= 3);
   const overlap = nameWords.filter(w => ql.includes(w)).length;
@@ -250,7 +303,18 @@ export async function handleSymbolSearch(
   const relevant = scoredResults.filter(r => r.relevance >= MIN_RELEVANCE_THRESHOLD);
   const hasExactMatch = relevant.some(r => r.name.toLowerCase() === request.query.toLowerCase());
   // symbols alias removed — use results (symbols was an exact duplicate wasting tokens)
-  const response: SymbolSearchResponse = { results: relevant, exactMatchFound: hasExactMatch };
+  // Add suggestion when no relevant results or all results are weak
+  const bestRelevance = relevant.length > 0 ? Math.max(...relevant.map(r => r.relevance)) : 0;
+  const suggestion = relevant.length === 0
+    ? "No close matches found. Try broader terms or use kinds filter."
+    : bestRelevance < 0.5
+      ? "Results may not be relevant. Try more specific terms, use kinds filter, or try sdl.symbol.search with a wildcard pattern."
+      : undefined;
+  const response: SymbolSearchResponse = {
+    results: relevant,
+    exactMatchFound: hasExactMatch,
+    ...(suggestion !== undefined && { suggestion }),
+  };
   if (request.includeRetrievalEvidence) {
     if (useHybrid && retrievalEvidence) {
       (response as Record<string, unknown>).retrievalEvidence = relevant.map((r) => ({

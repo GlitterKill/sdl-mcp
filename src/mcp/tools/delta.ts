@@ -116,8 +116,8 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       budget,
       runDiagnostics: true,
       diagnosticsTimeoutMs: 5000,
-      fromVersionId: validated.fromVersion,
-      toVersionId: validated.toVersion,
+      fromVersionId: fromVersion,
+      toVersionId: toVersion,
     };
 
     const conn = await getLadybugConn();

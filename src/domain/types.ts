@@ -42,6 +42,7 @@ export interface SymbolSignature {
 export interface SymbolDeps {
   imports: string[];
   calls: string[];
+  callsNote?: string;
 }
 
 export interface SliceDepRef {

@@ -5,6 +5,9 @@
  * → excerpt generation → telemetry → structured response.
  */
 
+import { access, mkdtemp, writeFile, rm } from "fs/promises";
+import { join } from "path";
+import { tmpdir } from "os";
 import type { ToolContext } from "../../server.js";
 import {
   RuntimeExecuteRequestSchema,
@@ -29,8 +32,7 @@ import {
 } from "../../runtime/executor.js";
 import { writeArtifact } from "../../runtime/artifacts.js";
 import type { OutputExcerpt, ConcurrencyTracker } from "../../runtime/types.js";
-import { logRuntimeExecution } from "../telemetry.js";
-import { logPolicyDecision } from "../telemetry.js";
+import { logRuntimeExecution, logPolicyDecision } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
 import { hashContent } from "../../util/hashing.js";
 import { logger } from "../../util/logger.js";
@@ -39,9 +41,6 @@ import {
   RUNTIME_KEYWORD_CONTEXT_LINES,
   RUNTIME_MAX_LINE_LENGTH,
 } from "../../config/constants.js";
-import { access, mkdtemp, writeFile, rm } from "fs/promises";
-import { join } from "path";
-import { tmpdir } from "os";
 
 // ============================================================================
 // Module-Level Singletons

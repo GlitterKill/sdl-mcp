@@ -11,8 +11,8 @@ import { getFilesByIds } from "../../db/ladybug-repos.js";
 import type { BlastRadiusItem } from "../types.js";
 import { IndexError } from "../errors.js";
 
-const MAX_CHANGED_SYMBOLS_IN_RESPONSE = 30;
-const MAX_BLAST_RADIUS_IN_RESPONSE = 20;
+const DEFAULT_MAX_CHANGED_SYMBOLS = 30;
+const DEFAULT_MAX_BLAST_RADIUS = 20;
 const MAX_FINDINGS = 10;
 const MAX_RECOMMENDED_TESTS = 10;
 const MAX_EVIDENCE_ITEMS = 5;
@@ -22,6 +22,18 @@ type ChangedSymbol = ComputedDeltaWithTiers["changedSymbols"][number];
 
 export async function handlePRRiskAnalysis(args: unknown) {
   const validated = PRRiskAnalysisRequestSchema.parse(args);
+
+  // --- Budget: allow caller to cap response size ---
+  const MAX_CHANGED_SYMBOLS_CAP = 200;
+const maxChangedSymbols = Math.min(
+    validated.budget?.maxChangedSymbols ?? DEFAULT_MAX_CHANGED_SYMBOLS,
+    MAX_CHANGED_SYMBOLS_CAP,
+  );
+  const MAX_BLAST_RADIUS_CAP = 200;
+const maxBlastRadius = Math.min(
+    validated.budget?.maxBlastRadius ?? DEFAULT_MAX_BLAST_RADIUS,
+    MAX_BLAST_RADIUS_CAP,
+  );
 
   recordToolTrace({
     repoId: validated.repoId,
@@ -120,10 +132,19 @@ export async function handlePRRiskAnalysis(args: unknown) {
     };
   };
 
+  // --- Filter by riskThreshold when set ---
+  const riskThreshold = validated.riskThreshold;
+  const filteredChangedSymbols = riskThreshold !== undefined
+    ? delta.changedSymbols.filter(
+        (c: ChangedSymbol) => (c.tiers?.riskScore ?? 0) >= riskThreshold,
+      )
+    : delta.changedSymbols;
+
   // --- Enrich and truncate changedSymbols ---
-  const totalChangedSymbols = delta.changedSymbols.length;
-  const truncatedChangedSymbols = delta.changedSymbols
-    .slice(0, MAX_CHANGED_SYMBOLS_IN_RESPONSE)
+  const totalChangedSymbols = filteredChangedSymbols.length;
+  const unfilteredTotal = delta.changedSymbols.length;
+  const truncatedChangedSymbols = filteredChangedSymbols
+    .slice(0, maxChangedSymbols)
     .map((c: ChangedSymbol) => ({
       ...enrichSymbol(c.symbolId),
       changeType: c.changeType,
@@ -133,7 +154,7 @@ export async function handlePRRiskAnalysis(args: unknown) {
   // --- Enrich and truncate blastRadius ---
   const totalBlastRadius = blastRadiusItems.length;
   const truncatedBlastRadius = blastRadiusItems
-    .slice(0, MAX_BLAST_RADIUS_IN_RESPONSE)
+    .slice(0, maxBlastRadius)
     .map((item: BlastRadiusItem) => ({
       ...enrichSymbol(item.symbolId),
       reason: item.reason,
@@ -155,7 +176,18 @@ export async function handlePRRiskAnalysis(args: unknown) {
   const totalEvidence = evidence.length;
   const truncatedEvidence = evidence.slice(0, MAX_EVIDENCE_ITEMS);
 
+  // --- Top-level summary for quick triage ---
+  const topRiskItemName = truncatedChangedSymbols.length > 0 ? truncatedChangedSymbols[0].name ?? truncatedChangedSymbols[0].symbolId : undefined;
+
   const response = {
+    summary: {
+      riskScore,
+      riskLevel: getRiskLevel(riskScore),
+      changedCount: unfilteredTotal,
+      filteredCount: totalChangedSymbols,
+      blastRadiusCount: totalBlastRadius,
+      topRiskItem: topRiskItemName,
+    },
     analysis: {
       repoId: delta.repoId,
       fromVersion: delta.fromVersion,
@@ -165,12 +197,14 @@ export async function handlePRRiskAnalysis(args: unknown) {
       changedSymbols: {
         items: truncatedChangedSymbols,
         totalCount: totalChangedSymbols,
-        truncated: totalChangedSymbols > MAX_CHANGED_SYMBOLS_IN_RESPONSE,
+        unfilteredTotal,
+        truncated: totalChangedSymbols > maxChangedSymbols,
+        filteredByRiskThreshold: riskThreshold !== undefined,
       },
       blastRadius: {
         items: truncatedBlastRadius,
         totalCount: totalBlastRadius,
-        truncated: totalBlastRadius > MAX_BLAST_RADIUS_IN_RESPONSE,
+        truncated: totalBlastRadius > maxBlastRadius,
       },
       findings: {
         items: truncatedFindings,

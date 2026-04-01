@@ -867,6 +867,8 @@ export const SymbolSearchResponseSchema = z.object({
   retrievalEvidence: z.array(RetrievalEvidenceItemSchema).optional(),
   /** Whether any result had a high-confidence exact match (relevance >= 0.85). */
   exactMatchFound: z.boolean().optional(),
+  /** Suggestion text when results are weak or empty. */
+  suggestion: z.string().optional(),
 });
 
 const NotModifiedResponseSchema = z.object({
@@ -1682,6 +1684,10 @@ export const PRRiskAnalysisRequestSchema = z.object({
   fromVersion: z.string(),
   toVersion: z.string(),
   riskThreshold: z.number().int().min(0).max(100).optional(),
+  budget: z.object({
+    maxChangedSymbols: z.number().int().min(1).max(200).optional(),
+    maxBlastRadius: z.number().int().min(1).max(200).optional(),
+  }).optional(),
 });
 
 export const PRRiskAnalysisResponseSchema = z.object({

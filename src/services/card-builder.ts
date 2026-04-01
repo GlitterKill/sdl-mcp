@@ -109,24 +109,31 @@ async function buildOverlayCardForSymbol(
     [...new Set([...callTargetIds, ...importTargetIds])],
   );
 
+  const overlayResolvedCalls = uniqueLimit(
+    callTargetIds
+      .map((targetId) =>
+        pickDepLabel(targetId, targetNamesById.get(targetId)?.name),
+      )
+      .filter((label): label is string => Boolean(label))
+      .filter((label) => !label.startsWith("unresolved:")),
+    SYMBOL_CARD_MAX_DEPS_PER_KIND,
+  );
+
   const deps: SymbolDeps = {
     imports: uniqueLimit(
       importTargetIds
         .map((targetId) =>
           pickDepLabel(targetId, targetNamesById.get(targetId)?.name),
         )
-        .filter((label): label is string => Boolean(label)),
-      SYMBOL_CARD_MAX_DEPS_PER_KIND,
-    ),
-    calls: uniqueLimit(
-      callTargetIds
-        .map((targetId) =>
-          pickDepLabel(targetId, targetNamesById.get(targetId)?.name),
-        )
         .filter((label): label is string => Boolean(label))
-        .filter((label) => !label.startsWith("unresolved:")),
+        .filter((label) => !includeResolutionMetadata && label.startsWith("unresolved:") ? false : true),
       SYMBOL_CARD_MAX_DEPS_PER_KIND,
     ),
+    calls: overlayResolvedCalls,
+    callsNote:
+      CLASS_LIKE_KINDS.has(overlay.symbol.kind) && overlayResolvedCalls.length === 0
+        ? "See method cards for call dependencies"
+        : undefined,
   };
 
   const callResolution: CallResolution | undefined = includeResolutionMetadata
@@ -237,6 +244,8 @@ async function buildOverlayCardForSymbol(
     etag,
   };
 }
+
+const CLASS_LIKE_KINDS = new Set(["class", "interface", "module"]);
 
 export async function buildCardForSymbol(
   repoId: string,
@@ -396,24 +405,31 @@ export async function buildCardForSymbol(
     targetIds,
   );
 
+  const resolvedCalls = uniqueLimit(
+    callTargetIds
+      .map((targetId) =>
+        pickDepLabel(targetId, targetNamesById.get(targetId)?.name),
+      )
+      .filter((label): label is string => Boolean(label))
+      .filter((label) => !label.startsWith("unresolved:")),
+    SYMBOL_CARD_MAX_DEPS_PER_KIND,
+  );
+
   const deps: SymbolDeps = {
     imports: uniqueLimit(
       importTargetIds
         .map((targetId) =>
           pickDepLabel(targetId, targetNamesById.get(targetId)?.name),
         )
-        .filter((label): label is string => Boolean(label)),
-      SYMBOL_CARD_MAX_DEPS_PER_KIND,
-    ),
-    calls: uniqueLimit(
-      callTargetIds
-        .map((targetId) =>
-          pickDepLabel(targetId, targetNamesById.get(targetId)?.name),
-        )
         .filter((label): label is string => Boolean(label))
-        .filter((label) => !label.startsWith("unresolved:")),
+        .filter((label) => !options.includeResolutionMetadata && label.startsWith("unresolved:") ? false : true),
       SYMBOL_CARD_MAX_DEPS_PER_KIND,
     ),
+    calls: resolvedCalls,
+    callsNote:
+      CLASS_LIKE_KINDS.has(symbol.kind) && resolvedCalls.length === 0
+        ? "See method cards for call dependencies"
+        : undefined,
   };
 
   const callResolution: CallResolution | undefined =

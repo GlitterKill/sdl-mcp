@@ -1,5 +1,6 @@
 import { createActionMap } from "../gateway/router.js";
 import type { LiveIndexCoordinator } from "../live-index/types.js";
+import { logger } from "../util/logger.js";
 
 export const FN_NAME_MAP: Record<string, string> = {
   symbolSearch: "symbol.search",
@@ -161,9 +162,7 @@ export function generateManual(_liveIndex?: LiveIndexCoordinator): string {
   const mappedActions = Object.values(FN_NAME_MAP);
   for (const key of actionKeys) {
     if (!mappedActions.includes(key)) {
-      process.stderr.write(
-        `[code-mode] Warning: action "${key}" not in FN_NAME_MAP\n`,
-      );
+      logger.warn(`[code-mode] action "${key}" not in FN_NAME_MAP`);
     }
   }
 
