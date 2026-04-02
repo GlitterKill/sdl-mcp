@@ -14,13 +14,17 @@ describe("MemoryConfig schema and resolver", () => {
 
   it("repo config accepts omitted memory section", async () => {
     const { RepoConfigSchema } = await import("../../dist/config/types.js");
-    const result = RepoConfigSchema.safeParse({ repoId: "test", rootPath: "/tmp" });
+    const result = RepoConfigSchema.safeParse({
+      repoId: "test",
+      rootPath: "/tmp",
+    });
     assert.ok(result.success);
     assert.strictEqual(result.data.memory, undefined);
   });
 
   it("built-in default resolves to enabled=false", async () => {
-    const { resolveMemoryConfig } = await import("../../dist/config/memory-config.js");
+    const { resolveMemoryConfig } =
+      await import("../../dist/config/memory-config.js");
     const { AppConfigSchema } = await import("../../dist/config/types.js");
     const config = AppConfigSchema.parse({
       repos: [{ repoId: "r", rootPath: "/tmp" }],
@@ -31,7 +35,8 @@ describe("MemoryConfig schema and resolver", () => {
   });
 
   it("subordinate flags are gated by enabled=false", async () => {
-    const { getMemoryCapabilities } = await import("../../dist/config/memory-config.js");
+    const { getMemoryCapabilities } =
+      await import("../../dist/config/memory-config.js");
     const { AppConfigSchema } = await import("../../dist/config/types.js");
     const config = AppConfigSchema.parse({
       repos: [{ repoId: "r", rootPath: "/tmp" }],
@@ -46,10 +51,17 @@ describe("MemoryConfig schema and resolver", () => {
   });
 
   it("repo-level override merges correctly", async () => {
-    const { getMemoryCapabilities } = await import("../../dist/config/memory-config.js");
+    const { getMemoryCapabilities } =
+      await import("../../dist/config/memory-config.js");
     const { AppConfigSchema } = await import("../../dist/config/types.js");
     const config = AppConfigSchema.parse({
-      repos: [{ repoId: "r", rootPath: "/tmp", memory: { enabled: true, fileSyncEnabled: false } }],
+      repos: [
+        {
+          repoId: "r",
+          rootPath: "/tmp",
+          memory: { enabled: true, fileSyncEnabled: false },
+        },
+      ],
       policy: {},
       memory: { enabled: false },
     });
@@ -61,7 +73,8 @@ describe("MemoryConfig schema and resolver", () => {
   });
 
   it("anyRepoHasMemoryTools returns false when all repos disabled", async () => {
-    const { anyRepoHasMemoryTools } = await import("../../dist/config/memory-config.js");
+    const { anyRepoHasMemoryTools } =
+      await import("../../dist/config/memory-config.js");
     const { AppConfigSchema } = await import("../../dist/config/types.js");
     const config = AppConfigSchema.parse({
       repos: [{ repoId: "r", rootPath: "/tmp" }],
@@ -71,7 +84,8 @@ describe("MemoryConfig schema and resolver", () => {
   });
 
   it("anyRepoHasMemoryTools returns true when one repo enabled", async () => {
-    const { anyRepoHasMemoryTools } = await import("../../dist/config/memory-config.js");
+    const { anyRepoHasMemoryTools } =
+      await import("../../dist/config/memory-config.js");
     const { AppConfigSchema } = await import("../../dist/config/types.js");
     const config = AppConfigSchema.parse({
       repos: [
@@ -84,7 +98,8 @@ describe("MemoryConfig schema and resolver", () => {
   });
 
   it("global enabled + repo override disabled = disabled for that repo", async () => {
-    const { getMemoryCapabilities } = await import("../../dist/config/memory-config.js");
+    const { getMemoryCapabilities } =
+      await import("../../dist/config/memory-config.js");
     const { AppConfigSchema } = await import("../../dist/config/types.js");
     const config = AppConfigSchema.parse({
       repos: [{ repoId: "r", rootPath: "/tmp", memory: { enabled: false } }],
@@ -94,5 +109,24 @@ describe("MemoryConfig schema and resolver", () => {
     const caps = getMemoryCapabilities(config, "r");
     assert.strictEqual(caps.enabled, false);
     assert.strictEqual(caps.toolsEnabled, false);
+  });
+
+  it("repo { enabled: true } inherits app-level fileSyncEnabled=false", async () => {
+    const { getMemoryCapabilities } =
+      await import("../../dist/config/memory-config.js");
+    const { AppConfigSchema } = await import("../../dist/config/types.js");
+    const config = AppConfigSchema.parse({
+      repos: [{ repoId: "r", rootPath: "/tmp", memory: { enabled: true } }],
+      policy: {},
+      memory: { enabled: true, fileSyncEnabled: false },
+    });
+    const caps = getMemoryCapabilities(config, "r");
+    assert.strictEqual(caps.enabled, true);
+    assert.strictEqual(
+      caps.fileSyncEnabled,
+      false,
+      "repo should inherit app-level fileSyncEnabled=false",
+    );
+    assert.strictEqual(caps.toolsEnabled, true); // default
   });
 });

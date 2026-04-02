@@ -52,10 +52,27 @@ export const MemoryConfigSchema = z.object({
   fileSyncEnabled: z.boolean().default(true),
   surfacingEnabled: z.boolean().default(true),
   hintsEnabled: z.boolean().default(true),
-  defaultSurfaceLimit: z.number().int().min(1).max(50).default(DEFAULT_MEMORY_SURFACE_LIMIT),
+  defaultSurfaceLimit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .default(DEFAULT_MEMORY_SURFACE_LIMIT),
 });
 
 export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
+
+/** Partial schema for repo-level overrides — no defaults filled in. */
+export const MemoryConfigOverrideSchema = z.object({
+  enabled: z.boolean().optional(),
+  toolsEnabled: z.boolean().optional(),
+  fileSyncEnabled: z.boolean().optional(),
+  surfacingEnabled: z.boolean().optional(),
+  hintsEnabled: z.boolean().optional(),
+  defaultSurfaceLimit: z.number().int().min(1).max(50).optional(),
+});
+
+export type MemoryConfigOverride = z.infer<typeof MemoryConfigOverrideSchema>;
 
 export const RepoConfigSchema = z.object({
   repoId: z.string().min(1),
@@ -91,7 +108,7 @@ export const RepoConfigSchema = z.object({
   packageJsonPath: z.string().nullish(),
   tsconfigPath: z.string().nullish(),
   workspaceGlobs: z.array(z.string()).nullish(),
-  memory: MemoryConfigSchema.optional(),
+  memory: MemoryConfigOverrideSchema.optional(),
 });
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
@@ -103,10 +120,16 @@ export const PolicyConfigSchema = z.object({
   allowBreakGlass: z.boolean().default(false),
   defaultMinCallConfidence: z.number().min(0).max(1).optional(),
   defaultDenyRaw: z.boolean().default(true),
-  budgetCaps: z.object({
-    maxCards: z.number().int().min(1).default(DEFAULT_MAX_CARDS),
-    maxEstimatedTokens: z.number().int().min(1).default(DEFAULT_MAX_TOKENS_SLICE),
-  }).optional(),
+  budgetCaps: z
+    .object({
+      maxCards: z.number().int().min(1).default(DEFAULT_MAX_CARDS),
+      maxEstimatedTokens: z
+        .number()
+        .int()
+        .min(1)
+        .default(DEFAULT_MAX_TOKENS_SLICE),
+    })
+    .optional(),
 });
 
 export type PolicyConfig = z.infer<typeof PolicyConfigSchema>;
@@ -253,12 +276,10 @@ export const SemanticRetrievalVectorConfigSchema = z.object({
   topK: z.number().int().min(1).default(75),
   efs: z.number().int().min(1).default(200),
   /** Per-model HNSW index config keyed by model name. */
-  indexes: z
-    .record(z.string(), SemanticRetrievalVectorIndexSchema)
-    .default({
-      "all-MiniLM-L6-v2": { indexName: "symbol_vec_minilm_l6_v2" },
-      "nomic-embed-text-v1.5": { indexName: "symbol_vec_nomic_embed_v15" },
-    }),
+  indexes: z.record(z.string(), SemanticRetrievalVectorIndexSchema).default({
+    "all-MiniLM-L6-v2": { indexName: "symbol_vec_minilm_l6_v2" },
+    "nomic-embed-text-v1.5": { indexName: "symbol_vec_nomic_embed_v15" },
+  }),
 });
 
 export const SemanticRetrievalFusionConfigSchema = z.object({
@@ -271,17 +292,31 @@ export const SemanticRetrievalConfigSchema = z.object({
   mode: z.enum(["legacy", "hybrid"]).default("hybrid"),
   /** When true, file-extension filtering is optional (not enforced during retrieval). */
   extensionsOptional: z.boolean().default(true),
-  fts: SemanticRetrievalFtsConfigSchema.optional().default(() => SemanticRetrievalFtsConfigSchema.parse({})),
-  vector: SemanticRetrievalVectorConfigSchema.optional().default(() => SemanticRetrievalVectorConfigSchema.parse({})),
-  fusion: SemanticRetrievalFusionConfigSchema.optional().default(() => SemanticRetrievalFusionConfigSchema.parse({})),
+  fts: SemanticRetrievalFtsConfigSchema.optional().default(() =>
+    SemanticRetrievalFtsConfigSchema.parse({}),
+  ),
+  vector: SemanticRetrievalVectorConfigSchema.optional().default(() =>
+    SemanticRetrievalVectorConfigSchema.parse({}),
+  ),
+  fusion: SemanticRetrievalFusionConfigSchema.optional().default(() =>
+    SemanticRetrievalFusionConfigSchema.parse({}),
+  ),
   /** Maximum candidate symbols to collect before fusion re-ranking. */
   candidateLimit: z.number().int().min(1).default(100),
 });
 
-export type SemanticRetrievalFtsConfig = z.infer<typeof SemanticRetrievalFtsConfigSchema>;
-export type SemanticRetrievalVectorConfig = z.infer<typeof SemanticRetrievalVectorConfigSchema>;
-export type SemanticRetrievalFusionConfig = z.infer<typeof SemanticRetrievalFusionConfigSchema>;
-export type SemanticRetrievalConfig = z.infer<typeof SemanticRetrievalConfigSchema>;
+export type SemanticRetrievalFtsConfig = z.infer<
+  typeof SemanticRetrievalFtsConfigSchema
+>;
+export type SemanticRetrievalVectorConfig = z.infer<
+  typeof SemanticRetrievalVectorConfigSchema
+>;
+export type SemanticRetrievalFusionConfig = z.infer<
+  typeof SemanticRetrievalFusionConfigSchema
+>;
+export type SemanticRetrievalConfig = z.infer<
+  typeof SemanticRetrievalConfigSchema
+>;
 
 export const SemanticConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -362,7 +397,9 @@ export type ConcurrencyConfig = z.infer<typeof ConcurrencyConfigSchema>;
 
 export const RuntimeConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  allowedRuntimes: z.array(z.enum(RUNTIME_NAMES)).default(["node", "typescript", "python", "shell"]),
+  allowedRuntimes: z
+    .array(z.enum(RUNTIME_NAMES))
+    .default(["node", "typescript", "python", "shell"]),
   allowedExecutables: z.array(z.string()).default([]),
   maxDurationMs: z
     .number()
@@ -419,7 +456,12 @@ export const CodeModeConfigSchema = z.object({
   /** Maximum total estimated tokens for a workflow's results */
   maxWorkflowTokens: z.number().int().min(100).max(500_000).default(50_000),
   /** Maximum wall-clock duration for a workflow in milliseconds */
-  maxWorkflowDurationMs: z.number().int().min(1000).max(300_000).default(60_000),
+  maxWorkflowDurationMs: z
+    .number()
+    .int()
+    .min(1000)
+    .max(300_000)
+    .default(60_000),
   /** Context ladder validation: off, warn (add warnings), enforce (reject violations) */
   ladderValidation: z.enum(["off", "warn", "enforce"]).default("warn"),
   /** Auto-inject ifNoneMatch ETags for repeated symbol card requests within a workflow */

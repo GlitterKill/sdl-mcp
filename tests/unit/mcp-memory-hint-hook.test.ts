@@ -1,6 +1,10 @@
-import { describe, it } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createMemoryHintHook } from "../../dist/mcp/hooks/memory-hint.js";
+import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 
 /**
  * Tests for src/mcp/hooks/memory-hint.ts — post-dispatch hook that
@@ -16,6 +20,28 @@ function makeContext(sessionId?: string) {
 }
 
 describe("Memory hint hook", () => {
+  let tmpDir: string;
+
+  before(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "sdl-hint-test-"));
+    const configPath = join(tmpDir, "sdlmcp.config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        repos: [{ repoId: "test-repo", rootPath: tmpDir }],
+        policy: {},
+        memory: { enabled: true },
+      }),
+    );
+    process.env.SDL_CONFIG = configPath;
+    invalidateConfigCache();
+  });
+
+  after(() => {
+    delete process.env.SDL_CONFIG;
+    invalidateConfigCache();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
   it("createMemoryHintHook returns a function", () => {
     const hook = createMemoryHintHook();
     assert.strictEqual(typeof hook, "function");
@@ -47,14 +73,21 @@ describe("Memory hint hook", () => {
     for (let i = 0; i < 2; i++) {
       const r: Record<string, unknown> = {};
       await hook("sdl.code.needWindow", {}, r, ctx);
-      assert.strictEqual(r._memoryHint, undefined, `call ${i + 1} should not hint yet`);
+      assert.strictEqual(
+        r._memoryHint,
+        undefined,
+        `call ${i + 1} should not hint yet`,
+      );
     }
 
     // 3rd call: recentCalls now has 3 entries (including this one), >= 3 triggers hint
     const result: Record<string, unknown> = {};
     await hook("sdl.code.needWindow", {}, result, ctx);
 
-    assert.ok(result._memoryHint, "should have _memoryHint after 3 needWindow calls");
+    assert.ok(
+      result._memoryHint,
+      "should have _memoryHint after 3 needWindow calls",
+    );
     const hint = result._memoryHint as Record<string, unknown>;
     assert.strictEqual(hint.suggestedType, "bugfix");
     assert.strictEqual(hint.pattern, "deep_debugging");

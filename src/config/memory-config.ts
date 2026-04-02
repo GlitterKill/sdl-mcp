@@ -1,4 +1,8 @@
-import { MemoryConfigSchema, type MemoryConfig, type AppConfig } from "./types.js";
+import {
+  MemoryConfigSchema,
+  type MemoryConfig,
+  type AppConfig,
+} from "./types.js";
 import { DEFAULT_MEMORY_SURFACE_LIMIT } from "./constants.js";
 
 /** Built-in defaults: memory disabled, but sub-features on if ever enabled */
@@ -25,7 +29,10 @@ export interface MemoryCapabilities {
  * Resolve effective memory config for a repo.
  * Precedence: built-in defaults < app-level memory < repo-level memory
  */
-export function resolveMemoryConfig(appConfig: AppConfig, repoId?: string): MemoryConfig {
+export function resolveMemoryConfig(
+  appConfig: AppConfig,
+  repoId?: string,
+): MemoryConfig {
   const appLevel = appConfig.memory
     ? MemoryConfigSchema.parse(appConfig.memory)
     : BUILT_IN_DEFAULTS;
@@ -33,18 +40,23 @@ export function resolveMemoryConfig(appConfig: AppConfig, repoId?: string): Memo
   if (!repoId) return { ...BUILT_IN_DEFAULTS, ...appLevel };
 
   const repo = appConfig.repos.find((r) => r.repoId === repoId);
-  const repoLevel = repo?.memory ? MemoryConfigSchema.parse(repo.memory) : undefined;
+  const repoOverrides = repo?.memory;
 
-  if (!repoLevel) return { ...BUILT_IN_DEFAULTS, ...appLevel };
+  if (!repoOverrides) return { ...BUILT_IN_DEFAULTS, ...appLevel };
 
-  return { ...BUILT_IN_DEFAULTS, ...appLevel, ...repoLevel };
+  // Repo-level uses MemoryConfigOverrideSchema (all optional, no defaults),
+  // so only explicitly set keys are present — safe to spread directly.
+  return { ...BUILT_IN_DEFAULTS, ...appLevel, ...repoOverrides };
 }
 
 /**
  * Get flattened capabilities with master gate applied.
  * When `enabled=false`, all sub-features resolve to false.
  */
-export function getMemoryCapabilities(appConfig: AppConfig, repoId?: string): MemoryCapabilities {
+export function getMemoryCapabilities(
+  appConfig: AppConfig,
+  repoId?: string,
+): MemoryCapabilities {
   const config = resolveMemoryConfig(appConfig, repoId);
   if (!config.enabled) {
     return {

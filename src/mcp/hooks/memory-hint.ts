@@ -40,7 +40,11 @@ interface MemoryHint {
   pattern: string;
 }
 
-function detectPatterns(session: SessionTracker, toolName: string, args: unknown): MemoryHint | null {
+function detectPatterns(
+  session: SessionTracker,
+  toolName: string,
+  args: unknown,
+): MemoryHint | null {
   const recentCalls = session.calls.filter(
     (c) => Date.now() - c.timestamp < 30 * 60 * 1000, // last 30 minutes
   );
@@ -74,7 +78,10 @@ function detectPatterns(session: SessionTracker, toolName: string, args: unknown
   }
 
   // Pattern: agent.context with implement task completes
-  if (toolName === "sdl.agent.context" && !session.hintsSent.has("feature_complete")) {
+  if (
+    toolName === "sdl.agent.context" &&
+    !session.hintsSent.has("feature_complete")
+  ) {
     const contextArgs = args as Record<string, unknown> | null;
     if (contextArgs?.taskType === "implement") {
       session.hintsSent.add("feature_complete");
@@ -88,9 +95,16 @@ function detectPatterns(session: SessionTracker, toolName: string, args: unknown
   }
 
   // Pattern: agent.feedback with missingSymbols
-  if (toolName === "sdl.agent.feedback" && !session.hintsSent.has("missing_symbols")) {
+  if (
+    toolName === "sdl.agent.feedback" &&
+    !session.hintsSent.has("missing_symbols")
+  ) {
     const feedbackArgs = args as Record<string, unknown> | null;
-    if (feedbackArgs?.missingSymbols && Array.isArray(feedbackArgs.missingSymbols) && feedbackArgs.missingSymbols.length > 0) {
+    if (
+      feedbackArgs?.missingSymbols &&
+      Array.isArray(feedbackArgs.missingSymbols) &&
+      feedbackArgs.missingSymbols.length > 0
+    ) {
       session.hintsSent.add("missing_symbols");
       return {
         suggestedType: "bugfix",
@@ -114,13 +128,11 @@ export function createMemoryHintHook(): PostDispatchHook {
     result: unknown,
     context: ToolContext,
   ): Promise<void> => {
-    // Check if memory hints are enabled for this repo
+    // Check if memory hints are enabled (global fallback when repoId absent)
     const argsObj = args as Record<string, unknown> | null;
     const repoId = argsObj?.repoId as string | undefined;
-    if (repoId) {
-      const caps = getMemoryCapabilities(loadConfig(), repoId);
-      if (!caps.hintsEnabled) return;
-    }
+    const caps = getMemoryCapabilities(loadConfig(), repoId);
+    if (!caps.hintsEnabled) return;
 
     const sessionId = context.sessionId ?? "stdio";
     const session = getSession(sessionId);
@@ -148,7 +160,7 @@ export function createMemoryHintHook(): PostDispatchHook {
       const r = result as Record<string, unknown>;
       if (typeof r.changedFiles === "number" && r.changedFiles > 10) {
         session.hintsSent.add("large_change");
-        (r)._memoryHint = {
+        r._memoryHint = {
           suggestedType: "task_context",
           message: `Large code change indexed (${r.changedFiles} files). Consider storing context about the changes via sdl.memory.store.`,
           pattern: "large_change",
