@@ -40,9 +40,11 @@ export function buildGatewayWireSchema(
   actions: readonly string[],
   actionMap: ActionMap,
 ): JsonSchema {
+  // Filter to only actions present in the map (memory actions may be gated)
+  const activeActions = actions.filter((action) => action in actionMap);
   return compactJsonSchema({
     type: "object",
-    oneOf: actions.map((action) => buildActionEnvelope(action, actionMap)),
+    oneOf: activeActions.map((action) => buildActionEnvelope(action, actionMap)),
   });
 }
 

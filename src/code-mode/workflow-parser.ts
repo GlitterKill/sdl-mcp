@@ -2,7 +2,7 @@ import {
   WorkflowRequestSchema,
   type WorkflowBudget,
 } from "./types.js";
-import { ACTION_TO_FN, FN_NAME_MAP } from "./manual-generator.js";
+import { getActiveFnNameMap, getActiveActionToFn } from "./manual-generator.js";
 import { isInternalTransform } from "./transforms.js";
 
 export interface ParsedWorkflowStep {
@@ -77,6 +77,8 @@ export function parseWorkflowRequest(
   const { repoId, steps, budget, onError, defaultMaxResponseTokens, onlyFinalResult } = parsed.data;
   const errors: string[] = [];
   const parsedSteps: ParsedWorkflowStep[] = [];
+  const fnNameMap = getActiveFnNameMap();
+  const actionToFn = getActiveActionToFn();
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
@@ -84,16 +86,16 @@ export function parseWorkflowRequest(
 
     // Normalize dot-notation (e.g., "repo.status") to camelCase (e.g., "repoStatus")
     let resolvedFn = step.fn;
-    if (!isTransform && !(resolvedFn in FN_NAME_MAP)) {
-      const mapped = ACTION_TO_FN[resolvedFn];
+    if (!isTransform && !(resolvedFn in fnNameMap)) {
+      const mapped = actionToFn[resolvedFn];
       if (mapped) {
         resolvedFn = mapped;
       }
     }
 
-    if (!isTransform && !(resolvedFn in FN_NAME_MAP)) {
+    if (!isTransform && !(resolvedFn in fnNameMap)) {
       errors.push(
-        `Unknown function '${step.fn}' in step ${i}. Available: ${Object.keys(FN_NAME_MAP).join(", ")}, dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet`,
+        `Unknown function '${step.fn}' in step ${i}. Available: ${Object.keys(fnNameMap).join(", ")}, dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet`,
       );
       continue;
     }
@@ -107,7 +109,7 @@ export function parseWorkflowRequest(
 
     parsedSteps.push({
       fn: resolvedFn,
-      action: isTransform ? step.fn : FN_NAME_MAP[resolvedFn],
+      action: isTransform ? step.fn : fnNameMap[resolvedFn],
       args: step.args,
       internal: isTransform,
       maxResponseTokens: step.maxResponseTokens,

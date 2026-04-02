@@ -93,6 +93,8 @@ import {
 } from "./memory.js";
 import { handleUsageStats } from "./usage.js";
 import { handleFileRead } from "./file-read.js";
+import { loadConfig } from "../../config/loadConfig.js";
+import { anyRepoHasMemoryTools } from "../../config/memory-config.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -131,7 +133,9 @@ export interface ToolDescriptor {
 export function buildFlatToolDescriptors(
   services: ToolServices,
 ): ToolDescriptor[] {
-  return [
+  const memoryToolsVisible = anyRepoHasMemoryTools(loadConfig());
+
+  const all: ToolDescriptor[] = [
     {
       name: "sdl.repo.register",
       description: "Register a new repository for indexing",
@@ -360,6 +364,11 @@ export function buildFlatToolDescriptors(
       handler: handleFileRead,
     },
   ];
+
+  if (!memoryToolsVisible) {
+    return all.filter((d) => !d.name.startsWith("sdl.memory."));
+  }
+  return all;
 }
 
 // ---------------------------------------------------------------------------

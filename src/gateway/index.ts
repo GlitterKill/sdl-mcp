@@ -16,7 +16,7 @@ import {
   QUERY_DESCRIPTION,
   CODE_DESCRIPTION,
   REPO_DESCRIPTION,
-  AGENT_DESCRIPTION,
+  getAgentDescription,
 } from "./descriptions.js";
 import { createActionMap, routeGatewayCall, type ActionMap } from "./router.js";
 import { registerLegacyTools } from "./legacy.js";
@@ -90,7 +90,7 @@ export function registerGatewayTools(
 
   server.registerTool(
     "sdl.agent",
-    AGENT_DESCRIPTION,
+    getAgentDescription(),
     AgentGatewaySchema,
     makeHandler(),
     agentWireSchema,

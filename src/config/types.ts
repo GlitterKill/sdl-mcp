@@ -45,6 +45,19 @@ export const LanguageSchema = z.enum([
   "sh",
 ]);
 
+export const MemoryConfigSchema = z.object({
+  /** Master gate: when false, all memory sub-features are disabled. */
+  enabled: z.boolean().default(false),
+  /** Whether memory MCP tools (store/query/remove/surface) are exposed. */
+  toolsEnabled: z.boolean().default(true),
+  /** Whether file-sync (.sdl-memory/) is active. */
+  fileSyncEnabled: z.boolean().default(true),
+  /** Whether memories are auto-surfaced during agent context retrieval. */
+  autoSurfaceEnabled: z.boolean().default(true),
+});
+
+export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
+
 export const RepoConfigSchema = z.object({
   repoId: z.string().min(1),
   rootPath: z.string().min(1),
@@ -79,6 +92,8 @@ export const RepoConfigSchema = z.object({
   packageJsonPath: z.string().nullish(),
   tsconfigPath: z.string().nullish(),
   workspaceGlobs: z.array(z.string()).nullish(),
+  /** Per-repo memory opt-in configuration. Overrides app-level memory config. */
+  memory: MemoryConfigSchema.optional(),
 });
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
@@ -456,6 +471,8 @@ export const AppConfigSchema = z.object({
   codeMode: CodeModeConfigSchema.optional(),
   security: SecurityConfigSchema.optional(),
   httpAuth: HttpAuthConfigSchema.optional(),
+  /** App-level memory configuration. Individual repos can override via repo.memory. */
+  memory: MemoryConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

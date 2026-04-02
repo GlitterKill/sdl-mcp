@@ -1,5 +1,8 @@
-import { describe, it } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   generateManual,
@@ -9,8 +12,36 @@ import {
   registerActionSearchTool,
 } from "../../dist/code-mode/index.js";
 import { resolveRefs } from "../../dist/code-mode/ref-resolver.js";
+import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
+
+const originalSdlConfig = process.env.SDL_CONFIG;
 
 describe("code-mode regressions", () => {
+  let tmpDir: string;
+
+  before(() => {
+    // Create a config with memory enabled so manual contains all signatures
+    tmpDir = mkdtempSync(join(tmpdir(), "sdl-regressions-"));
+    const configPath = join(tmpDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({
+      repos: [{ repoId: "test", rootPath: tmpDir, memory: { enabled: true } }],
+      policy: {},
+    }));
+    process.env.SDL_CONFIG = configPath;
+    invalidateConfigCache();
+  });
+
+  after(() => {
+    if (originalSdlConfig !== undefined) {
+      process.env.SDL_CONFIG = originalSdlConfig;
+    } else {
+      delete process.env.SDL_CONFIG;
+    }
+    invalidateConfigCache();
+    invalidateManualCache();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it("hardcoded manual signatures match the live tool contracts", () => {
     invalidateManualCache();
     const manual = generateManual();

@@ -90,6 +90,10 @@ import { handleUsageStats } from "../mcp/tools/usage.js";
 import { handleFileRead } from "../mcp/tools/file-read.js";
 import type { z } from "zod";
 import { normalizeToolArguments } from "../mcp/request-normalization.js";
+import { loadConfig } from "../config/loadConfig.js";
+import { anyRepoHasMemoryTools } from "../config/memory-config.js";
+
+const MEMORY_ACTIONS = new Set(["memory.store", "memory.query", "memory.remove", "memory.surface"]);
 
 type ActionHandler = (args: unknown, context?: ToolContext) => Promise<unknown>;
 
@@ -106,7 +110,7 @@ export type ActionMap = Record<string, ActionEntry>;
  * `createActionMap()` at registration time.
  */
 export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
-  return {
+  const map: ActionMap = {
     // === Query actions ===
     "symbol.search": {
       schema: SymbolSearchRequestSchema,
@@ -243,6 +247,14 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
       handler: handleMemorySurface,
     },
   };
+
+  if (!anyRepoHasMemoryTools(loadConfig())) {
+    for (const key of MEMORY_ACTIONS) {
+      delete map[key];
+    }
+  }
+
+  return map;
 }
 
 /**
