@@ -34,22 +34,38 @@ describe("memory tool exposure gating", () => {
 
   describe("anyRepoHasMemoryTools", () => {
     it("returns false when no memory config is set", async () => {
-      const { anyRepoHasMemoryTools } = await import(
-        "../../dist/config/memory-config.js"
-      );
+      const { anyRepoHasMemoryTools } =
+        await import("../../dist/config/memory-config.js");
       const result = anyRepoHasMemoryTools({
-        repos: [{ repoId: "r", rootPath: tmpDir, ignore: [], languages: [], maxFileBytes: 1024, includeNodeModulesTypes: false }],
+        repos: [
+          {
+            repoId: "r",
+            rootPath: tmpDir,
+            ignore: [],
+            languages: [],
+            maxFileBytes: 1024,
+            includeNodeModulesTypes: false,
+          },
+        ],
         policy: {},
       } as any);
       assert.strictEqual(result, false);
     });
 
     it("returns false when memory.enabled is false", async () => {
-      const { anyRepoHasMemoryTools } = await import(
-        "../../dist/config/memory-config.js"
-      );
+      const { anyRepoHasMemoryTools } =
+        await import("../../dist/config/memory-config.js");
       const result = anyRepoHasMemoryTools({
-        repos: [{ repoId: "r", rootPath: tmpDir, ignore: [], languages: [], maxFileBytes: 1024, includeNodeModulesTypes: false }],
+        repos: [
+          {
+            repoId: "r",
+            rootPath: tmpDir,
+            ignore: [],
+            languages: [],
+            maxFileBytes: 1024,
+            includeNodeModulesTypes: false,
+          },
+        ],
         memory: { enabled: false },
         policy: {},
       } as any);
@@ -57,43 +73,75 @@ describe("memory tool exposure gating", () => {
     });
 
     it("returns true when app-level memory.enabled is true", async () => {
-      const { anyRepoHasMemoryTools } = await import(
-        "../../dist/config/memory-config.js"
-      );
+      const { anyRepoHasMemoryTools } =
+        await import("../../dist/config/memory-config.js");
       const result = anyRepoHasMemoryTools({
-        repos: [{ repoId: "r", rootPath: tmpDir, ignore: [], languages: [], maxFileBytes: 1024, includeNodeModulesTypes: false }],
-        memory: { enabled: true, toolsEnabled: true, fileSyncEnabled: true, autoSurfaceEnabled: true },
+        repos: [
+          {
+            repoId: "r",
+            rootPath: tmpDir,
+            ignore: [],
+            languages: [],
+            maxFileBytes: 1024,
+            includeNodeModulesTypes: false,
+          },
+        ],
+        memory: {
+          enabled: true,
+          toolsEnabled: true,
+          fileSyncEnabled: true,
+          surfacingEnabled: true,
+        },
         policy: {},
       } as any);
       assert.strictEqual(result, true);
     });
 
     it("returns true when a repo has memory.enabled", async () => {
-      const { anyRepoHasMemoryTools } = await import(
-        "../../dist/config/memory-config.js"
-      );
+      const { anyRepoHasMemoryTools } =
+        await import("../../dist/config/memory-config.js");
       const result = anyRepoHasMemoryTools({
-        repos: [{
-          repoId: "r",
-          rootPath: tmpDir,
-          ignore: [],
-          languages: [],
-          maxFileBytes: 1024,
-          includeNodeModulesTypes: false,
-          memory: { enabled: true, toolsEnabled: true, fileSyncEnabled: true, autoSurfaceEnabled: true },
-        }],
+        repos: [
+          {
+            repoId: "r",
+            rootPath: tmpDir,
+            ignore: [],
+            languages: [],
+            maxFileBytes: 1024,
+            includeNodeModulesTypes: false,
+            memory: {
+              enabled: true,
+              toolsEnabled: true,
+              fileSyncEnabled: true,
+              surfacingEnabled: true,
+            },
+          },
+        ],
         policy: {},
       } as any);
       assert.strictEqual(result, true);
     });
 
     it("returns false when master gate is on but toolsEnabled is false", async () => {
-      const { anyRepoHasMemoryTools } = await import(
-        "../../dist/config/memory-config.js"
-      );
+      const { anyRepoHasMemoryTools } =
+        await import("../../dist/config/memory-config.js");
       const result = anyRepoHasMemoryTools({
-        repos: [{ repoId: "r", rootPath: tmpDir, ignore: [], languages: [], maxFileBytes: 1024, includeNodeModulesTypes: false }],
-        memory: { enabled: true, toolsEnabled: false, fileSyncEnabled: true, autoSurfaceEnabled: true },
+        repos: [
+          {
+            repoId: "r",
+            rootPath: tmpDir,
+            ignore: [],
+            languages: [],
+            maxFileBytes: 1024,
+            includeNodeModulesTypes: false,
+          },
+        ],
+        memory: {
+          enabled: true,
+          toolsEnabled: false,
+          fileSyncEnabled: true,
+          surfacingEnabled: true,
+        },
         policy: {},
       } as any);
       assert.strictEqual(result, false);
@@ -102,35 +150,54 @@ describe("memory tool exposure gating", () => {
 
   describe("getMemoryCapabilities", () => {
     it("applies master gate to disable all sub-features", async () => {
-      const { getMemoryCapabilities } = await import(
-        "../../dist/config/memory-config.js"
-      );
+      const { getMemoryCapabilities } =
+        await import("../../dist/config/memory-config.js");
       const caps = getMemoryCapabilities({
-        repos: [{ repoId: "r", rootPath: tmpDir, ignore: [], languages: [], maxFileBytes: 1024, includeNodeModulesTypes: false }],
-        memory: { enabled: false, toolsEnabled: true, fileSyncEnabled: true, autoSurfaceEnabled: true },
-        policy: {},
-      } as any);
-      assert.strictEqual(caps.enabled, false);
-      assert.strictEqual(caps.toolsEnabled, false);
-      assert.strictEqual(caps.fileSyncEnabled, false);
-      assert.strictEqual(caps.autoSurfaceEnabled, false);
-    });
-
-    it("respects per-repo override", async () => {
-      const { getMemoryCapabilities } = await import(
-        "../../dist/config/memory-config.js"
-      );
-      const caps = getMemoryCapabilities(
-        {
-          repos: [{
+        repos: [
+          {
             repoId: "r",
             rootPath: tmpDir,
             ignore: [],
             languages: [],
             maxFileBytes: 1024,
             includeNodeModulesTypes: false,
-            memory: { enabled: true, toolsEnabled: true, fileSyncEnabled: false, autoSurfaceEnabled: true },
-          }],
+          },
+        ],
+        memory: {
+          enabled: false,
+          toolsEnabled: true,
+          fileSyncEnabled: true,
+          surfacingEnabled: true,
+        },
+        policy: {},
+      } as any);
+      assert.strictEqual(caps.enabled, false);
+      assert.strictEqual(caps.toolsEnabled, false);
+      assert.strictEqual(caps.fileSyncEnabled, false);
+      assert.strictEqual(caps.surfacingEnabled, false);
+    });
+
+    it("respects per-repo override", async () => {
+      const { getMemoryCapabilities } =
+        await import("../../dist/config/memory-config.js");
+      const caps = getMemoryCapabilities(
+        {
+          repos: [
+            {
+              repoId: "r",
+              rootPath: tmpDir,
+              ignore: [],
+              languages: [],
+              maxFileBytes: 1024,
+              includeNodeModulesTypes: false,
+              memory: {
+                enabled: true,
+                toolsEnabled: true,
+                fileSyncEnabled: false,
+                surfacingEnabled: true,
+              },
+            },
+          ],
           policy: {},
         } as any,
         "r",
@@ -156,17 +223,32 @@ describe("memory tool exposure gating", () => {
       process.env.SDL_CONFIG = configPath;
 
       // Invalidate cached config
-      const { invalidateConfigCache } = await import(
-        "../../dist/config/loadConfig.js"
-      );
+      const { invalidateConfigCache } =
+        await import("../../dist/config/loadConfig.js");
       invalidateConfigCache();
 
       const { createActionMap } = await import("../../dist/gateway/router.js");
       const map = createActionMap();
-      assert.strictEqual(map["memory.store"], undefined, "memory.store should be absent");
-      assert.strictEqual(map["memory.query"], undefined, "memory.query should be absent");
-      assert.strictEqual(map["memory.remove"], undefined, "memory.remove should be absent");
-      assert.strictEqual(map["memory.surface"], undefined, "memory.surface should be absent");
+      assert.strictEqual(
+        map["memory.store"],
+        undefined,
+        "memory.store should be absent",
+      );
+      assert.strictEqual(
+        map["memory.query"],
+        undefined,
+        "memory.query should be absent",
+      );
+      assert.strictEqual(
+        map["memory.remove"],
+        undefined,
+        "memory.remove should be absent",
+      );
+      assert.strictEqual(
+        map["memory.surface"],
+        undefined,
+        "memory.surface should be absent",
+      );
       // Other actions should still be present
       assert.ok(map["symbol.search"], "symbol.search should be present");
       assert.ok(map["repo.status"], "repo.status should be present");
@@ -183,9 +265,8 @@ describe("memory tool exposure gating", () => {
       );
       process.env.SDL_CONFIG = configPath;
 
-      const { invalidateConfigCache } = await import(
-        "../../dist/config/loadConfig.js"
-      );
+      const { invalidateConfigCache } =
+        await import("../../dist/config/loadConfig.js");
       invalidateConfigCache();
 
       const { createActionMap } = await import("../../dist/gateway/router.js");
@@ -211,14 +292,12 @@ describe("memory tool exposure gating", () => {
       );
       process.env.SDL_CONFIG = configPath;
 
-      const { invalidateConfigCache } = await import(
-        "../../dist/config/loadConfig.js"
-      );
+      const { invalidateConfigCache } =
+        await import("../../dist/config/loadConfig.js");
       invalidateConfigCache();
 
-      const { buildFlatToolDescriptors } = await import(
-        "../../dist/mcp/tools/tool-descriptors.js"
-      );
+      const { buildFlatToolDescriptors } =
+        await import("../../dist/mcp/tools/tool-descriptors.js");
       const descriptors = buildFlatToolDescriptors({});
       const memTools = descriptors.filter((d: any) =>
         d.name.startsWith("sdl.memory."),
@@ -242,14 +321,12 @@ describe("memory tool exposure gating", () => {
       );
       process.env.SDL_CONFIG = configPath;
 
-      const { invalidateConfigCache } = await import(
-        "../../dist/config/loadConfig.js"
-      );
+      const { invalidateConfigCache } =
+        await import("../../dist/config/loadConfig.js");
       invalidateConfigCache();
 
-      const { buildFlatToolDescriptors } = await import(
-        "../../dist/mcp/tools/tool-descriptors.js"
-      );
+      const { buildFlatToolDescriptors } =
+        await import("../../dist/mcp/tools/tool-descriptors.js");
       const descriptors = buildFlatToolDescriptors({});
       const memTools = descriptors.filter((d: any) =>
         d.name.startsWith("sdl.memory."),
@@ -276,14 +353,12 @@ describe("memory tool exposure gating", () => {
       );
       process.env.SDL_CONFIG = configPath;
 
-      const { invalidateConfigCache } = await import(
-        "../../dist/config/loadConfig.js"
-      );
+      const { invalidateConfigCache } =
+        await import("../../dist/config/loadConfig.js");
       invalidateConfigCache();
 
-      const { generateManual, invalidateManualCache } = await import(
-        "../../dist/code-mode/manual-generator.js"
-      );
+      const { generateManual, invalidateManualCache } =
+        await import("../../dist/code-mode/manual-generator.js");
       invalidateManualCache();
       const manual = generateManual();
       assert.ok(
@@ -312,14 +387,12 @@ describe("memory tool exposure gating", () => {
       );
       process.env.SDL_CONFIG = configPath;
 
-      const { invalidateConfigCache } = await import(
-        "../../dist/config/loadConfig.js"
-      );
+      const { invalidateConfigCache } =
+        await import("../../dist/config/loadConfig.js");
       invalidateConfigCache();
 
-      const { generateManual, invalidateManualCache } = await import(
-        "../../dist/code-mode/manual-generator.js"
-      );
+      const { generateManual, invalidateManualCache } =
+        await import("../../dist/code-mode/manual-generator.js");
       invalidateManualCache();
       const manual = generateManual();
       assert.ok(
@@ -347,14 +420,12 @@ describe("memory tool exposure gating", () => {
       );
       process.env.SDL_CONFIG = configPath;
 
-      const { invalidateConfigCache } = await import(
-        "../../dist/config/loadConfig.js"
-      );
+      const { invalidateConfigCache } =
+        await import("../../dist/config/loadConfig.js");
       invalidateConfigCache();
 
-      const { getActiveFnNameMap } = await import(
-        "../../dist/code-mode/manual-generator.js"
-      );
+      const { getActiveFnNameMap } =
+        await import("../../dist/code-mode/manual-generator.js");
       const fnMap = getActiveFnNameMap();
       assert.strictEqual(fnMap.memoryStore, undefined);
       assert.strictEqual(fnMap.memoryQuery, undefined);
@@ -375,14 +446,12 @@ describe("memory tool exposure gating", () => {
       );
       process.env.SDL_CONFIG = configPath;
 
-      const { invalidateConfigCache } = await import(
-        "../../dist/config/loadConfig.js"
-      );
+      const { invalidateConfigCache } =
+        await import("../../dist/config/loadConfig.js");
       invalidateConfigCache();
 
-      const { getActiveFnNameMap } = await import(
-        "../../dist/code-mode/manual-generator.js"
-      );
+      const { getActiveFnNameMap } =
+        await import("../../dist/code-mode/manual-generator.js");
       const fnMap = getActiveFnNameMap();
       assert.strictEqual(fnMap.memoryStore, "memory.store");
       assert.strictEqual(fnMap.memoryQuery, "memory.query");
@@ -405,14 +474,12 @@ describe("memory tool exposure gating", () => {
       );
       process.env.SDL_CONFIG = configPath;
 
-      const { invalidateConfigCache } = await import(
-        "../../dist/config/loadConfig.js"
-      );
+      const { invalidateConfigCache } =
+        await import("../../dist/config/loadConfig.js");
       invalidateConfigCache();
 
-      const { getAgentDescription } = await import(
-        "../../dist/gateway/descriptions.js"
-      );
+      const { getAgentDescription } =
+        await import("../../dist/gateway/descriptions.js");
       const desc = getAgentDescription();
       assert.ok(
         !desc.includes("memory.store"),
@@ -444,14 +511,12 @@ describe("memory tool exposure gating", () => {
       );
       process.env.SDL_CONFIG = configPath;
 
-      const { invalidateConfigCache } = await import(
-        "../../dist/config/loadConfig.js"
-      );
+      const { invalidateConfigCache } =
+        await import("../../dist/config/loadConfig.js");
       invalidateConfigCache();
 
-      const { getAgentDescription } = await import(
-        "../../dist/gateway/descriptions.js"
-      );
+      const { getAgentDescription } =
+        await import("../../dist/gateway/descriptions.js");
       const desc = getAgentDescription();
       assert.ok(
         desc.includes("memory.store"),
