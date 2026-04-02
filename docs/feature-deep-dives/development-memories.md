@@ -4,11 +4,19 @@ Cross-session knowledge persistence for AI coding agents, backed by the graph da
 
 ---
 
+## Opt-In Feature
+
+The memory subsystem is **opt-in and disabled by default**. When disabled, memory tools return a clear error, no `.sdl-memory/` files are imported or modified, no memory hints appear in tool responses, and no memories are surfaced in `repo.status` or `slice.build`. Existing memory data (graph nodes and `.sdl-memory/` files) is preserved and fully restored when memory is re-enabled.
+
+See [Enabling Memory](#enabling-memory) below for configuration details.
+
+---
+
 ## The Problem
 
 AI coding agents are stateless. Every session starts from scratch — the agent has no memory of previous debugging sessions, architectural decisions, or bugfix context. Teams work around this with CLAUDE.md files and manual notes, but these are disconnected from the code graph and can't be automatically surfaced when relevant.
 
-**Development Memories** solve this by storing structured knowledge directly in the symbol graph. When an agent builds a slice touching `authenticate()`, it automatically sees the memory: *"Fixed race condition here — added mutex on session map"*.
+**Development Memories** solve this by storing structured knowledge directly in the symbol graph. When an agent builds a slice touching `authenticate()` and memory is enabled, it automatically sees the memory: *"Fixed race condition here — added mutex on session map"*.
 
 ---
 
@@ -87,7 +95,76 @@ Every memory exists in two places:
 
 2. **Markdown Files** — `.sdl-memory/<type>/<memoryId>.md` with YAML frontmatter. These files can be committed to version control, shared across team members, and survive database rebuilds.
 
-The graph is the primary store. Files are a durable backup and collaboration mechanism. During `sdl.index.refresh`, any `.sdl-memory/` files are imported into the graph, so team members who pull new memory files automatically get them indexed.
+The graph is the primary store. Files are a durable backup and collaboration mechanism. During `sdl.index.refresh` (when memory file sync is enabled), any `.sdl-memory/` files are imported into the graph, so team members who pull new memory files automatically get them indexed.
+
+---
+
+## Enabling Memory
+
+Memory is disabled by default. To use the memory subsystem, you must explicitly enable it in your SDL-MCP configuration.
+
+### Global enable
+
+Add `"memory": { "enabled": true }` to your top-level config to enable memory for all repositories:
+
+```json
+{
+  "memory": {
+    "enabled": true
+  }
+}
+```
+
+### Per-repo enable
+
+You can enable memory for specific repositories while leaving it disabled globally. Per-repo settings override the global setting:
+
+```json
+{
+  "memory": {
+    "enabled": false
+  },
+  "repos": [
+    {
+      "repoId": "my-repo",
+      "rootPath": "/path/to/repo",
+      "memory": {
+        "enabled": true,
+        "surfacingEnabled": true,
+        "fileSyncEnabled": false
+      }
+    }
+  ]
+}
+```
+
+### Sub-feature flags
+
+When memory is enabled, individual sub-features can be toggled independently:
+
+| Flag | Default | What it controls |
+|:-----|:--------|:-----------------|
+| `enabled` | `false` | Master switch for the entire memory subsystem |
+| `toolsEnabled` | `true` (when enabled) | Whether `sdl.memory.*` tools are registered and callable |
+| `fileSyncEnabled` | `true` (when enabled) | Whether `.sdl-memory/` files are imported during `index.refresh` and written on `memory.store` |
+| `surfacingEnabled` | `true` (when enabled) | Whether memories are auto-surfaced in `slice.build` and `repo.status` responses |
+| `hintsEnabled` | `true` (when enabled) | Whether `_memoryHint` fields appear in tool responses |
+| `defaultSurfaceLimit` | `5` | Max memories to auto-surface in slice/status responses |
+
+All sub-feature flags default to `true` when the master `enabled` flag is `true`, so a minimal `"memory": { "enabled": true }` activates everything.
+
+---
+
+## When Memory is Disabled
+
+When memory is disabled (the default):
+
+- **Memory tools return a clear error** — calling `sdl.memory.store`, `sdl.memory.query`, `sdl.memory.remove`, or `sdl.memory.surface` returns a descriptive error indicating that memory is not enabled for the repository
+- **`.sdl-memory/` files are not imported or modified** — the file sync step during `index.refresh` is skipped entirely
+- **No memory hints appear** — tool responses do not include `_memoryHint` fields
+- **No memory surfacing** — `repo.status` and `slice.build` do not query or include memories in their responses
+- **Existing data is preserved** — Memory nodes in the graph database and `.sdl-memory/` files on disk are left untouched; nothing is deleted
+- **Re-enabling restores full functionality** — setting `enabled: true` immediately restores all memory features, including surfacing of previously stored memories
 
 ---
 
@@ -210,6 +287,8 @@ flowchart TD
 ---
 
 ## MCP Tools
+
+Memory tools are only available when memory is enabled in the configuration (either globally or for the specific repository). When memory is disabled, these tools return a clear error indicating that memory is not enabled.
 
 ### `sdl.memory.store`
 
@@ -342,7 +421,7 @@ Results are deduplicated, scored, and returned in descending rank order.
 
 ## Automatic Slice Integration
 
-When `sdl.slice.build` or `sdl.repo.status` is called, memories are **automatically surfaced** alongside the response. No extra tool call is required. `repo.status` only surfaces memories when `surfaceMemories: true` is explicitly passed, keeping the default response lightweight.
+When memory is enabled and `surfacingEnabled` is `true`, calling `sdl.slice.build` or `sdl.repo.status` automatically surfaces relevant memories alongside the response. No extra tool call is required. `repo.status` only surfaces memories when `surfaceMemories: true` is explicitly passed, keeping the default response lightweight. When memory is disabled, no memory queries or surfacing occur.
 
 **How it works:**
 
@@ -357,7 +436,7 @@ When `sdl.slice.build` or `sdl.repo.status` is called, memories are **automatica
 
 | Field | Type | Default | Description |
 |:------|:-----|:--------|:------------|
-| `includeMemories` | boolean | `true` | Set to `false` to disable memory surfacing |
+| `includeMemories` | boolean | `true` (when memory is enabled) | Set to `false` to disable memory surfacing for this call. Has no effect when memory is disabled in config. |
 | `memoryLimit` | number | 5 | Max memories to include (0–20) |
 
 **Response shape** (new `memories` field on `GraphSlice`):
@@ -414,7 +493,7 @@ When `sdl.index.refresh` runs (full or incremental), memories linked to changed 
 
 ## File Sync During Indexing
 
-During `sdl.index.refresh`, the indexer scans the `.sdl-memory/` directory and imports any files found into the graph:
+When memory is enabled and `fileSyncEnabled` is `true`, `sdl.index.refresh` scans the `.sdl-memory/` directory and imports any files found into the graph. When memory is disabled or `fileSyncEnabled` is `false`, this step is skipped entirely.
 
 1. `scanMemoryFiles(repoRoot)` recursively finds all `.md` files under `.sdl-memory/`
 2. Each file is parsed via `readMemoryFile()` (YAML frontmatter + markdown body)

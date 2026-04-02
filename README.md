@@ -306,9 +306,9 @@ Run tests, linters, and scripts through SDL-MCP's governance layer instead of un
 
 ---
 
-### Development Memories — Cross-Session Knowledge Persistence
+### Development Memories — Cross-Session Knowledge Persistence (Opt-In)
 
-Agents forget everything between sessions. SDL-MCP fixes this with a **graph-backed memory system** that lets agents store decisions, bugfix context, and task notes linked directly to the symbols and files they relate to. Memories are stored both in the graph database (for fast querying) and as checked-in markdown files (for version control and team sharing).
+Agents forget everything between sessions. SDL-MCP fixes this with an **opt-in graph-backed memory system** that lets agents store decisions, bugfix context, and task notes linked directly to the symbols and files they relate to. Memory is **disabled by default** and must be explicitly enabled in the configuration. When enabled, memories are stored both in the graph database (for fast querying) and as checked-in markdown files (for version control and team sharing).
 
 ```mermaid
 flowchart LR
@@ -322,11 +322,12 @@ flowchart LR
     Graph --> Recall["Relevant memory surfaced<br/>race condition fix in authenticate()"]
 ```
 
-Memories are **automatically surfaced** inside graph slices — when an agent builds a slice touching symbols with linked memories, those memories appear alongside the cards. During re-indexing, memories linked to changed symbols are **flagged as stale**, prompting agents to review and update them. Four MCP tools (`store`, `query`, `remove`, `surface`) provide full CRUD plus intelligent ranking by confidence, recency, and symbol overlap.
+When enabled, memories are **automatically surfaced** inside graph slices — when an agent builds a slice touching symbols with linked memories, those memories appear alongside the cards. During re-indexing, memories linked to changed symbols are **flagged as stale**, prompting agents to review and update them. Four MCP tools (`store`, `query`, `remove`, `surface`) provide full CRUD plus intelligent ranking by confidence, recency, and symbol overlap. Memory tools are only available when memory is enabled in the configuration.
 
 **Why it matters:**
 - Structured knowledge **persists across sessions**, linked directly to symbols and files
-- Automatically surfaced inside graph slices when touching related symbols
+- Opt-in and disabled by default — enable via `"memory": { "enabled": true }` in config
+- When enabled, automatically surfaced inside graph slices when touching related symbols
 - Stale memories flagged when linked symbols change during re-indexing
 - Dual storage: graph DB for fast querying + markdown files for version control and team sharing
 

@@ -1145,11 +1145,13 @@ Retrieves and searches stored runtime output artifacts on demand.
 
 ## 13. Development Memories
 
+> **Note:** Memory tools are only available when memory is enabled in the configuration (either globally or per-repo via `"memory": { "enabled": true }`). When memory is disabled (the default), these tools return a clear error. See the [Enabling Memory](./feature-deep-dives/development-memories.md#enabling-memory) section.
+
 ### sdl.memory.store
 
-Stores or updates a development memory with optional symbol and file links. Memories persist across sessions and are automatically surfaced in relevant slices.
+Stores or updates a development memory with optional symbol and file links. Memories persist across sessions and are surfaced in relevant slices when memory surfacing is enabled.
 
-**What it does:** Creates a `Memory` node in the graph database linked to the repository, and optionally to specific symbols and files via `MEMORY_OF` and `MEMORY_OF_FILE` edges. Also writes a backing `.sdl-memory/*.md` file for version control. Content-addressed deduplication prevents duplicate memories.
+**What it does:** Creates a `Memory` node in the graph database linked to the repository, and optionally to specific symbols and files via `MEMORY_OF` and `MEMORY_OF_FILE` edges. When file sync is enabled, also writes a backing `.sdl-memory/*.md` file for version control. Content-addressed deduplication prevents duplicate memories.
 
 **Parameters:**
 
