@@ -651,11 +651,15 @@ export async function handleCodeNeedWindow(
       reason: whyApproved,
     });
 
-    const codeTruncation = windowResult.truncated
+    const symbolTotalLines = symbolRange.endLine - symbolRange.startLine + 1;
+    const windowLines = windowResult.code.split("\n").length;
+    const isRangeNarrowed = effectiveRange.startLine > symbolRange.startLine || effectiveRange.endLine < symbolRange.endLine;
+    const isTruncated = windowResult.truncated || isRangeNarrowed;
+    const codeTruncation = isTruncated
       ? {
           truncated: true,
           droppedCount:
-            windowResult.originalLines - windowResult.code.split("\n").length,
+            Math.max(0, symbolTotalLines - windowLines),
           howToResume: {
             type: "cursor" as const,
             value: windowResult.actualRange.endLine,

@@ -7,6 +7,7 @@ import * as ladybugDb from "../../db/ladybug-queries.js";
 import { normalizePath, validatePathWithinRoot } from "../../util/paths.js";
 import { logger } from "../../util/logger.js";
 import { NotFoundError, ValidationError } from "../../domain/errors.js";
+import { attachRawContext } from "../token-usage.js";
 
 const SDL_SOURCE_EXTENSIONS = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
@@ -17,6 +18,7 @@ const SDL_SOURCE_EXTENSIONS = new Set([
 ]);
 
 const MAX_FILE_SIZE_BYTES = 512 * 1024; // 512KB
+const BYTES_PER_TOKEN = 4;
 
 /**
  * Extract a value from a parsed object using a dot-separated key path.
@@ -107,6 +109,16 @@ function searchLines(
   };
 }
 
+function withRawTokenBaseline(
+  response: FileReadResponse,
+  totalBytes: number,
+): FileReadResponse {
+  // Measure every file.read variant against the full underlying file read.
+  return attachRawContext(response, {
+    rawTokens: Math.ceil(totalBytes / BYTES_PER_TOKEN),
+  });
+}
+
 export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
   const request = FileReadRequestSchema.parse(args);
   const conn = await getLadybugConn();
@@ -189,7 +201,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
 
     const extracted = extractByPath(parsed, request.jsonPath);
     if (extracted === undefined) {
-      return {
+      return withRawTokenBaseline({
         filePath,
         content: "",
         bytes: 0,
@@ -197,7 +209,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
         returnedLines: 0,
         truncated: false,
         extractedPath: request.jsonPath,
-      };
+      }, totalBytes);
     }
 
     const serialized = typeof extracted === "string"
@@ -205,7 +217,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
       : JSON.stringify(extracted, null, 2);
     const extractedBytes = Buffer.byteLength(serialized, "utf-8");
 
-    return {
+    return withRawTokenBaseline({
       filePath,
       content: serialized,
       bytes: extractedBytes,
@@ -213,7 +225,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
       returnedLines: serialized.split("\n").length,
       truncated: false,
       extractedPath: request.jsonPath,
-    };
+    }, totalBytes);
   }
 
   // === Feature 2: Search with context ===
@@ -224,7 +236,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
     const rangedLines = lines.slice(searchOffset, searchOffset + searchLimit);
 
     const result = searchLines(rangedLines, request.search, Math.min(request.searchContext ?? 2, 50));
-    return {
+    return withRawTokenBaseline({
       filePath,
       content: result.content,
       bytes: Buffer.byteLength(result.content, "utf-8"),
@@ -232,7 +244,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
       returnedLines: result.returnedLines,
       truncated: false,
       matchCount: result.matchCount,
-    };
+    }, totalBytes);
   }
 
   // === Feature 1: Line range ===
@@ -248,7 +260,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
     // Apply maxBytes truncation
     if (slicedBytes > maxBytes) {
       const truncated = numberedContent.slice(0, maxBytes);
-      return {
+      return withRawTokenBaseline({
         filePath,
         content: truncated,
         bytes: slicedBytes,
@@ -256,24 +268,24 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
         returnedLines: sliced.length,
         truncated: true,
         truncatedAt: maxBytes,
-      };
+      }, totalBytes);
     }
 
-    return {
+    return withRawTokenBaseline({
       filePath,
       content: numberedContent,
       bytes: slicedBytes,
       totalLines,
       returnedLines: sliced.length,
       truncated: false,
-    };
+    }, totalBytes);
   }
 
   // === Default: full file read with maxBytes truncation ===
   if (totalBytes > maxBytes) {
     const truncated = rawContent.slice(0, maxBytes);
     logger.debug(`file.read truncated ${filePath}: ${totalBytes} -> ${maxBytes} bytes`);
-    return {
+    return withRawTokenBaseline({
       filePath,
       content: truncated,
       bytes: totalBytes,
@@ -281,15 +293,15 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
       returnedLines: truncated.split("\n").length,
       truncated: true,
       truncatedAt: maxBytes,
-    };
+    }, totalBytes);
   }
 
-  return {
+  return withRawTokenBaseline({
     filePath,
     content: rawContent,
     bytes: totalBytes,
     totalLines,
     returnedLines: totalLines,
     truncated: false,
-  };
+  }, totalBytes);
 }

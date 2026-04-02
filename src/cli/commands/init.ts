@@ -495,7 +495,7 @@ ext=".\${ext##*.}"
 
 for blocked_ext in ${blocked}; do
   if [ "$ext" = "$blocked_ext" ]; then
-    python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Use SDL-MCP tools instead of native Read for indexed source code. Start with sdl.repo.status, then use sdl.context or sdl.agent.context for context retrieval, or sdl.action.search to find the right tool. Use symbolRef when the symbol name is known but the ID is not, and follow SDL fallback guidance when present. Read is only allowed for non-indexed file types.'}}))"
+    python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Use SDL-MCP tools for indexed source code. Do not use native Read, shell commands, or sdl.workflow/runtimeExecute to print or read indexed source files directly.\\n\\nFor indexed source:\\n1. Start with sdl.repo.status.\\n2. Use sdl.context (or sdl.agent.context outside Code Mode) for explain/debug/review/implement work.\\n3. If more detail is needed, follow the SDL ladder: symbol.search/getCard -> slice.build -> code.getSkeleton -> code.getHotPath -> code.needWindow.\\n4. Use symbolRef when the symbol name is known but the ID is not.\\n5. Follow nextBestAction, fallbackTools, and fallbackRationale from SDL responses.\\n\\nOnly use file.read for non-indexed files such as docs, config, JSON, YAML, TOML, SQL, lockfiles, and templates.\\nDo not use runtimeExecute as a workaround to read indexed source.'}}))"
     exit 0
   fi
 done

@@ -77,6 +77,8 @@ export interface WorkflowStepResult {
   status: WorkflowStepStatus;
   /** Error message if status is "error" */
   error?: string;
+  /** Suggested fallback action names from catalog when this step failed */
+  fallbackTools?: string[];
   /** Present when step result was truncated due to maxResponseTokens */
   truncatedResponse?: {
     originalTokens: number;

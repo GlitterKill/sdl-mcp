@@ -66,6 +66,7 @@ export async function executeWorkflow(
   context?: ToolContext,
   traceOpts?: WorkflowTraceOptions,
 ): Promise<WorkflowResponse> {
+  const actionCatalog = buildCatalog();
   const budget = new WorkflowBudgetTracker(request.budget, {
     maxSteps: config.maxWorkflowSteps,
     maxTokens: config.maxWorkflowTokens,
@@ -351,6 +352,10 @@ export async function executeWorkflow(
           durationMs: stepDuration,
           status: "error",
           error: errorMessage,
+          ...((() => {
+            const meta = actionCatalog.find(a => a.action === step.action);
+            return meta?.fallbacks?.length ? { fallbackTools: meta.fallbacks } : {};
+          })()),
         });
         priorResults.push(null);
 
@@ -428,7 +433,16 @@ export async function executeWorkflow(
     totalTokens: budgetState.tokensUsed,
     durationMs: totalDurationMs,
     truncated: budgetState.truncated,
-    ladderWarnings: ladderWarnings.length > 0 ? ladderWarnings : undefined,
+    // Filter out ladder warnings for steps that failed (e.g., "symbol not found")
+    ladderWarnings: (() => {
+      const filtered = ladderWarnings.filter(w => {
+        const match = w.match(/^Step (\d+)/);
+        if (!match) return true;
+        const stepIdx = parseInt(match[1], 10);
+        return stepResults[stepIdx]?.status !== "error";
+      });
+      return filtered.length > 0 ? filtered : undefined;
+    })(),
     etagCache: hasEtags ? etagCacheState : undefined,
   };
 

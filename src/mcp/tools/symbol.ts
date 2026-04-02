@@ -28,6 +28,7 @@ import {
 import { checkRetrievalHealth, shouldFallbackToLegacy } from "../../retrieval/index.js";
 import type { RetrievalEvidence } from "../../retrieval/types.js";
 import { logger } from "../../util/logger.js";
+import { splitCamelCase } from "../../indexer/summaries.js";
 import { buildCardForSymbol } from "../../services/card-builder.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 import {
@@ -270,6 +271,27 @@ export async function handleSymbolSearch(
   }));
 
   // Prioritize exact name matches over fuzzy/partial matches
+  // CamelCase fallback: when no results, try searching individual tokens
+  if (results.length === 0 && !request.query.includes("*") && !request.query.includes("?")) {
+    const camelTokens = splitCamelCase(request.query).filter(t => t.length >= 3);
+    if (camelTokens.length >= 2) {
+      // Search for the longest/most specific token
+      const sortedTokens = [...camelTokens].sort((a, b) => b.length - a.length);
+      for (const token of sortedTokens.slice(0, 2)) {
+        const fallbackRows = await searchSymbolsWithOverlay(conn, request.repoId, token, limit, request.kinds);
+        const existingIds = new Set(results.map(r => r.symbolId));
+        for (const row of fallbackRows) {
+          if (!existingIds.has(row.symbolId)) {
+            results.push({ symbolId: row.symbolId, name: row.name, file: row.filePath, kind: row.kind as SymbolKind });
+            existingIds.add(row.symbolId);
+          }
+        }
+        if (results.length >= requestedLimit) break;
+      }
+      if (results.length > requestedLimit) results = results.slice(0, requestedLimit);
+    }
+  }
+
   results = sortByExactMatch(results, request.query);
 
   // FP-5: For wildcard queries or when no exact match, sort by importance metrics
@@ -366,7 +388,12 @@ export async function handleSymbolSearch(
   const suggestion = relevant.length === 0
     ? (semanticRequested && !semanticEnabled
       ? `Semantic search unavailable (${fallbackReason || 'embedding model not loaded'}). Lexical search returned no matches. Try exact symbol names or broader terms.`
-      : "No close matches found. Try broader terms or use kinds filter.")
+      : (() => {
+        const tokens = splitCamelCase(request.query).filter(t => t.length >= 3).map(t => t.toLowerCase());
+        return tokens.length >= 2
+          ? `No close matches found. Try individual terms: ${tokens.map(t => `"${t}"`).join(", ")}`
+          : "No close matches found. Try broader terms or use kinds filter.";
+      })())
     : bestRelevance < 0.5
       ? "Results may not be relevant. Try more specific terms, use kinds filter, or try sdl.symbol.search with a wildcard pattern."
       : undefined;

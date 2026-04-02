@@ -379,7 +379,9 @@ function generateBehavioralFunctionSummary(
   // For "handle*" functions, use the rest as a noun phrase describing what's handled
   const HANDLER_PREFIXES = new Set(["handle", "process", "on"]);
   const isHandler = HANDLER_PREFIXES.has(firstWord);
-  const subject = extractEnrichedSubject(symbol) || restWords.join(" ");
+  const enrichedSubject = extractEnrichedSubject(symbol);
+  const subject = enrichedSubject || restWords.join(" ");
+  const subjectIsFromName = !enrichedSubject;
 
   // 0. Handler pattern — use "Handles X" with behavioral detail suffix
   if (isHandler && subject) {
@@ -475,10 +477,10 @@ function generateBehavioralFunctionSummary(
 
   // 7. Transform
   if (signals.transforms && signals.iterates) {
-    return subject ? `Transforms each ${subject}` : "Transforms collection elements";
+    return (subject && !subjectIsFromName) ? `Transforms each ${subject}` : null;
   }
   if (signals.transforms && !signals.iterates) {
-    return subject ? `Transforms ${subject}` : "Transforms data";
+    return (subject && !subjectIsFromName) ? `Transforms ${subject}` : null;
   }
 
   // 8. Sort
@@ -493,22 +495,27 @@ function generateBehavioralFunctionSummary(
 
   // 10. Dispatch/routing
   if (signals.switchOrChain && signals.earlyReturns > 3) {
-    return subject ? `Dispatches ${subject} across branches` : "Routes by condition";
+    return (subject && !subjectIsFromName) ? `Dispatches ${subject} across branches` : "Routes by condition";
   }
 
   // 11. Recursion
   if (signals.recursion) {
-    return subject ? `Recursively processes ${subject}` : "Recursive computation";
+    return (subject && !subjectIsFromName) ? `Recursively processes ${subject}` : "Recursive computation";
   }
 
   // 12. Iteration without transform
   if (signals.iterates && !signals.transforms) {
-    return subject ? `Iterates over ${subject}` : "Iterates over elements";
+    return (subject && !subjectIsFromName) ? `Iterates over ${subject}` : null;
   }
 
   // 13. Throws without validation context
   if (signals.throws && subject) {
     return `Validates ${subject}, throws on failure`;
+  }
+
+  // If no behavioral signals fired, a type-signature summary is tautological
+  if (activeCount === 0) {
+    return null;
   }
 
   // DF-1: For functions with typed params/returns, include type info instead of null
