@@ -307,17 +307,19 @@ Use `sdl.agent.feedback.query` with `limit` and `since` (ISO timestamp) to revie
    - `allowBreakGlass: false` — enforce strict proof-of-need gating.
    - `requireIdentifiers: false` — allow unscoped code window requests (not recommended).
 
-### 11) Development memories
+### 11) Development memories (opt-in, disabled by default)
 
-Store cross-session knowledge that auto-surfaces in future slice builds:
+Memory is **opt-in and disabled by default**. Enable it via `"memory": { "enabled": true }` in config (global or per-repo). When enabled:
 
 - **Store**: `sdl.memory.store` with `type` (`"decision"` | `"bugfix"` | `"task_context"` | `"pattern"` | `"convention"` | `"architecture"` | `"performance"` | `"security"`), `title`, `content`, optional `symbolIds`, `fileRelPaths`, `tags`, `confidence`.
 - **Query**: `sdl.memory.query` with `query` (text search), `types`, `tags`, `symbolIds`, `staleOnly`, `limit`, `sortBy` (`"recency"` | `"confidence"`).
 - **Surface**: `sdl.memory.surface` with `symbolIds` and/or `taskType` — returns ranked by confidence × recency × symbol overlap.
 - **Remove**: `sdl.memory.remove` with `memoryId`; add `deleteFile: true` to also remove the `.sdl-memory/` file.
-- **Automatic surfacing**: `sdl.slice.build` includes relevant memories by default. Set `includeMemories: false` to disable, or `memoryLimit: N` to control count.
+- **Automatic surfacing**: `sdl.slice.build` includes relevant memories when memory is enabled and `includeMemories` is not `false`. Set `memoryLimit: N` to control count.
 - **Staleness**: after refactors, query `sdl.memory.query` with `staleOnly: true` and update or remove outdated memories.
-- **Team sharing**: memories save to `.sdl-memory/` files; commit to Git. On `sdl.index.refresh`, other team members' files are imported into the graph.
+- **Team sharing**: when file sync is enabled, memories save to `.sdl-memory/` files; commit to Git. On `sdl.index.refresh`, other team members' files are imported into the graph.
+
+When memory is disabled, memory tools return a clear error and no memory surfacing occurs.
 
 ### 12) Do not
 

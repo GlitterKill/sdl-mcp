@@ -371,15 +371,16 @@ Both are text models that benefit from LLM summaries when enabled.
 
 ---
 
-## Development Memories
+## Development Memories (Opt-In)
 
-Graph-backed cross-session knowledge persistence. Agents store decisions, bugfix context, and task notes as `Memory` nodes linked to symbols and files via `MEMORY_OF` and `MEMORY_OF_FILE` edges.
+Graph-backed cross-session knowledge persistence. The memory subsystem is **opt-in and disabled by default**. When enabled, agents store decisions, bugfix context, and task notes as `Memory` nodes linked to symbols and files via `MEMORY_OF` and `MEMORY_OF_FILE` edges.
 
+- **Opt-in** — disabled by default; enable via `"memory": { "enabled": true }` in config (global or per-repo)
 - **Dual storage** — graph database (fast queries) + `.sdl-memory/*.md` files (version control)
-- **Auto-surfacing** — memories appear inside `slice.build` responses when they link to slice symbols
+- **Auto-surfacing** — when enabled, memories appear inside `slice.build` responses when they link to slice symbols
 - **Staleness detection** — memories are flagged stale when linked symbols change during re-indexing
-- **File import** — `.sdl-memory/` files are imported into the graph during `index.refresh`
-- **4 MCP tools** — `memory.store`, `memory.query`, `memory.remove`, `memory.surface`
+- **File import** — `.sdl-memory/` files are imported into the graph during `index.refresh` (when file sync is enabled)
+- **4 MCP tools** — `memory.store`, `memory.query`, `memory.remove`, `memory.surface` (only available when memory is enabled)
 
 See [Development Memories deep dive](./feature-deep-dives/development-memories.md).
 

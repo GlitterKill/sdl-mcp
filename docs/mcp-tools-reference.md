@@ -124,7 +124,7 @@ Get status for one repository including latest version, indexed files/symbols, t
 - `watcherHealth` (nullable) — runtime telemetry: enabled, running, filesWatched, eventsReceived/Processed, errors, queueDepth, restartCount, stale, lastEventAt, lastSuccessfulReindexAt
 - `prefetchStats` — queue depth, hit/waste rates, latency reduction, last run
 - `liveIndexStatus` — live buffer overlay state: enabled, pendingBuffers, dirtyBuffers, parseQueueDepth, checkpointPending, reconcileQueueDepth, etc.
-- `memories` (when `surfaceMemories: true`) — array of relevant development memories auto-surfaced for the repository
+- `memories` (when `surfaceMemories: true` and memory is enabled in config) — array of relevant development memories auto-surfaced for the repository
 
 **Example:**
 
@@ -482,7 +482,7 @@ Build a task-scoped graph slice. `taskText` alone is sufficient — it triggers 
 | `wireFormatVersion` | `1 \| 2 \| 3` | No | Wire format version (default: 2) |
 | `minCallConfidence` | `number` | No | Filter call edges below this confidence threshold (0-1) |
 | `includeResolutionMetadata` | `boolean` | No | Include call resolution metadata in edge data |
-| `includeMemories` | `boolean` | No | Include related development memories in the response |
+| `includeMemories` | `boolean` | No | Include related development memories in the response (only effective when memory is enabled in config) |
 | `memoryLimit` | `integer` | No | Max memories to include (default: 5) |
 | `includeRetrievalEvidence` | `boolean` | No | Include retrieval evidence (sources, candidate counts, symptom type, fusion latency, fallback reason) |
 
@@ -1053,9 +1053,11 @@ Each excerpt: `{ lineStart, lineEnd, content, source }`
 
 ## Development Memories (4 tools)
 
+> **Note:** Memory tools are only available when memory is enabled in the configuration (`"memory": { "enabled": true }`). When disabled (the default), these tools return a clear error. See the [Enabling Memory](./feature-deep-dives/development-memories.md#enabling-memory) section.
+
 ### `sdl.memory.store`
 
-Store or update a development memory with optional symbol and file links. Memories persist across sessions and are automatically surfaced in relevant slices.
+Store or update a development memory with optional symbol and file links. Memories persist across sessions and are surfaced in relevant slices when memory is enabled.
 
 **Parameters:**
 
@@ -1239,12 +1241,12 @@ Use tools in this order for most tasks:
 3. `sdl.symbol.search` — find relevant symbols (start with tight limits)
 4. `sdl.agent.context` / `sdl.context` — get task-shaped context first for explain/debug/review/implement work
 5. `sdl.symbol.getCard` / `sdl.symbol.getCards` — understand what symbols do
-6. `sdl.slice.build` — get related symbols for a task (auto-surfaces relevant memories)
+6. `sdl.slice.build` — get related symbols for a task (auto-surfaces relevant memories when memory is enabled)
 7. `sdl.code.getSkeleton` — see code structure without full bodies
 8. `sdl.code.getHotPath` — find specific identifiers in code
 9. `sdl.code.needWindow` — raw code only when necessary
 10. `sdl.agent.feedback` — record which symbols were useful after completing a task
-11. `sdl.memory.store` — persist important decisions, bugfixes, or context for future sessions
+11. `sdl.memory.store` — persist important decisions, bugfixes, or context for future sessions (requires memory enabled in config)
 
 ### Task-Specific Workflows
 

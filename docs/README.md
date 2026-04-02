@@ -42,7 +42,7 @@ Use this page as the entry point for SDL-MCP documentation.
   - [Claude-Specific Enforcement](./tool-enforcement-for-claude.md)
 - I need operational debugging guidance:
   - [Troubleshooting](./troubleshooting.md)
-- I want to understand the memory protocol:
+- I want to understand the memory protocol (opt-in, disabled by default):
   - [Memory Protocol](./memory-protocol.md)
 
 ## Feature Deep-Dives

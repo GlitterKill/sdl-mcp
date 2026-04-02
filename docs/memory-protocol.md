@@ -1,5 +1,7 @@
 # SDL-MCP Memory Protocol
 
+> **Note:** The memory subsystem is **opt-in and disabled by default**. All behavior described in this document requires memory to be enabled in the SDL-MCP configuration. See the [Enabling Memory](./feature-deep-dives/development-memories.md#enabling-memory) section for setup instructions.
+
 ## Architecture
 
 ```mermaid
@@ -48,14 +50,17 @@ Store via `sdl.memory.store` at these checkpoints:
 
 ## When Memories Are Surfaced
 
-- **At session start**: `sdl.repo.status` auto-includes relevant memories
-- **During slice builds**: `sdl.slice.build` auto-includes up to 5 related memories based on symbol overlap
+When memory is enabled and surfacing is active:
+
+- **At session start**: `sdl.repo.status` includes relevant memories when `surfaceMemories: true` is passed
+- **During slice builds**: `sdl.slice.build` includes up to 5 related memories based on symbol overlap (when `includeMemories` is not `false`)
 - **On demand**: Call `sdl.memory.surface` with relevant symbolIds for deeper context
+
+When memory is disabled, none of the above surfacing occurs.
 
 ## Responding to Memory Hints
 
-When a tool response includes `_memoryHint`, evaluate whether to store a memory.
-The hint suggests a type and context — draft a memory and call `sdl.memory.store`.
+When memory is enabled and `hintsEnabled` is `true`, tool responses may include `_memoryHint`. Evaluate whether to store a memory when you see one. The hint suggests a type and context — draft a memory and call `sdl.memory.store`. When memory is disabled, `_memoryHint` fields do not appear.
 
 Do not ignore hints. They indicate patterns worth capturing:
 - Deep debugging sessions (3+ code window requests)
@@ -86,7 +91,7 @@ sdl.memory.store({
 
 ## File Sync (`.sdl-memory/`)
 
-Memories are dual-stored: in the LadybugDB graph (for fast querying) and as markdown files in `<repo-root>/.sdl-memory/` (for version control and team sharing). Files are organized by type: `decisions/`, `bugfixes/`, `task_context/`, `patterns/`, `conventions/`, `architecture/`, `performance/`, and `security/`. Changes to `.sdl-memory/` files are imported into the graph during `sdl.index.refresh`.
+Memories are dual-stored: in the LadybugDB graph (for fast querying) and as markdown files in `<repo-root>/.sdl-memory/` (for version control and team sharing). Files are organized by type: `decisions/`, `bugfixes/`, `task_context/`, `patterns/`, `conventions/`, `architecture/`, `performance/`, and `security/`. When memory is enabled and `fileSyncEnabled` is `true`, changes to `.sdl-memory/` files are imported into the graph during `sdl.index.refresh`. When memory is disabled, `.sdl-memory/` files are not imported or modified.
 
 See [Development Memories deep dive](./feature-deep-dives/development-memories.md) for full details.
 
