@@ -25,7 +25,7 @@ import { normalizePath } from "../../util/paths.js";
 import { DatabaseError, ConfigError, ValidationError } from "../errors.js";
 import { logger } from "../../util/logger.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { MAX_FILE_BYTES, DEFAULT_MEMORY_SURFACE_LIMIT } from "../../config/constants.js";
+import { MAX_FILE_BYTES } from "../../config/constants.js";
 import { buildRepoOverview, clearOverviewCache } from "../../graph/overview.js";
 import { clearSliceCache } from "../../graph/sliceCache.js";
 import { symbolCardCache } from "../../graph/cache.js";
@@ -36,6 +36,7 @@ import {
 } from "../telemetry.js";
 import { getPrefetchStats } from "../../graph/prefetch.js";
 import { surfaceRelevantMemories } from "../../memory/surface.js";
+import { getMemoryCapabilities } from "../../config/memory-config.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { invalidateGraphSnapshot } from "../../graph/graphSnapshotCache.js";
 import {
@@ -382,11 +383,12 @@ export async function handleRepoStatus(
     });
     }
 
-    // Surface relevant memories if enabled (default: false)
+    // Surface relevant memories if enabled (default: false) and config allows it
+    const memCaps = getMemoryCapabilities(loadConfig(), repoId);
     let memories: Awaited<ReturnType<typeof surfaceRelevantMemories>> | undefined;
-    if (surfaceMemories === true) {
+    if (surfaceMemories === true && memCaps.surfacingEnabled) {
       try {
-        memories = await surfaceRelevantMemories(conn, { repoId, limit: DEFAULT_MEMORY_SURFACE_LIMIT });
+        memories = await surfaceRelevantMemories(conn, { repoId, limit: memCaps.defaultSurfaceLimit });
         if (memories.length === 0) memories = undefined;
       } catch (err) {
         logger.debug("Memory surfacing failed (non-critical)", {

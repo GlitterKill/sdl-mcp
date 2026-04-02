@@ -3,6 +3,8 @@
  * and appends _memoryHint to tool responses.
  */
 import type { PostDispatchHook, ToolContext } from "../../server.js";
+import { loadConfig } from "../../config/loadConfig.js";
+import { getMemoryCapabilities } from "../../config/memory-config.js";
 
 interface ToolCallRecord {
   tool: string;
@@ -112,6 +114,14 @@ export function createMemoryHintHook(): PostDispatchHook {
     result: unknown,
     context: ToolContext,
   ): Promise<void> => {
+    // Check if memory hints are enabled for this repo
+    const argsObj = args as Record<string, unknown> | null;
+    const repoId = argsObj?.repoId as string | undefined;
+    if (repoId) {
+      const caps = getMemoryCapabilities(loadConfig(), repoId);
+      if (!caps.hintsEnabled) return;
+    }
+
     const sessionId = context.sessionId ?? "stdio";
     const session = getSession(sessionId);
 

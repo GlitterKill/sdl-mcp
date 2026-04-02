@@ -48,7 +48,7 @@ import {
 } from "../../config/constants.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyConfigSchema } from "../../config/types.js";
-import { DEFAULT_MEMORY_SURFACE_LIMIT } from "../../config/constants.js";
+import { getMemoryCapabilities } from "../../config/memory-config.js";
 import {
   createPolicyDenial,
   NotFoundError,
@@ -262,7 +262,8 @@ async function handleSliceBuildInternal(
     includeRetrievalEvidence,
   } = request;
 
-  const shouldIncludeMemories = includeMemories === true;
+  const memCaps = getMemoryCapabilities(loadConfig(), repoId);
+  const shouldIncludeMemories = includeMemories === true && memCaps.surfacingEnabled;
 
   // Resolve any file::name shorthands in entrySymbols
   let resolvedEntrySymbols = entrySymbols;
@@ -455,7 +456,7 @@ async function handleSliceBuildInternal(
         const memories = await surfaceRelevantMemories(conn, {
           repoId,
           symbolIds: sliceSymbolIds,
-          limit: memoryLimit ?? DEFAULT_MEMORY_SURFACE_LIMIT,
+          limit: memoryLimit ?? memCaps.defaultSurfaceLimit,
         });
         if (memories.length > 0) {
           slice.memories = memories;

@@ -16,7 +16,9 @@ import {
 import type { SurfacedMemory } from "../types.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
-import { DatabaseError, ValidationError } from "../errors.js";
+import { DatabaseError, ValidationError, ConfigError } from "../errors.js";
+import { loadConfig } from "../../config/loadConfig.js";
+import { getMemoryCapabilities } from "../../config/memory-config.js";
 import { surfaceRelevantMemories } from "../../memory/surface.js";
 import {
   writeMemoryFile,
@@ -65,6 +67,11 @@ export async function handleMemoryStore(
   const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
     throw new DatabaseError(`Repository ${repoId} not found`);
+  }
+
+  const caps = getMemoryCapabilities(loadConfig(), repoId);
+  if (!caps.toolsEnabled) {
+    throw new ConfigError(`Memory tools are disabled for repository "${repoId}". Enable memory in config: { "memory": { "enabled": true } }`);
   }
 
   const now = new Date().toISOString();
@@ -125,21 +132,23 @@ export async function handleMemoryStore(
       }
     });
 
-    // Write backing file
-    await writeMemoryFile(repo.rootPath, {
-      memoryId: providedMemoryId,
-      type,
-      title,
-      content,
-      tags: tags ?? [],
-      confidence,
-      symbols: symbolIds ?? [],
-      files: fileRelPaths ?? [],
-      createdAt: existing.createdAt,
-      deleted: false,
-    }).catch((err) => {
-      logger.warn("Failed to write memory file", { error: String(err) });
-    });
+    // Write backing file (only if file sync is enabled)
+    if (caps.fileSyncEnabled) {
+      await writeMemoryFile(repo.rootPath, {
+        memoryId: providedMemoryId,
+        type,
+        title,
+        content,
+        tags: tags ?? [],
+        confidence,
+        symbols: symbolIds ?? [],
+        files: fileRelPaths ?? [],
+        createdAt: existing.createdAt,
+        deleted: false,
+      }).catch((err) => {
+        logger.warn("Failed to write memory file", { error: String(err) });
+      });
+    }
 
     return {
       ok: true,
@@ -212,31 +221,33 @@ export async function handleMemoryStore(
     }
   });
 
-  // Write backing file (non-critical)
-  const sourceFile = await writeMemoryFile(repo.rootPath, {
-    memoryId,
-    type,
-    title,
-    content,
-    tags: tags ?? [],
-    confidence,
-    symbols: symbolIds ?? [],
-    files: fileRelPaths ?? [],
-    createdAt: now,
-    deleted: false,
-  }).catch((err) => { logger.debug("Failed to write memory file for sourceFile update", { error: String(err) }); return null; });
+  // Write backing file (non-critical, only if file sync is enabled)
+  if (caps.fileSyncEnabled) {
+    const sourceFile = await writeMemoryFile(repo.rootPath, {
+      memoryId,
+      type,
+      title,
+      content,
+      tags: tags ?? [],
+      confidence,
+      symbols: symbolIds ?? [],
+      files: fileRelPaths ?? [],
+      createdAt: now,
+      deleted: false,
+    }).catch((err) => { logger.debug("Failed to write memory file for sourceFile update", { error: String(err) }); return null; });
 
-  // Update sourceFile in DB if write succeeded
-  if (sourceFile) {
-    await withWriteConn(async (wConn) => {
-      const existing = await ladybugDb.getMemory(wConn, memoryId);
-      if (existing) {
-        await ladybugDb.upsertMemory(wConn, {
-          ...existing,
-          sourceFile,
-        });
-      }
-    });
+    // Update sourceFile in DB if write succeeded
+    if (sourceFile) {
+      await withWriteConn(async (wConn) => {
+        const existing = await ladybugDb.getMemory(wConn, memoryId);
+        if (existing) {
+          await ladybugDb.upsertMemory(wConn, {
+            ...existing,
+            sourceFile,
+          });
+        }
+      });
+    }
   }
 
   return {
@@ -267,6 +278,11 @@ export async function handleMemoryQuery(
   const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
     throw new DatabaseError(`Repository ${repoId} not found`);
+  }
+
+  const caps = getMemoryCapabilities(loadConfig(), repoId);
+  if (!caps.toolsEnabled) {
+    throw new ConfigError(`Memory tools are disabled for repository "${repoId}". Enable memory in config: { "memory": { "enabled": true } }`);
   }
 
   let rows;
@@ -319,6 +335,11 @@ export async function handleMemoryRemove(
     throw new DatabaseError(`Repository ${repoId} not found`);
   }
 
+  const caps = getMemoryCapabilities(loadConfig(), repoId);
+  if (!caps.toolsEnabled) {
+    throw new ConfigError(`Memory tools are disabled for repository "${repoId}". Enable memory in config: { "memory": { "enabled": true } }`);
+  }
+
   const memory = await ladybugDb.getMemory(conn, memoryId);
   if (!memory) {
     throw new DatabaseError(`Memory ${memoryId} not found`);
@@ -334,22 +355,24 @@ export async function handleMemoryRemove(
     await ladybugDb.softDeleteMemory(wConn, memoryId);
   });
 
-  if (shouldDeleteFile) {
-    await deleteMemoryFile(repo.rootPath, memory.type, memoryId).catch(
-      (err) => logger.warn("Failed to sync memory file", { error: String(err) }),
-    );
-  } else {
-    // Update frontmatter to mark deleted without removing file
-    const subDir = typeToDir(memory.type);
-    const filePath = path.join(
-      repo.rootPath,
-      ".sdl-memory",
-      subDir,
-      `${memoryId}.md`,
-    );
-    await updateMemoryFileFrontmatter(filePath, { deleted: true }).catch(
-      (err) => logger.warn("Failed to sync memory file", { error: String(err) }),
-    );
+  if (caps.fileSyncEnabled) {
+    if (shouldDeleteFile) {
+      await deleteMemoryFile(repo.rootPath, memory.type, memoryId).catch(
+        (err) => logger.warn("Failed to sync memory file", { error: String(err) }),
+      );
+    } else {
+      // Update frontmatter to mark deleted without removing file
+      const subDir = typeToDir(memory.type);
+      const filePath = path.join(
+        repo.rootPath,
+        ".sdl-memory",
+        subDir,
+        `${memoryId}.md`,
+      );
+      await updateMemoryFileFrontmatter(filePath, { deleted: true }).catch(
+        (err) => logger.warn("Failed to sync memory file", { error: String(err) }),
+      );
+    }
   }
 
   return { ok: true, memoryId };
@@ -366,6 +389,11 @@ export async function handleMemorySurface(
   const repo = await ladybugDb.getRepo(conn, repoId);
   if (!repo) {
     throw new DatabaseError(`Repository ${repoId} not found`);
+  }
+
+  const caps = getMemoryCapabilities(loadConfig(), repoId);
+  if (!caps.toolsEnabled) {
+    throw new ConfigError(`Memory tools are disabled for repository "${repoId}". Enable memory in config: { "memory": { "enabled": true } }`);
   }
 
   const memories = await surfaceRelevantMemories(conn, {

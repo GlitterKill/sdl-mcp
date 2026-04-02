@@ -6,6 +6,8 @@ import { logger } from "../util/logger.js";
 import { normalizePath } from "../util/paths.js";
 import { scanMemoryFiles, readMemoryFile } from "../memory/file-sync.js";
 import type { LadybugConn } from "./indexer-init.js";
+import { loadConfig } from "../config/loadConfig.js";
+import { getMemoryCapabilities } from "../config/memory-config.js";
 
 /** Flag memories linked to symbols in changed files as stale. Failures are swallowed. */
 export async function flagStaleMemoriesForChangedFiles(
@@ -14,6 +16,8 @@ export async function flagStaleMemoriesForChangedFiles(
   changedFileIds: Set<string>,
   versionId: string,
 ): Promise<void> {
+  const caps = getMemoryCapabilities(loadConfig(), repoId);
+  if (!caps.enabled) return;
   if (changedFileIds.size === 0) return;
   try {
     const changedSymbolIds: string[] = [];
@@ -51,6 +55,8 @@ export async function importMemoryFilesFromDisk(
   repoId: string,
   versionId: string,
 ): Promise<void> {
+  const caps = getMemoryCapabilities(loadConfig(), repoId);
+  if (!caps.fileSyncEnabled) return;
   try {
     const memoryFiles = await scanMemoryFiles(repoRoot);
     if (memoryFiles.length === 0) return;
