@@ -11,7 +11,13 @@
  */
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ZodError } from "zod";
@@ -29,6 +35,7 @@ import {
   handleMemoryRemove,
   handleMemorySurface,
 } from "../../dist/mcp/tools/memory.js";
+import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,6 +43,21 @@ import {
 
 function makeTempDbPath(): string {
   return mkdtempSync(join(tmpdir(), "sdl-memory-tools-test-"));
+}
+
+/** Write a temp config that enables memory for the test repo. */
+function writeMemoryEnabledConfig(tmpDir: string, repoRoot: string): string {
+  const configPath = join(tmpDir, "sdlmcp.config.json");
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      repos: [
+        { repoId: REPO_ID, rootPath: repoRoot, memory: { enabled: true } },
+      ],
+      policy: {},
+    }),
+  );
+  return configPath;
 }
 
 async function setupDb(dbPath: string): Promise<void> {
@@ -49,6 +71,7 @@ async function setupDb(dbPath: string): Promise<void> {
 
 async function teardownDb(dbPath: string): Promise<void> {
   await closeLadybugDb();
+  delete process.env.SDL_CONFIG;
   if (existsSync(dbPath)) {
     rmSync(dbPath, { recursive: true, force: true });
   }
@@ -90,6 +113,8 @@ describe("handleMemoryStore", () => {
   before(async () => {
     dbPath = makeTempDbPath();
     await setupDb(dbPath);
+    process.env.SDL_CONFIG = writeMemoryEnabledConfig(dbPath, FAKE_ROOT);
+    invalidateConfigCache();
     await seedRepo();
     await seedVersion();
   });
@@ -305,7 +330,11 @@ describe("handleMemoryStore", () => {
       memoryId: "nonexistent-memory-id",
     });
     assert.ok(result.ok, "Should succeed as create");
-    assert.strictEqual(result.memoryId, "nonexistent-memory-id", "Should use provided memoryId");
+    assert.strictEqual(
+      result.memoryId,
+      "nonexistent-memory-id",
+      "Should use provided memoryId",
+    );
     assert.strictEqual(result.created, true, "Should be marked as created");
   });
 });
@@ -320,6 +349,8 @@ describe("handleMemoryQuery", () => {
   before(async () => {
     dbPath = makeTempDbPath();
     await setupDb(dbPath);
+    process.env.SDL_CONFIG = writeMemoryEnabledConfig(dbPath, FAKE_ROOT);
+    invalidateConfigCache();
     await seedRepo();
     await seedVersion();
   });
@@ -486,6 +517,8 @@ describe("handleMemoryRemove", () => {
   before(async () => {
     dbPath = makeTempDbPath();
     await setupDb(dbPath);
+    process.env.SDL_CONFIG = writeMemoryEnabledConfig(dbPath, FAKE_ROOT);
+    invalidateConfigCache();
     await seedRepo();
     await seedVersion();
   });
@@ -633,6 +666,8 @@ describe("handleMemorySurface", () => {
   before(async () => {
     dbPath = makeTempDbPath();
     await setupDb(dbPath);
+    process.env.SDL_CONFIG = writeMemoryEnabledConfig(dbPath, FAKE_ROOT);
+    invalidateConfigCache();
     await seedRepo();
     await seedVersion();
   });
