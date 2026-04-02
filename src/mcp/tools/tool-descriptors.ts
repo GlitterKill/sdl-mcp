@@ -306,7 +306,7 @@ export function buildFlatToolDescriptors(
       name: "sdl.runtime.execute",
       description:
         "Execute a command in a repo-scoped subprocess with structured output, " +
-        "artifact persistence, and deterministic excerpts. Requires runtime.enabled = true in config.",
+        "artifact persistence, and deterministic excerpts. Enabled by default; set runtime.enabled = false to disable.",
       schema: RuntimeExecuteRequestSchema,
       handler: handleRuntimeExecute,
     },

@@ -263,7 +263,7 @@ Raw code access (Rung 4) is **policy-gated**. Agents must provide:
 
 Requests that don't meet policy are denied with actionable guidance ("try `getHotPath` with these identifiers instead"). Every access is audit-logged.
 
-The sandboxed runtime execution tool (`sdl.runtime.execute`) has its own governance layer: disabled by default, executable allowlisting, CWD jailing, environment scrubbing, concurrency limits, and timeout enforcement. The `outputMode` parameter (`"minimal"` | `"summary"` | `"intent"`) defaults to `"minimal"` for ~95% token savings, with `sdl.runtime.queryOutput` enabling on-demand output retrieval when needed.
+The sandboxed runtime execution tool (`sdl.runtime.execute`) has its own governance layer: enabled by default, but still guarded by executable allowlisting, CWD jailing, environment scrubbing, concurrency limits, and timeout enforcement. The `outputMode` parameter (`"minimal"` | `"summary"` | `"intent"`) defaults to `"minimal"` for ~95% token savings, with `sdl.runtime.queryOutput` enabling on-demand output retrieval when needed.
 
 **Why it matters:**
 - Proof-of-need gating prevents agents from wastefully reading raw code

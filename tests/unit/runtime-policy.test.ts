@@ -279,6 +279,21 @@ describe("PolicyEngine - Runtime Execution Policy", () => {
 });
 
 describe("config validation", () => {
+  it("defaults runtime.enabled to true when omitted", () => {
+    const config = RuntimeConfigSchema.parse({});
+    assert.strictEqual(config.enabled, true);
+  });
+
+  it("defaults allowedRuntimes to node, typescript, python, and shell", () => {
+    const config = RuntimeConfigSchema.parse({});
+    assert.deepStrictEqual(config.allowedRuntimes, [
+      "node",
+      "typescript",
+      "python",
+      "shell",
+    ]);
+  });
+
   it("should accept valid runtime names in allowedRuntimes", () => {
     const config = RuntimeConfigSchema.parse({
       enabled: true,

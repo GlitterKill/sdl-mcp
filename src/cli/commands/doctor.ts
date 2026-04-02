@@ -788,7 +788,7 @@ async function checkRuntimeExecution(
       return {
         status: "warn",
         message:
-          "Runtime execution disabled (runtime.enabled = false or not configured)",
+          "Runtime execution disabled (runtime.enabled = false)",
       };
     }
 

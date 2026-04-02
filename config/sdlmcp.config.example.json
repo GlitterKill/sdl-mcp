@@ -160,10 +160,12 @@
     "toolQueueTimeoutMs": 30000
   },
   "runtime": {
-    "enabled": false,
+    "enabled": true,
     "allowedRuntimes": [
       "node",
-      "python"
+      "typescript",
+      "python",
+      "shell"
     ],
     "allowedExecutables": [],
     "maxDurationMs": 30000,

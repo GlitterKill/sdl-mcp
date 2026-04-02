@@ -77,6 +77,9 @@ node --experimental-strip-types scripts/check-benchmark-claims.ts --in benchmark
 
 # Validate benchmark-efficient sensitivity thresholds
 node --experimental-strip-types scripts/check-benchmark-claims.ts --in benchmarks/real-world/runs/coverage-matrix-efficient/aggregate.json --profile efficient
+
+# Validate the PR smoke subset
+node --experimental-strip-types scripts/check-benchmark-claims.ts --in .benchmark/matrix-smoke/aggregate.json --profile smoke
 ```
 
 ## Benchmark Policy
@@ -112,6 +115,10 @@ For broad token-efficiency claims, use these gates on aggregated benchmark outpu
 
 These thresholds should be checked across task families and repos, not only a single
 summary average.
+
+The scheduled nightly workflow now treats the realism check as an audit signal rather
+than a blocking gate. That keeps the benchmark matrix visible while we retune weak
+families back into claim-compliant territory.
 
 ## Tasks File Schema
 

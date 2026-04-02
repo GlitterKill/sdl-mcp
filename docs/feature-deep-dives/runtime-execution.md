@@ -265,8 +265,8 @@ Example uses:
 {
   "runtime": {
     "enabled": true,
-    // Default: ["node", "python"]. Add more as needed from the 16 supported runtimes.
-    "allowedRuntimes": ["node", "python", "shell"],
+    // Default: ["node", "typescript", "python", "shell"]. Add more as needed from the 16 supported runtimes.
+    "allowedRuntimes": ["node", "typescript", "python", "shell"],
     "maxDurationMs": 600000,
     "maxConcurrentJobs": 2,
     "maxStdoutBytes": 1048576,

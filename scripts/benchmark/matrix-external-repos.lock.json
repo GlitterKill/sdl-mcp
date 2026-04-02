@@ -1,0 +1,70 @@
+{
+  "generatedAt": "2026-04-02T00:00:00.000Z",
+  "description": "Pinned external repositories for the real-world benchmark matrix.",
+  "repos": [
+    {
+      "repoId": "zod-oss",
+      "cloneUrl": "https://github.com/colinhacks/zod.git",
+      "ref": "c7805073fef5b6b8857307c3d4b3597a70613bc2",
+      "languages": ["ts", "tsx", "js"],
+      "ignore": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/lib/**",
+        "**/coverage/**",
+        "**/*.test.ts",
+        "**/*.spec.ts"
+      ]
+    },
+    {
+      "repoId": "preact-oss",
+      "cloneUrl": "https://github.com/preactjs/preact.git",
+      "ref": "21dd6d04c1a9a43e5b60976bb5eb7d856253195b",
+      "languages": ["ts", "tsx", "js", "jsx"],
+      "ignore": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/coverage/**",
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "**/*.test.tsx",
+        "**/*.spec.tsx"
+      ]
+    },
+    {
+      "repoId": "flask-oss",
+      "cloneUrl": "https://github.com/pallets/flask.git",
+      "ref": "7ef2946fb5151b745df30201b8c27790cac53875",
+      "languages": ["py"],
+      "ignore": [
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/.pytest_cache/**",
+        "**/build/**",
+        "**/dist/**",
+        "**/*.pyc",
+        "**/tests/**"
+      ]
+    },
+    {
+      "repoId": "ansible-lint-oss",
+      "cloneUrl": "https://github.com/ansible/ansible-lint.git",
+      "ref": "f1b79918291273b23a8c3bf40e75a53a13d062b2",
+      "languages": ["py", "sh"],
+      "ignore": [
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/.pytest_cache/**",
+        "**/build/**",
+        "**/dist/**",
+        "**/*.pyc",
+        "**/test/**",
+        "**/tests/**",
+        "**/.tox/**"
+      ]
+    }
+  ]
+}

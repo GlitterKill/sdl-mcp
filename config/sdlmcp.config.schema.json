@@ -916,8 +916,8 @@
         }
       },
       "default": {
-        "enabled": false,
-        "allowedRuntimes": ["node", "python"],
+        "enabled": true,
+        "allowedRuntimes": ["node", "typescript", "python", "shell"],
         "allowedExecutables": [],
         "maxDurationMs": 30000,
         "maxConcurrentJobs": 2,

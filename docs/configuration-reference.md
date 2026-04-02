@@ -440,12 +440,12 @@ Below is every option with inline commentary. JSON does not support comments, so
   // RUNTIME — sandboxed command execution via sdl.runtime.execute
   // ──────────────────────────────────────────────────────────
   "runtime": {
-    // Must be true to use sdl.runtime.execute.
-    "enabled": false,
+    // Enabled by default. Set false to disable sdl.runtime.execute.
+    "enabled": true,
 
     // Whitelist of runtimes. 16 supported: node, typescript, python, shell,
     // ruby, php, perl, r, elixir, go, java, kotlin, rust, c, cpp, csharp.
-    "allowedRuntimes": ["node", "python"],
+    "allowedRuntimes": ["node", "typescript", "python", "shell"],
 
     // Additional executables beyond the runtime defaults (e.g., ["bun", "deno"]).
     "allowedExecutables": [],
@@ -865,8 +865,8 @@ Controls the sandboxed runtime execution engine (`sdl.runtime.execute`).
 
 | Field                | Type       | Default              | Range         | Description                                         |
 | -------------------- | ---------- | -------------------- | ------------- | --------------------------------------------------- |
-| `enabled`            | `boolean`  | `false`              | —             | Enable runtime execution (must be `true` to use `sdl.runtime.execute`) |
-| `allowedRuntimes`    | `string[]` | `["node", "python"]` | See note      | Runtimes permitted for execution                    |
+| `enabled`            | `boolean`  | `true`               | —             | Enable runtime execution (`false` disables `sdl.runtime.execute`) |
+| `allowedRuntimes`    | `string[]` | `["node", "typescript", "python", "shell"]` | See note      | Runtimes permitted for execution                    |
 | `allowedExecutables` | `string[]` | `[]`                 | —             | Additional executable names allowed (whitelist)     |
 | `maxDurationMs`      | `integer`  | `30000`              | 100-600000    | Default execution timeout (ms)                      |
 | `maxStdoutBytes`     | `integer`  | `1048576` (1 MB)     | min: 1024     | Max stdout capture size (bytes)                     |
@@ -881,7 +881,7 @@ Controls the sandboxed runtime execution engine (`sdl.runtime.execute`).
 
 > **When to change:**
 >
-> - **Enable runtime:** Set `enabled: true` and configure `allowedRuntimes` with the runtimes you need.
+> - **Disable runtime entirely:** Set `enabled: false` if your deployment must forbid subprocess execution.
 > - **CI pipelines:** Add `"shell"` to `allowedRuntimes` for running test/build commands via `sdl.runtime.execute`.
 > - **Security:** Keep `allowedRuntimes` minimal — only include runtimes your agents actually need.
 > - **Custom interpreters:** Use `allowedExecutables` to whitelist specific binaries (e.g., `["bun", "deno"]`).

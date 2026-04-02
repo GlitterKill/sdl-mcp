@@ -19,8 +19,8 @@ import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
  * Policy evaluation happens after DB access, so we need a working LadybugDB with
  * a registered repo to reach the policy path.
  *
- * With default config (no runtime section), runtime.enabled defaults to false,
- * so policy denies execution before any subprocess is spawned.
+ * With default config (no runtime section), runtime defaults should permit
+ * execution for allowlisted runtimes before more specific policy checks apply.
  */
 
 const __filename = fileURLToPath(import.meta.url);
@@ -72,9 +72,9 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     mkdirSync(testDir, { recursive: true });
 
     // Write a default config with NO runtime section so that
-    // RuntimeConfigSchema.parse({}) yields enabled: false.
+    // RuntimeConfigSchema.parse({}) supplies the built-in defaults.
     // This avoids picking up a user-level SDL_CONFIG that may
-    // have runtime.enabled = true.
+    // override runtime behavior.
     writeFileSync(
       configPath,
       JSON.stringify(
@@ -132,7 +132,7 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     }
   });
 
-  it("should deny execution when runtime.enabled is false (default config)", async () => {
+  it("should allow execution with the default runtime config when omitted", async () => {
     const { handleRuntimeExecute } =
       await import("../../dist/mcp/tools/runtime.js");
 
@@ -140,25 +140,33 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
       repoId,
       runtime: "node",
       args: ["-e", "console.log('hello')"],
+      persistOutput: false,
+      outputMode: "summary",
     });
 
     assert.ok(result, "Expected a response object");
     assert.strictEqual(
       result.status,
-      "denied",
-      `Expected status "denied" when runtime is disabled, got "${result.status}"`,
+      "success",
+      `Expected status "success" with default runtime config, got "${result.status}"`,
     );
-    assert.ok(
-      result.policyDecision,
-      "Expected policyDecision in denied response",
-    );
-    assert.ok(
-      result.policyDecision.auditHash,
-      "Expected auditHash in policyDecision",
-    );
+    assert.ok(result.stdoutSummary.includes("hello"));
   });
 
   it("should include denied reasons in the response", async () => {
+    writeConfig({
+      enabled: false,
+      allowedRuntimes: ["node", "typescript", "python", "shell"],
+      allowedExecutables: [],
+      maxDurationMs: 5000,
+      maxStdoutBytes: 1_048_576,
+      maxStderrBytes: 262_144,
+      maxArtifactBytes: 10_485_760,
+      artifactTtlHours: 24,
+      maxConcurrentJobs: 2,
+      envAllowlist: [],
+    });
+
     const { handleRuntimeExecute } =
       await import("../../dist/mcp/tools/runtime.js");
 

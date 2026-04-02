@@ -1026,7 +1026,7 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 
 **What it does:** Executes a command using one of 16 supported runtimes (Node.js, TypeScript, Python, Shell, Go, Java, Kotlin, Rust, C, C++, C#, Ruby, PHP, Perl, R, Elixir) within the repository's directory. The execution is fully governed:
 
-1. **Disabled by default** — `runtime.enabled` must be set to `true` in the config.
+1. **Enabled by default** — Set `runtime.enabled: false` to disable subprocess execution in hardened deployments.
 2. **Policy evaluation** — The policy engine checks whether the requested runtime, executable, CWD, and timeout are allowed.
 3. **Executable validation** — Custom executables must be compatible with the selected runtime (e.g., you can't use `powershell` with the `node` runtime).
 4. **Scrubbed environment** — Subprocesses receive only `PATH` and explicitly allowlisted env vars. Secrets do not leak.

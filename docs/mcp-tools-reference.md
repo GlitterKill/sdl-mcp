@@ -977,7 +977,7 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 
 ### `sdl.runtime.execute`
 
-Run a command in a repo-scoped subprocess. Requires `runtime.enabled: true` in config.
+Run a command in a repo-scoped subprocess. Runtime execution is enabled by default; set `runtime.enabled: false` to disable it.
 
 **Parameters:**
 

@@ -215,7 +215,7 @@ Stale buffer pushes (version ≤ current) are rejected automatically.
 
 ### 6) Runtime execution (`sdl.runtime.execute` + `sdl.runtime.queryOutput`)
 
-Run commands in a repo-scoped subprocess. Requires `runtime.enabled: true` in config.
+Run commands in a repo-scoped subprocess. Runtime execution is enabled by default; set `runtime.enabled: false` to disable it.
 
 **Output modes** control how much data is returned inline:
 
@@ -251,7 +251,7 @@ Then, if needed:
 }
 ```
 
-- **Runtimes**: 16 supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`. Default allowed: `["node", "python"]`.
+- **Runtimes**: 16 supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`. Default allowed: `["node", "typescript", "python", "shell"]`.
 - Use `code` to run inline code or `args` to invoke a file.
 - `queryTerms` extracts only matching lines from output (like a built-in grep). In `"intent"` mode, only matched excerpts are returned.
 - `persistOutput: true` (default) saves full output to an artifact handle for later retrieval via `sdl.runtime.queryOutput`.

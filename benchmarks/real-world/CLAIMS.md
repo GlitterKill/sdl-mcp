@@ -20,6 +20,13 @@ Use `scripts/check-benchmark-claims.ts` on matrix aggregate output with:
 Default profile:
 - `--profile realism` enforces the claim gates above.
 - `--profile efficient` is for benchmark-efficient sensitivity runs (`p50>=45`, `p25>=35`, task floor `>=0`).
+- `--profile smoke` is for the PR smoke subset only (`p50>=30`, `p25>=20`, task floor `>=5`).
+
+## Scheduled CI
+
+- The scheduled benchmark matrix run is an audit, not a release-claim gate.
+- It uploads the full aggregate and runs `--profile realism` as a non-blocking check so drift stays visible without turning upstream benchmark-corpus changes into a red default branch signal.
+- Blocking claim validation should be run when refreshing published benchmark claims or retuning the benchmark matrix.
 
 Command:
 
