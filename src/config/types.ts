@@ -26,6 +26,7 @@ import {
   RUNTIME_DEFAULT_MAX_CONCURRENT_JOBS,
   RUNTIME_MAX_CONCURRENT_JOBS,
   RUNTIME_MIN_BYTES,
+  DEFAULT_MEMORY_SURFACE_LIMIT,
 } from "./constants.js";
 
 export const LanguageSchema = z.enum([
@@ -44,6 +45,17 @@ export const LanguageSchema = z.enum([
   "kt",
   "sh",
 ]);
+
+export const MemoryConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  toolsEnabled: z.boolean().default(true),
+  fileSyncEnabled: z.boolean().default(true),
+  surfacingEnabled: z.boolean().default(true),
+  hintsEnabled: z.boolean().default(true),
+  defaultSurfaceLimit: z.number().int().min(1).max(50).default(DEFAULT_MEMORY_SURFACE_LIMIT),
+});
+
+export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
 
 export const RepoConfigSchema = z.object({
   repoId: z.string().min(1),
@@ -79,6 +91,7 @@ export const RepoConfigSchema = z.object({
   packageJsonPath: z.string().nullish(),
   tsconfigPath: z.string().nullish(),
   workspaceGlobs: z.array(z.string()).nullish(),
+  memory: MemoryConfigSchema.optional(),
 });
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
@@ -456,6 +469,7 @@ export const AppConfigSchema = z.object({
   codeMode: CodeModeConfigSchema.optional(),
   security: SecurityConfigSchema.optional(),
   httpAuth: HttpAuthConfigSchema.optional(),
+  memory: MemoryConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

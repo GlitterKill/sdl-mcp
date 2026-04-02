@@ -99,6 +99,45 @@
             "items": {
               "type": "string"
             }
+          },
+          "memory": {
+            "type": "object",
+            "description": "Memory subsystem configuration. Memory is disabled by default.",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "description": "Master enable for the memory subsystem. When false, all memory features are disabled.",
+                "default": false
+              },
+              "toolsEnabled": {
+                "type": "boolean",
+                "description": "Enable memory CRUD tools (store, query, remove, surface)",
+                "default": true
+              },
+              "fileSyncEnabled": {
+                "type": "boolean",
+                "description": "Enable .sdl-memory file read/import/write/delete",
+                "default": true
+              },
+              "surfacingEnabled": {
+                "type": "boolean",
+                "description": "Enable memory injection into repo.status and slice.build",
+                "default": true
+              },
+              "hintsEnabled": {
+                "type": "boolean",
+                "description": "Enable _memoryHint post-dispatch guidance",
+                "default": true
+              },
+              "defaultSurfaceLimit": {
+                "type": "integer",
+                "description": "Default number of memories to surface when limit is omitted",
+                "default": 5,
+                "minimum": 1,
+                "maximum": 50
+              }
+            },
+            "additionalProperties": false
           }
         }
       }
@@ -1031,6 +1070,45 @@
         "enabled": true,
         "exclusive": true
       }
+    },
+    "memory": {
+      "type": "object",
+      "description": "Memory subsystem configuration. Memory is disabled by default.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Master enable for the memory subsystem. When false, all memory features are disabled.",
+          "default": false
+        },
+        "toolsEnabled": {
+          "type": "boolean",
+          "description": "Enable memory CRUD tools (store, query, remove, surface)",
+          "default": true
+        },
+        "fileSyncEnabled": {
+          "type": "boolean",
+          "description": "Enable .sdl-memory file read/import/write/delete",
+          "default": true
+        },
+        "surfacingEnabled": {
+          "type": "boolean",
+          "description": "Enable memory injection into repo.status and slice.build",
+          "default": true
+        },
+        "hintsEnabled": {
+          "type": "boolean",
+          "description": "Enable _memoryHint post-dispatch guidance",
+          "default": true
+        },
+        "defaultSurfaceLimit": {
+          "type": "integer",
+          "description": "Default number of memories to surface when limit is omitted",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 50
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

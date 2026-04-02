@@ -32,7 +32,12 @@
       "includeNodeModulesTypes": true,
       "packageJsonPath": null,
       "tsconfigPath": null,
-      "workspaceGlobs": null
+      "workspaceGlobs": null,
+      "memory": {
+        "enabled": true,
+        "surfacingEnabled": true,
+        "fileSyncEnabled": false
+      }
     }
   ],
   "graphDatabase": {
@@ -196,5 +201,8 @@
   },
   "security": {
     "allowedRepoRoots": []
+  },
+  "memory": {
+    "enabled": false
   }
 }
