@@ -1,5 +1,8 @@
-import { describe, it } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   generateManual,
   getManualCached,
@@ -7,9 +10,38 @@ import {
   FN_NAME_MAP,
   ACTION_TO_FN,
 } from "../../dist/code-mode/manual-generator.js";
+import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import { estimateTokens } from "../../dist/util/tokenize.js";
 
+const originalSdlConfig = process.env.SDL_CONFIG;
+
 describe("code-mode manual generator", () => {
+  let tmpDir: string;
+
+  before(() => {
+    // Create a config with memory enabled so all functions appear in manual
+    tmpDir = mkdtempSync(join(tmpdir(), "sdl-manual-"));
+    const configPath = join(tmpDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({
+      repos: [{ repoId: "test", rootPath: tmpDir, memory: { enabled: true } }],
+      policy: {},
+    }));
+    process.env.SDL_CONFIG = configPath;
+    invalidateConfigCache();
+    invalidateManualCache();
+  });
+
+  after(() => {
+    if (originalSdlConfig !== undefined) {
+      process.env.SDL_CONFIG = originalSdlConfig;
+    } else {
+      delete process.env.SDL_CONFIG;
+    }
+    invalidateConfigCache();
+    invalidateManualCache();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it("generateManual() returns a non-empty string", () => {
     const result = generateManual();
     assert.strictEqual(typeof result, "string");

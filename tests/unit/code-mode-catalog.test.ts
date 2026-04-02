@@ -1,14 +1,44 @@
-import { describe, it } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildCatalog,
   rankCatalog,
   zodToSchemaSummary,
   invalidateCatalog,
 } from "../../dist/code-mode/action-catalog.js";
+import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import { z } from "zod";
 
+const originalSdlConfig = process.env.SDL_CONFIG;
+
 describe("code-mode action catalog", () => {
+  let tmpDir: string;
+
+  before(() => {
+    // Create a config with memory enabled so all actions are present
+    tmpDir = mkdtempSync(join(tmpdir(), "sdl-catalog-"));
+    const configPath = join(tmpDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({
+      repos: [{ repoId: "test", rootPath: tmpDir, memory: { enabled: true } }],
+      policy: {},
+    }));
+    process.env.SDL_CONFIG = configPath;
+    invalidateConfigCache();
+  });
+
+  after(() => {
+    if (originalSdlConfig !== undefined) {
+      process.env.SDL_CONFIG = originalSdlConfig;
+    } else {
+      delete process.env.SDL_CONFIG;
+    }
+    invalidateConfigCache();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   describe("buildCatalog", () => {
     it("returns gateway actions and internal transforms", () => {
       invalidateCatalog();

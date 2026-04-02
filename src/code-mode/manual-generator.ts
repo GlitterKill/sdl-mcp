@@ -1,6 +1,11 @@
 import { createActionMap } from "../gateway/router.js";
 import type { LiveIndexCoordinator } from "../live-index/types.js";
 import { logger } from "../util/logger.js";
+import { loadConfig } from "../config/loadConfig.js";
+import { anyRepoHasMemoryTools } from "../config/memory-config.js";
+
+const MEMORY_FN_NAMES = new Set(["memoryStore", "memoryQuery", "memoryRemove", "memorySurface"]);
+const MEMORY_ACTIONS = new Set(["memory.store", "memory.query", "memory.remove", "memory.surface"]);
 
 export const FN_NAME_MAP: Record<string, string> = {
   symbolSearch: "symbol.search",
@@ -40,6 +45,30 @@ export const FN_NAME_MAP: Record<string, string> = {
 export const ACTION_TO_FN: Record<string, string> = Object.fromEntries(
   Object.entries(FN_NAME_MAP).map(([fn, action]) => [action, fn]),
 );
+
+/**
+ * Get the active FN_NAME_MAP, filtering out memory entries when memory is disabled.
+ */
+export function getActiveFnNameMap(): Record<string, string> {
+  if (anyRepoHasMemoryTools(loadConfig())) return FN_NAME_MAP;
+  const filtered: Record<string, string> = {};
+  for (const [fn, action] of Object.entries(FN_NAME_MAP)) {
+    if (!MEMORY_FN_NAMES.has(fn)) filtered[fn] = action;
+  }
+  return filtered;
+}
+
+/**
+ * Get the active ACTION_TO_FN, filtering out memory entries when memory is disabled.
+ */
+export function getActiveActionToFn(): Record<string, string> {
+  if (anyRepoHasMemoryTools(loadConfig())) return ACTION_TO_FN;
+  const filtered: Record<string, string> = {};
+  for (const [action, fn] of Object.entries(ACTION_TO_FN)) {
+    if (!MEMORY_ACTIONS.has(action)) filtered[action] = fn;
+  }
+  return filtered;
+}
 
 const MANUAL_TEMPLATE = `// SDL-MCP API - use sdl.context for context retrieval, sdl.workflow for multi-step operations
 // repoId is set in the workflow envelope, not per-step.
@@ -159,25 +188,52 @@ function dataTemplate(p: { input: Record<string, unknown> | unknown[]; template:
 export function generateManual(_liveIndex?: LiveIndexCoordinator): string {
   const actionMap = createActionMap(_liveIndex);
   const actionKeys = Object.keys(actionMap);
-  const mappedActions = Object.values(FN_NAME_MAP);
+  const activeFnMap = getActiveFnNameMap();
+  const mappedActions = Object.values(activeFnMap);
   for (const key of actionKeys) {
     if (!mappedActions.includes(key)) {
       logger.warn(`[code-mode] action "${key}" not in FN_NAME_MAP`);
     }
   }
 
-  return MANUAL_TEMPLATE;
+  const memoryVisible = anyRepoHasMemoryTools(loadConfig());
+  if (memoryVisible) {
+    return MANUAL_TEMPLATE;
+  }
+
+  // Strip the "// === Memory ===" section from the manual when memory is disabled.
+  const lines = MANUAL_TEMPLATE.split("\n");
+  const filtered: string[] = [];
+  let inMemorySection = false;
+  for (const line of lines) {
+    if (line.startsWith("// === Memory ===")) {
+      inMemorySection = true;
+      continue;
+    }
+    if (inMemorySection && line.startsWith("// ===")) {
+      // Hit the next section marker, stop skipping
+      inMemorySection = false;
+    }
+    if (!inMemorySection) {
+      filtered.push(line);
+    }
+  }
+  return filtered.join("\n");
 }
 
 let cachedManual: string | null = null;
+let cachedManualMemoryVisible: boolean | null = null;
 
 export function getManualCached(liveIndex?: LiveIndexCoordinator): string {
-  if (cachedManual === null) {
+  const memoryVisible = anyRepoHasMemoryTools(loadConfig());
+  if (cachedManual === null || cachedManualMemoryVisible !== memoryVisible) {
     cachedManual = generateManual(liveIndex);
+    cachedManualMemoryVisible = memoryVisible;
   }
   return cachedManual;
 }
 
 export function invalidateManualCache(): void {
   cachedManual = null;
+  cachedManualMemoryVisible = null;
 }

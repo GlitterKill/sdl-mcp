@@ -25,7 +25,7 @@ import { executeWorkflow } from "./workflow-executor.js";
 import {
   getManualCached,
   invalidateManualCache,
-  FN_NAME_MAP,
+  getActiveFnNameMap,
 } from "./manual-generator.js";
 import { parseWorkflowRequest } from "./workflow-parser.js";
 import {
@@ -133,9 +133,10 @@ export function registerCodeModeTools(
       });
 
       if (args.actions && args.actions.length > 0) {
+        const activeFnMap = getActiveFnNameMap();
         const validNames = new Set([
-          ...Object.keys(FN_NAME_MAP),
-          ...Object.values(FN_NAME_MAP),
+          ...Object.keys(activeFnMap),
+          ...Object.values(activeFnMap),
           ...INTERNAL_TRANSFORM_NAMES,
           "workflow",
           "context",

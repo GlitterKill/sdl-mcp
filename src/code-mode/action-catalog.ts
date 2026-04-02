@@ -3,6 +3,8 @@ import { ACTION_TO_FN } from "./manual-generator.js";
 import { INTERNAL_TRANSFORMS } from "./transforms.js";
 import type { LiveIndexCoordinator } from "../live-index/types.js";
 import type { z } from "zod";
+import { loadConfig } from "../config/loadConfig.js";
+import { anyRepoHasMemoryTools } from "../config/memory-config.js";
 
 // --- Action Tags / Categories ---
 
@@ -661,6 +663,8 @@ let cachedCatalog: ActionDescriptor[] | null = null;
 // Cache the action map alongside the catalog to avoid redundant createActionMap calls.
 // Assumes liveIndex is a singleton; if it changes, call invalidateCatalog().
 let cachedActionMap: ReturnType<typeof createActionMap> | null = null;
+// Track the memory visibility state used when the cache was built.
+let cachedMemoryVisible: boolean | null = null;
 
 /**
  * Builds the full action catalog from the gateway action map and internal transforms.
@@ -674,10 +678,12 @@ export function buildCatalog(opts?: {
   const includeSchemas = opts?.includeSchemas ?? false;
   const includeExamples = opts?.includeExamples ?? false;
 
-  // Use cached base catalog if available and no dynamic options
-  if (cachedCatalog === null || cachedActionMap === null) {
+  // Use cached base catalog if available, but invalidate if memory visibility changed.
+  const memoryVisible = anyRepoHasMemoryTools(loadConfig());
+  if (cachedCatalog === null || cachedActionMap === null || cachedMemoryVisible !== memoryVisible) {
     cachedActionMap = createActionMap(opts?.liveIndex);
     cachedCatalog = buildBaseCatalogFromMap(cachedActionMap);
+    cachedMemoryVisible = memoryVisible;
   }
 
   if (!includeSchemas && !includeExamples) {
@@ -786,6 +792,7 @@ function buildBaseCatalogFromMap(actionMap: ReturnType<typeof createActionMap>):
 export function invalidateCatalog(): void {
   cachedCatalog = null;
   cachedActionMap = null;
+  cachedMemoryVisible = null;
 }
 
 // --- Discovery Ranking ---

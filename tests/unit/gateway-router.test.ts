@@ -1,8 +1,38 @@
-import { describe, it } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createActionMap, routeGatewayCall } from "../../dist/gateway/router.js";
+import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
+
+const originalSdlConfig = process.env.SDL_CONFIG;
 
 describe("Gateway router", () => {
+  let tmpDir: string;
+
+  before(() => {
+    // Create a config with memory enabled so all 32 actions are present
+    tmpDir = mkdtempSync(join(tmpdir(), "sdl-gw-router-"));
+    const configPath = join(tmpDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({
+      repos: [{ repoId: "test", rootPath: tmpDir, memory: { enabled: true } }],
+      policy: {},
+    }));
+    process.env.SDL_CONFIG = configPath;
+    invalidateConfigCache();
+  });
+
+  after(() => {
+    if (originalSdlConfig !== undefined) {
+      process.env.SDL_CONFIG = originalSdlConfig;
+    } else {
+      delete process.env.SDL_CONFIG;
+    }
+    invalidateConfigCache();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   describe("createActionMap", () => {
     it("contains all 32 actions", () => {
       const map = createActionMap();
