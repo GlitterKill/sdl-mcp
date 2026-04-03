@@ -100,20 +100,56 @@ export class ContextEngine {
         }
 
         // FP1: Keyword fallback when entity search returns few/no results.
-        // Cap total seeded context at 15 symbols to avoid flooding broad mode.
-        const MAX_SEEDED_CONTEXT = 15;
+        // Broad mode gets higher limits to cover conceptual queries.
+        const isBroad = task.options?.contextMode !== "precise";
+        const MAX_SEEDED_CONTEXT = isBroad ? 25 : 15;
+        const PER_TERM_LIMIT = isBroad ? 8 : 5;
         if (context.length < MAX_SEEDED_CONTEXT) {
           try {
             const conn = await getLadybugConn();
-            const terms = extractIdentifiersFromText(task.taskText);
+            // Pass taskText as queryContext so domain terms in the query
+            // (e.g., "slice", "symbol") are preserved, not filtered.
+            const terms = extractIdentifiersFromText(
+              task.taskText,
+              task.taskText,
+            );
             const seen = new Set(
               context
                 .filter((c) => c.startsWith("symbol:"))
                 .map((c) => c.slice("symbol:".length)),
             );
-            for (const term of terms.slice(0, 3)) {
+
+            // Strategy 1: Compound multi-term search — pass all content
+            // words as a space-separated query so searchSymbols' built-in
+            // multi-term merge ranks symbols matching MULTIPLE terms higher.
+            const compoundQuery = terms.slice(0, 6).join(" ");
+            if (compoundQuery) {
+              const compoundResults = await searchSymbols(
+                conn,
+                task.repoId,
+                compoundQuery,
+                isBroad ? 15 : 8,
+              );
+              for (const r of compoundResults) {
+                if (context.length >= MAX_SEEDED_CONTEXT) break;
+                if (!seen.has(r.symbolId)) {
+                  seen.add(r.symbolId);
+                  context.push(`symbol:${r.symbolId}`);
+                }
+              }
+            }
+
+            // Strategy 2: Individual term searches to fill remaining slots
+            // with symbols that may match only one term but are still useful.
+            const MAX_INDIVIDUAL_TERMS = isBroad ? 6 : 3;
+            for (const term of terms.slice(0, MAX_INDIVIDUAL_TERMS)) {
               if (context.length >= MAX_SEEDED_CONTEXT) break;
-              const results = await searchSymbols(conn, task.repoId, term, 5);
+              const results = await searchSymbols(
+                conn,
+                task.repoId,
+                term,
+                PER_TERM_LIMIT,
+              );
               for (const r of results) {
                 if (context.length >= MAX_SEEDED_CONTEXT) break;
                 if (!seen.has(r.symbolId)) {
@@ -125,7 +161,8 @@ export class ContextEngine {
             if (context.length > 0) {
               logger.debug("Keyword fallback seeded task context", {
                 repoId: task.repoId,
-                terms: terms.slice(0, 5),
+                compoundQuery,
+                terms: terms.slice(0, 6),
                 symbolCount: context.length,
               });
             }

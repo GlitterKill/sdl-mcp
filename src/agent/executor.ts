@@ -68,11 +68,10 @@ const RUNG_TOKEN_FALLBACK_ESTIMATES: Record<RungType, number> = {
 };
 
 /**
- * Common English words and SDL-MCP domain terms filtered out during
- * identifier extraction. Includes both natural-language noise words and
- * tool-specific jargon that would produce low-value hot-path matches.
+ * Natural-language noise words that are always filtered during extraction.
+ * These never carry discriminating value for symbol search.
  */
-export const IDENTIFIER_STOP_WORDS = new Set([
+const ALWAYS_STOP_WORDS = new Set([
   "the",
   "and",
   "for",
@@ -98,6 +97,32 @@ export const IDENTIFIER_STOP_WORDS = new Set([
   "make",
   "find",
   "found",
+  "look",
+  "into",
+  "what",
+  "how",
+  "why",
+  "when",
+  "where",
+  "which",
+  "new",
+  "true",
+  "false",
+  "null",
+]);
+
+/**
+ * Domain terms that are stop words only when the query is NOT about them.
+ * When a query *is* about one of these subsystems (e.g., "slice cache strategy"),
+ * the domain term is the most discriminating keyword and must not be filtered.
+ *
+ * These are conditionally filtered: a domain term is kept when the query
+ * contains fewer than 3 non-stop content words *after* removing it, or when
+ * the domain term appears alongside a qualifying noun/adjective
+ * (heuristic: the query has other substantive words that form a concept
+ * with the domain term).
+ */
+const DOMAIN_STOP_WORDS = new Set([
   "code",
   "file",
   "function",
@@ -124,14 +149,6 @@ export const IDENTIFIER_STOP_WORDS = new Set([
   "window",
   "slice",
   "rung",
-  "look",
-  "into",
-  "what",
-  "how",
-  "why",
-  "when",
-  "where",
-  "which",
   "return",
   "import",
   "export",
@@ -142,35 +159,89 @@ export const IDENTIFIER_STOP_WORDS = new Set([
   "interface",
   "async",
   "await",
-  "new",
-  "true",
-  "false",
-  "null",
 ]);
+
+/**
+ * The full stop word set used by default (no query context).
+ * Exported for backward compatibility with existing tests.
+ */
+export const IDENTIFIER_STOP_WORDS = new Set([
+  ...ALWAYS_STOP_WORDS,
+  ...DOMAIN_STOP_WORDS,
+]);
+
+/**
+ * Build a context-aware stop word set. Domain terms that appear in the
+ * query alongside other substantive words are preserved (not filtered).
+ *
+ * Heuristic: count non-stop content words in the query (words 3+ chars
+ * not in ALWAYS_STOP_WORDS). If a domain term co-occurs with at least
+ * 2 other content words, it is likely a subsystem reference and is kept.
+ */
+export function buildContextAwareStopWords(queryText: string): Set<string> {
+  const words = queryText.toLowerCase().match(/[a-z_][a-z0-9_]{2,}/g) ?? [];
+  const contentWords = words.filter((w) => !ALWAYS_STOP_WORDS.has(w));
+  const nonDomainContent = contentWords.filter(
+    (w) => !DOMAIN_STOP_WORDS.has(w),
+  );
+
+  // Short queries (≤2 content words) or queries where domain terms
+  // don't co-occur with enough non-domain content: filter all domain
+  // terms as usual. Example: "find the code that does validation" has
+  // only "code" (domain) + "validation" (non-domain) → "code" is filler.
+  if (contentWords.length < 3 || nonDomainContent.length < 1) {
+    return new Set(IDENTIFIER_STOP_WORDS);
+  }
+
+  // For compound conceptual queries (3+ content words with at least
+  // 1 non-domain word), keep domain terms that appear in the query.
+  // Example: "slice cache strategy eviction" → "slice" is kept because
+  // it co-occurs with "cache", "strategy", "eviction" to form a concept.
+  const queryWordSet = new Set(contentWords);
+  const stopWords = new Set(ALWAYS_STOP_WORDS);
+  for (const domainWord of DOMAIN_STOP_WORDS) {
+    if (!queryWordSet.has(domainWord)) {
+      stopWords.add(domainWord);
+    }
+  }
+  return stopWords;
+}
 
 /**
  * Extract potential code identifiers from free text.
  * Exported for testability; the Executor class method delegates to this
  * plus evidence-based augmentation.
+ *
+ * @param text - The text to extract identifiers from.
+ * @param queryContext - Optional original query text used to build
+ *   context-aware stop words. When provided, domain terms that appear
+ *   in the query are preserved instead of being filtered.
  */
-export function extractIdentifiersFromText(text: string): string[] {
+export function extractIdentifiersFromText(
+  text: string,
+  queryContext?: string,
+): string[] {
   const bounded = text.slice(0, 2000);
+  const stopWords = queryContext
+    ? buildContextAwareStopWords(queryContext)
+    : IDENTIFIER_STOP_WORDS;
 
   // Specific code-identifier patterns (high priority)
   const camelCase = bounded.match(/[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*/g) ?? [];
   const pascalCase = bounded.match(/[A-Z][a-z]+[A-Z][a-zA-Z0-9]*/g) ?? [];
   const singlePascal = (
     bounded.match(/\b[A-Z][a-z]{5,}[a-zA-Z0-9]*\b/g) ?? []
-  ).filter((w) => !IDENTIFIER_STOP_WORDS.has(w.toLowerCase()));
+  ).filter((w) => !stopWords.has(w.toLowerCase()));
   const snakeCase = bounded.match(/[a-zA-Z][a-zA-Z0-9]*_[a-zA-Z0-9_]+/g) ?? [];
 
   const primary = [
     ...new Set([...camelCase, ...pascalCase, ...singlePascal, ...snakeCase]),
   ];
 
-  // Generic word tokens (low priority — fill remaining slots only)
+  // Generic word tokens — for conceptual queries these are often the
+  // most valuable terms (e.g., "cache", "eviction", "pipeline").
   const words = (bounded.match(/[a-zA-Z_][a-zA-Z0-9_]{2,}/g) ?? []).filter(
-    (w) => !IDENTIFIER_STOP_WORDS.has(w.toLowerCase()),
+    (w) => !stopWords.has(w.toLowerCase()),
   );
   const primarySet = new Set(primary);
   const secondary = [...new Set(words)].filter((w) => !primarySet.has(w));
@@ -489,28 +560,64 @@ export class Executor {
       }
       let score = 0;
       const nameLower = sym.name.toLowerCase();
-      if (nameLower.length >= 3 && taskTextLower.includes(nameLower))
+
+      // Exact name-in-taskText bonus: only for names 8+ chars to avoid
+      // rewarding generic short names like "cache" or "process" that
+      // coincidentally appear in the query as vocabulary words.
+      if (nameLower.length >= 8 && taskTextLower.includes(nameLower))
         score += 10;
-      if (identifierSet.has(nameLower)) score += 8;
-      // Only check partial overlap for names 3+ chars (avoid matching 'i', 'r', etc.)
+      // Exact identifier match: only for compound names (6+ chars) or
+      // names that look like code identifiers (contain uppercase).
+      if (
+        identifierSet.has(nameLower) &&
+        (nameLower.length >= 6 || /[A-Z]/.test(sym.name))
+      )
+        score += 8;
+
+      // Award points for EACH matching identifier in the symbol name.
+      // Multi-term overlap (e.g., name contains both "slice" and "cache")
+      // signals higher relevance than a single-term match.
       if (nameLower.length >= 3) {
+        let nameMatches = 0;
         for (const id of identifiers) {
           if (id.length < 3) continue;
           const idLower = id.toLowerCase();
-          if (nameLower.includes(idLower) || idLower.includes(nameLower)) {
-            score += 3;
-            break;
+          if (
+            nameLower.includes(idLower) ||
+            (nameLower.length >= 6 && idLower.includes(nameLower))
+          ) {
+            nameMatches++;
           }
         }
+        // Scale per-match bonus: first match +3, additional matches +4
+        // to strongly reward multi-term overlap.
+        score += nameMatches > 0 ? 3 + Math.min(nameMatches - 1, 3) * 4 : 0;
       }
+      // Award points for EACH matching identifier in the summary.
       if (sym.summary) {
         const summaryLower = sym.summary.toLowerCase();
+        let summaryMatches = 0;
         for (const id of identifiers) {
+          if (id.length < 3) continue;
           if (summaryLower.includes(id.toLowerCase())) {
-            score += 2;
-            break;
+            summaryMatches++;
           }
         }
+        score += Math.min(summaryMatches, 4) * 2;
+      }
+      // Bonus for searchText containing query terms. searchText includes
+      // path tokens, role tags, and split name parts — good for conceptual
+      // proximity when the symbol name itself is a compound identifier.
+      if (sym.searchText) {
+        const searchLower = sym.searchText.toLowerCase();
+        let searchMatches = 0;
+        for (const id of identifiers) {
+          if (id.length < 3) continue;
+          if (searchLower.includes(id.toLowerCase())) {
+            searchMatches++;
+          }
+        }
+        score += Math.min(searchMatches, 3) * 2;
       }
       if (sym.exported) score += 1;
       scored.push({ symbolId, score });
@@ -521,18 +628,18 @@ export class Executor {
     const isPrecise = task.options?.contextMode === "precise";
 
     // Precise: aggressive threshold (60% of top), cap at 5 symbols.
-    // Broad: generous threshold (40% of top), but with higher absolute floor
-    // and a cap when no focusPaths/focusSymbols constrain the query.
+    // Broad: generous threshold (30% of top) with a lower absolute floor
+    // to retain partial/summary matches from conceptual queries.
     const threshold = isPrecise
       ? Math.max(5, topScore * 0.6)
-      : Math.max(5, topScore * 0.4);
+      : Math.max(2, topScore * 0.3);
     const hasScope =
       task.options?.focusPaths?.length || task.options?.focusSymbols?.length;
     const effectiveMax = isPrecise
       ? Math.min(5, maxCount)
       : hasScope
         ? maxCount
-        : Math.min(15, maxCount);
+        : Math.min(20, maxCount);
     const relevant = scored.filter((s) => s.score >= threshold);
     const count = Math.max(1, Math.min(relevant.length, effectiveMax));
 
@@ -568,10 +675,15 @@ export class Executor {
 
       // Fallback: identifier-based search with per-term resolution
       if (allSymbols.length === 0 && task.taskText) {
+        // Broad mode gets higher limits to cover conceptual queries
+        const isBroad = task.options?.contextMode !== "precise";
+        const maxTerms = isBroad ? 8 : 5;
+        const searchFallbackLimit = isBroad ? 20 : MAX_SEARCH_FALLBACK;
+
         // 1. Determine search terms: explicit searchTerms option > extracted identifiers
         const searchTerms = task.options?.searchTerms?.length
-          ? task.options.searchTerms.slice(0, 5)
-          : this.extractIdentifiersFromTask(task).slice(0, 5);
+          ? task.options.searchTerms.slice(0, maxTerms)
+          : this.extractIdentifiersFromTask(task).slice(0, maxTerms);
 
         const seen = new Set<string>();
         const useHybrid = await isHybridRetrievalAvailable();
@@ -583,7 +695,7 @@ export class Executor {
               repoId: task.repoId,
               query: term,
               limit: Math.ceil(
-                MAX_SEARCH_FALLBACK / Math.max(searchTerms.length, 1),
+                searchFallbackLimit / Math.max(searchTerms.length, 1),
               ),
               includeEvidence: false,
             });
@@ -599,7 +711,7 @@ export class Executor {
               conn,
               task.repoId,
               term,
-              Math.ceil(MAX_SEARCH_FALLBACK / Math.max(searchTerms.length, 1)),
+              Math.ceil(searchFallbackLimit / Math.max(searchTerms.length, 1)),
             );
             for (const result of searchResults) {
               if (!seen.has(result.symbolId)) {
@@ -616,7 +728,7 @@ export class Executor {
             const hybridResult = await hybridSearch({
               repoId: task.repoId,
               query: task.taskText,
-              limit: MAX_SEARCH_FALLBACK,
+              limit: searchFallbackLimit,
               includeEvidence: false,
             });
             for (const item of hybridResult.results) {
@@ -628,7 +740,7 @@ export class Executor {
               conn,
               task.repoId,
               task.taskText,
-              MAX_SEARCH_FALLBACK,
+              searchFallbackLimit,
             );
             for (const result of searchResults) {
               allSymbols.push(result.symbolId);
@@ -1025,7 +1137,10 @@ export class Executor {
    * Extract potential identifiers from task text for hot-path searching.
    */
   private extractIdentifiersFromTask(task: AgentTask): string[] {
-    const identifiers = extractIdentifiersFromText(task.taskText);
+    const identifiers = extractIdentifiersFromText(
+      task.taskText,
+      task.taskText,
+    );
 
     // Augment with symbol names from evidence already captured (card rung runs first)
     const cardEvidence = this.evidenceCapture.getEvidenceByType("symbolCard");
