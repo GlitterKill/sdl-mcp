@@ -1,8 +1,9 @@
 /**
- * Scenario 3: Mixed Read-Write
+ * Scenario: Mixed Read-Write Editful
  *
- * One "writer" client does incremental re-indexing while N-1 "reader" clients query.
- * Tests write serialization and read pool round-robin under contention.
+ * One writer mutates a fixture TypeScript file before each incremental refresh
+ * while readers query concurrently. This measures the real incremental edit
+ * path under contention instead of the no-op refresh fast path.
  */
 
 import { MetricsCollector } from "../infra/metrics-collector.js";
@@ -12,20 +13,21 @@ import {
   disconnectAll,
 } from "../infra/client-factory.js";
 import {
+  createStressFixtureEditSession,
   ensureStressFixtureReady,
   STRESS_REPO_ID,
 } from "../infra/scenario-setup.js";
 import type {
+  AggregateMetrics,
   ScenarioContext,
   ScenarioResult,
-  AggregateMetrics,
   ToolResultStats,
 } from "../infra/types.js";
 import {
-  stressLog,
   DEFAULT_THRESHOLDS,
   mergeResultStats,
   mergeToolDiagnostics,
+  stressLog,
 } from "../infra/types.js";
 
 const WRITER_ITERATIONS = 4;
@@ -41,31 +43,29 @@ const SEARCH_QUERIES = [
 
 async function writerWorkflow(
   client: import("../infra/client-factory.js").StressClient,
+  editSession: Awaited<ReturnType<typeof createStressFixtureEditSession>>,
 ): Promise<void> {
   for (let i = 0; i < WRITER_ITERATIONS; i++) {
-    // Incremental re-index
+    await editSession.applyIteration(i + 1);
+
     await client.callToolParsed("sdl.index.refresh", {
       repoId: STRESS_REPO_ID,
       mode: "incremental",
     });
 
-    // Check status after each re-index
     await client.callToolParsed("sdl.repo.status", {
       repoId: STRESS_REPO_ID,
     });
 
-    // Repo overview between writes — tests read contention during write phase
     await client.callToolParsed("sdl.repo.overview", {
       repoId: STRESS_REPO_ID,
       level: "stats",
     });
 
-    // Policy get — lightweight read interleaved with writes
     await client.callToolParsed("sdl.policy.get", {
       repoId: STRESS_REPO_ID,
     });
 
-    // Small delay to simulate realistic write cadence
     await new Promise((r) => setTimeout(r, 80));
   }
 }
@@ -77,7 +77,6 @@ async function readerWorkflow(
   for (let i = 0; i < READER_ITERATIONS; i++) {
     const query = SEARCH_QUERIES[(queryIndex + i) % SEARCH_QUERIES.length];
 
-    // Search
     const searchResult = await client.callToolParsed("sdl.symbol.search", {
       repoId: STRESS_REPO_ID,
       query,
@@ -91,26 +90,22 @@ async function readerWorkflow(
 
     const symbolId = results[0].symbolId;
 
-    // Get card
     await client.callToolParsed("sdl.symbol.getCard", {
       repoId: STRESS_REPO_ID,
       symbolId,
     });
 
-    // Build slice
     await client.callToolParsed("sdl.slice.build", {
       repoId: STRESS_REPO_ID,
       entrySymbols: [symbolId],
       budget: { maxCards: 15, maxEstimatedTokens: 2000 },
     });
 
-    // Skeleton — test code tools under write contention
     await client.callToolParsed("sdl.code.getSkeleton", {
       repoId: STRESS_REPO_ID,
       symbolId,
     });
 
-    // Hot path — focused identifier lookup during writes
     await client.callToolParsed("sdl.code.getHotPath", {
       repoId: STRESS_REPO_ID,
       symbolId,
@@ -119,7 +114,7 @@ async function readerWorkflow(
   }
 }
 
-export async function runMixedReadWrite(
+export async function runMixedReadWriteEditful(
   ctx: ScenarioContext,
 ): Promise<ScenarioResult> {
   const { config, serverPort, authToken, log, baselineMetrics } = ctx;
@@ -139,11 +134,11 @@ export async function runMixedReadWrite(
     ReturnType<MetricsCollector["getToolTimingDiagnostics"]>
   > = [];
 
-  log("Setup: Ensuring fixture repo is ready for mixed read-write");
+  log("Setup: Ensuring fixture repo is ready for editful mixed read-write");
   const setupCollector = new MetricsCollector();
   const setupClient = await createStressClient(
     serverPort,
-    "mrw-setup",
+    "mrwe-setup",
     setupCollector,
     config.verbose,
     authToken,
@@ -156,11 +151,12 @@ export async function runMixedReadWrite(
 
   for (const clientCount of config.concurrencyLevels) {
     log(
-      `--- Round: ${clientCount} clients (1 writer + ${clientCount - 1} readers) ---`,
+      `--- Round: ${clientCount} clients (1 writer + ${clientCount - 1} readers, editful) ---`,
     );
     const collector = new MetricsCollector();
     collector.recordMemorySnapshot();
 
+    const editSession = await createStressFixtureEditSession(config.fixturePath);
     const roundStart = Date.now();
     const clients = await createStressClients(
       serverPort,
@@ -172,23 +168,21 @@ export async function runMixedReadWrite(
     );
 
     try {
-      // First client is the writer, rest are readers
       const writerClient = clients[0];
       const readerClients = clients.slice(1);
 
       const results = await Promise.allSettled([
-        writerWorkflow(writerClient),
+        writerWorkflow(writerClient, editSession),
         ...readerClients.map((client, idx) => readerWorkflow(client, idx)),
       ]);
 
-      // Check for failures
       for (const result of results) {
         if (result.status === "rejected") {
           const msg =
             result.reason instanceof Error
               ? result.reason.message
               : String(result.reason);
-          stressLog("error", `Mixed read-write failed: ${msg}`);
+          stressLog("error", `Mixed read-write editful failed: ${msg}`);
         }
       }
 
@@ -199,7 +193,6 @@ export async function runMixedReadWrite(
       const roundErrors = collector.getErrors();
       allErrors.push(...roundErrors);
 
-      // Check for DB corruption errors specifically
       const corruptionErrors = roundErrors.filter(
         (e) =>
           e.message.includes("corrupt") ||
@@ -214,7 +207,6 @@ export async function runMixedReadWrite(
 
       const roundMetrics = collector.getAllToolMetrics();
       for (const [name, metrics] of Object.entries(roundMetrics)) {
-        // Keep the round with the worst P95 — that's the regression signal
         if (!allToolMetrics[name] || metrics.p95 > allToolMetrics[name].p95) {
           allToolMetrics[name] = metrics;
         }
@@ -223,7 +215,6 @@ export async function runMixedReadWrite(
       const memPeak = collector.getMemoryPeakMB();
       peakMemory = Math.max(peakMemory, memPeak);
 
-      // Check error rate
       const errorRate =
         roundErrors.length / Math.max(collector.getRecordCount(), 1);
       if (errorRate > DEFAULT_THRESHOLDS.maxErrorRate) {
@@ -233,7 +224,6 @@ export async function runMixedReadWrite(
         );
       }
 
-      // Check P95 against baseline (more lenient for mixed workload)
       if (baselineMetrics) {
         for (const [tool, metrics] of Object.entries(roundMetrics)) {
           const baseP95 = baselineMetrics[tool]?.p95;
@@ -257,11 +247,37 @@ export async function runMixedReadWrite(
       );
     } finally {
       await disconnectAll(clients);
+
+      // Keep later rounds and scenarios honest by restoring the shared fixture
+      // on disk and re-syncing the graph outside the measured round metrics.
+      const cleanupCollector = new MetricsCollector();
+      const cleanupClient = await createStressClient(
+        serverPort,
+        `mrwe-cleanup-${clientCount}`,
+        cleanupCollector,
+        config.verbose,
+        authToken,
+      );
+      try {
+        await editSession.restore();
+        await cleanupClient.callToolParsed("sdl.index.refresh", {
+          repoId: STRESS_REPO_ID,
+          mode: "incremental",
+        });
+      } catch (error) {
+        anyFailed = true;
+        const message = error instanceof Error ? error.message : String(error);
+        allWarnings.push(
+          `Round ${clientCount}: fixture cleanup failed (${message})`,
+        );
+      } finally {
+        await disconnectAll([cleanupClient]);
+      }
     }
   }
 
   return {
-    name: "mixed-read-write",
+    name: "mixed-read-write-editful",
     passed: !anyFailed,
     clients: config.concurrencyLevels[config.concurrencyLevels.length - 1],
     durationMs: totalDuration,

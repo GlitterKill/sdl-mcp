@@ -3,8 +3,15 @@
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber, withTransaction } from "./ladybug-core.js";
+import {
+  exec,
+  queryAll,
+  querySingle,
+  toNumber,
+  withTransaction,
+} from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
+import { normalizePath } from "../util/paths.js";
 
 // Promise-based singleton for join hint support detection.
 // Used by getEdgesToSymbols and getCallersOfSymbols to avoid
@@ -16,7 +23,11 @@ let joinHintSupportedPromise: Promise<boolean> | null = null;
 
 async function detectJoinHintSupport(conn: Connection): Promise<boolean> {
   try {
-    await queryAll(conn, `MATCH (a:Symbol)-[d:DEPENDS_ON]->(b:Symbol) WITH a, d, b HINT (b JOIN (d JOIN a)) RETURN a.symbolId LIMIT 0`, {});
+    await queryAll(
+      conn,
+      `MATCH (a:Symbol)-[d:DEPENDS_ON]->(b:Symbol) WITH a, d, b HINT (b JOIN (d JOIN a)) RETURN a.symbolId LIMIT 0`,
+      {},
+    );
     return true;
   } catch (err) {
     logger.warn("Join hint support detection failed", { error: String(err) });
@@ -86,7 +97,10 @@ function buildMinCallConfidenceClause(
   return ` AND (${alias}.edgeType <> 'call' OR ${alias}.confidence >= $minCallConfidence)`;
 }
 
-export async function insertEdge(conn: Connection, edge: EdgeRow): Promise<void> {
+export async function insertEdge(
+  conn: Connection,
+  edge: EdgeRow,
+): Promise<void> {
   // Note: MERGE on target symbol (b) may create "stub" nodes with only symbolId
   // and SYMBOL_IN_REPO edge when the target hasn't been indexed yet. This is
   // intentional — stubs are populated when the target file is indexed, and
@@ -166,7 +180,7 @@ export async function insertEdges(
                d.resolverId = $resolverId,
                d.resolutionPhase = $resolutionPhase,
                d.provenance = $provenance,
-               d.createdAt = $createdAt`,
+               d.createdAt = CASE WHEN d.createdAt IS NOT NULL THEN d.createdAt ELSE $createdAt END`,
           {
             fromSymbolId: edge.fromSymbolId,
             toSymbolId: edge.toSymbolId,
@@ -498,16 +512,12 @@ export async function getEdgesToSymbols(
     resolutionPhase: string | null;
     provenance: string | null;
     createdAt: string;
-  }>(
-    conn,
-    useJoinHint ? queryWithHint : queryWithoutHint,
-    {
-      symbolIds,
-      ...(options?.minCallConfidence !== undefined
-        ? { minCallConfidence: options.minCallConfidence }
-        : {}),
-    },
-  );
+  }>(conn, useJoinHint ? queryWithHint : queryWithoutHint, {
+    symbolIds,
+    ...(options?.minCallConfidence !== undefined
+      ? { minCallConfidence: options.minCallConfidence }
+      : {}),
+  });
 
   for (const row of rows) {
     const bucket = result.get(row.toSymbolId);
@@ -575,6 +585,114 @@ export async function getEdgesByRepo(
     resolutionPhase: row.resolutionPhase ?? undefined,
     provenance: row.provenance,
     createdAt: row.createdAt,
+  }));
+}
+
+export async function getEdgesByRepoLite(
+  conn: Connection,
+  repoId: string,
+): Promise<EdgeLite[]> {
+  return await queryAll<EdgeLite>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
+     RETURN a.symbolId AS fromSymbolId,
+            b.symbolId AS toSymbolId,
+            d.edgeType AS edgeType`,
+    { repoId },
+  );
+}
+
+export interface UnresolvedImportEdgeCandidate {
+  fromSymbolId: string;
+  toSymbolId: string;
+  provenance: string | null;
+}
+
+export interface UnresolvedImportEdgeQueryOptions {
+  affectedPaths?: string[];
+}
+
+export interface UnresolvedCallEdgeCandidate {
+  fromSymbolId: string;
+  toSymbolId: string;
+}
+
+export async function getUnresolvedImportEdgesByRepo(
+  conn: Connection,
+  repoId: string,
+  options?: UnresolvedImportEdgeQueryOptions,
+): Promise<UnresolvedImportEdgeCandidate[]> {
+  const affectedPaths = Array.from(
+    new Set((options?.affectedPaths ?? []).map((path) => normalizePath(path))),
+  ).filter((path) => path.length > 0);
+  const params: Record<string, unknown> = { repoId };
+  const targetPrefixClauses: string[] = [];
+  for (const [index, relPath] of affectedPaths.entries()) {
+    const paramName = `targetPrefix${index}`;
+    params[paramName] = `unresolved:${relPath}:`;
+    targetPrefixClauses.push(`b.symbolId STARTS WITH $${paramName}`);
+  }
+
+  const affectedPathsMatchClause =
+    affectedPaths.length > 0
+      ? `
+     MATCH (a)-[:SYMBOL_IN_FILE]->(f:File)`
+      : "";
+  const affectedPathsFilterClause =
+    affectedPaths.length > 0
+      ? `
+       AND (f.relPath IN $affectedPaths OR ${targetPrefixClauses.join(" OR ")})`
+      : "";
+  if (affectedPaths.length > 0) {
+    params.affectedPaths = affectedPaths;
+  }
+
+  const rows = await queryAll<{
+    fromSymbolId: string;
+    toSymbolId: string;
+    provenance: string | null;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
+     ${affectedPathsMatchClause}
+     WHERE d.edgeType = 'import' AND b.symbolId STARTS WITH 'unresolved:'${
+       affectedPaths.length > 0
+         ? `
+       ${affectedPathsFilterClause}`
+         : ""
+     }
+     RETURN a.symbolId AS fromSymbolId,
+            b.symbolId AS toSymbolId,
+            d.provenance AS provenance`,
+    params,
+  );
+
+  return rows.map((row) => ({
+    fromSymbolId: row.fromSymbolId,
+    toSymbolId: row.toSymbolId,
+    provenance: row.provenance,
+  }));
+}
+
+export async function getUnresolvedCallEdgesByRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<UnresolvedCallEdgeCandidate[]> {
+  const rows = await queryAll<{
+    fromSymbolId: string;
+    toSymbolId: string;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
+     WHERE d.edgeType = 'call' AND b.symbolId STARTS WITH 'unresolved:call:'
+     RETURN a.symbolId AS fromSymbolId,
+            b.symbolId AS toSymbolId`,
+    { repoId },
+  );
+
+  return rows.map((row) => ({
+    fromSymbolId: row.fromSymbolId,
+    toSymbolId: row.toSymbolId,
   }));
 }
 
@@ -748,4 +866,3 @@ export async function getCallEdgeResolutionCounts(
     resolvableCallEdges: resolvable ? toNumber(resolvable.count) : 0,
   };
 }
-

@@ -135,6 +135,25 @@ export interface ToolResultStats {
   sampleValues: Record<string, string>;
 }
 
+export interface NumericSummary {
+  count: number;
+  min: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  max: number;
+  avg: number;
+}
+
+export interface ToolTimingSummary {
+  totalMs: NumericSummary;
+  phases: Record<string, NumericSummary>;
+}
+
+export interface ToolDiagnostics {
+  timings: ToolTimingSummary;
+}
+
 /**
  * Merge multiple ToolResultStats (e.g. from successive concurrency rounds)
  * into a single aggregate.
@@ -153,6 +172,24 @@ export function mergeResultStats(parts: ToolResultStats[]): ToolResultStats {
     merged.checksFailed += p.checksFailed;
     merged.failures.push(...p.failures);
     Object.assign(merged.sampleValues, p.sampleValues);
+  }
+  return merged;
+}
+
+export function mergeToolDiagnostics(
+  parts: Array<Record<string, ToolDiagnostics>>,
+): Record<string, ToolDiagnostics> {
+  const merged: Record<string, ToolDiagnostics> = {};
+  for (const part of parts) {
+    for (const [toolName, diagnostics] of Object.entries(part)) {
+      const existing = merged[toolName];
+      if (
+        !existing ||
+        diagnostics.timings.totalMs.p95 > existing.timings.totalMs.p95
+      ) {
+        merged[toolName] = diagnostics;
+      }
+    }
   }
   return merged;
 }
@@ -177,6 +214,7 @@ export interface ScenarioResult {
   warnings: string[];
   /** Semantic validation of tool response content — release smoke-test signal */
   toolResultStats?: ToolResultStats;
+  toolDiagnostics?: Record<string, ToolDiagnostics>;
 }
 
 // ---------------------------------------------------------------------------

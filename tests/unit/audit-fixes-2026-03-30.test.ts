@@ -130,6 +130,15 @@ describe("index.refresh async mode schema", () => {
     );
   });
 
+  it("request schema accepts includeDiagnostics flag", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("src/mcp/tools.ts", "utf8");
+    assert.ok(
+      src.includes("includeDiagnostics: z.boolean().optional()"),
+      "IndexRefreshRequestSchema should have includeDiagnostics boolean field",
+    );
+  });
+
   it("response schema includes operationId and message", async () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync("src/mcp/tools.ts", "utf8");
@@ -140,6 +149,19 @@ describe("index.refresh async mode schema", () => {
     assert.ok(
       src.includes("message: z.string().optional()"),
       "IndexRefreshResponseSchema should have message field",
+    );
+  });
+
+  it("response schema includes diagnostics timings", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("src/mcp/tools.ts", "utf8");
+    assert.ok(
+      src.includes("diagnostics: z.object("),
+      "IndexRefreshResponseSchema should have diagnostics field",
+    );
+    assert.ok(
+      src.includes("timings: z.object("),
+      "IndexRefreshResponseSchema should include timings diagnostics",
     );
   });
 

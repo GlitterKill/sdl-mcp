@@ -27,6 +27,12 @@ export interface ClusterMemberRow {
   membershipScore: number;
 }
 
+export interface ClusterMemberForRepoRow {
+  clusterId: string;
+  symbolId: string;
+  membershipScore: number;
+}
+
 export interface ClusterForSymbolRow {
   clusterId: string;
   label: string;
@@ -204,6 +210,7 @@ export async function getClustersForRepo(
     cohesionScore: unknown;
     versionId: string | null;
     createdAt: string;
+    searchText: string | null;
   }>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:CLUSTER_IN_REPO]-(c:Cluster)
@@ -212,7 +219,8 @@ export async function getClustersForRepo(
             c.symbolCount AS symbolCount,
             c.cohesionScore AS cohesionScore,
             c.versionId AS versionId,
-            c.createdAt AS createdAt
+            c.createdAt AS createdAt,
+            c.searchText AS searchText
      ORDER BY c.clusterId`,
     { repoId },
   );
@@ -225,6 +233,7 @@ export async function getClustersForRepo(
     cohesionScore: toNumber(row.cohesionScore ?? 0),
     versionId: row.versionId,
     createdAt: row.createdAt,
+    searchText: row.searchText,
   }));
 }
 
@@ -239,6 +248,31 @@ export async function getClusterMembersForRepo(
     { repoId },
   );
   return rows;
+}
+
+export async function getClusterMembersWithScoresForRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<ClusterMemberForRepoRow[]> {
+  const rows = await queryAll<{
+    clusterId: string;
+    symbolId: string;
+    membershipScore: unknown;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[m:BELONGS_TO_CLUSTER]->(c:Cluster)
+     RETURN c.clusterId AS clusterId,
+            s.symbolId AS symbolId,
+            m.membershipScore AS membershipScore
+     ORDER BY c.clusterId ASC, s.symbolId ASC`,
+    { repoId },
+  );
+
+  return rows.map((row) => ({
+    clusterId: row.clusterId,
+    symbolId: row.symbolId,
+    membershipScore: toNumber(row.membershipScore ?? 0),
+  }));
 }
 
 export async function getClusterOverviewStats(
@@ -313,33 +347,24 @@ export async function getRelatedClusters(
   clusterId: string,
   limit: number = 20,
 ): Promise<Array<{ clusterId: string; edgeCount: number }>> {
-  const rows = await queryAll<{ clusterId: string }>(
+  const safeLimit = Math.max(0, limit);
+  if (safeLimit === 0) return [];
+
+  const rows = await queryAll<{ clusterId: string; edgeCount: unknown }>(
     conn,
     `MATCH (c1:Cluster {clusterId: $clusterId})<-[:BELONGS_TO_CLUSTER]-(s:Symbol)
      MATCH (s)-[d:DEPENDS_ON]->(t:Symbol)-[:BELONGS_TO_CLUSTER]->(c2:Cluster)
      WHERE c2.clusterId <> $clusterId
-     RETURN c2.clusterId AS clusterId`,
-    { clusterId },
+     RETURN c2.clusterId AS clusterId, COUNT(*) AS edgeCount
+     ORDER BY edgeCount DESC, clusterId ASC
+     LIMIT $limit`,
+    { clusterId, limit: safeLimit },
   );
 
-  const edgeCounts = new Map<string, number>();
-  for (const row of rows) {
-    edgeCounts.set(row.clusterId, (edgeCounts.get(row.clusterId) ?? 0) + 1);
-  }
-
-  const results = Array.from(edgeCounts.entries()).map(
-    ([clusterId, edgeCount]) => ({
-      clusterId,
-      edgeCount,
-    }),
-  );
-
-  results.sort(
-    (a, b) =>
-      b.edgeCount - a.edgeCount || a.clusterId.localeCompare(b.clusterId),
-  );
-
-  return results.slice(0, Math.max(1, limit));
+  return rows.map((row) => ({
+    clusterId: row.clusterId,
+    edgeCount: toNumber(row.edgeCount),
+  }));
 }
 
 /**

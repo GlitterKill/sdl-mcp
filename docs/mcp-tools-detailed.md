@@ -207,6 +207,8 @@ Triggers re-indexing of a repository in either full or incremental mode.
 | `repoId` | string | Yes | Repository identifier |
 | `mode` | `"full"` \| `"incremental"` | Yes | `full` re-indexes everything; `incremental` only processes files changed since the last index |
 | `reason` | string | No | Optional reason for the refresh (logged) |
+| `includeDiagnostics` | boolean | No | When `true`, include coarse phase timings in the synchronous response |
+| `async` | boolean | No | When `true`, start indexing in the background and return immediately with an `operationId` |
 
 **Response:**
 
@@ -216,10 +218,16 @@ Triggers re-indexing of a repository in either full or incremental mode.
 | `repoId` | string | Repository identifier |
 | `versionId` | string | The new ledger version ID |
 | `changedFiles` | number | Number of files processed |
+| `async` | boolean | Present when the refresh was accepted for background execution |
+| `operationId` | string | Background operation identifier when `async: true` |
+| `message` | string | Human-readable status for async refresh requests |
+| `diagnostics` | object | Optional diagnostics envelope returned only when `includeDiagnostics: true` on synchronous requests |
 
 **Notes:**
 - Incremental mode compares file content hashes to detect changes. Only changed files are re-parsed.
+- If no tracked files changed, incremental refresh can short-circuit after `scanRepo`, `versioning`, and `memorySync` while reusing the existing version.
 - After indexing, all slice caches and card caches are invalidated.
+- `diagnostics.timings.totalMs` covers the full synchronous indexing run, while `diagnostics.timings.phases` breaks out coarse stages such as `scanRepo`, `pass1`, `pass2`, and `finalizeIndexing`. Nested keys may also appear for hotspots inside a phase, for example `initSharedState.tsResolver`, `initSharedState.tsResolver.sourceFiles`, `initSharedState.tsResolver.programBuild`, `initSharedState.symbolMaps`, `resolveUnresolvedImports.fetchEdges`, `finalizeEdges.cleanupUnresolvedBuiltins`, `finalizeEdges.insertConfigEdges`, `finalizeIndexing.metrics`, `finalizeIndexing.metrics.testRefs`, `finalizeIndexing.fileSummaries`, `clustersAndProcesses.loadSymbols`, or `clustersAndProcesses.processWrite`. No-op incremental refreshes may omit later phases and report `shortCircuitNoOp` instead.
 
 ---
 

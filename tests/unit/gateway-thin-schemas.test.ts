@@ -45,6 +45,16 @@ describe("Gateway wire schemas", () => {
   });
 
   it("AGENT_THIN_SCHEMA carries action-specific envelopes", () => {
-    assertGatewaySchema(AGENT_THIN_SCHEMA, AGENT_ACTIONS);
+    // Memory actions are config-gated and excluded when memory is globally unused
+    const MEMORY_ACTIONS = new Set([
+      "memory.store",
+      "memory.query",
+      "memory.remove",
+      "memory.surface",
+    ]);
+    const activeAgentActions = AGENT_ACTIONS.filter(
+      (a) => !MEMORY_ACTIONS.has(a),
+    );
+    assertGatewaySchema(AGENT_THIN_SCHEMA, activeAgentActions);
   });
 });

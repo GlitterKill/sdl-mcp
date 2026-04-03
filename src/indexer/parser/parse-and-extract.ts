@@ -82,7 +82,14 @@ export async function parseAndExtract(params: {
             byteSize: fileMeta.size,
           });
         });
-        return { status: "skip", result: createEmptyProcessFileResult(true) };
+        return {
+          status: "skip",
+          result: createEmptyProcessFileResult(true, {
+            fileId,
+            relPath,
+            symbols: [],
+          }),
+        };
       }
 
       let extractedSymbols: ReturnType<LanguageAdapter["extractSymbols"]>;

@@ -455,12 +455,28 @@ export async function handleIndexRefresh(
   const request = args as IndexRefreshRequest;
   const { repoId, mode } = request;
   const asyncMode = request.async === true;
+  const includeDiagnostics = request.includeDiagnostics === true;
 
   recordToolTrace({
     repoId,
     taskType: "index",
     tool: "index.refresh",
   });
+
+  const toResponse = (
+    result: Awaited<ReturnType<typeof indexRepo>>,
+  ): IndexRefreshResponse => {
+    const response: IndexRefreshResponse = {
+      ok: true,
+      repoId,
+      versionId: result.versionId,
+      changedFiles: result.changedFiles,
+    };
+    if (includeDiagnostics && result.timings) {
+      response.diagnostics = { timings: result.timings };
+    }
+    return response;
+  };
 
   const executeRefresh = async () => {
     const conn = await getLadybugConn();
@@ -493,19 +509,20 @@ export async function handleIndexRefresh(
           }
         : undefined;
 
-    const result = await indexRepo(repoId, mode, onProgress, context?.signal);
+    const result = await indexRepo(
+      repoId,
+      mode,
+      onProgress,
+      context?.signal,
+      { includeTimings: includeDiagnostics },
+    );
 
     clearSliceCache();
     clearOverviewCache();
     symbolCardCache.clear();
     invalidateGraphSnapshot(repoId);
 
-    return {
-      ok: true,
-      repoId,
-      versionId: result.versionId,
-      changedFiles: result.changedFiles,
-    };
+    return toResponse(result);
   };
 
   // Async mode: return immediately, run indexing in background
@@ -522,7 +539,7 @@ export async function handleIndexRefresh(
       clearOverviewCache();
       symbolCardCache.clear();
       invalidateGraphSnapshot(repoId);
-      return { ok: true as const, repoId, versionId: result.versionId, changedFiles: result.changedFiles };
+      return toResponse(result);
     };
     bgRefresh().then(
       (result) => logger.info("Async index refresh completed", { repoId, operationId, versionId: result.versionId, changedFiles: result.changedFiles }),

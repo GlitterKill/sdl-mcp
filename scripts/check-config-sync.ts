@@ -39,7 +39,10 @@ interface DefaultEntry {
  *   - `key`:        `schemaName.fieldName` (unique per schema)
  *   - `value`:      the balanced parenthesis content
  */
-function extractDefaults(source: string, filename: string): Map<string, DefaultEntry[]> {
+function extractDefaults(
+  source: string,
+  filename: string,
+): Map<string, DefaultEntry[]> {
   const results = new Map<string, DefaultEntry[]>();
 
   // Pre-build a list of schema declaration positions so we can find the
@@ -75,7 +78,8 @@ function extractDefaults(source: string, filename: string): Map<string, DefaultE
 
     // Walk backwards from idx to find field identifier.
     const before = source.slice(Math.max(0, idx - 200), idx);
-    const fieldMatch = before.match(/(\w+)\s*\)\s*$/) ?? before.match(/(\w+)\s*$/);
+    const fieldMatch =
+      before.match(/(\w+)\s*\)\s*$/) ?? before.match(/(\w+)\s*$/);
     const fieldName = fieldMatch ? fieldMatch[1] : "<unknown>";
 
     // Find the enclosing schema: the last schema declaration before idx.
@@ -91,8 +95,9 @@ function extractDefaults(source: string, filename: string): Map<string, DefaultE
     const upToIdx = source.slice(0, idx);
     const lineNum = upToIdx.split("\n").length;
 
-    // Normalize value: collapse whitespace for comparison
-    const normalizedValue = rawValue.replace(/\s+/g, " ");
+    // Normalize value: collapse whitespace and strip trailing commas for comparison
+    // (TypeScript compiler removes trailing commas in function call arguments)
+    const normalizedValue = rawValue.replace(/\s+/g, " ").replace(/,\s*$/, "");
 
     // Use fully-qualified key to avoid collisions between schemas
     const key = `${schemaName}.${fieldName}`;
@@ -196,11 +201,15 @@ function main(): void {
   const mismatches = compareDefaults(tsDefaults, jsDefaults);
 
   if (mismatches.length === 0) {
-    console.log("check-config-sync: OK — all .default(...) values match between types.ts and types.js");
+    console.log(
+      "check-config-sync: OK — all .default(...) values match between types.ts and types.js",
+    );
     process.exit(0);
   }
 
-  console.error(`check-config-sync: FAIL — found ${mismatches.length} mismatch(es)\n`);
+  console.error(
+    `check-config-sync: FAIL — found ${mismatches.length} mismatch(es)\n`,
+  );
   for (const m of mismatches) {
     console.error(`  Context:  ${m.context}`);
     if (m.jsLine === -1) {

@@ -17,7 +17,6 @@ import type {
   TsCallResolver,
 } from "../edge-builder.js";
 import { getAdapterForExtension } from "../adapter/registry.js";
-import type { ConfigEdge } from "../configEdges.js";
 import type { FileMetadata } from "../fileScanner.js";
 import type { RustParseResult } from "../rustIndexer.js";
 import { buildSymbolAndEdgeRows } from "./build-rows.js";
@@ -26,7 +25,7 @@ import {
   computePass2HintPaths,
   loadExistingSymbols,
 } from "./symbol-mapping.js";
-import type { SymbolDetail } from "./types.js";
+import type { ProcessFileResult, SymbolDetail } from "./types.js";
 
 /**
  * Process a file using pre-parsed results from the Rust native engine.
@@ -57,13 +56,7 @@ export async function processFileFromRustResult(params: {
   globalNameToSymbolIds?: Map<string, string[]>;
   globalPreferredSymbolId?: Map<string, string>;
   supportsPass2FilePath?: (relPath: string) => boolean;
-}): Promise<{
-  symbolsIndexed: number;
-  edgesCreated: number;
-  changed: boolean;
-  configEdges: ConfigEdge[];
-  pass2HintPaths: string[];
-}> {
+}): Promise<ProcessFileResult> {
   const {
     repoId,
     repoRoot,
@@ -156,6 +149,11 @@ export async function processFileFromRustResult(params: {
         changed: true,
         configEdges: [],
         pass2HintPaths: [],
+        symbolMapFileUpdate: {
+          fileId,
+          relPath,
+          symbols: [],
+        },
       };
     }
 
@@ -249,6 +247,7 @@ export async function processFileFromRustResult(params: {
     // ── Phase 7: Build symbol rows + edges (shared) ──────────────
     const {
       symbolsToUpsert,
+      fileSymbols,
       edgesToInsert,
       symbolReferences,
       edgesCreated,
@@ -317,6 +316,18 @@ export async function processFileFromRustResult(params: {
       changed: true,
       configEdges: [],
       pass2HintPaths,
+      symbolMapFileUpdate: {
+        fileId,
+        relPath,
+        symbols: fileSymbols.map((symbol) => ({
+          symbolId: symbol.symbolId,
+          repoId: symbol.repoId,
+          fileId: symbol.fileId,
+          name: symbol.name,
+          kind: symbol.kind,
+          exported: symbol.exported,
+        })),
+      },
     };
   } catch (error) {
     logger.error(`Error processing Rust result for ${fileMeta.path}: ${error}`);

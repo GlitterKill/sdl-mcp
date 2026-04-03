@@ -362,13 +362,25 @@ describe("release regression guards", () => {
     );
   });
 
-  it("does not short-circuit no-change incremental indexing before shared finalization", () => {
+  it("keeps versioning and memory sync in the no-op incremental fast path", () => {
     const source = readSource("src/indexer/indexer.ts");
 
-    assert.doesNotMatch(
+    assert.match(
       source,
-      /if \(mode === "incremental" && allFilesUnchanged\) \{[\s\S]*?return \{/s,
-      "indexRepoImpl should not return early for no-change incremental runs",
+      /measurePhase\("shortCircuitNoOp"/,
+      "indexRepoImpl should keep an explicit no-op incremental fast path",
+    );
+
+    assert.match(
+      source,
+      /createOrReuseVersion\("Incremental index"\)/,
+      "no-op incremental runs should still reuse or create a version",
+    );
+
+    assert.match(
+      source,
+      /importMemoryFilesFromDisk\(repoRow\.rootPath, repoId, versionId\)/,
+      "no-op incremental runs should still import memory files",
     );
   });
 });

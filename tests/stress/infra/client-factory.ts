@@ -76,6 +76,7 @@ export class StressClient {
     name: string,
     args: Record<string, unknown> = {},
   ): Promise<unknown> {
+    const effectiveArgs = this.prepareToolArgs(name, args);
     const start = Date.now();
     let success = false;
     let responseSize = 0;
@@ -83,7 +84,10 @@ export class StressClient {
     let result: unknown;
 
     try {
-      const response = await this.client.callTool({ name, arguments: args });
+      const response = await this.client.callTool({
+        name,
+        arguments: effectiveArgs,
+      });
       result = response;
       responseSize = JSON.stringify(response).length;
       success = true;
@@ -150,7 +154,8 @@ export class StressClient {
     name: string,
     args: Record<string, unknown> = {},
   ): Promise<Record<string, unknown>> {
-    const response = await this.callTool(name, args);
+    const effectiveArgs = this.prepareToolArgs(name, args);
+    const response = await this.callTool(name, effectiveArgs);
     const content = (
       response as { content?: Array<{ type: string; text: string }> }
     )?.content;
@@ -159,7 +164,7 @@ export class StressClient {
       : ((response ?? {}) as Record<string, unknown>);
 
     // Run result validators — fires for every known tool, no-op for unknown
-    const checks = validateToolResult(name, args, parsed);
+    const checks = validateToolResult(name, effectiveArgs, parsed);
     if (checks.length > 0) {
       this.collector.recordResultChecks(checks);
     }
@@ -167,12 +172,26 @@ export class StressClient {
     if (Object.keys(samples).length > 0) {
       this.collector.recordSampleValues(name, samples);
     }
+    this.collector.recordToolTimingDiagnostics(name, parsed.diagnostics);
 
     return parsed;
   }
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  private prepareToolArgs(
+    name: string,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (name === "sdl.index.refresh" && args.includeDiagnostics !== true) {
+      return {
+        ...args,
+        includeDiagnostics: true,
+      };
+    }
+    return args;
   }
 }
 

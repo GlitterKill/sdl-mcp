@@ -189,5 +189,6 @@ export async function runSingleClientBaseline(
     memoryPeakMB: collector.getMemoryPeakMB(),
     warnings,
     toolResultStats: collector.getResultStats(),
+    toolDiagnostics: collector.getToolTimingDiagnostics(),
   };
 }

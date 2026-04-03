@@ -709,6 +709,7 @@ export const IndexRefreshRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   mode: z.enum(["full", "incremental"]),
   reason: z.string().optional(),
+  includeDiagnostics: z.boolean().optional(),
   async: z.boolean().optional().describe("If true, return immediately with operationId and run indexing in background"),
 });
 
@@ -720,6 +721,12 @@ export const IndexRefreshResponseSchema = z.object({
   async: z.boolean().optional(),
   operationId: z.string().optional(),
   message: z.string().optional(),
+  diagnostics: z.object({
+    timings: z.object({
+      totalMs: z.number(),
+      phases: z.record(z.string(), z.number()),
+    }),
+  }).optional(),
 });
 
 const BufferSelectionSchema = z.object({

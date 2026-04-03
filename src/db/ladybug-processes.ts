@@ -37,6 +37,13 @@ export interface ProcessForSymbolRow {
   role: string | null;
 }
 
+export interface ProcessStepForRepoRow {
+  processId: string;
+  symbolId: string;
+  stepOrder: number;
+  role: string | null;
+}
+
 export async function upsertProcess(
   conn: Connection,
   row: ProcessRow,
@@ -212,6 +219,72 @@ export async function getProcessesForSymbols(
   }
 
   return map;
+}
+
+export async function getProcessesForRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<ProcessRow[]> {
+  const rows = await queryAll<{
+    processId: string;
+    entrySymbolId: string;
+    label: string;
+    depth: unknown;
+    versionId: string | null;
+    createdAt: string;
+    searchText: string | null;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:PROCESS_IN_REPO]-(p:Process)
+     RETURN p.processId AS processId,
+            p.entrySymbolId AS entrySymbolId,
+            p.label AS label,
+            p.depth AS depth,
+            p.versionId AS versionId,
+            p.createdAt AS createdAt,
+            p.searchText AS searchText
+     ORDER BY p.processId ASC`,
+    { repoId },
+  );
+
+  return rows.map((row) => ({
+    processId: row.processId,
+    repoId,
+    entrySymbolId: row.entrySymbolId,
+    label: row.label,
+    depth: toNumber(row.depth),
+    versionId: row.versionId,
+    createdAt: row.createdAt,
+    searchText: row.searchText,
+  }));
+}
+
+export async function getProcessStepsForRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<ProcessStepForRepoRow[]> {
+  const rows = await queryAll<{
+    processId: string;
+    symbolId: string;
+    stepOrder: unknown;
+    role: string | null;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:PROCESS_IN_REPO]-(p:Process)<-[step:PARTICIPATES_IN]-(s:Symbol)
+     RETURN p.processId AS processId,
+            s.symbolId AS symbolId,
+            step.stepOrder AS stepOrder,
+            step.role AS role
+     ORDER BY p.processId ASC, step.stepOrder ASC, s.symbolId ASC`,
+    { repoId },
+  );
+
+  return rows.map((row) => ({
+    processId: row.processId,
+    symbolId: row.symbolId,
+    stepOrder: toNumber(row.stepOrder),
+    role: row.role,
+  }));
 }
 
 export async function getProcessOverviewStats(

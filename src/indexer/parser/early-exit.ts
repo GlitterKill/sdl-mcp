@@ -79,7 +79,14 @@ export async function resolveFileForIndexing(params: {
         byteSize: fileMeta.size,
       });
     });
-    return { status: "skip", result: createEmptyProcessFileResult(true) };
+    return {
+      status: "skip",
+      result: createEmptyProcessFileResult(true, {
+        fileId,
+        relPath,
+        symbols: [],
+      }),
+    };
   }
 
   // ── Content hash unchanged ───────────────────────────────────────
@@ -112,7 +119,14 @@ export async function resolveFileForIndexing(params: {
         byteSize: fileMeta.size,
       });
     });
-    return { status: "skip", result: createEmptyProcessFileResult(true) };
+    return {
+      status: "skip",
+      result: createEmptyProcessFileResult(true, {
+        fileId,
+        relPath,
+        symbols: [],
+      }),
+    };
   }
 
   // ── Adapter lookup ───────────────────────────────────────────────
@@ -134,7 +148,14 @@ export async function resolveFileForIndexing(params: {
         byteSize: fileMeta.size,
       });
     });
-    return { status: "skip", result: createEmptyProcessFileResult(true) };
+    return {
+      status: "skip",
+      result: createEmptyProcessFileResult(true, {
+        fileId,
+        relPath,
+        symbols: [],
+      }),
+    };
   }
 
   return {

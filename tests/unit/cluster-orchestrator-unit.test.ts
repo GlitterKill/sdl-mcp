@@ -280,4 +280,95 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
       ["sym-main", "sym-foo"],
     );
   });
+
+  it("refreshes cluster and process metadata without changing stable topology", async () => {
+    await resetDb();
+    await seedRepo("repo-stable");
+    await seedFile("repo-stable", "file-1", "src/stable.ts");
+    await seedSymbol({
+      repoId: "repo-stable",
+      fileId: "file-1",
+      symbolId: "sym-main",
+      name: "main",
+    });
+    await seedSymbol({
+      repoId: "repo-stable",
+      fileId: "file-1",
+      symbolId: "sym-foo",
+      name: "foo",
+    });
+    await seedSymbol({
+      repoId: "repo-stable",
+      fileId: "file-1",
+      symbolId: "sym-bar",
+      name: "bar",
+    });
+    const conn = await getLadybugConn();
+    await ladybugDb.insertEdges(conn, [
+      {
+        repoId: "repo-stable",
+        fromSymbolId: "sym-main",
+        toSymbolId: "sym-foo",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+      {
+        repoId: "repo-stable",
+        fromSymbolId: "sym-foo",
+        toSymbolId: "sym-bar",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+    ]);
+
+    await computeAndStoreClustersAndProcesses({
+      conn,
+      repoId: "repo-stable",
+      versionId: "v1",
+      minClusterSize: 2,
+      maxProcessDepth: 5,
+      entryPatterns: ["^main$"],
+    });
+
+    await computeAndStoreClustersAndProcesses({
+      conn,
+      repoId: "repo-stable",
+      versionId: "v2",
+      minClusterSize: 2,
+      maxProcessDepth: 5,
+      entryPatterns: ["^main$"],
+    });
+
+    const clusters = await ladybugDb.getClustersForRepo(conn, "repo-stable");
+    assert.ok(clusters.length >= 1);
+    assert.equal(clusters[0]?.versionId, "v2");
+
+    const processes = await ladybugDb.getProcessesForRepo(conn, "repo-stable");
+    assert.ok(processes.length >= 1);
+    assert.equal(processes[0]?.versionId, "v2");
+
+    const clusterMembers = await ladybugDb.getClusterMembersForRepo(
+      conn,
+      "repo-stable",
+    );
+    assert.ok(clusterMembers.length >= 2);
+
+    const processSteps = await ladybugDb.getProcessStepsForRepo(
+      conn,
+      "repo-stable",
+    );
+    assert.ok(processSteps.length >= 2);
+  });
 });

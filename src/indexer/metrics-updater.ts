@@ -21,12 +21,15 @@ export interface FinalizeIndexingParams {
   versionId: string;
   appConfig: AppConfig;
   changedFileIds?: Set<string>;
+  hasIndexMutations?: boolean;
+  includeTimings?: boolean;
   callResolutionTelemetry: CallResolutionTelemetry;
   onProgress?: (progress: IndexProgress) => void;
 }
 
 export interface FinalizeIndexingResult {
   summaryStats?: SummaryBatchResult;
+  timings?: Record<string, number>;
 }
 
 export async function finalizeIndexing({
@@ -34,23 +37,61 @@ export async function finalizeIndexing({
   versionId,
   appConfig,
   changedFileIds,
+  hasIndexMutations,
+  includeTimings,
   callResolutionTelemetry,
   onProgress,
 }: FinalizeIndexingParams): Promise<FinalizeIndexingResult> {
-  await updateMetricsForRepo(repoId, changedFileIds);
+  const timings: Record<string, number> | undefined = includeTimings ? {} : undefined;
+  const measureSubphase = async <T>(
+    phaseName: string,
+    fn: () => Promise<T>,
+  ): Promise<T> => {
+    const startMs = Date.now();
+    try {
+      return await fn();
+    } finally {
+      if (timings) {
+        timings[phaseName] = Date.now() - startMs;
+      }
+    }
+  };
+
+  // Incremental no-op refreshes can reuse the current version, so rerunning the
+  // repo-wide post-index phases is pure overhead.
+  if (changedFileIds && changedFileIds.size === 0 && hasIndexMutations === false) {
+    logger.debug("Skipping finalizeIndexing for no-op incremental refresh", {
+      repoId,
+    });
+    return { timings };
+  }
+
+  const metricsResult = await measureSubphase("metrics", () =>
+    updateMetricsForRepo(repoId, changedFileIds, {
+      includeTimings,
+    }),
+  );
+  if (timings && metricsResult.timings) {
+    for (const [phaseName, durationMs] of Object.entries(metricsResult.timings)) {
+      timings[`metrics.${phaseName}`] = durationMs;
+    }
+  }
 
   let summaryStats: SummaryBatchResult | undefined;
+  const semanticConfig = appConfig.semantic;
+  const shouldRunSemanticRefresh =
+    semanticConfig?.enabled &&
+    (changedFileIds === undefined || changedFileIds.size > 0);
 
-  if (appConfig.semantic?.enabled) {
-    const model = appConfig.semantic.model ?? "all-MiniLM-L6-v2";
+  if (shouldRunSemanticRefresh) {
+    const model = semanticConfig.model ?? "all-MiniLM-L6-v2";
 
-
-    // 1. LLM Summaries (if opted-in) — all text-based models benefit from
-    //    LLM summaries when available. Summaries are generated before embeddings
-    //    so the embedding step can incorporate them.
-    if (appConfig.semantic.generateSummaries) {
+    // Summaries are generated first so embeddings can incorporate them.
+    if (semanticConfig.generateSummaries) {
       try {
-        summaryStats = await generateSummariesForRepo(repoId, appConfig, onProgress);
+        summaryStats = await measureSubphase("semanticSummaries", () =>
+          generateSummariesForRepo(repoId, appConfig, onProgress),
+        );
         logger.info(
           `Summaries: ${summaryStats.generated} generated, ${summaryStats.skipped} cached, ${summaryStats.failed} failed ($${summaryStats.totalCostUsd.toFixed(4)})`,
         );
@@ -59,15 +100,15 @@ export async function finalizeIndexing({
       }
     }
 
-    // 2. Embeddings — uses summaries when available (High tier),
-    //    or raw symbol text (Low/Medium tier).
     try {
-      const embResult = await refreshSymbolEmbeddings({
-        repoId,
-        provider: appConfig.semantic.provider ?? "local",
-        model,
-        onProgress,
-      });
+      const embResult = await measureSubphase("semanticEmbeddings", () =>
+        refreshSymbolEmbeddings({
+          repoId,
+          provider: semanticConfig.provider ?? "local",
+          model,
+          onProgress,
+        }),
+      );
       logger.info(
         `Embeddings: ${embResult.embedded} embedded, ${embResult.skipped} cached (model: ${model})`,
       );
@@ -76,21 +117,22 @@ export async function finalizeIndexing({
     }
   }
 
-
   if (callResolutionTelemetry.pass2EligibleFileCount > 0) {
     try {
-      await withWriteConn(async (wConn) => {
-        await ladybugDb.insertAuditEvent(wConn, {
-          eventId: `audit_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`,
-          timestamp: new Date().toISOString(),
-          tool: "index.callResolution",
-          decision: "stats",
-          repoId,
-          symbolId: null,
-          detailsJson: JSON.stringify({
-            versionId,
-            ...callResolutionTelemetry,
-          }),
+      await measureSubphase("audit", async () => {
+        await withWriteConn(async (wConn) => {
+          await ladybugDb.insertAuditEvent(wConn, {
+            eventId: `audit_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`,
+            timestamp: new Date().toISOString(),
+            tool: "index.callResolution",
+            decision: "stats",
+            repoId,
+            symbolId: null,
+            detailsJson: JSON.stringify({
+              versionId,
+              ...callResolutionTelemetry,
+            }),
+          });
         });
       });
     } catch (error) {
@@ -98,11 +140,13 @@ export async function finalizeIndexing({
     }
   }
 
-
-  // Materialise FileSummary nodes for hybrid entity retrieval.
   try {
-    const conn = await getLadybugConn();
-    const fsResult = await materializeFileSummaries(conn, repoId);
+    const fsResult = await measureSubphase("fileSummaries", async () => {
+      const conn = await getLadybugConn();
+      return materializeFileSummaries(conn, repoId, {
+        changedFileIds,
+      });
+    });
     logger.info(
       `FileSummary materialisation: ${fsResult.updated}/${fsResult.total} files updated`,
     );
@@ -110,7 +154,7 @@ export async function finalizeIndexing({
     logger.warn(`FileSummary materialisation skipped: ${String(error)}`);
   }
 
-  return { summaryStats };
+  return { summaryStats, timings };
 }
 
 /**
@@ -123,9 +167,30 @@ export async function finalizeIndexing({
 export async function materializeFileSummaries(
   conn: import("kuzu").Connection,
   repoId: string,
+  options?: {
+    changedFileIds?: Set<string>;
+  },
 ): Promise<{ total: number; updated: number }> {
-  const files = await ladybugDb.getFilesByRepo(conn, repoId);
+  const changedFileIds = options?.changedFileIds;
+  let files: ladybugDb.FileRow[];
+
+  if (changedFileIds) {
+    if (changedFileIds.size === 0) {
+      return { total: 0, updated: 0 };
+    }
+
+    // Incremental runs only need to refresh FileSummary rows for files whose
+    // symbol exports changed; deleted-file cleanup already happens earlier in
+    // the file deletion path.
+    const fileMap = await ladybugDb.getFilesByIds(conn, [...changedFileIds]);
+    files = [...fileMap.values()]
+      .filter((file) => file.repoId === repoId)
+      .sort((a, b) => a.relPath.localeCompare(b.relPath));
+  } else {
+    files = await ladybugDb.getFilesByRepo(conn, repoId);
+  }
   let updated = 0;
+  const updatedAt = new Date().toISOString();
 
   // Collect all upserts, then batch-write via the serialized write connection
   // to avoid writing on a read-pool connection (which can crash Kuzu).
@@ -154,7 +219,7 @@ export async function materializeFileSummaries(
         repoId,
         summary: null,
         searchText,
-        updatedAt: new Date().toISOString(),
+        updatedAt,
       });
     } catch (err) {
       logger.warn(

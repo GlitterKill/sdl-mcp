@@ -130,6 +130,27 @@ function writeScenarioSection(scenario: ScenarioResult): void {
     w();
   }
 
+  if (scenario.toolDiagnostics) {
+    const entries = Object.entries(scenario.toolDiagnostics);
+    if (entries.length > 0) {
+      w(`  ${BOLD}Tool Diagnostics:${RESET}`);
+      for (const [toolName, diagnostics] of entries) {
+        const total = diagnostics.timings.totalMs;
+        w(
+          `    ${toolName} total p50=${formatMs(total.p50)} p95=${formatMs(total.p95)} max=${formatMs(total.max)} (${total.count} samples)`,
+        );
+        for (const [phaseName, summary] of Object.entries(
+          diagnostics.timings.phases,
+        )) {
+          w(
+            `      ${DIM}${phaseName}${RESET}: p50=${formatMs(summary.p50)} p95=${formatMs(summary.p95)} max=${formatMs(summary.max)}`,
+          );
+        }
+      }
+      w();
+    }
+  }
+
   // Warnings
   for (const warning of scenario.warnings) {
     w(`  ${warn(warning)}`);

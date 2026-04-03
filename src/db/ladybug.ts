@@ -18,6 +18,21 @@ import {
 import { resetJoinHintCache } from "./ladybug-edges.js";
 
 // ---------------------------------------------------------------------------
+// Close Hooks — allows external modules (e.g. indexer caches) to register
+// cleanup callbacks without the db/ layer importing from them (hexagonal).
+// ---------------------------------------------------------------------------
+const closeHooks: Array<() => void> = [];
+
+/**
+ * Register a callback to be invoked when the database is closed.
+ * This enables external modules (e.g. indexer caches) to hook into
+ * DB teardown without creating a circular import from db/ -> indexer/.
+ */
+export function registerDbCloseHook(fn: () => void): void {
+  closeHooks.push(fn);
+}
+
+// ---------------------------------------------------------------------------
 // Extension Capabilities
 // ---------------------------------------------------------------------------
 // Track which Kuzu extensions (fts, vector) loaded successfully.
@@ -283,7 +298,9 @@ async function getHealthyConnection(
     return conn;
   }
 
-  logger.warn(`LadybugDB ${label} connection unhealthy or poisoned, recreating`);
+  logger.warn(
+    `LadybugDB ${label} connection unhealthy or poisoned, recreating`,
+  );
   try {
     await conn.close();
   } catch (closeError) {
@@ -682,6 +699,16 @@ export async function closeLadybugDb(): Promise<void> {
 
   currentDbPath = null;
   resetJoinHintCache();
+  for (const hook of closeHooks) {
+    try {
+      hook();
+    } catch (err) {
+      logger.warn("Error in DB close hook", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  closeHooks.length = 0;
   logger.debug("LadybugDB closed");
 }
 

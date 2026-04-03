@@ -6,7 +6,11 @@ import { promisify } from "util";
 import { globSync } from "node:fs";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
-import type { EdgeRow, MetricsRow, SymbolRow } from "../db/ladybug-queries.js";
+import type {
+  EdgeLite,
+  MetricsRow,
+  SymbolLiteRow,
+} from "../db/ladybug-queries.js";
 import type { RepoConfig } from "../config/types.js";
 import type { CanonicalTest, StalenessTiers } from "../domain/types.js";
 import { normalizePath } from "../util/paths.js";
@@ -35,11 +39,21 @@ interface ChurnCache {
   lastCommitHash: string;
   churnMap: Map<string, number>;
   cachedAt: number;
+  lastHeadCheckedAt: number;
 }
 
 const CHURN_CACHE_TTL_MS = 5 * 60 * 1000;
+const CHURN_HEAD_RECHECK_MS = 30 * 1000;
 const MAX_METRICS_CACHED_REPOS = 5;
 const churnCacheByRepo = new Map<string, ChurnCache>();
+
+interface MetricsGitTestHooks {
+  now?: () => number;
+  getCurrentCommitHash?: (repoRoot: string) => Promise<string>;
+  getChurnByFile?: (repoRoot: string) => Promise<Map<string, number>>;
+}
+
+let metricsGitTestHooks: MetricsGitTestHooks | null = null;
 
 interface TestRefCache {
   repoRoot: string;
@@ -51,7 +65,7 @@ interface TestRefCache {
 const testRefCacheByRepo = new Map<string, TestRefCache>();
 
 function calculateFanMetrics(
-  edges: EdgeRow[],
+  edges: EdgeLite[],
   symbols: Set<string>,
 ): Map<string, FanMetrics> {
   const metrics = new Map<string, FanMetrics>();
@@ -73,6 +87,9 @@ function calculateFanMetrics(
 }
 
 async function getCurrentCommitHash(repoRoot: string): Promise<string> {
+  if (metricsGitTestHooks?.getCurrentCommitHash) {
+    return await metricsGitTestHooks.getCurrentCommitHash(repoRoot);
+  }
   try {
     const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
       cwd: repoRoot,
@@ -85,6 +102,9 @@ async function getCurrentCommitHash(repoRoot: string): Promise<string> {
 }
 
 async function getChurnByFile(repoRoot: string): Promise<Map<string, number>> {
+  if (metricsGitTestHooks?.getChurnByFile) {
+    return await metricsGitTestHooks.getChurnByFile(repoRoot);
+  }
   try {
     const { stdout } = await execFileAsync(
       "git",
@@ -113,16 +133,26 @@ async function getChurnByFileCached(
   repoRoot: string,
 ): Promise<Map<string, number>> {
   const cached = churnCacheByRepo.get(repoRoot);
+  const now = metricsGitTestHooks?.now?.() ?? Date.now();
+
+  // Churn is commit-history-based and intentionally approximate, so repeated
+  // refreshes can safely skip `git rev-parse HEAD` for a short hot window.
+  if (cached && now - cached.lastHeadCheckedAt < CHURN_HEAD_RECHECK_MS) {
+    logger.debug(`Churn cache HOT HIT for repo ${repoRoot}`);
+    return cached.churnMap;
+  }
+
   const currentHead = await getCurrentCommitHash(repoRoot);
 
   if (
     cached &&
     cached.lastCommitHash === currentHead &&
-    Date.now() - cached.cachedAt < CHURN_CACHE_TTL_MS
+    now - cached.cachedAt < CHURN_CACHE_TTL_MS
   ) {
     logger.debug(
       `Churn cache HIT for repo ${repoRoot} (commit: ${currentHead})`,
     );
+    cached.lastHeadCheckedAt = now;
     return cached.churnMap;
   }
 
@@ -134,7 +164,8 @@ async function getChurnByFileCached(
     repoRoot,
     lastCommitHash: currentHead,
     churnMap,
-    cachedAt: Date.now(),
+    cachedAt: now,
+    lastHeadCheckedAt: now,
   });
   if (churnCacheByRepo.size > MAX_METRICS_CACHED_REPOS) {
     const firstKey = churnCacheByRepo.keys().next().value;
@@ -161,18 +192,21 @@ async function collectTestRefs(
     `**/tests/**/*.${extGroup}`,
   ];
 
-  const bracePattern = patterns.length === 1 ? patterns[0] : `{${patterns.join(",")}}`;
-  const testFiles = [...globSync(bracePattern, {
-    cwd: repoRoot,
-    exclude: [
-      ...(config.ignore ?? []),
-      "**/fixtures/**",
-      "**/__fixtures__/**",
-      "**/testdata/**",
-      "**/test-data/**",
-      "**/mock-data/**",
-    ],
-  })];
+  const bracePattern =
+    patterns.length === 1 ? patterns[0] : `{${patterns.join(",")}}`;
+  const testFiles = [
+    ...globSync(bracePattern, {
+      cwd: repoRoot,
+      exclude: [
+        ...(config.ignore ?? []),
+        "**/fixtures/**",
+        "**/__fixtures__/**",
+        "**/testdata/**",
+        "**/test-data/**",
+        "**/mock-data/**",
+      ],
+    }),
+  ];
 
   const nameToSymbolIds = new Map<string, string[]>();
   for (const symbol of symbols) {
@@ -190,7 +224,11 @@ async function collectTestRefs(
   const newTestRefs = new Map<string, Set<string>>();
 
   // Process test files in chunks to avoid blocking the event loop
-  for (let chunkStart = 0; chunkStart < testFiles.length; chunkStart += CONCURRENCY_LIMIT) {
+  for (
+    let chunkStart = 0;
+    chunkStart < testFiles.length;
+    chunkStart += CONCURRENCY_LIMIT
+  ) {
     const chunk = testFiles.slice(chunkStart, chunkStart + CONCURRENCY_LIMIT);
     const results = await Promise.all(
       chunk.map(async (file) => {
@@ -198,7 +236,10 @@ async function collectTestRefs(
           const content = await readFile(join(repoRoot, file), "utf-8");
           return { file, content };
         } catch (err) {
-          logger.debug("Failed to read test file", { file, error: String(err) });
+          logger.debug("Failed to read test file", {
+            file,
+            error: String(err),
+          });
           return null;
         }
       }),
@@ -223,6 +264,7 @@ async function collectTestRefs(
               }
             }
           }
+          newTestRefs.set(file, cachedFileRefs);
           continue;
         }
       }
@@ -270,6 +312,16 @@ export function clearTestRefCache(repoRoot?: string): void {
   }
 }
 
+/**
+ * For testing only: override Git/time dependencies in metrics caching.
+ * @internal
+ */
+export function _setMetricsGitHooksForTesting(
+  hooks: MetricsGitTestHooks | null,
+): void {
+  metricsGitTestHooks = hooks;
+}
+
 export { collectTestRefs };
 
 const MAX_BFS_COST = 12;
@@ -283,10 +335,14 @@ const MAX_BATCH_BFS_QUEUE = 50000;
  */
 function edgeCost(edgeType: string): number {
   switch (edgeType) {
-    case "call": return 1;
-    case "config": return 1.5;
-    case "import": return 2;
-    default: return 2;
+    case "call":
+      return 1;
+    case "config":
+      return 1.5;
+    case "import":
+      return 2;
+    default:
+      return 2;
   }
 }
 
@@ -510,7 +566,10 @@ function batchComputeCanonicalTests(
 
   while (queueHead < queue.length) {
     if (queue.length > MAX_BATCH_BFS_QUEUE) {
-      logger.warn("Batch BFS queue exceeded limit", { queueSize: queue.length, limit: MAX_BATCH_BFS_QUEUE });
+      logger.warn("Batch BFS queue exceeded limit", {
+        queueSize: queue.length,
+        limit: MAX_BATCH_BFS_QUEUE,
+      });
       break;
     }
     const {
@@ -632,31 +691,60 @@ export function calculateRiskScoresForSymbols(
 export async function updateMetricsForRepo(
   repoId: string,
   changedFileIds?: Set<string>,
-): Promise<void> {
+  options?: {
+    includeTimings?: boolean;
+  },
+): Promise<{ timings?: Record<string, number> }> {
+  const timings: Record<string, number> | undefined = options?.includeTimings
+    ? {}
+    : undefined;
+  const measureSubphase = async <T>(
+    phaseName: string,
+    fn: () => Promise<T>,
+  ): Promise<T> => {
+    const startMs = Date.now();
+    try {
+      return await fn();
+    } finally {
+      if (timings) {
+        timings[phaseName] = Date.now() - startMs;
+      }
+    }
+  };
+
+  // An explicitly empty set means the caller already knows there are no file
+  // changes, so skip all DB and graph work up front.
+  if (changedFileIds && changedFileIds.size === 0) {
+    logger.debug("Empty changedFileIds provided - no updates needed");
+    return { timings };
+  }
+
   const conn = await getLadybugConn();
 
-  const [edges, repo] = await Promise.all([
-    ladybugDb.getEdgesByRepo(conn, repoId),
-    ladybugDb.getRepo(conn, repoId),
-  ]);
+  const [edges, repo] = await measureSubphase("loadRepoState", () =>
+    Promise.all([
+      ladybugDb.getEdgesByRepoLite(conn, repoId),
+      ladybugDb.getRepo(conn, repoId),
+    ]),
+  );
   if (!repo) {
-    return;
+    return { timings };
   }
-  const config = safeJsonParse(repo.configJson, ConfigObjectSchema, {}) as RepoConfig;
-  const [files, allSymbols] = await Promise.all([
-    ladybugDb.getFilesByRepo(conn, repoId),
-    ladybugDb.getSymbolsByRepo(conn, repoId),
-  ]);
+  const config = safeJsonParse(
+    repo.configJson,
+    ConfigObjectSchema,
+    {},
+  ) as RepoConfig;
+  const [files, allSymbols] = await measureSubphase("loadFilesAndSymbols", () =>
+    Promise.all([
+      ladybugDb.getFilesByRepoLite(conn, repoId),
+      ladybugDb.getSymbolsByRepoLite(conn, repoId),
+    ]),
+  );
   const fileById = new Map(files.map((file) => [file.fileId, file.relPath]));
   const symbolIds = new Set(allSymbols.map((symbol) => symbol.symbolId));
 
   let symbols = allSymbols;
-
-  // If an empty set is explicitly passed, it means no files changed - nothing to update
-  if (changedFileIds && changedFileIds.size === 0) {
-    logger.debug("Empty changedFileIds provided - no updates needed");
-    return;
-  }
 
   if (changedFileIds && changedFileIds.size > 0) {
     const affectedSymbolIds = new Set<string>();
@@ -682,14 +770,20 @@ export async function updateMetricsForRepo(
     );
   }
 
-  const fanMetrics = calculateFanMetrics(edges, symbolIds);
-  const churnByFile = await getChurnByFileCached(repo.rootPath);
-  const testRefs = await collectTestRefs(repo.rootPath, allSymbols, config);
+  const fanMetrics = await measureSubphase("fanMetrics", async () =>
+    calculateFanMetrics(edges, symbolIds),
+  );
+  const churnByFile = await measureSubphase("churn", () =>
+    getChurnByFileCached(repo.rootPath),
+  );
+  const testRefs = await measureSubphase("testRefs", () =>
+    collectTestRefs(repo.rootPath, allSymbols, config),
+  );
 
   // Build a lightweight Graph for canonicalTest BFS
   const symbolMap = new Map(allSymbols.map((s) => [s.symbolId, s]));
-  const adjacencyOut = new Map<string, EdgeRow[]>();
-  const adjacencyIn = new Map<string, EdgeRow[]>();
+  const adjacencyOut = new Map<string, EdgeLite[]>();
+  const adjacencyIn = new Map<string, EdgeLite[]>();
   for (const s of allSymbols) {
     adjacencyOut.set(s.symbolId, []);
     adjacencyIn.set(s.symbolId, []);
@@ -710,7 +804,9 @@ export async function updateMetricsForRepo(
 
   // Batch-compute all canonical tests in a single BFS pass (O(edges)) rather
   // than running a separate per-symbol BFS (O(symbols × MAX_BFS_VISITED)).
-  const batchCanonical = batchComputeCanonicalTests(graph, fileById);
+  const batchCanonical = await measureSubphase("canonicalTests", async () =>
+    batchComputeCanonicalTests(graph, fileById),
+  );
 
   const now = monotonicIsoNow();
 
@@ -741,38 +837,63 @@ export async function updateMetricsForRepo(
   // stale canonical test data persists for unchanged symbols.
   if (changedFileIds && changedFileIds.size > 0) {
     const affectedSet = new Set(symbols.map((s) => s.symbolId));
-    const canonicalOnlyRows: Array<{ symbolId: string; canonicalTestJson: string | null; updatedAt: string }> = [];
+    const unchangedSymbolIds = allSymbols
+      .filter((symbol) => !affectedSet.has(symbol.symbolId))
+      .map((symbol) => symbol.symbolId);
+    const existingMetrics =
+      unchangedSymbolIds.length > 0
+        ? await measureSubphase("loadExistingCanonical", () =>
+            ladybugDb.getMetricsBySymbolIds(conn, unchangedSymbolIds),
+          )
+        : new Map<string, MetricsRow | null>();
+    const canonicalOnlyRows: Array<{
+      symbolId: string;
+      canonicalTestJson: string | null;
+      updatedAt: string;
+    }> = [];
     for (const symbol of allSymbols) {
       if (affectedSet.has(symbol.symbolId)) continue;
       const ct = batchCanonical.get(symbol.symbolId) ?? null;
+      const canonicalTestJson = ct ? JSON.stringify(ct) : null;
+      const previousCanonical =
+        existingMetrics.get(symbol.symbolId)?.canonicalTestJson ?? null;
+      if (previousCanonical === canonicalTestJson) {
+        continue;
+      }
       canonicalOnlyRows.push({
         symbolId: symbol.symbolId,
-        canonicalTestJson: ct ? JSON.stringify(ct) : null,
+        canonicalTestJson,
         updatedAt: now,
       });
     }
     if (canonicalOnlyRows.length > 0) {
-      await withWriteConn(async (wConn) => {
-        for (let i = 0; i < canonicalOnlyRows.length; i += BATCH_SIZE) {
-          const chunk = canonicalOnlyRows.slice(i, i + BATCH_SIZE);
-          await ladybugDb.upsertCanonicalTestBatch(wConn, chunk);
-        }
+      await measureSubphase("writeCanonical", async () => {
+        await withWriteConn(async (wConn) => {
+          for (let i = 0; i < canonicalOnlyRows.length; i += BATCH_SIZE) {
+            const chunk = canonicalOnlyRows.slice(i, i + BATCH_SIZE);
+            await ladybugDb.upsertCanonicalTestBatch(wConn, chunk);
+          }
+        });
       });
     }
   }
 
-  await withWriteConn(async (wConn) => {
-    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-      const chunk = rows.slice(i, i + BATCH_SIZE);
-      await ladybugDb.upsertMetricsBatch(wConn, chunk);
-    }
+  await measureSubphase("writeMetrics", async () => {
+    await withWriteConn(async (wConn) => {
+      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+        const chunk = rows.slice(i, i + BATCH_SIZE);
+        await ladybugDb.upsertMetricsBatch(wConn, chunk);
+      }
+    });
   });
+
+  return { timings };
 }
 
 export interface Graph {
   repoId: string;
-  symbols: Map<string, SymbolRow>;
-  edges: EdgeRow[];
-  adjacencyIn: Map<string, EdgeRow[]>;
-  adjacencyOut: Map<string, EdgeRow[]>;
+  symbols: Map<string, Pick<SymbolLiteRow, "symbolId" | "fileId">>;
+  edges: EdgeLite[];
+  adjacencyIn: Map<string, EdgeLite[]>;
+  adjacencyOut: Map<string, EdgeLite[]>;
 }

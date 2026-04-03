@@ -19,6 +19,12 @@ import type { ConfigEdge } from "./configEdges.js";
 import type { RepoConfig } from "../config/types.js";
 import type { FileMetadata } from "./fileScanner.js";
 import type { ParserWorkerPool } from "./workerPool.js";
+import type { SymbolMapFileUpdate } from "./symbol-map-cache.js";
+import {
+  getOrLoadSymbolMapCache,
+  removeFilesFromSymbolMapCache,
+  type SymbolMapCache,
+} from "./symbol-map-cache.js";
 
 export interface IndexProgress {
   stage: "scanning" | "parsing" | "pass1" | "pass2" | "finalizing" | "summaries" | "embeddings";
@@ -41,6 +47,7 @@ export interface Pass1Accumulator {
   allConfigEdges: ConfigEdge[];
   changedFileIds: Set<string>;
   changedPass2FilePaths: Set<string>;
+  symbolMapFileUpdates: Map<string, SymbolMapFileUpdate>;
 }
 
 export interface Pass1Params {
@@ -89,24 +96,21 @@ export function fileIdForPath(
 export async function loadExistingSymbolMaps(
   conn: LadybugConn,
   repoId: string,
+  removedFileIds: Iterable<string> = [],
 ): Promise<{
+  symbolMapCache: SymbolMapCache;
   allSymbolsByName: Map<string, ladybugDb.SymbolLiteRow[]>;
   globalNameToSymbolIds: Map<string, string[]>;
   globalPreferredSymbolId: Map<string, string>;
 }> {
-  const allSymbolsByName = new Map<string, ladybugDb.SymbolLiteRow[]>();
-  const globalNameToSymbolIds = new Map<string, string[]>();
-  const repoSymbols = await ladybugDb.getSymbolsByRepoLite(conn, repoId);
-  for (const symbol of repoSymbols) {
-    const byName = allSymbolsByName.get(symbol.name) ?? [];
-    byName.push(symbol);
-    allSymbolsByName.set(symbol.name, byName);
-    const byId = globalNameToSymbolIds.get(symbol.name) ?? [];
-    byId.push(symbol.symbolId);
-    globalNameToSymbolIds.set(symbol.name, byId);
-  }
-  const globalPreferredSymbolId = buildGlobalPreferredSymbolIds(allSymbolsByName);
-  return { allSymbolsByName, globalNameToSymbolIds, globalPreferredSymbolId };
+  const symbolMapCache = await getOrLoadSymbolMapCache(conn, repoId);
+  removeFilesFromSymbolMapCache(symbolMapCache, removedFileIds);
+  return {
+    symbolMapCache,
+    allSymbolsByName: symbolMapCache.allSymbolsByName,
+    globalNameToSymbolIds: symbolMapCache.globalNameToSymbolIds,
+    globalPreferredSymbolId: symbolMapCache.globalPreferredSymbolId,
+  };
 }
 
 /**

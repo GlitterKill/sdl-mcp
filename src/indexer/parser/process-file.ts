@@ -206,6 +206,18 @@ export async function processFile(
       changed: true,
       configEdges,
       pass2HintPaths,
+      symbolMapFileUpdate: {
+        fileId: fileData.fileId,
+        relPath: fileData.relPath,
+        symbols: fileSymbols.map((symbol) => ({
+          symbolId: symbol.symbolId,
+          repoId: symbol.repoId,
+          fileId: symbol.fileId,
+          name: symbol.name,
+          kind: symbol.kind,
+          exported: symbol.exported,
+        })),
+      },
     };
   } catch (error) {
     logger.error(`Error processing file ${fileMeta.path}:`, { error });

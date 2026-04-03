@@ -178,7 +178,19 @@ const VALIDATORS: Record<string, ValidatorFn> = {
 
   "sdl.index.refresh": (_args, result) => {
     const tool = "sdl.index.refresh";
-    return [checkNonEmptyString(tool, "versionId returned", result.versionId)];
+    const checks = [
+      checkNonEmptyString(tool, "versionId returned", result.versionId),
+    ];
+    if (_args.includeDiagnostics === true) {
+      const diagnostics = result.diagnostics as Record<string, unknown> | undefined;
+      const timings = diagnostics?.timings as Record<string, unknown> | undefined;
+      checks.push(
+        checkExists(tool, "diagnostics.timings present", timings),
+        checkExists(tool, "diagnostics.timings.totalMs present", timings?.totalMs),
+        checkExists(tool, "diagnostics.timings.phases present", timings?.phases),
+      );
+    }
+    return checks;
   },
 
   // -------------------------------------------------------------------------
@@ -549,6 +561,10 @@ const SAMPLE_EXTRACTORS: Record<string, SampleExtractorFn> = {
 
   "sdl.index.refresh": (result) => ({
     versionId: String(result.versionId ?? "?"),
+    timingTotalMs: String(
+      (result.diagnostics as { timings?: { totalMs?: unknown } } | undefined)
+        ?.timings?.totalMs ?? "?",
+    ),
   }),
 
   "sdl.agent.feedback": (result) => ({

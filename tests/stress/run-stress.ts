@@ -7,12 +7,13 @@
  * 2. Start server harness
  * 3. Run baseline (must pass before continuing)
  * 4. Run concurrent readers (3→4→5→6)
- * 5. Run mixed read/write (3→4→5→6)
- * 6. Restart server with maxSessions: 4 → run session saturation
- * 7. Restart server with maxToolConcurrency: 4 → run dispatch pressure
- * 8. Restart server (default config) → run semantic tools
- * 9. Restart server (max config) → run limit stress (1 writer + 7 readers)
- * 10. Generate report
+ * 5. Run mixed read/write no-op refreshes (3→4→5→6)
+ * 6. Run mixed read/write editful refreshes (3→4→5→6)
+ * 7. Restart server with maxSessions: 4 → run session saturation
+ * 8. Restart server with maxToolConcurrency: 4 → run dispatch pressure
+ * 9. Restart server (default config) → run semantic tools
+ * 10. Restart server (max config) → run limit stress (1 writer + 7 readers)
+ * 11. Generate report
  *
  * Usage:
  *   node --import tsx tests/stress/run-stress.ts
@@ -31,6 +32,7 @@ import { writeConsoleReport, writeJsonReport } from "./infra/report-writer.js";
 import { runSingleClientBaseline } from "./scenarios/single-client-baseline.js";
 import { runConcurrentReaders } from "./scenarios/concurrent-readers.js";
 import { runMixedReadWrite } from "./scenarios/mixed-read-write.js";
+import { runMixedReadWriteEditful } from "./scenarios/mixed-read-write-editful.js";
 import { runSessionSaturation } from "./scenarios/session-saturation.js";
 import { runDispatchPressure } from "./scenarios/dispatch-pressure.js";
 import { runSemanticTools } from "./scenarios/semantic-tools.js";
@@ -172,12 +174,13 @@ async function main(): Promise<void> {
   });
 
   // -----------------------------------------------------------------------
-  // Scenarios 1-3: Baseline, Concurrent Readers, Mixed Read-Write
+  // Scenarios 1-4: Baseline, Concurrent Readers, Mixed Read-Write, Editful Mixed Read-Write
   // -----------------------------------------------------------------------
   if (
     shouldRun("single-client-baseline") ||
     shouldRun("concurrent-readers") ||
-    shouldRun("mixed-read-write")
+    shouldRun("mixed-read-write") ||
+    shouldRun("mixed-read-write-editful")
   ) {
     const harness = new ServerHarness(config);
     let port: number;
@@ -236,18 +239,29 @@ async function main(): Promise<void> {
         );
         scenarios.push(result);
       }
+
+      // Scenario 4: Mixed Read-Write Editful
+      if (shouldRun("mixed-read-write-editful")) {
+        stressLog("info", "=== Scenario 4: Mixed Read-Write Editful ===");
+        const result = await withTimeout(
+          runMixedReadWriteEditful(makeCtx(port, token)),
+          cliArgs.timeout * config.concurrencyLevels.length,
+          "mixed-read-write-editful",
+        );
+        scenarios.push(result);
+      }
     } finally {
       await harness.stop();
     }
   }
 
   // -----------------------------------------------------------------------
-  // Scenario 4: Session Saturation (maxSessions: 4)
+  // Scenario 5: Session Saturation (maxSessions: 4)
   // -----------------------------------------------------------------------
   if (shouldRun("session-saturation")) {
     stressLog(
       "info",
-      "=== Scenario 4: Session Saturation (maxSessions: 4) ===",
+      "=== Scenario 5: Session Saturation (maxSessions: 4) ===",
     );
     const harness = new ServerHarness(config);
     try {
@@ -269,12 +283,12 @@ async function main(): Promise<void> {
   }
 
   // -----------------------------------------------------------------------
-  // Scenario 5: Dispatch Pressure (maxToolConcurrency: 4)
+  // Scenario 6: Dispatch Pressure (maxToolConcurrency: 4)
   // -----------------------------------------------------------------------
   if (shouldRun("dispatch-pressure")) {
     stressLog(
       "info",
-      "=== Scenario 5: Dispatch Pressure (maxToolConcurrency: 4) ===",
+      "=== Scenario 6: Dispatch Pressure (maxToolConcurrency: 4) ===",
     );
     const harness = new ServerHarness(config);
     try {
@@ -296,10 +310,10 @@ async function main(): Promise<void> {
   }
 
   // -----------------------------------------------------------------------
-  // Scenario 6: Semantic Tools (default server config)
+  // Scenario 7: Semantic Tools (default server config)
   // -----------------------------------------------------------------------
   if (shouldRun("semantic-tools")) {
-    stressLog("info", "=== Scenario 6: Semantic Tools ===");
+    stressLog("info", "=== Scenario 7: Semantic Tools ===");
     const harness = new ServerHarness(config);
     try {
       const port = await harness.start({
@@ -320,12 +334,12 @@ async function main(): Promise<void> {
   }
 
   // -----------------------------------------------------------------------
-  // Scenario 7: Limit Stress (maxSessions: 8, 1 writer + 7 readers)
+  // Scenario 8: Limit Stress (maxSessions: 8, 1 writer + 7 readers)
   // -----------------------------------------------------------------------
   if (shouldRun("limit-stress")) {
     stressLog(
       "info",
-      "=== Scenario 7: Limit Stress (1 writer + 7 readers, max sessions) ===",
+      "=== Scenario 8: Limit Stress (1 writer + 7 readers, max sessions) ===",
     );
     const harness = new ServerHarness(config);
     try {

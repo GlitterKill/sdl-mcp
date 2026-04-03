@@ -410,6 +410,7 @@ export async function runLimitStress(
       memoryPeakMB: collector.getMemoryPeakMB(),
       warnings,
       toolResultStats: collector.getResultStats(),
+      toolDiagnostics: collector.getToolTimingDiagnostics(),
     };
   } finally {
     clearInterval(samplerInterval);

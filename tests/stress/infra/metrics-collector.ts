@@ -7,6 +7,8 @@ import type {
   ToolResultCheck,
   ToolResultStats,
   AggregateMetrics,
+  NumericSummary,
+  ToolDiagnostics,
   MemorySnapshot,
   PoolSnapshot,
   DispatchSnapshot,
@@ -21,6 +23,10 @@ export class MetricsCollector {
   private sessionSnapshots: SessionSnapshot[] = [];
   private resultChecks: ToolResultCheck[] = [];
   private sampleValues: Map<string, string> = new Map();
+  private toolTimingSamples: Map<
+    string,
+    { totalMs: number[]; phases: Map<string, number[]> }
+  > = new Map();
 
   // ---------------------------------------------------------------------------
   // Recording
@@ -176,6 +182,28 @@ export class MetricsCollector {
     }
   }
 
+  recordToolTimingDiagnostics(
+    toolName: string,
+    diagnostics: unknown,
+  ): void {
+    const timings = extractTimingsPayload(diagnostics);
+    if (!timings) return;
+
+    const existing = this.toolTimingSamples.get(toolName) ?? {
+      totalMs: [],
+      phases: new Map<string, number[]>(),
+    };
+
+    existing.totalMs.push(timings.totalMs);
+    for (const [phaseName, durationMs] of Object.entries(timings.phases)) {
+      const phaseSamples = existing.phases.get(phaseName) ?? [];
+      phaseSamples.push(durationMs);
+      existing.phases.set(phaseName, phaseSamples);
+    }
+
+    this.toolTimingSamples.set(toolName, existing);
+  }
+
   getResultStats(): ToolResultStats {
     const passed = this.resultChecks.filter((c) => c.passed).length;
     const failed = this.resultChecks.filter((c) => !c.passed).length;
@@ -186,6 +214,25 @@ export class MetricsCollector {
       failures: this.resultChecks.filter((c) => !c.passed),
       sampleValues: Object.fromEntries(this.sampleValues),
     };
+  }
+
+  getToolTimingDiagnostics(): Record<string, ToolDiagnostics> {
+    const diagnostics: Record<string, ToolDiagnostics> = {};
+    for (const [toolName, samples] of this.toolTimingSamples.entries()) {
+      if (samples.totalMs.length === 0) continue;
+      const phases: Record<string, NumericSummary> = {};
+      for (const [phaseName, values] of samples.phases.entries()) {
+        if (values.length === 0) continue;
+        phases[phaseName] = summarizeNumbers(values);
+      }
+      diagnostics[toolName] = {
+        timings: {
+          totalMs: summarizeNumbers(samples.totalMs),
+          phases,
+        },
+      };
+    }
+    return diagnostics;
   }
 
   // ---------------------------------------------------------------------------
@@ -318,6 +365,7 @@ export class MetricsCollector {
     this.sessionSnapshots = [];
     this.resultChecks = [];
     this.sampleValues = new Map();
+    this.toolTimingSamples = new Map();
   }
 
   getRecordCount(): number {
@@ -333,4 +381,47 @@ function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0;
   const idx = Math.ceil(p * sorted.length) - 1;
   return sorted[Math.max(0, Math.min(idx, sorted.length - 1))];
+}
+
+function summarizeNumbers(values: number[]): NumericSummary {
+  const sorted = [...values].sort((a, b) => a - b);
+  return {
+    count: sorted.length,
+    min: sorted[0] ?? 0,
+    p50: percentile(sorted, 0.5),
+    p95: percentile(sorted, 0.95),
+    p99: percentile(sorted, 0.99),
+    max: sorted[sorted.length - 1] ?? 0,
+    avg:
+      sorted.length > 0
+        ? Math.round(sorted.reduce((sum, value) => sum + value, 0) / sorted.length)
+        : 0,
+  };
+}
+
+function extractTimingsPayload(
+  diagnostics: unknown,
+): { totalMs: number; phases: Record<string, number> } | null {
+  if (!diagnostics || typeof diagnostics !== "object") {
+    return null;
+  }
+  const timings = (diagnostics as { timings?: unknown }).timings;
+  if (!timings || typeof timings !== "object") {
+    return null;
+  }
+
+  const totalMs = (timings as { totalMs?: unknown }).totalMs;
+  const phases = (timings as { phases?: unknown }).phases;
+  if (typeof totalMs !== "number" || !phases || typeof phases !== "object") {
+    return null;
+  }
+
+  const numericPhases: Record<string, number> = {};
+  for (const [phaseName, value] of Object.entries(phases)) {
+    if (typeof value === "number") {
+      numericPhases[phaseName] = value;
+    }
+  }
+
+  return { totalMs, phases: numericPhases };
 }

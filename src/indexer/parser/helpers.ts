@@ -3,7 +3,6 @@ import type { Connection } from "kuzu";
 import { withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { EdgeRow, SymbolReferenceRow } from "../../db/ladybug-queries.js";
-import type { ConfigEdge } from "../configEdges.js";
 import {
   findEnclosingSymbolByRange,
   resolveSymbolIdFromIndex,
@@ -13,6 +12,8 @@ import type {
   SymbolIndex,
   TsCallResolver,
 } from "../edge-builder.js";
+import type { ProcessFileResult } from "./types.js";
+import type { SymbolMapFileUpdate } from "../symbol-map-cache.js";
 
 interface PersistSkippedFileParams {
   conn: Connection;
@@ -108,19 +109,17 @@ export async function persistSkippedFile({
   });
 }
 
-export function createEmptyProcessFileResult(changed: boolean): {
-  symbolsIndexed: number;
-  edgesCreated: number;
-  changed: boolean;
-  configEdges: ConfigEdge[];
-  pass2HintPaths: string[];
-} {
+export function createEmptyProcessFileResult(
+  changed: boolean,
+  symbolMapFileUpdate?: SymbolMapFileUpdate,
+): ProcessFileResult {
   return {
     symbolsIndexed: 0,
     edgesCreated: 0,
     changed,
     configEdges: [],
     pass2HintPaths: [],
+    symbolMapFileUpdate,
   };
 }
 

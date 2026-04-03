@@ -23,6 +23,49 @@ const DEFAULT_ENTRY_PATTERNS = [
 export interface ClusterOrchestratorResult {
   clustersComputed: number;
   processesTraced: number;
+  timings?: Record<string, number>;
+}
+
+interface NextClusterState {
+  clusterId: string;
+  label: string;
+  symbolCount: number;
+  searchText: string;
+  members: Array<{ symbolId: string; membershipScore: number }>;
+}
+
+interface NextProcessState {
+  processId: string;
+  entrySymbolId: string;
+  label: string;
+  depth: number;
+  searchText: string;
+  steps: Array<{ symbolId: string; stepOrder: number; role: string }>;
+}
+
+function serializeClusterState(states: NextClusterState[]): string {
+  return JSON.stringify(
+    states.map((state) => ({
+      clusterId: state.clusterId,
+      label: state.label,
+      symbolCount: state.symbolCount,
+      searchText: state.searchText,
+      members: state.members,
+    })),
+  );
+}
+
+function serializeProcessState(states: NextProcessState[]): string {
+  return JSON.stringify(
+    states.map((state) => ({
+      processId: state.processId,
+      entrySymbolId: state.entrySymbolId,
+      label: state.label,
+      depth: state.depth,
+      searchText: state.searchText,
+      steps: state.steps,
+    })),
+  );
 }
 
 export async function computeAndStoreClustersAndProcesses(params: {
@@ -32,6 +75,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
   entryPatterns?: string[];
   minClusterSize?: number;
   maxProcessDepth?: number;
+  includeTimings?: boolean;
 }): Promise<ClusterOrchestratorResult> {
   const {
     conn,
@@ -40,54 +84,99 @@ export async function computeAndStoreClustersAndProcesses(params: {
     entryPatterns = DEFAULT_ENTRY_PATTERNS,
     minClusterSize = DEFAULT_MIN_CLUSTER_SIZE,
     maxProcessDepth = DEFAULT_MAX_PROCESS_DEPTH,
+    includeTimings = false,
   } = params;
 
   const startMs = Date.now();
   const now = new Date().toISOString();
+  const timings: Record<string, number> | undefined = includeTimings
+    ? {}
+    : undefined;
+  const measureSubphase = async <T>(
+    phaseName: string,
+    fn: () => Promise<T>,
+  ): Promise<T> => {
+    const phaseStart = Date.now();
+    try {
+      return await fn();
+    } finally {
+      if (timings) {
+        timings[phaseName] = Date.now() - phaseStart;
+      }
+    }
+  };
 
-  // Use lite query — cluster computation only needs symbolId, name, fileId.
-  const symbols = await ladybugDb.getSymbolsByRepoLite(conn, repoId);
+  // Cluster/process computation only needs symbol ids, names, file ids, and
+  // lightweight edges, so keep the read path narrow.
+  const symbols = await measureSubphase("loadSymbols", () =>
+    ladybugDb.getSymbolsByRepoLite(conn, repoId),
+  );
   if (symbols.length === 0) {
-    return { clustersComputed: 0, processesTraced: 0 };
+    return {
+      clustersComputed: 0,
+      processesTraced: 0,
+      ...(timings ? { timings } : {}),
+    };
   }
 
   const symbolIds = symbols.map((s) => s.symbolId).sort();
 
-  let edgesByFrom = await ladybugDb.getEdgesFromSymbolsLite(conn, symbolIds);
-  const clusterEdges: Array<{ fromSymbolId: string; toSymbolId: string }> = [];
-  const callEdges: Array<{ callerId: string; calleeId: string }> = [];
+  const { clusterEdges, callEdges } = await measureSubphase(
+    "loadEdges",
+    async () => {
+      let edgesByFrom = await ladybugDb.getEdgesFromSymbolsLite(
+        conn,
+        symbolIds,
+      );
+      const nextClusterEdges: Array<{
+        fromSymbolId: string;
+        toSymbolId: string;
+      }> = [];
+      const nextCallEdges: Array<{ callerId: string; calleeId: string }> = [];
 
-  for (const [fromSymbolId, edges] of edgesByFrom) {
-    for (const e of edges) {
-      clusterEdges.push({ fromSymbolId, toSymbolId: e.toSymbolId });
-      if (e.edgeType === "call") {
-        callEdges.push({ callerId: fromSymbolId, calleeId: e.toSymbolId });
+      for (const [fromSymbolId, edges] of edgesByFrom) {
+        for (const edge of edges) {
+          nextClusterEdges.push({ fromSymbolId, toSymbolId: edge.toSymbolId });
+          if (edge.edgeType === "call") {
+            nextCallEdges.push({
+              callerId: fromSymbolId,
+              calleeId: edge.toSymbolId,
+            });
+          }
+        }
       }
-    }
-  }
 
-  // Free the DB result map now that edges are extracted into flat arrays.
-  edgesByFrom.clear();
+      edgesByFrom.clear();
+      return {
+        clusterEdges: nextClusterEdges,
+        callEdges: nextCallEdges,
+      };
+    },
+  );
 
   const clustersStartMs = Date.now();
-  const clusterAssignments =
-    computeClustersRust(
-      symbolIds.map((symbolId) => ({ symbolId })),
-      clusterEdges,
-      minClusterSize,
-    ) ?? (await computeClustersTS(repoId, { minClusterSize }));
+  const clusterAssignments = await measureSubphase(
+    "clusterCompute",
+    async () =>
+      computeClustersRust(
+        symbolIds.map((symbolId) => ({ symbolId })),
+        clusterEdges,
+        minClusterSize,
+      ) ?? (await computeClustersTS(repoId, { minClusterSize })),
+  );
 
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.deleteClustersByRepo(wConn, repoId);
-  });
-
-  // Build lookup maps for label generation
   const symbolById = new Map<string, { name: string; fileId: string }>();
-  for (const s of symbols) {
-    symbolById.set(s.symbolId, { name: s.name, fileId: s.fileId });
+  for (const symbol of symbols) {
+    symbolById.set(symbol.symbolId, {
+      name: symbol.name,
+      fileId: symbol.fileId,
+    });
   }
-  const allFileIds = [...new Set(symbols.map((s) => s.fileId))];
-  const filesById = await ladybugDb.getFilesByIds(conn, allFileIds);
+
+  const allFileIds = [...new Set(symbols.map((symbol) => symbol.fileId))];
+  const filesById = await measureSubphase("loadFiles", () =>
+    ladybugDb.getFilesByIds(conn, allFileIds),
+  );
 
   const clustersById = new Map<
     string,
@@ -103,12 +192,11 @@ export async function computeAndStoreClustersAndProcesses(params: {
   }
 
   const sortedClusterIds = Array.from(clustersById.keys()).sort();
-  let clusterIndex = 0;
-  await withWriteConn(async (wConn) => {
-    for (const clusterId of sortedClusterIds) {
-      const members = clustersById.get(clusterId) ?? [];
-      members.sort((a, b) => a.symbolId.localeCompare(b.symbolId));
-
+  const nextClusterStates: NextClusterState[] = sortedClusterIds.map(
+    (clusterId, clusterIndex) => {
+      const members = (clustersById.get(clusterId) ?? [])
+        .slice()
+        .sort((a, b) => a.symbolId.localeCompare(b.symbolId));
       const label = generateClusterLabel(
         members,
         symbolById,
@@ -117,88 +205,122 @@ export async function computeAndStoreClustersAndProcesses(params: {
       );
 
       const memberNames = members
-        .map((m) => symbolById.get(m.symbolId)?.name)
-        .filter((n): n is string => Boolean(n));
-      const clusterSearchText = buildClusterSearchText(label, memberNames);
+        .map((member) => symbolById.get(member.symbolId)?.name)
+        .filter((name): name is string => Boolean(name));
 
-      await ladybugDb.upsertCluster(wConn, {
+      return {
         clusterId,
-        repoId,
         label,
         symbolCount: members.length,
-        cohesionScore: 0.0,
-        versionId,
-        createdAt: now,
-        searchText: clusterSearchText,
+        searchText: buildClusterSearchText(label, memberNames),
+        members,
+      };
+    },
+  );
+  await measureSubphase("clusterWrite", async () => {
+    const existingClusters = await ladybugDb.getClustersForRepo(conn, repoId);
+    const existingMembers = await ladybugDb.getClusterMembersWithScoresForRepo(
+      conn,
+      repoId,
+    );
+    const existingClusterState = serializeClusterState(
+      existingClusters.map((cluster) => ({
+        clusterId: cluster.clusterId,
+        label: cluster.label,
+        symbolCount: cluster.symbolCount,
+        searchText: cluster.searchText ?? "",
+        members: existingMembers
+          .filter((member) => member.clusterId === cluster.clusterId)
+          .map((member) => ({
+            symbolId: member.symbolId,
+            membershipScore: member.membershipScore,
+          })),
+      })),
+    );
+    const nextClusterState = serializeClusterState(nextClusterStates);
+
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.withTransaction(wConn, async (txConn) => {
+        if (existingClusterState !== nextClusterState) {
+          await ladybugDb.deleteClustersByRepo(txConn, repoId);
+        }
+
+        for (const cluster of nextClusterStates) {
+          await ladybugDb.upsertCluster(txConn, {
+            clusterId: cluster.clusterId,
+            repoId,
+            label: cluster.label,
+            symbolCount: cluster.symbolCount,
+            cohesionScore: 0.0,
+            versionId,
+            createdAt: now,
+            searchText: cluster.searchText,
+          });
+
+          if (existingClusterState !== nextClusterState) {
+            await ladybugDb.upsertClusterMembersBatch(
+              txConn,
+              cluster.members.map((member) => ({
+                symbolId: member.symbolId,
+                clusterId: cluster.clusterId,
+                membershipScore: member.membershipScore,
+              })),
+            );
+          }
+        }
       });
-
-      await ladybugDb.upsertClusterMembersBatch(
-        wConn,
-        members.map((member) => ({
-          symbolId: member.symbolId,
-          clusterId,
-          membershipScore: member.membershipScore,
-        })),
-      );
-
-      clusterIndex++;
-    }
+    });
   });
 
-  // Free cluster-related structures before process tracing.
-  clusterEdges.length = 0;
-  clustersById.clear();
-
   const processesStartMs = Date.now();
-  const processes =
-    traceProcessesRust(
-      symbols.map((s) => ({ symbolId: s.symbolId, name: s.name })),
-      callEdges,
-      maxProcessDepth,
-      entryPatterns,
-    ) ??
-    (await traceProcessesTS(repoId, entryPatterns, {
-      maxDepth: maxProcessDepth,
-    }));
+  const processes = await measureSubphase(
+    "processCompute",
+    async () =>
+      traceProcessesRust(
+        symbols.map((symbol) => ({
+          symbolId: symbol.symbolId,
+          name: symbol.name,
+        })),
+        callEdges,
+        maxProcessDepth,
+        entryPatterns,
+      ) ??
+      (await traceProcessesTS(repoId, entryPatterns, {
+        maxDepth: maxProcessDepth,
+      })),
+  );
 
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.deleteProcessesByRepo(wConn, repoId);
-
-    for (const proc of processes) {
+  const nextProcessStates: NextProcessState[] = processes.map(
+    (process, processIndex) => {
       const lastOrder =
-        proc.steps.length > 0 ? proc.steps[proc.steps.length - 1].stepOrder : 0;
+        process.steps.length > 0
+          ? process.steps[process.steps.length - 1].stepOrder
+          : 0;
 
-      const entrySymbol = symbolById.get(proc.entrySymbolId);
+      const entrySymbol = symbolById.get(process.entrySymbolId);
       const entryName = entrySymbol?.name ?? "";
-      const entryFile = entrySymbol?.fileId ? filesById.get(entrySymbol.fileId)?.relPath : undefined;
-      const fileHint = entryFile ? entryFile.split("/").slice(-2).join("/") : "";
-      const procLabel = entryName
-        ? (fileHint ? `Process: ${entryName} (${fileHint})` : `Process: ${entryName}`)
-        : `Process ${clusterIndex + 1}`;
-      const stepNames = proc.steps
+      const entryFile = entrySymbol?.fileId
+        ? filesById.get(entrySymbol.fileId)?.relPath
+        : undefined;
+      const fileHint = entryFile
+        ? entryFile.split("/").slice(-2).join("/")
+        : "";
+      const label = entryName
+        ? fileHint
+          ? `Process: ${entryName} (${fileHint})`
+          : `Process: ${entryName}`
+        : `Process ${processIndex + 1}`;
+      const stepNames = process.steps
         .map((step) => symbolById.get(step.symbolId)?.name)
-        .filter((n): n is string => Boolean(n));
-      const processSearchText = buildProcessSearchText(
-        procLabel,
-        entryName,
-        stepNames,
-      );
+        .filter((name): name is string => Boolean(name));
 
-      await ladybugDb.upsertProcess(wConn, {
-        processId: proc.processId,
-        repoId,
-        entrySymbolId: proc.entrySymbolId,
-        label: procLabel,
-        depth: proc.depth,
-        versionId,
-        createdAt: now,
-        searchText: processSearchText,
-      });
-
-      await ladybugDb.upsertProcessStepsBatch(
-        wConn,
-        proc.steps.map((step) => ({
-          processId: proc.processId,
+      return {
+        processId: process.processId,
+        entrySymbolId: process.entrySymbolId,
+        label,
+        depth: process.depth,
+        searchText: buildProcessSearchText(label, entryName, stepNames),
+        steps: process.steps.map((step) => ({
           symbolId: step.symbolId,
           stepOrder: step.stepOrder,
           role:
@@ -208,8 +330,63 @@ export async function computeAndStoreClustersAndProcesses(params: {
                 ? "exit"
                 : "intermediate",
         })),
-      );
-    }
+      };
+    },
+  );
+
+  await measureSubphase("processWrite", async () => {
+    const existingProcesses = await ladybugDb.getProcessesForRepo(conn, repoId);
+    const existingSteps = await ladybugDb.getProcessStepsForRepo(conn, repoId);
+    const existingProcessState = serializeProcessState(
+      existingProcesses.map((process) => ({
+        processId: process.processId,
+        entrySymbolId: process.entrySymbolId,
+        label: process.label,
+        depth: process.depth,
+        searchText: process.searchText ?? "",
+        steps: existingSteps
+          .filter((step) => step.processId === process.processId)
+          .map((step) => ({
+            symbolId: step.symbolId,
+            stepOrder: step.stepOrder,
+            role: step.role ?? "",
+          })),
+      })),
+    );
+    const nextProcessState = serializeProcessState(nextProcessStates);
+
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.withTransaction(wConn, async (txConn) => {
+        if (existingProcessState !== nextProcessState) {
+          await ladybugDb.deleteProcessesByRepo(txConn, repoId);
+        }
+
+        for (const process of nextProcessStates) {
+          await ladybugDb.upsertProcess(txConn, {
+            processId: process.processId,
+            repoId,
+            entrySymbolId: process.entrySymbolId,
+            label: process.label,
+            depth: process.depth,
+            versionId,
+            createdAt: now,
+            searchText: process.searchText,
+          });
+
+          if (existingProcessState !== nextProcessState) {
+            await ladybugDb.upsertProcessStepsBatch(
+              txConn,
+              process.steps.map((step) => ({
+                processId: process.processId,
+                symbolId: step.symbolId,
+                stepOrder: step.stepOrder,
+                role: step.role,
+              })),
+            );
+          }
+        }
+      });
+    });
   });
 
   logger.info("Cluster/process computation completed", {
@@ -224,6 +401,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
   return {
     clustersComputed: sortedClusterIds.length,
     processesTraced: processes.length,
+    ...(timings ? { timings } : {}),
   };
 }
 
@@ -285,7 +463,8 @@ function generateClusterLabel(
   if (exportedNames.length > 0) {
     // Pick the most common name, or the first alphabetically as a representative
     const nameCounts = new Map<string, number>();
-    for (const n of exportedNames) nameCounts.set(n, (nameCounts.get(n) ?? 0) + 1);
+    for (const n of exportedNames)
+      nameCounts.set(n, (nameCounts.get(n) ?? 0) + 1);
     const sorted = [...nameCounts.entries()].sort((a, b) => b[1] - a[1]);
     if (sorted.length === 1) {
       return sorted[0][0];
@@ -301,7 +480,9 @@ function generateClusterLabel(
         .map((s) => filesById.get(s.fileId)?.relPath ?? "")
         .filter(Boolean);
       if (memberFiles.length > 0) {
-        const dirs = memberFiles.map((f) => f.split("/").slice(0, -1).join("/"));
+        const dirs = memberFiles.map((f) =>
+          f.split("/").slice(0, -1).join("/"),
+        );
         const dirCounts = new Map<string, number>();
         for (const d of dirs) {
           if (d) dirCounts.set(d, (dirCounts.get(d) ?? 0) + 1);
@@ -312,14 +493,17 @@ function generateClusterLabel(
         const dirThreshold = members.length > 50 ? 0.3 : 0.5;
         if (topDir && topDir[1] >= memberFiles.length * dirThreshold) {
           // Show top 2 directories if the second is also significant
-          if (sortedDirs.length >= 2 && sortedDirs[1][1] >= memberFiles.length * 0.2) {
+          if (
+            sortedDirs.length >= 2 &&
+            sortedDirs[1][1] >= memberFiles.length * 0.2
+          ) {
             return `${topDir[0]} + ${sortedDirs[1][0]}`;
           }
           return topDir[0];
         }
       }
       // DF-2: For large clusters, try harder to produce a directory-based label
-      // "supports + 1798 related" is uninformative — use the dominant directory instead
+      // "supports + 1798 related" is uninformative - use the dominant directory instead
       const memberFilesFallback = members
         .map((m) => symbolById.get(m.symbolId))
         .filter((s): s is { name: string; fileId: string } => Boolean(s))
@@ -330,11 +514,19 @@ function generateClusterLabel(
         const depth2Counts = new Map<string, number>();
         for (const f of memberFilesFallback) {
           const parts = f.split("/");
-          const d2 = parts.length >= 3 ? parts.slice(0, 3).join("/") : parts.slice(0, -1).join("/");
+          const d2 =
+            parts.length >= 3
+              ? parts.slice(0, 3).join("/")
+              : parts.slice(0, -1).join("/");
           if (d2) depth2Counts.set(d2, (depth2Counts.get(d2) ?? 0) + 1);
         }
-        const sortedDirs2 = [...depth2Counts.entries()].sort((a, b) => b[1] - a[1]);
-        if (sortedDirs2.length > 0 && sortedDirs2[0][1] >= memberFilesFallback.length * 0.2) {
+        const sortedDirs2 = [...depth2Counts.entries()].sort(
+          (a, b) => b[1] - a[1],
+        );
+        if (
+          sortedDirs2.length > 0 &&
+          sortedDirs2[0][1] >= memberFilesFallback.length * 0.2
+        ) {
           const topDirs = sortedDirs2
             .filter(([, count]) => count >= memberFilesFallback.length * 0.1)
             .slice(0, 3)

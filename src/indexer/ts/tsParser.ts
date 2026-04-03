@@ -2,6 +2,7 @@ import path from "path";
 import { globSync } from "node:fs";
 import ts from "typescript";
 import type { SymbolKind } from "../../domain/types.js";
+import { hashContent } from "../../util/hashing.js";
 import { normalizePath } from "../../util/paths.js";
 import type { FileMetadata } from "../fileScanner.js";
 
@@ -25,18 +26,132 @@ export interface TsCallResolver {
   invalidateFiles: (relPaths: string[]) => void;
 }
 
+interface TsProgramCacheEntry {
+  builderProgram: ts.SemanticDiagnosticsBuilderProgram;
+  program: ts.Program;
+  host: ts.CompilerHost;
+  fileSetKey: string;
+  compilerOptionsKey: string;
+  buildId: number;
+}
+
 /** Cache of ts.Program keyed by repoRoot. */
-const programCache = new Map<string, ts.Program>();
+const programCache = new Map<string, TsProgramCacheEntry>();
+
+/** Cache of discovered `node_modules/@types` files keyed by repoRoot. */
+const typeDefinitionFileCache = new Map<string, string[]>();
 
 /** Files that need to be invalidated on next program build. */
 const invalidationSet = new Map<string, Set<string>>();
+let nextProgramBuildId = 1;
 
 function buildProgram(
   fileNames: string[],
   compilerOptions: ts.CompilerOptions,
-): ts.Program {
-  const host = ts.createCompilerHost(compilerOptions, true);
-  return ts.createProgram(fileNames, compilerOptions, host);
+  oldEntry?: TsProgramCacheEntry,
+): { builderProgram: ts.SemanticDiagnosticsBuilderProgram; program: ts.Program; host: ts.CompilerHost } {
+  const host =
+    oldEntry?.compilerOptionsKey === buildCompilerOptionsKey(compilerOptions)
+      ? oldEntry.host
+      : ts.createIncrementalCompilerHost(compilerOptions, ts.sys);
+  const builderProgram = ts.createSemanticDiagnosticsBuilderProgram(
+    fileNames,
+    compilerOptions,
+    host,
+    oldEntry?.builderProgram,
+  );
+  return {
+    builderProgram,
+    program: builderProgram.getProgram(),
+    host,
+  };
+}
+
+function buildFileSetKey(fileNames: string[]): string {
+  return hashContent(fileNames.join("\n"));
+}
+
+function buildCompilerOptionsKey(
+  compilerOptions: ts.CompilerOptions,
+): string {
+  return hashContent(JSON.stringify(compilerOptions));
+}
+
+function markInvalidatedFiles(repoRoot: string, relPaths: string[]): void {
+  if (relPaths.length === 0) return;
+
+  if (!invalidationSet.has(repoRoot)) {
+    invalidationSet.set(repoRoot, new Set());
+  }
+  const set = invalidationSet.get(repoRoot)!;
+  for (const relPath of relPaths) {
+    set.add(normalizePath(relPath));
+  }
+}
+
+function upsertCachedProgram(params: {
+  repoRoot: string;
+  fileNames: string[];
+  fileSetKey: string;
+  compilerOptions: ts.CompilerOptions;
+  compilerOptionsKey: string;
+  timingsOut?: Record<string, number>;
+}): TsProgramCacheEntry {
+  const {
+    repoRoot,
+    fileNames,
+    fileSetKey,
+    compilerOptions,
+    compilerOptionsKey,
+    timingsOut,
+  } = params;
+  const oldEntry = programCache.get(repoRoot);
+  const buildStart = timingsOut ? Date.now() : 0;
+  const nextProgram = buildProgram(fileNames, compilerOptions, oldEntry);
+  const entry: TsProgramCacheEntry = {
+    builderProgram: nextProgram.builderProgram,
+    program: nextProgram.program,
+    host: nextProgram.host,
+    fileSetKey,
+    compilerOptionsKey,
+    buildId: nextProgramBuildId++,
+  };
+  if (timingsOut) {
+    timingsOut.programBuild = Date.now() - buildStart;
+  }
+  invalidationSet.delete(repoRoot);
+  programCache.set(repoRoot, entry);
+  return entry;
+}
+
+function getTypeDefinitionFiles(
+  repoRoot: string,
+  includeNodeModulesTypes: boolean,
+  timingsOut?: Record<string, number>,
+): string[] {
+  if (!includeNodeModulesTypes) {
+    return [];
+  }
+
+  const startMs = timingsOut ? Date.now() : 0;
+  const cached = typeDefinitionFileCache.get(repoRoot);
+  if (cached) {
+    if (timingsOut) {
+      timingsOut.typeDefinitions = Date.now() - startMs;
+    }
+    return cached;
+  }
+
+  const discovered = [...globSync("node_modules/@types/**/*.d.ts", {
+    cwd: repoRoot,
+    exclude: ["node_modules/@types/node/**", "node_modules/@types/node.d.ts"],
+  })].map((file) => path.resolve(repoRoot, file));
+
+  typeDefinitionFileCache.set(repoRoot, discovered);
+  if (timingsOut) {
+    timingsOut.typeDefinitions = Date.now() - startMs;
+  }
+  return discovered;
 }
 
 /**
@@ -63,12 +178,25 @@ function resolveAliasedSymbol(
 }
 
 /**
- * Release cached TS programs and invalidation sets to free memory.
- * Call after pass2 resolvers complete and the TS compiler is no longer needed.
+ * Release cached TS programs and invalidation sets.
+ * When `repoRoot` is omitted, clears all resolver cache state.
  */
-export function clearTsCallResolverCache(): void {
+export function clearTsCallResolverCache(repoRoot?: string): void {
+  if (repoRoot) {
+    programCache.delete(repoRoot);
+    typeDefinitionFileCache.delete(repoRoot);
+    invalidationSet.delete(repoRoot);
+    return;
+  }
+
   programCache.clear();
+  typeDefinitionFileCache.clear();
   invalidationSet.clear();
+  nextProgramBuildId = 1;
+}
+
+export function getTsCallResolverCacheBuildId(repoRoot: string): number | null {
+  return programCache.get(repoRoot)?.buildId ?? null;
 }
 
 export function createTsCallResolver(
@@ -76,8 +204,12 @@ export function createTsCallResolver(
   files: FileMetadata[],
   options?: {
     includeNodeModulesTypes?: boolean;
+    dirtyRelPaths?: string[];
+    timingsOut?: Record<string, number>;
   },
 ): TsCallResolver | null {
+  const timingsOut = options?.timingsOut;
+  const sourceFileStart = timingsOut ? Date.now() : 0;
   const sourceFileNames = files
     .map((file) => path.resolve(repoRoot, file.path))
     .filter(
@@ -87,19 +219,27 @@ export function createTsCallResolver(
         file.endsWith(".js") ||
         file.endsWith(".jsx"),
     );
+  if (timingsOut) {
+    timingsOut.sourceFiles = Date.now() - sourceFileStart;
+  }
 
   const includeNodeModulesTypes =
     options?.includeNodeModulesTypes !== undefined
       ? options.includeNodeModulesTypes
       : true;
-  const typeDefinitionFiles = includeNodeModulesTypes
-    ? [...globSync("node_modules/@types/**/*.d.ts", {
-        cwd: repoRoot,
-        exclude: ["node_modules/@types/node/**", "node_modules/@types/node.d.ts"],
-      })].map(f => path.resolve(repoRoot, f))
-    : [];
+  const typeDefinitionFiles = getTypeDefinitionFiles(
+    repoRoot,
+    includeNodeModulesTypes,
+    timingsOut,
+  );
 
-  const fileNames = Array.from(new Set([...sourceFileNames, ...typeDefinitionFiles]));
+  const fileSetStart = timingsOut ? Date.now() : 0;
+  const fileNames = Array.from(
+    new Set([...sourceFileNames, ...typeDefinitionFiles]),
+  ).sort();
+  if (timingsOut) {
+    timingsOut.fileSet = Date.now() - fileSetStart;
+  }
 
   if (fileNames.length === 0) {
     return null;
@@ -113,9 +253,21 @@ export function createTsCallResolver(
     skipLibCheck: true,
     noEmit: true,
   };
+  const fileSetKey = buildFileSetKey(fileNames);
+  const compilerOptionsKey = buildCompilerOptionsKey(compilerOptions);
+
+  if (options?.dirtyRelPaths && options.dirtyRelPaths.length > 0) {
+    markInvalidatedFiles(repoRoot, options.dirtyRelPaths);
+  }
 
   // Ensure program is built (or rebuilt after invalidation).
-  let needsRebuild = !programCache.has(repoRoot);
+  let cachedEntry = programCache.get(repoRoot);
+  let needsRebuild = !cachedEntry;
+  if (!needsRebuild) {
+    needsRebuild =
+      cachedEntry!.fileSetKey !== fileSetKey ||
+      cachedEntry!.compilerOptionsKey !== compilerOptionsKey;
+  }
   if (!needsRebuild) {
     const pending = invalidationSet.get(repoRoot);
     if (pending && pending.size > 0) {
@@ -124,32 +276,39 @@ export function createTsCallResolver(
   }
 
   if (needsRebuild) {
-    invalidationSet.delete(repoRoot);
-    programCache.set(repoRoot, buildProgram(fileNames, compilerOptions));
+    cachedEntry = upsertCachedProgram({
+      repoRoot,
+      fileNames,
+      fileSetKey,
+      compilerOptions,
+      compilerOptionsKey,
+      timingsOut,
+    });
+  } else if (timingsOut) {
+    timingsOut.programBuild = 0;
   }
 
    
-  let program = programCache.get(repoRoot)!;
+  let program = cachedEntry!.program;
   let checker = program.getTypeChecker();
 
   return {
     invalidateFiles: (relPaths: string[]): void => {
-      if (!invalidationSet.has(repoRoot)) {
-        invalidationSet.set(repoRoot, new Set());
-      }
-      const set = invalidationSet.get(repoRoot)!;
-      for (const rp of relPaths) {
-        set.add(rp);
-      }
+      markInvalidatedFiles(repoRoot, relPaths);
     },
 
     getResolvedCalls: (relPath: string) => {
       // Rebuild program if invalidated since last call.
       const pending = invalidationSet.get(repoRoot);
       if (pending && pending.size > 0) {
-        invalidationSet.delete(repoRoot);
-        program = buildProgram(fileNames, compilerOptions);
-        programCache.set(repoRoot, program);
+        const refreshedEntry = upsertCachedProgram({
+          repoRoot,
+          fileNames,
+          fileSetKey,
+          compilerOptions,
+          compilerOptionsKey,
+        });
+        program = refreshedEntry.program;
         checker = program.getTypeChecker();
       }
 

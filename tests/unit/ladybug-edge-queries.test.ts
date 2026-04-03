@@ -263,6 +263,203 @@ describe("LadybugDB Edge Queries", () => {
   );
 
   it(
+    "getUnresolvedImportEdgesByRepo returns only unresolved import candidates",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "unresolved:src/target.ts:Target",
+        edgeType: "import",
+        weight: 0.6,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "import:Target",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-to",
+        edgeType: "import",
+        weight: 0.6,
+        confidence: 1,
+        resolution: "exact",
+        provenance: "import:ResolvedTarget",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "unresolved:call:print",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "call:print",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+
+      const queriesWithUnresolvedImports = queries as typeof queries & {
+        getUnresolvedImportEdgesByRepo?: (
+          conn: import("kuzu").Connection,
+          repoId: string,
+          options?: { affectedPaths?: string[] },
+        ) => Promise<Array<import("../../dist/db/ladybug-queries.js").EdgeRow>>;
+      };
+
+      assert.strictEqual(
+        typeof queriesWithUnresolvedImports.getUnresolvedImportEdgesByRepo,
+        "function",
+      );
+
+      const unresolvedImports = await queriesWithUnresolvedImports
+        .getUnresolvedImportEdgesByRepo!(
+          conn as unknown as import("kuzu").Connection,
+          repoId,
+        );
+
+      assert.deepStrictEqual(
+        unresolvedImports.map((edge) => Object.keys(edge).sort()),
+        [["fromSymbolId", "provenance", "toSymbolId"]],
+      );
+      assert.deepStrictEqual(
+        unresolvedImports,
+        [
+          {
+            fromSymbolId: "edge-from",
+            toSymbolId: "unresolved:src/target.ts:Target",
+            provenance: "import:Target",
+          },
+        ],
+      );
+
+      const unrelatedImports = await queriesWithUnresolvedImports
+        .getUnresolvedImportEdgesByRepo!(
+          conn as unknown as import("kuzu").Connection,
+          repoId,
+          { affectedPaths: ["src/other.ts"] },
+        );
+      assert.deepStrictEqual(unrelatedImports, []);
+
+      const targetScopedImports = await queriesWithUnresolvedImports
+        .getUnresolvedImportEdgesByRepo!(
+          conn as unknown as import("kuzu").Connection,
+          repoId,
+          { affectedPaths: ["src/target.ts"] },
+        );
+      assert.deepStrictEqual(targetScopedImports, unresolvedImports);
+    },
+  );
+
+  it(
+    "getUnresolvedCallEdgesByRepo returns only unresolved call candidates",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "unresolved:call:console.log",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "call:console.log",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-to",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        provenance: "call:resolvedTarget",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "unresolved:src/target.ts:Target",
+        edgeType: "import",
+        weight: 0.6,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "import:Target",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+
+      const queriesWithUnresolvedCalls = queries as typeof queries & {
+        getUnresolvedCallEdgesByRepo?: (
+          conn: import("kuzu").Connection,
+          repoId: string,
+        ) => Promise<Array<{ fromSymbolId: string; toSymbolId: string }>>;
+      };
+
+      assert.strictEqual(
+        typeof queriesWithUnresolvedCalls.getUnresolvedCallEdgesByRepo,
+        "function",
+      );
+
+      const unresolvedCalls = await queriesWithUnresolvedCalls
+        .getUnresolvedCallEdgesByRepo!(
+          conn as unknown as import("kuzu").Connection,
+          repoId,
+        );
+
+      assert.deepStrictEqual(
+        unresolvedCalls.map((edge) => Object.keys(edge).sort()),
+        [["fromSymbolId", "toSymbolId"]],
+      );
+      assert.deepStrictEqual(
+        unresolvedCalls,
+        [
+          {
+            fromSymbolId: "edge-from",
+            toSymbolId: "unresolved:call:console.log",
+          },
+        ],
+      );
+    },
+  );
+
+  it(
+    "getEdgesByRepoLite returns only lite edge fields",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-to",
+        edgeType: "call",
+        weight: 1,
+        confidence: 0.9,
+        resolution: "exact",
+        provenance: "call:edgeTo",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+
+      const liteEdges = await queries.getEdgesByRepoLite(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+      );
+
+      assert.deepStrictEqual(
+        liteEdges.map((edge) => Object.keys(edge).sort()),
+        [["edgeType", "fromSymbolId", "toSymbolId"]],
+      );
+      assert.deepStrictEqual(liteEdges, [
+        {
+          fromSymbolId: "edge-from",
+          toSymbolId: "edge-to",
+          edgeType: "call",
+        },
+      ]);
+    },
+  );
+
+  it(
     "persists resolver metadata on call edges",
     { skip: !ladybugAvailable },
     async () => {

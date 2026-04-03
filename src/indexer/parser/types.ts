@@ -13,6 +13,7 @@ import type { SymbolWithNodeId } from "../worker.js";
 import type { ExtractedCall } from "../treesitter/extractCalls.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
 import type * as ladybugDb from "../../db/ladybug-queries.js";
+import type { SymbolMapFileUpdate } from "../symbol-map-cache.js";
 
 // ── ProcessFile params & result ─────────────────────────────────────
 
@@ -47,6 +48,7 @@ export interface ProcessFileResult {
   changed: boolean;
   configEdges: ConfigEdge[];
   pass2HintPaths: string[];
+  symbolMapFileUpdate?: SymbolMapFileUpdate;
 }
 
 // ── Early-exit phase output ─────────────────────────────────────────

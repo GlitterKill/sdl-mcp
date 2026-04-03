@@ -36,6 +36,7 @@ export async function runPass1WithRustEngine(
     filesProcessed: 0, changedFiles: 0, totalSymbolsIndexed: 0,
     totalEdgesCreated: 0, allConfigEdges: [], changedFileIds: new Set(),
     changedPass2FilePaths: new Set(),
+    symbolMapFileUpdates: new Map(),
   };
   const updateProgress = (currentFile?: string): void => {
     onProgress?.({
@@ -127,6 +128,12 @@ export async function runPass1WithRustEngine(
         acc.changedFileIds.add(
           fileIdForPath(repoId, file.path, existingByPath),
         );
+        if (result.symbolMapFileUpdate) {
+          acc.symbolMapFileUpdates.set(
+            result.symbolMapFileUpdate.fileId,
+            result.symbolMapFileUpdate,
+          );
+        }
         if (skipCallResolution) {
           acc.changedPass2FilePaths.add(file.path);
           for (const hinted of result.pass2HintPaths)
@@ -175,6 +182,12 @@ export async function runPass1WithRustEngine(
         acc.changedFileIds.add(
           fileIdForPath(repoId, file.path, existingByPath),
         );
+        if (result.symbolMapFileUpdate) {
+          acc.symbolMapFileUpdates.set(
+            result.symbolMapFileUpdate.fileId,
+            result.symbolMapFileUpdate,
+          );
+        }
         if (skipCallResolution) {
           acc.changedPass2FilePaths.add(file.path);
           for (const hinted of result.pass2HintPaths)
@@ -208,6 +221,7 @@ export async function runPass1WithTsEngine(
     filesProcessed: 0, changedFiles: 0, totalSymbolsIndexed: 0,
     totalEdgesCreated: 0, allConfigEdges: [], changedFileIds: new Set(),
     changedPass2FilePaths: new Set(),
+    symbolMapFileUpdates: new Map(),
   };
   // SAFETY: nextIndex++ must remain synchronous — no `await` between reading
   // and incrementing. JavaScript's single-threaded event loop guarantees
@@ -257,6 +271,12 @@ export async function runPass1WithTsEngine(
           acc.changedFileIds.add(
             fileIdForPath(repoId, file.path, existingByPath),
           );
+          if (result.symbolMapFileUpdate) {
+            acc.symbolMapFileUpdates.set(
+              result.symbolMapFileUpdate.fileId,
+              result.symbolMapFileUpdate,
+            );
+          }
           if (skipCallResolution) {
             acc.changedPass2FilePaths.add(file.path);
             for (const hinted of result.pass2HintPaths)

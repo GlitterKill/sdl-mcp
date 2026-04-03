@@ -28,6 +28,11 @@ import {
   type LadybugConn,
 } from "./indexer-init.js";
 
+type FinalizeEdgesPhaseMeasurer = <T>(
+  phaseName: string,
+  fn: () => Promise<T> | T,
+) => Promise<T>;
+
 /**
  * Rebuild the in-memory `symbolIndex` and `globalNameToSymbolIds` from the DB
  * after Pass 1 so Pass 2 resolvers see all freshly indexed symbols.
@@ -183,11 +188,35 @@ export async function finalizeEdges(params: {
   createdCallEdges: Set<string>;
   allConfigEdges: ConfigEdge[];
   configEdgeWeight: number;
+  measurePhase?: FinalizeEdgesPhaseMeasurer;
 }): Promise<{ configEdgesCreated: number }> {
-  const { repoId, pendingCallEdges, symbolIndex, createdCallEdges, allConfigEdges, configEdgeWeight } = params;
+  const {
+    repoId,
+    pendingCallEdges,
+    symbolIndex,
+    createdCallEdges,
+    allConfigEdges,
+    configEdgeWeight,
+    measurePhase,
+  } = params;
+  const measure = measurePhase ??
+    (async <T>(_phaseName: string, fn: () => Promise<T> | T): Promise<T> =>
+      await fn());
 
-  await resolvePendingCallEdges(pendingCallEdges, symbolIndex, createdCallEdges, repoId);
-  await cleanupUnresolvedEdges(repoId);
+  await measure(
+    "resolvePendingCalls",
+    async () =>
+      await resolvePendingCallEdges(
+        pendingCallEdges,
+        symbolIndex,
+        createdCallEdges,
+        repoId,
+      ),
+  );
+  await measure(
+    "cleanupUnresolvedBuiltins",
+    async () => await cleanupUnresolvedEdges(repoId),
+  );
 
   const now = new Date().toISOString();
   const configEdgesToInsert: ladybugDb.EdgeRow[] = allConfigEdges.map(
@@ -203,8 +232,12 @@ export async function finalizeEdges(params: {
       createdAt: now,
     }),
   );
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.insertEdges(wConn, configEdgesToInsert);
-  });
+  await measure(
+    "insertConfigEdges",
+    async () =>
+      await withWriteConn(async (wConn) => {
+        await ladybugDb.insertEdges(wConn, configEdgesToInsert);
+      }),
+  );
   return { configEdgesCreated: configEdgesToInsert.length };
 }

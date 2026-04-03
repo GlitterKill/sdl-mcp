@@ -145,17 +145,21 @@ Refresh the symbol index in `incremental` or `full` mode.
 | `repoId` | `string` | Yes | Repository identifier |
 | `mode` | `"full" \| "incremental"` | Yes | Refresh mode |
 | `reason` | `string` | No | Human-readable reason for the refresh |
+| `includeDiagnostics` | `boolean` | No | When `true`, include coarse phase timings in the synchronous response |
+| `async` | `boolean` | No | When `true`, start indexing in the background and return an `operationId` immediately |
 
-**Response:** `{ ok: boolean, repoId: string, versionId: string, changedFiles: integer }`
+**Response:** `{ ok: boolean, repoId: string, versionId?: string, changedFiles?: integer, async?: boolean, operationId?: string, message?: string, diagnostics?: { timings: { totalMs: number, phases: Record<string, number> } } }`
 
-In incremental mode, files whose modification time predates their last indexed timestamp are skipped. If no files changed, the existing version is reused instead of creating an empty snapshot.
+In incremental mode, files whose modification time predates their last indexed timestamp are skipped. If no tracked files changed, the existing version is reused instead of creating an empty snapshot and the refresh can short-circuit after `scanRepo`, `versioning`, and `memorySync`.
 
 When called with a progress token, the server emits `notifications/progress` messages with the current stage, file path, and completion percentage.
+
+`diagnostics.timings` is only returned for synchronous requests with `includeDiagnostics: true`. `diagnostics.timings.phases` may include nested subphases such as `initSharedState.tsResolver`, `initSharedState.tsResolver.sourceFiles`, `initSharedState.tsResolver.programBuild`, `initSharedState.symbolMaps`, `resolveUnresolvedImports.fetchEdges`, `finalizeEdges.cleanupUnresolvedBuiltins`, `finalizeEdges.insertConfigEdges`, `finalizeIndexing.metrics`, `finalizeIndexing.metrics.testRefs`, `finalizeIndexing.fileSummaries`, `clustersAndProcesses.loadSymbols`, and `clustersAndProcesses.processWrite`. No-op incremental refreshes may omit later phases entirely and report a `shortCircuitNoOp` phase instead.
 
 **Example:**
 
 ```json
-{ "repoId": "my-repo", "mode": "incremental", "reason": "post-edit refresh" }
+{ "repoId": "my-repo", "mode": "incremental", "reason": "post-edit refresh", "includeDiagnostics": true }
 ```
 
 ---

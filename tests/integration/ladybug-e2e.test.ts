@@ -8,6 +8,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
@@ -355,6 +356,11 @@ describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
       ].join("\n"),
       "utf8",
     );
+    // Ensure the file's mtime is strictly in the future so the incremental
+    // scanner detects the change even if writeFileSync completed within the
+    // same millisecond as the previous index's lastIndexedAt timestamp.
+    const futureTime = new Date(Date.now() + 2000);
+    utimesSync(loginPath, futureTime, futureTime);
 
     const inc = await indexRepo(REPO_ID, "incremental");
     const afterVersion = inc.versionId;
