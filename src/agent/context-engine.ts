@@ -18,6 +18,7 @@ import { searchSymbols } from "../db/ladybug-queries.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
 import { classifySymptomType } from "../retrieval/evidence.js";
 import { estimateTokens } from "../util/tokenize.js";
+import { BROAD_VISIBLE_FIELDS } from "../mcp/context-response-projection.js";
 import { randomUUID } from "node:crypto";
 
 const HANDLED_EVIDENCE_TYPES = new Set([
@@ -494,10 +495,28 @@ export class ContextEngine {
   }
 
   /**
-   * Enforce token budget on broad-mode responses.  Progressively trims
-   * answer, finalEvidence, and actionsTaken until the serialized payload
-   * fits within the effective cap (user budget or MAX_CONTEXT_RESPONSE_TOKENS,
-   * whichever is smaller).
+   * Compact a broad-mode result to only model-visible fields.
+   * Uses the same allowlist as server-side projection so the projection
+   * becomes a no-op for already-compact payloads.
+   */
+  private compactBroadResult(result: ContextResult): ContextResult {
+    const compact: Record<string, unknown> = {};
+    const source = result as unknown as Record<string, unknown>;
+    for (const key of Object.keys(source)) {
+      if (BROAD_VISIBLE_FIELDS.has(key)) {
+        compact[key] = source[key];
+      }
+    }
+    return compact as unknown as ContextResult;
+  }
+
+  /**
+   * Enforce token budget on broad-mode responses.
+   *
+   * 1. Compact to model-visible fields first (drops actionsTaken, path, metrics, etc.).
+   * 2. Progressively trim finalEvidence, then actionsTaken, then answer length.
+   * 3. **Never fully remove `answer` on a successful result** — the answer is the
+   *    primary value of a broad-mode response.
    */
   private truncateIfOverBudget(
     result: ContextResult,
@@ -507,6 +526,9 @@ export class ContextEngine {
       budgetMaxTokens ?? MAX_CONTEXT_RESPONSE_TOKENS,
       MAX_CONTEXT_RESPONSE_TOKENS,
     );
+
+    // Phase 0: Compact to model-visible fields before measuring tokens
+    result = this.compactBroadResult(result);
 
     const serialized = JSON.stringify(result);
     const originalTokens = estimateTokens(serialized);
@@ -522,31 +544,8 @@ export class ContextEngine {
 
     const fieldsAffected: string[] = [];
 
-    // Phase 1: Truncate answer to half the budget
-    if (result.answer) {
-      const halfBudgetChars = Math.floor((effectiveCap / 2) * 3.5); // rough token-to-char
-      if (result.answer.length > halfBudgetChars) {
-        result = {
-          ...result,
-          answer:
-            result.answer.slice(0, halfBudgetChars) + "\n\n[answer truncated]",
-        };
-        fieldsAffected.push("answer");
-      }
-    }
-
-    // Check after phase 1
-    let currentTokens = estimateTokens(JSON.stringify(result));
-    if (currentTokens <= effectiveCap) {
-      result.truncation = {
-        originalTokens,
-        truncatedTokens: currentTokens,
-        fieldsAffected,
-      };
-      return result;
-    }
-
-    // Phase 2: Trim finalEvidence — keep first N items that fit
+    // Phase 1: Trim finalEvidence — keep first N items that fit
+    let currentTokens = originalTokens;
     if (result.finalEvidence.length > 0) {
       const targetEvidenceCount = Math.max(
         1,
@@ -563,7 +562,7 @@ export class ContextEngine {
       }
     }
 
-    // Check after phase 2
+    // Check after phase 1
     currentTokens = estimateTokens(JSON.stringify(result));
     if (currentTokens <= effectiveCap) {
       result.truncation = {
@@ -574,8 +573,8 @@ export class ContextEngine {
       return result;
     }
 
-    // Phase 3: Trim actionsTaken — keep first N items
-    if (result.actionsTaken.length > 0) {
+    // Phase 2: Trim actionsTaken — keep first N items
+    if (result.actionsTaken && result.actionsTaken.length > 0) {
       const targetActionCount = Math.max(
         1,
         Math.floor(result.actionsTaken.length * (effectiveCap / currentTokens)),
@@ -589,14 +588,29 @@ export class ContextEngine {
       }
     }
 
-    // Phase 4: If still over, aggressively strip answer entirely
+    // Check after phase 2
     currentTokens = estimateTokens(JSON.stringify(result));
-    if (currentTokens > effectiveCap && result.answer) {
-      result = {
-        ...result,
-        answer: "[answer removed — response exceeded token budget]",
+    if (currentTokens <= effectiveCap) {
+      result.truncation = {
+        originalTokens,
+        truncatedTokens: currentTokens,
+        fieldsAffected,
       };
-      if (!fieldsAffected.includes("answer")) fieldsAffected.push("answer");
+      return result;
+    }
+
+    // Phase 3: Truncate answer length but NEVER remove it on successful results.
+    // The answer is the primary value of a broad-mode response.
+    if (result.answer) {
+      const halfBudgetChars = Math.floor((effectiveCap / 2) * 3.5); // rough token-to-char
+      if (result.answer.length > halfBudgetChars) {
+        result = {
+          ...result,
+          answer:
+            result.answer.slice(0, halfBudgetChars) + "\n\n[answer truncated]",
+        };
+        if (!fieldsAffected.includes("answer")) fieldsAffected.push("answer");
+      }
     }
 
     const truncatedTokens = estimateTokens(JSON.stringify(result));

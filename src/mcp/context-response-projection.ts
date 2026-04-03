@@ -3,8 +3,9 @@
  * Precise-mode and non-context tool results pass through unchanged.
  */
 
-/** Fields kept in the compact broad response. */
-const BROAD_VISIBLE_FIELDS = new Set([
+/** Fields kept in the compact broad response.
+ *  Shared with context-engine.ts for pre-truncation compaction. */
+export const BROAD_VISIBLE_FIELDS = new Set([
   "taskId",
   "taskType",
   "success",

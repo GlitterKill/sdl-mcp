@@ -124,5 +124,47 @@ describe("context-response-projection", () => {
         precise,
       );
     });
+
+    it("is idempotent on already-compact broad payloads", () => {
+      // Simulate what the context engine returns after compaction:
+      // only BROAD_VISIBLE_FIELDS, no actionsTaken/path/metrics
+      const compact = {
+        taskId: "task-123",
+        taskType: "explain",
+        success: true,
+        summary: "Task completed",
+        answer: "# Results\n\nFound 1 symbol.",
+        finalEvidence: [
+          { type: "symbolCard", reference: "sym:1", summary: "test" },
+        ],
+        nextBestAction: "none",
+      };
+      // First projection should detect it's not a broad result (no actionsTaken)
+      // and return it unchanged
+      const first = projectBroadContextResult("sdl.agent.context", compact);
+      assert.strictEqual(
+        first,
+        compact,
+        "Already-compact broad payload should pass through unchanged",
+      );
+    });
+
+    it("is idempotent when re-projecting a projected result", () => {
+      // Project the full broad result once
+      const projected = projectBroadContextResult(
+        "sdl.agent.context",
+        broadResult,
+      ) as Record<string, unknown>;
+      // Project again — should pass through since actionsTaken was stripped
+      const reprojected = projectBroadContextResult(
+        "sdl.agent.context",
+        projected,
+      );
+      assert.strictEqual(
+        reprojected,
+        projected,
+        "Re-projecting should return the same reference (no-op)",
+      );
+    });
   });
 });

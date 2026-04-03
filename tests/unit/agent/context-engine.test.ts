@@ -116,9 +116,8 @@ describe("ContextEngine", () => {
     assert.equal(executeMock.mock.callCount(), 1);
     assert.equal(result.success, true);
     assert.equal(result.taskType, "debug");
-    assert.deepEqual(result.actionsTaken, actions);
+    // Broad-mode compacts: actionsTaken, path, metrics are stripped
     assert.deepEqual(result.finalEvidence, evidence);
-    assert.equal(result.metrics.totalActions, 2);
     assert.equal(result.nextBestAction, "none");
     assert.match(result.answer ?? "", /## Symbols Found \(1\)/);
   });
@@ -133,9 +132,10 @@ describe("ContextEngine", () => {
     mock.method(Executor.prototype, "getNextBestAction", () => undefined);
 
     const engine = new ContextEngine();
+    // Use precise mode so path/metrics remain visible on the result
     const result = await engine.buildContext(
       createTask({
-        options: { requireDiagnostics: true },
+        options: { requireDiagnostics: true, contextMode: "precise" },
         budget: {
           maxTokens: 100,
           maxDurationMs: 40,
@@ -212,7 +212,7 @@ describe("ContextEngine", () => {
     const result = await engine.buildContext(createTask());
 
     assert.equal(result.success, false);
-    assert.equal(result.actionsTaken.length, 1);
+    // Broad-mode compacts actionsTaken away, but summary and answer remain
     assert.match(result.summary, /completed with errors/);
     assert.equal(
       result.answer,
@@ -246,7 +246,7 @@ describe("ContextEngine", () => {
     const result = await engine.buildContext(createTask());
 
     assert.equal(result.success, true);
-    assert.deepEqual(result.path.rungs, []);
+    // Broad-mode compacts path away; verify summary instead
     assert.match(
       result.summary,
       /Executed 0 action\(s\), collected 0 evidence item\(s\)\./,
@@ -358,6 +358,173 @@ describe("ContextEngine", () => {
     assert.ok(capturedContext.includes("symbol:member-10"));
     // Verify 11th member is NOT present (cap at 10)
     assert.ok(!capturedContext.includes("symbol:member-11"));
+  });
+
+  it("preserves answer on successful broad-mode results even under budget pressure", async () => {
+    // Create a large evidence set to push the response over budget
+    const largeEvidence: Evidence[] = Array.from({ length: 50 }, (_, i) => ({
+      type: "symbolCard" as const,
+      reference: `symbol:sym-${i}`,
+      summary:
+        `Symbol ${i} with a long description that takes up tokens `.repeat(5),
+      timestamp: Date.now(),
+    }));
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [
+        {
+          id: "a-1",
+          type: "getCard",
+          status: "completed",
+          input: {},
+          timestamp: Date.now(),
+          durationMs: 1,
+          evidence: [],
+        },
+      ],
+      evidence: largeEvidence,
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(
+      createTask({
+        options: { contextMode: "broad" },
+        budget: { maxTokens: 500 }, // Very tight budget
+      }),
+    );
+
+    assert.equal(result.success, true);
+    // Answer must exist and not be a removal placeholder
+    assert.ok(
+      result.answer,
+      "answer must be present on successful broad result",
+    );
+    assert.ok(
+      !result.answer!.includes("[answer removed"),
+      "answer must not be fully removed on success",
+    );
+    // Truncation may affect finalEvidence and actionsTaken but NOT remove answer
+    if (result.truncation) {
+      assert.ok(
+        !result.truncation.fieldsAffected.includes("answer") ||
+          !result.answer!.includes("[answer removed"),
+        "truncation must not remove answer on success",
+      );
+    }
+  });
+
+  it("truncation trims finalEvidence and actionsTaken before answer", async () => {
+    const evidence: Evidence[] = Array.from({ length: 30 }, (_, i) => ({
+      type: "symbolCard" as const,
+      reference: `symbol:sym-${i}`,
+      summary: `Symbol ${i} description `.repeat(10),
+      timestamp: Date.now(),
+    }));
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [
+        {
+          id: "a-1",
+          type: "getCard",
+          status: "completed",
+          input: {},
+          timestamp: Date.now(),
+          durationMs: 1,
+          evidence: [],
+        },
+      ],
+      evidence,
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(
+      createTask({
+        options: { contextMode: "broad" },
+        budget: { maxTokens: 1000 },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    // If truncation happened, evidence should be trimmed before answer
+    if (result.truncation && result.truncation.fieldsAffected.length > 0) {
+      const fields = result.truncation.fieldsAffected;
+      // finalEvidence should be trimmed before answer
+      if (fields.includes("answer")) {
+        assert.ok(
+          fields.includes("finalEvidence"),
+          "finalEvidence must be trimmed before answer",
+        );
+      }
+    }
+  });
+
+  it("compact broad response omits internal fields (path, metrics, retrievalEvidence)", async () => {
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [
+        {
+          id: "a-1",
+          type: "getCard",
+          status: "completed",
+          input: {},
+          timestamp: Date.now(),
+          durationMs: 1,
+          evidence: [],
+        },
+      ],
+      evidence: [
+        {
+          type: "symbolCard",
+          reference: "symbol:alpha",
+          summary: "alpha card",
+          timestamp: Date.now(),
+        },
+      ],
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => "none");
+
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(
+      createTask({
+        options: { contextMode: "broad" },
+        budget: { maxTokens: 200 }, // Force truncation path
+      }),
+    );
+
+    // After compaction, internal fields should not be present
+    const resultObj = result as Record<string, unknown>;
+    // These fields are stripped by compaction (not in BROAD_VISIBLE_FIELDS):
+    assert.equal(
+      resultObj.path,
+      undefined,
+      "path should be stripped by compaction",
+    );
+    assert.equal(
+      resultObj.metrics,
+      undefined,
+      "metrics should be stripped by compaction",
+    );
+    assert.equal(
+      resultObj.retrievalEvidence,
+      undefined,
+      "retrievalEvidence should be stripped by compaction",
+    );
   });
 
   it("does not add irrelevant cluster members", async () => {
