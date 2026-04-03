@@ -24,12 +24,21 @@ import { hybridSearch } from "../retrieval/orchestrator.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
 import { randomUUID } from "node:crypto";
 
-
-const BEHAVIORAL_KINDS = new Set(['function', 'method', 'class', 'constructor']);
+const BEHAVIORAL_KINDS = new Set([
+  "function",
+  "method",
+  "class",
+  "constructor",
+]);
 /** Injectable gate evaluator for testability. */
 export type GateEvaluator = typeof evaluateRequest;
 
-const RUNG_ESCALATION_ORDER: RungType[] = ["card", "skeleton", "hotPath", "raw"];
+const RUNG_ESCALATION_ORDER: RungType[] = [
+  "card",
+  "skeleton",
+  "hotPath",
+  "raw",
+];
 
 const MAX_CARD_SYMBOLS = 20;
 const MAX_SKELETON_SYMBOLS = 5;
@@ -58,26 +67,86 @@ const RUNG_TOKEN_FALLBACK_ESTIMATES: Record<RungType, number> = {
   raw: 2000,
 };
 
-
 /**
  * Common English words and SDL-MCP domain terms filtered out during
  * identifier extraction. Includes both natural-language noise words and
  * tool-specific jargon that would produce low-value hot-path matches.
  */
 export const IDENTIFIER_STOP_WORDS = new Set([
-  "the", "and", "for", "that", "this", "with", "from", "are", "was",
-  "have", "has", "had", "does", "did", "will", "would", "could",
-  "should", "need", "use", "used", "using", "make", "find", "found",
-  "code", "file", "function", "class", "method", "implement", "fix",
-  "bug", "error", "issue", "problem", "task", "work", "check",
-  "symbol", "review", "analyze", "inspect", "debug", "explain",
-  "context", "skeleton", "hotpath", "window", "slice", "rung",
-  "look", "into", "what", "how", "why", "when", "where", "which",
-  "return", "import", "export", "const", "let", "var", "type",
-  "interface", "async", "await", "new", "true", "false", "null",
+  "the",
+  "and",
+  "for",
+  "that",
+  "this",
+  "with",
+  "from",
+  "are",
+  "was",
+  "have",
+  "has",
+  "had",
+  "does",
+  "did",
+  "will",
+  "would",
+  "could",
+  "should",
+  "need",
+  "use",
+  "used",
+  "using",
+  "make",
+  "find",
+  "found",
+  "code",
+  "file",
+  "function",
+  "class",
+  "method",
+  "implement",
+  "fix",
+  "bug",
+  "error",
+  "issue",
+  "problem",
+  "task",
+  "work",
+  "check",
+  "symbol",
+  "review",
+  "analyze",
+  "inspect",
+  "debug",
+  "explain",
+  "context",
+  "skeleton",
+  "hotpath",
+  "window",
+  "slice",
+  "rung",
+  "look",
+  "into",
+  "what",
+  "how",
+  "why",
+  "when",
+  "where",
+  "which",
+  "return",
+  "import",
+  "export",
+  "const",
+  "let",
+  "var",
+  "type",
+  "interface",
+  "async",
+  "await",
+  "new",
+  "true",
+  "false",
+  "null",
 ]);
-
-
 
 /**
  * Extract potential code identifiers from free text.
@@ -90,15 +159,19 @@ export function extractIdentifiersFromText(text: string): string[] {
   // Specific code-identifier patterns (high priority)
   const camelCase = bounded.match(/[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*/g) ?? [];
   const pascalCase = bounded.match(/[A-Z][a-z]+[A-Z][a-zA-Z0-9]*/g) ?? [];
-  const singlePascal = (bounded.match(/\b[A-Z][a-z]{5,}[a-zA-Z0-9]*\b/g) ?? [])
-    .filter((w) => !IDENTIFIER_STOP_WORDS.has(w.toLowerCase()));
+  const singlePascal = (
+    bounded.match(/\b[A-Z][a-z]{5,}[a-zA-Z0-9]*\b/g) ?? []
+  ).filter((w) => !IDENTIFIER_STOP_WORDS.has(w.toLowerCase()));
   const snakeCase = bounded.match(/[a-zA-Z][a-zA-Z0-9]*_[a-zA-Z0-9_]+/g) ?? [];
 
-  const primary = [...new Set([...camelCase, ...pascalCase, ...singlePascal, ...snakeCase])];
+  const primary = [
+    ...new Set([...camelCase, ...pascalCase, ...singlePascal, ...snakeCase]),
+  ];
 
   // Generic word tokens (low priority — fill remaining slots only)
-  const words = (bounded.match(/[a-zA-Z_][a-zA-Z0-9_]{2,}/g) ?? [])
-    .filter((w) => !IDENTIFIER_STOP_WORDS.has(w.toLowerCase()));
+  const words = (bounded.match(/[a-zA-Z_][a-zA-Z0-9_]{2,}/g) ?? []).filter(
+    (w) => !IDENTIFIER_STOP_WORDS.has(w.toLowerCase()),
+  );
   const primarySet = new Set(primary);
   const secondary = [...new Set(words)].filter((w) => !primarySet.has(w));
 
@@ -159,12 +232,18 @@ export class Executor {
       // Track tokens: use actual evidence-based count when available,
       // fall back to static estimates otherwise
       const rungEvidence = this.evidenceCapture.getAllEvidence();
-      const actualTokens = rungEvidence.length > evidenceBefore
-        ? rungEvidence.slice(evidenceBefore).reduce((sum, e) => {
-            const tokenMatch = e.summary.match(/~(\d+) tokens/);
-            return sum + (tokenMatch ? parseInt(tokenMatch[1], 10) : RUNG_TOKEN_FALLBACK_ESTIMATES[rung] ?? 0);
-          }, 0)
-        : RUNG_TOKEN_FALLBACK_ESTIMATES[rung] ?? 0;
+      const actualTokens =
+        rungEvidence.length > evidenceBefore
+          ? rungEvidence.slice(evidenceBefore).reduce((sum, e) => {
+              const tokenMatch = e.summary.match(/~(\d+) tokens/);
+              return (
+                sum +
+                (tokenMatch
+                  ? parseInt(tokenMatch[1], 10)
+                  : (RUNG_TOKEN_FALLBACK_ESTIMATES[rung] ?? 0))
+              );
+            }, 0)
+          : (RUNG_TOKEN_FALLBACK_ESTIMATES[rung] ?? 0);
       this.metrics.totalTokens += actualTokens;
 
       const evidenceAfter = this.evidenceCapture.getAllEvidence().length;
@@ -307,23 +386,38 @@ export class Executor {
           if (file) {
             const symbols = await ladybugDb.getSymbolsByFile(conn, file.fileId);
             // Prefer behavioral symbols (functions/methods/classes) over variables for explain tasks
-            const behavioral = symbols.filter((s) => BEHAVIORAL_KINDS.has(s.kind));
+            const behavioral = symbols.filter((s) =>
+              BEHAVIORAL_KINDS.has(s.kind),
+            );
             const preferred = behavioral.length > 0 ? behavioral : symbols;
             return preferred.slice(0, 50).map((sym) => sym.symbolId);
           }
 
-          // If exact match fails, treat as directory prefix and find files under it
-          const normalizedPrefix = relPath.endsWith("/") ? relPath : relPath + "/";
-          const filesUnderDir = await ladybugDb.getFilesByPrefix(conn, repoId, normalizedPrefix);
+          // If exact match fails, treat as directory prefix and find files under it.
+          // Cap total symbols per directory to avoid flooding broad-mode queries.
+          const MAX_DIR_SYMBOLS = 30;
+          const normalizedPrefix = relPath.endsWith("/")
+            ? relPath
+            : relPath + "/";
+          const filesUnderDir = await ladybugDb.getFilesByPrefix(
+            conn,
+            repoId,
+            normalizedPrefix,
+          );
           if (filesUnderDir.length > 0) {
             const symbolResults = await Promise.all(
-              filesUnderDir.slice(0, 20).map(async (f) => {
-                const symbols = await ladybugDb.getSymbolsByFile(conn, f.fileId);
+              filesUnderDir.slice(0, 10).map(async (f) => {
+                const symbols = await ladybugDb.getSymbolsByFile(
+                  conn,
+                  f.fileId,
+                );
                 const beh = symbols.filter((s) => BEHAVIORAL_KINDS.has(s.kind));
-                return (beh.length > 0 ? beh : symbols).slice(0, 10).map((sym) => sym.symbolId);
+                return (beh.length > 0 ? beh : symbols)
+                  .slice(0, 5)
+                  .map((sym) => sym.symbolId);
               }),
             );
-            return symbolResults.flat();
+            return symbolResults.flat().slice(0, MAX_DIR_SYMBOLS);
           }
         } catch (err) {
           logger.debug("Failed to resolve symbols for file", {
@@ -389,23 +483,33 @@ export class Executor {
     const scored: Array<{ symbolId: string; score: number }> = [];
     for (const symbolId of symbolIds) {
       const sym = symbolMap.get(symbolId);
-      if (!sym) { scored.push({ symbolId, score: 0 }); continue; }
+      if (!sym) {
+        scored.push({ symbolId, score: 0 });
+        continue;
+      }
       let score = 0;
       const nameLower = sym.name.toLowerCase();
-      if (nameLower.length >= 3 && taskTextLower.includes(nameLower)) score += 10;
+      if (nameLower.length >= 3 && taskTextLower.includes(nameLower))
+        score += 10;
       if (identifierSet.has(nameLower)) score += 8;
       // Only check partial overlap for names 3+ chars (avoid matching 'i', 'r', etc.)
       if (nameLower.length >= 3) {
         for (const id of identifiers) {
           if (id.length < 3) continue;
           const idLower = id.toLowerCase();
-          if (nameLower.includes(idLower) || idLower.includes(nameLower)) { score += 3; break; }
+          if (nameLower.includes(idLower) || idLower.includes(nameLower)) {
+            score += 3;
+            break;
+          }
         }
       }
       if (sym.summary) {
         const summaryLower = sym.summary.toLowerCase();
         for (const id of identifiers) {
-          if (summaryLower.includes(id.toLowerCase())) { score += 2; break; }
+          if (summaryLower.includes(id.toLowerCase())) {
+            score += 2;
+            break;
+          }
         }
       }
       if (sym.exported) score += 1;
@@ -414,18 +518,33 @@ export class Executor {
     scored.sort((a, b) => b.score - a.score);
 
     const topScore = scored[0]?.score ?? 0;
-    const isPrecise = task.options?.contextMode === 'precise';
+    const isPrecise = task.options?.contextMode === "precise";
 
     // Precise: aggressive threshold (60% of top), cap at 5 symbols.
-    // Broad: generous threshold (40% of top), use caller's maxCount.
+    // Broad: generous threshold (40% of top), but with higher absolute floor
+    // and a cap when no focusPaths/focusSymbols constrain the query.
     const threshold = isPrecise
       ? Math.max(5, topScore * 0.6)
-      : Math.max(3, topScore * 0.4);
-    const effectiveMax = isPrecise ? Math.min(5, maxCount) : maxCount;
+      : Math.max(5, topScore * 0.4);
+    const hasScope =
+      task.options?.focusPaths?.length || task.options?.focusSymbols?.length;
+    const effectiveMax = isPrecise
+      ? Math.min(5, maxCount)
+      : hasScope
+        ? maxCount
+        : Math.min(15, maxCount);
     const relevant = scored.filter((s) => s.score >= threshold);
     const count = Math.max(1, Math.min(relevant.length, effectiveMax));
 
-    logger.debug('Adaptive symbol selection', { total: scored.length, topScore, threshold, selected: count, contextMode: isPrecise ? 'precise' : 'broad' });
+    logger.debug("Adaptive symbol selection", {
+      total: scored.length,
+      topScore,
+      threshold,
+      selected: count,
+      effectiveMax,
+      scoped: !!hasScope,
+      contextMode: isPrecise ? "precise" : "broad",
+    });
     return scored.slice(0, count).map((s) => s.symbolId);
   }
 
@@ -442,9 +561,10 @@ export class Executor {
         task.repoId,
       );
 
-      let allSymbols = rawSymbols.length > 0 && task.taskText
-        ? await this.selectTopSymbols(rawSymbols, task, MAX_CARD_SYMBOLS)
-        : rawSymbols.slice(0, MAX_CARD_SYMBOLS);
+      let allSymbols =
+        rawSymbols.length > 0 && task.taskText
+          ? await this.selectTopSymbols(rawSymbols, task, MAX_CARD_SYMBOLS)
+          : rawSymbols.slice(0, MAX_CARD_SYMBOLS);
 
       // Fallback: identifier-based search with per-term resolution
       if (allSymbols.length === 0 && task.taskText) {
@@ -462,7 +582,9 @@ export class Executor {
             const hybridResult = await hybridSearch({
               repoId: task.repoId,
               query: term,
-              limit: Math.ceil(MAX_SEARCH_FALLBACK / Math.max(searchTerms.length, 1)),
+              limit: Math.ceil(
+                MAX_SEARCH_FALLBACK / Math.max(searchTerms.length, 1),
+              ),
               includeEvidence: false,
             });
             for (const item of hybridResult.results) {
@@ -512,10 +634,13 @@ export class Executor {
               allSymbols.push(result.symbolId);
             }
           }
-          logger.debug("Fallback: full taskText search used (no identifier matches)", {
-            taskText: task.taskText.slice(0, 100),
-            resultCount: allSymbols.length,
-          });
+          logger.debug(
+            "Fallback: full taskText search used (no identifier matches)",
+            {
+              taskText: task.taskText.slice(0, 100),
+              resultCount: allSymbols.length,
+            },
+          );
         } else {
           logger.debug("Identifier-based search resolved symbols", {
             searchTerms,
@@ -544,16 +669,23 @@ export class Executor {
                 }
               }
               // Sort boosted by boost value (descending)
-              boosted.sort((a, b) => (boosts.get(b) ?? 0) - (boosts.get(a) ?? 0));
+              boosted.sort(
+                (a, b) => (boosts.get(b) ?? 0) - (boosts.get(a) ?? 0),
+              );
               allSymbols.length = 0;
               allSymbols.push(...boosted, ...unboosted);
-              logger.debug("Feedback boost reordered executor card search results", {
-                boostedCount: boosted.length,
-                totalCount: allSymbols.length,
-              });
+              logger.debug(
+                "Feedback boost reordered executor card search results",
+                {
+                  boostedCount: boosted.length,
+                  totalCount: allSymbols.length,
+                },
+              );
             }
           } catch (err) {
-            logger.debug(`[executor] Feedback boost reorder failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+            logger.debug(
+              `[executor] Feedback boost reorder failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
       }
@@ -563,10 +695,7 @@ export class Executor {
       } else {
         // Fetch real symbol data from DB
         const conn = await this.getConn();
-        const symbolMap = await ladybugDb.getSymbolsByIds(
-          conn,
-          allSymbols,
-        );
+        const symbolMap = await ladybugDb.getSymbolsByIds(conn, allSymbols);
 
         // Iterate in ranked order to preserve relevance in evidence
         for (const symbolId of allSymbols) {
@@ -584,7 +713,9 @@ export class Executor {
               const sig = JSON.parse(sym.signatureJson);
               if (sig.text) parts.push(`sig: ${sig.text}`);
             } catch (err) {
-              logger.debug("Failed to parse signature JSON", { error: String(err) });
+              logger.debug("Failed to parse signature JSON", {
+                error: String(err),
+              });
             }
           }
           if (sym.summary) parts.push(sym.summary);
@@ -629,25 +760,24 @@ export class Executor {
     const startTime = Date.now();
 
     try {
-      const { symbolIds: rawSkeletonSymbols, filePaths } = await this.resolveContextToSymbols(
-        context,
-        task.repoId,
-      );
+      const { symbolIds: rawSkeletonSymbols, filePaths } =
+        await this.resolveContextToSymbols(context, task.repoId);
 
-      const symbolIds = rawSkeletonSymbols.length > 0 && task.taskText
-        ? await this.selectTopSymbols(rawSkeletonSymbols, task, MAX_SKELETON_SYMBOLS)
-        : rawSkeletonSymbols.slice(0, MAX_SKELETON_SYMBOLS);
+      const symbolIds =
+        rawSkeletonSymbols.length > 0 && task.taskText
+          ? await this.selectTopSymbols(
+              rawSkeletonSymbols,
+              task,
+              MAX_SKELETON_SYMBOLS,
+            )
+          : rawSkeletonSymbols.slice(0, MAX_SKELETON_SYMBOLS);
 
       let processedCount = 0;
 
       // Generate skeletons for symbol IDs
       for (const symbolId of symbolIds) {
         try {
-          const result = await generateSkeletonIR(
-            task.repoId,
-            symbolId,
-            {},
-          );
+          const result = await generateSkeletonIR(task.repoId, symbolId, {});
           if (result) {
             this.evidenceCapture.captureSkeleton(
               symbolId,
@@ -665,10 +795,12 @@ export class Executor {
 
       // Precise: skip file-level skeletons (symbol skeletons suffice).
       // Broad: 1 file skeleton if symbol skeletons exist, full count otherwise.
-      const isPreciseSkeleton = task.options?.contextMode === 'precise';
+      const isPreciseSkeleton = task.options?.contextMode === "precise";
       const maxFileSks = isPreciseSkeleton
         ? 0
-        : processedCount > 0 ? 1 : MAX_SKELETON_SYMBOLS;
+        : processedCount > 0
+          ? 1
+          : MAX_SKELETON_SYMBOLS;
       for (const filePath of filePaths.slice(0, maxFileSks)) {
         try {
           const result = await generateFileSkeleton(
@@ -723,14 +855,17 @@ export class Executor {
     const startTime = Date.now();
 
     try {
-      const { symbolIds: rawHotpathSymbols } = await this.resolveContextToSymbols(
-        context,
-        task.repoId,
-      );
+      const { symbolIds: rawHotpathSymbols } =
+        await this.resolveContextToSymbols(context, task.repoId);
 
-      const symbols = rawHotpathSymbols.length > 0 && task.taskText
-        ? await this.selectTopSymbols(rawHotpathSymbols, task, MAX_HOTPATH_SYMBOLS)
-        : rawHotpathSymbols.slice(0, MAX_HOTPATH_SYMBOLS);
+      const symbols =
+        rawHotpathSymbols.length > 0 && task.taskText
+          ? await this.selectTopSymbols(
+              rawHotpathSymbols,
+              task,
+              MAX_HOTPATH_SYMBOLS,
+            )
+          : rawHotpathSymbols.slice(0, MAX_HOTPATH_SYMBOLS);
 
       const identifiers = this.extractIdentifiersFromTask(task);
 

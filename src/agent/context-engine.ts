@@ -21,7 +21,12 @@ import { estimateTokens } from "../util/tokenize.js";
 import { randomUUID } from "node:crypto";
 
 const HANDLED_EVIDENCE_TYPES = new Set([
-  "symbolCard", "skeleton", "hotPath", "codeWindow", "diagnostic", "searchResult",
+  "symbolCard",
+  "skeleton",
+  "hotPath",
+  "codeWindow",
+  "diagnostic",
+  "searchResult",
 ]);
 
 /** Hard safety cap for broad-mode responses regardless of budget. */
@@ -64,14 +69,19 @@ export class ContextEngine {
             entityTypes: ["symbol", "cluster", "process"],
             includeEvidence: false,
           });
-          if (entityResult.results.length > 0) {
-            const symbolIds = entityResult.results
+          // Drop low-confidence matches to reduce noise in broad unfocused queries
+          const MIN_ENTITY_SCORE = 0.3;
+          const filtered = entityResult.results.filter(
+            (r) => r.score >= MIN_ENTITY_SCORE,
+          );
+          if (filtered.length > 0) {
+            const symbolIds = filtered
               .filter((r) => r.entityType === "symbol")
               .map((r) => `symbol:${r.entityId}`);
-            const clusterIds = entityResult.results
+            const clusterIds = filtered
               .filter((r) => r.entityType === "cluster")
               .map((r) => `cluster:${r.entityId}`);
-            const processIds = entityResult.results
+            const processIds = filtered
               .filter((r) => r.entityType === "process")
               .map((r) => `process:${r.entityId}`);
             context = [...symbolIds, ...clusterIds, ...processIds];
@@ -89,15 +99,23 @@ export class ContextEngine {
           );
         }
 
-        // FP1: Keyword fallback when entity search returns empty context
-        if (context.length === 0) {
+        // FP1: Keyword fallback when entity search returns few/no results.
+        // Cap total seeded context at 15 symbols to avoid flooding broad mode.
+        const MAX_SEEDED_CONTEXT = 15;
+        if (context.length < MAX_SEEDED_CONTEXT) {
           try {
             const conn = await getLadybugConn();
             const terms = extractIdentifiersFromText(task.taskText);
-            const seen = new Set();
-            for (const term of terms.slice(0, 5)) {
+            const seen = new Set(
+              context
+                .filter((c) => c.startsWith("symbol:"))
+                .map((c) => c.slice("symbol:".length)),
+            );
+            for (const term of terms.slice(0, 3)) {
+              if (context.length >= MAX_SEEDED_CONTEXT) break;
               const results = await searchSymbols(conn, task.repoId, term, 5);
               for (const r of results) {
+                if (context.length >= MAX_SEEDED_CONTEXT) break;
                 if (!seen.has(r.symbolId)) {
                   seen.add(r.symbolId);
                   context.push(`symbol:${r.symbolId}`);
@@ -112,9 +130,12 @@ export class ContextEngine {
               });
             }
           } catch (err) {
-            logger.debug("Keyword fallback for context seeding failed (non-fatal)", {
-              error: err instanceof Error ? err.message : String(err),
-            });
+            logger.debug(
+              "Keyword fallback for context seeding failed (non-fatal)",
+              {
+                error: err instanceof Error ? err.message : String(err),
+              },
+            );
           }
         }
       }
@@ -167,7 +188,7 @@ export class ContextEngine {
       // actionsTaken and summary are always populated — they are the most
       // useful fields for agent consumers.  Only answer, nextBestAction,
       // and retrievalEvidence are stripped in precise mode.
-      const isPrecise = task.options?.contextMode === 'precise';
+      const isPrecise = task.options?.contextMode === "precise";
 
       if (isPrecise) {
         return {
@@ -259,9 +280,10 @@ export class ContextEngine {
     // Append per-action details: rung, symbol/file, tokens, duration
     if (actions.length > 0) {
       const actionLines = actions.map((a) => {
-        const sym = typeof a.input?.context === "object" && Array.isArray(a.input.context)
-          ? (a.input.context as string[]).slice(0, 3).join(", ")
-          : undefined;
+        const sym =
+          typeof a.input?.context === "object" && Array.isArray(a.input.context)
+            ? (a.input.context as string[]).slice(0, 3).join(", ")
+            : undefined;
         const ref = sym ? ` [${sym}]` : "";
         return `- ${a.type} (${a.status}, ${a.durationMs}ms)${ref}`;
       });
@@ -306,7 +328,8 @@ export class ContextEngine {
       byType.set(e.type, list);
     }
 
-    const taskLabel = task.taskType.charAt(0).toUpperCase() + task.taskType.slice(1);
+    const taskLabel =
+      task.taskType.charAt(0).toUpperCase() + task.taskType.slice(1);
     const sections: string[] = [`# ${taskLabel} Results`];
 
     // Add task question as context
@@ -315,15 +338,17 @@ export class ContextEngine {
     }
 
     // Synthesize brief intro
-    const cardCount = evidence.filter(e => e.type === "symbolCard").length;
-    const skeletonCount = evidence.filter(e => e.type === "skeleton").length;
-    const hotPathCount = evidence.filter(e => e.type === "hotPath").length;
+    const cardCount = evidence.filter((e) => e.type === "symbolCard").length;
+    const skeletonCount = evidence.filter((e) => e.type === "skeleton").length;
+    const hotPathCount = evidence.filter((e) => e.type === "hotPath").length;
     const introParts: string[] = [];
     if (cardCount > 0) introParts.push(`${cardCount} symbol(s)`);
     if (skeletonCount > 0) introParts.push(`${skeletonCount} skeleton(s)`);
     if (hotPathCount > 0) introParts.push(`${hotPathCount} hot path(s)`);
     if (introParts.length > 0) {
-      sections.push(`Found ${introParts.join(", ")} relevant to this ${task.taskType} task.`);
+      sections.push(
+        `Found ${introParts.join(", ")} relevant to this ${task.taskType} task.`,
+      );
     }
 
     if (!success) {
@@ -466,7 +491,8 @@ export class ContextEngine {
       if (result.answer.length > halfBudgetChars) {
         result = {
           ...result,
-          answer: result.answer.slice(0, halfBudgetChars) + "\n\n[answer truncated]",
+          answer:
+            result.answer.slice(0, halfBudgetChars) + "\n\n[answer truncated]",
         };
         fieldsAffected.push("answer");
       }
@@ -475,7 +501,11 @@ export class ContextEngine {
     // Check after phase 1
     let currentTokens = estimateTokens(JSON.stringify(result));
     if (currentTokens <= effectiveCap) {
-      result.truncation = { originalTokens, truncatedTokens: currentTokens, fieldsAffected };
+      result.truncation = {
+        originalTokens,
+        truncatedTokens: currentTokens,
+        fieldsAffected,
+      };
       return result;
     }
 
@@ -483,7 +513,9 @@ export class ContextEngine {
     if (result.finalEvidence.length > 0) {
       const targetEvidenceCount = Math.max(
         1,
-        Math.floor(result.finalEvidence.length * (effectiveCap / currentTokens)),
+        Math.floor(
+          result.finalEvidence.length * (effectiveCap / currentTokens),
+        ),
       );
       if (targetEvidenceCount < result.finalEvidence.length) {
         result = {
@@ -497,7 +529,11 @@ export class ContextEngine {
     // Check after phase 2
     currentTokens = estimateTokens(JSON.stringify(result));
     if (currentTokens <= effectiveCap) {
-      result.truncation = { originalTokens, truncatedTokens: currentTokens, fieldsAffected };
+      result.truncation = {
+        originalTokens,
+        truncatedTokens: currentTokens,
+        fieldsAffected,
+      };
       return result;
     }
 
@@ -519,7 +555,10 @@ export class ContextEngine {
     // Phase 4: If still over, aggressively strip answer entirely
     currentTokens = estimateTokens(JSON.stringify(result));
     if (currentTokens > effectiveCap && result.answer) {
-      result = { ...result, answer: "[answer removed — response exceeded token budget]" };
+      result = {
+        ...result,
+        answer: "[answer removed — response exceeded token budget]",
+      };
       if (!fieldsAffected.includes("answer")) fieldsAffected.push("answer");
     }
 
