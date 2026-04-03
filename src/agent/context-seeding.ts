@@ -154,7 +154,10 @@ export async function buildSeedContext(
           const ref = `symbol:${r.symbolId}`;
           if (seen.has(ref)) continue;
           seen.add(ref);
-          // Score lexical results on a 0-1 scale based on rank
+          // Score lexical results on a 0-1 scale based on rank.
+          // Note: cross-batch scores (compound vs individual) aren't perfectly
+          // comparable because denominators differ, but the final sort + cap
+          // handles this acceptably.
           const score = Math.max(
             0,
             1 - lexicalRank / Math.max(compoundResults.length, 1),

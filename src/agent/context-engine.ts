@@ -407,7 +407,9 @@ export class ContextEngine {
       MAX_CONTEXT_RESPONSE_TOKENS,
     );
 
-    // Phase 0: Compact to model-visible fields before measuring tokens
+    // Phase 0: Compact to model-visible fields before measuring tokens.
+    // This runs on both success and error results — error results also
+    // carry an answer field that should be preserved in compact form.
     result = this.compactBroadResult(result);
 
     const serialized = JSON.stringify(result);
@@ -521,7 +523,7 @@ export class ContextEngine {
    */
   private async expandContextForClusters(
     context: string[],
-    _taskText?: string,
+    _taskText?: string, // kept for call-site compat; keyword filtering replaced by graph scoring
     contextMode?: string,
   ): Promise<{ expandedContext: string[]; clusterExpandedCount: number }> {
     const symbolIds = context
