@@ -570,7 +570,25 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 - [ ] Returns taskId and taskType
 - [ ] Returns finalEvidence array
 - [ ] Returns summary and answer
+- [ ] `answer` field is a non-empty string on successful responses (never removed by budget trimming)
 - [ ] Does not include actionsTaken, path, or metrics in default broad response
+
+**Input (tight budget, verify answer preservation):**
+
+```json
+{
+  "repoId": "test-repo",
+  "taskType": "explain",
+  "taskText": "Explain the MCP server implementation",
+  "budget": { "maxTokens": 500, "maxActions": 2 }
+}
+```
+
+**Expected:** Compact broad response with answer preserved even under budget pressure.
+
+- [ ] `answer` field is present and non-empty on success
+- [ ] `finalEvidence` may be shorter but is present
+- [ ] Response does not include `actionsTaken`, `path`, or `metrics`
 
 #### sdl.agent.feedback
 
@@ -964,7 +982,7 @@ Test with each supported client:
 | Performance           |      |      |       |
 | Client Compatibility  |      |      |       |
 
-**Tested By:** ******\_\_\_******
-**Date:** ******\_\_\_******
+**Tested By:** **\*\***\_\_\_**\*\***
+**Date:** **\*\***\_\_\_**\*\***
 **Version:** 0.10.2
 **Result:** PASS / FAIL

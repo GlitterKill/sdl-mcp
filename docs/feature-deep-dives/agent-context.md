@@ -50,10 +50,11 @@ flowchart TD
 The context engine:
 
 1. classifies the task as `debug`, `review`, `implement`, or `explain`
-2. chooses a ladder path based on `contextMode`, budget, and scope
-3. ranks candidate symbols from `focusSymbols`, `focusPaths`, or task text
-4. executes only the rungs needed to answer the task
-5. returns evidence, metrics, and a broader answer envelope when appropriate
+2. chooses a ladder path based on `contextMode`, budget, scope, and retrieval confidence
+3. seeds candidates using a three-stage pipeline: semantic embedding match first, lexical fallback when embeddings are unavailable, then feedback-based priors from previous tasks
+4. ranks candidates with a multi-factor evidence-aware scorer that combines retrieval confidence, graph proximity, lexical overlap, summary support, feedback history, and structural signals
+5. executes only the rungs needed to answer the task
+6. returns evidence, metrics, and a broader answer envelope when appropriate
 
 ---
 
@@ -111,7 +112,7 @@ The context engine works with plain task text, but these inputs sharpen retrieva
 - `includeTests` when test context matters
 - `requireDiagnostics` only when deeper debugging is justified
 
-When scope is absent, SDL-MCP still extracts identifiers from the task text and ranks candidates automatically.
+When scope is absent, SDL-MCP seeds candidates via semantic embedding similarity when available, falling back to lexical identifier extraction from task text. Either way, the engine ranks candidates automatically using evidence-aware scoring, so explicit `focusPaths` and `focusSymbols` are helpful but not required -- especially in broad mode, where semantic seeding often finds the right entry points without explicit path hints.
 
 ---
 
@@ -139,7 +140,9 @@ Precise mode strips the envelope differently:
 - `finalEvidence`
 - `metrics`
 
-Both modes are significantly more token-efficient than a hand-built workflow. Broad mode prioritizes `finalEvidence` and `answer` as the primary model-visible fields. Precise mode prioritizes `finalEvidence` and `path` for chain-efficient downstream use.
+Both modes are significantly more token-efficient than a hand-built workflow. Broad mode prioritizes `finalEvidence` and `answer` as the primary model-visible fields. The `answer` field is always preserved on successful broad responses -- budget trimming may shorten it but never removes it entirely. Precise mode prioritizes `finalEvidence` and `path` for chain-efficient downstream use.
+
+No schema changes accompany these improvements. The MCP input contract and response shapes are unchanged.
 
 ---
 
@@ -147,7 +150,7 @@ Both modes are significantly more token-efficient than a hand-built workflow. Br
 
 After a task, `sdl.agent.feedback` records which symbols were useful and which were missing.
 
-That feedback is not just bookkeeping. SDL-MCP uses it to bias future retrieval toward historically useful symbols and to surface previously missing ones earlier in the ladder.
+That feedback is not just bookkeeping. The seeding pipeline uses feedback priors as a third-stage signal: symbols marked useful in past tasks are boosted in candidate seeding, and symbols marked missing are surfaced earlier in the ladder.
 
 ---
 
@@ -167,13 +170,15 @@ Do not treat `sdl.context.summary` as a replacement for `sdl.agent.context` or `
 
 ## Key Files
 
-| File                          | Responsibility                                      |
-| :---------------------------- | :-------------------------------------------------- |
-| `src/agent/context-engine.ts` | Top-level task-shaped context orchestration         |
-| `src/agent/planner.ts`        | Rung selection and budget trimming                  |
-| `src/agent/executor.ts`       | Symbol ranking, rung execution, evidence generation |
-| `src/agent/evidence.ts`       | Evidence capture and deduplication                  |
-| `src/mcp/tools/context.ts`    | MCP handler for `sdl.agent.context`                 |
+| File                           | Responsibility                                              |
+| :----------------------------- | :---------------------------------------------------------- |
+| `src/agent/context-engine.ts`  | Top-level task-shaped context orchestration                 |
+| `src/agent/context-seeding.ts` | Three-stage candidate seeding (semantic, lexical, feedback) |
+| `src/agent/context-ranking.ts` | Evidence-aware multi-factor symbol scoring                  |
+| `src/agent/planner.ts`         | Rung selection, confidence-aware budget trimming            |
+| `src/agent/executor.ts`        | Rung execution and evidence generation                      |
+| `src/agent/evidence.ts`        | Evidence capture and deduplication                          |
+| `src/mcp/tools/context.ts`     | MCP handler for `sdl.agent.context`                         |
 
 ---
 

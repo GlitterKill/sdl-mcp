@@ -410,11 +410,19 @@ const VALIDATORS: Record<string, ValidatorFn> = {
 
   "sdl.agent.context": (_args, result) => {
     const tool = "sdl.agent.context";
-    return [
+    const checks: ToolResultCheck[] = [
       checkNonEmptyString(tool, "taskId present", result.taskId),
       checkNonEmptyString(tool, "taskType present", result.taskType),
       checkExists(tool, "finalEvidence present", result.finalEvidence),
     ];
+    // Broad mode: answer must be present on successful responses
+    // (compact format may omit actionsTaken, path, metrics — that is expected)
+    if (result.success === true && result.answer !== undefined) {
+      checks.push(
+        checkNonEmptyString(tool, "answer present on success", result.answer),
+      );
+    }
+    return checks;
   },
 
   "sdl.agent.feedback": (_args, result) => {
@@ -565,10 +573,14 @@ const SAMPLE_EXTRACTORS: Record<string, SampleExtractorFn> = {
 
   "sdl.agent.context": (result) => {
     const actions = result.actionsTaken as unknown[] | undefined;
-    return {
-      actionCount: actions ? String(actions.length) : "hidden",
+    const vals: Record<string, string> = {
+      actionCount: actions ? String(actions.length) : "compact",
       taskType: String(result.taskType ?? "?"),
     };
+    if (result.success === true) {
+      vals.hasAnswer = result.answer ? "true" : "false";
+    }
+    return vals;
   },
 
   "sdl.index.refresh": (result) => ({

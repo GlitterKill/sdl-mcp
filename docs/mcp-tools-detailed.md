@@ -930,11 +930,13 @@ Task-shaped context engine that selects the optimal Iris Gate Ladder path and co
 
 **What it does:** Given a task type (`debug`, `review`, `implement`, `explain`) and a text description, the context engine:
 
-1. Plans a **rung path** (e.g., `card → skeleton → hotPath`) based on the task type, budget constraints, and available evidence.
-2. Executes each rung in sequence, collecting evidence at each step.
-3. Returns the full execution trace: actions taken, evidence collected, metrics, and optionally a synthesized answer.
+1. Seeds candidates using a three-stage pipeline: semantic embedding match first, lexical fallback when embeddings are unavailable, then feedback priors from previous tasks.
+2. Ranks candidates with an evidence-aware multi-factor scorer that combines retrieval confidence, graph proximity, lexical overlap, summary support, feedback history, and structural signals.
+3. Plans a **rung path** (e.g., `card → skeleton → hotPath`) based on the task type, budget constraints, and retrieval confidence tier.
+4. Executes each rung in sequence, collecting evidence at each step.
+5. Returns evidence, a synthesized answer (broad mode), and optionally the execution path (precise mode).
 
-The planner estimates token costs per rung (`card: ~50`, `skeleton: ~200`, `hotPath: ~500`, `raw: ~2000`) and trims rungs from the end when the budget is tight.
+The planner estimates token costs per rung (`card: ~50`, `skeleton: ~200`, `hotPath: ~500`, `raw: ~2000`) and trims rungs based on both budget and confidence: high-confidence retrievals trim aggressively; low-confidence retrievals preserve diagnostic rungs.
 
 When Code Mode is enabled, `sdl.context` accepts the same task envelope and should be preferred over `sdl.workflow` for retrieval.
 
@@ -965,7 +967,7 @@ Broad responses are compacted at the MCP serialization layer. The model-visible 
 | `nextBestAction` | string  | Suggested follow-up action (when relevant)                               |
 | `error`          | string  | Error message (when failed)                                              |
 
-The fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are still computed internally by the ContextEngine but are not included in the model-visible broad response. `finalEvidence` is the primary evidence surface for broad mode.
+The fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are still computed internally by the ContextEngine but are not included in the model-visible broad response. `finalEvidence` is the primary evidence surface for broad mode. The `answer` field is always preserved on successful broad responses -- budget trimming may shorten it but never removes it entirely.
 
 **Response (precise mode):** Only `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics`. Envelope fields stripped for token efficiency.
 
@@ -973,7 +975,8 @@ The fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are still 
 
 - Use `contextMode: "precise"` for targeted lookups — more token-efficient than manual `sdl.workflow`.
 - Use `contextMode: "broad"` (default) for investigation and exploration.
-- Always provide `budget` and scope with `focusSymbols`/`focusPaths`.
+- Semantic seeding means explicit `focusPaths` are less critical in broad mode — the engine often finds the right entry points from task text alone. Still provide `focusSymbols`/`focusPaths` when you have them, as they sharpen retrieval.
+- Always provide `budget`.
 - Avoid `requireDiagnostics` unless needed — it can force a raw code rung.
 
 ---

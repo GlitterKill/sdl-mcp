@@ -40,6 +40,7 @@ Precise mode is designed for targeted lookups.
 Characteristics:
 
 - aggressively ranks symbols and keeps only the most relevant ones
+- cluster expansion is capped at 4 symbols maximum, ensuring tight focus
 - uses smaller rung plans
 - strips non-essential response-envelope fields
 - usually beats manual `sdl.workflow` retrieval on both bytes and latency
@@ -59,8 +60,9 @@ Broad mode is designed for investigation and exploration.
 
 Characteristics:
 
-- admits more surrounding symbols
+- admits more surrounding symbols via graph-guided cluster expansion (capped at 10 symbols, max 3 per cluster, with diversity scoring to avoid over-representing a single cluster)
 - returns a compact response with `finalEvidence`, `answer`, and `summary` as the primary model-visible fields
+- the `answer` field is always preserved on successful responses -- budget pressure trims other fields first and may shorten the answer, but never removes it
 - surfaces next-step guidance via `nextBestAction` when relevant
 - favors structural understanding over minimum size
 
@@ -91,20 +93,39 @@ The important part is not the exact rung count. It is the routing choice:
 
 ---
 
-## Ranking Signals
+## Seeding and Ranking
 
-When SDL-MCP has to infer the target from task text, it scores candidate symbols using signals such as:
+Candidate seeding uses a three-stage pipeline:
 
-- exact symbol-name matches in the task text
-- identifier extraction from camelCase, PascalCase, and snake_case tokens
-- partial name overlap for meaningful fragments
-- summary overlap with task keywords
-- exported-symbol preference as a tiebreaker
+1. **Semantic** -- embedding similarity against task text (preferred when embeddings are available)
+2. **Lexical fallback** -- identifier extraction from camelCase, PascalCase, and snake_case tokens in task text, matched against symbol names and summaries
+3. **Feedback priors** -- symbols previously marked useful or missing in past tasks are boosted or surfaced earlier
+
+Because semantic seeding is the first stage, explicit `focusPaths` are less critical in broad mode than they were previously. The engine often finds the right entry points from task text alone.
+
+After seeding, an evidence-aware multi-factor scorer ranks every candidate using:
+
+- retrieval confidence from the seeding stage
+- graph proximity to anchor symbols
+- lexical overlap between symbol names/summaries and task text
+- summary support (does the symbol's summary relate to the task?)
+- feedback history from prior tasks
+- structural signals (exported symbols, entry-point position)
 
 The threshold changes by mode:
 
 - precise keeps only top-scoring symbols
 - broad admits more near-matches to widen context
+
+## Budget Trimming and Confidence
+
+When the planner must trim rungs to stay within budget, it now considers the retrieval confidence tier:
+
+- **High confidence**: trims aggressively to the cheapest rungs (usually card-only)
+- **Medium confidence**: retains card and at least one diagnostic rung (skeleton or hotPath)
+- **Low confidence**: escalates to more rungs to compensate for uncertainty
+
+This means budget pressure no longer uniformly removes expensive rungs -- the planner preserves diagnostic depth when the retrieval signal is weak.
 
 ---
 

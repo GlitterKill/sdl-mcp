@@ -142,7 +142,7 @@ Use this order unless task constraints force escalation:
 - **Live editing**: `buffer.push` as files change (with cursor/selection tracking) → `buffer.checkpoint` to persist → search/card/slice now reflect draft state.
 - **Context export**: `context.summary` with `format: "clipboard"` to produce a summary for non-MCP tools.
 - **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `python`, or `shell`) to run tests and capture structured output.
-- **Context retrieval** _(recommended)_: use `sdl.agent.context` directly, or `sdl.context` inside Code Mode. `contextMode: "precise"` is best for targeted lookups; `"broad"` is best for investigation. Both are more token-efficient than manual workflow-based context gathering.
+- **Context retrieval** _(recommended)_: use `sdl.agent.context` directly, or `sdl.context` inside Code Mode. `contextMode: "precise"` is best for targeted lookups; `"broad"` is best for investigation. Both use semantic-first seeding and evidence-aware ranking, making them more accurate and more token-efficient than manual workflow-based context gathering.
 - **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, and batch mutations. Do not use it for context retrieval — route explain/debug/review/implement work to context first.
 
 ### 3) Token controls by tool
@@ -200,8 +200,8 @@ Stale buffer pushes (version ≤ current) are rejected automatically.
 ### 5) Task Context (`sdl.agent.context`) guidance
 
 - Always provide a budget (`maxTokens`, `maxActions`, optionally `maxDurationMs`).
-- Always scope with `focusSymbols` and/or `focusPaths`.
-- Use `contextMode: "precise"` for targeted lookups (1 symbol, minimal tokens — beats manual workflow assembly). Use `"broad"` (default) for investigation tasks needing surrounding context.
+- Scope with `focusSymbols` and/or `focusPaths` when you have them. In broad mode, semantic seeding often finds the right entry points from task text alone, so explicit `focusPaths` are helpful but not required.
+- Use `contextMode: "precise"` for targeted lookups (max 4 cluster-expanded symbols, minimal tokens — beats manual workflow assembly). Use `"broad"` (default) for investigation tasks needing surrounding context (max 10 cluster-expanded symbols with diversity scoring).
 - Avoid `requireDiagnostics` unless needed; it can add a raw rung.
 - Task types: `"debug"`, `"review"`, `"implement"`, `"explain"`.
 - Precise mode plans fewer rungs per task type: debug = card + hotPath, explain = card + skeleton, review = card, implement = card + skeleton.
@@ -210,8 +210,8 @@ Stale buffer pushes (version ≤ current) are rejected automatically.
   - `skeleton`: `200`
   - `hotPath`: `500`
   - `raw`: `2000`
-- When over budget, planner trims rungs from the end while keeping at least one rung.
-- Broad mode returns a compact response by default: `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, and `nextBestAction` (when relevant). The fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are not part of the model-visible broad response. `finalEvidence` and `answer` are the primary model-visible fields.
+- When over budget, planner trims rungs based on confidence tier: high-confidence retrievals trim to cheapest rungs, low-confidence retrievals preserve diagnostic depth. At least one rung is always kept.
+- Broad mode returns a compact response by default: `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, and `nextBestAction` (when relevant). The fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are not part of the model-visible broad response. `finalEvidence` and `answer` are the primary model-visible fields. The `answer` field is always preserved on successful responses.
 - Precise mode strips the response further. Only `taskId`, `taskType`, `success`, `path`, `finalEvidence`, and `metrics` are returned.
 
 ### 6) Runtime execution (`sdl.runtime.execute` + `sdl.runtime.queryOutput`)

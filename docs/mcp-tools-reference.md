@@ -817,12 +817,12 @@ Update policy configuration for a repository. Accepts a partial patch — only s
 
 ### `sdl.agent.context`
 
-Retrieve task-shaped code context with rung path selection and evidence capture. The planner selects an optimal path through the context ladder (card -> skeleton -> hotPath -> raw) based on the task type, budget, and context mode.
+Retrieve task-shaped code context with rung path selection and evidence capture. The engine uses semantic-first candidate seeding (with lexical and feedback fallbacks), evidence-aware ranking, and confidence-driven rung planning to select an optimal path through the context ladder (card -> skeleton -> hotPath -> raw).
 
 **Context modes:**
 
-- **`"precise"`** — Returns minimal, chain-efficient context. Adaptive symbol selection (1 symbol per rung), stripped response envelope (no `actionsTaken`, `summary`, `answer`, `nextBestAction`). Designed to beat manual `sdl.workflow` on token efficiency.
-- **`"broad"`** (default) — Returns richer surrounding context with adaptive selection based on task relevance. Full response envelope with diagnostics.
+- **`"precise"`** — Returns minimal, chain-efficient context. Tight cluster expansion (max 4 symbols), stripped response envelope (no `actionsTaken`, `summary`, `answer`, `nextBestAction`). Designed to beat manual `sdl.workflow` on token efficiency.
+- **`"broad"`** (default) — Returns richer surrounding context with graph-guided cluster expansion (max 10 symbols, diversity-scored). Compact response envelope with `answer` always preserved on success. Semantic seeding means explicit `focusPaths` are less critical than before.
 
 **Parameters:**
 
@@ -854,11 +854,11 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 
 **Response:**
 
-In **broad** mode (default, compact): `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, `nextBestAction?`, `error?` — the fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are omitted from the model-visible response. `finalEvidence` is the primary evidence surface.
+In **broad** mode (default, compact): `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, `nextBestAction?`, `error?` — the fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are omitted from the model-visible response. `finalEvidence` is the primary evidence surface. The `answer` field is always preserved on successful responses.
 
 In **precise** mode: `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics` — envelope fields stripped for token efficiency.
 
-Planner token estimates: card ~50, skeleton ~200, hotPath ~500, raw ~2000. When over budget, the planner trims rungs from the end while keeping at least one.
+Planner token estimates: card ~50, skeleton ~200, hotPath ~500, raw ~2000. When over budget, the planner trims rungs based on confidence tier: high-confidence retrievals trim to cheapest rungs, low-confidence retrievals preserve diagnostic depth.
 
 When Code Mode is enabled, `sdl.context` accepts the same task envelope and should be preferred over `sdl.workflow` for `debug`, `review`, `implement`, and `explain` retrieval.
 
