@@ -71,7 +71,13 @@ describe("MCPServer", () => {
       };
 
       assert.doesNotThrow(() => {
-        server.registerTool("sdl.test.wire", "desc", schema, handler, wireSchema);
+        server.registerTool(
+          "sdl.test.wire",
+          "desc",
+          schema,
+          handler,
+          wireSchema,
+        );
       });
     });
   });
@@ -113,6 +119,18 @@ describe("MCPServer", () => {
     it("does not throw when no client is connected", async () => {
       // With no transport connected, notification should be swallowed
       await assert.doesNotReject(server.notifyToolListChanged());
+    });
+  });
+
+  describe("broad context compaction", () => {
+    it("does not affect non-context tool registration", () => {
+      const schema = z.object({ repoId: z.string() });
+      const handler = async () => ({ results: [1, 2, 3] });
+
+      server.registerTool("sdl.symbol.search", "Search", schema, handler);
+      // Just verify registration works — the actual compaction is tested
+      // in context-response-projection.test.ts
+      assert.ok(server);
     });
   });
 });

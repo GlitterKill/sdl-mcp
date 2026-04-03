@@ -626,10 +626,13 @@ export class ContextEngine {
         nameMap = await ladybugDb.getSymbolsByIdsLite(conn, candidateIds);
       }
 
+      const MAX_CLUSTER_EXPANSION_SYMBOLS = 10;
       const additional: string[] = [];
 
       for (const members of memberLists) {
         for (const m of members) {
+          if (additional.length >= MAX_CLUSTER_EXPANSION_SYMBOLS) break;
+
           const ref = `symbol:${m.symbolId}`;
           if (already.has(ref)) continue;
 
@@ -652,7 +655,7 @@ export class ContextEngine {
           additional.push(ref);
           already.add(ref);
         }
-        if (additional.length >= 10) break;
+        if (additional.length >= MAX_CLUSTER_EXPANSION_SYMBOLS) break;
       }
 
       return {

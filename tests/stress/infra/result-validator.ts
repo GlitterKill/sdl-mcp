@@ -182,12 +182,24 @@ const VALIDATORS: Record<string, ValidatorFn> = {
       checkNonEmptyString(tool, "versionId returned", result.versionId),
     ];
     if (_args.includeDiagnostics === true) {
-      const diagnostics = result.diagnostics as Record<string, unknown> | undefined;
-      const timings = diagnostics?.timings as Record<string, unknown> | undefined;
+      const diagnostics = result.diagnostics as
+        | Record<string, unknown>
+        | undefined;
+      const timings = diagnostics?.timings as
+        | Record<string, unknown>
+        | undefined;
       checks.push(
         checkExists(tool, "diagnostics.timings present", timings),
-        checkExists(tool, "diagnostics.timings.totalMs present", timings?.totalMs),
-        checkExists(tool, "diagnostics.timings.phases present", timings?.phases),
+        checkExists(
+          tool,
+          "diagnostics.timings.totalMs present",
+          timings?.totalMs,
+        ),
+        checkExists(
+          tool,
+          "diagnostics.timings.phases present",
+          timings?.phases,
+        ),
       );
     }
     return checks;
@@ -400,8 +412,8 @@ const VALIDATORS: Record<string, ValidatorFn> = {
     const tool = "sdl.agent.context";
     return [
       checkNonEmptyString(tool, "taskId present", result.taskId),
-      checkExists(tool, "actionsTaken array", result.actionsTaken),
       checkNonEmptyString(tool, "taskType present", result.taskType),
+      checkExists(tool, "finalEvidence present", result.finalEvidence),
     ];
   },
 
@@ -554,7 +566,7 @@ const SAMPLE_EXTRACTORS: Record<string, SampleExtractorFn> = {
   "sdl.agent.context": (result) => {
     const actions = result.actionsTaken as unknown[] | undefined;
     return {
-      actionCount: String(actions?.length ?? 0),
+      actionCount: actions ? String(actions.length) : "hidden",
       taskType: String(result.taskType ?? "?"),
     };
   },

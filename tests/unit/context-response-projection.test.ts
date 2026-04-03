@@ -1,0 +1,128 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import {
+  isBroadContextResult,
+  projectBroadContextResult,
+} from "../../dist/mcp/context-response-projection.js";
+
+describe("context-response-projection", () => {
+  const broadResult = {
+    taskId: "task-123",
+    taskType: "explain",
+    actionsTaken: [{ id: "a-1", type: "getCard", status: "completed" }],
+    path: { rungs: ["card"], estimatedTokens: 50 },
+    finalEvidence: [
+      { type: "symbolCard", reference: "sym:1", summary: "test" },
+    ],
+    summary: "Task completed",
+    success: true,
+    metrics: { totalDurationMs: 10, totalTokens: 50 },
+    answer: "# Explain Results\n\nFound 1 symbol(s).",
+    nextBestAction: "none",
+    retrievalEvidence: { symptomType: "taskText" },
+  };
+
+  describe("isBroadContextResult", () => {
+    it("returns true for sdl.agent.context broad result", () => {
+      assert.equal(
+        isBroadContextResult("sdl.agent.context", broadResult),
+        true,
+      );
+    });
+
+    it("returns true for sdl.context broad result", () => {
+      assert.equal(isBroadContextResult("sdl.context", broadResult), true);
+    });
+
+    it("returns false for non-context tools", () => {
+      assert.equal(
+        isBroadContextResult("sdl.symbol.search", broadResult),
+        false,
+      );
+    });
+
+    it("returns false for null/undefined/array", () => {
+      assert.equal(isBroadContextResult("sdl.agent.context", null), false);
+      assert.equal(isBroadContextResult("sdl.agent.context", undefined), false);
+      assert.equal(isBroadContextResult("sdl.agent.context", [1, 2]), false);
+    });
+
+    it("returns false when answer field is missing (precise mode)", () => {
+      const precise = { taskId: "t-1", actionsTaken: [], success: true };
+      assert.equal(isBroadContextResult("sdl.agent.context", precise), false);
+    });
+  });
+
+  describe("projectBroadContextResult", () => {
+    it("keeps only visible fields for broad context", () => {
+      const projected = projectBroadContextResult(
+        "sdl.agent.context",
+        broadResult,
+      ) as Record<string, unknown>;
+
+      assert.equal(projected.taskId, "task-123");
+      assert.equal(projected.taskType, "explain");
+      assert.equal(projected.success, true);
+      assert.equal(projected.summary, "Task completed");
+      assert.ok(projected.answer);
+      assert.ok(projected.finalEvidence);
+      assert.equal(projected.nextBestAction, "none");
+
+      // Hidden fields
+      assert.equal(projected.actionsTaken, undefined);
+      assert.equal(projected.path, undefined);
+      assert.equal(projected.metrics, undefined);
+      assert.equal(projected.retrievalEvidence, undefined);
+    });
+
+    it("preserves error field when present", () => {
+      const errorResult = { ...broadResult, error: "something broke" };
+      const projected = projectBroadContextResult(
+        "sdl.agent.context",
+        errorResult,
+      ) as Record<string, unknown>;
+      assert.equal(projected.error, "something broke");
+    });
+
+    it("preserves truncation field when present", () => {
+      const truncated = {
+        ...broadResult,
+        truncation: {
+          originalTokens: 100,
+          truncatedTokens: 50,
+          fieldsAffected: ["answer"],
+        },
+      };
+      const projected = projectBroadContextResult(
+        "sdl.agent.context",
+        truncated,
+      ) as Record<string, unknown>;
+      assert.deepEqual(projected.truncation, truncated.truncation);
+    });
+
+    it("preserves _displayFooter", () => {
+      const withFooter = { ...broadResult, _displayFooter: "meter text" };
+      const projected = projectBroadContextResult(
+        "sdl.agent.context",
+        withFooter,
+      ) as Record<string, unknown>;
+      assert.equal(projected._displayFooter, "meter text");
+    });
+
+    it("returns non-context tool results unchanged", () => {
+      const result = { foo: "bar" };
+      assert.strictEqual(
+        projectBroadContextResult("sdl.symbol.search", result),
+        result,
+      );
+    });
+
+    it("returns precise-mode results unchanged", () => {
+      const precise = { taskId: "t-1", actionsTaken: [], success: true };
+      assert.strictEqual(
+        projectBroadContextResult("sdl.agent.context", precise),
+        precise,
+      );
+    });
+  });
+});

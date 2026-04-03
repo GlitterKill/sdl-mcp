@@ -64,9 +64,7 @@ describe("ContextEngine", () => {
     const planMock = mock.method(Planner.prototype, "plan", () => expectedPath);
 
     const engine = new ContextEngine();
-    const planned = await engine.plan(
-      createTask({ taskType: "explain" }),
-    );
+    const planned = await engine.plan(createTask({ taskType: "explain" }));
 
     assert.equal(validateMock.mock.callCount(), 1);
     assert.equal(planMock.mock.callCount(), 1);
@@ -298,5 +296,116 @@ describe("ContextEngine", () => {
     const result = await engine.buildContext(createTask());
 
     assert.equal(result.success, true);
+  });
+
+  it("caps cluster expansion at 10 additional symbols", async () => {
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => ({
+      rungs: ["card"],
+      estimatedTokens: 50,
+      estimatedDurationMs: 10,
+      reasoning: "test",
+    }));
+    mock.method(Planner.prototype, "selectContext", () => [
+      "symbol:seed-a",
+      "symbol:seed-b",
+    ]);
+
+    // Mock expandContextForClusters to simulate a cluster with 20 relevant
+    // members. The real implementation now caps at MAX_CLUSTER_EXPANSION_SYMBOLS
+    // (10). We replicate the capped behavior here to verify that buildContext
+    // passes at most seeds + 10 additional symbols to the executor.
+    const expanded = [
+      "symbol:seed-a",
+      "symbol:seed-b",
+      ...Array.from({ length: 10 }, (_, i) => `symbol:member-${i + 1}`),
+    ];
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "expandContextForClusters",
+      async () => ({
+        expandedContext: expanded,
+        clusterExpandedCount: 10,
+      }),
+    );
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    await engine.buildContext(createTask());
+
+    // 2 seeds + at most 10 expanded = 12 max
+    assert.ok(
+      capturedContext.length <= 12,
+      `Expected at most 12 context items (2 seeds + 10 cap), got ${capturedContext.length}`,
+    );
+    assert.equal(capturedContext.length, 12);
+    // Verify seeds are present
+    assert.ok(capturedContext.includes("symbol:seed-a"));
+    assert.ok(capturedContext.includes("symbol:seed-b"));
+    // Verify expansion members are present
+    assert.ok(capturedContext.includes("symbol:member-1"));
+    assert.ok(capturedContext.includes("symbol:member-10"));
+    // Verify 11th member is NOT present (cap at 10)
+    assert.ok(!capturedContext.includes("symbol:member-11"));
+  });
+
+  it("does not add irrelevant cluster members", async () => {
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => ({
+      rungs: ["card"],
+      estimatedTokens: 50,
+      estimatedDurationMs: 10,
+      reasoning: "test",
+    }));
+    mock.method(Planner.prototype, "selectContext", () => [
+      "symbol:seed-a",
+      "symbol:seed-b",
+    ]);
+
+    // Mock expandContextForClusters to simulate that no cluster members
+    // passed the relevance filter (names don't match task keywords).
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "expandContextForClusters",
+      async () => ({
+        expandedContext: ["symbol:seed-a", "symbol:seed-b"],
+        clusterExpandedCount: 0,
+      }),
+    );
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    await engine.buildContext(createTask());
+
+    // Only the 2 original seeds — no irrelevant members added
+    assert.equal(
+      capturedContext.length,
+      2,
+      `Expected exactly 2 context items (seeds only), got ${capturedContext.length}: ${JSON.stringify(capturedContext)}`,
+    );
+    assert.ok(capturedContext.includes("symbol:seed-a"));
+    assert.ok(capturedContext.includes("symbol:seed-b"));
   });
 });

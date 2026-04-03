@@ -22,24 +22,9 @@
   "expectedResponse": {
     "taskId": "string",
     "taskType": "implement",
-    "actionsTaken": "array",
-    "path": {
-      "rungs": "array",
-      "estimatedTokens": "number",
-      "estimatedDurationMs": "number",
-      "reasoning": "string"
-    },
     "finalEvidence": "array",
     "summary": "string",
     "success": "boolean",
-    "metrics": {
-      "totalDurationMs": "number",
-      "totalTokens": "number",
-      "totalActions": "number",
-      "successfulActions": "number",
-      "failedActions": "number",
-      "cacheHits": "number"
-    },
     "answer": "string"
   }
 }

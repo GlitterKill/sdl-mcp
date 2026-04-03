@@ -21,7 +21,10 @@ import {
   type TokenUsageMetadata,
 } from "./mcp/token-usage.js";
 import { tokenAccumulator } from "./mcp/token-accumulator.js";
-import { renderUserNotificationLine, formatTokenCount } from "./mcp/savings-meter.js";
+import {
+  renderUserNotificationLine,
+  formatTokenCount,
+} from "./mcp/savings-meter.js";
 import { formatToolCallForUser } from "./mcp/tool-call-formatter.js";
 import type { LiveIndexCoordinator } from "./live-index/types.js";
 import type { CodeModeConfig } from "./config/types.js";
@@ -32,6 +35,10 @@ import {
   type ToolPresentation,
 } from "./mcp/tool-presentation.js";
 import { getPackageVersion } from "./util/package-info.js";
+import {
+  projectBroadContextResult,
+  isBroadContextResult,
+} from "./mcp/context-response-projection.js";
 
 export interface ToolContext {
   progressToken?: string | number;
@@ -61,13 +68,22 @@ interface ToolDefinition {
   presentation: ToolPresentation;
 }
 
-export function attachDisplayFooter(result: unknown, footerText: string): unknown {
-  if (!footerText || !result || typeof result !== "object" || Array.isArray(result)) {
+export function attachDisplayFooter(
+  result: unknown,
+  footerText: string,
+): unknown {
+  if (
+    !footerText ||
+    !result ||
+    typeof result !== "object" ||
+    Array.isArray(result)
+  ) {
     return result;
   }
 
   const obj = result as Record<string, unknown>;
-  const existingFooter = typeof obj._displayFooter === "string" ? obj._displayFooter : "";
+  const existingFooter =
+    typeof obj._displayFooter === "string" ? obj._displayFooter : "";
   const mergedFooter = existingFooter
     ? `${existingFooter}\n\n${footerText}`
     : footerText;
@@ -128,9 +144,10 @@ export class MCPServer {
           tools: Array.from(this.tools.values()).map((tool) => ({
             name: tool.name,
             title: tool.presentation.title,
-            description: tool.presentation.includeVersionInDescription === false
-              ? tool.description
-              : buildVersionedToolDescription(tool.description),
+            description:
+              tool.presentation.includeVersionInDescription === false
+                ? tool.description
+                : buildVersionedToolDescription(tool.description),
             annotations: {
               title: tool.presentation.title,
             } satisfies ToolAnnotations,
@@ -169,21 +186,21 @@ export class MCPServer {
           }
 
           const start = Date.now();
-          const normalizedArgs = normalizeToolArguments(request.params.arguments);
+          const normalizedArgs = normalizeToolArguments(
+            request.params.arguments,
+          );
           const repoId = extractStringField(normalizedArgs, "repoId");
           const symbolId = extractStringField(normalizedArgs, "symbolId");
 
           // Centralized input validation: parse against the registered Zod schema
           // before dispatching to the handler. This ensures all tools receive
           // validated, coerced arguments regardless of individual handler logic.
-          const parseResult = tool.inputSchema.safeParse(
-            normalizedArgs,
-          );
+          const parseResult = tool.inputSchema.safeParse(normalizedArgs);
           if (!parseResult.success) {
             const issueDetails = parseResult.error.issues.map((issue) => ({
-                  path: issue.path.join("."),
-                  message: issue.message,
-                }));
+              path: issue.path.join("."),
+              message: issue.message,
+            }));
             const humanLines = issueDetails.map((d) =>
               d.path ? `  - ${d.path}: ${d.message}` : `  - ${d.message}`,
             );
@@ -240,17 +257,21 @@ export class MCPServer {
                   usage.rawEquivalent,
                 );
                 // Send per-call savings notification to user (MCP logging)
-                void toolContext.sendNotification({
-                  method: "notifications/message",
-                  params: {
-                    level: "info",
-                    logger: "sdl-mcp",
-                    data: renderUserNotificationLine(
-                      usage.sdlTokens,
-                      usage.rawEquivalent,
-                    ),
-                  },
-                  }).catch(() => { /* non-critical */ });
+                void toolContext
+                  .sendNotification({
+                    method: "notifications/message",
+                    params: {
+                      level: "info",
+                      logger: "sdl-mcp",
+                      data: renderUserNotificationLine(
+                        usage.sdlTokens,
+                        usage.rawEquivalent,
+                      ),
+                    },
+                  })
+                  .catch(() => {
+                    /* non-critical */
+                  });
               } else if (
                 shouldAttachUsage(request.params.name) &&
                 typeof r.totalTokens === "number" &&
@@ -271,23 +292,36 @@ export class MCPServer {
                 r,
               );
               if (userDisplay) {
-                void toolContext.sendNotification({
-                  method: "notifications/message",
-                  params: {
-                    level: "info",
-                    logger: "sdl-mcp",
-                    data: userDisplay,
-                  },
-                  }).catch(() => { /* non-critical */ });
+                void toolContext
+                  .sendNotification({
+                    method: "notifications/message",
+                    params: {
+                      level: "info",
+                      logger: "sdl-mcp",
+                      data: userDisplay,
+                    },
+                  })
+                  .catch(() => {
+                    /* non-critical */
+                  });
               }
 
               // Capture token usage before stripping internal fields
               capturedUsage = r._tokenUsage as TokenUsageMetadata | undefined;
               finalResult = stripRawContext(r);
               // Also strip _tokenUsage (stripRawContext only handles _rawContext)
-              if (finalResult && typeof finalResult === "object" && "_tokenUsage" in finalResult) {
+              if (
+                finalResult &&
+                typeof finalResult === "object" &&
+                "_tokenUsage" in finalResult
+              ) {
                 delete (finalResult as Record<string, unknown>)._tokenUsage;
               }
+              // Compact broad context responses — hide actionsTaken, path, metrics, retrievalEvidence
+              finalResult = projectBroadContextResult(
+                request.params.name,
+                finalResult,
+              );
             }
 
             // Capture formatted summary for content block before it gets deleted
@@ -300,19 +334,25 @@ export class MCPServer {
               typeof finalResult === "object" &&
               "formattedSummary" in finalResult
             ) {
-              const summary = (finalResult as Record<string, unknown>).formattedSummary;
+              const summary = (finalResult as Record<string, unknown>)
+                .formattedSummary;
               if (typeof summary === "string") {
-                void toolContext.sendNotification({
-                  method: "notifications/message",
-                  params: {
-                    level: "info",
-                    logger: "sdl-mcp",
-                    data: summary,
-                  },
-                  }).catch(() => { /* non-critical */ });
+                void toolContext
+                  .sendNotification({
+                    method: "notifications/message",
+                    params: {
+                      level: "info",
+                      logger: "sdl-mcp",
+                      data: summary,
+                    },
+                  })
+                  .catch(() => {
+                    /* non-critical */
+                  });
                 // Strip from tool response — summary is for the user, not the LLM
                 capturedSummary = summary;
-                delete (finalResult as Record<string, unknown>).formattedSummary;
+                delete (finalResult as Record<string, unknown>)
+                  .formattedSummary;
               }
             }
 
@@ -320,9 +360,17 @@ export class MCPServer {
             for (const hook of this.postDispatchHooks) {
               try {
                 await Promise.race([
-                  hook(request.params.name, parseResult.data, finalResult, toolContext),
+                  hook(
+                    request.params.name,
+                    parseResult.data,
+                    finalResult,
+                    toolContext,
+                  ),
                   new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error("Post-dispatch hook timed out")), 5_000).unref(),
+                    setTimeout(
+                      () => reject(new Error("Post-dispatch hook timed out")),
+                      5_000,
+                    ).unref(),
                   ),
                 ]);
               } catch (err) {
@@ -364,7 +412,16 @@ export class MCPServer {
             ];
 
             // Append per-call token savings meter (visible in tool response)
-            if (capturedUsage && capturedUsage.rawEquivalent > 0) {
+            // Skip for compacted broad context — meter is already in _displayFooter
+            const wasCompacted = isBroadContextResult(
+              request.params.name,
+              result,
+            );
+            if (
+              capturedUsage &&
+              capturedUsage.rawEquivalent > 0 &&
+              !wasCompacted
+            ) {
               contentBlocks.push({
                 type: "text",
                 text: `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens (SDL/raw-equiv) ${capturedUsage.meter}`,
@@ -486,7 +543,6 @@ function extractStringField(args: unknown, field: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
- 
 function convertSchema(
   schema: z.ZodType,
   compact = false,
@@ -511,7 +567,9 @@ export interface MCPServerServices {
  * Uses dynamic import to avoid eager loading of all tool modules at the top level.
  * Used by the HTTP transport to create per-session server instances.
  */
-export async function createMCPServer(services: MCPServerServices = {}): Promise<MCPServer> {
+export async function createMCPServer(
+  services: MCPServerServices = {},
+): Promise<MCPServer> {
   const { registerTools } = await import("./mcp/tools/index.js");
   const server = new MCPServer();
   registerTools(
