@@ -131,6 +131,42 @@ node dist/cli/index.js benchmark:ci --skip-indexing
 - `callEdgeCount`: Total call edges detected
 - `importEdgeCount`: Total import edges detected
 
+## Context Quality Suite
+
+The context quality benchmark (`tests/benchmark/context-quality.test.ts`) validates that `ContextEngine.buildContext()` produces useful, noise-free evidence and preserves answer content under broad-mode truncation. It runs 24 cases across all four task types (debug, explain, review, implement) in both precise and broad context modes.
+
+### What It Measures
+
+- **Answer preservation**: Whether broad-mode responses retain a meaningful `answer` field after truncation. An answer that contains `[answer removed` or `[answer truncated` is counted as lost.
+- **Useful-symbol recall**: The fraction of `expectedUsefulSymbols` (per case) that appear in `finalEvidence[].summary` or `finalEvidence[].reference`. Higher recall means the retrieval pipeline is surfacing the right symbols for the task.
+- **Noise rate**: The fraction of evidence items that mention an `unexpectedSymbol`. Unexpected symbols are things like Zod request schemas, tool descriptors, and unrelated tool handlers that should not appear in task-focused context.
+- **Latency**: Wall-clock time per case, tracked for regression detection.
+
+### Useful vs Noisy Evidence
+
+**Useful evidence** contains symbols that are directly relevant to the task. For a debug task targeting `truncateIfOverBudget`, useful symbols include `ContextEngine`, `estimateTokens`, and `MAX_CONTEXT_RESPONSE_TOKENS` — the actual functions and constants involved in the truncation logic.
+
+**Noisy evidence** contains symbols that are structurally reachable but semantically irrelevant. For the same debug task, `AgentContextRequestSchema` (a Zod validation schema), `ToolDescriptor` (tool registration plumbing), and `registerLegacyTools` (gateway wiring) would be noise — they are connected in the dependency graph but do not help understand or fix the truncation behavior.
+
+### Target Deltas
+
+| Metric                      | Baseline (pre-improvement)                       | Target (post-improvement) |
+| --------------------------- | ------------------------------------------------ | ------------------------- |
+| Answer present              | May fail (truncation strips answers)             | 100% of broad cases       |
+| Answer truncation incidents | Non-zero                                         | 0                         |
+| Useful-symbol recall        | Low (lexical seeding misses symbols)             | +50% vs baseline          |
+| Noise rate                  | High (broad context includes irrelevant symbols) | -50% vs baseline          |
+| Latency (p95)               | Current                                          | No worse than +20%        |
+
+### Running the Suite
+
+```bash
+# Requires a built dist/ and indexed sdl-mcp repository
+node --experimental-strip-types --test tests/benchmark/context-quality.test.ts
+```
+
+The suite degrades gracefully: when no indexed repository is available, only structural validation of the case definitions runs. Retrieval quality and answer preservation checks are skipped with a summary noting the skip count.
+
 ## Statistical Smoothing
 
 To reduce test flakiness, the system applies statistical smoothing:

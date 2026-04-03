@@ -1,0 +1,508 @@
+[
+  {
+    "id": "debug-precise-truncation-logic",
+    "taskType": "debug",
+    "contextMode": "precise",
+    "taskText": "The truncateIfOverBudget method strips the answer field entirely when the response exceeds the token cap. Debug why answers are removed instead of being shortened proportionally.",
+    "focusPaths": ["src/agent/context-engine.ts"],
+    "includeTests": false,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "truncateIfOverBudget",
+      "ContextEngine",
+      "estimateTokens",
+      "MAX_CONTEXT_RESPONSE_TOKENS"
+    ],
+    "unexpectedSymbols": [
+      "AgentContextRequestSchema",
+      "ToolDescriptor",
+      "registerLegacyTools"
+    ]
+  },
+  {
+    "id": "debug-precise-executor-card-rung",
+    "taskType": "debug",
+    "contextMode": "precise",
+    "taskText": "executeCardRung fails silently when selectTopSymbols returns an empty array. Debug the control flow that leads to zero evidence in the card rung.",
+    "focusPaths": ["src/agent/executor.ts"],
+    "includeTests": false,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "executeCardRung",
+      "selectTopSymbols",
+      "Executor",
+      "Evidence"
+    ],
+    "unexpectedSymbols": [
+      "buildFlatToolDescriptors",
+      "registerFlatTools",
+      "computeVersionHash"
+    ]
+  },
+  {
+    "id": "debug-precise-planner-budget",
+    "taskType": "debug",
+    "contextMode": "precise",
+    "taskText": "adjustForBudget trims rungs incorrectly when the budget maxTokens is very small, leaving only card rungs even for debug tasks that need hotPath.",
+    "focusPaths": ["src/agent/planner.ts"],
+    "includeTests": false,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "adjustForBudget",
+      "buildRungPath",
+      "Planner",
+      "RungPath"
+    ],
+    "unexpectedSymbols": [
+      "AgentContextRequestSchema",
+      "handleAgentContext",
+      "PolicyEngine"
+    ]
+  },
+  {
+    "id": "debug-precise-feedback-boost",
+    "taskType": "debug",
+    "contextMode": "precise",
+    "taskText": "queryFeedbackBoosts returns stale boost scores after feedback entries are soft-deleted. Debug why deleted feedback still influences context seeding.",
+    "focusPaths": ["src/retrieval/feedback-boost.ts"],
+    "includeTests": false,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "queryFeedbackBoosts",
+      "mergeFeedbackBoosts",
+      "FeedbackBoostResult"
+    ],
+    "unexpectedSymbols": ["beamSearch", "computeClustersTS", "ToolDescriptor"]
+  },
+  {
+    "id": "debug-broad-entity-search-fallback",
+    "taskType": "debug",
+    "contextMode": "broad",
+    "taskText": "When entitySearch returns zero results for a task query, the keyword fallback in buildContext uses extractIdentifiersFromText which filters out domain-specific terms like 'slice' and 'symbol'. Debug why relevant search terms are dropped.",
+    "focusPaths": ["src/agent/context-engine.ts", "src/agent/executor.ts"],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "buildContext",
+      "extractIdentifiersFromText",
+      "entitySearch",
+      "searchSymbols",
+      "buildContextAwareStopWords"
+    ],
+    "unexpectedSymbols": [
+      "registerLegacyTools",
+      "computeStalenessTiers",
+      "ToolDescriptor"
+    ]
+  },
+  {
+    "id": "debug-broad-cluster-expansion",
+    "taskType": "debug",
+    "contextMode": "broad",
+    "taskText": "expandContextForClusters adds irrelevant cluster members to the context because the keyword overlap filter misses camelCase symbol names. Debug the name matching logic.",
+    "focusPaths": ["src/agent/context-engine.ts", "src/graph/cluster.ts"],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "expandContextForClusters",
+      "ContextEngine",
+      "getClusterMembers",
+      "getClustersForSymbols"
+    ],
+    "unexpectedSymbols": [
+      "AgentContextRequestSchema",
+      "buildFlatToolDescriptors",
+      "diffSignature"
+    ]
+  },
+  {
+    "id": "debug-broad-broad-projection",
+    "taskType": "debug",
+    "contextMode": "broad",
+    "taskText": "projectBroadContextResult strips fields that the model needs. The BROAD_VISIBLE_FIELDS set is missing the retrievalEvidence field, causing symptom classification data to be lost in broad responses.",
+    "focusPaths": [
+      "src/mcp/context-response-projection.ts",
+      "src/mcp/tools/context.ts"
+    ],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "projectBroadContextResult",
+      "isBroadContextResult",
+      "BROAD_VISIBLE_FIELDS",
+      "handleAgentContext"
+    ],
+    "unexpectedSymbols": [
+      "beamSearch",
+      "computeClustersTS",
+      "generateAstFingerprint"
+    ]
+  },
+  {
+    "id": "debug-broad-skeleton-rung-timeout",
+    "taskType": "debug",
+    "contextMode": "broad",
+    "taskText": "executeSkeletonRung takes too long on large files because extractSkeletonFromNode parses the entire AST without a depth limit. Debug where the performance bottleneck is and why the skeleton budget is exceeded.",
+    "focusPaths": ["src/agent/executor.ts", "src/code/skeleton.ts"],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "executeSkeletonRung",
+      "extractSkeletonFromNode",
+      "Executor",
+      "SkeletonOptions"
+    ],
+    "unexpectedSymbols": [
+      "registerLegacyTools",
+      "ToolDescriptor",
+      "computeVersionHash"
+    ]
+  },
+  {
+    "id": "explain-precise-context-ladder",
+    "taskType": "explain",
+    "contextMode": "precise",
+    "taskText": "Explain how the context ladder works: how does the Planner decide which rungs (card, skeleton, hotPath, raw) to include for different task types?",
+    "focusPaths": ["src/agent/planner.ts", "src/agent/types.ts"],
+    "includeTests": false,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "Planner",
+      "plan",
+      "buildRungPath",
+      "RungPath",
+      "RungType",
+      "TaskType"
+    ],
+    "unexpectedSymbols": [
+      "handleAgentContext",
+      "registerFlatTools",
+      "buildSlice"
+    ]
+  },
+  {
+    "id": "explain-precise-evidence-types",
+    "taskType": "explain",
+    "contextMode": "precise",
+    "taskText": "Explain the different evidence types (symbolCard, skeleton, hotPath, codeWindow, diagnostic, searchResult) and how each is produced during executor rung execution.",
+    "focusPaths": ["src/agent/types.ts", "src/agent/executor.ts"],
+    "includeTests": false,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "Evidence",
+      "Executor",
+      "executeCardRung",
+      "executeSkeletonRung",
+      "executeHotPathRung",
+      "Action"
+    ],
+    "unexpectedSymbols": [
+      "AgentContextRequestSchema",
+      "ToolDescriptor",
+      "computeClustersTS"
+    ]
+  },
+  {
+    "id": "explain-precise-gate-policy",
+    "taskType": "explain",
+    "contextMode": "precise",
+    "taskText": "Explain the proof-of-need gating mechanism: how does the PolicyEngine decide whether to approve or deny a code window request?",
+    "focusPaths": ["src/code/gate.ts", "src/policy/engine.ts"],
+    "includeTests": false,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "GateContext",
+      "PolicyEngine",
+      "generateDenialGuidance",
+      "DenialGuidance"
+    ],
+    "unexpectedSymbols": [
+      "buildFlatToolDescriptors",
+      "extractIdentifiersFromText",
+      "computeVersionHash"
+    ]
+  },
+  {
+    "id": "explain-broad-retrieval-pipeline",
+    "taskType": "explain",
+    "contextMode": "broad",
+    "taskText": "Explain the full retrieval pipeline: how does a natural language task query get converted into ranked symbol candidates via entity search, hybrid search, and RRF fusion?",
+    "focusPaths": ["src/retrieval/orchestrator.ts", "src/retrieval/types.ts"],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "hybridSearch",
+      "entitySearch",
+      "HybridSearchResult",
+      "RetrievalEvidence",
+      "HybridSearchOptions"
+    ],
+    "unexpectedSymbols": [
+      "registerLegacyTools",
+      "ToolDescriptor",
+      "generateAstFingerprint"
+    ]
+  },
+  {
+    "id": "explain-broad-beam-search",
+    "taskType": "explain",
+    "contextMode": "broad",
+    "taskText": "Explain how the beam search engine works for graph slice building: what are frontier items, how does dynamic cap tightening work, and when does the search terminate?",
+    "focusPaths": [
+      "src/graph/slice/beam-search-engine.ts",
+      "src/graph/slice.ts"
+    ],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "beamSearch",
+      "FrontierItem",
+      "BeamSearchRequest",
+      "shouldTightenDynamicCap",
+      "DynamicCapState",
+      "normalizeEdgeConfidence"
+    ],
+    "unexpectedSymbols": [
+      "handleAgentContext",
+      "AgentContextRequestSchema",
+      "registerFlatTools"
+    ]
+  },
+  {
+    "id": "explain-broad-answer-generation",
+    "taskType": "explain",
+    "contextMode": "broad",
+    "taskText": "Explain how the ContextEngine generates the answer field in broad mode: how is evidence grouped by type and formatted into the markdown response?",
+    "focusPaths": ["src/agent/context-engine.ts"],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "ContextEngine",
+      "generateAnswer",
+      "generateSummary",
+      "ContextResult",
+      "Evidence"
+    ],
+    "unexpectedSymbols": [
+      "ToolDescriptor",
+      "buildFlatToolDescriptors",
+      "computeVersionHash"
+    ]
+  },
+  {
+    "id": "review-precise-executor-error-handling",
+    "taskType": "review",
+    "contextMode": "precise",
+    "taskText": "Review the error handling in the Executor class: are rung failures properly caught, do failed actions still produce partial evidence, and are metrics accurate?",
+    "focusPaths": ["src/agent/executor.ts"],
+    "includeTests": false,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "Executor",
+      "executeCardRung",
+      "executeSkeletonRung",
+      "Action",
+      "ExecutionMetrics"
+    ],
+    "unexpectedSymbols": [
+      "AgentContextRequestSchema",
+      "registerLegacyTools",
+      "computeClustersTS"
+    ]
+  },
+  {
+    "id": "review-precise-projection-completeness",
+    "taskType": "review",
+    "contextMode": "precise",
+    "taskText": "Review isBroadContextResult and projectBroadContextResult for correctness: does the projection preserve all fields needed by the consuming model?",
+    "focusPaths": ["src/mcp/context-response-projection.ts"],
+    "includeTests": false,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "isBroadContextResult",
+      "projectBroadContextResult",
+      "BROAD_VISIBLE_FIELDS"
+    ],
+    "unexpectedSymbols": ["beamSearch", "FrontierItem", "computeVersionHash"]
+  },
+  {
+    "id": "review-precise-identifier-extraction",
+    "taskType": "review",
+    "contextMode": "precise",
+    "taskText": "Review extractIdentifiersFromText and buildContextAwareStopWords: are domain-specific terms being incorrectly filtered when the query itself is about those terms?",
+    "focusPaths": ["src/agent/executor.ts"],
+    "includeTests": false,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "extractIdentifiersFromText",
+      "buildContextAwareStopWords",
+      "IDENTIFIER_STOP_WORDS",
+      "MAX_IDENTIFIERS"
+    ],
+    "unexpectedSymbols": [
+      "ToolDescriptor",
+      "registerFlatTools",
+      "generateAstFingerprint"
+    ]
+  },
+  {
+    "id": "review-broad-context-seeding",
+    "taskType": "review",
+    "contextMode": "broad",
+    "taskText": "Review the full context seeding pipeline in buildContext: entity retrieval, keyword fallback with compound and individual term searches, feedback boost, and cluster expansion. Are there race conditions or ordering issues?",
+    "focusPaths": [
+      "src/agent/context-engine.ts",
+      "src/retrieval/feedback-boost.ts"
+    ],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "buildContext",
+      "ContextEngine",
+      "entitySearch",
+      "queryFeedbackBoosts",
+      "expandContextForClusters",
+      "extractIdentifiersFromText"
+    ],
+    "unexpectedSymbols": [
+      "buildFlatToolDescriptors",
+      "ToolDescriptor",
+      "registerLegacyTools"
+    ]
+  },
+  {
+    "id": "review-broad-truncation-strategy",
+    "taskType": "review",
+    "contextMode": "broad",
+    "taskText": "Review the truncation strategy in truncateIfOverBudget: is the 4-phase approach (truncate answer, trim evidence, trim actions, remove answer) optimal? Are there cases where useful evidence is discarded before the bloated answer?",
+    "focusPaths": ["src/agent/context-engine.ts"],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "truncateIfOverBudget",
+      "ContextEngine",
+      "estimateTokens",
+      "ContextResult",
+      "MAX_CONTEXT_RESPONSE_TOKENS"
+    ],
+    "unexpectedSymbols": [
+      "AgentContextRequestSchema",
+      "registerLegacyTools",
+      "computeClustersTS"
+    ]
+  },
+  {
+    "id": "review-broad-score-ranking",
+    "taskType": "review",
+    "contextMode": "broad",
+    "taskText": "Review symbol scoring and ranking in the graph slice: how does scoreSymbol weight fan-in, churn, and test coverage? Does the scoring function produce stable rankings for the same input?",
+    "focusPaths": ["src/graph/score.ts", "src/graph/slice.ts"],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "scoreSymbol",
+      "scoreSymbolWithMetrics",
+      "calculateHotness",
+      "combineScores",
+      "SliceContext"
+    ],
+    "unexpectedSymbols": [
+      "handleAgentContext",
+      "AgentContextRequestSchema",
+      "ToolDescriptor"
+    ]
+  },
+  {
+    "id": "implement-precise-skeleton-budget",
+    "taskType": "implement",
+    "contextMode": "precise",
+    "taskText": "Implement a token budget parameter for getSkeleton so that large skeletons are trimmed to fit within the caller's budget before being returned as evidence.",
+    "focusPaths": ["src/code/skeleton.ts", "src/agent/executor.ts"],
+    "includeTests": false,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "extractSkeletonFromNode",
+      "trimSkeletonToBounds",
+      "SkeletonOptions",
+      "SkeletonResult",
+      "executeSkeletonRung"
+    ],
+    "unexpectedSymbols": [
+      "AgentContextRequestSchema",
+      "registerLegacyTools",
+      "computeVersionHash"
+    ]
+  },
+  {
+    "id": "implement-precise-confidence-planning",
+    "taskType": "implement",
+    "contextMode": "precise",
+    "taskText": "Implement confidence-aware rung planning in the Planner: use edge confidence scores from the graph to decide whether hotPath or raw rungs are needed beyond the card rung.",
+    "focusPaths": [
+      "src/agent/planner.ts",
+      "src/graph/slice/beam-search-engine.ts"
+    ],
+    "includeTests": false,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "Planner",
+      "plan",
+      "buildRungPath",
+      "adjustForBudget",
+      "normalizeEdgeConfidence",
+      "getAdaptiveMinConfidence"
+    ],
+    "unexpectedSymbols": [
+      "ToolDescriptor",
+      "registerFlatTools",
+      "handleAgentContext"
+    ]
+  },
+  {
+    "id": "implement-broad-semantic-seeding",
+    "taskType": "implement",
+    "contextMode": "broad",
+    "taskText": "Implement semantic-first context seeding: replace the pure lexical keyword fallback in buildContext with hybridSearch that combines vector similarity and full-text search using RRF fusion.",
+    "focusPaths": [
+      "src/agent/context-engine.ts",
+      "src/retrieval/orchestrator.ts"
+    ],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "buildContext",
+      "ContextEngine",
+      "hybridSearch",
+      "entitySearch",
+      "extractIdentifiersFromText",
+      "HybridSearchOptions"
+    ],
+    "unexpectedSymbols": [
+      "registerLegacyTools",
+      "ToolDescriptor",
+      "buildFlatToolDescriptors"
+    ]
+  },
+  {
+    "id": "implement-broad-evidence-dedup",
+    "taskType": "implement",
+    "contextMode": "broad",
+    "taskText": "Implement evidence-aware symbol deduplication in the Executor so that when multiple rungs produce evidence for the same symbol, the highest-value evidence is kept and duplicates are discarded before the final result.",
+    "focusPaths": ["src/agent/executor.ts", "src/agent/types.ts"],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "Executor",
+      "Evidence",
+      "Action",
+      "executeCardRung",
+      "selectTopSymbols",
+      "ExecutionMetrics"
+    ],
+    "unexpectedSymbols": [
+      "AgentContextRequestSchema",
+      "registerLegacyTools",
+      "computeClustersTS"
+    ]
+  }
+]
