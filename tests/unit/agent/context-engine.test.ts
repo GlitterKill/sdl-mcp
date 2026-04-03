@@ -530,6 +530,102 @@ describe("ContextEngine", () => {
     assert.ok(!capturedContext.includes("symbol:member-11"));
   });
 
+  it("precise mode caps cluster expansion at 4 additional symbols", async () => {
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => ({
+      rungs: ["card"],
+      estimatedTokens: 50,
+      estimatedDurationMs: 10,
+      reasoning: "test",
+    }));
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:seed-a"]);
+
+    // Mock with precise mode cap (4 expanded)
+    const expanded = [
+      "symbol:seed-a",
+      ...Array.from({ length: 4 }, (_, i) => `symbol:precise-member-${i + 1}`),
+    ];
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "expandContextForClusters",
+      async () => ({
+        expandedContext: expanded,
+        clusterExpandedCount: 4,
+      }),
+    );
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    await engine.buildContext(
+      createTask({ options: { contextMode: "precise" } }),
+    );
+
+    // 1 seed + at most 4 expanded = 5 max
+    assert.ok(
+      capturedContext.length <= 5,
+      `Expected at most 5 context items (1 seed + 4 cap), got ${capturedContext.length}`,
+    );
+  });
+
+  it("per-cluster cap limits contributions from a single cluster", async () => {
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => ({
+      rungs: ["card"],
+      estimatedTokens: 50,
+      estimatedDurationMs: 10,
+      reasoning: "test",
+    }));
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:seed-a"]);
+
+    // Mock: 2 clusters, each with 5 members, per-cluster cap is 3
+    // So max from cluster 1 = 3, max from cluster 2 = 3, total capped at 6
+    const expanded = [
+      "symbol:seed-a",
+      ...Array.from({ length: 6 }, (_, i) => `symbol:cluster-member-${i + 1}`),
+    ];
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "expandContextForClusters",
+      async () => ({
+        expandedContext: expanded,
+        clusterExpandedCount: 6,
+      }),
+    );
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    await engine.buildContext(createTask());
+
+    // Should have seed + capped expansion
+    assert.ok(capturedContext.includes("symbol:seed-a"));
+    assert.ok(
+      capturedContext.length <= 11,
+      `Expected reasonable expansion, got ${capturedContext.length}`,
+    );
+  });
+
   it("preserves answer on successful broad-mode results even under budget pressure", async () => {
     // Create a large evidence set to push the response over budget
     const largeEvidence: Evidence[] = Array.from({ length: 50 }, (_, i) => ({

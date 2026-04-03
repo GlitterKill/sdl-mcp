@@ -78,7 +78,11 @@ export class ContextEngine {
       }
 
       const { expandedContext, clusterExpandedCount } =
-        await this.expandContextForClusters(context, task.taskText);
+        await this.expandContextForClusters(
+          context,
+          task.taskText,
+          task.options?.contextMode,
+        );
 
       const executor = new Executor(this.policyEngine);
       const { actions, evidence, success } = await executor.execute(
@@ -494,9 +498,23 @@ export class ContextEngine {
     return buildSeedContext(task);
   }
 
+  /**
+   * Expand context with graph-guided cluster member selection.
+   *
+   * Instead of keyword-filtering cluster members by name overlap, this
+   * scores candidates by graph proximity to the already-selected context
+   * symbols and applies a diversity pass so broad mode covers distinct
+   * neighborhoods rather than near-duplicates.
+   *
+   * Caps:
+   * - precise: max 4 added symbols total
+   * - broad:   max 10 added symbols total
+   * - per cluster: max 3
+   */
   private async expandContextForClusters(
     context: string[],
-    taskText?: string,
+    _taskText?: string,
+    contextMode?: string,
   ): Promise<{ expandedContext: string[]; clusterExpandedCount: number }> {
     const symbolIds = context
       .filter((c) => c.startsWith("symbol:"))
@@ -506,6 +524,10 @@ export class ContextEngine {
     if (symbolIds.length === 0) {
       return { expandedContext: context, clusterExpandedCount: 0 };
     }
+
+    const isPrecise = contextMode === "precise";
+    const MAX_TOTAL = isPrecise ? 4 : 10;
+    const MAX_PER_CLUSTER = 3;
 
     try {
       const conn = await getLadybugConn();
@@ -528,62 +550,114 @@ export class ContextEngine {
         ),
       );
 
-      // Build task keyword set for relevance filtering
-      const taskKeywords = new Set<string>();
-      if (taskText) {
-        for (const word of taskText.toLowerCase().split(/\W+/)) {
-          if (word.length >= 3) taskKeywords.add(word);
-        }
-      }
-
-      // Collect all candidate member symbolIds to fetch names for filtering
-      const candidateIds: string[] = [];
+      // Collect candidate IDs (not already in context)
       const already = new Set(context);
-      for (const members of memberLists) {
-        for (const m of members) {
+      const candidateIds: string[] = [];
+      const candidateCluster = new Map<string, string>(); // symbolId -> clusterId
+      for (let ci = 0; ci < memberLists.length; ci++) {
+        const clusterId = cappedClusterIds[ci]!;
+        for (const m of memberLists[ci]!) {
           const ref = `symbol:${m.symbolId}`;
           if (already.has(ref)) continue;
-          candidateIds.push(m.symbolId);
-        }
-      }
-
-      // If we have task keywords, fetch symbol names for relevance filtering
-      let nameMap: Map<string, { name: string; kind: string }> | null = null;
-      if (taskKeywords.size > 0 && candidateIds.length > 0) {
-        nameMap = await ladybugDb.getSymbolsByIdsLite(conn, candidateIds);
-      }
-
-      const MAX_CLUSTER_EXPANSION_SYMBOLS = 10;
-      const additional: string[] = [];
-
-      for (const members of memberLists) {
-        for (const m of members) {
-          if (additional.length >= MAX_CLUSTER_EXPANSION_SYMBOLS) break;
-
-          const ref = `symbol:${m.symbolId}`;
-          if (already.has(ref)) continue;
-
-          // When task keywords are available, only add members whose name
-          // has at least one overlapping keyword with the task text.
-          if (nameMap && taskKeywords.size > 0) {
-            const info = nameMap.get(m.symbolId);
-            if (info) {
-              const nameLower = info.name.toLowerCase();
-              const isRelevant = Array.from(taskKeywords).some(
-                (kw) => nameLower.includes(kw) || kw.includes(nameLower),
-              );
-              if (!isRelevant) continue;
-            } else {
-              // Symbol not in nameMap and keywords exist — skip (relevance unknown)
-              continue;
-            }
+          if (!candidateCluster.has(m.symbolId)) {
+            candidateIds.push(m.symbolId);
+            candidateCluster.set(m.symbolId, clusterId);
           }
-
-          additional.push(ref);
-          already.add(ref);
         }
-        if (additional.length >= MAX_CLUSTER_EXPANSION_SYMBOLS) break;
       }
+
+      if (candidateIds.length === 0) {
+        return { expandedContext: context, clusterExpandedCount: 0 };
+      }
+
+      // Score candidates by graph proximity: count edges connecting to
+      // already-selected context symbols.
+      const anchorSet = new Set(symbolIds);
+      const edgeMap = await ladybugDb.getEdgesFromSymbolsLite(
+        conn,
+        candidateIds,
+      );
+
+      // Also fetch name/kind for behavioral-kind bonus
+      const nameMap = await ladybugDb.getSymbolsByIdsLite(conn, candidateIds);
+
+      const scored: Array<{
+        symbolId: string;
+        clusterId: string;
+        score: number;
+      }> = [];
+      for (const cid of candidateIds) {
+        const edges = edgeMap.get(cid) ?? [];
+        let score = 0;
+
+        // Graph proximity: +3 for each edge connecting to an anchor symbol
+        for (const e of edges) {
+          if (anchorSet.has(e.toSymbolId)) {
+            score += e.edgeType === "call" ? 3 : 2;
+          }
+        }
+
+        // Behavioral kind bonus
+        const info = nameMap.get(cid);
+        if (info) {
+          const behavKinds = new Set([
+            "function",
+            "method",
+            "class",
+            "constructor",
+          ]);
+          if (behavKinds.has(info.kind)) score += 1;
+        }
+
+        scored.push({
+          symbolId: cid,
+          clusterId: candidateCluster.get(cid) ?? "",
+          score,
+        });
+      }
+
+      // Sort by score descending
+      scored.sort((a, b) => b.score - a.score);
+
+      // Diversity pass: cap per cluster, skip duplicates of the same
+      // file neighborhood (crude: first 2 path segments of fileId)
+      const additional: string[] = [];
+      const clusterCounts = new Map<string, number>();
+      const seenNeighborhoods = new Set<string>();
+
+      for (const candidate of scored) {
+        if (additional.length >= MAX_TOTAL) break;
+
+        const clCount = clusterCounts.get(candidate.clusterId) ?? 0;
+        if (clCount >= MAX_PER_CLUSTER) continue;
+
+        // Diversity: extract a neighborhood key from the symbol's file
+        const info = nameMap.get(candidate.symbolId);
+        if (info) {
+          const neighborhood = (info as { fileId?: string }).fileId
+            ? String((info as { fileId?: string }).fileId)
+                .split("/")
+                .slice(0, 3)
+                .join("/")
+            : candidate.symbolId;
+          if (seenNeighborhoods.has(neighborhood) && additional.length > 0) {
+            // Allow one per neighborhood to avoid near-duplicates
+            continue;
+          }
+          seenNeighborhoods.add(neighborhood);
+        }
+
+        additional.push(`symbol:${candidate.symbolId}`);
+        already.add(`symbol:${candidate.symbolId}`);
+        clusterCounts.set(candidate.clusterId, clCount + 1);
+      }
+
+      logger.debug("Graph-guided cluster expansion", {
+        candidates: candidateIds.length,
+        selected: additional.length,
+        clusters: cappedClusterIds.length,
+        maxTotal: MAX_TOTAL,
+      });
 
       return {
         expandedContext:
