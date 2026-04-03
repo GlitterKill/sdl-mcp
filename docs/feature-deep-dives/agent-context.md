@@ -18,11 +18,11 @@ In Code Mode, the equivalent surface is `sdl.context`. The two tools share the s
 
 ## Direct vs Code Mode
 
-| Surface | Use when | Primary job |
-|:--------|:---------|:------------|
-| `sdl.agent.context` | You are calling flat or gateway tools directly | Retrieve task-shaped code context |
-| `sdl.context` | You are already operating through Code Mode | Retrieve the same task-shaped context without leaving Code Mode |
-| `sdl.context.summary` | You need a portable write-up for a non-MCP consumer | Export a bounded summary, not a retrieval workflow |
+| Surface               | Use when                                            | Primary job                                                     |
+| :-------------------- | :-------------------------------------------------- | :-------------------------------------------------------------- |
+| `sdl.agent.context`   | You are calling flat or gateway tools directly      | Retrieve task-shaped code context                               |
+| `sdl.context`         | You are already operating through Code Mode         | Retrieve the same task-shaped context without leaving Code Mode |
+| `sdl.context.summary` | You need a portable write-up for a non-MCP consumer | Export a bounded summary, not a retrieval workflow              |
 
 ---
 
@@ -90,12 +90,12 @@ See [Context Modes](./context-modes.md) for the full comparison.
 
 ## Task-Type Defaults
 
-| Task type | Precise path | Broad path |
-|:----------|:-------------|:-----------|
-| `debug` | card -> hotPath | card -> skeleton -> hotPath -> raw* |
-| `review` | card | card -> skeleton |
-| `implement` | card -> skeleton | card -> skeleton -> hotPath |
-| `explain` | card -> skeleton | card -> skeleton |
+| Task type   | Precise path     | Broad path                           |
+| :---------- | :--------------- | :----------------------------------- |
+| `debug`     | card -> hotPath  | card -> skeleton -> hotPath -> raw\* |
+| `review`    | card             | card -> skeleton                     |
+| `implement` | card -> skeleton | card -> skeleton -> hotPath          |
+| `explain`   | card -> skeleton | card -> skeleton                     |
 
 `*` Raw is still governed by policy and usually only appears when diagnostics are explicitly required.
 
@@ -117,19 +117,20 @@ When scope is absent, SDL-MCP still extracts identifiers from the task text and 
 
 ## Response Shape
 
-Broad mode returns:
+Broad mode returns a compact response by default. The model-visible payload includes:
 
 - `taskId`
 - `taskType`
-- `path`
-- `actionsTaken`
-- `finalEvidence`
+- `success`
 - `summary`
 - `answer`
-- `metrics`
+- `finalEvidence` (primary evidence surface)
 - `nextBestAction` when relevant
+- `error` when failed
 
-Precise mode strips the envelope down to:
+The fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are still computed internally by the ContextEngine and available in the internal `ContextResult` type, but they are stripped at the MCP serialization layer before the response reaches the model. This compaction happens outside the engine itself, keeping the internal data model unchanged.
+
+Precise mode strips the envelope differently:
 
 - `taskId`
 - `taskType`
@@ -138,7 +139,7 @@ Precise mode strips the envelope down to:
 - `finalEvidence`
 - `metrics`
 
-That stripped response is a large part of why precise mode usually beats a hand-built workflow on token cost.
+Both modes are significantly more token-efficient than a hand-built workflow. Broad mode prioritizes `finalEvidence` and `answer` as the primary model-visible fields. Precise mode prioritizes `finalEvidence` and `path` for chain-efficient downstream use.
 
 ---
 
@@ -166,13 +167,13 @@ Do not treat `sdl.context.summary` as a replacement for `sdl.agent.context` or `
 
 ## Key Files
 
-| File | Responsibility |
-|:-----|:---------------|
-| `src/agent/context-engine.ts` | Top-level task-shaped context orchestration |
-| `src/agent/planner.ts` | Rung selection and budget trimming |
-| `src/agent/executor.ts` | Symbol ranking, rung execution, evidence generation |
-| `src/agent/evidence.ts` | Evidence capture and deduplication |
-| `src/mcp/tools/context.ts` | MCP handler for `sdl.agent.context` |
+| File                          | Responsibility                                      |
+| :---------------------------- | :-------------------------------------------------- |
+| `src/agent/context-engine.ts` | Top-level task-shaped context orchestration         |
+| `src/agent/planner.ts`        | Rung selection and budget trimming                  |
+| `src/agent/executor.ts`       | Symbol ranking, rung execution, evidence generation |
+| `src/agent/evidence.ts`       | Evidence capture and deduplication                  |
+| `src/mcp/tools/context.ts`    | MCP handler for `sdl.agent.context`                 |
 
 ---
 

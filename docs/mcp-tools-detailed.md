@@ -76,16 +76,16 @@ Returns a unified runtime and environment report for SDL-MCP.
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `version` | string | SDL-MCP package version |
-| `runtime` | object | `{node, platform, arch}` |
-| `config` | object | `{path, exists, loaded}` |
-| `logging` | object | `{path, consoleMirroring, fallbackUsed}` |
-| `ladybug` | object | `{available, activePath}` |
-| `native` | object | `{available, sourcePath, disabledByEnv, reason}` |
-| `warnings` | string[] | Non-fatal environment warnings |
-| `misconfigurations` | string[] | Actionable setup problems |
+| Field               | Type     | Description                                      |
+| :------------------ | :------- | :----------------------------------------------- |
+| `version`           | string   | SDL-MCP package version                          |
+| `runtime`           | object   | `{node, platform, arch}`                         |
+| `config`            | object   | `{path, exists, loaded}`                         |
+| `logging`           | object   | `{path, consoleMirroring, fallbackUsed}`         |
+| `ladybug`           | object   | `{available, activePath}`                        |
+| `native`            | object   | `{available, sourcePath, disabledByEnv, reason}` |
+| `warnings`          | string[] | Non-fatal environment warnings                   |
+| `misconfigurations` | string[] | Actionable setup problems                        |
 
 **Typical use:** Call this when startup, logging, DB, or native-addon behavior looks wrong and you need one consolidated environment snapshot.
 
@@ -101,13 +101,13 @@ Registers a new repository (or updates an existing one) for indexing. This is ty
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Unique identifier for the repository (e.g., `"my-app"`) |
-| `rootPath` | string | Yes | Absolute path to the repository root directory |
-| `ignore` | string[] | No | Glob patterns to ignore (defaults to `node_modules`, `dist`, `.next`, `build`) |
-| `languages` | string[] | No | Language extensions to index. Defaults to all 12 languages (11 adapters): `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh` |
-| `maxFileBytes` | number | No | Maximum file size to index in bytes (default: 2,000,000) |
+| Parameter      | Type     | Required | Description                                                                                                                                                       |
+| :------------- | :------- | :------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repoId`       | string   | Yes      | Unique identifier for the repository (e.g., `"my-app"`)                                                                                                           |
+| `rootPath`     | string   | Yes      | Absolute path to the repository root directory                                                                                                                    |
+| `ignore`       | string[] | No       | Glob patterns to ignore (defaults to `node_modules`, `dist`, `.next`, `build`)                                                                                    |
+| `languages`    | string[] | No       | Language extensions to index. Defaults to all 12 languages (11 adapters): `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh` |
+| `maxFileBytes` | number   | No       | Maximum file size to index in bytes (default: 2,000,000)                                                                                                          |
 
 **Response:**
 
@@ -119,6 +119,7 @@ Registers a new repository (or updates an existing one) for indexing. This is ty
 ```
 
 **Notes:**
+
 - Re-registering an existing `repoId` updates the configuration without losing indexed data.
 - The tool does not trigger indexing. Call `sdl.index.refresh` afterward.
 
@@ -132,29 +133,29 @@ Returns the current indexing state and health metrics for a registered repositor
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `surfaceMemories` | boolean | No | Include relevant development memories in the response (default: `false`) |
+| Parameter         | Type    | Required | Description                                                              |
+| :---------------- | :------ | :------- | :----------------------------------------------------------------------- |
+| `repoId`          | string  | Yes      | Repository identifier                                                    |
+| `surfaceMemories` | boolean | No       | Include relevant development memories in the response (default: `false`) |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `repoId` | string | Repository identifier |
-| `rootPath` | string | Absolute path to the repository root |
-| `latestVersionId` | string \| null | Most recent ledger version, or null if never indexed |
-| `filesIndexed` | number | Total files currently tracked |
-| `symbolsIndexed` | number | Total symbols in the graph |
-| `lastIndexedAt` | string \| null | ISO timestamp of the most recent indexing |
-| `healthScore` | number (0-100) | Composite health score |
-| `healthComponents` | object | Breakdown: `freshness`, `coverage`, `errorRate`, `edgeQuality`, `callResolution` (each 0-1) |
-| `healthAvailable` | boolean | Whether health metrics are populated |
-| `watcherHealth` | object \| null | File watcher state: `enabled`, `running`, `filesWatched`, `eventsReceived`, `eventsProcessed`, `errors`, `queueDepth`, `restartCount`, `stale`, `lastEventAt`, `lastSuccessfulReindexAt` |
-| `watcherNote` | string | Guidance when watcher is inactive |
-| `prefetchStats` | object | Predictive prefetch metrics: `enabled`, `queueDepth`, `running`, `completed`, `cancelled`, `cacheHits`, `cacheMisses`, `wastedPrefetch`, `hitRate`, `wasteRate`, `avgLatencyReductionMs`, `lastRunAt` |
-| `liveIndexStatus` | object | Live editor buffer state: `enabled`, `pendingBuffers`, `dirtyBuffers`, `parseQueueDepth`, `checkpointPending`, `lastBufferEventAt`, `lastCheckpointAt`, `lastCheckpointResult`, `reconcileQueueDepth`, etc. |
-| `memories` | array \| null | Relevant development memories auto-surfaced for this repo (when `surfaceMemories` is true) |
+| Field              | Type           | Description                                                                                                                                                                                                 |
+| :----------------- | :------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repoId`           | string         | Repository identifier                                                                                                                                                                                       |
+| `rootPath`         | string         | Absolute path to the repository root                                                                                                                                                                        |
+| `latestVersionId`  | string \| null | Most recent ledger version, or null if never indexed                                                                                                                                                        |
+| `filesIndexed`     | number         | Total files currently tracked                                                                                                                                                                               |
+| `symbolsIndexed`   | number         | Total symbols in the graph                                                                                                                                                                                  |
+| `lastIndexedAt`    | string \| null | ISO timestamp of the most recent indexing                                                                                                                                                                   |
+| `healthScore`      | number (0-100) | Composite health score                                                                                                                                                                                      |
+| `healthComponents` | object         | Breakdown: `freshness`, `coverage`, `errorRate`, `edgeQuality`, `callResolution` (each 0-1)                                                                                                                 |
+| `healthAvailable`  | boolean        | Whether health metrics are populated                                                                                                                                                                        |
+| `watcherHealth`    | object \| null | File watcher state: `enabled`, `running`, `filesWatched`, `eventsReceived`, `eventsProcessed`, `errors`, `queueDepth`, `restartCount`, `stale`, `lastEventAt`, `lastSuccessfulReindexAt`                    |
+| `watcherNote`      | string         | Guidance when watcher is inactive                                                                                                                                                                           |
+| `prefetchStats`    | object         | Predictive prefetch metrics: `enabled`, `queueDepth`, `running`, `completed`, `cancelled`, `cacheHits`, `cacheMisses`, `wastedPrefetch`, `hitRate`, `wasteRate`, `avgLatencyReductionMs`, `lastRunAt`       |
+| `liveIndexStatus`  | object         | Live editor buffer state: `enabled`, `pendingBuffers`, `dirtyBuffers`, `parseQueueDepth`, `checkpointPending`, `lastBufferEventAt`, `lastCheckpointAt`, `lastCheckpointResult`, `reconcileQueueDepth`, etc. |
+| `memories`         | array \| null  | Relevant development memories auto-surfaced for this repo (when `surfaceMemories` is true)                                                                                                                  |
 
 **Typical use:** Call this first in any session to understand the state of the index before doing deeper queries.
 
@@ -168,27 +169,28 @@ Returns a token-efficient summary of the entire codebase structure, tunable from
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `level` | `"stats"` \| `"directories"` \| `"full"` | Yes | Detail level. `stats` is cheapest (~100 tokens). `directories` adds per-directory summaries. `full` adds hotspots + architecture. |
-| `includeHotspots` | boolean | No | Force hotspot inclusion at any level (auto-enabled at `full`) |
-| `directories` | string[] | No | Filter to specific directory paths |
-| `maxDirectories` | number (1-200) | No | Limit the number of directories returned |
-| `maxExportsPerDirectory` | number (1-50) | No | Limit exports listed per directory |
+| Parameter                | Type                                     | Required | Description                                                                                                                       |
+| :----------------------- | :--------------------------------------- | :------- | :-------------------------------------------------------------------------------------------------------------------------------- |
+| `repoId`                 | string                                   | Yes      | Repository identifier                                                                                                             |
+| `level`                  | `"stats"` \| `"directories"` \| `"full"` | Yes      | Detail level. `stats` is cheapest (~100 tokens). `directories` adds per-directory summaries. `full` adds hotspots + architecture. |
+| `includeHotspots`        | boolean                                  | No       | Force hotspot inclusion at any level (auto-enabled at `full`)                                                                     |
+| `directories`            | string[]                                 | No       | Filter to specific directory paths                                                                                                |
+| `maxDirectories`         | number (1-200)                           | No       | Limit the number of directories returned                                                                                          |
+| `maxExportsPerDirectory` | number (1-50)                            | No       | Limit exports listed per directory                                                                                                |
 
 **Response includes:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `stats` | object | `fileCount`, `symbolCount`, `edgeCount`, `exportedSymbolCount`, `byKind` (function/class/interface/type/method/variable/module/constructor counts), `byEdgeType` (call/import/config counts), `avgSymbolsPerFile`, `avgEdgesPerSymbol` |
-| `directories` | array | Per-directory: `path`, `fileCount`, `symbolCount`, `exportedCount`, `byKind`, `exports`, `topByFanIn`, `topByChurn`, `subdirectories`, `estimatedFullTokens`, `summaryTokens` |
-| `hotspots` | object | `mostDepended` (highest fan-in symbols), `mostChanged` (highest churn), `largestFiles`, `mostConnected` (files with most edges) |
-| `clusters` | object | `totalClusters`, `averageClusterSize`, `largestClusters` (list of `{clusterId, label, size}`) |
-| `processes` | object | `totalProcesses`, `averageDepth`, `entryPoints`, `longestProcesses` (list of `{processId, label, depth}`) |
-| `tokenMetrics` | object | `fullCardsEstimate`, `overviewTokens`, `compressionRatio` |
+| Field          | Type   | Description                                                                                                                                                                                                                            |
+| :------------- | :----- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stats`        | object | `fileCount`, `symbolCount`, `edgeCount`, `exportedSymbolCount`, `byKind` (function/class/interface/type/method/variable/module/constructor counts), `byEdgeType` (call/import/config counts), `avgSymbolsPerFile`, `avgEdgesPerSymbol` |
+| `directories`  | array  | Per-directory: `path`, `fileCount`, `symbolCount`, `exportedCount`, `byKind`, `exports`, `topByFanIn`, `topByChurn`, `subdirectories`, `estimatedFullTokens`, `summaryTokens`                                                          |
+| `hotspots`     | object | `mostDepended` (highest fan-in symbols), `mostChanged` (highest churn), `largestFiles`, `mostConnected` (files with most edges)                                                                                                        |
+| `clusters`     | object | `totalClusters`, `averageClusterSize`, `largestClusters` (list of `{clusterId, label, size}`)                                                                                                                                          |
+| `processes`    | object | `totalProcesses`, `averageDepth`, `entryPoints`, `longestProcesses` (list of `{processId, label, depth}`)                                                                                                                              |
+| `tokenMetrics` | object | `fullCardsEstimate`, `overviewTokens`, `compressionRatio`                                                                                                                                                                              |
 
 **Token guidance:**
+
 - `level: "stats"` is the cheapest entry point for any new task.
 - Use `directories` filter + `maxDirectories` to bound payload for large repos.
 
@@ -202,28 +204,29 @@ Triggers re-indexing of a repository in either full or incremental mode.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `mode` | `"full"` \| `"incremental"` | Yes | `full` re-indexes everything; `incremental` only processes files changed since the last index |
-| `reason` | string | No | Optional reason for the refresh (logged) |
-| `includeDiagnostics` | boolean | No | When `true`, include coarse phase timings in the synchronous response |
-| `async` | boolean | No | When `true`, start indexing in the background and return immediately with an `operationId` |
+| Parameter            | Type                        | Required | Description                                                                                   |
+| :------------------- | :-------------------------- | :------- | :-------------------------------------------------------------------------------------------- |
+| `repoId`             | string                      | Yes      | Repository identifier                                                                         |
+| `mode`               | `"full"` \| `"incremental"` | Yes      | `full` re-indexes everything; `incremental` only processes files changed since the last index |
+| `reason`             | string                      | No       | Optional reason for the refresh (logged)                                                      |
+| `includeDiagnostics` | boolean                     | No       | When `true`, include coarse phase timings in the synchronous response                         |
+| `async`              | boolean                     | No       | When `true`, start indexing in the background and return immediately with an `operationId`    |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `ok` | boolean | Success flag |
-| `repoId` | string | Repository identifier |
-| `versionId` | string | The new ledger version ID |
-| `changedFiles` | number | Number of files processed |
-| `async` | boolean | Present when the refresh was accepted for background execution |
-| `operationId` | string | Background operation identifier when `async: true` |
-| `message` | string | Human-readable status for async refresh requests |
-| `diagnostics` | object | Optional diagnostics envelope returned only when `includeDiagnostics: true` on synchronous requests |
+| Field          | Type    | Description                                                                                         |
+| :------------- | :------ | :-------------------------------------------------------------------------------------------------- |
+| `ok`           | boolean | Success flag                                                                                        |
+| `repoId`       | string  | Repository identifier                                                                               |
+| `versionId`    | string  | The new ledger version ID                                                                           |
+| `changedFiles` | number  | Number of files processed                                                                           |
+| `async`        | boolean | Present when the refresh was accepted for background execution                                      |
+| `operationId`  | string  | Background operation identifier when `async: true`                                                  |
+| `message`      | string  | Human-readable status for async refresh requests                                                    |
+| `diagnostics`  | object  | Optional diagnostics envelope returned only when `includeDiagnostics: true` on synchronous requests |
 
 **Notes:**
+
 - Incremental mode compares file content hashes to detect changes. Only changed files are re-parsed.
 - If no tracked files changed, incremental refresh can short-circuit after `scanRepo`, `versioning`, and `memorySync` while reusing the existing version.
 - After indexing, all slice caches and card caches are invalidated.
@@ -243,29 +246,29 @@ Pushes an editor buffer event (open, change, save, close, checkpoint) to the liv
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `eventType` | `"open"` \| `"change"` \| `"save"` \| `"close"` \| `"checkpoint"` | Yes | Type of editor event |
-| `filePath` | string | Yes | Relative file path within the repo (must not contain `..`) |
-| `content` | string | Yes | Full file content (max 5 MB) |
-| `language` | string | No | Language identifier (e.g., `"typescript"`) |
-| `version` | number | Yes | Editor buffer version number (monotonically increasing) |
-| `dirty` | boolean | Yes | Whether the buffer has unsaved changes |
-| `timestamp` | string | Yes | ISO timestamp of the event |
-| `cursor` | `{line, col}` | No | Current cursor position |
-| `selections` | array of `{startLine, startCol, endLine, endCol}` | No | Active text selections |
+| Parameter    | Type                                                              | Required | Description                                                |
+| :----------- | :---------------------------------------------------------------- | :------- | :--------------------------------------------------------- |
+| `repoId`     | string                                                            | Yes      | Repository identifier                                      |
+| `eventType`  | `"open"` \| `"change"` \| `"save"` \| `"close"` \| `"checkpoint"` | Yes      | Type of editor event                                       |
+| `filePath`   | string                                                            | Yes      | Relative file path within the repo (must not contain `..`) |
+| `content`    | string                                                            | Yes      | Full file content (max 5 MB)                               |
+| `language`   | string                                                            | No       | Language identifier (e.g., `"typescript"`)                 |
+| `version`    | number                                                            | Yes      | Editor buffer version number (monotonically increasing)    |
+| `dirty`      | boolean                                                           | Yes      | Whether the buffer has unsaved changes                     |
+| `timestamp`  | string                                                            | Yes      | ISO timestamp of the event                                 |
+| `cursor`     | `{line, col}`                                                     | No       | Current cursor position                                    |
+| `selections` | array of `{startLine, startCol, endLine, endCol}`                 | No       | Active text selections                                     |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `accepted` | boolean | Whether the event was accepted |
-| `repoId` | string | Repository identifier |
-| `overlayVersion` | number | Current overlay version |
-| `parseScheduled` | boolean | Whether a background parse was queued |
-| `checkpointScheduled` | boolean | Whether a checkpoint was queued |
-| `warnings` | string[] | Any warnings (e.g., max draft files exceeded) |
+| Field                 | Type     | Description                                   |
+| :-------------------- | :------- | :-------------------------------------------- |
+| `accepted`            | boolean  | Whether the event was accepted                |
+| `repoId`              | string   | Repository identifier                         |
+| `overlayVersion`      | number   | Current overlay version                       |
+| `parseScheduled`      | boolean  | Whether a background parse was queued         |
+| `checkpointScheduled` | boolean  | Whether a checkpoint was queued               |
+| `warnings`            | string[] | Any warnings (e.g., max draft files exceeded) |
 
 ---
 
@@ -277,22 +280,22 @@ Requests a manual checkpoint of all pending live draft buffers to the durable gr
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `reason` | string | No | Optional reason for the checkpoint |
+| Parameter | Type   | Required | Description                        |
+| :-------- | :----- | :------- | :--------------------------------- |
+| `repoId`  | string | Yes      | Repository identifier              |
+| `reason`  | string | No       | Optional reason for the checkpoint |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `repoId` | string | Repository identifier |
-| `requested` | boolean | Whether the checkpoint was initiated |
-| `checkpointId` | string | Unique checkpoint identifier |
-| `pendingBuffers` | number | Buffers pending at time of request |
-| `checkpointedFiles` | number | Files successfully checkpointed |
-| `failedFiles` | number | Files that failed to checkpoint |
-| `lastCheckpointAt` | string \| null | ISO timestamp of last successful checkpoint |
+| Field               | Type           | Description                                 |
+| :------------------ | :------------- | :------------------------------------------ |
+| `repoId`            | string         | Repository identifier                       |
+| `requested`         | boolean        | Whether the checkpoint was initiated        |
+| `checkpointId`      | string         | Unique checkpoint identifier                |
+| `pendingBuffers`    | number         | Buffers pending at time of request          |
+| `checkpointedFiles` | number         | Files successfully checkpointed             |
+| `failedFiles`       | number         | Files that failed to checkpoint             |
+| `lastCheckpointAt`  | string \| null | ISO timestamp of last successful checkpoint |
 
 ---
 
@@ -304,26 +307,26 @@ Returns the current state of the live editor buffer system for a repository.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
+| Parameter | Type   | Required | Description           |
+| :-------- | :----- | :------- | :-------------------- |
+| `repoId`  | string | Yes      | Repository identifier |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `repoId` | string | Repository identifier |
-| `enabled` | boolean | Whether live indexing is active |
-| `pendingBuffers` | number | Buffers awaiting processing |
-| `dirtyBuffers` | number | Buffers with unsaved changes |
-| `parseQueueDepth` | number | Background parse queue size |
-| `checkpointPending` | boolean | Whether a checkpoint is queued |
-| `lastBufferEventAt` | string \| null | ISO timestamp of last buffer event |
-| `lastCheckpointAt` | string \| null | ISO timestamp of last checkpoint |
-| `lastCheckpointResult` | `"success"` \| `"partial"` \| `"failed"` \| null | Result of last checkpoint |
-| `lastCheckpointError` | string \| null | Error message if last checkpoint failed |
-| `reconcileQueueDepth` | number | Pending reconciliation tasks |
-| `reconcileInflight` | boolean | Whether reconciliation is running |
+| Field                  | Type                                             | Description                             |
+| :--------------------- | :----------------------------------------------- | :-------------------------------------- |
+| `repoId`               | string                                           | Repository identifier                   |
+| `enabled`              | boolean                                          | Whether live indexing is active         |
+| `pendingBuffers`       | number                                           | Buffers awaiting processing             |
+| `dirtyBuffers`         | number                                           | Buffers with unsaved changes            |
+| `parseQueueDepth`      | number                                           | Background parse queue size             |
+| `checkpointPending`    | boolean                                          | Whether a checkpoint is queued          |
+| `lastBufferEventAt`    | string \| null                                   | ISO timestamp of last buffer event      |
+| `lastCheckpointAt`     | string \| null                                   | ISO timestamp of last checkpoint        |
+| `lastCheckpointResult` | `"success"` \| `"partial"` \| `"failed"` \| null | Result of last checkpoint               |
+| `lastCheckpointError`  | string \| null                                   | Error message if last checkpoint failed |
+| `reconcileQueueDepth`  | number                                           | Pending reconciliation tasks            |
+| `reconcileInflight`    | boolean                                          | Whether reconciliation is running       |
 
 ---
 
@@ -337,23 +340,23 @@ Searches the symbol graph by name, with optional semantic reranking or hybrid re
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `query` | string | Yes | Search query (matched against symbol names) |
-| `kinds` | string[] | No | Filter by symbol kind (e.g., `["function", "class"]`). Valid kinds: `function`, `class`, `interface`, `type`, `module`, `method`, `constructor`, `variable` |
-| `limit` | number (1-1000) | No | Maximum results to return (default: 50) |
-| `semantic` | boolean | No | Enable semantic reranking / hybrid retrieval |
-| `includeRetrievalEvidence` | boolean | No | Include retrieval evidence in response (sources used, candidate counts, fusion latency, fallback reason) |
+| Parameter                  | Type            | Required | Description                                                                                                                                                 |
+| :------------------------- | :-------------- | :------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repoId`                   | string          | Yes      | Repository identifier                                                                                                                                       |
+| `query`                    | string          | Yes      | Search query (matched against symbol names)                                                                                                                 |
+| `kinds`                    | string[]        | No       | Filter by symbol kind (e.g., `["function", "class"]`). Valid kinds: `function`, `class`, `interface`, `type`, `module`, `method`, `constructor`, `variable` |
+| `limit`                    | number (1-1000) | No       | Maximum results to return (default: 50)                                                                                                                     |
+| `semantic`                 | boolean         | No       | Enable semantic reranking / hybrid retrieval                                                                                                                |
+| `includeRetrievalEvidence` | boolean         | No       | Include retrieval evidence in response (sources used, candidate counts, fusion latency, fallback reason)                                                    |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `results` | array | Each result: `{symbolId, name, file, kind}` where kind is one of `function`, `class`, `interface`, `type`, `module`, `method`, `constructor`, `variable` |
-| `truncation` | object | Present if results were truncated: `{truncated, droppedCount, howToResume}` |
+| Field               | Type   | Description                                                                                                                                               |
+| :------------------ | :----- | :-------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `results`           | array  | Each result: `{symbolId, name, file, kind}` where kind is one of `function`, `class`, `interface`, `type`, `module`, `method`, `constructor`, `variable`  |
+| `truncation`        | object | Present if results were truncated: `{truncated, droppedCount, howToResume}`                                                                               |
 | `retrievalEvidence` | object | Present when `includeRetrievalEvidence: true`. Contains `{mode, ftsAvailable, vectorAvailable, candidateCountPerSource, fusionLatencyMs, fallbackReason}` |
-| `retrievalMode` | string | `"hybrid"` or `"legacy"` — indicates which retrieval path was used |
+| `retrievalMode`     | string | `"hybrid"` or `"legacy"` — indicates which retrieval path was used                                                                                        |
 
 **Token guidance:** Start with `limit: 5-20`. Only increase if the initial results don't contain what you need.
 
@@ -369,41 +372,41 @@ Supports ETag-based conditional requests via `ifNoneMatch` — if the symbol has
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `symbolId` | string | Conditional | Symbol identifier (SHA-256 hash) |
-| `symbolRef` | object | Conditional | Natural symbol reference: `{name, file?, kind?, exportedOnly?}` |
-| `ifNoneMatch` | string | No | ETag from a previous card response. Returns `notModified` if unchanged. |
-| `minCallConfidence` | number (0-1) | No | Filter out call edges below this confidence threshold |
-| `includeResolutionMetadata` | boolean | No | Include full call resolution details (resolver ID, resolution phase, reason) |
+| Parameter                   | Type         | Required    | Description                                                                  |
+| :-------------------------- | :----------- | :---------- | :--------------------------------------------------------------------------- |
+| `repoId`                    | string       | Yes         | Repository identifier                                                        |
+| `symbolId`                  | string       | Conditional | Symbol identifier (SHA-256 hash)                                             |
+| `symbolRef`                 | object       | Conditional | Natural symbol reference: `{name, file?, kind?, exportedOnly?}`              |
+| `ifNoneMatch`               | string       | No          | ETag from a previous card response. Returns `notModified` if unchanged.      |
+| `minCallConfidence`         | number (0-1) | No          | Filter out call edges below this confidence threshold                        |
+| `includeResolutionMetadata` | boolean      | No          | Include full call resolution details (resolver ID, resolution phase, reason) |
 
 Provide exactly one of `symbolId` or `symbolRef`.
 
 **Response (full card):**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `symbolId` | string | Unique symbol identifier |
-| `repoId` | string | Repository identifier |
-| `file` | string | Relative file path |
-| `range` | object | `{startLine, startCol, endLine, endCol}` |
-| `kind` | string | `function`, `class`, `interface`, `type`, `module`, `method`, `constructor`, or `variable` |
-| `name` | string | Symbol name |
-| `exported` | boolean | Whether the symbol is exported |
-| `visibility` | string | `public`, `protected`, `private`, `exported`, or `internal` |
-| `signature` | object | `{name, params: [{name, type}], returns, generics, overloads}` |
-| `summary` | string | 1-2 line semantic summary |
-| `invariants` | string[] | Known invariants (e.g., "returns non-null") |
-| `sideEffects` | string[] | Known side effects (e.g., "writes to disk") |
-| `cluster` | object | `{clusterId, label, memberCount}` — community detection result |
-| `processes` | array | `{processId, label, role: "entry"|"intermediate"|"exit", depth}` — call-chain participation |
-| `callResolution` | object | Full resolution metadata: `{minCallConfidence, calls: [{symbolId, label, confidence, resolutionReason, resolverId, resolutionPhase}]}` |
-| `deps` | object | `{imports: string[], calls: string[]}` — human-readable dependency labels |
-| `metrics` | object | `{fanIn, fanOut, churn30d, testRefs: string[], canonicalTest: {file, symbolId, distance, proximity}}` |
-| `detailLevel` | string | Card detail level |
-| `etag` | string | Content hash for conditional requests |
-| `version` | object | `{ledgerVersion, astFingerprint}` |
+| Field            | Type     | Description                                                                                                                            |
+| :--------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------- | -------------- | ------------------------------------------ |
+| `symbolId`       | string   | Unique symbol identifier                                                                                                               |
+| `repoId`         | string   | Repository identifier                                                                                                                  |
+| `file`           | string   | Relative file path                                                                                                                     |
+| `range`          | object   | `{startLine, startCol, endLine, endCol}`                                                                                               |
+| `kind`           | string   | `function`, `class`, `interface`, `type`, `module`, `method`, `constructor`, or `variable`                                             |
+| `name`           | string   | Symbol name                                                                                                                            |
+| `exported`       | boolean  | Whether the symbol is exported                                                                                                         |
+| `visibility`     | string   | `public`, `protected`, `private`, `exported`, or `internal`                                                                            |
+| `signature`      | object   | `{name, params: [{name, type}], returns, generics, overloads}`                                                                         |
+| `summary`        | string   | 1-2 line semantic summary                                                                                                              |
+| `invariants`     | string[] | Known invariants (e.g., "returns non-null")                                                                                            |
+| `sideEffects`    | string[] | Known side effects (e.g., "writes to disk")                                                                                            |
+| `cluster`        | object   | `{clusterId, label, memberCount}` — community detection result                                                                         |
+| `processes`      | array    | `{processId, label, role: "entry"                                                                                                      | "intermediate" | "exit", depth}` — call-chain participation |
+| `callResolution` | object   | Full resolution metadata: `{minCallConfidence, calls: [{symbolId, label, confidence, resolutionReason, resolverId, resolutionPhase}]}` |
+| `deps`           | object   | `{imports: string[], calls: string[]}` — human-readable dependency labels                                                              |
+| `metrics`        | object   | `{fanIn, fanOut, churn30d, testRefs: string[], canonicalTest: {file, symbolId, distance, proximity}}`                                  |
+| `detailLevel`    | string   | Card detail level                                                                                                                      |
+| `etag`           | string   | Content hash for conditional requests                                                                                                  |
+| `version`        | object   | `{ledgerVersion, astFingerprint}`                                                                                                      |
 
 **Response (not modified):**
 
@@ -429,14 +432,14 @@ Batch-fetches multiple symbol cards in a single round trip.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `symbolIds` | string[] (1-100) | Conditional | Array of symbol IDs to fetch |
-| `symbolRefs` | object[] (1-100) | Conditional | Array of natural symbol references: `{name, file?, kind?, exportedOnly?}` |
-| `knownEtags` | Record<string, string> | No | Map of `symbolId → ETag` for conditional fetching |
-| `minCallConfidence` | number (0-1) | No | Filter call edges below this confidence |
-| `includeResolutionMetadata` | boolean | No | Include full call resolution details |
+| Parameter                   | Type                   | Required    | Description                                                               |
+| :-------------------------- | :--------------------- | :---------- | :------------------------------------------------------------------------ |
+| `repoId`                    | string                 | Yes         | Repository identifier                                                     |
+| `symbolIds`                 | string[] (1-100)       | Conditional | Array of symbol IDs to fetch                                              |
+| `symbolRefs`                | object[] (1-100)       | Conditional | Array of natural symbol references: `{name, file?, kind?, exportedOnly?}` |
+| `knownEtags`                | Record<string, string> | No          | Map of `symbolId → ETag` for conditional fetching                         |
+| `minCallConfidence`         | number (0-1)           | No          | Filter call edges below this confidence                                   |
+| `includeResolutionMetadata` | boolean                | No          | Include full call resolution details                                      |
 
 Provide exactly one of `symbolIds` or `symbolRefs`.
 
@@ -476,43 +479,45 @@ Builds a task-scoped dependency subgraph from entry symbols, returning the most 
 The result is a **slice** containing the N most relevant symbol cards, their interconnecting edges, a frontier of symbols just outside the slice boundary, and a handle/lease for subsequent refresh operations.
 
 Supports three wire format versions for encoding efficiency:
+
 - **V1**: Compact with shortened field names
 - **V2** (default): File paths and edge types are deduplicated into lookup tables
 - **V3**: Grouped edge encoding for further compression
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `taskText` | string | No | Natural language task description. Can be used *alone* (without `entrySymbols`) to auto-discover relevant symbols via hybrid retrieval (FTS + vector + RRF) or legacy full-text search. |
-| `stackTrace` | string | No | Stack trace for debugging tasks |
-| `failingTestPath` | string | No | Path to a failing test file |
-| `editedFiles` | string[] (max 100) | No | Recently edited file paths |
-| `entrySymbols` | string[] (max 100) | No | Symbol IDs to start the BFS from |
-| `knownCardEtags` | Record<string, string> | No | Map of `symbolId → ETag`. Matching cards return `cardRefs` instead of full cards. |
-| `cardDetail` | `"minimal"` \| `"signature"` \| `"deps"` \| `"compact"` \| `"full"` | No | Detail level for cards in the slice |
-| `adaptiveDetail` | boolean | No | Let the system choose detail level per card based on relevance |
-| `wireFormat` | `"standard"` \| `"readable"` \| `"compact"` \| `"agent"` | No | Response encoding (default: `"compact"`) |
-| `wireFormatVersion` | 1 \| 2 \| 3 | No | Compact format version (default: 2) |
-| `budget` | object | No | `{maxCards: 1-500, maxEstimatedTokens: 1-200000}` |
-| `minConfidence` | number (0-1) | No | Drop edges below this confidence (default: 0.5) |
-| `minCallConfidence` | number (0-1) | No | Filter call edges specifically |
-| `includeResolutionMetadata` | boolean | No | Include call resolution details on cards |
-| `includeRetrievalEvidence` | boolean | No | Include retrieval evidence showing how start-node seeds were discovered (sources, candidate counts, symptom type, fusion latency) |
+| Parameter                   | Type                                                                | Required | Description                                                                                                                                                                             |
+| :-------------------------- | :------------------------------------------------------------------ | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repoId`                    | string                                                              | Yes      | Repository identifier                                                                                                                                                                   |
+| `taskText`                  | string                                                              | No       | Natural language task description. Can be used _alone_ (without `entrySymbols`) to auto-discover relevant symbols via hybrid retrieval (FTS + vector + RRF) or legacy full-text search. |
+| `stackTrace`                | string                                                              | No       | Stack trace for debugging tasks                                                                                                                                                         |
+| `failingTestPath`           | string                                                              | No       | Path to a failing test file                                                                                                                                                             |
+| `editedFiles`               | string[] (max 100)                                                  | No       | Recently edited file paths                                                                                                                                                              |
+| `entrySymbols`              | string[] (max 100)                                                  | No       | Symbol IDs to start the BFS from                                                                                                                                                        |
+| `knownCardEtags`            | Record<string, string>                                              | No       | Map of `symbolId → ETag`. Matching cards return `cardRefs` instead of full cards.                                                                                                       |
+| `cardDetail`                | `"minimal"` \| `"signature"` \| `"deps"` \| `"compact"` \| `"full"` | No       | Detail level for cards in the slice                                                                                                                                                     |
+| `adaptiveDetail`            | boolean                                                             | No       | Let the system choose detail level per card based on relevance                                                                                                                          |
+| `wireFormat`                | `"standard"` \| `"readable"` \| `"compact"` \| `"agent"`            | No       | Response encoding (default: `"compact"`)                                                                                                                                                |
+| `wireFormatVersion`         | 1 \| 2 \| 3                                                         | No       | Compact format version (default: 2)                                                                                                                                                     |
+| `budget`                    | object                                                              | No       | `{maxCards: 1-500, maxEstimatedTokens: 1-200000}`                                                                                                                                       |
+| `minConfidence`             | number (0-1)                                                        | No       | Drop edges below this confidence (default: 0.5)                                                                                                                                         |
+| `minCallConfidence`         | number (0-1)                                                        | No       | Filter call edges specifically                                                                                                                                                          |
+| `includeResolutionMetadata` | boolean                                                             | No       | Include call resolution details on cards                                                                                                                                                |
+| `includeRetrievalEvidence`  | boolean                                                             | No       | Include retrieval evidence showing how start-node seeds were discovered (sources, candidate counts, symptom type, fusion latency)                                                       |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `sliceHandle` | string | Handle for refresh/spillover operations |
-| `ledgerVersion` | string | Version this slice is based on |
-| `lease` | object | `{expiresAt, minVersion, maxVersion}` — slice validity window |
-| `sliceEtag` | object | `{handle, version, sliceHash}` for conditional refresh |
-| `slice` | object | The graph slice containing `cards`, `cardRefs`, `edges`, `frontier`, `truncation`, `symbolIndex`, `budget`, `startSymbols`, `confidenceDistribution` |
+| Field               | Type   | Description                                                                                                                                                                                                                                     |
+| :------------------ | :----- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sliceHandle`       | string | Handle for refresh/spillover operations                                                                                                                                                                                                         |
+| `ledgerVersion`     | string | Version this slice is based on                                                                                                                                                                                                                  |
+| `lease`             | object | `{expiresAt, minVersion, maxVersion}` — slice validity window                                                                                                                                                                                   |
+| `sliceEtag`         | object | `{handle, version, sliceHash}` for conditional refresh                                                                                                                                                                                          |
+| `slice`             | object | The graph slice containing `cards`, `cardRefs`, `edges`, `frontier`, `truncation`, `symbolIndex`, `budget`, `startSymbols`, `confidenceDistribution`                                                                                            |
 | `retrievalEvidence` | object | Present when `includeRetrievalEvidence: true`. Contains `{mode, symptomType, candidateCountPerSource, fusionLatencyMs, fallbackReason}`. `symptomType` classifies the input: `"taskText"`, `"stackTrace"`, `"failingTest"`, or `"editedFiles"`. |
 
 **Token guidance:**
+
 - Set `budget: {maxCards: 30, maxEstimatedTokens: 4000}` as a starting point.
 - Use `knownCardEtags` on subsequent calls to avoid re-sending unchanged cards.
 - Raise `minConfidence` to 0.8+ for precision-focused work; keep at 0.5 for broader recall.
@@ -527,21 +532,21 @@ Incrementally updates an existing slice handle, returning only the delta (change
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `sliceHandle` | string | Yes | Handle from a previous `slice.build` |
-| `knownVersion` | string | Yes | The version your client last saw |
+| Parameter      | Type   | Required | Description                          |
+| :------------- | :----- | :------- | :----------------------------------- |
+| `sliceHandle`  | string | Yes      | Handle from a previous `slice.build` |
+| `knownVersion` | string | Yes      | The version your client last saw     |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `sliceHandle` | string | The same handle |
-| `knownVersion` | string | The version you sent |
-| `currentVersion` | string | The current ledger version |
-| `notModified` | boolean | True if nothing changed |
-| `delta` | object \| null | A delta pack (see `sdl.delta.get`) scoped to the slice's symbols, including `changedSymbols`, `blastRadius`, `trimmedSet`, and `spilloverHandle` |
-| `lease` | object | Updated lease |
+| Field            | Type           | Description                                                                                                                                      |
+| :--------------- | :------------- | :----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sliceHandle`    | string         | The same handle                                                                                                                                  |
+| `knownVersion`   | string         | The version you sent                                                                                                                             |
+| `currentVersion` | string         | The current ledger version                                                                                                                       |
+| `notModified`    | boolean        | True if nothing changed                                                                                                                          |
+| `delta`          | object \| null | A delta pack (see `sdl.delta.get`) scoped to the slice's symbols, including `changedSymbols`, `blastRadius`, `trimmedSet`, and `spilloverHandle` |
+| `lease`          | object         | Updated lease                                                                                                                                    |
 
 **Notes:** Always prefer `slice.refresh` over rebuilding when you already have a handle. It is dramatically cheaper.
 
@@ -555,20 +560,20 @@ Fetches overflow symbols that didn't fit within the slice's token budget, via pa
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `spilloverHandle` | string | Yes | Handle from `slice.build` truncation metadata |
-| `cursor` | string | No | Pagination cursor from the previous page |
-| `pageSize` | number (1-100) | No | Number of symbols per page (default: 20) |
+| Parameter         | Type           | Required | Description                                   |
+| :---------------- | :------------- | :------- | :-------------------------------------------- |
+| `spilloverHandle` | string         | Yes      | Handle from `slice.build` truncation metadata |
+| `cursor`          | string         | No       | Pagination cursor from the previous page      |
+| `pageSize`        | number (1-100) | No       | Number of symbols per page (default: 20)      |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `spilloverHandle` | string | Same handle |
-| `cursor` | string | Cursor for the next page |
-| `hasMore` | boolean | Whether more pages exist |
-| `symbols` | array | Array of full symbol cards |
+| Field             | Type    | Description                |
+| :---------------- | :------ | :------------------------- |
+| `spilloverHandle` | string  | Same handle                |
+| `cursor`          | string  | Cursor for the next page   |
+| `hasMore`         | boolean | Whether more pages exist   |
+| `symbols`         | array   | Array of full symbol cards |
 
 ---
 
@@ -580,32 +585,32 @@ These three tools form Rungs 2-4 of the Iris Gate Ladder. They should be used in
 
 Returns a deterministic "table of contents" for a symbol or file — signatures and control flow structures with implementation bodies elided.
 
-**What it does:** Parses the source file and produces a skeleton view that includes function/method signatures, class declarations, control flow structures (`if`, `for`, `while`, `try`), but replaces implementation bodies with `/* ... */`. This lets agents understand the *shape* of the code without reading every line.
+**What it does:** Parses the source file and produces a skeleton view that includes function/method signatures, class declarations, control flow structures (`if`, `for`, `while`, `try`), but replaces implementation bodies with `/* ... */`. This lets agents understand the _shape_ of the code without reading every line.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `symbolId` | string | Conditional | Symbol to skeletonize (provide either `symbolId` or `file`) |
-| `file` | string | Conditional | File path to skeletonize (provide either `symbolId` or `file`) |
-| `exportedOnly` | boolean | No | Only include exported symbols (reduces noise in large library files) |
-| `maxLines` | number | No | Maximum lines to return |
-| `maxTokens` | number | No | Maximum tokens to return |
-| `identifiersToFind` | string[] (max 50) | No | Highlight specific identifiers in the skeleton |
-| `skeletonOffset` | number (min: 0) | No | Resume from a previous truncation point (line offset for pagination) |
+| Parameter           | Type              | Required    | Description                                                          |
+| :------------------ | :---------------- | :---------- | :------------------------------------------------------------------- |
+| `repoId`            | string            | Yes         | Repository identifier                                                |
+| `symbolId`          | string            | Conditional | Symbol to skeletonize (provide either `symbolId` or `file`)          |
+| `file`              | string            | Conditional | File path to skeletonize (provide either `symbolId` or `file`)       |
+| `exportedOnly`      | boolean           | No          | Only include exported symbols (reduces noise in large library files) |
+| `maxLines`          | number            | No          | Maximum lines to return                                              |
+| `maxTokens`         | number            | No          | Maximum tokens to return                                             |
+| `identifiersToFind` | string[] (max 50) | No          | Highlight specific identifiers in the skeleton                       |
+| `skeletonOffset`    | number (min: 0)   | No          | Resume from a previous truncation point (line offset for pagination) |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `skeleton` | string | The skeleton IR text |
-| `file` | string | File path |
-| `range` | object | `{startLine, startCol, endLine, endCol}` |
-| `estimatedTokens` | number | Token count of the skeleton |
-| `originalLines` | number | Line count of the original source |
-| `truncated` | boolean | Whether the skeleton was truncated |
-| `truncation` | object | Truncation details if applicable |
+| Field             | Type    | Description                              |
+| :---------------- | :------ | :--------------------------------------- |
+| `skeleton`        | string  | The skeleton IR text                     |
+| `file`            | string  | File path                                |
+| `range`           | object  | `{startLine, startCol, endLine, endCol}` |
+| `estimatedTokens` | number  | Token count of the skeleton              |
+| `originalLines`   | number  | Line count of the original source        |
+| `truncated`       | boolean | Whether the skeleton was truncated       |
+| `truncation`      | object  | Truncation details if applicable         |
 
 **Token cost:** ~200-400 tokens. This is Rung 2 of the Iris Gate Ladder.
 
@@ -619,26 +624,26 @@ Extracts only the lines containing specific identifiers, plus surrounding contex
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `symbolId` | string | Yes | Symbol to search within |
-| `identifiersToFind` | string[] (1-50) | Yes | Identifiers to locate in the source |
-| `maxLines` | number | No | Maximum total lines to return |
-| `maxTokens` | number | No | Maximum tokens to return |
-| `contextLines` | number | No | Lines of context above/below each match (default: 3) |
+| Parameter           | Type            | Required | Description                                          |
+| :------------------ | :-------------- | :------- | :--------------------------------------------------- |
+| `repoId`            | string          | Yes      | Repository identifier                                |
+| `symbolId`          | string          | Yes      | Symbol to search within                              |
+| `identifiersToFind` | string[] (1-50) | Yes      | Identifiers to locate in the source                  |
+| `maxLines`          | number          | No       | Maximum total lines to return                        |
+| `maxTokens`         | number          | No       | Maximum tokens to return                             |
+| `contextLines`      | number          | No       | Lines of context above/below each match (default: 3) |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `excerpt` | string | The hot-path excerpt text |
-| `file` | string | File path |
-| `range` | object | `{startLine, startCol, endLine, endCol}` |
-| `estimatedTokens` | number | Token count |
+| Field                | Type     | Description                                   |
+| :------------------- | :------- | :-------------------------------------------- |
+| `excerpt`            | string   | The hot-path excerpt text                     |
+| `file`               | string   | File path                                     |
+| `range`              | object   | `{startLine, startCol, endLine, endCol}`      |
+| `estimatedTokens`    | number   | Token count                                   |
 | `matchedIdentifiers` | string[] | Which of the requested identifiers were found |
-| `matchedLineNumbers` | number[] | Line numbers where matches occurred |
-| `truncated` | boolean | Whether the excerpt was truncated |
+| `matchedLineNumbers` | number[] | Line numbers where matches occurred           |
+| `truncated`          | boolean  | Whether the excerpt was truncated             |
 
 **Token cost:** ~400-800 tokens. This is Rung 3 of the Iris Gate Ladder.
 
@@ -656,40 +661,40 @@ If denied, the response includes `whyDenied` reasons and a `nextBestAction` sugg
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `symbolId` | string | Yes | Symbol to read |
-| `reason` | string | Yes | Justification for why raw code is needed |
-| `expectedLines` | number | Yes | How many lines the agent expects (policy enforces `<= maxWindowLines`) |
-| `identifiersToFind` | string[] (max 50) | Yes | Identifiers the agent expects to find (required by policy) |
-| `granularity` | `"symbol"` \| `"block"` \| `"fileWindow"` | No | Scope of the code window |
-| `maxTokens` | number | No | Maximum tokens (policy enforces `<= maxWindowTokens`) |
-| `sliceContext` | object | No | Task context for policy evaluation: `{taskText?, stackTrace?, failingTestPath?, editedFiles?, entrySymbols?, budget?}` |
+| Parameter           | Type                                      | Required | Description                                                                                                            |
+| :------------------ | :---------------------------------------- | :------- | :--------------------------------------------------------------------------------------------------------------------- |
+| `repoId`            | string                                    | Yes      | Repository identifier                                                                                                  |
+| `symbolId`          | string                                    | Yes      | Symbol to read                                                                                                         |
+| `reason`            | string                                    | Yes      | Justification for why raw code is needed                                                                               |
+| `expectedLines`     | number                                    | Yes      | How many lines the agent expects (policy enforces `<= maxWindowLines`)                                                 |
+| `identifiersToFind` | string[] (max 50)                         | Yes      | Identifiers the agent expects to find (required by policy)                                                             |
+| `granularity`       | `"symbol"` \| `"block"` \| `"fileWindow"` | No       | Scope of the code window                                                                                               |
+| `maxTokens`         | number                                    | No       | Maximum tokens (policy enforces `<= maxWindowTokens`)                                                                  |
+| `sliceContext`      | object                                    | No       | Task context for policy evaluation: `{taskText?, stackTrace?, failingTestPath?, editedFiles?, entrySymbols?, budget?}` |
 
 **Response (approved):**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `approved` | true | Request was approved |
-| `symbolId` | string | Symbol identifier |
-| `file` | string | File path |
-| `range` | object | `{startLine, startCol, endLine, endCol}` |
-| `code` | string | The raw source code |
-| `whyApproved` | string[] | Reasons for approval |
-| `estimatedTokens` | number | Token count |
-| `downgradedFrom` | string | If the request was downgraded (e.g., to skeleton) |
-| `matchedIdentifiers` | string[] | Which identifiers were found |
-| `matchedLineNumbers` | number[] | Line numbers of matches |
+| Field                | Type     | Description                                       |
+| :------------------- | :------- | :------------------------------------------------ |
+| `approved`           | true     | Request was approved                              |
+| `symbolId`           | string   | Symbol identifier                                 |
+| `file`               | string   | File path                                         |
+| `range`              | object   | `{startLine, startCol, endLine, endCol}`          |
+| `code`               | string   | The raw source code                               |
+| `whyApproved`        | string[] | Reasons for approval                              |
+| `estimatedTokens`    | number   | Token count                                       |
+| `downgradedFrom`     | string   | If the request was downgraded (e.g., to skeleton) |
+| `matchedIdentifiers` | string[] | Which identifiers were found                      |
+| `matchedLineNumbers` | number[] | Line numbers of matches                           |
 
 **Response (denied):**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `approved` | false | Request was denied |
-| `whyDenied` | string[] | Reasons for denial |
-| `suggestedNextRequest` | object | Modified request parameters that might be approved |
-| `nextBestAction` | object | `{tool, args, rationale}` — alternative tool to try |
+| Field                  | Type     | Description                                         |
+| :--------------------- | :------- | :-------------------------------------------------- |
+| `approved`             | false    | Request was denied                                  |
+| `whyDenied`            | string[] | Reasons for denial                                  |
+| `suggestedNextRequest` | object   | Modified request parameters that might be approved  |
+| `nextBestAction`       | object   | `{tool, args, rationale}` — alternative tool to try |
 
 **Token cost:** ~1,000-4,000 tokens. This is Rung 4 (last resort) of the Iris Gate Ladder.
 
@@ -705,16 +710,16 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|:----------|:-----|:---------|:--------|:------------|
-| `repoId` | string | Yes | — | Repository identifier |
-| `filePath` | string | Yes | — | Path relative to repo root |
-| `maxBytes` | number | No | 524288 (512KB) | Max bytes to return before truncation |
-| `offset` | number | No | 0 | Start line (0-based) for line range mode |
-| `limit` | number | No | all | Max lines to return in line range mode |
-| `search` | string | No | — | Regex pattern for search mode (case-insensitive) |
-| `searchContext` | number | No | 2 | Lines of context around each match in search mode |
-| `jsonPath` | string | No | — | Dot-separated key path for JSON/YAML extraction (e.g., `"scripts.build"`, `"items.0.name"`) |
+| Parameter       | Type   | Required | Default        | Description                                                                                 |
+| :-------------- | :----- | :------- | :------------- | :------------------------------------------------------------------------------------------ |
+| `repoId`        | string | Yes      | —              | Repository identifier                                                                       |
+| `filePath`      | string | Yes      | —              | Path relative to repo root                                                                  |
+| `maxBytes`      | number | No       | 524288 (512KB) | Max bytes to return before truncation                                                       |
+| `offset`        | number | No       | 0              | Start line (0-based) for line range mode                                                    |
+| `limit`         | number | No       | all            | Max lines to return in line range mode                                                      |
+| `search`        | string | No       | —              | Regex pattern for search mode (case-insensitive)                                            |
+| `searchContext` | number | No       | 2              | Lines of context around each match in search mode                                           |
+| `jsonPath`      | string | No       | —              | Dot-separated key path for JSON/YAML extraction (e.g., `"scripts.build"`, `"items.0.name"`) |
 
 **Modes** (mutually exclusive, checked in priority order):
 
@@ -725,17 +730,17 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `filePath` | string | Normalized relative path |
-| `content` | string | File content (formatted per mode) |
-| `bytes` | number | Total file size in bytes |
-| `totalLines` | number | Total line count in the file |
-| `returnedLines` | number | Lines returned in this response |
-| `truncated` | boolean | Whether content was truncated |
-| `truncatedAt` | number | Byte offset of truncation (only if truncated) |
-| `matchCount` | number | Number of regex matches (search mode only) |
-| `extractedPath` | string | JSON path that was extracted (jsonPath mode only) |
+| Field           | Type    | Description                                       |
+| :-------------- | :------ | :------------------------------------------------ |
+| `filePath`      | string  | Normalized relative path                          |
+| `content`       | string  | File content (formatted per mode)                 |
+| `bytes`         | number  | Total file size in bytes                          |
+| `totalLines`    | number  | Total line count in the file                      |
+| `returnedLines` | number  | Lines returned in this response                   |
+| `truncated`     | boolean | Whether content was truncated                     |
+| `truncatedAt`   | number  | Byte offset of truncation (only if truncated)     |
+| `matchCount`    | number  | Number of regex matches (search mode only)        |
+| `extractedPath` | string  | JSON path that was extracted (jsonPath mode only) |
 
 **Blocked extensions:** `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyw`, `.go`, `.java`, `.cs`, `.c`, `.h`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.php`, `.phtml`, `.rs`, `.kt`, `.kts`, `.sh`, `.bash`, `.zsh`. Use SDL code tools for these.
 
@@ -755,21 +760,21 @@ Computes a semantic diff between two ledger versions, including blast radius ana
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `fromVersion` | string | Yes | Starting version ID |
-| `toVersion` | string | Yes | Ending version ID |
-| `budget` | object | No | `{maxCards, maxEstimatedTokens}` — constrain output size |
+| Parameter     | Type   | Required | Description                                              |
+| :------------ | :----- | :------- | :------------------------------------------------------- |
+| `repoId`      | string | Yes      | Repository identifier                                    |
+| `fromVersion` | string | Yes      | Starting version ID                                      |
+| `toVersion`   | string | Yes      | Ending version ID                                        |
+| `budget`      | object | No       | `{maxCards, maxEstimatedTokens}` — constrain output size |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `delta` | object | The delta pack: `repoId`, `fromVersion`, `toVersion`, `changedSymbols`, `blastRadius`, `diagnosticsSummary`, `diagnosticSuspects`, `truncation`, `trimmedSet`, `spilloverHandle` |
-| `delta.changedSymbols` | array | Each: `{symbolId, changeType: "added"|"removed"|"modified", signatureDiff: {before, after}, invariantDiff: {added, removed}, sideEffectDiff: {added, removed}}` |
-| `delta.blastRadius` | array | Each: `{symbolId, reason, distance, rank, signal: "diagnostic"|"directDependent"|"graph"|"process", fanInTrend: {previous, current, growthRate, isAmplifier}}` |
-| `amplifiers` | array | Each: `{symbolId, growthRate, previous, current}` — symbols with rapidly growing fan-in |
+| Field                  | Type   | Description                                                                                                                                                                      |
+| :--------------------- | :----- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `delta`                | object | The delta pack: `repoId`, `fromVersion`, `toVersion`, `changedSymbols`, `blastRadius`, `diagnosticsSummary`, `diagnosticSuspects`, `truncation`, `trimmedSet`, `spilloverHandle` |
+| `delta.changedSymbols` | array  | Each: `{symbolId, changeType: "added"                                                                                                                                            | "removed"         | "modified", signatureDiff: {before, after}, invariantDiff: {added, removed}, sideEffectDiff: {added, removed}}` |
+| `delta.blastRadius`    | array  | Each: `{symbolId, reason, distance, rank, signal: "diagnostic"                                                                                                                   | "directDependent" | "graph"                                                                                                         | "process", fanInTrend: {previous, current, growthRate, isAmplifier}}` |
+| `amplifiers`           | array  | Each: `{symbolId, growthRate, previous, current}` — symbols with rapidly growing fan-in                                                                                          |
 
 **Notes:** Use `budget` for large version diffs to constrain how many changed symbols and blast radius entries are returned.
 
@@ -785,9 +790,9 @@ Retrieves the current policy configuration for a repository.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
+| Parameter | Type   | Required | Description           |
+| :-------- | :----- | :------- | :-------------------- |
+| `repoId`  | string | Yes      | Repository identifier |
 
 **Response:**
 
@@ -812,10 +817,10 @@ Updates policy settings for a repository.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `policyPatch` | object | Yes | Partial policy: any subset of `{maxWindowLines, maxWindowTokens, requireIdentifiers, allowBreakGlass}` |
+| Parameter     | Type   | Required | Description                                                                                            |
+| :------------ | :----- | :------- | :----------------------------------------------------------------------------------------------------- |
+| `repoId`      | string | Yes      | Repository identifier                                                                                  |
+| `policyPatch` | object | Yes      | Partial policy: any subset of `{maxWindowLines, maxWindowTokens, requireIdentifiers, allowBreakGlass}` |
 
 **Response:**
 
@@ -838,27 +843,27 @@ Analyzes the risk of a code change between two versions, computing a risk score,
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `fromVersion` | string | Yes | Starting version ID |
-| `toVersion` | string | Yes | Ending version ID |
-| `riskThreshold` | number (0-100) | No | Only return findings above this risk score |
+| Parameter       | Type           | Required | Description                                |
+| :-------------- | :------------- | :------- | :----------------------------------------- |
+| `repoId`        | string         | Yes      | Repository identifier                      |
+| `fromVersion`   | string         | Yes      | Starting version ID                        |
+| `toVersion`     | string         | Yes      | Ending version ID                          |
+| `riskThreshold` | number (0-100) | No       | Only return findings above this risk score |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `analysis.riskScore` | number (0-100) | Composite risk score |
-| `analysis.riskLevel` | `"low"` \| `"medium"` \| `"high"` | Risk category |
-| `analysis.findings` | array | Each: `{type, severity: "low"|"medium"|"high", message, affectedSymbols, metadata}` |
-| `analysis.impactedSymbols` | string[] | All symbols affected by the changes |
-| `analysis.evidence` | array | Each: `{type, description, symbolId, data}` |
-| `analysis.recommendedTests` | array | Each: `{type, description, targetSymbols, priority: "high"|"medium"|"low"}` |
-| `analysis.changedSymbolsCount` | number | Total changed symbols |
-| `analysis.blastRadiusCount` | number | Total symbols in the blast radius |
-| `escalationRequired` | boolean | Whether the risk level warrants review escalation |
-| `policyDecision` | object | `{decision, deniedReasons, auditHash}` |
+| Field                          | Type                              | Description                                                |
+| :----------------------------- | :-------------------------------- | :--------------------------------------------------------- | -------- | -------------------------------------------- |
+| `analysis.riskScore`           | number (0-100)                    | Composite risk score                                       |
+| `analysis.riskLevel`           | `"low"` \| `"medium"` \| `"high"` | Risk category                                              |
+| `analysis.findings`            | array                             | Each: `{type, severity: "low"                              | "medium" | "high", message, affectedSymbols, metadata}` |
+| `analysis.impactedSymbols`     | string[]                          | All symbols affected by the changes                        |
+| `analysis.evidence`            | array                             | Each: `{type, description, symbolId, data}`                |
+| `analysis.recommendedTests`    | array                             | Each: `{type, description, targetSymbols, priority: "high" | "medium" | "low"}`                                      |
+| `analysis.changedSymbolsCount` | number                            | Total changed symbols                                      |
+| `analysis.blastRadiusCount`    | number                            | Total symbols in the blast radius                          |
+| `escalationRequired`           | boolean                           | Whether the risk level warrants review escalation          |
+| `policyDecision`               | object                            | `{decision, deniedReasons, auditHash}`                     |
 
 ---
 
@@ -881,34 +886,36 @@ Results are cached by `repoId + indexVersion + query` to avoid redundant graph q
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `query` | string | Yes | Natural-language query, file path, or symbol name |
-| `budget` | number | No | Token budget for the summary (default: 2000) |
-| `format` | `"markdown"` \| `"json"` \| `"clipboard"` | No | Output format (default: `"markdown"`) |
-| `scope` | `"symbol"` \| `"file"` \| `"task"` | No | Query scope (auto-detected if omitted) |
+| Parameter | Type                                      | Required | Description                                       |
+| :-------- | :---------------------------------------- | :------- | :------------------------------------------------ |
+| `repoId`  | string                                    | Yes      | Repository identifier                             |
+| `query`   | string                                    | Yes      | Natural-language query, file path, or symbol name |
+| `budget`  | number                                    | No       | Token budget for the summary (default: 2000)      |
+| `format`  | `"markdown"` \| `"json"` \| `"clipboard"` | No       | Output format (default: `"markdown"`)             |
+| `scope`   | `"symbol"` \| `"file"` \| `"task"`        | No       | Query scope (auto-detected if omitted)            |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `repoId` | string | Repository identifier |
-| `format` | string | Output format used |
-| `summary` | object | Structured summary: `{repoId, query, scope, keySymbols, dependencyGraph, riskAreas, filesTouched, metadata}` |
-| `summary.keySymbols` | array | Each: `{symbolId, name, kind, signature, summary, cluster: {clusterId, label, memberCount}, processes: [{processId, label, role, depth}]}` |
-| `summary.dependencyGraph` | array | Each: `{fromSymbolId, toSymbolIds: string[]}` |
-| `summary.riskAreas` | array | Each: `{symbolId, name, reasons: string[]}` |
-| `summary.filesTouched` | array | Each: `{file, symbolCount}` |
-| `summary.metadata` | object | `{query, summaryTokens, budget, truncated, indexVersion}` |
-| `content` | string | The rendered summary (markdown or JSON string) |
+| Field                     | Type   | Description                                                                                                                                |
+| :------------------------ | :----- | :----------------------------------------------------------------------------------------------------------------------------------------- |
+| `repoId`                  | string | Repository identifier                                                                                                                      |
+| `format`                  | string | Output format used                                                                                                                         |
+| `summary`                 | object | Structured summary: `{repoId, query, scope, keySymbols, dependencyGraph, riskAreas, filesTouched, metadata}`                               |
+| `summary.keySymbols`      | array  | Each: `{symbolId, name, kind, signature, summary, cluster: {clusterId, label, memberCount}, processes: [{processId, label, role, depth}]}` |
+| `summary.dependencyGraph` | array  | Each: `{fromSymbolId, toSymbolIds: string[]}`                                                                                              |
+| `summary.riskAreas`       | array  | Each: `{symbolId, name, reasons: string[]}`                                                                                                |
+| `summary.filesTouched`    | array  | Each: `{file, symbolCount}`                                                                                                                |
+| `summary.metadata`        | object | `{query, summaryTokens, budget, truncated, indexVersion}`                                                                                  |
+| `content`                 | string | The rendered summary (markdown or JSON string)                                                                                             |
 
 **Scope auto-detection:**
+
 - Contains `/` or `\` or a file extension → `"file"`
 - Contains 3+ words or task-related words (fix, debug, analyze, refactor, etc.) → `"task"`
 - Otherwise → `"symbol"`
 
 **Use cases:**
+
 - Copy/paste context into non-MCP environments (Slack, Jira, PRs)
 - Quick task briefing before diving into a codebase area
 - The CLI `sdl-mcp summary` command wraps this tool
@@ -933,35 +940,37 @@ When Code Mode is enabled, `sdl.context` accepts the same task envelope and shou
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `taskType` | `"debug"` \| `"review"` \| `"implement"` \| `"explain"` | Yes | Type of task |
-| `taskText` | string | Yes | Task description or prompt |
-| `budget` | object | No | `{maxTokens, maxActions, maxDurationMs}` |
-| `options` | object | No | `{contextMode?, focusSymbols?, focusPaths?, includeTests?, requireDiagnostics?}` |
+| Parameter  | Type                                                    | Required | Description                                                                      |
+| :--------- | :------------------------------------------------------ | :------- | :------------------------------------------------------------------------------- |
+| `repoId`   | string                                                  | Yes      | Repository identifier                                                            |
+| `taskType` | `"debug"` \| `"review"` \| `"implement"` \| `"explain"` | Yes      | Type of task                                                                     |
+| `taskText` | string                                                  | Yes      | Task description or prompt                                                       |
+| `budget`   | object                                                  | No       | `{maxTokens, maxActions, maxDurationMs}`                                         |
+| `options`  | object                                                  | No       | `{contextMode?, focusSymbols?, focusPaths?, includeTests?, requireDiagnostics?}` |
 
 `options.contextMode`: `"precise"` returns minimal, chain-efficient context (1 symbol per rung, stripped envelope). `"broad"` (default) returns richer surrounding context with full diagnostics.
 
-**Response (broad mode):**
+**Response (broad mode — compact by default):**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `taskId` | string | Unique task identifier |
-| `taskType` | string | Task type executed |
-| `actionsTaken` | array | Each: `{id, type, status, input, output, error, timestamp, durationMs, evidence}` |
-| `path` | object | `{rungs: string[], estimatedTokens, estimatedDurationMs, reasoning}` — the selected rung path |
-| `finalEvidence` | array | Each: `{type, reference, summary, timestamp}` |
-| `summary` | string | Human-readable execution summary |
-| `success` | boolean | Whether the task completed successfully |
-| `error` | string | Error message if failed |
-| `metrics` | object | `{totalDurationMs, totalTokens, totalActions, successfulActions, failedActions, cacheHits}` |
-| `answer` | string | Synthesized answer based on evidence |
-| `nextBestAction` | string | Suggested follow-up action |
+Broad responses are compacted at the MCP serialization layer. The model-visible payload contains only:
+
+| Field            | Type    | Description                                                              |
+| :--------------- | :------ | :----------------------------------------------------------------------- |
+| `taskId`         | string  | Unique task identifier                                                   |
+| `taskType`       | string  | Task type executed                                                       |
+| `success`        | boolean | Whether the task completed successfully                                  |
+| `summary`        | string  | Human-readable execution summary                                         |
+| `answer`         | string  | Synthesized answer based on evidence                                     |
+| `finalEvidence`  | array   | Each: `{type, reference, summary, timestamp}` — primary evidence surface |
+| `nextBestAction` | string  | Suggested follow-up action (when relevant)                               |
+| `error`          | string  | Error message (when failed)                                              |
+
+The fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are still computed internally by the ContextEngine but are not included in the model-visible broad response. `finalEvidence` is the primary evidence surface for broad mode.
 
 **Response (precise mode):** Only `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics`. Envelope fields stripped for token efficiency.
 
 **Notes:**
+
 - Use `contextMode: "precise"` for targeted lookups — more token-efficient than manual `sdl.workflow`.
 - Use `contextMode: "broad"` (default) for investigation and exploration.
 - Always provide `budget` and scope with `focusSymbols`/`focusPaths`.
@@ -977,26 +986,26 @@ Records which symbols were useful or missing during a task, enabling offline tun
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `versionId` | string | Yes | Ledger version the feedback applies to |
-| `sliceHandle` | string | Yes | Slice handle that was used |
-| `usefulSymbols` | string[] (min 1) | Yes | Symbol IDs that were useful |
-| `missingSymbols` | string[] | No | Symbol IDs that were expected but absent |
-| `taskTags` | string[] | No | Tags describing the task |
-| `taskType` | `"debug"` \| `"review"` \| `"implement"` \| `"explain"` | No | Type of task |
-| `taskText` | string | No | Task description for context |
+| Parameter        | Type                                                    | Required | Description                              |
+| :--------------- | :------------------------------------------------------ | :------- | :--------------------------------------- |
+| `repoId`         | string                                                  | Yes      | Repository identifier                    |
+| `versionId`      | string                                                  | Yes      | Ledger version the feedback applies to   |
+| `sliceHandle`    | string                                                  | Yes      | Slice handle that was used               |
+| `usefulSymbols`  | string[] (min 1)                                        | Yes      | Symbol IDs that were useful              |
+| `missingSymbols` | string[]                                                | No       | Symbol IDs that were expected but absent |
+| `taskTags`       | string[]                                                | No       | Tags describing the task                 |
+| `taskType`       | `"debug"` \| `"review"` \| `"implement"` \| `"explain"` | No       | Type of task                             |
+| `taskText`       | string                                                  | No       | Task description for context             |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `ok` | boolean | Whether the feedback was recorded |
-| `feedbackId` | string | Unique feedback record ID |
-| `repoId` | string | Repository identifier |
-| `versionId` | string | Version identifier |
-| `symbolsRecorded` | number | Total symbols in the feedback record |
+| Field             | Type    | Description                          |
+| :---------------- | :------ | :----------------------------------- |
+| `ok`              | boolean | Whether the feedback was recorded    |
+| `feedbackId`      | string  | Unique feedback record ID            |
+| `repoId`          | string  | Repository identifier                |
+| `versionId`       | string  | Version identifier                   |
+| `symbolsRecorded` | number  | Total symbols in the feedback record |
 
 ---
 
@@ -1008,21 +1017,21 @@ Queries stored feedback records and aggregated statistics for offline tuning pip
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `versionId` | string | No | Filter by version |
-| `limit` | number (1-1000) | No | Maximum records to return |
-| `since` | string | No | ISO timestamp to filter from |
+| Parameter   | Type            | Required | Description                  |
+| :---------- | :-------------- | :------- | :--------------------------- |
+| `repoId`    | string          | Yes      | Repository identifier        |
+| `versionId` | string          | No       | Filter by version            |
+| `limit`     | number (1-1000) | No       | Maximum records to return    |
+| `since`     | string          | No       | ISO timestamp to filter from |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `repoId` | string | Repository identifier |
-| `feedback` | array | Each: `{feedbackId, versionId, sliceHandle, usefulSymbols, missingSymbols, taskTags, taskType, taskText, createdAt}` |
-| `aggregatedStats` | object | `{totalFeedback, topUsefulSymbols: [{symbolId, count}], topMissingSymbols: [{symbolId, count}]}` |
-| `hasMore` | boolean | Whether more records exist |
+| Field             | Type    | Description                                                                                                          |
+| :---------------- | :------ | :------------------------------------------------------------------------------------------------------------------- |
+| `repoId`          | string  | Repository identifier                                                                                                |
+| `feedback`        | array   | Each: `{feedbackId, versionId, sliceHandle, usefulSymbols, missingSymbols, taskTags, taskType, taskText, createdAt}` |
+| `aggregatedStats` | object  | `{totalFeedback, topUsefulSymbols: [{symbolId, count}], topMissingSymbols: [{symbolId, count}]}`                     |
+| `hasMore`         | boolean | Whether more records exist                                                                                           |
 
 ---
 
@@ -1048,37 +1057,37 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `runtime` | string | Yes | Runtime to use. Supported: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp` |
-| `executable` | string | No | Override the default executable (e.g., `"bun"` instead of `"node"`) |
-| `args` | string[] | No | Arguments to pass to the executable |
-| `code` | string | No | Inline code to execute (written to temp file). Mutually exclusive with args-only mode. |
-| `relativeCwd` | string | No | Working directory relative to repo root (default: `"."`) |
-| `timeoutMs` | number | No | Execution timeout in milliseconds |
-| `queryTerms` | string[] (max 10) | No | Keywords for excerpt matching in the output |
-| `maxResponseLines` | number (10-1000) | No | Max lines in stdout/stderr summaries (default: 100) |
-| `persistOutput` | boolean | No | Whether to persist full output as a gzip artifact (default: true) |
-| `outputMode` | `"minimal"` \| `"summary"` \| `"intent"` | No | Controls response verbosity. `"minimal"` (default): ~50 tokens with status and artifact handle only. `"summary"`: head+tail output excerpts (legacy behavior). `"intent"`: only `queryTerms`-matched excerpts. |
+| Parameter          | Type                                     | Required | Description                                                                                                                                                                                                    |
+| :----------------- | :--------------------------------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repoId`           | string                                   | Yes      | Repository identifier                                                                                                                                                                                          |
+| `runtime`          | string                                   | Yes      | Runtime to use. Supported: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`                                                 |
+| `executable`       | string                                   | No       | Override the default executable (e.g., `"bun"` instead of `"node"`)                                                                                                                                            |
+| `args`             | string[]                                 | No       | Arguments to pass to the executable                                                                                                                                                                            |
+| `code`             | string                                   | No       | Inline code to execute (written to temp file). Mutually exclusive with args-only mode.                                                                                                                         |
+| `relativeCwd`      | string                                   | No       | Working directory relative to repo root (default: `"."`)                                                                                                                                                       |
+| `timeoutMs`        | number                                   | No       | Execution timeout in milliseconds                                                                                                                                                                              |
+| `queryTerms`       | string[] (max 10)                        | No       | Keywords for excerpt matching in the output                                                                                                                                                                    |
+| `maxResponseLines` | number (10-1000)                         | No       | Max lines in stdout/stderr summaries (default: 100)                                                                                                                                                            |
+| `persistOutput`    | boolean                                  | No       | Whether to persist full output as a gzip artifact (default: true)                                                                                                                                              |
+| `outputMode`       | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): ~50 tokens with status and artifact handle only. `"summary"`: head+tail output excerpts (legacy behavior). `"intent"`: only `queryTerms`-matched excerpts. |
 
 **Response (varies by `outputMode`):**
 
 **Common fields (all modes):**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `status` | `"success"` \| `"failure"` \| `"timeout"` \| `"cancelled"` \| `"denied"` | Execution result |
-| `exitCode` | number \| null | Process exit code |
-| `signal` | string \| null | Signal that terminated the process (e.g., `"SIGTERM"`) |
-| `durationMs` | number | Execution duration |
-| `artifactHandle` | string \| null | Handle for the persisted artifact (if `persistOutput` was true) |
-| `policyDecision` | object | `{auditHash, deniedReasons}` |
+| Field            | Type                                                                     | Description                                                     |
+| :--------------- | :----------------------------------------------------------------------- | :-------------------------------------------------------------- |
+| `status`         | `"success"` \| `"failure"` \| `"timeout"` \| `"cancelled"` \| `"denied"` | Execution result                                                |
+| `exitCode`       | number \| null                                                           | Process exit code                                               |
+| `signal`         | string \| null                                                           | Signal that terminated the process (e.g., `"SIGTERM"`)          |
+| `durationMs`     | number                                                                   | Execution duration                                              |
+| `artifactHandle` | string \| null                                                           | Handle for the persisted artifact (if `persistOutput` was true) |
+| `policyDecision` | object                                                                   | `{auditHash, deniedReasons}`                                    |
 
 **`outputMode: "minimal"` (default) — adds:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
+| Field         | Type   | Description                               |
+| :------------ | :----- | :---------------------------------------- |
 | `outputLines` | number | Total lines captured across stdout+stderr |
 | `outputBytes` | number | Total bytes captured across stdout+stderr |
 
@@ -1086,25 +1095,26 @@ No `stdoutSummary`, `stderrSummary`, or `excerpts` fields. Use `sdl.runtime.quer
 
 **`outputMode: "summary"` — adds:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `stdoutSummary` | string | Head + tail of stdout, truncated to `maxResponseLines` |
-| `stderrSummary` | string | Tail of stderr |
-| `excerpts` | array | Keyword-matched windows: `{lineStart, lineEnd, content, source: "stdout"\|"stderr"}` |
-| `truncation` | object | `{stdoutTruncated, stderrTruncated, totalStdoutBytes, totalStderrBytes}` |
+| Field           | Type   | Description                                                                          |
+| :-------------- | :----- | :----------------------------------------------------------------------------------- |
+| `stdoutSummary` | string | Head + tail of stdout, truncated to `maxResponseLines`                               |
+| `stderrSummary` | string | Tail of stderr                                                                       |
+| `excerpts`      | array  | Keyword-matched windows: `{lineStart, lineEnd, content, source: "stdout"\|"stderr"}` |
+| `truncation`    | object | `{stdoutTruncated, stderrTruncated, totalStdoutBytes, totalStderrBytes}`             |
 
 **`outputMode: "intent"` — adds:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `excerpts` | array | Only `queryTerms`-matched windows: `{lineStart, lineEnd, content, source}` |
-| `truncation` | object | `{stdoutTruncated, stderrTruncated, totalStdoutBytes, totalStderrBytes}` |
+| Field        | Type   | Description                                                                |
+| :----------- | :----- | :------------------------------------------------------------------------- |
+| `excerpts`   | array  | Only `queryTerms`-matched windows: `{lineStart, lineEnd, content, source}` |
+| `truncation` | object | `{stdoutTruncated, stderrTruncated, totalStdoutBytes, totalStderrBytes}`   |
 
 No `stdoutSummary` or `stderrSummary` — only matched excerpts are returned.
 
 > **Per-line truncation:** All output modes enforce a 500-character per-line cap. Lines exceeding this limit are truncated with a `[truncated]` suffix.
 
 **Default executables by runtime (common examples):**
+
 - `node` → `node` (or `bun` if available)
 - `typescript` → `tsx` / `ts-node`
 - `python` → `python3` (Unix) / `python` (Windows)
@@ -1129,23 +1139,23 @@ Retrieves and searches stored runtime output artifacts on demand.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `artifactHandle` | string | Yes | Handle returned by `sdl.runtime.execute` |
-| `queryTerms` | string[] | Yes | Keywords to search for in the output |
-| `maxExcerpts` | integer (1-100) | No | Maximum excerpt windows to return (default: 10) |
-| `contextLines` | integer (0-20) | No | Lines of context around each match (default: 3) |
-| `stream` | `"stdout"` \| `"stderr"` \| `"both"` | No | Which stream(s) to search (default: `"both"`) |
+| Parameter        | Type                                 | Required | Description                                     |
+| :--------------- | :----------------------------------- | :------- | :---------------------------------------------- |
+| `artifactHandle` | string                               | Yes      | Handle returned by `sdl.runtime.execute`        |
+| `queryTerms`     | string[]                             | Yes      | Keywords to search for in the output            |
+| `maxExcerpts`    | integer (1-100)                      | No       | Maximum excerpt windows to return (default: 10) |
+| `contextLines`   | integer (0-20)                       | No       | Lines of context around each match (default: 3) |
+| `stream`         | `"stdout"` \| `"stderr"` \| `"both"` | No       | Which stream(s) to search (default: `"both"`)   |
 
 **Response:**
 
-| Field | Type | Description |
-|:------|:-----|:------------|
-| `artifactHandle` | string | Echo of the requested handle |
-| `excerpts` | array | Matched windows: `{lineStart, lineEnd, content, source: "stdout"\|"stderr"}` |
-| `totalLines` | integer | Total lines in the artifact |
-| `totalBytes` | integer | Total bytes in the artifact |
-| `searchedStreams` | string[] | Streams that were searched |
+| Field             | Type     | Description                                                                  |
+| :---------------- | :------- | :--------------------------------------------------------------------------- |
+| `artifactHandle`  | string   | Echo of the requested handle                                                 |
+| `excerpts`        | array    | Matched windows: `{lineStart, lineEnd, content, source: "stdout"\|"stderr"}` |
+| `totalLines`      | integer  | Total lines in the artifact                                                  |
+| `totalBytes`      | integer  | Total bytes in the artifact                                                  |
+| `searchedStreams` | string[] | Streams that were searched                                                   |
 
 **Use cases:** Inspecting test failures after a minimal execute, searching build logs for specific errors, extracting diagnostic output from long-running commands.
 
@@ -1163,17 +1173,17 @@ Stores or updates a development memory with optional symbol and file links. Memo
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `type` | `"decision"` \| `"bugfix"` \| `"task_context"` \| `"pattern"` \| `"convention"` \| `"architecture"` \| `"performance"` \| `"security"` | Yes | Memory type |
-| `title` | string (1-120 chars) | Yes | Short, scannable title |
-| `content` | string (1-50,000 chars) | Yes | Memory content (include the *why*, not just the *what*) |
-| `tags` | string[] (max 20) | No | Categorization tags |
-| `confidence` | number (0-1) | No | Confidence score (0.9 for verified facts, 0.7 for hypotheses) |
-| `symbolIds` | string[] (max 100) | No | Link memory to specific symbols |
-| `fileRelPaths` | string[] (max 100) | No | Link memory to specific files |
-| `memoryId` | string | No | Existing memory ID for upsert |
+| Parameter      | Type                                                                                                                                   | Required | Description                                                   |
+| :------------- | :------------------------------------------------------------------------------------------------------------------------------------- | :------- | :------------------------------------------------------------ |
+| `repoId`       | string                                                                                                                                 | Yes      | Repository identifier                                         |
+| `type`         | `"decision"` \| `"bugfix"` \| `"task_context"` \| `"pattern"` \| `"convention"` \| `"architecture"` \| `"performance"` \| `"security"` | Yes      | Memory type                                                   |
+| `title`        | string (1-120 chars)                                                                                                                   | Yes      | Short, scannable title                                        |
+| `content`      | string (1-50,000 chars)                                                                                                                | Yes      | Memory content (include the _why_, not just the _what_)       |
+| `tags`         | string[] (max 20)                                                                                                                      | No       | Categorization tags                                           |
+| `confidence`   | number (0-1)                                                                                                                           | No       | Confidence score (0.9 for verified facts, 0.7 for hypotheses) |
+| `symbolIds`    | string[] (max 100)                                                                                                                     | No       | Link memory to specific symbols                               |
+| `fileRelPaths` | string[] (max 100)                                                                                                                     | No       | Link memory to specific files                                 |
+| `memoryId`     | string                                                                                                                                 | No       | Existing memory ID for upsert                                 |
 
 **Response:** `{ ok, memoryId, created, deduplicated? }`
 
@@ -1187,16 +1197,16 @@ Searches and filters memories by text, type, tags, or linked symbols.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `query` | string (max 1,000) | No | Full-text search query |
-| `types` | string[] | No | Filter by memory types |
-| `tags` | string[] (max 20) | No | Filter by tags |
-| `symbolIds` | string[] (max 100) | No | Filter by linked symbols |
-| `staleOnly` | boolean | No | Return only stale memories (linked symbols changed) |
-| `limit` | number (1-100) | No | Max results |
-| `sortBy` | `"recency"` \| `"confidence"` | No | Sort order |
+| Parameter   | Type                          | Required | Description                                         |
+| :---------- | :---------------------------- | :------- | :-------------------------------------------------- |
+| `repoId`    | string                        | Yes      | Repository identifier                               |
+| `query`     | string (max 1,000)            | No       | Full-text search query                              |
+| `types`     | string[]                      | No       | Filter by memory types                              |
+| `tags`      | string[] (max 20)             | No       | Filter by tags                                      |
+| `symbolIds` | string[] (max 100)            | No       | Filter by linked symbols                            |
+| `staleOnly` | boolean                       | No       | Return only stale memories (linked symbols changed) |
+| `limit`     | number (1-100)                | No       | Max results                                         |
+| `sortBy`    | `"recency"` \| `"confidence"` | No       | Sort order                                          |
 
 **Response:** `{ memories, total }`
 
@@ -1208,11 +1218,11 @@ Soft-deletes a memory from the graph. Optionally removes the backing `.sdl-memor
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `memoryId` | string | Yes | Memory ID to remove |
-| `deleteFile` | boolean | No | Also delete the backing markdown file |
+| Parameter    | Type    | Required | Description                           |
+| :----------- | :------ | :------- | :------------------------------------ |
+| `repoId`     | string  | Yes      | Repository identifier                 |
+| `memoryId`   | string  | Yes      | Memory ID to remove                   |
+| `deleteFile` | boolean | No       | Also delete the backing markdown file |
 
 **Response:** `{ ok, memoryId, fileDeleted? }`
 
@@ -1224,12 +1234,12 @@ Auto-surfaces memories relevant to a set of symbols or task type. Memories are r
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository identifier |
-| `symbolIds` | string[] (max 500) | No | Symbols to find related memories for |
-| `taskType` | string | No | Filter by memory type |
-| `limit` | number (1-50) | No | Max memories to return |
+| Parameter   | Type               | Required | Description                          |
+| :---------- | :----------------- | :------- | :----------------------------------- |
+| `repoId`    | string             | Yes      | Repository identifier                |
+| `symbolIds` | string[] (max 500) | No       | Symbols to find related memories for |
+| `taskType`  | string             | No       | Filter by memory type                |
+| `limit`     | number (1-50)      | No       | Max memories to return               |
 
 **Response:** `{ memories: SurfacedMemory[], total }` — each memory includes a `score` and `matchedSymbols` field.
 
@@ -1245,13 +1255,13 @@ Returns cumulative token usage statistics and savings metrics.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | No | Repository identifier (omit for global stats) |
-| `scope` | `"session"` \| `"history"` \| `"both"` | No | Stats scope (default: `"both"`) |
-| `persist` | boolean | No | Whether to persist current session stats |
-| `since` | string | No | ISO timestamp to filter historical stats from |
-| `limit` | number (1-100) | No | Max historical entries to return |
+| Parameter | Type                                   | Required | Description                                   |
+| :-------- | :------------------------------------- | :------- | :-------------------------------------------- |
+| `repoId`  | string                                 | No       | Repository identifier (omit for global stats) |
+| `scope`   | `"session"` \| `"history"` \| `"both"` | No       | Stats scope (default: `"both"`)               |
+| `persist` | boolean                                | No       | Whether to persist current session stats      |
+| `since`   | string                                 | No       | ISO timestamp to filter historical stats from |
+| `limit`   | number (1-100)                         | No       | Max historical entries to return              |
 
 **Response:** Token usage counters, savings estimates, compression ratios, and per-tool breakdowns when available.
 
@@ -1279,15 +1289,16 @@ Executes a workflow of SDL-MCP operations in a single round-trip with budget tra
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `repoId` | string | Yes | Repository scope for all steps |
-| `steps` | array (min 1) | Yes | Workflow steps: `[{ fn, args? }]` |
-| `budget` | object | No | Budget constraints for the workflow |
-| `onError` | `"continue"` \| `"stop"` | No | Error handling mode |
-| `trace` | object | No | Enable execution tracing |
+| Parameter | Type                     | Required | Description                         |
+| :-------- | :----------------------- | :------- | :---------------------------------- |
+| `repoId`  | string                   | Yes      | Repository scope for all steps      |
+| `steps`   | array (min 1)            | Yes      | Workflow steps: `[{ fn, args? }]`   |
+| `budget`  | object                   | No       | Budget constraints for the workflow |
+| `onError` | `"continue"` \| `"stop"` | No       | Error handling mode                 |
+| `trace`   | object                   | No       | Enable execution tracing            |
 
 Each step has:
+
 - `fn`: Action name (e.g., `"symbolSearch"`, `"dataPick"`)
 - `args`: Arguments object (supports `$N` references to previous step results)
 
@@ -1305,13 +1316,13 @@ Searches the SDL action catalog for matching actions. Use this as the first disc
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `query` | string | Yes | Search query |
-| `limit` | number (1-50) | No | Max results |
-| `offset` | number (min: 0) | No | Skip the first N ranked results |
-| `includeSchemas` | boolean | No | Include parameter schema summaries |
-| `includeExamples` | boolean | No | Include usage examples |
+| Parameter         | Type            | Required | Description                        |
+| :---------------- | :-------------- | :------- | :--------------------------------- |
+| `query`           | string          | Yes      | Search query                       |
+| `limit`           | number (1-50)   | No       | Max results                        |
+| `offset`          | number (min: 0) | No       | Skip the first N ranked results    |
+| `includeSchemas`  | boolean         | No       | Include parameter schema summaries |
+| `includeExamples` | boolean         | No       | Include usage examples             |
 
 **Response:** `{ actions: ActionMatch[], total, hasMore, offset, limit, tokenEstimate }`
 
@@ -1325,12 +1336,12 @@ Returns the SDL-MCP API manual — a compact reference listing all available fun
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|:----------|:-----|:---------|:------------|
-| `query` | string | No | Filter manual to matching actions |
-| `actions` | string[] | No | Specific actions to include |
-| `format` | `"typescript"` \| `"markdown"` \| `"json"` | No | Output format |
-| `includeSchemas` | boolean | No | Include full parameter schemas |
-| `includeExamples` | boolean | No | Include usage examples |
+| Parameter         | Type                                       | Required | Description                       |
+| :---------------- | :----------------------------------------- | :------- | :-------------------------------- |
+| `query`           | string                                     | No       | Filter manual to matching actions |
+| `actions`         | string[]                                   | No       | Specific actions to include       |
+| `format`          | `"typescript"` \| `"markdown"` \| `"json"` | No       | Output format                     |
+| `includeSchemas`  | boolean                                    | No       | Include full parameter schemas    |
+| `includeExamples` | boolean                                    | No       | Include usage examples            |
 
 **Response:** `{ manual, tokenEstimate }`

@@ -37,45 +37,45 @@ flowchart LR
 
 SDL-MCP exposes 34 tools in flat default mode (32 flat tools plus `sdl.action.search` and `sdl.info`). Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, while gateway mode replaces the 32 flat tools with 4 namespace surfaces.
 
-| Category | Tool | Purpose |
-|:---------|:-----|:--------|
-| **Repository** | `sdl.repo.register` | Register a new repository for indexing |
-| | `sdl.repo.status` | Get repo status, health metrics, watcher state, prefetch stats |
-| | `sdl.index.refresh` | Trigger full or incremental re-indexing |
-| | `sdl.repo.overview` | Token-efficient codebase overview (stats, directories, hotspots, clusters, processes) |
-| **Live Buffers** | `sdl.buffer.push` | Push editor buffer content with cursor/selection tracking for draft-aware indexing |
-| | `sdl.buffer.checkpoint` | Trigger a checkpoint to persist draft changes into the symbol overlay |
-| | `sdl.buffer.status` | Check live buffer state (pending, dirty, queue depth) |
-| **Symbols** | `sdl.symbol.search` | Search symbols by name or summary; supports semantic reranking via `semantic: true` |
-| | `sdl.symbol.getCard` | Get a single symbol card by `symbolId` or `symbolRef`, with ETag caching and optional `minCallConfidence` filtering |
-| | `sdl.symbol.getCards` | Batch fetch up to 100 cards by `symbolIds` or `symbolRefs`; supports `knownEtags` and partial-success metadata |
-| **Slices** | `sdl.slice.build` | Build graph slice from entry symbols, task text, stack traces, or edited files |
-| | `sdl.slice.refresh` | Refresh an existing slice handle; returns incremental delta only |
-| | `sdl.slice.spillover.get` | Paginated fetch for overflow symbols beyond budget |
-| **Code Access** | `sdl.code.getSkeleton` | Deterministic skeleton IR (signatures + control flow, elided bodies) |
-| | `sdl.code.getHotPath` | Hot-path excerpt: only lines matching specified identifiers |
-| | `sdl.code.needWindow` | Full raw code window (gated — requires proof-of-need justification); accepts `sliceContext` |
-| **Deltas** | `sdl.delta.get` | Delta pack between two versions with blast radius and fan-in trends |
-| **Policy** | `sdl.policy.get` | Read current policy settings |
-| | `sdl.policy.set` | Update policy (merge patch) |
-| **Risk** | `sdl.pr.risk.analyze` | Analyze PR risk, blast radius, and recommend test targets |
-| **Agent** | `sdl.agent.context` | Direct task-shaped context retrieval with budget-controlled rung planning |
-| | `sdl.agent.feedback` | Record which symbols were useful/missing after a task; supports `taskTags` |
-| | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics |
-| **Context** | `sdl.context.summary` | Generate token-bounded summary for non-MCP contexts (clipboard, markdown, JSON) |
-| **File** | `sdl.file.read` | Read non-indexed files with line range, search, or JSON path extraction |
-| **Runtime** | `sdl.runtime.execute` | Sandboxed subprocess execution with `outputMode` (`minimal`, `summary`, `intent`); 16 runtimes including `node`, `typescript`, `python`, `shell`, `go`, `rust`, etc. |
-| | `sdl.runtime.queryOutput` | On-demand keyword search of stored runtime output artifacts by `artifactHandle` |
-| **Memory** | `sdl.memory.store` | Store or update a development memory with symbol/file links |
-| | `sdl.memory.query` | Search memories by text, type, tags, or linked symbols; `staleOnly` filter |
-| | `sdl.memory.remove` | Soft-delete a memory from graph and optionally from disk |
-| | `sdl.memory.surface` | Auto-surface relevant memories ranked by confidence, recency, and symbol overlap |
-| **Usage** | `sdl.usage.stats` | Get cumulative token usage statistics and savings metrics |
-| **Diagnostics** | `sdl.info` | Unified runtime, config, logging, LadybugDB, and native-addon status |
-| **Code Mode** *(optional)* | `sdl.action.search` | Discover the most relevant SDL actions with optional schema/example metadata |
-| | `sdl.manual` | Return a compact filtered API reference for a queried or explicit action subset |
-| | `sdl.context` | Retrieve task-shaped context inside Code Mode for explain/debug/review/implement work |
-| | `sdl.workflow` | Execute up to 50 actions in a single round trip with `$N` result piping, transforms, and optional traces |
+| Category                   | Tool                       | Purpose                                                                                                                                                              |
+| :------------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Repository**             | `sdl.repo.register`        | Register a new repository for indexing                                                                                                                               |
+|                            | `sdl.repo.status`          | Get repo status, health metrics, watcher state, prefetch stats                                                                                                       |
+|                            | `sdl.index.refresh`        | Trigger full or incremental re-indexing                                                                                                                              |
+|                            | `sdl.repo.overview`        | Token-efficient codebase overview (stats, directories, hotspots, clusters, processes)                                                                                |
+| **Live Buffers**           | `sdl.buffer.push`          | Push editor buffer content with cursor/selection tracking for draft-aware indexing                                                                                   |
+|                            | `sdl.buffer.checkpoint`    | Trigger a checkpoint to persist draft changes into the symbol overlay                                                                                                |
+|                            | `sdl.buffer.status`        | Check live buffer state (pending, dirty, queue depth)                                                                                                                |
+| **Symbols**                | `sdl.symbol.search`        | Search symbols by name or summary; supports semantic reranking via `semantic: true`                                                                                  |
+|                            | `sdl.symbol.getCard`       | Get a single symbol card by `symbolId` or `symbolRef`, with ETag caching and optional `minCallConfidence` filtering                                                  |
+|                            | `sdl.symbol.getCards`      | Batch fetch up to 100 cards by `symbolIds` or `symbolRefs`; supports `knownEtags` and partial-success metadata                                                       |
+| **Slices**                 | `sdl.slice.build`          | Build graph slice from entry symbols, task text, stack traces, or edited files                                                                                       |
+|                            | `sdl.slice.refresh`        | Refresh an existing slice handle; returns incremental delta only                                                                                                     |
+|                            | `sdl.slice.spillover.get`  | Paginated fetch for overflow symbols beyond budget                                                                                                                   |
+| **Code Access**            | `sdl.code.getSkeleton`     | Deterministic skeleton IR (signatures + control flow, elided bodies)                                                                                                 |
+|                            | `sdl.code.getHotPath`      | Hot-path excerpt: only lines matching specified identifiers                                                                                                          |
+|                            | `sdl.code.needWindow`      | Full raw code window (gated — requires proof-of-need justification); accepts `sliceContext`                                                                          |
+| **Deltas**                 | `sdl.delta.get`            | Delta pack between two versions with blast radius and fan-in trends                                                                                                  |
+| **Policy**                 | `sdl.policy.get`           | Read current policy settings                                                                                                                                         |
+|                            | `sdl.policy.set`           | Update policy (merge patch)                                                                                                                                          |
+| **Risk**                   | `sdl.pr.risk.analyze`      | Analyze PR risk, blast radius, and recommend test targets                                                                                                            |
+| **Agent**                  | `sdl.agent.context`        | Direct task-shaped context retrieval with budget-controlled rung planning                                                                                            |
+|                            | `sdl.agent.feedback`       | Record which symbols were useful/missing after a task; supports `taskTags`                                                                                           |
+|                            | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics                                                                                                                     |
+| **Context**                | `sdl.context.summary`      | Generate token-bounded summary for non-MCP contexts (clipboard, markdown, JSON)                                                                                      |
+| **File**                   | `sdl.file.read`            | Read non-indexed files with line range, search, or JSON path extraction                                                                                              |
+| **Runtime**                | `sdl.runtime.execute`      | Sandboxed subprocess execution with `outputMode` (`minimal`, `summary`, `intent`); 16 runtimes including `node`, `typescript`, `python`, `shell`, `go`, `rust`, etc. |
+|                            | `sdl.runtime.queryOutput`  | On-demand keyword search of stored runtime output artifacts by `artifactHandle`                                                                                      |
+| **Memory**                 | `sdl.memory.store`         | Store or update a development memory with symbol/file links                                                                                                          |
+|                            | `sdl.memory.query`         | Search memories by text, type, tags, or linked symbols; `staleOnly` filter                                                                                           |
+|                            | `sdl.memory.remove`        | Soft-delete a memory from graph and optionally from disk                                                                                                             |
+|                            | `sdl.memory.surface`       | Auto-surface relevant memories ranked by confidence, recency, and symbol overlap                                                                                     |
+| **Usage**                  | `sdl.usage.stats`          | Get cumulative token usage statistics and savings metrics                                                                                                            |
+| **Diagnostics**            | `sdl.info`                 | Unified runtime, config, logging, LadybugDB, and native-addon status                                                                                                 |
+| **Code Mode** _(optional)_ | `sdl.action.search`        | Discover the most relevant SDL actions with optional schema/example metadata                                                                                         |
+|                            | `sdl.manual`               | Return a compact filtered API reference for a queried or explicit action subset                                                                                      |
+|                            | `sdl.context`              | Retrieve task-shaped context inside Code Mode for explain/debug/review/implement work                                                                                |
+|                            | `sdl.workflow`             | Execute up to 50 actions in a single round trip with `$N` result piping, transforms, and optional traces                                                             |
 
 ---
 
@@ -83,7 +83,7 @@ SDL-MCP exposes 34 tools in flat default mode (32 flat tools plus `sdl.action.se
 
 Copy this block into `AGENTS.md` for token-efficient SDL-MCP usage on the current codebase/tooling. Replace `[repoid]` with your repo's ID.
 
-```md
+````md
 ## SDL-MCP Token-Efficient Protocol (v0.10)
 
 - Repository ID: `[repoid]`
@@ -142,8 +142,8 @@ Use this order unless task constraints force escalation:
 - **Live editing**: `buffer.push` as files change (with cursor/selection tracking) → `buffer.checkpoint` to persist → search/card/slice now reflect draft state.
 - **Context export**: `context.summary` with `format: "clipboard"` to produce a summary for non-MCP tools.
 - **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `python`, or `shell`) to run tests and capture structured output.
-- **Context retrieval** *(recommended)*: use `sdl.agent.context` directly, or `sdl.context` inside Code Mode. `contextMode: "precise"` is best for targeted lookups; `"broad"` is best for investigation. Both are more token-efficient than manual workflow-based context gathering.
-- **Multi-step operations** *(Code Mode)*: `sdl.workflow` for runtime execution, data transforms, and batch mutations. Do not use it for context retrieval — route explain/debug/review/implement work to context first.
+- **Context retrieval** _(recommended)_: use `sdl.agent.context` directly, or `sdl.context` inside Code Mode. `contextMode: "precise"` is best for targeted lookups; `"broad"` is best for investigation. Both are more token-efficient than manual workflow-based context gathering.
+- **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, and batch mutations. Do not use it for context retrieval — route explain/debug/review/implement work to context first.
 
 ### 3) Token controls by tool
 
@@ -182,7 +182,7 @@ Use this order unless task constraints force escalation:
 - `sdl.runtime.queryOutput`:
   - Use to search stored output artifacts on-demand after a `minimal`-mode execution.
   - Pass the `artifactHandle` from the execute response plus `queryTerms` to extract relevant excerpts.
-- `sdl.workflow` *(Code Mode)*:
+- `sdl.workflow` _(Code Mode)_:
   - Set `budget.maxTotalTokens` and `budget.maxSteps` to bound chain execution.
   - Use `onError: "continue"` (default) to let the chain proceed past failures, or `"stop"` to halt on first error.
 
@@ -211,7 +211,8 @@ Stale buffer pushes (version ≤ current) are rejected automatically.
   - `hotPath`: `500`
   - `raw`: `2000`
 - When over budget, planner trims rungs from the end while keeping at least one rung.
-- Precise mode strips the response envelope (`actionsTaken`, `summary`, `answer`, `nextBestAction`) to minimize token burn. Only `finalEvidence`, `metrics`, and `path` are returned.
+- Broad mode returns a compact response by default: `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, and `nextBestAction` (when relevant). The fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are not part of the model-visible broad response. `finalEvidence` and `answer` are the primary model-visible fields.
+- Precise mode strips the response further. Only `taskId`, `taskType`, `success`, `path`, `finalEvidence`, and `metrics` are returned.
 
 ### 6) Runtime execution (`sdl.runtime.execute` + `sdl.runtime.queryOutput`)
 
@@ -219,11 +220,11 @@ Run commands in a repo-scoped subprocess. Runtime execution is enabled by defaul
 
 **Output modes** control how much data is returned inline:
 
-| Mode | Default? | Tokens | Returns |
-|:-----|:---------|:-------|:--------|
-| `"minimal"` | Yes | ~50 | `{status, exitCode, signal, durationMs, outputLines, outputBytes, artifactHandle}` |
-| `"summary"` | No | ~200-500 | Head+tail output excerpts (legacy behavior) |
-| `"intent"` | No | ~100-300 | Only `queryTerms`-matched excerpts; no head/tail summary |
+| Mode        | Default? | Tokens   | Returns                                                                            |
+| :---------- | :------- | :------- | :--------------------------------------------------------------------------------- |
+| `"minimal"` | Yes      | ~50      | `{status, exitCode, signal, durationMs, outputLines, outputBytes, artifactHandle}` |
+| `"summary"` | No       | ~200-500 | Head+tail output excerpts (legacy behavior)                                        |
+| `"intent"`  | No       | ~100-300 | Only `queryTerms`-matched excerpts; no head/tail summary                           |
 
 **Two-phase pattern** (recommended for large output):
 
@@ -239,6 +240,7 @@ Run commands in a repo-scoped subprocess. Runtime execution is enabled by defaul
   "outputMode": "minimal"
 }
 ```
+````
 
 Then, if needed:
 
@@ -275,10 +277,12 @@ When `codeMode.enabled: true` is set in config, three Code Mode tools sit alongs
 - `sdl.workflow` — executes up to 50 actions in a single round trip with `$N` result piping, internal data transforms, and optional traces.
 
 Routing guidance:
+
 - Start with `sdl.context` for explain/debug/review work, and for implement work when you need understanding before execution.
 - Use `sdl.workflow` only when the task is genuinely multi-step: runtime execution, data shaping, batch mutations, or a reusable operation pipeline.
 
 Workflow guidance:
+
 - Start with `sdl.action.search` when the right action is unclear.
 - Use `sdl.manual(query|actions)` to avoid loading the full manual when a subset is enough.
 - Each step has `fn` (action name) and `args`. Use `$N.path.to.field` to reference step N's result (0-based).
@@ -291,6 +295,7 @@ Workflow guidance:
 ### 9) Feedback loop (`sdl.agent.feedback`)
 
 After completing a task, call `sdl.agent.feedback` with:
+
 - `versionId` (from `sdl.repo.status`), `sliceHandle` (from `sdl.slice.build`).
 - `usefulSymbols` (required, min 1), `missingSymbols` (optional).
 - `taskType` (`"debug"` | `"review"` | `"implement"` | `"explain"`), `taskText`, `taskTags`.
@@ -337,4 +342,7 @@ When memory is disabled, memory tools return a clear error and no memory surfaci
 - Do not use `sdl.workflow` for context retrieval — use `sdl.context` in Code Mode or `sdl.agent.context` directly with `contextMode: "precise"` or `"broad"` instead. Workflow is for multi-step operations (runtime, data transforms, mutations).
 - Do not use `sdl.workflow` for a single action — it adds overhead. Use the direct tool instead.
 - Do not hardcode step indices in `$N` references without checking the actual step order in your chain.
+
+```
+
 ```

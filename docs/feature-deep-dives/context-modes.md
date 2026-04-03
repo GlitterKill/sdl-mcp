@@ -60,8 +60,8 @@ Broad mode is designed for investigation and exploration.
 Characteristics:
 
 - admits more surrounding symbols
-- keeps the full answer envelope
-- surfaces more diagnostics and next-step guidance
+- returns a compact response with `finalEvidence`, `answer`, and `summary` as the primary model-visible fields
+- surfaces next-step guidance via `nextBestAction` when relevant
 - favors structural understanding over minimum size
 
 Best for:
@@ -75,12 +75,12 @@ Best for:
 
 ## Task-Type Plans
 
-| Task type | Precise | Broad |
-|:----------|:--------|:------|
-| `debug` | card -> hotPath | card -> skeleton -> hotPath -> raw* |
-| `review` | card | card -> skeleton |
-| `implement` | card -> skeleton | card -> skeleton -> hotPath |
-| `explain` | card -> skeleton | card -> skeleton |
+| Task type   | Precise          | Broad                                |
+| :---------- | :--------------- | :----------------------------------- |
+| `debug`     | card -> hotPath  | card -> skeleton -> hotPath -> raw\* |
+| `review`    | card             | card -> skeleton                     |
+| `implement` | card -> skeleton | card -> skeleton -> hotPath          |
+| `explain`   | card -> skeleton | card -> skeleton                     |
 
 `*` Raw still depends on policy and diagnostics requirements.
 
@@ -112,14 +112,18 @@ The threshold changes by mode:
 
 ### Broad mode
 
-Returns the full response envelope:
+Returns a compact response by default. The model-visible payload includes:
 
-- `actionsTaken`
+- `taskId`
+- `taskType`
+- `success`
 - `summary`
 - `answer`
-- `nextBestAction`
-- `finalEvidence`
-- `metrics`
+- `finalEvidence` (primary evidence surface)
+- `nextBestAction` (when relevant)
+- `error` (when failed)
+
+The fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are computed internally but omitted from the model-visible response at the MCP serialization layer.
 
 ### Precise mode
 
@@ -132,7 +136,7 @@ Returns only the context-bearing fields:
 - `finalEvidence`
 - `metrics`
 
-This is why precise mode can answer "what does this do?" without the overhead of a synthetic narrative that the model does not need.
+Both modes are compact. Broad mode favors `finalEvidence` and `answer` as the primary surfaces. Precise mode favors `finalEvidence` and `path` for chain-efficient downstream use.
 
 ---
 
@@ -140,11 +144,11 @@ This is why precise mode can answer "what does this do?" without the overhead of
 
 Measured against manual `sdl.workflow` retrieval on the SDL-MCP codebase:
 
-| Scenario | Manual workflow | Precise context | Broad context |
-|:---------|:----------------|:----------------|:--------------|
-| Targeted debug | largest response | smallest response | richer but larger |
-| Focused explain | larger envelope | smallest useful answer | richer structure |
-| Broad investigation | incomplete without extra planning | often too narrow | best fit |
+| Scenario            | Manual workflow                   | Precise context        | Broad context     |
+| :------------------ | :-------------------------------- | :--------------------- | :---------------- |
+| Targeted debug      | largest response                  | smallest response      | richer but larger |
+| Focused explain     | larger envelope                   | smallest useful answer | richer structure  |
+| Broad investigation | incomplete without extra planning | often too narrow       | best fit          |
 
 The consistent pattern is:
 

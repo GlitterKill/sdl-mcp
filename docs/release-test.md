@@ -150,6 +150,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.repo.register
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -167,6 +168,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.repo.status
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo"
@@ -182,6 +184,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.repo.overview
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -200,6 +203,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.index.refresh (Full)
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -218,6 +222,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.index.refresh (Incremental)
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -235,6 +240,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.symbol.search
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -252,6 +258,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.symbol.getCard
 
 **Input:** (use symbolId from search results)
+
 ```json
 {
   "repoId": "test-repo",
@@ -272,6 +279,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.symbol.getCard (with ETag - Not Modified)
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -288,6 +296,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.symbol.getCards (Batch)
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -305,6 +314,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.slice.build
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -325,6 +335,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.slice.refresh
 
 **Input:**
+
 ```json
 {
   "sliceHandle": "<handle-from-build>",
@@ -340,6 +351,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.slice.spillover.get
 
 **Input:**
+
 ```json
 {
   "spilloverHandle": "<spilloverHandle-from-build>",
@@ -357,6 +369,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.delta.get
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -376,6 +389,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.code.getSkeleton
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -395,6 +409,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.code.getHotPath
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -411,6 +426,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.code.needWindow
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -434,6 +450,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.policy.get
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo"
@@ -449,6 +466,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.policy.set
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -469,6 +487,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.memory.store
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -486,6 +505,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.memory.query
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -501,6 +521,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.memory.remove
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -516,6 +537,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.memory.surface
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -533,6 +555,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.agent.context
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -542,16 +565,17 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 }
 ```
 
-**Expected:** Returns task-shaped context retrieval results.
+**Expected:** Returns compact broad context response.
 
-- [ ] Returns taskId
-- [ ] Returns actionsTaken array
-- [ ] Returns path with rungs
+- [ ] Returns taskId and taskType
+- [ ] Returns finalEvidence array
 - [ ] Returns summary and answer
+- [ ] Does not include actionsTaken, path, or metrics in default broad response
 
 #### sdl.agent.feedback
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -568,6 +592,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.agent.feedback.query
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo"
@@ -581,6 +606,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.context.summary
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo"
@@ -594,6 +620,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.context
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -613,6 +640,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.workflow
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -630,6 +658,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.manual
 
 **Input:**
+
 ```json
 {}
 ```
@@ -644,6 +673,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.buffer.push
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -659,6 +689,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.buffer.checkpoint
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo"
@@ -672,6 +703,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.buffer.status
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo"
@@ -687,6 +719,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.runtime.execute
 
 **Input (minimal mode — new default):**
+
 ```json
 {
   "repoId": "test-repo",
@@ -706,6 +739,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 - [ ] Does NOT include `stdoutSummary`/`stderrSummary` in minimal mode
 
 **Input (summary mode — legacy behavior):**
+
 ```json
 {
   "repoId": "test-repo",
@@ -724,6 +758,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.runtime.queryOutput
 
 **Input:**
+
 ```json
 {
   "artifactHandle": "<handle from sdl.runtime.execute>",
@@ -742,6 +777,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.pr.risk.analyze
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo",
@@ -759,6 +795,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 #### sdl.usage.stats
 
 **Input:**
+
 ```json
 {
   "repoId": "test-repo"
@@ -908,26 +945,26 @@ Test with each supported client:
 
 ## Sign-Off
 
-| Test Section | Pass | Fail | Notes |
-|--------------|------|------|-------|
-| CLI Commands | | | |
-| Repository Management | | | |
-| Indexing | | | |
-| Symbol Operations | | | |
-| Graph Slicing | | | |
-| Delta Packs | | | |
-| Code Access | | | |
-| Policy Management | | | |
-| Memory Tools | | | |
-| Agent & Orchestration | | | |
-| Buffer Tools | | | |
-| Runtime & Analysis | | | |
-| Integration Tests | | | |
-| Error Handling | | | |
-| Performance | | | |
-| Client Compatibility | | | |
+| Test Section          | Pass | Fail | Notes |
+| --------------------- | ---- | ---- | ----- |
+| CLI Commands          |      |      |       |
+| Repository Management |      |      |       |
+| Indexing              |      |      |       |
+| Symbol Operations     |      |      |       |
+| Graph Slicing         |      |      |       |
+| Delta Packs           |      |      |       |
+| Code Access           |      |      |       |
+| Policy Management     |      |      |       |
+| Memory Tools          |      |      |       |
+| Agent & Orchestration |      |      |       |
+| Buffer Tools          |      |      |       |
+| Runtime & Analysis    |      |      |       |
+| Integration Tests     |      |      |       |
+| Error Handling        |      |      |       |
+| Performance           |      |      |       |
+| Client Compatibility  |      |      |       |
 
-**Tested By:** _______________
-**Date:** _______________
+**Tested By:** ******\_\_\_******
+**Date:** ******\_\_\_******
 **Version:** 0.10.2
 **Result:** PASS / FAIL
