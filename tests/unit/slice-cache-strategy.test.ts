@@ -149,7 +149,7 @@ describe("Benchmark validation", () => {
     );
   });
 
-  it("should verify Bloom filter pre-check adds measurable overhead", () => {
+  it("should verify Bloom filter pre-check has no false negatives", () => {
     const cache = new Map<string, number>();
     const bloomBits = new Uint8Array(1024);
 
@@ -177,25 +177,23 @@ describe("Benchmark validation", () => {
       addToBloom(key);
     }
 
-    const iterations = 10000;
-
-    const startMapOnly = performance.now();
-    for (let i = 0; i < iterations; i++) {
-      cache.get(`key-${i % 1000}`);
+    // Bloom filters must never have false negatives: every inserted key must be found
+    for (let i = 0; i < 1000; i++) {
+      assert.ok(
+        mightContain(`key-${i}`),
+        `Bloom filter false negative for key-${i}`,
+      );
     }
-    const mapOnlyTime = performance.now() - startMapOnly;
 
-    const startWithBloom = performance.now();
-    for (let i = 0; i < iterations; i++) {
-      if (mightContain(`key-${i % 1000}`)) {
-        cache.get(`key-${i % 1000}`);
-      }
+    // Keys never inserted may or may not match (false positives are allowed)
+    let falsePositives = 0;
+    for (let i = 1000; i < 2000; i++) {
+      if (mightContain(`key-${i}`)) falsePositives++;
     }
-    const withBloomTime = performance.now() - startWithBloom;
-
+    // With 8192 bits and 1000 keys, false positive rate should be well under 50%
     assert.ok(
-      withBloomTime > mapOnlyTime * 0.8,
-      `Bloom pre-check should add overhead (map: ${mapOnlyTime.toFixed(3)}ms, bloom: ${withBloomTime.toFixed(3)}ms)`,
+      falsePositives < 500,
+      `Too many false positives: ${falsePositives}/1000`,
     );
   });
 });
