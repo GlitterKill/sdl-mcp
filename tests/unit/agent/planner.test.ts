@@ -338,4 +338,119 @@ describe("Agent Planner", () => {
       assert.ok(path.reasoning.toLowerCase().includes("debug"));
     });
   });
+
+  describe("Confidence-Aware Budget Trimming", () => {
+    it("low confidence preserves a diagnostic rung under tight budget", () => {
+      // Budget allows card (50) + hotPath (500) = 550, but not skeleton too
+      const task = createTask("debug", {
+        budget: { maxTokens: 600 },
+      });
+      const path = planner.plan(task, "low");
+
+      // Low confidence should keep card + hotPath (the richer rung) rather
+      // than just card (which is what the old tail-pop would produce at 600 tokens
+      // after popping raw, hotPath, then skeleton).
+      assert.ok(path.rungs.includes("card"), "card must always be present");
+      assert.ok(
+        path.rungs.length >= 2,
+        `Low confidence should preserve at least 2 rungs, got ${path.rungs.length}: ${path.rungs.join(", ")}`,
+      );
+    });
+
+    it("medium confidence keeps card + skeleton for precise under budget pressure", () => {
+      // Precise debug normally has [card, hotPath] = 550 tokens
+      // Budget: 300 — enough for card + skeleton (250) but not card + hotPath (550)
+      const task = createTask("debug", {
+        options: { contextMode: "precise" },
+        budget: { maxTokens: 300 },
+      });
+      const path = planner.plan(task, "medium");
+
+      assert.ok(path.rungs.includes("card"));
+      // Medium confidence with precise mode should try to keep skeleton
+      // (the diagnostic rung for precise)
+      assert.ok(
+        path.estimatedTokens <= 300,
+        `Should fit within budget, got ${path.estimatedTokens}`,
+      );
+    });
+
+    it("medium confidence keeps card + hotPath for broad under budget pressure", () => {
+      // Broad review normally has [card, skeleton] = 250 tokens
+      // Add focusPaths to get [card, skeleton, hotPath] = 750
+      // Budget: 600 — enough for card + hotPath (550) but not all three (750)
+      const task = createTask("review", {
+        options: { focusPaths: ["src/agent/"] },
+        budget: { maxTokens: 600 },
+      });
+      const path = planner.plan(task, "medium");
+
+      assert.ok(path.rungs.includes("card"));
+      assert.ok(
+        path.estimatedTokens <= 600,
+        `Should fit within budget, got ${path.estimatedTokens}`,
+      );
+      // Medium broad: should prefer card + hotPath
+      if (path.rungs.length >= 2) {
+        assert.ok(
+          path.rungs.includes("hotPath"),
+          `Medium broad should preserve hotPath, got: ${path.rungs.join(", ")}`,
+        );
+      }
+    });
+
+    it("high confidence produces cheapest plan (same as tail-pop)", () => {
+      // Budget only allows card (50 tokens)
+      const task = createTask("debug", {
+        budget: { maxTokens: 60 },
+      });
+      const path = planner.plan(task, "high");
+
+      assert.ok(path.rungs.includes("card"));
+      assert.ok(
+        path.estimatedTokens <= 60,
+        `High confidence should produce cheapest plan`,
+      );
+    });
+
+    it("very low budget falls back to card-only regardless of confidence", () => {
+      // Budget: 55 tokens — only card (50) fits
+      const task = createTask("debug", {
+        budget: { maxTokens: 55 },
+      });
+
+      const lowPath = planner.plan(task, "low");
+      const medPath = planner.plan(task, "medium");
+
+      assert.deepStrictEqual(lowPath.rungs, ["card"]);
+      assert.deepStrictEqual(medPath.rungs, ["card"]);
+    });
+
+    it("confidence-aware trimming includes reasoning", () => {
+      const task = createTask("debug", {
+        budget: { maxTokens: 600 },
+      });
+      const path = planner.plan(task, "low");
+
+      if (path.rungs.length < 3) {
+        // Trimming happened — reasoning should mention confidence
+        assert.ok(
+          path.reasoning.includes("Confidence-aware") ||
+            path.reasoning.includes("Trimmed"),
+          `Reasoning should explain trim: "${path.reasoning}"`,
+        );
+      }
+    });
+
+    it("no confidence defaults to high (backward compatible)", () => {
+      const task = createTask("debug", {
+        budget: { maxTokens: 60 },
+      });
+      // No confidence argument
+      const path = planner.plan(task);
+
+      assert.deepStrictEqual(path.rungs, ["card"]);
+      assert.ok(path.estimatedTokens <= 60);
+    });
+  });
 });

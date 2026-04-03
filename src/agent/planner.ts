@@ -1,4 +1,10 @@
-import type { AgentTask, RungPath, RungType, TaskOptions } from "./types.js";
+import type {
+  AgentTask,
+  ConfidenceTier,
+  RungPath,
+  RungType,
+  TaskOptions,
+} from "./types.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import { searchSymbols, getFilesByPrefix } from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
@@ -18,31 +24,35 @@ const DEFAULT_DURATION_ESTIMATES_MS: Record<string, number> = {
 };
 
 export class Planner {
-  plan(task: AgentTask): RungPath {
+  plan(task: AgentTask, confidence?: ConfidenceTier): RungPath {
     const taskType = task.taskType;
     const options = task.options ?? {};
 
     switch (taskType) {
       case "debug":
-        return this.planDebug(task, options);
+        return this.planDebug(task, options, confidence);
       case "review":
-        return this.planReview(task, options);
+        return this.planReview(task, options, confidence);
       case "implement":
-        return this.planImplement(task, options);
+        return this.planImplement(task, options, confidence);
       case "explain":
-        return this.planExplain(task, options);
+        return this.planExplain(task, options, confidence);
       default:
-        return this.planDefault(task, options);
+        return this.planDefault(task, options, confidence);
     }
   }
 
-  private planDebug(task: AgentTask, options: TaskOptions): RungPath {
-    // Precise mode: card + hotPath only (skip skeleton — hotpath gives the code).
+  private planDebug(
+    task: AgentTask,
+    options: TaskOptions,
+    confidence?: ConfidenceTier,
+  ): RungPath {
     if (options.contextMode === "precise") {
       return this.buildRungPath(
         ["card", "hotPath"],
         task,
         "Precise debug: card + hotPath",
+        confidence,
       );
     }
 
@@ -56,12 +66,22 @@ export class Planner {
       rungs,
       task,
       "Debug task prioritizes detailed code analysis",
+      confidence,
     );
   }
 
-  private planReview(task: AgentTask, options: TaskOptions): RungPath {
+  private planReview(
+    task: AgentTask,
+    options: TaskOptions,
+    confidence?: ConfidenceTier,
+  ): RungPath {
     if (options.contextMode === "precise") {
-      return this.buildRungPath(["card"], task, "Precise review: card only");
+      return this.buildRungPath(
+        ["card"],
+        task,
+        "Precise review: card only",
+        confidence,
+      );
     }
 
     const rungs: RungType[] = ["card", "skeleton"];
@@ -81,15 +101,21 @@ export class Planner {
       rungs,
       task,
       "Review task focuses on structure and hot paths",
+      confidence,
     );
   }
 
-  private planImplement(task: AgentTask, options: TaskOptions): RungPath {
+  private planImplement(
+    task: AgentTask,
+    options: TaskOptions,
+    confidence?: ConfidenceTier,
+  ): RungPath {
     if (options.contextMode === "precise") {
       return this.buildRungPath(
         ["card", "skeleton"],
         task,
         "Precise implement: card + skeleton",
+        confidence,
       );
     }
 
@@ -106,17 +132,24 @@ export class Planner {
       rungs,
       task,
       "Implement task requires structure and context",
+      confidence,
     );
   }
 
-  private planExplain(task: AgentTask, options: TaskOptions): RungPath {
-    // Precise mode: card only — minimal tokens for quick lookups.
+  private planExplain(
+    task: AgentTask,
+    options: TaskOptions,
+    confidence?: ConfidenceTier,
+  ): RungPath {
     if (options.contextMode === "precise") {
-      return this.buildRungPath(["card"], task, "Precise explain: card only");
+      return this.buildRungPath(
+        ["card"],
+        task,
+        "Precise explain: card only",
+        confidence,
+      );
     }
 
-    // Broad (default): card + skeleton for structural understanding;
-    // add hotPath when explicit focus narrows the scope.
     const rungs: RungType[] = ["card", "skeleton"];
 
     if (
@@ -130,18 +163,29 @@ export class Planner {
       rungs,
       task,
       "Explain task: cards + skeletons for structural understanding",
+      confidence,
     );
   }
 
-  private planDefault(_task: AgentTask, _options: TaskOptions): RungPath {
+  private planDefault(
+    _task: AgentTask,
+    _options: TaskOptions,
+    confidence?: ConfidenceTier,
+  ): RungPath {
     const rungs: RungType[] = ["card", "skeleton"];
-    return this.buildRungPath(rungs, _task, "Default balanced approach");
+    return this.buildRungPath(
+      rungs,
+      _task,
+      "Default balanced approach",
+      confidence,
+    );
   }
 
   private buildRungPath(
     rungs: RungType[],
     task: AgentTask,
     reasoning: string,
+    confidence?: ConfidenceTier,
   ): RungPath {
     const path: RungPath = {
       rungs,
@@ -151,7 +195,12 @@ export class Planner {
     };
 
     if (task.budget) {
-      this.adjustForBudget(path, task.budget);
+      this.adjustForBudget(
+        path,
+        task.budget,
+        task.options?.contextMode,
+        confidence,
+      );
     }
 
     return path;
@@ -171,48 +220,149 @@ export class Planner {
     );
   }
 
+  /**
+   * Confidence-aware budget adjustment.
+   *
+   * - high confidence: cheapest plan (pop expensive rungs first, same as before).
+   * - medium confidence: preserve one diagnostic rung (skeleton for precise,
+   *   hotPath for broad) if budget allows card + that rung.
+   * - low confidence: escalate — try to keep the richer of skeleton or hotPath
+   *   to compensate for uncertain ranking.
+   * - Falls back to tail-pop when the confidence-aware minimum still exceeds budget.
+   */
   private adjustForBudget(
     path: RungPath,
     budget: NonNullable<AgentTask["budget"]>,
+    contextMode?: string,
+    confidence?: ConfidenceTier,
   ): void {
-    if (budget.maxTokens && path.estimatedTokens > budget.maxTokens) {
-      this.reducePathForTokenLimit(path, budget.maxTokens);
+    const overTokens =
+      budget.maxTokens && path.estimatedTokens > budget.maxTokens;
+    const overDuration =
+      budget.maxDurationMs && path.estimatedDurationMs > budget.maxDurationMs;
+
+    if (!overTokens && !overDuration) return;
+
+    const tier = confidence ?? "high";
+    const isPrecise = contextMode === "precise";
+
+    // Determine the minimum rungs we want to preserve based on confidence.
+    // "card" is always the floor.
+    let minRungs: RungType[];
+    if (tier === "low") {
+      // Low confidence: preserve one disambiguating rung beyond card
+      const prefer: RungType = path.rungs.includes("hotPath")
+        ? "hotPath"
+        : "skeleton";
+      minRungs = path.rungs.includes(prefer) ? ["card", prefer] : ["card"];
+    } else if (tier === "medium") {
+      // Medium: keep card + one diagnostic
+      const diagnosticRung: RungType = isPrecise ? "skeleton" : "hotPath";
+      minRungs = path.rungs.includes(diagnosticRung)
+        ? ["card", diagnosticRung]
+        : ["card"];
+    } else {
+      // High confidence: cheapest plan, just card if needed
+      minRungs = ["card"];
     }
 
-    if (
-      budget.maxDurationMs &&
-      path.estimatedDurationMs > budget.maxDurationMs
-    ) {
-      this.reducePathForDurationLimit(path, budget.maxDurationMs);
-    }
-  }
+    // Check if the minimum set fits within budget
+    const minTokens = this.estimateTokens(minRungs);
+    const minDuration = this.estimateDuration(minRungs);
+    const minFitsTokens = !budget.maxTokens || minTokens <= budget.maxTokens;
+    const minFitsDuration =
+      !budget.maxDurationMs || minDuration <= budget.maxDurationMs;
 
-  private reducePathForTokenLimit(path: RungPath, maxTokens: number): void {
+    if (!minFitsTokens || !minFitsDuration) {
+      // Even the minimum doesn't fit — fall back to simple tail-pop
+      this.reducePathSimple(path, budget);
+      return;
+    }
+
+    // Pop rungs that are NOT in the minimum set first, then pop minimum rungs
+    // only as a last resort. This avoids tail-pop ordering problems where a
+    // preserved rung (e.g. hotPath) is at the end and would be popped first.
     const originalRungs = [...path.rungs];
-    while (path.estimatedTokens > maxTokens && path.rungs.length > 1) {
-      path.rungs.pop();
+    const minRungSet = new Set(minRungs);
+
+    // Phase 1: remove non-minimum rungs from the tail
+    while (path.rungs.length > minRungs.length) {
+      const fitsTokens =
+        !budget.maxTokens || path.estimatedTokens <= budget.maxTokens;
+      const fitsDuration =
+        !budget.maxDurationMs ||
+        path.estimatedDurationMs <= budget.maxDurationMs;
+      if (fitsTokens && fitsDuration) break;
+
+      // Find the last rung that is NOT in the minimum set
+      let popped = false;
+      for (let i = path.rungs.length - 1; i >= 0; i--) {
+        if (!minRungSet.has(path.rungs[i]!)) {
+          path.rungs.splice(i, 1);
+          popped = true;
+          break;
+        }
+      }
+      if (!popped) break; // Only minimum rungs remain
+
       path.estimatedTokens = this.estimateTokens(path.rungs);
       path.estimatedDurationMs = this.estimateDuration(path.rungs);
     }
+
+    // Phase 2: if still over, fall back to exactly the minimum set
+    const stillOverTokens =
+      budget.maxTokens && path.estimatedTokens > budget.maxTokens;
+    const stillOverDuration =
+      budget.maxDurationMs && path.estimatedDurationMs > budget.maxDurationMs;
+    if (stillOverTokens || stillOverDuration) {
+      path.rungs = [...minRungs];
+      path.estimatedTokens = this.estimateTokens(path.rungs);
+      path.estimatedDurationMs = this.estimateDuration(path.rungs);
+    }
+
     const removed = originalRungs.filter((r) => !path.rungs.includes(r));
     if (removed.length > 0) {
-      path.reasoning += `; Trimmed rung(s) ${removed.join(", ")} to meet token budget (${maxTokens})`;
+      const budgetParts: string[] = [];
+      if (budget.maxTokens)
+        budgetParts.push(`token budget (${budget.maxTokens})`);
+      if (budget.maxDurationMs)
+        budgetParts.push(`duration budget (${budget.maxDurationMs}ms)`);
+      const budgetDesc = budgetParts.join(" and ");
+
+      const reason =
+        tier !== "high"
+          ? `; Confidence-aware (${tier}) trim: removed ${removed.join(", ")}, preserved ${path.rungs.join(", ")} to meet ${budgetDesc}`
+          : `; Trimmed rung(s) ${removed.join(", ")} to meet ${budgetDesc}`;
+      path.reasoning += reason;
     }
   }
 
-  private reducePathForDurationLimit(
+  /** Simple tail-pop reduction when confidence-aware minimum doesn't fit. */
+  private reducePathSimple(
     path: RungPath,
-    maxDurationMs: number,
+    budget: NonNullable<AgentTask["budget"]>,
   ): void {
     const originalRungs = [...path.rungs];
-    while (path.estimatedDurationMs > maxDurationMs && path.rungs.length > 1) {
+    while (path.rungs.length > 1) {
+      const fitsTokens =
+        !budget.maxTokens || path.estimatedTokens <= budget.maxTokens;
+      const fitsDuration =
+        !budget.maxDurationMs ||
+        path.estimatedDurationMs <= budget.maxDurationMs;
+      if (fitsTokens && fitsDuration) break;
+
       path.rungs.pop();
       path.estimatedTokens = this.estimateTokens(path.rungs);
       path.estimatedDurationMs = this.estimateDuration(path.rungs);
     }
     const removed = originalRungs.filter((r) => !path.rungs.includes(r));
     if (removed.length > 0) {
-      path.reasoning += `; Trimmed rung(s) ${removed.join(", ")} to meet duration budget (${maxDurationMs}ms)`;
+      const budgetParts: string[] = [];
+      if (budget.maxTokens)
+        budgetParts.push(`token budget (${budget.maxTokens})`);
+      if (budget.maxDurationMs)
+        budgetParts.push(`duration budget (${budget.maxDurationMs}ms)`);
+      path.reasoning += `; Trimmed rung(s) ${removed.join(", ")} to meet ${budgetParts.join(" and ")}`;
     }
   }
 
