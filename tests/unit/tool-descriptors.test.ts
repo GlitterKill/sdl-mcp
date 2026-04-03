@@ -10,6 +10,11 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const inventoryPath = resolve(__dirname, "../../docs/generated/tool-inventory.json");
 const inventory = JSON.parse(readFileSync(inventoryPath, "utf-8"));
+// The generated inventory is a superset that still documents opt-in memory tools.
+// Default flat registration hides those unless memory tools are enabled in config.
+const defaultVisibleFlatToolNames = inventory.flatToolNames.filter(
+  (name: string) => !name.startsWith("sdl.memory."),
+);
 
 describe("buildFlatToolDescriptors", () => {
   const descriptors = buildFlatToolDescriptors({} as any);
@@ -17,8 +22,8 @@ describe("buildFlatToolDescriptors", () => {
   it("returns the expected number of flat tool descriptors", () => {
     assert.strictEqual(
       descriptors.length,
-      inventory.flatToolNames.length,
-      `expected ${inventory.flatToolNames.length} descriptors, got ${descriptors.length}`,
+      defaultVisibleFlatToolNames.length,
+      `expected ${defaultVisibleFlatToolNames.length} descriptors, got ${descriptors.length}`,
     );
   });
 
@@ -36,7 +41,7 @@ describe("buildFlatToolDescriptors", () => {
 
   it("contains all expected tool names from inventory", () => {
     const names = new Set(descriptors.map((d) => d.name));
-    for (const expected of inventory.flatToolNames) {
+    for (const expected of defaultVisibleFlatToolNames) {
       assert.ok(names.has(expected), `missing expected tool: ${expected}`);
     }
   });
