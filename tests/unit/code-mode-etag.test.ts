@@ -91,4 +91,72 @@ describe("code-mode etag cache", () => {
     cache.injectEtags("symbol.getCards", args);
     assert.deepStrictEqual(args.knownEtags, { sym1: "e1", sym3: "e3" });
   });
+
+  it("sliceBuild injects knownCardEtags from cached card etags", () => {
+    const cache = new WorkflowEtagCache();
+    cache.seed({ sym1: "e1", sym2: "e2" });
+    const args: Record<string, unknown> = {
+      taskText: "debug auth flow",
+    };
+
+    cache.injectEtags("slice.build", args);
+
+    assert.deepStrictEqual(args.knownCardEtags, {
+      sym1: "e1",
+      sym2: "e2",
+    });
+  });
+
+  it("sliceBuild does not overwrite existing knownCardEtags", () => {
+    const cache = new WorkflowEtagCache();
+    cache.seed({ sym1: "e1" });
+    const args: Record<string, unknown> = {
+      taskText: "debug auth flow",
+      knownCardEtags: { existing: "etag-existing" },
+    };
+
+    cache.injectEtags("slice.build", args);
+
+    assert.deepStrictEqual(args.knownCardEtags, { existing: "etag-existing" });
+  });
+
+  it("sliceBuild extracts card etags from compact v2 cardRefs", () => {
+    const cache = new WorkflowEtagCache();
+
+    cache.extractEtags("slice.build", {
+      slice: {
+        wf: "compact",
+        wv: 2,
+        si: ["sym1", "sym2"],
+        cr: [
+          { ci: 0, e: "etag-1" },
+          { ci: 1, e: "etag-2" },
+        ],
+      },
+    });
+
+    assert.deepStrictEqual(cache.getCache(), {
+      sym1: "etag-1",
+      sym2: "etag-2",
+    });
+  });
+
+  it("sliceBuild extracts card etags from readable cardRefs", () => {
+    const cache = new WorkflowEtagCache();
+
+    cache.extractEtags("slice.build", {
+      slice: {
+        cards: [],
+        cardRefs: [
+          { symbolId: "sym-a", etag: "etag-a" },
+          { symbolId: "sym-b", etag: "etag-b" },
+        ],
+      },
+    });
+
+    assert.deepStrictEqual(cache.getCache(), {
+      "sym-a": "etag-a",
+      "sym-b": "etag-b",
+    });
+  });
 });

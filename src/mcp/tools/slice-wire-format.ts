@@ -423,6 +423,7 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
     compact.cr = slice.cardRefs.map((ref) => {
       const compactRef: CompactCardRefV2 = {
         ci: symbolIdToIndex.get(ref.symbolId) ?? -1,
+        sid: ref.symbolId,
         e: ref.etag,
       };
       if (ref.detailLevel !== "compact") {
@@ -605,6 +606,7 @@ export function toCompactGraphSliceV3(slice: GraphSlice): CompactGraphSliceV3 {
     compact.cr = slice.cardRefs.map((ref) => {
       const compactRef: CompactCardRefV2 = {
         ci: symbolIdToIndex.get(ref.symbolId) ?? -1,
+        sid: ref.symbolId,
         e: ref.etag,
       };
       if (ref.detailLevel !== "compact") {

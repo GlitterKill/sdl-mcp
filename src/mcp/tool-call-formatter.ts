@@ -107,6 +107,9 @@ function fmtCodeSkeleton(
   _args: Record<string, unknown>,
   result: Record<string, unknown>,
 ): string | null {
+  if (result.notModified) {
+    return "code.getSkeleton -> not modified (ETag hit)";
+  }
   const file = str(result.file);
   const originalLines = num(result.originalLines);
   const estimatedTokens = num(result.estimatedTokens);
@@ -118,6 +121,9 @@ function fmtCodeHotPath(
   args: Record<string, unknown>,
   result: Record<string, unknown>,
 ): string | null {
+  if (result.notModified) {
+    return "code.getHotPath -> not modified (ETag hit)";
+  }
   const matched = result.matchedIdentifiers as string[] | undefined;
   const requested = (args.identifiersToFind as string[])?.length ?? 0;
   const found = matched?.length ?? 0;
@@ -191,8 +197,11 @@ function fmtRepoStatus(
 
 function fmtRepoOverview(
   args: Record<string, unknown>,
-  _result: Record<string, unknown>,
+  result: Record<string, unknown>,
 ): string | null {
+  if (result.notModified) {
+    return "repo.overview -> not modified (ETag hit)";
+  }
   const level = str(args.level) || "stats";
   return `repo.overview (${level})`;
 }
@@ -226,6 +235,9 @@ function fmtAgentContext(
   _args: Record<string, unknown>,
   result: Record<string, unknown>,
 ): string | null {
+  if (result.notModified) {
+    return "agent.context -> not modified (ETag hit)";
+  }
   const path = result.path as Record<string, unknown> | undefined;
   const rungs = (path?.rungs as unknown[])?.length ?? 0;
   const status = typeof result.success === "boolean"

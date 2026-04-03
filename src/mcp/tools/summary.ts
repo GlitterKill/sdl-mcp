@@ -8,6 +8,7 @@ import {
 } from "../../services/summary.js";
 import { ValidationError, IndexError } from "../errors.js";
 import { ZodError } from "zod";
+import { buildConditionalResponse } from "../../util/conditional-response.js";
 
 export async function handleContextSummary(
   args: unknown,
@@ -22,12 +23,14 @@ export async function handleContextSummary(
     });
 
     const format = request.format ?? "markdown";
-    return {
+    return buildConditionalResponse({
       repoId: request.repoId,
       format,
       summary,
       content: renderContextSummary(summary, format),
-    };
+    }, {
+      ifNoneMatch: request.ifNoneMatch,
+    });
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(

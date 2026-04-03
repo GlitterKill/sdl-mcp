@@ -57,6 +57,7 @@ import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { toLegacySymbolRow } from "./symbol-utils.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 import { getOverlaySnapshot } from "../../live-index/overlay-reader.js";
+import { buildConditionalResponse } from "../../util/conditional-response.js";
 
 
 function buildPolicyNextBestAction(params: {
@@ -812,7 +813,7 @@ export async function handleGetSkeleton(
         }
       : undefined;
 
-    const response: GetSkeletonResponse = {
+    const response = {
       skeleton: result.skeleton,
       file: file?.relPath || "",
       range: result.actualRange,
@@ -822,9 +823,12 @@ export async function handleGetSkeleton(
       truncation: skeletonTruncation,
     };
 
-    return symbol
+    const enrichedResponse = symbol
       ? attachRawContext(response, { fileIds: [symbol.fileId] })
       : response;
+    return buildConditionalResponse(enrichedResponse, {
+      ifNoneMatch: request.ifNoneMatch,
+    });
   } else if (request.file) {
     const result = await generateFileSkeleton(
       request.repoId,
@@ -857,7 +861,7 @@ export async function handleGetSkeleton(
         }
       : undefined;
 
-    const response: GetSkeletonResponse = {
+    const response = {
       skeleton: result.skeleton,
       file: request.file,
       range: result.actualRange,
@@ -873,9 +877,12 @@ export async function handleGetSkeleton(
       request.repoId,
       request.file,
     );
-    return fileRow
+    const enrichedResponse = fileRow
       ? attachRawContext(response, { fileIds: [fileRow.fileId] })
       : response;
+    return buildConditionalResponse(enrichedResponse, {
+      ifNoneMatch: request.ifNoneMatch,
+    });
   }
 
   throw new ValidationError("Either symbolId or file must be provided");
@@ -967,7 +974,10 @@ export async function handleGetHotPath(
     } : {}),
     truncated: result.truncated,
   };
-  return symbol
+  const enrichedResponse = symbol
     ? attachRawContext(response, { fileIds: [symbol.fileId] })
     : response;
+  return buildConditionalResponse(enrichedResponse, {
+    ifNoneMatch: request.ifNoneMatch,
+  });
 }

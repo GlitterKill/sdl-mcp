@@ -213,6 +213,7 @@ describe("v3 to v2 decode", () => {
     const v3 = toCompactGraphSliceV3(slice);
     const v2 = decodeCompactGraphSliceV3ToV2(v3);
 
+    assert.strictEqual(v3.cr?.[0]?.sid, SYM1_FULL);
     assert.strictEqual(v2.vid, v3.vid);
     assert.deepStrictEqual(v2.b, v3.b);
     assert.deepStrictEqual(v2.ss, v3.ss);

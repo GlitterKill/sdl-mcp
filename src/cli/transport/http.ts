@@ -61,20 +61,25 @@ type GraphLink = {
   weight: number;
 };
 
-export type LiveIndexApiRequest = {
+export type HttpApiRequest = {
   method?: string;
   pathname: string;
   body?: unknown;
+  headers?: Record<string, string | string[] | undefined>;
 };
+
+export type LiveIndexApiRequest = HttpApiRequest;
 
 type LiveIndexApiResponse = {
   status: number;
   payload: unknown;
+  headers?: Record<string, string>;
 };
 
 type HttpTransportServices = {
   liveIndex?: LiveIndexCoordinator;
   sessionManager?: SessionManager;
+  symbolGetCard?: typeof handleSymbolGetCard;
 };
 
 const MAX_SESSIONS = 16;
@@ -239,7 +244,7 @@ class InMemoryEventStore implements EventStore {
 // ---------------------------------------------------------------------------
 
 export async function routeLiveIndexApiRequest(
-  request: LiveIndexApiRequest,
+  request: HttpApiRequest,
   services: HttpTransportServices = {},
 ): Promise<LiveIndexApiResponse | null> {
   const method = request.method ?? "GET";
@@ -316,6 +321,78 @@ export async function routeLiveIndexApiRequest(
   }
 
   return null;
+}
+
+function getHeaderValue(
+  headers: Record<string, string | string[] | undefined> | undefined,
+  name: string,
+): string | undefined {
+  if (!headers) {
+    return undefined;
+  }
+
+  const targetName = name.toLowerCase();
+  const headerEntry = Object.entries(headers).find(([key]) =>
+    key.toLowerCase() === targetName
+  );
+  const value = headerEntry?.[1];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export async function routeSymbolCardApiRequest(
+  request: HttpApiRequest,
+  services: HttpTransportServices = {},
+): Promise<LiveIndexApiResponse | null> {
+  const method = request.method ?? "GET";
+  const symbolCardMatch = request.pathname.match(
+    /^\/api\/symbol\/([^/]+)\/card\/([^/]+)$/,
+  );
+  if (method !== "GET" || !symbolCardMatch) {
+    return null;
+  }
+
+  const [, repoId, symbolIdRaw] = symbolCardMatch;
+  const symbolId = decodeURIComponent(symbolIdRaw);
+  const symbolGetCard = services.symbolGetCard ?? handleSymbolGetCard;
+  const ifNoneMatch = getHeaderValue(request.headers, "if-none-match");
+  const response = await symbolGetCard({
+    repoId,
+    symbolId,
+    ifNoneMatch,
+  });
+
+  if ("notModified" in response) {
+    return {
+      status: 304,
+      payload: null,
+      headers: {
+        ETag: response.etag,
+      },
+    };
+  }
+
+  if (!response.card) {
+    return {
+      status: 404,
+      payload: { error: `Symbol not found: ${symbolId}` },
+    };
+  }
+
+  return {
+    status: 200,
+    payload: {
+      symbolId,
+      name: response.card.name,
+      kind: response.card.kind,
+      summary: response.card.summary,
+      file: response.card.file,
+      fanIn: response.card.metrics?.fanIn ?? 0,
+      fanOut: response.card.metrics?.fanOut ?? 0,
+    },
+    headers: {
+      ETag: response.card.etag,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -782,34 +859,26 @@ async function handleRestRequest(
       return true;
     }
 
-    const symbolCardMatch = pathname.match(
-      /^\/api\/symbol\/([^/]+)\/card\/([^/]+)$/,
+    const symbolCardResponse = await routeSymbolCardApiRequest(
+      {
+        method: req.method,
+        pathname,
+        headers: req.headers,
+      },
+      services,
     );
-    if (req.method === "GET" && symbolCardMatch) {
-      const [, repoId, symbolIdRaw] = symbolCardMatch;
-      const symbolId = decodeURIComponent(symbolIdRaw);
-      const response = await handleSymbolGetCard({
-        repoId,
-        symbolId,
-      });
-      if ("notModified" in response) {
+    if (symbolCardResponse) {
+      if (symbolCardResponse.headers) {
+        for (const [key, value] of Object.entries(symbolCardResponse.headers)) {
+          res.setHeader(key, value);
+        }
+      }
+      if (symbolCardResponse.status === 304) {
         res.writeHead(304);
         res.end();
-        return true;
+      } else {
+        json(res, symbolCardResponse.status, symbolCardResponse.payload);
       }
-      if (!response.card) {
-        json(res, 404, { error: `Symbol not found: ${symbolId}` });
-        return true;
-      }
-      json(res, 200, {
-        symbolId,
-        name: response.card.name,
-        kind: response.card.kind,
-        summary: response.card.summary,
-        file: response.card.file,
-        fanIn: response.card.metrics?.fanIn ?? 0,
-        fanOut: response.card.metrics?.fanOut ?? 0,
-      });
       return true;
     }
 

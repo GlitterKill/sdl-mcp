@@ -159,6 +159,7 @@ Cards include **confidence-scored call resolution** (the pass-2 resolver traces 
 - Confidence-scored dependency edges trace real call relationships across files
 - Community detection and call-chain tracing reveal architectural structure
 - ETag-based conditional requests avoid re-fetching unchanged symbols
+- Workflow ETag caching now seeds `slice.build` with `knownCardEtags` so repeated slice builds can skip unchanged cards
 
 [Indexing & Language Support Deep Dive →](./docs/feature-deep-dives/indexing-languages.md)
 
@@ -395,7 +396,7 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 <tr><td rowspan="4"><strong>Repository</strong></td>
     <td><code>sdl.repo.register</code></td><td>Register a codebase for indexing</td></tr>
 <tr><td><code>sdl.repo.status</code></td><td>Health, versions, watcher, prefetch, live-index stats</td></tr>
-<tr><td><code>sdl.repo.overview</code></td><td>Codebase summary: stats, directories, hotspots, clusters</td></tr>
+<tr><td><code>sdl.repo.overview</code></td><td>Codebase summary: stats, directories, hotspots, clusters, with conditional ETag fetch support</td></tr>
 <tr><td><code>sdl.index.refresh</code></td><td>Trigger full or incremental re-indexing</td></tr>
 
 <tr><td rowspan="3"><strong>Live Buffer</strong></td>
@@ -414,8 +415,8 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 <tr><td><code>sdl.slice.spillover.get</code></td><td>Page through overflow symbols beyond the budget</td></tr>
 
 <tr><td rowspan="3"><strong>Code Access</strong></td>
-    <td><code>sdl.code.getSkeleton</code></td><td>Signatures + control flow, bodies elided</td></tr>
-<tr><td><code>sdl.code.getHotPath</code></td><td>Lines matching specific identifiers + context</td></tr>
+    <td><code>sdl.code.getSkeleton</code></td><td>Signatures + control flow, bodies elided, with conditional ETag fetch support</td></tr>
+<tr><td><code>sdl.code.getHotPath</code></td><td>Lines matching specific identifiers + context, with conditional ETag fetch support</td></tr>
 <tr><td><code>sdl.code.needWindow</code></td><td>Full source code (policy-gated, requires justification)</td></tr>
 
 <tr><td><strong>Deltas</strong></td>
@@ -429,10 +430,10 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
     <td><code>sdl.pr.risk.analyze</code></td><td>Scored PR risk with findings and test recommendations</td></tr>
 
 <tr><td><strong>Context</strong></td>
-    <td><code>sdl.context.summary</code></td><td>Token-bounded portable briefing (markdown/JSON/clipboard)</td></tr>
+    <td><code>sdl.context.summary</code></td><td>Token-bounded portable briefing (markdown/JSON/clipboard) with conditional ETag fetch support</td></tr>
 
 <tr><td rowspan="3"><strong>Agent</strong></td>
-    <td><code>sdl.agent.context</code></td><td>Task-shaped context retrieval with budget-controlled rung planning</td></tr>
+    <td><code>sdl.agent.context</code></td><td>Task-shaped context retrieval with budget-controlled rung planning and conditional ETag fetch support</td></tr>
 <tr><td><code>sdl.agent.feedback</code></td><td>Record which symbols were useful or missing</td></tr>
 <tr><td><code>sdl.agent.feedback.query</code></td><td>Query aggregated feedback statistics</td></tr>
 

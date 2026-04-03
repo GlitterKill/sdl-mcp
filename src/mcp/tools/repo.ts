@@ -39,6 +39,7 @@ import { surfaceRelevantMemories } from "../../memory/surface.js";
 import { getMemoryCapabilities } from "../../config/memory-config.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { invalidateGraphSnapshot } from "../../graph/graphSnapshotCache.js";
+import { buildConditionalResponse } from "../../util/conditional-response.js";
 import {
   withSpan,
   SPAN_NAMES,
@@ -668,5 +669,12 @@ export async function handleRepoOverview(
 
   const overview = await buildRepoOverview(request);
 
-  return overview;
+  return buildConditionalResponse(overview, {
+    ifNoneMatch: request.ifNoneMatch,
+    // Ignore generatedAt so identical overview content can reuse client cache.
+    stableValue: {
+      ...overview,
+      generatedAt: null,
+    },
+  });
 }

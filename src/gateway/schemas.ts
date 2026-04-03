@@ -139,6 +139,7 @@ const ContextSummaryAction = z.object({
   budget: z.number().int().min(1).optional(),
   format: z.enum(["markdown", "json", "clipboard"]).optional(),
   scope: z.enum(["symbol", "file", "task", "repo"]).optional(),
+  ifNoneMatch: z.string().optional(),
 });
 
 const PRRiskAnalyzeAction = z.object({
@@ -198,6 +199,7 @@ const GetSkeletonAction = z.object({
   maxLines: z.number().int().min(1).optional(),
   maxTokens: z.number().int().min(1).optional(),
   identifiersToFind: z.array(z.string()).max(50).optional(),
+  ifNoneMatch: z.string().optional(),
 });
 
 const GetHotPathAction = z.object({
@@ -207,6 +209,7 @@ const GetHotPathAction = z.object({
   maxLines: z.number().int().min(1).optional(),
   maxTokens: z.number().int().min(1).optional(),
   contextLines: z.number().int().min(0).optional(),
+  ifNoneMatch: z.string().optional(),
 });
 
 export const CodeGatewaySchema = z
@@ -244,6 +247,7 @@ const RepoOverviewAction = z.object({
   directories: z.array(z.string()).optional(),
   maxDirectories: z.number().int().min(1).max(200).optional(),
   maxExportsPerDirectory: z.number().int().min(1).max(50).optional(),
+  ifNoneMatch: z.string().optional(),
 });
 
 const IndexRefreshAction = z.object({
@@ -352,6 +356,7 @@ const AgentContextAction = z.object({
     contextMode: z.enum(["precise", "broad"]).optional(),
     })
     .optional(),
+  ifNoneMatch: z.string().optional(),
 });
 
 const AgentFeedbackAction = z.object({

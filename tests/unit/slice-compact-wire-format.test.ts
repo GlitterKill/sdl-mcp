@@ -241,6 +241,7 @@ describe("slice compact wire format v2", () => {
     assert.strictEqual(compact.cr![0].ci, 0);
     assert.strictEqual(compact.cr![0].e, "etag-1");
     assert.strictEqual(compact.cr![0].dl, "full");
+    assert.strictEqual(compact.cr![0].sid, SYM1_FULL);
   });
 
   it("omits truncation when not truncated", () => {

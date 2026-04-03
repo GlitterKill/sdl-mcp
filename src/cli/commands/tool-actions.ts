@@ -200,6 +200,7 @@ const contextSummary: ActionDefinition = {
     { flag: "--budget", field: "budget", type: "number", description: "Token budget" },
     { flag: "--format", field: "format", type: "string", description: "Output format: markdown|json|clipboard" },
     { flag: "--scope", field: "scope", type: "string", description: "Scope: symbol|file|task" },
+    { flag: "--if-none-match", field: "ifNoneMatch", type: "string", description: "ETag for conditional fetch" },
   ],
   examples: [
     'sdl-mcp tool context.summary --repo-id my-repo --query "auth module"',
@@ -256,6 +257,7 @@ const codeGetSkeleton: ActionDefinition = {
     { flag: "--max-lines", field: "maxLines", type: "number", description: "Max lines in output" },
     { flag: "--max-tokens", field: "maxTokens", type: "number", description: "Max tokens in output" },
     { flag: "--identifiers", field: "identifiersToFind", type: "string[]", description: "Comma-separated identifiers to highlight" },
+    { flag: "--if-none-match", field: "ifNoneMatch", type: "string", description: "ETag for conditional fetch" },
   ],
   examples: [
     'sdl-mcp tool code.getSkeleton --repo-id my-repo --file src/server.ts',
@@ -274,6 +276,7 @@ const codeGetHotPath: ActionDefinition = {
     { flag: "--max-lines", field: "maxLines", type: "number", description: "Max lines in output" },
     { flag: "--max-tokens", field: "maxTokens", type: "number", description: "Max tokens in output" },
     { flag: "--context-lines", field: "contextLines", type: "number", description: "Context lines around matches" },
+    { flag: "--if-none-match", field: "ifNoneMatch", type: "string", description: "ETag for conditional fetch" },
   ],
   examples: [
     'sdl-mcp tool code.getHotPath --repo-id my-repo --symbol-id "sym1" --identifiers "handleAuth,validateToken"',
@@ -324,6 +327,7 @@ const repoOverview: ActionDefinition = {
     { flag: "--directories", field: "directories", type: "string[]", description: "Comma-separated directories to focus on" },
     { flag: "--max-directories", field: "maxDirectories", type: "number", description: "Max directories to include (1-200)" },
     { flag: "--max-exports-per-directory", field: "maxExportsPerDirectory", type: "number", description: "Max exports per directory (1-50)" },
+    { flag: "--if-none-match", field: "ifNoneMatch", type: "string", description: "ETag for conditional fetch" },
   ],
   examples: [
     'sdl-mcp tool repo.overview --repo-id my-repo --level stats',
@@ -385,6 +389,7 @@ const agentContext: ActionDefinition = {
     { flag: "--task-text", field: "taskText", type: "string", required: true, description: "Task description" },
     { flag: "--budget", field: "budget", type: "json", description: 'JSON budget, e.g. \'{"maxTokens":5000}\'' },
     { flag: "--options", field: "options", type: "json", description: 'JSON options, e.g. \'{"contextMode":"precise","includeTests":true}\'' },
+    { flag: "--if-none-match", field: "ifNoneMatch", type: "string", description: "ETag for conditional fetch" },
   ],
   examples: [
     'sdl-mcp tool agent.context --repo-id my-repo --task-type debug --task-text "fix auth bug"',

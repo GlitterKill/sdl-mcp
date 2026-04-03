@@ -90,15 +90,15 @@ function sliceSpilloverGet(p: { spilloverHandle: string; page?: number; pageSize
 /** Get delta between versions */
 function deltaGet(p: { fromVersion?: string; toVersion?: string; includeBlastRadius?: boolean }): { changed: object[]; blastRadius?: object[] }
 /** Generate context summary */
-function contextSummary(p: { symbolId?: string; file?: string; query?: string; budget?: number; format?: "markdown"|"json"|"clipboard"; scope?: "symbol"|"file"|"task"|"repo" }): { summary: string; tokens: number }
+function contextSummary(p: { symbolId?: string; file?: string; query?: string; budget?: number; format?: "markdown"|"json"|"clipboard"; scope?: "symbol"|"file"|"task"|"repo"; ifNoneMatch?: string }): { summary: string; tokens: number } | { notModified: true; etag: string }
 /** Analyze PR risk */
 function prRiskAnalyze(p: { fromVersion: string; toVersion: string; riskThreshold?: number }): { riskItems: object[]; summary: string }
 
 // === Code (ladder: card -> skeleton -> hotPath -> needWindow) ===
 /** Get skeleton IR (signatures + control flow) */
-function codeSkeleton(p: { symbolId?: string; file?: string; exportedOnly?: boolean }): { skeleton: string }
+function codeSkeleton(p: { symbolId?: string; file?: string; exportedOnly?: boolean; ifNoneMatch?: string }): { skeleton: string; etag: string } | { notModified: true; etag: string }
 /** Get hot-path excerpt for specific identifiers */
-function codeHotPath(p: { symbolId: string; identifiersToFind: string[]; contextLines?: number }): { excerpt: string; foundIdentifiers: string[] }
+function codeHotPath(p: { symbolId: string; identifiersToFind: string[]; contextLines?: number; ifNoneMatch?: string }): { excerpt: string; foundIdentifiers: string[]; etag: string } | { notModified: true; etag: string }
 /** Request raw code window (requires justification) */
 function codeNeedWindow(p: { symbolId: string; reason: string; expectedLines: number; identifiersToFind: string[]; maxTokens?: number }): { code: string; approved: boolean }
 
@@ -108,7 +108,7 @@ function repoRegister(p: { rootPath: string }): { repoId: string }
 /** Get repository status */
 function repoStatus(): { status: object }
 /** Get codebase overview */
-function repoOverview(p: { level?: "stats" | "directories" | "full" }): { overview: object }
+function repoOverview(p: { level?: "stats" | "directories" | "full"; ifNoneMatch?: string }): { overview: object; etag: string } | { notModified: true; etag: string }
 /** Refresh index */
 function indexRefresh(p: { mode?: "full" | "incremental" }): { indexed: number; duration: number }
 /** Get policy config */
@@ -128,7 +128,7 @@ function memorySurface(p: { symbolIds?: string[]; fileIds?: string[]; taskText?:
 
 // === Context / Agent ===
 /** Retrieve multi-rung task context */
-function agentContext(p: { taskType: "debug" | "review" | "implement" | "explain"; taskText: string; budget?: { maxTokens?: number; maxActions?: number; maxDurationMs?: number }; options?: { focusSymbols?: string[]; focusPaths?: string[]; includeTests?: boolean; requireDiagnostics?: boolean; contextMode?: "precise"|"broad" } }): { evidence: object[] }
+function agentContext(p: { taskType: "debug" | "review" | "implement" | "explain"; taskText: string; budget?: { maxTokens?: number; maxActions?: number; maxDurationMs?: number }; options?: { focusSymbols?: string[]; focusPaths?: string[]; includeTests?: boolean; requireDiagnostics?: boolean; contextMode?: "precise"|"broad" }; ifNoneMatch?: string }): { evidence: object[]; etag: string } | { notModified: true; etag: string }
 /** Record agent feedback */
 function agentFeedback(p: { versionId: string; sliceHandle: string; usefulSymbols: string[]; missingSymbols?: string[]; rating?: string; comment?: string }): { recorded: boolean }
 /** Query feedback records */
@@ -182,7 +182,7 @@ function dataTemplate(p: { input: Record<string, unknown> | unknown[]; template:
 // Edge (e[]): [fromCardIdx, toCardIdx, edgeTypeIdx, weight]
 // Frontier (f[]): ci=cardIndex(-1=not in slice), s=score, w=why(c=call,i=import,e=entry)
 // Truncation (t): tr=truncated, dc=droppedCards, de=droppedEdges, res={t=type, v=value}
-// CardRef (cr[]): ci=cardIndex, e=etag, dl=detailLevel (used with knownCardEtags)
+// CardRef (cr[]): ci=cardIndex, sid=fullSymbolId, e=etag, dl=detailLevel (used with knownCardEtags)
 `;
 
 export function generateManual(_liveIndex?: LiveIndexCoordinator): string {

@@ -73,12 +73,18 @@ function normalizeObject(obj: unknown): NormalizedValue {
   return obj as NormalizedValue;
 }
 
+export function normalizeValue(value: unknown): NormalizedValue {
+  return normalizeObject(value);
+}
+
+export function hashValue(value: unknown): string {
+  return hashContent(JSON.stringify(normalizeValue(value)));
+}
+
 export function normalizeCard(card: SymbolCard): NormalizedValue {
-  return normalizeObject(card);
+  return normalizeValue(card);
 }
 
 export function hashCard(card: SymbolCard): string {
-  const normalized = normalizeCard(card);
-  const canonical = JSON.stringify(normalized);
-  return hashContent(canonical);
+  return hashValue(normalizeCard(card));
 }

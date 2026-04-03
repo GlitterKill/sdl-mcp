@@ -381,6 +381,7 @@ const CompactFrontierItemV2Schema = z.object({
 
 const CompactSliceCardRefV2Schema = z.object({
   ci: z.number().int().min(0),
+  sid: z.string().optional(),
   e: z.string(),
   dl: CardDetailLevelSchema.optional(),
 });
@@ -884,6 +885,11 @@ const NotModifiedResponseSchema = z.object({
   ledgerVersion: z.string(),
 });
 
+const ConditionalNotModifiedResponseSchema = z.object({
+  notModified: z.literal(true),
+  etag: z.string(),
+});
+
 export const SymbolRefSchema = z.object({
   name: z.string().min(1),
   file: z.string().min(1).optional(),
@@ -1256,12 +1262,13 @@ export const GetSkeletonRequestSchema = z
     maxTokens: z.number().int().min(1).optional(),
     identifiersToFind: z.array(z.string()).max(50).optional(),
     skeletonOffset: z.number().int().min(0).optional(),
+    ifNoneMatch: z.string().optional(),
   })
   .refine((data) => data.symbolId !== undefined || data.file !== undefined, {
     message: "Either symbolId or file must be provided",
   });
 
-export const GetSkeletonResponseSchema = z.object({
+const GetSkeletonPayloadSchema = z.object({
   skeleton: z.string(),
   file: z.string(),
   range: RangeSchema,
@@ -1283,6 +1290,13 @@ export const GetSkeletonResponseSchema = z.object({
     .optional(),
 });
 
+export const GetSkeletonResponseSchema = z.union([
+  GetSkeletonPayloadSchema.extend({
+    etag: z.string(),
+  }),
+  ConditionalNotModifiedResponseSchema,
+]);
+
 export const GetHotPathRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
@@ -1290,9 +1304,10 @@ export const GetHotPathRequestSchema = z.object({
   maxLines: z.number().int().min(1).optional(),
   maxTokens: z.number().int().min(1).optional(),
   contextLines: z.number().int().min(0).optional(),
+  ifNoneMatch: z.string().optional(),
 });
 
-export const GetHotPathResponseSchema = z.object({
+const GetHotPathPayloadSchema = z.object({
   excerpt: z.string(),
   file: z.string(),
   range: RangeSchema,
@@ -1302,6 +1317,13 @@ export const GetHotPathResponseSchema = z.object({
   missedIdentifiers: z.array(z.string()).optional(),
   truncated: z.boolean(),
 });
+
+export const GetHotPathResponseSchema = z.union([
+  GetHotPathPayloadSchema.extend({
+    etag: z.string(),
+  }),
+  ConditionalNotModifiedResponseSchema,
+]);
 
 const PolicyConfigSchema = z.object({
   maxWindowLines: z.number().int().min(1).default(DEFAULT_MAX_WINDOW_LINES),
@@ -1425,9 +1447,10 @@ export const RepoOverviewRequestSchema = z.object({
   directories: z.array(z.string()).optional(),
   maxDirectories: z.number().int().min(1).max(200).optional(),
   maxExportsPerDirectory: z.number().int().min(1).max(50).optional(),
+  ifNoneMatch: z.string().optional(),
 });
 
-export const RepoOverviewResponseSchema = z.object({
+const RepoOverviewPayloadSchema = z.object({
   repoId: z.string().min(1),
   versionId: z.string(),
   generatedAt: z.string(),
@@ -1465,6 +1488,13 @@ export const RepoOverviewResponseSchema = z.object({
     .optional(),
   tokenMetrics: TokenMetricsSchema,
 });
+
+export const RepoOverviewResponseSchema = z.union([
+  RepoOverviewPayloadSchema.extend({
+    etag: z.string(),
+  }),
+  ConditionalNotModifiedResponseSchema,
+]);
 
 // ============================================================================
 // Context Summary Schemas
@@ -1549,14 +1579,22 @@ export const ContextSummaryRequestSchema = z.object({
   budget: z.number().int().min(1).optional(),
   format: ContextSummaryFormatSchema.optional(),
   scope: ContextSummaryScopeSchema.optional(),
+  ifNoneMatch: z.string().optional(),
 });
 
-export const ContextSummaryResponseSchema = z.object({
+const ContextSummaryPayloadSchema = z.object({
   repoId: z.string().min(1),
   format: ContextSummaryFormatSchema,
   summary: ContextSummarySchema,
   content: z.string(),
 });
+
+export const ContextSummaryResponseSchema = z.union([
+  ContextSummaryPayloadSchema.extend({
+    etag: z.string(),
+  }),
+  ConditionalNotModifiedResponseSchema,
+]);
 
 export type RepoRegisterRequest = z.infer<typeof RepoRegisterRequestSchema>;
 export type RepoRegisterResponse = z.infer<typeof RepoRegisterResponseSchema>;
@@ -1758,9 +1796,10 @@ export const AgentContextRequestSchema = z.object({
     })
     .optional()
     .describe("Task-specific options"),
+  ifNoneMatch: z.string().optional(),
 });
 
-export const AgentContextResponseSchema = z.object({
+const AgentContextPayloadSchema = z.object({
   taskId: z.string().describe("Unique task identifier"),
   taskType: z
     .enum(["debug", "review", "implement", "explain"])
@@ -1832,6 +1871,13 @@ export const AgentContextResponseSchema = z.object({
     }).optional(),
   }).optional(),
 });
+
+export const AgentContextResponseSchema = z.union([
+  AgentContextPayloadSchema.extend({
+    etag: z.string(),
+  }),
+  ConditionalNotModifiedResponseSchema,
+]);
 
 export type AgentContextRequest = z.infer<
   typeof AgentContextRequestSchema

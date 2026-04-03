@@ -1,4 +1,5 @@
 const MAX_ETAG_CACHE_SIZE = 2000;
+const MAX_KNOWN_CARD_ETAGS = 1000;
 
 export class WorkflowEtagCache {
   private cache: Map<string, string> = new Map();
@@ -28,6 +29,11 @@ export class WorkflowEtagCache {
         if (found) {
           args.knownEtags = knownEtags;
         }
+      }
+    } else if (action === "slice.build" && !args.knownCardEtags) {
+      const knownCardEtags = this.getRecentEtags(MAX_KNOWN_CARD_ETAGS);
+      if (Object.keys(knownCardEtags).length > 0) {
+        args.knownCardEtags = knownCardEtags;
       }
     }
   }
@@ -65,7 +71,57 @@ export class WorkflowEtagCache {
           }
         }
       }
+    } else if (action === "slice.build") {
+      this.extractSliceEtags(record.slice);
     }
+  }
+
+  private extractSliceEtags(slice: unknown): void {
+    if (!slice || typeof slice !== "object") return;
+
+    const record = slice as Record<string, unknown>;
+    const cardRefs = record.cardRefs;
+    if (Array.isArray(cardRefs)) {
+      for (const entry of cardRefs) {
+        if (!entry || typeof entry !== "object") continue;
+        const ref = entry as Record<string, unknown>;
+        const symbolId = ref.symbolId;
+        const etag = ref.etag;
+        if (typeof symbolId === "string" && typeof etag === "string") {
+          this.cache.set(symbolId, etag);
+          this.evictIfNeeded();
+        }
+      }
+      return;
+    }
+
+    const compactRefs = record.cr;
+    if (!Array.isArray(compactRefs)) return;
+
+    const symbolIndex = Array.isArray(record.si) ? record.si : [];
+    for (const entry of compactRefs) {
+      if (!entry || typeof entry !== "object") continue;
+      const ref = entry as Record<string, unknown>;
+      const etag = ref.e;
+      if (typeof etag !== "string") continue;
+
+      const symbolId =
+        typeof ref.sid === "string"
+          ? ref.sid
+          : typeof ref.ci === "number"
+            ? symbolIndex[ref.ci]
+            : undefined;
+
+      if (typeof symbolId === "string") {
+        this.cache.set(symbolId, etag);
+        this.evictIfNeeded();
+      }
+    }
+  }
+
+  private getRecentEtags(limit: number): Record<string, string> {
+    const entries = Array.from(this.cache.entries());
+    return Object.fromEntries(entries.slice(-limit));
   }
 
   private evictIfNeeded(): void {

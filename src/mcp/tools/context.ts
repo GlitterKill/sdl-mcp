@@ -7,6 +7,82 @@ import {
   type AgentContextResponse,
 } from "../tools.js";
 import { ZodError } from "zod";
+import { buildConditionalResponse } from "../../util/conditional-response.js";
+
+function stripVolatileEvidenceFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripVolatileEvidenceFields(entry));
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const stableEntries = Object.entries(record)
+      .filter(([key]) => key !== "timestamp")
+      .map(([key, entryValue]) => [key, stripVolatileEvidenceFields(entryValue)]);
+    return Object.fromEntries(stableEntries);
+  }
+
+  return value;
+}
+
+function buildStableAgentContextValue(
+  response: Record<string, unknown>,
+): Record<string, unknown> {
+  const actionsTaken = Array.isArray(response.actionsTaken)
+    ? response.actionsTaken.map((action) => {
+      if (!action || typeof action !== "object") return action;
+      const entry = action as Record<string, unknown>;
+      return {
+        type: entry.type,
+        status: entry.status,
+        input: entry.input,
+        output: entry.output,
+        error: entry.error,
+        evidence: stripVolatileEvidenceFields(entry.evidence),
+      };
+    })
+    : [];
+
+  const finalEvidence = Array.isArray(response.finalEvidence)
+    ? response.finalEvidence.map((item) => {
+      if (!item || typeof item !== "object") return item;
+      const entry = item as Record<string, unknown>;
+      return {
+        type: entry.type,
+        reference: entry.reference,
+        summary: entry.summary,
+      };
+    })
+    : [];
+
+  const metrics =
+    response.metrics && typeof response.metrics === "object"
+      ? (() => {
+        const entry = response.metrics as Record<string, unknown>;
+        return {
+          totalTokens: entry.totalTokens,
+          totalActions: entry.totalActions,
+          successfulActions: entry.successfulActions,
+          failedActions: entry.failedActions,
+          cacheHits: entry.cacheHits,
+        };
+      })()
+      : undefined;
+
+  return {
+    taskType: response.taskType,
+    actionsTaken,
+    path: response.path,
+    finalEvidence,
+    summary: response.summary,
+    success: response.success,
+    error: response.error,
+    metrics,
+    answer: response.answer,
+    nextBestAction: response.nextBestAction,
+    retrievalEvidence: stripVolatileEvidenceFields(response.retrievalEvidence),
+  };
+}
 
 export async function handleAgentContext(
   args: unknown,
@@ -22,16 +98,26 @@ export async function handleAgentContext(
     };
 
     const result = await contextEngine.buildContext(task);
-    const response = result as AgentContextResponse;
+    const response = result as Exclude<
+      AgentContextResponse,
+      { notModified: true }
+    >;
 
     const focusPaths = request.options?.focusPaths;
     const fileIds = focusPaths?.length
       ? focusPaths.map((path) => `${request.repoId}:${path}`)
       : undefined;
-    return attachRawContext(
+    const enrichedResponse = attachRawContext(
       response,
       fileIds ? { fileIds } : { rawTokens: response.metrics.totalTokens * 3 },
     );
+    return buildConditionalResponse(enrichedResponse, {
+      ifNoneMatch: request.ifNoneMatch,
+      // Strip request-unique IDs and timing data from the ETag source.
+      stableValue: buildStableAgentContextValue(
+        enrichedResponse as Record<string, unknown>,
+      ),
+    });
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(
