@@ -22,6 +22,7 @@ import { logger } from "../util/logger.js";
 import { isHybridRetrievalAvailable } from "../retrieval/fallback.js";
 import { hybridSearch } from "../retrieval/orchestrator.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
+import { rankSymbols, applyAdaptiveCutoff } from "./context-ranking.js";
 import { randomUUID } from "node:crypto";
 
 const BEHAVIORAL_KINDS = new Set([
@@ -529,9 +530,8 @@ export class Executor {
   }
 
   /**
-   * Select the top symbols based on relevance scores with adaptive cutoff.
-   * For precise queries (1-2 high-scoring symbols), returns only those.
-   * For broad queries (many similar scores), returns more context.
+   * Select the top symbols based on multi-factor ranking with adaptive cutoff.
+   * Delegates scoring to context-ranking.ts for evidence-aware symbol selection.
    */
   private async selectTopSymbols(
     symbolIds: string[],
@@ -548,111 +548,14 @@ export class Executor {
     const conn = await this.getConn();
     const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
 
-    const identifierSet = new Set(identifiers.map((id) => id.toLowerCase()));
-    const taskTextLower = task.taskText.toLowerCase();
+    const ranking = rankSymbols(symbolIds, symbolMap, identifiers, task);
 
-    const scored: Array<{ symbolId: string; score: number }> = [];
-    for (const symbolId of symbolIds) {
-      const sym = symbolMap.get(symbolId);
-      if (!sym) {
-        scored.push({ symbolId, score: 0 });
-        continue;
-      }
-      let score = 0;
-      const nameLower = sym.name.toLowerCase();
-
-      // Exact name-in-taskText bonus: only for names 8+ chars to avoid
-      // rewarding generic short names like "cache" or "process" that
-      // coincidentally appear in the query as vocabulary words.
-      if (nameLower.length >= 8 && taskTextLower.includes(nameLower))
-        score += 10;
-      // Exact identifier match: only for compound names (6+ chars) or
-      // names that look like code identifiers (contain uppercase).
-      if (
-        identifierSet.has(nameLower) &&
-        (nameLower.length >= 6 || /[A-Z]/.test(sym.name))
-      )
-        score += 8;
-
-      // Award points for EACH matching identifier in the symbol name.
-      // Multi-term overlap (e.g., name contains both "slice" and "cache")
-      // signals higher relevance than a single-term match.
-      if (nameLower.length >= 3) {
-        let nameMatches = 0;
-        for (const id of identifiers) {
-          if (id.length < 3) continue;
-          const idLower = id.toLowerCase();
-          if (
-            nameLower.includes(idLower) ||
-            (nameLower.length >= 6 && idLower.includes(nameLower))
-          ) {
-            nameMatches++;
-          }
-        }
-        // Scale per-match bonus: first match +3, additional matches +4
-        // to strongly reward multi-term overlap.
-        score += nameMatches > 0 ? 3 + Math.min(nameMatches - 1, 3) * 4 : 0;
-      }
-      // Award points for EACH matching identifier in the summary.
-      if (sym.summary) {
-        const summaryLower = sym.summary.toLowerCase();
-        let summaryMatches = 0;
-        for (const id of identifiers) {
-          if (id.length < 3) continue;
-          if (summaryLower.includes(id.toLowerCase())) {
-            summaryMatches++;
-          }
-        }
-        score += Math.min(summaryMatches, 4) * 2;
-      }
-      // Bonus for searchText containing query terms. searchText includes
-      // path tokens, role tags, and split name parts — good for conceptual
-      // proximity when the symbol name itself is a compound identifier.
-      if (sym.searchText) {
-        const searchLower = sym.searchText.toLowerCase();
-        let searchMatches = 0;
-        for (const id of identifiers) {
-          if (id.length < 3) continue;
-          if (searchLower.includes(id.toLowerCase())) {
-            searchMatches++;
-          }
-        }
-        score += Math.min(searchMatches, 3) * 2;
-      }
-      if (sym.exported) score += 1;
-      scored.push({ symbolId, score });
-    }
-    scored.sort((a, b) => b.score - a.score);
-
-    const topScore = scored[0]?.score ?? 0;
     const isPrecise = task.options?.contextMode === "precise";
+    const hasScope = !!(
+      task.options?.focusPaths?.length || task.options?.focusSymbols?.length
+    );
 
-    // Precise: aggressive threshold (60% of top), cap at 5 symbols.
-    // Broad: generous threshold (30% of top) with a lower absolute floor
-    // to retain partial/summary matches from conceptual queries.
-    const threshold = isPrecise
-      ? Math.max(5, topScore * 0.6)
-      : Math.max(2, topScore * 0.3);
-    const hasScope =
-      task.options?.focusPaths?.length || task.options?.focusSymbols?.length;
-    const effectiveMax = isPrecise
-      ? Math.min(5, maxCount)
-      : hasScope
-        ? maxCount
-        : Math.min(20, maxCount);
-    const relevant = scored.filter((s) => s.score >= threshold);
-    const count = Math.max(1, Math.min(relevant.length, effectiveMax));
-
-    logger.debug("Adaptive symbol selection", {
-      total: scored.length,
-      topScore,
-      threshold,
-      selected: count,
-      effectiveMax,
-      scoped: !!hasScope,
-      contextMode: isPrecise ? "precise" : "broad",
-    });
-    return scored.slice(0, count).map((s) => s.symbolId);
+    return applyAdaptiveCutoff(ranking, maxCount, isPrecise, hasScope);
   }
 
   private async executeCardRung(

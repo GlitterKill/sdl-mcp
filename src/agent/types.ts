@@ -152,3 +152,31 @@ export interface ContextSeedResult {
   candidates: ContextSeedCandidate[];
   sources: { semantic: number; lexical: number; feedback: number };
 }
+
+// ---------------------------------------------------------------------------
+// Symbol ranking types (multi-factor scoring)
+// ---------------------------------------------------------------------------
+
+/** Confidence tier from ranking analysis. */
+export type ConfidenceTier = "high" | "medium" | "low";
+
+/** Scored symbol with multi-factor breakdown. */
+export interface ScoredSymbol {
+  symbolId: string;
+  totalScore: number;
+  retrievalPrior: number; // 0-40
+  graphProximity: number; // 0-20
+  lexicalOverlap: number; // 0-15
+  summarySupport: number; // 0-10
+  feedbackPrior: number; // 0-10
+  structuralBonus: number; // 0-5
+}
+
+/** Result of symbol ranking with confidence metadata. */
+export interface SymbolRankingResult {
+  ranked: ScoredSymbol[];
+  topScore: number;
+  secondScore: number;
+  confidenceTier: ConfidenceTier;
+  sourceAgreement: number; // how many sources agree on top symbols
+}

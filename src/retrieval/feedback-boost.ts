@@ -33,6 +33,8 @@ export interface FeedbackBoostOptions {
   query: string;
   /** Max feedback rows to consider. Default: 10. */
   limit?: number;
+  /** Current task type for similarity bonus. */
+  currentTaskType?: string;
 }
 
 /**
@@ -47,11 +49,15 @@ export interface FeedbackBoostOptions {
  */
 export function mergeFeedbackBoosts(
   feedbackHits: FeedbackBoostResult[],
+  currentTaskType?: string,
 ): Map<string, number> {
   const boosts = new Map<string, number>();
 
   for (const hit of feedbackHits) {
-    const weight = hit.score * 0.3;
+    // Task-type similarity bonus: +50% if same task type
+    const typeSimilarity =
+      currentTaskType && hit.taskType === currentTaskType ? 1.5 : 1.0;
+    const weight = hit.score * 0.3 * typeSimilarity;
     for (const symbolId of hit.usefulSymbols) {
       const current = boosts.get(symbolId) ?? 0;
       boosts.set(symbolId, Math.min(1.0, current + weight));
@@ -80,7 +86,8 @@ export async function queryFeedbackBoosts(
     // Dynamic imports to avoid pulling OTel/DB chains at module load time
     const { entitySearch } = await import("./orchestrator.js");
     const { queryAll } = await import("../db/ladybug-core.js");
-    const { safeJsonParse, StringArraySchema } = await import("../util/safeJson.js");
+    const { safeJsonParse, StringArraySchema } =
+      await import("../util/safeJson.js");
     const { logger } = await import("../util/logger.js");
 
     const searchResult = await entitySearch({
@@ -97,7 +104,9 @@ export async function queryFeedbackBoosts(
 
     const feedbackHits: FeedbackBoostResult[] = [];
     const feedbackIds = searchResult.results.map((r) => r.entityId);
-    const scoreMap = new Map(searchResult.results.map((r) => [r.entityId, r.score]));
+    const scoreMap = new Map(
+      searchResult.results.map((r) => [r.entityId, r.score]),
+    );
 
     const rows = await queryAll<{
       feedbackId: string;
@@ -119,8 +128,16 @@ export async function queryFeedbackBoosts(
       feedbackHits.push({
         feedbackId: row.feedbackId,
         score: scoreMap.get(row.feedbackId) ?? 0,
-        usefulSymbols: safeJsonParse(row.usefulSymbolsJson, StringArraySchema, []),
-        missingSymbols: safeJsonParse(row.missingSymbolsJson, StringArraySchema, []),
+        usefulSymbols: safeJsonParse(
+          row.usefulSymbolsJson,
+          StringArraySchema,
+          [],
+        ),
+        missingSymbols: safeJsonParse(
+          row.missingSymbolsJson,
+          StringArraySchema,
+          [],
+        ),
         taskType: row.taskType,
       });
     }
@@ -129,7 +146,7 @@ export async function queryFeedbackBoosts(
 
     logger.debug(
       `[feedback-boost] Found ${feedbackHits.length} matching feedback rows, ` +
-      `boosting ${boosts.size} symbols`,
+        `boosting ${boosts.size} symbols`,
     );
 
     return { boosts, feedbackHits };
