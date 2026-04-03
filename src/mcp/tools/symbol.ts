@@ -25,7 +25,10 @@ import {
   searchSymbolsWithOverlay,
   searchSymbolsHybridWithOverlay,
 } from "../../live-index/overlay-reader.js";
-import { checkRetrievalHealth, shouldFallbackToLegacy } from "../../retrieval/index.js";
+import {
+  checkRetrievalHealth,
+  shouldFallbackToLegacy,
+} from "../../retrieval/index.js";
 import type { RetrievalEvidence } from "../../retrieval/types.js";
 import { logger } from "../../util/logger.js";
 import { buildCardForSymbol } from "../../services/card-builder.js";
@@ -58,14 +61,63 @@ export function sortByExactMatch<T extends { name: string }>(
     const bFile = (b as Record<string, unknown>).file as string | undefined;
     const sourceScore = (f: string | undefined) => {
       if (!f) return 0;
-      if (f.startsWith('tests/fixtures/')) return -2;
-      if (f.startsWith('tests/')) return -1;
-      if (f.startsWith('src/')) return 1;
+      if (f.startsWith("tests/fixtures/")) return -2;
+      if (f.startsWith("tests/")) return -1;
+      if (f.startsWith("src/")) return 1;
       return 0;
     };
     return sourceScore(bFile) - sourceScore(aFile);
   });
 }
+
+/** Common stop words filtered from search suggestions to improve quality. */
+const SUGGESTION_STOP_WORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "will",
+  "would",
+  "could",
+  "should",
+  "may",
+  "might",
+  "can",
+  "shall",
+  "not",
+  "no",
+  "nor",
+  "and",
+  "or",
+  "but",
+  "if",
+  "then",
+  "else",
+  "for",
+  "from",
+  "to",
+  "in",
+  "on",
+  "at",
+  "by",
+  "of",
+  "with",
+  "as",
+  "get",
+  "set",
+]);
 
 /**
  * Split a camelCase/PascalCase/snake_case identifier into lowercase subwords.
@@ -73,8 +125,12 @@ export function sortByExactMatch<T extends { name: string }>(
  * Exported for testability.
  */
 export function splitCamelSubwords(s: string): string[] {
-  const words = s.match(/[A-Z]+\d+[A-Z]+(?=[A-Z][a-z]|[^a-zA-Z0-9]|$)|[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|\d+/g);
-  return (words ?? [s]).map(w => w.toLowerCase()).filter(w => w.length >= 2);
+  const words = s.match(
+    /[A-Z]+\d+[A-Z]+(?=[A-Z][a-z]|[^a-zA-Z0-9]|$)|[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|\d+/g,
+  );
+  return (words ?? [s])
+    .map((w) => w.toLowerCase())
+    .filter((w) => w.length >= 2);
 }
 
 /**
@@ -127,7 +183,9 @@ export function computeRelevance(name: string, query: string): number {
     try {
       if (new RegExp("^" + pattern + "$", "i").test(nl)) return 0.9;
       if (new RegExp(pattern, "i").test(nl)) return 0.75;
-    } catch { /* invalid pattern, fall through */ }
+    } catch {
+      /* invalid pattern, fall through */
+    }
   }
   if (nl.startsWith(ql)) return 0.85;
   if (nl.includes(ql)) return 0.7;
@@ -137,13 +195,17 @@ export function computeRelevance(name: string, query: string): number {
   const queryParts = splitCamelSubwords(query);
   const nameParts = splitCamelSubwords(name);
   if (queryParts.length >= 2 && nameParts.length >= 2) {
-    const matchCount = queryParts.filter(qp => nameParts.some(np => np.includes(qp) || qp.includes(np))).length;
+    const matchCount = queryParts.filter((qp) =>
+      nameParts.some((np) => np.includes(qp) || qp.includes(np)),
+    ).length;
     const ratio = matchCount / queryParts.length;
     if (matchCount === queryParts.length) return 0.8;
     // Also check reverse: if ALL nameParts appear in queryParts (name is a subset of query)
     // e.g. query "buildGraphSlice" -> [build,graph,slice], name "buildSlice" -> [build,slice]
     // nameMatchCount = 2/2 = 1.0 -> score 0.7
-    const nameMatchCount = nameParts.filter(np => queryParts.some(qp => qp.includes(np) || np.includes(qp))).length;
+    const nameMatchCount = nameParts.filter((np) =>
+      queryParts.some((qp) => qp.includes(np) || np.includes(qp)),
+    ).length;
     const nameRatio = nameMatchCount / nameParts.length;
     if (nameRatio === 1 && nameParts.length >= 2) return 0.7;
     if (matchCount > 0 || nameMatchCount > 0) {
@@ -156,9 +218,9 @@ export function computeRelevance(name: string, query: string): number {
     }
   }
   // Check if query words appear in the name (multi-word queries)
-  const queryWords = ql.split(/[\s_]+/).filter(w => w.length >= 3);
+  const queryWords = ql.split(/[\s_]+/).filter((w) => w.length >= 3);
   if (queryWords.length > 1) {
-    const matchCount = queryWords.filter(w => nl.includes(w)).length;
+    const matchCount = queryWords.filter((w) => nl.includes(w)).length;
     if (matchCount > 0) return 0.3 + 0.3 * (matchCount / queryWords.length);
   }
   // Check if name appears in query
@@ -167,9 +229,16 @@ export function computeRelevance(name: string, query: string): number {
   const triSim = trigramSimilarity(nl, ql);
   if (triSim >= 0.3) return 0.1 + 0.3 * triSim;
   // Weak: individual word overlap
-  const nameWords = (nl.match(/[A-Z]+\d+[A-Z]+(?=[A-Z][a-z]|[^a-zA-Z0-9]|$)|[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|\d+/gi) ?? [nl]).map(w => w.toLowerCase()).filter(w => w.length >= 3);
-  const overlap = nameWords.filter(w => ql.includes(w)).length;
-  if (overlap > 0) return 0.1 + 0.15 * (overlap / Math.max(nameWords.length, 1));
+  const nameWords = (
+    nl.match(
+      /[A-Z]+\d+[A-Z]+(?=[A-Z][a-z]|[^a-zA-Z0-9]|$)|[A-Z]{2,}(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[A-Z]+|\d+/gi,
+    ) ?? [nl]
+  )
+    .map((w) => w.toLowerCase())
+    .filter((w) => w.length >= 3);
+  const overlap = nameWords.filter((w) => ql.includes(w)).length;
+  if (overlap > 0)
+    return 0.1 + 0.15 * (overlap / Math.max(nameWords.length, 1));
   return 0.05;
 }
 
@@ -181,7 +250,10 @@ export async function handleSymbolSearch(
   const startedAt = Date.now();
   const request = args as SymbolSearchRequest;
   const requestedLimit = request.limit ?? SYMBOL_SEARCH_DEFAULT_LIMIT;
-  const limit = (request.kinds && request.kinds.length > 0) ? requestedLimit * 10 : requestedLimit;
+  const limit =
+    request.kinds && request.kinds.length > 0
+      ? requestedLimit * 10
+      : requestedLimit;
   const config = loadConfig();
   const semanticConfig = config.semantic;
   const semanticRequested = request.semantic === true;
@@ -223,7 +295,9 @@ export async function handleSymbolSearch(
       }
     } catch (err) {
       fallbackReason = `Health check error: ${err instanceof Error ? err.message : String(err)}`;
-      logger.warn(`[symbol.search] Hybrid health check failed, using legacy: ${fallbackReason}`);
+      logger.warn(
+        `[symbol.search] Hybrid health check failed, using legacy: ${fallbackReason}`,
+      );
     }
   }
 
@@ -233,19 +307,20 @@ export async function handleSymbolSearch(
   if (useHybrid) {
     // --- HYBRID PATH: FTS + vector + RRF fusion for durable, lexical for overlay ---
     try {
-      const { rows: hybridRows, evidence } = await searchSymbolsHybridWithOverlay(
-        conn,
-        request.repoId,
-        request.query,
-        limit,
-        {
-          ftsTopK: retrievalConfig?.fts?.topK,
-          vectorTopK: retrievalConfig?.vector?.topK,
-          rrfK: retrievalConfig?.fusion?.rrfK,
-          candidateLimit: retrievalConfig?.candidateLimit,
-          includeEvidence: request.includeRetrievalEvidence === true,
-        },
-      );
+      const { rows: hybridRows, evidence } =
+        await searchSymbolsHybridWithOverlay(
+          conn,
+          request.repoId,
+          request.query,
+          limit,
+          {
+            ftsTopK: retrievalConfig?.fts?.topK,
+            vectorTopK: retrievalConfig?.vector?.topK,
+            rrfK: retrievalConfig?.fusion?.rrfK,
+            candidateLimit: retrievalConfig?.candidateLimit,
+            includeEvidence: request.includeRetrievalEvidence === true,
+          },
+        );
       rows = hybridRows;
       retrievalEvidence = evidence;
       semanticEnabled = true;
@@ -255,11 +330,23 @@ export async function handleSymbolSearch(
         `[symbol.search] Hybrid search failed, falling back to legacy: ${err instanceof Error ? err.message : String(err)}`,
       );
       fallbackReason = `Hybrid search error: ${err instanceof Error ? err.message : String(err)}`;
-      rows = await searchSymbolsWithOverlay(conn, request.repoId, request.query, limit, request.kinds);
+      rows = await searchSymbolsWithOverlay(
+        conn,
+        request.repoId,
+        request.query,
+        limit,
+        request.kinds,
+      );
     }
   } else {
     // --- LEGACY PATH: lexical search + optional semantic reranking ---
-    rows = await searchSymbolsWithOverlay(conn, request.repoId, request.query, limit, request.kinds);
+    rows = await searchSymbolsWithOverlay(
+      conn,
+      request.repoId,
+      request.query,
+      limit,
+      request.kinds,
+    );
   }
 
   let results = rows.map((row) => ({
@@ -274,20 +361,68 @@ export async function handleSymbolSearch(
   // decompose into subwords and re-search with joined terms (multi-term query)
   let camelFallbackUsed = false;
   let camelFallbackTerms: string[] = [];
-  if (results.length === 0 && !request.query.includes("*") && !request.query.includes("?")) {
+  if (
+    results.length === 0 &&
+    !request.query.includes("*") &&
+    !request.query.includes("?")
+  ) {
     const subwords = splitCamelSubwords(request.query);
     if (subwords.length >= 2) {
       camelFallbackTerms = subwords;
       const joinedQuery = subwords.join(" ");
-      const fallbackRows = await searchSymbolsWithOverlay(conn, request.repoId, joinedQuery, limit, request.kinds);
-      const existingIds = new Set(results.map(r => r.symbolId));
+      const fallbackRows = await searchSymbolsWithOverlay(
+        conn,
+        request.repoId,
+        joinedQuery,
+        limit,
+        request.kinds,
+      );
+      const existingIds = new Set(results.map((r) => r.symbolId));
       for (const row of fallbackRows) {
         if (!existingIds.has(row.symbolId)) {
-          results.push({ symbolId: row.symbolId, name: row.name, file: row.filePath, kind: row.kind as SymbolKind });
+          results.push({
+            symbolId: row.symbolId,
+            name: row.name,
+            file: row.filePath,
+            kind: row.kind as SymbolKind,
+          });
           existingIds.add(row.symbolId);
         }
       }
-      if (results.length > requestedLimit) results = results.slice(0, requestedLimit);
+      // If joined multi-term query still found nothing, try individual subwords
+      // e.g. "buildGraphSlice" → joined "build graph slice" matches nothing,
+      // but "build*" finds buildSlice, "slice*" finds sliceBuild, etc.
+      if (results.length === 0) {
+        const significantSubwords = subwords.filter((w) => w.length >= 3);
+        if (significantSubwords.length > 0) {
+          const perTermLimit = Math.max(
+            3,
+            Math.ceil(limit / significantSubwords.length),
+          );
+          for (const subword of significantSubwords) {
+            const subRows = await searchSymbolsWithOverlay(
+              conn,
+              request.repoId,
+              subword + "*",
+              perTermLimit,
+              request.kinds,
+            );
+            for (const row of subRows) {
+              if (!existingIds.has(row.symbolId)) {
+                results.push({
+                  symbolId: row.symbolId,
+                  name: row.name,
+                  file: row.filePath,
+                  kind: row.kind as SymbolKind,
+                });
+                existingIds.add(row.symbolId);
+              }
+            }
+          }
+        }
+      }
+      if (results.length > requestedLimit)
+        results = results.slice(0, requestedLimit);
       if (results.length > 0) {
         camelFallbackUsed = true;
       }
@@ -298,10 +433,15 @@ export async function handleSymbolSearch(
 
   // FP-5: For wildcard queries or when no exact match, sort by importance metrics
   // This ensures "*" queries return the most important symbols rather than arbitrary order
-  const isWildcard = request.query === "*" || request.query.includes("*") || request.query.includes("?");
+  const isWildcard =
+    request.query === "*" ||
+    request.query.includes("*") ||
+    request.query.includes("?");
   if (isWildcard && results.length > 1) {
     // Fetch metrics for top results to sort by importance
-    const topIds = results.slice(0, Math.min(results.length, 100)).map(r => r.symbolId);
+    const topIds = results
+      .slice(0, Math.min(results.length, 100))
+      .map((r) => r.symbolId);
     try {
       const metrics = await ladybugDb.getMetricsBySymbolIds(conn, topIds);
       const symbols = await ladybugDb.getSymbolsByIds(conn, topIds);
@@ -325,10 +465,13 @@ export async function handleSymbolSearch(
       });
     } catch (sortErr) {
       // Graceful degradation: keep original order if metrics unavailable
-      logger.debug("wildcard sort: metrics fetch failed, keeping original order", {
-        repoId: request.repoId,
-        error: sortErr instanceof Error ? sortErr.message : String(sortErr),
-      });
+      logger.debug(
+        "wildcard sort: metrics fetch failed, keeping original order",
+        {
+          repoId: request.repoId,
+          error: sortErr instanceof Error ? sortErr.message : String(sortErr),
+        },
+      );
     }
   }
 
@@ -366,41 +509,60 @@ export async function handleSymbolSearch(
     }),
     ...(fallbackReason && { fallbackReason }),
     finalResultCount: results.length,
-    ...(semanticRequested && retrievalConfig?.mode === "hybrid" && {
-      ftsAvailable: retrievalEvidence?.sources?.includes("fts") ?? false,
-      vectorAvailable: (retrievalEvidence?.sources?.some((s) => s.startsWith("vector:")) ?? false),
-    }),
+    ...(semanticRequested &&
+      retrievalConfig?.mode === "hybrid" && {
+        ftsAvailable: retrievalEvidence?.sources?.includes("fts") ?? false,
+        vectorAvailable:
+          retrievalEvidence?.sources?.some((s) => s.startsWith("vector:")) ??
+          false,
+      }),
   });
 
   // FP2: Add relevance scoring and filter out spurious matches
   const scoredResults = results.map((r, idx) => ({
     ...r,
-    relevance: Math.round(Math.min(1, computeRelevance(r.name, request.query) +
-      // Boost semantic results: top-ranked results from semantic search
-      // are likely relevant even if the name doesn't match the query text
-      (request.semantic && semanticEnabled
-        ? Math.max(0, 0.3 * (1 - idx / Math.max(results.length, 1)))
-        : 0)) * 100) / 100,
+    relevance:
+      Math.round(
+        Math.min(
+          1,
+          computeRelevance(r.name, request.query) +
+            // Boost semantic results: top-ranked results from semantic search
+            // are likely relevant even if the name doesn't match the query text
+            (request.semantic && semanticEnabled
+              ? Math.max(0, 0.3 * (1 - idx / Math.max(results.length, 1)))
+              : 0),
+        ) * 100,
+      ) / 100,
   }));
-  const relevant = scoredResults.filter(r => r.relevance >= MIN_RELEVANCE_THRESHOLD);
-  const hasExactMatch = relevant.some(r => r.name.toLowerCase() === request.query.toLowerCase());
+  const relevant = scoredResults.filter(
+    (r) => r.relevance >= MIN_RELEVANCE_THRESHOLD,
+  );
+  const hasExactMatch = relevant.some(
+    (r) => r.name.toLowerCase() === request.query.toLowerCase(),
+  );
   // symbols alias removed — use results (symbols was an exact duplicate wasting tokens)
   // Add suggestion when no relevant results or all results are weak
-  const bestRelevance = relevant.length > 0 ? Math.max(...relevant.map(r => r.relevance)) : 0;
-  const suggestion = relevant.length === 0
-    ? (semanticRequested && !semanticEnabled
-      ? `Semantic search unavailable (${fallbackReason || 'embedding model not loaded'}). Lexical search returned no matches. Try exact symbol names or broader terms.`
-      : (() => {
-        const tokens = splitCamelSubwords(request.query);
-        return tokens.length >= 2
-          ? `No close matches found. Try individual terms: ${tokens.map(t => `"${t}"`).join(", ")}`
-          : "No close matches found. Try broader terms or use kinds filter.";
-      })())
-    : camelFallbackUsed
-      ? `No exact match for '${request.query}'. Showing results for decomposed terms: ${camelFallbackTerms.join(", ")}`
-      : bestRelevance < 0.5
-        ? "Results may not be relevant. Try more specific terms, use kinds filter, or try sdl.symbol.search with a wildcard pattern."
-        : undefined;
+  const bestRelevance =
+    relevant.length > 0 ? Math.max(...relevant.map((r) => r.relevance)) : 0;
+  const suggestion =
+    relevant.length === 0
+      ? semanticRequested && !semanticEnabled
+        ? `Semantic search unavailable (${fallbackReason || "embedding model not loaded"}). Lexical search returned no matches. Try exact symbol names or broader terms.`
+        : (() => {
+            const tokens = splitCamelSubwords(request.query).filter(
+              (t) => t.length >= 3 && !SUGGESTION_STOP_WORDS.has(t),
+            );
+            return tokens.length >= 2
+              ? `No close matches found. Try individual terms: ${tokens.map((t) => `"${t}"`).join(", ")}`
+              : tokens.length === 1
+                ? `No close matches found. Try: "${tokens[0]}" or use a wildcard like "${tokens[0]}*".`
+                : "No close matches found. Try broader terms or use kinds filter.";
+          })()
+      : camelFallbackUsed
+        ? `No exact match for '${request.query}'. Showing results for decomposed terms: ${camelFallbackTerms.join(", ")}`
+        : bestRelevance < 0.5
+          ? "Results may not be relevant. Try more specific terms, use kinds filter, or try sdl.symbol.search with a wildcard pattern."
+          : undefined;
   const response: SymbolSearchResponse = {
     results: relevant,
     exactMatchFound: hasExactMatch,
@@ -408,15 +570,19 @@ export async function handleSymbolSearch(
   };
   if (request.includeRetrievalEvidence) {
     if (useHybrid && retrievalEvidence) {
-      (response as Record<string, unknown>).retrievalEvidence = relevant.map((r) => ({
-        symbolId: r.symbolId,
-        retrievalSource: "hybrid" as const,
-      }));
+      (response as Record<string, unknown>).retrievalEvidence = relevant.map(
+        (r) => ({
+          symbolId: r.symbolId,
+          retrievalSource: "hybrid" as const,
+        }),
+      );
     } else if (fallbackReason) {
-      (response as Record<string, unknown>).retrievalEvidence = relevant.map((r) => ({
-        symbolId: r.symbolId,
-        retrievalSource: "legacy" as const,
-      }));
+      (response as Record<string, unknown>).retrievalEvidence = relevant.map(
+        (r) => ({
+          symbolId: r.symbolId,
+          retrievalSource: "legacy" as const,
+        }),
+      );
     }
   }
   return attachRawContext(response, {
@@ -440,19 +606,29 @@ async function resolveRequestedSymbolId(
   request: SymbolGetCardRequest,
 ): Promise<string> {
   if (request.symbolId) {
-    const { symbolId } = await resolveSymbolId(conn, request.repoId, request.symbolId);
+    const { symbolId } = await resolveSymbolId(
+      conn,
+      request.repoId,
+      request.symbolId,
+    );
     return symbolId;
   }
 
   if (!request.symbolRef) {
-    const error = new ValidationError("Provide exactly one of symbolId or symbolRef.");
+    const error = new ValidationError(
+      "Provide exactly one of symbolId or symbolRef.",
+    );
     throw Object.assign(error, {
       classification: "invalid_input",
       retryable: false,
     });
   }
 
-  const resolution = await resolveSymbolRef(conn, request.repoId, request.symbolRef);
+  const resolution = await resolveSymbolRef(
+    conn,
+    request.repoId,
+    request.symbolRef,
+  );
   if (resolution.status === "resolved") {
     return resolution.symbolId;
   }
@@ -478,7 +654,8 @@ function createSymbolResolutionError(
       classification: "ambiguous_input",
       retryable: false,
       fallbackTools,
-      fallbackRationale: "Use sdl.symbol.search or provide file/kind hints to disambiguate.",
+      fallbackRationale:
+        "Use sdl.symbol.search or provide file/kind hints to disambiguate.",
       candidates: candidatePayload,
     });
   }
@@ -488,7 +665,8 @@ function createSymbolResolutionError(
     classification: "not_found",
     retryable: false,
     fallbackTools,
-    fallbackRationale: "Use sdl.symbol.search to discover the canonical symbol identifier.",
+    fallbackRationale:
+      "Use sdl.symbol.search to discover the canonical symbol identifier.",
     candidates: candidatePayload,
   });
 }
@@ -536,7 +714,8 @@ async function buildCardsForSymbolIds(
 
   const symbolMap = await ladybugDb.getSymbolsByIds(conn, input.symbolIds);
   for (const symbolId of input.symbolIds) {
-    const symbol = symbolMap.get(symbolId) ?? await ladybugDb.getSymbol(conn, symbolId);
+    const symbol =
+      symbolMap.get(symbolId) ?? (await ladybugDb.getSymbol(conn, symbolId));
     if (symbol && symbol.repoId !== input.repoId) {
       throw new DatabaseError(
         `Symbol ${symbolId} belongs to repo "${symbol.repoId}", not "${input.repoId}"`,
@@ -573,12 +752,8 @@ export async function handleSymbolGetCard(
     throw new NotFoundError(`Repository not found: ${request.repoId}`);
   }
 
-  const {
-    repoId,
-    ifNoneMatch,
-    minCallConfidence,
-    includeResolutionMetadata,
-  } = request;
+  const { repoId, ifNoneMatch, minCallConfidence, includeResolutionMetadata } =
+    request;
   const symbolId = await resolveRequestedSymbolId(conn, request);
 
   recordToolTrace({
@@ -633,7 +808,9 @@ export async function handleSymbolGetCards(
       minCallConfidence,
       includeResolutionMetadata,
     });
-    const fileIds = [...new Set(Array.from(symbolMap.values()).map((symbol) => symbol.fileId))];
+    const fileIds = [
+      ...new Set(Array.from(symbolMap.values()).map((symbol) => symbol.fileId)),
+    ];
     const response = { cards };
     return attachRawContext(response, { fileIds });
   }
@@ -647,7 +824,9 @@ export async function handleSymbolGetCards(
       continue;
     }
 
-    failures.push(toBatchFailure(symbolRef, createSymbolResolutionError(resolution)));
+    failures.push(
+      toBatchFailure(symbolRef, createSymbolResolutionError(resolution)),
+    );
   }
 
   let cards: Awaited<ReturnType<typeof buildCardForSymbol>>[] = [];
@@ -662,7 +841,11 @@ export async function handleSymbolGetCards(
     });
 
     cards = built.cards;
-    fileIds = [...new Set(Array.from(built.symbolMap.values()).map((symbol) => symbol.fileId))];
+    fileIds = [
+      ...new Set(
+        Array.from(built.symbolMap.values()).map((symbol) => symbol.fileId),
+      ),
+    ];
   }
 
   const response: SymbolGetCardsResponse = { cards };

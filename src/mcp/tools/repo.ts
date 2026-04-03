@@ -48,18 +48,40 @@ import {
 import type { ToolContext } from "../../server.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 
-// Health snapshot cache with 30s TTL to avoid expensive recomputation
-const healthSnapshotCache = new Map<string, { snapshot: Awaited<ReturnType<typeof getRepoHealthSnapshot>>; cachedAt: number }>();
+// Health snapshot cache with 30s TTL to avoid expensive recomputation.
+// lastKnownHealth persists indefinitely as a stale fallback when fresh computation times out.
+const healthSnapshotCache = new Map<
+  string,
+  {
+    snapshot: Awaited<ReturnType<typeof getRepoHealthSnapshot>>;
+    cachedAt: number;
+  }
+>();
+const lastKnownHealth = new Map<
+  string,
+  Awaited<ReturnType<typeof getRepoHealthSnapshot>>
+>();
 const HEALTH_CACHE_TTL_MS = 30_000;
 
-async function getCachedHealthSnapshot(repoId: string) {
+async function getCachedHealthSnapshot(repoId: string): Promise<{
+  snapshot: Awaited<ReturnType<typeof getRepoHealthSnapshot>>;
+  isStale: boolean;
+}> {
   const cached = healthSnapshotCache.get(repoId);
   if (cached && Date.now() - cached.cachedAt < HEALTH_CACHE_TTL_MS) {
-    return cached.snapshot;
+    return { snapshot: cached.snapshot, isStale: false };
   }
-  const snapshot = await getRepoHealthSnapshot(repoId);
-  healthSnapshotCache.set(repoId, { snapshot, cachedAt: Date.now() });
-  return snapshot;
+  try {
+    const snapshot = await getRepoHealthSnapshot(repoId);
+    healthSnapshotCache.set(repoId, { snapshot, cachedAt: Date.now() });
+    lastKnownHealth.set(repoId, snapshot);
+    return { snapshot, isStale: false };
+  } catch (err) {
+    // On failure, return last known health if available (marked stale)
+    const stale = lastKnownHealth.get(repoId);
+    if (stale) return { snapshot: stale, isStale: true };
+    throw err;
+  }
 }
 const SUPPORTED_LANGUAGES = [...LanguageSchema.options];
 
@@ -77,7 +99,9 @@ export function checkRepoRootAllowlist(
   allowedRoots: string[],
 ): void {
   if (allowedRoots.length === 0) {
-    logger.warn("No allowedRepoRoots configured — any absolute path can be registered as a repository");
+    logger.warn(
+      "No allowedRepoRoots configured — any absolute path can be registered as a repository",
+    );
     return; // empty allowlist = unrestricted (backward compatible)
   }
 
@@ -155,7 +179,9 @@ export async function handleRepoRegister(
   }
 
   if (!existsSync(resolvedRoot)) {
-    throw new ConfigError("The provided rootPath does not exist or is inaccessible");
+    throw new ConfigError(
+      "The provided rootPath does not exist or is inaccessible",
+    );
   }
 
   // Security: enforce allowlist if configured
@@ -329,37 +355,57 @@ export async function handleRepoStatus(
       throw new DatabaseError(`Repository ${repoId} not found`);
     }
 
-        // "minimal" skips health computation entirely (fastest path)
+    // "minimal" skips health computation entirely (fastest path)
     const includeHealth = detail !== "minimal";
     const includeLiveIndex = detail === "full";
 
-    const [latestVersion, filesIndexed, symbolsIndexed, lastIndexedAt, health] = await Promise.all([
+    const unavailableHealth = {
+      snapshot: {
+        score: null as number | null,
+        components: { freshness: 0, coverage: 0, errorRate: 0, edgeQuality: 0 },
+        available: false,
+      },
+      isStale: false,
+    };
+    const [
+      latestVersion,
+      filesIndexed,
+      symbolsIndexed,
+      lastIndexedAt,
+      healthResult,
+    ] = await Promise.all([
       ladybugDb.getLatestVersion(conn, repoId),
       ladybugDb.getFileCount(conn, repoId),
       ladybugDb.getSymbolCount(conn, repoId),
       ladybugDb.getLastIndexedAt(conn, repoId),
-      includeHealth ? Promise.race([
-      getCachedHealthSnapshot(repoId),
-      new Promise<{ score: number | null; components: { freshness: number; coverage: number; errorRate: number; edgeQuality: number }; available: boolean }>((resolve) =>
-        setTimeout(() => {
-          logger.debug("Health computation timed out for repoStatus, returning unavailable");
-          resolve({ score: null, components: { freshness: 0, coverage: 0, errorRate: 0, edgeQuality: 0 }, available: false });
-        }, 5000).unref(),
-      ),
-    ]) : Promise.resolve({ score: null, components: { freshness: 0, coverage: 0, errorRate: 0, edgeQuality: 0 }, available: false }),
+      includeHealth
+        ? Promise.race([
+            getCachedHealthSnapshot(repoId),
+            new Promise<typeof unavailableHealth>((resolve) =>
+              setTimeout(() => {
+                logger.debug(
+                  "Health computation timed out for repoStatus, returning unavailable",
+                );
+                resolve(unavailableHealth);
+              }, 5000).unref(),
+            ),
+          ])
+        : Promise.resolve(unavailableHealth),
     ]);
+    const health = healthResult.snapshot;
+    const healthIsStale = healthResult.isStale;
     const watcherHealth = includeHealth ? getWatcherHealth(repoId) : null;
     const prefetchStats = includeHealth ? getPrefetchStats(repoId) : null;
     const liveIndexStatus = includeLiveIndex
       ? await getDefaultLiveIndexCoordinator()
-        .getLiveStatus(repoId)
-        .catch((err) => {
-          logger.warn("Failed to get live index status", {
-            repoId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return undefined;
-        })
+          .getLiveStatus(repoId)
+          .catch((err) => {
+            logger.warn("Failed to get live index status", {
+              repoId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return undefined;
+          })
       : undefined;
     if (watcherHealth) {
       logWatcherHealthTelemetry({
@@ -374,21 +420,26 @@ export async function handleRepoStatus(
       });
     }
     if (prefetchStats) {
-    logPrefetchTelemetry({
-      repoId,
-      hitRate: prefetchStats.hitRate,
-      wasteRate: prefetchStats.wasteRate,
-      avgLatencyReductionMs: prefetchStats.avgLatencyReductionMs,
-      queueDepth: prefetchStats.queueDepth,
-    });
+      logPrefetchTelemetry({
+        repoId,
+        hitRate: prefetchStats.hitRate,
+        wasteRate: prefetchStats.wasteRate,
+        avgLatencyReductionMs: prefetchStats.avgLatencyReductionMs,
+        queueDepth: prefetchStats.queueDepth,
+      });
     }
 
     // Surface relevant memories if enabled (default: false) and config allows it
     const memCaps = getMemoryCapabilities(loadConfig(), repoId);
-    let memories: Awaited<ReturnType<typeof surfaceRelevantMemories>> | undefined;
+    let memories:
+      | Awaited<ReturnType<typeof surfaceRelevantMemories>>
+      | undefined;
     if (surfaceMemories === true && memCaps.surfacingEnabled) {
       try {
-        memories = await surfaceRelevantMemories(conn, { repoId, limit: memCaps.defaultSurfaceLimit });
+        memories = await surfaceRelevantMemories(conn, {
+          repoId,
+          limit: memCaps.defaultSurfaceLimit,
+        });
         if (memories.length === 0) memories = undefined;
       } catch (err) {
         logger.debug("Memory surfacing failed (non-critical)", {
@@ -408,7 +459,17 @@ export async function handleRepoStatus(
       healthScore: health.score,
       healthComponents: health.components,
       healthAvailable: health.available,
-      ...(!health.available ? { healthNote: "Health metrics require a fresh sdl.index.refresh (even incremental) after server start to populate. The index itself is up to date." } : {}),
+      ...(!health.available
+        ? {
+            healthNote:
+              "Health computation timed out or is pending. Run sdl.index.refresh (incremental) to populate, or retry — a cached result may become available shortly.",
+          }
+        : healthIsStale
+          ? {
+              healthNote:
+                "Health data may be stale (last known result). Fresh computation failed — retry or run sdl.index.refresh.",
+            }
+          : {}),
       watcherHealth,
       watcherNote:
         watcherHealth === null
@@ -509,13 +570,9 @@ export async function handleIndexRefresh(
           }
         : undefined;
 
-    const result = await indexRepo(
-      repoId,
-      mode,
-      onProgress,
-      context?.signal,
-      { includeTimings: includeDiagnostics },
-    );
+    const result = await indexRepo(repoId, mode, onProgress, context?.signal, {
+      includeTimings: includeDiagnostics,
+    });
 
     clearSliceCache();
     clearOverviewCache();
@@ -542,8 +599,19 @@ export async function handleIndexRefresh(
       return toResponse(result);
     };
     bgRefresh().then(
-      (result) => logger.info("Async index refresh completed", { repoId, operationId, versionId: result.versionId, changedFiles: result.changedFiles }),
-      (err) => logger.error("Async index refresh failed", { repoId, operationId, error: err instanceof Error ? err.message : String(err) }),
+      (result) =>
+        logger.info("Async index refresh completed", {
+          repoId,
+          operationId,
+          versionId: result.versionId,
+          changedFiles: result.changedFiles,
+        }),
+      (err) =>
+        logger.error("Async index refresh failed", {
+          repoId,
+          operationId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
     );
     return {
       ok: true,

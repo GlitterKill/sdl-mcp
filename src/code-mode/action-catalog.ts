@@ -88,7 +88,10 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
 
   // Unwrap to get the inner ZodObject if wrapped in ZodEffects/ZodPipeline
   const inner = unwrapZod(schema);
-  if (!inner || typeof (inner as unknown as Record<string, unknown>).shape !== "object") {
+  if (
+    !inner ||
+    typeof (inner as unknown as Record<string, unknown>).shape !== "object"
+  ) {
     return { fields };
   }
 
@@ -104,7 +107,10 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
 }
 
 function unwrapZod(s: z.ZodType): z.ZodType {
-  const def = (s as unknown as Record<string, unknown>)._def as Record<string, unknown>;
+  const def = (s as unknown as Record<string, unknown>)._def as Record<
+    string,
+    unknown
+  >;
   if (!def) return s;
 
   // ZodEffects (transform, refine, preprocess)
@@ -135,9 +141,10 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
     if (def.type === "default") {
       required = false;
       hasDefault = true;
-      defaultValue = typeof def.defaultValue === "function"
-        ? (def.defaultValue as () => unknown)()
-        : def.defaultValue;
+      defaultValue =
+        typeof def.defaultValue === "function"
+          ? (def.defaultValue as () => unknown)()
+          : def.defaultValue;
       current = def.innerType as z.ZodType;
       continue;
     }
@@ -165,24 +172,42 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
     string,
     unknown
   >;
-  if (def?.type === "enum" && (current as unknown as Record<string, unknown>).options) {
-    field.enumValues = (current as unknown as Record<string, unknown>).options as string[];
+  if (
+    def?.type === "enum" &&
+    (current as unknown as Record<string, unknown>).options
+  ) {
+    field.enumValues = (current as unknown as Record<string, unknown>)
+      .options as string[];
   }
 
-
   // Extract subFields for nested ZodObject fields (e.g., dataSort.by)
-  if (def?.type === "object" && typeof (current as unknown as Record<string, unknown>).shape === "object") {
-    const nestedShape = (current as unknown as Record<string, unknown>).shape as Record<string, z.ZodType>;
-    field.subFields = Object.entries(nestedShape).map(([subName, subSchema]) => describeField(subName, subSchema));
+  if (
+    def?.type === "object" &&
+    typeof (current as unknown as Record<string, unknown>).shape === "object"
+  ) {
+    const nestedShape = (current as unknown as Record<string, unknown>)
+      .shape as Record<string, z.ZodType>;
+    field.subFields = Object.entries(nestedShape).map(([subName, subSchema]) =>
+      describeField(subName, subSchema),
+    );
   }
   // Extract subFields for array-of-objects (e.g., dataFilter.clauses)
   if (def?.type === "array") {
     const elemType = (def.element ?? def.innerType) as z.ZodType | undefined;
     if (elemType) {
-      const elemDef = (elemType as unknown as Record<string, unknown>)._def as Record<string, unknown> | undefined;
-      if (elemDef?.type === "object" && typeof (elemType as unknown as Record<string, unknown>).shape === "object") {
-        const nestedShape = (elemType as unknown as Record<string, unknown>).shape as Record<string, z.ZodType>;
-        field.subFields = Object.entries(nestedShape).map(([subName, subSchema]) => describeField(subName, subSchema));
+      const elemDef = (elemType as unknown as Record<string, unknown>)._def as
+        | Record<string, unknown>
+        | undefined;
+      if (
+        elemDef?.type === "object" &&
+        typeof (elemType as unknown as Record<string, unknown>).shape ===
+          "object"
+      ) {
+        const nestedShape = (elemType as unknown as Record<string, unknown>)
+          .shape as Record<string, z.ZodType>;
+        field.subFields = Object.entries(nestedShape).map(
+          ([subName, subSchema]) => describeField(subName, subSchema),
+        );
       }
     }
   }
@@ -214,7 +239,12 @@ function resolveTypeName(schema: z.ZodType): string {
       return `enum(${(((schema as unknown as Record<string, unknown>).options as string[] | undefined) ?? Object.keys((def.entries ?? {}) as Record<string, unknown>)).join("|")})`;
     case "literal": {
       // Zod v4 stores value in def.values array, v3 in def.value
-      const litVal = def.value !== undefined ? def.value : Array.isArray(def.values) ? (def.values as unknown[])[0] : undefined;
+      const litVal =
+        def.value !== undefined
+          ? def.value
+          : Array.isArray(def.values)
+            ? (def.values as unknown[])[0]
+            : undefined;
       return `literal(${JSON.stringify(litVal)})`;
     }
     case "union":
@@ -285,8 +315,15 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   },
   "buffer.checkpoint": {},
   "buffer.status": {},
-  "runtime.execute": { runtime: "node", args: ["--version"], outputMode: "summary" },
-  "runtime.queryOutput": { artifactHandle: "runtime-myrepo-123-abc", queryTerms: ["error", "failed"] },
+  "runtime.execute": {
+    runtime: "node",
+    args: ["--version"],
+    outputMode: "summary",
+  },
+  "runtime.queryOutput": {
+    artifactHandle: "runtime-myrepo-123-abc",
+    queryTerms: ["error", "failed"],
+  },
   "memory.store": {
     type: "pattern",
     title: "Auth uses JWT",
@@ -341,7 +378,8 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "symbol.getCards": "Batch-fetch symbol cards",
   "slice.build": "Build dependency graph slice",
   "slice.refresh": "Refresh existing slice (delta only)",
-  "slice.spillover.get": "Fetch spillover page (requires spilloverHandle from slice.build spillover response)",
+  "slice.spillover.get":
+    "Fetch spillover page (requires spilloverHandle from slice.build spillover response)",
   "delta.get": "Get delta between versions",
   "context.summary": "Generate context summary",
   "pr.risk.analyze": "Analyze PR risk",
@@ -353,8 +391,10 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "repo.overview": "Get codebase overview",
   "index.refresh": "Refresh index",
   "policy.get": "Get policy config",
-  "policy.set": "Set policy config (policyPatch wrapper: maxWindowLines, maxWindowTokens, requireIdentifiers, allowBreakGlass, defaultMinCallConfidence, defaultDenyRaw, budgetCaps)",
-  "agent.context": "Retrieve multi-rung task context for explain, debug, review, implement, understand, or investigate tasks",
+  "policy.set":
+    "Set policy config (policyPatch wrapper: maxWindowLines, maxWindowTokens, requireIdentifiers, allowBreakGlass, defaultMinCallConfidence, defaultDenyRaw, budgetCaps)",
+  "agent.context":
+    "Retrieve multi-rung task context for explain, debug, review, implement, understand, or investigate tasks",
   "agent.feedback": "Record agent feedback",
   "agent.feedback.query": "Query feedback records",
   "buffer.push": "Push buffer update",
@@ -383,20 +423,23 @@ const META_TOOL_DESCRIPTIONS: Record<string, string> = {
 
 const TRANSFORM_DESCRIPTIONS: Record<string, string> = {
   dataPick:
-    "Project fields from an object. fields is {outputKey: \"inputKey\"} (Record, NOT array). First param is input, not source.",
+    'Project fields from an object. fields is {outputKey: "inputKey"} (Record, NOT array). First param is input, not source.',
   dataMap:
-    "Project fields from each element of an array. fields is {outputKey: \"inputKey\"} (Record, NOT array). First param is input, not source.",
+    'Project fields from each element of an array. fields is {outputKey: "inputKey"} (Record, NOT array). First param is input, not source.',
   dataFilter:
-    "Filter array elements by clauses. Each clause: {path, op, value}. ops: eq|ne|gt|gte|lt|lte|contains|in|exists. mode: \"all\"|\"any\" (default \"all\").",
+    'Filter array elements by clauses. Each clause: {path, op, value}. ops: eq|ne|gt|gte|lt|lte|contains|in|exists. mode: "all"|"any" (default "all").',
   dataSort:
-    "Sort array elements. by: {path: string, direction: \"asc\"|\"desc\", type?: \"string\"|\"number\"|\"date\"|\"boolean\"}. NOT field/order.",
+    'Sort array elements. by: {path: string, direction: "asc"|"desc", type?: "string"|"number"|"date"|"boolean"}. NOT field/order.',
   dataTemplate:
     "Render {{mustache}} template strings from object or array. joinWith (default '\\n') joins array results.",
 };
 
 const TRANSFORM_EXAMPLES: Record<string, Record<string, unknown>> = {
   dataPick: { input: "$0", fields: { name: "name", file: "file" } },
-  dataMap: { input: "$0.results", fields: { id: "symbolId", name: "name", file: "file" } },
+  dataMap: {
+    input: "$0.results",
+    fields: { id: "symbolId", name: "name", file: "file" },
+  },
   dataFilter: {
     input: "$0.results",
     clauses: [{ path: "kind", op: "eq", value: "function" }],
@@ -680,7 +723,11 @@ export function buildCatalog(opts?: {
 
   // Use cached base catalog if available, but invalidate if memory visibility changed.
   const memoryVisible = anyRepoHasMemoryTools(loadConfig());
-  if (cachedCatalog === null || cachedActionMap === null || cachedMemoryVisible !== memoryVisible) {
+  if (
+    cachedCatalog === null ||
+    cachedActionMap === null ||
+    cachedMemoryVisible !== memoryVisible
+  ) {
     cachedActionMap = createActionMap(opts?.liveIndex);
     cachedCatalog = buildBaseCatalogFromMap(cachedActionMap);
     cachedMemoryVisible = memoryVisible;
@@ -722,7 +769,9 @@ export function buildCatalog(opts?: {
   });
 }
 
-function buildBaseCatalogFromMap(actionMap: ReturnType<typeof createActionMap>): ActionDescriptor[] {
+function buildBaseCatalogFromMap(
+  actionMap: ReturnType<typeof createActionMap>,
+): ActionDescriptor[] {
   const catalog: ActionDescriptor[] = [];
 
   // Gateway actions
@@ -808,10 +857,18 @@ export function rankCatalog(
   const q = query.toLowerCase();
   const terms = q.split(/\s+/).filter(Boolean);
 
-
   // Wildcard or empty query returns all actions sorted alphabetically
   if (terms.length === 0 || (terms.length === 1 && terms[0] === "*")) {
     return [...catalog].sort((a, b) => a.action.localeCompare(b.action));
+  }
+
+  // Pre-build word-boundary regexes to avoid O(catalog * terms) compilations
+  const wordBoundaryRegexes = new Map<string, RegExp>();
+  for (const term of terms) {
+    wordBoundaryRegexes.set(
+      term,
+      new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`),
+    );
   }
 
   const scored = catalog.map((desc) => {
@@ -829,19 +886,26 @@ export function rankCatalog(
       .toLowerCase();
 
     for (const term of terms) {
-      // Exact name match
+      // Exact name match (highest weight)
       if (name === term || fn === term) {
         score += 100;
       } else if (name.startsWith(term) || fn.startsWith(term)) {
         score += 50;
       } else if (name.includes(term) || fn.includes(term)) {
         score += 30;
-      } else if (description.includes(term)) {
-        score += 10;
       } else if (tagStr.includes(term)) {
-        score += 5;
-      } else if (metadataStr.includes(term)) {
-        score += 4;
+        // Tags before description: "memory" tag should outrank "stored" in description
+        score += 20;
+      } else {
+        // Word-boundary match in description (avoid partial matches like "store" in "stored")
+        const wordBoundaryRe = wordBoundaryRegexes.get(term)!;
+        if (wordBoundaryRe.test(description)) {
+          score += 10;
+        } else if (description.includes(term)) {
+          score += 3;
+        } else if (metadataStr.includes(term)) {
+          score += 2;
+        }
       }
     }
 

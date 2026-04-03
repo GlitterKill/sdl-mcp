@@ -23,7 +23,13 @@ import { loadConfig } from "../../config/loadConfig.js";
 import { RuntimeConfigSchema } from "../../config/types.js";
 import { PolicyEngine } from "../../policy/engine.js";
 import type { RuntimePolicyRequestContext } from "../../policy/types.js";
-import { getRuntime, getRegisteredRuntimes, getRuntimeExtension, getRuntimeRequiredEnvKeys, isCompileThenExecute } from "../../runtime/runtimes.js";
+import {
+  getRuntime,
+  getRegisteredRuntimes,
+  getRuntimeExtension,
+  getRuntimeRequiredEnvKeys,
+  isCompileThenExecute,
+} from "../../runtime/runtimes.js";
 import {
   execute,
   createConcurrencyTracker,
@@ -63,7 +69,10 @@ function getOrCreateConcurrencyTracker(maxJobs: number): ConcurrencyTracker {
 
 function truncateLine(line: string): string {
   if (line.length <= RUNTIME_MAX_LINE_LENGTH) return line;
-  return line.slice(0, RUNTIME_MAX_LINE_LENGTH) + `… (+${line.length - RUNTIME_MAX_LINE_LENGTH})`;
+  return (
+    line.slice(0, RUNTIME_MAX_LINE_LENGTH) +
+    `… (+${line.length - RUNTIME_MAX_LINE_LENGTH})`
+  );
 }
 
 // ============================================================================
@@ -97,15 +106,25 @@ function generateIntentExcerpts(
   const lowerTerms = queryTerms.map((t) => t.toLowerCase());
 
   const searchStream = (lines: string[], source: "stdout" | "stderr") => {
-    for (let i = 0; i < lines.length && excerpts.length < RUNTIME_MAX_KEYWORD_EXCERPTS; i++) {
+    for (
+      let i = 0;
+      i < lines.length && excerpts.length < RUNTIME_MAX_KEYWORD_EXCERPTS;
+      i++
+    ) {
       const lower = lines[i].toLowerCase();
       if (lowerTerms.some((t) => lower.includes(t))) {
         const start = Math.max(0, i - RUNTIME_KEYWORD_CONTEXT_LINES);
-        const end = Math.min(lines.length - 1, i + RUNTIME_KEYWORD_CONTEXT_LINES);
+        const end = Math.min(
+          lines.length - 1,
+          i + RUNTIME_KEYWORD_CONTEXT_LINES,
+        );
         excerpts.push({
           lineStart: start + 1,
           lineEnd: end + 1,
-          content: lines.slice(start, end + 1).map(truncateLine).join("\n"),
+          content: lines
+            .slice(start, end + 1)
+            .map(truncateLine)
+            .join("\n"),
           source,
         });
         i = end; // skip ahead past context window
@@ -138,7 +157,10 @@ function generateExcerpts(
   // Head + tail for stdout summary
   const halfMax = Math.floor(maxResponseLines / 2);
   const headCount = Math.min(halfMax, stdoutLines.length);
-  const tailCount = Math.min(maxResponseLines - headCount, Math.max(0, stdoutLines.length - headCount));
+  const tailCount = Math.min(
+    maxResponseLines - headCount,
+    Math.max(0, stdoutLines.length - headCount),
+  );
 
   let stdoutSummary: string;
   if (stdoutLines.length <= headCount + tailCount) {
@@ -181,7 +203,10 @@ function generateExcerpts(
             lines.length - 1,
             i + RUNTIME_KEYWORD_CONTEXT_LINES,
           );
-          const content = lines.slice(start, end + 1).map(truncateLine).join("\n");
+          const content = lines
+            .slice(start, end + 1)
+            .map(truncateLine)
+            .join("\n");
           excerpts.push({
             lineStart: start + 1,
             lineEnd: end + 1,
@@ -199,13 +224,23 @@ function generateExcerpts(
 
     // Fallback: if no keyword matches found, return first lines of output
     if (excerpts.length === 0) {
-      const fallbackLines = (lines: string[], source: "stdout" | "stderr"): void => {
-        if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) return;
-        const end = Math.min(lines.length - 1, RUNTIME_MAX_KEYWORD_EXCERPTS - 1);
+      const fallbackLines = (
+        lines: string[],
+        source: "stdout" | "stderr",
+      ): void => {
+        if (lines.length === 0 || (lines.length === 1 && lines[0] === ""))
+          return;
+        const end = Math.min(
+          lines.length - 1,
+          RUNTIME_MAX_KEYWORD_EXCERPTS - 1,
+        );
         excerpts.push({
           lineStart: 1,
           lineEnd: end + 1,
-          content: lines.slice(0, end + 1).map(truncateLine).join("\n"),
+          content: lines
+            .slice(0, end + 1)
+            .map(truncateLine)
+            .join("\n"),
           source,
         });
       };
@@ -241,7 +276,9 @@ export async function handleRuntimeExecute(
   const runtimeDescriptor = getRuntime(request.runtime);
   if (!runtimeDescriptor) {
     const available = getRegisteredRuntimes().join(", ");
-    throw new RuntimePolicyDeniedError(`Unknown runtime: ${request.runtime}. Available: ${available}`);
+    throw new RuntimePolicyDeniedError(
+      `Unknown runtime: ${request.runtime}. Available: ${available}`,
+    );
   }
 
   // 3. Evaluate policy
@@ -349,7 +386,10 @@ export async function handleRuntimeExecute(
       tempCodeDir = await mkdtemp(join(tmpdir(), "sdl-runtime-code-"));
       const ext = getRuntimeExtension(request.runtime) ?? ".txt";
       codePath = join(tempCodeDir, `code${ext}`);
-      await writeFile(codePath, request.code, { encoding: "utf-8", mode: 0o600 });
+      await writeFile(codePath, request.code, {
+        encoding: "utf-8",
+        mode: 0o600,
+      });
     }
 
     // 7. Build command
@@ -404,43 +444,89 @@ export async function handleRuntimeExecute(
         });
 
         if (request.outputMode === "minimal") {
-          const stdoutLineCount = compileStdout ? compileStdout.split("\n").length : 0;
-          const stderrLineCount = compileStderr ? compileStderr.split("\n").length : 0;
-          return attachRawContext({
-            status: compileResult.status,
-            exitCode: compileResult.exitCode,
-            signal: compileResult.signal,
-            durationMs: compileResult.durationMs,
-            stdoutSummary: "",
-            stdoutPreview: buildStdoutPreview(compileStdout),
-            stderrSummary: "",
-            outputLines: stdoutLineCount + stderrLineCount,
-            outputBytes: compileResult.totalStdoutBytes + compileResult.totalStderrBytes,
-            artifactHandle: null,
-            truncation: {
-              stdoutTruncated: compileResult.stdoutTruncated,
-              stderrTruncated: compileResult.stderrTruncated,
-              totalStdoutBytes: compileResult.totalStdoutBytes,
-              totalStderrBytes: compileResult.totalStderrBytes,
+          const stdoutLineCount = compileStdout
+            ? compileStdout.split("\n").length
+            : 0;
+          const stderrLineCount = compileStderr
+            ? compileStderr.split("\n").length
+            : 0;
+          return attachRawContext(
+            {
+              status: compileResult.status,
+              exitCode: compileResult.exitCode,
+              signal: compileResult.signal,
+              durationMs: compileResult.durationMs,
+              stdoutSummary: "",
+              stdoutPreview: buildStdoutPreview(compileStdout),
+              stderrSummary: "",
+              outputLines: stdoutLineCount + stderrLineCount,
+              outputBytes:
+                compileResult.totalStdoutBytes + compileResult.totalStderrBytes,
+              artifactHandle: null,
+              truncation: {
+                stdoutTruncated: compileResult.stdoutTruncated,
+                stderrTruncated: compileResult.stderrTruncated,
+                totalStdoutBytes: compileResult.totalStdoutBytes,
+                totalStderrBytes: compileResult.totalStderrBytes,
+              },
+              policyDecision: {
+                auditHash: policyDecision.auditHash,
+              },
             },
-            policyDecision: {
-              auditHash: policyDecision.auditHash,
-            },
-          }, { rawTokens: compileRawTokens });
+            { rawTokens: compileRawTokens },
+          );
         }
 
         if (request.outputMode === "intent") {
           const excerpts: OutputExcerpt[] = [];
           if (request.queryTerms && request.queryTerms.length > 0) {
-            excerpts.push(...generateIntentExcerpts(compileStdout, compileStderr, request.queryTerms));
+            excerpts.push(
+              ...generateIntentExcerpts(
+                compileStdout,
+                compileStderr,
+                request.queryTerms,
+              ),
+            );
           }
-          return attachRawContext({
+          return attachRawContext(
+            {
+              status: compileResult.status,
+              exitCode: compileResult.exitCode,
+              signal: compileResult.signal,
+              durationMs: compileResult.durationMs,
+              stdoutSummary: "",
+              stderrSummary: "",
+              artifactHandle: null,
+              excerpts: excerpts.length > 0 ? excerpts : undefined,
+              truncation: {
+                stdoutTruncated: compileResult.stdoutTruncated,
+                stderrTruncated: compileResult.stderrTruncated,
+                totalStdoutBytes: compileResult.totalStdoutBytes,
+                totalStderrBytes: compileResult.totalStderrBytes,
+              },
+              policyDecision: {
+                auditHash: policyDecision.auditHash,
+              },
+            },
+            { rawTokens: compileRawTokens },
+          );
+        }
+
+        // "summary" mode — existing behavior
+        const { stdoutSummary, stderrSummary, excerpts } = generateExcerpts(
+          compileStdout,
+          compileStderr,
+          request.maxResponseLines,
+          request.queryTerms,
+        );
+        return attachRawContext(
+          {
             status: compileResult.status,
             exitCode: compileResult.exitCode,
             signal: compileResult.signal,
             durationMs: compileResult.durationMs,
-            stdoutSummary: "",
-            stderrSummary: "",
+            stdoutSummary,
+            stderrSummary,
             artifactHandle: null,
             excerpts: excerpts.length > 0 ? excerpts : undefined,
             truncation: {
@@ -452,35 +538,9 @@ export async function handleRuntimeExecute(
             policyDecision: {
               auditHash: policyDecision.auditHash,
             },
-          }, { rawTokens: compileRawTokens });
-        }
-
-        // "summary" mode — existing behavior
-        const { stdoutSummary, stderrSummary, excerpts } = generateExcerpts(
-          compileStdout,
-          compileStderr,
-          request.maxResponseLines,
-          request.queryTerms,
+          },
+          { rawTokens: compileRawTokens },
         );
-        return attachRawContext({
-          status: compileResult.status,
-          exitCode: compileResult.exitCode,
-          signal: compileResult.signal,
-          durationMs: compileResult.durationMs,
-          stdoutSummary,
-          stderrSummary,
-          artifactHandle: null,
-          excerpts: excerpts.length > 0 ? excerpts : undefined,
-          truncation: {
-            stdoutTruncated: compileResult.stdoutTruncated,
-            stderrTruncated: compileResult.stderrTruncated,
-            totalStdoutBytes: compileResult.totalStdoutBytes,
-            totalStderrBytes: compileResult.totalStderrBytes,
-          },
-          policyDecision: {
-            auditHash: policyDecision.auditHash,
-          },
-        }, { rawTokens: compileRawTokens });
       }
 
       const compileDurationMs = Date.now() - compileStart;
@@ -508,7 +568,9 @@ export async function handleRuntimeExecute(
       }
 
       // Derive output binary path and replace cmd/codePath for execution phase
-      const outBinary = codePath.replace(/\.[^.]+$/, "") + (process.platform === "win32" ? ".exe" : "");
+      const outBinary =
+        codePath.replace(/\.[^.]+$/, "") +
+        (process.platform === "win32" ? ".exe" : "");
       try {
         await access(outBinary);
       } catch {
@@ -595,14 +657,18 @@ export async function handleRuntimeExecute(
         auditHash: policyDecision.auditHash,
         artifactHandle,
       });
-      const minimalResponse = {
+      const isSmallOutput =
+        !result.stdoutTruncated &&
+        !result.stderrTruncated &&
+        result.totalStdoutBytes + result.totalStderrBytes < 4096;
+      const minimalBase = {
         status: result.status,
         exitCode: result.exitCode,
         signal: result.signal,
         durationMs: result.durationMs,
         stdoutSummary: "",
         stdoutPreview: buildStdoutPreview(stdoutStr),
-        stderrSummary: "",
+        stderrSummary: stderrStr ? stderrStr.slice(0, 200) : "",
         outputLines: stdoutLineCount + stderrLineCount,
         outputBytes: result.totalStdoutBytes + result.totalStderrBytes,
         artifactHandle,
@@ -616,13 +682,32 @@ export async function handleRuntimeExecute(
           auditHash: policyDecision.auditHash,
         },
       };
-      return attachRawContext(minimalResponse, { rawTokens: rawOutputTokens });
+      // For small, non-truncated output, omit empty/zero fields to reduce token overhead
+      // while keeping the shape schema-compliant
+      if (isSmallOutput) {
+        const compact = {
+          status: minimalBase.status,
+          exitCode: minimalBase.exitCode,
+          signal: minimalBase.signal,
+          durationMs: minimalBase.durationMs,
+          stdoutSummary: "",
+          stdoutPreview: minimalBase.stdoutPreview,
+          stderrSummary: "",
+          artifactHandle,
+          truncation: minimalBase.truncation,
+          policyDecision: minimalBase.policyDecision,
+        };
+        return attachRawContext(compact, { rawTokens: rawOutputTokens });
+      }
+      return attachRawContext(minimalBase, { rawTokens: rawOutputTokens });
     }
 
     if (request.outputMode === "intent") {
       const excerpts: OutputExcerpt[] = [];
       if (request.queryTerms && request.queryTerms.length > 0) {
-        excerpts.push(...generateIntentExcerpts(stdoutStr, stderrStr, request.queryTerms));
+        excerpts.push(
+          ...generateIntentExcerpts(stdoutStr, stderrStr, request.queryTerms),
+        );
       }
       logRuntimeExecution({
         repoId: request.repoId,

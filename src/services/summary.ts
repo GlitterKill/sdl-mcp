@@ -81,7 +81,16 @@ function evictSummaryCache(): void {
 }
 
 export function detectSummaryScope(query: string): ContextSummaryScope {
-  const repoTerms = ["overview", "architecture", "project", "codebase", "repo", "repository", "structure", "summary"];
+  const repoTerms = [
+    "overview",
+    "architecture",
+    "project",
+    "codebase",
+    "repo",
+    "repository",
+    "structure",
+    "summary",
+  ];
   const q = query.trim().toLowerCase();
   if (!q) return "task";
 
@@ -127,7 +136,15 @@ export function buildContextSummary(input: {
   riskAreas: ContextSummaryRiskArea[];
   filesTouched: ContextSummaryFileTouch[];
 }): ContextSummary {
-  const budget = Math.max(1, input.budget ?? DEFAULT_SUMMARY_BUDGET);
+  // Enforce minimum budget per scope to prevent degenerate results
+  const BUDGET_MINIMUMS: Record<string, number> = {
+    repo: 800,
+    task: 500,
+    file: 300,
+    symbol: 150,
+  };
+  const scopeMin = BUDGET_MINIMUMS[input.scope] ?? 300;
+  const budget = Math.max(scopeMin, input.budget ?? DEFAULT_SUMMARY_BUDGET);
   const maxTokens = Math.ceil(budget * 1.05);
 
   const keySymbols = [...input.keySymbols];
@@ -256,17 +273,28 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
     const compoundTokens: string[] = [];
     for (let i = 0; i < Math.min(tokens.length - 1, 4); i++) {
       // camelCase: "beam" + "search" -> "beamSearch"
-      const camel = tokens[i] + tokens[i + 1].charAt(0).toUpperCase() + tokens[i + 1].slice(1);
+      const camel =
+        tokens[i] +
+        tokens[i + 1].charAt(0).toUpperCase() +
+        tokens[i + 1].slice(1);
       compoundTokens.push(camel);
       // Also try 3-word compounds
       if (i < tokens.length - 2) {
-        const camel3 = camel + tokens[i + 2].charAt(0).toUpperCase() + tokens[i + 2].slice(1);
+        const camel3 =
+          camel +
+          tokens[i + 2].charAt(0).toUpperCase() +
+          tokens[i + 2].slice(1);
         compoundTokens.push(camel3);
       }
     }
     for (const compound of compoundTokens) {
       if (compound.length >= 5) {
-        const partial = await ladybugDb.searchSymbolsLite(conn, repoId, compound, 5);
+        const partial = await ladybugDb.searchSymbolsLite(
+          conn,
+          repoId,
+          compound,
+          5,
+        );
         for (const row of partial) {
           if (!seen.has(row.symbolId)) {
             seen.add(row.symbolId);
@@ -283,13 +311,18 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
     try {
       const allFiles = await ladybugDb.getFilesByRepoLite(conn, repoId);
       const pathTokens = tokenize(query).filter((t) => t.length >= 3);
-      const matchingFiles = allFiles.filter((f) =>
-        pathTokens.some((token) => {
-          const pathLower = f.relPath.toLowerCase();
-          const fileName = pathLower.split("/").pop() ?? "";
-          return fileName.includes(token) || token.includes(fileName.replace(/\.[^.]+$/, ""));
-        }),
-      ).slice(0, 5);
+      const matchingFiles = allFiles
+        .filter((f) =>
+          pathTokens.some((token) => {
+            const pathLower = f.relPath.toLowerCase();
+            const fileName = pathLower.split("/").pop() ?? "";
+            return (
+              fileName.includes(token) ||
+              token.includes(fileName.replace(/\.[^.]+$/, ""))
+            );
+          }),
+        )
+        .slice(0, 5);
       if (matchingFiles.length > 0) {
         const fileIds = matchingFiles.map((f) => f.fileId);
         for (const fileId of fileIds) {
@@ -297,12 +330,20 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
           for (const symId of syms) {
             if (!seen.has(symId) && merged.length < SUMMARY_MAX_RESULTS) {
               seen.add(symId);
-              merged.push({ symbolId: symId, name: "", filePath: "", kind: "function", fileId: "" } as unknown as ladybugDb.SearchSymbolLiteRow);
+              merged.push({
+                symbolId: symId,
+                name: "",
+                filePath: "",
+                kind: "function",
+                fileId: "",
+              } as unknown as ladybugDb.SearchSymbolLiteRow);
             }
           }
         }
       }
-    } catch { /* graceful degradation */ }
+    } catch {
+      /* graceful degradation */
+    }
   }
 
   const mergedSymbolsMap = await ladybugDb.getSymbolsByIds(
@@ -311,9 +352,11 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
   );
   const mergedFilesMap = await ladybugDb.getFilesByIds(
     conn,
-    Array.from(new Set(
-      Array.from(mergedSymbolsMap.values()).map((symbol) => symbol.fileId),
-    )),
+    Array.from(
+      new Set(
+        Array.from(mergedSymbolsMap.values()).map((symbol) => symbol.fileId),
+      ),
+    ),
   );
   merged.sort((a, b) => {
     const symbolA = mergedSymbolsMap.get(a.symbolId);
@@ -346,7 +389,9 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
   });
 
   // FP-3: Boost symbols whose file path matches query terms for better relevance
-  const queryTermsForPath = tokenize(query).filter(t => !TASK_TEXT_STOP_WORDS.has(t) && t.length >= 3);
+  const queryTermsForPath = tokenize(query).filter(
+    (t) => !TASK_TEXT_STOP_WORDS.has(t) && t.length >= 3,
+  );
   if (queryTermsForPath.length > 0) {
     const pathBoost = new Map<string, number>();
     for (const row of merged) {
@@ -354,9 +399,14 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
       const file = sym ? mergedFilesMap.get(sym.fileId) : undefined;
       if (file) {
         const pathLower = file.relPath.toLowerCase();
-        const pathMatchCount = queryTermsForPath.filter(t => pathLower.includes(t)).length;
+        const pathMatchCount = queryTermsForPath.filter((t) =>
+          pathLower.includes(t),
+        ).length;
         if (pathMatchCount > 0) {
-          pathBoost.set(row.symbolId, 0.3 * (pathMatchCount / queryTermsForPath.length));
+          pathBoost.set(
+            row.symbolId,
+            0.3 * (pathMatchCount / queryTermsForPath.length),
+          );
         }
       }
     }
@@ -378,11 +428,17 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
   // Phase 3: 1-hop edge expansion — follow outbound edges from search hits
   // to discover closely-related symbols that the text search missed.
   // This populates the dependency graph with meaningful connections.
-  const searchEdges = await ladybugDb.getEdgesFromSymbolsForSlice(conn, symbolIds);
+  const searchEdges = await ladybugDb.getEdgesFromSymbolsForSlice(
+    conn,
+    symbolIds,
+  );
   const expansionIds: string[] = [];
   for (const edges of searchEdges.values()) {
     for (const edge of edges) {
-      if (!symbolIdSet.has(edge.toSymbolId) && expansionIds.length < SUMMARY_EXPANSION_DEPTH) {
+      if (
+        !symbolIdSet.has(edge.toSymbolId) &&
+        expansionIds.length < SUMMARY_EXPANSION_DEPTH
+      ) {
         expansionIds.push(edge.toSymbolId);
         symbolIdSet.add(edge.toSymbolId);
       }
@@ -398,9 +454,15 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
   }
   const filesMap = await ladybugDb.getFilesByIds(conn, [...fileIds]);
   const metricsMap = await ladybugDb.getMetricsBySymbolIds(conn, allSymbolIds);
-  const edgesMap = await ladybugDb.getEdgesFromSymbolsForSlice(conn, allSymbolIds);
+  const edgesMap = await ladybugDb.getEdgesFromSymbolsForSlice(
+    conn,
+    allSymbolIds,
+  );
   const clustersMap = await ladybugDb.getClustersForSymbols(conn, allSymbolIds);
-  const processesMap = await ladybugDb.getProcessesForSymbols(conn, allSymbolIds);
+  const processesMap = await ladybugDb.getProcessesForSymbols(
+    conn,
+    allSymbolIds,
+  );
 
   const keySymbols: ContextSummarySymbol[] = [];
   const fileCounts = new Map<string, number>();
@@ -419,7 +481,16 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
       kind: symbol.kind as SymbolKind,
       signature: toSignature(symbol.signatureJson, symbol.name),
       summary: symbol.summary ?? `${symbol.kind} ${symbol.name}`,
-      cluster: (() => {          const ci = clustersMap.get(symbol.symbolId);          return ci ? { clusterId: ci.clusterId, label: ci.label, memberCount: ci.symbolCount } : undefined;        })(),
+      cluster: (() => {
+        const ci = clustersMap.get(symbol.symbolId);
+        return ci
+          ? {
+              clusterId: ci.clusterId,
+              label: ci.label,
+              memberCount: ci.symbolCount,
+            }
+          : undefined;
+      })(),
       processes: processesMap.get(symbol.symbolId)?.length
         ? processesMap
             .get(symbol.symbolId)!
@@ -483,12 +554,17 @@ async function buildSeed(repoId: string, query: string): Promise<SummarySeed> {
     const summaryLowerB = (b.summary ?? "").toLowerCase();
     let relevanceA = 0;
     let relevanceB = 0;
-    let nameHitsA = 0, nameHitsB = 0;
+    let nameHitsA = 0,
+      nameHitsB = 0;
     for (const token of queryTokensLower) {
-      if (nameLowerA.includes(token)) { relevanceA += 10; nameHitsA++; }
-      else if (summaryLowerA.includes(token)) relevanceA += 3;
-      if (nameLowerB.includes(token)) { relevanceB += 10; nameHitsB++; }
-      else if (summaryLowerB.includes(token)) relevanceB += 3;
+      if (nameLowerA.includes(token)) {
+        relevanceA += 10;
+        nameHitsA++;
+      } else if (summaryLowerA.includes(token)) relevanceA += 3;
+      if (nameLowerB.includes(token)) {
+        relevanceB += 10;
+        nameHitsB++;
+      } else if (summaryLowerB.includes(token)) relevanceB += 3;
     }
     // Bonus for matching ALL query tokens in name (full relevance match)
     const tokenCount = queryTokensLower.length || 1;
@@ -564,7 +640,10 @@ export async function generateContextSummary(args: {
     seed = await Promise.race([
       buildSeed(args.repoId, query),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("buildSeed timed out after 30s")), 30_000).unref(),
+        setTimeout(
+          () => reject(new Error("buildSeed timed out after 30s")),
+          30_000,
+        ).unref(),
       ),
     ]);
     summarySeedCache.set(cacheKey, seed);
