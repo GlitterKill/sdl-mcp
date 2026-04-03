@@ -618,7 +618,7 @@ export const RepoStatusResponseSchema = z.object({
   filesIndexed: z.number().int(),
   symbolsIndexed: z.number().int(),
   lastIndexedAt: z.string().nullable(),
-  healthScore: z.number().int().min(0).max(100).optional(),
+  healthScore: z.number().int().min(0).max(100).nullable().optional(),
   healthComponents: z.object({
     freshness: z.number().min(0).max(1),
     coverage: z.number().min(0).max(1),
@@ -1529,6 +1529,7 @@ const ContextSummaryMetadataSchema = z.object({
   budget: z.number().int().min(1),
   truncated: z.boolean(),
   indexVersion: z.string(),
+  budgetWarning: z.string().optional(),
 });
 
 const ContextSummarySchema = z.object({

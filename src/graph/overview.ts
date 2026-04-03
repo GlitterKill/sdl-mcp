@@ -110,11 +110,13 @@ function toCompactRef(row: {
 }): CompactSymbolRef {
   let signature: string | undefined;
   if (row.signatureJson) {
-    const sig = safeJsonParseOptional(row.signatureJson, SignatureSchema) as {
-      name?: string;
-      params?: Array<{ name: string; type?: string }>;
-      returns?: string;
-    } | undefined;
+    const sig = safeJsonParseOptional(row.signatureJson, SignatureSchema) as
+      | {
+          name?: string;
+          params?: Array<{ name: string; type?: string }>;
+          returns?: string;
+        }
+      | undefined;
     if (sig?.name) {
       const params = sig.params
         ? `(${sig.params.map((p) => p.name).join(", ")})`
@@ -127,7 +129,7 @@ function toCompactRef(row: {
   return {
     symbolId: row.symbolId,
     name: row.name,
-    kind: (isSymbolKind(row.kind) ? row.kind : "function"),
+    kind: isSymbolKind(row.kind) ? row.kind : "function",
     exported: row.exported,
     signature,
   };
@@ -164,7 +166,7 @@ const overviewCache = new Map<string, OverviewCacheEntry>();
 const overviewInflight = new Map<string, Promise<RepoOverview>>();
 
 function makeOverviewCacheKey(request: RepoOverviewRequest): string {
-  const hotspots = request.includeHotspots ?? (request.level === "full");
+  const hotspots = request.includeHotspots ?? request.level === "full";
   return `${request.repoId}:${request.level}:${hotspots}:${JSON.stringify([...(request.directories ?? [])].sort())}:${request.maxDirectories ?? ""}:${request.maxExportsPerDirectory ?? ""}`;
 }
 
@@ -175,6 +177,70 @@ function makeOverviewCacheKey(request: RepoOverviewRequest): string {
 export function clearOverviewCache(): void {
   overviewCache.clear();
   overviewInflight.clear();
+}
+
+/**
+ * Peek into the overview cache for a previously computed higher-detail entry
+ * that already contains cluster/process data for the given repoId.
+ * Returns the data if found, or undefined if no suitable cache entry exists.
+ */
+function peekCachedClusterProcess(repoId: string):
+  | {
+      clusterStats: {
+        totalClusters: number;
+        averageClusterSize: number;
+        largestClusters: Array<{
+          clusterId: string;
+          label: string;
+          size: number;
+        }>;
+      };
+      processStats: {
+        totalProcesses: number;
+        averageDepth: number;
+        entryPoints: number;
+        longestProcesses: Array<{
+          processId: string;
+          label: string;
+          depth: number;
+        }>;
+      };
+    }
+  | undefined {
+  const now = Date.now();
+  for (const [key, entry] of overviewCache) {
+    if (entry.expiresAt <= now) continue;
+    // Only look at entries for the same repo at directories/full level
+    if (!key.startsWith(`${repoId}:`) || key.startsWith(`${repoId}:stats:`))
+      continue;
+    const overview = entry.result;
+    // If the cached overview has cluster or process data, extract it
+    if (overview.clusters || overview.processes) {
+      return {
+        clusterStats: overview.clusters
+          ? {
+              totalClusters: overview.clusters.totalClusters,
+              averageClusterSize: overview.clusters.averageClusterSize,
+              largestClusters: overview.clusters.largestClusters,
+            }
+          : { totalClusters: 0, averageClusterSize: 0, largestClusters: [] },
+        processStats: overview.processes
+          ? {
+              totalProcesses: overview.processes.totalProcesses,
+              averageDepth: overview.processes.averageDepth,
+              entryPoints: overview.processes.entryPoints,
+              longestProcesses: overview.processes.longestProcesses,
+            }
+          : {
+              totalProcesses: 0,
+              averageDepth: 0,
+              entryPoints: 0,
+              longestProcesses: [],
+            },
+      };
+    }
+  }
+  return undefined;
 }
 
 // ============================================================================
@@ -251,16 +317,58 @@ async function buildRepoOverviewImpl(
   const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
   const versionId = latestVersion?.versionId ?? "0";
 
-  // Fetch core rows once
-  const [files, symbols, edgeCount, edgeCountsByType, clusterStats, processStats] =
-    await Promise.all([
+  // Fetch core rows once.
+  // At "stats" level, skip expensive cluster/process graph traversals unless
+  // results are already cached from a previous higher-detail call.  The cache
+  // key format mirrors makeOverviewCacheKey so we can peek at "directories" or
+  // "full" entries that would already contain the computed data.
+  const skipClusterProcess = level === "stats";
+
+  const [files, symbols, edgeCount, edgeCountsByType] = await Promise.all([
     ladybugDb.getFilesByRepo(conn, repoId),
     ladybugDb.getSymbolsByRepo(conn, repoId),
     ladybugDb.getEdgeCount(conn, repoId),
     ladybugDb.getEdgeCountsByType(conn, repoId),
-    ladybugDb.getClusterOverviewStats(conn, repoId),
-    ladybugDb.getProcessOverviewStats(conn, repoId),
   ]);
+
+  // For stats level, try to reuse cluster/process data from a cached
+  // higher-detail overview.  If nothing is cached, return placeholder values
+  // rather than blocking on potentially expensive graph queries.
+  let clusterStats: Awaited<
+    ReturnType<typeof ladybugDb.getClusterOverviewStats>
+  >;
+  let processStats: Awaited<
+    ReturnType<typeof ladybugDb.getProcessOverviewStats>
+  >;
+  let clusterProcessDeferred = false;
+
+  if (skipClusterProcess) {
+    // Peek at cached higher-detail overviews for pre-computed data
+    const cachedClusterProcess = peekCachedClusterProcess(repoId);
+    if (cachedClusterProcess) {
+      clusterStats = cachedClusterProcess.clusterStats;
+      processStats = cachedClusterProcess.processStats;
+    } else {
+      // Return stub data — cluster/process info available at higher detail levels
+      clusterStats = {
+        totalClusters: 0,
+        averageClusterSize: 0,
+        largestClusters: [],
+      };
+      processStats = {
+        totalProcesses: 0,
+        averageDepth: 0,
+        entryPoints: 0,
+        longestProcesses: [],
+      };
+      clusterProcessDeferred = true;
+    }
+  } else {
+    [clusterStats, processStats] = await Promise.all([
+      ladybugDb.getClusterOverviewStats(conn, repoId),
+      ladybugDb.getProcessOverviewStats(conn, repoId),
+    ]);
+  }
 
   // Always build stats
   const stats = buildRepoStats(files, symbols, edgeCount, edgeCountsByType);
@@ -291,7 +399,12 @@ async function buildRepoOverviewImpl(
   // Find entry points (scoped to directoryFilter when set)
   const allEntryPoints = findEntryPoints(files);
   const entryPoints = directoryFilter?.length
-    ? allEntryPoints.filter(ep => directoryFilter.some(d => { const nd = d.endsWith("/") ? d.slice(0, -1) : d; return ep === nd || ep.startsWith(nd + "/"); }))
+    ? allEntryPoints.filter((ep) =>
+        directoryFilter.some((d) => {
+          const nd = d.endsWith("/") ? d.slice(0, -1) : d;
+          return ep === nd || ep.startsWith(nd + "/");
+        }),
+      )
     : allEntryPoints;
 
   // Calculate token metrics
@@ -324,8 +437,7 @@ async function buildRepoOverviewImpl(
   if (clusterStats.totalClusters > 0 && !directoryFilter?.length) {
     overview.clusters = {
       totalClusters: clusterStats.totalClusters,
-      averageClusterSize:
-        Math.round(clusterStats.averageClusterSize * 10) / 10,
+      averageClusterSize: Math.round(clusterStats.averageClusterSize * 10) / 10,
       largestClusters: clusterStats.largestClusters,
     };
   }
@@ -337,6 +449,14 @@ async function buildRepoOverviewImpl(
       entryPoints: processStats.entryPoints,
       longestProcesses: processStats.longestProcesses,
     };
+  }
+
+  // When cluster/process computation was deferred at stats level,
+  // add a hint so consumers know the data is available at higher detail levels.
+  if (clusterProcessDeferred) {
+    overview.clustersAvailable = false;
+    overview.clustersHint =
+      'Cluster/process data deferred at stats level. Use level "directories" or "full" to include.';
   }
 
   return overview;
@@ -373,7 +493,9 @@ function buildRepoStats(
       config: edgesByType.config ?? 0,
     },
     avgSymbolsPerFile:
-      files.length > 0 ? Math.round((symbols.length / files.length) * 10) / 10 : 0,
+      files.length > 0
+        ? Math.round((symbols.length / files.length) * 10) / 10
+        : 0,
     avgEdgesPerSymbol:
       symbols.length > 0
         ? Math.round((edgeCount / symbols.length) * 10) / 10
@@ -492,24 +614,22 @@ async function buildDirectorySummaries(
   const summaries: DirectorySummary[] = [];
   const allDirectories = new Set(Array.from(aggregates.keys()));
 
-  const sortedAggregates = Array.from(aggregates.values()).sort(
-    (a, b) => {
-      // Primary: source directories before tests/scripts/other
-      const pathPriority = (dir: string): number => {
-        if (dir.startsWith("src/")) return 3;
-        if (dir.startsWith("packages/")) return 2;
-        if (dir.startsWith("native/")) return 2;
-        if (dir.startsWith("scripts/")) return 1;
-        if (dir.startsWith("tests/")) return 0;
-        return 1;
-      };
-      const priA = pathPriority(a.directory);
-      const priB = pathPriority(b.directory);
-      if (priA !== priB) return priB - priA;
-      // Secondary: by symbol count
-      return b.symbolCount - a.symbolCount;
-    },
-  );
+  const sortedAggregates = Array.from(aggregates.values()).sort((a, b) => {
+    // Primary: source directories before tests/scripts/other
+    const pathPriority = (dir: string): number => {
+      if (dir.startsWith("src/")) return 3;
+      if (dir.startsWith("packages/")) return 2;
+      if (dir.startsWith("native/")) return 2;
+      if (dir.startsWith("scripts/")) return 1;
+      if (dir.startsWith("tests/")) return 0;
+      return 1;
+    };
+    const priA = pathPriority(a.directory);
+    const priB = pathPriority(b.directory);
+    if (priA !== priB) return priB - priA;
+    // Secondary: by symbol count
+    return b.symbolCount - a.symbolCount;
+  });
 
   for (const agg of sortedAggregates) {
     // Apply directory filter if specified
@@ -519,8 +639,13 @@ async function buildDirectorySummaries(
           const regex = globToSafeRegex(pattern);
           return regex.test(agg.directory);
         }
-        const normalizedPattern = pattern.endsWith("/") ? pattern.slice(0, -1) : pattern;
-        return agg.directory === normalizedPattern || agg.directory.startsWith(normalizedPattern + "/");
+        const normalizedPattern = pattern.endsWith("/")
+          ? pattern.slice(0, -1)
+          : pattern;
+        return (
+          agg.directory === normalizedPattern ||
+          agg.directory.startsWith(normalizedPattern + "/")
+        );
       });
       if (!matches) continue;
     }
@@ -601,7 +726,10 @@ async function buildCodebaseHotspots(
   // Largest files by symbol count
   const symbolCountByFile = new Map<string, number>();
   for (const sym of symbols) {
-    symbolCountByFile.set(sym.fileId, (symbolCountByFile.get(sym.fileId) ?? 0) + 1);
+    symbolCountByFile.set(
+      sym.fileId,
+      (symbolCountByFile.get(sym.fileId) ?? 0) + 1,
+    );
   }
 
   const largestFiles = Array.from(symbolCountByFile.entries())
@@ -622,7 +750,10 @@ async function buildCodebaseHotspots(
   for (const sym of symbols) {
     const metrics = metricsMap.get(sym.symbolId);
     const endpoints = (metrics?.fanIn ?? 0) + (metrics?.fanOut ?? 0);
-    edgeCountByFile.set(sym.fileId, (edgeCountByFile.get(sym.fileId) ?? 0) + endpoints);
+    edgeCountByFile.set(
+      sym.fileId,
+      (edgeCountByFile.get(sym.fileId) ?? 0) + endpoints,
+    );
   }
 
   const mostConnected = Array.from(edgeCountByFile.entries())
@@ -645,12 +776,17 @@ async function buildCodebaseHotspots(
 /**
  * Identifies architectural layers from directory structure.
  */
-function identifyArchitecturalLayers(directories: DirectorySummary[]): string[] {
+function identifyArchitecturalLayers(
+  directories: DirectorySummary[],
+): string[] {
   const layers: string[] = [];
   const layerPatterns = [
     { pattern: /^src\/?(api|routes|controllers|handlers)\/?/, layer: "API" },
     { pattern: /^src\/?(services|domain|core)\/?/, layer: "Service" },
-    { pattern: /^src\/?(db|data|models|entities|repositories)\/?/, layer: "Data" },
+    {
+      pattern: /^src\/?(db|data|models|entities|repositories)\/?/,
+      layer: "Data",
+    },
     { pattern: /^src\/?(utils?|helpers?|lib|common)\/?/, layer: "Utilities" },
     { pattern: /^src\/?(cli|commands)\/?/, layer: "CLI" },
     { pattern: /^src\/?(config|settings)\/?/, layer: "Configuration" },

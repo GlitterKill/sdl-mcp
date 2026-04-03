@@ -108,6 +108,14 @@ describe("sliceErrorToMessage", () => {
     );
   });
 
+  it("should format missing_entry_hint message", () => {
+    const error: SliceError = { type: "missing_entry_hint", repoId: "test-repo" };
+    assert.strictEqual(
+      sliceErrorToMessage(error),
+      "At least one entry symbol, taskText, stackTrace, failingTestPath, or editedFiles is required to seed a slice for repo test-repo",
+    );
+  });
+
   it("should format policy_denied message", () => {
     const error: SliceError = {
       type: "policy_denied",
@@ -162,6 +170,13 @@ describe("sliceErrorToCode", () => {
     assert.strictEqual(
       sliceErrorToCode({ type: "no_symbols", repoId: "x" }),
       "NO_SYMBOLS",
+    );
+  });
+
+  it("should return correct code for missing_entry_hint", () => {
+    assert.strictEqual(
+      sliceErrorToCode({ type: "missing_entry_hint", repoId: "x" }),
+      "MISSING_ENTRY_HINT",
     );
   });
 

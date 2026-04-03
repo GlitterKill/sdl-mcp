@@ -5,8 +5,15 @@ import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
-import { buildRepoOverview, clearOverviewCache } from "../../dist/graph/overview.js";
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import {
+  buildRepoOverview,
+  clearOverviewCache,
+} from "../../dist/graph/overview.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 
 const REPO_ID = "test-overview-cluster-stats-repo";
@@ -101,7 +108,7 @@ describe("repo overview cluster/process stats", () => {
     assert.strictEqual(overview.processes, undefined);
   });
 
-  it("includes aggregate cluster/process stats when data exists", async () => {
+  it("defers cluster/process stats at stats level on cold cache", async () => {
     clearOverviewCache();
     const conn = await getLadybugConn();
     const now = new Date().toISOString();
@@ -147,9 +154,24 @@ describe("repo overview cluster/process stats", () => {
       role: "exit",
     });
 
-    const overview = await buildRepoOverview({
+    // At stats level with cold cache, cluster/process data is deferred
+    const statsOverview = await buildRepoOverview({
       repoId: REPO_ID,
       level: "stats",
+    });
+
+    assert.strictEqual(statsOverview.clusters, undefined);
+    assert.strictEqual(statsOverview.processes, undefined);
+    assert.strictEqual(statsOverview.clustersAvailable, false);
+    assert.ok(typeof statsOverview.clustersHint === "string");
+  });
+
+  it("includes cluster/process stats at directories level", async () => {
+    clearOverviewCache();
+
+    const overview = await buildRepoOverview({
+      repoId: REPO_ID,
+      level: "directories",
     });
 
     assert.ok(overview.clusters);
@@ -164,5 +186,22 @@ describe("repo overview cluster/process stats", () => {
     assert.strictEqual(overview.processes.entryPoints, 1);
     assert.strictEqual(overview.processes.longestProcesses.length, 1);
     assert.strictEqual(overview.processes.longestProcesses[0]!.depth, 2);
+  });
+
+  it("stats level picks up cluster/process from cached higher-detail call", async () => {
+    // Populate cache via a directories-level call first
+    clearOverviewCache();
+    await buildRepoOverview({ repoId: REPO_ID, level: "directories" });
+
+    // Now stats level should reuse the cached cluster/process data
+    const statsOverview = await buildRepoOverview({
+      repoId: REPO_ID,
+      level: "stats",
+    });
+
+    assert.ok(statsOverview.clusters);
+    assert.strictEqual(statsOverview.clusters.totalClusters, 1);
+    assert.ok(statsOverview.processes);
+    assert.strictEqual(statsOverview.processes.totalProcesses, 1);
   });
 });

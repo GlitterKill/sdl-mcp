@@ -42,7 +42,7 @@ export interface HealthScoreInput {
 }
 
 export interface HealthScoreResult {
-  score: number;
+  score: number | null;
   available: boolean;
   components: HealthComponents;
 }
@@ -57,7 +57,7 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
 
   if (!available) {
     return {
-      score: 0,
+      score: null,
       available: false,
       components: {
         freshness: 0,

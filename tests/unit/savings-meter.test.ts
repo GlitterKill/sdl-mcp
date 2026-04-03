@@ -92,10 +92,10 @@ describe("renderUserNotificationLine", () => {
     assert.strictEqual(result, "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 100%");
   });
 
-  it("handles negative savings (SDL > raw) gracefully", () => {
-    // When SDL tokens exceed raw equivalent, saved is clamped to 0
+  it("handles negative savings (SDL > raw) by showing overhead", () => {
+    // When SDL tokens exceed raw equivalent, show overhead percentage
     const result = renderUserNotificationLine(1500, 1000);
-    assert.strictEqual(result, "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 0%");
+    assert.strictEqual(result, "\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 0% (SDL overhead: +50%)");
   });
 
   it("handles very small numbers", () => {

@@ -18,6 +18,8 @@ import {
 import { IndexError } from "../domain/errors.js";
 import { getOverlayEmbeddingCache } from "./overlay-embedding-cache.js";
 
+import { logger } from "../util/logger.js";
+
 export interface InMemoryLiveIndexCoordinatorOptions {
   enabled?: boolean;
   debounceMs?: number;
@@ -118,14 +120,44 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     // Close events are lifecycle signals — always accept them regardless of version
     if (input.eventType === "close" && !input.dirty) {
       if (existing && input.version !== existing.version) {
-        warnings.push(`Close event version ${input.version} does not match draft version ${existing.version}.`);
+        warnings.push(
+          `Close event version ${input.version} does not match draft version ${existing.version}.`,
+        );
       }
       this.overlayStore.removeDraft(input.repoId, input.filePath);
+
+      // Re-index from the actual disk file to restore canonical index state.
+      // Without this, a previous partial/garbage buffer push that was
+      // checkpointed would leave the index permanently corrupted because
+      // incremental refresh sees no disk change.
+      let diskRecoveryScheduled = false;
+      try {
+        // Pass the raw filePath — patchSavedFile normalizes internally
+        await patchSavedFile({
+          repoId: input.repoId,
+          filePath: input.filePath,
+          language: input.language,
+          version: input.version,
+          // content omitted — patchSavedFile reads from disk when absent
+        });
+        diskRecoveryScheduled = true;
+        logger.debug("Restored canonical index from disk on close event", {
+          repoId: input.repoId,
+          filePath: input.filePath,
+        });
+      } catch (error) {
+        logger.warn("Failed to restore index from disk on close event", {
+          repoId: input.repoId,
+          filePath: input.filePath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
       return {
         accepted: true,
         repoId: input.repoId,
         overlayVersion: input.version,
-        parseScheduled: false,
+        parseScheduled: diskRecoveryScheduled,
         checkpointScheduled: false,
         warnings,
       };
@@ -162,7 +194,10 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
 
     // Invalidate overlay embedding cache for any symbols in this file's previous draft.
     {
-      const prevDraft = this.overlayStore.getDraft(input.repoId, input.filePath);
+      const prevDraft = this.overlayStore.getDraft(
+        input.repoId,
+        input.filePath,
+      );
       if (prevDraft?.parseResult) {
         const staleIds = prevDraft.parseResult.symbols.map((s) => s.symbolId);
         getOverlayEmbeddingCache().invalidateMany(staleIds);

@@ -116,12 +116,29 @@ const MAX_BODY_SCAN_LINES = 200;
  * Skips comment lines. Caps scan at MAX_BODY_SCAN_LINES.
  */
 const SKIP_CALLS = new Set([
-    "console.log", "console.warn", "console.error",
-    "Math.min", "Math.max", "Math.abs", "Math.floor", "Math.ceil", "Math.round",
-    "Array.isArray", "Object.keys", "Object.values", "Object.entries",
-    "JSON.stringify", "JSON.parse", "String", "Number", "Boolean",
-    "parseInt", "parseFloat", "Promise.all", "Promise.resolve",
-  ]);
+  "console.log",
+  "console.warn",
+  "console.error",
+  "Math.min",
+  "Math.max",
+  "Math.abs",
+  "Math.floor",
+  "Math.ceil",
+  "Math.round",
+  "Array.isArray",
+  "Object.keys",
+  "Object.values",
+  "Object.entries",
+  "JSON.stringify",
+  "JSON.parse",
+  "String",
+  "Number",
+  "Boolean",
+  "parseInt",
+  "parseFloat",
+  "Promise.all",
+  "Promise.resolve",
+]);
 
 export function analyzeBodyPatterns(
   symbol: ExtractedSymbol,
@@ -179,7 +196,10 @@ export function analyzeBodyPatterns(
     if (/\bthrow\s+/.test(line)) signals.throws = true;
 
     // Validation guards: if (!...) throw/return
-    if (/if\s*\(!/.test(line) && (/throw\b/.test(line) || /return\b/.test(line))) {
+    if (
+      /if\s*\(!/.test(line) &&
+      (/throw\b/.test(line) || /return\b/.test(line))
+    ) {
       signals.validates = true;
     }
     if (/if\s*\(/.test(line) && /throw\s+new\b/.test(line)) {
@@ -190,17 +210,27 @@ export function analyzeBodyPatterns(
     if (/\bawait\s/.test(line)) signals.isAsync = true;
 
     // Iteration
-    if (/\.forEach\s*\(/.test(line) || /\.map\s*\(/.test(line) ||
-        /\.filter\s*\(/.test(line) || /\.reduce\s*\(/.test(line) ||
-        /\bfor\s*\(/.test(line) || /\bwhile\s*\(/.test(line) ||
-        /\bfor\s+of\b/.test(line) || /\bfor\s+in\b/.test(line)) {
+    if (
+      /\.forEach\s*\(/.test(line) ||
+      /\.map\s*\(/.test(line) ||
+      /\.filter\s*\(/.test(line) ||
+      /\.reduce\s*\(/.test(line) ||
+      /\bfor\s*\(/.test(line) ||
+      /\bwhile\s*\(/.test(line) ||
+      /\bfor\s+of\b/.test(line) ||
+      /\bfor\s+in\b/.test(line)
+    ) {
       signals.iterates = true;
     }
 
     // Transform patterns
-    if (/\.map\s*\(/.test(line) || /\.flatMap\s*\(/.test(line) ||
-        /Object\.assign\s*\(/.test(line) || /\{\.\.\./.test(line) ||
-        /Array\.from\s*\(/.test(line)) {
+    if (
+      /\.map\s*\(/.test(line) ||
+      /\.flatMap\s*\(/.test(line) ||
+      /Object\.assign\s*\(/.test(line) ||
+      /\{\.\.\./.test(line) ||
+      /Array\.from\s*\(/.test(line)
+    ) {
       signals.transforms = true;
     }
 
@@ -215,43 +245,68 @@ export function analyzeBodyPatterns(
     }
 
     // Merge
-    if (/Object\.assign\s*\(/.test(line) || /deepMerge\s*\(/i.test(line) ||
-        /\{\.\.\..*,\s*\.\.\./.test(line)) {
+    if (
+      /Object\.assign\s*\(/.test(line) ||
+      /deepMerge\s*\(/i.test(line) ||
+      /\{\.\.\..*,\s*\.\.\./.test(line)
+    ) {
       signals.merges = true;
     }
 
     // Cache
-    if (/cache\.(get|set|has)\s*\(/i.test(line) || /\.memoize\s*\(/i.test(line) ||
-        /new\s+WeakMap/i.test(line) || /new\s+WeakRef/i.test(line)) {
+    if (
+      /cache\.(get|set|has)\s*\(/i.test(line) ||
+      /\.memoize\s*\(/i.test(line) ||
+      /new\s+WeakMap/i.test(line) ||
+      /new\s+WeakRef/i.test(line)
+    ) {
       signals.caches = true;
     }
 
     // Network I/O
-    if (/\bfetch\s*\(/.test(line) || /axios\./.test(line) ||
-        /http\.request\s*\(/.test(line) || /http\.get\s*\(/.test(line) ||
-        /http\.post\s*\(/.test(line)) {
+    if (
+      /\bfetch\s*\(/.test(line) ||
+      /axios\./.test(line) ||
+      /http\.request\s*\(/.test(line) ||
+      /http\.get\s*\(/.test(line) ||
+      /http\.post\s*\(/.test(line)
+    ) {
       signals.hasNetworkIO = true;
     }
 
     // Filesystem I/O
-    if (/fs\.(readFile|writeFile|appendFile|unlink|mkdir|rmdir|existsSync|readFileSync|writeFileSync)/.test(line) ||
-        /\b(readFileSync|writeFileSync)\s*\(/.test(line)) {
+    if (
+      /fs\.(readFile|writeFile|appendFile|unlink|mkdir|rmdir|existsSync|readFileSync|writeFileSync)/.test(
+        line,
+      ) ||
+      /\b(readFileSync|writeFileSync)\s*\(/.test(line)
+    ) {
       signals.hasFileIO = true;
     }
 
     // Database I/O
-    if (/\b(db|pool|connection|client|conn)\.(query|execute)\s*\(/.test(line) ||
-        (/\.query\s*\(/.test(line) && /\b(SELECT|INSERT|UPDATE|DELETE|MERGE|MATCH|CREATE)\b/i.test(line))) {
+    if (
+      /\b(db|pool|connection|client|conn)\.(query|execute)\s*\(/.test(line) ||
+      (/\.query\s*\(/.test(line) &&
+        /\b(SELECT|INSERT|UPDATE|DELETE|MERGE|MATCH|CREATE)\b/i.test(line))
+    ) {
       signals.hasDbIO = true;
     }
 
     // Events
-    if (/\.emit\s*\(/.test(line) || /\.dispatch\s*\(/.test(line) ||
-        /\.trigger\s*\(/.test(line) || /\.publish\s*\(/.test(line)) {
+    if (
+      /\.emit\s*\(/.test(line) ||
+      /\.dispatch\s*\(/.test(line) ||
+      /\.trigger\s*\(/.test(line) ||
+      /\.publish\s*\(/.test(line)
+    ) {
       signals.emitsEvents = true;
     }
-    if (/\.on\s*\(\s*['"`]/.test(line) || /\.addEventListener\s*\(/.test(line) ||
-        /\.subscribe\s*\(/.test(line)) {
+    if (
+      /\.on\s*\(\s*['"`]/.test(line) ||
+      /\.addEventListener\s*\(/.test(line) ||
+      /\.subscribe\s*\(/.test(line)
+    ) {
       signals.registersListeners = true;
     }
 
@@ -266,8 +321,13 @@ export function analyzeBodyPatterns(
     if (nameRegex.test(line)) signals.recursion = true;
 
     // Track call targets for delegation detection
-    const callMatch = line.match(/(?:this\.)?([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)\s*\(/);
-    if (callMatch && !/^(function |const |if |while |for |switch )/.test(line)) {
+    const callMatch = line.match(
+      /(?:this\.)?([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)\s*\(/,
+    );
+    if (
+      callMatch &&
+      !/^(function |const |if |while |for |switch )/.test(line)
+    ) {
       const target = callMatch[1];
       if (!SKIP_CALLS.has(target)) {
         callCounts.set(target, (callCounts.get(target) ?? 0) + 1);
@@ -282,14 +342,24 @@ export function analyzeBodyPatterns(
   // behavioral signal was detected (otherwise .map/.sort/.forEach etc.
   // would be misclassified as delegation).
   const hasSpecificSignal =
-    signals.iterates || signals.transforms || signals.aggregates ||
-    signals.sorts || signals.merges || signals.caches ||
-    signals.hasNetworkIO || signals.hasFileIO || signals.hasDbIO ||
-    signals.emitsEvents || signals.registersListeners ||
-    signals.recursion || signals.validates;
+    signals.iterates ||
+    signals.transforms ||
+    signals.aggregates ||
+    signals.sorts ||
+    signals.merges ||
+    signals.caches ||
+    signals.hasNetworkIO ||
+    signals.hasFileIO ||
+    signals.hasDbIO ||
+    signals.emitsEvents ||
+    signals.registersListeners ||
+    signals.recursion ||
+    signals.validates;
   if (callCounts.size > 0 && lines.length <= 10 && !hasSpecificSignal) {
     const totalCalls = [...callCounts.values()].reduce((a, b) => a + b, 0);
-    const [topTarget, topCount] = [...callCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const [topTarget, topCount] = [...callCounts.entries()].sort(
+      (a, b) => b[1] - a[1],
+    )[0];
     if (topCount >= 1 && totalCalls <= 3 && topTarget !== symbol.name) {
       signals.delegates = topTarget;
     }
@@ -300,6 +370,15 @@ export function analyzeBodyPatterns(
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Prepends an appropriate article ("a" or "an") before the subject phrase.
+ */
+function prefixArticle(subject: string): string {
+  const firstChar = subject.charAt(0).toLowerCase();
+  const article = "aeiou".includes(firstChar) ? "an" : "a";
+  return `${article} ${subject}`;
 }
 
 /**
@@ -314,14 +393,25 @@ function escapeRegex(s: string): string {
 function extractEnrichedSubject(symbol: ExtractedSymbol): string {
   // Try return type (strip Promise<> wrapper, generics)
   const rt = symbol.signature?.returns;
-  if (rt && rt !== "void" && rt !== "unknown" && rt !== "any" && rt !== "undefined") {
+  if (
+    rt &&
+    rt !== "void" &&
+    rt !== "unknown" &&
+    rt !== "any" &&
+    rt !== "undefined"
+  ) {
     const promiseMatch = /^Promise<(.+)>/.exec(rt);
     const inner = promiseMatch ? promiseMatch[1] : rt;
     const unwrapped = inner
       .replace(/<[^>]+>/g, "")
       .replace(/\[\]/g, "")
       .trim();
-    if (unwrapped && unwrapped.length > 2 && unwrapped.length < 40 && /^[A-Z]/.test(unwrapped)) {
+    if (
+      unwrapped &&
+      unwrapped.length > 2 &&
+      unwrapped.length < 40 &&
+      /^[A-Z]/.test(unwrapped)
+    ) {
       return splitCamelCase(unwrapped).join(" ").toLowerCase();
     }
   }
@@ -330,7 +420,11 @@ function extractEnrichedSubject(symbol: ExtractedSymbol): string {
   const params = symbol.signature?.params ?? [];
   if (params.length > 0) {
     const firstType = params[0].type?.replace(/^:\s*/, "").trim();
-    if (firstType && /^[A-Z][a-zA-Z]+/.test(firstType) && firstType.length < 30) {
+    if (
+      firstType &&
+      /^[A-Z][a-zA-Z]+/.test(firstType) &&
+      firstType.length < 30
+    ) {
       const cleaned = firstType.replace(/<[^>]+>/g, "").replace(/\[\]/g, "");
       return splitCamelCase(cleaned).join(" ").toLowerCase();
     }
@@ -338,7 +432,10 @@ function extractEnrichedSubject(symbol: ExtractedSymbol): string {
 
   // Fall back to name-based subject
   const words = splitCamelCase(symbol.name);
-  return words.slice(1).map((w) => w.toLowerCase()).join(" ");
+  return words
+    .slice(1)
+    .map((w) => w.toLowerCase())
+    .join(" ");
 }
 
 /**
@@ -365,7 +462,253 @@ function countActiveSignals(signals: BodySignals): number {
   return count;
 }
 // Built-in method names filtered from delegation summaries to avoid misleading output
-const BUILTIN_DELEGATES = new Set(["test", "has", "get", "set", "push", "pop", "delete", "add", "next", "call", "apply", "bind", "toString", "valueOf", "then", "catch", "finally", "exec", "match", "replace", "split", "join", "includes", "indexOf", "slice", "keys", "values", "entries", "log", "warn", "error", "info", "debug"]);
+const BUILTIN_DELEGATES = new Set([
+  "test",
+  "has",
+  "get",
+  "set",
+  "push",
+  "pop",
+  "delete",
+  "add",
+  "next",
+  "call",
+  "apply",
+  "bind",
+  "toString",
+  "valueOf",
+  "then",
+  "catch",
+  "finally",
+  "exec",
+  "match",
+  "replace",
+  "split",
+  "join",
+  "includes",
+  "indexOf",
+  "slice",
+  "keys",
+  "values",
+  "entries",
+  "log",
+  "warn",
+  "error",
+  "info",
+  "debug",
+]);
+
+/**
+ * Generate a summary based on the function name prefix (verb).
+ * Called as a fallback after behavioral signal-based templates, so only fires
+ * when behavioral analysis doesn't have a more specific match.
+ */
+function generatePrefixSummary(
+  firstWord: string,
+  subject: string,
+  signals: BodySignals,
+  returnSuffix: string,
+): string | null {
+  if (firstWord === "get") {
+    const ioDetail = signals.hasDbIO
+      ? " from database"
+      : signals.hasNetworkIO
+        ? " from network"
+        : signals.hasFileIO
+          ? " from filesystem"
+          : signals.caches
+            ? " (cached)"
+            : "";
+    return `Retrieves ${subject}${ioDetail}${returnSuffix}`;
+  }
+  if (firstWord === "set") return `Sets ${subject}`;
+  if (firstWord === "find") {
+    const searchDetail = signals.iterates
+      ? " by searching through candidates"
+      : "";
+    return `Finds ${subject}${searchDetail}${returnSuffix}`;
+  }
+  if (firstWord === "create") return `Creates a new ${subject}${returnSuffix}`;
+  if (firstWord === "make") return `Constructs ${subject}${returnSuffix}`;
+  if (firstWord === "build" || firstWord === "compose") {
+    return `Builds ${subject}${signals.iterates ? " from components" : ""}${returnSuffix}`;
+  }
+  if (
+    firstWord === "compute" ||
+    firstWord === "calculate" ||
+    firstWord === "calc"
+  ) {
+    return `Computes ${subject}${signals.aggregates ? " by aggregating values" : ""}${returnSuffix}`;
+  }
+  if (firstWord === "resolve") {
+    return `Resolves ${subject}${signals.isAsync ? " asynchronously" : ""}${returnSuffix}`;
+  }
+  if (
+    firstWord === "check" ||
+    firstWord === "verify" ||
+    firstWord === "assert"
+  ) {
+    return `Checks ${subject}${signals.throws ? ", throws on failure" : ""}${returnSuffix}`;
+  }
+  if (firstWord === "ensure" || firstWord === "require") {
+    return `Ensures ${subject} is valid${signals.throws ? " or throws" : ""}`;
+  }
+  if (firstWord === "parse" || firstWord === "decode") {
+    return `Parses ${subject}${signals.validates ? " with validation" : ""}${returnSuffix}`;
+  }
+  if (
+    firstWord === "format" ||
+    firstWord === "render" ||
+    firstWord === "stringify"
+  ) {
+    return `Formats ${subject} for output${returnSuffix}`;
+  }
+  if (firstWord === "normalize" || firstWord === "clean") {
+    return `Normalizes ${subject} to canonical form${returnSuffix}`;
+  }
+  if (
+    firstWord === "init" ||
+    firstWord === "initialize" ||
+    firstWord === "setup"
+  ) {
+    return `Initializes ${subject}`;
+  }
+  if (firstWord === "register" || firstWord === "subscribe") {
+    return `Registers ${subject}${signals.registersListeners ? " as event listener" : ""}`;
+  }
+  if (
+    firstWord === "remove" ||
+    firstWord === "delete" ||
+    firstWord === "destroy" ||
+    firstWord === "unregister"
+  ) {
+    return `Removes ${subject}`;
+  }
+  if (firstWord === "update" || firstWord === "patch") {
+    return `Updates ${subject}${signals.hasDbIO ? " in database" : ""}`;
+  }
+  if (firstWord === "load" || firstWord === "read" || firstWord === "fetch") {
+    const ioDetail = signals.hasDbIO
+      ? " from database"
+      : signals.hasNetworkIO
+        ? " from network"
+        : signals.hasFileIO
+          ? " from disk"
+          : "";
+    return `Loads ${subject}${ioDetail}${returnSuffix}`;
+  }
+  if (
+    firstWord === "save" ||
+    firstWord === "write" ||
+    firstWord === "store" ||
+    firstWord === "persist"
+  ) {
+    const ioDetail = signals.hasDbIO
+      ? " to database"
+      : signals.hasFileIO
+        ? " to disk"
+        : "";
+    return `Saves ${subject}${ioDetail}`;
+  }
+  if (
+    firstWord === "emit" ||
+    firstWord === "fire" ||
+    firstWord === "dispatch" ||
+    firstWord === "publish" ||
+    firstWord === "send" ||
+    firstWord === "notify"
+  ) {
+    return `Emits ${subject} event`;
+  }
+  if (
+    firstWord === "map" ||
+    firstWord === "convert" ||
+    firstWord === "transform"
+  ) {
+    return `Transforms ${subject}${returnSuffix}`;
+  }
+  if (
+    firstWord === "filter" ||
+    firstWord === "select" ||
+    firstWord === "exclude"
+  ) {
+    return `Filters ${subject}${signals.iterates ? " from collection" : ""}${returnSuffix}`;
+  }
+  if (firstWord === "sort" || firstWord === "order" || firstWord === "rank") {
+    return `Sorts ${subject}${returnSuffix}`;
+  }
+  if (
+    firstWord === "merge" ||
+    firstWord === "combine" ||
+    firstWord === "join" ||
+    firstWord === "concat"
+  ) {
+    return `Merges ${subject}${returnSuffix}`;
+  }
+  if (
+    firstWord === "split" ||
+    firstWord === "separate" ||
+    firstWord === "partition"
+  ) {
+    return `Splits ${subject}${returnSuffix}`;
+  }
+  if (firstWord === "validate" || firstWord === "sanitize") {
+    return `Validates ${subject}${signals.throws ? ", throws on invalid input" : ""}${returnSuffix}`;
+  }
+  if (firstWord === "extract" || firstWord === "derive") {
+    return `Extracts ${subject}${returnSuffix}`;
+  }
+  if (
+    firstWord === "apply" ||
+    firstWord === "execute" ||
+    firstWord === "run" ||
+    firstWord === "invoke"
+  ) {
+    return `Executes ${subject}${signals.isAsync ? " asynchronously" : ""}`;
+  }
+  if (
+    firstWord === "enable" ||
+    firstWord === "activate" ||
+    firstWord === "start"
+  ) {
+    return `Enables ${subject}`;
+  }
+  if (
+    firstWord === "disable" ||
+    firstWord === "deactivate" ||
+    firstWord === "stop"
+  ) {
+    return `Disables ${subject}`;
+  }
+  if (firstWord === "reset") return `Resets ${subject} to initial state`;
+  if (firstWord === "clear" || firstWord === "flush" || firstWord === "purge") {
+    return `Clears ${subject}`;
+  }
+  if (firstWord === "compare" || firstWord === "diff") {
+    return `Compares ${subject}${returnSuffix}`;
+  }
+  if (
+    firstWord === "count" ||
+    firstWord === "measure" ||
+    firstWord === "estimate"
+  ) {
+    return `Counts ${subject}${returnSuffix}`;
+  }
+  if (firstWord === "log" || firstWord === "trace" || firstWord === "record") {
+    return `Records ${subject}`;
+  }
+  if (
+    firstWord === "clone" ||
+    firstWord === "copy" ||
+    firstWord === "duplicate"
+  ) {
+    return `Creates a copy of ${subject}${returnSuffix}`;
+  }
+  if (firstWord === "await" || firstWord === "wait") {
+    return `Waits for ${subject} to complete${returnSuffix}`;
+  }
+  return null;
+}
 
 function generateBehavioralFunctionSummary(
   symbol: ExtractedSymbol,
@@ -392,15 +735,47 @@ function generateBehavioralFunctionSummary(
     if (signals.hasNetworkIO) details.push("via network");
     if (signals.hasFileIO) details.push("via filesystem");
     if (signals.caches) details.push("with caching");
-    const suffix = details.length > 0 ? " " + details.slice(0, 2).join(" and ") : "";
+    const suffix =
+      details.length > 0 ? " " + details.slice(0, 2).join(" and ") : "";
     return `Handles ${subject}${suffix}`;
   }
 
+  // 0a. Prefix-based semantic patterns for common naming conventions
+  const returnType = symbol.signature?.returns;
+  const returnSuffix =
+    returnType &&
+    returnType !== "void" &&
+    returnType !== "any" &&
+    returnType !== "unknown"
+      ? `. Returns ${returnType}`
+      : "";
+
+  if (firstWord === "is" && subject) {
+    // "isWindowsPathLike" → "Returns true if the value is a windows path like"
+    const detail = signals.validates ? " (with validation guards)" : "";
+    return `Returns true if the value is ${prefixArticle(subject)}${detail}${returnSuffix}`;
+  }
+
+  if (firstWord === "has" && subject) {
+    return `Checks whether ${subject} exists or is present${returnSuffix}`;
+  }
+
+  if (firstWord === "to" && subject) {
+    // "toAbsolutePath" → "Converts input to absolute path"
+    const inputHint = symbol.signature?.params?.[0]?.type
+      ?.replace(/^:\s*/, "")
+      .trim();
+    const fromPart =
+      inputHint && inputHint !== "any" && inputHint !== "unknown"
+        ? ` ${inputHint}`
+        : " input";
+    return `Converts${fromPart} to ${subject}${returnSuffix}`;
+  }
 
   // Fix A: Multi-signal composite summaries for complex functions
   // When 3+ behavioral signals fire, combine them instead of picking one
   const activeCount = countActiveSignals(signals);
-  const bodyLength = (symbol.range.endLine - symbol.range.startLine);
+  const bodyLength = symbol.range.endLine - symbol.range.startLine;
 
   if (activeCount >= 3 && subject) {
     const phrases: string[] = [];
@@ -410,7 +785,8 @@ function generateBehavioralFunctionSummary(
     if (signals.validates) phrases.push("validates input");
     if (signals.aggregates) phrases.push("aggregates results");
     if (signals.transforms) phrases.push("transforms data");
-    if (signals.iterates && !signals.transforms) phrases.push("iterates elements");
+    if (signals.iterates && !signals.transforms)
+      phrases.push("iterates elements");
     if (signals.sorts) phrases.push("sorts output");
     if (signals.merges) phrases.push("merges data");
     if (signals.caches) phrases.push("with caching");
@@ -418,9 +794,7 @@ function generateBehavioralFunctionSummary(
     if (signals.switchOrChain) phrases.push("with branching");
     if (signals.emitsEvents) phrases.push("emits events");
     if (phrases.length >= 2) {
-      const verb = firstWord || "processes";
-      const capitalVerb = verb.charAt(0).toUpperCase() + verb.slice(1);
-      return `${capitalVerb}s ${subject}: ${phrases.slice(0, 3).join(", ")}`;
+      return `Processes ${subject}: ${phrases.slice(0, 3).join(", ")}`;
     }
   }
 
@@ -429,7 +803,7 @@ function generateBehavioralFunctionSummary(
   if (bodyLength > 100 && activeCount <= 1) {
     return null;
   }
-    // Template priority (first match wins):
+  // Template priority (first match wins):
 
   // 1. Delegation (filter out common built-in method names that produce misleading summaries)
   if (signals.delegates && !BUILTIN_DELEGATES.has(signals.delegates)) {
@@ -439,7 +813,12 @@ function generateBehavioralFunctionSummary(
   }
 
   // 2. Validation
-  if (signals.validates && !signals.iterates && !signals.transforms && !signals.recursion) {
+  if (
+    signals.validates &&
+    !signals.iterates &&
+    !signals.transforms &&
+    !signals.recursion
+  ) {
     const throwClause = signals.throws ? ", throws on failure" : "";
     return subject
       ? `Validates ${subject}${throwClause}`
@@ -448,13 +827,19 @@ function generateBehavioralFunctionSummary(
 
   // 3. I/O patterns
   if (signals.hasNetworkIO) {
-    return subject ? `Fetches ${subject} via network` : "Performs network request";
+    return subject
+      ? `Fetches ${subject} via network`
+      : "Performs network request";
   }
   if (signals.hasFileIO) {
-    return subject ? `Reads/writes ${subject} on disk` : "Performs filesystem I/O";
+    return subject
+      ? `Reads/writes ${subject} on disk`
+      : "Performs filesystem I/O";
   }
   if (signals.hasDbIO) {
-    return subject ? `Queries ${subject} from database` : "Performs database query";
+    return subject
+      ? `Queries ${subject} from database`
+      : "Performs database query";
   }
 
   // 4. Cache
@@ -477,10 +862,10 @@ function generateBehavioralFunctionSummary(
 
   // 7. Transform
   if (signals.transforms && signals.iterates) {
-    return (subject && !subjectIsFromName) ? `Transforms each ${subject}` : null;
+    return subject && !subjectIsFromName ? `Transforms each ${subject}` : null;
   }
   if (signals.transforms && !signals.iterates) {
-    return (subject && !subjectIsFromName) ? `Transforms ${subject}` : null;
+    return subject && !subjectIsFromName ? `Transforms ${subject}` : null;
   }
 
   // 8. Sort
@@ -495,17 +880,21 @@ function generateBehavioralFunctionSummary(
 
   // 10. Dispatch/routing
   if (signals.switchOrChain && signals.earlyReturns > 3) {
-    return (subject && !subjectIsFromName) ? `Dispatches ${subject} across branches` : "Routes by condition";
+    return subject && !subjectIsFromName
+      ? `Dispatches ${subject} across branches`
+      : "Routes by condition";
   }
 
   // 11. Recursion
   if (signals.recursion) {
-    return (subject && !subjectIsFromName) ? `Recursively processes ${subject}` : "Recursive computation";
+    return subject && !subjectIsFromName
+      ? `Recursively processes ${subject}`
+      : "Recursive computation";
   }
 
   // 12. Iteration without transform
   if (signals.iterates && !signals.transforms) {
-    return (subject && !subjectIsFromName) ? `Iterates over ${subject}` : null;
+    return subject && !subjectIsFromName ? `Iterates over ${subject}` : null;
   }
 
   // 13. Throws without validation context
@@ -518,19 +907,36 @@ function generateBehavioralFunctionSummary(
     return null;
   }
 
+  // 14. Action-verb prefix patterns — provide semantic summaries when behavioral
+  // templates above didn't produce a match. Only fires when at least one
+  // behavioral signal exists (empty-body functions return null above).
+  if (subject) {
+    const prefixSummary = generatePrefixSummary(
+      firstWord,
+      subject,
+      signals,
+      returnSuffix,
+    );
+    if (prefixSummary !== null) {
+      return prefixSummary;
+    }
+  }
+
   // DF-1: For functions with typed params/returns, include type info instead of null
   if (symbol.signature?.params && symbol.signature.params.length > 0) {
     const paramTypes = symbol.signature.params
-      .filter(p => p.type && p.type !== ": any" && p.type !== ": unknown")
-      .map(p => `${p.name}${p.type}`)
+      .filter((p) => p.type && p.type !== ": any" && p.type !== ": unknown")
+      .map((p) => `${p.name}${p.type}`)
       .slice(0, 3);
-    const returnInfo = symbol.signature.returns && symbol.signature.returns !== "void"
-      ? ` → ${symbol.signature.returns}`
-      : "";
+    const returnInfo =
+      symbol.signature.returns && symbol.signature.returns !== "void"
+        ? ` → ${symbol.signature.returns}`
+        : "";
     if (paramTypes.length > 0 || returnInfo) {
       const desc = subject || words.join(" ").toLowerCase();
       if (desc && desc.length >= 3) {
-        const paramStr = paramTypes.length > 0 ? ` (${paramTypes.join(", ")})` : "";
+        const paramStr =
+          paramTypes.length > 0 ? ` (${paramTypes.join(", ")})` : "";
         return `${desc.charAt(0).toUpperCase() + desc.slice(1)}${paramStr}${returnInfo}`;
       }
     }
@@ -544,7 +950,9 @@ function generateClassSummary(symbol: ExtractedSymbol): string | null {
   const name = symbol.name;
   for (const [suffix, role] of ROLE_SUFFIXES) {
     if (name.endsWith(suffix) && name.length > suffix.length) {
-      const base = splitCamelCase(name.slice(0, -suffix.length)).join(" ").toLowerCase();
+      const base = splitCamelCase(name.slice(0, -suffix.length))
+        .join(" ")
+        .toLowerCase();
       return `Implements the ${role} pattern for ${base}`;
     }
   }
@@ -564,13 +972,20 @@ function generateClassSummary(symbol: ExtractedSymbol): string | null {
 
 function generateInterfaceSummary(symbol: ExtractedSymbol): string | null {
   const name = symbol.name;
-  if (name.length > 1 && name[0] === "I" && name[1] === name[1].toUpperCase() && /[A-Z]/.test(name[1])) {
+  if (
+    name.length > 1 &&
+    name[0] === "I" &&
+    name[1] === name[1].toUpperCase() &&
+    /[A-Z]/.test(name[1])
+  ) {
     const base = splitCamelCase(name.slice(1)).join(" ").toLowerCase();
     return `Contract for ${base}`;
   }
   for (const [suffix, desc] of SUFFIX_PATTERNS) {
     if (name.endsWith(suffix) && name.length > suffix.length) {
-      const base = splitCamelCase(name.slice(0, -suffix.length)).join(" ").toLowerCase();
+      const base = splitCamelCase(name.slice(0, -suffix.length))
+        .join(" ")
+        .toLowerCase();
       return `${desc} for ${base}`;
     }
   }
@@ -587,7 +1002,9 @@ function generateTypeSummary(symbol: ExtractedSymbol): string | null {
   const name = symbol.name;
   for (const [suffix, desc] of SUFFIX_PATTERNS) {
     if (name.endsWith(suffix) && name.length > suffix.length) {
-      const base = splitCamelCase(name.slice(0, -suffix.length)).join(" ").toLowerCase();
+      const base = splitCamelCase(name.slice(0, -suffix.length))
+        .join(" ")
+        .toLowerCase();
       return `${desc} for ${base}`;
     }
   }
@@ -599,7 +1016,6 @@ function generateTypeSummary(symbol: ExtractedSymbol): string | null {
   const words = splitCamelCase(name).join(" ").toLowerCase();
   return `Type alias for ${words}`;
 }
-
 
 function generateVariableSummary(symbol: ExtractedSymbol): string | null {
   const name = symbol.name;
@@ -635,16 +1051,54 @@ function generateConstructorSummary(_symbol: ExtractedSymbol): string | null {
  * Used to clear stale name-only summaries during incremental reindexing.
  */
 const NAME_ONLY_NOISE = new Set([
-  "class", "interface", "for", "type", "alias",
-  "returning", "by", "with", "from", "at", "and", "returns",
-  "constructs", "defining", "contract", "behavior", "encapsulating",
-  "pattern", "implements", "the", "a", "an", "of", "to", "in", "on",
+  "class",
+  "interface",
+  "for",
+  "type",
+  "alias",
+  "returning",
+  "by",
+  "with",
+  "from",
+  "at",
+  "and",
+  "returns",
+  "constructs",
+  "defining",
+  "contract",
+  "behavior",
+  "encapsulating",
+  "pattern",
+  "implements",
+  "the",
+  "a",
+  "an",
+  "of",
+  "to",
+  "in",
+  "on",
 ]);
 
 const TYPE_NOISE = new Set([
-  "string", "number", "boolean", "object", "array", "map", "set",
-  "promise", "partial", "readonly", "record", "void", "null",
-  "undefined", "any", "unknown", "mixed", "never", "bigint",
+  "string",
+  "number",
+  "boolean",
+  "object",
+  "array",
+  "map",
+  "set",
+  "promise",
+  "partial",
+  "readonly",
+  "record",
+  "void",
+  "null",
+  "undefined",
+  "any",
+  "unknown",
+  "mixed",
+  "never",
+  "bigint",
 ]);
 
 export function isNameOnlySummary(
@@ -653,11 +1107,7 @@ export function isNameOnlySummary(
 ): boolean {
   // Remove structural noise words BEFORE deconjugation (so "alias" isn't stemmed to "alia")
 
-
-  const rawSummaryWords = summary
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean);
+  const rawSummaryWords = summary.toLowerCase().split(/\s+/).filter(Boolean);
   const meaningful = rawSummaryWords
     .filter((w) => !NAME_ONLY_NOISE.has(w))
     .map(deconjugate);
@@ -675,9 +1125,7 @@ export function isNameOnlySummary(
   if (overlap / meaningful.length >= 0.8) return true;
 
   // Detect "name words + type noise" pattern (e.g. "Builds tool from string and Partial")
-  const meaningfulWithoutTypes = meaningful.filter(
-    (w) => !TYPE_NOISE.has(w),
-  );
+  const meaningfulWithoutTypes = meaningful.filter((w) => !TYPE_NOISE.has(w));
 
   if (meaningfulWithoutTypes.length > 0) {
     let overlapNoTypes = 0;
@@ -695,15 +1143,25 @@ export function isNameOnlySummary(
 
 function deconjugate(word: string): string {
   const reverseIrregulars: Record<string, string> = {
-    gets: "get", sets: "set", does: "do", runs: "run", goes: "go",
-    checks: "check", determines: "determine", handles: "handle",
+    gets: "get",
+    sets: "set",
+    does: "do",
+    runs: "run",
+    goes: "go",
+    checks: "check",
+    determines: "determine",
+    handles: "handle",
   };
   if (reverseIrregulars[word]) return reverseIrregulars[word];
-  if (word.endsWith("ies") && word.length > 4)
-    return word.slice(0, -3) + "y";
+  if (word.endsWith("ies") && word.length > 4) return word.slice(0, -3) + "y";
   // For -es endings: sibilants lose -es (pushes→push), others lose just -s (creates→create)
-  if (word.endsWith("sses") || word.endsWith("zes") || word.endsWith("xes") ||
-      word.endsWith("shes") || word.endsWith("ches")) {
+  if (
+    word.endsWith("sses") ||
+    word.endsWith("zes") ||
+    word.endsWith("xes") ||
+    word.endsWith("shes") ||
+    word.endsWith("ches")
+  ) {
     return word.slice(0, -2);
   }
   if (word.endsWith("s") && !word.endsWith("ss") && word.length > 2)
@@ -990,34 +1448,69 @@ export function splitCamelCase(str: string): string[] {
 
 export function getSummaryQuality(
   summary: string | null,
-  source: "jsdoc" | "llm" | "nn-direct" | "nn-adapted" | "heuristic-body" | "heuristic-typed" | "heuristic-fallback" | "unknown",
+  source:
+    | "jsdoc"
+    | "llm"
+    | "nn-direct"
+    | "nn-adapted"
+    | "heuristic-body"
+    | "heuristic-typed"
+    | "heuristic-fallback"
+    | "unknown",
 ): number {
   if (!summary) return 0.0;
   switch (source) {
-    case "jsdoc": return 1.0;
-    case "llm": return 0.8;
-    case "nn-direct": return 0.6;
-    case "nn-adapted": return 0.5;
-    case "heuristic-body": return 0.55;
-    case "heuristic-typed": return 0.4;
-    case "heuristic-fallback": return 0.3;
-    default: return 0.0;
+    case "jsdoc":
+      return 1.0;
+    case "llm":
+      return 0.8;
+    case "nn-direct":
+      return 0.6;
+    case "nn-adapted":
+      return 0.5;
+    case "heuristic-body":
+      return 0.55;
+    case "heuristic-typed":
+      return 0.4;
+    case "heuristic-fallback":
+      return 0.3;
+    default:
+      return 0.0;
   }
 }
 
 const BODY_TEMPLATE_PREFIXES = [
-  "Delegates to", "Validates", "Fetches", "Caches", "Emits",
-  "Aggregates", "Transforms", "Sorts", "Merges", "Dispatches",
-  "Recursively", "Iterates over", "Reads/writes",
-  "Performs", "Subscribes to", "Routes by", "Memoizes",
-  "Queries", "Registers event",
+  "Delegates to",
+  "Validates",
+  "Fetches",
+  "Caches",
+  "Emits",
+  "Aggregates",
+  "Transforms",
+  "Sorts",
+  "Merges",
+  "Dispatches",
+  "Recursively",
+  "Iterates over",
+  "Reads/writes",
+  "Performs",
+  "Subscribes to",
+  "Routes by",
+  "Memoizes",
+  "Queries",
+  "Registers event",
 ];
 
 export function classifySummarySource(
   summary: string | null,
   hadJSDoc: boolean,
   symbolKind: string,
-): "jsdoc" | "heuristic-body" | "heuristic-typed" | "heuristic-fallback" | "unknown" {
+):
+  | "jsdoc"
+  | "heuristic-body"
+  | "heuristic-typed"
+  | "heuristic-fallback"
+  | "unknown" {
   if (!summary) return "unknown";
   if (hadJSDoc) return "jsdoc";
   // Detect body-derived behavioral templates

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { computeHealthScore } from "../../dist/mcp/health.js";
+import { computeHealthScore } from "../../dist/services/health.js";
 
 describe("health scoring", () => {
   it("returns unavailable for empty repos", () => {
@@ -18,7 +18,7 @@ describe("health scoring", () => {
     });
 
     assert.strictEqual(result.available, false);
-    assert.strictEqual(result.score, 0);
+    assert.strictEqual(result.score, null);
   });
 
   it("computes a bounded weighted score and components", () => {

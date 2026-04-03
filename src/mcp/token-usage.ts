@@ -1,7 +1,7 @@
 import { estimateTokens } from "../util/tokenize.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
-import { renderOperationMeter } from "./savings-meter.js";
+import { renderOperationMeter, renderNegativeSavingsMeter } from "./savings-meter.js";
 
 export interface TokenUsageMetadata {
   sdlTokens: number;
@@ -38,12 +38,27 @@ export function computeSavings(
   sdlTokens: number,
   rawEquivalent: number,
 ): TokenUsageMetadata {
-  const savingsPercent =
-    rawEquivalent > 0 && sdlTokens < rawEquivalent
-      ? Math.round((1 - sdlTokens / rawEquivalent) * 100)
-      : 0;
+  if (rawEquivalent > 0 && sdlTokens < rawEquivalent) {
+    // Positive savings
+    const savingsPercent = Math.round((1 - sdlTokens / rawEquivalent) * 100);
+    return { sdlTokens, rawEquivalent, savingsPercent, meter: renderOperationMeter(savingsPercent) };
+  }
 
-  return { sdlTokens, rawEquivalent, savingsPercent, meter: renderOperationMeter(savingsPercent) };
+  if (rawEquivalent > 0 && sdlTokens > rawEquivalent) {
+    // Negative savings: SDL response is larger than raw equivalent.
+    // Report negative percentage so callers see the overhead honestly.
+    const overheadPercent = Math.round(((sdlTokens / rawEquivalent) - 1) * 100);
+    const savingsPercent = -overheadPercent;
+    return {
+      sdlTokens,
+      rawEquivalent,
+      savingsPercent,
+      meter: renderNegativeSavingsMeter(overheadPercent),
+    };
+  }
+
+  // No savings (equal or zero raw equivalent)
+  return { sdlTokens, rawEquivalent, savingsPercent: 0, meter: renderOperationMeter(0) };
 }
 
 export async function computeTokenUsage(

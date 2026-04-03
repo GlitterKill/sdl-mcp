@@ -169,6 +169,19 @@ export function buildContextSummary(input: {
     });
   }
 
+  // Budget guidance: warn when budget is too small for the requested scope
+  const BUDGET_THRESHOLDS: Record<ContextSummaryScope, number> = {
+    repo: 1500,
+    file: 500,
+    symbol: 200,
+    task: 800,
+  };
+  const minBudget = BUDGET_THRESHOLDS[input.scope] ?? 500;
+  const budgetWarning =
+    budget < minBudget
+      ? `Budget of ${budget} tokens is small for ${input.scope} scope. Consider budget >= ${minBudget} for meaningful ${input.scope}-level summaries${input.scope === "repo" ? ", or use scope: 'file' or 'symbol' for focused results" : ""}.`
+      : undefined;
+
   return {
     repoId: input.repoId,
     query: input.query,
@@ -183,6 +196,7 @@ export function buildContextSummary(input: {
       budget,
       truncated,
       indexVersion: input.indexVersion,
+      ...(budgetWarning ? { budgetWarning } : {}),
     },
   };
 }
@@ -671,6 +685,11 @@ export function renderContextSummary(
     for (const file of summary.filesTouched) {
       lines.push(`- ${file.file} (${file.symbolCount})`);
     }
+  }
+
+  if (summary.metadata.budgetWarning) {
+    lines.push("");
+    lines.push(`> **Budget warning**: ${summary.metadata.budgetWarning}`);
   }
 
   if (summary.metadata.truncated) {

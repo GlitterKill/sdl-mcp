@@ -344,7 +344,7 @@ export class MCPServer {
             const footerLines: string[] = [];
             if (capturedUsage && capturedUsage.rawEquivalent > 0) {
               footerLines.push(
-                `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens (SDL/raw-equiv savings) ${capturedUsage.meter}`,
+                `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens (SDL/raw-equiv) ${capturedUsage.meter}`,
               );
             }
             if (capturedSummary) {
@@ -367,7 +367,7 @@ export class MCPServer {
             if (capturedUsage && capturedUsage.rawEquivalent > 0) {
               contentBlocks.push({
                 type: "text",
-                text: `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens (SDL/raw-equiv savings) ${capturedUsage.meter}`,
+                text: `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens (SDL/raw-equiv) ${capturedUsage.meter}`,
               });
             }
 

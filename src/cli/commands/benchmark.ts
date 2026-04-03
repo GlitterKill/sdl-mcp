@@ -67,7 +67,7 @@ interface BenchmarkMetrics {
   totalFiles: number;
   summaryGenerationMs: number;
   summaryTokens: number;
-  healthScore: number;
+  healthScore: number | null;
   watcherEventsProcessed: number;
   watcherErrors: number;
 }
@@ -563,7 +563,7 @@ export async function benchmarkCICommand(
     `  Summary tokens:     ${formatNumber(benchmarkMetrics.summaryTokens)}`,
   );
   console.log(
-    `  Health score:       ${formatNumber(benchmarkMetrics.healthScore)}`,
+    `  Health score:       ${benchmarkMetrics.healthScore !== null ? formatNumber(benchmarkMetrics.healthScore) : "unavailable"}`,
   );
   console.log(
     `  Watcher events:     ${formatNumber(benchmarkMetrics.watcherEventsProcessed)}`,
@@ -663,7 +663,7 @@ export async function benchmarkCICommand(
       avgSkeletonTokens: benchmarkMetrics.avgSkeletonTokens,
       summaryGenerationMs: benchmarkMetrics.summaryGenerationMs,
       summaryTokens: benchmarkMetrics.summaryTokens,
-      healthScore: benchmarkMetrics.healthScore,
+      healthScore: benchmarkMetrics.healthScore ?? 0,
       watcherEventsProcessed: benchmarkMetrics.watcherEventsProcessed,
       watcherErrors: benchmarkMetrics.watcherErrors,
     };

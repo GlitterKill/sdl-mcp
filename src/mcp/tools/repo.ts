@@ -340,13 +340,13 @@ export async function handleRepoStatus(
       ladybugDb.getLastIndexedAt(conn, repoId),
       includeHealth ? Promise.race([
       getCachedHealthSnapshot(repoId),
-      new Promise<{ score: number; components: { freshness: number; coverage: number; errorRate: number; edgeQuality: number }; available: boolean }>((resolve) =>
+      new Promise<{ score: number | null; components: { freshness: number; coverage: number; errorRate: number; edgeQuality: number }; available: boolean }>((resolve) =>
         setTimeout(() => {
           logger.debug("Health computation timed out for repoStatus, returning unavailable");
-          resolve({ score: 0, components: { freshness: 0, coverage: 0, errorRate: 0, edgeQuality: 0 }, available: false });
+          resolve({ score: null, components: { freshness: 0, coverage: 0, errorRate: 0, edgeQuality: 0 }, available: false });
         }, 5000).unref(),
       ),
-    ]) : Promise.resolve({ score: 0, components: { freshness: 0, coverage: 0, errorRate: 0, edgeQuality: 0 }, available: false }),
+    ]) : Promise.resolve({ score: null, components: { freshness: 0, coverage: 0, errorRate: 0, edgeQuality: 0 }, available: false }),
     ]);
     const watcherHealth = includeHealth ? getWatcherHealth(repoId) : null;
     const prefetchStats = includeHealth ? getPrefetchStats(repoId) : null;

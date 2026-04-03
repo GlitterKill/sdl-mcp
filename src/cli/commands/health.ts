@@ -27,7 +27,7 @@ export async function healthCommand(options: HealthOptions): Promise<void> {
 
   if (options.badge) {
     const message = snapshot.available ? String(snapshot.score) : "N/A";
-    const color = snapshot.available ? getBadgeColor(snapshot.score) : "red";
+    const color = snapshot.available && snapshot.score !== null ? getBadgeColor(snapshot.score) : "red";
     process.stdout.write(
       `${JSON.stringify(
         {

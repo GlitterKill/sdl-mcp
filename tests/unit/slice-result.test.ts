@@ -66,6 +66,12 @@ describe("sliceErrorToMessage", () => {
     assert.ok(msg.includes("No symbols found for entry symbols"));
   });
 
+  it("missing_entry_hint", () => {
+    const msg = sliceErrorToMessage({ type: "missing_entry_hint", repoId: "r1" });
+    assert.ok(msg.includes("At least one entry symbol"));
+    assert.ok(msg.includes("r1"));
+  });
+
   it("policy_denied", () => {
     const msg = sliceErrorToMessage({
       type: "policy_denied",
@@ -92,7 +98,7 @@ describe("sliceErrorToMessage", () => {
 });
 
 describe("sliceErrorToCode", () => {
-  it("maps all 5 error types to correct codes", () => {
+  it("maps all 6 error types to correct codes", () => {
     assert.strictEqual(
       sliceErrorToCode({ type: "invalid_repo", repoId: "r1" }),
       "INVALID_REPO",
@@ -104,6 +110,10 @@ describe("sliceErrorToCode", () => {
     assert.strictEqual(
       sliceErrorToCode({ type: "no_symbols", repoId: "r1" }),
       "NO_SYMBOLS",
+    );
+    assert.strictEqual(
+      sliceErrorToCode({ type: "missing_entry_hint", repoId: "r1" }),
+      "MISSING_ENTRY_HINT",
     );
     assert.strictEqual(
       sliceErrorToCode({ type: "policy_denied", reason: "x" }),

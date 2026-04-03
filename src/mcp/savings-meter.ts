@@ -71,6 +71,15 @@ export function renderOperationMeter(savingsPercent: number): string {
   return `${renderMeter(clamped)} ${clamped}%`;
 }
 
+/**
+ * Render a meter for negative savings (SDL overhead).
+ * Shows an empty bar with the overhead percentage.
+ * Example: "░░░░░░░░░░ 0% (SDL overhead: +88%)"
+ */
+export function renderNegativeSavingsMeter(overheadPercent: number): string {
+  return `${EMPTY.repeat(SECTIONS)} 0% (SDL overhead: +${overheadPercent}%)`;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -80,10 +89,15 @@ function shortToolName(tool: string): string {
   return tool.startsWith("sdl.") ? tool.slice(4) : tool;
 }
 
-/** Compute per-tool savings percent from a ToolUsageEntry. */
+/** Compute per-tool savings percent from a ToolUsageEntry.
+ *  Returns negative values when SDL tokens exceed raw equivalent. */
 function toolSavingsPercent(entry: ToolUsageEntry): number {
-  if (entry.rawEquivalent <= 0 || entry.savedTokens <= 0) return 0;
-  return Math.round((entry.savedTokens / entry.rawEquivalent) * 100);
+  if (entry.rawEquivalent <= 0) return 0;
+  if (entry.savedTokens >= 0) {
+    return Math.round((entry.savedTokens / entry.rawEquivalent) * 100);
+  }
+  // Negative savings: return negative overhead percent
+  return -Math.round((-entry.savedTokens / entry.rawEquivalent) * 100);
 }
 
 /** Render a tool breakdown table (shared by task and session summaries). */
@@ -96,11 +110,20 @@ function renderToolRows(
   for (const entry of sorted) {
     const name = shortToolName(entry.tool).padEnd(maxNameLen);
     const pct = toolSavingsPercent(entry);
-    const meter = renderMeter(pct);
-    const pctStr = String(pct).padStart(2) + "%";
     const calls = String(entry.callCount).padStart(3) + " calls";
-    const saved = formatTokenCount(entry.savedTokens).padStart(6) + " saved";
-    lines.push(`  ${name}  ${meter} ${pctStr} ${PIPE} ${calls} ${PIPE} ${saved}`);
+
+    if (pct < 0) {
+      // Negative savings: show empty meter with overhead indicator
+      const meter = EMPTY.repeat(SECTIONS);
+      const pctStr = ` 0%`;
+      const overhead = `+${formatTokenCount(-entry.savedTokens)} overhead`;
+      lines.push(`  ${name}  ${meter} ${pctStr} ${PIPE} ${calls} ${PIPE} ${overhead}`);
+    } else {
+      const meter = renderMeter(pct);
+      const pctStr = String(pct).padStart(2) + "%";
+      const saved = formatTokenCount(entry.savedTokens).padStart(6) + " saved";
+      lines.push(`  ${name}  ${meter} ${pctStr} ${PIPE} ${calls} ${PIPE} ${saved}`);
+    }
   }
   return lines;
 }
@@ -198,11 +221,16 @@ export function renderLifetimeSummary(
 /**
  * Render a compact savings meter for a single tool call notification.
  * Example: "████████░░ 84%"
+ * Shows overhead when SDL tokens exceed raw equivalent.
  */
 export function renderUserNotificationLine(
   totalSdlTokens: number,
   totalRawEquivalent: number,
 ): string {
+  if (totalRawEquivalent > 0 && totalSdlTokens > totalRawEquivalent) {
+    const overheadPct = Math.round(((totalSdlTokens / totalRawEquivalent) - 1) * 100);
+    return `${EMPTY.repeat(SECTIONS)} 0% (SDL overhead: +${overheadPct}%)`;
+  }
   const saved = Math.max(0, totalRawEquivalent - totalSdlTokens);
   const pct = totalRawEquivalent > 0
     ? Math.round((saved / totalRawEquivalent) * 100)

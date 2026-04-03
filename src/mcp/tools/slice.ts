@@ -192,7 +192,7 @@ export async function handleSliceBuild(
 
   if (!hasAnyEntryHint) {
     return sliceErrorToResponse({
-      type: "no_symbols",
+      type: "missing_entry_hint",
       repoId: request.repoId ?? "unknown",
     });
   }

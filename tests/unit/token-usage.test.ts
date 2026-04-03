@@ -51,9 +51,10 @@ describe("token-usage", () => {
       assert.strictEqual(result.savingsPercent, 0);
     });
 
-    it("returns 0 savings when sdlTokens >= rawEquivalent", () => {
+    it("returns negative savings when sdlTokens > rawEquivalent", () => {
       const result = computeSavings(500, 100);
-      assert.strictEqual(result.savingsPercent, 0);
+      assert.strictEqual(result.savingsPercent, -400);
+      assert.ok(result.meter.includes("SDL overhead"));
     });
 
     it("returns 0 savings when sdlTokens equal rawEquivalent", () => {
@@ -87,13 +88,14 @@ describe("token-usage", () => {
       assert.strictEqual(usage.savingsPercent, 0);
     });
 
-    it("clamps savings to 0 when sdlTokens exceed rawEquivalent", async () => {
+    it("reports negative savings when sdlTokens exceed rawEquivalent", async () => {
       const result = {
         data: "a".repeat(1000),
         _rawContext: { rawTokens: 1 },
       };
       const usage = await computeTokenUsage(result as Record<string, unknown>);
-      assert.strictEqual(usage.savingsPercent, 0);
+      assert.ok(usage.savingsPercent < 0, "savingsPercent should be negative");
+      assert.ok(usage.meter.includes("SDL overhead"), "meter should show overhead");
     });
 
     it("excludes _rawContext from sdlTokens estimate", async () => {

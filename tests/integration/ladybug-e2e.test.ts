@@ -425,7 +425,7 @@ describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
 
     const overview = await buildRepoOverview({
       repoId: REPO_ID,
-      level: "stats",
+      level: "directories",
     });
     assert.ok(overview.clusters);
     assert.strictEqual(

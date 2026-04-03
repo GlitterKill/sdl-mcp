@@ -130,7 +130,12 @@ export function normalizeCardDetailLevel(
   if (!level) return "deps";
   if (level === "compact") return "deps";
   // Validate against known values
-  const validLevels: readonly string[] = ["minimal", "signature", "deps", "full"];
+  const validLevels: readonly string[] = [
+    "minimal",
+    "signature",
+    "deps",
+    "full",
+  ];
   if (validLevels.includes(level)) {
     return level as CardDetailLevel;
   }
@@ -142,7 +147,13 @@ export function legacyDetailLevelToWire(
 ): CardDetailLevel {
   if (!level) return "compact";
   // Validate against known values
-  const validLevels: readonly string[] = ["minimal", "signature", "deps", "compact", "full"];
+  const validLevels: readonly string[] = [
+    "minimal",
+    "signature",
+    "deps",
+    "compact",
+    "full",
+  ];
   if (validLevels.includes(level)) {
     return level as CardDetailLevel;
   }
@@ -287,7 +298,13 @@ export interface GraphSlice {
  * to `signatureDiff`, `invariantDiff`, and `sideEffectDiff` at compile time.
  */
 export type DeltaSymbolChange =
-  | { symbolId: SymbolId; changeType: "added" | "removed"; name?: string; kind?: string; file?: string }
+  | {
+      symbolId: SymbolId;
+      changeType: "added" | "removed";
+      name?: string;
+      kind?: string;
+      file?: string;
+    }
   | {
       symbolId: SymbolId;
       changeType: "modified";
@@ -752,6 +769,11 @@ export interface RepoOverview {
     largestClusters: Array<{ clusterId: string; label: string; size: number }>;
   };
 
+  /** True when cluster/process data was deferred (stats level, cold cache) */
+  clustersAvailable?: boolean;
+  /** Hint for how to fetch full cluster/process data */
+  clustersHint?: string;
+
   processes?: {
     totalProcesses: number;
     averageDepth: number;
@@ -831,6 +853,8 @@ export interface ContextSummaryMetadata {
   budget: number;
   truncated: boolean;
   indexVersion: VersionId | string;
+  /** Warning when budget is too small for the requested scope. */
+  budgetWarning?: string;
 }
 
 export interface ContextSummary {
@@ -876,7 +900,15 @@ export interface WatcherHealth {
 // Agent Memory Types
 // ============================================================================
 
-export type MemoryType = "decision" | "bugfix" | "task_context" | "pattern" | "convention" | "architecture" | "performance" | "security";
+export type MemoryType =
+  | "decision"
+  | "bugfix"
+  | "task_context"
+  | "pattern"
+  | "convention"
+  | "architecture"
+  | "performance"
+  | "security";
 
 export interface SurfacedMemory {
   memoryId: string;

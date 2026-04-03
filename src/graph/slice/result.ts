@@ -5,6 +5,7 @@ export type SliceError =
   | { type: "invalid_repo"; repoId: RepoId }
   | { type: "no_version"; repoId: RepoId }
   | { type: "no_symbols"; repoId: RepoId; entrySymbols?: SymbolId[] }
+  | { type: "missing_entry_hint"; repoId: RepoId }
   | { type: "policy_denied"; reason: string }
   | { type: "internal"; message: string; cause?: string };
 
@@ -42,6 +43,8 @@ export function sliceErrorToMessage(error: SliceError): string {
       return error.entrySymbols
         ? `No symbols found for entry symbols in repo ${error.repoId}`
         : `No symbols indexed for repo ${error.repoId}`;
+    case "missing_entry_hint":
+      return `At least one entry symbol, taskText, stackTrace, failingTestPath, or editedFiles is required to seed a slice for repo ${error.repoId}`;
     case "policy_denied":
       return `Policy denied slice request: ${error.reason}`;
     case "internal":
@@ -59,6 +62,8 @@ export function sliceErrorToCode(error: SliceError): string {
       return "NO_VERSION";
     case "no_symbols":
       return "NO_SYMBOLS";
+    case "missing_entry_hint":
+      return "MISSING_ENTRY_HINT";
     case "policy_denied":
       return "POLICY_DENIED";
     case "internal":

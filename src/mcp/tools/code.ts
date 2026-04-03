@@ -225,7 +225,9 @@ export async function handleCodeNeedWindow(
     const overlaySnap = getOverlaySnapshot(request.repoId);
     symbol = overlaySnap?.symbolsById.get(request.symbolId) ?? null;
     if (!symbol) {
-      throw new NotFoundError(`Symbol not found: ${request.symbolId}`);
+      throw new NotFoundError(
+        `Symbol not found: ${request.symbolId}. Use sdl.symbol.search to find valid symbol IDs.`,
+      );
     }
   }
 
@@ -238,7 +240,9 @@ export async function handleCodeNeedWindow(
   const files = await ladybugDb.getFilesByIds(conn, [symbol.fileId]);
   const file = files.get(symbol.fileId);
   if (!file) {
-    throw new NotFoundError(`File not found for symbol: ${request.symbolId}`);
+    throw new NotFoundError(
+      `File record missing for symbol ${symbol.name} (${request.symbolId}). Try re-indexing with sdl.index.refresh.`,
+    );
   }
 
   const repo = await ladybugDb.getRepo(conn, request.repoId);
@@ -767,8 +771,23 @@ export async function handleGetSkeleton(
     );
 
     if (!result) {
+      // Distinguish between symbol-not-found vs file-not-found for clearer error messages
+      const skConn = await getLadybugConn();
+      const skSymbol = await ladybugDb.getSymbol(skConn, request.symbolId);
+      if (!skSymbol) {
+        throw new NotFoundError(
+          `Symbol not found: ${request.symbolId}. Use sdl.symbol.search to find valid symbol IDs.`,
+        );
+      }
+      const skFiles = await ladybugDb.getFilesByIds(skConn, [skSymbol.fileId]);
+      const skFile = skFiles.get(skSymbol.fileId);
+      if (!skFile) {
+        throw new NotFoundError(
+          `File record missing for symbol ${skSymbol.name} (${request.symbolId}). Try re-indexing with sdl.index.refresh.`,
+        );
+      }
       throw new NotFoundError(
-        `File not found on disk for symbol: ${request.symbolId}`,
+        `File not found on disk: ${skFile.relPath}. The file may have been moved or deleted since last indexing.`,
       );
     }
 
