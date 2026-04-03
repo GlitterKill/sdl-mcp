@@ -17,15 +17,22 @@ import assert from "node:assert";
 
 describe("Executor selectTopSymbols precise mode cap", () => {
   it("precise mode effectiveMax should be min(5, maxCount), not 1", async () => {
-    // Read the source to verify the fix is in place
+    // The ranking logic moved from executor.ts to context-ranking.ts in the
+    // evidence-aware ranking refactor. Verify the fix is in the new location.
     const { readFileSync } = await import("node:fs");
-    const src = readFileSync("src/agent/executor.ts", "utf8");
+    const src = readFileSync("src/agent/context-ranking.ts", "utf8");
     assert.ok(
       src.includes("Math.min(5, maxCount)"),
-      "effectiveMax for precise mode should be Math.min(5, maxCount)",
+      "effectiveMax for precise mode should be Math.min(5, maxCount) in context-ranking.ts",
+    );
+    // Also verify executor delegates to ranking module
+    const executorSrc = readFileSync("src/agent/executor.ts", "utf8");
+    assert.ok(
+      executorSrc.includes("applyAdaptiveCutoff"),
+      "executor.ts should delegate to applyAdaptiveCutoff from context-ranking",
     );
     assert.ok(
-      !src.includes("isPrecise ? 1 : maxCount"),
+      !executorSrc.includes("isPrecise ? 1 : maxCount"),
       "Old hardcoded effectiveMax of 1 should be gone",
     );
   });
@@ -39,7 +46,9 @@ describe("memory.store upsert with explicit memoryId", () => {
     const src = readFileSync("src/mcp/tools/memory.ts", "utf8");
     // Should NOT throw "not found" when memoryId is provided but doesn't exist
     assert.ok(
-      !src.includes('throw new DatabaseError(`Memory ${providedMemoryId} not found`)'),
+      !src.includes(
+        "throw new DatabaseError(`Memory ${providedMemoryId} not found`)",
+      ),
       "Should not throw DatabaseError for missing providedMemoryId",
     );
     // Should use providedMemoryId in create path
@@ -107,14 +116,22 @@ describe("PolicyEngine config propagation", () => {
     const { PolicyEngine } = await import("../../dist/policy/engine.js");
     const engine = new PolicyEngine({ defaultDenyRaw: false });
     const config = engine.getConfig();
-    assert.strictEqual(config.defaultDenyRaw, false, "defaultDenyRaw should be false");
+    assert.strictEqual(
+      config.defaultDenyRaw,
+      false,
+      "defaultDenyRaw should be false",
+    );
   });
 
   it("PolicyEngine defaults defaultDenyRaw to true", async () => {
     const { PolicyEngine } = await import("../../dist/policy/engine.js");
     const engine = new PolicyEngine();
     const config = engine.getConfig();
-    assert.strictEqual(config.defaultDenyRaw, true, "defaultDenyRaw should default to true");
+    assert.strictEqual(
+      config.defaultDenyRaw,
+      true,
+      "defaultDenyRaw should default to true",
+    );
   });
 });
 

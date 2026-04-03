@@ -30,6 +30,14 @@ const HANDLED_EVIDENCE_TYPES = new Set([
 /** Hard safety cap for broad-mode responses regardless of budget. */
 const MAX_CONTEXT_RESPONSE_TOKENS = 50_000;
 
+/** Behavioral symbol kinds that get a scoring bonus in cluster expansion. */
+const BEHAVIORAL_KINDS = new Set([
+  "function",
+  "method",
+  "class",
+  "constructor",
+]);
+
 export class ContextEngine {
   private planner: Planner;
   private policyEngine: PolicyEngine;
@@ -600,13 +608,7 @@ export class ContextEngine {
         // Behavioral kind bonus
         const info = nameMap.get(cid);
         if (info) {
-          const behavKinds = new Set([
-            "function",
-            "method",
-            "class",
-            "constructor",
-          ]);
-          if (behavKinds.has(info.kind)) score += 1;
+          if (BEHAVIORAL_KINDS.has(info.kind)) score += 1;
         }
 
         scored.push({
