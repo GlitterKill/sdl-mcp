@@ -38,8 +38,12 @@ export class Planner {
 
   private planDebug(task: AgentTask, options: TaskOptions): RungPath {
     // Precise mode: card + hotPath only (skip skeleton — hotpath gives the code).
-    if (options.contextMode === 'precise') {
-      return this.buildRungPath(['card', 'hotPath'], task, 'Precise debug: card + hotPath');
+    if (options.contextMode === "precise") {
+      return this.buildRungPath(
+        ["card", "hotPath"],
+        task,
+        "Precise debug: card + hotPath",
+      );
     }
 
     const rungs: RungType[] = ["card", "skeleton", "hotPath"];
@@ -56,8 +60,8 @@ export class Planner {
   }
 
   private planReview(task: AgentTask, options: TaskOptions): RungPath {
-    if (options.contextMode === 'precise') {
-      return this.buildRungPath(['card'], task, 'Precise review: card only');
+    if (options.contextMode === "precise") {
+      return this.buildRungPath(["card"], task, "Precise review: card only");
     }
 
     const rungs: RungType[] = ["card", "skeleton"];
@@ -81,8 +85,12 @@ export class Planner {
   }
 
   private planImplement(task: AgentTask, options: TaskOptions): RungPath {
-    if (options.contextMode === 'precise') {
-      return this.buildRungPath(['card', 'skeleton'], task, 'Precise implement: card + skeleton');
+    if (options.contextMode === "precise") {
+      return this.buildRungPath(
+        ["card", "skeleton"],
+        task,
+        "Precise implement: card + skeleton",
+      );
     }
 
     const rungs: RungType[] = ["card", "skeleton"];
@@ -102,25 +110,26 @@ export class Planner {
   }
 
   private planExplain(task: AgentTask, options: TaskOptions): RungPath {
-    // Precise mode: card + skeleton — skeleton shows control flow which is
-    // essential for understanding how a symbol works.
-    if (options.contextMode === 'precise') {
-      return this.buildRungPath(['card', 'skeleton'], task, 'Precise explain: card + skeleton');
+    // Precise mode: card only — minimal tokens for quick lookups.
+    if (options.contextMode === "precise") {
+      return this.buildRungPath(["card"], task, "Precise explain: card only");
     }
 
-    const rungs: RungType[] = ["card"];
+    // Broad (default): card + skeleton for structural understanding;
+    // add hotPath when explicit focus narrows the scope.
+    const rungs: RungType[] = ["card", "skeleton"];
 
     if (
       (options.focusSymbols && options.focusSymbols.length > 0) ||
       (options.focusPaths && options.focusPaths.length > 0)
     ) {
-      rungs.push("skeleton");
+      rungs.push("hotPath");
     }
 
     return this.buildRungPath(
       rungs,
       task,
-      "Explain task starts with high-level summaries",
+      "Explain task: cards + skeletons for structural understanding",
     );
   }
 
@@ -225,7 +234,10 @@ export class Planner {
             if (results.length > 0) {
               context.push(`symbol:${results[0].symbolId}`);
             } else {
-              logger.debug("focusSymbol name resolution found no match", { name: sym, repoId: task.repoId });
+              logger.debug("focusSymbol name resolution found no match", {
+                name: sym,
+                repoId: task.repoId,
+              });
             }
           } catch {
             // If resolution fails, skip this symbol silently
@@ -240,12 +252,21 @@ export class Planner {
       // opaque file reference (which would yield only ~1 symbol card).
       for (const filePath of options.focusPaths) {
         const normalizedPath = filePath.replace(/\\/g, "/");
-        const isDirectory = normalizedPath.endsWith("/") || !normalizedPath.split("/").pop()?.includes(".");
+        const isDirectory =
+          normalizedPath.endsWith("/") ||
+          !normalizedPath.split("/").pop()?.includes(".");
         if (isDirectory) {
           try {
             const dirConn = await getLadybugConn();
-            const dirPrefix = normalizedPath.endsWith("/") ? normalizedPath : normalizedPath + "/";
-            const filesInDir = await getFilesByPrefix(dirConn, task.repoId, dirPrefix, 20);
+            const dirPrefix = normalizedPath.endsWith("/")
+              ? normalizedPath
+              : normalizedPath + "/";
+            const filesInDir = await getFilesByPrefix(
+              dirConn,
+              task.repoId,
+              dirPrefix,
+              20,
+            );
             if (filesInDir.length > 0) {
               context.push(...filesInDir.map((f) => `file:${f.relPath}`));
             } else {

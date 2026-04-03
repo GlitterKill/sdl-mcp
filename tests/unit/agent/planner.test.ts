@@ -106,18 +106,28 @@ describe("Agent Planner", () => {
   });
 
   describe("Explain Task Planning", () => {
-    it("plans explain task with focus symbols to include skeleton", () => {
+    it("plans explain task with focus symbols to include hotPath", () => {
       const task = createTask("explain", {
         options: { focusSymbols: ["symbol1"] },
       });
+      const path = planner.plan(task);
+
+      assert.strictEqual(path.rungs.length, 3);
+      assert.deepStrictEqual(path.rungs, ["card", "skeleton", "hotPath"]);
+    });
+
+    it("plans explain task without options to include card + skeleton", () => {
+      const task = createTask("explain");
       const path = planner.plan(task);
 
       assert.strictEqual(path.rungs.length, 2);
       assert.deepStrictEqual(path.rungs, ["card", "skeleton"]);
     });
 
-    it("plans explain task without options to include only card", () => {
-      const task = createTask("explain");
+    it("plans precise explain to include only card", () => {
+      const task = createTask("explain", {
+        options: { contextMode: "precise" },
+      });
       const path = planner.plan(task);
 
       assert.strictEqual(path.rungs.length, 1);
@@ -164,7 +174,13 @@ describe("Agent Planner", () => {
   describe("Context Selection", () => {
     it("selects focus symbols from options", async () => {
       const task = createTask("debug", {
-        options: { focusSymbols: ["a0a1b2c3d4e5f6a7", "b1b2c3d4e5f6a7a8", "c2c3d4e5f6a7a8b9"] },
+        options: {
+          focusSymbols: [
+            "a0a1b2c3d4e5f6a7",
+            "b1b2c3d4e5f6a7a8",
+            "c2c3d4e5f6a7a8b9",
+          ],
+        },
       });
       const context = await planner.selectContext(task);
 
@@ -196,7 +212,10 @@ describe("Agent Planner", () => {
       const context = await planner.selectContext(task);
 
       assert.strictEqual(context.length, 2);
-      assert.deepStrictEqual(context, ["symbol:a0a1b2c3d4e5f6a7", "file:file1.ts"]);
+      assert.deepStrictEqual(context, [
+        "symbol:a0a1b2c3d4e5f6a7",
+        "file:file1.ts",
+      ]);
     });
 
     it("returns empty context when no options provided", async () => {
