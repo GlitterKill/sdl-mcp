@@ -12,13 +12,10 @@ import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { ValidationError } from "../domain/errors.js";
 import { logger } from "../util/logger.js";
-import { entitySearch } from "../retrieval/index.js";
-import { extractIdentifiersFromText } from "./executor.js";
-import { searchSymbols } from "../db/ladybug-queries.js";
-import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
 import { classifySymptomType } from "../retrieval/evidence.js";
 import { estimateTokens } from "../util/tokenize.js";
 import { BROAD_VISIBLE_FIELDS } from "../mcp/context-response-projection.js";
+import { buildSeedContext, seedResultToContext } from "./context-seeding.js";
 import { randomUUID } from "node:crypto";
 
 const HANDLED_EVIDENCE_TYPES = new Set([
@@ -58,154 +55,25 @@ export class ContextEngine {
       const path = this.planner.plan(task);
       let context = await this.planner.selectContext(task);
 
-      // When no explicit focusSymbols/focusPaths were provided, use entity retrieval
-      // to seed the context with relevant symbols, clusters, and processes.
+      // When no explicit focusSymbols/focusPaths were provided, use the
+      // semantic-first seeding pipeline to populate context with relevant
+      // symbols, clusters, processes, and feedback-boosted symbols.
       const hasExplicitContext = context.length > 0;
       if (!hasExplicitContext && task.taskText) {
         try {
-          const entityResult = await entitySearch({
+          const seedResult = await this.seedContext(task);
+          context = seedResultToContext(seedResult);
+          logger.debug("Semantic-first seeding completed", {
             repoId: task.repoId,
-            query: task.taskText,
-            limit: 20,
-            entityTypes: ["symbol", "cluster", "process"],
-            includeEvidence: false,
+            semantic: seedResult.sources.semantic,
+            lexical: seedResult.sources.lexical,
+            feedback: seedResult.sources.feedback,
+            total: context.length,
           });
-          // Drop low-confidence matches to reduce noise in broad unfocused queries
-          const MIN_ENTITY_SCORE = 0.3;
-          const filtered = entityResult.results.filter(
-            (r) => r.score >= MIN_ENTITY_SCORE,
-          );
-          if (filtered.length > 0) {
-            const symbolIds = filtered
-              .filter((r) => r.entityType === "symbol")
-              .map((r) => `symbol:${r.entityId}`);
-            const clusterIds = filtered
-              .filter((r) => r.entityType === "cluster")
-              .map((r) => `cluster:${r.entityId}`);
-            const processIds = filtered
-              .filter((r) => r.entityType === "process")
-              .map((r) => `process:${r.entityId}`);
-            context = [...symbolIds, ...clusterIds, ...processIds];
-            logger.debug("Entity retrieval seeded task context", {
-              repoId: task.repoId,
-              symbolCount: symbolIds.length,
-              clusterCount: clusterIds.length,
-              processCount: processIds.length,
-            });
-          }
         } catch (err) {
-          logger.debug(
-            "Entity retrieval for task context failed; proceeding with empty context",
-            { repoId: task.repoId, error: err },
-          );
-        }
-
-        // FP1: Keyword fallback when entity search returns few/no results.
-        // Broad mode gets higher limits to cover conceptual queries.
-        const isBroad = task.options?.contextMode !== "precise";
-        const MAX_SEEDED_CONTEXT = isBroad ? 25 : 15;
-        const PER_TERM_LIMIT = isBroad ? 8 : 5;
-        if (context.length < MAX_SEEDED_CONTEXT) {
-          try {
-            const conn = await getLadybugConn();
-            // Pass taskText as queryContext so domain terms in the query
-            // (e.g., "slice", "symbol") are preserved, not filtered.
-            const terms = extractIdentifiersFromText(
-              task.taskText,
-              task.taskText,
-            );
-            const seen = new Set(
-              context
-                .filter((c) => c.startsWith("symbol:"))
-                .map((c) => c.slice("symbol:".length)),
-            );
-
-            // Strategy 1: Compound multi-term search — pass all content
-            // words as a space-separated query so searchSymbols' built-in
-            // multi-term merge ranks symbols matching MULTIPLE terms higher.
-            const compoundQuery = terms.slice(0, 6).join(" ");
-            if (compoundQuery) {
-              const compoundResults = await searchSymbols(
-                conn,
-                task.repoId,
-                compoundQuery,
-                isBroad ? 15 : 8,
-              );
-              for (const r of compoundResults) {
-                if (context.length >= MAX_SEEDED_CONTEXT) break;
-                if (!seen.has(r.symbolId)) {
-                  seen.add(r.symbolId);
-                  context.push(`symbol:${r.symbolId}`);
-                }
-              }
-            }
-
-            // Strategy 2: Individual term searches to fill remaining slots
-            // with symbols that may match only one term but are still useful.
-            const MAX_INDIVIDUAL_TERMS = isBroad ? 6 : 3;
-            for (const term of terms.slice(0, MAX_INDIVIDUAL_TERMS)) {
-              if (context.length >= MAX_SEEDED_CONTEXT) break;
-              const results = await searchSymbols(
-                conn,
-                task.repoId,
-                term,
-                PER_TERM_LIMIT,
-              );
-              for (const r of results) {
-                if (context.length >= MAX_SEEDED_CONTEXT) break;
-                if (!seen.has(r.symbolId)) {
-                  seen.add(r.symbolId);
-                  context.push(`symbol:${r.symbolId}`);
-                }
-              }
-            }
-            if (context.length > 0) {
-              logger.debug("Keyword fallback seeded task context", {
-                repoId: task.repoId,
-                compoundQuery,
-                terms: terms.slice(0, 6),
-                symbolCount: context.length,
-              });
-            }
-          } catch (err) {
-            logger.debug(
-              "Keyword fallback for context seeding failed (non-fatal)",
-              {
-                error: err instanceof Error ? err.message : String(err),
-              },
-            );
-          }
-        }
-      }
-
-      // Feedback-aware boosting: query prior feedback for similar tasks
-      // and add historically useful symbols to the context.
-      if (task.taskText) {
-        try {
-          const conn = await getLadybugConn();
-          const { boosts } = await queryFeedbackBoosts(conn, {
-            repoId: task.repoId,
-            query: task.taskText,
-            limit: 10,
+          logger.debug("Context seeding failed (non-fatal)", {
+            error: err instanceof Error ? err.message : String(err),
           });
-
-          if (boosts.size > 0) {
-            // Add boosted symbols not already in context
-            for (const [symbolId] of boosts) {
-              const contextKey = `symbol:${symbolId}`;
-              if (!context.includes(contextKey)) {
-                context.push(contextKey);
-              }
-            }
-            logger.debug("Feedback boost added symbols to task context", {
-              repoId: task.repoId,
-              symbolsBoosted: boosts.size,
-            });
-          }
-        } catch (err) {
-          logger.debug(
-            `[context-engine] Feedback boost failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
-          );
         }
       }
 
@@ -616,6 +484,14 @@ export class ContextEngine {
     const truncatedTokens = estimateTokens(JSON.stringify(result));
     result.truncation = { originalTokens, truncatedTokens, fieldsAffected };
     return result;
+  }
+
+  /**
+   * Delegate to the seeding pipeline.
+   * Extracted as a private method so tests can mock it via prototype.
+   */
+  private async seedContext(task: AgentTask) {
+    return buildSeedContext(task);
   }
 
   private async expandContextForClusters(

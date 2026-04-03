@@ -6,6 +6,7 @@ import { Executor } from "../../../dist/agent/executor.js";
 import type {
   Action,
   AgentTask,
+  ContextSeedResult,
   Evidence,
   ExecutionMetrics,
   RungPath,
@@ -274,6 +275,175 @@ describe("ContextEngine", () => {
 
     assert.equal(result.success, true);
     assert.ok(!result.summary.includes("expanded"));
+  });
+
+  // -----------------------------------------------------------------------
+  // Semantic-first context seeding tests
+  // -----------------------------------------------------------------------
+
+  it("semantic seeding is attempted before keyword fallback", async () => {
+    const seedResult: ContextSeedResult = {
+      candidates: [
+        {
+          contextRef: "symbol:sem-1",
+          source: "semantic",
+          score: 0.95,
+          sourceRank: 0,
+        },
+        {
+          contextRef: "symbol:sem-2",
+          source: "semantic",
+          score: 0.8,
+          sourceRank: 1,
+        },
+        {
+          contextRef: "cluster:cl-1",
+          source: "semantic",
+          score: 0.7,
+          sourceRank: 2,
+        },
+      ],
+      sources: { semantic: 3, lexical: 0, feedback: 0 },
+    };
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    // Return empty context so seeding pipeline runs
+    mock.method(Planner.prototype, "selectContext", () => []);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async () => seedResult,
+    );
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(createTask());
+
+    assert.equal(result.success, true);
+    // Verify the seeded symbols/clusters appear in the context passed to executor
+    assert.ok(
+      capturedContext.includes("symbol:sem-1"),
+      "Semantic seed symbol-1 should be in context",
+    );
+    assert.ok(
+      capturedContext.includes("symbol:sem-2"),
+      "Semantic seed symbol-2 should be in context",
+    );
+    assert.ok(
+      capturedContext.includes("cluster:cl-1"),
+      "Semantic seed cluster should be in context",
+    );
+  });
+
+  it("falls back gracefully when semantic seeding throws", async () => {
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => []);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async () => {
+        throw new Error("retrieval unavailable");
+      },
+    );
+
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence: [],
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(createTask());
+
+    // Engine should still succeed — seeding failure is non-fatal
+    assert.equal(result.success, true);
+    assert.ok(!result.error, "No error should surface from seeding failure");
+  });
+
+  it("respects per-source quotas in seed results", async () => {
+    // Create a seed result where semantic dominates but is capped
+    const seedResult: ContextSeedResult = {
+      candidates: [
+        {
+          contextRef: "symbol:sem-1",
+          source: "semantic",
+          score: 1.0,
+          sourceRank: 0,
+        },
+        {
+          contextRef: "symbol:sem-2",
+          source: "semantic",
+          score: 0.9,
+          sourceRank: 1,
+        },
+        {
+          contextRef: "symbol:lex-1",
+          source: "lexical",
+          score: 0.85,
+          sourceRank: 0,
+        },
+        {
+          contextRef: "symbol:fb-1",
+          source: "feedback",
+          score: 0.6,
+          sourceRank: 0,
+        },
+      ],
+      sources: { semantic: 2, lexical: 1, feedback: 1 },
+    };
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => []);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async () => seedResult,
+    );
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(
+      createTask({ options: { contextMode: "precise" } }),
+    );
+
+    assert.equal(result.success, true);
+    // Total context should match the seed result (4 candidates)
+    assert.equal(
+      capturedContext.length,
+      4,
+      `Expected 4 seeded context items, got ${capturedContext.length}`,
+    );
+    // Verify all sources are represented
+    assert.ok(capturedContext.includes("symbol:sem-1"));
+    assert.ok(capturedContext.includes("symbol:lex-1"));
+    assert.ok(capturedContext.includes("symbol:fb-1"));
   });
 
   it("keeps original symbol context even if cluster expansion is unavailable", async () => {

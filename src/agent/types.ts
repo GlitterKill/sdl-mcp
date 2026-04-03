@@ -131,3 +131,24 @@ export interface Diagnostic {
   message: string;
   code?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Context seeding pipeline types (internal)
+// ---------------------------------------------------------------------------
+
+/** Source kind for context seed candidates. */
+export type SeedSourceKind = "semantic" | "lexical" | "feedback";
+
+/** A single candidate from the seeding pipeline. */
+export interface ContextSeedCandidate {
+  contextRef: string; // e.g. "symbol:abc123", "cluster:xyz", "file:path"
+  source: SeedSourceKind;
+  score: number; // normalized 0-1
+  sourceRank: number; // rank within source (0 = best)
+}
+
+/** Result of the seeding pipeline. */
+export interface ContextSeedResult {
+  candidates: ContextSeedCandidate[];
+  sources: { semantic: number; lexical: number; feedback: number };
+}
