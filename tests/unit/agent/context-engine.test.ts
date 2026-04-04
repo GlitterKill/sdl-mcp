@@ -120,7 +120,7 @@ describe("ContextEngine", () => {
     // Broad-mode compacts: actionsTaken, path, metrics are stripped
     assert.deepEqual(result.finalEvidence, evidence);
     assert.equal(result.nextBestAction, "none");
-    assert.match(result.answer ?? "", /## Symbols Found \(1\)/);
+    assert.match(result.answer ?? "", /## Symbols \(1\)/);
   });
 
   it("enforces planner budget constraints for token and duration", async () => {

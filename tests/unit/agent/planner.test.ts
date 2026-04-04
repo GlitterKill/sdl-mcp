@@ -124,14 +124,14 @@ describe("Agent Planner", () => {
       assert.deepStrictEqual(path.rungs, ["card", "skeleton"]);
     });
 
-    it("plans precise explain to include only card", () => {
+    it("plans precise explain to include card + skeleton", () => {
       const task = createTask("explain", {
         options: { contextMode: "precise" },
       });
       const path = planner.plan(task);
 
-      assert.strictEqual(path.rungs.length, 1);
-      assert.deepStrictEqual(path.rungs, ["card"]);
+      assert.strictEqual(path.rungs.length, 2);
+      assert.deepStrictEqual(path.rungs, ["card", "skeleton"]);
     });
   });
 

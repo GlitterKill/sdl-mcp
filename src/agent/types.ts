@@ -169,7 +169,8 @@ export interface ScoredSymbol {
   lexicalOverlap: number; // 0-15
   summarySupport: number; // 0-10
   feedbackPrior: number; // 0-10
-  structuralBonus: number; // 0-5
+  structuralBonus: number; // 0-8
+  languageAffinity: number; // 0-4
 }
 
 /** Result of symbol ranking with confidence metadata. */

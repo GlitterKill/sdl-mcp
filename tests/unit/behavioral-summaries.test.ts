@@ -183,14 +183,11 @@ describe("behavioral function summaries", () => {
     assert.ok(result!.startsWith("Delegates to"), "Expected delegation summary, got: " + result);
   });
 
-  it("returns validation summary for guard function", () => {
+  it("returns null for guard function with name-only subject", () => {
     const body = "function validateEmail(email) {\n  if (!email) throw new Error('required');\n  if (!email.includes('@')) throw new Error('invalid');\n  return email;\n}";
     const sym = makeSymbol("validateEmail", "function", body);
     const result = generateSummary(sym as any, body);
-    assert.ok(result !== null, "should not be null");
-    assert.ok(result!.startsWith("Validates"), "Expected validation summary, got: " + result);
-    assert.ok(result!.includes("throws"), "Expected throws clause, got: " + result);
-  });
+    assert.equal(result, null, "name-only subject should return null");  });
 
   it("returns network I/O summary for fetch function", () => {
     const body = "async function fetchData(url) {\n  const resp = await fetch(url);\n  return resp.json();\n}";
@@ -200,13 +197,11 @@ describe("behavioral function summaries", () => {
     assert.ok(result!.includes("Fetches") || result!.includes("network"), "Expected network summary, got: " + result);
   });
 
-  it("returns transform summary for .map chain", () => {
+  it("returns null for .map chain with name-only subject", () => {
     const body = "function transformItems(items) {\n  return items.map(i => i.name).filter(n => n.length > 0);\n}";
     const sym = makeSymbol("transformItems", "function", body);
     const result = generateSummary(sym as any, body);
-    assert.ok(result !== null, "should not be null");
-    assert.ok(result!.includes("Transforms"), "Expected transform summary, got: " + result);
-  });
+    assert.equal(result, null, "name-only subject should return null");  });
 
   it("returns recursion summary for self-calling function", () => {
     const body = "function traverse(node) {\n  if (!node) return;\n  console.log(node.value);\n  traverse(node.left);\n  traverse(node.right);\n}";
@@ -224,32 +219,24 @@ describe("behavioral function summaries", () => {
     assert.strictEqual(result, null);
   });
 
-  it("returns iteration summary for forEach loop", () => {
+  it("returns null for forEach loop with name-only subject", () => {
     const body = "function notifyAll(listeners) {\n  listeners.forEach(l => l.callback());\n}";
     const sym = makeSymbol("notifyAll", "function", body);
     const result = generateSummary(sym as any, body);
-    assert.ok(result !== null, "should not be null");
-    // forEach without .map/.flatMap = iteration, not transform
-    assert.ok(
-      result!.includes("Iterates") || result!.includes("Transforms"),
-      "Expected iteration/transform summary, got: " + result,
-    );
-  });
+    assert.equal(result, null, "name-only subject should return null");  });
 
-  it("returns sort summary for .sort call", () => {
+  it("returns null for .sort call with name-only subject", () => {
     const body = "function sortUsers(users) {\n  return users.sort((a, b) => a.name.localeCompare(b.name));\n}";
     const sym = makeSymbol("sortUsers", "function", body);
     const result = generateSummary(sym as any, body);
-    assert.ok(result !== null, "should not be null");
-    assert.ok(result!.includes("Sorts"), "Expected sort summary, got: " + result);
-  });
+    assert.equal(result, null, "name-only subject should return null");  });
 
   it("returns filesystem I/O summary for readFile", () => {
     const body = "function loadConfig(path) {\n  const raw = fs.readFileSync(path, 'utf8');\n  return JSON.parse(raw);\n}";
     const sym = makeSymbol("loadConfig", "function", body);
     const result = generateSummary(sym as any, body);
     assert.ok(result !== null, "should not be null");
-    assert.ok(result!.includes("Reads/writes") || result!.includes("disk"), "Expected filesystem summary, got: " + result);
+    assert.ok(result!.includes("filesystem") || result!.includes("Reads/writes"), "Expected filesystem I/O summary, got: " + result);
   });
 
   it("preserves JSDoc summaries over behavioral analysis", () => {

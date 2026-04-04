@@ -76,10 +76,12 @@ export class Planner {
     confidence?: ConfidenceTier,
   ): RungPath {
     if (options.contextMode === "precise") {
+      // Review requires seeing actual code structure, not just card summaries.
+      // Always include skeleton + hotPath so reviewers can inspect logic.
       return this.buildRungPath(
-        ["card"],
+        ["card", "skeleton", "hotPath"],
         task,
-        "Precise review: card only",
+        "Precise review: card + skeleton + hotPath for code inspection",
         confidence,
       );
     }
@@ -142,10 +144,12 @@ export class Planner {
     confidence?: ConfidenceTier,
   ): RungPath {
     if (options.contextMode === "precise") {
+      // Explain tasks need at least skeleton to show code structure.
+      // Card-only is never enough to understand how something works.
       return this.buildRungPath(
-        ["card"],
+        ["card", "skeleton"],
         task,
-        "Precise explain: card only",
+        "Precise explain: card + skeleton for structural understanding",
         confidence,
       );
     }

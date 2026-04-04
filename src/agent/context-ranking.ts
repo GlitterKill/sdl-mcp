@@ -172,6 +172,108 @@ function scoreFeedbackPrior(
 /** Symbol kinds that represent type definitions / schemas. */
 const DECLARATIVE_KINDS = new Set(["type", "interface", "enum", "typeAlias"]);
 
+// ---------------------------------------------------------------------------
+// Language Affinity
+// ---------------------------------------------------------------------------
+
+/**
+ * Map of language-indicator keywords (lowercase) to file extensions.
+ * When the task text mentions language-specific terms, symbols from
+ * files with matching extensions get a bonus.
+ */
+const LANGUAGE_AFFINITY_MAP: Array<{ keywords: string[]; extensions: string[] }> = [
+  {
+    keywords: [
+      "typescript", "ts file", ".ts", "type alias",
+      "zod", "tsx", "esm import", ".js extension",
+    ],
+    extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
+  },
+  {
+    keywords: ["python", "py file", ".py", "def ", "__init__"],
+    extensions: [".py", ".pyw"],
+  },
+  {
+    keywords: ["rust", "rs file", ".rs", "cargo", "crate", "impl ", "fn ", "pub fn"],
+    extensions: [".rs"],
+  },
+  {
+    keywords: ["golang", "go file", ".go", "goroutine", "func "],
+    extensions: [".go"],
+  },
+  {
+    keywords: ["java", "jvm", ".java", "public static"],
+    extensions: [".java"],
+  },
+  {
+    keywords: ["kotlin", ".kt", "fun ", "data class", "companion object"],
+    extensions: [".kt", ".kts"],
+  },
+  {
+    keywords: ["csharp", "c#", ".cs", "dotnet"],
+    extensions: [".cs"],
+  },
+  {
+    keywords: ["cpp", "c++", ".cpp", ".hpp", "#include", "std::"],
+    extensions: [".cpp", ".hpp", ".cc", ".cxx", ".hxx", ".h"],
+  },
+  {
+    keywords: ["php", ".php", "namespace "],
+    extensions: [".php", ".phtml"],
+  },
+  {
+    keywords: ["shell", "bash", ".sh", "script"],
+    extensions: [".sh", ".bash", ".zsh"],
+  },
+];
+
+/**
+ * Detect which file extensions are relevant based on task text keywords.
+ * Returns a Set of extensions to boost (empty if no language signal detected).
+ */
+function detectLanguageAffinity(taskTextLower: string): Set<string> {
+  const extensions = new Set<string>();
+  let bestScore = 0;
+  let bestExts: string[] = [];
+
+  for (const entry of LANGUAGE_AFFINITY_MAP) {
+    let score = 0;
+    for (const kw of entry.keywords) {
+      if (taskTextLower.includes(kw)) {
+        score += kw.length;
+      }
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestExts = entry.extensions;
+    }
+  }
+
+  // Only apply if we have a strong signal (keyword match >= 4 chars)
+  if (bestScore >= 4) {
+    for (const ext of bestExts) extensions.add(ext);
+  }
+
+  return extensions;
+}
+
+/**
+ * Score language affinity (0-4): bonus when the symbol's file extension
+ * matches the language implied by the task text.
+ */
+function scoreLanguageAffinity(
+  sym: RankableSymbol,
+  affinityExtensions: Set<string>,
+): number {
+  if (affinityExtensions.size === 0 || !sym.fileId) return 0;
+  const fileId = sym.fileId;
+  const dotIdx = fileId.lastIndexOf(".");
+  if (dotIdx < 0) return 0;
+  const ext = fileId.slice(dotIdx);
+  return affinityExtensions.has(ext) ? 4 : 0;
+}
+
+
 /**
  * Structural/centrality bonus (0-8): exported, behavioral kind, focus path
  * match, and task-type affinity.
@@ -276,6 +378,7 @@ export function rankSymbols(
 ): SymbolRankingResult {
   const taskTextLower = task.taskText.toLowerCase();
   const focusPaths = task.options?.focusPaths ?? [];
+  const affinityExtensions = detectLanguageAffinity(taskTextLower);
 
   // Build seed score lookup: contextRef "symbol:<id>" -> normalized score
   const seedMap = new Map<string, number>();
@@ -315,6 +418,7 @@ export function rankSymbols(
         summarySupport: 0,
         feedbackPrior: 0,
         structuralBonus: 0,
+        languageAffinity: 0,
       });
       continue;
     }
@@ -334,6 +438,7 @@ export function rankSymbols(
       focusPaths,
       task.taskType,
     );
+    const languageAffinity = scoreLanguageAffinity(sym, affinityExtensions);
 
     const totalScore = Math.min(
       100,
@@ -342,7 +447,8 @@ export function rankSymbols(
         lexicalOverlap +
         summarySupport +
         feedbackPrior +
-        structuralBonus,
+        structuralBonus +
+        languageAffinity,
     );
 
     scored.push({
@@ -354,6 +460,7 @@ export function rankSymbols(
       summarySupport,
       feedbackPrior,
       structuralBonus,
+      languageAffinity,
     });
   }
 

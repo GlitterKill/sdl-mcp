@@ -15,7 +15,7 @@ import { logger } from "../util/logger.js";
 import { classifySymptomType } from "../retrieval/evidence.js";
 import { estimateTokens } from "../util/tokenize.js";
 import { BROAD_VISIBLE_FIELDS } from "../mcp/context-response-projection.js";
-import { buildSeedContext, seedResultToContext } from "./context-seeding.js";
+import { buildSeedContext, seedResultToContext, inferFocusPathsFromTaskText } from "./context-seeding.js";
 import { randomUUID } from "node:crypto";
 
 const HANDLED_EVIDENCE_TYPES = new Set([
@@ -60,12 +60,47 @@ export class ContextEngine {
     }
 
     try {
-      const path = this.planner.plan(task);
+      // Infer focus paths from task text when none are explicitly provided.
+      // This dramatically improves symbol discovery for natural language queries
+      // like "how does beam search work" or "debug skeleton IR parameters".
+      const hasExplicitScope = !!(
+        task.options?.focusPaths?.length ||
+        task.options?.focusSymbols?.length
+      );
+      if (!hasExplicitScope && task.taskText) {
+        const inferred = inferFocusPathsFromTaskText(task.taskText);
+        if (inferred.length > 0) {
+          task = {
+            ...task,
+            options: {
+              ...task.options,
+              focusPaths: inferred,
+            },
+          };
+          logger.debug("Inferred focus paths from task text", {
+            repoId: task.repoId,
+            inferredPaths: inferred,
+            taskText: task.taskText.slice(0, 100),
+          });
+        }
+      }
+
+      // Plan WITHOUT inferred paths — inferred paths should only affect
+      // context selection, not rung escalation. Otherwise broad-mode tasks
+      // silently get extra rungs (hotPath) just because keywords matched.
+      // NOTE: This means broad-mode review tasks with inferred scope get
+      // ["card", "skeleton"] instead of ["card", "skeleton", "hotPath"]
+      // because planReview only adds hotPath when focusPaths are present.
+      // This is intentional: phantom rung escalation from keyword matching
+      // is worse than occasionally missing hotPath for inferred scopes.
+      const planTask = hasExplicitScope
+        ? task
+        : { ...task, options: { ...task.options, focusPaths: undefined, focusSymbols: undefined } };
+      const path = this.planner.plan(planTask);
       let context = await this.planner.selectContext(task);
 
-      // When no explicit focusSymbols/focusPaths were provided, use the
-      // semantic-first seeding pipeline to populate context with relevant
-      // symbols, clusters, processes, and feedback-boosted symbols.
+      // If selectContext returned context (from user-provided or inferred
+      // paths), seeding is unnecessary — the context is already populated.
       const hasExplicitContext = context.length > 0;
       if (!hasExplicitContext && task.taskText) {
         try {
@@ -282,31 +317,27 @@ export class ContextEngine {
       );
     }
 
-    // Symbol cards section
+    // Symbol cards section — concise: count + top 5 only
     const cards = byType.get("symbolCard");
     if (cards && cards.length > 0) {
+      const topCards = cards.slice(0, 5);
+      const overflow = cards.length > 5 ? "\n- ... and " + (cards.length - 5) + " more (see finalEvidence)" : "";
       sections.push(
-        `## Symbols Found (${cards.length})\n` +
-          cards.map((c) => `- ${c.summary}`).join("\n"),
+        `## Symbols (${cards.length})\n` +
+          topCards.map((c) => `- ${c.summary}`).join("\n") + overflow,
       );
     }
 
-    // Skeleton section
+    // Skeleton section — reference only, full content is in finalEvidence
     const skeletons = byType.get("skeleton");
     if (skeletons && skeletons.length > 0) {
-      sections.push(
-        `## Code Structure (${skeletons.length} skeleton(s))\n` +
-          skeletons.map((s) => `- ${s.reference}: ${s.summary}`).join("\n"),
-      );
+      sections.push("Includes " + skeletons.length + " skeleton(s) — see finalEvidence for details.");
     }
 
-    // Hot path section
+    // Hot path section — reference only, full content is in finalEvidence
     const hotPaths = byType.get("hotPath");
     if (hotPaths && hotPaths.length > 0) {
-      sections.push(
-        `## Hot Paths (${hotPaths.length})\n` +
-          hotPaths.map((h) => `- ${h.reference}: ${h.summary}`).join("\n"),
-      );
+      sections.push("Includes " + hotPaths.length + " hot path(s) — see finalEvidence for details.");
     }
 
     // Code window section

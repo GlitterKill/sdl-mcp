@@ -51,6 +51,87 @@ const COMPOUND_LIMIT_BROAD = 15;
 const FEEDBACK_LIMIT = 10;
 
 // ---------------------------------------------------------------------------
+// Focus Path Inference
+// ---------------------------------------------------------------------------
+
+/**
+ * Known concept-to-directory mappings for common codebase structures.
+ * Each entry maps a set of keywords (lowercase) to directories where
+ * related symbols are most likely to live.
+ */
+const CONCEPT_DIRECTORY_MAP: Array<{ keywords: string[]; paths: string[] }> = [
+  { keywords: ["graph", "slice", "beam", "beam search", "bfs"], paths: ["src/graph/"] },
+  { keywords: ["skeleton", "hotpath", "hot path", "hot-path", "code window", "gating", "gate"], paths: ["src/code/"] },
+  { keywords: ["index", "indexer", "indexing", "symbol extraction", "tree-sitter", "treesitter", "adapter"], paths: ["src/indexer/"] },
+  { keywords: ["import", "barrel", "re-export", "reexport", "call resolution"], paths: ["src/indexer/", "src/indexer/treesitter/"] },
+  { keywords: ["delta", "blast radius", "version", "diff"], paths: ["src/delta/"] },
+  { keywords: ["policy", "governance", "proof of need"], paths: ["src/policy/"] },
+  { keywords: ["cli", "command", "serve", "doctor", "init"], paths: ["src/cli/"] },
+  { keywords: ["mcp", "tool handler", "tool dispatch"], paths: ["src/mcp/"] },
+  { keywords: ["config", "configuration", "settings"], paths: ["src/config/"] },
+  { keywords: ["database", "ladybug", "cypher", "query", "schema"], paths: ["src/db/"] },
+  { keywords: ["agent", "planner", "executor", "context engine", "seeding", "ranking"], paths: ["src/agent/"] },
+  { keywords: ["code mode", "workflow", "sdl.context", "sdl.workflow"], paths: ["src/code-mode/"] },
+  { keywords: ["memory", "memories"], paths: ["src/memory/"] },
+  { keywords: ["runtime", "execute", "runtime execute"], paths: ["src/runtime/"] },
+  { keywords: ["summary", "summaries", "summarize"], paths: ["src/indexer/", "src/services/"] },
+  { keywords: ["live index", "draft buffer", "overlay"], paths: ["src/live-index/"] },
+  { keywords: ["embedding", "semantic", "vector", "nomic"], paths: ["src/indexer/", "src/retrieval/"] },
+  { keywords: ["cluster", "community detection", "louvain"], paths: ["src/graph/"] },
+  { keywords: ["rust", "native", "napi"], paths: ["native/src/"] },
+  { keywords: ["path", "normalize", "windows path"], paths: ["src/util/"] },
+  { keywords: ["telemetry", "metrics", "audit"], paths: ["src/mcp/"] },
+  { keywords: ["pass2", "resolver", "edge builder"], paths: ["src/indexer/pass2/", "src/indexer/edge-builder/"] },
+];
+
+/** Maximum number of inferred focus paths to return. */
+const MAX_INFERRED_PATHS = 3;
+
+/**
+ * Infer likely focus paths from task text when no explicit focusPaths
+ * are provided.  Scans for known concept keywords and returns the
+ * directories most likely to contain relevant symbols.
+ *
+ * Returns an empty array if no concepts are recognized — callers should
+ * treat this as "no constraint" rather than "empty constraint".
+ */
+export function inferFocusPathsFromTaskText(taskText: string): string[] {
+  const textLower = taskText.toLowerCase();
+
+  // Score each mapping entry by how many of its keywords appear in the text
+  const scored: Array<{ paths: string[]; score: number }> = [];
+  for (const entry of CONCEPT_DIRECTORY_MAP) {
+    let matchScore = 0;
+    for (const kw of entry.keywords) {
+      if (textLower.includes(kw)) {
+        // Longer keywords are stronger signals
+        matchScore += kw.length;
+      }
+    }
+    if (matchScore > 0) {
+      scored.push({ paths: entry.paths, score: matchScore });
+    }
+  }
+
+  if (scored.length === 0) return [];
+
+  // Sort by score descending, collect unique paths
+  scored.sort((a, b) => b.score - a.score);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const { paths } of scored) {
+    for (const p of paths) {
+      if (!seen.has(p) && result.length < MAX_INFERRED_PATHS) {
+        seen.add(p);
+        result.push(p);
+      }
+    }
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 

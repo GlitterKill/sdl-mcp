@@ -430,12 +430,9 @@ function extractEnrichedSubject(symbol: ExtractedSymbol): string {
     }
   }
 
-  // Fall back to name-based subject
-  const words = splitCamelCase(symbol.name);
-  return words
-    .slice(1)
-    .map((w) => w.toLowerCase())
-    .join(" ");
+  // No enriched subject available — return empty string.
+  // The caller will fall back to restWords and set subjectIsFromName = true.
+  return "";
 }
 
 /**
@@ -496,6 +493,85 @@ const BUILTIN_DELEGATES = new Set([
   "error",
   "info",
   "debug",
+  // Common built-in methods that produce misleading delegation summaries
+  "toLowerCase",
+  "toUpperCase",
+  "trim",
+  "startsWith",
+  "endsWith",
+  "concat",
+  "map",
+  "filter",
+  "reduce",
+  "forEach",
+  "find",
+  "findIndex",
+  "some",
+  "every",
+  "sort",
+  "reverse",
+  "flat",
+  "flatMap",
+  "fill",
+  "from",
+  "of",
+  "parse",
+  "stringify",
+  "resolve",
+  "reject",
+  "all",
+  "race",
+  "now",
+  "floor",
+  "ceil",
+  "round",
+  "max",
+  "min",
+  "abs",
+  "random",
+  "assign",
+  "freeze",
+  "defineProperty",
+  "hasOwnProperty",
+  "isArray",
+  "write",
+  "read",
+  "close",
+  "open",
+  "emit",
+  "on",
+  "off",
+  "once",
+  "addEventListener",
+  "removeEventListener",
+  "dispatch",
+  "send",
+  "end",
+  "destroy",
+  "pipe",
+  "Date.now",
+  "Math.floor",
+  "Math.ceil",
+  "Math.round",
+  "Math.max",
+  "Math.min",
+  "Math.abs",
+  "Math.random",
+  "JSON.parse",
+  "JSON.stringify",
+  "Object.assign",
+  "Object.keys",
+  "Object.values",
+  "Object.entries",
+  "Array.isArray",
+  "Array.from",
+  "console.log",
+  "console.error",
+  "console.warn",
+  "console.debug",
+  "unshift",
+  "shift",
+  "splice",
 ]);
 
 /**
@@ -820,44 +896,45 @@ function generateBehavioralFunctionSummary(
     !signals.recursion
   ) {
     const throwClause = signals.throws ? ", throws on failure" : "";
-    return subject
-      ? `Validates ${subject}${throwClause}`
-      : `Validates input${throwClause}`;
+    if (subject && !subjectIsFromName) {
+      return `Validates ${subject}${throwClause}`;
+    }
+    // Fall through to prefix-based patterns (e.g. "validate*" name prefix)
   }
 
   // 3. I/O patterns
   if (signals.hasNetworkIO) {
-    return subject
+    return subject && !subjectIsFromName
       ? `Fetches ${subject} via network`
       : "Performs network request";
   }
   if (signals.hasFileIO) {
-    return subject
+    return subject && !subjectIsFromName
       ? `Reads/writes ${subject} on disk`
       : "Performs filesystem I/O";
   }
   if (signals.hasDbIO) {
-    return subject
+    return subject && !subjectIsFromName
       ? `Queries ${subject} from database`
       : "Performs database query";
   }
 
   // 4. Cache
   if (signals.caches) {
-    return subject ? `Caches ${subject}` : "Memoizes result";
+    return subject && !subjectIsFromName ? `Caches ${subject}` : null;
   }
 
   // 5. Events
   if (signals.emitsEvents) {
-    return subject ? `Emits ${subject} event` : "Emits event";
+    return subject && !subjectIsFromName ? `Emits ${subject} event` : null;
   }
   if (signals.registersListeners) {
-    return subject ? `Subscribes to ${subject}` : "Registers event listener";
+    return subject && !subjectIsFromName ? `Subscribes to ${subject}` : null;
   }
 
   // 6. Aggregation
   if (signals.aggregates && !signals.transforms) {
-    return subject ? `Aggregates ${subject}` : "Aggregates data";
+    return subject && !subjectIsFromName ? `Aggregates ${subject}` : null;
   }
 
   // 7. Transform
@@ -870,12 +947,12 @@ function generateBehavioralFunctionSummary(
 
   // 8. Sort
   if (signals.sorts) {
-    return subject ? `Sorts ${subject}` : "Sorts elements";
+    return subject && !subjectIsFromName ? `Sorts ${subject}` : null;
   }
 
   // 9. Merge
   if (signals.merges) {
-    return subject ? `Merges ${subject}` : "Merges data";
+    return subject && !subjectIsFromName ? `Merges ${subject}` : null;
   }
 
   // 10. Dispatch/routing
@@ -898,7 +975,7 @@ function generateBehavioralFunctionSummary(
   }
 
   // 13. Throws without validation context
-  if (signals.throws && subject) {
+  if (signals.throws && subject && !subjectIsFromName) {
     return `Validates ${subject}, throws on failure`;
   }
 

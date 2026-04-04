@@ -218,6 +218,66 @@ export function buildContextAwareStopWords(queryText: string): Set<string> {
  *   context-aware stop words. When provided, domain terms that appear
  *   in the query are preserved instead of being filtered.
  */
+/**
+ * Generate compound identifiers from adjacent word tokens in text.
+ * Produces camelCase, PascalCase, and snake_case variants from word pairs
+ * and triples found in the text.
+ *
+ * Examples:
+ *   "graph slice" → ["graphSlice", "GraphSlice", "graph_slice"]
+ *   "barrel re exports" → ["barrelReExports", "BarrelReExports", "barrel_re_exports", "reExports", "ReExports"]
+ */
+/** Stop words for compound identifier generation. */
+const COMPOUND_STOP_WORDS = new Set([
+    "the", "and", "for", "with", "from", "that", "this", "have", "are",
+    "was", "not", "but", "has", "how", "does", "what", "when", "where",
+    "which", "about", "into", "through", "during", "before", "after",
+    "should", "would", "could", "being", "been", "will", "than", "also",
+    "need", "understand", "investigate", "check", "look", "find",
+]);
+
+export function generateCompoundIdentifiers(text: string): string[] {
+  // Extract plain words (3+ chars, no stop words)
+  const words = (text.match(/[a-zA-Z]{3,}/g) ?? [])
+    .map((w) => w.toLowerCase())
+    .filter((w) => !COMPOUND_STOP_WORDS.has(w));
+
+  if (words.length < 2) return [];
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  const addUnique = (s: string): void => {
+    if (s.length >= 4 && !seen.has(s)) {
+      seen.add(s);
+      result.push(s);
+    }
+  };
+
+  const toCamel = (parts: string[]): string =>
+    parts[0] + parts.slice(1).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
+  const toPascal = (parts: string[]): string =>
+    parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
+  const toSnake = (parts: string[]): string => parts.join("_");
+
+  // Pairs
+  for (let i = 0; i < words.length - 1 && result.length < 30; i++) {
+    const pair = [words[i], words[i + 1]];
+    addUnique(toCamel(pair));
+    addUnique(toPascal(pair));
+    addUnique(toSnake(pair));
+  }
+
+  // Triples (up to 5)
+  for (let i = 0; i < words.length - 2 && result.length < 40; i++) {
+    const triple = [words[i], words[i + 1], words[i + 2]];
+    addUnique(toCamel(triple));
+    addUnique(toPascal(triple));
+  }
+
+  return result;
+}
+
 export function extractIdentifiersFromText(
   text: string,
   queryContext?: string,
@@ -247,7 +307,14 @@ export function extractIdentifiersFromText(
   const primarySet = new Set(primary);
   const secondary = [...new Set(words)].filter((w) => !primarySet.has(w));
 
-  return [...primary, ...secondary].slice(0, MAX_IDENTIFIERS);
+  // Generate compound identifiers from adjacent word pairs.
+  // "graph slice" → "graphSlice", "graph_slice"
+  // "barrel re-exports" → "barrelReExports", "barrel_re_exports", "reExport"
+  const compounds = generateCompoundIdentifiers(bounded);
+  const allSet = new Set([...primary, ...secondary]);
+  const compoundsFiltered = compounds.filter((c) => !allSet.has(c));
+
+  return [...primary, ...secondary, ...compoundsFiltered].slice(0, MAX_IDENTIFIERS);
 }
 
 export class Executor {
