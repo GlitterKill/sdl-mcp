@@ -73,7 +73,22 @@ Below is every option with inline commentary. JSON does not support comments, so
 
       // File extensions to index. Only include languages present in your repo for faster indexing.
       // Supported: ts, tsx, js, jsx, py, go, java, cs, c, cpp, php, rs, kt, sh
-      "languages": ["ts", "tsx", "js", "jsx", "py", "go", "java", "cs", "c", "cpp", "php", "rs", "kt", "sh"],
+      "languages": [
+        "ts",
+        "tsx",
+        "js",
+        "jsx",
+        "py",
+        "go",
+        "java",
+        "cs",
+        "c",
+        "cpp",
+        "php",
+        "rs",
+        "kt",
+        "sh",
+      ],
 
       // Files larger than this (bytes) are skipped. Default: 2000000 (2MB).
       "maxFileBytes": 2000000,
@@ -187,11 +202,11 @@ Below is every option with inline commentary. JSON does not support comments, so
   // LIVE INDEX — editor buffer overlay for draft-aware intelligence
   // ──────────────────────────────────────────────────────────
   "liveIndex": {
-    "enabled": true,               // Enable live overlay for unsaved buffers
-    "debounceMs": 75,              // Parse delay after buffer update (25-5000)
-    "idleCheckpointMs": 15000,     // Auto-checkpoint after idle (1000-300000)
-    "maxDraftFiles": 200,          // Max concurrent draft files (1-10000)
-    "reconcileConcurrency": 1,     // Concurrent overlay→DB merge jobs (1-8)
+    "enabled": true, // Enable live overlay for unsaved buffers
+    "debounceMs": 75, // Parse delay after buffer update (25-5000)
+    "idleCheckpointMs": 15000, // Auto-checkpoint after idle (1000-300000)
+    "maxDraftFiles": 200, // Max concurrent draft files (1-10000)
+    "reconcileConcurrency": 1, // Concurrent overlay→DB merge jobs (1-8)
     "clusterRefreshThreshold": 25, // Reconciled symbols before cluster refresh (1-1000)
   },
 
@@ -328,9 +343,9 @@ Below is every option with inline commentary. JSON does not support comments, so
     // backward-compatible config parsing.
     "ann": {
       "enabled": true,
-      "m": 16,              // Bi-directional links per HNSW node (4-64)
+      "m": 16, // Bi-directional links per HNSW node (4-64)
       "efConstruction": 200, // Candidate list during build (16-500)
-      "efSearch": 50,        // Candidate list during search (8-256)
+      "efSearch": 50, // Candidate list during search (8-256)
       "maxElements": 200000, // Max elements in index (1000-1000000)
     },
 
@@ -347,25 +362,31 @@ Below is every option with inline commentary. JSON does not support comments, so
       "fts": {
         "enabled": true,
         "indexName": "symbol_search_text_v1", // FTS index name on Symbol.searchText
-        "topK": 75,                           // Max FTS candidates before fusion (1-500)
-        "conjunctive": false,                 // true = AND all terms; false = OR
+        "topK": 75, // Max FTS candidates before fusion (1-500)
+        "conjunctive": false, // true = AND all terms; false = OR
       },
 
       // Vector (HNSW) retrieval stage using native Ladybug vector indexes.
       "vector": {
         "enabled": true,
-        "topK": 75,       // Max candidates per model (1-500)
-        "efs": 200,        // Query-time accuracy (efSearch) (8-1000)
-        "indexes": {       // Per-model index name overrides
+        "topK": 75, // Max candidates per model (1-500)
+        "efs": 200, // Query-time accuracy (efSearch) (8-1000)
+        "indexes": {
+          // Per-model index name overrides
           "all-MiniLM-L6-v2": { "indexName": "symbol_vec_minilm_l6_v2" },
-          "nomic-embed-text-v1.5": { "indexName": "symbol_vec_nomic_embed_v15" },
+          "nomic-embed-text-v1.5": {
+            "indexName": "symbol_vec_nomic_embed_v15",
+          },
+          "jina-embeddings-v2-base-code": {
+            "indexName": "symbol_vec_jina_code_v2",
+          },
         },
       },
 
       // Score fusion for combining FTS and vector results.
       "fusion": {
-        "strategy": "rrf",  // Reciprocal Rank Fusion
-        "rrfK": 60,         // RRF smoothing constant (1-1000)
+        "strategy": "rrf", // Reciprocal Rank Fusion
+        "rrfK": 60, // RRF smoothing constant (1-1000)
       },
 
       // Max candidate symbols after fusion re-ranking (10-1000).
@@ -429,11 +450,11 @@ Below is every option with inline commentary. JSON does not support comments, so
   // CONCURRENCY — session, tool, and DB connection limits
   // ──────────────────────────────────────────────────────────
   "concurrency": {
-    "maxSessions": 8,          // Max concurrent HTTP sessions (1-16)
-    "maxToolConcurrency": 8,   // Max concurrent tool handler executions (1-32)
-    "readPoolSize": 4,         // LadybugDB read connections (1-8)
-    "writeQueueTimeoutMs": 30000,  // Queued write timeout (ms)
-    "toolQueueTimeoutMs": 30000,   // Queued tool invocation timeout (ms)
+    "maxSessions": 8, // Max concurrent HTTP sessions (1-16)
+    "maxToolConcurrency": 8, // Max concurrent tool handler executions (1-32)
+    "readPoolSize": 4, // LadybugDB read connections (1-8)
+    "writeQueueTimeoutMs": 30000, // Queued write timeout (ms)
+    "toolQueueTimeoutMs": 30000, // Queued tool invocation timeout (ms)
   },
 
   // ──────────────────────────────────────────────────────────
@@ -479,8 +500,8 @@ Below is every option with inline commentary. JSON does not support comments, so
   // GATEWAY — namespace-scoped tool registration
   // ──────────────────────────────────────────────────────────
   "gateway": {
-    "enabled": true,          // Enable gateway-mode tool registration
-    "emitLegacyTools": false,  // Legacy tool aliases (deprecated)
+    "enabled": true, // Enable gateway-mode tool registration
+    "emitLegacyTools": false, // Legacy tool aliases (deprecated)
   },
 
   // ──────────────────────────────────────────────────────────
@@ -500,13 +521,13 @@ Below is every option with inline commentary. JSON does not support comments, so
   // CODE MODE — sdl.manual + sdl.context + sdl.workflow
   // ──────────────────────────────────────────────────────────
   "codeMode": {
-    "enabled": true,            // Enable Code Mode tools (sdl.action.search, sdl.manual, sdl.context, sdl.workflow)
-    "exclusive": true,          // Suppress gateway and legacy tools — only register code-mode tools + discovery
-    "maxWorkflowSteps": 20,     // Max steps per workflow (1-50)
+    "enabled": true, // Enable Code Mode tools (sdl.action.search, sdl.manual, sdl.context, sdl.workflow)
+    "exclusive": true, // Suppress gateway and legacy tools — only register code-mode tools + discovery
+    "maxWorkflowSteps": 20, // Max steps per workflow (1-50)
     "maxWorkflowTokens": 50000, // Max tokens per workflow (100-500000)
-    "maxWorkflowDurationMs": 60000,// Max workflow duration in ms (1000-300000)
+    "maxWorkflowDurationMs": 60000, // Max workflow duration in ms (1000-300000)
     "ladderValidation": "warn", // off | warn | enforce
-    "etagCaching": true,        // Auto-inject ETags within workflows
+    "etagCaching": true, // Auto-inject ETags within workflows
   },
 
   // ──────────────────────────────────────────────────────────
@@ -532,7 +553,7 @@ Each entry registers a codebase for indexing. You can index multiple repos in on
 | `repoId`                  | `string`   | —                                                                    | **Required.** Unique identifier used in all tool calls  |
 | `rootPath`                | `string`   | —                                                                    | **Required.** Absolute or relative path to repo root    |
 | `ignore`                  | `string[]` | `["**/node_modules/**", "**/dist/**", "**/.next/**", "**/build/**"]` | Glob patterns to exclude                                |
-| `languages`               | `string[]` | All supported                                                     | File extensions to index                                |
+| `languages`               | `string[]` | All supported                                                        | File extensions to index                                |
 | `maxFileBytes`            | `integer`  | `2000000` (2MB)                                                      | Max file size; larger files skipped                     |
 | `includeNodeModulesTypes` | `boolean`  | `true`                                                               | Index `@types/*` for TS call resolution                 |
 | `packageJsonPath`         | `string`   | Auto-detected                                                        | Override package.json location                          |
@@ -571,8 +592,8 @@ Legacy v0.7.x SQLite database file path, only used by the one-time SQLite→Lady
 
 Controls the proof-of-need gating system for raw code access via `sdl.code.needWindow`.
 
-| Field                      | Type      | Default | Description                                                                           |
-| -------------------------- | --------- | ------- | ------------------------------------------------------------------------------------- |
+| Field                      | Type      | Default | Description |
+| -------------------------- | --------- | ------- | ----------- | ------------------------------------------------------------------------------------- |
 | `maxWindowLines`           | `integer` | `180`   | Min: 1      | Max lines per code window                                                             |
 | `maxWindowTokens`          | `integer` | `1400`  | Min: 1      | Max tokens per code window                                                            |
 | `requireIdentifiers`       | `boolean` | `true`  | —           | Require `identifiersToFind` in needWindow calls                                       |
@@ -615,14 +636,14 @@ Each custom pattern:
 
 Controls how and when code is indexed.
 
-| Field                | Type      | Default        | Range                      | Description                                     |
-| -------------------- | --------- | -------------- | -------------------------- | ----------------------------------------------- |
-| `concurrency`        | `integer` | `8`            | 1-10                       | Concurrent indexing workers                     |
-| `enableFileWatching` | `boolean` | `true`         | —                          | Auto-reindex on file changes                    |
-| `maxWatchedFiles`    | `integer` | `25000`        | min: 1                     | Cap on tracked files to prevent memory overload |
-| `workerPoolSize`     | `integer` | Auto           | 1-16                       | Override worker pool thread count               |
-| `engine`             | `string`  | `"rust"`       | `"typescript"` \| `"rust"` | Indexer implementation (falls back to TS if native addon missing) |
-| `watchDebounceMs`    | `integer` | `300`          | 50-5000                    | Debounce delay for file watch events (ms)       |
+| Field                | Type      | Default  | Range                      | Description                                                       |
+| -------------------- | --------- | -------- | -------------------------- | ----------------------------------------------------------------- |
+| `concurrency`        | `integer` | `8`      | 1-10                       | Concurrent indexing workers                                       |
+| `enableFileWatching` | `boolean` | `true`   | —                          | Auto-reindex on file changes                                      |
+| `maxWatchedFiles`    | `integer` | `25000`  | min: 1                     | Cap on tracked files to prevent memory overload                   |
+| `workerPoolSize`     | `integer` | Auto     | 1-16                       | Override worker pool thread count                                 |
+| `engine`             | `string`  | `"rust"` | `"typescript"` \| `"rust"` | Indexer implementation (falls back to TS if native addon missing) |
+| `watchDebounceMs`    | `integer` | `300`    | 50-5000                    | Debounce delay for file watch events (ms)                         |
 
 > **When to change:**
 >
@@ -656,13 +677,13 @@ Per-call `budget` parameters in `sdl.slice.build` override these defaults.
 
 TypeScript/JavaScript diagnostics integration for delta packs and blast radius.
 
-| Field       | Type      | Default          | Range                             | Description                                   |
-| ----------- | --------- | ---------------- | --------------------------------- | --------------------------------------------- |
+| Field       | Type      | Default          | Range                             | Description                                      |
+| ----------- | --------- | ---------------- | --------------------------------- | ------------------------------------------------ |
 | `enabled`   | `boolean` | `true`           | —                                 | Enable diagnostics (only applies to TS/JS repos) |
-| `mode`      | `string`  | `"tsLS"`         | `"tsLS"` \| `"tsc"`               | Engine: Language Service (faster) or compiler |
-| `maxErrors` | `integer` | `50`             | min: 1                            | Max errors before truncation                  |
-| `timeoutMs` | `integer` | `2000`           | min: 100                          | Per-operation timeout (ms)                    |
-| `scope`     | `string`  | `"changedFiles"` | `"changedFiles"` \| `"workspace"` | Which files to check                          |
+| `mode`      | `string`  | `"tsLS"`         | `"tsLS"` \| `"tsc"`               | Engine: Language Service (faster) or compiler    |
+| `maxErrors` | `integer` | `50`             | min: 1                            | Max errors before truncation                     |
+| `timeoutMs` | `integer` | `2000`           | min: 100                          | Per-operation timeout (ms)                       |
+| `scope`     | `string`  | `"changedFiles"` | `"changedFiles"` \| `"workspace"` | Which files to check                             |
 
 > **When to change:** Disable for non-TypeScript repos. Use `scope: "workspace"` for thorough CI checks (much slower). Increase `timeoutMs` for very large files.
 
@@ -702,60 +723,60 @@ Adapter plugin loading for extending indexer language support.
 
 Controls semantic search reranking, embedding generation, and LLM-powered symbol summaries.
 
-| Field                   | Type      | Default                       | Range                            | Description                                              |
-| ----------------------- | --------- | ----------------------------- | -------------------------------- | -------------------------------------------------------- |
-| `enabled`               | `boolean` | `true`                        | —                                | Enable semantic reranking in symbol search               |
+| Field                   | Type      | Default                       | Range                            | Description                                                                                |
+| ----------------------- | --------- | ----------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------ |
+| `enabled`               | `boolean` | `true`                        | —                                | Enable semantic reranking in symbol search                                                 |
 | `alpha`                 | `number`  | `0.6`                         | 0.0-1.0                          | **Deprecated** — use `retrieval.fusion.rrfK` instead. Legacy lexical/semantic blend weight |
-| `provider`              | `string`  | `"local"`                     | `"api"` \| `"local"` \| `"mock"` | Embedding provider                                       |
-| `model`                 | `string`  | `"all-MiniLM-L6-v2"`          | —                                | Embedding model identifier                               |
-| `generateSummaries`     | `boolean` | `false`                       | —                                | Generate LLM summaries during indexing                   |
-| `summaryModel`          | `string`  | `"claude-haiku-4-5-20251001"` | —                                | LLM model for summaries                                  |
-| `summaryApiKey`         | `string?` | `null`                        | —                                | API key (falls back to `ANTHROPIC_API_KEY` env var)      |
-| `summaryApiBaseUrl`     | `string?` | `null`                        | —                                | Base URL for OpenAI-compatible endpoints                 |
-| `summaryMaxConcurrency` | `integer` | `5`                           | 1-20                             | Max concurrent LLM requests                              |
-| `summaryBatchSize`      | `integer` | `20`                          | 1-50                             | Symbols per LLM batch request                            |
-| `modelCacheDir`         | `string?` | `null`                        | —                                | Override directory for downloaded ONNX model files       |
+| `provider`              | `string`  | `"local"`                     | `"api"` \| `"local"` \| `"mock"` | Embedding provider                                                                         |
+| `model`                 | `string`  | `"all-MiniLM-L6-v2"`          | —                                | Embedding model identifier                                                                 |
+| `generateSummaries`     | `boolean` | `false`                       | —                                | Generate LLM summaries during indexing                                                     |
+| `summaryModel`          | `string`  | `"claude-haiku-4-5-20251001"` | —                                | LLM model for summaries                                                                    |
+| `summaryApiKey`         | `string?` | `null`                        | —                                | API key (falls back to `ANTHROPIC_API_KEY` env var)                                        |
+| `summaryApiBaseUrl`     | `string?` | `null`                        | —                                | Base URL for OpenAI-compatible endpoints                                                   |
+| `summaryMaxConcurrency` | `integer` | `5`                           | 1-20                             | Max concurrent LLM requests                                                                |
+| `summaryBatchSize`      | `integer` | `20`                          | 1-50                             | Symbols per LLM batch request                                                              |
+| `modelCacheDir`         | `string?` | `null`                        | —                                | Override directory for downloaded ONNX model files                                         |
 
 #### `semantic.retrieval` (nested, optional)
 
 Hybrid retrieval configuration. Replaces legacy alpha-blending with FTS + vector search fused via Reciprocal Rank Fusion (RRF).
 
-| Field                | Type      | Default    | Range                  | Description                                      |
-| -------------------- | --------- | ---------- | ---------------------- | ------------------------------------------------ |
-| `mode`               | `string`  | `"hybrid"` | `"legacy"` \| `"hybrid"` | Retrieval strategy                              |
-| `extensionsOptional` | `boolean` | `true`     | —                      | Allow graceful fallback when extensions unavailable |
-| `candidateLimit`     | `integer` | `100`      | 10-1000                | Max candidates after fusion                      |
+| Field                | Type      | Default    | Range                    | Description                                         |
+| -------------------- | --------- | ---------- | ------------------------ | --------------------------------------------------- |
+| `mode`               | `string`  | `"hybrid"` | `"legacy"` \| `"hybrid"` | Retrieval strategy                                  |
+| `extensionsOptional` | `boolean` | `true`     | —                        | Allow graceful fallback when extensions unavailable |
+| `candidateLimit`     | `integer` | `100`      | 10-1000                  | Max candidates after fusion                         |
 
 #### `semantic.retrieval.fts` (nested, optional)
 
 Full-text search stage configuration.
 
-| Field         | Type      | Default                    | Range | Description                            |
-| ------------- | --------- | -------------------------- | ----- | -------------------------------------- |
-| `enabled`     | `boolean` | `true`                     | —     | Enable FTS retrieval                   |
-| `indexName`   | `string`  | `"symbol_search_text_v1"`  | —     | FTS index name on Symbol.searchText    |
-| `topK`        | `integer` | `75`                       | 1-500 | Max FTS candidates                     |
-| `conjunctive` | `boolean` | `false`                    | —     | `true` = AND all terms; `false` = OR   |
+| Field         | Type      | Default                   | Range | Description                          |
+| ------------- | --------- | ------------------------- | ----- | ------------------------------------ |
+| `enabled`     | `boolean` | `true`                    | —     | Enable FTS retrieval                 |
+| `indexName`   | `string`  | `"symbol_search_text_v1"` | —     | FTS index name on Symbol.searchText  |
+| `topK`        | `integer` | `75`                      | 1-500 | Max FTS candidates                   |
+| `conjunctive` | `boolean` | `false`                   | —     | `true` = AND all terms; `false` = OR |
 
 #### `semantic.retrieval.vector` (nested, optional)
 
 Vector search stage configuration. Uses native Ladybug vector indexes on Symbol embedding properties.
 
-| Field     | Type      | Default | Range   | Description                              |
-| --------- | --------- | ------- | ------- | ---------------------------------------- |
-| `enabled` | `boolean` | `true`  | —       | Enable vector retrieval                  |
-| `topK`    | `integer` | `75`    | 1-500   | Max candidates per model                 |
-| `efs`     | `integer` | `200`   | 8-1000  | Query-time accuracy parameter            |
-| `indexes` | `object`  | —       | —       | Per-model index name overrides (optional)|
+| Field     | Type      | Default | Range  | Description                               |
+| --------- | --------- | ------- | ------ | ----------------------------------------- |
+| `enabled` | `boolean` | `true`  | —      | Enable vector retrieval                   |
+| `topK`    | `integer` | `75`    | 1-500  | Max candidates per model                  |
+| `efs`     | `integer` | `200`   | 8-1000 | Query-time accuracy parameter             |
+| `indexes` | `object`  | —       | —      | Per-model index name overrides (optional) |
 
 #### `semantic.retrieval.fusion` (nested, optional)
 
 Fusion strategy for combining FTS and vector candidates.
 
-| Field      | Type      | Default | Range  | Description                              |
-| ---------- | --------- | ------- | ------ | ---------------------------------------- |
-| `strategy` | `string`  | `"rrf"` | `"rrf"` | Fusion algorithm (Reciprocal Rank Fusion)|
-| `rrfK`     | `integer` | `60`    | 1-1000 | RRF smoothing constant (higher = more uniform ranking) |
+| Field      | Type      | Default | Range   | Description                                            |
+| ---------- | --------- | ------- | ------- | ------------------------------------------------------ |
+| `strategy` | `string`  | `"rrf"` | `"rrf"` | Fusion algorithm (Reciprocal Rank Fusion)              |
+| `rrfK`     | `integer` | `60`    | 1-1000  | RRF smoothing constant (higher = more uniform ranking) |
 
 #### `semantic.ann` (removed)
 
@@ -820,13 +841,13 @@ Worker-thread acceleration for beam search scoring in `sdl.slice.build`.
 
 Controls concurrency limits for sessions, tool dispatch, and database connections.
 
-| Field                | Type      | Default | Range        | Description                                |
-| -------------------- | --------- | ------- | ------------ | ------------------------------------------ |
-| `maxSessions`        | `integer` | `8`     | 1-16         | Max concurrent HTTP sessions               |
-| `maxToolConcurrency` | `integer` | `8`     | 1-32         | Max concurrent tool handler executions     |
-| `readPoolSize`       | `integer` | `4`     | 1-8          | LadybugDB read connection pool size        |
-| `writeQueueTimeoutMs`| `integer` | `30000` | 1000-120000  | Timeout for queued write operations (ms)   |
-| `toolQueueTimeoutMs` | `integer` | `30000` | 5000-120000  | Timeout for queued tool invocations (ms)   |
+| Field                 | Type      | Default | Range       | Description                              |
+| --------------------- | --------- | ------- | ----------- | ---------------------------------------- |
+| `maxSessions`         | `integer` | `8`     | 1-16        | Max concurrent HTTP sessions             |
+| `maxToolConcurrency`  | `integer` | `8`     | 1-32        | Max concurrent tool handler executions   |
+| `readPoolSize`        | `integer` | `4`     | 1-8         | LadybugDB read connection pool size      |
+| `writeQueueTimeoutMs` | `integer` | `30000` | 1000-120000 | Timeout for queued write operations (ms) |
+| `toolQueueTimeoutMs`  | `integer` | `30000` | 5000-120000 | Timeout for queued tool invocations (ms) |
 
 > **When to change:**
 >
@@ -841,14 +862,14 @@ Controls concurrency limits for sessions, tool dispatch, and database connection
 
 Controls the live editor buffer overlay for draft-aware code intelligence.
 
-| Field                     | Type      | Default | Range        | Description                                               |
-| ------------------------- | --------- | ------- | ------------ | --------------------------------------------------------- |
-| `enabled`                 | `boolean` | `true`  | —            | Enable live index overlay for unsaved editor buffers      |
-| `debounceMs`              | `integer` | `75`    | 25-5000      | Debounce delay before parsing buffer updates (ms)         |
-| `idleCheckpointMs`        | `integer` | `15000` | 1000-300000  | Idle time before auto-checkpoint to DB (ms)               |
-| `maxDraftFiles`           | `integer` | `200`   | 1-10000      | Max concurrent draft files in the overlay                 |
-| `reconcileConcurrency`    | `integer` | `1`     | 1-8          | Concurrent reconciliation jobs (overlay → DB merge)       |
-| `clusterRefreshThreshold` | `integer` | `25`    | 1-1000       | Number of reconciled symbols before triggering cluster refresh |
+| Field                     | Type      | Default | Range       | Description                                                    |
+| ------------------------- | --------- | ------- | ----------- | -------------------------------------------------------------- |
+| `enabled`                 | `boolean` | `true`  | —           | Enable live index overlay for unsaved editor buffers           |
+| `debounceMs`              | `integer` | `75`    | 25-5000     | Debounce delay before parsing buffer updates (ms)              |
+| `idleCheckpointMs`        | `integer` | `15000` | 1000-300000 | Idle time before auto-checkpoint to DB (ms)                    |
+| `maxDraftFiles`           | `integer` | `200`   | 1-10000     | Max concurrent draft files in the overlay                      |
+| `reconcileConcurrency`    | `integer` | `1`     | 1-8         | Concurrent reconciliation jobs (overlay → DB merge)            |
+| `clusterRefreshThreshold` | `integer` | `25`    | 1-1000      | Number of reconciled symbols before triggering cluster refresh |
 
 > **When to change:**
 >
@@ -863,19 +884,19 @@ Controls the live editor buffer overlay for draft-aware code intelligence.
 
 Controls the sandboxed runtime execution engine (`sdl.runtime.execute`).
 
-| Field                | Type       | Default              | Range         | Description                                         |
-| -------------------- | ---------- | -------------------- | ------------- | --------------------------------------------------- |
-| `enabled`            | `boolean`  | `true`               | —             | Enable runtime execution (`false` disables `sdl.runtime.execute`) |
-| `allowedRuntimes`    | `string[]` | `["node", "typescript", "python", "shell"]` | See note      | Runtimes permitted for execution                    |
-| `allowedExecutables` | `string[]` | `[]`                 | —             | Additional executable names allowed (whitelist)     |
-| `maxDurationMs`      | `integer`  | `30000`              | 100-600000    | Default execution timeout (ms)                      |
-| `maxStdoutBytes`     | `integer`  | `1048576` (1 MB)     | min: 1024     | Max stdout capture size (bytes)                     |
-| `maxStderrBytes`     | `integer`  | `262144` (256 KB)    | min: 1024     | Max stderr capture size (bytes)                     |
-| `maxArtifactBytes`   | `integer`  | `10485760` (10 MB)   | min: 1024     | Max persisted artifact size (bytes)                 |
-| `artifactTtlHours`   | `integer`  | `24`                 | min: 1        | Hours to retain output artifacts                    |
-| `maxConcurrentJobs`  | `integer`  | `2`                  | 1-8           | Max concurrent runtime executions                   |
-| `envAllowlist`       | `string[]` | `[]`                 | —             | Environment variables passed through to subprocesses |
-| `artifactBaseDir`    | `string?`  | Auto                 | —             | Override directory for runtime output artifacts     |
+| Field                | Type       | Default                                     | Range      | Description                                                       |
+| -------------------- | ---------- | ------------------------------------------- | ---------- | ----------------------------------------------------------------- |
+| `enabled`            | `boolean`  | `true`                                      | —          | Enable runtime execution (`false` disables `sdl.runtime.execute`) |
+| `allowedRuntimes`    | `string[]` | `["node", "typescript", "python", "shell"]` | See note   | Runtimes permitted for execution                                  |
+| `allowedExecutables` | `string[]` | `[]`                                        | —          | Additional executable names allowed (whitelist)                   |
+| `maxDurationMs`      | `integer`  | `30000`                                     | 100-600000 | Default execution timeout (ms)                                    |
+| `maxStdoutBytes`     | `integer`  | `1048576` (1 MB)                            | min: 1024  | Max stdout capture size (bytes)                                   |
+| `maxStderrBytes`     | `integer`  | `262144` (256 KB)                           | min: 1024  | Max stderr capture size (bytes)                                   |
+| `maxArtifactBytes`   | `integer`  | `10485760` (10 MB)                          | min: 1024  | Max persisted artifact size (bytes)                               |
+| `artifactTtlHours`   | `integer`  | `24`                                        | min: 1     | Hours to retain output artifacts                                  |
+| `maxConcurrentJobs`  | `integer`  | `2`                                         | 1-8        | Max concurrent runtime executions                                 |
+| `envAllowlist`       | `string[]` | `[]`                                        | —          | Environment variables passed through to subprocesses              |
+| `artifactBaseDir`    | `string?`  | Auto                                        | —          | Override directory for runtime output artifacts                   |
 
 **Supported runtimes:** `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp` (16 runtimes total).
 
@@ -893,10 +914,10 @@ Controls the sandboxed runtime execution engine (`sdl.runtime.execute`).
 
 Controls the gateway tool registration mode.
 
-| Field            | Type      | Default | Description                                                |
-| ---------------- | --------- | ------- | ---------------------------------------------------------- |
-| `enabled`        | `boolean` | `true`  | Enable gateway-mode tool registration (namespace-scoped)   |
-| `emitLegacyTools`| `boolean` | `false` | Also emit flat (legacy) tools alongside gateway tools (deprecated) |
+| Field             | Type      | Default | Description                                                        |
+| ----------------- | --------- | ------- | ------------------------------------------------------------------ |
+| `enabled`         | `boolean` | `true`  | Enable gateway-mode tool registration (namespace-scoped)           |
+| `emitLegacyTools` | `boolean` | `false` | Also emit flat (legacy) tools alongside gateway tools (deprecated) |
 
 Gateway mode groups tools into 4 namespace tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`) plus `sdl.action.search` and `sdl.info`. When `emitLegacyTools` is `true`, the flat tool names are also registered for backwards compatibility.
 
@@ -908,15 +929,15 @@ Gateway mode groups tools into 4 namespace tools (`sdl.query`, `sdl.code`, `sdl.
 
 Controls Code Mode tools (`sdl.manual`, `sdl.context`, and `sdl.workflow`).
 
-| Field               | Type      | Default  | Range        | Description                                                |
-| -------------------- | --------- | -------- | ------------ | ---------------------------------------------------------- |
-| `enabled`            | `boolean` | `true`   | —            | Enable Code Mode tools (`sdl.manual` + `sdl.context` + `sdl.workflow`) |
-| `exclusive`          | `boolean` | `true`   | —            | When true, suppress gateway and legacy tools — only register code-mode tools + discovery |
-| `maxWorkflowSteps`      | `integer` | `20`     | 1-50         | Maximum steps allowed in a single workflow                 |
-| `maxWorkflowTokens`     | `integer` | `50000`  | 100-500000   | Maximum total estimated tokens for workflow results        |
-| `maxWorkflowDurationMs` | `integer` | `60000`  | 1000-300000  | Maximum wall-clock duration for a workflow (ms)            |
-| `ladderValidation`   | `string`  | `"warn"` | `"off"` \| `"warn"` \| `"enforce"` | Context ladder validation mode |
-| `etagCaching`        | `boolean` | `true`   | —            | Auto-inject ifNoneMatch ETags for repeated card requests within a workflow |
+| Field                   | Type      | Default  | Range                              | Description                                                                              |
+| ----------------------- | --------- | -------- | ---------------------------------- | ---------------------------------------------------------------------------------------- |
+| `enabled`               | `boolean` | `true`   | —                                  | Enable Code Mode tools (`sdl.manual` + `sdl.context` + `sdl.workflow`)                   |
+| `exclusive`             | `boolean` | `true`   | —                                  | When true, suppress gateway and legacy tools — only register code-mode tools + discovery |
+| `maxWorkflowSteps`      | `integer` | `20`     | 1-50                               | Maximum steps allowed in a single workflow                                               |
+| `maxWorkflowTokens`     | `integer` | `50000`  | 100-500000                         | Maximum total estimated tokens for workflow results                                      |
+| `maxWorkflowDurationMs` | `integer` | `60000`  | 1000-300000                        | Maximum wall-clock duration for a workflow (ms)                                          |
+| `ladderValidation`      | `string`  | `"warn"` | `"off"` \| `"warn"` \| `"enforce"` | Context ladder validation mode                                                           |
+| `etagCaching`           | `boolean` | `true`   | —                                  | Auto-inject ifNoneMatch ETags for repeated card requests within a workflow               |
 
 > **When to change:**
 >
@@ -946,10 +967,10 @@ When non-empty, `sdl.repo.register` calls are rejected unless the `rootPath` sta
 
 Controls bearer-token authentication for the HTTP transport (`sdl-mcp serve --http`). Has no effect on stdio transport.
 
-| Field     | Type      | Default | Description                                                                 |
-| --------- | --------- | ------- | --------------------------------------------------------------------------- |
-| `enabled` | `boolean` | `false` | Enable bearer-token authentication for `/mcp` and `/api/*` endpoints        |
-| `token`   | `string?` | `null`  | Static bearer token. When `null`, a random token is generated at startup.   |
+| Field     | Type      | Default | Description                                                               |
+| --------- | --------- | ------- | ------------------------------------------------------------------------- |
+| `enabled` | `boolean` | `false` | Enable bearer-token authentication for `/mcp` and `/api/*` endpoints      |
+| `token`   | `string?` | `null`  | Static bearer token. When `null`, a random token is generated at startup. |
 
 Three modes:
 
@@ -981,7 +1002,7 @@ Three modes:
 | `SDL_CONSOLE_LOGGING`            | Set to `true` to mirror log lines to stderr in addition to file logging        |
 | `SDL_LOG_FORMAT`                 | Log format: `json`, `text`                                                     |
 | `ANTHROPIC_API_KEY`              | Fallback API key for `semantic.generateSummaries`                              |
-| `SDL_MCP_DISABLE_NATIVE_ADDON`  | Set to `1` to force TypeScript fallback engine (skip native Rust addon)        |
+| `SDL_MCP_DISABLE_NATIVE_ADDON`   | Set to `1` to force TypeScript fallback engine (skip native Rust addon)        |
 
 SDL-MCP expands `${VAR_NAME}` references inside JSON config values at load time.
 

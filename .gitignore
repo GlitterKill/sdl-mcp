@@ -127,3 +127,4 @@ docs/plans/observability-dashboard-v1-plan.md
 .gitignore
 LEGACY-CLEANUP-PLAN.md
 scripts/apply-orchestrate-fix.mjs
+.fallow/cache.bin

@@ -50,7 +50,7 @@ flowchart TD
     Integration --> Golden["Golden File Tests<br/>Fixture validation and deterministic snapshots"]
     Golden --> Unit["Unit Tests<br/>Extractors, adapters, import resolution"]
     Unit --> Property["Property Tests<br/>Randomized invariants and schema contracts"]
-    Property --> Runner["Runner: node:test + --experimental-strip-types<br/>CI: ubuntu + windows x Node 22.x + 24.x"]
+    Property --> Runner["Runner: node:test + --experimental-strip-types<br/>CI: ubuntu + windows x Node 24.x"]
 
     style Runner fill:#e7f5ff,stroke:#1971c2
 ```

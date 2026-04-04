@@ -4,7 +4,7 @@
 
 ---
 
-SDL-MCP doesn't just parse syntax — it *understands* your code. Three interconnected subsystems form the **semantic engine**: a multi-language call resolver that traces dependencies with confidence scoring, an embedding-powered search reranker that finds what you mean (not just what you typed), and an LLM summary generator that describes what symbols do in plain English.
+SDL-MCP doesn't just parse syntax — it _understands_ your code. Three interconnected subsystems form the **semantic engine**: a multi-language call resolver that traces dependencies with confidence scoring, an embedding-powered search reranker that finds what you mean (not just what you typed), and an LLM summary generator that describes what symbols do in plain English.
 
 This document covers all three in depth, with architecture diagrams, configuration examples, and practical usage patterns.
 
@@ -55,11 +55,11 @@ flowchart TD
     style Cards fill:#d4edda,stroke:#28a745
 ```
 
-| Pillar | Runs When | Output | Default State |
-|:-------|:----------|:-------|:--------------|
-| **Pass-2 Resolution** | Every index (full & incremental) | Confidence-scored call edges | Always on |
-| **Embedding Search** | On `sdl.symbol.search` with `semantic: true` | Reranked search results | Enabled, opt-in per query |
-| **Summary Pipeline** | Every index (heuristics + NN transfer); LLM if configured | Quality-scored summaries (0.3-1.0) | Heuristics always on; NN transfer when `semantic.enabled`; LLM off by default |
+| Pillar                | Runs When                                                 | Output                             | Default State                                                                 |
+| :-------------------- | :-------------------------------------------------------- | :--------------------------------- | :---------------------------------------------------------------------------- |
+| **Pass-2 Resolution** | Every index (full & incremental)                          | Confidence-scored call edges       | Always on                                                                     |
+| **Embedding Search**  | On `sdl.symbol.search` with `semantic: true`              | Reranked search results            | Enabled, opt-in per query                                                     |
+| **Summary Pipeline**  | Every index (heuristics + NN transfer); LLM if configured | Quality-scored summaries (0.3-1.0) | Heuristics always on; NN transfer when `semantic.enabled`; LLM off by default |
 
 ---
 
@@ -67,7 +67,7 @@ flowchart TD
 
 ### The Problem with Naive Call Detection
 
-Pass-1 (initial indexing) extracts *raw* call identifiers from AST nodes. When it sees `validateToken(input)`, it records a call to the name `"validateToken"` — but doesn't know *which* `validateToken`. Is it the one from `./auth/jwt.ts`? Or the one from `./utils/validation.ts`? Or a third-party library function?
+Pass-1 (initial indexing) extracts _raw_ call identifiers from AST nodes. When it sees `validateToken(input)`, it records a call to the name `"validateToken"` — but doesn't know _which_ `validateToken`. Is it the one from `./auth/jwt.ts`? Or the one from `./utils/validation.ts`? Or a third-party library function?
 
 Pass-2 answers this question by tracing import chains, analyzing scope, and resolving each raw call identifier to a specific `symbolId` with a confidence score.
 
@@ -93,30 +93,30 @@ flowchart LR
 
 The resolver system uses a **registry pattern**. Each language registers a `Pass2Resolver` that knows its own import semantics, scope rules, and naming conventions.
 
-| Language | Resolver | Key Capabilities |
-|:---------|:---------|:-----------------|
-| **TypeScript** | `TsPass2Resolver` | Import aliases, barrel re-exports, tagged templates, TS compiler integration, namespace imports |
-| **JavaScript** | `TsPass2Resolver` | Shared with TypeScript — same module system |
-| **Go** | `GoPass2Resolver` | Package indexing, receiver type inference, method resolution on receiver types |
-| **Python** | `PythonPass2Resolver` | Module path resolution, relative imports, class method lookup |
-| **Java** | `JavaPass2Resolver` | Package-based namespacing, generic type handling, inheritance chain traversal |
-| **C#** | `CSharpPass2Resolver` | Namespace resolution, generic types |
-| **C** | `CPass2Resolver` | Header-based declarations, function pointer patterns |
-| **C++** | `CppPass2Resolver` | Namespace resolution, template functions, method overloads |
-| **PHP** | `PhpPass2Resolver` | Namespace resolution, use statements |
-| **Rust** | `RustPass2Resolver` | Module system, trait method resolution |
-| **Kotlin** | `KotlinPass2Resolver` | Package imports, extension functions |
-| **Shell** | `ShellPass2Resolver` | Function calls (limited — shell is loosely typed) |
+| Language       | Resolver              | Key Capabilities                                                                                |
+| :------------- | :-------------------- | :---------------------------------------------------------------------------------------------- |
+| **TypeScript** | `TsPass2Resolver`     | Import aliases, barrel re-exports, tagged templates, TS compiler integration, namespace imports |
+| **JavaScript** | `TsPass2Resolver`     | Shared with TypeScript — same module system                                                     |
+| **Go**         | `GoPass2Resolver`     | Package indexing, receiver type inference, method resolution on receiver types                  |
+| **Python**     | `PythonPass2Resolver` | Module path resolution, relative imports, class method lookup                                   |
+| **Java**       | `JavaPass2Resolver`   | Package-based namespacing, generic type handling, inheritance chain traversal                   |
+| **C#**         | `CSharpPass2Resolver` | Namespace resolution, generic types                                                             |
+| **C**          | `CPass2Resolver`      | Header-based declarations, function pointer patterns                                            |
+| **C++**        | `CppPass2Resolver`    | Namespace resolution, template functions, method overloads                                      |
+| **PHP**        | `PhpPass2Resolver`    | Namespace resolution, use statements                                                            |
+| **Rust**       | `RustPass2Resolver`   | Module system, trait method resolution                                                          |
+| **Kotlin**     | `KotlinPass2Resolver` | Package imports, extension functions                                                            |
+| **Shell**      | `ShellPass2Resolver`  | Function calls (limited — shell is loosely typed)                                               |
 
 ### Resolution Strategies & Confidence Scores
 
 Every resolved call edge is tagged with a **strategy** and a **confidence score**:
 
-| Resolution Strategy | Base Confidence | Description |
-|:--------------------|:----------------|:------------|
-| `exact` | `0.92` | Direct match via compiler API, node ID, or an unambiguous import |
-| `heuristic` | `0.68 - 0.92` | Single candidate by name and kind, same-package lookup, or receiver type inference |
-| `unresolved` | `0.20 - 0.35` | Multiple candidates or no match found; placeholder edge created |
+| Resolution Strategy | Base Confidence | Description                                                                        |
+| :------------------ | :-------------- | :--------------------------------------------------------------------------------- |
+| `exact`             | `0.92`          | Direct match via compiler API, node ID, or an unambiguous import                   |
+| `heuristic`         | `0.68 - 0.92`   | Single candidate by name and kind, same-package lookup, or receiver type inference |
+| `unresolved`        | `0.20 - 0.35`   | Multiple candidates or no match found; placeholder edge created                    |
 
 #### Ambiguity Penalty
 
@@ -126,12 +126,12 @@ When multiple candidate symbols match a call, confidence is penalized:
 confidence = max(0, baseline - 0.04 * candidateCount)
 ```
 
-| Candidates | Result |
-|:-----------|:-------|
-| 1 | `0.92` (no penalty) |
-| 2 | `0.84` (`0.92 - 0.08`) |
-| 5 | `0.72` (`0.92 - 0.20`) |
-| 10 | `0.52` (`0.92 - 0.40`, clamped) |
+| Candidates | Result                          |
+| :--------- | :------------------------------ |
+| 1          | `0.92` (no penalty)             |
+| 2          | `0.84` (`0.92 - 0.08`)          |
+| 5          | `0.72` (`0.92 - 0.20`)          |
+| 10         | `0.52` (`0.92 - 0.40`, clamped) |
 
 ### What Gets Stored Per Edge
 
@@ -155,15 +155,17 @@ confidence = max(0, baseline - 0.04 * candidateCount)
 The TypeScript resolver handles the most complex scenarios:
 
 **Import Alias Resolution:**
+
 ```typescript
 // File: src/handler.ts
 import { validateToken as checkToken } from "./auth/jwt.js";
 
-checkToken(input);  // → resolves to validateToken in auth/jwt.ts
-                    //   confidence: 0.92 (exact, unambiguous import)
+checkToken(input); // → resolves to validateToken in auth/jwt.ts
+//   confidence: 0.92 (exact, unambiguous import)
 ```
 
 **Barrel Re-export Tracing:**
+
 ```typescript
 // File: src/auth/index.ts
 export { validateToken } from "./jwt.js";
@@ -172,19 +174,21 @@ export { hashPassword } from "./crypto.js";
 // File: src/handler.ts
 import { validateToken } from "./auth/index.js";
 
-validateToken(input);  // → resolves through barrel to jwt.ts/validateToken
-                       //   confidence: 0.90 (exact, via re-export chain)
+validateToken(input); // → resolves through barrel to jwt.ts/validateToken
+//   confidence: 0.90 (exact, via re-export chain)
 ```
 
 **Namespace Imports:**
+
 ```typescript
 import * as auth from "./auth/index.js";
 
-auth.validateToken(input);  // → resolves via namespace map
-                            //   confidence: 0.92 (exact)
+auth.validateToken(input); // → resolves via namespace map
+//   confidence: 0.92 (exact)
 ```
 
 **Tagged Template Literals:**
+
 ```typescript
 const result = sql`SELECT * FROM users WHERE id = ${userId}`;
 // → resolves "sql" as a tagged template call
@@ -225,11 +229,12 @@ When you request a card with `includeResolutionMetadata: true`, the response inc
 
 Both `sdl.symbol.getCard` and `sdl.slice.build` accept a `minCallConfidence` parameter:
 
-| Mode | Threshold | Keeps | Drops |
-|:-----|:----------|:------|:------|
-| Default | `0.5` | Exact edges and strong heuristics (`0.72+`) | Unresolved and weak heuristics |
-| Precision | `0.8` | Exact edges only | Everything below `0.8` |
-| Recall | `0.0` | Everything, including unresolved edges | Nothing |
+| Mode      | Threshold | Keeps                                       | Drops                          |
+| :-------- | :-------- | :------------------------------------------ | :----------------------------- |
+| Default   | `0.5`     | Exact edges and strong heuristics (`0.72+`) | Unresolved and weak heuristics |
+| Precision | `0.8`     | Exact edges only                            | Everything below `0.8`         |
+| Recall    | `0.0`     | Everything, including unresolved edges      | Nothing                        |
+
 ### Health Metric: `callResolution`
 
 `sdl.repo.status` includes a `callResolution` health component (0.0-1.0) measuring the percentage of call edges that were resolved above the confidence threshold. A score below 0.6 indicates the pass-2 resolver is struggling with the codebase (e.g., heavy dynamic dispatch, missing type information).
@@ -240,7 +245,7 @@ Both `sdl.symbol.getCard` and `sdl.slice.build` accept a `minCallConfidence` par
 
 ### Beyond Lexical Matching
 
-Standard symbol search is lexical: searching for `"validate"` matches `validateToken`, `validateInput`, `isValid`, etc. — ranked by string similarity. But what if you search for `"check auth credentials"`? Lexical search finds nothing. Semantic search finds `validateToken`, `authenticate`, `verifyPassword` — because it understands *meaning*.
+Standard symbol search is lexical: searching for `"validate"` matches `validateToken`, `validateInput`, `isValid`, etc. — ranked by string similarity. But what if you search for `"check auth credentials"`? Lexical search finds nothing. Semantic search finds `validateToken`, `authenticate`, `verifyPassword` — because it understands _meaning_.
 
 ### How It Works: Hybrid Retrieval
 
@@ -266,7 +271,8 @@ rrfK = 60 by default"]
 when multiple sources agree"]
 ```
 
-RRF is more robust than alpha-blending because it fuses *rank positions* rather than raw scores, making it insensitive to score distribution differences between FTS and vector backends.
+RRF is more robust than alpha-blending because it fuses _rank positions_ rather than raw scores, making it insensitive to score distribution differences between FTS and vector backends.
+
 #### Legacy Pipeline (Alpha Blending)
 
 The legacy path is retained as a fallback and can be explicitly selected via `semantic.retrieval.mode: "legacy"`:
@@ -281,6 +287,7 @@ flowchart TD
 ```
 
 > **Deprecation notice**: `semantic.alpha` is deprecated in favor of `semantic.retrieval.fusion`. The legacy alpha-blending path remains functional but is no longer the recommended default.
+
 #### Automatic Fallback
 
 The hybrid retrieval system performs health checks before each search. If the Ladybug `fts` or `vector` extensions are unavailable, or if indexes are unhealthy, it automatically falls back to the legacy path and records the fallback reason in telemetry. This ensures `symbol.search` and `slice.build` remain functional in all environments.
@@ -308,33 +315,36 @@ When `includeRetrievalEvidence: true` is passed to `symbol.search` or `slice.bui
 
 If a fallback occurred, `mode` is `"legacy"` and `fallbackReason` explains why (e.g., `"fts extension not loaded"`, `"vector index unhealthy"`).
 
-### Two Embedding Models
+### Three Embedding Models
 
-SDL-MCP ships with two embedding models, each suited to different workflows:
+SDL-MCP ships with three embedding models, each suited to different workflows:
 
 ```mermaid
 flowchart LR
-    MiniLM["all-MiniLM-L6-v2<br/>384 dims<br/>256 max tokens<br/>~22 MB INT8<br/>Bundled with npm<br/>Best for quick setup"] --> Shared["Natural-language symbol text<br/>benefits from summaries"]
-    Nomic["nomic-embed-text-v1.5<br/>768 dims<br/>8,192 max tokens<br/>~138 MB download<br/>Best for higher quality"] --> Shared
+    MiniLM["all-MiniLM-L6-v2<br/>384 dims, 256 max tokens<br/>~22 MB INT8, bundled<br/>Best for quick setup"] --> Shared["Natural-language symbol text<br/>benefits from summaries"]
+    Nomic["nomic-embed-text-v1.5<br/>768 dims, 8192 max tokens<br/>~138 MB download<br/>Best for NL queries + summaries"] --> Shared
+    Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~110 MB download<br/>Best for code-to-code search"] --> Shared
 ```
 
 **Which should you choose?**
 
-| If you... | Use |
-|:----------|:----|
-| Want zero setup, no downloads | `all-MiniLM-L6-v2` (bundled in npm) |
-| Want better quality, longer context | `nomic-embed-text-v1.5` (768-dim, 8192 tokens) |
-| Have LLM summaries enabled | Either model benefits from summaries |
-| Have a large codebase (>10k symbols) | `all-MiniLM-L6-v2` (smaller vectors = faster ANN) |
-| Want the best overall quality | `nomic-embed-text-v1.5` + LLM summaries |
+| If you...                            | Use                                                          |
+| :----------------------------------- | :----------------------------------------------------------- |
+| Want zero setup, no downloads        | `all-MiniLM-L6-v2` (bundled in npm)                          |
+| Want better quality, longer context  | `nomic-embed-text-v1.5` (768-dim, 8192 tokens)               |
+| Work with multi-language codebases   | `jina-embeddings-v2-base-code` (trained on 30+ languages)    |
+| Have LLM summaries enabled           | MiniLM or Nomic (text models benefit most from NL summaries) |
+| Have a large codebase (>10k symbols) | `all-MiniLM-L6-v2` (smaller vectors = faster ANN)            |
+| Want the best NL query quality       | `nomic-embed-text-v1.5` + LLM summaries                      |
+| Want the best code similarity        | `jina-embeddings-v2-base-code`                               |
 
 ### Three Embedding Providers
 
-| Provider | How It Works | When to Use |
-|:---------|:-------------|:------------|
-| **`local`** (default) | ONNX runtime on your machine, fully offline | Most users — no API keys needed |
-| **`api`** | Anthropic API | Enterprise environments |
-| **`mock`** | Deterministic hash-based vectors (64-dim) | Testing, CI, when ONNX is unavailable |
+| Provider              | How It Works                                | When to Use                           |
+| :-------------------- | :------------------------------------------ | :------------------------------------ |
+| **`local`** (default) | ONNX runtime on your machine, fully offline | Most users — no API keys needed       |
+| **`api`**             | Anthropic API                               | Enterprise environments               |
+| **`mock`**            | Deterministic hash-based vectors (64-dim)   | Testing, CI, when ONNX is unavailable |
 
 The local provider uses `onnxruntime-node` and `tokenizers` (optional dependencies). If they're not installed, it gracefully falls back to mock embeddings.
 
@@ -346,6 +356,7 @@ Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB. Eac
 flowchart TD
     Symbol["Symbol node"] --> MiniLM["embeddingMiniLM<br/>embeddingMiniLMCardHash<br/>embeddingMiniLMUpdatedAt"]
     Symbol --> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
+    Symbol --> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
 ```
 
 Vectors are compressed for storage: `Float32 -> multiply by 10,000 -> round to Int16 -> base64 encode` (~50% savings vs raw float32, negligible precision loss for cosine similarity).
@@ -394,6 +405,7 @@ flowchart TD
 ```
 
 These summaries serve two purposes:
+
 1. **For agents**: instant understanding without reading code (Rung 1 of the Iris Gate Ladder)
 2. **For embeddings**: richer text input for the MiniLM model, producing better semantic search results
 
@@ -401,15 +413,15 @@ These summaries serve two purposes:
 
 Every symbol carries a `summaryQuality` (0.0-1.0) score and a `summarySource` field tracking provenance. Higher quality means the summary is more trustworthy and informative.
 
-| Source | Quality | `summarySource` | When |
-|:-------|:--------|:----------------|:-----|
-| JSDoc / doc comment | `1.0` | `jsdoc` | Extracted from code comments |
-| LLM-generated | `0.8` | `llm` | API call (Claude Haiku, Ollama) |
-| NN direct transfer | `0.6` | `nn-direct:<symbolId>` | Neighbor similarity >= `0.85` |
-| NN adapted transfer | `0.5` | `nn-adapted:<symbolId>` | Neighbor similarity `0.70-0.85` |
-| Heuristic (typed) | `0.4` | `heuristic-typed` | Functions or methods with parameter types |
-| Heuristic (fallback) | `0.3` | `heuristic-fallback` | Pattern-matched from name and kind |
-| No summary | `0.0` | `unknown` | No information available |
+| Source               | Quality | `summarySource`         | When                                      |
+| :------------------- | :------ | :---------------------- | :---------------------------------------- |
+| JSDoc / doc comment  | `1.0`   | `jsdoc`                 | Extracted from code comments              |
+| LLM-generated        | `0.8`   | `llm`                   | API call (Claude Haiku, Ollama)           |
+| NN direct transfer   | `0.6`   | `nn-direct:<symbolId>`  | Neighbor similarity >= `0.85`             |
+| NN adapted transfer  | `0.5`   | `nn-adapted:<symbolId>` | Neighbor similarity `0.70-0.85`           |
+| Heuristic (typed)    | `0.4`   | `heuristic-typed`       | Functions or methods with parameter types |
+| Heuristic (fallback) | `0.3`   | `heuristic-fallback`    | Pattern-matched from name and kind        |
+| No summary           | `0.0`   | `unknown`               | No information available                  |
 
 Quality scores flow through the pipeline - each stage only overwrites if it can produce a higher-quality summary. The LLM stage uses quality gating: symbols with `summaryQuality >= 0.8` (for example from JSDoc) are skipped, avoiding redundant API calls.
 
@@ -417,18 +429,18 @@ Quality scores flow through the pipeline - each stage only overwrites if it can 
 
 The heuristic summary engine generates pattern-matched summaries for **all symbol kinds**, not just functions. These run automatically during every index - no configuration required.
 
-| Symbol Kind | Pattern | Example Output |
-|:------------|:--------|:---------------|
-| `function` / `method` | Typed params plus return type | `Validates token using string` |
-| `class` | Role suffix such as `Provider` or `Factory` | `Implements the provider pattern for auth` |
-| `class` | Generic type parameters | `Generic cache class parameterized by K, V` |
-| `interface` | `I` prefix like `IUserService` | `Contract for user service` |
-| `interface` | Suffix such as `Props`, `Options`, or `Config` | `Props definition for button` |
-| `type` | Suffix plus generics | `Result type for query` |
-| `enum` | Name expansion | `Enumeration of log level values` |
-| `variable` | `SCREAMING_SNAKE_CASE` | `Constant defining max retries` |
-| `variable` | `Schema` or `Validator` suffix | `Validation schema for user` |
-| `constructor` | Typed parameters | `Constructs from string and number` |
+| Symbol Kind           | Pattern                                        | Example Output                              |
+| :-------------------- | :--------------------------------------------- | :------------------------------------------ |
+| `function` / `method` | Typed params plus return type                  | `Validates token using string`              |
+| `class`               | Role suffix such as `Provider` or `Factory`    | `Implements the provider pattern for auth`  |
+| `class`               | Generic type parameters                        | `Generic cache class parameterized by K, V` |
+| `interface`           | `I` prefix like `IUserService`                 | `Contract for user service`                 |
+| `interface`           | Suffix such as `Props`, `Options`, or `Config` | `Props definition for button`               |
+| `type`                | Suffix plus generics                           | `Result type for query`                     |
+| `enum`                | Name expansion                                 | `Enumeration of log level values`           |
+| `variable`            | `SCREAMING_SNAKE_CASE`                         | `Constant defining max retries`             |
+| `variable`            | `Schema` or `Validator` suffix                 | `Validation schema for user`                |
+| `constructor`         | Typed parameters                               | `Constructs from string and number`         |
 
 Both the TypeScript and Rust indexing engines implement these generators with identical output, ensuring consistent summaries regardless of which engine is used.
 
@@ -461,6 +473,7 @@ A well-documented function `validateToken` with summary "Validates JWT signature
 3. LLM summary generation (quality-gated: skips quality >= 0.8)
 4. refreshSymbolEmbeddings(...)
 ```
+
 ### LLM Generation Pipeline
 
 ```mermaid
@@ -470,13 +483,14 @@ flowchart TD
     Prompt --> Summary["Generate 1-3 sentence summary<br/>max 256 tokens"]
     Summary --> Cache["Cache in LadybugDB<br/>keyed by name, kind, signature, fingerprint, provider, model"]
 ```
+
 ### Three Summary Providers
 
-| Provider | Model (default) | Endpoint | Best For |
-|:---------|:----------------|:---------|:---------|
-| **`api`** (Anthropic) | `claude-haiku-4-5-20251001` | `api.anthropic.com` | Production (fast, cheap, high quality) |
-| **`local`** (OpenAI-compatible) | `gpt-4o-mini` | `localhost:11434` (Ollama) | Offline / air-gapped environments |
-| **`mock`** | — | — | Testing, CI pipelines |
+| Provider                        | Model (default)             | Endpoint                   | Best For                               |
+| :------------------------------ | :-------------------------- | :------------------------- | :------------------------------------- |
+| **`api`** (Anthropic)           | `claude-haiku-4-5-20251001` | `api.anthropic.com`        | Production (fast, cheap, high quality) |
+| **`local`** (OpenAI-compatible) | `gpt-4o-mini`               | `localhost:11434` (Ollama) | Offline / air-gapped environments      |
+| **`mock`**                      | —                           | —                          | Testing, CI pipelines                  |
 
 ### Batch Processing
 
@@ -489,18 +503,19 @@ flowchart TD
     Wave2 --> Remaining["Continue until all 25 batches complete"]
     Remaining --> Time["Approximate time: 3-5 minutes for 500 symbols<br/>Approximate cost: ~$0.50 USD with Claude Haiku"]
 ```
+
 ### Cache Invalidation
 
 The cache key is a SHA-256 hash of `name | kind | signature | astFingerprint | provider | model`. This means:
 
-| Change | Invalidates Cache? |
-|:-------|:------------------:|
-| Code body changes (different AST fingerprint) | Yes |
-| Signature changes (new parameter) | Yes |
-| Rename the symbol | Yes |
-| Switch from Haiku to GPT-4o-mini | Yes |
-| Whitespace-only change (same fingerprint) | No |
-| Unrelated file changes | No |
+| Change                                        | Invalidates Cache? |
+| :-------------------------------------------- | :----------------: |
+| Code body changes (different AST fingerprint) |        Yes         |
+| Signature changes (new parameter)             |        Yes         |
+| Rename the symbol                             |        Yes         |
+| Switch from Haiku to GPT-4o-mini              |        Yes         |
+| Whitespace-only change (same fingerprint)     |         No         |
+| Unrelated file changes                        |         No         |
 
 ### Cost Tracking
 
@@ -530,33 +545,34 @@ Both supported embedding models (`all-MiniLM-L6-v2` and `nomic-embed-text-v1.5`)
 {
   "semantic": {
     // ── Master Switch ──
-    "enabled": true,              // Enable semantic features globally
+    "enabled": true, // Enable semantic features globally
 
     // ── Embedding Configuration ──
-    "provider": "local",          // "local" (ONNX), "api", or "mock"
+    "provider": "local", // "local" (ONNX), "api", or "mock"
     "model": "all-MiniLM-L6-v2", // or "nomic-embed-text-v1.5"
-    "modelCacheDir": null,        // Custom model cache directory
-    "alpha": 0.6,                 // Lexical/semantic blend (0=pure semantic, 1=pure lexical)
+    "modelCacheDir": null, // Custom model cache directory
+    "alpha": 0.6, // Lexical/semantic blend (0=pure semantic, 1=pure lexical)
 
     // ── Summary Configuration ──
-    "generateSummaries": false,       // Enable LLM summary generation
-    "summaryProvider": null,          // null = inherit from "provider"
-    "summaryModel": null,             // null = provider default
-    "summaryApiKey": null,            // null = use ANTHROPIC_API_KEY env var
-    "summaryApiBaseUrl": null,        // null = provider default
-    "summaryMaxConcurrency": 5,       // 1-20, parallel batch workers
-    "summaryBatchSize": 20,           // 1-50, symbols per batch
+    "generateSummaries": false, // Enable LLM summary generation
+    "summaryProvider": null, // null = inherit from "provider"
+    "summaryModel": null, // null = provider default
+    "summaryApiKey": null, // null = use ANTHROPIC_API_KEY env var
+    "summaryApiBaseUrl": null, // null = provider default
+    "summaryMaxConcurrency": 5, // 1-20, parallel batch workers
+    "summaryBatchSize": 20, // 1-50, symbols per batch
 
     // ── ANN Index (Removed in v0.10.1 — silently ignored) ──
     // "ann": { "enabled": true, "m": 16, ... }
     // Use retrieval.vector instead for HNSW index configuration.
-  }
+  },
 }
 ```
 
 ### Quick Config Recipes
 
 **Recipe 1: Fully offline (no API keys needed)**
+
 ```json
 {
   "semantic": {
@@ -569,6 +585,7 @@ Both supported embedding models (`all-MiniLM-L6-v2` and `nomic-embed-text-v1.5`)
 ```
 
 **Recipe 2: Best quality with Claude Haiku summaries**
+
 ```json
 {
   "semantic": {
@@ -581,9 +598,11 @@ Both supported embedding models (`all-MiniLM-L6-v2` and `nomic-embed-text-v1.5`)
   }
 }
 ```
+
 Set `ANTHROPIC_API_KEY` in your environment.
 
 **Recipe 3: Local LLM via Ollama**
+
 ```json
 {
   "semantic": {
@@ -600,6 +619,7 @@ Set `ANTHROPIC_API_KEY` in your environment.
 ```
 
 **Recipe 4: CI / testing (no dependencies)**
+
 ```json
 {
   "semantic": {
@@ -790,23 +810,23 @@ sdl.symbol.search({
 
     // Hybrid retrieval replaces alpha-blending
     "retrieval": {
-      "mode": "hybrid",           // "hybrid" or "legacy"
+      "mode": "hybrid", // "hybrid" or "legacy"
       "fts": {
-        "enabled": true,          // Full-text search on Symbol.searchText
-        "topK": 75                // Max FTS candidates
+        "enabled": true, // Full-text search on Symbol.searchText
+        "topK": 75, // Max FTS candidates
       },
       "vector": {
-        "enabled": true,          // Vector search on Symbol embeddings
-        "topK": 75,               // Max vector candidates per model
-        "efs": 200                // Query-time accuracy parameter
+        "enabled": true, // Vector search on Symbol embeddings
+        "topK": 75, // Max vector candidates per model
+        "efs": 200, // Query-time accuracy parameter
       },
       "fusion": {
-        "strategy": "rrf",       // Reciprocal Rank Fusion
-        "rrfK": 60               // RRF smoothing constant
+        "strategy": "rrf", // Reciprocal Rank Fusion
+        "rrfK": 60, // RRF smoothing constant
       },
-      "candidateLimit": 100       // Max candidates after fusion
-    }
-  }
+      "candidateLimit": 100, // Max candidates after fusion
+    },
+  },
 }
 ```
 
@@ -826,7 +846,8 @@ and semantic ranking surfaces validateToken first"]
     Search --> Outcome["Agent finds the symbol, understands it from metadata, and traces the auth flow without opening raw source"]
 ```
 
-This is how SDL-MCP achieves 10-50x token savings: the semantic engine provides *understanding* at the metadata level, so raw code is rarely needed.
+This is how SDL-MCP achieves 10-50x token savings: the semantic engine provides _understanding_ at the metadata level, so raw code is rarely needed.
+
 ## Related Documentation
 
 - [Symbol Cards & Indexing](./indexing-languages.md) — How symbols are extracted and enriched

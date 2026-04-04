@@ -68,14 +68,14 @@ graph LR
 
 The CI workflow uses these environment variables:
 
-| Variable         | Description         | Default                       |
-| ---------------- | ------------------- | ----------------------------- |
-| `SDL_CONFIG`     | Path to config file | auto-discovered if unset |
-| `SDL_CONFIG_PATH` | Alternate config path env var | (none)               |
-| `SDL_CONFIG_HOME` | Default global config directory override | platform default |
-| `SDL_GRAPH_DB_PATH` | Override graph DB file path | (none) |
-| `SDL_GRAPH_DB_DIR` | Legacy directory-style graph DB override | (none) |
-| `SDL_DB_PATH`    | Legacy alias for graph DB path override (v0.7.x) | (none) |
+| Variable            | Description                                      | Default                  |
+| ------------------- | ------------------------------------------------ | ------------------------ |
+| `SDL_CONFIG`        | Path to config file                              | auto-discovered if unset |
+| `SDL_CONFIG_PATH`   | Alternate config path env var                    | (none)                   |
+| `SDL_CONFIG_HOME`   | Default global config directory override         | platform default         |
+| `SDL_GRAPH_DB_PATH` | Override graph DB file path                      | (none)                   |
+| `SDL_GRAPH_DB_DIR`  | Legacy directory-style graph DB override         | (none)                   |
+| `SDL_DB_PATH`       | Legacy alias for graph DB path override (v0.7.x) | (none)                   |
 
 ### Workflow Configuration
 
@@ -112,11 +112,11 @@ Sync artifacts are stored in CI artifact storage with:
 
 CI Memory Sync validates performance budgets to keep CI feedback loops fast.
 
-| Operation | Linux Budget | Windows Budget | Rationale |
-| --------- | ------------ | -------------- | --------- |
+| Operation | Linux Budget | Windows Budget | Rationale                              |
+| --------- | ------------ | -------------- | -------------------------------------- |
 | Index     | 45s          | 70s            | Filesystem-heavy indexing varies by OS |
 | Export    | 8s           | 10s            | Artifact serialization and compression |
-| Total     | 52s          | 78s            | End-to-end sync job budget |
+| Total     | 52s          | 78s            | End-to-end sync job budget             |
 
 ### Performance Validation
 
@@ -542,19 +542,21 @@ When upgrading SDL-MCP:
 
 ### Performance Budget Rationale
 
-**Index (30s):**
+> **Note**: The baseline rationale below assumes a ~1000-file repo. The actual CI budgets in the table above (Linux: 45s/8s/52s, Windows: 70s/10s/78s) include headroom for larger repos and CI variability.
+
+**Index (baseline ~30s for ~1000 files):**
 
 - Based on ~1000 files with 5-10 symbols per file
 - Assumes 3ms per file average
 - Includes database writes and indexing
 
-**Export (5s):**
+**Export (baseline ~5s):**
 
 - Based on artifact size ~1MB
 - Assumes gzip compression at ~200MB/s
 - Includes JSON serialization and file I/O
 
-**Total (35s):**
+**Total (baseline ~35s):**
 
 - Ensures fast feedback loops
 - Allows for CI queue time

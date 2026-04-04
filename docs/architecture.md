@@ -24,16 +24,16 @@ SDL-MCP is a high-performance codebase indexing and context retrieval server. Th
 
 ## Technical Stack
 
-| Layer | Technology |
-|:------|:-----------|
-| Runtime | Node.js v24+ / TypeScript 5.9+ (strict, ESM) |
-| Database | LadybugDB (embedded graph database, single-file storage, Kuzu engine) |
-| MCP SDK | `@modelcontextprotocol/sdk` ^1.27.1 |
-| Transports | stdio (CLI agents), HTTP/SSE (network clients) |
-| AST parsing | tree-sitter 0.25.0 + language grammars (0.23.x–0.25.x) |
-| Native addon | Rust via napi-rs (optional, multi-threaded pass-1) |
-| Embeddings | ONNX Runtime (MiniLM 384-dim, nomic-embed-text-v1.5 768-dim) |
-| Validation | Zod schemas for all tool payloads and responses |
+| Layer        | Technology                                                                                         |
+| :----------- | :------------------------------------------------------------------------------------------------- |
+| Runtime      | Node.js v24+ / TypeScript 5.9+ (strict, ESM)                                                       |
+| Database     | LadybugDB (embedded graph database, single-file storage, Kuzu engine)                              |
+| MCP SDK      | `@modelcontextprotocol/sdk` ^1.27.1                                                                |
+| Transports   | stdio (CLI agents), HTTP/SSE (network clients)                                                     |
+| AST parsing  | tree-sitter 0.26.2 (via @keqingmoe/tree-sitter) + language grammars (0.23.x–0.25.x)                |
+| Native addon | Rust via napi-rs (optional, multi-threaded pass-1)                                                 |
+| Embeddings   | ONNX Runtime (MiniLM 384-dim, nomic-embed-text-v1.5 768-dim, jina-embeddings-v2-base-code 768-dim) |
+| Validation   | Zod schemas for all tool payloads and responses                                                    |
 
 ---
 
@@ -133,7 +133,9 @@ flowchart TD
     Engine --> Calls["Calls<br/>raw identifiers"]
     Engine --> Fingerprints["Fingerprints<br/>SHA-256 of symbol parts"]
 ```
+
 **Language adapters** (`src/indexer/adapter/`) — 11 adapters covering 12 languages, each extends `BaseAdapter`:
+
 - `typescript.ts` (shared by TS/JS), `python.ts`, `go.ts`, `java.ts`, `rust.ts`, `csharp.ts`, `c.ts`, `cpp.ts`, `php.ts`, `kotlin.ts`, `shell.ts`
 
 **Native Rust engine** (`native/src/extract/`) — optional, mirrors all TS adapters at near-native speed via napi-rs.
@@ -146,6 +148,7 @@ Sequential, cross-file. Resolves raw call identifiers to specific symbol IDs usi
 flowchart TD
     Raw["Raw call edge<br/>getUserById"] --> Registry["Resolver registry<br/>11 language-specific resolvers<br/>selected by file extension"] --> Resolver["Language resolver<br/>import maps, alias chains, barrel re-exports,<br/>package resolution, inheritance"] --> Resolved["Resolved edge<br/>targetSymbolId: abc123<br/>confidence: 0.92<br/>strategy: import-alias"]
 ```
+
 11 language-specific resolvers are registered, all performing semantic cross-file analysis. Every resolver builds a repo-wide index (namespace, module, package, or directory-scoped), follows import/use/include/source chains to resolve call targets, handles language-specific patterns (generics, traits, templates, extensions, header pairs), and assigns stratified confidence scores (same-file 0.93 → imports 0.9 → same-scope 0.88–0.92 → fallback 0.45–0.78). TS and JS share one resolver implementation; the remaining 10 languages each have a dedicated resolver (700–1,350 lines).
 
 ### Finalization
@@ -167,6 +170,7 @@ After pass 1 + 2:
 SDL-MCP uses LadybugDB (Kuzu engine, npm alias `kuzu`) as the sole persistence layer. The database is a single file on disk (`.lbug` extension).
 
 **Path resolution** (`src/db/initGraphDb.ts`):
+
 1. `SDL_GRAPH_DB_PATH` env var (or legacy `SDL_DB_PATH`)
 2. `graphDatabase.path` in config
 3. Default: `<configDir>/sdl-mcp-graph.lbug`
@@ -182,52 +186,97 @@ flowchart TD
     Reads --> DB["LadybugDB"]
     Write --> DB
 ```
+
 Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write serialization prevents graph corruption.
 
-### Graph Schema (Node + Edge Tables)
+### Graph Schema (22 Node Tables, 14 Edge Tables)
 
-| Node Table | Key Fields |
-|:-----------|:-----------|
-| **Repo** | repoId, rootPath, configJson, createdAt |
-| **File** | fileId, repoId, relPath, byteSize, contentHash |
-| **Symbol** | symbolId, repoId, fileId, kind, name, exported, signatureJson, summary, summaryQuality, summarySource, etag, embeddingMiniLM, embeddingNomic |
-| **Version** | versionId, repoId, timestamp, indexedAt |
-| **Cluster** | clusterId, label, memberCount, searchText |
-| **Process** | processId, label, repoId, searchText |
-| **FileSummary** | fileId, repoId, summary, searchText, embeddingMiniLM, embeddingNomic |
-| **SummaryCache** | symbolId, summary, provider, model, cardHash, costUsd |
-| **SliceHandle** | handle, createdAt, expiresAt, minVersion, maxVersion |
-| **AgentFeedback** | feedbackId, repoId, taskText, taskType, searchText, embeddingMiniLM, embeddingNomic |
+**Core nodes:**
 
-| Edge Table | From → To | Key Fields |
-|:-----------|:----------|:-----------|
-| **CALLS** | Symbol → Symbol | confidence, resolverStrategy, provenance |
-| **IMPORTS** | Symbol → Symbol | importKind, alias |
-| **DEFINED_IN** | Symbol → File | — |
-| **BELONGS_TO** | File → Repo | — |
-| **BELONGS_TO_CLUSTER** | Symbol → Cluster | membershipScore |
-| **PARTICIPATES_IN** | Symbol → Process | stepOrder, role |
+| Node Table        | Key Fields                                                                                                                                                      |
+| :---------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Repo**          | repoId, rootPath, configJson, createdAt                                                                                                                         |
+| **File**          | fileId, repoId, relPath, byteSize, contentHash                                                                                                                  |
+| **Symbol**        | symbolId, repoId, fileId, kind, name, exported, signatureJson, summary, summaryQuality, summarySource, etag, embeddingMiniLM, embeddingNomic, embeddingJinaCode |
+| **Version**       | versionId, repoId, timestamp, indexedAt                                                                                                                         |
+| **SymbolVersion** | symbolId, versionId, signatureJson, summary                                                                                                                     |
+| **Metrics**       | symbolId, repoId, fanIn, fanOut, churn, testRefs                                                                                                                |
+
+**Graph enrichment nodes:**
+
+| Node Table      | Key Fields                                                                              |
+| :-------------- | :-------------------------------------------------------------------------------------- |
+| **Cluster**     | clusterId, label, memberCount, searchText                                               |
+| **Process**     | processId, label, repoId, searchText                                                    |
+| **FileSummary** | fileId, repoId, summary, searchText, embeddingMiniLM, embeddingNomic, embeddingJinaCode |
+
+**Infrastructure nodes:**
+
+| Node Table        | Key Fields                                                                                             |
+| :---------------- | :----------------------------------------------------------------------------------------------------- |
+| **SliceHandle**   | handle, createdAt, expiresAt, minVersion, maxVersion                                                   |
+| **CardHash**      | symbolId, hash                                                                                         |
+| **Audit**         | auditId, repoId, action, timestamp                                                                     |
+| **AgentFeedback** | feedbackId, repoId, taskText, taskType, searchText, embeddingMiniLM, embeddingNomic, embeddingJinaCode |
+| **SchemaVersion** | version, appliedAt                                                                                     |
+
+**Semantic nodes:**
+
+| Node Table          | Key Fields                                            |
+| :------------------ | :---------------------------------------------------- |
+| **SymbolEmbedding** | symbolId, embedding, model                            |
+| **SummaryCache**    | symbolId, summary, provider, model, cardHash, costUsd |
+| **SymbolReference** | referenceId, symbolId, file, line                     |
+
+**Sync, policy, and memory nodes:**
+
+| Node Table         | Key Fields                                                |
+| :----------------- | :-------------------------------------------------------- |
+| **SyncArtifact**   | artifactId, repoId, format, createdAt                     |
+| **ToolPolicyHash** | toolName, hash                                            |
+| **TsconfigHash**   | repoId, hash                                              |
+| **Memory**         | memoryId, repoId, type, title, content, tags, createdAt   |
+| **UsageSnapshot**  | snapshotId, sessionId, totalSdlTokens, totalRawEquivalent |
+
+**Edge tables (14):**
+
+| Edge Table               | From → To          | Key Fields                                         |
+| :----------------------- | :----------------- | :------------------------------------------------- |
+| **FILE_IN_REPO**         | File → Repo        | —                                                  |
+| **SYMBOL_IN_FILE**       | Symbol → File      | —                                                  |
+| **SYMBOL_IN_REPO**       | Symbol → Repo      | —                                                  |
+| **DEPENDS_ON**           | Symbol → Symbol    | edgeKind, confidence, resolverStrategy, provenance |
+| **VERSION_OF_REPO**      | Version → Repo     | —                                                  |
+| **BELONGS_TO_CLUSTER**   | Symbol → Cluster   | membershipScore                                    |
+| **PARTICIPATES_IN**      | Symbol → Process   | stepOrder, role                                    |
+| **CLUSTER_IN_REPO**      | Cluster → Repo     | —                                                  |
+| **PROCESS_IN_REPO**      | Process → Repo     | —                                                  |
+| **HAS_MEMORY**           | Repo → Memory      | —                                                  |
+| **MEMORY_OF**            | Memory → Symbol    | —                                                  |
+| **MEMORY_OF_FILE**       | Memory → File      | —                                                  |
+| **FILE_SUMMARY_IN_REPO** | FileSummary → Repo | —                                                  |
+| **SUMMARY_OF_FILE**      | FileSummary → File | —                                                  |
 
 ### Query Modules
 
 Each module owns a specific domain of queries:
 
-| Module | Purpose |
-|:-------|:--------|
-| `ladybug-repos.ts` | Repo CRUD, registration, config |
-| `ladybug-symbols.ts` | Symbol upsert, search, ETag, batch fetch |
-| `ladybug-edges.ts` | Call/import edge mutations, confidence updates |
-| `ladybug-versions.ts` | Version chain, timestamp tracking |
-| `ladybug-clusters.ts` | Cluster membership, label queries |
-| `ladybug-processes.ts` | Process steps, role queries |
-| `ladybug-embeddings.ts` | **Deprecated** — legacy SymbolEmbedding node queries |
+| Module                         | Purpose                                                                             |
+| :----------------------------- | :---------------------------------------------------------------------------------- |
+| `ladybug-repos.ts`             | Repo CRUD, registration, config                                                     |
+| `ladybug-symbols.ts`           | Symbol upsert, search, ETag, batch fetch                                            |
+| `ladybug-edges.ts`             | Call/import edge mutations, confidence updates                                      |
+| `ladybug-versions.ts`          | Version chain, timestamp tracking                                                   |
+| `ladybug-clusters.ts`          | Cluster membership, label queries                                                   |
+| `ladybug-processes.ts`         | Process steps, role queries                                                         |
+| `ladybug-embeddings.ts`        | **Deprecated** — legacy SymbolEmbedding node queries                                |
 | `ladybug-symbol-embeddings.ts` | Inline embedding properties on Symbol nodes (replacement for ladybug-embeddings.ts) |
-| `ladybug-metrics.ts` | Fan-in/out, churn, test refs |
-| `ladybug-feedback.ts` | Agent feedback, audit events, searchText + embeddings for retrieval boosting |
-| `ladybug-slices.ts` | Slice handles, lease expiry |
-| `ladybug-memories.ts` | Memory nodes, symbol/file links, staleness |
-| `ladybug-file-summaries.ts` | FileSummary nodes — file-level summaries with searchText and embeddings |
-| `ladybug-usage.ts` | Token usage tracking, savings metrics |
+| `ladybug-metrics.ts`           | Fan-in/out, churn, test refs                                                        |
+| `ladybug-feedback.ts`          | Agent feedback, audit events, searchText + embeddings for retrieval boosting        |
+| `ladybug-slices.ts`            | Slice handles, lease expiry                                                         |
+| `ladybug-memories.ts`          | Memory nodes, symbol/file links, staleness                                          |
+| `ladybug-file-summaries.ts`    | FileSummary nodes — file-level summaries with searchText and embeddings             |
+| `ladybug-usage.ts`             | Token usage tracking, savings metrics                                               |
 
 ---
 
@@ -241,14 +290,15 @@ flowchart TD
     Start --> Beam["Beam-search engine<br/>weighted BFS<br/>call 1.0, config 0.8, import 0.6<br/>adaptive minConfidence + budget tracking"]
     Beam --> Serialize["Slice serializer<br/>adaptive detail<br/>in-slice edge filtering<br/>ETag dedup + spillover"]
 ```
+
 **Card detail levels** — the serializer adapts detail based on remaining budget:
 
-| Level | Fields Included | ~Tokens |
-|:------|:----------------|:--------|
-| minimal | name, kind, range | ~15 |
-| signature | + signature, summary (truncated) | ~40 |
-| deps | + dependencies (filtered to slice) | ~80 |
-| full | everything (invariants, metrics, cluster, process) | ~135 |
+| Level     | Fields Included                                    | ~Tokens |
+| :-------- | :------------------------------------------------- | :------ |
+| minimal   | name, kind, range                                  | ~15     |
+| signature | + signature, summary (truncated)                   | ~40     |
+| deps      | + dependencies (filtered to slice)                 | ~80     |
+| full      | everything (invariants, metrics, cluster, process) | ~135    |
 
 **Wire format versions:** V1 (compact field names), V2 (deduplicated lookup tables), V3 (grouped edge encoding for large slices).
 
@@ -269,9 +319,11 @@ flowchart TD
 ```
 
 ### Skeleton (`src/code/skeleton.ts`)
+
 Deterministic code outline using tree-sitter. Keeps imports, type declarations, and signatures verbatim. Elides function/class bodies. Supports all 12 indexed languages.
 
 ### Hot-Path (`src/code/hotpath.ts`)
+
 Finds lines matching requested identifiers with configurable context lines before/after each match. Returns excerpt, matched line numbers, and which identifiers were found.
 
 ### Proof-of-Need Gating (`src/code/gate.ts`)
@@ -302,6 +354,7 @@ flowchart TD
 flowchart TD
     Changed["Changed symbols"] --> Reverse["Reverse-edge BFS<br/>imports + calls + config"] --> Score["Scoring and ranking<br/>0.6 distance + 0.3 fanIn + 0.1 test proximity<br/>fan-in amplifiers flagged across versions"]
 ```
+
 **PR risk analysis** (`src/mcp/tools/prRisk.ts`) — builds on blast radius to recommend test targets and flag high-risk changes.
 
 ---
@@ -314,6 +367,7 @@ The live index system (`src/live-index/`) provides draft-aware code intelligence
 flowchart TD
     Editor["Editor<br/>VSCode, etc."] --> Push["buffer.push<br/>on each keystroke or save"] --> Overlay["Overlay store<br/>content, version, parseResult, dirty flag"] --> Coordinator["Live index coordinator<br/>parse queue, reconcile queue,<br/>checkpoint service, idle monitor"] --> Reads["Merged into reads<br/>search, getCard, slice.build, getSkeleton"]
 ```
+
 **Version conflict:** `upsertDraft()` rejects updates where `update.version < existing.version` — prevents out-of-order edits from overwriting newer content.
 
 ---
@@ -334,19 +388,20 @@ flowchart TD
     Http --> Rest["REST endpoints<br/>health, buffer, graph, symbol, UI"]
     Http --> Events["EventStore<br/>message replay on reconnect<br/>FIFO eviction"]
 ```
+
 Each connected client gets its own `MCPServer` instance, ensuring complete session isolation. The `SessionManager` enforces the 8-session limit and reaps idle connections.
 
 ---
 
 ## Concurrency Control
 
-| Limiter | Scope | Max | Timeout | Purpose |
-|:--------|:------|:----|:--------|:--------|
-| Tool dispatch | Per-server | 8 concurrent | 30s queue | Prevents handler starvation |
-| DB write conn | Global | 1 (serialized) | — | Graph integrity |
-| DB read pool | Global | 4 connections | — | Concurrent multi-session reads |
-| Session manager | Global | 8 sessions | 5 min idle | Resource limits |
-| Summary batch | Per-index | 5 concurrent | — | API rate limiting |
+| Limiter         | Scope      | Max            | Timeout    | Purpose                        |
+| :-------------- | :--------- | :------------- | :--------- | :----------------------------- |
+| Tool dispatch   | Per-server | 8 concurrent   | 30s queue  | Prevents handler starvation    |
+| DB write conn   | Global     | 1 (serialized) | —          | Graph integrity                |
+| DB read pool    | Global     | 4 connections  | —          | Concurrent multi-session reads |
+| Session manager | Global     | 8 sessions     | 5 min idle | Resource limits                |
+| Summary batch   | Per-index  | 5 concurrent   | —          | API rate limiting              |
 
 **ConcurrencyLimiter** (`src/util/concurrency.ts`) — generic queue-based limiter reused across the system.
 
@@ -357,16 +412,21 @@ Each connected client gets its own `MCPServer` instance, ensuring complete sessi
 Three subsystems that enhance code intelligence beyond structural analysis:
 
 ### Pass-2 Call Resolution
+
 11 language-specific resolvers that trace import chains and resolve raw call identifiers to symbolIds with confidence scores (0.0-1.0). See [Semantic Engine deep dive](./feature-deep-dives/semantic-engine.md).
 
 ### Embedding Search
-Alpha-blended lexical + embedding similarity reranking using ONNX models. Two text models available — quality ladder: MiniLM alone < Nomic alone < either + LLM summaries:
-- **all-MiniLM-L6-v2** (384-dim, ~22 MB, bundled) — general-purpose baseline, zero-setup
-- **nomic-embed-text-v1.5** (768-dim, ~138 MB, downloaded) — higher-quality embeddings, longer context (8192 tokens)
 
-Both are text models that benefit from LLM summaries when enabled.
+Alpha-blended lexical + embedding similarity reranking using ONNX models. Three models available:
+
+- **all-MiniLM-L6-v2** (384-dim, ~22 MB, bundled) — general-purpose baseline, zero-setup
+- **nomic-embed-text-v1.5** (768-dim, ~138 MB, downloaded) — higher-quality text embeddings, longer context (8192 tokens), uses document/query prefixes
+- **jina-embeddings-v2-base-code** (768-dim, ~110 MB, downloaded) — code-specialized for 30+ programming languages, 8192-token context
+
+MiniLM and Nomic are text models that benefit most from LLM summaries. Jina Code is trained on source code and excels at code-to-code similarity without requiring natural-language summaries.
 
 ### LLM Summaries
+
 1-3 sentence semantic descriptions generated per symbol. Three providers (Anthropic API, OpenAI-compatible/Ollama, mock). Cached with content-addressed hashing. See [Indexing Languages deep dive](./feature-deep-dives/indexing-languages.md#llm-generated-summaries).
 
 ---
@@ -401,6 +461,7 @@ flowchart TD
 ```
 
 The `outputMode` parameter controls response verbosity:
+
 - **`minimal`** (default): ~50 tokens — just status + artifact handle
 - **`summary`**: ~200-500 tokens — head + tail excerpts
 - **`intent`**: variable — only `queryTerms`-matched excerpts
@@ -422,10 +483,12 @@ MCP logging notifications emit per-call savings meters and end-of-task session s
 ## Error Handling
 
 **Typed errors** (`src/domain/errors.ts`):
+
 - `ConfigError`, `DatabaseError`, `ValidationError`, `IndexError`, `PolicyError`, `NotFoundError`
 - `errorToMcpResponse()` (in `src/mcp/errors.ts`) converts any error to MCP-safe JSON
 
 **Policy denials** include actionable guidance:
+
 ```
 {
   "error": {
@@ -438,6 +501,7 @@ MCP logging notifications emit per-call savings meters and end-of-task session s
 ```
 
 **Graceful degradation:**
+
 - Rust native indexer unavailable → falls back to tree-sitter TS
 - ONNX runtime unavailable → falls back to mock embeddings
 - LLM API unavailable → skips summary generation (uses heuristic)
@@ -478,7 +542,6 @@ flowchart TD
     Src --> MCP["mcp/<br/>tools, errors, telemetry, token-usage, session-manager, dispatch-limiter"]
     Src --> Util["util/<br/>paths, concurrency, hashing, tokenizer"]
 ```
-
 
 ## Component Diagram
 

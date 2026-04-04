@@ -1,6 +1,6 @@
 # @sdl-mcp/ladybug
 
-LadybugDB 0.15.1 repackaged with per-platform native binaries.
+LadybugDB 0.15.2 repackaged with per-platform native binaries.
 
 ## Why?
 
@@ -20,13 +20,13 @@ with `os`/`cpu` constraints.
 
 ## Packages
 
-| Package | Platform | Size |
-|---------|----------|------|
-| `@sdl-mcp/ladybug` | All (JS wrapper) | ~50 KB |
-| `@sdl-mcp/ladybug-win32-x64` | Windows x64 | ~13 MB |
-| `@sdl-mcp/ladybug-linux-x64` | Linux x64 | ~25 MB |
-| `@sdl-mcp/ladybug-linux-arm64` | Linux ARM64 | ~24 MB |
-| `@sdl-mcp/ladybug-darwin-arm64` | macOS ARM64 | ~18 MB |
+| Package                         | Platform         | Size   |
+| ------------------------------- | ---------------- | ------ |
+| `@sdl-mcp/ladybug`              | All (JS wrapper) | ~50 KB |
+| `@sdl-mcp/ladybug-win32-x64`    | Windows x64      | ~13 MB |
+| `@sdl-mcp/ladybug-linux-x64`    | Linux x64        | ~25 MB |
+| `@sdl-mcp/ladybug-linux-arm64`  | Linux ARM64      | ~24 MB |
+| `@sdl-mcp/ladybug-darwin-arm64` | macOS ARM64      | ~18 MB |
 
 ## API
 

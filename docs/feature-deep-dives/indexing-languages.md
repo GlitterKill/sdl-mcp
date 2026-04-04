@@ -21,11 +21,12 @@ A high-performance, multi-threaded Rust addon compiled via `napi-rs`. This is th
 A pure Node.js engine using tree-sitter grammars for AST parsing. This is the **fallback engine** used when the native Rust addon is unavailable. It works everywhere Node.js runs.
 
 Select explicitly via config:
+
 ```jsonc
 {
   "indexing": {
-    "engine": "typescript"  // fallback; default is "rust" (native addon)
-  }
+    "engine": "typescript", // fallback; default is "rust" (native addon)
+  },
 }
 ```
 
@@ -88,19 +89,20 @@ flowchart LR
 
 For every file, the indexer produces:
 
-| Artifact | Description |
-|:---------|:------------|
-| **Symbols** | Functions, classes, interfaces, types, methods, constructors, variables, modules |
-| **Import edges** | Which modules/symbols are imported |
-| **Call identifiers** | Raw function/method call names (not yet resolved to symbol IDs) |
-| **AST fingerprints** | Content-addressed hashes for stable symbol identity |
-| **Signatures** | Parameter names, types, return types, generics, overloads |
+| Artifact             | Description                                                                      |
+| :------------------- | :------------------------------------------------------------------------------- |
+| **Symbols**          | Functions, classes, interfaces, types, methods, constructors, variables, modules |
+| **Import edges**     | Which modules/symbols are imported                                               |
+| **Call identifiers** | Raw function/method call names (not yet resolved to symbol IDs)                  |
+| **AST fingerprints** | Content-addressed hashes for stable symbol identity                              |
+| **Signatures**       | Parameter names, types, return types, generics, overloads                        |
 
 ### Pass 2: Cross-File Resolution
 
 The pass-2 resolver takes raw call identifiers from pass-1 and resolves them to specific symbol IDs. Every supported language has a dedicated resolver registered via an extensible registry pattern. Resolution strategies vary by language:
 
 **TypeScript / JavaScript:**
+
 - Import alias mapping — follows `import { foo as bar }` chains
 - Barrel re-export resolution — traces through `index.ts` re-exports
 - Scope analysis — distinguishes local variables from imported symbols
@@ -108,53 +110,63 @@ The pass-2 resolver takes raw call identifiers from pass-1 and resolves them to 
 - Namespace import resolution
 
 **Go:**
+
 - Package indexing and import aliasing
 - Receiver type inference from assignments
 - Method resolution on receiver types
 
 **Python:**
+
 - Module path resolution (absolute and relative imports)
 - Class method lookup with `self`/`cls` receiver resolution
 - Same-module symbol resolution
 - Instance method detection on imported classes
 
 **Java:**
+
 - Package-based namespacing
 - Inheritance chain traversal (`.extends`)
 - Wildcard import resolution
 - Qualified method call resolution
 
 **C#:**
+
 - Namespace indexing via `using` statements (including `using static` and aliases)
 - Base class method lookup
 - Qualified accessor resolution
 
 **C++:**
+
 - `#include` chain traversal (header → implementation pairing)
 - `using namespace` resolution
 - Template function and method overload matching
 
 **PHP:**
+
 - Namespace indexing via `use` statements
 - Fully-qualified class name (FQN) resolution
 - Method lookup by class FQN
 
 **Rust:**
+
 - Module tree construction from file paths (`crate::module::name`)
 - `use` path resolution
 - Trait method resolution via `impl` block ownership
 
 **Kotlin:**
+
 - Package-scoped indexing via `import` statements
 - Extension function resolution
 - Companion object method lookup
 
 **C:**
+
 - Header pair inference (`.c` ↔ `.h` matching)
 - `#include`-based symbol collection
 - Directory-scoped fallback for translation units
 
 **Shell:**
+
 - `source` statement parsing (follows sourced file paths)
 - Directory-scoped function resolution
 
@@ -164,20 +176,20 @@ Every resolved call edge includes a **confidence score** (0.0–1.0), a **resolv
 
 ## Supported Languages
 
-| Language | Extensions | Pass-1 | Pass-2 Resolver |
-|:---------|:-----------|:------:|:----------------:|
-| TypeScript | `.ts`, `.tsx` | Full | Semantic (aliases, barrels, tagged templates) |
-| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | Full | Semantic (shared with TS) |
-| Python | `.py`, `.pyw` | Full | Semantic (module paths, relative imports, class methods) |
-| Go | `.go` | Full | Semantic (packages, receiver types) |
-| Java | `.java` | Full | Semantic (packages, inheritance, wildcards) |
-| C# | `.cs` | Full | Semantic (namespaces, `using`, generics, static imports) |
-| C | `.c`, `.h` | Full | Semantic (header pairs, `#include` inference) |
-| C++ | `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx` | Full | Semantic (`#include` chains, namespaces, templates) |
-| PHP | `.php`, `.phtml` | Full | Semantic (namespaces, `use`, FQN resolution) |
-| Rust | `.rs` | Full | Semantic (module tree, `use` paths, trait methods) |
-| Kotlin | `.kt`, `.kts` | Full | Semantic (packages, imports, extension functions, companion objects) |
-| Shell | `.sh`, `.bash`, `.zsh` | Full | Semantic (`source` statements, directory scoping) |
+| Language   | Extensions                            | Pass-1 |                           Pass-2 Resolver                            |
+| :--------- | :------------------------------------ | :----: | :------------------------------------------------------------------: |
+| TypeScript | `.ts`, `.tsx`                         |  Full  |            Semantic (aliases, barrels, tagged templates)             |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs`         |  Full  |                      Semantic (shared with TS)                       |
+| Python     | `.py`, `.pyw`                         |  Full  |       Semantic (module paths, relative imports, class methods)       |
+| Go         | `.go`                                 |  Full  |                 Semantic (packages, receiver types)                  |
+| Java       | `.java`                               |  Full  |             Semantic (packages, inheritance, wildcards)              |
+| C#         | `.cs`                                 |  Full  |       Semantic (namespaces, `using`, generics, static imports)       |
+| C          | `.c`, `.h`                            |  Full  |            Semantic (header pairs, `#include` inference)             |
+| C++        | `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx` |  Full  |         Semantic (`#include` chains, namespaces, templates)          |
+| PHP        | `.php`, `.phtml`                      |  Full  |             Semantic (namespaces, `use`, FQN resolution)             |
+| Rust       | `.rs`                                 |  Full  |          Semantic (module tree, `use` paths, trait methods)          |
+| Kotlin     | `.kt`, `.kts`                         |  Full  | Semantic (packages, imports, extension functions, companion objects) |
+| Shell      | `.sh`, `.bash`, `.zsh`                |  Full  |          Semantic (`source` statements, directory scoping)           |
 
 ---
 
@@ -205,6 +217,7 @@ Symbols are grouped into clusters of highly-coupled code. A cluster might repres
 ### Call-Chain Tracing (Processes)
 
 Sequential call paths are traced to identify:
+
 - **Entry points** — where call chains begin (e.g., HTTP handlers)
 - **Intermediate nodes** — functions in the middle of call chains
 - **Exit points** — where call chains terminate (e.g., database queries)
@@ -219,12 +232,13 @@ SDL-MCP can generate 1–3 sentence semantic summaries for every symbol using an
 
 The summary system interacts with the embedding pipeline to create four distinct quality tiers:
 
-| Tier | Embedding Model | Summary Source | Cost |
-|:-----|:----------------|:---------------|:-----|
-| Low | `all-MiniLM-L6-v2` (384-dim, ~22 MB) | Heuristic summaries | Free, bundled |
-| Medium | `nomic-embed-text-v1.5` (768-dim, ~138 MB) | Heuristic summaries | Free, downloaded model |
-| Enhanced (1.5) | Either model with `semantic: true` | Enhanced heuristics plus NN summary transfer | Free, requires embeddings |
-| High | Either model with summaries enabled | LLM-generated 1-3 sentence summaries | API cost (~$2 / 1M tokens) |
+| Tier           | Embedding Model                                   | Summary Source                               | Cost                                      |
+| :------------- | :------------------------------------------------ | :------------------------------------------- | :---------------------------------------- |
+| Low            | `all-MiniLM-L6-v2` (384-dim, ~22 MB)              | Heuristic summaries                          | Free, bundled                             |
+| Medium         | `nomic-embed-text-v1.5` (768-dim, ~138 MB)        | Heuristic summaries                          | Free, downloaded model                    |
+| Medium+        | `jina-embeddings-v2-base-code` (768-dim, ~110 MB) | Heuristic summaries                          | Free, downloaded model (code-specialized) |
+| Enhanced (1.5) | Either model with `semantic: true`                | Enhanced heuristics plus NN summary transfer | Free, requires embeddings                 |
+| High           | Either model with summaries enabled               | LLM-generated 1-3 sentence summaries         | API cost (~$2 / 1M tokens)                |
 
 - **Low** - default. Embeds raw symbol text (name + kind + signature) with a general-purpose model. Enhanced per-kind heuristic summaries are always generated (class, interface, type, enum, variable, constructor), but no embedding-based enrichment.
 - **Medium** - swaps in a higher-quality text model with longer context (8192 tokens). Same heuristic summaries as Low.
@@ -233,14 +247,13 @@ The summary system interacts with the embedding pipeline to create four distinct
 
 Each symbol now carries `summaryQuality` (0.0-1.0) and `summarySource` fields tracking provenance: `jsdoc` (1.0), `llm` (0.8), `nn-direct` (0.6), `nn-adapted` (0.5), `heuristic-typed` (0.4), `heuristic-fallback` (0.3).
 
-
 #### Three Providers
 
-| Provider | Config value | Model default | Requires |
-|:---------|:-------------|:--------------|:---------|
-| **Anthropic API** | `"api"` | `claude-haiku-4-5-20251001` | `summaryApiKey` or `ANTHROPIC_API_KEY` env var |
-| **OpenAI-compatible** | `"local"` | `gpt-4o-mini` | Local server (e.g., Ollama at `localhost:11434`) |
-| **Mock** | `"mock"` | — | Nothing (deterministic heuristic patterns) |
+| Provider              | Config value | Model default               | Requires                                         |
+| :-------------------- | :----------- | :-------------------------- | :----------------------------------------------- |
+| **Anthropic API**     | `"api"`      | `claude-haiku-4-5-20251001` | `summaryApiKey` or `ANTHROPIC_API_KEY` env var   |
+| **OpenAI-compatible** | `"local"`    | `gpt-4o-mini`               | Local server (e.g., Ollama at `localhost:11434`) |
+| **Mock**              | `"mock"`     | —                           | Nothing (deterministic heuristic patterns)       |
 
 #### Batch Processing & Caching
 
@@ -259,14 +272,14 @@ Cache entries automatically invalidate when the symbol's code changes (fingerpri
 ```jsonc
 {
   "semantic": {
-    "generateSummaries": true,              // Enable LLM summaries (default: false)
-    "summaryProvider": "api",               // "api" | "local" | "mock"
+    "generateSummaries": true, // Enable LLM summaries (default: false)
+    "summaryProvider": "api", // "api" | "local" | "mock"
     "summaryModel": "claude-haiku-4-5-20251001",
     "summaryApiKey": "${ANTHROPIC_API_KEY}",
-    "summaryApiBaseUrl": null,              // Custom endpoint for "local" provider
-    "summaryMaxConcurrency": 5,             // Parallel requests (1–20)
-    "summaryBatchSize": 20                  // Symbols per batch (1–50)
-  }
+    "summaryApiBaseUrl": null, // Custom endpoint for "local" provider
+    "summaryMaxConcurrency": 5, // Parallel requests (1–20)
+    "summaryBatchSize": 20, // Symbols per batch (1–50)
+  },
 }
 ```
 

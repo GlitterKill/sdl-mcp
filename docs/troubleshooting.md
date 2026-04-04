@@ -182,12 +182,13 @@ Then run manual refreshes with `sdl-mcp index` until the underlying issue is fix
 
 #### Embedding model download fails
 
-- Symptom: first-run hangs or errors during model download (e.g., `nomic-embed-text-v1.5`)
-- Cause: network restrictions or proxy settings blocking the model download (~138 MB)
+- Symptom: first-run hangs or errors during model download (e.g., `nomic-embed-text-v1.5` or `jina-embeddings-v2-base-code`)
+- Cause: network restrictions or proxy settings blocking the model download (~138 MB for Nomic, ~110 MB for Jina Code)
 - Resolution:
   - ensure outbound HTTPS access to Hugging Face model hub
   - configure proxy via `HTTPS_PROXY` environment variable if needed
-  - use the smaller default model (`all-MiniLM-L6-v2`) which may already be cached
+  - use the smaller default model (`all-MiniLM-L6-v2`) which is bundled and requires no download
+  - if one downloaded model fails, try the other (`nomic-embed-text-v1.5` vs `jina-embeddings-v2-base-code`)
 
 ## Debug Commands
 

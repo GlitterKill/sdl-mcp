@@ -17,6 +17,7 @@ flowchart TD
     subgraph Models["Embedding Models"]
         MiniLM["all-MiniLM-L6-v2<br/>384-dim, ~22 MB, bundled"]
         Nomic["nomic-embed-text-v1.5<br/>768-dim, ~138 MB, downloaded"]
+        Jina["jina-embeddings-v2-base-code<br/>768-dim, ~110 MB, downloaded<br/>code-specialized"]
         Mock["Mock fallback<br/>64-dim, deterministic"]
     end
 
@@ -46,14 +47,15 @@ flowchart TD
 
 ## Required vs Optional Dependencies
 
-| Dependency | npm Package | Version | Required? | Purpose |
-|:-----------|:------------|:--------|:----------|:--------|
-| ONNX Runtime | `onnxruntime-node` | `^1.24.3` | Optional | Run embedding model inference (CPU) |
-| HuggingFace Tokenizer | `tokenizers` | `^0.13.3` | Optional | Tokenize text for ONNX models |
-| MiniLM Model | bundled | — | Included | 384-dim general-purpose embeddings |
-| Nomic Model | downloaded | — | Optional | 768-dim high-quality text embeddings |
-| Anthropic API Key | — | — | Optional | LLM summary generation (High tier) |
-| Ollama Server | — | — | Optional | Local LLM summary generation |
+| Dependency            | npm Package        | Version   | Required? | Purpose                              |
+| :-------------------- | :----------------- | :-------- | :-------- | :----------------------------------- |
+| ONNX Runtime          | `onnxruntime-node` | `^1.24.3` | Optional  | Run embedding model inference (CPU)  |
+| HuggingFace Tokenizer | `tokenizers`       | `^0.13.3` | Optional  | Tokenize text for ONNX models        |
+| MiniLM Model          | bundled            | —         | Included  | 384-dim general-purpose embeddings   |
+| Nomic Model           | downloaded         | —         | Optional  | 768-dim high-quality text embeddings |
+| Jina Code Model       | downloaded         | —         | Optional  | 768-dim code-specialized embeddings  |
+| Anthropic API Key     | —                  | —         | Optional  | LLM summary generation (High tier)   |
+| Ollama Server         | —                  | —         | Optional  | Local LLM summary generation         |
 
 **Without the optional dependencies**, SDL-MCP still works — embeddings fall back to a deterministic 64-dim mock. Semantic search will function but with lower quality results.
 
@@ -81,6 +83,7 @@ npx sdl-mcp doctor
 ```
 
 Look for:
+
 ```
 Semantic embedding models .................. PASS
   onnxruntime-node: 1.24.x
@@ -96,8 +99,8 @@ Semantic embedding models .................. PASS
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "all-MiniLM-L6-v2"
-  }
+    "model": "all-MiniLM-L6-v2",
+  },
 }
 ```
 
@@ -110,11 +113,13 @@ npx sdl-mcp index --repo my-repo
 Embeddings are generated during the finalization step of indexing. Subsequent searches with `semantic: true` will use them.
 
 **How text is constructed for MiniLM:**
+
 ```
 validateToken (function)
 (token: string, opts?: ValidateOpts): Promise<DecodedToken>
 Validates JWT signature and checks expiration claim
 ```
+
 Natural language format — name, kind, signature, and summary (if available) joined with newlines.
 
 ---
@@ -132,6 +137,7 @@ npm install onnxruntime-node tokenizers
 **Step 2 — Download the Nomic model (~138 MB):**
 
 Option A — Pre-download via script:
+
 ```bash
 node scripts/download-models.mjs nomic-embed-text-v1.5
 ```
@@ -141,20 +147,20 @@ The model is fetched from HuggingFace on the first embedding call during indexin
 
 **Where files are stored:**
 
-| Platform | Path |
-|:---------|:-----|
-| Windows | `%LOCALAPPDATA%\sdl-mcp\models\nomic-embed-text-v1.5\` |
-| macOS | `~/.cache/sdl-mcp/models/nomic-embed-text-v1.5/` |
-| Linux | `~/.cache/sdl-mcp/models/nomic-embed-text-v1.5/` |
-| Custom | Set `semantic.modelCacheDir` in config |
+| Platform | Path                                                   |
+| :------- | :----------------------------------------------------- |
+| Windows  | `%LOCALAPPDATA%\sdl-mcp\models\nomic-embed-text-v1.5\` |
+| macOS    | `~/.cache/sdl-mcp/models/nomic-embed-text-v1.5/`       |
+| Linux    | `~/.cache/sdl-mcp/models/nomic-embed-text-v1.5/`       |
+| Custom   | Set `semantic.modelCacheDir` in config                 |
 
 **What gets downloaded:**
 
-| File | Source | Size |
-|:-----|:-------|:-----|
+| File                   | Source                                                                                                      | Size    |
+| :--------------------- | :---------------------------------------------------------------------------------------------------------- | :------ |
 | `model_quantized.onnx` | [HuggingFace](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/onnx/model_quantized.onnx) | ~138 MB |
-| `tokenizer.json` | [HuggingFace](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/tokenizer.json) | ~700 KB |
-| `config.json` | [HuggingFace](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/config.json) | ~1 KB |
+| `tokenizer.json`       | [HuggingFace](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/tokenizer.json)            | ~700 KB |
+| `config.json`          | [HuggingFace](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/config.json)               | ~1 KB   |
 
 **Step 3 — Configure:**
 
@@ -164,8 +170,8 @@ The model is fetched from HuggingFace on the first embedding call during indexin
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "nomic-embed-text-v1.5"
-  }
+    "model": "nomic-embed-text-v1.5",
+  },
 }
 ```
 
@@ -184,6 +190,7 @@ npx sdl-mcp doctor
 ```
 
 Look for:
+
 ```
 Semantic embedding models .................. PASS
   onnxruntime-node: 1.24.x
@@ -192,18 +199,110 @@ Semantic embedding models .................. PASS
 ```
 
 **How text is constructed for Nomic:**
+
 ```
 validateToken (function)
 (token: string, opts?: ValidateOpts): Promise<DecodedToken>
 Validates JWT signature and checks expiration claim
 ```
+
 Same natural-language format as MiniLM — both are text models. The Nomic model's 8,192-token window means longer signatures and summaries are captured without truncation.
+
+---
+
+### Tier 2b: Medium — Code-Specialized (Free, Downloaded)
+
+Uses the **jina-embeddings-v2-base-code** model, which is trained specifically on source code across 30+ programming languages. Same 768 dimensions and 8,192-token context window as Nomic, but optimized for code retrieval rather than general text. Best choice when your primary use case is searching code rather than documentation.
+
+**Step 1 — Install ONNX dependencies (if not already):**
+
+```bash
+npm install onnxruntime-node tokenizers
+```
+
+**Step 2 — Download the Jina Code model (~110 MB):**
+
+Option A — Pre-download via script:
+
+```bash
+node scripts/download-models.mjs jina-embeddings-v2-base-code
+```
+
+Option B — Let SDL-MCP download on first use (automatic):
+The model is fetched from HuggingFace on the first embedding call during indexing.
+
+**Where files are stored:**
+
+| Platform | Path                                                          |
+| :------- | :------------------------------------------------------------ |
+| Windows  | `%LOCALAPPDATA%\sdl-mcp\models\jina-embeddings-v2-base-code\` |
+| macOS    | `~/.cache/sdl-mcp/models/jina-embeddings-v2-base-code/`       |
+| Linux    | `~/.cache/sdl-mcp/models/jina-embeddings-v2-base-code/`       |
+| Custom   | Set `semantic.modelCacheDir` in config                        |
+
+**What gets downloaded:**
+
+| File                   | Source                                                                                                           | Size    |
+| :--------------------- | :--------------------------------------------------------------------------------------------------------------- | :------ |
+| `model_quantized.onnx` | [HuggingFace](https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/onnx/model_quantized.onnx) | ~110 MB |
+| `tokenizer.json`       | [HuggingFace](https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/tokenizer.json)            | ~700 KB |
+| `config.json`          | [HuggingFace](https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/config.json)               | ~1 KB   |
+
+**Step 3 — Configure:**
+
+```jsonc
+// sdl-mcp.config.json
+{
+  "semantic": {
+    "enabled": true,
+    "provider": "local",
+    "model": "jina-embeddings-v2-base-code",
+  },
+}
+```
+
+**Step 4 — Re-index to generate new embeddings:**
+
+```bash
+npx sdl-mcp index --repo my-repo --mode full
+```
+
+A full re-index is needed when switching models because the embedding dimensions and model semantics change.
+
+**Step 5 — Verify:**
+
+```bash
+npx sdl-mcp doctor
+```
+
+Look for:
+
+```
+Semantic embedding models .................. PASS
+  onnxruntime-node: 1.24.x
+  tokenizers: available
+  model: jina-embeddings-v2-base-code (768d, files present)
+```
+
+**When to choose Jina Code over Nomic:**
+
+- Your codebase is primarily source code with minimal prose documentation
+- You work across multiple programming languages (Jina Code was trained on 30+ languages)
+- You want better code-to-code similarity matching (e.g., finding similar implementations)
+
+**When to choose Nomic over Jina Code:**
+
+- Your queries are natural-language descriptions (e.g., "find the authentication handler")
+- Your codebase has rich documentation, comments, and summaries
+- You're using LLM-generated summaries (Tier 3) — Nomic handles natural-language summaries better
+
+> **Note**: Unlike Nomic, the Jina Code model does not use document/query prefixes. Text is embedded as-is.
 
 ---
 
 ### Tier 3: High (API Tokens Required)
 
-Adds LLM-generated natural-language summaries (quality 0.8) to either embedding model. Both MiniLM and Nomic are text models that benefit equally from summaries. For maximum quality, pair summaries with `nomic-embed-text-v1.5`. Produces the highest quality semantic search results because the LLM distills code meaning into plain English that embedding models handle well.
+Adds LLM-generated natural-language summaries (quality 0.8) to any embedding model. MiniLM, Nomic, and Jina Code all benefit from richer symbol text. For maximum quality with natural-language queries, pair summaries with `nomic-embed-text-v1.5`. For code-centric queries, pair with `jina-embeddings-v2-base-code`. Produces the highest quality semantic search results because the LLM distills code meaning into plain English that embedding models handle well.
 
 The LLM stage is quality-gated: symbols that already have `summaryQuality >= 0.8` (e.g., from JSDoc extraction) are automatically skipped, avoiding redundant API calls. In practice, this means well-documented codebases spend less on LLM summaries while undocumented symbols get the most attention.
 
@@ -218,16 +317,18 @@ Sign up at [console.anthropic.com](https://console.anthropic.com) and create an 
 **Step 2 — Set the API key:**
 
 Option A — Environment variable:
+
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
 Option B — Config file:
+
 ```jsonc
 {
   "semantic": {
-    "summaryApiKey": "sk-ant-api03-..."
-  }
+    "summaryApiKey": "sk-ant-api03-...",
+  },
 }
 ```
 
@@ -244,8 +345,8 @@ Option B — Config file:
     "summaryProvider": "api",
     "summaryModel": "claude-haiku-4-5-20251001",
     "summaryMaxConcurrency": 5,
-    "summaryBatchSize": 20
-  }
+    "summaryBatchSize": 20,
+  },
 }
 ```
 
@@ -262,6 +363,7 @@ npx sdl-mcp index --repo my-repo
 **Default model:** `claude-haiku-4-5-20251001`
 
 Other supported models (any Anthropic model works):
+
 - `claude-sonnet-4-20250514` (higher quality, higher cost)
 - `claude-haiku-4-5-20251001` (recommended — best quality/cost ratio)
 
@@ -305,8 +407,8 @@ Ollama runs an OpenAI-compatible API at `http://localhost:11434/v1` by default.
     "summaryModel": "llama3.2:3b",
     "summaryApiBaseUrl": "http://localhost:11434/v1",
     "summaryMaxConcurrency": 2,
-    "summaryBatchSize": 10
-  }
+    "summaryBatchSize": 10,
+  },
 }
 ```
 
@@ -331,8 +433,8 @@ Any server implementing the `/v1/chat/completions` endpoint works — LM Studio,
     "summaryProvider": "local",
     "summaryModel": "your-model-name",
     "summaryApiKey": "your-api-key",
-    "summaryApiBaseUrl": "http://your-server:8080/v1"
-  }
+    "summaryApiBaseUrl": "http://your-server:8080/v1",
+  },
 }
 ```
 
@@ -342,33 +444,40 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 
 ## Model Comparison
 
-| Property | `all-MiniLM-L6-v2` | `nomic-embed-text-v1.5` |
-|:---------|:-------------------|:------------------------|
-| Dimensions | 384 | 768 |
-| Max input tokens | 256 | 8,192 |
-| ONNX file size | ~22 MB (INT8) | ~138 MB (INT8) |
-| Bundled with npm | Yes | No, downloaded on demand |
-| Training data | English sentence embeddings | Diverse text embeddings |
-| Input format | Natural-language symbol text | Natural-language symbol text |
-| Best paired with | LLM summaries | LLM summaries |
-| Disk location | `<pkg>/models/` | `<cache>/models/` |
-| Upstream source | `sentence-transformers` | `nomic-ai` |
+| Property              | `all-MiniLM-L6-v2`           | `nomic-embed-text-v1.5`                | `jina-embeddings-v2-base-code` |
+| :-------------------- | :--------------------------- | :------------------------------------- | :----------------------------- |
+| Dimensions            | 384                          | 768                                    | 768                            |
+| Max input tokens      | 256                          | 8,192                                  | 8,192                          |
+| ONNX file size        | ~22 MB (INT8)                | ~138 MB (INT8)                         | ~110 MB (INT8)                 |
+| Bundled with npm      | Yes                          | No, downloaded on demand               | No, downloaded on demand       |
+| Training data         | English sentence embeddings  | Diverse text embeddings                | Source code (30+ languages)    |
+| Input format          | Natural-language symbol text | Natural-language symbol text           | Natural-language symbol text   |
+| Document/query prefix | None                         | `search_document: ` / `search_query: ` | None                           |
+| Best paired with      | LLM summaries                | LLM summaries (NL queries)             | Code-centric queries           |
+| Disk location         | `<pkg>/models/`              | `<cache>/models/`                      | `<cache>/models/`              |
+| Upstream source       | `sentence-transformers`      | `nomic-ai`                             | `jinaai`                       |
 
-"Max input tokens" is the model context window. MiniLM benefits more from concise summaries because its 256-token window truncates quickly, while Nomic can ingest much longer signatures, comments, and summaries without losing context.
+**Choosing a model:**
+
+- **MiniLM** — Zero setup, bundled, good baseline. Benefits most from concise summaries since its 256-token window truncates quickly.
+- **Nomic** — Best for natural-language queries ("find the auth handler") and when using LLM summaries. Its 8,192-token window captures longer signatures and documentation.
+- **Jina Code** — Best for code-to-code similarity and multi-language codebases. Trained directly on source code from 30+ languages, so it understands code structure natively without needing natural-language summaries.
 
 ## Summary Provider Comparison
 
-| Provider | Config value | Default model | Endpoint | Auth | Cost |
-|:---------|:-------------|:--------------|:---------|:-----|:-----|
-| **Anthropic** | `"api"` | `claude-haiku-4-5-20251001` | `https://api.anthropic.com/v1/messages` | `ANTHROPIC_API_KEY` or `summaryApiKey` | ~$2/1M tokens |
-| **Ollama / Local** | `"local"` | `gpt-4o-mini` | `http://localhost:11434/v1/chat/completions` | Optional (default: `"ollama"`) | Free (local compute) |
-| **Mock** | `"mock"` | — | None | None | Free |
+| Provider           | Config value | Default model               | Endpoint                                     | Auth                                   | Cost                 |
+| :----------------- | :----------- | :-------------------------- | :------------------------------------------- | :------------------------------------- | :------------------- |
+| **Anthropic**      | `"api"`      | `claude-haiku-4-5-20251001` | `https://api.anthropic.com/v1/messages`      | `ANTHROPIC_API_KEY` or `summaryApiKey` | ~$2/1M tokens        |
+| **Ollama / Local** | `"local"`    | `gpt-4o-mini`               | `http://localhost:11434/v1/chat/completions` | Optional (default: `"ollama"`)         | Free (local compute) |
+| **Mock**           | `"mock"`     | —                           | None                                         | None                                   | Free                 |
 
 **API format differences:**
+
 - `"api"` sends Anthropic Messages API format (`x-api-key` header, `anthropic-version` header)
 - `"local"` sends OpenAI Chat Completions format (`Authorization: Bearer` header)
 
 **System prompt used for all providers:**
+
 > "You are a code documentation assistant. Write a 1-3 sentence summary of what this TypeScript/JavaScript symbol does. Be specific, not generic. Focus on behavior, not structure."
 
 ---
@@ -396,6 +505,7 @@ finalScore = 0.6 * lexicalScore + 0.4 * semanticScore
 ```
 
 Adjust `semantic.alpha` in config:
+
 - `0.0` = pure semantic
 - `0.5` = balanced
 - `0.6` = default with slight lexical bias
@@ -414,31 +524,31 @@ Hybrid retrieval replaces the legacy alpha-blending search with native Ladybug F
   "semantic": {
     "enabled": true,
     "retrieval": {
-      "mode": "hybrid",              // "hybrid" (default) or "legacy"
+      "mode": "hybrid", // "hybrid" (default) or "legacy"
       "fts": {
-        "enabled": true,             // Full-text search on Symbol.searchText
+        "enabled": true, // Full-text search on Symbol.searchText
         "indexName": "symbol_search_text_v1",
-        "topK": 75,                  // Max FTS candidates
-        "conjunctive": false         // true = AND all terms; false = OR
+        "topK": 75, // Max FTS candidates
+        "conjunctive": false, // true = AND all terms; false = OR
       },
       "vector": {
-        "enabled": true,             // Vector search on inline embeddings
-        "topK": 75,                  // Max candidates per model
-        "efs": 200                   // Query-time accuracy parameter
+        "enabled": true, // Vector search on inline embeddings
+        "topK": 75, // Max candidates per model
+        "efs": 200, // Query-time accuracy parameter
       },
       "fusion": {
-        "strategy": "rrf",          // Reciprocal Rank Fusion
-        "rrfK": 60                   // Smoothing constant (higher = more uniform)
+        "strategy": "rrf", // Reciprocal Rank Fusion
+        "rrfK": 60, // Smoothing constant (higher = more uniform)
       },
-      "candidateLimit": 100          // Max candidates after fusion
-    }
-  }
+      "candidateLimit": 100, // Max candidates after fusion
+    },
+  },
 }
 ```
 
 ### How It Works
 
-1. **FTS and vector indexes are created automatically** on DB init when `semantic.enabled: true`. The FTS extension indexes `Symbol.searchText`; vector indexes cover `Symbol.embeddingMiniLM` and `Symbol.embeddingNomic`.
+1. **FTS and vector indexes are created automatically** on DB init when `semantic.enabled: true`. The FTS extension indexes `Symbol.searchText`; vector indexes cover `Symbol.embeddingMiniLM`, `Symbol.embeddingNomic`, and `Symbol.embeddingJinaCode`.
 2. **At query time**, FTS and vector searches run in parallel. Each source produces a ranked candidate list.
 3. **RRF fuses** the rank lists: `score(d) = Σ 1/(k + rank_i(d))` — symbols ranked highly by multiple sources rise to the top.
 4. **If extensions are unavailable** (e.g., `fts` or `vector` not loaded), the system automatically falls back to the legacy alpha-blending path and records the fallback reason in telemetry.
@@ -454,6 +564,7 @@ Retrieval extensions ...................... PASS
   FTS index: symbol_search_text_v1 (healthy)
   Vector index: symbol_embedding_minilm_v1 (healthy)
   Vector index: symbol_embedding_nomic_v1 (healthy)
+  Vector index: symbol_embedding_jina_code_v1 (healthy)
 ```
 
 ### Migration from SymbolEmbedding
@@ -478,6 +589,7 @@ Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB:
 flowchart TD
     Symbol["Symbol node"] --> MiniLM["embeddingMiniLM<br/>embeddingMiniLMCardHash<br/>embeddingMiniLMUpdatedAt"]
     Symbol --> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
+    Symbol --> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
 ```
 
 Vectors are compressed using Float16 quantization:
@@ -499,12 +611,14 @@ cardHash = SHA256(symbolName | kind | signature | astFingerprint | providerName 
 ```
 
 **A cache entry invalidates when:**
+
 - The symbol's code changes (new `astFingerprint`)
 - The symbol's signature changes
 - The configured provider or model changes
 - The symbol is deleted
 
 **Cache entries survive:**
+
 - Whitespace-only changes (stable fingerprint)
 - Unrelated file edits
 - Server restarts (persisted in graph DB)
@@ -518,6 +632,7 @@ cardHash = SHA256(symbolName | kind | signature | astFingerprint | providerName 
 **Cause:** `onnxruntime-node` or `tokenizers` not installed.
 
 **Fix:**
+
 ```bash
 npm install onnxruntime-node tokenizers
 ```
@@ -529,6 +644,7 @@ Then run `npx sdl-mcp doctor` to verify.
 **Cause:** The `models/all-MiniLM-L6-v2/` directory is missing from the package.
 
 **Fix:**
+
 ```bash
 node scripts/download-models.mjs all-MiniLM-L6-v2
 ```
@@ -538,6 +654,7 @@ node scripts/download-models.mjs all-MiniLM-L6-v2
 **Cause:** Network error during HuggingFace download. Possibly behind a proxy or firewall.
 
 **Fix — manual download:**
+
 ```bash
 # Download files manually and place in cache directory:
 # Windows: %LOCALAPPDATA%\sdl-mcp\models\nomic-embed-text-v1.5\
@@ -549,11 +666,12 @@ curl -L -o config.json "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/re
 ```
 
 Or point to a custom cache directory:
+
 ```jsonc
 {
   "semantic": {
-    "modelCacheDir": "/path/to/your/models"
-  }
+    "modelCacheDir": "/path/to/your/models",
+  },
 }
 ```
 
@@ -562,6 +680,7 @@ Or point to a custom cache directory:
 **Cause:** ONNX session creation failed. Could be missing model files, incompatible onnxruntime version, or corrupted download.
 
 **Fix:**
+
 1. Run `npx sdl-mcp doctor` to identify what's missing
 2. Re-download the model: `node scripts/download-models.mjs <model-name>`
 3. If onnxruntime-node won't install (platform issue), use mock mode:
@@ -574,9 +693,11 @@ Or point to a custom cache directory:
 **Cause:** `summaryProvider: "api"` configured but no key found.
 
 **Fix — set the key:**
+
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
+
 Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
 
 ### Summaries not generating with Ollama
@@ -584,6 +705,7 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
 **Cause:** Ollama server not running, wrong model name, or wrong port.
 
 **Fix:**
+
 1. Verify Ollama is running: `curl http://localhost:11434/v1/models`
 2. Verify your model is pulled: `ollama list`
 3. Test manually:
@@ -602,25 +724,25 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
 {
   "semantic": {
     // ── Embedding Model ─────────────────────────────────────────
-    "enabled": true,                                // Enable semantic search
-    "provider": "local",                            // "local" | "api" | "mock"
-    "model": "all-MiniLM-L6-v2",                   // or "nomic-embed-text-v1.5"
-    "modelCacheDir": null,                          // Override model storage path
-    "alpha": 0.6,                                   // Lexical/semantic blend (0-1)
+    "enabled": true, // Enable semantic search
+    "provider": "local", // "local" | "api" | "mock"
+    "model": "all-MiniLM-L6-v2", // or "nomic-embed-text-v1.5"
+    "modelCacheDir": null, // Override model storage path
+    "alpha": 0.6, // Lexical/semantic blend (0-1)
 
     // ── LLM Summaries ───────────────────────────────────────────
-    "generateSummaries": false,                     // Enable LLM summary generation
-    "summaryProvider": null,                        // "api" | "local" | "mock" (default: inherit from provider)
-    "summaryModel": null,                           // Model name (default: claude-haiku-4-5-20251001 for api)
-    "summaryApiKey": null,                          // API key (or use ANTHROPIC_API_KEY env var)
-    "summaryApiBaseUrl": null,                      // Custom endpoint (default: Anthropic for api, localhost:11434 for local)
-    "summaryMaxConcurrency": 5,                     // Parallel summary requests (1-20)
-    "summaryBatchSize": 20,                         // Symbols per batch (1-50)
+    "generateSummaries": false, // Enable LLM summary generation
+    "summaryProvider": null, // "api" | "local" | "mock" (default: inherit from provider)
+    "summaryModel": null, // Model name (default: claude-haiku-4-5-20251001 for api)
+    "summaryApiKey": null, // API key (or use ANTHROPIC_API_KEY env var)
+    "summaryApiBaseUrl": null, // Custom endpoint (default: Anthropic for api, localhost:11434 for local)
+    "summaryMaxConcurrency": 5, // Parallel summary requests (1-20)
+    "summaryBatchSize": 20, // Symbols per batch (1-50)
 
     // ── ANN Index (Removed in v0.10.1 — silently ignored) ──
     // "ann": { "enabled": true, "m": 16, ... }
     // Use retrieval.vector instead for HNSW index configuration.
-  }
+  },
 }
 ```
 
@@ -634,8 +756,8 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
 {
   "semantic": {
     "enabled": true,
-    "model": "all-MiniLM-L6-v2"
-  }
+    "model": "all-MiniLM-L6-v2",
+  },
 }
 ```
 
@@ -645,8 +767,8 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
 {
   "semantic": {
     "enabled": true,
-    "model": "nomic-embed-text-v1.5"
-  }
+    "model": "nomic-embed-text-v1.5",
+  },
 }
 ```
 
@@ -660,8 +782,8 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
     "generateSummaries": true,
     "summaryProvider": "api",
     "summaryModel": "claude-haiku-4-5-20251001",
-    "summaryMaxConcurrency": 5
-  }
+    "summaryMaxConcurrency": 5,
+  },
 }
 ```
 
@@ -677,8 +799,8 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
     "summaryProvider": "local",
     "summaryModel": "qwen2.5-coder:7b",
     "summaryApiBaseUrl": "http://gpu-server:11434/v1",
-    "summaryMaxConcurrency": 2
-  }
+    "summaryMaxConcurrency": 2,
+  },
 }
 ```
 

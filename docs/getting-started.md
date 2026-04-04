@@ -107,14 +107,14 @@ By default, `sdl-mcp serve --stdio` runs a single MCP session over standard I/O 
 
 ### When to Use HTTP vs Stdio
 
-| | Stdio | Streamable HTTP |
-|:--|:------|:----------------|
-| **Connections** | 1 agent | Up to 8 concurrent agents (configurable) |
-| **Setup** | Zero config — agent spawns the process | Start server first, then point agents at the URL |
-| **Session isolation** | N/A (single session) | Each connection gets its own MCP session |
-| **Reconnect support** | None (process dies = session lost) | Built-in event store for resumable sessions |
-| **Graph UI + REST API** | Not available | Available at `/ui/graph` and `/api/*` |
-| **Best for** | Single-agent workflows, simple setups | Multi-agent teams, shared dev servers, CI pipelines |
+|                         | Stdio                                  | Streamable HTTP                                     |
+| :---------------------- | :------------------------------------- | :-------------------------------------------------- |
+| **Connections**         | 1 agent                                | Up to 8 concurrent agents (configurable)            |
+| **Setup**               | Zero config — agent spawns the process | Start server first, then point agents at the URL    |
+| **Session isolation**   | N/A (single session)                   | Each connection gets its own MCP session            |
+| **Reconnect support**   | None (process dies = session lost)     | Built-in event store for resumable sessions         |
+| **Graph UI + REST API** | Not available                          | Available at `/ui/graph` and `/api/*`               |
+| **Best for**            | Single-agent workflows, simple setups  | Multi-agent teams, shared dev servers, CI pipelines |
 
 ### Starting the HTTP Server
 
@@ -156,16 +156,16 @@ Set `"enabled": false` to disable auth for trusted local environments. See [Conf
 
 ### Endpoints
 
-| Endpoint | Method | Purpose |
-|:---------|:-------|:--------|
-| `/mcp` | POST | Streamable HTTP MCP calls (primary) |
-| `/mcp` | GET | Server-sent events for push notifications |
-| `/mcp` | DELETE | Terminate an MCP session |
-| `/sse` | GET | Legacy SSE transport (deprecated) |
-| `/message` | POST | Legacy SSE message endpoint (deprecated) |
-| `/health` | GET | Health check (no auth required) |
-| `/ui/graph` | GET | Interactive graph explorer |
-| `/api/*` | GET | REST API for graph queries |
+| Endpoint    | Method | Purpose                                   |
+| :---------- | :----- | :---------------------------------------- |
+| `/mcp`      | POST   | Streamable HTTP MCP calls (primary)       |
+| `/mcp`      | GET    | Server-sent events for push notifications |
+| `/mcp`      | DELETE | Terminate an MCP session                  |
+| `/sse`      | GET    | Legacy SSE transport (deprecated)         |
+| `/message`  | POST   | Legacy SSE message endpoint (deprecated)  |
+| `/health`   | GET    | Health check (no auth required)           |
+| `/ui/graph` | GET    | Interactive graph explorer                |
+| `/api/*`    | GET    | REST API for graph queries                |
 
 ### Session Management
 
@@ -298,16 +298,18 @@ LLM summaries produce 1–3 sentence natural-language descriptions for every sym
 The summary system has **three quality tiers**. Each tier builds on the previous one:
 
 ```
-Tier     Embedding Model              Summaries    Search Quality   Cost
-─────    ───────────────────────────  ───────────  ───────────────  ────────
-Low      all-MiniLM-L6-v2 (384d)     None         Baseline         Free
-Medium   nomic-embed-text-v1.5 (768d) None         Better           Free
-High     either model                 LLM-gen'd    Best             API cost
+Tier     Embedding Model                    Summaries    Search Quality   Cost
+─────    ────────────────────────────────  ───────────  ───────────────  ────────
+Low      all-MiniLM-L6-v2 (384d)          None         Baseline         Free
+Medium   nomic-embed-text-v1.5 (768d)     None         Better           Free
+Medium+  jina-embeddings-v2-base-code(768d) None       Best for code    Free
+High     any model above                  LLM-gen'd    Best             API cost
 ```
 
 - **Low** (default) — embeds raw symbol text (name + kind + signature) with a general-purpose model. No API calls needed.
 - **Medium** — swaps in a higher-quality text embedding model with longer context (8192 tokens) for better semantic matching. Still fully offline (~138 MB download).
-- **High** — adds LLM-generated natural-language summaries to either embedding model. Both models are text-based and benefit equally from summaries. This produces the best search results because the LLM distills code meaning into plain English that embedding models handle well.
+- **Medium+** — uses `jina-embeddings-v2-base-code`, a code-specialized model trained on 30+ programming languages. Same 768 dimensions and 8192-token context as Nomic, but optimized for code-to-code semantic search. Fully offline (~110 MB download). Best choice for pure code search without summaries.
+- **High** — adds LLM-generated natural-language summaries to any embedding model. This produces the best search results because the LLM distills code meaning into plain English that embedding models handle well.
 
 To reach the **High** tier, you enable `generateSummaries` and configure one of the three summary providers below.
 
@@ -315,11 +317,11 @@ To reach the **High** tier, you enable `generateSummaries` and configure one of 
 
 Summary generation is independent from the embedding provider. You can mix and match — for example, use local embeddings but Anthropic for summaries.
 
-| Provider | `summaryProvider` | Best for | Cost |
-|:---------|:-------------------|:---------|:-----|
-| **Anthropic API** | `"api"` | Highest quality, no local GPU needed | ~$0.25/1M input tokens (Haiku) |
-| **Ollama / OpenAI-compatible** | `"local"` | Free, private, runs on your machine | Free (your hardware) |
-| **Mock** | `"mock"` | Testing and CI pipelines | Free (deterministic heuristics) |
+| Provider                       | `summaryProvider` | Best for                             | Cost                            |
+| :----------------------------- | :---------------- | :----------------------------------- | :------------------------------ |
+| **Anthropic API**              | `"api"`           | Highest quality, no local GPU needed | ~$0.25/1M input tokens (Haiku)  |
+| **Ollama / OpenAI-compatible** | `"local"`         | Free, private, runs on your machine  | Free (your hardware)            |
+| **Mock**                       | `"mock"`          | Testing and CI pipelines             | Free (deterministic heuristics) |
 
 ---
 
@@ -328,16 +330,17 @@ Summary generation is independent from the embedding provider. You can mix and m
 Uses Claude models via the Anthropic Messages API. This is the highest-quality option and requires no local GPU.
 
 **Get an API key:**
+
 1. Sign up at [console.anthropic.com](https://console.anthropic.com)
 2. Go to **API Keys** and create a new key
 3. Copy the key (starts with `sk-ant-`)
 
 **Recommended models:**
 
-| Model | Speed | Quality | Pricing (input / output) |
-|:------|:------|:--------|:-------------------------|
-| `claude-haiku-4-5-20251001` | Fast | Good (default) | $0.25 / $1.25 per 1M tokens |
-| `claude-sonnet-4-20250514` | Medium | Higher | $3 / $15 per 1M tokens |
+| Model                       | Speed  | Quality        | Pricing (input / output)    |
+| :-------------------------- | :----- | :------------- | :-------------------------- |
+| `claude-haiku-4-5-20251001` | Fast   | Good (default) | $0.25 / $1.25 per 1M tokens |
+| `claude-sonnet-4-20250514`  | Medium | Higher         | $3 / $15 per 1M tokens      |
 
 For most repositories, Haiku is the best balance of cost and quality. Each symbol uses roughly 50–150 input tokens.
 
@@ -402,12 +405,12 @@ ollama pull deepseek-coder-v2  # 16B params, best code quality (~9 GB)
 
 **Recommended Ollama models for code summaries:**
 
-| Model | Size | RAM needed | Quality | Notes |
-|:------|:-----|:-----------|:--------|:------|
-| `llama3.2` | 3B | ~2 GB | Good | Fastest, fine for simple codebases |
-| `qwen2.5-coder` | 7B | ~4.5 GB | Better | Trained on code, understands patterns well |
-| `llama3.1` | 8B | ~5 GB | Better | Strong general-purpose reasoning |
-| `deepseek-coder-v2` | 16B | ~9 GB | Best | Best code understanding, needs more RAM |
+| Model               | Size | RAM needed | Quality | Notes                                      |
+| :------------------ | :--- | :--------- | :------ | :----------------------------------------- |
+| `llama3.2`          | 3B   | ~2 GB      | Good    | Fastest, fine for simple codebases         |
+| `qwen2.5-coder`     | 7B   | ~4.5 GB    | Better  | Trained on code, understands patterns well |
+| `llama3.1`          | 8B   | ~5 GB      | Better  | Strong general-purpose reasoning           |
+| `deepseek-coder-v2` | 16B  | ~9 GB      | Best    | Best code understanding, needs more RAM    |
 
 **Configuration:**
 
@@ -429,13 +432,13 @@ ollama pull deepseek-coder-v2  # 16B params, best code quality (~9 GB)
 
 Any server that implements the `/v1/chat/completions` endpoint works. Examples:
 
-| Server | Base URL | Notes |
-|:-------|:---------|:------|
-| [Ollama](https://ollama.com) | `http://localhost:11434/v1` | Default, no auth needed |
-| [LM Studio](https://lmstudio.ai) | `http://localhost:1234/v1` | GUI-based, easy model management |
-| [vLLM](https://docs.vllm.ai) | `http://localhost:8000/v1` | High-throughput production serving |
-| [LocalAI](https://localai.io) | `http://localhost:8080/v1` | Drop-in OpenAI replacement |
-| OpenAI API | `https://api.openai.com/v1` | Set `summaryApiKey` to your OpenAI key |
+| Server                           | Base URL                    | Notes                                  |
+| :------------------------------- | :-------------------------- | :------------------------------------- |
+| [Ollama](https://ollama.com)     | `http://localhost:11434/v1` | Default, no auth needed                |
+| [LM Studio](https://lmstudio.ai) | `http://localhost:1234/v1`  | GUI-based, easy model management       |
+| [vLLM](https://docs.vllm.ai)     | `http://localhost:8000/v1`  | High-throughput production serving     |
+| [LocalAI](https://localai.io)    | `http://localhost:8080/v1`  | Drop-in OpenAI replacement             |
+| OpenAI API                       | `https://api.openai.com/v1` | Set `summaryApiKey` to your OpenAI key |
 
 ```json
 {
@@ -472,10 +475,10 @@ Generates deterministic heuristic summaries without any API calls. Useful for te
 
 Summary generation processes symbols in parallel batches. Adjust these settings based on your provider's rate limits and your hardware:
 
-| Setting | Default | Range | Description |
-|:--------|:--------|:------|:------------|
-| `summaryBatchSize` | 20 | 1–50 | Symbols processed per batch |
-| `summaryMaxConcurrency` | 5 | 1–20 | Batches running in parallel |
+| Setting                 | Default | Range | Description                 |
+| :---------------------- | :------ | :---- | :-------------------------- |
+| `summaryBatchSize`      | 20      | 1–50  | Symbols processed per batch |
+| `summaryMaxConcurrency` | 5       | 1–20  | Batches running in parallel |
 
 **For Anthropic API** — defaults are fine. Lower `summaryMaxConcurrency` to `3` if you hit rate limits on a free-tier key.
 
@@ -509,6 +512,7 @@ The card's `summary` field should contain a natural-language description instead
 ### Quick Reference: Copy-Paste Configs
 
 **Anthropic Haiku (recommended for most users):**
+
 ```json
 {
   "semantic": {
@@ -521,9 +525,11 @@ The card's `summary` field should contain a natural-language description instead
   }
 }
 ```
+
 Requires: `ANTHROPIC_API_KEY` environment variable.
 
 **Ollama local (free, private):**
+
 ```json
 {
   "semantic": {
@@ -536,9 +542,11 @@ Requires: `ANTHROPIC_API_KEY` environment variable.
   }
 }
 ```
+
 Requires: Ollama running with `qwen2.5-coder` pulled.
 
 **Nomic embeddings + Anthropic summaries (highest quality):**
+
 ```json
 {
   "semantic": {
@@ -551,7 +559,22 @@ Requires: Ollama running with `qwen2.5-coder` pulled.
   }
 }
 ```
+
 Requires: `ANTHROPIC_API_KEY` environment variable. Downloads ~138 MB embedding model on first run.
+
+**Jina Code embeddings (best for code-to-code search):**
+
+```json
+{
+  "semantic": {
+    "enabled": true,
+    "provider": "local",
+    "model": "jina-embeddings-v2-base-code"
+  }
+}
+```
+
+Downloads ~110 MB code-specialized embedding model on first run. Trained on 30+ programming languages — ideal when your primary use case is finding similar code patterns rather than natural-language queries.
 
 For the full configuration reference, see [Configuration Reference](./configuration-reference.md). For a deeper look at how summaries interact with embeddings and pass-2 resolution, see [Semantic Engine](./feature-deep-dives/semantic-engine.md).
 
@@ -634,7 +657,22 @@ SDL-MCP resolves config path in this order:
       "repoId": "my-repo",
       "rootPath": ".",
       "ignore": ["**/node_modules/**", "**/dist/**", "**/.git/**"],
-      "languages": ["ts", "tsx", "js", "jsx", "py", "go", "java", "cs", "c", "cpp", "php", "rs", "kt", "sh"],
+      "languages": [
+        "ts",
+        "tsx",
+        "js",
+        "jsx",
+        "py",
+        "go",
+        "java",
+        "cs",
+        "c",
+        "cpp",
+        "php",
+        "rs",
+        "kt",
+        "sh"
+      ],
       "maxFileBytes": 2000000
     }
   ],
@@ -653,6 +691,7 @@ SDL-MCP resolves config path in this order:
 These configs use stdio transport — the agent spawns the SDL-MCP process directly. For HTTP transport configs (multi-agent), see [Streamable HTTP Transport](#optional-streamable-http-transport-multi-agent) above.
 
 Codex CLI .toml
+
 ```toml
 [mcp_servers.sdl-mcp]
 command = "npx"
@@ -671,6 +710,7 @@ SDL_CONFIG = "[path-to-global]/sdlmcp.config.json"
 
 Claude Code CLI .json with NVM4Windows
 Use `serve --stdio`; running only `npx sdl-mcp` does not start the MCP server.
+
 ```json
 "sdl-mcp": {
   "type": "stdio",
@@ -686,6 +726,7 @@ Use `serve --stdio`; running only `npx sdl-mcp` does not start the MCP server.
 ```
 
 Gemini CLI .json with NVM4Windows
+
 ```json
 "sdl-mcp": {
   "type": "stdio",
@@ -701,6 +742,7 @@ Gemini CLI .json with NVM4Windows
 ```
 
 OpenCode CLI .json with NVM4Windows
+
 ```json
 "sdl-mcp": {
 		"type": "local",

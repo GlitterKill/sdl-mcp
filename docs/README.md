@@ -93,13 +93,14 @@ Use this page as the entry point for SDL-MCP documentation.
   - Memory: store, query, remove, surface
   - Buffer: push, checkpoint, status
   - Runtime: execute, queryOutput
+  - File: read (non-indexed files)
   - Usage: stats
   - Universal: `sdl.action.search` and `sdl.info`
   - Default flat mode: 34 tools (`32` flat tools + `sdl.action.search` + `sdl.info`)
   - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
   - Gateway + legacy mode: 38 tools (`4` gateway + `32` legacy flat + `sdl.action.search` + `sdl.info`)
   - Code Mode (optional): adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow`
-- **Semantic features**: optional semantic reranking, LLM-generated symbol summaries (Anthropic/Ollama/mock)
+- **Semantic features**: optional semantic reranking with 3 embedding models (MiniLM, Nomic, Jina Code), LLM-generated symbol summaries (Anthropic/Ollama/mock)
 - **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
 - **Native addon**: Rust via napi-rs for multi-threaded indexing (default engine, TS fallback)
 - **Runtime execution**: 16 supported runtimes (node, typescript, python, shell, ruby, php, perl, r, elixir, go, java, kotlin, rust, c, cpp, csharp)
