@@ -18,7 +18,10 @@ function stripVolatileEvidenceFields(value: unknown): unknown {
     const record = value as Record<string, unknown>;
     const stableEntries = Object.entries(record)
       .filter(([key]) => key !== "timestamp")
-      .map(([key, entryValue]) => [key, stripVolatileEvidenceFields(entryValue)]);
+      .map(([key, entryValue]) => [
+        key,
+        stripVolatileEvidenceFields(entryValue),
+      ]);
     return Object.fromEntries(stableEntries);
   }
 
@@ -30,43 +33,43 @@ function buildStableAgentContextValue(
 ): Record<string, unknown> {
   const actionsTaken = Array.isArray(response.actionsTaken)
     ? response.actionsTaken.map((action) => {
-      if (!action || typeof action !== "object") return action;
-      const entry = action as Record<string, unknown>;
-      return {
-        type: entry.type,
-        status: entry.status,
-        input: entry.input,
-        output: entry.output,
-        error: entry.error,
-        evidence: stripVolatileEvidenceFields(entry.evidence),
-      };
-    })
+        if (!action || typeof action !== "object") return action;
+        const entry = action as Record<string, unknown>;
+        return {
+          type: entry.type,
+          status: entry.status,
+          input: entry.input,
+          output: entry.output,
+          error: entry.error,
+          evidence: stripVolatileEvidenceFields(entry.evidence),
+        };
+      })
     : [];
 
   const finalEvidence = Array.isArray(response.finalEvidence)
     ? response.finalEvidence.map((item) => {
-      if (!item || typeof item !== "object") return item;
-      const entry = item as Record<string, unknown>;
-      return {
-        type: entry.type,
-        reference: entry.reference,
-        summary: entry.summary,
-      };
-    })
+        if (!item || typeof item !== "object") return item;
+        const entry = item as Record<string, unknown>;
+        return {
+          type: entry.type,
+          reference: entry.reference,
+          summary: entry.summary,
+        };
+      })
     : [];
 
   const metrics =
     response.metrics && typeof response.metrics === "object"
       ? (() => {
-        const entry = response.metrics as Record<string, unknown>;
-        return {
-          totalTokens: entry.totalTokens,
-          totalActions: entry.totalActions,
-          successfulActions: entry.successfulActions,
-          failedActions: entry.failedActions,
-          cacheHits: entry.cacheHits,
-        };
-      })()
+          const entry = response.metrics as Record<string, unknown>;
+          return {
+            totalTokens: entry.totalTokens,
+            totalActions: entry.totalActions,
+            successfulActions: entry.successfulActions,
+            failedActions: entry.failedActions,
+            cacheHits: entry.cacheHits,
+          };
+        })()
       : undefined;
 
   return {
@@ -107,9 +110,10 @@ export async function handleAgentContext(
     const fileIds = focusPaths?.length
       ? focusPaths.map((path) => `${request.repoId}:${path}`)
       : undefined;
+    const rawTokens = (response.metrics?.totalTokens ?? 0) * 3;
     const enrichedResponse = attachRawContext(
       response,
-      fileIds ? { fileIds } : { rawTokens: response.metrics.totalTokens * 3 },
+      fileIds ? { fileIds } : { rawTokens },
     );
     return buildConditionalResponse(enrichedResponse, {
       ifNoneMatch: request.ifNoneMatch,
