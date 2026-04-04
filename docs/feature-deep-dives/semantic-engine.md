@@ -533,7 +533,7 @@ Every generated summary records its estimated API cost:
 
 ### Summary Compatibility
 
-Both supported embedding models (`all-MiniLM-L6-v2` and `nomic-embed-text-v1.5`) are text-based models that benefit from LLM summaries. When `generateSummaries: true` is set, summaries are generated and embedded for all models, producing higher-quality semantic search results.
+All three supported embedding models (`all-MiniLM-L6-v2`, `nomic-embed-text-v1.5`, and `jina-embeddings-v2-base-code`) benefit from LLM summaries. When `generateSummaries: true` is set, summaries are generated and embedded for all models, producing higher-quality semantic search results. Note that `jina-embeddings-v2-base-code` is already optimized for code semantics, so the improvement from summaries may be less dramatic than with the general-purpose models.
 
 ---
 
@@ -549,7 +549,7 @@ Both supported embedding models (`all-MiniLM-L6-v2` and `nomic-embed-text-v1.5`)
 
     // ── Embedding Configuration ──
     "provider": "local", // "local" (ONNX), "api", or "mock"
-    "model": "all-MiniLM-L6-v2", // or "nomic-embed-text-v1.5"
+    "model": "all-MiniLM-L6-v2", // or "nomic-embed-text-v1.5" or "jina-embeddings-v2-base-code"
     "modelCacheDir": null, // Custom model cache directory
     "alpha": 0.6, // Lexical/semantic blend (0=pure semantic, 1=pure lexical)
 
@@ -601,7 +601,22 @@ Both supported embedding models (`all-MiniLM-L6-v2` and `nomic-embed-text-v1.5`)
 
 Set `ANTHROPIC_API_KEY` in your environment.
 
-**Recipe 3: Local LLM via Ollama**
+**Recipe 3: Code-specialized embeddings (best for code search)**
+
+```json
+{
+  "semantic": {
+    "enabled": true,
+    "provider": "local",
+    "model": "jina-embeddings-v2-base-code",
+    "generateSummaries": false
+  }
+}
+```
+
+Downloads ~110 MB on first run. Trained on 30+ programming languages — best choice when searching for similar code patterns.
+
+**Recipe 4: Local LLM via Ollama**
 
 ```json
 {
@@ -618,7 +633,7 @@ Set `ANTHROPIC_API_KEY` in your environment.
 }
 ```
 
-**Recipe 4: CI / testing (no dependencies)**
+**Recipe 5: CI / testing (no dependencies)**
 
 ```json
 {
