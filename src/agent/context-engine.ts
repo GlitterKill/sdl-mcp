@@ -92,11 +92,18 @@ export class ContextEngine {
           task.options?.contextMode,
         );
 
+      // Graph neighbor expansion: follow call/import edges from top-seeded
+      // symbols to discover closely related code that keyword search misses.
+      const finalContext = await this.expandContextByEdges(
+        expandedContext,
+        task.options?.contextMode,
+      );
+
       const executor = new Executor(this.policyEngine);
       const { actions, evidence, success } = await executor.execute(
         task,
         path.rungs,
-        expandedContext,
+        finalContext,
       );
 
       const metrics = executor.getMetrics();
@@ -623,11 +630,14 @@ export class ContextEngine {
       // Sort by score descending
       scored.sort((a, b) => b.score - a.score);
 
-      // Diversity pass: cap per cluster, skip duplicates of the same
-      // file neighborhood (crude: first 2 path segments of fileId)
+      // Diversity pass: cap per cluster, deduplicate by name within each
+      // cluster, and skip duplicate file neighborhoods across clusters.
       const additional: string[] = [];
       const clusterCounts = new Map<string, number>();
       const seenNeighborhoods = new Set<string>();
+      // Per-cluster name dedup: avoids dropping legitimately distinct symbols
+      // with common names (handle, parse, init) across different clusters.
+      const seenNamesPerCluster = new Map<string, Set<string>>();
 
       for (const candidate of scored) {
         if (additional.length >= MAX_TOTAL) break;
@@ -635,17 +645,26 @@ export class ContextEngine {
         const clCount = clusterCounts.get(candidate.clusterId) ?? 0;
         if (clCount >= MAX_PER_CLUSTER) continue;
 
-        // Diversity: extract a neighborhood key from the symbol's file
         const info = nameMap.get(candidate.symbolId);
+
+        // Name dedup within the same cluster only
         if (info) {
-          const neighborhood = (info as { fileId?: string }).fileId
-            ? String((info as { fileId?: string }).fileId)
-                .split("/")
-                .slice(0, 3)
-                .join("/")
+          const clusterNames =
+            seenNamesPerCluster.get(candidate.clusterId) ?? new Set<string>();
+          if (clusterNames.has(info.name)) continue;
+          clusterNames.add(info.name);
+          seenNamesPerCluster.set(candidate.clusterId, clusterNames);
+        }
+
+        // Diversity: extract a neighborhood key from the symbol's file
+        if (info) {
+          const relPath = info.fileId?.includes(":")
+            ? info.fileId.slice(info.fileId.indexOf(":") + 1)
+            : undefined;
+          const neighborhood = relPath
+            ? relPath.split("/").slice(0, 3).join("/")
             : candidate.symbolId;
           if (seenNeighborhoods.has(neighborhood) && additional.length > 0) {
-            // Allow one per neighborhood to avoid near-duplicates
             continue;
           }
           seenNeighborhoods.add(neighborhood);
@@ -673,6 +692,117 @@ export class ContextEngine {
         error: err,
       });
       return { expandedContext: context, clusterExpandedCount: 0 };
+    }
+  }
+
+  /**
+   * Follow outgoing call/import edges from the top N context symbols to
+   * discover closely related code that keyword/semantic search missed.
+   *
+   * This addresses the "follow graph edges" gap: when `buildSlice` is found
+   * by search, its call edge to `beamSearch` should pull that symbol in.
+   *
+   * Caps: max 5 symbols from edges, only follows top 5 context symbols.
+   */
+  private async expandContextByEdges(
+    context: string[],
+    contextMode?: string,
+  ): Promise<string[]> {
+    const symbolIds = context
+      .filter((c) => c.startsWith("symbol:"))
+      .map((s) => s.slice("symbol:".length))
+      .filter(Boolean);
+
+    if (symbolIds.length === 0) return context;
+
+    const MAX_EDGE_EXPANSION = contextMode === "precise" ? 3 : 5;
+    const TOP_N_SOURCES = 5;
+
+    try {
+      const conn = await getLadybugConn();
+      const topSources = symbolIds.slice(0, TOP_N_SOURCES);
+      const edgeMap = await ladybugDb.getEdgesFromSymbolsLite(conn, topSources);
+
+      const already = new Set(context);
+      const candidateIds: string[] = [];
+
+      for (const sourceId of topSources) {
+        const edges = edgeMap.get(sourceId) ?? [];
+        for (const e of edges) {
+          const ref = `symbol:${e.toSymbolId}`;
+          if (already.has(ref)) continue;
+          candidateIds.push(e.toSymbolId);
+          already.add(ref); // dedup across sources
+        }
+      }
+
+      if (candidateIds.length === 0) return context;
+
+      // Fetch metadata to filter and score
+      const nameMap = await ladybugDb.getSymbolsByIdsLite(conn, candidateIds);
+
+      // Collect existing context symbol names for cross-dedup
+      const existingNames = new Set<string>();
+      const existingLite = await ladybugDb.getSymbolsByIdsLite(conn, symbolIds);
+      for (const info of existingLite.values()) {
+        existingNames.add(info.name);
+      }
+
+      // Filter: skip variables/unknowns (utility noise) and name duplicates
+      const EDGE_EXPANSION_KINDS = new Set([
+        "function",
+        "method",
+        "class",
+        "constructor",
+        "type",
+        "interface",
+        "enum",
+        "typeAlias",
+      ]);
+      const scored: Array<{ symbolId: string; weight: number }> = [];
+      for (const cid of candidateIds) {
+        const info = nameMap.get(cid);
+        if (!info) continue;
+        // Skip non-behavioral/non-declarative kinds (variables, constants, etc.)
+        if (!EDGE_EXPANSION_KINDS.has(info.kind)) continue;
+        // Skip if a symbol with this name is already in context
+        if (existingNames.has(info.name)) continue;
+
+        // Weight: call edges are stronger signals than import edges.
+        // Look up this symbol's edge type from the source edges.
+        let weight = 1;
+        for (const sourceId of topSources) {
+          const edges = edgeMap.get(sourceId) ?? [];
+          for (const e of edges) {
+            if (e.toSymbolId === cid && e.edgeType === "call") {
+              weight = 3;
+            }
+          }
+        }
+        scored.push({ symbolId: cid, weight });
+        existingNames.add(info.name); // prevent name dupes among candidates
+      }
+
+      if (scored.length === 0) return context;
+
+      // Sort by weight descending, take top N
+      scored.sort((a, b) => b.weight - a.weight);
+      const selected = scored
+        .slice(0, MAX_EDGE_EXPANSION)
+        .map((c) => `symbol:${c.symbolId}`);
+
+      logger.debug("Graph neighbor expansion", {
+        sources: topSources.length,
+        candidates: scored.length,
+        selected: selected.length,
+      });
+
+      return [...context, ...selected];
+    } catch (err) {
+      logger.debug("Graph neighbor expansion failed (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return context;
     }
   }
 }

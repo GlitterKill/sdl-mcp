@@ -156,11 +156,12 @@ describe("model mapping", async () => {
     assert.equal(modelMapping.getVectorIndexName("unknown-model"), null);
   });
 
-  it("EMBEDDING_MODELS has exactly 2 real model entries", () => {
+  it("EMBEDDING_MODELS has exactly 3 real model entries", () => {
     const keys = Object.keys(modelMapping.EMBEDDING_MODELS);
-    assert.equal(keys.length, 2);
+    assert.equal(keys.length, 3);
     assert.ok(keys.includes("all-MiniLM-L6-v2"));
     assert.ok(keys.includes("nomic-embed-text-v1.5"));
+    assert.ok(keys.includes("jina-embeddings-v2-base-code"));
   });
 
   it("dimensions match expected values", () => {

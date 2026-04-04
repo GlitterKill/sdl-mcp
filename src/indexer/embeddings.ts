@@ -6,7 +6,7 @@ import {
   createOnnxSession,
   type OnnxEmbeddingSession,
 } from "./embeddings-local.js";
-import { getModelInfo } from "./model-registry.js";
+import { getModelInfo, applyDocumentPrefix } from "./model-registry.js";
 import type { IndexProgress } from "./indexer.js";
 import {
   getSymbolEmbeddingFromNode,
@@ -301,7 +301,8 @@ export async function refreshSymbolEmbeddings(params: {
       }
     }
 
-    const cardHash = buildCardHash(symbol, text);
+    const prefixedText = applyDocumentPrefix(modelName, text);
+    const cardHash = buildCardHash(symbol, prefixedText);
     let storageModel = provider.isMockFallback?.()
       ? "mock-fallback"
       : modelName;
@@ -317,8 +318,13 @@ export async function refreshSymbolEmbeddings(params: {
       continue;
     }
 
-    const [vector] = await provider.embed([text]);
+    const [vector] = await provider.embed([prefixedText]);
     storageModel = provider.isMockFallback?.() ? "mock-fallback" : modelName;
+    // Guard: if provider degraded to mock during embed, skip storage.
+    if (storageModel === "mock-fallback") {
+      skipped += 1;
+      continue;
+    }
     // Re-check after embed in case provider changed fallback status
     const existingAfterEmbed = await getSymbolEmbeddingFromNode(conn, symbol.symbolId, storageModel);
     if (existingAfterEmbed && existingAfterEmbed.cardHash === cardHash) {

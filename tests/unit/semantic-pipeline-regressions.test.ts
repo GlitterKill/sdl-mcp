@@ -18,13 +18,13 @@ describe("semantic pipeline regressions", () => {
 
     const fnBody = source.slice(fnStart, fnEnd);
     const cardHashIdx = fnBody.indexOf(
-      "const cardHash = buildCardHash(symbol, text);",
+      "const cardHash = buildCardHash(symbol, prefixedText);",
     );
     const storageModelIdx = fnBody.indexOf("let storageModel =");
     const existingIdx = fnBody.indexOf(
       "const existing = await getSymbolEmbeddingFromNode(conn, symbol.symbolId, storageModel);",
     );
-    const embedIdx = fnBody.indexOf("const [vector] = await provider.embed([text]);");
+    const embedIdx = fnBody.indexOf("const [vector] = await provider.embed([prefixedText]);");
     const existingAfterEmbedIdx = fnBody.indexOf(
       "const existingAfterEmbed = await getSymbolEmbeddingFromNode(conn, symbol.symbolId, storageModel);",
     );

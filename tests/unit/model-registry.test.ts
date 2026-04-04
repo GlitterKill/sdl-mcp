@@ -44,11 +44,12 @@ test("getModelInfo throws for unknown model", () => {
   );
 });
 
-test("listModels returns both registered models", () => {
+test("listModels returns all registered models", () => {
   const models = listModels();
   assert.ok(models.includes("all-MiniLM-L6-v2"));
   assert.ok(models.includes("nomic-embed-text-v1.5"));
-  assert.strictEqual(models.length, 2);
+  assert.ok(models.includes("jina-embeddings-v2-base-code"));
+  assert.strictEqual(models.length, 3);
 });
 
 test("isKnownModel returns true for registered models", () => {

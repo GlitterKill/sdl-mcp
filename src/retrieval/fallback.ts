@@ -44,6 +44,7 @@ export async function checkRetrievalHealth(
       fts: false,
       vectorMiniLM: false,
       vectorNomic: false,
+      vectorJinaCode: false,
     };
   }
 
@@ -55,12 +56,15 @@ export async function checkRetrievalHealth(
     // Derive per-model vector availability from the health result.
     let vectorMiniLM = false;
     let vectorNomic = false;
+    let vectorJinaCode = false;
 
     for (const v of health.vectors) {
       if (v.model === "all-MiniLM-L6-v2") {
         vectorMiniLM = v.exists;
       } else if (v.model === "nomic-embed-text-v1.5") {
         vectorNomic = v.exists;
+      } else if (v.model === "jina-embeddings-v2-base-code") {
+        vectorJinaCode = v.exists;
       }
     }
 
@@ -68,6 +72,7 @@ export async function checkRetrievalHealth(
       fts: health.fts.exists,
       vectorMiniLM,
       vectorNomic,
+      vectorJinaCode,
     };
   } catch (err) {
     // Index health check failed — fall back to extension-based proxy
@@ -82,6 +87,7 @@ export async function checkRetrievalHealth(
       fts: caps.fts,
       vectorMiniLM: caps.vector,
       vectorNomic: caps.vector,
+      vectorJinaCode: caps.vector,
     };
   }
 }
@@ -154,7 +160,7 @@ export async function isHybridRetrievalAvailable(): Promise<boolean> {
 
     // Legacy mode — auto-promote when infrastructure is healthy.
     const health = await checkRetrievalHealth();
-    return health.fts && (health.vectorMiniLM || health.vectorNomic);
+    return health.fts && (health.vectorMiniLM || health.vectorNomic || health.vectorJinaCode);
   } catch {
     return false;
   }

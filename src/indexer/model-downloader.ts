@@ -2,7 +2,7 @@
  * model-downloader.ts — On-demand model download for non-bundled models (e.g., nomic-embed-text-v1.5).
  * Downloads model files from HuggingFace and caches them in the platform-specific cache directory.
  */
-import { existsSync, mkdirSync, createWriteStream, statSync } from "fs";
+import { existsSync, mkdirSync, createWriteStream, statSync, unlinkSync } from "fs";
 import { join } from "path";
 import { pipeline } from "stream/promises";
 import { logger } from "../util/logger.js";
@@ -59,7 +59,7 @@ export async function ensureModelAvailable(name: string): Promise<string> {
 
     logger.info(`  Downloading ${file.name}...`);
     try {
-      await downloadFile(file.url, destPath);
+      await downloadFile(file.url, destPath, { maxBytes: info.maxDownloadBytes });
       const stats = statSync(destPath);
       const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
       logger.info(`  Downloaded ${file.name} (${sizeMB} MB)`);
@@ -75,7 +75,11 @@ export async function ensureModelAvailable(name: string): Promise<string> {
   return modelDir;
 }
 
-async function downloadFile(url: string, destPath: string): Promise<void> {
+async function downloadFile(
+  url: string,
+  destPath: string,
+  opts?: { maxBytes?: number },
+): Promise<void> {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} ${response.statusText}`);
@@ -85,7 +89,25 @@ async function downloadFile(url: string, destPath: string): Promise<void> {
     throw new Error("Response body is null");
   }
 
+  // Enforce size cap from Content-Length header when available.
+  const maxBytes = opts?.maxBytes ?? 500_000_000; // 500 MB default cap
+  const contentLength = Number(response.headers.get("content-length") ?? 0);
+  if (contentLength > 0 && contentLength > maxBytes) {
+    throw new Error(
+      `Download too large: Content-Length ${contentLength} exceeds limit ${maxBytes}`,
+    );
+  }
+
   const fileStream = createWriteStream(destPath);
   // Node 20+ fetch returns a web ReadableStream
   await pipeline(response.body as unknown as NodeJS.ReadableStream, fileStream);
+
+  // Post-download size check (guards against missing/incorrect Content-Length).
+  const stats = statSync(destPath);
+  if (stats.size > maxBytes) {
+    unlinkSync(destPath);
+    throw new Error(
+      `Downloaded file ${stats.size} bytes exceeds limit ${maxBytes}`,
+    );
+  }
 }

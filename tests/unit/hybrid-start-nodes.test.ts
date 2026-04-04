@@ -254,7 +254,7 @@ describe("shouldFallbackToLegacy — source verification (Stage 2)", () => {
 
   it("isHybridRetrievalAvailable auto-promotes from legacy when healthy", () => {
     assert.ok(
-      src.includes("health.fts && (health.vectorMiniLM || health.vectorNomic)"),
+      src.includes("health.fts && (health.vectorMiniLM || health.vectorNomic || health.vectorJinaCode)"),
       "should auto-promote from legacy when FTS + vector healthy",
     );
   });

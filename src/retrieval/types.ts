@@ -15,6 +15,7 @@ export type RetrievalSource =
   | "fts"
   | "vector:minilm"
   | "vector:nomic"
+  | "vector:jinacode"
   | "legacyFallback"
   | "overlay";
 
@@ -68,6 +69,7 @@ export interface RetrievalCapabilities {
   fts: boolean;
   vectorMiniLM: boolean;
   vectorNomic: boolean;
+  vectorJinaCode: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ import { loadConfig } from "../config/loadConfig.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
 import { logger } from "../util/logger.js";
 import { getEmbeddingProvider } from "../indexer/embeddings.js";
+import { applyQueryPrefix } from "../indexer/model-registry.js";
 import { EMBEDDING_MODELS } from "./model-mapping.js";
 import { ENTITY_FTS_INDEX_NAMES } from "./index-lifecycle.js";
 import { checkRetrievalHealth, shouldFallbackToLegacy } from "./fallback.js";
@@ -117,6 +118,9 @@ async function queryFts(
 function vectorSourceForModel(model: string): RetrievalSource {
   if (model.includes("MiniLM") || model.includes("minilm")) {
     return "vector:minilm";
+  }
+  if (model.includes("jina") && model.includes("code")) {
+    return "vector:jinacode";
   }
   if (model.includes("nomic")) {
     return "vector:nomic";
@@ -415,7 +419,8 @@ export async function hybridSearch(
       const source = vectorSourceForModel(modelName);
       const capAvailable =
         (source === "vector:minilm" && caps.vectorMiniLM) ||
-        (source === "vector:nomic" && caps.vectorNomic);
+        (source === "vector:nomic" && caps.vectorNomic) ||
+        (source === "vector:jinacode" && caps.vectorJinaCode);
 
       if (!capAvailable) {
         logger.debug(
@@ -451,7 +456,8 @@ export async function hybridSearch(
       // Generate query embedding.
       let queryEmbedding: number[];
       try {
-        const embeddings = await provider.embed([options.query]);
+        const prefixedQuery = applyQueryPrefix(modelName, options.query);
+        const embeddings = await provider.embed([prefixedQuery]);
         queryEmbedding = embeddings[0];
         if (!queryEmbedding || queryEmbedding.length === 0) {
           logger.debug(
@@ -565,6 +571,7 @@ const ENTITY_VECTOR_CONFIG: Partial<
   symbol: {
     "all-MiniLM-L6-v2":       { indexName: "symbol_vec_minilm_l6_v2",         idField: "symbolId" },
     "nomic-embed-text-v1.5":  { indexName: "symbol_vec_nomic_embed_v15",       idField: "symbolId" },
+    "jina-embeddings-v2-base-code": { indexName: "symbol_vec_jina_code_v2",      idField: "symbolId" },
   },
   fileSummary: {
     "all-MiniLM-L6-v2":       { indexName: "filesummary_vec_minilm_l6_v2",    idField: "fileId" },
@@ -785,7 +792,8 @@ export async function entitySearch(
       const source = vectorSourceForModel(modelName);
       const capAvailable =
         (source === "vector:minilm" && caps.vectorMiniLM) ||
-        (source === "vector:nomic"  && caps.vectorNomic);
+        (source === "vector:nomic"  && caps.vectorNomic) ||
+        (source === "vector:jinacode" && caps.vectorJinaCode);
 
       if (!capAvailable) {
         logger.debug(
@@ -816,7 +824,8 @@ export async function entitySearch(
 
       let queryEmbedding: number[];
       try {
-        const embeddings = await provider.embed([options.query]);
+        const prefixedQuery = applyQueryPrefix(modelName, options.query);
+        const embeddings = await provider.embed([prefixedQuery]);
         queryEmbedding = embeddings[0];
         if (!queryEmbedding || queryEmbedding.length === 0) {
           logger.debug(

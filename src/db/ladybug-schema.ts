@@ -73,7 +73,10 @@ const NODE_TABLES: string[] = [
     embeddingMiniLMUpdatedAt STRING,
     embeddingNomic STRING,
     embeddingNomicCardHash STRING,
-    embeddingNomicUpdatedAt STRING
+    embeddingNomicUpdatedAt STRING,
+    embeddingJinaCode STRING,
+    embeddingJinaCodeCardHash STRING,
+    embeddingJinaCodeUpdatedAt STRING
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS Version (

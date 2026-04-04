@@ -169,12 +169,17 @@ function scoreFeedbackPrior(
   return Math.min(10, Math.max(0, boost * 10));
 }
 
+/** Symbol kinds that represent type definitions / schemas. */
+const DECLARATIVE_KINDS = new Set(["type", "interface", "enum", "typeAlias"]);
+
 /**
- * Structural/centrality bonus (0-5): exported, behavioral kind, focus path match.
+ * Structural/centrality bonus (0-8): exported, behavioral kind, focus path
+ * match, and task-type affinity.
  */
 function scoreStructuralBonus(
   sym: RankableSymbol,
   focusPaths: string[],
+  taskType?: string,
 ): number {
   let score = 0;
   if (sym.exported) score += 2;
@@ -191,7 +196,33 @@ function scoreStructuralBonus(
     }
   }
 
-  return Math.min(5, score);
+  // Task-type affinity: boost kinds that are most useful per task type.
+  if (taskType === "explain") {
+    // Explain tasks benefit from types, interfaces, enums — definitions
+    if (DECLARATIVE_KINDS.has(sym.kind)) score += 3;
+  } else if (taskType === "review") {
+    // Review tasks benefit from functions that have side effects or do I/O.
+    // Heuristic: summary mentions write/send/delete/execute/spawn/emit.
+    if (sym.summary) {
+      const sLower = sym.summary.toLowerCase();
+      if (
+        /\b(writ|send|delet|execut|spawn|emit|mutate|insert|updat|remov)\w*\b/.test(
+          sLower,
+        )
+      ) {
+        score += 3;
+      }
+    }
+  } else if (taskType === "implement") {
+    // Implement tasks benefit from type definitions (contracts to implement
+    // against) and symbols with signatures (concrete patterns to follow).
+    // This is complementary to the base exported+behavioral bonus — it
+    // lifts typed interfaces and signed functions that define the API shape.
+    if (DECLARATIVE_KINDS.has(sym.kind)) score += 2;
+    else if (sym.signature && BEHAVIORAL_KINDS.has(sym.kind)) score += 1;
+  }
+
+  return Math.min(8, score);
 }
 
 // ---------------------------------------------------------------------------
@@ -298,15 +329,21 @@ export function rankSymbols(
     const lexicalOverlap = scoreLexicalOverlap(sym, identifiers, taskTextLower);
     const summarySupport = scoreSummarySupport(sym, identifiers);
     const feedbackPrior = scoreFeedbackPrior(symbolId, feedbackBoosts);
-    const structuralBonus = scoreStructuralBonus(sym, focusPaths);
+    const structuralBonus = scoreStructuralBonus(
+      sym,
+      focusPaths,
+      task.taskType,
+    );
 
-    const totalScore =
+    const totalScore = Math.min(
+      100,
       retrievalPrior +
-      graphProximity +
-      lexicalOverlap +
-      summarySupport +
-      feedbackPrior +
-      structuralBonus;
+        graphProximity +
+        lexicalOverlap +
+        summarySupport +
+        feedbackPrior +
+        structuralBonus,
+    );
 
     scored.push({
       symbolId,

@@ -722,7 +722,12 @@ export class Executor {
           } else {
             this.cardCache.add(sym.symbolId);
           }
+          // Extract relPath from fileId (format: "repoId:relPath")
+          const relPath = sym.fileId?.includes(":")
+            ? sym.fileId.slice(sym.fileId.indexOf(":") + 1)
+            : undefined;
           const parts: string[] = [`${sym.kind} ${sym.name}`];
+          if (relPath) parts.push(relPath);
           if (sym.signatureJson) {
             try {
               const sig = JSON.parse(sym.signatureJson);
@@ -789,11 +794,11 @@ export class Executor {
 
       let processedCount = 0;
 
-      // Generate skeletons for symbol IDs
+      // Generate skeletons for symbol IDs (skip degenerate < 10 tokens)
       for (const symbolId of symbolIds) {
         try {
           const result = await generateSkeletonIR(task.repoId, symbolId, {});
-          if (result) {
+          if (result && result.estimatedTokens >= 10) {
             this.evidenceCapture.captureSkeleton(
               symbolId,
               `Skeleton (${result.originalLines} lines, ~${result.estimatedTokens} tokens): ${result.skeletonText.slice(0, 200)}`,

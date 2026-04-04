@@ -279,6 +279,7 @@ export const SemanticRetrievalVectorConfigSchema = z.object({
   indexes: z.record(z.string(), SemanticRetrievalVectorIndexSchema).default({
     "all-MiniLM-L6-v2": { indexName: "symbol_vec_minilm_l6_v2" },
     "nomic-embed-text-v1.5": { indexName: "symbol_vec_nomic_embed_v15" },
+    "jina-embeddings-v2-base-code": { indexName: "symbol_vec_jina_code_v2" },
   }),
 });
 

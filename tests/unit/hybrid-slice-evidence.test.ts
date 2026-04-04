@@ -67,7 +67,8 @@ describe("mapRetrievalSource — logic", () => {
       "fts",
       "vector:minilm",
       "vector:nomic",
-      "legacyFallback",
+  "vector:jinacode",
+  "legacyFallback",
       "overlay",
     ];
     for (const source of allSources) {

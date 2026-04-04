@@ -3,7 +3,15 @@
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, toNumber, toBoolean, assertSafeInt, withTransaction } from "./ladybug-core.js";
+import {
+  exec,
+  queryAll,
+  querySingle,
+  toNumber,
+  toBoolean,
+  assertSafeInt,
+  withTransaction,
+} from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
 
 const MAX_BATCH_WARNING_THRESHOLD = 5000;
@@ -93,7 +101,7 @@ export async function upsertSymbol(
       roleTagsJson: symbol.roleTagsJson ?? null,
       searchText: symbol.searchText ?? null,
       summaryQuality: symbol.summaryQuality ?? 0.0,
-      summarySource: symbol.summarySource ?? 'unknown',
+      summarySource: symbol.summarySource ?? "unknown",
       updatedAt: symbol.updatedAt,
     },
   );
@@ -556,6 +564,7 @@ export interface SymbolBasicInfo {
   symbolId: string;
   name: string;
   kind: string;
+  fileId?: string;
 }
 
 export async function getSymbolsByIdsLite(
@@ -576,13 +585,16 @@ export async function getSymbolsByIdsLite(
     symbolId: string;
     name: string;
     kind: string;
+    fileId: string | null;
   }>(
     conn,
     `MATCH (s:Symbol)
      WHERE s.symbolId IN $symbolIds
+     OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
      RETURN s.symbolId AS symbolId,
             coalesce(s.name, '') AS name,
-            coalesce(s.kind, '') AS kind`,
+            coalesce(s.kind, '') AS kind,
+            f.fileId AS fileId`,
     { symbolIds },
   );
 
@@ -591,6 +603,7 @@ export async function getSymbolsByIdsLite(
       symbolId: row.symbolId,
       name: row.name,
       kind: row.kind,
+      fileId: row.fileId ?? undefined,
     });
   }
 
@@ -832,7 +845,10 @@ interface SearchSymbolsRawRow {
   updatedAt: string;
 }
 
-function mapSearchSymbolRow(row: SearchSymbolsRawRow, repoId: string): SymbolRow {
+function mapSearchSymbolRow(
+  row: SearchSymbolsRawRow,
+  repoId: string,
+): SymbolRow {
   return {
     symbolId: row.symbolId,
     repoId,
@@ -869,7 +885,7 @@ async function searchSymbolsSingleTerm(
      WHERE (lower(s.name) CONTAINS lower($query)
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
         OR lower(coalesce(s.searchText, '')) CONTAINS lower($query))
-     ${kinds && kinds.length > 0 ? 'AND s.kind IN $kinds' : ''}
+     ${kinds && kinds.length > 0 ? "AND s.kind IN $kinds" : ""}
      WITH s, f,
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
@@ -921,7 +937,15 @@ async function searchSymbolsSingleTerm(
             s.updatedAt AS updatedAt
      ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
      LIMIT $limit`,
-    { repoId, query: term, queryPadded: ` ${term.toLowerCase()} `, queryStart: `${term.toLowerCase()} `, queryEnd: ` ${term.toLowerCase()}`, limit: 200, ...(kinds && kinds.length > 0 && { kinds }) },
+    {
+      repoId,
+      query: term,
+      queryPadded: ` ${term.toLowerCase()} `,
+      queryStart: `${term.toLowerCase()} `,
+      queryEnd: ` ${term.toLowerCase()}`,
+      limit: 200,
+      ...(kinds && kinds.length > 0 && { kinds }),
+    },
   );
 }
 
@@ -943,7 +967,9 @@ export async function searchSymbols(
   // Single-term: use existing behavior
   if (terms.length <= 1) {
     const rows = await searchSymbolsSingleTerm(conn, repoId, trimmed, kinds);
-    return rows.slice(0, safeLimit).map((row) => mapSearchSymbolRow(row, repoId));
+    return rows
+      .slice(0, safeLimit)
+      .map((row) => mapSearchSymbolRow(row, repoId));
   }
 
   // Multi-term (including camelCase-split): run per-term queries, merge with match-count ranking
@@ -951,7 +977,10 @@ export async function searchSymbols(
     terms.map((term) => searchSymbolsSingleTerm(conn, repoId, term, kinds)),
   );
 
-  const matchCounts = new Map<string, { row: SearchSymbolsRawRow; count: number }>();
+  const matchCounts = new Map<
+    string,
+    { row: SearchSymbolsRawRow; count: number }
+  >();
   for (const termRows of perTermResults) {
     for (const row of termRows) {
       const existing = matchCounts.get(row.symbolId);
@@ -979,11 +1008,13 @@ export async function searchSymbols(
       const bContains = b.row.name.toLowerCase().includes(lowerTrimmed) ? 0 : 1;
       if (aContains !== bContains) return aContains - bContains;
       // More terms matched = better
-      return b.count - a.count
-        || a.row.name.localeCompare(b.row.name)
-        || (a.row.file.startsWith("tests/") ? 1 : 0)
-          - (b.row.file.startsWith("tests/") ? 1 : 0)
-        || (a.row.exported ? 0 : 1) - (b.row.exported ? 0 : 1);
+      return (
+        b.count - a.count ||
+        a.row.name.localeCompare(b.row.name) ||
+        (a.row.file.startsWith("tests/") ? 1 : 0) -
+          (b.row.file.startsWith("tests/") ? 1 : 0) ||
+        (a.row.exported ? 0 : 1) - (b.row.exported ? 0 : 1)
+      );
     })
     .map((entry) => mapSearchSymbolRow(entry.row, repoId))
     .slice(0, safeLimit);
@@ -1030,7 +1061,7 @@ async function searchSymbolsLiteSingleTerm(
      WHERE (lower(s.name) CONTAINS lower($query)
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
         OR lower(coalesce(s.searchText, '')) CONTAINS lower($query))
-     ${kinds && kinds.length > 0 ? 'AND s.kind IN $kinds' : ''}
+     ${kinds && kinds.length > 0 ? "AND s.kind IN $kinds" : ""}
      WITH s, f,
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
@@ -1068,7 +1099,15 @@ async function searchSymbolsLiteSingleTerm(
             s.exported AS exported
      ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
      LIMIT $limit`,
-    { repoId, query: term, queryPadded: ` ${term.toLowerCase()} `, queryStart: `${term.toLowerCase()} `, queryEnd: ` ${term.toLowerCase()}`, limit: 200, ...(kinds && kinds.length > 0 && { kinds }) },
+    {
+      repoId,
+      query: term,
+      queryPadded: ` ${term.toLowerCase()} `,
+      queryStart: `${term.toLowerCase()} `,
+      queryEnd: ` ${term.toLowerCase()}`,
+      limit: 200,
+      ...(kinds && kinds.length > 0 && { kinds }),
+    },
   );
 }
 
@@ -1089,7 +1128,12 @@ export async function searchSymbolsLite(
 
   // Single-term: use existing behavior
   if (terms.length <= 1) {
-    const rows = await searchSymbolsLiteSingleTerm(conn, repoId, trimmed, kinds);
+    const rows = await searchSymbolsLiteSingleTerm(
+      conn,
+      repoId,
+      trimmed,
+      kinds,
+    );
     return rows.slice(0, safeLimit);
   }
 
@@ -1099,7 +1143,10 @@ export async function searchSymbolsLite(
   );
 
   // Count how many terms each symbol matched
-  const matchCounts = new Map<string, { row: SearchSymbolLiteRow; count: number }>();
+  const matchCounts = new Map<
+    string,
+    { row: SearchSymbolLiteRow; count: number }
+  >();
   for (const termRows of perTermResults) {
     for (const row of termRows) {
       const existing = matchCounts.get(row.symbolId);
@@ -1128,11 +1175,13 @@ export async function searchSymbolsLite(
       const bContains = b.row.name.toLowerCase().includes(lt) ? 0 : 1;
       if (aContains !== bContains) return aContains - bContains;
       // More terms matched = better
-      return b.count - a.count
-        || a.row.name.localeCompare(b.row.name)
-        || (a.row.file.startsWith("tests/") ? 1 : 0)
-          - (b.row.file.startsWith("tests/") ? 1 : 0)
-        || (a.row.exported ? 0 : 1) - (b.row.exported ? 0 : 1);
+      return (
+        b.count - a.count ||
+        a.row.name.localeCompare(b.row.name) ||
+        (a.row.file.startsWith("tests/") ? 1 : 0) -
+          (b.row.file.startsWith("tests/") ? 1 : 0) ||
+        (a.row.exported ? 0 : 1) - (b.row.exported ? 0 : 1)
+      );
     })
     .map((entry) => entry.row)
     .slice(0, safeLimit);
@@ -1181,4 +1230,3 @@ export async function resolveSymbolByShorthand(
 
   return rows[0].symbolId;
 }
-

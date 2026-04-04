@@ -26,6 +26,12 @@ export interface ModelInfo {
     tokenizer: string;
     config: string;
   };
+  /** Prefix prepended to text at index time (e.g. nomic "search_document: "). */
+  documentPrefix?: string;
+  /** Prefix prepended to text at search/query time (e.g. nomic "search_query: "). */
+  queryPrefix?: string;
+  /** Maximum download size in bytes per file (defense against oversized payloads). */
+  maxDownloadBytes?: number;
 }
 
 const MODEL_REGISTRY: Record<string, ModelInfo> = {
@@ -58,6 +64,29 @@ const MODEL_REGISTRY: Record<string, ModelInfo> = {
       config:
         "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/config.json",
     },
+    documentPrefix: "search_document: ",
+    queryPrefix: "search_query: ",
+    maxDownloadBytes: 200_000_000, // ~138MB model + tokenizer + config
+  },
+  "jina-embeddings-v2-base-code": {
+    name: "jina-embeddings-v2-base-code",
+    dimension: 768,
+    maxSequenceLength: 8192,
+    bundled: false,
+    modelFile: "model_quantized.onnx",
+    tokenizerFile: "tokenizer.json",
+    configFile: "config.json",
+    description:
+      "Code-specialized embedding model for 30+ programming languages (768-dim, ~110MB quantized)",
+    downloadUrls: {
+      model:
+        "https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/onnx/model_quantized.onnx",
+      tokenizer:
+        "https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/tokenizer.json",
+      config:
+        "https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/config.json",
+    },
+    maxDownloadBytes: 200_000_000, // ~110MB model + tokenizer + config
   },
 };
 
@@ -65,14 +94,13 @@ const MODEL_REGISTRY: Record<string, ModelInfo> = {
  * Get model metadata by name. Throws if model is unknown.
  */
 export function getModelInfo(name: string): ModelInfo {
-  const info = MODEL_REGISTRY[name];
-  if (!info) {
+  if (!Object.hasOwn(MODEL_REGISTRY, name)) {
     const known = Object.keys(MODEL_REGISTRY).join(", ");
     throw new Error(
       `Unknown embedding model "${name}". Available models: ${known}`,
     );
   }
-  return info;
+  return MODEL_REGISTRY[name];
 }
 
 /**
@@ -86,7 +114,7 @@ export function listModels(): string[] {
  * Check if a model name is known to the registry.
  */
 export function isKnownModel(name: string): boolean {
-  return name in MODEL_REGISTRY;
+  return Object.hasOwn(MODEL_REGISTRY, name);
 }
 
 /**
@@ -159,4 +187,24 @@ export function isModelAvailable(name: string): boolean {
     existsSync(join(dir, info.modelFile)) &&
     existsSync(join(dir, info.tokenizerFile))
   );
+}
+
+/**
+ * Apply the model's document prefix to text at index/embedding time.
+ * Returns text unchanged for models without a document prefix.
+ */
+export function applyDocumentPrefix(model: string, text: string): string {
+  if (!Object.hasOwn(MODEL_REGISTRY, model)) return text;
+  const info = MODEL_REGISTRY[model];
+  return info?.documentPrefix ? `${info.documentPrefix}${text}` : text;
+}
+
+/**
+ * Apply the model's query prefix to text at search/retrieval time.
+ * Returns text unchanged for models without a query prefix.
+ */
+export function applyQueryPrefix(model: string, text: string): string {
+  if (!Object.hasOwn(MODEL_REGISTRY, model)) return text;
+  const info = MODEL_REGISTRY[model];
+  return info?.queryPrefix ? `${info.queryPrefix}${text}` : text;
 }

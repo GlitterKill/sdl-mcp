@@ -46,8 +46,8 @@ describe("EMBEDDING_MODELS", () => {
     assert.strictEqual(EMBEDDING_MODELS[NOMIC]!.propertyPrefix, "embeddingNomic");
   });
 
-  it("has exactly two entries", () => {
-    assert.strictEqual(Object.keys(EMBEDDING_MODELS).length, 2);
+  it("has exactly three entries", () => {
+    assert.strictEqual(Object.keys(EMBEDDING_MODELS).length, 3);
   });
 });
 

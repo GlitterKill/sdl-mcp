@@ -29,6 +29,7 @@ export interface EmbeddingModelInfo {
 export const EMBEDDING_MODELS: Readonly<Record<string, EmbeddingModelInfo>> = {
   "all-MiniLM-L6-v2": { dimension: 384, propertyPrefix: "embeddingMiniLM", indexName: "symbol_vec_minilm_l6_v2" },
   "nomic-embed-text-v1.5": { dimension: 768, propertyPrefix: "embeddingNomic", indexName: "symbol_vec_nomic_embed_v15" },
+  "jina-embeddings-v2-base-code": { dimension: 768, propertyPrefix: "embeddingJinaCode", indexName: "symbol_vec_jina_code_v2" },
 } as const;
 
 // ---------------------------------------------------------------------------

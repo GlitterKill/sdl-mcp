@@ -522,7 +522,7 @@
         },
         "model": {
           "type": "string",
-          "enum": ["all-MiniLM-L6-v2", "nomic-embed-text-v1.5"],
+          "enum": ["all-MiniLM-L6-v2", "nomic-embed-text-v1.5", "jina-embeddings-v2-base-code"],
           "default": "all-MiniLM-L6-v2"
         },
         "modelCacheDir": {
