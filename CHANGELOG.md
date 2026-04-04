@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3] - 2026-04-04
+
+### Added
+
+- **Jina embeddings v2 base-code model** support for semantic symbol search alongside nomic-embed-text.
+- **Graph-guided cluster expansion** — cluster neighbor expansion now uses graph edges for diversity instead of flat member lists.
+- **Confidence-aware context planning** — the Planner adjusts rung paths based on confidence tiers (high confidence → cheapest plan, low → deeper rungs).
+- **Evidence-aware context symbol ranking** — retrieved symbols ranked by retrieval evidence quality, not just graph proximity.
+- **Semantic-first context seeding** — `sdl.context` seeding prefers semantic (embedding) retrieval over keyword-only search when available.
+- **`sdl.context` quality benchmark harness** (`tests/`) for measuring context retrieval accuracy across task types.
+- **Compound identifier search** in context seeding — multi-word queries generate camelCase variants ("beam search" → "beamSearch") for better symbol discovery.
+- **Focus-path inference** and **language-affinity scoring** in context ranking.
+- **Response deduplication** across context evidence items.
+
+### Changed
+
+- **Broad-mode context retrieval** overhauled: improved identifier extraction, capped cluster expansion to prevent token blowout, and compacted context responses.
+- **Planner broad-mode path selection** improved — selects rungs more appropriate for exploratory queries.
+- **Task-type ranking** weights tuned per task type (debug, review, implement, explain) for more relevant symbol ordering.
+- **ETag cache optimizations** — reduced redundant card lookups across workflow steps.
+- **Context answers preserved** under broad-mode truncation (previously dropped when response was trimmed to budget).
+- Memory opt-in model: memory tools hidden from action search when `memory.enabled` is false; runtime behavior fully gated behind config.
+
+### Fixed
+
+- **Token tracking** accuracy corrected for multi-step workflow executions.
+- **Bloom filter microbenchmark** replaced with deterministic correctness assertions (eliminated flaky CI failures).
+- **Audit test** updated for ranking refactor; hoisted Set allocation out of hot loop.
+- **Context `contextMode` propagation** — broad-mode options no longer stripped by gateway schema validation.
+
 ## [0.10.2] - 2026-04-01
 
 ### Breaking
@@ -873,6 +903,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.10.3]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.10.3
 [0.10.2]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.10.2
 [0.10.1]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.10.1
 [0.10.0]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.10.0

@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp-native-darwin-x64",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "Native Rust indexer for SDL-MCP - macOS x64",
   "license": "SEE LICENSE IN LICENSE",
   "os": [

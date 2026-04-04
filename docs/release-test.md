@@ -984,5 +984,5 @@ Test with each supported client:
 
 **Tested By:** **\*\***\_\_\_**\*\***
 **Date:** **\*\***\_\_\_**\*\***
-**Version:** 0.10.2
+**Version:** 0.10.3
 **Result:** PASS / FAIL
