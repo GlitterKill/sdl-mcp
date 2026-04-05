@@ -42,7 +42,7 @@ flowchart TD
     Codebase["Your Codebase"]
     Indexer["Indexer<br/>12 languages<br/>Rust native or Tree-sitter fallback"]
     Graph["LadybugDB graph<br/>symbols, edges, metrics, versions"]
-    MCP["37 unique MCP tool surfaces<br/>flat, gateway, and code-mode"]
+    MCP["38 unique MCP tool surfaces<br/>flat, gateway, and code-mode"]
     CLI["13 CLI commands"]
     HTTP["HTTP API and graph UI"]
     Agent["AI coding agent<br/>Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini"]
@@ -342,6 +342,31 @@ When enabled, memories are **automatically surfaced** inside graph slices — wh
 
 ---
 
+### SCIP Integration — Compiler-Grade Cross-References
+
+Tree-sitter gives SDL-MCP fast, syntax-level symbol extraction across 11 languages. SCIP (Source Code Intelligence Protocol) supplements this with **compiler-grade cross-references** from tools like scip-typescript, scip-go, and rust-analyzer. Generate a `.scip` index file, point SDL-MCP at it, and heuristic edges are upgraded to exact compiler-verified edges, external dependency symbols become first-class graph nodes, and new `implements` edges reveal interface/trait relationships that syntax analysis cannot discover.
+
+```mermaid
+flowchart LR
+    Compiler["Compiler / Type Checker"] --> SCIP[".scip index file"]
+    SCIP --> Ingest["sdl.scip.ingest"]
+    Ingest --> Upgrade["Heuristic edges → exact edges"]
+    Ingest --> External["External dependency nodes"]
+    Ingest --> Implements["implements edges"]
+```
+
+**Why it matters:**
+
+- Upgrades heuristic call resolution to **compiler-verified exact edges** (confidence 0.95)
+- External dependencies (npm packages, Go modules, crate deps) become searchable graph nodes
+- Interface/trait implementations tracked via `implements` edges
+- Auto-ingest on `sdl.index.refresh` keeps SCIP data current with zero manual steps
+- Complementary: tree-sitter provides structure, SCIP provides semantic precision
+
+[SCIP Integration Deep Dive →](./docs/feature-deep-dives/scip-integration.md)
+
+---
+
 ### CLI Tool Access — No MCP Server Required
 
 Access all 32 flat SDL action tools directly from the command line with `sdl-mcp tool`. No MCP server, transport, or SDK is required.
@@ -397,7 +422,7 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 
 <br/>
 
-## All 37 Unique Tool Surfaces at a Glance
+## All 38 Unique Tool Surfaces at a Glance
 
 <table>
 <tr><th>Category</th><th>Tool</th><th>One-Line Description</th></tr>
@@ -459,6 +484,9 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
     <td><code>sdl.context</code></td><td>Code Mode task-shaped context retrieval for explain/debug/review/implement work</td></tr>
 <tr><td><code>sdl.workflow</code></td><td>Multi-step operations with budget tracking, ETag caching, and transforms</td></tr>
 <tr><td><code>sdl.manual</code></td><td>Self-documentation — query usage guide, action schemas, output format reference</td></tr>
+
+<tr><td><strong>SCIP</strong></td>
+    <td><code>sdl.scip.ingest</code></td><td>Ingest a pre-built SCIP index for compiler-grade cross-references (with dry-run support)</td></tr>
 
 <tr><td><strong>File</strong></td>
     <td><code>sdl.file.read</code></td><td>Read non-indexed files (configs, docs, templates) with line-range, search, or JSON-path modes</td></tr>
@@ -603,6 +631,7 @@ flowchart TD
 | [Semantic Embeddings Setup](./docs/feature-deep-dives/semantic-embeddings-setup.md) | Dependencies, model installation, provider configuration, tier-by-tier setup          |
 | [Code Mode](./docs/feature-deep-dives/code-mode.md)                                 | `sdl.context`, `sdl.workflow`, action discovery, manual reference, one-call workflows |
 | [Development Memories](./docs/feature-deep-dives/development-memories.md)           | Graph-backed cross-session memory, file sync, staleness detection, auto-surfacing     |
+| [SCIP Integration](./docs/feature-deep-dives/scip-integration.md)                   | Compiler-grade cross-references, external deps, implements edges, auto-ingest         |
 | [Token Savings Meter](./docs/feature-deep-dives/token-savings-meter.md)             | Per-call meter, session summaries, lifetime tracking, `sdl.usage.stats`               |
 
 <br/>

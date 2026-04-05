@@ -183,11 +183,13 @@ describe("behavioral function summaries", () => {
     assert.ok(result!.startsWith("Delegates to"), "Expected delegation summary, got: " + result);
   });
 
-  it("returns null for guard function with name-only subject", () => {
+  it("returns prefix-based summary for validate* with name-only subject", () => {
     const body = "function validateEmail(email) {\n  if (!email) throw new Error('required');\n  if (!email.includes('@')) throw new Error('invalid');\n  return email;\n}";
     const sym = makeSymbol("validateEmail", "function", body);
     const result = generateSummary(sym as any, body);
-    assert.equal(result, null, "name-only subject should return null");  });
+    assert.ok(result !== null, "validate* prefix should produce a summary");
+    assert.ok(result!.startsWith("Validates email"), "Expected 'Validates email...' summary, got: " + result);
+  });
 
   it("returns network I/O summary for fetch function", () => {
     const body = "async function fetchData(url) {\n  const resp = await fetch(url);\n  return resp.json();\n}";

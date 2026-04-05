@@ -18,6 +18,7 @@
  *   ladybug-clusters.ts   � Cluster operations
  *   ladybug-processes.ts   Process operations
  *   ladybug-file-summaries.ts FileSummary operations
+ *   ladybug-scip.ts          SCIP ingestion operations
  */
 
 // Core helpers
@@ -76,3 +77,6 @@ export * from "./ladybug-usage.js";
 
 // FileSummary operations
 export * from "./ladybug-file-summaries.js";
+
+// SCIP ingestion operations
+export * from "./ladybug-scip.js";

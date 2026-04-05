@@ -114,3 +114,35 @@ export class ArtifactCleanupError extends Error {
     this.name = "ArtifactCleanupError";
   }
 }
+
+export class ScipDecodeError extends Error {
+  readonly code = ErrorCode.INDEX_ERROR;
+  constructor(message: string) {
+    super(message);
+    this.name = "ScipDecodeError";
+  }
+}
+
+export class ScipFileNotFoundError extends Error {
+  readonly code = ErrorCode.NOT_FOUND;
+  constructor(message: string) {
+    super(message);
+    this.name = "ScipFileNotFoundError";
+  }
+}
+
+export class ScipIngestionError extends Error {
+  readonly code = ErrorCode.INDEX_ERROR;
+  constructor(message: string) {
+    super(message);
+    this.name = "ScipIngestionError";
+  }
+}
+
+export class ScipSymbolMatchError extends Error {
+  readonly code = ErrorCode.VALIDATION_ERROR;
+  constructor(message: string) {
+    super(message);
+    this.name = "ScipSymbolMatchError";
+  }
+}

@@ -1120,6 +1120,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
         call: 1.0,
         import: 0.6,
         config: 0.8,
+        implements: 0.9,
       },
     },
     prefetch: {

@@ -46,6 +46,7 @@ import {
   MemorySurfaceRequestSchema,
   UsageStatsRequestSchema,
   FileReadRequestSchema,
+  ScipIngestRequestSchema,
 } from "../tools.js";
 
 import {
@@ -93,6 +94,7 @@ import {
 } from "./memory.js";
 import { handleUsageStats } from "./usage.js";
 import { handleFileRead } from "./file-read.js";
+import { handleScipIngest } from "./scip.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { anyRepoHasMemoryTools } from "../../config/memory-config.js";
 
@@ -362,6 +364,13 @@ export function buildFlatToolDescriptors(
         "Read non-indexed files (templates, configs, docs) with optional line range, search, or JSON path extraction",
       schema: FileReadRequestSchema,
       handler: handleFileRead,
+    },
+    {
+      name: "sdl.scip.ingest",
+      description:
+        "Ingest a pre-built SCIP index file to overlay compiler-grade cross-references onto the symbol graph. Supports dry-run mode.",
+      schema: ScipIngestRequestSchema,
+      handler: handleScipIngest,
     },
   ];
 

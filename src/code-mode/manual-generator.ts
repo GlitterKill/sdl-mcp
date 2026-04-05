@@ -40,6 +40,7 @@ export const FN_NAME_MAP: Record<string, string> = {
   memorySurface: "memory.surface",
   usageStats: "usage.stats",
   fileRead: "file.read",
+  scipIngest: "scip.ingest",
 };
 
 export const ACTION_TO_FN: Record<string, string> = Object.fromEntries(
@@ -116,6 +117,9 @@ function policyGet(): { policy: object }
 /** Set policy config */
 function policySet(p: { policyPatch: { maxWindowLines?: number; maxWindowTokens?: number; requireIdentifiers?: boolean; allowBreakGlass?: boolean; defaultDenyRaw?: boolean } }): { policy: object }
 
+// === SCIP ===
+/** Ingest a pre-built SCIP index to overlay compiler-grade cross-references */
+function scipIngest(p: { indexPath: string; dryRun?: boolean }): { status: "ingested" | "alreadyIngested" | "dryRun"; documentsProcessed: number; symbolsMatched: number; symbolsCreated: number; edgesCreated: number }
 // === Memory ===
 /** Store a development memory */
 function memoryStore(p: { type: "decision"|"bugfix"|"task_context"|"pattern"|"convention"|"architecture"|"performance"|"security"; title: string; content: string; tags?: string[]; symbolIds?: string[]; fileRelPaths?: string[] }): { memoryId: string }

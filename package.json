@@ -134,6 +134,7 @@
     "tokenizers-win32-x64-msvc": "0.13.4-rc2"
   },
   "devDependencies": {
+    "@bufbuild/protobuf": "^2.0.0",
     "@napi-rs/cli": "^2.18.0",
     "@opentelemetry/sdk-trace-web": "^2.6.0",
     "@stryker-mutator/core": "^9.6.0",

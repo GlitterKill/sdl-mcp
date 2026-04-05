@@ -166,12 +166,7 @@
   },
   "runtime": {
     "enabled": true,
-    "allowedRuntimes": [
-      "node",
-      "typescript",
-      "python",
-      "shell"
-    ],
+    "allowedRuntimes": ["node", "typescript", "python", "shell"],
     "allowedExecutables": [],
     "maxDurationMs": 30000,
     "maxStdoutBytes": 1048576,
@@ -201,6 +196,21 @@
   },
   "security": {
     "allowedRepoRoots": []
+  },
+  "scip": {
+    "enabled": false,
+    "indexes": [
+      {
+        "path": "index.scip",
+        "label": "typescript"
+      }
+    ],
+    "externalSymbols": {
+      "enabled": true,
+      "maxPerIndex": 10000
+    },
+    "confidence": 0.95,
+    "autoIngestOnRefresh": true
   },
   "memory": {
     "enabled": false

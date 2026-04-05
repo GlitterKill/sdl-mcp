@@ -162,7 +162,7 @@ const SliceSymbolCardSchema = SymbolCardSchema.omit({
 const CompressedEdgeSchema = z.tuple([
   z.number().int().min(0),
   z.number().int().min(0),
-  z.enum(["import", "call", "config"]),
+  z.enum(["import", "call", "config", "implements"]),
   z.number(),
 ]);
 
@@ -842,6 +842,8 @@ export const SymbolSearchRequestSchema = z.object({
   semantic: z.boolean().optional(),
   /** When true, include per-result retrieval evidence (FTS score, vector score, fusion rank). */
   includeRetrievalEvidence: z.boolean().optional(),
+  /** When true, exclude external symbols (from SCIP) from search results. */
+  excludeExternal: z.boolean().optional(),
 });
 
 export const RetrievalEvidenceItemSchema = z.object({
@@ -2328,3 +2330,28 @@ export interface FileReadResponse {
   matchCount?: number;
   extractedPath?: string;
 }
+
+
+// ============================================================================
+// SCIP Ingest Schemas
+// ============================================================================
+
+export const ScipIngestRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  indexPath: z
+    .string()
+    .min(1)
+    .describe(
+      "Path to the SCIP index file (.scip or .lsif). " +
+        "Can be absolute or relative to the repository root.",
+    ),
+  dryRun: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "If true, validate and parse the SCIP index without writing to the graph database.",
+    ),
+});
+
+export type ScipIngestRequest = z.infer<typeof ScipIngestRequestSchema>;

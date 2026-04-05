@@ -79,7 +79,7 @@ describe("Gateway tool registration", () => {
     );
   });
 
-  it("registers 30 tools when gateway disabled (28 flat + 2 universal)", () => {
+  it("registers 31 tools when gateway disabled (29 flat + 2 universal)", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -111,12 +111,12 @@ describe("Gateway tool registration", () => {
     assert.ok(names.includes("sdl.info"), "expected sdl.info");
     assert.strictEqual(
       names.length,
-      30,
-      "expected 30 tools (28 flat + 2 universal)",
+      31,
+      "expected 31 tools (29 flat + 2 universal)",
     );
   });
 
-  it("registers 30 tools when no gateway config (28 flat + 2 universal)", () => {
+  it("registers 31 tools when no gateway config (29 flat + 2 universal)", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -138,8 +138,8 @@ describe("Gateway tool registration", () => {
     assert.ok(names.includes("sdl.info"), "expected sdl.info");
     assert.strictEqual(
       names.length,
-      30,
-      "expected 30 tools (28 flat + 2 universal)",
+      31,
+      "expected 31 tools (29 flat + 2 universal)",
     );
   });
 

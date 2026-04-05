@@ -193,6 +193,7 @@ export async function buildSlice(
     call: 1.0,
     import: 0.6,
     config: 0.8,
+    implements: 0.9,
   };
 
   const budget = {

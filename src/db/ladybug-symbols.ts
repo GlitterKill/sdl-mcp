@@ -38,6 +38,11 @@ export interface SymbolRow {
   summarySource?: string;
   roleTagsJson?: string | null;
   searchText?: string | null;
+  // SCIP integration fields
+  external?: boolean;
+  packageName?: string | null;
+  packageVersion?: string | null;
+  scipSymbol?: string | null;
   updatedAt: string;
 }
 
@@ -229,6 +234,10 @@ export async function getSymbolsByFile(
     summarySource: string | null;
     roleTagsJson: string | null;
     searchText: string | null;
+    external: unknown;
+    packageName: string | null;
+    packageVersion: string | null;
+    scipSymbol: string | null;
     updatedAt: string;
   }>(
     conn,
@@ -254,6 +263,10 @@ export async function getSymbolsByFile(
             s.summarySource AS summarySource,
             s.roleTagsJson AS roleTagsJson,
             s.searchText AS searchText,
+            coalesce(s.external, false) AS external,
+            s.packageName AS packageName,
+            s.packageVersion AS packageVersion,
+            s.scipSymbol AS scipSymbol,
             s.updatedAt AS updatedAt`,
     { fileId },
   );
@@ -280,6 +293,10 @@ export async function getSymbolsByFile(
     summarySource: row.summarySource ?? undefined,
     roleTagsJson: row.roleTagsJson,
     searchText: row.searchText,
+    external: toBoolean(row.external) || undefined,
+    packageName: row.packageName,
+    packageVersion: row.packageVersion,
+    scipSymbol: row.scipSymbol,
     updatedAt: row.updatedAt,
   }));
 }
@@ -377,6 +394,10 @@ export async function getSymbolsByRepo(
     summarySource: string | null;
     roleTagsJson: string | null;
     searchText: string | null;
+    external: unknown;
+    packageName: string | null;
+    packageVersion: string | null;
+    scipSymbol: string | null;
     updatedAt: string;
   }>(
     conn,
@@ -402,6 +423,10 @@ export async function getSymbolsByRepo(
             s.summarySource AS summarySource,
             s.roleTagsJson AS roleTagsJson,
             s.searchText AS searchText,
+            coalesce(s.external, false) AS external,
+            s.packageName AS packageName,
+            s.packageVersion AS packageVersion,
+            s.scipSymbol AS scipSymbol,
             s.updatedAt AS updatedAt`,
     { repoId },
   );
@@ -428,6 +453,10 @@ export async function getSymbolsByRepo(
     summarySource: row.summarySource ?? undefined,
     roleTagsJson: row.roleTagsJson,
     searchText: row.searchText,
+    external: toBoolean(row.external) || undefined,
+    packageName: row.packageName,
+    packageVersion: row.packageVersion,
+    scipSymbol: row.scipSymbol,
     updatedAt: row.updatedAt,
   }));
 }
@@ -498,6 +527,10 @@ export async function getSymbolsByIds(
     summarySource: string | null;
     roleTagsJson: string | null;
     searchText: string | null;
+    external: unknown;
+    packageName: string | null;
+    packageVersion: string | null;
+    scipSymbol: string | null;
     updatedAt: string;
   }>(
     conn,
@@ -526,6 +559,10 @@ export async function getSymbolsByIds(
             s.summarySource AS summarySource,
             s.roleTagsJson AS roleTagsJson,
             s.searchText AS searchText,
+            coalesce(s.external, false) AS external,
+            s.packageName AS packageName,
+            s.packageVersion AS packageVersion,
+            s.scipSymbol AS scipSymbol,
             s.updatedAt AS updatedAt`,
     { symbolIds },
   );
@@ -554,6 +591,10 @@ export async function getSymbolsByIds(
       summarySource: row.summarySource ?? undefined,
       roleTagsJson: row.roleTagsJson,
       searchText: row.searchText,
+      external: toBoolean(row.external) || undefined,
+      packageName: row.packageName,
+      packageVersion: row.packageVersion,
+      scipSymbol: row.scipSymbol,
       updatedAt: row.updatedAt,
     });
   }
@@ -822,6 +863,139 @@ export async function deleteSymbolsByFileId(
   });
 }
 
+/**
+ * Delete specific symbols by their IDs, including all relationships and
+ * associated nodes. This is the targeted counterpart to deleteSymbolsByFileId,
+ * used by the diff/merge reconciliation to remove only specific symbols.
+ */
+export async function deleteSymbolsByIds(
+  conn: Connection,
+  symbolIds: string[],
+): Promise<void> {
+  if (symbolIds.length === 0) return;
+
+  await withTransaction(conn, async (txConn) => {
+    // Outgoing DEPENDS_ON edges
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE d`,
+      { symbolIds },
+    );
+
+    // Incoming DEPENDS_ON edges
+    await exec(
+      txConn,
+      `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE d`,
+      { symbolIds },
+    );
+
+    // SYMBOL_IN_REPO edges
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
+
+    // SYMBOL_IN_FILE edges
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[r:SYMBOL_IN_FILE]->(:File)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
+
+    // BELONGS_TO_CLUSTER edges
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
+
+    // PARTICIPATES_IN edges
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[r:PARTICIPATES_IN]->(:Process)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
+
+    // Metrics nodes
+    await exec(
+      txConn,
+      `MATCH (m:Metrics)
+       WHERE m.symbolId IN $symbolIds
+       DELETE m`,
+      { symbolIds },
+    );
+
+    // SymbolEmbedding nodes
+    await exec(
+      txConn,
+      `MATCH (e:SymbolEmbedding)
+       WHERE e.symbolId IN $symbolIds
+       DELETE e`,
+      { symbolIds },
+    );
+
+    // SummaryCache nodes
+    await exec(
+      txConn,
+      `MATCH (sc:SummaryCache)
+       WHERE sc.symbolId IN $symbolIds
+       DELETE sc`,
+      { symbolIds },
+    );
+
+    // MEMORY_OF edges (Memory -> deleted Symbol)
+    await exec(
+      txConn,
+      `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
+
+    // Symbol nodes
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE s`,
+      { symbolIds },
+    );
+  });
+}
+
+/**
+ * Delete non-SCIP outgoing edges for specific symbols. Used during diff/merge
+ * reconciliation to refresh tree-sitter edges while preserving SCIP edges.
+ */
+export async function deleteNonScipOutgoingEdges(
+  conn: Connection,
+  symbolIds: string[],
+): Promise<void> {
+  if (symbolIds.length === 0) return;
+
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
+     WHERE s.symbolId IN $symbolIds
+       AND (d.resolverId IS NULL OR d.resolverId <> 'scip')
+     DELETE d`,
+    { symbolIds },
+  );
+}
+
 interface SearchSymbolsRawRow {
   symbolId: string;
   fileId: string;
@@ -878,6 +1052,7 @@ async function searchSymbolsSingleTerm(
   repoId: string,
   term: string,
   kinds?: string[],
+  excludeExternal?: boolean,
 ): Promise<SearchSymbolsRawRow[]> {
   return queryAll<SearchSymbolsRawRow>(
     conn,
@@ -886,6 +1061,7 @@ async function searchSymbolsSingleTerm(
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
         OR lower(coalesce(s.searchText, '')) CONTAINS lower($query))
      ${kinds && kinds.length > 0 ? "AND s.kind IN $kinds" : ""}
+     ${excludeExternal ? "AND coalesce(s.external, false) = false" : ""}
      WITH s, f,
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
@@ -955,6 +1131,7 @@ export async function searchSymbols(
   query: string,
   limit: number,
   kinds?: string[],
+  excludeExternal?: boolean,
 ): Promise<SymbolRow[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
@@ -966,7 +1143,7 @@ export async function searchSymbols(
 
   // Single-term: use existing behavior
   if (terms.length <= 1) {
-    const rows = await searchSymbolsSingleTerm(conn, repoId, trimmed, kinds);
+    const rows = await searchSymbolsSingleTerm(conn, repoId, trimmed, kinds, excludeExternal);
     return rows
       .slice(0, safeLimit)
       .map((row) => mapSearchSymbolRow(row, repoId));
@@ -974,7 +1151,7 @@ export async function searchSymbols(
 
   // Multi-term (including camelCase-split): run per-term queries, merge with match-count ranking
   const perTermResults = await Promise.all(
-    terms.map((term) => searchSymbolsSingleTerm(conn, repoId, term, kinds)),
+    terms.map((term) => searchSymbolsSingleTerm(conn, repoId, term, kinds, excludeExternal)),
   );
 
   const matchCounts = new Map<
@@ -1054,6 +1231,7 @@ async function searchSymbolsLiteSingleTerm(
   repoId: string,
   term: string,
   kinds?: string[],
+  excludeExternal?: boolean,
 ): Promise<SearchSymbolLiteRow[]> {
   return queryAll<SearchSymbolLiteRow>(
     conn,
@@ -1062,6 +1240,7 @@ async function searchSymbolsLiteSingleTerm(
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
         OR lower(coalesce(s.searchText, '')) CONTAINS lower($query))
      ${kinds && kinds.length > 0 ? "AND s.kind IN $kinds" : ""}
+     ${excludeExternal ? "AND coalesce(s.external, false) = false" : ""}
      WITH s, f,
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
@@ -1117,6 +1296,7 @@ export async function searchSymbolsLite(
   query: string,
   limit: number,
   kinds?: string[],
+  excludeExternal?: boolean,
 ): Promise<SearchSymbolLiteRow[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
@@ -1133,13 +1313,14 @@ export async function searchSymbolsLite(
       repoId,
       trimmed,
       kinds,
+      excludeExternal,
     );
     return rows.slice(0, safeLimit);
   }
 
   // Multi-term: run per-term queries, merge with match-count ranking
   const perTermResults = await Promise.all(
-    terms.map((term) => searchSymbolsLiteSingleTerm(conn, repoId, term, kinds)),
+    terms.map((term) => searchSymbolsLiteSingleTerm(conn, repoId, term, kinds, excludeExternal)),
   );
 
   // Count how many terms each symbol matched

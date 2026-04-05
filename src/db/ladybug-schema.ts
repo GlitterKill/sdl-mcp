@@ -11,7 +11,8 @@
  *              Cluster, Process, FileSummary, SliceHandle, CardHash, Audit,
  *              AgentFeedback (with searchText + embedding columns),
  *              SymbolEmbedding, SummaryCache, SyncArtifact,
- *              SymbolReference, Memory, UsageSnapshot, SchemaVersion
+ *              SymbolReference, Memory, UsageSnapshot, SchemaVersion,
+ *              ScipIngestion
  *
  * Rel tables: FILE_IN_REPO, SYMBOL_IN_FILE, SYMBOL_IN_REPO, DEPENDS_ON,
  *             VERSION_OF_REPO, BELONGS_TO_CLUSTER, PARTICIPATES_IN,
@@ -76,7 +77,12 @@ const NODE_TABLES: string[] = [
     embeddingNomicUpdatedAt STRING,
     embeddingJinaCode STRING,
     embeddingJinaCodeCardHash STRING,
-    embeddingJinaCodeUpdatedAt STRING
+    embeddingJinaCodeUpdatedAt STRING,
+    external BOOL DEFAULT false,
+    scipSymbol STRING,
+    source STRING DEFAULT 'treesitter',
+    packageName STRING,
+    packageVersion STRING
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS Version (
@@ -284,6 +290,19 @@ const NODE_TABLES: string[] = [
     createdAt STRING,
     updatedAt STRING
   )`,
+  `CREATE NODE TABLE IF NOT EXISTS ScipIngestion (
+    id STRING PRIMARY KEY,
+    repoId STRING,
+    indexPath STRING,
+    contentHash STRING,
+    ingestedAt STRING,
+    ledgerVersion STRING,
+    symbolCount INT64,
+    edgeCount INT64,
+    externalSymbolCount INT64,
+    truncated BOOL DEFAULT false
+  )`,
+
 ];
 
 export const CALL_EDGE_METADATA_FIELDS = [

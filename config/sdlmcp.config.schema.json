@@ -522,7 +522,11 @@
         },
         "model": {
           "type": "string",
-          "enum": ["all-MiniLM-L6-v2", "nomic-embed-text-v1.5", "jina-embeddings-v2-base-code"],
+          "enum": [
+            "all-MiniLM-L6-v2",
+            "nomic-embed-text-v1.5",
+            "jina-embeddings-v2-base-code"
+          ],
           "default": "all-MiniLM-L6-v2"
         },
         "modelCacheDir": {
@@ -658,8 +662,12 @@
                     }
                   },
                   "default": {
-                    "all-MiniLM-L6-v2": { "indexName": "symbol_vec_minilm_l6_v2" },
-                    "nomic-embed-text-v1.5": { "indexName": "symbol_vec_nomic_embed_v15" }
+                    "all-MiniLM-L6-v2": {
+                      "indexName": "symbol_vec_minilm_l6_v2"
+                    },
+                    "nomic-embed-text-v1.5": {
+                      "indexName": "symbol_vec_nomic_embed_v15"
+                    }
                   }
                 }
               },
@@ -668,8 +676,12 @@
                 "topK": 75,
                 "efs": 200,
                 "indexes": {
-                  "all-MiniLM-L6-v2": { "indexName": "symbol_vec_minilm_l6_v2" },
-                  "nomic-embed-text-v1.5": { "indexName": "symbol_vec_nomic_embed_v15" }
+                  "all-MiniLM-L6-v2": {
+                    "indexName": "symbol_vec_minilm_l6_v2"
+                  },
+                  "nomic-embed-text-v1.5": {
+                    "indexName": "symbol_vec_nomic_embed_v15"
+                  }
                 }
               }
             },
@@ -717,7 +729,9 @@
               "efs": 200,
               "indexes": {
                 "all-MiniLM-L6-v2": { "indexName": "symbol_vec_minilm_l6_v2" },
-                "nomic-embed-text-v1.5": { "indexName": "symbol_vec_nomic_embed_v15" }
+                "nomic-embed-text-v1.5": {
+                  "indexName": "symbol_vec_nomic_embed_v15"
+                }
               }
             },
             "fusion": {
@@ -1069,6 +1083,44 @@
       "default": {
         "enabled": true,
         "exclusive": true
+      }
+    },
+    "scip": {
+      "type": "object",
+      "description": "SCIP index ingestion configuration",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "indexes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "label": { "type": "string" }
+            },
+            "required": ["path"]
+          },
+          "default": []
+        },
+        "externalSymbols": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "maxPerIndex": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 100000,
+              "default": 10000
+            }
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 1.0,
+          "default": 0.95
+        },
+        "autoIngestOnRefresh": { "type": "boolean", "default": true }
       }
     },
     "memory": {

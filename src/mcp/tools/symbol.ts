@@ -336,6 +336,7 @@ export async function handleSymbolSearch(
         request.query,
         limit,
         request.kinds,
+        request.excludeExternal,
       );
     }
   } else {
@@ -346,6 +347,7 @@ export async function handleSymbolSearch(
       request.query,
       limit,
       request.kinds,
+      request.excludeExternal,
     );
   }
 
@@ -376,6 +378,7 @@ export async function handleSymbolSearch(
         joinedQuery,
         limit,
         request.kinds,
+        request.excludeExternal,
       );
       const existingIds = new Set(results.map((r) => r.symbolId));
       for (const row of fallbackRows) {
@@ -406,6 +409,7 @@ export async function handleSymbolSearch(
               subword + "*",
               perTermLimit,
               request.kinds,
+              request.excludeExternal,
             );
             for (const row of subRows) {
               if (!existingIds.has(row.symbolId)) {

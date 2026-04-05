@@ -580,6 +580,31 @@ export async function handleIndexRefresh(
     symbolCardCache.clear();
     invalidateGraphSnapshot(repoId);
 
+    // Auto-ingest SCIP indexes if configured
+    try {
+      const appConfig = loadConfig();
+      const scipConfig = appConfig.scip;
+      if (scipConfig?.enabled && scipConfig?.autoIngestOnRefresh) {
+        const repo = await ladybugDb.getRepo(conn, repoId);
+        if (repo?.rootPath) {
+          const { autoIngestScipIndexes } = await import("../../scip/ingestion.js");
+          const scipResults = await autoIngestScipIndexes(repoId, scipConfig, repo.rootPath);
+          if (scipResults.length > 0) {
+            logger.info("Auto-ingested SCIP indexes after refresh", {
+              repoId,
+              count: scipResults.length,
+              statuses: scipResults.map((r) => r.status),
+            });
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn("SCIP auto-ingest failed (non-fatal)", {
+        repoId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     return toResponse(result);
   };
 

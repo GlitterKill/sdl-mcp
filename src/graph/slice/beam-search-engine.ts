@@ -682,6 +682,12 @@ export function beamSearch(
       if (state.visited.has(neighborId)) continue;
       state.visited.add(neighborId);
 
+      // External symbols (from SCIP) are leaf nodes: include in slice but don't traverse further
+      if (neighborSymbol.external) {
+        acceptNodeIntoSlice(state, neighborId, 0);
+        continue;
+      }
+
       const edge = edgeByTarget.get(neighborId);
       if (!edge) continue;
 
@@ -1028,6 +1034,7 @@ export async function beamSearchLadybug(
         call: 0,
         import: 1,
         config: 2,
+        implements: 3,
       };
 
       for (const edge of outgoing) {
@@ -1100,6 +1107,12 @@ export async function beamSearchLadybug(
         if (!neighborSymbol || neighborSymbol.repoId !== repoId) continue;
         if (st.visited.has(neighborId)) continue;
         st.visited.add(neighborId);
+
+        // External symbols (from SCIP) are leaf nodes: include in slice but don't traverse further
+        if (neighborSymbol.external) {
+          acceptNodeIntoSlice(st, neighborId, 0);
+          continue;
+        }
 
         const edge = edgeByTarget.get(neighborId);
         if (!edge) continue;
@@ -1210,6 +1223,8 @@ export function getEdgeWhy(edgeType: EdgeType): string {
       return "imports";
     case "config":
       return "configures";
+    case "implements":
+      return "implements";
   }
 }
 

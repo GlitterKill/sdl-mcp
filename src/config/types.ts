@@ -183,6 +183,7 @@ export const EdgeWeightsSchema = z.object({
   call: z.number().min(0).default(1.0),
   import: z.number().min(0).default(0.6),
   config: z.number().min(0).default(0.8),
+  implements: z.number().min(0).default(0.9),
 });
 
 export const SliceConfigSchema = z.object({
@@ -486,6 +487,26 @@ export const SecurityConfigSchema = z.object({
 
 export type SecurityConfig = z.infer<typeof SecurityConfigSchema>;
 
+export const ScipExternalSymbolsConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  maxPerIndex: z.number().int().min(100).max(100_000).default(10_000),
+});
+
+export const ScipIndexEntrySchema = z.object({
+  path: z.string(),
+  label: z.string().optional(),
+});
+
+export const ScipConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  indexes: z.array(ScipIndexEntrySchema).default([]),
+  externalSymbols: ScipExternalSymbolsConfigSchema.default({ enabled: true, maxPerIndex: 10_000 }),
+  confidence: z.number().min(0.5).max(1.0).default(0.95),
+  autoIngestOnRefresh: z.boolean().default(true),
+});
+
+export type ScipConfig = z.infer<typeof ScipConfigSchema>;
+
 export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
   /**
@@ -513,6 +534,7 @@ export const AppConfigSchema = z.object({
   security: SecurityConfigSchema.optional(),
   httpAuth: HttpAuthConfigSchema.optional(),
   memory: MemoryConfigSchema.optional(),
+  scip: ScipConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

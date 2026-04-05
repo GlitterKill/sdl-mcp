@@ -292,6 +292,10 @@ async function _loadGraphSnapshot(
             summary: sym.summary,
             invariants_json: sym.invariantsJson,
             side_effects_json: sym.sideEffectsJson,
+            external: sym.external ? 1 : 0,
+            package_name: sym.packageName,
+            package_version: sym.packageVersion,
+            scip_symbol: sym.scipSymbol,
             updated_at: sym.updatedAt,
         } as SymbolRow);
     }

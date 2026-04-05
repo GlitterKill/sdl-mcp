@@ -315,6 +315,24 @@ const FileReadAction = z.object({
   jsonPath: z.string().max(200).optional(),
 });
 
+const ScipIngestAction = z.object({
+  action: z.literal("scip.ingest"),
+  indexPath: z
+    .string()
+    .min(1)
+    .describe(
+      "Path to the SCIP index file (.scip or .lsif). " +
+        "Can be absolute or relative to the repository root.",
+    ),
+  dryRun: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "If true, validate and parse the SCIP index without writing to the graph database.",
+    ),
+});
+
 export const RepoGatewaySchema = z
   .object({
     repoId: z.string().min(1),
@@ -329,6 +347,7 @@ export const RepoGatewaySchema = z
       PolicySetAction,
       UsageStatsAction,
       FileReadAction,
+      ScipIngestAction,
     ]),
   );
 

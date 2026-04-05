@@ -138,6 +138,8 @@ export async function computeBlastRadius(
     for (const [symbolId, { distance }] of distanceBySymbol) {
       const fanIn = fanInOutMap.get(symbolId)?.fanIn ?? 0;
       const symbol = symbolsMap.get(symbolId);
+      // External symbols (from SCIP) cannot be impacted by local changes
+      if (symbol?.external) continue;
       const relPath = symbol ? filesMap.get(symbol.fileId)?.relPath : null;
       const testProximity = relPath && isTestFile(relPath) ? 1 : 0;
 

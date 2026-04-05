@@ -53,6 +53,7 @@ const ACTION_TAGS: Record<string, ActionTag[]> = {
   "memory.surface": ["memory"],
   "usage.stats": ["query"],
   "file.read": ["repo"],
+  "scip.ingest": ["repo"],
 };
 
 const META_TOOL_TAGS: Record<string, ActionTag[]> = {
@@ -408,6 +409,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "memory.surface": "Auto-surface relevant memories",
   "usage.stats": "Get cumulative token savings statistics",
   "file.read": "Read non-indexed file content (templates, configs, docs)",
+  "scip.ingest": "Ingest a pre-built SCIP index to overlay compiler-grade cross-references onto the symbol graph",
 };
 
 const META_TOOL_DESCRIPTIONS: Record<string, string> = {

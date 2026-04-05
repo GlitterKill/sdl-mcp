@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - Unreleased
+
+### Added
+
+- **SCIP Integration**: Ingest pre-built SCIP index files for compiler-grade cross-references
+  - `sdl.scip.ingest` MCP tool action with dry-run support
+  - Auto-ingest on `sdl.index.refresh` when configured
+  - External dependency symbols as first-class graph nodes
+  - New `"implements"` edge type for interface/trait implementations
+  - Rust decoder (primary) with TypeScript fallback
+  - SCIP-only symbols survive live-index reconciliation
+  - `excludeExternal` filter for symbol search
+
 ## [0.10.3] - 2026-04-04
 
 ### Added

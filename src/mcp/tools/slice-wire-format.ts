@@ -6,7 +6,7 @@ import type {
   CompactGroupedEdgeV3,
   SliceBuildWireFormat,
 } from "../tools.js";
-import type { Visibility } from "../../domain/types.js";
+import type { EdgeType, Visibility } from "../../domain/types.js";
 import {
   AST_FINGERPRINT_COMPACT_WIRE_LENGTH,
   SYMBOL_ID_COMPACT_WIRE_LENGTH,
@@ -694,12 +694,12 @@ export function decodeCompactGraphSliceV3ToV2(
 export function decodeCompactEdgesV2ToV1(
   edges: Array<[number, number, number, number]>,
   edgeTypes?: string[],
-): Array<[number, number, "import" | "call" | "config", number]> {
+): Array<[number, number, EdgeType, number]> {
   const types = edgeTypes ?? ["import", "call", "config"];
   return edges.map(([from, to, typeIdx, weight]) => [
     from,
     to,
-    (types[typeIdx] ?? "import") as "import" | "call" | "config",
+    (types[typeIdx] ?? "import") as EdgeType,
     weight,
   ]);
 }
@@ -707,9 +707,9 @@ export function decodeCompactEdgesV2ToV1(
 export function decodeCompactEdgesV3ToV1(
   edges: CompactGroupedEdgeV3[],
   edgeTypes?: string[],
-): Array<[number, number, "import" | "call" | "config", number]> {
+): Array<[number, number, EdgeType, number]> {
   const types = edgeTypes ?? ["import", "call", "config"];
-  const result: Array<[number, number, "import" | "call" | "config", number]> =
+  const result: Array<[number, number, EdgeType, number]> =
     [];
 
   for (const edge of edges) {

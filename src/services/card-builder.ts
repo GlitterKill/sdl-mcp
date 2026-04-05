@@ -15,6 +15,7 @@ import type {
   SymbolMetrics,
   SymbolSignature,
 } from "../mcp/types.js";
+import type { SymbolKind } from "../domain/types.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { symbolCardCache } from "../graph/cache.js";
@@ -318,6 +319,39 @@ export async function buildCardForSymbol(
     throw new DatabaseError(
       `Symbol ${symbolId} belongs to repo "${symbol.repoId}", not "${repoId}"`,
     );
+  }
+
+  // External symbols (from SCIP) get a minimal card without code details
+  if (symbol.external) {
+    const latestVer = latestVersion ?? await ladybugDb.getLatestVersion(conn, repoId);
+    const minimalCard: SymbolCard = {
+      symbolId,
+      repoId,
+      file: "",
+      range: { startLine: 0, startCol: 0, endLine: 0, endCol: 0 },
+      kind: symbol.kind as SymbolKind,
+      name: symbol.name,
+      exported: symbol.exported,
+      external: true,
+      packageName: symbol.packageName ?? undefined,
+      packageVersion: symbol.packageVersion ?? undefined,
+      scipSymbol: symbol.scipSymbol ?? undefined,
+      deps: { imports: [], calls: [] },
+      detailLevel: "minimal",
+      version: {
+        ledgerVersion: latestVer?.versionId ?? "",
+        astFingerprint: symbol.astFingerprint,
+      },
+    };
+    const minimalETag = hashCard(minimalCard);
+    if (ifNoneMatch && ifNoneMatch === minimalETag) {
+      return {
+        notModified: true,
+        etag: minimalETag,
+        ledgerVersion: latestVer?.versionId ?? "",
+      };
+    }
+    return { ...minimalCard, etag: minimalETag };
   }
 
   const legacySymbol = toLegacySymbolRow(symbol);

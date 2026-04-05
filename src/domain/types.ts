@@ -2,7 +2,7 @@
 // Domain primitives — canonical definitions (no imports from ../db/)
 // ---------------------------------------------------------------------------
 
-export type EdgeType = "import" | "call" | "config";
+export type EdgeType = "import" | "call" | "config" | "implements";
 export type EdgeResolutionStrategy = "exact" | "heuristic" | "unresolved";
 export type SymbolKind =
   | "function"
@@ -195,6 +195,13 @@ export interface SymbolCard {
   metrics?: SymbolMetrics;
   detailLevel?: CardDetailLevel;
   etag?: string;
+
+  // SCIP integration fields
+  external?: boolean;
+  scipSymbol?: string;
+  source?: "treesitter" | "scip" | "both";
+  packageName?: string;
+  packageVersion?: string;
 
   version: {
     ledgerVersion: VersionId;

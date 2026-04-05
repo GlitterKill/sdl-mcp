@@ -12,6 +12,7 @@ pub mod lang;
 pub mod parse;
 pub mod process;
 pub mod scanner;
+pub mod scip;
 pub mod types;
 
 use types::{
@@ -210,3 +211,41 @@ fn num_cpus() -> usize {
         .unwrap_or(1);
     cpus.saturating_sub(1).max(1)
 }
+
+
+// --- SCIP decoder napi exports ---
+
+use std::sync::Arc;
+use scip::decoder::ScipDecodeState;
+
+#[napi]
+pub struct ScipDecodeHandle {
+    state: Arc<ScipDecodeState>,
+}
+
+#[napi]
+pub fn scip_decode_start(file_path: String) -> napi::Result<ScipDecodeHandle> {
+    let state = ScipDecodeState::new(&file_path)?;
+    Ok(ScipDecodeHandle {
+        state: Arc::new(state),
+    })
+}
+
+#[napi]
+impl ScipDecodeHandle {
+    #[napi]
+    pub fn metadata(&self) -> napi::Result<scip::types::NapiScipMetadata> {
+        self.state.metadata()
+    }
+
+    #[napi]
+    pub fn next_document(&self) -> napi::Result<Option<scip::types::NapiScipDocument>> {
+        self.state.next_document()
+    }
+
+    #[napi]
+    pub fn external_symbols(&self) -> napi::Result<Vec<scip::types::NapiScipExternalSymbol>> {
+        self.state.external_symbols()
+    }
+}
+

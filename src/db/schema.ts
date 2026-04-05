@@ -52,6 +52,12 @@ export interface SymbolRow {
   role_tags_json?: string | null;
   search_text?: string | null;
 
+  // SCIP integration fields
+  external?: 0 | 1;
+  package_name?: string | null;
+  package_version?: string | null;
+  scip_symbol?: string | null;
+
   updated_at: string;
 }
 

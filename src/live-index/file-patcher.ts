@@ -10,6 +10,11 @@ import {
 import { parseDraftFile, type DraftParseResult } from "./draft-parser.js";
 import { IndexError } from "../domain/errors.js";
 import { logger } from "../util/logger.js";
+import {
+  diffSymbols,
+  toExistingSymbol,
+  toNewSymbol,
+} from "./symbol-diff.js";
 
 export interface SavedFilePatchRequest {
   repoId: string;
@@ -25,6 +30,9 @@ export interface SavedFilePatchResult {
   filePath: string;
   fileId: string;
   symbolsUpserted: number;
+  symbolsAdded: number;
+  symbolsRemoved: number;
+  symbolsPreserved: number;
   edgesUpserted: number;
   referencesUpserted: number;
   parseResult: DraftParseResult;
@@ -87,36 +95,116 @@ export async function patchSavedFile(
     lastIndexedAt: now,
   };
 
+  // Load existing symbols for diff/merge when the file already exists in the DB
+  const existingSymbols = existingFile
+    ? await ladybugDb.getSymbolsByFile(conn, existingFile.fileId)
+    : [];
+
+  // Diff existing DB symbols against new tree-sitter-derived symbols
+  const newSymbols = parseResult.symbols.map(toNewSymbol);
+  const existingMapped = existingSymbols.map((row) =>
+    toExistingSymbol(row as Parameters<typeof toExistingSymbol>[0]),
+  );
+  const diff = diffSymbols(existingMapped, newSymbols);
+
   await withWriteConn(async (wConn) => {
     await ladybugDb.withTransaction(wConn, async (txConn) => {
       await ladybugDb.upsertFile(txConn, durableFile);
-      if (existingFile) {
-        await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
-        await ladybugDb.deleteSymbolReferencesByFileId(
-          txConn,
-          existingFile.fileId,
+
+      // Always refresh symbol references for this file
+      await ladybugDb.deleteSymbolReferencesByFileId(
+        txConn,
+        durableFile.fileId,
+      );
+      await ladybugDb.insertSymbolReferences(txConn, parseResult.references);
+
+      // --- Matched symbols: update properties, refresh non-SCIP edges ---
+      if (diff.matched.length > 0) {
+        const matchedOldIds = diff.matched.map((m) => m.old.symbolId);
+
+        // Delete only non-SCIP outgoing edges for matched symbols.
+        // SCIP edges (resolverId === "scip") are preserved.
+        await ladybugDb.deleteNonScipOutgoingEdges(txConn, matchedOldIds);
+
+        // Upsert each matched symbol with updated properties from tree-sitter.
+        // Build a lookup from new symbolId -> parse result symbol for fast access.
+        const newSymbolLookup = new Map(
+          parseResult.symbols.map((s) => [s.symbolId, s]),
         );
-      } else {
-        await ladybugDb.deleteSymbolReferencesByFileId(
-          txConn,
-          durableFile.fileId,
+
+        for (const { old: oldSym, new: newSym } of diff.matched) {
+          const freshSymbol = newSymbolLookup.get(newSym.symbolId);
+          if (!freshSymbol) continue;
+
+          // If the old symbol came from SCIP, promote source to "both"
+          // since tree-sitter also found it.  We preserve the old symbolId
+          // so all existing edges, metrics, and embeddings remain linked.
+          await ladybugDb.upsertSymbol(txConn, {
+            ...freshSymbol,
+            symbolId: oldSym.symbolId,
+            updatedAt: now,
+          });
+        }
+
+        // Insert fresh tree-sitter edges for matched symbols.
+        // Filter to edges originating from matched old symbol IDs.
+        const matchedNewToOldId = new Map(
+          diff.matched.map((m) => [m.new.symbolId, m.old.symbolId]),
         );
+        const matchedEdges = parseResult.edges
+          .filter((edge) => matchedNewToOldId.has(edge.fromSymbolId))
+          .map((edge) => ({
+            ...edge,
+            // Remap fromSymbolId to the old (stable) symbol ID
+            fromSymbolId:
+              matchedNewToOldId.get(edge.fromSymbolId) ?? edge.fromSymbolId,
+            createdAt: now,
+          }));
+        if (matchedEdges.length > 0) {
+          await ladybugDb.insertEdges(txConn, matchedEdges);
+        }
       }
 
-      await ladybugDb.insertSymbolReferences(txConn, parseResult.references);
-      for (const symbol of parseResult.symbols) {
-        await ladybugDb.upsertSymbol(txConn, {
-          ...symbol,
-          updatedAt: now,
+      // --- Added symbols: insert fresh ---
+      if (diff.added.length > 0) {
+        const addedIds = new Set(diff.added.map((s) => s.symbolId));
+        for (const symbol of parseResult.symbols) {
+          if (addedIds.has(symbol.symbolId)) {
+            await ladybugDb.upsertSymbol(txConn, {
+              ...symbol,
+              updatedAt: now,
+            });
+          }
+        }
+
+        // Insert edges originating from added symbols
+        const addedEdges = parseResult.edges
+          .filter((edge) => addedIds.has(edge.fromSymbolId))
+          .map((edge) => ({
+            ...edge,
+            createdAt: now,
+          }));
+        if (addedEdges.length > 0) {
+          await ladybugDb.insertEdges(txConn, addedEdges);
+        }
+      }
+
+      // --- Removed symbols: delete (source != "scip") ---
+      if (diff.removed.length > 0) {
+        const removedIds = diff.removed.map((s) => s.symbolId);
+        await ladybugDb.deleteSymbolsByIds(txConn, removedIds);
+      }
+
+      // --- Preserved symbols: SCIP-only, leave untouched ---
+      // (No action needed -- they survive reconciliation.)
+      if (diff.preserved.length > 0) {
+        logger.debug("SCIP-only symbols preserved during reconciliation", {
+          repoId: request.repoId,
+          filePath: relPath,
+          preservedCount: diff.preserved.length,
+          symbolIds: diff.preserved.map((s) => s.symbolId),
         });
       }
-      await ladybugDb.insertEdges(
-        txConn,
-        parseResult.edges.map((edge) => ({
-          ...edge,
-          createdAt: now,
-        })),
-      );
     });
   });
 
@@ -124,7 +212,10 @@ export async function patchSavedFile(
     repoId: request.repoId,
     filePath: relPath,
     fileId: durableFile.fileId,
-    symbolsUpserted: parseResult.symbols.length,
+    symbolsUpserted: diff.matched.length + diff.added.length,
+    symbolsAdded: diff.added.length,
+    symbolsRemoved: diff.removed.length,
+    symbolsPreserved: diff.preserved.length,
     edgesUpserted: parseResult.edges.length,
     referencesUpserted: parseResult.references.length,
     parseResult: {
