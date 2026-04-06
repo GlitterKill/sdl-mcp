@@ -11,6 +11,9 @@ on:
     - cron: "23 7 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   tests:
     # No custom 'name' — GitHub auto-appends matrix values (e.g. "tests (ubuntu-latest)").
