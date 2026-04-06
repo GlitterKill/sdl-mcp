@@ -57,7 +57,7 @@
     "benchmark:v067": "node scripts/benchmark/v067-baseline.ts",
     "benchmark:v067:check": "node scripts/benchmark/v067-baseline.ts --check devdocs/benchmarks/v067-baseline.json",
     "benchmark:v067:save": "node scripts/benchmark/v067-baseline.ts --out devdocs/benchmarks/v067-baseline.json",
-    "package:exe": "node scripts/build-exe.js",
+    "package:exe": "npm run build:scripts && node dist/scripts/build-exe.js",
     "prepack": "npm run build:runtime",
     "build:native": "napi build --release --cargo-cwd native --config native/package.json native",
     "build:native:debug": "napi build --cargo-cwd native --config native/package.json native",

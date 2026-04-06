@@ -12,6 +12,7 @@
     "skipLibCheck": true
   },
   "include": [
+    "scripts/build-exe.ts",
     "scripts/migrate.ts",
     "scripts/index-repo.ts",
     "scripts/dump-symbol.ts",

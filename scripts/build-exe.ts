@@ -1,12 +1,74 @@
 #!/usr/bin/env node
 
+import { execFileSync, execSync } from "child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
+import { basename, dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
-import { execSync } from "child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+export function resolveRepoRootFromScriptDir(scriptDir: string): string {
+  if (
+    basename(scriptDir) === "scripts" &&
+    basename(dirname(scriptDir)) === "dist"
+  ) {
+    return dirname(dirname(scriptDir));
+  }
+  return dirname(scriptDir);
+}
+
+const REPO_ROOT = resolveRepoRootFromScriptDir(__dirname);
+const DIST_DIR = join(REPO_ROOT, "dist");
+
+export function resolveNpxExecutable(
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return platform === "win32" ? "npx.cmd" : "npx";
+}
+
+interface CommandInvocation {
+  command: string;
+  args: string[];
+}
+
+export function buildPkgInvocation(
+  entryFile: string,
+  targets: string[],
+  outputFile: string,
+  platform: NodeJS.Platform = process.platform,
+): CommandInvocation {
+  return {
+    command: resolveNpxExecutable(platform),
+    args: [
+      "pkg",
+      entryFile,
+      "--targets",
+      targets.join(","),
+      "--output",
+      outputFile,
+    ],
+  };
+}
+
+export function buildNexeInvocation(
+  entryFile: string,
+  outputFile: string,
+  platform: NodeJS.Platform = process.platform,
+): CommandInvocation {
+  return {
+    command: resolveNpxExecutable(platform),
+    args: ["nexe", entryFile, "--output", outputFile],
+  };
+}
+
+function formatInvocation(invocation: CommandInvocation): string {
+  return [invocation.command, ...invocation.args].join(" ");
+}
+
+function runInvocation(invocation: CommandInvocation): void {
+  execFileSync(invocation.command, invocation.args, { stdio: "inherit" });
+}
 
 function log(message: string): void {
   console.log(`[build-exe] ${message}`);
@@ -20,7 +82,9 @@ function error(message: string): void {
 function checkPrerequisites(): void {
   log("Checking prerequisites...");
 
-  const pkgJson = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8"));
+  const pkgJson = JSON.parse(
+    readFileSync(join(REPO_ROOT, "package.json"), "utf-8"),
+  );
 
   if (!pkgJson.dependencies) {
     error("No dependencies found in package.json");
@@ -30,7 +94,7 @@ function checkPrerequisites(): void {
 
   try {
     execSync("npm list --depth=0", { stdio: "pipe" });
-  } catch (err) {
+  } catch {
     error("Dependencies not installed. Run 'npm install' first.");
   }
 
@@ -43,7 +107,7 @@ function buildTypeScript(): void {
   try {
     execSync("npm run build", { stdio: "inherit" });
     log("✅ TypeScript build successful");
-  } catch (err) {
+  } catch {
     error("TypeScript build failed");
   }
 }
@@ -53,22 +117,23 @@ function buildWithPkg(): void {
 
   try {
     execSync("npm list pkg", { stdio: "pipe" });
-  } catch (err) {
+  } catch {
     log("pkg not found, installing...");
     try {
       execSync("npm install --save-dev pkg", { stdio: "inherit" });
-    } catch (installErr) {
+    } catch {
       error("Failed to install pkg");
     }
   }
 
-  const outputDir = join(__dirname, "../dist/exe");
+  const outputDir = join(DIST_DIR, "exe");
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });
   }
 
-  const pkgJson = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8"));
   const targets: string[] = [];
+  const entryFile = join(DIST_DIR, "cli", "index.js");
+  const outputFile = join(outputDir, "sdl-mcp");
 
   if (process.platform === "win32") {
     targets.push("node18-win-x64");
@@ -81,24 +146,26 @@ function buildWithPkg(): void {
   log(`Building targets: ${targets.join(", ")}`);
 
   try {
-    const pkgCmd = `npx pkg dist/cli/index.js --targets ${targets.join(",")} --output ${outputDir}/sdl-mcp`;
-    log(`Running: ${pkgCmd}`);
-    execSync(pkgCmd, { stdio: "inherit" });
+    const pkgInvocation = buildPkgInvocation(entryFile, targets, outputFile);
+    log(`Running: ${formatInvocation(pkgInvocation)}`);
+    runInvocation(pkgInvocation);
     log("✅ Single executable built successfully");
-  } catch (err) {
+  } catch {
     log("⚠️  pkg build encountered issues, trying alternative method...");
 
     try {
-      const altCmd = `npx pkg . --targets ${targets.join(",")} --output ${outputDir}/sdl-mcp`;
-      log(`Running: ${altCmd}`);
-      execSync(altCmd, { stdio: "inherit" });
+      const altInvocation = buildPkgInvocation(REPO_ROOT, targets, outputFile);
+      log(`Running: ${formatInvocation(altInvocation)}`);
+      runInvocation(altInvocation);
       log("✅ Single executable built successfully");
-    } catch (altErr) {
+    } catch {
       error("Single executable build failed");
     }
   }
 
-  log(`\nExecutable location: ${outputDir}/sdl-mcp${process.platform === "win32" ? ".exe" : ""}`);
+  log(
+    `\nExecutable location: ${outputDir}/sdl-mcp${process.platform === "win32" ? ".exe" : ""}`,
+  );
 }
 
 function buildWithNexe(): void {
@@ -106,29 +173,33 @@ function buildWithNexe(): void {
 
   try {
     execSync("npm list nexe", { stdio: "pipe" });
-  } catch (err) {
+  } catch {
     log("nexe not found, installing...");
     try {
       execSync("npm install --save-dev nexe", { stdio: "inherit" });
-    } catch (installErr) {
+    } catch {
       log("⚠️  Failed to install nexe, skipping...");
       return;
     }
   }
 
-  const outputDir = join(__dirname, "../dist/exe");
+  const outputDir = join(DIST_DIR, "exe");
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });
   }
 
-  const output = join(outputDir, `sdl-mcp${process.platform === "win32" ? ".exe" : ""}`);
+  const output = join(
+    outputDir,
+    `sdl-mcp${process.platform === "win32" ? ".exe" : ""}`,
+  );
+  const entryFile = join(DIST_DIR, "cli", "index.js");
 
   try {
-    const nexeCmd = `npx nexe dist/cli/index.js --output ${output}`;
-    log(`Running: ${nexeCmd}`);
-    execSync(nexeCmd, { stdio: "inherit" });
+    const nexeInvocation = buildNexeInvocation(entryFile, output);
+    log(`Running: ${formatInvocation(nexeInvocation)}`);
+    runInvocation(nexeInvocation);
     log("✅ Single executable built successfully with nexe");
-  } catch (err) {
+  } catch {
     log("⚠️  nexe build encountered issues");
   }
 }
@@ -136,7 +207,7 @@ function buildWithNexe(): void {
 function createInstallerScript(): void {
   log("Creating installation script...");
 
-  const outputDir = join(__dirname, "../dist/exe");
+  const outputDir = join(DIST_DIR, "exe");
   const installerPath = join(outputDir, "install.sh");
 
   const scriptContent = `#!/bin/bash
@@ -235,14 +306,18 @@ function main(): void {
   log("");
   log("Next steps:");
   log("  - Test the executable: ./dist/exe/sdl-mcp --help");
-  log("  - Run installer script (Linux/Mac: ./dist/exe/install.sh, Windows: ./dist/exe/install.ps1)");
+  log(
+    "  - Run installer script (Linux/Mac: ./dist/exe/install.sh, Windows: ./dist/exe/install.ps1)",
+  );
   log("  - Or manually copy to your PATH");
   log("=====================================");
 }
 
-
-try {
-  main();
-} catch (err) {
-  error(`Fatal error: ${err instanceof Error ? err.message : String(err)}`);
+const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
+if (__filename === invokedPath) {
+  try {
+    main();
+  } catch (err) {
+    error(`Fatal error: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
