@@ -48,6 +48,7 @@ import {
 } from "../../util/tracing.js";
 import type { ToolContext } from "../../server.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
+import type { Connection } from "kuzu";
 
 // Health snapshot cache with 30s TTL to avoid expensive recomputation.
 // lastKnownHealth persists indefinitely as a stale fallback when fresh computation times out.
@@ -540,6 +541,47 @@ export async function handleIndexRefresh(
     return response;
   };
 
+  // Post-refresh work shared by sync (executeRefresh) and async (bgRefresh) paths:
+  // cache invalidation + optional SCIP auto-ingest. Kept as a closure so both
+  // paths stay in sync — prior versions duplicated this block and the async
+  // path silently skipped SCIP ingestion when autoIngestOnRefresh was set.
+  const runPostRefresh = async (conn: Connection): Promise<void> => {
+    clearSliceCache();
+    clearOverviewCache();
+    symbolCardCache.clear();
+    invalidateGraphSnapshot(repoId);
+
+    try {
+      const appConfig = loadConfig();
+      const scipConfig = appConfig.scip;
+      if (scipConfig?.enabled && scipConfig?.autoIngestOnRefresh) {
+        const repo = await ladybugDb.getRepo(conn, repoId);
+        if (repo?.rootPath) {
+          const { autoIngestScipIndexes } = await import(
+            "../../scip/ingestion.js"
+          );
+          const scipResults = await autoIngestScipIndexes(
+            repoId,
+            scipConfig,
+            repo.rootPath,
+          );
+          if (scipResults.length > 0) {
+            logger.info("Auto-ingested SCIP indexes after refresh", {
+              repoId,
+              count: scipResults.length,
+              statuses: scipResults.map((r) => r.status),
+            });
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn("SCIP auto-ingest failed (non-fatal)", {
+        repoId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   const executeRefresh = async () => {
     const conn = await getLadybugConn();
     const repo = await ladybugDb.getRepo(conn, repoId);
@@ -575,35 +617,7 @@ export async function handleIndexRefresh(
       includeTimings: includeDiagnostics,
     });
 
-    clearSliceCache();
-    clearOverviewCache();
-    symbolCardCache.clear();
-    invalidateGraphSnapshot(repoId);
-
-    // Auto-ingest SCIP indexes if configured
-    try {
-      const appConfig = loadConfig();
-      const scipConfig = appConfig.scip;
-      if (scipConfig?.enabled && scipConfig?.autoIngestOnRefresh) {
-        const repo = await ladybugDb.getRepo(conn, repoId);
-        if (repo?.rootPath) {
-          const { autoIngestScipIndexes } = await import("../../scip/ingestion.js");
-          const scipResults = await autoIngestScipIndexes(repoId, scipConfig, repo.rootPath);
-          if (scipResults.length > 0) {
-            logger.info("Auto-ingested SCIP indexes after refresh", {
-              repoId,
-              count: scipResults.length,
-              statuses: scipResults.map((r) => r.status),
-            });
-          }
-        }
-      }
-    } catch (err) {
-      logger.warn("SCIP auto-ingest failed (non-fatal)", {
-        repoId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    await runPostRefresh(conn);
 
     return toResponse(result);
   };
@@ -618,10 +632,7 @@ export async function handleIndexRefresh(
       const repo = await ladybugDb.getRepo(conn, repoId);
       if (!repo) throw new DatabaseError(`Repository ${repoId} not found`);
       const result = await indexRepo(repoId, mode, undefined, undefined);
-      clearSliceCache();
-      clearOverviewCache();
-      symbolCardCache.clear();
-      invalidateGraphSnapshot(repoId);
+      await runPostRefresh(conn);
       return toResponse(result);
     };
     bgRefresh().then(

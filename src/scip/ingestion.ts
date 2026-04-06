@@ -225,7 +225,7 @@ export async function ingestScipIndex(
 
       if (externalBatch.length > 0 && !dryRun) {
         await withWriteConn(async (wConn) => {
-          await batchMergeExternalSymbols(wConn, externalBatch);
+          await batchMergeExternalSymbols(wConn, request.repoId, externalBatch);
         });
       }
       externalSymbolsCreated = externalBatch.length;
@@ -326,7 +326,7 @@ export async function ingestScipIndex(
       const edgeBatchCreate: typeof rawEdges = [];
 
       for (const edge of rawEdges) {
-        const key = `${edge.sourceSymbolId}:${edge.targetSymbolId}`;
+        const key = `${edge.sourceSymbolId}:${edge.targetSymbolId}:${edge.edgeType}`;
         const existingRaw = existingEdgesMap.get(key) ?? null;
 
         // Construct ExistingEdge with source/target for classifyEdgeAction

@@ -342,7 +342,12 @@ export async function batchGetExistingEdges(
     { edgeType: string; confidence: number; resolution: string; resolverId: string }
   >();
   for (const row of rows) {
-    const key = `${row.sourceId}:${row.targetId}`;
+    // Key includes edgeType so multiple edges between the same pair
+    // (e.g. both a `call` and an `import` from A to B) are tracked
+    // independently. A shorter key collapsed them and caused edgesCreated
+    // vs edgesUpgraded counts to be misattributed when the same pair had
+    // edges of different types.
+    const key = `${row.sourceId}:${row.targetId}:${row.edgeType}`;
     if (!result.has(key)) {
       result.set(key, {
         edgeType: row.edgeType,
@@ -579,6 +584,7 @@ const SYMBOL_BATCH_SIZE = 100;
  */
 export async function batchMergeExternalSymbols(
   conn: Connection,
+  repoId: string,
   symbols: Array<{
     symbolId: string;
     kind: string;
@@ -604,9 +610,15 @@ export async function batchMergeExternalSymbols(
       const batch = symbols.slice(i, i + SYMBOL_BATCH_SIZE);
 
       for (const symbol of batch) {
+        // Also create the SYMBOL_IN_REPO edge so external symbols are
+        // reachable from the Repo node (required for sdl.symbol.search and
+        // any other query that scopes symbols by repo via <-[:SYMBOL_IN_REPO]-).
+        // Without this edge external symbols are graph-orphaned and the
+        // documented excludeExternal filter in symbol.search has no effect.
         await exec(
           txConn,
-          `MERGE (s:Symbol {symbolId: $symbolId})
+          `MATCH (r:Repo {repoId: $repoId})
+           MERGE (s:Symbol {symbolId: $symbolId})
            ON CREATE SET
                s.kind = $kind,
                s.name = $name,
@@ -636,8 +648,10 @@ export async function batchMergeExternalSymbols(
                s.source = $source,
                s.packageName = $packageName,
                s.packageVersion = $packageVersion,
-               s.updatedAt = $updatedAt`,
+               s.updatedAt = $updatedAt
+           MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
           {
+            repoId,
             symbolId: symbol.symbolId,
             kind: symbol.kind,
             name: symbol.name,

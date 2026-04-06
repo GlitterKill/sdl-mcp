@@ -1017,6 +1017,10 @@ interface SearchSymbolsRawRow {
   summaryQuality: number | null;
   summarySource: string | null;
   updatedAt: string;
+  external: unknown;
+  scipSymbol: string | null;
+  packageName: string | null;
+  packageVersion: string | null;
 }
 
 function mapSearchSymbolRow(
@@ -1044,6 +1048,10 @@ function mapSearchSymbolRow(
     summaryQuality: row.summaryQuality ?? undefined,
     summarySource: row.summarySource ?? undefined,
     updatedAt: row.updatedAt,
+    external: toBoolean(row.external),
+    scipSymbol: row.scipSymbol,
+    packageName: row.packageName,
+    packageVersion: row.packageVersion,
   };
 }
 
@@ -1056,12 +1064,13 @@ async function searchSymbolsSingleTerm(
 ): Promise<SearchSymbolsRawRow[]> {
   return queryAll<SearchSymbolsRawRow>(
     conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
      WHERE (lower(s.name) CONTAINS lower($query)
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
         OR lower(coalesce(s.searchText, '')) CONTAINS lower($query))
      ${kinds && kinds.length > 0 ? "AND s.kind IN $kinds" : ""}
      ${excludeExternal ? "AND coalesce(s.external, false) = false" : ""}
+     OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
      WITH s, f,
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
@@ -1092,8 +1101,8 @@ async function searchSymbolsSingleTerm(
           END AS kindRank,
           CASE WHEN lower(s.name) CONTAINS lower($query) THEN 0 ELSE 1 END AS nameMatchRank
      RETURN s.symbolId AS symbolId,
-            f.fileId AS fileId,
-            f.relPath AS file,
+            coalesce(f.fileId, '') AS fileId,
+            coalesce(f.relPath, '') AS file,
             s.kind AS kind,
             s.name AS name,
             s.exported AS exported,
@@ -1110,7 +1119,11 @@ async function searchSymbolsSingleTerm(
             s.sideEffectsJson AS sideEffectsJson,
             s.summaryQuality AS summaryQuality,
             s.summarySource AS summarySource,
-            s.updatedAt AS updatedAt
+            s.updatedAt AS updatedAt,
+            coalesce(s.external, false) AS external,
+            s.scipSymbol AS scipSymbol,
+            s.packageName AS packageName,
+            s.packageVersion AS packageVersion
      ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
      LIMIT $limit`,
     {
@@ -1235,12 +1248,13 @@ async function searchSymbolsLiteSingleTerm(
 ): Promise<SearchSymbolLiteRow[]> {
   return queryAll<SearchSymbolLiteRow>(
     conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
      WHERE (lower(s.name) CONTAINS lower($query)
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
         OR lower(coalesce(s.searchText, '')) CONTAINS lower($query))
      ${kinds && kinds.length > 0 ? "AND s.kind IN $kinds" : ""}
      ${excludeExternal ? "AND coalesce(s.external, false) = false" : ""}
+     OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
      WITH s, f,
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
@@ -1272,8 +1286,8 @@ async function searchSymbolsLiteSingleTerm(
            CASE WHEN lower(s.name) CONTAINS lower($query) THEN 0 ELSE 1 END AS nameMatchRank
      RETURN s.symbolId AS symbolId,
             s.name AS name,
-            f.fileId AS fileId,
-            f.relPath AS file,
+            coalesce(f.fileId, '') AS fileId,
+            coalesce(f.relPath, '') AS file,
             s.kind AS kind,
             s.exported AS exported
      ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank

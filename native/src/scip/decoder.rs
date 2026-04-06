@@ -20,6 +20,20 @@ pub struct ScipDecodeState {
 impl ScipDecodeState {
     /// Parse a SCIP index file from disk into an in-memory protobuf structure.
     pub fn new(file_path: &str) -> NapiResult<Self> {
+        // Size guard — reject SCIP files larger than MAX_SCIP_INDEX_BYTES
+        // to prevent OOM of the Node process when reading very large
+        // monorepo indexes. Matches the 256 MB limit in the TS decoder.
+        const MAX_SCIP_INDEX_BYTES: u64 = 256 * 1024 * 1024;
+        let metadata = std::fs::metadata(file_path).map_err(|e| {
+            napi::Error::from_reason(format!("Failed to stat SCIP file: {}", e))
+        })?;
+        if metadata.len() > MAX_SCIP_INDEX_BYTES {
+            return Err(napi::Error::from_reason(format!(
+                "SCIP index file too large: {} bytes (max {} bytes)",
+                metadata.len(),
+                MAX_SCIP_INDEX_BYTES
+            )));
+        }
         let bytes = std::fs::read(file_path)
             .map_err(|e| napi::Error::from_reason(format!("Failed to read SCIP file: {}", e)))?;
         let index = Index::decode(&bytes[..])

@@ -24,6 +24,9 @@ native/*.node
 *.lbug.wal
 *.lbug.shadow
 
+# SCIP index binaries (generated; never commit)
+*.scip
+
 # Environment
 .env
 .env.local
