@@ -92,7 +92,6 @@ export interface ScipIngestResponse {
   documentsProcessed: number;
   documentsSkipped: number;
   symbolsMatched: number;
-  symbolsCreated: number;
   externalSymbolsCreated: number;
   edgesCreated: number;
   edgesUpgraded: number;

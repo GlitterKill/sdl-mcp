@@ -30,7 +30,11 @@ import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import { ScipFileNotFoundError, ScipIngestionError } from "../domain/errors.js";
 import type { SymbolId } from "../domain/types.js";
 import { logger } from "../util/logger.js";
-import { getRelativePath, normalizePath, validatePathWithinRootAsync } from "../util/paths.js";
+import {
+  getRelativePath,
+  normalizePath,
+  validatePathWithinRootAsync,
+} from "../util/paths.js";
 import { createScipDecoder, getDecoderBackend } from "./decoder-factory.js";
 import {
   buildEdgesFromOccurrences,
@@ -72,7 +76,6 @@ function zeroCounts(): Omit<
     documentsProcessed: 0,
     documentsSkipped: 0,
     symbolsMatched: 0,
-    symbolsCreated: 0,
     externalSymbolsCreated: 0,
     edgesCreated: 0,
     edgesUpgraded: 0,
@@ -239,7 +242,6 @@ export async function ingestScipIndex(
     let documentsProcessed = 0;
     let documentsSkipped = 0;
     let symbolsMatched = 0;
-    let symbolsCreated = 0;
     let skippedSymbols = 0;
     let edgesCreated = 0;
     let edgesUpgraded = 0;
@@ -262,7 +264,10 @@ export async function ingestScipIndex(
       const sdlSymbols = await getSymbolsForFile(conn, request.repoId, relPath);
 
       // Build match map: SCIP symbol -> SDL symbol
-      const { matches: matchMap, skippedCount } = buildSymbolMatchMap(doc, sdlSymbols);
+      const { matches: matchMap, skippedCount } = buildSymbolMatchMap(
+        doc,
+        sdlSymbols,
+      );
       skippedSymbols += skippedCount;
 
       // Process matched/created symbols
@@ -438,7 +443,7 @@ export async function ingestScipIndex(
           contentHash,
           ingestedAt: new Date().toISOString(),
           ledgerVersion,
-          symbolCount: symbolsMatched + symbolsCreated,
+          symbolCount: symbolsMatched,
           edgeCount: edgesCreated + edgesUpgraded + edgesReplaced,
           externalSymbolCount: externalSymbolsCreated,
           truncated: truncatedExternals,
@@ -458,7 +463,6 @@ export async function ingestScipIndex(
       documentsProcessed,
       documentsSkipped,
       symbolsMatched,
-      symbolsCreated,
       externalSymbolsCreated,
       edgesCreated,
       edgesUpgraded,
@@ -472,7 +476,6 @@ export async function ingestScipIndex(
       documentsProcessed,
       documentsSkipped,
       symbolsMatched,
-      symbolsCreated,
       externalSymbolsCreated,
       edgesCreated,
       edgesUpgraded,
@@ -483,15 +486,6 @@ export async function ingestScipIndex(
       durationMs,
     };
   } catch (err) {
-    // Ensure decoder is closed on error
-    if (decoder) {
-      try {
-        decoder.close();
-      } catch {
-        // Best-effort close
-      }
-    }
-
     // Re-throw known error types
     if (
       err instanceof ScipFileNotFoundError ||
@@ -505,6 +499,8 @@ export async function ingestScipIndex(
       `SCIP ingestion failed for "${request.indexPath}": ${message}`,
     );
   } finally {
+    // finally runs on both success and error paths, so this is the single
+    // authoritative close site for the decoder.
     if (decoder) {
       try {
         decoder.close();

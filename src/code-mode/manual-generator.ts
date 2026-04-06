@@ -4,8 +4,18 @@ import { logger } from "../util/logger.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { anyRepoHasMemoryTools } from "../config/memory-config.js";
 
-const MEMORY_FN_NAMES = new Set(["memoryStore", "memoryQuery", "memoryRemove", "memorySurface"]);
-const MEMORY_ACTIONS = new Set(["memory.store", "memory.query", "memory.remove", "memory.surface"]);
+const MEMORY_FN_NAMES = new Set([
+  "memoryStore",
+  "memoryQuery",
+  "memoryRemove",
+  "memorySurface",
+]);
+const MEMORY_ACTIONS = new Set([
+  "memory.store",
+  "memory.query",
+  "memory.remove",
+  "memory.surface",
+]);
 
 export const FN_NAME_MAP: Record<string, string> = {
   symbolSearch: "symbol.search",
@@ -119,7 +129,7 @@ function policySet(p: { policyPatch: { maxWindowLines?: number; maxWindowTokens?
 
 // === SCIP ===
 /** Ingest a pre-built SCIP index to overlay compiler-grade cross-references */
-function scipIngest(p: { indexPath: string; dryRun?: boolean }): { status: "ingested" | "alreadyIngested" | "dryRun"; documentsProcessed: number; symbolsMatched: number; symbolsCreated: number; edgesCreated: number }
+function scipIngest(p: { indexPath: string; dryRun?: boolean }): { status: "ingested" | "alreadyIngested" | "dryRun"; documentsProcessed: number; symbolsMatched: number; edgesCreated: number }
 // === Memory ===
 /** Store a development memory */
 function memoryStore(p: { type: "decision"|"bugfix"|"task_context"|"pattern"|"convention"|"architecture"|"performance"|"security"; title: string; content: string; tags?: string[]; symbolIds?: string[]; fileRelPaths?: string[] }): { memoryId: string }

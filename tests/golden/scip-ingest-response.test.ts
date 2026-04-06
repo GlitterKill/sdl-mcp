@@ -19,7 +19,6 @@ describe("SCIP Ingest Response Golden", () => {
       documentsProcessed: 5,
       documentsSkipped: 1,
       symbolsMatched: 20,
-      symbolsCreated: 3,
       externalSymbolsCreated: 10,
       edgesCreated: 30,
       edgesUpgraded: 5,
@@ -35,7 +34,6 @@ describe("SCIP Ingest Response Golden", () => {
     assert.ok(typeof response.documentsProcessed === "number");
     assert.ok(typeof response.documentsSkipped === "number");
     assert.ok(typeof response.symbolsMatched === "number");
-    assert.ok(typeof response.symbolsCreated === "number");
     assert.ok(typeof response.externalSymbolsCreated === "number");
     assert.ok(typeof response.edgesCreated === "number");
     assert.ok(typeof response.edgesUpgraded === "number");
@@ -45,9 +43,9 @@ describe("SCIP Ingest Response Golden", () => {
     assert.ok(typeof response.truncated === "boolean");
     assert.ok(typeof response.durationMs === "number");
 
-    // Verify all 14 fields are present
+    // Verify all 13 fields are present
     const keys = Object.keys(response);
-    assert.equal(keys.length, 14);
+    assert.equal(keys.length, 13);
   });
 
   it("should accept all valid status values", () => {
@@ -64,7 +62,6 @@ describe("SCIP Ingest Response Golden", () => {
         documentsProcessed: 0,
         documentsSkipped: 0,
         symbolsMatched: 0,
-        symbolsCreated: 0,
         externalSymbolsCreated: 0,
         edgesCreated: 0,
         edgesUpgraded: 0,
@@ -91,7 +88,6 @@ describe("SCIP Ingest Response Golden", () => {
         documentsProcessed: 0,
         documentsSkipped: 0,
         symbolsMatched: 0,
-        symbolsCreated: 0,
         externalSymbolsCreated: 0,
         edgesCreated: 0,
         edgesUpgraded: 0,
@@ -112,7 +108,6 @@ describe("SCIP Ingest Response Golden", () => {
       documentsProcessed: 10,
       documentsSkipped: 2,
       symbolsMatched: 50,
-      symbolsCreated: 5,
       externalSymbolsCreated: 15,
       edgesCreated: 80,
       edgesUpgraded: 10,
@@ -134,7 +129,6 @@ describe("SCIP Ingest Response Golden", () => {
       "externalSymbolsCreated",
       "skippedSymbols",
       "status",
-      "symbolsCreated",
       "symbolsMatched",
       "truncated",
       "unresolvedOccurrences",
@@ -151,7 +145,6 @@ describe("SCIP Ingest Response Golden", () => {
       documentsProcessed: 100,
       documentsSkipped: 0,
       symbolsMatched: 5000,
-      symbolsCreated: 200,
       externalSymbolsCreated: 1000,
       edgesCreated: 8000,
       edgesUpgraded: 500,
@@ -173,7 +166,6 @@ describe("SCIP Ingest Response Golden", () => {
       documentsProcessed: 10,
       documentsSkipped: 0,
       symbolsMatched: 45,
-      symbolsCreated: 0,
       externalSymbolsCreated: 0,
       edgesCreated: 0,
       edgesUpgraded: 0,
@@ -186,7 +178,6 @@ describe("SCIP Ingest Response Golden", () => {
 
     assert.equal(response.status, "dryRun");
     // In dry-run mode, no mutations should occur
-    assert.equal(response.symbolsCreated, 0);
     assert.equal(response.externalSymbolsCreated, 0);
     assert.equal(response.edgesCreated, 0);
     assert.equal(response.edgesUpgraded, 0);
@@ -200,7 +191,6 @@ describe("SCIP Ingest Response Golden", () => {
       documentsProcessed: 0,
       documentsSkipped: 0,
       symbolsMatched: 0,
-      symbolsCreated: 0,
       externalSymbolsCreated: 0,
       edgesCreated: 0,
       edgesUpgraded: 0,
@@ -224,7 +214,6 @@ describe("SCIP Ingest Response Golden", () => {
       documentsProcessed: 0,
       documentsSkipped: 0,
       symbolsMatched: 0,
-      symbolsCreated: 0,
       externalSymbolsCreated: 0,
       edgesCreated: 0,
       edgesUpgraded: 0,
@@ -239,7 +228,6 @@ describe("SCIP Ingest Response Golden", () => {
       "documentsProcessed",
       "documentsSkipped",
       "symbolsMatched",
-      "symbolsCreated",
       "externalSymbolsCreated",
       "edgesCreated",
       "edgesUpgraded",

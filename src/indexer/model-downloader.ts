@@ -2,7 +2,13 @@
  * model-downloader.ts — On-demand model download for non-bundled models (e.g., nomic-embed-text-v1.5).
  * Downloads model files from HuggingFace and caches them in the platform-specific cache directory.
  */
-import { existsSync, mkdirSync, createWriteStream, statSync, unlinkSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  createWriteStream,
+  statSync,
+  unlinkSync,
+} from "fs";
 import { join } from "path";
 import { pipeline } from "stream/promises";
 import { logger } from "../util/logger.js";
@@ -39,9 +45,15 @@ export async function ensureModelAvailable(name: string): Promise<string> {
     );
   }
 
-  logger.info(
-    `Downloading model "${name}" (~${info.dimension === 768 ? "138MB" : "22MB"})...`,
-  );
+  const sizeHint =
+    name === "all-MiniLM-L6-v2"
+      ? "22MB"
+      : name === "nomic-embed-text-v1.5"
+        ? "138MB"
+        : name === "jina-embeddings-v2-base-code"
+          ? "110MB"
+          : "unknown size";
+  logger.info(`Downloading model "${name}" (~${sizeHint})...`);
   mkdirSync(modelDir, { recursive: true });
 
   const filesToDownload = [
@@ -59,7 +71,9 @@ export async function ensureModelAvailable(name: string): Promise<string> {
 
     logger.info(`  Downloading ${file.name}...`);
     try {
-      await downloadFile(file.url, destPath, { maxBytes: info.maxDownloadBytes });
+      await downloadFile(file.url, destPath, {
+        maxBytes: info.maxDownloadBytes,
+      });
       const stats = statSync(destPath);
       const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
       logger.info(`  Downloaded ${file.name} (${sizeMB} MB)`);
@@ -99,8 +113,22 @@ async function downloadFile(
   }
 
   const fileStream = createWriteStream(destPath);
-  // Node 20+ fetch returns a web ReadableStream
-  await pipeline(response.body as unknown as NodeJS.ReadableStream, fileStream);
+  try {
+    // Node 20+ fetch returns a web ReadableStream
+    await pipeline(
+      response.body as unknown as NodeJS.ReadableStream,
+      fileStream,
+    );
+  } catch (err) {
+    // Remove partial file so the next run will retry instead of skipping
+    // via the existsSync check in ensureModelAvailable.
+    try {
+      unlinkSync(destPath);
+    } catch {
+      // Best-effort cleanup
+    }
+    throw err;
+  }
 
   // Post-download size check (guards against missing/incorrect Content-Length).
   const stats = statSync(destPath);

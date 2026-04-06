@@ -290,6 +290,9 @@ function resolveConfig(): SemanticRetrievalConfig {
       indexes: {
         "all-MiniLM-L6-v2": { indexName: "symbol_vec_minilm_l6_v2" },
         "nomic-embed-text-v1.5": { indexName: "symbol_vec_nomic_embed_v15" },
+        "jina-embeddings-v2-base-code": {
+          indexName: "symbol_vec_jina_code_v2",
+        },
       },
     },
     fusion: { strategy: "rrf", rrfK: DEFAULT_RRF_K },
@@ -366,19 +369,14 @@ export async function hybridSearch(
       results: [],
       ...(options.includeEvidence
         ? {
-            evidence: buildEvidence(
-              [],
-              [],
-              0,
-              "db-connection-unavailable",
-            ),
+            evidence: buildEvidence([], [], 0, "db-connection-unavailable"),
           }
         : {}),
     };
   }
 
   const rankings: SourceRanking[] = [];
-  
+
   const fusionStart = performance.now();
 
   // ----- FTS retrieval -----
@@ -394,7 +392,10 @@ export async function hybridSearch(
     if (ftsRows.length > 0) {
       const ranks = new Map<string, number>();
       for (let i = 0; i < ftsRows.length; i++) {
-        const sid = ftsRows[i].symbolId ?? ftsRows[i].node?.symbolId ?? ftsRows[i]._node?.symbolId;
+        const sid =
+          ftsRows[i].symbolId ??
+          ftsRows[i].node?.symbolId ??
+          ftsRows[i]._node?.symbolId;
         if (sid && !ranks.has(sid)) {
           ranks.set(sid, i + 1); // 1-based rank
         }
@@ -505,9 +506,10 @@ export async function hybridSearch(
 
   // ----- Handle empty results -----
   if (rankings.length === 0) {
-    const reason = !ftsEnabled && !vectorEnabled
-      ? "all-backends-disabled"
-      : "all-backends-returned-empty";
+    const reason =
+      !ftsEnabled && !vectorEnabled
+        ? "all-backends-disabled"
+        : "all-backends-returned-empty";
 
     logger.debug(`[hybrid-search] No results from any backend: ${reason}`);
 
@@ -530,11 +532,7 @@ export async function hybridSearch(
     results: fusedResults,
     ...(options.includeEvidence
       ? {
-          evidence: buildEvidence(
-            rankings,
-            fusedResults,
-            fusionLatencyMs,
-          ),
+          evidence: buildEvidence(rankings, fusedResults, fusionLatencyMs),
         }
       : {}),
   };
@@ -552,11 +550,11 @@ const ENTITY_FTS_CONFIG: Record<
   EntityType,
   { tableName: string; idField: string }
 > = {
-  symbol:     { tableName: "Symbol",      idField: "symbolId" },
-  memory:     { tableName: "Memory",      idField: "memoryId" },
-  cluster:    { tableName: "Cluster",     idField: "clusterId" },
-  process:    { tableName: "Process",     idField: "processId" },
-  fileSummary:{ tableName: "FileSummary", idField: "fileId" },
+  symbol: { tableName: "Symbol", idField: "symbolId" },
+  memory: { tableName: "Memory", idField: "memoryId" },
+  cluster: { tableName: "Cluster", idField: "clusterId" },
+  process: { tableName: "Process", idField: "processId" },
+  fileSummary: { tableName: "FileSummary", idField: "fileId" },
   agentFeedback: { tableName: "AgentFeedback", idField: "feedbackId" },
 };
 
@@ -569,17 +567,38 @@ const ENTITY_VECTOR_CONFIG: Partial<
   Record<EntityType, Record<string, { indexName: string; idField: string }>>
 > = {
   symbol: {
-    "all-MiniLM-L6-v2":       { indexName: "symbol_vec_minilm_l6_v2",         idField: "symbolId" },
-    "nomic-embed-text-v1.5":  { indexName: "symbol_vec_nomic_embed_v15",       idField: "symbolId" },
-    "jina-embeddings-v2-base-code": { indexName: "symbol_vec_jina_code_v2",      idField: "symbolId" },
+    "all-MiniLM-L6-v2": {
+      indexName: "symbol_vec_minilm_l6_v2",
+      idField: "symbolId",
+    },
+    "nomic-embed-text-v1.5": {
+      indexName: "symbol_vec_nomic_embed_v15",
+      idField: "symbolId",
+    },
+    "jina-embeddings-v2-base-code": {
+      indexName: "symbol_vec_jina_code_v2",
+      idField: "symbolId",
+    },
   },
   fileSummary: {
-    "all-MiniLM-L6-v2":       { indexName: "filesummary_vec_minilm_l6_v2",    idField: "fileId" },
-    "nomic-embed-text-v1.5":  { indexName: "filesummary_vec_nomic_embed_v15", idField: "fileId" },
+    "all-MiniLM-L6-v2": {
+      indexName: "filesummary_vec_minilm_l6_v2",
+      idField: "fileId",
+    },
+    "nomic-embed-text-v1.5": {
+      indexName: "filesummary_vec_nomic_embed_v15",
+      idField: "fileId",
+    },
   },
   agentFeedback: {
-    "all-MiniLM-L6-v2":       { indexName: "agentfeedback_vec_minilm_l6_v2",    idField: "feedbackId" },
-    "nomic-embed-text-v1.5":  { indexName: "agentfeedback_vec_nomic_embed_v15", idField: "feedbackId" },
+    "all-MiniLM-L6-v2": {
+      indexName: "agentfeedback_vec_minilm_l6_v2",
+      idField: "feedbackId",
+    },
+    "nomic-embed-text-v1.5": {
+      indexName: "agentfeedback_vec_nomic_embed_v15",
+      idField: "feedbackId",
+    },
   },
 };
 
@@ -607,10 +626,10 @@ function rrfFuseEntities(
   k: number,
   limit: number,
 ): EntitySearchResultItem[] {
-  const scores        = new Map<string, number>();
-  const bestSource    = new Map<string, RetrievalSource>();
+  const scores = new Map<string, number>();
+  const bestSource = new Map<string, RetrievalSource>();
   const bestEntityType = new Map<string, EntityType>();
-  const bestContrib   = new Map<string, number>();
+  const bestContrib = new Map<string, number>();
 
   for (const ranking of rankings) {
     for (const [entityId, rank] of ranking.ranks) {
@@ -693,17 +712,21 @@ export async function entitySearch(
   options: EntitySearchOptions,
 ): Promise<EntitySearchResult> {
   const config = resolveConfig();
-  const caps   = await checkRetrievalHealth(options.repoId);
+  const caps = await checkRetrievalHealth(options.repoId);
 
-  const ftsEnabled    = options.ftsEnabled    ?? config.fts.enabled;
+  const ftsEnabled = options.ftsEnabled ?? config.fts.enabled;
   const vectorEnabled = options.vectorEnabled ?? config.vector.enabled;
-  const rrfK          = options.rrfK          ?? config.fusion.rrfK ?? DEFAULT_RRF_K;
+  const rrfK = options.rrfK ?? config.fusion.rrfK ?? DEFAULT_RRF_K;
   const candidateLimit =
     options.candidateLimit ?? config.candidateLimit ?? DEFAULT_CANDIDATE_LIMIT;
   const limit = Math.min(options.limit, candidateLimit);
 
   const ALL_ENTITY_TYPES: EntityType[] = [
-    "symbol", "memory", "cluster", "process", "fileSummary",
+    "symbol",
+    "memory",
+    "cluster",
+    "process",
+    "fileSummary",
   ];
   const entityTypes = options.entityTypes ?? ALL_ENTITY_TYPES;
 
@@ -728,7 +751,14 @@ export async function entitySearch(
     return {
       results: [],
       ...(options.includeEvidence
-        ? { evidence: buildEntityEvidence([], [], 0, "db-connection-unavailable") }
+        ? {
+            evidence: buildEntityEvidence(
+              [],
+              [],
+              0,
+              "db-connection-unavailable",
+            ),
+          }
         : {}),
     };
   }
@@ -771,14 +801,21 @@ export async function entitySearch(
         for (let i = 0; i < ftsRows.length; i++) {
           // ID field varies by entity type; fall back through defensive paths.
           const idVal =
-            (ftsRows[i] as Record<string, unknown>)[entityCfg.idField] as string | undefined
-            ?? ftsRows[i].node?.[entityCfg.idField] as string | undefined
-            ?? ftsRows[i]._node?.[entityCfg.idField] as string | undefined;
+            ((ftsRows[i] as Record<string, unknown>)[entityCfg.idField] as
+              | string
+              | undefined) ??
+            (ftsRows[i].node?.[entityCfg.idField] as string | undefined) ??
+            (ftsRows[i]._node?.[entityCfg.idField] as string | undefined);
           if (idVal && !ranks.has(idVal)) {
             ranks.set(idVal, i + 1); // 1-based rank
           }
         }
-        rankings.push({ source: "fts", entityType, ranks, candidateCount: ftsRows.length });
+        rankings.push({
+          source: "fts",
+          entityType,
+          ranks,
+          candidateCount: ftsRows.length,
+        });
       }
     }
   }
@@ -786,13 +823,13 @@ export async function entitySearch(
   // ----- Vector retrieval (Symbol and FileSummary only) -----
   if (vectorEnabled) {
     const providerType = resolveEmbeddingProviderType();
-    const vectorTopK   = config.vector.topK ?? DEFAULT_VECTOR_TOP_K;
+    const vectorTopK = config.vector.topK ?? DEFAULT_VECTOR_TOP_K;
 
     for (const [modelName, modelInfo] of Object.entries(EMBEDDING_MODELS)) {
       const source = vectorSourceForModel(modelName);
       const capAvailable =
         (source === "vector:minilm" && caps.vectorMiniLM) ||
-        (source === "vector:nomic"  && caps.vectorNomic) ||
+        (source === "vector:nomic" && caps.vectorNomic) ||
         (source === "vector:jinacode" && caps.vectorJinaCode);
 
       if (!capAvailable) {
@@ -870,13 +907,13 @@ export async function entitySearch(
             // The id field varies by entity type.
             const idField = entityVecCfg.idField;
             const entityId =
-              (r as Record<string, unknown>)[idField] as string | undefined
-              ?? r.node?.[idField] as string | undefined
-              ?? r._node?.[idField] as string | undefined
-              ?? r.symbolId  // legacy fallback for Symbol
-              ?? r.node?.symbolId
-              ?? r._node?.symbolId
-              ?? "";
+              ((r as Record<string, unknown>)[idField] as string | undefined) ??
+              (r.node?.[idField] as string | undefined) ??
+              (r._node?.[idField] as string | undefined) ??
+              r.symbolId ?? // legacy fallback for Symbol
+              r.node?.symbolId ??
+              r._node?.symbolId ??
+              "";
             const score =
               (r.score ?? r._score) != null
                 ? Number(r.score ?? r._score)
@@ -902,7 +939,12 @@ export async function entitySearch(
               ranks.set(eid, i + 1);
             }
           }
-          rankings.push({ source, entityType, ranks, candidateCount: vecRows.length });
+          rankings.push({
+            source,
+            entityType,
+            ranks,
+            candidateCount: vecRows.length,
+          });
         }
       }
     }

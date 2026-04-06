@@ -24,7 +24,7 @@ export interface RankableSymbol {
   summary?: string | null;
   searchText?: string | null;
   exported?: boolean;
-  signature?: string | null;
+  signatureJson?: string | null;
   fileId?: string;
 }
 
@@ -181,11 +181,20 @@ const DECLARATIVE_KINDS = new Set(["type", "interface", "enum", "typeAlias"]);
  * When the task text mentions language-specific terms, symbols from
  * files with matching extensions get a bonus.
  */
-const LANGUAGE_AFFINITY_MAP: Array<{ keywords: string[]; extensions: string[] }> = [
+const LANGUAGE_AFFINITY_MAP: Array<{
+  keywords: string[];
+  extensions: string[];
+}> = [
   {
     keywords: [
-      "typescript", "ts file", ".ts", "type alias",
-      "zod", "tsx", "esm import", ".js extension",
+      "typescript",
+      "ts file",
+      ".ts",
+      "type alias",
+      "zod",
+      "tsx",
+      "esm import",
+      ".js extension",
     ],
     extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
   },
@@ -194,7 +203,16 @@ const LANGUAGE_AFFINITY_MAP: Array<{ keywords: string[]; extensions: string[] }>
     extensions: [".py", ".pyw"],
   },
   {
-    keywords: ["rust", "rs file", ".rs", "cargo", "crate", "impl ", "fn ", "pub fn"],
+    keywords: [
+      "rust",
+      "rs file",
+      ".rs",
+      "cargo",
+      "crate",
+      "impl ",
+      "fn ",
+      "pub fn",
+    ],
     extensions: [".rs"],
   },
   {
@@ -218,7 +236,7 @@ const LANGUAGE_AFFINITY_MAP: Array<{ keywords: string[]; extensions: string[] }>
     extensions: [".cpp", ".hpp", ".cc", ".cxx", ".hxx", ".h"],
   },
   {
-    keywords: ["php", ".php", "namespace "],
+    keywords: ["php", ".php", "<?php", "phpunit"],
     extensions: [".php", ".phtml"],
   },
   {
@@ -273,7 +291,6 @@ function scoreLanguageAffinity(
   return affinityExtensions.has(ext) ? 4 : 0;
 }
 
-
 /**
  * Structural/centrality bonus (0-8): exported, behavioral kind, focus path
  * match, and task-type affinity.
@@ -321,7 +338,7 @@ function scoreStructuralBonus(
     // This is complementary to the base exported+behavioral bonus — it
     // lifts typed interfaces and signed functions that define the API shape.
     if (DECLARATIVE_KINDS.has(sym.kind)) score += 2;
-    else if (sym.signature && BEHAVIORAL_KINDS.has(sym.kind)) score += 1;
+    else if (sym.signatureJson && BEHAVIORAL_KINDS.has(sym.kind)) score += 1;
   }
 
   return Math.min(8, score);

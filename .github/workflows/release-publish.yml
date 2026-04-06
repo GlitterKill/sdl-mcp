@@ -139,13 +139,6 @@ jobs:
       - name: Setup tree-sitter
         uses: ./.github/actions/setup-tree-sitter
 
-      - name: Setup protoc
-        # Required by native/build.rs to compile the SCIP protobuf schema via prost-build.
-        uses: arduino/setup-protoc@v3
-        with:
-          version: "27.2"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Build native addon
         run: npx napi build --release --cargo-cwd native --config native/package.json --target ${{ matrix.target }} native
         env:
