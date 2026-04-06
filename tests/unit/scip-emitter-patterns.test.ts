@@ -729,6 +729,288 @@ describe("SCIP Emitter Patterns: rust-analyzer", () => {
 });
 
 // ---------------------------------------------------------------------------
+// scip-clang patterns (best-effort C/C++ support)
+// ---------------------------------------------------------------------------
+// scip-clang (https://github.com/sourcegraph/scip-clang) emits SCIP indexes
+// from a clang compile_commands.json. The decoder and matcher are emitter-
+// agnostic, so these tests verify that scip-clang's symbol scheme (cxx
+// descriptors, namespace/class nesting, overload disambiguators, header/impl
+// splits) decodes cleanly through the same fixture pipeline as the
+// first-class emitters above.
+describe("SCIP Emitter Patterns: scip-clang", () => {
+  it("should handle free functions in a translation unit", () => {
+    const bytes = buildTestScipIndex({
+      metadata: {
+        version: 1,
+        toolName: "scip-clang",
+        toolVersion: "0.3.2",
+        projectRoot: "file:///home/user/my-project",
+      },
+      documents: [
+        {
+          relativePath: "src/utils.cpp",
+          language: "Cpp",
+          occurrences: [
+            {
+              range: [3, 5, 15],
+              symbol:
+                "scip-clang cxx my-project 1.0.0 utils/parse_line(int).",
+              symbolRoles: SymbolRole.Definition,
+            },
+            {
+              range: [9, 5, 17],
+              symbol:
+                "scip-clang cxx my-project 1.0.0 utils/format_output(s).",
+              symbolRoles: SymbolRole.Definition,
+            },
+          ],
+          symbols: [
+            {
+              symbol:
+                "scip-clang cxx my-project 1.0.0 utils/parse_line(int).",
+              kind: SK.Function,
+              displayName: "parse_line",
+              documentation: ["Parse a single line of input"],
+            },
+            {
+              symbol:
+                "scip-clang cxx my-project 1.0.0 utils/format_output(s).",
+              kind: SK.Function,
+              displayName: "format_output",
+            },
+          ],
+        },
+      ],
+    });
+
+    const index = decodeScipIndex(bytes);
+    assert.equal(index.metadata?.toolInfo?.name, "scip-clang");
+    assert.equal(index.documents.length, 1);
+    assert.equal(index.documents[0].language, "Cpp");
+
+    const symbols = index.documents[0].symbols;
+    assert.equal(symbols.length, 2);
+    assert.equal(symbols[0].kind, SK.Function);
+    assert.equal(symbols[0].displayName, "parse_line");
+    assert.equal(symbols[1].displayName, "format_output");
+  });
+
+  it("should handle namespaced classes with methods and fields", () => {
+    const bytes = buildTestScipIndex({
+      metadata: {
+        version: 1,
+        toolName: "scip-clang",
+        toolVersion: "0.3.2",
+        projectRoot: "file:///home/user/my-project",
+      },
+      documents: [
+        {
+          relativePath: "src/server.cpp",
+          language: "Cpp",
+          occurrences: [
+            {
+              range: [4, 13, 19],
+              symbol: "scip-clang cxx my-project 1.0.0 net/Server#",
+              symbolRoles: SymbolRole.Definition,
+            },
+            {
+              range: [5, 8, 12],
+              symbol: "scip-clang cxx my-project 1.0.0 net/Server#port.",
+              symbolRoles: SymbolRole.Definition,
+            },
+            {
+              range: [7, 9, 14],
+              symbol: "scip-clang cxx my-project 1.0.0 net/Server#start().",
+              symbolRoles: SymbolRole.Definition,
+            },
+          ],
+          symbols: [
+            {
+              symbol: "scip-clang cxx my-project 1.0.0 net/Server#",
+              kind: SK.Class,
+              displayName: "Server",
+            },
+            {
+              symbol: "scip-clang cxx my-project 1.0.0 net/Server#port.",
+              kind: SK.Field,
+              displayName: "port",
+            },
+            {
+              symbol: "scip-clang cxx my-project 1.0.0 net/Server#start().",
+              kind: SK.Method,
+              displayName: "start",
+            },
+          ],
+        },
+      ],
+    });
+
+    const index = decodeScipIndex(bytes);
+    const symbols = index.documents[0].symbols;
+    assert.equal(symbols.length, 3);
+    assert.equal(symbols[0].kind, SK.Class);
+    assert.equal(symbols[1].kind, SK.Field);
+    assert.equal(symbols[2].kind, SK.Method);
+    assert.equal(symbols[0].displayName, "Server");
+  });
+
+  it("should handle overload disambiguators on functions", () => {
+    // scip-clang appends a hash to disambiguate C++ overloads with the same
+    // name but different parameter types. The decoder should treat them as
+    // distinct symbols even though displayName is identical.
+    const bytes = buildTestScipIndex({
+      metadata: {
+        version: 1,
+        toolName: "scip-clang",
+        toolVersion: "0.3.2",
+      },
+      documents: [
+        {
+          relativePath: "src/math.cpp",
+          language: "Cpp",
+          symbols: [
+            {
+              symbol:
+                "scip-clang cxx my-project 1.0.0 math/add(int,int)#a1b2c3d4.",
+              kind: SK.Function,
+              displayName: "add",
+            },
+            {
+              symbol:
+                "scip-clang cxx my-project 1.0.0 math/add(double,double)#e5f6a7b8.",
+              kind: SK.Function,
+              displayName: "add",
+            },
+          ],
+        },
+      ],
+    });
+
+    const index = decodeScipIndex(bytes);
+    const symbols = index.documents[0].symbols;
+    assert.equal(symbols.length, 2);
+    assert.equal(symbols[0].displayName, "add");
+    assert.equal(symbols[1].displayName, "add");
+    assert.notEqual(symbols[0].symbol, symbols[1].symbol);
+  });
+
+  it("should handle header/implementation split with cross-file definitions", () => {
+    // C++ commonly declares a class in a .h header and defines its methods in
+    // a .cpp file. scip-clang emits the class as a definition in the header
+    // and the method bodies as definitions in the implementation file.
+    const bytes = buildTestScipIndex({
+      metadata: {
+        version: 1,
+        toolName: "scip-clang",
+        toolVersion: "0.3.2",
+      },
+      documents: [
+        {
+          relativePath: "include/widget.h",
+          language: "CppHeader",
+          occurrences: [
+            {
+              range: [2, 6, 12],
+              symbol: "scip-clang cxx my-project 1.0.0 ui/Widget#",
+              symbolRoles: SymbolRole.Definition,
+            },
+          ],
+          symbols: [
+            {
+              symbol: "scip-clang cxx my-project 1.0.0 ui/Widget#",
+              kind: SK.Class,
+              displayName: "Widget",
+            },
+          ],
+        },
+        {
+          relativePath: "src/widget.cpp",
+          language: "Cpp",
+          occurrences: [
+            {
+              range: [4, 0, 18],
+              symbol: "scip-clang cxx my-project 1.0.0 ui/Widget#draw().",
+              symbolRoles: SymbolRole.Definition,
+            },
+          ],
+          symbols: [
+            {
+              symbol: "scip-clang cxx my-project 1.0.0 ui/Widget#draw().",
+              kind: SK.Method,
+              displayName: "draw",
+            },
+          ],
+        },
+      ],
+    });
+
+    const index = decodeScipIndex(bytes);
+    assert.equal(index.documents.length, 2);
+    assert.equal(index.documents[0].relativePath, "include/widget.h");
+    assert.equal(index.documents[1].relativePath, "src/widget.cpp");
+    assert.equal(index.documents[0].symbols[0].kind, SK.Class);
+    assert.equal(index.documents[1].symbols[0].kind, SK.Method);
+  });
+
+  it("should handle abstract base class with virtual override relationship", () => {
+    // C++ inheritance with `virtual` produces an isImplementation relationship
+    // analogous to interface implementation in other languages. This mirrors
+    // the rust-analyzer trait-impl test above.
+    const bytes = buildTestScipIndex({
+      metadata: {
+        version: 1,
+        toolName: "scip-clang",
+        toolVersion: "0.3.2",
+      },
+      documents: [
+        {
+          relativePath: "src/codec.cpp",
+          language: "Cpp",
+          symbols: [
+            {
+              symbol: "scip-clang cxx my-project 1.0.0 codec/Encoder#",
+              kind: SK.Class,
+              displayName: "Encoder",
+            },
+            {
+              symbol: "scip-clang cxx my-project 1.0.0 codec/JsonEncoder#",
+              kind: SK.Class,
+              displayName: "JsonEncoder",
+              relationships: [
+                {
+                  symbol: "scip-clang cxx my-project 1.0.0 codec/Encoder#",
+                  isImplementation: true,
+                },
+              ],
+            },
+            {
+              symbol:
+                "scip-clang cxx my-project 1.0.0 codec/JsonEncoder#encode().",
+              kind: SK.Method,
+              displayName: "encode",
+              relationships: [
+                {
+                  symbol:
+                    "scip-clang cxx my-project 1.0.0 codec/Encoder#encode().",
+                  isImplementation: true,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const index = decodeScipIndex(bytes);
+    const symbols = index.documents[0].symbols;
+    assert.equal(symbols.length, 3);
+    assert.equal(symbols[1].relationships.length, 1);
+    assert.equal(symbols[1].relationships[0].isImplementation, true);
+    assert.equal(symbols[2].relationships[0].isImplementation, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Cross-emitter edge cases
 // ---------------------------------------------------------------------------
 describe("SCIP Emitter Patterns: cross-emitter edge cases", () => {

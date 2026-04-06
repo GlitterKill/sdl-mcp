@@ -33,6 +33,65 @@ export interface NativeProcess {
   steps: Array<NativeProcessStep>
   depth: number
 }
+export interface NapiScipMetadata {
+  version: number
+  toolName: string
+  toolVersion: string
+  toolArguments: Array<string>
+  projectRoot: string
+  textDocumentEncoding: string
+}
+export interface NapiScipRange {
+  startLine: number
+  startCol: number
+  endLine: number
+  endCol: number
+}
+export interface NapiScipRelationship {
+  symbol: string
+  isReference: boolean
+  isImplementation: boolean
+  isTypeDefinition: boolean
+  isDefinition: boolean
+}
+export interface NapiScipDiagnostic {
+  severity: number
+  code: string
+  message: string
+  source: string
+  range?: NapiScipRange
+}
+export interface NapiScipOccurrence {
+  range: NapiScipRange
+  symbol: string
+  symbolRoles: number
+  overrideDocumentation: Array<string>
+  syntaxKind: number
+  diagnostics: Array<NapiScipDiagnostic>
+}
+export interface NapiScipSymbolInfo {
+  symbol: string
+  documentation: Array<string>
+  relationships: Array<NapiScipRelationship>
+  kind: number
+  displayName: string
+  signatureDocumentation?: string
+  enclosingSymbol?: string
+}
+export interface NapiScipDocument {
+  language: string
+  relativePath: string
+  occurrences: Array<NapiScipOccurrence>
+  symbols: Array<NapiScipSymbolInfo>
+}
+export interface NapiScipExternalSymbol {
+  symbol: string
+  documentation: Array<string>
+  relationships: Array<NapiScipRelationship>
+  kind: number
+  displayName: string
+  signatureDocumentation?: string
+}
 /** Input file descriptor passed from TypeScript to Rust. */
 export interface NativeFileInput {
   /** Relative path from repo root (forward slashes). */
@@ -165,3 +224,9 @@ export declare function hashContentNative(content: string): string
 export declare function generateSymbolIdNative(repoId: string, relPath: string, kind: string, name: string, fingerprint: string): string
 export declare function computeClusters(symbols: Array<NativeClusterSymbol>, edges: Array<NativeClusterEdge>, minClusterSize: number): Array<NativeClusterAssignment>
 export declare function traceProcesses(symbols: Array<NativeProcessSymbol>, callEdges: Array<NativeProcessCallEdge>, maxDepth: number, entryPatterns: Array<string>): Array<NativeProcess>
+export declare function scipDecodeStart(filePath: string): ScipDecodeHandle
+export declare class ScipDecodeHandle {
+  metadata(): NapiScipMetadata
+  nextDocument(): NapiScipDocument | null
+  externalSymbols(): Array<NapiScipExternalSymbol>
+}

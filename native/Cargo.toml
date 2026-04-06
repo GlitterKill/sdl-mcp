@@ -37,6 +37,7 @@ petgraph = "0.6"
 [build-dependencies]
 napi-build = "2"
 prost-build = "0.13"
+protox = "0.8"
 
 [profile.release]
 lto = true

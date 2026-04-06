@@ -8,7 +8,12 @@
 
 import type { SymbolKind } from "../domain/types.js";
 import type { ScipSymbolMatch, ScipDocument, ScipRange } from "./types.js";
-import { mapScipKind } from "./kind-mapping.js";
+import {
+  mapScipKind,
+  parseScipSymbol,
+  extractNameFromDescriptors,
+  normalizeClangDescriptors,
+} from "./kind-mapping.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -186,57 +191,34 @@ function pickBestByRange(
  * This is a simplified version that extracts the last identifier before
  * the descriptor suffix.
  */
+/**
+ * Extract the display name from a SCIP symbol string.
+ *
+ * Delegates to `parseScipSymbol` + `extractNameFromDescriptors` from
+ * kind-mapping so the parser logic lives in exactly one place, and applies
+ * `normalizeClangDescriptors` for scip-clang symbols so C++ parameter lists
+ * and overload disambiguator hashes are stripped before name extraction.
+ *
+ * Header/impl unification for C++ is handled implicitly at the ingestion
+ * layer: the SCIP symbol → SDL symbolId map is global across documents, so a
+ * class declared in `include/widget.h` and its methods defined in
+ * `src/widget.cpp` both resolve correctly as long as each has a Definition
+ * occurrence in its own document (which scip-clang always emits).
+ */
 function extractNameFromScipSymbol(scipSymbol: string): string {
-  const trimmed = scipSymbol.trim();
+  const parsed = parseScipSymbol(scipSymbol);
 
-  // Local symbols: "local <id>"
-  if (trimmed.startsWith("local ")) {
-    return trimmed.slice(6);
+  // Local symbols have no scheme/package and descriptors is the identifier.
+  if (parsed.scheme === "local") {
+    return parsed.descriptors;
   }
 
-  // Find the descriptors portion (everything after the 4th space)
-  let spaceCount = 0;
-  let descriptorStart = -1;
-  for (let i = 0; i < trimmed.length; i++) {
-    if (trimmed[i] === " ") {
-      spaceCount++;
-      if (spaceCount === 4) {
-        descriptorStart = i + 1;
-        break;
-      }
-    }
-  }
+  const descriptors =
+    parsed.scheme === "scip-clang"
+      ? normalizeClangDescriptors(parsed.descriptors)
+      : parsed.descriptors;
 
-  if (descriptorStart === -1 || descriptorStart >= trimmed.length) return "";
-
-  let descriptors = trimmed.slice(descriptorStart);
-
-  // Strip trailing suffix: "().", "#", ".", "(", "[", ")", "!"
-  if (descriptors.endsWith("().")) {
-    descriptors = descriptors.slice(0, -3);
-  } else {
-    const last = descriptors[descriptors.length - 1];
-    if (
-      last === "#" ||
-      last === "." ||
-      last === "(" ||
-      last === "[" ||
-      last === ")" ||
-      last === "!"
-    ) {
-      descriptors = descriptors.slice(0, -1);
-    }
-  }
-
-  // The name is the last segment after "/" or "#"
-  const lastSepIdx = Math.max(
-    descriptors.lastIndexOf("/"),
-    descriptors.lastIndexOf("#"),
-  );
-
-  if (lastSepIdx === -1) return descriptors;
-
-  return descriptors.slice(lastSepIdx + 1);
+  return extractNameFromDescriptors(descriptors);
 }
 
 // ---------------------------------------------------------------------------

@@ -330,6 +330,90 @@ export function extractNameFromDescriptors(descriptors: string): string {
  *
  * Returns either `{ sdlKind, skip: false }` or `{ sdlKind: null, skip: true, reason }`.
  */
+/**
+ * Strip scip-clang specific suffixes from a descriptor string so that the
+ * result matches what tree-sitter extracts on the SDL side.
+ *
+ * scip-clang descriptors encode the full C++ function signature:
+ *   - Parameter types:         `utils/parse_line(int).`
+ *   - Overload disambiguators: `math/add(int,int)#a1b2c3d4.`
+ *
+ * Tree-sitter extracts only the bare function name (`parse_line`, `add`),
+ * so we normalize away the parameter list and disambiguator hash before
+ * passing the descriptor to `extractNameFromDescriptors` or
+ * `classifyDescriptorSuffix`.
+ *
+ * This function is idempotent and safe on non-clang descriptors that
+ * happen not to match the clang patterns.
+ *
+ * Known limitation: C++ template specializations like `Vector<int>` are
+ * not currently stripped. Follow-up work may add `<...>` handling.
+ */
+export function normalizeClangDescriptors(descriptors: string): string {
+  if (descriptors.length === 0) return descriptors;
+
+  // Preserve the descriptor terminator so classifyDescriptorSuffix still
+  // sees a recognizable suffix (`().`, `.`, `#`, etc).
+  let core = descriptors;
+  let terminator = "";
+  if (core.endsWith("().")) {
+    core = core.slice(0, -3);
+    terminator = "().";
+  } else if (core.endsWith(".")) {
+    core = core.slice(0, -1);
+    terminator = ".";
+  }
+
+  // Strip overload disambiguator: a trailing `#<alnum>+` that follows `)`.
+  // scip-clang emits this for C++ overload resolution, e.g.
+  //   math/add(int,int)#a1b2c3d4
+  // The disambiguator is always alphanumeric and always follows a closing
+  // paren, which distinguishes it from the normal `Class#method` descriptor
+  // separator used by other emitters.
+  const disambiguatorMatch = core.match(/^(.*\))#[A-Za-z0-9_]+$/);
+  if (disambiguatorMatch) {
+    core = disambiguatorMatch[1]!;
+    // After stripping the disambiguator, the remaining shape is
+    // `...name(params)` — a function/method. Signal this to the suffix
+    // classifier by forcing the terminator to `().`.
+    terminator = "().";
+  }
+
+  // Strip trailing balanced parameter list `(...)` so the name extractor
+  // returns the bare function name.
+  if (core.endsWith(")")) {
+    const openIdx = findMatchingOpenParen(core);
+    if (openIdx !== -1) {
+      core = core.slice(0, openIdx);
+      if (terminator === "" || terminator === ".") {
+        terminator = "().";
+      }
+    }
+  }
+
+  return core + terminator;
+}
+
+/**
+ * Given a string ending in `)`, find the index of the matching `(` by
+ * scanning right-to-left with a depth counter. Handles nested parens
+ * such as `std::function<void(int)>` inside a parameter list. Returns
+ * -1 if the parens are unbalanced or the string does not end in `)`.
+ */
+function findMatchingOpenParen(s: string): number {
+  if (!s.endsWith(")")) return -1;
+  let depth = 0;
+  for (let i = s.length - 1; i >= 0; i--) {
+    const ch = s[i];
+    if (ch === ")") depth++;
+    else if (ch === "(") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
 export function mapScipKind(scipSymbol: string, kind?: number): ScipKindResult {
   const parsed = parseScipSymbol(scipSymbol);
 
@@ -338,12 +422,21 @@ export function mapScipKind(scipSymbol: string, kind?: number): ScipKindResult {
     return { sdlKind: null, skip: true, reason: "local" };
   }
 
-  const descriptorKind = classifyDescriptorSuffix(parsed.descriptors);
+  // Normalize scip-clang descriptors so the classifier and name extractor
+  // see the same descriptor shape used by other emitters. This strips C++
+  // parameter lists and overload disambiguator hashes that tree-sitter does
+  // not see on the SDL side.
+  const descriptors =
+    parsed.scheme === "scip-clang"
+      ? normalizeClangDescriptors(parsed.descriptors)
+      : parsed.descriptors;
+
+  const descriptorKind = classifyDescriptorSuffix(descriptors);
 
   switch (descriptorKind) {
     case "termWithParens": {
       // Method or function — check for constructor names
-      const name = extractNameFromDescriptors(parsed.descriptors);
+      const name = extractNameFromDescriptors(descriptors);
 
       if (kind === LSP_KIND.Constructor || CONSTRUCTOR_NAMES.has(name)) {
         return { sdlKind: "constructor", skip: false };
@@ -359,9 +452,9 @@ export function mapScipKind(scipSymbol: string, kind?: number): ScipKindResult {
 
       // Fallback: if the descriptor path contains a `#` before the method,
       // it's likely a class member → method. Otherwise → function.
-      const beforeMethod = parsed.descriptors.slice(
+      const beforeMethod = descriptors.slice(
         0,
-        parsed.descriptors.length - name.length - 3, // "name()."
+        descriptors.length - name.length - 3, // "name()."
       );
       if (beforeMethod.includes("#")) {
         return { sdlKind: "method", skip: false };
