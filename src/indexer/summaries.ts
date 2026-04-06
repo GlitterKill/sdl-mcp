@@ -1,3 +1,4 @@
+import { normalizeTypeName } from "../util/type-name.js";
 import { ExtractedSymbol } from "./treesitter/extractSymbols.js";
 
 const ROLE_SUFFIXES: ReadonlyMap<string, string> = new Map([
@@ -402,10 +403,7 @@ function extractEnrichedSubject(symbol: ExtractedSymbol): string {
   ) {
     const promiseMatch = /^Promise<(.+)>/.exec(rt);
     const inner = promiseMatch ? promiseMatch[1] : rt;
-    const unwrapped = inner
-      .replace(/<[^>]+>/g, "")
-      .replace(/\[\]/g, "")
-      .trim();
+    const unwrapped = normalizeTypeName(inner);
     if (
       unwrapped &&
       unwrapped.length > 2 &&
@@ -425,7 +423,7 @@ function extractEnrichedSubject(symbol: ExtractedSymbol): string {
       /^[A-Z][a-zA-Z]+/.test(firstType) &&
       firstType.length < 30
     ) {
-      const cleaned = firstType.replace(/<[^>]+>/g, "").replace(/\[\]/g, "");
+      const cleaned = normalizeTypeName(firstType);
       return splitCamelCase(cleaned).join(" ").toLowerCase();
     }
   }

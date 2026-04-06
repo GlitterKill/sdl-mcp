@@ -9,6 +9,7 @@ import type { SymbolKind } from "../../../domain/types.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
 import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
+import { normalizeTypeName } from "../../../util/type-name.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
 import { resolveImportTargets } from "../../edge-builder/import-resolution.js";
 import { findEnclosingSymbolByRange } from "../../edge-builder/enclosing-symbol.js";
@@ -255,12 +256,12 @@ function createNodeIdToSymbolId(
 }
 
 function normalizeIdentifier(identifier: string): string {
-  return identifier
-    .replace(/^new\s+/, "")
-    .replace(/\s+/g, "")
-    .replace(/<[^>]*>/g, "")
-    .replace(/\(\)$/g, "")
-    .trim();
+  return normalizeTypeName(
+    identifier
+      .replace(/^new\s+/, "")
+      .replace(/\s+/g, "")
+      .replace(/\(\)$/g, ""),
+  ).trim();
 }
 
 function toUniqueCandidates(candidates: string[] | undefined): string[] {

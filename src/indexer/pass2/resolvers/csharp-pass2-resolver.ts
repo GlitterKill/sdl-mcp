@@ -9,6 +9,7 @@ import type { SymbolKind } from "../../../domain/types.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
 import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
+import { normalizeTypeName } from "../../../util/type-name.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
 import { resolveImportTargets } from "../../edge-builder/import-resolution.js";
 import { findEnclosingSymbolByRange } from "../../edge-builder/enclosing-symbol.js";
@@ -318,13 +319,13 @@ function buildCSharpCallScope(
         const match = header.match(/:\s*([^\{]+)/);
         if (match?.[1]) {
           const firstBase =
-            match[1]
-              .split(",")[0]
-              ?.trim()
-              .split(".")
-              .pop()
-              ?.replace(/<.*>/g, "")
-              .trim() ?? "";
+            normalizeTypeName(
+              match[1]
+                .split(",")[0]
+                ?.trim()
+                .split(".")
+                .pop() ?? "",
+            ) ?? "";
           if (firstBase) {
             localBaseByClassName.set(className, firstBase);
           }
