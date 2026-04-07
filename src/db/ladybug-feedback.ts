@@ -312,13 +312,20 @@ export async function getAggregatedFeedback(
     >
   >(
     conn,
+    // LIMIT 10000 caps the aggregation at the 10k most recent feedback rows.
+    // Previously this query had no bound, so a repo that had accumulated a
+    // large feedback history would scan, deserialize, and parse every row
+    // on every call to sdl.agent.feedback.query — causing linear latency
+    // growth and a potential OOM surface. Aggregates are now "approximate
+    // over the most recent 10k entries"; use `since` to tighten the window.
     `MATCH (f:AgentFeedback)
      WHERE ${conditions.join(" AND ")}
      RETURN f.usefulSymbolsJson AS usefulSymbolsJson,
             f.missingSymbolsJson AS missingSymbolsJson,
             f.taskTagsJson AS taskTagsJson,
             f.taskType AS taskType
-     ORDER BY f.createdAt DESC`,
+     ORDER BY f.createdAt DESC
+     LIMIT 10000`,
     params,
   );
 
