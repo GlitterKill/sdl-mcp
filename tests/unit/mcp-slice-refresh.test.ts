@@ -92,6 +92,26 @@ describe("SliceRefreshRequestSchema validation", () => {
     });
     assert.strictEqual(parsed.success, false);
   });
+
+  it("rejects empty-string sliceHandle (schema hardening)", () => {
+    // Regression guard: before the schema was hardened to .min(1), an empty
+    // handle would parse as valid and only fail later at the DB lookup with a
+    // NotFoundError, which is misleading and also lets an unbounded-length
+    // handle pass through to the prepared-statement cache.
+    const parsed = SliceRefreshRequestSchema.safeParse({
+      sliceHandle: "",
+      knownVersion: "v1234567890",
+    });
+    assert.strictEqual(parsed.success, false);
+  });
+
+  it("rejects oversized sliceHandle (schema hardening)", () => {
+    const parsed = SliceRefreshRequestSchema.safeParse({
+      sliceHandle: "x".repeat(1024),
+      knownVersion: "v1234567890",
+    });
+    assert.strictEqual(parsed.success, false);
+  });
 });
 
 describe("slice refresh with test DB", () => {
