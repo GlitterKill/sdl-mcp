@@ -777,11 +777,22 @@ export async function handleSliceSpilloverGet(
     `spillover data for handle: ${spilloverHandle}`,
   );
 
-  const startIndex = cursor ? Number(cursor) : 0;
-  if (!Number.isInteger(startIndex) || startIndex < 0) {
-    throw new ValidationError(
-      `Invalid cursor value: ${cursor} must be a non-negative integer`,
-    );
+  // Strict integer parsing: `Number(" 3 ")` evaluates to 3 and `Number("")`
+  // evaluates to 0, which would silently restart pagination on whitespace
+  // input. Require the cursor to be a literal non-negative decimal string.
+  let startIndex = 0;
+  if (cursor !== undefined && cursor !== "") {
+    if (!/^\d+$/.test(cursor)) {
+      throw new ValidationError(
+        `Invalid cursor value: ${cursor} must be a non-negative integer`,
+      );
+    }
+    startIndex = Number(cursor);
+    if (!Number.isSafeInteger(startIndex)) {
+      throw new ValidationError(
+        `Invalid cursor value: ${cursor} exceeds safe integer range`,
+      );
+    }
   }
   const size = pageSize ?? SPILLOVER_DEFAULT_PAGE_SIZE;
   const endIndex = startIndex + size;

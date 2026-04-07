@@ -37,6 +37,19 @@ import {
 import { logger } from "../util/logger.js";
 import { safeJsonParse, StringArraySchema } from "../util/safeJson.js";
 
+/**
+ * Compare an inbound `ifNoneMatch` header against the current ETag, treating
+ * the comparison as case-insensitive. Server-emitted ETags are always
+ * lowercase hex SHA-256, so this is a one-sided normalization — we lowercase
+ * the inbound side in case the client capitalized it on the round trip
+ * (some HTTP intermediaries do this), and compare against the current value
+ * directly.
+ */
+function etagMatches(ifNoneMatch: string | undefined, current: string): boolean {
+  if (ifNoneMatch === undefined) return false;
+  return ifNoneMatch.toLowerCase() === current;
+}
+
 export interface BuildCardOptions {
   minCallConfidence?: number;
   includeResolutionMetadata?: boolean;
@@ -232,7 +245,7 @@ async function buildOverlayCardForSymbol(
   };
 
   const etag = hashCard(card);
-  if (ifNoneMatch && ifNoneMatch === etag) {
+  if (etagMatches(ifNoneMatch, etag)) {
     return {
       notModified: true as const,
       etag,
@@ -292,7 +305,7 @@ export async function buildCardForSymbol(
       };
       delete normalizedCachedCard.etag;
       const cachedETag = hashCard(normalizedCachedCard);
-      if (ifNoneMatch && ifNoneMatch === cachedETag) {
+      if (etagMatches(ifNoneMatch, cachedETag)) {
         return {
           notModified: true,
           etag: cachedETag,
@@ -344,7 +357,7 @@ export async function buildCardForSymbol(
       },
     };
     const minimalETag = hashCard(minimalCard);
-    if (ifNoneMatch && ifNoneMatch === minimalETag) {
+    if (etagMatches(ifNoneMatch, minimalETag)) {
       return {
         notModified: true,
         etag: minimalETag,
@@ -561,7 +574,7 @@ export async function buildCardForSymbol(
   };
 
   const etag = hashCard(card);
-  if (ifNoneMatch && ifNoneMatch === etag) {
+  if (etagMatches(ifNoneMatch, etag)) {
     return {
       notModified: true,
       etag,

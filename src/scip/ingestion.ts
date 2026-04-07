@@ -563,12 +563,13 @@ export async function autoIngestScipIndexes(
       continue;
     }
 
-    // Compute relative path for record lookup
-    const relIndexPath = normalizePath(
-      absolutePath.startsWith(normalizedRoot)
-        ? absolutePath.slice(normalizedRoot.length).replace(/^\//, "")
-        : entry.path,
-    );
+    // Compute relative path for record lookup. getRelativePath() handles
+    // Windows backslashes and trailing-slash differences correctly, where
+    // the previous inline slice would produce wrong results on those edge
+    // cases (case-insensitive prefix mismatch, missing separator, etc).
+    const relIndexPath = absolutePath.startsWith(normalizedRoot)
+      ? normalizePath(getRelativePath(normalizedRoot, absolutePath))
+      : normalizePath(entry.path);
 
     // Check mtime against last ingestion
     const existingRecord = await getScipIngestionRecord(

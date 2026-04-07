@@ -28,12 +28,12 @@ export async function handlePRRiskAnalysis(args: unknown) {
 
   // --- Budget: allow caller to cap response size ---
   const MAX_CHANGED_SYMBOLS_CAP = 200;
-const maxChangedSymbols = Math.min(
+  const maxChangedSymbols = Math.min(
     validated.budget?.maxChangedSymbols ?? DEFAULT_MAX_CHANGED_SYMBOLS,
     MAX_CHANGED_SYMBOLS_CAP,
   );
   const MAX_BLAST_RADIUS_CAP = 200;
-const maxBlastRadius = Math.min(
+  const maxBlastRadius = Math.min(
     validated.budget?.maxBlastRadius ?? DEFAULT_MAX_BLAST_RADIUS,
     MAX_BLAST_RADIUS_CAP,
   );
