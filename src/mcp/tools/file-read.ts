@@ -49,6 +49,10 @@ function extractByPath(obj: unknown, keyPath: string): unknown {
  * Apply regex search with context lines. Returns matching line ranges
  * merged to avoid overlap.
  */
+const REDOS_NESTED_QUANTIFIER = /\([^)]*[+*][^)]*\)[+*?]/;
+const SEARCH_TIME_BUDGET_MS = 500;
+const SEARCH_MAX_LINE_CHARS = 10_000;
+
 function searchLines(
   lines: string[],
   pattern: string,
@@ -56,6 +60,15 @@ function searchLines(
 ): { content: string; matchCount: number; returnedLines: number } {
   if (pattern.length > 500) {
     throw new ValidationError("Search pattern too long (max 500 characters)");
+  }
+  // ReDoS heuristic: reject patterns with nested quantifiers on a group
+  // (e.g. `(a+)+`, `(x*)*`) — the classic catastrophic-backtracking shape.
+  // Not exhaustive, but catches the worst offenders without needing a
+  // timeout-capable regex engine.
+  if (REDOS_NESTED_QUANTIFIER.test(pattern)) {
+    throw new ValidationError(
+      "Search pattern contains nested quantifiers that may cause catastrophic backtracking",
+    );
   }
   let regex: RegExp;
   try {
@@ -65,8 +78,22 @@ function searchLines(
   }
 
   const matchIndices: number[] = [];
+  const deadline = Date.now() + SEARCH_TIME_BUDGET_MS;
   for (let i = 0; i < lines.length; i++) {
-    if (regex.test(lines[i])) {
+    // Wall-clock budget check every 1024 lines — bounded worst case even if
+    // the regex engine manages to start backtracking on a pathological line.
+    if ((i & 1023) === 0 && Date.now() > deadline) {
+      throw new ValidationError(
+        `Search exceeded ${SEARCH_TIME_BUDGET_MS}ms time budget — narrow the pattern or use offset/limit`,
+      );
+    }
+    // Per-line length cap: test only the first N chars of very long lines so
+    // the regex engine cannot be handed an unbounded haystack.
+    const line =
+      lines[i].length > SEARCH_MAX_LINE_CHARS
+        ? lines[i].slice(0, SEARCH_MAX_LINE_CHARS)
+        : lines[i];
+    if (regex.test(line)) {
       matchIndices.push(i);
     }
   }
@@ -155,11 +182,15 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
 
   const maxBytes = request.maxBytes ?? MAX_FILE_SIZE_BYTES;
 
-  // Check file size before reading to prevent excessive memory allocation
+  // Check file size before reading to prevent excessive memory allocation.
+  // Allow a small headroom over maxBytes so near-boundary reads are not
+  // rejected outright, but do not allow a 4x overread into memory the way
+  // the previous "maxBytes * 4" gate did.
   const fileStat = await stat(absPath);
-  if (fileStat.size > maxBytes * 4) {
+  const sizeCap = maxBytes + 64 * 1024;
+  if (fileStat.size > sizeCap) {
     throw new ValidationError(
-      `File size ${fileStat.size} bytes exceeds safe read limit. Use offset/limit parameters to read a portion.`,
+      `File size ${fileStat.size} bytes exceeds read cap of ${sizeCap} bytes. Use offset/limit parameters to read a portion.`,
     );
   }
 

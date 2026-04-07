@@ -231,22 +231,65 @@ const maxBlastRadius = Math.min(
     policyDecision,
   };
 
-  // Guardrail: cap serialized response size to prevent unbounded output
-  const serialized = JSON.stringify(response);
+  // Guardrail: cap serialized response size to prevent unbounded output.
+  // The first pass trims the obvious large arrays; if the trimmed response
+  // is still over the cap (e.g. because individual items have pathologically
+  // long signatureDiff strings) we progressively shrink until it fits or we
+  // hit the minimum viable envelope.
+  let serialized = JSON.stringify(response);
   if (serialized.length > MAX_RESPONSE_BYTES) {
-    (response as Record<string, unknown>).truncationWarning = "Response truncated: " + serialized.length + " bytes exceeds " + MAX_RESPONSE_BYTES + " byte cap. Use budget.maxChangedSymbols to narrow scope.";
-    // Aggressively trim to fit
-    if (response.analysis.changedSymbols.items.length > 10) {
-      response.analysis.changedSymbols.items = response.analysis.changedSymbols.items.slice(0, 10);
-      response.analysis.changedSymbols.truncated = true;
-    }
-    if (response.analysis.blastRadius.items.length > 10) {
-      response.analysis.blastRadius.items = response.analysis.blastRadius.items.slice(0, 10);
-      response.analysis.blastRadius.truncated = true;
-    }
-    if (response.analysis.findings.items.length > 5) {
-      response.analysis.findings.items = response.analysis.findings.items.slice(0, 5);
-      response.analysis.findings.truncated = true;
+    const originalBytes = serialized.length;
+    (response as Record<string, unknown>).truncationWarning =
+      "Response truncated: " + originalBytes + " bytes exceeds " + MAX_RESPONSE_BYTES + " byte cap. Use budget.maxChangedSymbols to narrow scope.";
+
+    const trimSteps: Array<() => void> = [
+      // Pass 1: initial aggressive trim.
+      () => {
+        if (response.analysis.changedSymbols.items.length > 10) {
+          response.analysis.changedSymbols.items = response.analysis.changedSymbols.items.slice(0, 10);
+          response.analysis.changedSymbols.truncated = true;
+        }
+        if (response.analysis.blastRadius.items.length > 10) {
+          response.analysis.blastRadius.items = response.analysis.blastRadius.items.slice(0, 10);
+          response.analysis.blastRadius.truncated = true;
+        }
+        if (response.analysis.findings.items.length > 5) {
+          response.analysis.findings.items = response.analysis.findings.items.slice(0, 5);
+          response.analysis.findings.truncated = true;
+        }
+      },
+      // Pass 2: halve what we kept.
+      () => {
+        response.analysis.changedSymbols.items = response.analysis.changedSymbols.items.slice(0, 5);
+        response.analysis.blastRadius.items = response.analysis.blastRadius.items.slice(0, 5);
+        response.analysis.findings.items = response.analysis.findings.items.slice(0, 3);
+        response.analysis.evidence.items = response.analysis.evidence.items.slice(0, 3);
+        response.analysis.recommendedTests.items = response.analysis.recommendedTests.items.slice(0, 3);
+        response.analysis.changedSymbols.truncated = true;
+        response.analysis.blastRadius.truncated = true;
+        response.analysis.findings.truncated = true;
+        response.analysis.evidence.truncated = true;
+        response.analysis.recommendedTests.truncated = true;
+      },
+      // Pass 3: empty all arrays — envelope only.
+      () => {
+        response.analysis.changedSymbols.items = [];
+        response.analysis.blastRadius.items = [];
+        response.analysis.findings.items = [];
+        response.analysis.evidence.items = [];
+        response.analysis.recommendedTests.items = [];
+        response.analysis.changedSymbols.truncated = true;
+        response.analysis.blastRadius.truncated = true;
+        response.analysis.findings.truncated = true;
+        response.analysis.evidence.truncated = true;
+        response.analysis.recommendedTests.truncated = true;
+      },
+    ];
+
+    for (const step of trimSteps) {
+      step();
+      serialized = JSON.stringify(response);
+      if (serialized.length <= MAX_RESPONSE_BYTES) break;
     }
   }
 

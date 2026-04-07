@@ -4,7 +4,7 @@
 
 import type { ToolContext } from "../../server.js";
 import { ingestScipIndex } from "../../scip/ingestion.js";
-import type { ScipIngestRequest } from "../../scip/types.js";
+import { ScipIngestRequestSchema } from "../tools.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import type { ScipConfig } from "../../config/types.js";
 import { ConfigError } from "../../domain/errors.js";
@@ -18,7 +18,7 @@ export async function handleScipIngest(
   args: unknown,
   _context?: ToolContext,
 ): Promise<object> {
-  const request = args as ScipIngestRequest;
+  const request = ScipIngestRequestSchema.parse(args);
   const { repoId, indexPath, dryRun } = request;
 
   const config = loadConfig();

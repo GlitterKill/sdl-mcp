@@ -400,17 +400,23 @@ export async function ingestScipIndex(
         });
       }
 
-      // Track unresolved from this document (occurrences that had no match)
+      // Track unresolved from this document. We count distinct symbols per
+      // document, not raw occurrences, so a single unresolved function with N
+      // call sites contributes 1 rather than N. Previously the counter could
+      // be inflated by an order of magnitude and mislead operators using it
+      // to gauge match quality.
       const matchedScipSymbols = new Set(scipSymbolToId.keys());
+      const unresolvedInDoc = new Set<string>();
       for (const occ of doc.occurrences) {
         if (occ.symbol === "" || occ.symbol.startsWith("local ")) continue;
         if (
           !matchedScipSymbols.has(occ.symbol) &&
           !isExternalSymbol(occ.symbol, metadata.projectRoot)
         ) {
-          unresolvedOccurrences++;
+          unresolvedInDoc.add(occ.symbol);
         }
       }
+      unresolvedOccurrences += unresolvedInDoc.size;
 
       // Log progress milestones (we don't know total upfront with async gen,
       // so log every 50 documents)

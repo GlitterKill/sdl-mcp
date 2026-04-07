@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from "child_process";
-import { mkdtemp, writeFile, rm } from "fs/promises";
+import { mkdtemp, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { realpath } from "fs/promises";
@@ -125,16 +125,6 @@ export async function execute(
 ): Promise<ExecutionResult> {
   const startTime = Date.now();
 
-  let tempWorkspaceDir: string | null = null;
-  let tempCodePath: string | null = null;
-
-  if (request.codePath) {
-    tempWorkspaceDir = await createTempWorkspace();
-    tempCodePath = join(tempWorkspaceDir, "code-mode-script");
-    await writeFile(tempCodePath, request.codePath, "utf8");
-  }
-
-  try {
   const stdoutChunks: Buffer[] = [];
   const stderrChunks: Buffer[] = [];
 
@@ -256,11 +246,6 @@ export async function execute(
     totalStdoutBytes,
     totalStderrBytes,
   };
-  } finally {
-    if (tempWorkspaceDir) {
-      await cleanupTempWorkspace(tempWorkspaceDir);
-    }
-  }
 }
 
 export function createConcurrencyTracker(maxJobs: number): ConcurrencyTracker {
