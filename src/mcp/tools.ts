@@ -576,8 +576,8 @@ const CodeWindowRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
   reason: z.string().max(10000),
-  expectedLines: z.number().int().min(1),
-  identifiersToFind: z.array(z.string()).max(50),
+  expectedLines: z.number().int().min(1).max(100000),
+  identifiersToFind: z.array(z.string().min(1).max(256)).max(50),
   granularity: z.enum(["symbol", "block", "fileWindow"]).optional(),
   maxTokens: z.number().int().min(1).optional(),
   sliceContext: z
@@ -1016,7 +1016,7 @@ const SliceEtagSchema = z.object({
 });
 
 export const SliceRefreshRequestSchema = z.object({
-  sliceHandle: z.string(),
+  sliceHandle: z.string().min(1).max(256),
   knownVersion: z.string().optional().describe("Known version. Defaults to the slice handle's maxVersion."),
 });
 
@@ -1164,7 +1164,7 @@ export const DeltaGetResponseSchema = z.object({
 });
 
 export const SliceSpilloverGetRequestSchema = z.object({
-  spilloverHandle: z.string(),
+  spilloverHandle: z.string().min(1).max(256),
   cursor: z.string().optional(),
   pageSize: z.number().int().min(1).max(PAGE_SIZE_MAX).optional(),
 });
@@ -1180,8 +1180,8 @@ export const CodeNeedWindowRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
   reason: z.string().min(1).max(10000),
-  expectedLines: z.number().int().min(1),
-  identifiersToFind: z.array(z.string()).max(50),
+  expectedLines: z.number().int().min(1).max(100000),
+  identifiersToFind: z.array(z.string().min(1).max(256)).max(50),
   granularity: z.enum(["symbol", "block", "fileWindow"]).optional(),
   maxTokens: z.number().int().min(1).optional(),
   sliceContext: z
@@ -1262,7 +1262,7 @@ export const GetSkeletonRequestSchema = z
     exportedOnly: z.boolean().optional(),
     maxLines: z.number().int().min(1).optional(),
     maxTokens: z.number().int().min(1).optional(),
-    identifiersToFind: z.array(z.string()).max(50).optional(),
+    identifiersToFind: z.array(z.string().min(1).max(256)).max(50).optional(),
     skeletonOffset: z.number().int().min(0).optional(),
     ifNoneMatch: z.string().optional(),
   })
@@ -1302,7 +1302,7 @@ export const GetSkeletonResponseSchema = z.union([
 export const GetHotPathRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
-  identifiersToFind: z.array(z.string()).min(1).max(50),
+  identifiersToFind: z.array(z.string().min(1).max(256)).min(1).max(50),
   maxLines: z.number().int().min(1).optional(),
   maxTokens: z.number().int().min(1).optional(),
   contextLines: z.number().int().min(0).optional(),
