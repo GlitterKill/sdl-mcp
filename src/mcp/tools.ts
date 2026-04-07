@@ -2189,6 +2189,7 @@ export const MemoryQueryRequestSchema = z.object({
   symbolIds: z.array(z.string()).max(100).optional(),
   staleOnly: z.boolean().optional(),
   limit: z.number().int().min(1).max(100).optional(),
+  offset: z.number().int().min(0).max(10000).optional(),
   sortBy: z.enum(["recency", "confidence"]).optional(),
 });
 
@@ -2197,6 +2198,9 @@ export const MemoryQueryResponseSchema = z.object({
   memories: z.array(SurfacedMemorySchema),
   total: z.number().int().min(0),
   hasMore: z.boolean().optional(),
+  // Continuation offset for the next page. Non-null when hasMore is true,
+  // null (or omitted) when the caller has reached the end of the result set.
+  nextOffset: z.number().int().min(0).nullable().optional(),
 });
 
 export const MemoryRemoveRequestSchema = z.object({
