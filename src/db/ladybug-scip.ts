@@ -316,6 +316,14 @@ export async function batchGetExistingEdges(
 
   const sourceIds = pairs.map((p) => p.sourceId);
   const targetIds = pairs.map((p) => p.targetId);
+  // The query below filters by `a.symbolId IN $sourceIds AND b.symbolId IN
+  // $targetIds`, which is a Cartesian product — it can return rows for
+  // (source, target) combinations that were not in the original input pairs
+  // but happen to exist in the graph. We post-filter against this Set so only
+  // actually-requested pairs are reported as "already exists".
+  const allowedPairs = new Set(
+    pairs.map((p) => `${p.sourceId}:${p.targetId}`),
+  );
 
   const rows = await queryAll<{
     sourceId: string;
@@ -342,6 +350,10 @@ export async function batchGetExistingEdges(
     { edgeType: string; confidence: number; resolution: string; resolverId: string }
   >();
   for (const row of rows) {
+    // Drop Cartesian-product rows that were not in the original input pairs.
+    if (!allowedPairs.has(`${row.sourceId}:${row.targetId}`)) {
+      continue;
+    }
     // Key includes edgeType so multiple edges between the same pair
     // (e.g. both a `call` and an `import` from A to B) are tracked
     // independently. A shorter key collapsed them and caused edgesCreated

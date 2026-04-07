@@ -467,6 +467,23 @@ describe("classifyEdgeAction", () => {
     assert.equal(action, "skip");
   });
 
+  it("returns 'upgrade' when existing edge has same target and same confidence but heuristic resolution", () => {
+    // Regression guard for the equal-confidence upgrade bug. When a prior run
+    // already wrote a heuristic edge at SCIP's 0.95 confidence (e.g. because
+    // a config entry was set to 0.95), re-ingesting the same edge from SCIP
+    // must still upgrade the resolution metadata to "exact" so downstream
+    // queries filtering on resolverId/resolution see it as compiler-grade.
+    const existing: ExistingEdge = {
+      sourceSymbolId: "src",
+      targetSymbolId: "tgt",
+      edgeType: "call",
+      confidence: 0.95,
+      resolution: "heuristic",
+    };
+    const action = classifyEdgeAction(existing, newEdge);
+    assert.equal(action, "upgrade");
+  });
+
   it("returns 'skip' when existing edge has different target but exact resolution", () => {
     const existing: ExistingEdge = {
       sourceSymbolId: "src",

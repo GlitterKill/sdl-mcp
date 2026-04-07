@@ -61,26 +61,35 @@ export async function handlePolicySet(
   const request = PolicySetRequestSchema.parse(args);
   const { repoId, policyPatch } = request;
 
-  const conn = await getLadybugConn();
-  const repo = await ladybugDb.getRepo(conn, repoId);
-  if (!repo) {
-    throw new DatabaseError(`Repository ${repoId} not found`);
-  }
-
   const appConfig = loadConfig();
-  const configJson = safeJsonParseOrThrow(repo.configJson, ConfigObjectSchema, `configJson for repository ${repoId}`);
-  const existingPolicyOverrides =
-    configJson.policy && typeof configJson.policy === "object"
-      ? configJson.policy
-      : {};
-  const mergedOverrides = { ...existingPolicyOverrides, ...policyPatch };
-  PolicyConfigSchema.parse({
-    ...appConfig.policy,
-    ...mergedOverrides,
-  });
-  configJson.policy = mergedOverrides;
 
+  // The read-merge-write sequence runs entirely inside withWriteConn so it is
+  // atomic under the single-writer limiter. Previously the read happened on a
+  // separate read-pool connection, which allowed two concurrent policy.set
+  // calls to both observe the same configJson, merge their patches
+  // independently, and lose one of the updates on write.
   await withWriteConn(async (wConn) => {
+    const repo = await ladybugDb.getRepo(wConn, repoId);
+    if (!repo) {
+      throw new DatabaseError(`Repository ${repoId} not found`);
+    }
+
+    const configJson = safeJsonParseOrThrow(
+      repo.configJson,
+      ConfigObjectSchema,
+      `configJson for repository ${repoId}`,
+    );
+    const existingPolicyOverrides =
+      configJson.policy && typeof configJson.policy === "object"
+        ? configJson.policy
+        : {};
+    const mergedOverrides = { ...existingPolicyOverrides, ...policyPatch };
+    PolicyConfigSchema.parse({
+      ...appConfig.policy,
+      ...mergedOverrides,
+    });
+    configJson.policy = mergedOverrides;
+
     await ladybugDb.upsertRepo(wConn, {
       repoId,
       rootPath: repo.rootPath,
