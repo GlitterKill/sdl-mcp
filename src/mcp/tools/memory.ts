@@ -270,6 +270,7 @@ export async function handleMemoryQuery(
     symbolIds,
     staleOnly,
     limit = 10,
+    offset = 0,
     sortBy = "recency",
   } = request;
 
@@ -295,6 +296,7 @@ export async function handleMemoryQuery(
       symbolIds,
       staleOnly,
       limit,
+      offset,
       sortBy,
     });
   } catch (err) {
@@ -314,11 +316,16 @@ export async function handleMemoryQuery(
     tags: safeJsonParse(row.tagsJson, StringArraySchema, []),
   }));
 
+  const hasMore = memories.length === limit;
   return {
     repoId,
     memories,
     total: memories.length,
-    hasMore: memories.length === limit,
+    hasMore,
+    // Continuation offset for the next page, or null when there is no more.
+    // Previously hasMore was signaled but no cursor was provided, leaving
+    // callers unable to actually advance.
+    nextOffset: hasMore ? offset + limit : null,
   };
 }
 

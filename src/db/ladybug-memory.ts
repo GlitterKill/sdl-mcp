@@ -152,11 +152,14 @@ export async function queryMemories(
     symbolIds?: string[];
     staleOnly?: boolean;
     limit?: number;
+    offset?: number;
     sortBy?: "recency" | "confidence";
   },
 ): Promise<MemoryRow[]> {
   const safeLimit = options.limit ?? 10;
+  const safeOffset = options.offset ?? 0;
   assertSafeInt(safeLimit, "limit");
+  assertSafeInt(safeOffset, "offset");
 
   const useSymbolFilter = options.symbolIds && options.symbolIds.length > 0;
 
@@ -209,8 +212,10 @@ export async function queryMemories(
       ? "ORDER BY confidence DESC"
       : "ORDER BY updatedAt DESC";
 
-  // Over-fetch with a generous LIMIT to bound DB work before JS-side tag filtering
-  const overFetchLimit = safeLimit * 5;
+  // Over-fetch enough rows to cover both the post-filter (tags) and the
+  // JS-side offset window. Deep pagination gets progressively more expensive;
+  // callers that need it should tighten filters instead of chasing large offsets.
+  const overFetchLimit = (safeOffset + safeLimit) * 5;
   params.overFetchLimit = overFetchLimit;
   const cypher = `${matchClause}
      ${whereClause}
@@ -228,7 +233,7 @@ export async function queryMemories(
     });
   }
 
-  return rows.slice(0, safeLimit).map(toMemoryRow);
+  return rows.slice(safeOffset, safeOffset + safeLimit).map(toMemoryRow);
 }
 
 export async function softDeleteMemory(
