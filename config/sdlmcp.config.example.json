@@ -210,7 +210,14 @@
       "maxPerIndex": 10000
     },
     "confidence": 0.95,
-    "autoIngestOnRefresh": true
+    "autoIngestOnRefresh": true,
+    "generator": {
+      "enabled": false,
+      "binary": "scip-io",
+      "args": [],
+      "autoInstall": true,
+      "timeoutMs": 600000
+    }
   },
   "memory": {
     "enabled": false

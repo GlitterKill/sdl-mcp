@@ -1,10 +1,13 @@
+import type { LogLevel } from "../util/logger.js";
+
+export type { LogLevel };
+
 export interface CLIOptions {
   config?: string;
   logLevel?: LogLevel;
   logFormat?: LogFormat;
 }
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogFormat = "json" | "pretty";
 
 export interface CommandContext {

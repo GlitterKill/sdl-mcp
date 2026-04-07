@@ -131,3 +131,4 @@ docs/plans/observability-dashboard-v1-plan.md
 LEGACY-CLEANUP-PLAN.md
 scripts/apply-orchestrate-fix.mjs
 .fallow/cache.bin
+.fallowrc.json

@@ -534,8 +534,8 @@ export function parseBenchmarkOptions(
   args: string[],
   global: CLIOptions,
   values: ParsedOptionValues,
-): import("./commands/benchmark.js").BenchmarkOptions {
-  const options: import("./commands/benchmark.js").BenchmarkOptions = {
+): import("./types.js").BenchmarkOptions {
+  const options: import("./types.js").BenchmarkOptions = {
     ...global,
   };
 

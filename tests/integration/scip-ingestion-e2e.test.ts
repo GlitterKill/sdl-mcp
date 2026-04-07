@@ -49,6 +49,13 @@ const scipConfig: ScipConfig = {
   externalSymbols: { enabled: true, maxPerIndex: 10_000 },
   confidence: 0.95,
   autoIngestOnRefresh: false,
+  generator: {
+    enabled: false,
+    binary: "scip-io",
+    args: [],
+    autoInstall: false,
+    timeoutMs: 600_000,
+  },
 };
 
 describe("SCIP Ingestion E2E", () => {

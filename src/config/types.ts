@@ -497,12 +497,56 @@ export const ScipIndexEntrySchema = z.object({
   label: z.string().optional(),
 });
 
+/**
+ * Configuration for the scip-io CLI integration that auto-generates the
+ * SCIP index before each refresh. When enabled (and `scip.enabled` is also
+ * true), `indexRepo` runs `scip-io index` in the repo root before its own
+ * indexing pass; the existing post-refresh ingest then picks up the freshly
+ * written `index.scip`.
+ *
+ * If the binary is not found in PATH and `autoInstall` is true, sdl-mcp
+ * downloads the platform-matched binary directly from the scip-io GitHub
+ * releases (with SHA-256 verification) into `~/.sdl-mcp/bin/`.
+ *
+ * All failures are non-fatal: a warning is logged and the indexer continues
+ * with whatever `index.scip` is on disk (or none).
+ */
+export const ScipGeneratorConfigSchema = z.object({
+  /** Master enable for the generator. Has no effect unless `scip.enabled` is also true. */
+  enabled: z.boolean().default(false),
+  /** Override the binary name. Default 'scip-io' (or 'scip-io.exe' on Windows). */
+  binary: z.string().default("scip-io"),
+  /** Extra args appended after `index` (e.g. ["--no-clean"]). Default []. */
+  args: z.array(z.string()).default([]),
+  /** Auto-download scip-io from GitHub releases if not found in PATH. */
+  autoInstall: z.boolean().default(true),
+  /** Hard timeout for the `scip-io index` command. */
+  timeoutMs: z
+    .number()
+    .int()
+    .min(1000)
+    .max(30 * 60 * 1000)
+    .default(10 * 60 * 1000),
+});
+
+export type ScipGeneratorConfig = z.infer<typeof ScipGeneratorConfigSchema>;
+
 export const ScipConfigSchema = z.object({
   enabled: z.boolean().default(false),
   indexes: z.array(ScipIndexEntrySchema).default([]),
-  externalSymbols: ScipExternalSymbolsConfigSchema.default({ enabled: true, maxPerIndex: 10_000 }),
+  externalSymbols: ScipExternalSymbolsConfigSchema.default({
+    enabled: true,
+    maxPerIndex: 10_000,
+  }),
   confidence: z.number().min(0.5).max(1.0).default(0.95),
   autoIngestOnRefresh: z.boolean().default(true),
+  generator: ScipGeneratorConfigSchema.default({
+    enabled: false,
+    binary: "scip-io",
+    args: [],
+    autoInstall: true,
+    timeoutMs: 10 * 60 * 1000,
+  }),
 });
 
 export type ScipConfig = z.infer<typeof ScipConfigSchema>;

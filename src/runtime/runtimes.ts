@@ -66,7 +66,10 @@ const RUNTIME_TABLE: RuntimeTableEntry[] = [
     aliases: ["python3", "python", "py"],
     extension: ".py",
     versionFlag: "--version",
-    candidates: { win32: ["python", "python3", "py"], unix: ["python3", "python"] },
+    candidates: {
+      win32: ["python", "python3", "py"],
+      unix: ["python3", "python"],
+    },
     commandBuilder: "interpreted",
   },
   {
@@ -155,7 +158,11 @@ const RUNTIME_TABLE: RuntimeTableEntry[] = [
     versionFlag: "--version",
     candidates: { win32: ["rustc"], unix: ["rustc"] },
     commandBuilder: "compiled",
-    compileStep: { mode: "compile-then-execute", command: "rustc", args: ["$CODE", "-o", "$OUT"] },
+    compileStep: {
+      mode: "compile-then-execute",
+      command: "rustc",
+      args: ["$CODE", "-o", "$OUT"],
+    },
   },
   {
     name: "c",
@@ -164,7 +171,11 @@ const RUNTIME_TABLE: RuntimeTableEntry[] = [
     versionFlag: "--version",
     candidates: { win32: ["gcc"], unix: ["gcc", "cc"] },
     commandBuilder: "compiled",
-    compileStep: { mode: "compile-then-execute", command: "gcc", args: ["$CODE", "-o", "$OUT"] },
+    compileStep: {
+      mode: "compile-then-execute",
+      command: "gcc",
+      args: ["$CODE", "-o", "$OUT"],
+    },
   },
   {
     name: "cpp",
@@ -173,7 +184,11 @@ const RUNTIME_TABLE: RuntimeTableEntry[] = [
     versionFlag: "--version",
     candidates: { win32: ["g++"], unix: ["g++", "c++"] },
     commandBuilder: "compiled",
-    compileStep: { mode: "compile-then-execute", command: "g++", args: ["$CODE", "-o", "$OUT"] },
+    compileStep: {
+      mode: "compile-then-execute",
+      command: "g++",
+      args: ["$CODE", "-o", "$OUT"],
+    },
   },
   {
     name: "csharp",
@@ -187,7 +202,10 @@ const RUNTIME_TABLE: RuntimeTableEntry[] = [
   },
 ];
 
-export const RUNTIME_NAMES = RUNTIME_TABLE.map(e => e.name) as [string, ...string[]];
+export const RUNTIME_NAMES = RUNTIME_TABLE.map((e) => e.name) as [
+  string,
+  ...string[],
+];
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -235,16 +253,34 @@ export function normalizeExecutableName(executable: string): string {
   return basename(normalized).toLowerCase();
 }
 
-export function isExecutableCompatibleWithRuntime(runtime: string, executable: string): boolean {
+export function isExecutableCompatibleWithRuntime(
+  runtime: string,
+  executable: string,
+): boolean {
   const aliases = RUNTIME_EXECUTABLE_ALIASES.get(runtime);
   if (!aliases) return false;
   return aliases.has(normalizeExecutableName(executable));
 }
 
-function resolveExecutable(name: string): string | undefined {
+/**
+ * Resolve an executable name to an absolute path by searching PATH.
+ *
+ * Uses the platform-native lookup tool (`where` on Windows, `which` on Unix)
+ * via execFileSync (no shell, args passed as array) so the binary name cannot
+ * be interpreted as a shell expression.
+ *
+ * Exported so other modules (e.g. external CLI integrations like scip-io)
+ * can reuse the same lookup without duplicating the platform handling.
+ *
+ * @returns The absolute path to the executable, or `undefined` if not found.
+ */
+export function resolveExecutable(name: string): string | undefined {
   try {
     const [prog, ...args] = IS_WINDOWS ? ["where", name] : ["which", name];
-    const result = execFileSync(prog, args, { timeout: 5000, encoding: "utf-8" }).trim();
+    const result = execFileSync(prog, args, {
+      timeout: 5000,
+      encoding: "utf-8",
+    }).trim();
     const firstLine = result.split(/\r?\n/)[0]?.trim();
     return firstLine || undefined;
   } catch {
@@ -252,7 +288,10 @@ function resolveExecutable(name: string): string | undefined {
   }
 }
 
-function getVersion(executable: string, versionFlag: string): string | undefined {
+function getVersion(
+  executable: string,
+  versionFlag: string,
+): string | undefined {
   try {
     const raw = execFileSync(executable, [versionFlag], {
       timeout: 5000,
@@ -272,7 +311,9 @@ function getExtension(entry: RuntimeTableEntry): string {
 }
 
 function createDescriptor(entry: RuntimeTableEntry): RuntimeDescriptor {
-  const candidates = IS_WINDOWS ? entry.candidates.win32 : entry.candidates.unix;
+  const candidates = IS_WINDOWS
+    ? entry.candidates.win32
+    : entry.candidates.unix;
 
   return {
     name: entry.name,
@@ -285,7 +326,11 @@ function createDescriptor(entry: RuntimeTableEntry): RuntimeDescriptor {
         const path = resolveExecutable(candidate);
         if (path) {
           const version = getVersion(path, entry.versionFlag);
-          const result: RuntimeDetectionResult = { available: true, version, path };
+          const result: RuntimeDetectionResult = {
+            available: true,
+            version,
+            path,
+          };
           setCached(entry.name, result);
           return result;
         }
@@ -315,20 +360,33 @@ function createDescriptor(entry: RuntimeTableEntry): RuntimeDescriptor {
           : { executable: sh, args: ["-c", args.map(shellEscape).join(" ")] };
       }
 
-      if (entry.commandBuilder === "compiled" && entry.compileStep?.mode === "run-command") {
+      if (
+        entry.commandBuilder === "compiled" &&
+        entry.compileStep?.mode === "run-command"
+      ) {
         const cmd = opts.executable ?? entry.compileStep.command;
         return opts.codePath
-          ? { executable: cmd, args: [...entry.compileStep.args, opts.codePath, ...args] }
+          ? {
+              executable: cmd,
+              args: [...entry.compileStep.args, opts.codePath, ...args],
+            }
           : { executable: cmd, args: [...entry.compileStep.args, ...args] };
       }
 
-      if (entry.commandBuilder === "compiled" && entry.compileStep?.mode === "compile-then-execute") {
+      if (
+        entry.commandBuilder === "compiled" &&
+        entry.compileStep?.mode === "compile-then-execute"
+      ) {
         if (opts.codePath) {
-          const outPath = opts.codePath.replace(/\.[^.]+$/, "") + (IS_WINDOWS ? ".exe" : "");
-          const compileArgs = entry.compileStep.args.map(a =>
+          const outPath =
+            opts.codePath.replace(/\.[^.]+$/, "") + (IS_WINDOWS ? ".exe" : "");
+          const compileArgs = entry.compileStep.args.map((a) =>
             a === "$CODE" ? opts.codePath! : a === "$OUT" ? outPath : a,
           );
-          return { executable: opts.executable ?? entry.compileStep.command, args: compileArgs };
+          return {
+            executable: opts.executable ?? entry.compileStep.command,
+            args: compileArgs,
+          };
         }
         return { executable: exe, args };
       }
@@ -353,7 +411,9 @@ export function getRegisteredRuntimes(): string[] {
   return [...RUNTIME_REGISTRY.keys()];
 }
 
-export async function detectAllRuntimes(): Promise<Map<string, RuntimeDetectionResult>> {
+export async function detectAllRuntimes(): Promise<
+  Map<string, RuntimeDetectionResult>
+> {
   const results = new Map<string, RuntimeDetectionResult>();
   const entries = [...RUNTIME_REGISTRY.entries()];
   const detected = await Promise.all(entries.map(([, rt]) => rt.detect()));
@@ -363,22 +423,24 @@ export async function detectAllRuntimes(): Promise<Map<string, RuntimeDetectionR
   return results;
 }
 
-export function getRuntimeTableEntry(name: string): RuntimeTableEntry | undefined {
-  return RUNTIME_TABLE.find(e => e.name === name);
+export function getRuntimeTableEntry(
+  name: string,
+): RuntimeTableEntry | undefined {
+  return RUNTIME_TABLE.find((e) => e.name === name);
 }
 
 export function getRuntimeExtension(name: string): string | undefined {
-  const entry = RUNTIME_TABLE.find(e => e.name === name);
+  const entry = RUNTIME_TABLE.find((e) => e.name === name);
   if (!entry) return undefined;
   return getExtension(entry);
 }
 
 export function getRuntimeRequiredEnvKeys(name: string): string[] {
-  const entry = RUNTIME_TABLE.find(e => e.name === name);
+  const entry = RUNTIME_TABLE.find((e) => e.name === name);
   return entry?.requiredEnvKeys ?? [];
 }
 
 export function isCompileThenExecute(name: string): boolean {
-  const entry = RUNTIME_TABLE.find(e => e.name === name);
+  const entry = RUNTIME_TABLE.find((e) => e.name === name);
   return entry?.compileStep?.mode === "compile-then-execute";
 }

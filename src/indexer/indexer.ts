@@ -139,6 +139,15 @@ export async function indexRepo(
   signal?: AbortSignal,
   options?: IndexRepoOptions,
 ): Promise<IndexResult> {
+  // scip-io pre-refresh hook runs BEFORE acquiring indexLocks so a slow
+  // scip-io run does not hold the per-repo lock and starve queued
+  // refreshes. The runner coalesces concurrent calls per repo so two
+  // scip-io processes never race on writing index.scip. See
+  // src/scip/scip-io-runner.ts::runScipIoPreRefreshForIndex.
+  const { runScipIoPreRefreshForIndex } =
+    await import("../scip/scip-io-runner.js");
+  await runScipIoPreRefreshForIndex(repoId, signal);
+
   // Serialize concurrent indexRepo calls for the same repo to prevent
   // LadybugDB write conflicts and race conditions during rapid watcher events.
   // Loop-and-recheck: after awaiting a lock, another caller may have set a new
@@ -229,6 +238,7 @@ async function indexRepoImpl(
   if (!repoRow) {
     throw new Error(`Repository ${repoId} not found`);
   }
+
   let config: RepoConfig;
   try {
     config = JSON.parse(repoRow.configJson);

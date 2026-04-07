@@ -17,6 +17,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Rust decoder (primary) with TypeScript fallback
   - SCIP-only symbols survive live-index reconciliation
   - `excludeExternal` filter for symbol search
+- **scip-io CLI integration** (`scip.generator` config): Automatically run the
+  polyglot [scip-io](https://github.com/GlitterKill/scip-io) orchestrator in the
+  repo root before every `indexRepo()` call to produce a fresh `index.scip`,
+  which the existing auto-ingest then picks up. Disabled by default; opt in
+  via `scip.generator.enabled = true` (requires `scip.enabled = true`).
+  - Pre-refresh hook lives in `indexRepoImpl()`, so every call path (MCP
+    `sdl.index.refresh`, CLI `sdl-mcp index`, HTTP reindex, file watcher,
+    sync pull, benchmarks) gets it automatically.
+  - Auto-installs scip-io from GitHub releases into `~/.sdl-mcp/bin/` when
+    missing from PATH and `scip.generator.autoInstall = true`. Downloads use
+    Node's built-in `fetch` (no shell, no remote scripts) against an
+    allowlist of `github.com` / `objects.githubusercontent.com` hosts —
+    tampered API responses pointing at other hosts are rejected. SHA-256
+    verification against the release's `SHA256SUMS.txt` is mandatory;
+    installs are refused if the checksum file is absent. Archives are
+    extracted via the system `tar` binary with realpath-based staging-dir
+    containment to block symlink escapes.
+  - When the generator is enabled, `{ path: "index.scip" }` is auto-injected
+    into `scip.indexes` at config-load time so users only need one flag to
+    opt in.
+  - All failures (binary missing, install failure, non-zero exit, timeout)
+    are non-fatal and logged as warnings — indexing continues regardless.
 
 ## [0.10.3] - 2026-04-04
 

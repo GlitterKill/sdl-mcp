@@ -4,7 +4,7 @@ import { basename } from "node:path";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { searchSymbolsWithOverlay } from "../live-index/overlay-reader.js";
 import { normalizePath } from "./paths.js";
-import { splitCamelSubwords, computeRelevance } from "../mcp/tools/symbol.js";
+import { splitCamelSubwords, computeRelevance } from "./symbol-relevance.js";
 
 export interface SymbolRefInput {
   name: string;

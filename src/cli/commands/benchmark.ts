@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { dirname, resolve } from "path";
 import type { Connection } from "kuzu";
-import type { CLIOptions } from "../types.js";
+import type { BenchmarkOptions } from "../types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
@@ -35,16 +35,6 @@ import {
   type EdgeAccuracyScore,
 } from "../../benchmark/edgeAccuracy.js";
 import { logEdgeResolutionTelemetry } from "../../mcp/telemetry.js";
-
-export interface BenchmarkOptions extends CLIOptions {
-  repoId?: string;
-  baselinePath?: string;
-  thresholdPath?: string;
-  outputPath?: string;
-  jsonOutput?: boolean;
-  updateBaseline?: boolean;
-  skipIndexing?: boolean;
-}
 
 interface BenchmarkCIOptions extends BenchmarkOptions {}
 

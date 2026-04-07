@@ -1,4 +1,4 @@
-import type { RepoId } from "../domain/types.js";
+import type { RepoId, DiagnosticSuspect } from "../domain/types.js";
 import { RepoConfigSchema } from "../config/types.js";
 import type { Diagnostic, DiagnosticSummary } from "./diagnostics.js";
 import { diagnosticsManager } from "./diagnostics.js";
@@ -8,18 +8,7 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import { normalizePath, getRelativePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
 
-export interface DiagnosticSuspect {
-  symbolId: string;
-  file: string;
-  range: {
-    startLine: number;
-    startCol: number;
-    endLine: number;
-    endCol: number;
-  };
-  code: string | number;
-  messageShort: string;
-}
+export type { DiagnosticSuspect };
 
 export interface DiagnosticMappingOptions {
   repoId: RepoId;

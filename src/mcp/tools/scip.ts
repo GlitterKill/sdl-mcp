@@ -28,6 +28,13 @@ export async function handleScipIngest(
     externalSymbols: { enabled: true, maxPerIndex: 10_000 },
     confidence: 0.95,
     autoIngestOnRefresh: true,
+    generator: {
+      enabled: false,
+      binary: "scip-io",
+      args: [],
+      autoInstall: true,
+      timeoutMs: 10 * 60 * 1000,
+    },
   };
 
   if (!scipConfig.enabled) {

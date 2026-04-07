@@ -1120,7 +1120,34 @@
           "maximum": 1.0,
           "default": 0.95
         },
-        "autoIngestOnRefresh": { "type": "boolean", "default": true }
+        "autoIngestOnRefresh": { "type": "boolean", "default": true },
+        "generator": {
+          "type": "object",
+          "description": "Auto-generate index.scip via the scip-io CLI before each refresh. Has no effect unless scip.enabled is also true. When enabled and the binary is missing, sdl-mcp downloads it from GitHub releases into ~/.sdl-mcp/bin/ with mandatory SHA-256 verification against the release's SHA256SUMS.txt; installs are refused if the checksum file is absent.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "binary": { "type": "string", "default": "scip-io" },
+            "args": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": []
+            },
+            "autoInstall": { "type": "boolean", "default": true },
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 1800000,
+              "default": 600000
+            }
+          },
+          "default": {
+            "enabled": false,
+            "binary": "scip-io",
+            "args": [],
+            "autoInstall": true,
+            "timeoutMs": 600000
+          }
+        }
       }
     },
     "memory": {

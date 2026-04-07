@@ -2,6 +2,7 @@ import { readFileSync, statSync } from "fs";
 import { AppConfig, AppConfigSchema } from "./types.js";
 import { ConfigError } from "../domain/errors.js";
 import { resolveCliConfigPath } from "./configPath.js";
+import { normalizePath } from "../util/paths.js";
 
 function expandEnvVars(obj: unknown, configPath: string): unknown {
   if (typeof obj === "string") {
@@ -120,6 +121,29 @@ export function loadConfig(configPath?: string): AppConfig {
           ],
         };
         finalConfig = { ...config, security: mergedSecurity };
+      }
+    }
+
+    // scip-io integration: when the generator is enabled (and SCIP ingest is
+    // also enabled), ensure the produced index.scip is in scip.indexes so the
+    // existing post-refresh auto-ingest picks it up. Users only need
+    // `scip.generator.enabled = true` to opt in — they don't have to also
+    // remember to add `{ "path": "index.scip" }` to scip.indexes.
+    if (finalConfig.scip?.enabled && finalConfig.scip?.generator?.enabled) {
+      const hasIndexEntry = finalConfig.scip.indexes.some(
+        (e) => normalizePath(e.path) === "index.scip",
+      );
+      if (!hasIndexEntry) {
+        finalConfig = {
+          ...finalConfig,
+          scip: {
+            ...finalConfig.scip,
+            indexes: [
+              ...finalConfig.scip.indexes,
+              { path: "index.scip", label: "scip-io" },
+            ],
+          },
+        };
       }
     }
 

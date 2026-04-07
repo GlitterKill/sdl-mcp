@@ -1,3 +1,16 @@
+/**
+ * Architectural port in waiting.
+ *
+ * This file defines the hexagonal `SymbolRepository` port and an in-memory
+ * reference implementation. It is intentionally not wired in yet: production
+ * code currently accesses symbols directly via `src/db/ladybug-*.ts`. Keeping
+ * this file gives future refactors a stable seam to depend on without having
+ * to redesign the port surface under pressure.
+ *
+ * Marked as `dynamicallyLoaded` in `.fallowrc.json` so fallow does not flag it
+ * as unused. Before deleting, coordinate with the hexagonal-architecture note
+ * in the top-level CLAUDE.md files.
+ */
 import type {
   RepoId,
   SymbolId,
