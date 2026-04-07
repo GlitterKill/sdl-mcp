@@ -241,7 +241,17 @@ export function classifyEdgeAction(
 
   const sameTarget = existingEdge.targetSymbolId === newEdge.targetSymbolId;
 
-  if (sameTarget && existingEdge.confidence < newEdge.confidence) {
+  // Upgrade when the new edge has strictly higher confidence, OR when the
+  // confidence is equal but the existing edge is still tagged heuristic. The
+  // latter case happens on SCIP re-ingestion of an edge that was previously
+  // written at the SCIP confidence level via a heuristic config entry — we
+  // want the resolution/resolverId metadata to be promoted to "exact"/"scip".
+  const shouldUpgrade =
+    existingEdge.confidence < newEdge.confidence ||
+    (existingEdge.confidence === newEdge.confidence &&
+      existingEdge.resolution !== "exact");
+
+  if (sameTarget && shouldUpgrade) {
     return "upgrade";
   }
 
