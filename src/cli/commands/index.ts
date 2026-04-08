@@ -6,6 +6,7 @@ import {
   IndexWatchHandle,
   IndexResult,
 } from "../../indexer/indexer.js";
+import type { IndexProgress } from "../../indexer/indexer.js";
 import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
@@ -13,6 +14,175 @@ import { getCurrentTimestamp } from "../../util/time.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { findExistingProcess, type PidfileData } from "../../util/pidfile.js";
 import { connectSSE, type SSEEvent } from "../../util/sse-client.js";
+import type { AutoIngestProgressEvent } from "../../scip/ingestion.js";
+
+// ---------------------------------------------------------------------------
+// Progress renderer
+// ---------------------------------------------------------------------------
+//
+// Renders indexer and SCIP progress in-place when stdout is a TTY (using
+// carriage return + clear-to-EOL) and falls back to throttled line printing
+// in non-TTY contexts (CI logs, piped output). The renderer is stateful so it
+// can emit a newline when the active stage changes — without this, in-place
+// updates from stage N would collide with stage N+1 on the same line.
+
+interface ProgressState {
+  /** Key identifying the currently-rendered stage (e.g. "pass1", "scip:label:documents"). */
+  currentStage: string | null;
+  /** Last line written, used to dedupe identical updates from high-frequency callbacks. */
+  lastLine: string;
+  /** Last percentage printed in non-TTY mode (throttles to ~10% increments). */
+  lastPrintedPct: number;
+}
+
+function createProgressState(): ProgressState {
+  return { currentStage: null, lastLine: "", lastPrintedPct: -1 };
+}
+
+function isTty(): boolean {
+  return Boolean(process.stdout.isTTY);
+}
+
+function buildBar(pct: number, width = 20): string {
+  const clamped = Math.max(0, Math.min(100, pct));
+  const filled = Math.round((clamped / 100) * width);
+  return "[" + "#".repeat(filled) + "-".repeat(width - filled) + "]";
+}
+
+/**
+ * Map an IndexProgress stage to a user-facing label. The indexer emits
+ * internal stage names (snake/camel); the CLI shows human-friendly strings.
+ */
+function indexStageLabel(stage: IndexProgress["stage"]): string {
+  switch (stage) {
+    case "scanning":
+      return "Scanning files";
+    case "parsing":
+      return "Parsing";
+    case "pass1":
+      return "Pass 1 (symbols)";
+    case "pass2":
+      return "Pass 2 (edges)";
+    case "finalizing":
+      return "Finalizing (edges, metrics, file summaries)";
+    case "summaries":
+      return "Summaries";
+    case "embeddings":
+      return "Embeddings";
+    default:
+      return stage;
+  }
+}
+
+/**
+ * Write a progress line to stdout, either in-place (TTY) or throttled
+ * (non-TTY). When switching between stages, the previous line is finalized
+ * with a newline so it remains visible in scrollback.
+ */
+function writeProgressLine(
+  state: ProgressState,
+  stageKey: string,
+  line: string,
+  pct: number | null,
+): void {
+  // Stage transition — finalize the previous line so the new stage starts
+  // on a fresh line and scrollback shows all stages.
+  if (state.currentStage !== null && state.currentStage !== stageKey) {
+    if (isTty()) {
+      process.stdout.write("\n");
+    }
+    state.lastLine = "";
+    state.lastPrintedPct = -1;
+  }
+  state.currentStage = stageKey;
+
+  if (line === state.lastLine) return;
+
+  if (isTty()) {
+    // \r returns to line start; \x1b[K clears from cursor to end of line.
+    process.stdout.write(`\r${line}\x1b[K`);
+    state.lastLine = line;
+  } else {
+    // Non-TTY: throttle to ~10% boundaries so CI logs don't drown in ticks.
+    // Pass pct=null for "always print" lines (stage headers, spinners).
+    if (pct === null || pct === 100 || pct - state.lastPrintedPct >= 10) {
+      console.log(line);
+      state.lastLine = line;
+      state.lastPrintedPct = pct ?? -1;
+    }
+  }
+}
+
+/** Finalize any in-flight progress line with a newline so output that follows starts cleanly. */
+function finishProgress(state: ProgressState): void {
+  if (state.currentStage !== null && isTty()) {
+    process.stdout.write("\n");
+  }
+  state.currentStage = null;
+  state.lastLine = "";
+  state.lastPrintedPct = -1;
+}
+
+/**
+ * Render a single IndexProgress event. Handles both stages with a known
+ * total (parsing, pass1, pass2, summaries, embeddings — drawn as a bar) and
+ * stages without progress (scanning, finalizing — drawn as a spinner/label).
+ */
+function renderIndexProgress(state: ProgressState, p: IndexProgress): void {
+  const label = indexStageLabel(p.stage);
+  let line: string;
+  let pct: number | null = null;
+
+  if (p.stage === "scanning") {
+    line = `  ${label}...`;
+  } else if (p.stage === "finalizing") {
+    // finalizing fires only once; show it as a static indicator while the
+    // silent internal phases (finalizeEdges, metrics, fileSummaries) run.
+    line = `  ${label}...`;
+  } else if (p.total > 0) {
+    pct = Math.min(100, Math.floor((p.current / p.total) * 100));
+    const bar = buildBar(pct);
+    const file = p.currentFile ? ` ${p.currentFile}` : "";
+    line = `  ${label}: ${bar} ${String(pct).padStart(3)}% (${p.current}/${p.total})${file}`;
+  } else {
+    line = `  ${label}...`;
+  }
+
+  writeProgressLine(state, p.stage, line, pct);
+}
+
+/**
+ * Render a SCIP auto-ingest progress event. The externals phase has a known
+ * total (pre-fetched list) so it draws a real bar; the documents phase is
+ * streamed from an async iterator with no upfront count, so it renders a
+ * moving counter with running match/edge totals.
+ */
+function renderScipProgress(
+  state: ProgressState,
+  ev: AutoIngestProgressEvent,
+): void {
+  const { indexLabel, event } = ev;
+  let line: string;
+  let pct: number | null = null;
+  let stageKey: string;
+
+  if (event.phase === "externals") {
+    stageKey = `scip:${indexLabel}:externals`;
+    pct =
+      event.total > 0
+        ? Math.min(100, Math.floor((event.current / event.total) * 100))
+        : 100;
+    const bar = buildBar(pct);
+    line = `  SCIP [${indexLabel}] externals: ${bar} ${String(pct).padStart(3)}% (${event.current}/${event.total})`;
+  } else {
+    stageKey = `scip:${indexLabel}:documents`;
+    // No upfront total for streaming documents — show a counter with running
+    // match/edge totals so the user sees forward progress.
+    line = `  SCIP [${indexLabel}] documents: ${event.current} processed, ${event.matched} matched, +${event.edges} edges`;
+  }
+
+  writeProgressLine(state, stageKey, line, pct);
+}
 
 /**
  * Delegate indexing for a single repo to the running HTTP server via SSE.
@@ -28,7 +198,7 @@ async function delegateIndexToServer(
     `  Delegating to running server (PID ${server.pid}, port ${server.port})...`,
   );
 
-  let lastProgressLine = "";
+  const progressState = createProgressState();
   let completed = false;
 
   try {
@@ -45,57 +215,60 @@ async function delegateIndexToServer(
       onEvent: (evt: SSEEvent) => {
         if (evt.event === "progress") {
           try {
+            // The server forwards every stage the indexer emits
+            // (scanning/parsing/pass1/pass2/finalizing/summaries/embeddings),
+            // so cast to IndexProgress once validated and defer all
+            // formatting to the shared renderer.
             const p = JSON.parse(evt.data) as {
-              stage: string;
+              stage: IndexProgress["stage"];
               current: number;
               total: number;
               currentFile?: string;
             };
-            if (p.stage === "pass1" || p.stage === "pass2") {
-              const line = `  ${p.stage}: ${p.current}/${p.total}${p.currentFile ? ` ${p.currentFile}` : ""}`;
-              if (line !== lastProgressLine) {
-                console.log(line);
-                lastProgressLine = line;
-              }
-            }
+            renderIndexProgress(progressState, p);
           } catch {
             // Skip malformed SSE event
           }
         } else if (evt.event === "complete") {
+          // Finalize the in-flight progress line so summary prints cleanly.
+          finishProgress(progressState);
           try {
             const c = JSON.parse(evt.data) as {
-            filesProcessed: number;
-            symbolsIndexed: number;
-            totalSymbols: number;
-            edgesCreated: number;
-            totalEdges: number;
-            durationMs: number;
-            summaryStats?: {
-              generated: number;
-              totalCostUsd: number;
-              skipped: number;
-              failed: number;
-            } | null;
-          };
-          console.log(`  Files: ${c.filesProcessed}`);
-          console.log(
-            `  Symbols: ${c.symbolsIndexed} new (${c.totalSymbols} total)`,
-          );
-          console.log(
-            `  Edges: ${c.edgesCreated} new (${c.totalEdges} total)`,
-          );
-          console.log(`  Duration: ${c.durationMs}ms`);
-          if (c.summaryStats) {
-            const s = c.summaryStats;
+              filesProcessed: number;
+              symbolsIndexed: number;
+              totalSymbols: number;
+              edgesCreated: number;
+              totalEdges: number;
+              durationMs: number;
+              summaryStats?: {
+                generated: number;
+                totalCostUsd: number;
+                skipped: number;
+                failed: number;
+              } | null;
+            };
+            console.log(`  Files: ${c.filesProcessed}`);
             console.log(
-              `  Summaries: ${s.generated} new ($${s.totalCostUsd.toFixed(4)}), ${s.skipped} cached, ${s.failed} failed`,
+              `  Symbols: ${c.symbolsIndexed} new (${c.totalSymbols} total)`,
             );
-          }
-          completed = true;
+            console.log(
+              `  Edges: ${c.edgesCreated} new (${c.totalEdges} total)`,
+            );
+            console.log(`  Duration: ${c.durationMs}ms`);
+            if (c.summaryStats) {
+              const s = c.summaryStats;
+              console.log(
+                `  Summaries: ${s.generated} new ($${s.totalCostUsd.toFixed(4)}), ${s.skipped} cached, ${s.failed} failed`,
+              );
+            }
+            completed = true;
           } catch {
             // Skip malformed SSE event
           }
         } else if (evt.event === "error") {
+          // Finalize any in-flight progress line so the error message isn't
+          // glued to a half-written stage bar.
+          finishProgress(progressState);
           try {
             const e = JSON.parse(evt.data) as { message: string };
             console.error(`  Error from server: ${e.message}`);
@@ -106,8 +279,12 @@ async function delegateIndexToServer(
       },
     });
 
+    // Defensive finalize in case the SSE stream closed without emitting
+    // complete/error (network drop, server crash).
+    finishProgress(progressState);
     return completed;
   } catch (error) {
+    finishProgress(progressState);
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`  Failed to delegate to server: ${msg}`);
     return false;
@@ -204,25 +381,22 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       });
     });
 
-    const directMode =
-      options.force || !existingRepo ? "full" : "incremental";
+    const directMode = options.force || !existingRepo ? "full" : "incremental";
 
     try {
-      let lastProgressLine = "";
+      // Shared progress state across indexer + SCIP so stage transitions
+      // between them (e.g. embeddings -> SCIP externals) produce a clean
+      // newline boundary in TTY mode.
+      const progressState = createProgressState();
       const stats: IndexResult = await indexRepo(
         repo.repoId,
         directMode,
         (progress) => {
-          if (progress.stage !== "pass1" && progress.stage !== "pass2") {
-            return;
-          }
-          const line = `  ${progress.stage}: ${progress.current}/${progress.total}${progress.currentFile ? ` ${progress.currentFile}` : ""}`;
-          if (line !== lastProgressLine) {
-            console.log(line);
-            lastProgressLine = line;
-          }
+          renderIndexProgress(progressState, progress);
         },
       );
+      // Finalize the last indexer stage line before printing summary lines.
+      finishProgress(progressState);
       const totalSymbols = await ladybugDb.getSymbolCount(conn, repo.repoId);
       const totalEdges = await ladybugDb.getEdgeCount(conn, repo.repoId);
       console.log(`  Files: ${stats.filesProcessed}`);
@@ -236,6 +410,61 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
         console.log(
           `  Summaries: ${s.generated} new ($${s.totalCostUsd.toFixed(4)}), ${s.skipped} cached, ${s.failed} failed`,
         );
+      }
+
+      // SCIP auto-ingest — mirrors the MCP `runPostRefresh` behavior so
+      // `sdl-mcp index` and `sdl.index.refresh` produce the same final
+      // state. Without this the CLI path silently skipped SCIP ingestion
+      // even when scip.autoIngestOnRefresh was true.
+      if (config.scip?.enabled && config.scip?.autoIngestOnRefresh) {
+        try {
+          const { autoIngestScipIndexes } =
+            await import("../../scip/ingestion.js");
+          const total = config.scip.indexes?.length ?? 0;
+          if (total === 0) {
+            console.log(
+              "  SCIP: enabled but no indexes configured (set scip.indexes in config)",
+            );
+          } else {
+            console.log(`  SCIP: ingesting ${total} configured index(es)...`);
+            // Use a dedicated progress state for SCIP so its stage keys
+            // ("scip:<label>:externals" / ":documents") don't collide with
+            // indexer stage keys and so the first SCIP line starts on a
+            // fresh line below the indexer summary.
+            const scipProgressState = createProgressState();
+            const scipResults = await autoIngestScipIndexes(
+              repo.repoId,
+              config.scip,
+              repo.rootPath,
+              (event) => renderScipProgress(scipProgressState, event),
+            );
+            finishProgress(scipProgressState);
+            if (scipResults.length === 0) {
+              console.log(
+                `  SCIP: 0/${total} indexes ingested (files missing or unchanged since last ingest)`,
+              );
+            } else {
+              console.log(
+                `  SCIP: ${scipResults.length}/${total} index(es) processed`,
+              );
+              for (const r of scipResults) {
+                console.log(
+                  `    ${r.status}: docs ${r.documentsProcessed}/${
+                    r.documentsProcessed + r.documentsSkipped
+                  }, matched ${r.symbolsMatched}, edges +${r.edgesCreated}/^${
+                    r.edgesUpgraded
+                  }/~${r.edgesReplaced}, external ${
+                    r.externalSymbolsCreated
+                  }, unresolved ${r.unresolvedOccurrences} (${r.durationMs}ms)`,
+                );
+              }
+            }
+          }
+        } catch (scipErr) {
+          const msg =
+            scipErr instanceof Error ? scipErr.message : String(scipErr);
+          console.warn(`  SCIP auto-ingest failed (non-fatal): ${msg}`);
+        }
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -316,4 +545,3 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
 
   console.log("\n✓ Indexing complete");
 }
-

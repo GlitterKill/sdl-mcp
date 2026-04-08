@@ -64,21 +64,35 @@ Add a `scip` section to your `sdlmcp.config.json`:
       "maxPerIndex": 10000
     },
     "confidence": 0.95,
-    "autoIngestOnRefresh": true
+    "autoIngestOnRefresh": true,
+    "generator": {
+      "enabled": false,
+      "binary": "scip-io",
+      "args": [],
+      "autoInstall": true,
+      "timeoutMs": 600000
+    }
   }
 }
 ```
 
+The `generator` subsection wires sdl-mcp into the [scip-io](https://github.com/GlitterKill/scip-io) CLI to regenerate `index.scip` automatically before every refresh — see [Automatic Generation with scip-io](#automatic-generation-with-scip-io) below. The minimal opt-in is `scip.enabled: true` plus `scip.generator.enabled: true`; everything else defaults sensibly.
+
 ### Field Reference
 
-| Field                         | Type    | Default | Description                                                                                                                                                 |
-| :---------------------------- | :------ | :------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`                     | boolean | `false` | Master switch for SCIP integration. When false, all SCIP features are disabled.                                                                             |
-| `indexes`                     | array   | `[]`    | List of SCIP index files to ingest. Each entry has a `path` (relative to repo root) and an optional `label` (e.g., `"typescript"`, `"go"`) for diagnostics. |
-| `externalSymbols.enabled`     | boolean | `true`  | Whether to create graph nodes for external dependency symbols (symbols from packages outside the repo).                                                     |
-| `externalSymbols.maxPerIndex` | number  | `10000` | Cap on the number of external symbols ingested per index file. Prevents the graph from growing unbounded when a large dependency tree is present.           |
-| `confidence`                  | number  | `0.95`  | Confidence score assigned to SCIP-resolved edges. Reflects compiler-grade certainty (higher than heuristic edges, which typically score 0.5-0.8).           |
-| `autoIngestOnRefresh`         | boolean | `true`  | When true, `sdl.index.refresh` automatically re-ingests SCIP files if they are newer than the last ingestion timestamp.                                     |
+| Field                         | Type    | Default     | Description                                                                                                                                                                                                                                                                                 |
+| :---------------------------- | :------ | :---------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enabled`                     | boolean | `false`     | Master switch for SCIP integration. When false, all SCIP features are disabled.                                                                                                                                                                                                             |
+| `indexes`                     | array   | `[]`        | List of SCIP index files to ingest. Each entry has a `path` (relative to repo root) and an optional `label` (e.g., `"typescript"`, `"go"`) for diagnostics. When `generator.enabled` is true, `{ "path": "index.scip", "label": "scip-io" }` is auto-injected if not already present.       |
+| `externalSymbols.enabled`     | boolean | `true`      | Whether to create graph nodes for external dependency symbols (symbols from packages outside the repo).                                                                                                                                                                                     |
+| `externalSymbols.maxPerIndex` | number  | `10000`     | Cap on the number of external symbols ingested per index file. Prevents the graph from growing unbounded when a large dependency tree is present.                                                                                                                                           |
+| `confidence`                  | number  | `0.95`      | Confidence score assigned to SCIP-resolved edges. Reflects compiler-grade certainty (higher than heuristic edges, which typically score 0.5-0.8).                                                                                                                                           |
+| `autoIngestOnRefresh`         | boolean | `true`      | When true, `sdl.index.refresh` automatically re-ingests SCIP files if they are newer than the last ingestion timestamp.                                                                                                                                                                     |
+| `generator.enabled`           | boolean | `false`     | Master switch for the scip-io generator integration. Has no effect unless `scip.enabled` is also true.                                                                                                                                                                                      |
+| `generator.binary`            | string  | `"scip-io"` | Override the scip-io binary name. The runner looks it up in PATH first (cross-platform `which`/`where`), then falls back to the sdl-mcp managed location at `~/.sdl-mcp/bin/scip-io[.exe]`.                                                                                                 |
+| `generator.args`              | array   | `[]`        | Extra string args appended after `index` when invoking scip-io (e.g., `["--no-clean"]`). The first arg is always `index`.                                                                                                                                                                   |
+| `generator.autoInstall`       | boolean | `true`      | When true and the binary is missing from both PATH and the managed location, sdl-mcp downloads it from the scip-io GitHub releases (with mandatory SHA-256 verification) into `~/.sdl-mcp/bin/`. When false, a missing binary just logs a warning and the refresh proceeds without scip-io. |
+| `generator.timeoutMs`         | integer | `600000`    | Hard timeout for the `scip-io index` invocation, in milliseconds. Min `1000` (1s), max `1800000` (30min). Default 10 minutes. On timeout the process tree is killed and the refresh continues.                                                                                              |
 
 ---
 
@@ -144,6 +158,89 @@ scip-clang --compdb-path=build/compile_commands.json --index-output=index.scip
 ```
 
 The `.scip` file is a protobuf binary. You can inspect it with `scip print index.scip` (from the [scip CLI](https://github.com/sourcegraph/scip)).
+
+---
+
+## Automatic Generation with scip-io
+
+Manually invoking the right SCIP emitter for every language in a polyglot repo and remembering to re-run it after every change is friction. SDL-MCP supports automating that step via [scip-io](https://github.com/GlitterKill/scip-io) — a polyglot SCIP orchestrator written in Rust that detects which languages your repo contains, downloads the matching upstream emitters, runs them in parallel, and merges everything into a single `index.scip` at the repo root.
+
+When `scip.generator.enabled` is `true`, sdl-mcp runs `scip-io index` in the repo root **before** every `indexRepo()` call. The freshly written `index.scip` is then picked up automatically by the existing post-refresh ingest. There is nothing to wire up beyond the two flags.
+
+### Languages scip-io Orchestrates
+
+scip-io currently dispatches to upstream indexers for **TypeScript, JavaScript, Python, Rust, Go, Java, Scala, Kotlin, C#, Ruby, and C/C++**. It detects which languages are present in your repo, fetches each indexer (from GitHub releases, npm, dotnet tool, Coursier, or PATH), runs them, and merges the per-language outputs into one deterministic `index.scip`. See the [scip-io README](https://github.com/GlitterKill/scip-io) for the full matrix.
+
+### Minimal Configuration
+
+The smallest opt-in is two flags:
+
+```json
+{
+  "scip": {
+    "enabled": true,
+    "generator": {
+      "enabled": true
+    }
+  }
+}
+```
+
+That's enough. With `scip.generator.enabled = true`, sdl-mcp:
+
+1. Auto-injects `{ "path": "index.scip", "label": "scip-io" }` into `scip.indexes` at config-load time, so you don't need to also list the index file manually.
+2. Runs `scip-io index` in the repo root before every `indexRepo()` invocation (CLI `sdl-mcp index`, MCP `sdl.index.refresh`, the file watcher, sync pull, HTTP reindex — every code path is covered).
+3. Picks up the freshly written `index.scip` via the existing `autoIngestOnRefresh` path.
+
+All the other `generator.*` fields default to sensible values: a 10-minute timeout, no extra args, `binary: "scip-io"`, and `autoInstall: true`.
+
+### Auto-Install Behavior
+
+If scip-io is not on PATH and is not in the sdl-mcp managed location, sdl-mcp can fetch it for you. The install path is intentionally narrow to keep the trust model small:
+
+- **HTTPS only.** Downloads go through Node 24's built-in `fetch` — no shell, no curl-piped-to-bash, no remote install scripts.
+- **Host allowlist.** Every URL pulled from the GitHub Releases API response is validated against `github.com` and `objects.githubusercontent.com` (and subdomains) before any network I/O. A tampered API response pointing at an attacker-controlled host is rejected with a clear error.
+- **Mandatory SHA-256 verification.** sdl-mcp downloads the release's `SHA256SUMS.txt`, parses out the entry for the matching archive, and refuses to install if the digest does not match. **Releases that do not publish `SHA256SUMS.txt` are refused entirely** — there is no advisory/skip path. If you need to bypass this (e.g., a release without checksums), set `scip.generator.autoInstall = false` and install scip-io yourself.
+- **200 MB hard cap** on archive size, enforced both via the `Content-Length` header and via streaming-byte counting (so a server that lies about content-length still cannot OOM the process).
+- **Atomic install.** Archives are downloaded into a temp staging directory, extracted there, the binary is staged at `~/.sdl-mcp/bin/scip-io.tmp-<pid>`, smoke-tested via `scip-io --version`, and only then renamed to its final location. A crashed or aborted install never replaces a working binary.
+- **System `tar` for extraction.** Both `.tar.gz` (Linux, macOS) and `.zip` (Windows) archives are extracted by the OS-provided `tar` binary (Windows 10+ ships bsdtar via `tar.exe`). No new npm dependency, no JS zip parser. Extracted paths are validated against the staging directory using `realpath`, so a malicious archive containing a symlink that escapes the staging directory cannot land outside `~/.sdl-mcp/bin/`.
+
+The installed binary lives at `~/.sdl-mcp/bin/scip-io[.exe]`. Subsequent refreshes detect it there and skip the install path entirely.
+
+If `autoInstall` is `false` and the binary is missing, sdl-mcp logs a warning naming the managed directory and the indexer continues normally — you simply do not get a fresh `index.scip` for that refresh.
+
+### Concurrency and Lock Behavior
+
+Two design choices keep scip-io from interfering with sdl-mcp's own indexing throughput:
+
+- **Hook runs OUTSIDE `indexLocks`.** The pre-refresh hook fires in `indexRepo()` _before_ sdl-mcp acquires its per-repo serialization lock. A 10-minute scip-io run never blocks queued watcher-triggered incremental refreshes from grabbing their indexing slot.
+- **Per-repo coalescing.** The runner maintains a per-repo `Map<repoId, Promise<void>>` lock. If a second `indexRepo()` arrives while a previous scip-io run for the same repo is still in flight, the second caller waits on the first's promise instead of starting a parallel `scip-io index` (which would race on writing `index.scip` at the repo root). Different repos still run scip-io concurrently.
+- **Single-flight install lock.** The auto-install path itself uses a separate global lock so two parallel calls cannot both download the binary.
+
+### Failure Mode: Non-Fatal
+
+Every failure path on this integration is non-fatal:
+
+- Binary missing + `autoInstall: false` → warn, skip the run, continue indexing.
+- GitHub API unavailable → warn, skip, continue.
+- SHA-256 mismatch / missing checksums file → warn, skip, continue.
+- Archive extraction fails → warn, skip, continue.
+- Smoke test fails → warn, skip, continue.
+- `scip-io index` exits non-zero → warn (with up to 2KB of captured stderr), continue indexing with whatever `index.scip` happens to be on disk.
+- Timeout fires → kill the process tree (Windows: `taskkill /T /F`; Unix: SIGTERM/SIGKILL on the process group), warn, continue.
+
+The indexer always finishes its own pass. A broken scip-io setup will never block you from indexing.
+
+### When to Disable
+
+You should leave `scip.generator.enabled = false` (the default) when:
+
+- You are running another SCIP emitter manually (e.g., `scip-typescript` from a CI step) and writing the `.scip` file yourself.
+- Your repo's languages are not covered by scip-io's upstream indexers and the manual emitters do a better job for your stack.
+- You need a specific upstream indexer version that scip-io does not pin to.
+- You want minimum-overhead refreshes during heavy live-editing — scip-io adds wall-clock time even when sdl-mcp's own indexer would short-circuit.
+
+In all of those cases, the legacy path (`autoIngestOnRefresh: true` + manually-managed `index.scip` + entries in `scip.indexes`) still works exactly as before.
 
 ---
 

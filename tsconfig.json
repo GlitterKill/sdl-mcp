@@ -31,6 +31,7 @@
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
     "allowImportingTsExtensions": false,
+    "allowJs": true,
     "types": ["node"]
   },
   "include": ["src/**/*"],

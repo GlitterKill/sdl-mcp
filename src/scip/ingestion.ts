@@ -53,6 +53,36 @@ import type {
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
+// Progress event types — surfaced to callers (CLI progress bars, MCP logs)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fine-grained progress event emitted from the ingestion pipeline for a
+ * single SCIP index. The `externals` phase has a known total (all external
+ * symbols are pre-fetched), so it can drive a true percentage bar; the
+ * `documents` phase is streamed from an async iterator with no upfront
+ * total, so it is reported as a counter snapshot.
+ */
+export type ScipIngestProgressEvent =
+  | { phase: "externals"; current: number; total: number }
+  | {
+      phase: "documents";
+      current: number;
+      matched: number;
+      edges: number;
+    };
+
+/**
+ * Progress event emitted by `autoIngestScipIndexes` — wraps the per-index
+ * progress event with a label so multi-index configs can be disambiguated
+ * in the CLI output.
+ */
+export interface AutoIngestProgressEvent {
+  indexLabel: string;
+  event: ScipIngestProgressEvent;
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -108,6 +138,7 @@ function zeroCounts(): Omit<
 export async function ingestScipIndex(
   request: ScipIngestRequest,
   config: ScipConfig,
+  onProgress?: (event: ScipIngestProgressEvent) => void,
 ): Promise<ScipIngestResponse> {
   const startMs = Date.now();
   const dryRun = request.dryRun === true;
@@ -200,7 +231,25 @@ export async function ingestScipIndex(
       const externalBatch: Array<ExternalSymbolRow & { updatedAt: string }> =
         [];
 
-      for (const ext of allExternals) {
+      // Initial progress tick so callers can render a bar from 0% immediately
+      // after the externals list is loaded.
+      onProgress?.({
+        phase: "externals",
+        current: 0,
+        total: allExternals.length,
+      });
+
+      // Throttle progress emission to avoid flooding callers on large indexes.
+      // We emit every ~2% of externals processed (minimum every 25 items).
+      const externalsTickEvery = Math.max(
+        25,
+        Math.floor(allExternals.length / 50),
+      );
+      let externalsSinceLastTick = 0;
+
+      for (let i = 0; i < allExternals.length; i++) {
+        const ext = allExternals[i];
+
         if (externalBatch.length >= maxExternals) {
           truncatedExternals = true;
           logger.warn("External symbol cap reached", {
@@ -213,6 +262,15 @@ export async function ingestScipIndex(
         const row = createExternalSymbol(ext.symbol, ext, request.repoId);
         if (row === null) {
           // Unmappable kind — skip
+          externalsSinceLastTick++;
+          if (externalsSinceLastTick >= externalsTickEvery) {
+            onProgress?.({
+              phase: "externals",
+              current: i + 1,
+              total: allExternals.length,
+            });
+            externalsSinceLastTick = 0;
+          }
           continue;
         }
 
@@ -221,7 +279,25 @@ export async function ingestScipIndex(
           ...row,
           updatedAt: new Date().toISOString(),
         });
+
+        externalsSinceLastTick++;
+        if (externalsSinceLastTick >= externalsTickEvery) {
+          onProgress?.({
+            phase: "externals",
+            current: i + 1,
+            total: allExternals.length,
+          });
+          externalsSinceLastTick = 0;
+        }
       }
+
+      // Final tick at 100% so the bar reaches the end before the documents
+      // phase begins.
+      onProgress?.({
+        phase: "externals",
+        current: allExternals.length,
+        total: allExternals.length,
+      });
 
       if (externalBatch.length > 0 && !dryRun) {
         await withWriteConn(async (wConn) => {
@@ -247,6 +323,16 @@ export async function ingestScipIndex(
     let edgesUpgraded = 0;
     let edgesReplaced = 0;
     let unresolvedOccurrences = 0;
+
+    // Fire an initial zero-progress tick so the CLI can render the documents
+    // phase indicator immediately, even before the first document arrives
+    // from the streaming decoder.
+    onProgress?.({
+      phase: "documents",
+      current: 0,
+      matched: 0,
+      edges: 0,
+    });
 
     for await (const doc of decoder.documents()) {
       const relPath = normalizePath(doc.relativePath);
@@ -418,8 +504,9 @@ export async function ingestScipIndex(
       }
       unresolvedOccurrences += unresolvedInDoc.size;
 
-      // Log progress milestones (we don't know total upfront with async gen,
-      // so log every 50 documents)
+      // Log + emit progress every 50 documents. We don't know the total
+      // upfront with the streaming decoder, so progress is reported as a
+      // counter snapshot (current + running totals) rather than a percentage.
       if (documentsProcessed % 50 === 0) {
         logger.info("SCIP ingestion progress", {
           documentsProcessed,
@@ -427,8 +514,23 @@ export async function ingestScipIndex(
           symbolsMatched,
           edgesCreated,
         });
+        onProgress?.({
+          phase: "documents",
+          current: documentsProcessed,
+          matched: symbolsMatched,
+          edges: edgesCreated,
+        });
       }
     }
+
+    // Final tick after the last document so CLI renderers land on a clean
+    // end-state before the response is returned.
+    onProgress?.({
+      phase: "documents",
+      current: documentsProcessed,
+      matched: symbolsMatched,
+      edges: edgesCreated,
+    });
 
     // -------------------------------------------------------------------
     // Step 6: Write ingestion metadata
@@ -533,6 +635,7 @@ export async function autoIngestScipIndexes(
   repoId: string,
   config: ScipConfig,
   repoRootPath: string,
+  onProgress?: (event: AutoIngestProgressEvent) => void,
 ): Promise<ScipIngestResponse[]> {
   if (!config.enabled || !config.autoIngestOnRefresh) {
     return [];
@@ -602,9 +705,20 @@ export async function autoIngestScipIndexes(
         path: relIndexPath,
         label: entry.label,
       });
+      // Resolve a display label for this index — prefer the configured label,
+      // fall back to the relative path so every event carries a stable
+      // identifier when there are multiple indexes.
+      const displayLabel = entry.label ?? relIndexPath;
       const result = await ingestScipIndex(
         { repoId, indexPath: entry.path },
         config,
+        onProgress
+          ? (event) =>
+              onProgress({
+                indexLabel: displayLabel,
+                event,
+              })
+          : undefined,
       );
       results.push(result);
     } catch (err) {
