@@ -16,6 +16,7 @@ import { loadConfig } from "../config/loadConfig.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
+import { logIndexEvent } from "../mcp/telemetry.js";
 import { isRustEngineAvailable } from "./rustIndexer.js";
 import {
   clearTsCallResolverCache,
@@ -71,6 +72,21 @@ export interface IndexResult {
   durationMs: number;
   summaryStats?: SummaryBatchResult;
   timings?: IndexTimingDiagnostics;
+  /**
+   * Phase 1 Task 1.12 — per-language Pass-1 engine breakdown.
+   *
+   * Mirrors the `pass1Engine` block carried on the `index.refresh.complete`
+   * audit event so callers (tests, tooling) can inspect Rust engine coverage
+   * and fallback rates without scraping logs. Omitted when no Pass-1 was run
+   * (e.g., the incremental no-op short-circuit returns all-zero counters via
+   * the early-return path below).
+   */
+  pass1Engine?: {
+    rustFiles: number;
+    tsFiles: number;
+    rustFallbackFiles: number;
+    perLanguageFallback: Record<string, number>;
+  };
 }
 
 export interface IndexWatchHandle {
@@ -131,6 +147,32 @@ function collectDirtyTsResolverPaths(params: {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+/**
+ * Phase 1 Task 1.12 — Derive the per-language Pass-1 engine telemetry
+ * block that is surfaced on the `index.refresh.complete` audit event.
+ *
+ * Accepts a partially-populated accumulator (the short-circuit no-op
+ * incremental path never runs Pass 1, so all counters are 0 in that case).
+ */
+export function derivePass1EngineTelemetry(acc: {
+  rustFilesProcessed: number;
+  tsFilesProcessed: number;
+  rustFallbackFiles: number;
+  rustFallbackByLanguage: Map<string, number>;
+}): {
+  rustFiles: number;
+  tsFiles: number;
+  rustFallbackFiles: number;
+  perLanguageFallback: Record<string, number>;
+} {
+  return {
+    rustFiles: acc.rustFilesProcessed,
+    tsFiles: acc.tsFilesProcessed,
+    rustFallbackFiles: acc.rustFallbackFiles,
+    perLanguageFallback: Object.fromEntries(acc.rustFallbackByLanguage),
+  };
+}
 
 export async function indexRepo(
   repoId: string,
@@ -337,12 +379,41 @@ async function indexRepoImpl(
         processesTraced: 0,
         durationMs: totalMs,
         timings: phaseTimings ? { totalMs, phases: phaseTimings } : undefined,
+        // Phase 1 Task 1.12 — no Pass-1 ran in this short-circuit, emit zeros
+        // so downstream consumers see a stable shape.
+        pass1Engine: {
+          rustFiles: 0,
+          tsFiles: 0,
+          rustFallbackFiles: 0,
+          perLanguageFallback: {},
+        },
       };
 
       invalidateGraphSnapshot(repoId);
       clearOverviewCache();
       clearSliceCache();
       clearFingerprintCollisionLog();
+
+      // Phase 1 Task 1.12 — emit `index.refresh.complete` audit event with
+      // zero-valued Pass-1 engine telemetry (Pass 1 never ran in this
+      // short-circuit no-op incremental path).
+      logIndexEvent({
+        repoId,
+        versionId,
+        stats: {
+          filesScanned: result.filesProcessed,
+          symbolsExtracted: result.symbolsIndexed,
+          edgesExtracted: result.edgesCreated,
+          durationMs: result.durationMs,
+          errors: 0,
+          pass1Engine: {
+            rustFiles: 0,
+            tsFiles: 0,
+            rustFallbackFiles: 0,
+            perLanguageFallback: {},
+          },
+        },
+      });
       return result;
     });
   }
@@ -720,12 +791,32 @@ async function indexRepoImpl(
       durationMs,
       summaryStats,
       timings: phaseTimings ? { totalMs, phases: phaseTimings } : undefined,
+      // Phase 1 Task 1.12 — surface Pass-1 engine breakdown so tests and
+      // tooling can inspect Rust coverage / fallback rates without scraping
+      // the audit log.
+      pass1Engine: derivePass1EngineTelemetry(pass1Acc),
     };
 
     invalidateGraphSnapshot(repoId);
     clearOverviewCache();
     clearSliceCache();
     clearFingerprintCollisionLog();
+
+    // Phase 1 Task 1.12 — emit `index.refresh.complete` audit event
+    // carrying per-language Pass-1 engine telemetry so users can
+    // audit Rust engine coverage and fallback rates over time.
+    logIndexEvent({
+      repoId,
+      versionId,
+      stats: {
+        filesScanned: result.filesProcessed,
+        symbolsExtracted: result.symbolsIndexed,
+        edgesExtracted: result.edgesCreated,
+        durationMs: result.durationMs,
+        errors: 0,
+        pass1Engine: derivePass1EngineTelemetry(pass1Acc),
+      },
+    });
     return result;
   } finally {
     if (workerPool) {

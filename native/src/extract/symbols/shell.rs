@@ -50,7 +50,8 @@ fn process_function_definition(
         return None;
     }
 
-    let mut symbol = make_symbol(
+    // TS shell.ts always emits signature { params: [] } and visibility "public".
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &name,
         "function",
         node,
@@ -60,7 +61,7 @@ fn process_function_definition(
         &[],
         None,
         &[],
-        "",
+        "public",
         &[],
     );
     symbol.exported = true;
@@ -89,7 +90,7 @@ fn process_variable_assignment(
         &[],
         None,
         &[],
-        "",
+        "public",
         &[],
     );
     symbol.exported = has_export_keyword(node, source);

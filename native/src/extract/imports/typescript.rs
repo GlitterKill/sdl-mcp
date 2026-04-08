@@ -92,6 +92,7 @@ fn parse_import_node(node: Node<'_>, specifier: &str, source: &[u8]) -> NativePa
         named_imports: Vec::new(),
         default_import: None,
         namespace_import: None,
+        is_re_export,
         range: extract_range(node),
     };
 

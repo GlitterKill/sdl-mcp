@@ -60,11 +60,6 @@ pub fn extract_symbols_csharp(
                     symbols.push(symbol);
                 }
             }
-            "field_declaration" => {
-                if let Some(symbol) = process_variable_like(node, source, repo_id, rel_path) {
-                    symbols.push(symbol);
-                }
-            }
             _ => {}
         }
 
@@ -95,6 +90,9 @@ fn process_namespace_declaration(
         return None;
     }
 
+    // TS csharp.ts does NOT set visibility on namespace/module symbols.
+    // Pass empty string which serializes as omitted (visibility is skipped
+    // when empty by the NativeParsedSymbol serializer).
     let mut symbol = make_symbol(
         &name,
         "module",
@@ -105,8 +103,8 @@ fn process_namespace_declaration(
         &[],
         None,
         &[],
-        "public",
-        &[],
+        "",
+        &extract_decorators(node, source),
     );
     symbol.exported = true;
     Some(symbol)
@@ -122,20 +120,40 @@ fn process_type_like(
     let name = extract_identifier(node, source)?;
     let generics = extract_type_parameters(node, source);
     let visibility = extract_visibility(node, source);
+    let decorators = extract_decorators(node, source);
 
-    let mut symbol = make_symbol(
-        &name,
-        kind,
-        node,
-        source,
-        repo_id,
-        rel_path,
-        &[],
-        None,
-        &generics,
-        &visibility,
-        &[],
-    );
+    // TS csharp.ts emits signature for class/interface/struct/record but NOT
+    // for enum (which maps to kind "type" here). Force signature only for
+    // the class-like kinds.
+    let mut symbol = if kind == "type" {
+        make_symbol(
+            &name,
+            kind,
+            node,
+            source,
+            repo_id,
+            rel_path,
+            &[],
+            None,
+            &generics,
+            &visibility,
+            &decorators,
+        )
+    } else {
+        super::common::make_symbol_with_forced_signature(
+            &name,
+            kind,
+            node,
+            source,
+            repo_id,
+            rel_path,
+            &[],
+            None,
+            &generics,
+            &visibility,
+            &decorators,
+        )
+    };
     symbol.exported = visibility == "public";
     Some(symbol)
 }
@@ -171,7 +189,7 @@ fn process_method_declaration(
         returns.as_deref(),
         &[],
         &visibility,
-        &[],
+        &extract_decorators(node, source),
     );
     symbol.exported = visibility == "public";
     Some(symbol)
@@ -186,7 +204,8 @@ fn process_constructor_declaration(
     let visibility = extract_visibility(node, source);
     let params = extract_parameters(node, source);
 
-    let mut symbol = make_symbol(
+    // TS always emits signature for constructor; force it here.
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         "constructor",
         "constructor",
         node,
@@ -197,7 +216,7 @@ fn process_constructor_declaration(
         None,
         &[],
         &visibility,
-        &[],
+        &extract_decorators(node, source),
     );
     symbol.exported = visibility == "public";
     Some(symbol)
@@ -223,7 +242,7 @@ fn process_variable_like(
         None,
         &[],
         &visibility,
-        &[],
+        &extract_decorators(node, source),
     );
     symbol.exported = visibility == "public";
     Some(symbol)
@@ -344,4 +363,15 @@ fn extract_parameters(node: Node<'_>, source: &[u8]) -> Vec<ParamInfo> {
 fn extract_return_type(node: Node<'_>, source: &[u8]) -> Option<String> {
     find_child_by_kind(node, "type", source)
         .and_then(|ret| if ret.is_empty() { None } else { Some(ret) })
+}
+
+fn extract_decorators(node: Node<'_>, source: &[u8]) -> Vec<String> {
+    let mut decorators = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "attribute_list" {
+            decorators.push(node_text(child, source).to_string());
+        }
+    }
+    decorators
 }

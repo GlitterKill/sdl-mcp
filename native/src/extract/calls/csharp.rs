@@ -61,7 +61,7 @@ fn process_invocation_expression(
             if name.is_empty() {
                 return None;
             }
-            (name, "direct".to_string())
+            (name, "function".to_string())
         }
         "member_access_expression" => {
             let name = member_access_identifier(func_node, source)?;
@@ -78,7 +78,7 @@ fn process_invocation_expression(
             if name.is_empty() {
                 return None;
             }
-            (name, "direct".to_string())
+            (name, "function".to_string())
         }
         _ => {
             let name = node_text(func_node, source).to_string();
@@ -90,7 +90,7 @@ fn process_invocation_expression(
     };
 
     Some(NativeParsedCall {
-        caller_name: find_enclosing_symbol(node, symbols),
+        caller_node_id: find_enclosing_symbol(node, symbols),
         callee_identifier,
         call_type,
         range: extract_range(node),
@@ -129,7 +129,7 @@ fn process_object_creation_expression(
     }
 
     Some(NativeParsedCall {
-        caller_name: find_enclosing_symbol(node, symbols),
+        caller_node_id: find_enclosing_symbol(node, symbols),
         callee_identifier: format!("new {type_text}"),
         call_type: "constructor".to_string(),
         range: extract_range(node),

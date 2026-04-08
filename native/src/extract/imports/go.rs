@@ -62,11 +62,18 @@ fn process_import_spec(node: Node<'_>, source: &[u8]) -> Option<NativeParsedImpo
         .map(|name_node| node_text(name_node, source).to_string())
         .filter(|name| !name.is_empty());
 
+    // TS go.ts sets isReExport: false for dot imports (they are NOT re-exports
+    // in the JS/TS sense; they're namespace injections).
+    let is_re_export = false;
+
     let named_imports = alias.clone().into_iter().collect::<Vec<String>>();
 
-    let namespace_import = match alias {
-        Some(alias_name) if alias_name != "_" => Some(alias_name),
-        Some(_) => None,
+    // TS go.ts emits namespaceImport: "." for dot imports; for other aliased
+    // imports it uses the alias; otherwise the last path segment.
+    let namespace_import = match alias.as_deref() {
+        Some(".") => Some(".".to_string()),
+        Some("_") => None,
+        Some(alias_name) => Some(alias_name.to_string()),
         None => specifier
             .split('/')
             .next_back()
@@ -82,6 +89,7 @@ fn process_import_spec(node: Node<'_>, source: &[u8]) -> Option<NativeParsedImpo
         named_imports,
         default_import: None,
         namespace_import,
+        is_re_export,
         range: extract_range(node),
     })
 }

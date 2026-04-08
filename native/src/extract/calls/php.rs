@@ -55,7 +55,7 @@ fn parse_call_expression(
     }
 
     Some(NativeParsedCall {
-        caller_name: find_enclosing_symbol(node, symbols),
+        caller_node_id: find_enclosing_symbol(node, symbols),
         callee_identifier,
         call_type,
         range: extract_range(node),

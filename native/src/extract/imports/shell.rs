@@ -62,6 +62,7 @@ fn process_source_command(node: Node<'_>, source: &[u8]) -> Option<NativeParsedI
         named_imports: Vec::new(),
         default_import: None,
         namespace_import: None,
+        is_re_export: false,
         range: extract_range(node),
     })
 }

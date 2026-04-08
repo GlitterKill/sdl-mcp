@@ -222,6 +222,32 @@ export async function processFileFromRustResult(params: {
     const { nodeIdToSymbolId, nameToSymbolIds } =
       buildSymbolIndexMaps(symbolDetails);
 
+    // Phase 1 Task 1.6: Same-file resolution hints.
+    // The TS Pass-1 extractor stamps isResolved / calleeSymbolId inline
+    // when a call target name matches a same-file symbol. The Rust
+    // extractor only produces raw calls, so we reproduce that lightweight
+    // lookup here using the nameToSymbolIds map buildSymbolIndexMaps just
+    // returned. Unique-match writes calleeSymbolId + isResolved; ambiguous
+    // name writes candidateCount only.
+    for (const call of rustResult.calls) {
+      if (call.isResolved) continue;
+      if (!call.calleeIdentifier) continue;
+      const dotIdx = call.calleeIdentifier.lastIndexOf(".");
+      const bareName =
+        dotIdx >= 0
+          ? call.calleeIdentifier.slice(dotIdx + 1)
+          : call.calleeIdentifier;
+      if (!bareName) continue;
+      const candidates = nameToSymbolIds.get(bareName);
+      if (!candidates || candidates.length === 0) continue;
+      if (candidates.length === 1) {
+        call.isResolved = true;
+        call.calleeSymbolId = candidates[0];
+      } else {
+        call.candidateCount = candidates.length;
+      }
+    }
+
     // ── Import resolution ────────────────────────────────────────
     const extensions = languages.map((lang) => `.${lang}`);
     const importResolution = await resolveImportTargets(

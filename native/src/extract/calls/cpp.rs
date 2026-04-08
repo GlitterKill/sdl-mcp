@@ -58,7 +58,7 @@ fn process_call_expression(
             if name.is_empty() {
                 return None;
             }
-            (name, "direct".to_string())
+            (name, "function".to_string())
         }
         "field_expression" => {
             let argument = function.child_by_field_name("argument")?;
@@ -84,7 +84,7 @@ fn process_call_expression(
             if name.is_empty() {
                 return None;
             }
-            (name, "direct".to_string())
+            (name, "function".to_string())
         }
         _ => {
             let text = node_text(function, source).to_string();
@@ -96,7 +96,7 @@ fn process_call_expression(
     };
 
     Some(NativeParsedCall {
-        caller_name: find_enclosing_symbol(node, symbols),
+        caller_node_id: find_enclosing_symbol(node, symbols),
         callee_identifier,
         call_type,
         range: extract_range(node),
@@ -121,7 +121,7 @@ fn process_new_expression(
     }
 
     Some(NativeParsedCall {
-        caller_name: find_enclosing_symbol(node, symbols),
+        caller_node_id: find_enclosing_symbol(node, symbols),
         callee_identifier: format!("new {type_text}"),
         call_type: "constructor".to_string(),
         range: extract_range(node),

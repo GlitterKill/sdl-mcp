@@ -37,6 +37,8 @@ export async function runPass1WithRustEngine(
     totalEdgesCreated: 0, allConfigEdges: [], changedFileIds: new Set(),
     changedPass2FilePaths: new Set(),
     symbolMapFileUpdates: new Map(),
+    rustFilesProcessed: 0, tsFilesProcessed: 0, rustFallbackFiles: 0,
+    rustFallbackByLanguage: new Map(),
   };
   const updateProgress = (currentFile?: string): void => {
     onProgress?.({
@@ -95,6 +97,12 @@ export async function runPass1WithRustEngine(
       logger.info(
         `Rust engine does not support language for ${file.path}, falling back to TypeScript engine`,
       );
+      acc.rustFallbackFiles++;
+      const fbExt = file.path.split(".").pop()?.toLowerCase() ?? "";
+      acc.rustFallbackByLanguage.set(
+        fbExt,
+        (acc.rustFallbackByLanguage.get(fbExt) ?? 0) + 1,
+      );
       tsFallbackFiles.push(file);
       continue;
     }
@@ -123,6 +131,7 @@ export async function runPass1WithRustEngine(
         supportsPass2FilePath,
       });
       acc.filesProcessed++;
+      acc.rustFilesProcessed++;
       if (result.changed) {
         acc.changedFiles++;
         acc.changedFileIds.add(
@@ -177,6 +186,7 @@ export async function runPass1WithRustEngine(
         supportsPass2FilePath,
       });
       acc.filesProcessed++;
+      acc.tsFilesProcessed++;
       if (result.changed) {
         acc.changedFiles++;
         acc.changedFileIds.add(
@@ -203,6 +213,13 @@ export async function runPass1WithRustEngine(
     }
   }
 
+  logger.info("Pass 1 engine breakdown", {
+    rustFiles: acc.rustFilesProcessed,
+    tsFiles: acc.tsFilesProcessed,
+    rustFallbackFiles: acc.rustFallbackFiles,
+    perLanguageFallback: Object.fromEntries(acc.rustFallbackByLanguage),
+  });
+
   return { acc, usedRust: true };
 }
 
@@ -222,6 +239,8 @@ export async function runPass1WithTsEngine(
     totalEdgesCreated: 0, allConfigEdges: [], changedFileIds: new Set(),
     changedPass2FilePaths: new Set(),
     symbolMapFileUpdates: new Map(),
+    rustFilesProcessed: 0, tsFilesProcessed: 0, rustFallbackFiles: 0,
+    rustFallbackByLanguage: new Map(),
   };
   // SAFETY: nextIndex++ must remain synchronous — no `await` between reading
   // and incrementing. JavaScript's single-threaded event loop guarantees
@@ -266,6 +285,7 @@ export async function runPass1WithTsEngine(
           supportsPass2FilePath,
         });
         acc.filesProcessed++;
+        acc.tsFilesProcessed++;
         if (result.changed) {
           acc.changedFiles++;
           acc.changedFileIds.add(

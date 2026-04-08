@@ -68,6 +68,7 @@ fn process_import_statement(node: Node<'_>, source: &[u8], imports: &mut Vec<Nat
                     is_relative_specifier(&specifier),
                     Vec::new(),
                     namespace_import,
+                    false,
                 ));
             }
             "aliased_import" => {
@@ -91,6 +92,7 @@ fn process_import_statement(node: Node<'_>, source: &[u8], imports: &mut Vec<Nat
                     is_relative_specifier(&specifier),
                     Vec::new(),
                     alias,
+                    false,
                 ));
             }
             _ => {}
@@ -109,6 +111,8 @@ fn process_import_from_statement(
     let mut named_imports = Vec::new();
     let mut has_wildcard_import = false;
     let mut found_import_keyword = false;
+    // PEP 484 / typing: `from x import y as y` is an explicit re-export marker.
+    let mut is_re_export = false;
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -124,10 +128,18 @@ fn process_import_from_statement(
                 named_imports.push(node_text(child, source).to_string());
             }
             "aliased_import" if found_import_keyword => {
-                let name = child
-                    .child_by_field_name("alias")
-                    .or_else(|| child.child_by_field_name("name"))
+                let original_name = child
+                    .child_by_field_name("name")
                     .map(|n| node_text(n, source).to_string());
+                let alias_name = child
+                    .child_by_field_name("alias")
+                    .map(|n| node_text(n, source).to_string());
+                if let (Some(orig), Some(alias)) = (original_name.as_ref(), alias_name.as_ref()) {
+                    if orig == alias {
+                        is_re_export = true;
+                    }
+                }
+                let name = alias_name.or(original_name);
                 if let Some(name) = name {
                     named_imports.push(name);
                 }
@@ -149,6 +161,7 @@ fn process_import_from_statement(
         is_relative,
         named_imports,
         None,
+        is_re_export,
     ));
 }
 
@@ -177,6 +190,7 @@ fn build_import(
     is_relative: bool,
     named_imports: Vec<String>,
     namespace_import: Option<String>,
+    is_re_export: bool,
 ) -> NativeParsedImport {
     NativeParsedImport {
         specifier: specifier.to_string(),
@@ -185,6 +199,7 @@ fn build_import(
         named_imports,
         default_import: None,
         namespace_import,
+        is_re_export,
         range: extract_range(node),
     }
 }

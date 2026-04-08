@@ -90,6 +90,7 @@ fn process_using_directive(node: Node<'_>, source: &[u8]) -> Option<NativeParsed
         },
         default_import: alias,
         namespace_import: None,
+        is_re_export: false,
         range: extract_range(node),
     })
 }

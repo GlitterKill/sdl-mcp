@@ -3,7 +3,7 @@ use tree_sitter::Node;
 use crate::types::NativeParsedSymbol;
 
 use super::common::{
-    build_signature, find_child_by_kind, find_child_node, make_symbol, node_text, ParamInfo,
+    find_child_by_kind, find_child_node, make_symbol, node_text, ParamInfo,
 };
 
 pub fn extract_symbols_cpp(
@@ -78,7 +78,7 @@ fn process_namespace(
         return None;
     }
 
-    let fqn = build_fqn(node.parent().unwrap_or(node), &name, source);
+    let fqn = build_fqn(node, &name, source);
     let mut symbol = make_symbol(
         &fqn,
         "module",
@@ -111,7 +111,7 @@ fn process_class_like(
     let fqn = build_fqn(node, &name, source);
     let generics = extract_template_parameters(node, source);
 
-    let mut symbol = make_symbol(
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &fqn,
         "class",
         node,
@@ -125,7 +125,6 @@ fn process_class_like(
         &[],
     );
     symbol.exported = true;
-    symbol.signature = build_signature(&[], None, &generics);
     Some(symbol)
 }
 
@@ -142,6 +141,8 @@ fn process_enum(
     }
 
     let fqn = build_fqn(node, &name, source);
+    // TS cpp.ts does NOT emit signature for enum symbols (no .signature key)
+    // so we use plain make_symbol (no forced signature).
     let mut symbol = make_symbol(
         &fqn,
         "class",
@@ -278,7 +279,10 @@ fn process_function_like(
 
     let class_name = find_enclosing_class_name(node, source);
     let visibility = extract_visibility(node, source);
-    let params = extract_parameters(function_declarator, source);
+    // TS source-of-truth doesn't extract parameters for cpp function_definition
+    // symbols - it always emits signature: { params: [] }. Match that.
+    let _ = function_declarator; // suppress unused-var warning
+    let params: Vec<ParamInfo> = Vec::new();
     let returns = extract_return_type(node, source);
     let generics = extract_template_parameters(node, source);
 
@@ -288,8 +292,16 @@ fn process_function_like(
         .as_ref()
         .is_some_and(|cls| !is_destructor && short_name == *cls);
 
+    // TS cpp.ts: out-of-line destructor definitions (raw_name has "::")
+    // are emitted as kind "function"; in-class destructor declarations are
+    // emitted as kind "constructor".
+    let is_out_of_line = raw_name.contains("::");
     let (kind, exported) = if is_destructor {
-        ("constructor", visibility == "public")
+        if is_out_of_line {
+            ("function", visibility == "public")
+        } else {
+            ("constructor", visibility == "public")
+        }
     } else if is_constructor {
         ("constructor", visibility == "public")
     } else if class_name.is_some() {
@@ -298,7 +310,7 @@ fn process_function_like(
         ("function", true)
     };
 
-    let mut symbol = make_symbol(
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &fqn,
         kind,
         node,
@@ -362,6 +374,7 @@ fn process_variable_declaration(
     }
 }
 
+#[allow(dead_code)]
 fn find_function_declarator(node: Node<'_>) -> Option<Node<'_>> {
     if node.kind() == "function_declarator" {
         return Some(node);
@@ -424,6 +437,7 @@ fn find_identifier_in_declarator(node: Node<'_>) -> Option<Node<'_>> {
     None
 }
 
+#[allow(dead_code)]
 fn extract_parameters(function_declarator: Node<'_>, source: &[u8]) -> Vec<ParamInfo> {
     let mut params = Vec::new();
     let parameter_list = function_declarator
@@ -544,29 +558,20 @@ fn parse_template_parameter_list(template_node: Node<'_>, source: &[u8]) -> Vec<
 
 fn build_fqn(node: Node<'_>, name: &str, source: &[u8]) -> String {
     let mut parts = Vec::new();
-    let mut current = Some(node);
+    // Match TS: only prepend enclosing namespace_definition scopes. Do NOT
+    // include the enclosing class/struct/enum - TS uses the bare short name
+    // or the qualified name already baked into the declarator text.
+    let mut current = node.parent();
 
     while let Some(candidate) = current {
-        match candidate.kind() {
-            "namespace_definition" => {
-                if let Some(name_node) = candidate.child_by_field_name("name") {
-                    let segment = node_text(name_node, source).to_string();
-                    if !segment.is_empty() {
-                        parts.push(segment);
-                    }
+        if candidate.kind() == "namespace_definition" {
+            if let Some(name_node) = candidate.child_by_field_name("name") {
+                let segment = node_text(name_node, source).to_string();
+                if !segment.is_empty() {
+                    parts.push(segment);
                 }
             }
-            "class_specifier" | "struct_specifier" | "enum_specifier" => {
-                if let Some(name_node) = candidate.child_by_field_name("name") {
-                    let segment = node_text(name_node, source).to_string();
-                    if !segment.is_empty() {
-                        parts.push(segment);
-                    }
-                }
-            }
-            _ => {}
         }
-
         current = candidate.parent();
     }
 

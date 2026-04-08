@@ -96,6 +96,7 @@ mod tests {
 
     fn stub_symbol() -> NativeParsedSymbol {
         NativeParsedSymbol {
+            node_id: "handleLoginRequest:1:0".to_string(),
             symbol_id: "sym".to_string(),
             ast_fingerprint: "fp".to_string(),
             kind: "function".to_string(),
@@ -120,6 +121,7 @@ mod tests {
             invariants: vec![],
             side_effects: vec![],
             role_tags: vec![],
+            decorators: vec![],
             search_text: String::new(),
             summary_quality: None,
         }

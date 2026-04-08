@@ -48,6 +48,7 @@ fn process_mod_item(node: Node<'_>, source: &[u8]) -> Option<NativeParsedImport>
         named_imports: vec![module_name],
         default_import: None,
         namespace_import: None,
+        is_re_export: false,
         range: extract_range(node),
     })
 }
@@ -82,6 +83,10 @@ fn process_use_declaration(node: Node<'_>, source: &[u8]) -> Option<NativeParsed
     let is_relative = is_relative_specifier(&specifier);
     let is_external = is_external_specifier(&specifier, is_relative);
 
+    // TS rust.ts does NOT mark `pub use` statements as re-exports, so we
+    // emit false to match source-of-truth output.
+    let is_re_export = false;
+
     Some(NativeParsedImport {
         specifier,
         is_relative,
@@ -89,6 +94,7 @@ fn process_use_declaration(node: Node<'_>, source: &[u8]) -> Option<NativeParsed
         named_imports,
         default_import: None,
         namespace_import: None,
+        is_re_export,
         range: extract_range(node),
     })
 }

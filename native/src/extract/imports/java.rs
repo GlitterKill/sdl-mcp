@@ -38,34 +38,25 @@ fn process_import_declaration(node: Node<'_>, source: &[u8]) -> Option<NativePar
     let is_static = has_kind(node, "static")
         || find_child_node(node, "modifiers").is_some_and(|m| has_kind(m, "static"));
 
-    let mut named_imports = if is_wildcard {
+    let named_imports = if is_wildcard {
         vec!["*".to_string()]
     } else {
         vec![specifier.split('.').next_back().unwrap_or("").to_string()]
     };
 
-    let mut namespace_import = None;
-    if is_static {
-        let parts: Vec<&str> = specifier.split('.').collect();
-        if parts.len() > 1 {
-            namespace_import = Some(parts[parts.len() - 2].to_string());
-        }
-
-        let member = parts.last().copied().unwrap_or("");
-        named_imports = vec![if member == "*" {
-            "*".to_string()
-        } else {
-            member.to_string()
-        }];
-    }
+    // TS java.ts does NOT populate namespaceImport (it leaves it undefined).
+    let _ = is_static;
+    let namespace_import: Option<String> = None;
 
     Some(NativeParsedImport {
         specifier,
         is_relative: false,
-        is_external: true,
+        // TS java.ts emits is_external: false for all java imports.
+        is_external: false,
         named_imports,
         default_import: None,
         namespace_import,
+        is_re_export: false,
         range: extract_range(node),
     })
 }

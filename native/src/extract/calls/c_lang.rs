@@ -43,7 +43,7 @@ fn process_call_expression(
     let (callee_identifier, call_type) = match function.kind() {
         "identifier" => (
             node_text(function, source).to_string(),
-            "direct".to_string(),
+            "function".to_string(),
         ),
         "field_expression" => {
             let argument = function.child_by_field_name("argument")?;
@@ -79,7 +79,7 @@ fn process_call_expression(
     }
 
     Some(NativeParsedCall {
-        caller_name: find_enclosing_symbol(node, symbols),
+        caller_node_id: find_enclosing_symbol(node, symbols),
         callee_identifier,
         call_type,
         range: extract_range(node),

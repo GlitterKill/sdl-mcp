@@ -96,7 +96,7 @@ fn process_function_item(
     let generics = extract_generics(node, source);
     let visibility = extract_visibility(node, source);
 
-    let mut symbol = make_symbol(
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &name,
         "function",
         node,
@@ -129,7 +129,7 @@ fn process_struct_item(
     let generics = extract_generics(node, source);
     let visibility = extract_visibility(node, source);
 
-    let mut symbol = make_symbol(
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &name,
         "class",
         node,
@@ -162,7 +162,7 @@ fn process_enum_item(
     let generics = extract_generics(node, source);
     let visibility = extract_visibility(node, source);
 
-    let mut symbol = make_symbol(
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &name,
         "type",
         node,
@@ -194,7 +194,7 @@ fn process_trait_item(
     let generics = extract_generics(node, source);
     let visibility = extract_visibility(node, source);
 
-    let mut symbol = make_symbol(
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &name,
         "interface",
         node,
@@ -237,7 +237,7 @@ fn process_type_item(
     let generics = extract_generics(node, source);
     let visibility = extract_visibility(node, source);
 
-    let mut symbol = make_symbol(
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &name,
         "type",
         node,
@@ -350,13 +350,15 @@ fn process_impl_item(
             continue;
         }
 
-        let symbol_name = format!("{type_name}::{method_name}");
+        // TS rust.ts uses the bare method name (not Type::method_name).
+        let _ = &type_name;
+        let symbol_name = method_name.clone();
         let params = extract_function_parameters(child, source);
         let returns = extract_function_return_type(child, source);
         let generics = extract_generics(child, source);
         let visibility = extract_visibility(child, source);
 
-        let mut symbol = make_symbol(
+        let mut symbol = super::common::make_symbol_with_forced_signature(
             &symbol_name,
             "method",
             child,

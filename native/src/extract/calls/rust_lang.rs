@@ -58,7 +58,7 @@ fn parse_call_expression(
             if callee.is_empty() {
                 return None;
             }
-            (callee, "direct".to_string())
+            (callee, "function".to_string())
         }
         "scoped_identifier" => {
             let path = function_node.child_by_field_name("path");
@@ -81,7 +81,7 @@ fn parse_call_expression(
                 return None;
             }
 
-            (callee, "direct".to_string())
+            (callee, "function".to_string())
         }
         "field_expression" => {
             let value = function_node.child_by_field_name("value")?;
@@ -105,7 +105,7 @@ fn parse_call_expression(
     };
 
     Some(NativeParsedCall {
-        caller_name: find_enclosing_symbol(node, symbols),
+        caller_node_id: find_enclosing_symbol(node, symbols),
         callee_identifier,
         call_type,
         range: extract_range(node),
@@ -124,7 +124,7 @@ fn parse_macro_invocation(
     }
 
     Some(NativeParsedCall {
-        caller_name: find_enclosing_symbol(node, symbols),
+        caller_node_id: find_enclosing_symbol(node, symbols),
         callee_identifier: format!("{macro_name}!"),
         call_type: "dynamic".to_string(),
         range: extract_range(node),

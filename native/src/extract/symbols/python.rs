@@ -130,7 +130,7 @@ fn process_assignment(
         None,
         &[],
         &visibility,
-        &[],
+        &extract_decorators(node, source),
     );
     symbol.exported = !name.starts_with('_');
     Some(symbol)

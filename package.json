@@ -66,6 +66,8 @@
     "prepare-release": "node scripts/prepare-release.mjs",
     "inspector": "npx @modelcontextprotocol/inspector node dist/main.js",
     "test:native-parity": "node tests/native/parity-test.ts",
+    "test:integration": "node --experimental-strip-types --test-concurrency=1 --test tests/integration",
+    "test:parity": "node --experimental-strip-types --test-concurrency=1 --test tests/integration/engine-parity.test.ts",
     "check:config-sync": "node scripts/check-config-sync.ts",
     "docs:tools:generate": "node --experimental-strip-types scripts/generate-tool-inventory.ts",
     "docs:tools:check": "node --experimental-strip-types scripts/check-tool-inventory.ts",

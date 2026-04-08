@@ -35,9 +35,6 @@ pub fn extract_symbols_c(
                     symbols.push(symbol);
                 }
             }
-            "declaration" => {
-                process_file_scope_declaration(node, source, repo_id, rel_path, &mut symbols);
-            }
             _ => {}
         }
 
@@ -78,7 +75,7 @@ fn process_function_definition(
         &params,
         returns.as_deref(),
         &[],
-        "",
+        "public",
         &[],
     );
     symbol.exported = true;
@@ -91,7 +88,9 @@ fn process_struct_specifier(
     repo_id: &str,
     rel_path: &str,
 ) -> Option<NativeParsedSymbol> {
-    let _body = node.child_by_field_name("body")?;
+    // TS source-of-truth (src/indexer/adapter/c.ts) does NOT require body;
+    // it only reads the 'name' field. Match that so forward-declared
+    // struct references in typedefs still emit a class symbol.
     let name_node = node.child_by_field_name("name")?;
     if name_node.kind() != "type_identifier" {
         return None;
@@ -102,7 +101,9 @@ fn process_struct_specifier(
         return None;
     }
 
-    let mut symbol = make_symbol(
+    // TS always emits signature with params: members (possibly empty).
+    // Force signature emission to match TS shape.
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &name,
         "class",
         node,
@@ -112,7 +113,7 @@ fn process_struct_specifier(
         &[],
         None,
         &[],
-        "",
+        "public",
         &[],
     );
     symbol.exported = true;
@@ -135,7 +136,8 @@ fn process_enum_specifier(
         return None;
     }
 
-    let mut symbol = make_symbol(
+    // TS always emits signature with params: enumValues (possibly empty).
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &name,
         "class",
         node,
@@ -145,7 +147,7 @@ fn process_enum_specifier(
         &[],
         None,
         &[],
-        "",
+        "public",
         &[],
     );
     symbol.exported = true;
@@ -180,66 +182,13 @@ fn process_type_definition(
         &[],
         None,
         &[],
-        "",
+        "public",
         &[],
     );
     symbol.exported = true;
     Some(symbol)
 }
 
-fn process_file_scope_declaration(
-    node: Node<'_>,
-    source: &[u8],
-    repo_id: &str,
-    rel_path: &str,
-    symbols: &mut Vec<NativeParsedSymbol>,
-) {
-    if node
-        .parent()
-        .is_none_or(|parent| parent.kind() != "translation_unit")
-    {
-        return;
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() != "init_declarator" {
-            continue;
-        }
-
-        let declarator = child
-            .child_by_field_name("declarator")
-            .or_else(|| find_child_node(child, "declarator"));
-        let Some(declarator) = declarator else {
-            continue;
-        };
-
-        let Some(name_node) = find_identifier_in_declarator(declarator) else {
-            continue;
-        };
-
-        let name = node_text(name_node, source).to_string();
-        if name.is_empty() {
-            continue;
-        }
-
-        let mut symbol = make_symbol(
-            &name,
-            "variable",
-            child,
-            source,
-            repo_id,
-            rel_path,
-            &[],
-            None,
-            &[],
-            "",
-            &[],
-        );
-        symbol.exported = true;
-        symbols.push(symbol);
-    }
-}
 
 fn find_identifier_in_declarator(node: Node<'_>) -> Option<Node<'_>> {
     if matches!(node.kind(), "identifier" | "type_identifier") {
@@ -289,14 +238,11 @@ fn find_function_declarator(node: Node<'_>) -> Option<Node<'_>> {
 
 fn extract_function_params(declarator: Node<'_>, source: &[u8]) -> Vec<ParamInfo> {
     let mut params = Vec::new();
-    let Some(function_declarator) = find_function_declarator(declarator) else {
-        return params;
-    };
-
-    let parameter_list = function_declarator
-        .child_by_field_name("parameters")
-        .or_else(|| find_child_node(function_declarator, "parameter_list"));
-    let Some(parameter_list) = parameter_list else {
+    // Match TS extractParameters: declarator.childForFieldName("parameters")
+    // directly, with no recursion through pointer_declarator. Functions that
+    // return pointers (e.g. void *f(size_t)) therefore yield no params to
+    // mirror the TS source-of-truth output.
+    let Some(parameter_list) = declarator.child_by_field_name("parameters") else {
         return params;
     };
 

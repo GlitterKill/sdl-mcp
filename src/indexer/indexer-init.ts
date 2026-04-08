@@ -48,6 +48,20 @@ export interface Pass1Accumulator {
   changedFileIds: Set<string>;
   changedPass2FilePaths: Set<string>;
   symbolMapFileUpdates: Map<string, SymbolMapFileUpdate>;
+  /**
+   * Phase 1 Task 1.1 / 1.12 — Engine telemetry counters.
+   *
+   * Track which Pass-1 engine processed each file. When the active engine
+   * is "rust" but a file’s language is not supported by the Rust
+   * extractor (currently Kotlin, and any future gap), it is transparently
+   * routed to the TypeScript engine on a per-file basis. These counters
+   * make the split observable so fallback rates can be audited and future
+   * Rust-side work prioritised by impact.
+   */
+  rustFilesProcessed: number;
+  tsFilesProcessed: number;
+  rustFallbackFiles: number;
+  rustFallbackByLanguage: Map<string, number>;
 }
 
 export interface Pass1Params {

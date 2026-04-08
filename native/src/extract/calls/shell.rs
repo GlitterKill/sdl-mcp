@@ -52,10 +52,27 @@ fn process_command(
         return None;
     }
 
+    // TS shell.ts treats 'alias' commands as variable assignments, not
+    // calls. Filter them out here.
+    if callee_identifier == "alias" {
+        return None;
+    }
+
+    // TS shell.ts sets callType to "function" if the callee matches a
+    // declared function symbol, otherwise "dynamic" (external command).
+    let call_type = if symbols
+        .iter()
+        .any(|s| s.kind == "function" && s.name == callee_identifier)
+    {
+        "function".to_string()
+    } else {
+        "dynamic".to_string()
+    };
+
     Some(NativeParsedCall {
-        caller_name: find_enclosing_symbol(node, symbols),
+        caller_node_id: find_enclosing_symbol(node, symbols),
         callee_identifier,
-        call_type: "direct".to_string(),
+        call_type,
         range: extract_range(node),
     })
 }

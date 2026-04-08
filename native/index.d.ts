@@ -141,6 +141,14 @@ export interface NativeSymbolSignature {
 }
 /** Extracted symbol from AST analysis. */
 export interface NativeParsedSymbol {
+  /**
+   * Stable per-file nodeId, format `${name}:${startLine}:${startCol}`.
+   * Distinct from `symbol_id` (a cross-repo SHA-256) — `node_id` is the
+   * key used by same-file edge resolution and call-site joining in
+   * `buildSymbolIndexMaps`. Must match the `caller_node_id` emitted by
+   * `NativeParsedCall` for the enclosing symbol.
+   */
+  nodeId: string
   /** Stable symbol ID: sha256("{repoId}:{relPath}:{kind}:{name}:{astFingerprint}"). */
   symbolId: string
   /** AST fingerprint hash. */
@@ -168,6 +176,12 @@ export interface NativeParsedSymbol {
   sideEffects: Array<string>
   /** Role tags inferred from name/path heuristics. */
   roleTags: Array<string>
+  /**
+   * Raw decorator / annotation / attribute source text attached to this
+   * symbol. Includes the leading sigil (e.g. `@Component(...)`, `@override`,
+   * `#[derive(Debug)]`). Empty for languages without a decorator concept.
+   */
+  decorators: Array<string>
   /** Search-oriented text including identifier splits, summary, tags, and path hints. */
   searchText: string
   /** Summary quality score: 1.0 = doc comment, 0.4 = typed function, 0.3 = heuristic, 0.0 = none. */
@@ -187,13 +201,23 @@ export interface NativeParsedImport {
   defaultImport?: string
   /** Namespace import name (e.g., "* as ns"), if any. */
   namespaceImport?: string
+  /**
+   * Whether this statement re-exports (e.g., `export … from`, `pub use`).
+   * Languages without a re-export concept (Java, C#) always set this to false.
+   */
+  isReExport: boolean
   /** Source range. */
   range: NativeRange
 }
 /** Extracted call site. */
 export interface NativeParsedCall {
-  /** Node ID of the caller (enclosing symbol). */
-  callerName: string
+  /**
+   * Stable nodeId of the caller (enclosing symbol), format
+   * `${name}:${startLine}:${startCol}`. Must match the `node_id` of a
+   * `NativeParsedSymbol` emitted for the same file so downstream
+   * `buildSymbolIndexMaps` can join call sites to their callers.
+   */
+  callerNodeId: string
   /** Callee identifier (e.g., "foo", "this.bar", "ns.baz"). */
   calleeIdentifier: string
   /**

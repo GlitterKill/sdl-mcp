@@ -97,7 +97,7 @@ fn parse_method_invocation(
         .copied();
 
     Some(NativeParsedCall {
-        caller_name: find_enclosing_symbol(node, symbols),
+        caller_node_id: find_enclosing_symbol(node, symbols),
         callee_identifier,
         call_type,
         range: extract_range(node),
@@ -126,7 +126,7 @@ fn parse_object_creation(
     let _resolved_symbol = symbol_map.get(type_text.as_str()).copied();
 
     Some(NativeParsedCall {
-        caller_name: find_enclosing_symbol(node, symbols),
+        caller_node_id: find_enclosing_symbol(node, symbols),
         callee_identifier: format!("new {type_text}"),
         call_type: "constructor".to_string(),
         range: extract_range(node),
@@ -147,9 +147,9 @@ fn parse_call_expression(
         }
 
         return Some(NativeParsedCall {
-            caller_name: find_enclosing_symbol(node, symbols),
+            caller_node_id: find_enclosing_symbol(node, symbols),
             callee_identifier,
-            call_type: "direct".to_string(),
+            call_type: "function".to_string(),
             range: extract_range(node),
         });
     }

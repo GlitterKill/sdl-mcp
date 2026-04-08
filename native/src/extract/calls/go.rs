@@ -66,7 +66,7 @@ fn parse_call_node(
     let (callee_identifier, call_type) = match function_node.kind() {
         "identifier" => (
             node_text(function_node, source).to_string(),
-            "direct".to_string(),
+            "function".to_string(),
         ),
         "selector_expression" => {
             let operand = function_node.child_by_field_name("operand")?;
@@ -88,7 +88,7 @@ fn parse_call_node(
     }
 
     Some(NativeParsedCall {
-        caller_name: find_enclosing_symbol(call_node, symbols),
+        caller_node_id: find_enclosing_symbol(call_node, symbols),
         callee_identifier,
         call_type,
         range: extract_range(call_node),

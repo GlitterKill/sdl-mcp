@@ -38,6 +38,22 @@ export interface IndexStats {
   edgesExtracted: number;
   durationMs: number;
   errors: number;
+  /**
+   * Phase 1 Task 1.12 — Per-language Pass-1 engine telemetry.
+   *
+   * Counts which Pass-1 engine processed each file. Optional so existing
+   * call sites (and historical audit events) remain valid. When present,
+   * `rustFiles + tsFiles` equals the number of files Pass-1 attempted,
+   * and `rustFallbackFiles` is the subset of files routed from the Rust
+   * engine to the TypeScript engine because of an unsupported language.
+   * `perLanguageFallback` breaks that subset down by file extension.
+   */
+  pass1Engine?: {
+    rustFiles: number;
+    tsFiles: number;
+    rustFallbackFiles: number;
+    perLanguageFallback: Record<string, number>;
+  };
 }
 
 export interface IndexEvent {

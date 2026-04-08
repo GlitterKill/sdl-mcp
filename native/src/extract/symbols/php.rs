@@ -125,22 +125,8 @@ fn process_namespace_definition(
     }
 
     *current_namespace = Some(namespace.clone());
-
-    let mut symbol = make_symbol(
-        &namespace,
-        "module",
-        node,
-        source,
-        repo_id,
-        rel_path,
-        &[],
-        None,
-        &[],
-        "public",
-        &[],
-    );
-    symbol.exported = true;
-    symbols.push(symbol);
+    // TS php.ts tracks namespace state but does NOT emit it as a symbol.
+    let _ = (source, repo_id, rel_path, symbols);
 }
 
 fn process_type_like(
@@ -165,7 +151,7 @@ fn process_type_like(
         "public".to_string()
     };
 
-    let mut symbol = make_symbol(
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &fq_name,
         kind,
         node,
@@ -198,7 +184,7 @@ fn process_method_declaration(
     let returns = extract_return_type(node, source);
     let visibility = extract_visibility(node, source).unwrap_or_else(|| "public".to_string());
 
-    let mut symbol = make_symbol(
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &name,
         "method",
         node,
@@ -237,7 +223,7 @@ fn process_function_definition(
         "public".to_string()
     };
 
-    let mut symbol = make_symbol(
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &fq_name,
         "function",
         node,
@@ -265,15 +251,16 @@ fn process_property_declaration(
     let visibility = extract_visibility(node, source).unwrap_or_else(|| "public".to_string());
 
     for property in properties {
-        let normalized = property.trim_start_matches('$');
+        let normalized: String = property.trim_start_matches('$').to_string();
         let property_visibility = if normalized.starts_with('_') {
             "private".to_string()
         } else {
             visibility.clone()
         };
 
+        // TS php.ts strips the dollar sign from property names.
         let mut symbol = make_symbol(
-            &property,
+            &normalized,
             "variable",
             node,
             source,

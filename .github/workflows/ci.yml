@@ -136,6 +136,17 @@ jobs:
       - name: Run test harness
         run: npm run test:harness
 
+      - name: Engine parity harness (baseline)
+        shell: bash
+        env:
+          SDL_PARITY_HARNESS_BASELINE: "1"
+        run: |
+          # Baseline mode: logs diffs without failing the build. Phase 1 of the
+          # Rust engine rollout still has residual per-language parity gaps
+          # (tracked in devdocs/rust-engine-parity-gaps.md); Phase 2 will flip
+          # this step to strict mode once the Pass-2 resolvers close them.
+          npm run test:parity
+
       - name: Verify runtime entrypoints
         shell: bash
         run: |

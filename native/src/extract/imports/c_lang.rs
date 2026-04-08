@@ -34,13 +34,16 @@ fn process_preproc_include(node: Node<'_>, source: &[u8]) -> Option<NativeParsed
             return None;
         }
 
+        let is_relative = specifier.starts_with('.');
+        let named_imports = vec![specifier.clone()];
         return Some(NativeParsedImport {
             specifier,
-            is_relative: true,
+            is_relative,
             is_external: false,
-            named_imports: Vec::new(),
+            named_imports,
             default_import: None,
             namespace_import: None,
+            is_re_export: false,
             range: extract_range(node),
         });
     }
@@ -56,13 +59,15 @@ fn process_preproc_include(node: Node<'_>, source: &[u8]) -> Option<NativeParsed
             return None;
         }
 
+        let named_imports = vec![specifier.clone()];
         return Some(NativeParsedImport {
             specifier,
             is_relative: false,
             is_external: true,
-            named_imports: Vec::new(),
+            named_imports,
             default_import: None,
             namespace_import: None,
+            is_re_export: false,
             range: extract_range(node),
         });
     }

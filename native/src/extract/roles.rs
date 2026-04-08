@@ -152,6 +152,7 @@ mod tests {
 
     fn stub_symbol(name: &str, kind: &str) -> NativeParsedSymbol {
         NativeParsedSymbol {
+            node_id: name.to_string(),
             symbol_id: "sym".to_string(),
             ast_fingerprint: "fp".to_string(),
             kind: kind.to_string(),
@@ -169,6 +170,7 @@ mod tests {
             invariants: vec![],
             side_effects: vec![],
             role_tags: vec![],
+            decorators: vec![],
             search_text: String::new(),
             summary_quality: None,
         }

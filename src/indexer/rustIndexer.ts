@@ -42,6 +42,7 @@ interface NativeRange {
 }
 
 interface NativeParsedSymbol {
+  nodeId: string;
   symbolId: string;
   astFingerprint: string;
   kind: string;
@@ -58,6 +59,7 @@ interface NativeParsedSymbol {
   invariants: string[];
   sideEffects: string[];
   roleTags: string[];
+  decorators: string[];
   searchText: string;
 }
 
@@ -68,11 +70,18 @@ interface NativeParsedImport {
   namedImports: string[];
   defaultImport: string | null;
   namespaceImport: string | null;
+  isReExport: boolean;
   range: NativeRange;
 }
 
 interface NativeParsedCall {
-  callerName: string;
+  // Phase 1 Task 1.2+: stable node ID emitted by updated native binaries.
+  // Optional so older addon binaries (which emit `callerName`) are handled
+  // by the fallback shim in `mapNativeCall` below.
+  callerNodeId?: string;
+  // Legacy field name emitted by pre-Task-1.2 addon binaries. Kept for
+  // one release of version-skew tolerance; can be removed after 0.11.x.
+  callerName?: string;
   calleeIdentifier: string;
   callType: string;
   range: NativeRange;
@@ -564,7 +573,10 @@ function mapNativeResult(native: NativeParsedFile): RustParseResult {
 
 function mapNativeSymbol(sym: NativeParsedSymbol): RustExtractedSymbol {
   return {
-    nodeId: sym.name,
+    // Phase 1 Task 1.2: Rust now emits a stable per-file nodeId
+    // (`${name}:${startLine}:${startCol}`) via make_symbol in common.rs.
+    // Guarantees two same-named symbols in one file remain distinguishable.
+    nodeId: sym.nodeId,
     symbolId: sym.symbolId,
     astFingerprint: sym.astFingerprint,
     name: sym.name,
@@ -601,6 +613,7 @@ function mapNativeSymbol(sym: NativeParsedSymbol): RustExtractedSymbol {
     sideEffectsJson:
       sym.sideEffects.length > 0 ? JSON.stringify(sym.sideEffects) : "[]",
     roleTagsJson: sym.roleTags.length > 0 ? JSON.stringify(sym.roleTags) : "[]",
+    decorators: Array.isArray(sym.decorators) && sym.decorators.length > 0 ? sym.decorators : undefined,
     searchText: typeof sym.searchText === "string" ? sym.searchText : "",
   };
 }
@@ -613,13 +626,18 @@ function mapNativeImport(imp: NativeParsedImport): ExtractedImport {
     imports: imp.namedImports,
     defaultImport: imp.defaultImport ?? undefined,
     namespaceImport: imp.namespaceImport ?? undefined,
-    isReExport: false,
+    isReExport: imp.isReExport,
   };
 }
 
 function mapNativeCall(call: NativeParsedCall): ExtractedCall {
   return {
-    callerNodeId: call.callerName,
+    // Phase 1 Task 1.2: prefer the new `callerNodeId` field, but fall back to
+    // the legacy `callerName` field so the wrapper tolerates version skew with
+    // older native addon binaries that predate the rename. An empty string
+    // is only possible if the addon emits neither field, which would be a
+    // protocol bug rather than graceful degradation.
+    callerNodeId: call.callerNodeId ?? call.callerName ?? "",
     calleeIdentifier: call.calleeIdentifier,
     isResolved: false,
     callType: mapCallType(call.callType),
@@ -632,9 +650,14 @@ function mapNativeCall(call: NativeParsedCall): ExtractedCall {
   };
 }
 
+// Phase 1 Task 1.5: Rust now emits canonical kebab-case call type literals
+// directly (see `native/src/extract/calls/common.rs::CALL_TYPES`). Legacy
+// `"direct"` and `"tagged_template"` aliases are still accepted here for
+// compatibility with older .node binaries loaded via sdl-mcp-native version
+// skew during upgrades — new Rust builds never emit them.
 function mapCallType(rustType: string): ExtractedCall["callType"] {
   switch (rustType) {
-    case "direct":
+    case "function":
       return "function";
     case "method":
       return "method";
@@ -644,6 +667,11 @@ function mapCallType(rustType: string): ExtractedCall["callType"] {
       return "dynamic";
     case "computed":
       return "computed";
+    case "tagged-template":
+      return "tagged-template";
+    // Legacy aliases (pre-Task-1.5 binaries):
+    case "direct":
+      return "function";
     case "tagged_template":
       return "tagged-template";
     default:

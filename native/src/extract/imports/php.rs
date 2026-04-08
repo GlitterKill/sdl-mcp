@@ -76,6 +76,7 @@ fn parse_namespace_use_clause(node: Node<'_>, source: &[u8]) -> Option<NativePar
         },
         default_import: None,
         namespace_import: None,
+        is_re_export: false,
         range: extract_range(node),
     })
 }
@@ -129,6 +130,7 @@ fn process_include_like_expression(node: Node<'_>, source: &[u8]) -> Option<Nati
         named_imports: Vec::new(),
         default_import: None,
         namespace_import: None,
+        is_re_export: false,
         range: extract_range(node),
     })
 }

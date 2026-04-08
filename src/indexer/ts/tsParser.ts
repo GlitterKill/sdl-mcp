@@ -1,3 +1,21 @@
+/**
+ * TypeScript compiler-backed call resolver (Pass-2 type-aware call resolution).
+ *
+ * `TsCallResolver` wraps a `ts.createProgram` cache keyed by the file set and
+ * compiler options. Rebuilds only happen when the file set, compiler options,
+ * or invalidated (dirty) files change — otherwise the cached program is reused.
+ *
+ * Lifecycle: the resolver is created LAZILY by the Rust Pass-1 engine path in
+ * `src/indexer/indexer.ts` (`indexRepoImpl`, see the "Lazily create TS compiler
+ * resolver for Pass 2" section). Pass-1 itself runs without a resolver.
+ *
+ * Hybrid Pass-1 (Task 1.1 Rust→TS fallback) does NOT invalidate this cache:
+ * fallback files are processed by `processFile` with `tsResolver: null`, the
+ * same code path as pure-Rust Pass-1 files. The shared Pass-2 program is then
+ * built once over the full file set after Pass-1 completes.
+ *
+ * Consumers: `src/indexer/indexer.ts`, `src/indexer/indexer-pass1.ts`.
+ */
 import path from "path";
 import { globSync } from "node:fs";
 import ts from "typescript";

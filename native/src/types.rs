@@ -59,6 +59,12 @@ pub struct NativeSymbolSignature {
 #[napi(object)]
 #[derive(Debug, Clone)]
 pub struct NativeParsedSymbol {
+    /// Stable per-file nodeId, format `${name}:${startLine}:${startCol}`.
+    /// Distinct from `symbol_id` (a cross-repo SHA-256) — `node_id` is the
+    /// key used by same-file edge resolution and call-site joining in
+    /// `buildSymbolIndexMaps`. Must match the `caller_node_id` emitted by
+    /// `NativeParsedCall` for the enclosing symbol.
+    pub node_id: String,
     /// Stable symbol ID: sha256("{repoId}:{relPath}:{kind}:{name}:{astFingerprint}").
     pub symbol_id: String,
     /// AST fingerprint hash.
@@ -84,6 +90,10 @@ pub struct NativeParsedSymbol {
     pub side_effects: Vec<String>,
     /// Role tags inferred from name/path heuristics.
     pub role_tags: Vec<String>,
+    /// Raw decorator / annotation / attribute source text attached to this
+    /// symbol. Includes the leading sigil (e.g. `@Component(...)`, `@override`,
+    /// `#[derive(Debug)]`). Empty for languages without a decorator concept.
+    pub decorators: Vec<String>,
     /// Search-oriented text including identifier splits, summary, tags, and path hints.
     pub search_text: String,
     /// Summary quality score: 1.0 = doc comment, 0.4 = typed function, 0.3 = heuristic, 0.0 = none.
@@ -106,6 +116,9 @@ pub struct NativeParsedImport {
     pub default_import: Option<String>,
     /// Namespace import name (e.g., "* as ns"), if any.
     pub namespace_import: Option<String>,
+    /// Whether this statement re-exports (e.g., `export … from`, `pub use`).
+    /// Languages without a re-export concept (Java, C#) always set this to false.
+    pub is_re_export: bool,
     /// Source range.
     pub range: NativeRange,
 }
@@ -114,8 +127,11 @@ pub struct NativeParsedImport {
 #[napi(object)]
 #[derive(Debug, Clone)]
 pub struct NativeParsedCall {
-    /// Node ID of the caller (enclosing symbol).
-    pub caller_name: String,
+    /// Stable nodeId of the caller (enclosing symbol), format
+    /// `${name}:${startLine}:${startCol}`. Must match the `node_id` of a
+    /// `NativeParsedSymbol` emitted for the same file so downstream
+    /// `buildSymbolIndexMaps` can join call sites to their callers.
+    pub caller_node_id: String,
     /// Callee identifier (e.g., "foo", "this.bar", "ns.baz").
     pub callee_identifier: String,
     /// Call type: "direct", "method", "constructor", "super", "tagged_template",

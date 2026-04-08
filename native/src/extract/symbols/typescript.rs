@@ -2,7 +2,10 @@ use tree_sitter::Node;
 
 use crate::types::NativeParsedSymbol;
 
-use super::common::{extract_range, find_child_by_kind, make_symbol, node_text, ParamInfo};
+use super::common::{
+    extract_range, find_child_by_kind, make_symbol, make_symbol_with_forced_signature,
+    node_text, ParamInfo,
+};
 
 pub fn extract_symbols_ts(
     root: Node<'_>,
@@ -274,7 +277,7 @@ fn process_function_declaration(
     };
 
     let decorators = extract_decorators(node, source);
-    let mut symbol = make_symbol(
+    let mut symbol = make_symbol_with_forced_signature(
         &name,
         "function",
         node,
@@ -303,7 +306,21 @@ fn process_method_definition(
     let returns = extract_return_type(node, source);
     let visibility = extract_visibility(node, source);
     let decorators = extract_decorators(node, source);
-    let generics = extract_generics(node, source);
+
+    // TS source-of-truth only extracts method generics when the method
+    // has a `statement_block` body. Interface / abstract method
+    // signatures (no body) produce empty generics.
+    let has_body = {
+        let mut cursor = node.walk();
+        let result = node.children(&mut cursor)
+            .any(|c| c.kind() == "statement_block");
+        result
+    };
+    let generics = if has_body {
+        extract_generics(node, source)
+    } else {
+        Vec::new()
+    };
 
     let kind = if name == "constructor" {
         "constructor"
@@ -311,7 +328,7 @@ fn process_method_definition(
         "method"
     };
 
-    let mut symbol = make_symbol(
+    let mut symbol = make_symbol_with_forced_signature(
         &name,
         kind,
         node,
@@ -338,7 +355,7 @@ fn process_class_declaration(
     let generics = extract_generics(node, source);
     let decorators = extract_decorators(node, source);
 
-    let mut symbol = make_symbol(
+    let mut symbol = make_symbol_with_forced_signature(
         &name,
         "class",
         node,
@@ -364,7 +381,7 @@ fn process_interface_declaration(
     let name = extract_identifier(node, source)?;
     let generics = extract_generics(node, source);
 
-    let mut symbol = make_symbol(
+    let mut symbol = make_symbol_with_forced_signature(
         &name,
         "interface",
         node,
@@ -375,7 +392,7 @@ fn process_interface_declaration(
         None,
         &generics,
         "",
-        &[],
+        &extract_decorators(node, source),
     );
     symbol.exported = is_exported(node);
     Some(symbol)
@@ -390,7 +407,7 @@ fn process_type_alias_declaration(
     let name = extract_identifier(node, source)?;
     let generics = extract_generics(node, source);
 
-    let mut symbol = make_symbol(
+    let mut symbol = make_symbol_with_forced_signature(
         &name,
         "type",
         node,
@@ -401,7 +418,7 @@ fn process_type_alias_declaration(
         None,
         &generics,
         "",
-        &[],
+        &extract_decorators(node, source),
     );
     symbol.exported = is_exported(node);
     Some(symbol)
@@ -447,7 +464,7 @@ fn process_variable_declaration(
                         None,
                         &[],
                         "",
-                        &[],
+                        &extract_decorators(child, source),
                     );
                     symbol.exported = is_exported(parent_node);
                     symbol.range = extract_range(child);
@@ -474,7 +491,7 @@ fn process_variable_declaration(
         None,
         &[],
         "",
-        &[],
+        &extract_decorators(declarator, source),
     );
     symbol.exported = is_exported(parent_node);
     vec![symbol]
@@ -498,7 +515,7 @@ fn process_module(
         None,
         &[],
         "",
-        &[],
+        &extract_decorators(node, source),
     );
     symbol.exported = is_exported(node);
     Some(symbol)
@@ -535,7 +552,7 @@ fn process_assignment_expression(
     let params = extract_parameters(right, source);
     let returns = extract_return_type(right, source);
 
-    let mut symbol = make_symbol(
+    let mut symbol = make_symbol_with_forced_signature(
         &left_name,
         "function",
         right,
@@ -546,7 +563,7 @@ fn process_assignment_expression(
         returns.as_deref(),
         &[],
         "",
-        &[],
+        &extract_decorators(right, source),
     );
     symbol.name = left_name;
     symbol.exported = is_exported(right);

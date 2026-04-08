@@ -35,8 +35,8 @@ fn walk_for_calls(
             && !has_ancestor_of_type(node, "decorator")
         {
             seen_call_nodes.insert(node.id());
-            let caller_name = find_enclosing_symbol(node, symbols);
-            if let Some(call) = parse_call_node(node, source, &caller_name) {
+            let caller_node_id = find_enclosing_symbol(node, symbols);
+            if let Some(call) = parse_call_node(node, source, &caller_node_id) {
                 calls.push(call);
             }
         }
@@ -81,14 +81,14 @@ fn extract_decorator_calls(
 fn parse_call_node(
     call_node: Node<'_>,
     source: &[u8],
-    caller_name: &str,
+    caller_node_id: &str,
 ) -> Option<NativeParsedCall> {
     let function_node = call_node.child_by_field_name("function")?;
 
     let (callee_identifier, call_type) = match function_node.kind() {
         "identifier" => (
             node_text(function_node, source).to_string(),
-            "direct".to_string(),
+            "function".to_string(),
         ),
         "attribute" => {
             let object = function_node.child_by_field_name("object")?;
@@ -116,7 +116,7 @@ fn parse_call_node(
     }
 
     Some(NativeParsedCall {
-        caller_name: caller_name.to_string(),
+        caller_node_id: caller_node_id.to_string(),
         callee_identifier,
         call_type,
         range: extract_range(call_node),

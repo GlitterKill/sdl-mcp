@@ -100,7 +100,7 @@ fn process_package_declaration(
         None,
         &[],
         "public",
-        &[],
+        &extract_decorators(node, source),
     );
     symbol.exported = true;
     symbols.push(symbol);
@@ -117,19 +117,43 @@ fn process_type_like(
     let generics = extract_generics(node, source);
     let visibility = extract_visibility(node, source);
 
-    let mut symbol = make_symbol(
-        &name,
-        kind,
-        node,
-        source,
-        repo_id,
-        rel_path,
-        &[],
-        None,
-        &generics,
-        &visibility,
-        &[],
+    // TS java.ts emits signature for class_declaration and
+    // interface_declaration but NOT for enum_declaration /
+    // record_declaration / annotation_type_declaration.
+    let should_force_signature = matches!(
+        node.kind(),
+        "class_declaration" | "interface_declaration"
     );
+
+    let mut symbol = if should_force_signature {
+        super::common::make_symbol_with_forced_signature(
+            &name,
+            kind,
+            node,
+            source,
+            repo_id,
+            rel_path,
+            &[],
+            None,
+            &generics,
+            &visibility,
+            &[],
+        )
+    } else {
+        make_symbol(
+            &name,
+            kind,
+            node,
+            source,
+            repo_id,
+            rel_path,
+            &[],
+            None,
+            &generics,
+            &visibility,
+            &[],
+        )
+    };
     symbol.exported = is_public(node);
     Some(symbol)
 }
@@ -156,7 +180,7 @@ fn process_method_declaration(
         returns.as_deref(),
         &[],
         &visibility,
-        &[],
+        &extract_decorators(node, source),
     );
     symbol.exported = is_public(node);
     Some(symbol)
@@ -183,7 +207,7 @@ fn process_constructor_declaration(
         Some(&name),
         &[],
         &visibility,
-        &[],
+        &extract_decorators(node, source),
     );
     symbol.exported = is_public(node);
     Some(symbol)
@@ -223,7 +247,7 @@ fn process_field_declaration(
             None,
             &[],
             &visibility,
-            &[],
+            &extract_decorators(child, source),
         );
         symbol.exported = false;
         symbols.push(symbol);
@@ -242,8 +266,10 @@ fn extract_identifier(node: Node<'_>, source: &[u8]) -> Option<String> {
 }
 
 fn extract_visibility(node: Node<'_>, source: &[u8]) -> String {
+    // TS java.ts treats the absence of a modifier (Java package-private) as
+    // "public" for parity with other language adapters.
     let Some(modifiers) = find_child_node(node, "modifiers") else {
-        return String::new();
+        return "public".to_string();
     };
 
     let mut cursor = modifiers.walk();
@@ -256,12 +282,15 @@ fn extract_visibility(node: Node<'_>, source: &[u8]) -> String {
         }
     }
 
-    String::new()
+    // No explicit modifier among the modifiers node (only annotations etc.).
+    // Default to public to match TS source-of-truth.
+    "public".to_string()
 }
 
 fn is_public(node: Node<'_>) -> bool {
+    // TS java.ts treats absence of explicit visibility as exported (public).
     let Some(modifiers) = find_child_node(node, "modifiers") else {
-        return false;
+        return true;
     };
 
     let mut cursor = modifiers.walk();
@@ -304,7 +333,10 @@ fn extract_parameters(node: Node<'_>, source: &[u8]) -> Vec<ParamInfo> {
             continue;
         };
 
-        let type_annotation = extract_parameter_type(child, source);
+        // TS java.ts extracts type only for non-primitive reference types
+        // (type_identifier / scoped_type_identifier). Primitive types
+        // (integral_type, floating_point_type, etc.) are not extracted.
+        let type_annotation = extract_reference_parameter_type(child, source);
         params.push(ParamInfo {
             name: node_text(identifier, source).to_string(),
             type_annotation,
@@ -314,6 +346,26 @@ fn extract_parameters(node: Node<'_>, source: &[u8]) -> Vec<ParamInfo> {
     params
 }
 
+fn extract_reference_parameter_type(node: Node<'_>, source: &[u8]) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "type_identifier"
+            | "scoped_type_identifier"
+            | "generic_type"
+            | "array_type" => {
+                let text = node_text(child, source).to_string();
+                if !text.is_empty() {
+                    return Some(text);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+#[allow(dead_code)]
 fn extract_parameter_type(node: Node<'_>, source: &[u8]) -> Option<String> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -357,4 +409,9 @@ fn is_java_type_node(kind: &str) -> bool {
             | "scoped_type_identifier"
             | "array_type"
     )
+}
+
+fn extract_decorators(_node: Node<'_>, _source: &[u8]) -> Vec<String> {
+    // TS java.ts does NOT emit decorators for Java declarations.
+    Vec::new()
 }

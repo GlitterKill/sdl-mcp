@@ -51,6 +51,7 @@ fn process_preproc_include(node: Node<'_>, source: &[u8]) -> Option<NativeParsed
             named_imports: vec![specifier.clone()],
             default_import: None,
             namespace_import: None,
+            is_re_export: false,
             specifier,
             range: extract_range(node),
         });
@@ -72,6 +73,7 @@ fn process_preproc_include(node: Node<'_>, source: &[u8]) -> Option<NativeParsed
             named_imports: vec![specifier.clone()],
             default_import: None,
             namespace_import: None,
+            is_re_export: false,
             specifier,
             range: extract_range(node),
         });

@@ -114,7 +114,9 @@ fn process_function_declaration(
     let params = extract_params_for_function(node, source);
     let returns = extract_results(node, source);
 
-    let mut symbol = make_symbol(
+    // TS go.ts always emits signature for function_declaration (even when
+    // params is empty). Force signature to match.
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &name,
         "function",
         node,
@@ -143,17 +145,31 @@ fn process_method_declaration(
     let mut params = extract_params_for_method(node, source);
     let returns = extract_results(node, source);
 
-    if let Some(receiver_type) = extract_receiver_type(node, source) {
+    // TS go.ts extractParameters for methods inserts TWO synthetic params
+    // for the receiver: first the receiver type as name+type, then the
+    // receiver name with the receiver type as type. Replicate that.
+    if let Some((receiver_type, receiver_name)) =
+        extract_receiver_info(node, source)
+    {
         params.insert(
             0,
             ParamInfo {
                 name: receiver_type.clone(),
-                type_annotation: Some(receiver_type),
+                type_annotation: Some(receiver_type.clone()),
             },
         );
+        if let Some(recv_name) = receiver_name {
+            params.insert(
+                1,
+                ParamInfo {
+                    name: recv_name,
+                    type_annotation: Some(receiver_type),
+                },
+            );
+        }
     }
 
-    let mut symbol = make_symbol(
+    let mut symbol = super::common::make_symbol_with_forced_signature(
         &name,
         "method",
         node,
@@ -267,7 +283,15 @@ fn extract_params_for_method(node: Node<'_>, source: &[u8]) -> Vec<ParamInfo> {
     extract_param_infos(param_lists[1], source)
 }
 
+#[allow(dead_code)]
 fn extract_receiver_type(node: Node<'_>, source: &[u8]) -> Option<String> {
+    extract_receiver_info(node, source).map(|(ty, _)| ty)
+}
+
+fn extract_receiver_info(
+    node: Node<'_>,
+    source: &[u8],
+) -> Option<(String, Option<String>)> {
     let param_lists = collect_parameter_lists(node);
     let receiver_list = param_lists.first().copied()?;
 
@@ -277,14 +301,27 @@ fn extract_receiver_type(node: Node<'_>, source: &[u8]) -> Option<String> {
             continue;
         }
 
+        let mut receiver_name: Option<String> = None;
+        let mut receiver_type: Option<String> = None;
         let mut decl_cursor = child.walk();
         for decl_child in child.children(&mut decl_cursor) {
-            if decl_child.kind() != "identifier" {
-                let receiver_type = node_text(decl_child, source).to_string();
-                if !receiver_type.is_empty() {
-                    return Some(receiver_type);
+            if decl_child.kind() == "identifier" {
+                if receiver_name.is_none() {
+                    let t = node_text(decl_child, source).to_string();
+                    if !t.is_empty() {
+                        receiver_name = Some(t);
+                    }
+                }
+            } else if receiver_type.is_none() {
+                let t = node_text(decl_child, source).to_string();
+                if !t.is_empty() {
+                    receiver_type = Some(t);
                 }
             }
+        }
+
+        if let Some(ty) = receiver_type {
+            return Some((ty, receiver_name));
         }
     }
 
