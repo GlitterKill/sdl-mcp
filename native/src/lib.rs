@@ -97,10 +97,19 @@ pub fn compute_clusters(
 
     let result = cluster::label_propagation(&edge_pairs, symbol_ids.len(), 100);
 
+    // Drop oversized communities. Even after edge-type filtering upstream,
+    // dispatcher-like functions can still pull hundreds of unrelated symbols
+    // into one community via transitive call chains. A group this large is
+    // not a meaningful cohesive cluster and only serves to pollute labels.
+    const MAX_CLUSTER_SIZE: usize = 250;
+
     let mut assignments: Vec<NativeClusterAssignment> = Vec::new();
 
     for (_label, members) in result.communities {
         if members.len() < min_size {
+            continue;
+        }
+        if members.len() > MAX_CLUSTER_SIZE {
             continue;
         }
 

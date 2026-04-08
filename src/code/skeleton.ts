@@ -141,6 +141,39 @@ const BODY_TYPES = new Set([
   "class_body",
 ]);
 
+function extractSignatureBeforeBody(
+  node: Parser.SyntaxNode,
+  bodyNode: Parser.SyntaxNode,
+): string {
+  const nodeText = node.text;
+  const lines = nodeText.split("\n");
+  const rowDelta = bodyNode.startPosition.row - node.startPosition.row;
+  const bodyCol = bodyNode.startPosition.column;
+  if (rowDelta === 0) {
+    const startCol = node.startPosition.column;
+    return (lines[0] ?? "").slice(0, bodyCol - startCol).trimEnd();
+  }
+  if (rowDelta >= lines.length) {
+    return nodeText.trimEnd();
+  }
+  const beforeBodyLines = lines.slice(0, rowDelta);
+  const partialBodyLine = (lines[rowDelta] ?? "").slice(0, bodyCol);
+  return [...beforeBodyLines, partialBodyLine].join("\n").trimEnd();
+}
+
+function stripBlockBraces(text: string): string {
+  let s = text;
+  if (s.startsWith("{")) {
+    s = s.slice(1);
+    if (s.startsWith("\n")) s = s.slice(1);
+  }
+  if (s.endsWith("}")) {
+    s = s.slice(0, -1);
+    if (s.endsWith("\n")) s = s.slice(0, -1);
+  }
+  return s;
+}
+
 export function extractSkeletonFromNode(
   node: Parser.SyntaxNode,
   content: string,
@@ -318,15 +351,17 @@ export function extractSkeletonFromNode(
 
   // Function/class/method-like types: extract signature + elide body
   if (FUNCTION_LIKE_TYPES.has(nodeType)) {
-    const lines = node.text.split("\n");
-    const signature = lines[0] || "";
-
     // Find the body node using the language-agnostic body type set
     const bodyNode = node.children.find((c) => BODY_TYPES.has(c.type));
     if (!bodyNode) {
       // No body (e.g., abstract method, forward declaration)
       return node.text + "\n";
     }
+
+    // Reconstruct the full multi-line signature using the body node's
+    // start position. lines[0] alone drops parameters, return types,
+    // and anything else that wraps onto a second line.
+    const signature = extractSignatureBeforeBody(node, bodyNode);
 
     const bodySkeleton = extractSkeletonFromBody(
       bodyNode,
@@ -339,31 +374,21 @@ export function extractSkeletonFromNode(
       return signature + "\n" + bodySkeleton;
     }
 
-    const result = signature + " {\n" + bodySkeleton + "}\n";
-    return result;
+    return signature + " {\n" + bodySkeleton + "}\n";
   }
 
   // Arrow function (JS/TS)
   if (nodeType === "arrow_function") {
-    const lines = node.text.split("\n");
-    const signature = lines[0] || "";
-
-    const hasBody = node.children.some((c) => c.type === "statement_block");
-    if (!hasBody) {
-      return node.text;
-    }
-
     const bodyNode = node.children.find((c) => c.type === "statement_block");
     if (!bodyNode) {
       return node.text;
     }
-
+    const signature = extractSignatureBeforeBody(node, bodyNode);
     const bodySkeleton = extractSkeletonFromBody(
       bodyNode,
       content,
       includeIdentifiers,
     );
-
     return signature + " {\n" + bodySkeleton + "}";
   }
 
@@ -399,7 +424,9 @@ function extractSkeletonFromBody(
   const lines = bodyNode.text.split("\n");
 
   if (lines.length <= 5) {
-    return bodyNode.text;
+    // Strip surrounding { and } so callers that wrap with their own
+    // braces (signature + " {" + body + "}") do not produce duplicates.
+    return stripBlockBraces(bodyNode.text);
   }
 
   let processedStatements = 0;

@@ -347,10 +347,17 @@ export async function watchRepositoryWithIndexer(
         typedWatcher.on("ready", () => {
           const watched = typedWatcher.getWatched?.();
           if (watched && typeof watched === "object") {
-            const count = Object.values(watched).reduce(
-              (total, entries) => total + entries.length,
-              0,
-            );
+            // Filter to files matching the configured source extensions.
+            // chokidar.getWatched() returns ALL files in watched dirs,
+            // including .git, build artifacts, lockfiles, and other noise.
+            // The user-meaningful number is "how many indexable source
+            // files are we tracking", not "how many fs entries".
+            let count = 0;
+            for (const entries of Object.values(watched) as string[][]) {
+              for (const entry of entries) {
+                if (matchesExtensions(entry, extensions)) count++;
+              }
+            }
             health.filesWatched = count;
           }
           resolveReady();

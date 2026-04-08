@@ -603,7 +603,8 @@ function generatePrefixSummary(
     return `Finds ${subject}${searchDetail}${returnSuffix}`;
   }
   if (firstWord === "create") return `Creates a new ${subject}${returnSuffix}`;
-  if (firstWord === "make") return `Constructs ${subject}${returnSuffix}`;
+  if (firstWord === "make" || firstWord === "construct")
+    return `Constructs ${subject}${returnSuffix}`;
   if (firstWord === "build" || firstWord === "compose") {
     return `Builds ${subject}${signals.iterates ? " from components" : ""}${returnSuffix}`;
   }
@@ -872,9 +873,50 @@ function generateBehavioralFunctionSummary(
     }
   }
 
-  // Length gate: functions >100 lines with only 1 generic signal
-  // should return null — the name alone is more honest than a vague summary
-  if (bodyLength > 100 && activeCount <= 1) {
+  // Prefix-based action verbs (build/get/load/save/...) describe what
+  // the function does at a higher level than the generic transform/
+  // iterate templates below. Run the prefix matcher early so a function
+  // named buildSlice does not get summarized as "Transforms each slice"
+  // just because it contains a single .map() call.
+  const STRONG_VERB_PREFIXES = new Set([
+    "build", "compose", "create", "make", "construct",
+    "compute", "calculate", "calc",
+    "load", "fetch", "read",
+    "save", "write", "store", "persist",
+    "parse", "decode",
+    "format", "render", "stringify",
+    "normalize", "clean",
+    "init", "initialize", "setup",
+    "register", "subscribe",
+    "remove", "delete", "destroy", "unregister",
+    "update", "patch",
+    "validate", "sanitize",
+    "extract", "derive",
+    "apply", "execute", "run", "invoke",
+    "reset", "clear", "flush", "purge",
+    "compare", "diff",
+    "count", "measure", "estimate",
+    "clone", "copy", "duplicate",
+  ]);
+  if (STRONG_VERB_PREFIXES.has(firstWord) && (subject || restWords.length > 0)) {
+    // For verb-prefixed names, the camelCase remainder is usually a
+    // cleaner subject than a type-derived one (e.g. buildSlice →
+    // "slice", not "slice build request" extracted from SliceBuildRequest).
+    const prefixSubject = restWords.length > 0 ? restWords.join(" ") : subject;
+    const earlyPrefixSummary = generatePrefixSummary(
+      firstWord,
+      prefixSubject,
+      signals,
+      returnSuffix,
+    );
+    if (earlyPrefixSummary !== null) {
+      return earlyPrefixSummary;
+    }
+  }
+
+  // Length gate: long functions with only weak generic signals should
+  // return null — the name alone is more honest than a vague summary.
+  if (bodyLength > 60 && activeCount <= 2) {
     return null;
   }
   // Template priority (first match wins):

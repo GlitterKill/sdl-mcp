@@ -52,12 +52,13 @@ function extractByPath(obj: unknown, keyPath: string): unknown {
 const REDOS_NESTED_QUANTIFIER = /\([^)]*[+*][^)]*\)[+*?]/;
 const SEARCH_TIME_BUDGET_MS = 500;
 const SEARCH_MAX_LINE_CHARS = 10_000;
+const MAX_SEARCH_MATCHES = 50;
 
 function searchLines(
   lines: string[],
   pattern: string,
   contextLines: number,
-): { content: string; matchCount: number; returnedLines: number } {
+): { content: string; matchCount: number; returnedLines: number; matchesTruncated: boolean } {
   if (pattern.length > 500) {
     throw new ValidationError("Search pattern too long (max 500 characters)");
   }
@@ -78,6 +79,7 @@ function searchLines(
   }
 
   const matchIndices: number[] = [];
+  let totalMatchCount = 0;
   const deadline = Date.now() + SEARCH_TIME_BUDGET_MS;
   for (let i = 0; i < lines.length; i++) {
     // Wall-clock budget check every 1024 lines — bounded worst case even if
@@ -94,12 +96,15 @@ function searchLines(
         ? lines[i].slice(0, SEARCH_MAX_LINE_CHARS)
         : lines[i];
     if (regex.test(line)) {
-      matchIndices.push(i);
+      totalMatchCount++;
+      if (matchIndices.length < MAX_SEARCH_MATCHES) {
+        matchIndices.push(i);
+      }
     }
   }
 
   if (matchIndices.length === 0) {
-    return { content: "", matchCount: 0, returnedLines: 0 };
+    return { content: "", matchCount: 0, returnedLines: 0, matchesTruncated: false };
   }
 
   // Build ranges with context, merge overlaps
@@ -131,8 +136,9 @@ function searchLines(
 
   return {
     content: outputParts.join("\n"),
-    matchCount: matchIndices.length,
+    matchCount: totalMatchCount,
     returnedLines,
+    matchesTruncated: totalMatchCount > matchIndices.length,
   };
 }
 
@@ -267,13 +273,16 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
     const rangedLines = lines.slice(searchOffset, searchOffset + searchLimit);
 
     const result = searchLines(rangedLines, request.search, Math.min(request.searchContext ?? 2, 50));
+    const finalContent = result.matchesTruncated
+      ? `// WARNING: ${result.matchCount} total matches, showing first ${MAX_SEARCH_MATCHES}. Narrow the pattern.\n${result.content}`
+      : result.content;
     return withRawTokenBaseline({
       filePath,
-      content: result.content,
-      bytes: Buffer.byteLength(result.content, "utf-8"),
+      content: finalContent,
+      bytes: Buffer.byteLength(finalContent, "utf-8"),
       totalLines,
       returnedLines: result.returnedLines,
-      truncated: false,
+      truncated: result.matchesTruncated,
       matchCount: result.matchCount,
     }, totalBytes);
   }

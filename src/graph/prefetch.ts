@@ -87,10 +87,14 @@ function getOrCreateStats(repoId: string): PrefetchStats {
 function updateRates(stats: PrefetchStats): void {
   const total = stats.cacheHits + stats.cacheMisses;
   stats.hitRate = total > 0 ? stats.cacheHits / total : 0;
+  // wasteRate: fraction of prefetched items that were never used.
+  // wastedPrefetch counts ITEMS, not batches, so the denominator must
+  // also count items. The previous formula divided items by batch
+  // count (stats.completed) which produced unbounded values like 50.0
+  // when 1 batch prefetched 50 unused items.
+  const consumedOrExpired = stats.cacheHits + stats.wastedPrefetch;
   stats.wasteRate =
-    stats.completed > 0
-      ? stats.wastedPrefetch / Math.max(1, stats.completed)
-      : 0;
+    consumedOrExpired > 0 ? stats.wastedPrefetch / consumedOrExpired : 0;
 }
 
 function currentCpuLoadRatio(): number {

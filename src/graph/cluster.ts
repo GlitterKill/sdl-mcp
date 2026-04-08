@@ -106,11 +106,17 @@ export async function computeClustersTS(
 
   const edgesByFrom = await ladybugDb.getEdgesFromSymbolsLite(conn, symbolIds);
 
+  // Restrict clustering to call edges only. Import edges create
+  // artificial hubs (utility modules referenced by hundreds of files)
+  // that collapse LPA into a single giant catch-all community. Calls
+  // represent runtime dependencies, which is what cluster cohesion
+  // should actually measure.
   const edgePairs: Array<[number, number]> = [];
   for (const [from, edges] of edgesByFrom) {
     const fromIdx = indexById.get(from);
     if (fromIdx === undefined) continue;
     for (const e of edges) {
+      if (e.edgeType !== "call") continue;
       const toIdx = indexById.get(e.toSymbolId);
       if (toIdx === undefined) continue;
       const a = Math.min(fromIdx, toIdx);
@@ -128,9 +134,15 @@ export async function computeClustersTS(
 
   const { communities } = labelPropagation(edgePairs, symbolIds.length, 100);
 
+  // Skip oversized communities. Even on call-only edges, dispatcher
+  // functions can pull a few hundred unrelated symbols into one
+  // community. A group this large is not a meaningful cohesive cluster.
+  const MAX_CLUSTER_SIZE = 250;
+
   const assignments: ClusterAssignment[] = [];
   for (const members of communities.values()) {
     if (members.length < minClusterSize) continue;
+    if (members.length > MAX_CLUSTER_SIZE) continue;
 
     const memberSymbolIds = members.map((idx) => symbolIds[idx]).sort();
     const seed = memberSymbolIds.join("|");

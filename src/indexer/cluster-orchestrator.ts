@@ -136,8 +136,13 @@ export async function computeAndStoreClustersAndProcesses(params: {
 
       for (const [fromSymbolId, edges] of edgesByFrom) {
         for (const edge of edges) {
-          nextClusterEdges.push({ fromSymbolId, toSymbolId: edge.toSymbolId });
+          // Restrict clustering to call edges only. Import edges create
+          // artificial hubs (utility modules referenced by hundreds of
+          // files) that collapse LPA into a single giant catch-all
+          // community. Calls represent runtime dependencies, which is
+          // what cluster cohesion should actually measure.
           if (edge.edgeType === "call") {
+            nextClusterEdges.push({ fromSymbolId, toSymbolId: edge.toSymbolId });
             nextCallEdges.push({
               callerId: fromSymbolId,
               calleeId: edge.toSymbolId,

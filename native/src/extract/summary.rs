@@ -268,17 +268,170 @@ fn analyze_body_patterns(symbol: &NativeParsedSymbol, file_content: &str) -> Bod
 
 /// Build a behavioral summary for a function/method.
 /// Returns None if no behavioral signal is detected (better than a tautology).
+/// Count how many behavioral signals are set on a BodySignals struct.
+/// Mirrors countActiveSignals in summaries.ts.
+fn count_active_signals(signals: &BodySignals) -> usize {
+    let mut count = 0;
+    if signals.throws { count += 1; }
+    if signals.validates { count += 1; }
+    if signals.delegates.is_some() { count += 1; }
+    if signals.iterates { count += 1; }
+    if signals.has_network_io { count += 1; }
+    if signals.has_file_io { count += 1; }
+    if signals.has_db_io { count += 1; }
+    if signals.transforms { count += 1; }
+    if signals.aggregates { count += 1; }
+    if signals.caches { count += 1; }
+    if signals.sorts { count += 1; }
+    if signals.merges { count += 1; }
+    if signals.switch_or_chain { count += 1; }
+    if signals.recursion { count += 1; }
+    if signals.emits_events { count += 1; }
+    if signals.registers_listeners { count += 1; }
+    count
+}
+
+/// Verb prefixes that convey a clear intent and should take priority over
+/// generic body-pattern templates. Mirrors STRONG_VERB_PREFIXES in summaries.ts.
+const STRONG_VERB_PREFIXES: &[&str] = &[
+    "build", "compose", "create", "make", "construct",
+    "compute", "calculate", "calc",
+    "load", "fetch", "read",
+    "save", "write", "store", "persist",
+    "parse", "decode",
+    "format", "render", "stringify",
+    "normalize", "clean",
+    "init", "initialize", "setup",
+    "register", "subscribe",
+    "remove", "delete", "destroy", "unregister",
+    "update", "patch",
+    "validate", "sanitize",
+    "extract", "derive",
+    "apply", "execute", "run", "invoke",
+    "reset", "clear", "flush", "purge",
+    "compare", "diff",
+    "count", "measure", "estimate",
+    "clone", "copy", "duplicate",
+];
+
+/// Build a summary from a verb-prefixed function name. Returns None when the
+/// first word is not a recognized action verb. Mirrors generatePrefixSummary
+/// in summaries.ts (minimal subset — just the most common verbs).
+fn generate_prefix_summary(first_word: &str, subject: &str, signals: &BodySignals) -> Option<String> {
+    let io_detail_get = if signals.has_db_io { " from database" }
+        else if signals.has_network_io { " from network" }
+        else if signals.has_file_io { " from filesystem" }
+        else if signals.caches { " (cached)" }
+        else { "" };
+    match first_word {
+        "get" => Some(format!("Retrieves {}{}", subject, io_detail_get)),
+        "set" => Some(format!("Sets {}", subject)),
+        "find" => Some(format!("Finds {}", subject)),
+        "create" => Some(format!("Creates a new {}", subject)),
+        "make" | "construct" => Some(format!("Constructs {}", subject)),
+        "build" | "compose" => Some(format!(
+            "Builds {}{}",
+            subject,
+            if signals.iterates { " from components" } else { "" }
+        )),
+        "compute" | "calculate" | "calc" => Some(format!(
+            "Computes {}{}",
+            subject,
+            if signals.aggregates { " by aggregating values" } else { "" }
+        )),
+        "check" | "verify" | "assert" => Some(format!(
+            "Checks {}{}",
+            subject,
+            if signals.throws { ", throws on failure" } else { "" }
+        )),
+        "ensure" | "require" => Some(format!(
+            "Ensures {} is valid{}",
+            subject,
+            if signals.throws { " or throws" } else { "" }
+        )),
+        "parse" | "decode" => Some(format!(
+            "Parses {}{}",
+            subject,
+            if signals.validates { " with validation" } else { "" }
+        )),
+        "format" | "render" | "stringify" => Some(format!("Formats {} for output", subject)),
+        "normalize" | "clean" => Some(format!("Normalizes {} to canonical form", subject)),
+        "init" | "initialize" | "setup" => Some(format!("Initializes {}", subject)),
+        "register" | "subscribe" => Some(format!(
+            "Registers {}{}",
+            subject,
+            if signals.registers_listeners { " as event listener" } else { "" }
+        )),
+        "remove" | "delete" | "destroy" | "unregister" => Some(format!("Removes {}", subject)),
+        "update" | "patch" => Some(format!(
+            "Updates {}{}",
+            subject,
+            if signals.has_db_io { " in database" } else { "" }
+        )),
+        "load" | "fetch" | "read" => {
+            let io = if signals.has_db_io { " from database" }
+                else if signals.has_network_io { " from network" }
+                else if signals.has_file_io { " from disk" }
+                else { "" };
+            Some(format!("Loads {}{}", subject, io))
+        }
+        "save" | "write" | "store" | "persist" => {
+            let io = if signals.has_db_io { " to database" }
+                else if signals.has_file_io { " to disk" }
+                else { "" };
+            Some(format!("Saves {}{}", subject, io))
+        }
+        "validate" | "sanitize" => Some(format!(
+            "Validates {}{}",
+            subject,
+            if signals.throws { ", throws on invalid input" } else { "" }
+        )),
+        "extract" | "derive" => Some(format!("Extracts {}", subject)),
+        "apply" | "execute" | "run" | "invoke" => Some(format!(
+            "Executes {}{}",
+            subject,
+            if signals.is_async { " asynchronously" } else { "" }
+        )),
+        "reset" => Some(format!("Resets {} to initial state", subject)),
+        "clear" | "flush" | "purge" => Some(format!("Clears {}", subject)),
+        "compare" | "diff" => Some(format!("Compares {}", subject)),
+        "count" | "measure" | "estimate" => Some(format!("Counts {}", subject)),
+        "clone" | "copy" | "duplicate" => Some(format!("Creates a copy of {}", subject)),
+        _ => None,
+    }
+}
+
 fn generate_behavioral_function_summary(symbol: &NativeParsedSymbol, file_content: &str) -> Option<String> {
     let signals = analyze_body_patterns(symbol, file_content);
 
     // Derive subject from name: split camelCase, drop the first word (verb)
     let words = split_camel_case(&symbol.name);
-    let subject = if words.len() > 1 {
-        words[1..].join(" ").to_lowercase()
+    let first_word = words.first().map(|w| w.to_lowercase()).unwrap_or_default();
+    let rest_words = if words.len() > 1 {
+        words[1..].iter().map(|w| w.to_lowercase()).collect::<Vec<_>>().join(" ")
     } else {
         String::new()
     };
-    let subject = if subject.is_empty() { None } else { Some(subject) };
+    let subject = if rest_words.is_empty() { None } else { Some(rest_words.clone()) };
+
+    // Prefix-based action verbs (build/get/load/save/...) describe what the
+    // function does at a higher level than the generic transform/iterate
+    // templates below. Run the prefix matcher early so a function named
+    // buildSlice does not get summarized as "Transforms each slice" just
+    // because it contains a single .map() call.
+    if STRONG_VERB_PREFIXES.contains(&first_word.as_str()) && !rest_words.is_empty() {
+        if let Some(s) = generate_prefix_summary(&first_word, &rest_words, &signals) {
+            return Some(s);
+        }
+    }
+
+    // Length gate: long functions with only weak generic signals should
+    // return None — the name alone is more honest than a vague summary.
+    let active_count = count_active_signals(&signals);
+    let body_length = symbol.range.end_line.saturating_sub(symbol.range.start_line);
+    if body_length > 60 && active_count <= 2 {
+        return None;
+    }
 
     // Template priority (first match wins)
 

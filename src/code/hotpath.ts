@@ -116,7 +116,7 @@ function findLinesMatchingIdentifiers(
   return { matchedLines, confirmedIdentifiers };
 }
 
-function buildHotPathExcerpt(
+export function buildHotPathExcerpt(
   lines: string[],
   matchedLines: Set<number>,
   contextLines: number,
@@ -166,39 +166,56 @@ function buildHotPathExcerpt(
   });
 
   const excerptLineNumbers = Array.from(excerptLineSet).sort((a, b) => a - b);
-  const excerptLines = excerptLineNumbers.map((i) => lines[i]);
 
   const resultLines: string[] = [];
   let remainingTokens = maxTokens;
+  let prevLineIdx: number | null = null;
+  let consumedLines = 0;
+  let truncated = false;
+  let lastCodeLineLength = 0;
 
-  for (const line of excerptLines) {
+  for (const lineIdx of excerptLineNumbers) {
+    // Insert a gap marker between non-contiguous excerpt windows so the
+    // consumer can see lines were skipped instead of treating merged
+    // windows as one continuous block.
+    if (prevLineIdx !== null && lineIdx > prevLineIdx + 1) {
+      const gap = lineIdx - prevLineIdx - 1;
+      const sep = `  // ... (${gap} line${gap === 1 ? "" : "s"} skipped)`;
+      const sepTokens = estimateTokenCount(sep);
+      if (sepTokens <= remainingTokens) {
+        resultLines.push(sep);
+        remainingTokens -= sepTokens;
+      }
+    }
+    const line = lines[lineIdx];
     const lineTokens = estimateTokenCount(line);
     if (lineTokens > remainingTokens) {
+      truncated = true;
       break;
     }
     resultLines.push(line);
     remainingTokens -= lineTokens;
-    if (resultLines.length >= maxLines) {
+    lastCodeLineLength = line.length;
+    prevLineIdx = lineIdx;
+    consumedLines++;
+    if (consumedLines >= maxLines) {
+      if (consumedLines < excerptLineNumbers.length) truncated = true;
       break;
     }
   }
 
   const excerpt = resultLines.join("\n");
-  const truncated = resultLines.length < excerptLines.length;
 
-  const startLine = resultLines.length > 0 ? excerptLineNumbers[0] + 1 : 1;
-  const lastIndex = Math.min(
-    resultLines.length - 1,
-    excerptLineNumbers.length - 1,
-  );
+  const startLine = consumedLines > 0 ? excerptLineNumbers[0] + 1 : 1;
+  const lastConsumedIdx = consumedLines - 1;
   const endLine =
-    resultLines.length > 0 ? excerptLineNumbers[lastIndex] + 1 : startLine;
+    consumedLines > 0 ? excerptLineNumbers[lastConsumedIdx] + 1 : startLine;
 
   const actualRange: Range = {
     startLine,
     startCol: 0,
     endLine,
-    endCol: resultLines[resultLines.length - 1]?.length ?? 0,
+    endCol: lastCodeLineLength,
   };
 
   return {

@@ -82,6 +82,43 @@ function scoreLexicalOverlap(
   let score = 0;
   const nameLower = sym.name.toLowerCase();
 
+  // File-name relevance: if the file basename contains a task identifier,
+  // boost the score. File names are often the most reliable signal of what
+  // a function is about (e.g. "gate.ts" for gating logic). Without this,
+  // a symbol like requireRawAccess in gate.ts loses to PolicyEngine even
+  // when the task is explicitly about "how the policy engine gates code".
+  if (sym.fileId) {
+    const colonIdx = sym.fileId.indexOf(":");
+    const relPath = colonIdx >= 0 ? sym.fileId.slice(colonIdx + 1) : sym.fileId;
+    const slashIdx = Math.max(
+      relPath.lastIndexOf("/"),
+      relPath.lastIndexOf("\\"),
+    );
+    const baseNameRaw = relPath.slice(slashIdx + 1).replace(/\.[^.]+$/, "");
+    const baseName = baseNameRaw.toLowerCase();
+    if (baseName.length >= 3) {
+      // Word-boundary match: "log" should match log.ts or log-writer.ts
+      // but NOT dialog.ts or changelog.ts. Split the raw basename on
+      // camelCase, kebab-case, and snake_case boundaries then check
+      // set membership instead of using a substring test.
+      const baseWords = new Set(
+        baseNameRaw
+          .replace(/([a-z])([A-Z])/g, (_, a, b) => a + "-" + b)
+          .toLowerCase()
+          .split(/[-_]+/)
+          .filter((w) => w.length > 0),
+      );
+      for (const id of identifiers) {
+        if (id.length < 3) continue;
+        const idLower = id.toLowerCase();
+        if (baseName === idLower || baseWords.has(idLower)) {
+          score += 3;
+          break;
+        }
+      }
+    }
+  }
+
   // Exact name in taskText: +5 (only for names >= 8 chars to avoid
   // rewarding generic short names that coincidentally appear in the query)
   if (nameLower.length >= 8 && taskTextLower.includes(nameLower)) {
@@ -517,7 +554,8 @@ export function rankSymbols(
 /**
  * Apply adaptive cutoff to a ranking result, returning the selected symbol IDs.
  *
- * - Precise mode: aggressive threshold (50% of top), cap at 5 symbols.
+ * - Precise unscoped: aggressive threshold (50% of top), cap at 5 symbols.
+ * - Precise scoped: relaxed threshold (25% of top), cap at 10 symbols.
  * - Broad unscoped: generous threshold (25% of top), cap at 20 symbols.
  * - Broad scoped: generous threshold (25% of top), use maxCount.
  * - Always returns at least 1 symbol if any are available.
@@ -532,15 +570,23 @@ export function applyAdaptiveCutoff(
 
   const { topScore } = ranking;
 
-  const threshold = isPrecise
-    ? Math.max(10, topScore * 0.5)
-    : Math.max(5, topScore * 0.25);
+  // Precise mode is strict by default, but when the user has explicitly
+  // provided focus paths/symbols (hasScope), trust them: use the broader
+  // threshold + a moderate cap so we keep coverage of the named paths
+  // instead of dropping them on a high score floor.
+  const threshold =
+    isPrecise && !hasScope
+      ? Math.max(10, topScore * 0.5)
+      : Math.max(5, topScore * 0.25);
 
-  const effectiveMax = isPrecise
-    ? Math.min(5, maxCount)
-    : hasScope
-      ? maxCount
-      : Math.min(20, maxCount);
+  const effectiveMax =
+    isPrecise && !hasScope
+      ? Math.min(5, maxCount)
+      : isPrecise && hasScope
+        ? Math.min(10, maxCount)
+        : hasScope
+          ? maxCount
+          : Math.min(20, maxCount);
 
   const relevant = ranking.ranked.filter((s) => s.totalScore >= threshold);
   const count = Math.max(1, Math.min(relevant.length, effectiveMax));

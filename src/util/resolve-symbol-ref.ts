@@ -248,7 +248,7 @@ function getNameMatchLevel(query: string, candidateName: string): number {
   return 0;
 }
 
-function getFileMatchLevel(
+export function getFileMatchLevel(
   normalizedRequestedFile: string | undefined,
   candidateFile: string,
 ): number {
@@ -266,6 +266,21 @@ function getFileMatchLevel(
   if (basename(normalizedCandidate) === basename(normalizedRequestedFile)) {
     return 1;
   }
+
+  // Tolerate missing extension on the requested file: if the candidate
+  // matches when its extension is stripped, treat as a level-2 fuzzy
+  // match so e.g. "src/graph/slice" resolves "src/graph/slice.ts".
+  const requestedHasExt = /\.[a-zA-Z0-9]+$/.test(normalizedRequestedFile);
+  if (!requestedHasExt) {
+    const candidateNoExt = normalizedCandidate.replace(/\.[^./]+$/, "");
+    if (candidateNoExt === normalizedRequestedFile) {
+      return 2;
+    }
+    if (candidateNoExt.endsWith(`/${normalizedRequestedFile}`)) {
+      return 2;
+    }
+  }
+
   return 0;
 }
 
