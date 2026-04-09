@@ -19,11 +19,11 @@ function navigatePath(obj: unknown, path: string): unknown {
   }
 
   // Handle .length on arrays and strings
-  if (path.endsWith('.length')) {
-    const parentPath = path.slice(0, -'.length'.length);
+  if (path.endsWith(".length")) {
+    const parentPath = path.slice(0, -".length".length);
     const parent = parentPath ? navigatePath(obj, parentPath) : obj;
     if (Array.isArray(parent)) return parent.length;
-    if (typeof parent === 'string') return parent.length;
+    if (typeof parent === "string") return parent.length;
     return undefined;
   }
 
@@ -38,7 +38,11 @@ function navigatePath(obj: unknown, path: string): unknown {
     const bracketIdx = rest.indexOf("[");
     if (dotIdx === -1 && bracketIdx === -1) {
       // Entire path is a single field
-      if (current !== null && current !== undefined && typeof current === "object") {
+      if (
+        current !== null &&
+        current !== undefined &&
+        typeof current === "object"
+      ) {
         return (current as Record<string, unknown>)[rest];
       }
       return undefined;
@@ -78,7 +82,8 @@ function navigatePath(obj: unknown, path: string): unknown {
       if (seg < 0 || seg >= current.length) return undefined;
       current = current[seg];
     } else {
-      if (typeof current !== "object" || Array.isArray(current)) return undefined;
+      if (typeof current !== "object" || Array.isArray(current))
+        return undefined;
       current = (current as Record<string, unknown>)[seg];
     }
   }
@@ -106,12 +111,14 @@ function compareValues(
   b: unknown,
   type: "string" | "number" | "date" | "boolean",
 ): number {
-  if (a === undefined || a === null) return b === undefined || b === null ? 0 : -1;
+  if (a === undefined || a === null)
+    return b === undefined || b === null ? 0 : -1;
   if (b === undefined || b === null) return 1;
 
   switch (type) {
     case "number": {
-      const na = Number(a), nb = Number(b);
+      const na = Number(a),
+        nb = Number(b);
       if (Number.isNaN(na) || Number.isNaN(nb)) return 0;
       return na - nb;
     }
@@ -143,7 +150,17 @@ const DataMapSchema = z.object({
 
 const FilterClauseSchema = z.object({
   path: z.string().min(1),
-  op: z.enum(["eq", "ne", "gt", "gte", "lt", "lte", "contains", "in", "exists"]),
+  op: z.enum([
+    "eq",
+    "ne",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "contains",
+    "in",
+    "exists",
+  ]),
   value: z.unknown().optional(),
 });
 
@@ -187,19 +204,8 @@ function execDataPick(args: unknown): unknown {
   }
 
   const result: Record<string, unknown> = {};
-  const unresolved: string[] = [];
   for (const [outputKey, sourcePath] of Object.entries(fields)) {
-    const value = navigatePath(input, sourcePath);
-    if (value === undefined) {
-      unresolved.push(`${outputKey}="${sourcePath}"`);
-    }
-    result[outputKey] = value;
-  }
-  if (unresolved.length > 0) {
-    throw new TransformError(
-      `dataPick: ${unresolved.length} path(s) did not resolve: ${unresolved.join(", ")}. ` +
-        `Use \`<array>.N.<field>\` or \`<array>[N].<field>\` for array indices, and \`.length\` for array length.`,
-    );
+    result[outputKey] = navigatePath(input, sourcePath);
   }
   return result;
 }
@@ -231,22 +237,26 @@ function matchesClause(
     case "ne":
       return fieldVal !== clause.value;
     case "gt": {
-      const nf = Number(fieldVal), nv = Number(clause.value);
+      const nf = Number(fieldVal),
+        nv = Number(clause.value);
       if (Number.isNaN(nf) || Number.isNaN(nv)) return false;
       return nf > nv;
     }
     case "gte": {
-      const nf = Number(fieldVal), nv = Number(clause.value);
+      const nf = Number(fieldVal),
+        nv = Number(clause.value);
       if (Number.isNaN(nf) || Number.isNaN(nv)) return false;
       return nf >= nv;
     }
     case "lt": {
-      const nf = Number(fieldVal), nv = Number(clause.value);
+      const nf = Number(fieldVal),
+        nv = Number(clause.value);
       if (Number.isNaN(nf) || Number.isNaN(nv)) return false;
       return nf < nv;
     }
     case "lte": {
-      const nf = Number(fieldVal), nv = Number(clause.value);
+      const nf = Number(fieldVal),
+        nv = Number(clause.value);
       if (Number.isNaN(nf) || Number.isNaN(nv)) return false;
       return nf <= nv;
     }
@@ -373,8 +383,13 @@ export const INTERNAL_TRANSFORMS: Record<string, InternalTransformEntry> = {
     schema: WorkflowContinuationGetSchema,
     handler: (args: unknown) => {
       const parsed = WorkflowContinuationGetSchema.parse(args);
-      const result = getContinuation(parsed.handle, parsed.offset, parsed.limit);
-      if (!result) throw new TransformError("Continuation handle expired or not found");
+      const result = getContinuation(
+        parsed.handle,
+        parsed.offset,
+        parsed.limit,
+      );
+      if (!result)
+        throw new TransformError("Continuation handle expired or not found");
       return result;
     },
     description:
@@ -410,6 +425,8 @@ export function executeTransform(fn: string, args: unknown): unknown {
       });
       throw new TransformError(`${fn}: ${messages.join("; ")}`);
     }
-    throw new TransformError(`${fn}: ${err instanceof Error ? err.message : String(err)}`);
+    throw new TransformError(
+      `${fn}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }

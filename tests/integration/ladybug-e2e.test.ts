@@ -406,6 +406,7 @@ describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
     const cardResponse = await handleSymbolGetCard({
       repoId: REPO_ID,
       symbolId: loginHandler.symbolId,
+      includeProcesses: true,
     });
     if ("notModified" in cardResponse) {
       throw new Error("Expected full card response, got notModified");
