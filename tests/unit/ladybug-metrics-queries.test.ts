@@ -119,6 +119,8 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
       churn30d INT64 DEFAULT 0,
       testRefsJson STRING,
       canonicalTestJson STRING,
+      pageRank DOUBLE DEFAULT 0.0,
+      kCore INT64 DEFAULT 0,
       updatedAt STRING
     )
   `,

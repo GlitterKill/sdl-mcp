@@ -163,6 +163,7 @@ export async function insertEdges(
           txConn,
           `MATCH (r:Repo {repoId: $repoId})
            MERGE (s:Symbol {symbolId: $symbolId})
+           SET s.repoId = $repoId
            MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
           { repoId, symbolId },
         );

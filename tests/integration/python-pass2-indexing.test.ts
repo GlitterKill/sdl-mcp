@@ -31,7 +31,7 @@ function writeRepoFile(
 }
 
 describe("Python pass2 indexing", () => {
-  const graphDbPath = join(tmpdir(), ".lbug-python-pass2-test-db.lbug");
+  const graphDbPath = mkdtempSync(join(tmpdir(), "sdl-python-pass2-test-db-"));
   const configPath = join(tmpdir(), "sdl-python-pass2-config.json");
   const prevSDL_CONFIG = process.env.SDL_CONFIG;
   const prevSDL_CONFIG_PATH = process.env.SDL_CONFIG_PATH;

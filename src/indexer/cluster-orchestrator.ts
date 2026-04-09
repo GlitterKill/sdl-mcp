@@ -8,6 +8,18 @@ import { logger } from "../util/logger.js";
 import { computeClustersTS } from "../graph/cluster.js";
 import { traceProcessesTS } from "../graph/process.js";
 import { computeClustersRust, traceProcessesRust } from "./rustIndexer.js";
+import {
+  detectAlgoCapability,
+  runPageRank,
+  runKCore,
+  runLouvain,
+} from "../db/ladybug-algorithms.js";
+import {
+  upsertCentralityBatch,
+  upsertShadowCluster,
+  upsertShadowClusterMembersBatch,
+  deleteShadowClustersByRepo,
+} from "../db/ladybug-queries.js";
 
 const DEFAULT_MIN_CLUSTER_SIZE = 3;
 const DEFAULT_MAX_PROCESS_DEPTH = 20;
@@ -23,6 +35,8 @@ const DEFAULT_ENTRY_PATTERNS = [
 export interface ClusterOrchestratorResult {
   clustersComputed: number;
   processesTraced: number;
+  centralityComputed: number;
+  shadowClustersComputed: number;
   timings?: Record<string, number>;
 }
 
@@ -115,6 +129,8 @@ export async function computeAndStoreClustersAndProcesses(params: {
     return {
       clustersComputed: 0,
       processesTraced: 0,
+      centralityComputed: 0,
+      shadowClustersComputed: 0,
       ...(timings ? { timings } : {}),
     };
   }
@@ -394,10 +410,174 @@ export async function computeAndStoreClustersAndProcesses(params: {
     });
   });
 
+  // ======================================================================
+  // Algorithm stage (shadow + additive): PageRank + K-core metrics and
+  // Louvain shadow communities. Failures in this block are isolated and
+  // do NOT roll back canonical cluster/process indexing.
+  // ======================================================================
+  let centralityComputed = 0;
+  let shadowClustersComputed = 0;
+  try {
+    await measureSubphase("algorithmStage", async () => {
+      const capability = await detectAlgoCapability(conn);
+      if (!capability.supported) {
+        logger.info("ladybug-algorithms: skipping algorithm stage", {
+          repoId,
+          reason: capability.reason ?? "unknown",
+        });
+        return;
+      }
+
+      const [pageRankResults, kCoreResults, louvainResults] = await Promise.all([
+        runPageRank(conn, repoId),
+        runKCore(conn, repoId),
+        runLouvain(conn, repoId),
+      ]);
+
+      // Merge pageRank + kCore on symbolId for combined write.
+      const pageRankMap = new Map<string, number>();
+      for (const r of pageRankResults) pageRankMap.set(r.symbolId, r.score);
+      const kCoreMap = new Map<string, number>();
+      for (const r of kCoreResults) kCoreMap.set(r.symbolId, r.coreness);
+      const centralityRows: Array<{
+        symbolId: string;
+        pageRank: number;
+        kCore: number;
+        updatedAt: string;
+      }> = [];
+      const mergedSymbolIds = new Set<string>([
+        ...pageRankMap.keys(),
+        ...kCoreMap.keys(),
+      ]);
+      for (const symbolId of mergedSymbolIds) {
+        centralityRows.push({
+          symbolId,
+          pageRank: pageRankMap.get(symbolId) ?? 0,
+          kCore: kCoreMap.get(symbolId) ?? 0,
+          updatedAt: now,
+        });
+      }
+      if (centralityRows.length > 0) {
+        await withWriteConn(async (wConn) => {
+          await upsertCentralityBatch(wConn, centralityRows);
+        });
+      }
+      centralityComputed = centralityRows.length;
+
+      // --- Louvain shadow communities ---
+      const communityMembers = new Map<number, string[]>();
+      for (const r of louvainResults) {
+        const members = communityMembers.get(r.communityId) ?? [];
+        members.push(r.symbolId);
+        communityMembers.set(r.communityId, members);
+      }
+      // Apply the same min-cluster-size threshold as canonical clusters
+      // so tiny Louvain fragments do not dominate downstream telemetry.
+      const sortedCommunityIds = [...communityMembers.keys()]
+        .filter((cid) => (communityMembers.get(cid)?.length ?? 0) >= minClusterSize)
+        .sort((a, b) => a - b);
+
+      await withWriteConn(async (wConn) => {
+        await deleteShadowClustersByRepo(wConn, repoId);
+        for (const communityId of sortedCommunityIds) {
+          const memberIds = (communityMembers.get(communityId) ?? []).slice().sort();
+          const shadowClusterId = `${repoId}:louvain:${communityId}`;
+          const label = `Louvain community ${communityId}`;
+          await upsertShadowCluster(wConn, {
+            shadowClusterId,
+            repoId,
+            algorithm: "louvain",
+            label,
+            symbolCount: memberIds.length,
+            modularity: 0.0,
+            versionId,
+            createdAt: now,
+          });
+          await upsertShadowClusterMembersBatch(
+            wConn,
+            memberIds.map((symbolId) => ({
+              symbolId,
+              shadowClusterId,
+              membershipScore: 1.0,
+            })),
+          );
+        }
+      });
+      shadowClustersComputed = sortedCommunityIds.length;
+
+      // --- Divergence telemetry: canonical vs Louvain ---
+      // Build symbol -> canonical clusterId map and symbol -> louvain id map,
+      // then compute average overlap ratio (intersection size /
+      // union size) across matched pairs by dominant assignment.
+      try {
+        const canonicalBySymbol = new Map<string, string>();
+        for (const assignment of clusterAssignments) {
+          canonicalBySymbol.set(assignment.symbolId, assignment.clusterId);
+        }
+        const louvainBySymbol = new Map<string, number>();
+        for (const r of louvainResults) louvainBySymbol.set(r.symbolId, r.communityId);
+
+        // For each canonical cluster, find the Louvain community with
+        // the largest intersection, then compute Jaccard overlap.
+        const canonicalMembership = new Map<string, Set<string>>();
+        for (const [symbolId, cid] of canonicalBySymbol) {
+          const set = canonicalMembership.get(cid) ?? new Set<string>();
+          set.add(symbolId);
+          canonicalMembership.set(cid, set);
+        }
+        const louvainMembership = new Map<number, Set<string>>();
+        for (const [symbolId, cid] of louvainBySymbol) {
+          const set = louvainMembership.get(cid) ?? new Set<string>();
+          set.add(symbolId);
+          louvainMembership.set(cid, set);
+        }
+
+        const overlapScores: number[] = [];
+        for (const [, canonMembers] of canonicalMembership) {
+          let bestOverlap = 0;
+          for (const [, louvMembers] of louvainMembership) {
+            let inter = 0;
+            for (const id of canonMembers) if (louvMembers.has(id)) inter++;
+            if (inter === 0) continue;
+            const union = canonMembers.size + louvMembers.size - inter;
+            const jaccard = union > 0 ? inter / union : 0;
+            if (jaccard > bestOverlap) bestOverlap = jaccard;
+          }
+          overlapScores.push(bestOverlap);
+        }
+        const avgOverlap =
+          overlapScores.length > 0
+            ? overlapScores.reduce((a, b) => a + b, 0) / overlapScores.length
+            : 0;
+        logger.info("ladybug-algorithms: canonical vs louvain divergence", {
+          repoId,
+          canonicalClusters: canonicalMembership.size,
+          louvainCommunities: louvainMembership.size,
+          avgOverlap: Number(avgOverlap.toFixed(4)),
+        });
+      } catch (telemetryErr) {
+        logger.debug("ladybug-algorithms: divergence telemetry failed", {
+          repoId,
+          error:
+            telemetryErr instanceof Error
+              ? telemetryErr.message
+              : String(telemetryErr),
+        });
+      }
+    });
+  } catch (err) {
+    logger.warn("ladybug-algorithms: algorithm stage failed; canonical indexing preserved", {
+      repoId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   logger.info("Cluster/process computation completed", {
     repoId,
     clustersComputed: sortedClusterIds.length,
     processesTraced: processes.length,
+    centralityComputed,
+    shadowClustersComputed,
     clustersDurationMs: Date.now() - clustersStartMs,
     processesDurationMs: Date.now() - processesStartMs,
     totalDurationMs: Date.now() - startMs,
@@ -406,6 +586,8 @@ export async function computeAndStoreClustersAndProcesses(params: {
   return {
     clustersComputed: sortedClusterIds.length,
     processesTraced: processes.length,
+    centralityComputed,
+    shadowClustersComputed,
     ...(timings ? { timings } : {}),
   };
 }

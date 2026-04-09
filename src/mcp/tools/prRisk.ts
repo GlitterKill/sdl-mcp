@@ -1,5 +1,13 @@
 import { computeDeltaWithTiers } from "../../delta/diff.js";
+import type { Connection } from "kuzu";
 import { computeBlastRadius } from "../../delta/blastRadius.js";
+import {
+  computeCentralityStats,
+  computeCentralitySignal,
+  compareScoresWithCentrality,
+  type CentralityStats,
+} from "../../graph/score.js";
+import { getMetricsBySymbolIds } from "../../db/ladybug-metrics.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyEngine } from "../../policy/engine.js";
 import { logger } from "../../util/logger.js";
@@ -80,7 +88,35 @@ export async function handlePRRiskAnalysis(args: unknown) {
 
   const findings = generateFindings(delta, blastRadiusItems);
 
-  const riskScore = computeOverallRiskScore(delta, blastRadiusItems);
+  const { centralityByItem: _centralityByItem } =
+    await buildCentralityMapForItems(conn, blastRadiusItems);
+  // Task 6: centrality-aware rerank (public shape unchanged).
+  const rerankedBlastRadiusItems = rerankItemsWithCentrality(
+    blastRadiusItems,
+    _centralityByItem,
+  );
+  blastRadiusItems.length = 0;
+  for (const it of rerankedBlastRadiusItems) blastRadiusItems.push(it);
+  // V1 baseline: compute with no centrality contribution (multiplier = 1).
+  // This avoids duplicating ~80 lines of scoring logic between two functions.
+  const riskScore = computeRiskScoreV2(delta, blastRadiusItems, new Map());
+  try {
+    const riskScoreV2 = computeRiskScoreV2(
+      delta,
+      blastRadiusItems,
+      _centralityByItem,
+    );
+    logger.info("prRisk: shadow riskScoreV2 telemetry", {
+      repoId: validated.repoId,
+      riskScore,
+      riskScoreV2,
+      delta: riskScoreV2 - riskScore,
+    });
+  } catch (err) {
+    logger.debug("prRisk: riskScoreV2 computation failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   const evidence = collectEvidence(delta, blastRadiusItems);
 
@@ -407,9 +443,17 @@ function generateFindings(
   });
 }
 
-function computeOverallRiskScore(
+/**
+ * Task 6: shadow riskScoreV2 formula — evaluated internally and logged
+ * via structured telemetry, never returned in the MCP response shape.
+ * Uses centrality-weighted blast-radius contribution rather than plain
+ * rank average so that high-centrality impacted symbols carry more
+ * weight. Kept bounded to [0, 100].
+ */
+function computeRiskScoreV2(
   delta: ComputedDeltaWithTiers,
   blastRadiusItems: BlastRadiusItem[],
+  centralityByItem: Map<string, number>,
 ): number {
   let totalRisk = 0;
   let weightSum = 0;
@@ -432,11 +476,17 @@ function computeOverallRiskScore(
   }
 
   if (blastRadiusItems.length > 0) {
-    const avgBlastRadiusScore =
-      blastRadiusItems.reduce((sum: number, item: BlastRadiusItem) => {
-        return sum + Math.min(1, item.rank ?? 0) * 100;
-      }, 0) / blastRadiusItems.length;
-    totalRisk += avgBlastRadiusScore * riskWeights.blastRadius;
+    // Centrality-weighted blast-radius contribution: items linked to
+    // highly-central impacted symbols get amplified up to 1.25x.
+    let accum = 0;
+    for (const item of blastRadiusItems) {
+      const baseContribution = Math.min(1, item.rank ?? 0) * 100;
+      const centralitySignal = centralityByItem.get(item.symbolId) ?? 0;
+      const multiplier = 1 + 0.25 * Math.min(1, centralitySignal);
+      accum += baseContribution * multiplier;
+    }
+    const avgBlastRadiusScore = accum / blastRadiusItems.length;
+    totalRisk += Math.min(100, avgBlastRadiusScore) * riskWeights.blastRadius;
     weightSum += riskWeights.blastRadius;
   }
 
@@ -463,10 +513,106 @@ function computeOverallRiskScore(
   return weightSum > 0 ? Math.min(100, Math.round(totalRisk / weightSum)) : 0;
 }
 
+/**
+ * Task 6: deterministic re-ranker for blast-radius evidence that uses
+ * centrality as a bounded tie-breaker. Primary key is `rank` (desc);
+ * secondary is centrality signal (desc); tertiary is symbolId (asc)
+ * for stable ordering.
+ */
+function rerankItemsWithCentrality(
+  items: BlastRadiusItem[],
+  centralityByItem: Map<string, number>,
+): BlastRadiusItem[] {
+  return items.slice().sort((a, b) => {
+    const cmp = compareScoresWithCentrality(
+      {
+        score: a.rank ?? 0,
+        centralitySignal: centralityByItem.get(a.symbolId) ?? 0,
+      },
+      {
+        score: b.rank ?? 0,
+        centralitySignal: centralityByItem.get(b.symbolId) ?? 0,
+      },
+    );
+    if (cmp !== 0) return cmp;
+    return a.symbolId.localeCompare(b.symbolId);
+  });
+}
+
+/**
+ * Task 6: build a per-item centrality signal map from blast-radius
+ * items by reading the Metrics rows (pageRank/kCore) for all impacted
+ * symbol IDs. Absent metrics are treated as zero centrality so that
+ * v1-era repos (no algorithm stage) see identical ordering.
+ */
+async function buildCentralityMapForItems(
+  conn: Connection,
+  items: BlastRadiusItem[],
+): Promise<{
+  centralityByItem: Map<string, number>;
+  stats: CentralityStats;
+}> {
+  const centralityByItem = new Map<string, number>();
+  if (items.length === 0) {
+    return { centralityByItem, stats: { maxPageRank: 0, maxKCore: 0 } };
+  }
+  try {
+    const symbolIds = items.map((i) => i.symbolId);
+    const metrics = await getMetricsBySymbolIds(conn, symbolIds);
+    const stats = computeCentralityStats(metrics.values());
+    for (const [symbolId, row] of metrics.entries()) {
+      const signal = computeCentralitySignal(
+        row.pageRank ?? 0,
+        row.kCore ?? 0,
+        stats,
+      );
+      centralityByItem.set(symbolId, signal);
+    }
+    return { centralityByItem, stats };
+  } catch (err) {
+    logger.debug(
+      "prRisk: centrality lookup failed, falling back to zero signals",
+      { error: err instanceof Error ? err.message : String(err) },
+    );
+    return { centralityByItem, stats: { maxPageRank: 0, maxKCore: 0 } };
+  }
+}
+// computeOverallRiskScore removed: computeRiskScoreV2 with an empty
+// centrality map produces identical output and avoids ~80 lines of
+// duplicated logic. See call-site in handlePRRiskAnalysis.
+
 function getRiskLevel(riskScore: number): "low" | "medium" | "high" {
   if (riskScore < 40) return "low";
   if (riskScore < 70) return "medium";
   return "high";
+}
+
+function formatDependencyChain(path: string[] | undefined): string | undefined {
+  if (!path || path.length === 0) return undefined;
+  return path.join(" -> ");
+}
+
+function compareItemsByExplanationPath(
+  a: BlastRadiusItem,
+  b: BlastRadiusItem,
+): number {
+  const aHasPath = a.explanationPath && a.explanationPath.length > 1 ? 1 : 0;
+  const bHasPath = b.explanationPath && b.explanationPath.length > 1 ? 1 : 0;
+  if (aHasPath !== bHasPath) {
+    return bHasPath - aHasPath;
+  }
+
+  const aPathLength = a.explanationPath?.length ?? Number.POSITIVE_INFINITY;
+  const bPathLength = b.explanationPath?.length ?? Number.POSITIVE_INFINITY;
+  if (aPathLength !== bPathLength) {
+    return aPathLength - bPathLength;
+  }
+
+  if (a.rank !== b.rank) {
+    return b.rank - a.rank;
+  }
+
+  return a.symbolId.localeCompare(b.symbolId);
 }
 
 function collectEvidence(
@@ -552,6 +698,8 @@ function collectEvidence(
           distance: item.distance,
           rank: item.rank,
           reason: item.reason,
+          explanationPath: item.explanationPath,
+          dependencyChain: formatDependencyChain(item.explanationPath),
         })),
     },
   });
@@ -603,10 +751,18 @@ function generateRecommendedTests(
     (item: BlastRadiusItem) => item.signal === "directDependent",
   );
   if (directDependents.length > 0) {
+    const prioritizedDirectDependents = directDependents
+      .slice()
+      .sort(compareItemsByExplanationPath);
+    const exemplarChain = formatDependencyChain(
+      prioritizedDirectDependents.find((item) => item.explanationPath)?.explanationPath,
+    );
     tests.push({
       type: "regression-tests",
-      description: "Run regression tests on direct dependents",
-      targetSymbols: directDependents
+      description: exemplarChain
+        ? `Run regression tests on direct dependents (shortest chain: ${exemplarChain})`
+        : "Run regression tests on direct dependents",
+      targetSymbols: prioritizedDirectDependents
         .slice(0, 20)
         .map((item: BlastRadiusItem) => item.symbolId),
       priority: "medium" as const,

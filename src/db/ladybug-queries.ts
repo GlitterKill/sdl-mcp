@@ -80,3 +80,8 @@ export * from "./ladybug-file-summaries.js";
 
 // SCIP ingestion operations
 export * from "./ladybug-scip.js";
+
+// Graph algorithm adapter (PageRank, K-core, Louvain, shortest-path)
+export * from "./ladybug-algorithms.js";
+// Shadow cluster (Louvain) operations
+export * from "./ladybug-shadow-clusters.js";

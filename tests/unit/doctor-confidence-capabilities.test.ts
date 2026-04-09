@@ -92,7 +92,7 @@ describe("doctor command - call resolution capabilities", { concurrency: 1 }, ()
     assert.match(output, /pass2-cpp/i);
     assert.match(output, /pass2-c/i);
     assert.match(output, /pass2-shell/i);
-    assert.match(output, /schema v10/i);
+    assert.match(output, /schema v\d+/i);
     assert.match(
       output,
       /confidence, resolution, resolverId, resolutionPhase/i,

@@ -4,9 +4,9 @@ import type { EdgeRow, FileRow, MetricsRow, SymbolRow } from "../db/schema.js";
 import {
   assertSafeInt,
   queryAll,
-  querySingle,
   toNumber,
 } from "../db/ladybug-core.js";
+import { shortestPath } from "../db/ladybug-algorithms.js";
 import { logger } from "../util/logger.js";
 
 export const LAZY_GRAPH_LOADING_DEFAULT_HOPS = 4;
@@ -107,6 +107,15 @@ export interface Graph {
   adjacencyIn: Map<SymbolId, EdgeRow[]>;
   adjacencyOut: Map<SymbolId, EdgeRow[]>;
   metrics?: Map<SymbolId, MetricsRow>;
+  /**
+   * Cached centrality stats derived from `metrics`. Pre-computed once when
+   * the Graph snapshot is built so repeated beam-search calls on the same
+   * snapshot see identical maxPageRank/maxKCore values (no drift from
+   * recomputing on partial metric iterations). The async DB-backed path
+   * (`beamSearchLadybug`) does not use this field and calls
+   * `loadRepoCentralityStats` instead.
+   */
+  centralityStats?: import("./score.js").CentralityStats;
   files?: Map<number, FileRow>;
   clusters?: Map<SymbolId, string>;
 }
@@ -159,45 +168,19 @@ export async function getPath(
   toSymbol: SymbolId,
   maxHops: number = 12,
 ): Promise<SymbolId[] | null> {
-  if (fromSymbol === toSymbol) {
-    return [fromSymbol];
-  }
-
-  const pathClause = buildVariableLengthPathClause(1, maxHops, "DEPENDS_ON", "out");
-
-  const row = await querySingle<{ pathNodes: unknown }>(
+  // Route through the centralized algorithm adapter so that all graph
+  // algorithm access (including shortest-path) goes through one module.
+  // The adapter uses native Cypher variable-length path syntax, so this
+  // still works without the algo extension.
+  const ids = await shortestPath(
     conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol {symbolId: $fromSymbol})
-     MATCH (r)<-[:SYMBOL_IN_REPO]-(b:Symbol {symbolId: $toSymbol})
-     MATCH p = (a)${pathClause}(b)
-     RETURN nodes(p) AS pathNodes
-     ORDER BY length(p)
-     LIMIT 1`,
-    { repoId, fromSymbol, toSymbol },
+    repoId,
+    fromSymbol,
+    toSymbol,
+    maxHops,
   );
-
-  if (!row) return null;
-
-  const rawNodes = row.pathNodes;
-  if (!Array.isArray(rawNodes)) {
-    return null;
-  }
-
-  const symbolIds: SymbolId[] = [];
-  for (const node of rawNodes) {
-    if (typeof node === "string") {
-      symbolIds.push(node);
-      continue;
-    }
-    if (node && typeof node === "object" && "symbolId" in node) {
-      const value = (node as { symbolId?: unknown }).symbolId;
-      if (typeof value === "string") {
-        symbolIds.push(value);
-      }
-    }
-  }
-
-  return symbolIds.length > 0 ? symbolIds : null;
+  if (ids === null) return null;
+  return ids;
 }
 
 export async function loadNeighborhood(

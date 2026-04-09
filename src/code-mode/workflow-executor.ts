@@ -107,6 +107,12 @@ export async function executeWorkflow(
     }
 
     if (!budget.shouldContinue()) {
+      // Fix #6: explain which budget dimension was exceeded and on which
+      // step, so callers can act on the feedback instead of seeing an
+      // opaque budget_exceeded status for every remaining step.
+      const explanation =
+        budget.exceededExplanation() ??
+        "Workflow budget exhausted.";
       for (let j = i; j < request.steps.length; j++) {
         stepResults.push({
           stepIndex: j,
@@ -115,6 +121,10 @@ export async function executeWorkflow(
           tokens: 0,
           durationMs: 0,
           status: "budget_exceeded",
+          error:
+            j === i
+              ? explanation
+              : `Skipped: ${explanation} First affected step: ${request.steps[i].fn} (index ${i}).`,
         });
         priorResults.push(null);
       }

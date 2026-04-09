@@ -176,6 +176,7 @@ export function serializeSliceForWireFormat(
   slice: GraphSlice,
   wireFormat: SliceBuildWireFormat,
   wireFormatVersion?: number,
+  options?: { includeLegend?: boolean },
 ): GraphSlice | CompactGraphSlice | CompactGraphSliceV2 | CompactGraphSliceV3 | AgentWireSlice {
   if (wireFormat === "readable") {
     return slice;
@@ -189,7 +190,7 @@ export function serializeSliceForWireFormat(
     } else if (wireFormatVersion === 3) {
       return toCompactGraphSliceV3(slice);
     }
-    return toCompactGraphSliceV2(slice);
+    return toCompactGraphSliceV2(slice, options?.includeLegend);
   }
   return slice;
 }
@@ -324,7 +325,10 @@ const FRONTIER_WHY_CODES: Record<string, string> = {
   "task text": "tt",
 };
 
-export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
+export function toCompactGraphSliceV2(
+  slice: GraphSlice,
+  includeLegend?: boolean,
+): CompactGraphSliceV2 {
   const filePaths: string[] = [];
   const filePathIndex = new Map<string, number>();
   for (const card of slice.cards) {
@@ -464,9 +468,15 @@ export function toCompactGraphSliceV2(slice: GraphSlice): CompactGraphSliceV2 {
     compact.memories = slice.memories;
   }
 
-  // Include legend only on the first compact response per session to save ~200 tokens
-  if (!legendSentThisSession) {
-    legendSentThisSession = true;
+  // Legend emission rules:
+  //   includeLegend === false   → never emit (caller knows the format)
+  //   includeLegend === true    → always emit, even if previously sent
+  //   includeLegend === undefined → auto: emit once per session, suppress after
+  const shouldEmitLegend =
+    includeLegend === true ||
+    (includeLegend === undefined && !legendSentThisSession);
+  if (shouldEmitLegend) {
+    if (includeLegend === undefined) legendSentThisSession = true;
     compact._legend = {
     wf: "wireFormat",
     wv: "wireFormatVersion",

@@ -68,6 +68,7 @@ export async function mergeScipSymbolProperties(
 export async function insertScipSymbol(
   conn: Connection,
   symbol: {
+    repoId?: string;
     symbolId: string;
     kind: string;
     name: string;
@@ -89,6 +90,7 @@ export async function insertScipSymbol(
     conn,
     `MERGE (s:Symbol {symbolId: $symbolId})
      ON CREATE SET
+         s.repoId = $repoId,
          s.kind = $kind,
          s.name = $name,
          s.exported = $exported,
@@ -104,6 +106,7 @@ export async function insertScipSymbol(
          s.packageVersion = $packageVersion,
          s.updatedAt = $updatedAt
      ON MATCH SET
+         s.repoId = coalesce($repoId, s.repoId),
          s.kind = $kind,
          s.name = $name,
          s.exported = $exported,
@@ -120,6 +123,7 @@ export async function insertScipSymbol(
          s.updatedAt = $updatedAt`,
     {
       symbolId: symbol.symbolId,
+      repoId: symbol.repoId ?? null,
       kind: symbol.kind,
       name: symbol.name,
       exported: symbol.exported,
@@ -632,6 +636,7 @@ export async function batchMergeExternalSymbols(
           `MATCH (r:Repo {repoId: $repoId})
            MERGE (s:Symbol {symbolId: $symbolId})
            ON CREATE SET
+               s.repoId = $repoId,
                s.kind = $kind,
                s.name = $name,
                s.exported = $exported,
@@ -647,6 +652,7 @@ export async function batchMergeExternalSymbols(
                s.packageVersion = $packageVersion,
                s.updatedAt = $updatedAt
            ON MATCH SET
+               s.repoId = $repoId,
                s.kind = $kind,
                s.name = $name,
                s.exported = $exported,

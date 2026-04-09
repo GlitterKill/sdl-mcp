@@ -261,3 +261,153 @@ export function calculateClusterCohesion(params: {
   }
   return 0;
 }
+
+/**
+ * Centrality tie-break epsilon. When two candidates have scores within
+ * this margin, the centrality signal is used as a bounded tie-breaker.
+ * Kept intentionally small so centrality cannot dominate the primary
+ * relevance score.
+ */
+export const CENTRALITY_TIEBREAK_EPSILON = 0.001;
+
+/**
+ * Per-repo normalization stats for centrality metrics.
+ * Computed once per beam-search / memory-surfacing run and reused.
+ */
+export interface CentralityStats {
+  maxPageRank: number;
+  maxKCore: number;
+}
+
+/**
+ * Derive per-repo normalization stats from a map of metrics rows.
+ * Accepts any object shape that exposes pageRank / kCore (camelCase)
+ * OR page_rank / k_core (snake_case legacy MetricsRow).
+ */
+export function computeCentralityStats(
+  entries: Iterable<{
+    pageRank?: number | null;
+    kCore?: number | null;
+    page_rank?: number | null;
+    k_core?: number | null;
+  }>,
+): CentralityStats {
+  let maxPageRank = 0;
+  let maxKCore = 0;
+  for (const entry of entries) {
+    const pr = entry.pageRank ?? entry.page_rank ?? 0;
+    const kc = entry.kCore ?? entry.k_core ?? 0;
+    if (pr > maxPageRank) maxPageRank = pr;
+    if (kc > maxKCore) maxKCore = kc;
+  }
+  return { maxPageRank, maxKCore };
+}
+
+/**
+ * Normalize a centrality component to [0, 1] given a per-repo max.
+ * Returns 0 when max is <= 0 or value is missing.
+ */
+export function normalizeCentrality(
+  value: number | null | undefined,
+  max: number,
+): number {
+  if (max <= 0) return 0;
+  const v = value ?? 0;
+  if (v <= 0) return 0;
+  return Math.min(v / max, 1);
+}
+
+/**
+ * Combine PageRank and K-core into a single centrality signal in [0, 1].
+ * centralitySignal = 0.6 * normalizedPageRank + 0.4 * normalizedKCore
+ */
+export function computeCentralitySignal(
+  pageRank: number | null | undefined,
+  kCore: number | null | undefined,
+  stats: CentralityStats,
+): number {
+  const prNorm = normalizeCentrality(pageRank, stats.maxPageRank);
+  const kcNorm = normalizeCentrality(kCore, stats.maxKCore);
+  return 0.6 * prNorm + 0.4 * kcNorm;
+}
+
+/**
+ * Compute shadow hotnessV2 = 0.75 * currentHotness + 0.25 * centralitySignal.
+ * Kept shadow-only in v1: the beam search does not promote this to the
+ * primary hotness factor yet. Exposed here for telemetry / future promotion.
+ */
+export function computeHotnessV2(
+  currentHotness: number,
+  centralitySignal: number,
+): number {
+  const h = Number.isFinite(currentHotness) ? currentHotness : 0;
+  const c = Number.isFinite(centralitySignal) ? centralitySignal : 0;
+  return 0.75 * h + 0.25 * c;
+}
+
+/**
+ * Apply a bounded centrality tie-break to a primary score. The tie-break
+ * can never exceed CENTRALITY_TIEBREAK_EPSILON, so ordering is preserved
+ * when primary score deltas are larger than that margin.
+ *
+ * When centralitySignal is 0 or not a finite number, the primary score is
+ * returned unchanged — this guarantees that existing orderings are stable
+ * for repos that have no centrality data.
+ */
+export function applyCentralityTiebreak(
+  score: number,
+  centralitySignal: number | null | undefined,
+): number {
+  const c = centralitySignal ?? 0;
+  if (!Number.isFinite(c) || c <= 0) return score;
+  return score + CENTRALITY_TIEBREAK_EPSILON * Math.min(c, 1);
+}
+
+export interface CentralityAwareScoreResult {
+  /**
+   * Primary relevance score before the bounded centrality tie-break is applied.
+   * Callers should apply the tie-break only after edge-weight / cohesion math
+   * so centrality remains strictly secondary to the established ranking terms.
+   */
+  primaryScore: number;
+  centralitySignal: number;
+  hotnessV2: number;
+}
+
+export function scoreSymbolWithCentralityContext(
+  symbol: SymbolRow,
+  context: SliceContext,
+  metrics: MetricsRow | null,
+  file: FileRow | undefined,
+  stats: CentralityStats,
+): CentralityAwareScoreResult {
+  const primaryScore = scoreSymbolWithMetrics(symbol, context, metrics, file);
+  const centralitySignal = metrics
+    ? computeCentralitySignal(metrics.page_rank, metrics.k_core, stats)
+    : 0;
+
+  return {
+    primaryScore,
+    centralitySignal,
+    // Shadow-only today, but computed here so the production scorers and the
+    // pure helper tests exercise the same centrality path.
+    hotnessV2: computeHotnessV2(calculateHotness(metrics), centralitySignal),
+  };
+}
+
+/**
+ * Deterministic comparator for two candidates with optional centrality
+ * signals. Primary key: score (desc). Secondary key: centrality signal
+ * when score deltas are within CENTRALITY_TIEBREAK_EPSILON.
+ * Returns negative when `a` should come first, positive otherwise.
+ */
+export function compareScoresWithCentrality(
+  a: { score: number; centralitySignal?: number },
+  b: { score: number; centralitySignal?: number },
+): number {
+  const delta = b.score - a.score;
+  if (Math.abs(delta) > CENTRALITY_TIEBREAK_EPSILON) return delta;
+  const aC = a.centralitySignal ?? 0;
+  const bC = b.centralitySignal ?? 0;
+  return bC - aC;
+}

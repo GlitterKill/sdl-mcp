@@ -906,6 +906,12 @@ export const SymbolGetCardRequestSchema = z.object({
   ifNoneMatch: z.string().optional(),
   minCallConfidence: z.number().min(0).max(1).optional(),
   includeResolutionMetadata: z.boolean().optional(),
+  /**
+   * When true, include the per-card `processes` array. Default false —
+   * processes add ~100 tokens per high-fan-in helper and are rarely
+   * decision-relevant.
+   */
+  includeProcesses: z.boolean().optional(),
 }).superRefine((value, ctx) => {
   const provided = Number(value.symbolId !== undefined) + Number(value.symbolRef !== undefined);
   if (provided !== 1) {
@@ -928,6 +934,11 @@ export const SymbolGetCardsRequestSchema = z.object({
   symbolRefs: z.array(SymbolRefSchema).min(1).max(100).optional(),
   minCallConfidence: z.number().min(0).max(1).optional(),
   includeResolutionMetadata: z.boolean().optional(),
+  /**
+   * When true, include the per-card `processes` array on each returned
+   * card. Default false — see SymbolGetCardRequestSchema for rationale.
+   */
+  includeProcesses: z.boolean().optional(),
   knownEtags: z
     .record(z.string(), z.string())
     .refine(obj => Object.keys(obj).length <= 1000, { message: "knownEtags exceeds maximum of 1000 entries" })
@@ -1001,6 +1012,19 @@ export const SliceBuildRequestSchema = z.object({
   memoryLimit: z.number().int().min(0).max(20).optional(),
   /** When true, include retrieval evidence in the slice response. */
   includeRetrievalEvidence: z.boolean().optional(),
+  /**
+   * Controls emission of the compact-wire-format _legend field.
+   * - false: never emit (for callers that already understand the format)
+   * - true: always emit, even after the session's first slice response
+   * - undefined (default): emit once per session, suppressed thereafter
+   */
+  includeLegend: z.boolean().optional(),
+  /**
+   * When true, include the per-card `processes` array on symbol cards in
+   * the slice. Default false — processes add ~100 tokens per high-fan-in
+   * helper and are rarely decision-relevant.
+   */
+  includeProcesses: z.boolean().optional(),
 });
 
 const SliceLeaseSchema = z.object({
@@ -1148,6 +1172,25 @@ export const DeltaGetRequestSchema = z.object({
   fromVersion: z.string().optional().describe("Start version. Defaults to previous version."),
   toVersion: z.string().optional().describe("End version. Defaults to latest version."),
   budget: SliceBudgetSchema.optional(),
+  /**
+   * Fix #1 — fast count-only preview mode. Returns just the changed-symbol
+   * counts and the first N enriched changes, skipping the (expensive)
+   * blast-radius governor loop entirely. Use this to probe the size of a
+   * delta before committing to a full computation.
+   */
+  preview: z.boolean().optional().describe(
+    "If true, skip blast-radius computation and return only changed-symbol " +
+    "counts plus a small sample (previewSampleSize). Much faster for large deltas.",
+  ),
+  previewSampleSize: z.number().int().min(0).max(200).optional().describe(
+    "Number of enriched changes to return when preview=true. Default 20.",
+  ),
+  /**
+   * Skip the blast-radius computation even when not in preview mode. Useful
+   * when the caller only needs changed-symbol details and wants to avoid
+   * the governor loop latency.
+   */
+  skipBlastRadius: z.boolean().optional(),
 });
 
 const AmplifierSummaryItemSchema = z.object({
@@ -1702,18 +1745,62 @@ const RecommendedTestSchema = z.object({
   priority: z.enum(["high", "medium", "low"]),
 });
 
+const EnrichedSymbolBaseSchema = z.object({
+  symbolId: z.string(),
+  name: z.string().optional(),
+  kind: z.string().optional(),
+  file: z.string().optional(),
+});
+
+const EnrichedChangedSymbolSchema = EnrichedSymbolBaseSchema.extend({
+  changeType: z.string().optional(),
+  tiers: z.unknown().optional(),
+});
+
+const EnrichedBlastRadiusItemSchema = EnrichedSymbolBaseSchema.extend({
+  reason: z.string().optional(),
+  distance: z.number().optional(),
+  rank: z.number().optional(),
+  signal: z.unknown().optional(),
+  fanInTrend: z.unknown().optional(),
+});
+
+const PaginatedSectionSchema = <T extends z.ZodTypeAny>(item: T) =>
+  z.object({
+    items: z.array(item),
+    totalCount: z.number().int().min(0),
+    truncated: z.boolean(),
+  });
+
+const ChangedSymbolsSectionSchema = PaginatedSectionSchema(
+  EnrichedChangedSymbolSchema,
+).extend({
+  unfilteredTotal: z.number().int().min(0).optional(),
+  filteredByRiskThreshold: z.boolean().optional(),
+});
+
 const PRRiskAnalysisSchema = z.object({
   repoId: z.string().min(1),
   fromVersion: z.string(),
   toVersion: z.string(),
   riskScore: z.number().int().min(0).max(100),
   riskLevel: z.enum(["low", "medium", "high"]),
-  findings: z.array(FindingSchema),
-  impactedSymbols: z.array(z.string()),
-  evidence: z.array(EvidenceSchema),
-  recommendedTests: z.array(RecommendedTestSchema),
+  changedSymbols: ChangedSymbolsSectionSchema,
+  blastRadius: PaginatedSectionSchema(EnrichedBlastRadiusItemSchema),
+  findings: PaginatedSectionSchema(FindingSchema),
+  evidence: PaginatedSectionSchema(EvidenceSchema),
+  recommendedTests: PaginatedSectionSchema(RecommendedTestSchema),
   changedSymbolsCount: z.number().int().min(0),
   blastRadiusCount: z.number().int().min(0),
+});
+
+const PRRiskSummarySchema = z.object({
+  riskScore: z.number().int().min(0).max(100),
+  riskLevel: z.enum(["low", "medium", "high"]),
+  changedCount: z.number().int().min(0),
+  filteredCount: z.number().int().min(0),
+  blastRadiusCount: z.number().int().min(0),
+  topRiskItem: z.string().optional(),
 });
 
 const PolicyDecisionSummarySchema = z.object({
@@ -1739,9 +1826,11 @@ export const PRRiskAnalysisRequestSchema = z.object({
 });
 
 export const PRRiskAnalysisResponseSchema = z.object({
+  summary: PRRiskSummarySchema,
   analysis: PRRiskAnalysisSchema,
   escalationRequired: z.boolean(),
   policyDecision: PolicyDecisionSummarySchema.optional(),
+  truncationWarning: z.string().optional(),
 });
 
 export type PRRiskAnalysisRequest = z.infer<typeof PRRiskAnalysisRequestSchema>;

@@ -14,6 +14,7 @@
 import type { Connection } from "kuzu";
 import type { RepoId, SymbolId, EdgeType } from "../domain/types.js";
 import type { Graph } from "./buildGraph.js";
+import { computeCentralityStats } from "./score.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 
@@ -240,6 +241,8 @@ async function _loadGraphSnapshot(
             churn_30d: m.churn30d,
             test_refs_json: m.testRefsJson,
             canonical_test_json: m.canonicalTestJson,
+            page_rank: m.pageRank ?? 0,
+            k_core: m.kCore ?? 0,
             updated_at: m.updatedAt,
         } as MetricsRow);
     }
@@ -329,6 +332,11 @@ async function _loadGraphSnapshot(
         if (inList) inList.push(legacyEdge);
     }
 
+    // Pre-compute centralityStats once per snapshot so every subsequent
+    // synchronous beam-search on this Graph sees identical
+    // maxPageRank/maxKCore values (keeps tie-break behavior consistent
+    // across calls until the snapshot is invalidated).
+    const centralityStats = computeCentralityStats(metrics.values());
     const graph: Graph = {
         repoId,
         symbols,
@@ -336,6 +344,7 @@ async function _loadGraphSnapshot(
         adjacencyIn,
         adjacencyOut,
         metrics,
+        centralityStats,
         files,
         clusters,
     };

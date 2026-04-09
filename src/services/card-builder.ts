@@ -53,6 +53,13 @@ function etagMatches(ifNoneMatch: string | undefined, current: string): boolean 
 export interface BuildCardOptions {
   minCallConfidence?: number;
   includeResolutionMetadata?: boolean;
+  /**
+   * When false or undefined at the MCP layer, omit the per-card `processes`
+   * array. Internal callers pass undefined and still get processes (default
+   * true) so tests and benchmarks keep working. Set true/false explicitly at
+   * MCP boundaries.
+   */
+  includeProcesses?: boolean;
 }
 
 function parseJson<T>(raw: string | null): T | undefined {
@@ -81,6 +88,7 @@ async function buildOverlayCardForSymbol(
   ifNoneMatch: string | undefined,
   effectiveMinCallConfidence: number | undefined,
   includeResolutionMetadata: boolean | undefined,
+  includeProcesses: boolean | undefined,
 ) {
   const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
   const overlaySnapshot = getOverlaySnapshot(repoId);
@@ -203,7 +211,7 @@ async function buildOverlayCardForSymbol(
         }
       : undefined,
     processes:
-      processesRows.length > 0
+      includeProcesses !== false && processesRows.length > 0
         ? processesRows.slice(0, SYMBOL_CARD_MAX_PROCESSES).map((row) => ({
             processId: row.processId,
             label: row.label,
@@ -286,6 +294,7 @@ export async function buildCardForSymbol(
     ifNoneMatch,
     effectiveMinCallConfidence,
     options.includeResolutionMetadata,
+    options.includeProcesses,
   );
   if (overlayCard) {
     return overlayCard;
@@ -547,7 +556,9 @@ export async function buildCardForSymbol(
         }
       : undefined,
     processes:
-      processesRows && processesRows.length > 0
+      options.includeProcesses !== false &&
+      processesRows &&
+      processesRows.length > 0
         ? processesRows.slice(0, SYMBOL_CARD_MAX_PROCESSES).map((row) => ({
             processId: row.processId,
             label: row.label,

@@ -15,6 +15,7 @@ const __dirname = dirname(__filename);
 describe("PR Risk Analysis Tool", () => {
   const kuzuDbPath = join(tmpdir(), ".lbug-pr-risk-test-db");
   const repoId = "test-repo";
+  const callerSymId = "sym-caller";
 
   beforeEach(async () => {
     if (existsSync(kuzuDbPath)) {
@@ -75,6 +76,39 @@ describe("PR Risk Analysis Tool", () => {
       invariantsJson: "[]",
       sideEffectsJson: "[]",
       updatedAt: now,
+    });
+
+    await ladybugDb.upsertSymbol(conn, {
+      symbolId: callerSymId,
+      repoId,
+      fileId: "file-1",
+      kind: "function",
+      name: "callerFunc",
+      exported: true,
+      visibility: "public",
+      language: "ts",
+      rangeStartLine: 11,
+      rangeStartCol: 0,
+      rangeEndLine: 20,
+      rangeEndCol: 1,
+      astFingerprint: "fp-caller",
+      signatureJson: '{"params":[],"returnType":"void"}',
+      summary: "Calls the changed function",
+      invariantsJson: "[]",
+      sideEffectsJson: "[]",
+      updatedAt: now,
+    });
+
+    await ladybugDb.insertEdge(conn, {
+      repoId,
+      fromSymbolId: callerSymId,
+      toSymbolId: symId,
+      edgeType: "call",
+      weight: 1,
+      confidence: 1,
+      resolution: "exact",
+      provenance: "static",
+      createdAt: now,
     });
 
     await ladybugDb.createVersion(conn, {
@@ -207,5 +241,31 @@ describe("PR Risk Analysis Tool", () => {
       assert.ok(typeof evidence.type === "string");
       assert.ok(typeof evidence.description === "string");
     });
+  });
+
+  it("surfaces dependency chains in blast-radius evidence and recommended tests", async () => {
+    const response = await handlePRRiskAnalysis({
+      repoId,
+      fromVersion: "v1",
+      toVersion: "v2",
+    });
+
+    const blastRadiusEvidence = response.analysis.evidence.items.find(
+      (item: any) => item.type === "blast-radius",
+    );
+    assert.ok(blastRadiusEvidence);
+
+    const impacted = blastRadiusEvidence.data?.topImpacted;
+    assert.ok(Array.isArray(impacted));
+    const callerItem = impacted.find((item: any) => item.symbolId === callerSymId);
+    assert.deepStrictEqual(callerItem?.explanationPath, [callerSymId, "sym1"]);
+    assert.strictEqual(callerItem?.dependencyChain, `${callerSymId} -> sym1`);
+
+    const regressionTest = response.analysis.recommendedTests.items.find(
+      (item: any) => item.type === "regression-tests",
+    );
+    assert.ok(regressionTest);
+    assert.ok(regressionTest.description.includes(`${callerSymId} -> sym1`));
+    assert.strictEqual(regressionTest.targetSymbols[0], callerSymId);
   });
 });

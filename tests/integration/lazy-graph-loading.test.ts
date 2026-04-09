@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(tmpdir(), ".lbug-lazy-graph-loading-test-db.lbug");
+const TEST_DB_PATH = join(tmpdir(), `.lbug-lazy-graph-loading-test-db-${process.pid}-${Date.now()}.lbug`);
 
 interface LadybugConnection {
   query: (q: string) => Promise<{
@@ -26,8 +26,11 @@ async function createTestDb(): Promise<{
   db: LadybugDatabase;
   conn: LadybugConnection;
 }> {
-  if (existsSync(TEST_DB_PATH)) {
-    rmSync(TEST_DB_PATH, { recursive: true, force: true });
+  for (const suffix of ["", ".wal", ".shm"]) {
+    const f = TEST_DB_PATH + suffix;
+    if (existsSync(f)) {
+      try { rmSync(f, { recursive: true, force: true }); } catch {}
+    }
   }
   mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
 

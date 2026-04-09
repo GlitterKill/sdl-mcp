@@ -110,10 +110,10 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
       versionId: "v1",
     });
 
-    assert.deepStrictEqual(result, { clustersComputed: 0, processesTraced: 0 });
+    assert.deepStrictEqual(result, { clustersComputed: 0, processesTraced: 0, centralityComputed: 0, shadowClustersComputed: 0 });
   });
 
-  it("returns zero counts for a symbol graph with no call edges", async () => {
+  it("returns zero cluster/process counts for a symbol graph with no call edges", async () => {
     await resetDb();
     await seedRepo("repo-single");
     await seedFile("repo-single", "file-1", "src/single.ts");
@@ -131,7 +131,17 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
       versionId: "v1",
     });
 
-    assert.deepStrictEqual(result, { clustersComputed: 0, processesTraced: 0 });
+    // Clusters/processes require call edges, so these stay at 0.
+    // Centrality (PageRank) still assigns a value to an isolated node in
+    // the projected graph, so centralityComputed can be 1 when the algo
+    // extension is available, or 0 when it falls back (no-op).
+    assert.strictEqual(result.clustersComputed, 0);
+    assert.strictEqual(result.processesTraced, 0);
+    assert.strictEqual(result.shadowClustersComputed, 0);
+    assert.ok(
+      result.centralityComputed === 0 || result.centralityComputed === 1,
+      `centralityComputed should be 0 (fallback) or 1 (isolated node), got ${result.centralityComputed}`,
+    );
   });
 
   it("computes clusters and traces processes for a simple call chain", async () => {

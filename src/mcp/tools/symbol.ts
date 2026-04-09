@@ -597,6 +597,7 @@ async function buildCardsForSymbolIds(
     knownEtags?: Record<string, string>;
     minCallConfidence?: number;
     includeResolutionMetadata?: boolean;
+    includeProcesses?: boolean;
   },
 ): Promise<{
   cards: Awaited<ReturnType<typeof buildCardForSymbol>>[];
@@ -626,6 +627,8 @@ async function buildCardsForSymbolIds(
         buildCardForSymbol(input.repoId, id, input.knownEtags?.[id], {
           minCallConfidence: input.minCallConfidence,
           includeResolutionMetadata: input.includeResolutionMetadata,
+          // MCP callers must opt in explicitly; undefined collapses to false
+          includeProcesses: input.includeProcesses === true,
         }),
       ),
     );
@@ -646,8 +649,13 @@ export async function handleSymbolGetCard(
     throw new NotFoundError(`Repository not found: ${request.repoId}`);
   }
 
-  const { repoId, ifNoneMatch, minCallConfidence, includeResolutionMetadata } =
-    request;
+  const {
+    repoId,
+    ifNoneMatch,
+    minCallConfidence,
+    includeResolutionMetadata,
+    includeProcesses,
+  } = request;
   const symbolId = await resolveRequestedSymbolId(conn, request);
 
   recordToolTrace({
@@ -661,6 +669,8 @@ export async function handleSymbolGetCard(
   const result = await buildCardForSymbol(repoId, symbolId, ifNoneMatch, {
     minCallConfidence,
     includeResolutionMetadata,
+    // MCP callers must opt in explicitly; undefined collapses to false
+    includeProcesses: includeProcesses === true,
   });
   if ("notModified" in result) {
     return result;

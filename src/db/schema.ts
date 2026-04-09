@@ -132,6 +132,10 @@ export interface MetricsRow {
   churn_30d: number;
   test_refs_json: string | null;
   canonical_test_json: string | null;
+  /** PageRank centrality score, 0.0 when unavailable. */
+  page_rank?: number;
+  /** K-core decomposition value, 0 when unavailable. */
+  k_core?: number;
   updated_at: string;
 }
 

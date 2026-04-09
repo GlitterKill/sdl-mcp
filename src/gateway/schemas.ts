@@ -561,6 +561,7 @@ export const REPO_ACTIONS = [
   "repo.status",
   "repo.overview",
   "index.refresh",
+  "scip.ingest",
   "policy.get",
   "policy.set",
   "usage.stats",

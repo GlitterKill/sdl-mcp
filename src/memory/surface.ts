@@ -7,12 +7,48 @@ import type { Connection } from "kuzu";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import type { SurfacedMemory, MemoryType } from "../domain/types.js";
 import { safeJsonParse, StringArraySchema } from "../util/safeJson.js";
+import {
+  computeCentralitySignal,
+  computeCentralityStats,
+} from "../graph/score.js";
 
 export interface SurfaceMemoriesOptions {
   repoId: string;
   symbolIds?: string[];
   limit?: number;
   taskType?: MemoryType;
+  /**
+   * Optional per-symbol centrality signals in [0, 1]. When present,
+   * memories linked to high-centrality symbols receive a small bounded
+   * boost. Absent centrality data reproduces the pre-Task-4 ranking.
+   */
+  centralitySignals?: Map<string, number>;
+}
+
+export async function loadCentralitySignals(
+  conn: Connection,
+  symbolIds: string[],
+): Promise<Map<string, number>> {
+  const signals = new Map<string, number>();
+  if (symbolIds.length === 0) return signals;
+
+  const metricsById = await ladybugDb.getMetricsBySymbolIds(conn, symbolIds);
+  const stats = computeCentralityStats(metricsById.values());
+
+  for (const symbolId of symbolIds) {
+    const metrics = metricsById.get(symbolId);
+    if (!metrics) continue;
+    const signal = computeCentralitySignal(
+      metrics.pageRank ?? 0,
+      metrics.kCore ?? 0,
+      stats,
+    );
+    if (signal > 0) {
+      signals.set(symbolId, signal);
+    }
+  }
+
+  return signals;
 }
 
 /**
@@ -26,6 +62,10 @@ export async function surfaceRelevantMemories(
 ): Promise<SurfacedMemory[]> {
   const { repoId, symbolIds, limit = 5, taskType } = options;
   const querySymbolIds = symbolIds ?? [];
+  const centralitySignals = options.centralitySignals ??
+    (querySymbolIds.length > 0
+      ? await loadCentralitySignals(conn, querySymbolIds)
+      : undefined);
 
   // Collect memories from symbol edges and repo-level
   const symbolMemoryRows =
@@ -79,9 +119,30 @@ export async function surfaceRelevantMemories(
     const overlap =
       queryCount > 0 ? entry.linkedSymbolIds.size / queryCount : 1.0;
 
+    // Bounded centrality boost (Task 4): mildly upweights memories
+    // linked to high-centrality symbols. The multiplier is kept in
+    // [1.0, 1.1] so central-but-unrelated memories cannot outrank
+    // high-confidence recent ones.
+    let centralityBoost = 1.0;
+    if (centralitySignals && entry.linkedSymbolIds.size > 0) {
+      let sum = 0;
+      let count = 0;
+      for (const sid of entry.linkedSymbolIds) {
+        const c = centralitySignals.get(sid);
+        if (typeof c === "number" && Number.isFinite(c) && c > 0) {
+          sum += Math.min(c, 1);
+          count++;
+        }
+      }
+      if (count > 0) {
+        const avg = sum / count;
+        centralityBoost = 1 + 0.1 * avg;
+      }
+    }
+
     return {
       ...entry,
-      score: entry.row.confidence * recency * overlap,
+      score: entry.row.confidence * recency * overlap * centralityBoost,
     };
   });
 

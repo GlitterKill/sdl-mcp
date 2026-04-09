@@ -14,9 +14,20 @@ import * as m007 from "./m007-copy-embeddings-to-symbol.js";
 import * as m008 from "./m008-add-entity-searchtext.js";
 import * as m009 from "./m009-add-symbol-summary-metadata.js";
 import * as m010 from "./m010-add-jina-code-embedding.js";
+import * as m011 from "./m011-add-centrality-and-shadow-clusters.js";
+import * as m012 from "./m012-add-symbol-repo-id-for-algo-projections.js";
 
 /** Ordered list of all migrations. Must be sorted by version ascending. */
-export const migrations: Migration[] = [m005, m006, m007, m008, m009, m010];
+export const migrations: Migration[] = [
+  m005,
+  m006,
+  m007,
+  m008,
+  m009,
+  m010,
+  m011,
+  m012,
+];
 
 // --- Registry validation (runs at import time) ---
 function validateMigrations(migs: Migration[]): void {

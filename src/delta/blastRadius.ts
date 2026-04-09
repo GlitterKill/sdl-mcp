@@ -12,6 +12,7 @@ import {
 } from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 import { DatabaseError } from "../domain/errors.js";
+import { shortestPath } from "../db/ladybug-algorithms.js";
 import type {
   BlastRadiusItem,
   DiagnosticSuspect,
@@ -65,6 +66,103 @@ function assertSafeInt(value: number, name: string): void {
   }
 }
 
+/**
+ * Task 5: internal cap on how many top-ranked blast-radius items
+ * receive minimal dependency-chain explanations. Kept small so
+ * shortest-path lookups cannot dominate delta.get / pr.risk.analyze
+ * latency on large impact sets.
+ */
+export const BLAST_RADIUS_PATH_TOP_N = 10;
+
+/**
+ * Task 5 internal helper: select the minimal dependency chain from
+ * a target impacted symbol back to any changed/entry symbol.
+ *
+ * Blast radius is built by reverse-edge traversal, so the explanatory
+ * dependency chain is naturally `impacted -> ... -> changed`, not the
+ * other way around. Picks the SHORTEST path across all sources and respects the
+ * provided hop cap. Returns null when no path is found within the
+ * hop budget — callers must treat absence as a soft signal, never
+ * as a failure.
+ *
+ * Protected: all errors from the adapter are caught so that the
+ * main blast-radius computation cannot be impacted by path-lookup
+ * failures (see Task 5 acceptance criteria).
+ */
+export async function selectMinimalPathExplanation(
+  conn: Connection,
+  repoId: RepoId,
+  sources: SymbolId[],
+  target: SymbolId,
+  maxHops: number,
+): Promise<SymbolId[] | null> {
+  if (sources.length === 0) return null;
+  if (sources.includes(target)) return [target];
+  let best: SymbolId[] | null = null;
+  for (const source of sources) {
+    try {
+      const path = await shortestPath(conn, repoId, target, source, maxHops);
+      if (!path || path.length === 0) continue;
+      if (path.length > maxHops + 1) continue;
+      if (!best || path.length < best.length) {
+        best = path as SymbolId[];
+      }
+    } catch (err) {
+      logger.debug("blastRadius: path explanation lookup failed", {
+        source,
+        target,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+  }
+  return best;
+}
+
+/**
+ * Task 5 internal helper: attach minimal dependency-chain
+ * explanations to the top-ranked blast-radius items plus all
+ * "must"-priority items. Bounded by BLAST_RADIUS_PATH_TOP_N to
+ * keep latency stable on large impact sets.
+ *
+ * Mutates the passed items in place for token efficiency. Errors
+ * are swallowed — explanation attachment is strictly additive.
+ */
+export async function attachPathExplanations(
+  conn: Connection,
+  repoId: RepoId,
+  changedSymbols: SymbolId[],
+  items: BlastRadiusItem[],
+  maxHops: number,
+): Promise<void> {
+  try {
+    const mustPriority = items.filter((i) => i.signal === "directDependent");
+    const topN = items.slice(0, BLAST_RADIUS_PATH_TOP_N);
+    const seen = new Set<string>();
+    const targets: BlastRadiusItem[] = [];
+    for (const item of [...mustPriority, ...topN]) {
+      if (seen.has(item.symbolId)) continue;
+      seen.add(item.symbolId);
+      targets.push(item);
+    }
+    for (const item of targets) {
+      const path = await selectMinimalPathExplanation(
+        conn,
+        repoId,
+        changedSymbols,
+        item.symbolId,
+        maxHops,
+      );
+      if (path && path.length > 0) {
+        item.explanationPath = path;
+      }
+    }
+  } catch (err) {
+    logger.debug("blastRadius: attachPathExplanations bailed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 export async function computeBlastRadius(
   conn: Connection,
   changedSymbols: SymbolId[],
@@ -280,6 +378,19 @@ export async function computeBlastRadius(
       }
       return b.rank - a.rank;
     });
+  }
+
+  // Task 5: attach minimal dependency-chain explanations to the
+  // top-ranked items. Strictly additive; errors are swallowed by
+  // attachPathExplanations so this cannot regress the main flow.
+  if (repoId) {
+    await attachPathExplanations(
+      conn,
+      repoId,
+      changedSymbols,
+      ranked,
+      Math.max(2, Math.min(maxHops, 6)),
+    );
   }
 
   return ranked;

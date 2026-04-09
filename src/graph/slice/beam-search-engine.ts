@@ -32,8 +32,11 @@ import { tokenize } from "../../util/tokenize.js";
 import type { Graph } from "../buildGraph.js";
 import { MinHeap } from "../minHeap.js";
 import {
+  applyCentralityTiebreak,
   calculateClusterCohesion,
-  scoreSymbolWithMetrics,
+  computeCentralityStats,
+  scoreSymbolWithCentralityContext,
+  type CentralityStats,
   SliceContext,
 } from "../score.js";
 import type { ResolvedStartNode } from "./start-node-resolver.js";
@@ -91,8 +94,26 @@ function toLegacyMetricsRow(metrics: ladybugDb.MetricsRow): MetricsRow {
     churn_30d: metrics.churn30d,
     test_refs_json: metrics.testRefsJson,
     canonical_test_json: metrics.canonicalTestJson,
+    page_rank: metrics.pageRank ?? 0,
+    k_core: metrics.kCore ?? 0,
     updated_at: metrics.updatedAt,
   };
+}
+
+async function loadRepoCentralityStats(
+  conn: Connection,
+  repoId: RepoId,
+): Promise<CentralityStats> {
+  try {
+    const metricsById = await ladybugDb.getMetricsByRepo(conn, repoId);
+    return computeCentralityStats(metricsById.values());
+  } catch (err) {
+    logger.debug("Failed to load repo centrality stats for beam search", {
+      repoId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { maxPageRank: 0, maxKCore: 0 };
+  }
 }
 
 function normalizeEdgeType(value: string): EdgeType | null {
@@ -615,6 +636,14 @@ export function beamSearch(
   seedFrontierFromGraph(state, startNodes, graph);
 
   const context = buildSliceContext(request);
+  // Prefer the snapshot-cached centralityStats so repeated beam-search
+  // calls on the same Graph see identical tie-break values. Fall back to
+  // recomputing from metrics.values() for any legacy Graph that omits it.
+  const centralityStats =
+    graph.centralityStats ??
+    (graph.metrics
+      ? computeCentralityStats(graph.metrics.values())
+      : { maxPageRank: 0, maxKCore: 0 });
 
   const entryClusterIds = new Set<string>(
     request.clusterContext?.entryClusterIds ?? [],
@@ -716,13 +745,19 @@ export function beamSearch(
         });
       }
 
-      const rawScore = scoreSymbolWithMetrics(
-        neighborSymbol,
-        context,
-        metrics,
-        file,
+      const { primaryScore, centralitySignal } =
+        scoreSymbolWithCentralityContext(
+          neighborSymbol,
+          context,
+          metrics,
+          file,
+          centralityStats,
+        );
+      const finalScore = applyCentralityTiebreak(
+        primaryScore * edgeWeight + clusterBoost,
+        centralitySignal,
       );
-      const neighborScore = -(rawScore * edgeWeight + clusterBoost);
+      const neighborScore = -finalScore;
 
       if (-neighborScore < SLICE_SCORE_THRESHOLD) {
         state.droppedCandidates++;
@@ -798,6 +833,7 @@ export async function beamSearchLadybug(
   const clusterCohesionEnabled =
     entryClusterIds.size > 0 || relatedClusterIds.size > 0;
   const clusterCache = new Map<SymbolId, string | null>();
+  const centralityStats = await loadRepoCentralityStats(conn, repoId);
 
   // ---------------------------------------------------------------------------
   // Batch prefetch: peek at the top N frontier items and warm all caches in
@@ -1130,12 +1166,14 @@ export async function beamSearchLadybug(
 
         const metrics = metricsCache.get(neighborId) ?? null;
         const file = fileCache.get(neighborSymbol.fileId);
-        const baseScore = scoreSymbolWithMetrics(
-          toLegacySymbolRow(neighborSymbol),
-          ctx,
-          metrics ? toLegacyMetricsRow(metrics) : null,
-          file ? toLegacyFileRow(file) : undefined,
-        );
+        const { primaryScore, centralitySignal } =
+          scoreSymbolWithCentralityContext(
+            toLegacySymbolRow(neighborSymbol),
+            ctx,
+            metrics ? toLegacyMetricsRow(metrics) : null,
+            file ? toLegacyFileRow(file) : undefined,
+            centralityStats,
+          );
         const cohesionBoost = clusterCohesionEnabled
           ? calculateClusterCohesion({
               symbolClusterId: clusterCache.get(neighborId),
@@ -1143,7 +1181,11 @@ export async function beamSearchLadybug(
               relatedClusterIds,
             })
           : 0;
-        const neighborScore = -(baseScore * edgeWeight + cohesionBoost);
+        const finalScore = applyCentralityTiebreak(
+          primaryScore * edgeWeight + cohesionBoost,
+          centralitySignal,
+        );
+        const neighborScore = -finalScore;
 
         if (-neighborScore < SLICE_SCORE_THRESHOLD) {
           st.droppedCandidates++;
@@ -1352,17 +1394,23 @@ class ParallelScorerPool {
     context: SliceContext,
     metricsMap: Map<string, MetricsRow | null>,
     filesMap: Map<number, FileRow | undefined>,
+    centralityStats: CentralityStats,
     scoreThreshold: number,
   ): Map<string, { score: number; passed: boolean }> {
     const result = new Map<string, { score: number; passed: boolean }>();
     for (const c of candidates) {
-      const baseScore = scoreSymbolWithMetrics(
-        c.neighborSymbol,
-        context,
-        metricsMap.get(c.symbolId) ?? null,
-        filesMap.get(c.neighborSymbol.file_id),
+      const { primaryScore, centralitySignal } =
+        scoreSymbolWithCentralityContext(
+          c.neighborSymbol,
+          context,
+          metricsMap.get(c.symbolId) ?? null,
+          filesMap.get(c.neighborSymbol.file_id),
+          centralityStats,
+        );
+      const finalScore = applyCentralityTiebreak(
+        primaryScore * c.edgeWeight,
+        centralitySignal,
       );
-      const finalScore = baseScore * c.edgeWeight;
       result.set(c.symbolId, {
         score: finalScore,
         passed: finalScore >= scoreThreshold,
@@ -1376,6 +1424,7 @@ class ParallelScorerPool {
     context: SliceContext,
     metricsMap: Map<string, import("../../db/schema.js").MetricsRow | null>,
     filesMap: Map<number, import("../../db/schema.js").FileRow | undefined>,
+    centralityStats: CentralityStats,
     scoreThreshold: number,
   ): Promise<Map<string, { score: number; passed: boolean }>> {
     if (
@@ -1388,6 +1437,7 @@ class ParallelScorerPool {
         context,
         metricsMap,
         filesMap,
+        centralityStats,
         scoreThreshold,
       );
     }
@@ -1399,6 +1449,7 @@ class ParallelScorerPool {
         context,
         metricsMap,
         filesMap,
+        centralityStats,
         scoreThreshold,
       );
     }
@@ -1415,6 +1466,7 @@ class ParallelScorerPool {
       },
       metricsMap: Object.fromEntries(metricsMap),
       filesMap: Object.fromEntries(filesMap),
+      centralityStats,
       scoreThreshold,
     };
 
@@ -1432,6 +1484,7 @@ class ParallelScorerPool {
             context,
             metricsMap,
             filesMap,
+            centralityStats,
             scoreThreshold,
           ),
         );
@@ -1454,6 +1507,7 @@ class ParallelScorerPool {
               context,
               metricsMap,
               filesMap,
+              centralityStats,
               scoreThreshold,
             ),
           );
@@ -1529,6 +1583,11 @@ export async function beamSearchAsync(
   seedFrontierFromGraph(state, startNodes, graph);
 
   const context = buildSliceContext(request);
+  const centralityStats =
+    graph.centralityStats ??
+    (graph.metrics
+      ? computeCentralityStats(graph.metrics.values())
+      : { maxPageRank: 0, maxKCore: 0 });
 
   const strategy: BeamSearchStrategy = {
     async estimateCardTokens(symbolId, _st) {
@@ -1592,6 +1651,7 @@ export async function beamSearchAsync(
         ctx,
         metricsMap,
         filesMap,
+        centralityStats,
         SLICE_SCORE_THRESHOLD,
       );
 

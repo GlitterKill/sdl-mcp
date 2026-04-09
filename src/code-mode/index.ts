@@ -52,20 +52,39 @@ export function registerActionSearchTool(
     ActionSearchRequestSchema,
     async (rawArgs: unknown) => {
       const args = ActionSearchRequestSchema.parse(rawArgs);
+      // Auto-enable schemas + examples when the caller is obviously homing in
+      // on a single action (limit=1 or an exact dotted-name query). Without
+      // this, the default payload omits enum values so callers frequently
+      // guess param shapes wrong.
+      const trimmed = args.query.trim();
+      const looksLikeExactName =
+        /^[a-zA-Z][\w.]*$/.test(trimmed) && trimmed.includes('.');
+      const narrowLookup = args.limit === 1 || looksLikeExactName;
+      const effectiveIncludeSchemas = args.includeSchemas || narrowLookup;
+      const effectiveIncludeExamples = args.includeExamples || narrowLookup;
       const catalog = buildCatalog({
         liveIndex: services.liveIndex,
-        includeSchemas: args.includeSchemas,
-        includeExamples: args.includeExamples,
+        includeSchemas: effectiveIncludeSchemas,
+        includeExamples: effectiveIncludeExamples,
       });
 
       const allRanked = rankCatalog(catalog, args.query);
       const offset = args.offset ?? 0;
       const ranked = allRanked.slice(offset, offset + args.limit);
+      const autoEnabled =
+        narrowLookup && (!args.includeSchemas || !args.includeExamples)
+          ? {
+              includeSchemas: !args.includeSchemas,
+              includeExamples: !args.includeExamples,
+              reason: args.limit === 1 ? 'limit=1' : 'exact-name-query',
+            }
+          : undefined;
       return {
         actions: ranked,
         total: allRanked.length,
         hasMore: allRanked.length > offset + args.limit,
         tokenEstimate: estimateTokens(JSON.stringify(ranked)),
+        ...(autoEnabled ? { autoEnabled } : {}),
       };
     },
     {

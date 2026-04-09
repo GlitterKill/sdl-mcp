@@ -50,6 +50,7 @@ const NODE_TABLES: string[] = [
 
   `CREATE NODE TABLE IF NOT EXISTS Symbol (
     symbolId STRING PRIMARY KEY,
+    repoId STRING,
     kind STRING,
     name STRING,
     exported BOOLEAN,
@@ -111,7 +112,20 @@ const NODE_TABLES: string[] = [
     churn30d INT64 DEFAULT 0,
     testRefsJson STRING,
     canonicalTestJson STRING,
+    pageRank DOUBLE DEFAULT 0.0,
+    kCore INT64 DEFAULT 0,
     updatedAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS ShadowCluster (
+    shadowClusterId STRING PRIMARY KEY,
+    repoId STRING,
+    algorithm STRING,
+    label STRING,
+    symbolCount INT64 DEFAULT 0,
+    modularity DOUBLE DEFAULT 0.0,
+    versionId STRING,
+    createdAt STRING
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS Cluster (
@@ -346,6 +360,15 @@ const REL_TABLES: string[] = [
     membershipScore DOUBLE DEFAULT 0.0
   )`,
 
+  `CREATE REL TABLE IF NOT EXISTS BELONGS_TO_SHADOW_CLUSTER (
+    FROM Symbol TO ShadowCluster,
+    membershipScore DOUBLE DEFAULT 1.0
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS SHADOW_CLUSTER_IN_REPO (
+    FROM ShadowCluster TO Repo
+  )`,
+
   `CREATE REL TABLE IF NOT EXISTS PARTICIPATES_IN (
     FROM Symbol TO Process,
     stepOrder INT32 DEFAULT 0,
@@ -389,9 +412,11 @@ async function execDdl(conn: Connection, ddl: string): Promise<void> {
 const INDEXES: string[] = [
   // Secondary indexes for common query patterns
   `CREATE INDEX IF NOT EXISTS idx_symbol_name ON Symbol(name)`,
+  `CREATE INDEX IF NOT EXISTS idx_symbol_repoId ON Symbol(repoId)`,
   `CREATE INDEX IF NOT EXISTS idx_file_relPath ON File(relPath)`,
   `CREATE INDEX IF NOT EXISTS idx_file_directory ON File(directory)`,
   `CREATE INDEX IF NOT EXISTS idx_cluster_repoId ON Cluster(repoId)`,
+  `CREATE INDEX IF NOT EXISTS idx_shadowcluster_repoId ON ShadowCluster(repoId)`,
   `CREATE INDEX IF NOT EXISTS idx_process_repoId ON Process(repoId)`,
   `CREATE INDEX IF NOT EXISTS idx_symbol_reference_fileId ON SymbolReference(fileId)`,
   `CREATE INDEX IF NOT EXISTS idx_symbol_reference_symbolName ON SymbolReference(symbolName)`,

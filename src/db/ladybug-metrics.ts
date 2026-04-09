@@ -29,6 +29,8 @@ export async function upsertMetrics(
          m.churn30d = $churn30d,
          m.testRefsJson = $testRefsJson,
          m.canonicalTestJson = $canonicalTestJson,
+         m.pageRank = $pageRank,
+         m.kCore = $kCore,
          m.updatedAt = $updatedAt`,
     {
       symbolId: metrics.symbolId,
@@ -37,6 +39,8 @@ export async function upsertMetrics(
       churn30d: metrics.churn30d,
       testRefsJson: metrics.testRefsJson,
       canonicalTestJson: metrics.canonicalTestJson,
+      pageRank: metrics.pageRank ?? 0,
+      kCore: metrics.kCore ?? 0,
       updatedAt: metrics.updatedAt,
     },
   );
@@ -62,6 +66,8 @@ export async function upsertMetricsBatch(
              m.churn30d = $churn30d,
              m.testRefsJson = $testRefsJson,
              m.canonicalTestJson = $canonicalTestJson,
+             m.pageRank = $pageRank,
+             m.kCore = $kCore,
              m.updatedAt = $updatedAt`,
         {
           symbolId: metrics.symbolId,
@@ -70,7 +76,44 @@ export async function upsertMetricsBatch(
           churn30d: metrics.churn30d,
           testRefsJson: metrics.testRefsJson,
           canonicalTestJson: metrics.canonicalTestJson,
+          pageRank: metrics.pageRank ?? 0,
+          kCore: metrics.kCore ?? 0,
           updatedAt: metrics.updatedAt,
+        },
+      );
+    }
+  });
+}
+
+/**
+ * Batch-upsert centrality metrics only (pageRank + kCore). Used by the
+ * algorithm stage of the cluster orchestrator to update only the new
+ * centrality fields without touching fanIn/fanOut/churn/test refs.
+ * Idempotent via MERGE.
+ */
+export async function upsertCentralityBatch(
+  conn: Connection,
+  rows: Array<{
+    symbolId: string;
+    pageRank: number;
+    kCore: number;
+    updatedAt: string;
+  }>,
+): Promise<void> {
+  if (rows.length === 0) return;
+  await withTransaction(conn, async (txConn) => {
+    for (const row of rows) {
+      await exec(
+        txConn,
+        `MERGE (m:Metrics {symbolId: $symbolId})
+         SET m.pageRank = $pageRank,
+             m.kCore = $kCore,
+             m.updatedAt = $updatedAt`,
+        {
+          symbolId: row.symbolId,
+          pageRank: row.pageRank,
+          kCore: row.kCore,
+          updatedAt: row.updatedAt,
         },
       );
     }
@@ -116,6 +159,8 @@ export async function getMetrics(
     churn30d: unknown;
     testRefsJson: string | null;
     canonicalTestJson: string | null;
+    pageRank: unknown;
+    kCore: unknown;
     updatedAt: string;
   }>(
     conn,
@@ -126,6 +171,8 @@ export async function getMetrics(
             m.churn30d AS churn30d,
             m.testRefsJson AS testRefsJson,
             m.canonicalTestJson AS canonicalTestJson,
+            coalesce(m.pageRank, 0.0) AS pageRank,
+            coalesce(m.kCore, 0) AS kCore,
             m.updatedAt AS updatedAt`,
     { symbolId },
   );
@@ -139,6 +186,8 @@ export async function getMetrics(
     churn30d: toNumber(row.churn30d),
     testRefsJson: row.testRefsJson,
     canonicalTestJson: row.canonicalTestJson,
+    pageRank: toNumber(row.pageRank),
+    kCore: toNumber(row.kCore),
     updatedAt: row.updatedAt,
   };
 }
@@ -156,6 +205,8 @@ export async function getMetricsBySymbolIds(
     churn30d: unknown;
     testRefsJson: string | null;
     canonicalTestJson: string | null;
+    pageRank: unknown;
+    kCore: unknown;
     updatedAt: string;
   }>(
     conn,
@@ -167,6 +218,8 @@ export async function getMetricsBySymbolIds(
             m.churn30d AS churn30d,
             m.testRefsJson AS testRefsJson,
             m.canonicalTestJson AS canonicalTestJson,
+            coalesce(m.pageRank, 0.0) AS pageRank,
+            coalesce(m.kCore, 0) AS kCore,
             m.updatedAt AS updatedAt`,
     { symbolIds },
   );
@@ -180,6 +233,8 @@ export async function getMetricsBySymbolIds(
       churn30d: toNumber(row.churn30d),
       testRefsJson: row.testRefsJson,
       canonicalTestJson: row.canonicalTestJson,
+      pageRank: toNumber(row.pageRank),
+      kCore: toNumber(row.kCore),
       updatedAt: row.updatedAt,
     });
   }
@@ -232,6 +287,8 @@ export async function getMetricsByRepo(
     churn30d: unknown;
     testRefsJson: string | null;
     canonicalTestJson: string | null;
+    pageRank: unknown;
+    kCore: unknown;
     updatedAt: string;
   }>(
     conn,
@@ -243,6 +300,8 @@ export async function getMetricsByRepo(
             m.churn30d AS churn30d,
             m.testRefsJson AS testRefsJson,
             m.canonicalTestJson AS canonicalTestJson,
+            coalesce(m.pageRank, 0.0) AS pageRank,
+            coalesce(m.kCore, 0) AS kCore,
             m.updatedAt AS updatedAt`,
     { repoId },
   );
@@ -256,6 +315,8 @@ export async function getMetricsByRepo(
       churn30d: toNumber(row.churn30d),
       testRefsJson: row.testRefsJson,
       canonicalTestJson: row.canonicalTestJson,
+      pageRank: toNumber(row.pageRank),
+      kCore: toNumber(row.kCore),
       updatedAt: row.updatedAt,
     });
   }

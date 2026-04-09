@@ -338,6 +338,14 @@ export interface BlastRadiusItem {
     growthRate: number; // (current - previous) / max(previous, 1)
     isAmplifier: boolean; // growthRate > FAN_IN_AMPLIFIER_THRESHOLD
   };
+  /**
+   * Internal (Task 5, v1): minimal dependency chain from a changed/
+   * entry symbol to this impacted symbol. Populated for the top
+   * BLAST_RADIUS_PATH_TOP_N items only. Not yet exposed in public MCP
+   * response shapes — consumers inside the server may read it for
+   * evidence, prioritization, and PR-risk explanations.
+   */
+  explanationPath?: SymbolId[];
 }
 
 export interface DiagnosticsSummary {

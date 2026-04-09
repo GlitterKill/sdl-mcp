@@ -77,7 +77,10 @@ import {
   serializeSliceForWireFormat,
   normalizeVisibility,
 } from "./slice-wire-format.js";
-import { surfaceRelevantMemories } from "../../memory/surface.js";
+import {
+  loadCentralitySignals,
+  surfaceRelevantMemories,
+} from "../../memory/surface.js";
 import type { SurfacedMemory } from "../../domain/types.js";
 
 export {
@@ -430,6 +433,24 @@ async function handleSliceBuildInternal(
       sliceHash,
     );
 
+    // Fix #4: if the slice was truncated (by tokens, cards, or anything
+    // else), surface the frontier as a reachable spillover payload so
+    // sdl.slice.spillover.get can return the symbols that almost made it.
+    // Without this, token-truncated slices produced only a `res` cursor
+    // and slice.spillover.get was effectively unreachable from the most
+    // common truncation path.
+    const sliceWasTruncated = slice.truncation?.truncated === true;
+    let spilloverPayload: string | null = null;
+    if (sliceWasTruncated && slice.frontier && slice.frontier.length > 0) {
+      spilloverPayload = JSON.stringify(
+        slice.frontier.map((item) => ({
+          symbolId: item.symbolId,
+          reason: `frontier (score=${item.score.toFixed(3)}, why=${item.why})`,
+          priority: "should" as const,
+        })),
+      );
+    }
+
     const handleRow: ladybugDb.SliceHandleRow = {
       handle,
       repoId,
@@ -438,7 +459,7 @@ async function handleSliceBuildInternal(
       minVersion: lease.minVersion,
       maxVersion: lease.maxVersion,
       sliceHash: sliceHash,
-      spilloverRef: null,
+      spilloverRef: spilloverPayload,
     };
 
     await withWriteConn(async (wConn) => {
@@ -453,10 +474,15 @@ async function handleSliceBuildInternal(
     if (shouldIncludeMemories) {
       try {
         const sliceSymbolIds = slice.cards.map((c) => c.symbolId);
+        const centralitySignals = await loadCentralitySignals(
+          conn,
+          sliceSymbolIds,
+        );
         const memories = await surfaceRelevantMemories(conn, {
           repoId,
           symbolIds: sliceSymbolIds,
           limit: memoryLimit ?? memCaps.defaultSurfaceLimit,
+          centralitySignals,
         });
         if (memories.length > 0) {
           slice.memories = memories;
@@ -549,10 +575,18 @@ async function handleSliceBuildInternal(
       ledgerVersion: latestVersion.versionId,
       lease,
       sliceEtag,
+      // Expose the spilloverHandle at the top level when the slice was
+      // truncated, so callers can reach slice.spillover.get without having
+      // to parse the compact wire format. The value aliases sliceHandle
+      // because slice.spillover.get looks up by slice handle.
+      ...(sliceWasTruncated && spilloverPayload
+        ? { spilloverHandle: handle }
+        : {}),
       slice: serializeSliceForWireFormat(
         slice,
         requestedWireFormat,
         effectiveWireFormatVersion,
+        { includeLegend: request.includeLegend },
       ),
       ...(evidenceItems ? { retrievalEvidence: evidenceItems } : {}),
       ...(includeRetrievalEvidence ? { symptomType: classifySymptomType({

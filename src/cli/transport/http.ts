@@ -39,7 +39,10 @@ import type { Connection } from "kuzu";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const UI_DIR_CANDIDATE = join(__dirname, "..", "..", "ui");
-const UI_DIR = existsSync(UI_DIR_CANDIDATE)
+// Ensure graph.html actually exists in the candidate — the compiled dist/ui
+// folder may contain only .js/.d.ts output from src/ui/graph.ts without the
+// html/css assets, in which case we must fall back to src/ui.
+const UI_DIR = existsSync(join(UI_DIR_CANDIDATE, "graph.html"))
   ? UI_DIR_CANDIDATE
   : join(__dirname, "..", "..", "..", "src", "ui");
 

@@ -91,12 +91,84 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       (change) => change.symbolId,
     );
 
+    // Fix #1: emit the large-delta warning BEFORE running the governor
+    // loop so callers with a huge auto-resolved range can bail out cheaply
+    // (the governor + blast-radius step is the dominant latency cost).
+    const totalChangesEarly = delta.changedSymbols.length;
+    const preValidated = validated as unknown as {
+      preview?: boolean;
+      previewSampleSize?: number;
+      skipBlastRadius?: boolean;
+    };
+    const autoSkipBlastRadius =
+      !validated.fromVersion && totalChangesEarly > 500;
+    const shouldSkipBlastRadius =
+      preValidated.preview === true ||
+      preValidated.skipBlastRadius === true ||
+      autoSkipBlastRadius;
+
+    if (preValidated.preview === true) {
+      const sampleSize = Math.min(
+        preValidated.previewSampleSize ?? 20,
+        totalChangesEarly,
+      );
+      const sampleIds = changedSymbolIds.slice(0, sampleSize);
+      const previewConn = await getLadybugConn();
+      const symbolMap = await ladybugDb.getSymbolsByIds(
+        previewConn,
+        sampleIds,
+      );
+      const fileIds = [
+        ...new Set(Array.from(symbolMap.values()).map((s) => s.fileId)),
+      ];
+      const fileMap = await ladybugDb.getFilesByIds(previewConn, fileIds);
+      const sample = delta.changedSymbols.slice(0, sampleSize).map((c) => {
+        const sym = symbolMap.get(c.symbolId);
+        const file = sym ? fileMap.get(sym.fileId) : undefined;
+        return {
+          ...c,
+          name: sym?.name,
+          kind: sym?.kind,
+          file: file?.relPath,
+        };
+      });
+      // Shape the preview response so withSpan's
+      // span.setAttributes(result.delta.changedSymbols.length, ...)
+      // still type-checks. We inject a synthetic `delta` envelope with
+      // an empty blastRadius and the sampled changes.
+      const previewDelta = {
+        ...delta,
+        changedSymbols: sample,
+        blastRadius: [],
+      };
+      (previewDelta as unknown as Record<string, unknown>).mode = "preview";
+      (previewDelta as unknown as Record<string, unknown>).totalChanges =
+        totalChangesEarly;
+      (previewDelta as unknown as Record<string, unknown>).sampleSize =
+        sampleSize;
+      if (totalChangesEarly > 500) {
+        (previewDelta as unknown as Record<string, unknown>).largeDeltaWarning =
+          `This delta spans ${totalChangesEarly} changes. Use fromVersion/toVersion to narrow, or call without preview=true to compute blast radius.`;
+      }
+      return {
+        delta: previewDelta,
+        amplifiers: [] as Array<{
+          symbolId: string;
+          growthRate: number;
+          previous: number;
+          current: number;
+        }>,
+      };
+    }
+
     // Consume prefetched blast-radius keys
     for (const symbolId of changedSymbolIds) {
       consumePrefetchedKey(validated.repoId, `blast:${symbolId}`);
     }
 
-    prefetchDeltaBlastRadius(validated.repoId, changedSymbolIds);
+    if (!shouldSkipBlastRadius) {
+      prefetchDeltaBlastRadius(validated.repoId, changedSymbolIds);
+    }
 
     const config = loadConfig();
     const rawBudget = validated.budget ?? {
@@ -121,16 +193,24 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     };
 
     const conn = await getLadybugConn();
-    const governorResult = await runGovernorLoop(
-      conn,
-      changedSymbolIds,
-      governorOptions,
-    );
+    // Fix #1: skip the governor loop (which drives the 111s latency on
+    // large deltas) when preview/skipBlastRadius/auto-skip is active.
+    let governorResult: Awaited<ReturnType<typeof runGovernorLoop>> | null = null;
+    if (!shouldSkipBlastRadius) {
+      governorResult = await runGovernorLoop(
+        conn,
+        changedSymbolIds,
+        governorOptions,
+      );
+      delta.blastRadius = governorResult.blastRadius;
+      delta.trimmedSet = governorResult.trimmedSet;
+    } else {
+      // Keep the shape deterministic even when skipped so downstream
+      // truncation + enrichment blocks don't branch on null.
+      delta.blastRadius = [];
+    }
 
-    delta.blastRadius = governorResult.blastRadius;
-    delta.trimmedSet = governorResult.trimmedSet;
-
-    if (governorResult.spilloverHandle) {
+    if (governorResult && governorResult.spilloverHandle) {
       const spilloverHandle = governorResult.spilloverHandle;
       delta.spilloverHandle = spilloverHandle;
 
@@ -196,7 +276,14 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     // Warn when auto-resolved delta is very large
     const totalChanges = delta.changedSymbols.length + (changedSymbolsTruncation.droppedCount ?? 0);
     if (totalChanges > 500 && !validated.fromVersion) {
-      (delta as unknown as Record<string, unknown>).largeDeltaWarning = "This delta spans " + totalChanges + " changes. Narrow the version range with fromVersion/toVersion for targeted results.";
+      const suffix = shouldSkipBlastRadius
+        ? " Blast-radius computation was skipped (pass skipBlastRadius=false to force)."
+        : "";
+      (delta as unknown as Record<string, unknown>).largeDeltaWarning =
+        "This delta spans " +
+        totalChanges +
+        " changes. Narrow the version range with fromVersion/toVersion for targeted results." +
+        suffix;
     }
 
     // Collect all symbol IDs for enrichment (changed + blast radius)

@@ -3,7 +3,10 @@ import { getContinuation } from "./workflow-truncation.js";
 
 // --- Path Navigation (reuses ref-resolver's dot/bracket model without $N prefix) ---
 
-const PATH_SEGMENT_RE = /\.([a-zA-Z_]\w*)|\[(\d+)\]/g;
+// Matches (1) dotted field name, (2) dotted numeric index (results.0.name),
+// or (3) bracketed numeric index (results[0].name). Group indices: 1=field,
+// 2=dotted-digit, 3=bracketed-digit.
+const PATH_SEGMENT_RE = /\.([a-zA-Z_]\w*)|\.(\d+)|\[(\d+)\]/g;
 const SIMPLE_FIELD_RE = /^[a-zA-Z_]\w*$/;
 
 function navigatePath(obj: unknown, path: string): unknown {
@@ -58,8 +61,12 @@ function navigatePath(obj: unknown, path: string): unknown {
   while ((match = re.exec(pathToParse)) !== null) {
     if (match[1] !== undefined) {
       segments.push(match[1]);
-    } else {
+    } else if (match[2] !== undefined) {
+      // .N  — dotted numeric array index
       segments.push(parseInt(match[2], 10));
+    } else {
+      // [N] — bracketed numeric array index
+      segments.push(parseInt(match[3], 10));
     }
   }
 
@@ -180,8 +187,19 @@ function execDataPick(args: unknown): unknown {
   }
 
   const result: Record<string, unknown> = {};
+  const unresolved: string[] = [];
   for (const [outputKey, sourcePath] of Object.entries(fields)) {
-    result[outputKey] = navigatePath(input, sourcePath);
+    const value = navigatePath(input, sourcePath);
+    if (value === undefined) {
+      unresolved.push(`${outputKey}="${sourcePath}"`);
+    }
+    result[outputKey] = value;
+  }
+  if (unresolved.length > 0) {
+    throw new TransformError(
+      `dataPick: ${unresolved.length} path(s) did not resolve: ${unresolved.join(", ")}. ` +
+        `Use \`<array>.N.<field>\` or \`<array>[N].<field>\` for array indices, and \`.length\` for array length.`,
+    );
   }
   return result;
 }

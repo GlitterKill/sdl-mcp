@@ -169,11 +169,13 @@ describe("LadybugDB Blast Radius (integration)", () => {
       assert.strictEqual(results[0].symbolId, "a");
       assert.strictEqual(results[0].distance, 1);
       assert.strictEqual(results[0].signal, "directDependent");
+      assert.deepStrictEqual(results[0].explanationPath, ["a", "b"]);
 
       const c = results.find((r) => r.symbolId === "c");
       assert.ok(c);
       assert.strictEqual(c.distance, 2);
       assert.strictEqual(c.signal, "graph");
+      assert.deepStrictEqual(c.explanationPath, ["c", "a", "b"]);
     },
   );
 });

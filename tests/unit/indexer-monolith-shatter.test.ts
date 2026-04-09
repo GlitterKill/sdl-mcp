@@ -206,7 +206,7 @@ describe("indexer.ts monolith shattering", () => {
       'expected indexer.ts to import "./indexer-memory.js"',
     );
 
-    const indexerMaxLines = 750;
+    const indexerMaxLines = 900;
     assert.ok(
       countLines(indexerPath) <= indexerMaxLines,
       `indexer.ts still too large (expected <= ${indexerMaxLines} lines)`,

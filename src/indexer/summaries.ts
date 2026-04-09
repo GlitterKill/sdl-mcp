@@ -82,7 +82,46 @@ export function generateFilteredSummary(
   const summary = generateSummary(symbol, fileContent);
   if (summary === null) return null;
   if (isNameOnlySummary(summary, symbol.name)) return null;
+  if (isTautologicalBodyTemplate(summary, symbol.name)) return null;
   return summary;
+}
+
+// Detects heuristic body-template summaries whose content after the leading
+// verb ("Aggregates", "Caches", "Iterates over", etc.) is mostly a restatement
+// of the symbol name. These add noise without adding semantic value.
+function isTautologicalBodyTemplate(
+  summary: string,
+  symbolName: string,
+): boolean {
+  // Find the longest matching template prefix (prefixes may be multi-word,
+  // e.g. "Iterates over", "Delegates to").
+  const sorted = [...BODY_TEMPLATE_PREFIXES].sort(
+    (a, b) => b.length - a.length,
+  );
+  const matched = sorted.find((p) => summary.startsWith(p));
+  if (!matched) return false;
+
+  const rest = summary.slice(matched.length).trim();
+  if (rest.length === 0) return true;
+
+  const restWords = rest
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((w) => !NAME_ONLY_NOISE.has(w) && !TYPE_NOISE.has(w))
+    .map(deconjugate);
+  if (restWords.length === 0) return true;
+
+  const nameWords = new Set(
+    splitCamelCase(symbolName).map((w) => deconjugate(w.toLowerCase())),
+  );
+  let overlap = 0;
+  for (const word of restWords) {
+    if (nameWords.has(word)) overlap++;
+  }
+  // 70% threshold — lower than isNameOnlySummary's 80% because the leading
+  // template verb is already a strong signal that this is a heuristic summary.
+  return overlap / restWords.length >= 0.7;
 }
 
 /**
@@ -873,46 +912,6 @@ function generateBehavioralFunctionSummary(
     }
   }
 
-  // Prefix-based action verbs (build/get/load/save/...) describe what
-  // the function does at a higher level than the generic transform/
-  // iterate templates below. Run the prefix matcher early so a function
-  // named buildSlice does not get summarized as "Transforms each slice"
-  // just because it contains a single .map() call.
-  const STRONG_VERB_PREFIXES = new Set([
-    "build", "compose", "create", "make", "construct",
-    "compute", "calculate", "calc",
-    "load", "fetch", "read",
-    "save", "write", "store", "persist",
-    "parse", "decode",
-    "format", "render", "stringify",
-    "normalize", "clean",
-    "init", "initialize", "setup",
-    "register", "subscribe",
-    "remove", "delete", "destroy", "unregister",
-    "update", "patch",
-    "validate", "sanitize",
-    "extract", "derive",
-    "apply", "execute", "run", "invoke",
-    "reset", "clear", "flush", "purge",
-    "compare", "diff",
-    "count", "measure", "estimate",
-    "clone", "copy", "duplicate",
-  ]);
-  if (STRONG_VERB_PREFIXES.has(firstWord) && (subject || restWords.length > 0)) {
-    // For verb-prefixed names, the camelCase remainder is usually a
-    // cleaner subject than a type-derived one (e.g. buildSlice →
-    // "slice", not "slice build request" extracted from SliceBuildRequest).
-    const prefixSubject = restWords.length > 0 ? restWords.join(" ") : subject;
-    const earlyPrefixSummary = generatePrefixSummary(
-      firstWord,
-      prefixSubject,
-      signals,
-      returnSuffix,
-    );
-    if (earlyPrefixSummary !== null) {
-      return earlyPrefixSummary;
-    }
-  }
 
   // Length gate: long functions with only weak generic signals should
   // return null — the name alone is more honest than a vague summary.
@@ -1194,6 +1193,18 @@ const NAME_ONLY_NOISE = new Set([
   "to",
   "in",
   "on",
+  // Body-template verbs that just restate the symbol name (e.g.
+  // "Aggregates search core async" for beamSearchCoreAsync). Adding them
+  // here lets isNameOnlySummary strip them before overlap checks.
+  "aggregates",
+  "caches",
+  "transforms",
+  "iterates",
+  "sorts",
+  "merges",
+  "executes",
+  "each",
+  "over",
 ]);
 
 const TYPE_NOISE = new Set([

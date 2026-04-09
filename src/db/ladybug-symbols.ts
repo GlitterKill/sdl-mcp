@@ -64,7 +64,8 @@ export async function upsertSymbol(
     `MATCH (r:Repo {repoId: $repoId})
      MATCH (f:File {fileId: $fileId})
      MERGE (s:Symbol {symbolId: $symbolId})
-     SET s.kind = $kind,
+     SET s.repoId = $repoId,
+         s.kind = $kind,
          s.name = $name,
          s.exported = $exported,
          s.visibility = $visibility,
@@ -795,6 +796,14 @@ export async function deleteSymbolsByFileId(
 
     await exec(
       txConn,
+      `MATCH (s:Symbol)-[r:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
+
+    await exec(
+      txConn,
       `MATCH (s:Symbol)-[r:PARTICIPATES_IN]->(:Process)
        WHERE s.symbolId IN $symbolIds
        DELETE r`,
@@ -915,6 +924,15 @@ export async function deleteSymbolsByIds(
     await exec(
       txConn,
       `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
+
+    // BELONGS_TO_SHADOW_CLUSTER edges
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[r:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
        WHERE s.symbolId IN $symbolIds
        DELETE r`,
       { symbolIds },

@@ -15,7 +15,10 @@ import {
   createMemoryOfEdge,
   type MemoryRow,
 } from "../../dist/db/ladybug-queries.js";
-import { surfaceRelevantMemories } from "../../dist/memory/surface.js";
+import {
+  loadCentralitySignals,
+  surfaceRelevantMemories,
+} from "../../dist/memory/surface.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -298,5 +301,51 @@ describe("surfaceRelevantMemories", () => {
     assert.ok(newerIdx >= 0);
     assert.ok(olderIdx >= 0);
     assert.ok(newerIdx < olderIdx);
+  });
+
+  it("mildly boosts memories linked to higher-centrality symbols", async () => {
+    await upsertMemory(conn, makeMemoryRow("mem-central-high"));
+    await upsertMemory(conn, makeMemoryRow("mem-central-low"));
+    await createMemoryOfEdge(conn, "mem-central-high", symbol1);
+    await createMemoryOfEdge(conn, "mem-central-low", symbol2);
+
+    await import("../../dist/db/ladybug-queries.js").then(async (queries) => {
+      await queries.upsertMetrics(conn, {
+        symbolId: symbol1,
+        fanIn: 1,
+        fanOut: 1,
+        churn30d: 0,
+        testRefsJson: null,
+        canonicalTestJson: null,
+        pageRank: 1.0,
+        kCore: 10,
+        updatedAt: "2026-03-18T12:00:00.000Z",
+      });
+      await queries.upsertMetrics(conn, {
+        symbolId: symbol2,
+        fanIn: 1,
+        fanOut: 1,
+        churn30d: 0,
+        testRefsJson: null,
+        canonicalTestJson: null,
+        pageRank: 0.1,
+        kCore: 1,
+        updatedAt: "2026-03-18T12:00:00.000Z",
+      });
+    });
+
+    const centralitySignals = await loadCentralitySignals(conn, [
+      symbol1,
+      symbol2,
+    ]);
+    const surfaced = await surfaceRelevantMemories(conn, {
+      repoId,
+      symbolIds: [symbol1, symbol2],
+      centralitySignals,
+      limit: 10,
+    });
+
+    assert.strictEqual(surfaced[0]?.memoryId, "mem-central-high");
+    assert.strictEqual(surfaced[1]?.memoryId, "mem-central-low");
   });
 });

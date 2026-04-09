@@ -9,16 +9,44 @@
     "riskThreshold": 70
   },
   "expectedResponse": {
+    "summary": {
+      "riskScore": "number",
+      "riskLevel": "string",
+      "changedCount": "number",
+      "filteredCount": "number",
+      "blastRadiusCount": "number"
+    },
     "analysis": {
       "repoId": "test-repo-001",
       "fromVersion": "version-001",
       "toVersion": "version-002",
       "riskScore": "number",
       "riskLevel": "string",
-      "findings": ["array"],
-      "impactedSymbols": ["array"],
-      "evidence": ["array"],
-      "recommendedTests": ["array"],
+      "changedSymbols": {
+        "items": ["array"],
+        "totalCount": "number",
+        "truncated": "boolean"
+      },
+      "blastRadius": {
+        "items": ["array"],
+        "totalCount": "number",
+        "truncated": "boolean"
+      },
+      "findings": {
+        "items": ["array"],
+        "totalCount": "number",
+        "truncated": "boolean"
+      },
+      "evidence": {
+        "items": ["array"],
+        "totalCount": "number",
+        "truncated": "boolean"
+      },
+      "recommendedTests": {
+        "items": ["array"],
+        "totalCount": "number",
+        "truncated": "boolean"
+      },
       "changedSymbolsCount": "number",
       "blastRadiusCount": "number"
     },

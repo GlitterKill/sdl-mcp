@@ -21,6 +21,10 @@ export interface MetricsRow {
   churn30d: number;
   testRefsJson: string | null;
   canonicalTestJson: string | null;
+  /** PageRank centrality score, 0.0 when unavailable. */
+  pageRank?: number;
+  /** K-core decomposition value, 0 when unavailable. */
+  kCore?: number;
   updatedAt: string;
 }
 
@@ -365,6 +369,13 @@ async function _deleteFilesByIdsInner(
     await exec(
       conn,
       `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    );
+    await exec(
+      conn,
+      `MATCH (s:Symbol)-[r:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
        WHERE s.symbolId IN $symbolIds
        DELETE r`,
       { symbolIds },

@@ -19,7 +19,10 @@ import * as ladybugDb from "../../db/ladybug-queries.js";
 import { DatabaseError, ValidationError, ConfigError } from "../errors.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { getMemoryCapabilities } from "../../config/memory-config.js";
-import { surfaceRelevantMemories } from "../../memory/surface.js";
+import {
+  loadCentralitySignals,
+  surfaceRelevantMemories,
+} from "../../memory/surface.js";
 import {
   writeMemoryFile,
   deleteMemoryFile,
@@ -403,11 +406,16 @@ export async function handleMemorySurface(
     throw new ConfigError(`Memory tools are disabled for repository "${repoId}". Enable memory in config: { "memory": { "enabled": true } }`);
   }
 
+  const centralitySignals = symbolIds && symbolIds.length > 0
+    ? await loadCentralitySignals(conn, symbolIds)
+    : undefined;
+
   const memories = await surfaceRelevantMemories(conn, {
     repoId,
     symbolIds,
     taskType,
     limit,
+    centralitySignals,
   });
 
   return { repoId, memories };

@@ -18,7 +18,7 @@ import { ReconcileWorker } from "../../dist/live-index/reconcile-worker.js";
 
 describe("reconcile derived-data refresh", () => {
   const repoId = "reconcile-derived-data-repo";
-  const dbPath = join(tmpdir(), ".lbug-reconcile-derived-data-test-db.lbug");
+  const dbPath = mkdtempSync(join(tmpdir(), "sdl-reconcile-derived-data-test-db-"));
   const configPath = join(tmpdir(), `sdl-reconcile-derived-data-${Date.now()}.json`);
   let repoDir = "";
   const prevConfig = process.env.SDL_CONFIG;

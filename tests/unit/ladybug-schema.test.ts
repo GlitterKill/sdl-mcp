@@ -100,7 +100,7 @@ describe("LadybugDB Schema", () => {
     it("should export schema version", async () => {
       const { LADYBUG_SCHEMA_VERSION } =
         await import("../../dist/db/ladybug-schema.js");
-      assert.strictEqual(LADYBUG_SCHEMA_VERSION, 10);
+      assert.strictEqual(LADYBUG_SCHEMA_VERSION, 12);
     });
   });
 
@@ -244,6 +244,83 @@ describe("LadybugDB Schema", () => {
         result.close();
         assert.strictEqual(Number(row["m.fanIn"]), 5);
         assert.strictEqual(Number(row["m.fanOut"]), 3);
+      } finally {
+        await cleanupTestDb(db, conn);
+      }
+    });
+
+    it("Metrics has pageRank and kCore columns (default 0) from m011", async () => {
+      const { db, conn } = await createTestDb();
+      try {
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
+        await createSchema(conn as unknown as import("kuzu").Connection);
+        await exec(
+          conn,
+          `CREATE (m:Metrics {symbolId: 'sym-pr', fanIn: 0, fanOut: 0, churn30d: 0, testRefsJson: null, updatedAt: '2024-01-01'})`,
+        );
+        const result = await conn.query(
+          `MATCH (m:Metrics {symbolId: 'sym-pr'}) RETURN m.pageRank AS pageRank, m.kCore AS kCore`,
+        );
+        assert.strictEqual(result.hasNext(), true);
+        const row = await result.getNext();
+        result.close();
+        assert.strictEqual(Number(row["pageRank"]), 0);
+        assert.strictEqual(Number(row["kCore"]), 0);
+      } finally {
+        await cleanupTestDb(db, conn);
+      }
+    });
+
+    it("ShadowCluster node table exists and accepts inserts", async () => {
+      const { db, conn } = await createTestDb();
+      try {
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
+        await createSchema(conn as unknown as import("kuzu").Connection);
+        await exec(
+          conn,
+          `CREATE (sc:ShadowCluster {shadowClusterId: 'sc1', repoId: 'repo1', algorithm: 'louvain', label: 'cluster 1', symbolCount: 3, modularity: 0.42, versionId: 'v1', createdAt: '2024-01-01'})`,
+        );
+        const result = await conn.query(
+          `MATCH (sc:ShadowCluster {shadowClusterId: 'sc1'}) RETURN sc.algorithm AS algorithm, sc.symbolCount AS symbolCount`,
+        );
+        assert.strictEqual(result.hasNext(), true);
+        const row = await result.getNext();
+        result.close();
+        assert.strictEqual(row["algorithm"], "louvain");
+        assert.strictEqual(Number(row["symbolCount"]), 3);
+      } finally {
+        await cleanupTestDb(db, conn);
+      }
+    });
+
+    it("BELONGS_TO_SHADOW_CLUSTER and SHADOW_CLUSTER_IN_REPO rel tables exist", async () => {
+      const { db, conn } = await createTestDb();
+      try {
+        const { createSchema } =
+          await import("../../dist/db/ladybug-schema.js");
+        await createSchema(conn as unknown as import("kuzu").Connection);
+        // Create the prerequisite nodes
+        await exec(conn, `CREATE (r:Repo {repoId: 'rsc', rootPath: '/r', configJson: '{}', createdAt: '2024-01-01'})`);
+        await exec(conn, `CREATE (sc:ShadowCluster {shadowClusterId: 'sc2', repoId: 'rsc', algorithm: 'louvain', label: 'l', symbolCount: 1, modularity: 0, versionId: 'v1', createdAt: '2024-01-01'})`);
+        await exec(conn, `CREATE (s:Symbol {symbolId: 'sym-sc', kind: 'function', name: 'fn', exported: false, visibility: 'private', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 1, rangeEndCol: 0, astFingerprint: '', signatureJson: '{}', summary: null, invariantsJson: null, sideEffectsJson: null, roleTagsJson: '[]', searchText: 'fn', updatedAt: '2024-01-01'})`);
+        // Verify rel-tables accept inserts (schema must exist for these to succeed).
+        await exec(
+          conn,
+          `MATCH (sc:ShadowCluster {shadowClusterId: 'sc2'}), (r:Repo {repoId: 'rsc'}) CREATE (sc)-[:SHADOW_CLUSTER_IN_REPO]->(r)`,
+        );
+        await exec(
+          conn,
+          `MATCH (s:Symbol {symbolId: 'sym-sc'}), (sc:ShadowCluster {shadowClusterId: 'sc2'}) CREATE (s)-[:BELONGS_TO_SHADOW_CLUSTER {membershipScore: 0.8}]->(sc)`,
+        );
+        const result = await conn.query(
+          `MATCH (s:Symbol)-[e:BELONGS_TO_SHADOW_CLUSTER]->(sc:ShadowCluster) RETURN e.membershipScore AS score`,
+        );
+        assert.strictEqual(result.hasNext(), true);
+        const row = await result.getNext();
+        result.close();
+        assert.ok(Number(row["score"]) > 0);
       } finally {
         await cleanupTestDb(db, conn);
       }

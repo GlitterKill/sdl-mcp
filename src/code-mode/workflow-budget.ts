@@ -44,19 +44,48 @@ export class WorkflowBudgetTracker {
   }
 
   shouldContinue(): boolean {
+    return this.exceededDimension() === null;
+  }
+
+  /**
+   * Returns which budget dimension is currently exhausted, or null if the
+   * workflow may continue. Callers use this to build actionable error
+   * messages on budget_exceeded step results (Fix #6 — previously the
+   * executor just marked remaining steps as budget_exceeded with no
+   * explanation of which limit was hit).
+   */
+  exceededDimension(): "tokens" | "steps" | "duration" | null {
     if (this.maxTokens !== null && this.tokensUsed >= this.maxTokens) {
-      return false;
+      return "tokens";
     }
     if (this.maxSteps !== null && this.stepsExecuted >= this.maxSteps) {
-      return false;
+      return "steps";
     }
     if (
       this.maxDurationMs !== null
       && Date.now() - this.startTime >= this.maxDurationMs
     ) {
-      return false;
+      return "duration";
     }
-    return true;
+    return null;
+  }
+
+  /**
+   * Returns a human-readable explanation of which budget dimension is
+   * exhausted, suitable for the `error` field of a budget_exceeded step.
+   * Includes the concrete usage vs limit values.
+   */
+  exceededExplanation(): string | null {
+    const dim = this.exceededDimension();
+    if (dim === null) return null;
+    if (dim === "tokens") {
+      return `Workflow token budget exhausted (${this.tokensUsed}/${this.maxTokens ?? 0} tokens used). Increase budget.maxTotalTokens to run more steps.`;
+    }
+    if (dim === "steps") {
+      return `Workflow step budget exhausted (${this.stepsExecuted}/${this.maxSteps ?? 0} steps executed). Increase budget.maxSteps to run more steps.`;
+    }
+    const elapsed = Date.now() - this.startTime;
+    return `Workflow duration budget exhausted (${elapsed}ms/${this.maxDurationMs ?? 0}ms elapsed). Increase budget.maxDurationMs or split the workflow.`;
   }
 
   state(): {

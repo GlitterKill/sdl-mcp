@@ -277,9 +277,21 @@ export function isExecutableCompatibleWithRuntime(
 export function resolveExecutable(name: string): string | undefined {
   try {
     const [prog, ...args] = IS_WINDOWS ? ["where", name] : ["which", name];
+    // Ensure PATHEXT is set on Windows so `where` expands extensions (.cmd,
+    // .bat, .exe). Some sandboxes/subprocesses strip PATHEXT, causing `where`
+    // to fail to find .cmd/.bat stubs by basename alone.
+    const childEnv = IS_WINDOWS
+      ? {
+          ...process.env,
+          PATHEXT:
+            process.env.PATHEXT ||
+            ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC",
+        }
+      : process.env;
     const result = execFileSync(prog, args, {
       timeout: 5000,
       encoding: "utf-8",
+      env: childEnv,
     }).trim();
     const firstLine = result.split(/\r?\n/)[0]?.trim();
     return firstLine || undefined;
