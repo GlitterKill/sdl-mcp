@@ -15,11 +15,21 @@ import { findEnclosingSymbolByRange } from "../../edge-builder/enclosing-symbol.
 import type { FileMetadata } from "../../fileScanner.js";
 
 import type {
+
   Pass2Resolver,
   Pass2ResolverContext,
   Pass2ResolverResult,
   Pass2Target,
 } from "../types.js";
+
+import { confidenceFor } from "../confidence.js";
+/**
+ * C resolver's header-pair confidence differs from the centralized rubric
+ * value (0.82). Preserved byte-for-byte from the pre-Phase-2 literal to
+ * keep edge weights stable; revisit in a follow-up task.
+ */
+const C_HEADER_PAIR_CONFIDENCE = 0.88;
+
 
 type ExtractedSymbol = {
   nodeId: string;
@@ -534,7 +544,7 @@ function resolveCPass2CallTarget(params: {
     return {
       symbolId: nodeIdToSymbolId.get(call.calleeSymbolId) ?? null,
       isResolved: true,
-      confidence: 0.93,
+      confidence: confidenceFor("package-qualified"),
       resolution: "same-file",
     };
   }
@@ -551,7 +561,7 @@ function resolveCPass2CallTarget(params: {
     return {
       symbolId: includeCandidates[0],
       isResolved: true,
-      confidence: 0.9,
+      confidence: confidenceFor("import-direct"),
       resolution: "include-matched",
     };
   }
@@ -563,7 +573,7 @@ function resolveCPass2CallTarget(params: {
     return {
       symbolId: headerPairCandidates[0],
       isResolved: true,
-      confidence: 0.88,
+      confidence: C_HEADER_PAIR_CONFIDENCE,
       resolution: "header-pair",
     };
   }
@@ -575,7 +585,7 @@ function resolveCPass2CallTarget(params: {
     return {
       symbolId: sameDirectoryCandidates[0],
       isResolved: true,
-      confidence: 0.78,
+      confidence: confidenceFor("cross-file-name-unique"),
       resolution: "same-directory",
     };
   }
@@ -587,7 +597,7 @@ function resolveCPass2CallTarget(params: {
     return {
       symbolId: globalCandidates[0],
       isResolved: true,
-      confidence: 0.45,
+      confidence: confidenceFor("cross-file-name-ambiguous"),
       resolution: "global-fallback",
     };
   }
@@ -595,7 +605,7 @@ function resolveCPass2CallTarget(params: {
   return {
     symbolId: null,
     isResolved: false,
-    confidence: 0.35,
+    confidence: confidenceFor("heuristic-only"),
     resolution: "unresolved",
     targetName: identifier,
     candidateCount:

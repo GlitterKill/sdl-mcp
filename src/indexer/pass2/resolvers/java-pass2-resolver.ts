@@ -15,6 +15,13 @@ import { findEnclosingSymbolByRange } from "../../edge-builder/enclosing-symbol.
 import type { FileMetadata } from "../../fileScanner.js";
 import { resolveImportCandidatePaths } from "../../import-resolution/registry.js";
 import type { ExtractedImport } from "../../treesitter/extractImports.js";
+import { confidenceFor } from "../confidence.js";
+import {
+  bucketForResolution,
+  recordPass2ResolverEdge,
+  recordPass2ResolverUnresolved,
+  type CallResolutionTelemetry,
+} from "../../edge-builder/telemetry.js";
 
 import type {
   Pass2Resolver,
@@ -662,7 +669,149 @@ function mergeNamespaceImports(
   return merged;
 }
 
-function resolveJavaPass2CallTarget(params: {
+/**
+ * Task 2.2.1 - given candidate symbolIds and an optional target arity,
+ * return candidates whose parameter count matches. If arity is unknown or
+ * no candidate has a recorded param count, returns the original list.
+ */
+export function filterByArity(
+  candidates: string[],
+  arity: number | undefined,
+  paramCountBySymbolId: Map<string, number> | undefined,
+): string[] {
+  if (arity === undefined || !paramCountBySymbolId || candidates.length <= 1) {
+    return candidates;
+  }
+  const hasInfo = candidates.some((id) => paramCountBySymbolId.has(id));
+  if (!hasInfo) {
+    return candidates;
+  }
+  const matches = candidates.filter(
+    (id) => paramCountBySymbolId.get(id) === arity,
+  );
+  return matches.length > 0 ? matches : candidates;
+}
+
+/**
+ * Task 2.2.1 - count arguments at a call site by scanning source text from
+ * the call.range start. Handles nested (), generics <>, and string literals.
+ */
+export function computeJavaCallArity(
+  content: string,
+  call: ExtractedCall,
+): number | undefined {
+  const lines = content.split(/\r?\n/);
+  if (call.range.startLine <= 0 || call.range.startLine > lines.length) {
+    return undefined;
+  }
+  let offset = 0;
+  for (let i = 0; i < call.range.startLine - 1; i++) {
+    offset += lines[i].length + 1;
+  }
+  offset += call.range.startCol;
+  const parenIdx = content.indexOf("(", offset);
+  if (parenIdx === -1) return undefined;
+  let depth = 1;
+  let i = parenIdx + 1;
+  let commasAtTop = 0;
+  let sawNonWs = false;
+  let inString: string | null = null;
+  let angleDepth = 0;
+  while (i < content.length) {
+    const ch = content[i];
+    if (inString) {
+      if (ch === "\\") { i += 2; continue; }
+      if (ch === inString) { inString = null; }
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { inString = ch; i++; continue; }
+    if (ch === "(") { depth++; sawNonWs = true; i++; continue; }
+    if (ch === ")") {
+      depth--;
+      if (depth === 0) {
+        if (!sawNonWs) return 0;
+        return commasAtTop + 1;
+      }
+      i++;
+      continue;
+    }
+    if (ch === "<" && depth === 1) { angleDepth++; sawNonWs = true; i++; continue; }
+    if (ch === ">" && depth === 1 && angleDepth > 0) { angleDepth--; i++; continue; }
+    if (ch === "," && depth === 1 && angleDepth === 0) {
+      commasAtTop++;
+      sawNonWs = true;
+      i++;
+      continue;
+    }
+    if (!/\s/.test(ch)) sawNonWs = true;
+    i++;
+  }
+  return undefined;
+}
+
+/**
+ * Task 2.2.2 - build per-file static-import map: bare-name member -> class name.
+ * The java adapter records static imports by setting `namespaceImport` to the
+ * class name and `imports` to the single member name (wildcard "*" when
+ * `import static pkg.Class.*;`).
+ */
+export function buildStaticImportMap(
+  imports: ExtractedImport[],
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const imp of imports) {
+    if (!imp.namespaceImport) continue;
+    if (!Array.isArray(imp.imports) || imp.imports.length !== 1) continue;
+    const member = imp.imports[0];
+    if (!member || member === "*") continue;
+    map.set(member, imp.namespaceImport);
+  }
+  return map;
+}
+
+/**
+ * Task 2.2.1 helper - compute param count for a method declaration by scanning
+ * source at the declared range (used to populate paramCountBySymbolId).
+ */
+export function computeJavaParamCountFromSource(
+  content: string,
+  startLine: number,
+  startCol: number,
+): number | undefined {
+  const lines = content.split(/\r?\n/);
+  if (startLine <= 0 || startLine > lines.length) return undefined;
+  let offset = 0;
+  for (let i = 0; i < startLine - 1; i++) {
+    offset += lines[i].length + 1;
+  }
+  offset += startCol;
+  const parenIdx = content.indexOf("(", offset);
+  if (parenIdx === -1) return undefined;
+  let depth = 1;
+  let i = parenIdx + 1;
+  let commas = 0;
+  let sawNonWs = false;
+  let angleDepth = 0;
+  while (i < content.length) {
+    const ch = content[i];
+    if (ch === "(") { depth++; sawNonWs = true; i++; continue; }
+    if (ch === ")") {
+      depth--;
+      if (depth === 0) return sawNonWs ? commas + 1 : 0;
+      i++;
+      continue;
+    }
+    if (ch === "<") { angleDepth++; sawNonWs = true; i++; continue; }
+    if (ch === ">" && angleDepth > 0) { angleDepth--; i++; continue; }
+    if (ch === "," && depth === 1 && angleDepth === 0) { commas++; sawNonWs = true; i++; continue; }
+    if (!/\s/.test(ch)) sawNonWs = true;
+    i++;
+  }
+  return undefined;
+}
+
+export function resolveJavaPass2CallTarget(params: {
   call: ExtractedCall;
   nodeIdToSymbolId: Map<string, string>;
   importedNameToSymbolIds: Map<string, string[]>;
@@ -673,6 +822,11 @@ function resolveJavaPass2CallTarget(params: {
   callerClassNameByNodeId: Map<string, string>;
   localExtendsByClassName: Map<string, string>;
   globalNameToSymbolIds?: Map<string, string[]>;
+  staticImportClassByMember?: Map<string, string>;
+  callArity?: number;
+  paramCountBySymbolId?: Map<string, number>;
+  telemetry?: CallResolutionTelemetry;
+  resolverId?: string;
 }): JavaResolvedCall | null {
   const {
     call,
@@ -685,13 +839,18 @@ function resolveJavaPass2CallTarget(params: {
     callerClassNameByNodeId,
     localExtendsByClassName,
     globalNameToSymbolIds,
+    staticImportClassByMember,
+    callArity,
+    paramCountBySymbolId,
+    telemetry,
+    resolverId,
   } = params;
 
   if (call.calleeSymbolId && nodeIdToSymbolId.has(call.calleeSymbolId)) {
     return {
       symbolId: nodeIdToSymbolId.get(call.calleeSymbolId) ?? null,
       isResolved: true,
-      confidence: 0.93,
+      confidence: confidenceFor("package-qualified"),
       resolution: "same-file",
     };
   }
@@ -706,9 +865,31 @@ function resolveJavaPass2CallTarget(params: {
     return {
       symbolId: importedCandidates[0],
       isResolved: true,
-      confidence: 0.9,
+      confidence: confidenceFor("import-direct"),
       resolution: "import-matched",
     };
+  }
+
+  // Task 2.2.2: `import static fully.qualified.ClassName.method;` creates a bare-name
+  // callable. Look up the class in classMethodsByName and resolve to the method.
+  const staticClassName = staticImportClassByMember?.get(identifier);
+  if (staticClassName) {
+    const staticMethods = classMethodsByName.get(staticClassName);
+    const staticCandidates = staticMethods?.get(identifier);
+    if (staticCandidates && staticCandidates.length >= 1) {
+      const arityFiltered = filterByArity(staticCandidates, callArity, paramCountBySymbolId);
+      if (arityFiltered.length === 1) {
+        return {
+          symbolId: arityFiltered[0],
+          isResolved: true,
+          confidence: confidenceFor("import-direct"),
+          resolution: "import-static",
+        };
+      }
+      if (arityFiltered.length > 1 && telemetry && resolverId) {
+        recordPass2ResolverUnresolved(telemetry, resolverId, "ambiguous");
+      }
+    }
   }
 
   if (identifier.includes(".")) {
@@ -724,7 +905,7 @@ function resolveJavaPass2CallTarget(params: {
         return {
           symbolId: importedMethodCandidates[0],
           isResolved: true,
-          confidence: 0.9,
+          confidence: confidenceFor("import-direct"),
           resolution: "import-matched",
         };
       }
@@ -735,7 +916,7 @@ function resolveJavaPass2CallTarget(params: {
       return {
         symbolId: namespace.get(member) ?? null,
         isResolved: true,
-        confidence: 0.9,
+        confidence: confidenceFor("import-direct"),
         resolution: "import-matched",
       };
     }
@@ -747,43 +928,64 @@ function resolveJavaPass2CallTarget(params: {
       if (callerClassName) {
         let className: string | undefined = callerClassName;
         const visited = new Set<string>();
+        let depth = 0;
         while (className && !visited.has(className)) {
           visited.add(className);
           const methods = classMethodsByName.get(className);
           const candidates = methods?.get(member);
-          if (candidates && candidates.length === 1) {
-            return {
-              symbolId: candidates[0],
-              isResolved: true,
-              confidence: 0.85,
-              resolution: "receiver-this",
-            };
+          if (candidates && candidates.length >= 1) {
+            const arityFiltered = filterByArity(candidates, callArity, paramCountBySymbolId);
+            if (arityFiltered.length === 1) {
+              const strategy = depth === 0 ? "receiver-this" : "inheritance-method";
+              return {
+                symbolId: arityFiltered[0],
+                isResolved: true,
+                confidence: confidenceFor(strategy),
+                resolution: depth === 0 ? "receiver-this" : "inheritance-method",
+              };
+            }
+            if (arityFiltered.length > 1 && telemetry && resolverId) {
+              recordPass2ResolverUnresolved(telemetry, resolverId, "ambiguous");
+            }
           }
           className = localExtendsByClassName.get(className);
+          depth++;
         }
       }
     }
 
     const samePackageClassMethods = classMethodsByName.get(prefix);
     const samePackageMethodCandidates = samePackageClassMethods?.get(member);
-    if (samePackageMethodCandidates && samePackageMethodCandidates.length === 1) {
-      return {
-        symbolId: samePackageMethodCandidates[0],
-        isResolved: true,
-        confidence: 0.92,
-        resolution: "same-package",
-      };
+    if (samePackageMethodCandidates && samePackageMethodCandidates.length >= 1) {
+      const arityFiltered = filterByArity(samePackageMethodCandidates, callArity, paramCountBySymbolId);
+      if (arityFiltered.length === 1) {
+        return {
+          symbolId: arityFiltered[0],
+          isResolved: true,
+          confidence: confidenceFor("receiver-this"),
+          resolution: "same-package",
+        };
+      }
+      if (arityFiltered.length > 1 && telemetry && resolverId) {
+        recordPass2ResolverUnresolved(telemetry, resolverId, "ambiguous");
+      }
     }
   }
 
   const samePackageCandidates = samePackageNameToSymbolIds.get(identifier);
-  if (samePackageCandidates && samePackageCandidates.length === 1) {
-    return {
-      symbolId: samePackageCandidates[0],
-      isResolved: true,
-      confidence: 0.92,
-      resolution: "same-package",
-    };
+  if (samePackageCandidates && samePackageCandidates.length >= 1) {
+    const arityFiltered = filterByArity(samePackageCandidates, callArity, paramCountBySymbolId);
+    if (arityFiltered.length === 1) {
+      return {
+        symbolId: arityFiltered[0],
+        isResolved: true,
+        confidence: confidenceFor("receiver-this"),
+        resolution: "same-package",
+      };
+    }
+    if (arityFiltered.length > 1 && telemetry && resolverId) {
+      recordPass2ResolverUnresolved(telemetry, resolverId, "ambiguous");
+    }
   }
 
   const wildcardCandidates = wildcardNameToSymbolIds.get(identifier);
@@ -791,7 +993,7 @@ function resolveJavaPass2CallTarget(params: {
     return {
       symbolId: wildcardCandidates[0],
       isResolved: true,
-      confidence: 0.8,
+      confidence: confidenceFor("global-fallback"),
       resolution: "wildcard-import",
     };
   }
@@ -801,7 +1003,7 @@ function resolveJavaPass2CallTarget(params: {
     return {
       symbolId: globalCandidates[0],
       isResolved: true,
-      confidence: 0.45,
+      confidence: confidenceFor("cross-file-name-ambiguous"),
       resolution: "global-fallback",
     };
   }
@@ -809,7 +1011,7 @@ function resolveJavaPass2CallTarget(params: {
   return {
     symbolId: null,
     isResolved: false,
-    confidence: 0.35,
+    confidence: confidenceFor("heuristic-only"),
     resolution: "unresolved",
     targetName: identifier,
     candidateCount:
@@ -974,6 +1176,31 @@ async function resolveJavaCallEdgesPass2(params: {
   );
   const classMap = buildClassMethodIndex(samePackageSymbols);
 
+  // Task 2.2.2 - build per-file static-import map from the adapter's import list.
+  const staticImportClassByMember = buildStaticImportMap(imports);
+
+  // Task 2.2.1 - precompute param counts for same-package methods so we can
+  // disambiguate overloads by arity. Iterate same-package symbol rows and scan
+  // their declared range in the owning file's source (best-effort; we only have
+  // current file content here, so only methods in this file will have counts).
+  const paramCountBySymbolId = new Map<string, number>();
+  for (const detail of filteredSymbolDetails) {
+    if (
+      detail.extractedSymbol.kind === "method" ||
+      detail.extractedSymbol.kind === "constructor" ||
+      detail.extractedSymbol.kind === "function"
+    ) {
+      const count = computeJavaParamCountFromSource(
+        content,
+        detail.extractedSymbol.range.startLine,
+        detail.extractedSymbol.range.startCol,
+      );
+      if (count !== undefined) {
+        paramCountBySymbolId.set(detail.symbolId, count);
+      }
+    }
+  }
+
   const now = new Date().toISOString();
   const edgesToInsert: ladybugDb.EdgeRow[] = [];
   let createdEdges = 0;
@@ -987,6 +1214,7 @@ async function resolveJavaCallEdgesPass2(params: {
         continue;
       }
 
+      const callArity = computeJavaCallArity(content, call);
       const resolved = resolveJavaPass2CallTarget({
         call,
         nodeIdToSymbolId,
@@ -998,6 +1226,11 @@ async function resolveJavaCallEdgesPass2(params: {
         callerClassNameByNodeId: callScope.callerClassNameByNodeId,
         localExtendsByClassName: callScope.localExtendsByClassName,
         globalNameToSymbolIds,
+        staticImportClassByMember,
+        callArity,
+        paramCountBySymbolId,
+        telemetry,
+        resolverId: "java-pass2-resolver",
       });
       if (!resolved) {
         continue;
@@ -1023,6 +1256,13 @@ async function resolveJavaCallEdgesPass2(params: {
         });
         createdCallEdges.add(edgeKey);
         createdEdges++;
+        if (telemetry) {
+          recordPass2ResolverEdge(
+            telemetry,
+            "pass2-java",
+            bucketForResolution(resolved.resolution),
+          );
+        }
       } else if (resolved.targetName) {
         const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
         const edgeKey = `${detail.symbolId}->${unresolvedTargetId}`;
@@ -1044,6 +1284,9 @@ async function resolveJavaCallEdgesPass2(params: {
         });
         createdCallEdges.add(edgeKey);
         createdEdges++;
+        if (telemetry) {
+          recordPass2ResolverUnresolved(telemetry, "pass2-java", "unresolved");
+        }
       }
     }
   }

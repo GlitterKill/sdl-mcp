@@ -19,6 +19,22 @@ import type {
   Pass2ResolverResult,
   Pass2Target,
 } from "../types.js";
+import { confidenceFor } from "../confidence.js";
+import type { ScopeNode } from "../scope-walker.js";
+import {
+  bucketForResolution,
+  recordPass2ResolverEdge,
+  recordPass2ResolverUnresolved,
+} from "../../edge-builder/telemetry.js";
+import {
+  followBarrelChain,
+  type ReExport,
+} from "../barrel-walker.js";
+import {
+  resolveDecoratorTargets,
+  parsePythonReExports,
+  resolveSelfMethodWithScope,
+} from "./python-pass2-helpers.js";
 
 type ExtractedSymbol = {
   nodeId: string;
@@ -31,6 +47,7 @@ type ExtractedSymbol = {
     endLine: number;
     endCol: number;
   };
+  decorators?: string[];
 };
 
 type ExtractedCall = {
@@ -62,6 +79,13 @@ type PythonResolvedCall = {
 };
 
 const PYTHON_PASS2_EXTENSIONS = new Set([".py"]);
+
+// Preserved pre-Phase-2 literal: receiver-imported-instance has no direct
+// strategy in the Phase-2 confidence rubric (0.84 sits between
+// receiver-type=0.85 and cross-file-name-unique=0.78). Keeping it as a
+// named constant preserves byte-for-byte parity without adding a one-off
+// strategy to the shared rubric.
+const PYTHON_RECEIVER_IMPORTED_INSTANCE_CONFIDENCE = 0.84;
 
 function toFullKey(
   kind: SymbolKind,
@@ -227,6 +251,75 @@ function createNodeIdToSymbolId(
   }
   return nodeIdToSymbolId;
 }
+
+// Phase 2 Task 2.1.1/2.1.3: map same-file function/method/class names to
+// their symbol IDs. Used by decorator-chain resolution and by the lexical
+// self.method() fallback when the flat local-class index is ambiguous.
+function buildLocalFunctionNameIndex(
+  filteredSymbolDetails: FilteredSymbolDetail[],
+): Map<string, string[]> {
+  const index = new Map<string, string[]>();
+  for (const detail of filteredSymbolDetails) {
+    const kind = detail.extractedSymbol.kind;
+    if (kind !== "function" && kind !== "method" && kind !== "class") {
+      continue;
+    }
+    const raw = detail.extractedSymbol.name;
+    const bare = raw.includes(".") ? raw.slice(raw.lastIndexOf(".") + 1) : raw;
+    const existing = index.get(bare) ?? [];
+    if (!existing.includes(detail.symbolId)) existing.push(detail.symbolId);
+    index.set(bare, existing);
+  }
+  return index;
+}
+
+// Phase 2 Task 2.1.3: build a class-scoped method index
+// Map<classSymbolId, Map<methodName, methodSymbolId[]>>
+// Used by the scope-walker fallback when `self.method()` is ambiguous
+// under the flat local class method index.
+function buildClassScopedMethodIndex(
+  filteredSymbolDetails: FilteredSymbolDetail[],
+): {
+  classes: FilteredSymbolDetail[];
+  methodsByClass: Map<string, Map<string, string[]>>;
+} {
+  const classes = filteredSymbolDetails.filter(
+    (d) => d.extractedSymbol.kind === "class",
+  );
+  const methodsByClass = new Map<string, Map<string, string[]>>();
+  for (const clazz of classes) {
+    methodsByClass.set(clazz.symbolId, new Map());
+  }
+  for (const detail of filteredSymbolDetails) {
+    if (
+      detail.extractedSymbol.kind !== "function" &&
+      detail.extractedSymbol.kind !== "method"
+    ) {
+      continue;
+    }
+    // Choose the smallest enclosing class (handles nested classes).
+    let owner: FilteredSymbolDetail | null = null;
+    let ownerSize = Number.MAX_SAFE_INTEGER;
+    for (const clazz of classes) {
+      if (!isRangeWithin(detail.extractedSymbol.range, clazz.extractedSymbol.range)) continue;
+      const r = clazz.extractedSymbol.range;
+      const size = (r.endLine - r.startLine) * 10_000 + (r.endCol - r.startCol);
+      if (size < ownerSize) {
+        owner = clazz;
+        ownerSize = size;
+      }
+    }
+    if (!owner) continue;
+    const raw = detail.extractedSymbol.name;
+    const bare = raw.includes(".") ? raw.slice(raw.lastIndexOf(".") + 1) : raw;
+    const classMap = methodsByClass.get(owner.symbolId)!;
+    const existing = classMap.get(bare) ?? [];
+    if (!existing.includes(detail.symbolId)) existing.push(detail.symbolId);
+    classMap.set(bare, existing);
+  }
+  return { classes, methodsByClass };
+}
+
 
 function isRangeWithin(
   inner: ExtractedSymbol["range"],
@@ -454,9 +547,104 @@ function resolveImportedInstanceMethodCall(params: {
   return {
     symbolId: methodCandidates[0],
     isResolved: true,
-    confidence: 0.84,
+    confidence: PYTHON_RECEIVER_IMPORTED_INSTANCE_CONFIDENCE,
     resolution: "receiver-imported-instance",
   };
+}
+
+// Phase 2 Task 2.1.2: follow a barrel chain through Python __init__.py
+// re-exports. Returns the resolved (file, name) if the chain is valid,
+// or null if the symbol does not originate in a __init__.py barrel.
+// Uses followBarrelChain from the shared walker and bounds depth via
+// MAX_BARREL_DEPTH.
+async function resolvePythonBarrelChain(params: {
+  conn: import("kuzu").Connection;
+  repoId: string;
+  repoRoot: string;
+  startFile: string;
+  symbolName: string;
+  extensions: string[];
+}): Promise<{ resolvedFile: string; resolvedName: string } | null> {
+  const { conn, repoId, repoRoot, startFile, symbolName, extensions } = params;
+  // Only attempt if the start file is an __init__.py.
+  if (!/__init__.(py|pyw)$/.test(startFile)) return null;
+  const reExportsByFile: Record<string, ReExport[]> = {};
+  // Pre-load the start file's re-exports.
+  try {
+    const absPath = join(repoRoot, startFile);
+    const content = await readFileAsync(absPath, "utf-8");
+    reExportsByFile[startFile] = parsePythonReExports(startFile, content);
+  } catch {
+    return null;
+  }
+  // Resolve function for the walker: given a target file prefix (no
+  // extension), find the actual .py or __init__.py file on disk. We
+  // lazily load re-exports for any __init__.py we traverse.
+  const hooks = {
+    getReExports: (file: string): ReExport[] => reExportsByFile[file] ?? [],
+  };
+  // The raw targetFile values from parsePythonReExports are path prefixes
+  // without extension. Resolve them against the filesystem before asking
+  // the walker to follow further. We do a single-step resolution: the
+  // walker's first hop yields either a .py file (done) or another
+  // __init__.py (recurse).
+  // For simplicity we resolve one hop manually and return the result; a
+  // full multi-hop walk would require preloading every candidate.
+  const firstHop = reExportsByFile[startFile].find(
+    (r) => r.exportedName === symbolName,
+  );
+  if (!firstHop) return null;
+  // Try to resolve the raw targetFile prefix to a concrete indexed file.
+  for (const ext of extensions) {
+    const candidate = `${firstHop.targetFile}${ext}`;
+    const file = await ladybugDb.getFileByRepoPath(conn, repoId, candidate);
+    if (file) {
+      // Direct .py hit -- done.
+      return {
+        resolvedFile: candidate,
+        resolvedName: firstHop.targetName,
+      };
+    }
+    const initCandidate = `${firstHop.targetFile}/__init__${ext}`;
+    const initFile = await ladybugDb.getFileByRepoPath(
+      conn,
+      repoId,
+      initCandidate,
+    );
+    if (initFile) {
+      // Another __init__.py -- load its re-exports and continue with
+      // the shared walker.
+      try {
+        const content = await readFileAsync(join(repoRoot, initCandidate), "utf-8");
+        reExportsByFile[initCandidate] = parsePythonReExports(initCandidate, content);
+      } catch {
+        return null;
+      }
+      const walked = followBarrelChain(
+        firstHop.targetName,
+        initCandidate,
+        hooks,
+      );
+      if (walked) {
+        return {
+          resolvedFile: walked.resolvedFile,
+          resolvedName: walked.resolvedName,
+        };
+      }
+      // The single-hop walker exhausted what we preloaded. Deeper
+      // multi-hop `__init__.py` chains (A/__init__.py -> B/__init__.py ->
+      // C/__init__.py -> real.py) are not currently supported because we
+      // would need to lazily preload every intermediate `__init__.py`
+      // re-export map. Log so operators chasing low call-resolution
+      // health on Python projects can see why a chain dropped.
+      logger.debug(
+        `python-barrel: multi-hop __init__.py chain not resolved for ` +
+          `${symbolName} starting at ${startFile} (hopped through ` +
+          `${initCandidate}); deeper chains require lazy preloading`,
+      );
+    }
+  }
+  return null;
 }
 
 async function resolvePythonImportMaps(params: {
@@ -542,6 +730,40 @@ async function resolvePythonImportMaps(params: {
       if (!match && imp.defaultImport === name && targetSymbols.length === 1) {
         match = targetSymbols[0];
       }
+      // Phase 2 Task 2.1.2: if the name is not defined in any target file
+      // but a target file is a package `__init__.py`, try to follow the
+      // re-export chain to the real definition file.
+      if (!match) {
+        for (const tf of targetFiles) {
+          if (!/__init__.(py|pyw)$/.test(tf.relPath)) continue;
+          const walked = await resolvePythonBarrelChain({
+            conn,
+            repoId,
+            repoRoot,
+            startFile: tf.relPath,
+            symbolName: name,
+            extensions,
+          });
+          if (!walked) continue;
+          const resolvedFileRow = await ladybugDb.getFileByRepoPath(
+            conn,
+            repoId,
+            walked.resolvedFile,
+          );
+          if (!resolvedFileRow) continue;
+          const syms = await ladybugDb.getSymbolsByFile(
+            conn,
+            resolvedFileRow.fileId,
+          );
+          const found = syms.find(
+            (sym) => sym.exported && sym.name === walked.resolvedName,
+          );
+          if (found) {
+            match = found;
+            break;
+          }
+        }
+      }
       if (!match) {
         continue;
       }
@@ -616,6 +838,11 @@ function resolvePythonPass2CallTarget(params: {
   namespaceImports: Map<string, Map<string, string>>;
   localClassMethodNameToSymbolIds: Map<string, string[]>;
   methodsByImportedClassSymbolId: Map<string, Map<string, string[]>>;
+  treeRoot?: ScopeNode | null;
+  classScopedMethods?: {
+    classes: FilteredSymbolDetail[];
+    methodsByClass: Map<string, Map<string, string[]>>;
+  };
 }): PythonResolvedCall | null {
   const {
     call,
@@ -626,13 +853,15 @@ function resolvePythonPass2CallTarget(params: {
     namespaceImports,
     localClassMethodNameToSymbolIds,
     methodsByImportedClassSymbolId,
+    treeRoot,
+    classScopedMethods,
   } = params;
 
   if (call.calleeSymbolId && nodeIdToSymbolId.has(call.calleeSymbolId)) {
     return {
       symbolId: nodeIdToSymbolId.get(call.calleeSymbolId) ?? null,
       isResolved: true,
-      confidence: 0.93,
+      confidence: confidenceFor("package-qualified"),
       resolution: "same-file",
     };
   }
@@ -647,7 +876,7 @@ function resolvePythonPass2CallTarget(params: {
     return {
       symbolId: importedCandidates[0],
       isResolved: true,
-      confidence: 0.9,
+      confidence: confidenceFor("import-direct"),
       resolution: "import-matched",
     };
   }
@@ -662,7 +891,7 @@ function resolvePythonPass2CallTarget(params: {
       return {
         symbolId: namespace.get(member) ?? null,
         isResolved: true,
-        confidence: 0.9,
+        confidence: confidenceFor("import-direct"),
         resolution: "namespace-import",
       };
     }
@@ -673,9 +902,29 @@ function resolvePythonPass2CallTarget(params: {
         return {
           symbolId: classMethodCandidates[0],
           isResolved: true,
-          confidence: 0.85,
+          confidence: confidenceFor("receiver-type"),
           resolution: "receiver-self",
         };
+      }
+      // Phase 2 Task 2.1.3: flat index is ambiguous -- fall back to the
+      // shared scope walker to find the enclosing class_definition and
+      // disambiguate by class scope.
+      if (classScopedMethods && treeRoot) {
+        const scoped = resolveSelfMethodWithScope({
+          methodName: member,
+          callerRange: { startLine: call.range.startLine, startCol: call.range.startCol },
+          treeRoot,
+          classes: classScopedMethods.classes,
+          methodsByClass: classScopedMethods.methodsByClass,
+        });
+        if (scoped) {
+          return {
+            symbolId: scoped,
+            isResolved: true,
+            confidence: confidenceFor("receiver-self"),
+            resolution: "receiver-self-scope",
+          };
+        }
       }
     }
 
@@ -695,7 +944,7 @@ function resolvePythonPass2CallTarget(params: {
   return {
     symbolId: null,
     isResolved: false,
-    confidence: 0.35,
+    confidence: confidenceFor("heuristic-only"),
     resolution: "unresolved",
     targetName: identifier,
     candidateCount: importedCandidates?.length ?? 0,
@@ -741,6 +990,10 @@ async function resolvePythonCallEdgesPass2(params: {
   let extractedSymbols: ExtractedSymbol[];
   let calls: ExtractedCall[];
   let imports: ReturnType<typeof adapter.extractImports>;
+  // Phase 2 Task 2.1.3: capture the tree root so the self.method() scope-walker
+  // fallback can find the enclosing class_definition. The tree is kept alive
+  // until the end of this function so node references remain valid.
+  const treeRoot: ScopeNode = (tree as unknown as { rootNode: ScopeNode }).rootNode;
   try {
     extractedSymbols = adapter.extractSymbols(
       tree,
@@ -754,8 +1007,9 @@ async function resolvePythonCallEdgesPass2(params: {
       extractedSymbols as never,
     ) as ExtractedCall[];
     imports = adapter.extractImports(tree, content, filePath);
-  } finally {
+  } catch (e) {
     (tree as unknown as { delete?: () => void }).delete?.();
+    throw e;
   }
 
   const fileRecord = await ladybugDb.getFileByRepoPath(
@@ -825,6 +1079,47 @@ async function resolvePythonCallEdgesPass2(params: {
   const edgesToInsert: ladybugDb.EdgeRow[] = [];
   let createdEdges = 0;
 
+  const localFunctionNameIndex = buildLocalFunctionNameIndex(filteredSymbolDetails);
+  const classScopedMethods = buildClassScopedMethodIndex(filteredSymbolDetails);
+  // Phase 2 Task 2.1.1: emit edges from decorated functions to their decorators.
+  for (const detail of filteredSymbolDetails) {
+    const decs = detail.extractedSymbol.decorators;
+    if (!decs || decs.length === 0) continue;
+    const decoratorTargets = resolveDecoratorTargets({
+      decorators: decs,
+      localFunctionNameIndex,
+      importedNameToSymbolIds,
+      onAmbiguous: telemetry
+        ? () =>
+            recordPass2ResolverUnresolved(
+              telemetry,
+              "pass2-python",
+              "ambiguous",
+            )
+        : undefined,
+    });
+    for (const targetId of decoratorTargets) {
+      const edgeKey = `${detail.symbolId}->${targetId}`;
+      if (createdCallEdges.has(edgeKey)) continue;
+      edgesToInsert.push({
+        repoId,
+        fromSymbolId: detail.symbolId,
+        toSymbolId: targetId,
+        edgeType: "call",
+        weight: 1.0,
+        confidence: confidenceFor("heuristic-only"),
+        resolution: "decorator-chain",
+        resolverId: "pass2-python",
+        resolutionPhase: "pass2",
+        provenance: `python-decorator:${detail.extractedSymbol.name}`,
+        createdAt: now,
+      });
+      createdCallEdges.add(edgeKey);
+      createdEdges++;
+      if (telemetry) recordPass2ResolverEdge(telemetry, "pass2-python", "heuristic");
+    }
+  }
+
   for (const detail of filteredSymbolDetails) {
     for (const call of calls) {
       const callerNodeId =
@@ -844,6 +1139,8 @@ async function resolvePythonCallEdgesPass2(params: {
         localClassMethodNameToSymbolIds,
         methodsByImportedClassSymbolId:
           pythonImportMaps.methodsByImportedClassSymbolId,
+        treeRoot,
+        classScopedMethods,
       });
       if (!resolved) {
         continue;
@@ -869,6 +1166,13 @@ async function resolvePythonCallEdgesPass2(params: {
         });
         createdCallEdges.add(edgeKey);
         createdEdges++;
+        if (telemetry) {
+          recordPass2ResolverEdge(
+            telemetry,
+            "pass2-python",
+            bucketForResolution(resolved.resolution),
+          );
+        }
       } else if (resolved.targetName) {
         const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
         const edgeKey = `${detail.symbolId}->${unresolvedTargetId}`;
@@ -890,6 +1194,9 @@ async function resolvePythonCallEdgesPass2(params: {
         });
         createdCallEdges.add(edgeKey);
         createdEdges++;
+        if (telemetry) {
+          recordPass2ResolverUnresolved(telemetry, "pass2-python", "unresolved");
+        }
       }
     }
   }
@@ -897,6 +1204,7 @@ async function resolvePythonCallEdgesPass2(params: {
   await withWriteConn(async (wConn) => {
     await ladybugDb.insertEdges(wConn, edgesToInsert);
   });
+  (tree as unknown as { delete?: () => void }).delete?.();
   return createdEdges;
 }
 

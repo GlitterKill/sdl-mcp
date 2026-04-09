@@ -22,6 +22,20 @@ import type {
   Pass2Target,
 } from "../types.js";
 
+import { confidenceFor } from "../confidence.js";
+/**
+ * C++ resolver's header-pair confidence (0.88) differs from the
+ * rubric value (0.82). Preserved byte-for-byte; revisit in follow-up.
+ */
+const CPP_HEADER_PAIR_CONFIDENCE = 0.88;
+
+/**
+ * C++ namespace-qualified confidence (0.9) differs from the centralized
+ * rubric value (0.88). Preserved byte-for-byte; revisit in follow-up.
+ */
+const CPP_NAMESPACE_QUALIFIED_CONFIDENCE = 0.9;
+
+
 type ExtractedSymbol = {
   nodeId: string;
   kind: SymbolKind;
@@ -785,7 +799,7 @@ function resolveCppPass2CallTarget(params: {
     return {
       symbolId: nodeIdToSymbolId.get(call.calleeSymbolId) ?? null,
       isResolved: true,
-      confidence: 0.93,
+      confidence: confidenceFor("package-qualified"),
       resolution: "same-file",
     };
   }
@@ -802,7 +816,7 @@ function resolveCppPass2CallTarget(params: {
     return {
       symbolId: includeCandidates[0],
       isResolved: true,
-      confidence: 0.9,
+      confidence: confidenceFor("import-direct"),
       resolution: "include-matched",
     };
   }
@@ -819,7 +833,7 @@ function resolveCppPass2CallTarget(params: {
         return {
           symbolId: namespaceQualifiedCandidates[0],
           isResolved: true,
-          confidence: 0.9,
+          confidence: CPP_NAMESPACE_QUALIFIED_CONFIDENCE,
           resolution: "namespace-qualified",
         };
       }
@@ -833,7 +847,7 @@ function resolveCppPass2CallTarget(params: {
     return {
       symbolId: headerPairCandidates[0],
       isResolved: true,
-      confidence: 0.88,
+      confidence: CPP_HEADER_PAIR_CONFIDENCE,
       resolution: "header-pair",
     };
   }
@@ -858,7 +872,7 @@ function resolveCppPass2CallTarget(params: {
       return {
         symbolId: Array.from(usingNamespaceCandidates)[0],
         isResolved: true,
-        confidence: 0.82,
+        confidence: confidenceFor("header-pair"),
         resolution: "using-namespace",
       };
     }
@@ -871,7 +885,7 @@ function resolveCppPass2CallTarget(params: {
     return {
       symbolId: sameDirectoryCandidates[0],
       isResolved: true,
-      confidence: 0.78,
+      confidence: confidenceFor("cross-file-name-unique"),
       resolution: "same-directory",
     };
   }
@@ -884,7 +898,7 @@ function resolveCppPass2CallTarget(params: {
     return {
       symbolId: globalCandidates[0],
       isResolved: true,
-      confidence: 0.45,
+      confidence: confidenceFor("cross-file-name-ambiguous"),
       resolution: "global-fallback",
     };
   }
@@ -892,7 +906,7 @@ function resolveCppPass2CallTarget(params: {
   return {
     symbolId: null,
     isResolved: false,
-    confidence: 0.35,
+    confidence: confidenceFor("heuristic-only"),
     resolution: "unresolved",
     targetName: identifier,
     candidateCount:

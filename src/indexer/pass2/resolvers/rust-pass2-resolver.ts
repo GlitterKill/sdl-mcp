@@ -14,6 +14,19 @@ import type { FileMetadata } from "../../fileScanner.js";
 import { isBuiltinCall } from "../../edge-builder/builtins.js";
 import { resolveImportTargets } from "../../edge-builder/import-resolution.js";
 import { findEnclosingSymbolByRange } from "../../edge-builder/enclosing-symbol.js";
+import {
+  bucketForResolution,
+  recordPass2ResolverEdge,
+  recordPass2ResolverUnresolved,
+} from "../../edge-builder/telemetry.js";
+import {
+  followBarrelChain,
+  hooksFromMap,
+  type ReExport,
+} from "../barrel-walker.js";
+import { confidenceFor } from "../confidence.js";
+import { findEnclosingByType } from "../scope-walker.js";
+import type { ScopeNode } from "../scope-walker.js";
 
 import type {
   Pass2Resolver,
@@ -70,6 +83,18 @@ type RustModuleIndex = {
 
 const RUST_PASS2_EXTENSIONS = new Set([".rs"]);
 
+/**
+ * Legacy literal confidence values that do not map cleanly to a single
+ * `CallResolutionStrategy` in the shared rubric (Phase 2 Task 2.0.1).
+ * These are kept behind named constants so the byte-for-byte snapshot
+ * is preserved until Task 2.11.2 retires the legacy path. Once the new
+ * rubric is the single source of truth, the same-file/disambiguated/
+ * global-fallback paths should migrate to their canonical strategies
+ * (compiler-resolved, cross-file-name-ambiguous, global-fallback).
+ */
+const RUST_SAME_FILE_ALREADY_BOUND_CONFIDENCE = 0.93;
+const RUST_GLOBAL_FALLBACK_CONFIDENCE = 0.45;
+
 function toFullKey(
   kind: SymbolKind,
   name: string,
@@ -97,6 +122,15 @@ function toStartLineKey(
   range: { startLine: number },
 ): string {
   return `${kind}:${name}:${range.startLine}`;
+}
+
+function callRangeKey(range: {
+  startLine: number;
+  startCol: number;
+  endLine: number;
+  endCol: number;
+}): string {
+  return `${range.startLine}:${range.startCol}:${range.endLine}:${range.endCol}`;
 }
 
 function toNameKindKey(kind: SymbolKind, name: string): string {
@@ -597,6 +631,235 @@ function disambiguateRustCandidates(
   return null; // Still ambiguous
 }
 
+
+// ============================================================================
+// Phase 2 Task 2.4.x — trait default dispatch + Self::method + aliased `use`
+// ============================================================================
+
+/**
+ * Minimal ScopeNode view produced from a tree-sitter node subtree. Keeps
+ * the `findEnclosingByType` helper in `scope-walker.ts` decoupled from
+ * tree-sitter. We only materialise a shallow projection: `type`,
+ * positions, children, and `text`.
+ */
+function toScopeNode(node: SyntaxNode): ScopeNode {
+  const children: ScopeNode[] = node.children.map((c) => toScopeNode(c));
+  return {
+    type: node.type,
+    startPosition: node.startPosition,
+    endPosition: node.endPosition,
+    children,
+    text: node.text,
+  };
+}
+
+/**
+ * Phase 2 Task 2.4.3 — returns the type name of the enclosing `impl`
+ * block at the given position, or null when the position is not inside
+ * any `impl`. Used to resolve `Self::method` calls to the local impl's
+ * method table.
+ */
+function findEnclosingImplType(
+  tree: Tree,
+  line: number,
+  col: number,
+): string | null {
+  const root = toScopeNode(tree.rootNode);
+  const impl = findEnclosingByType(root, line, col, "impl_item");
+  if (!impl) return null;
+  // `impl_item` children contain the type node directly — walk its
+  // children to find the first `type_identifier` or `generic_type`
+  // (matching the adapter's `extractImplInfo` logic).
+  for (const child of impl.children) {
+    if (child.type === "type_identifier") {
+      return normalizeRustTypeName(child.text);
+    }
+    if (child.type === "generic_type") {
+      for (const grand of child.children) {
+        if (grand.type === "type_identifier") {
+          return normalizeRustTypeName(grand.text);
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Phase 2 Task 2.4.1 — builds the trait-default method map for a file.
+ *
+ * Scans `trait_item` nodes for method declarations that include a body
+ * (`fn name(&self) { ... }`) and records the trait's own symbolId for
+ * each such method. Then scans `impl_item` nodes with a `trait` field
+ * (i.e. `impl Trait for Type`) to build a Type -> Trait mapping. When a
+ * method call's receiver type does not define the method locally but
+ * the receiver implements a trait whose default defines it, the call
+ * resolves to the trait's symbol.
+ */
+type TraitDefaultMap = {
+  /** traitName -> methodName -> symbolId of the trait's default fn */
+  traitDefaultMethods: Map<string, Map<string, string>>;
+  /** typeName -> list of trait names that the type implements */
+  implementedTraitsByType: Map<string, string[]>;
+};
+
+function buildRustTraitDefaultMap(
+  tree: Tree,
+  filteredSymbolDetails: FilteredSymbolDetail[],
+): TraitDefaultMap {
+  const traitDefaultMethods = new Map<string, Map<string, string>>();
+  const implementedTraitsByType = new Map<string, string[]>();
+
+  // Index extracted method symbols by nodeId (TypeOrTrait::method) for
+  // quick lookup once we know which trait owns which default method.
+  const symbolByNodeId = new Map<string, string>();
+  for (const d of filteredSymbolDetails) {
+    symbolByNodeId.set(d.extractedSymbol.nodeId, d.symbolId);
+  }
+
+  const visit = (node: SyntaxNode): void => {
+    if (node.type === "trait_item") {
+      const nameNode = node.childForFieldName("name");
+      const bodyNode = node.childForFieldName("body");
+      if (nameNode && bodyNode) {
+        const traitName = normalizeRustTypeName(nameNode.text);
+        const methodMap =
+          traitDefaultMethods.get(traitName) ?? new Map<string, string>();
+        for (const child of bodyNode.children) {
+          if (child.type !== "function_item") continue;
+          // Trait fns without a body are abstract; only keep ones that
+          // have a `body` child block.
+          const fnBody = child.childForFieldName("body");
+          if (!fnBody) continue;
+          const fnNameNode = child.childForFieldName("name");
+          if (!fnNameNode) continue;
+          const methodName = fnNameNode.text;
+          // Prefer the explicit extracted method symbolId if the adapter
+          // recorded one under `Trait::method`; otherwise fall back to a
+          // synthetic node id so downstream callers can still form an
+          // edge key.
+          const nodeId = `${traitName}::${methodName}`;
+          const symbolId = symbolByNodeId.get(nodeId);
+          if (symbolId) {
+            methodMap.set(methodName, symbolId);
+          }
+        }
+        if (methodMap.size > 0) {
+          traitDefaultMethods.set(traitName, methodMap);
+        }
+      }
+    } else if (node.type === "impl_item") {
+      // Only `impl Trait for Type` has a `trait` field; `impl Type` does
+      // not. tree-sitter-rust exposes both via `childForFieldName`.
+      const traitNode = node.childForFieldName("trait");
+      const typeNode = node.childForFieldName("type");
+      if (traitNode && typeNode) {
+        const traitName = normalizeRustTypeName(traitNode.text);
+        const typeName = normalizeRustTypeName(typeNode.text);
+        if (traitName && typeName) {
+          const existing = implementedTraitsByType.get(typeName) ?? [];
+          if (!existing.includes(traitName)) existing.push(traitName);
+          implementedTraitsByType.set(typeName, existing);
+        }
+      }
+    }
+    for (const child of node.children) {
+      visit(child);
+    }
+  };
+
+  visit(tree.rootNode);
+  return { traitDefaultMethods, implementedTraitsByType };
+}
+
+/**
+ * Phase 2 Task 2.4.1 — resolves `receiverType.method` to a trait's
+ * default implementation when the receiver type doesn't define the
+ * method locally. Returns the trait's method symbolId or null.
+ */
+function resolveTraitDefaultMethod(
+  receiverType: string,
+  methodName: string,
+  localImplMethodsByType: Map<string, Map<string, string>>,
+  traitDefaults: TraitDefaultMap,
+): string | null {
+  const normalized = normalizeRustTypeName(receiverType);
+  const localMethods = localImplMethodsByType.get(normalized);
+  if (localMethods?.has(methodName)) {
+    // Local override wins over the trait default.
+    return null;
+  }
+  const traits =
+    traitDefaults.implementedTraitsByType.get(normalized) ?? [];
+  for (const traitName of traits) {
+    const methodMap = traitDefaults.traitDefaultMethods.get(traitName);
+    const hit = methodMap?.get(methodName);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Phase 2 Task 2.4.2 — grouped and aliased `use` resolution.
+ *
+ * Parses the file's `use` declarations and returns a map from the local
+ * alias name to the underlying source name (what the target file
+ * actually exports). Callers can use this to translate a call's
+ * identifier back to its source name before looking it up in the
+ * regular `importedNameToSymbolIds` map.
+ */
+function buildRustUseAliasMap(source: string): Map<string, string> {
+  const aliasToSource = new Map<string, string>();
+  const bindings = parseRustUseDeclarations(source);
+  for (const b of bindings) {
+    if (b.isWildcard) continue;
+    if (b.localName === b.sourceName) continue;
+    aliasToSource.set(b.localName, b.sourceName);
+  }
+  return aliasToSource;
+}
+
+/**
+ * Phase 2 Task 2.4.2 — returns `ReExport` records for every `pub use`
+ * binding in the file. Used to drive the shared barrel walker when
+ * tracing re-export chains across modules.
+ */
+function buildRustReExportsForFile(source: string): ReExport[] {
+  const bindings = parseRustUseDeclarations(source);
+  const reExports: ReExport[] = [];
+  for (const b of bindings) {
+    if (!b.isReExport || b.isWildcard) continue;
+    // The target file is expressed as a Rust module specifier; the
+    // walker is path-keyed, so callers are expected to resolve
+    // specifiers themselves before feeding them to `followBarrelChain`.
+    reExports.push({
+      exportedName: b.localName,
+      targetFile: b.specifier,
+      targetName: b.sourceName,
+    });
+  }
+  return reExports;
+}
+
+/**
+ * Phase 2 Task 2.4.2 — follows a `pub use` chain starting from `startFile`
+ * to locate the real definition of `symbolName`. The walker is bounded
+ * by `MAX_BARREL_DEPTH` and returns the final file/name pair or null.
+ */
+function followRustBarrelChain(
+  symbolName: string,
+  startFile: string,
+  reExportsByFile: Map<string, readonly ReExport[]>,
+): { resolvedFile: string; resolvedName: string } | null {
+  const hooks = hooksFromMap(reExportsByFile);
+  const walked = followBarrelChain(symbolName, startFile, hooks);
+  if (!walked) return null;
+  return {
+    resolvedFile: walked.resolvedFile,
+    resolvedName: walked.resolvedName,
+  };
+}
+
 function resolveRustPass2CallTarget(params: {
   call: ExtractedCall;
   callerSymbol: ExtractedSymbol;
@@ -611,6 +874,11 @@ function resolveRustPass2CallTarget(params: {
   globalNameToSymbolIds?: Map<string, string[]>;
   callerFilePath?: string;
   symbolIdDetails?: Map<string, { filePath: string; exported: boolean }>;
+  // Phase 2 Task 2.4.x additions.
+  aliasToSourceName?: Map<string, string>;
+  traitDefaults?: TraitDefaultMap;
+  selfImplType?: string | null;
+  receiverTypes?: Map<string, string>;
 }): RustResolvedCall | null {
   const {
     call,
@@ -626,13 +894,17 @@ function resolveRustPass2CallTarget(params: {
     globalNameToSymbolIds,
     callerFilePath,
     symbolIdDetails,
+    aliasToSourceName,
+    traitDefaults,
+    selfImplType,
+    receiverTypes,
   } = params;
 
   if (call.calleeSymbolId && nodeIdToSymbolId.has(call.calleeSymbolId)) {
     return {
       symbolId: nodeIdToSymbolId.get(call.calleeSymbolId) ?? null,
       isResolved: true,
-      confidence: 0.93,
+      confidence: RUST_SAME_FILE_ALREADY_BOUND_CONFIDENCE,
       resolution: "same-file",
     };
   }
@@ -656,9 +928,26 @@ function resolveRustPass2CallTarget(params: {
     return {
       symbolId: directImportedCandidates[0],
       isResolved: true,
-      confidence: 0.9,
+      confidence: confidenceFor("import-direct"),
       resolution: "use-import",
     };
+  }
+
+  // Phase 2 Task 2.4.2 — aliased `use` (`use foo::bar as renamed`).
+  // Translate the local alias back to its source name and retry.
+  const aliasedSourceName = aliasToSourceName?.get(identifier);
+  if (aliasedSourceName) {
+    const aliasedCandidates = toUniqueCandidates(
+      importedNameToSymbolIds.get(aliasedSourceName),
+    );
+    if (aliasedCandidates.length === 1) {
+      return {
+        symbolId: aliasedCandidates[0],
+        isResolved: true,
+        confidence: confidenceFor("import-aliased"),
+        resolution: "use-import-aliased",
+      };
+    }
   }
 
   if (identifier.includes("::")) {
@@ -674,7 +963,7 @@ function resolveRustPass2CallTarget(params: {
       return {
         symbolId: namespace.get(member) ?? null,
         isResolved: true,
-        confidence: 0.9,
+        confidence: confidenceFor("import-direct"),
         resolution: "use-import",
       };
     }
@@ -688,7 +977,7 @@ function resolveRustPass2CallTarget(params: {
       return {
         symbolId: lastNameImportedCandidates[0],
         isResolved: true,
-        confidence: 0.9,
+        confidence: confidenceFor("import-direct"),
         resolution: "use-import",
       };
     }
@@ -698,13 +987,26 @@ function resolveRustPass2CallTarget(params: {
     return {
       symbolId: globalCandidates[0],
       isResolved: true,
-      confidence: 0.9,
+      confidence: confidenceFor("import-direct"),
       resolution: "use-import",
     };
   }
 
   if (identifier.includes("::")) {
     const parts = identifier.split("::").filter(Boolean);
+    // Phase 2 Task 2.4.3 — `Self::method` resolves to the enclosing impl.
+    if (parts.length >= 2 && parts[0] === "Self" && selfImplType) {
+      const methodName = parts[parts.length - 1];
+      const methodBucket = localImplMethodsByType.get(selfImplType);
+      if (methodBucket?.has(methodName)) {
+        return {
+          symbolId: methodBucket.get(methodName) ?? null,
+          isResolved: true,
+          confidence: confidenceFor("same-file-lexical"),
+          resolution: "self-impl-method",
+        };
+      }
+    }
     if (parts.length >= 2) {
       const ownerType = normalizeRustTypeName(parts[parts.length - 2]);
       const methodName = parts[parts.length - 1];
@@ -713,9 +1015,26 @@ function resolveRustPass2CallTarget(params: {
         return {
           symbolId: methodBucket.get(methodName) ?? null,
           isResolved: true,
-          confidence: 0.9,
+          confidence: confidenceFor("same-file-lexical"),
           resolution: "impl-method",
         };
+      }
+      // Phase 2 Task 2.4.1 — fall back to trait default method.
+      if (traitDefaults) {
+        const traitHit = resolveTraitDefaultMethod(
+          ownerType,
+          methodName,
+          localImplMethodsByType,
+          traitDefaults,
+        );
+        if (traitHit) {
+          return {
+            symbolId: traitHit,
+            isResolved: true,
+            confidence: confidenceFor("trait-default"),
+            resolution: "trait-default",
+          };
+        }
       }
     }
   }
@@ -733,7 +1052,7 @@ function resolveRustPass2CallTarget(params: {
           return {
             symbolId: methodBucket.get(methodName) ?? null,
             isResolved: true,
-            confidence: 0.9,
+            confidence: confidenceFor("same-file-lexical"),
             resolution: "impl-method",
           };
         }
@@ -745,9 +1064,33 @@ function resolveRustPass2CallTarget(params: {
       return {
         symbolId: receiverNamespace.get(methodName) ?? null,
         isResolved: true,
-        confidence: 0.9,
+        confidence: confidenceFor("same-file-lexical"),
         resolution: "impl-method",
       };
+    }
+
+    // Phase 2 Task 2.4.1 — trait-default dispatch for receiver.method()
+    // when the receiver's type has no local override of the method.
+    if (traitDefaults) {
+      const receiverType = receiver === "self"
+        ? (selfImplType ?? parseOwnerTypeFromNodeId(callerSymbol.nodeId))
+        : receiverTypes?.get(receiver);
+      if (receiverType) {
+        const traitHit = resolveTraitDefaultMethod(
+          receiverType,
+          methodName,
+          localImplMethodsByType,
+          traitDefaults,
+        );
+        if (traitHit) {
+          return {
+            symbolId: traitHit,
+            isResolved: true,
+            confidence: confidenceFor("trait-default"),
+            resolution: "trait-default",
+          };
+        }
+      }
     }
   }
 
@@ -759,7 +1102,7 @@ function resolveRustPass2CallTarget(params: {
       return {
         symbolId: candidates[0],
         isResolved: true,
-        confidence: 0.88,
+        confidence: confidenceFor("module-qualified"),
         resolution: "crate-path",
       };
     }
@@ -772,7 +1115,7 @@ function resolveRustPass2CallTarget(params: {
     return {
       symbolId: sameModuleCandidates[0],
       isResolved: true,
-      confidence: 0.82,
+      confidence: confidenceFor("header-pair"),
       resolution: "same-module",
     };
   }
@@ -781,7 +1124,7 @@ function resolveRustPass2CallTarget(params: {
     return {
       symbolId: globalCandidates[0],
       isResolved: true,
-      confidence: 0.45,
+      confidence: RUST_GLOBAL_FALLBACK_CONFIDENCE,
       resolution: "global-fallback",
     };
   }
@@ -802,7 +1145,7 @@ function resolveRustPass2CallTarget(params: {
       return {
         symbolId: disambiguated,
         isResolved: true,
-        confidence: 0.55,
+        confidence: confidenceFor("disambiguated"),
         resolution: "disambiguated",
       };
     }
@@ -811,7 +1154,7 @@ function resolveRustPass2CallTarget(params: {
   return {
     symbolId: null,
     isResolved: false,
-    confidence: 0.35,
+    confidence: confidenceFor("heuristic-only"),
     resolution: "unresolved",
     targetName: identifier,
     candidateCount:
@@ -871,6 +1214,14 @@ async function resolveRustCallEdgesPass2(params: {
   let calls: ExtractedCall[];
   let imports: ReturnType<typeof adapter.extractImports>;
   let receiverTypes: Map<string, string>;
+  // Phase 2 Task 2.4.x — trait defaults + per-call Self::impl type are
+  // computed while the tree is still live. Extracted outside the try
+  // so they can be referenced after the tree is released.
+  let traitDefaultsRaw: TraitDefaultMap = {
+    traitDefaultMethods: new Map(),
+    implementedTraitsByType: new Map(),
+  };
+  const selfImplTypeByCallKey = new Map<string, string>();
   try {
     extractedSymbols = adapter.extractSymbols(
       tree,
@@ -885,6 +1236,32 @@ async function resolveRustCallEdgesPass2(params: {
     ) as ExtractedCall[];
     imports = adapter.extractImports(tree, content, filePath);
     receiverTypes = inferRustReceiverTypes(tree);
+    // Build trait default map using the raw extractedSymbols; the
+    // `filteredSymbolDetails` layer is unavailable here, so pass a
+    // synthesised list that only carries the nodeId + synthetic
+    // symbolId so the helper's lookup still succeeds for the trait's
+    // own method entries. The real symbolId mapping is applied later
+    // via `normaliseTraitDefaultsWithSymbolIds`.
+    traitDefaultsRaw = buildRustTraitDefaultMap(
+      tree,
+      extractedSymbols.map((es) => ({
+        extractedSymbol: es,
+        symbolId: es.nodeId,
+      })),
+    );
+    // Pre-compute the enclosing impl type for every call site so the
+    // resolver can answer `Self::method` lookups without re-walking
+    // the tree per call.
+    for (const c of calls) {
+      const implType = findEnclosingImplType(
+        tree,
+        c.range.startLine - 1,
+        c.range.startCol,
+      );
+      if (implType) {
+        selfImplTypeByCallKey.set(callRangeKey(c.range), implType);
+      }
+    }
   } finally {
     (tree as unknown as { delete?: () => void }).delete?.();
   }
@@ -983,6 +1360,38 @@ async function resolveRustCallEdgesPass2(params: {
     }
   }
 
+  // Phase 2 Task 2.4.2 — precompute the alias->source map from the raw
+  // source text so aliased `use` imports resolve via the existing
+  // `importedNameToSymbolIds` index.
+  const aliasToSourceName = buildRustUseAliasMap(content);
+
+  // Phase 2 Task 2.4.1 — remap trait default method symbolIds from the
+  // synthetic nodeIds populated during parsing to the real persisted
+  // symbolIds (which are the keys we emit in call edges).
+  const traitDefaults: TraitDefaultMap = {
+    traitDefaultMethods: new Map(),
+    implementedTraitsByType: traitDefaultsRaw.implementedTraitsByType,
+  };
+  const nodeIdToPersistedSymbolId = new Map<string, string>();
+  for (const detail of filteredSymbolDetails) {
+    nodeIdToPersistedSymbolId.set(
+      detail.extractedSymbol.nodeId,
+      detail.symbolId,
+    );
+  }
+  for (const [traitName, methodMap] of traitDefaultsRaw.traitDefaultMethods) {
+    const remapped = new Map<string, string>();
+    for (const [methodName, syntheticId] of methodMap) {
+      const persistedId = nodeIdToPersistedSymbolId.get(syntheticId);
+      if (persistedId) {
+        remapped.set(methodName, persistedId);
+      }
+    }
+    if (remapped.size > 0) {
+      traitDefaults.traitDefaultMethods.set(traitName, remapped);
+    }
+  }
+
   const now = new Date().toISOString();
   const edgesToInsert: ladybugDb.EdgeRow[] = [];
   let createdEdges = 0;
@@ -996,6 +1405,8 @@ async function resolveRustCallEdgesPass2(params: {
         continue;
       }
 
+      const selfImplType =
+        selfImplTypeByCallKey.get(callRangeKey(call.range)) ?? null;
       const resolved = resolveRustPass2CallTarget({
         call,
         callerSymbol: detail.extractedSymbol,
@@ -1010,6 +1421,10 @@ async function resolveRustCallEdgesPass2(params: {
         globalNameToSymbolIds,
         callerFilePath: fileMeta.path,
         symbolIdDetails,
+        aliasToSourceName,
+        traitDefaults,
+        selfImplType,
+        receiverTypes,
       });
       if (!resolved) {
         continue;
@@ -1035,6 +1450,13 @@ async function resolveRustCallEdgesPass2(params: {
         });
         createdCallEdges.add(edgeKey);
         createdEdges++;
+        if (telemetry) {
+          recordPass2ResolverEdge(
+            telemetry,
+            "pass2-rust",
+            bucketForResolution(resolved.resolution),
+          );
+        }
       } else if (resolved.targetName) {
         // Skip Rust macro invocations (original identifier retains !)
         if (call.calleeIdentifier.endsWith("!")) {
@@ -1068,6 +1490,9 @@ async function resolveRustCallEdgesPass2(params: {
         });
         createdCallEdges.add(edgeKey);
         createdEdges++;
+        if (telemetry) {
+          recordPass2ResolverUnresolved(telemetry, "pass2-rust", "unresolved");
+        }
       }
     }
   }
@@ -1126,8 +1551,14 @@ export {
   buildCratePathFunctionIndex,
   buildLocalImplMethodNamespaces,
   buildRustModuleIndex,
+  buildRustReExportsForFile,
+  buildRustTraitDefaultMap,
+  buildRustUseAliasMap,
   buildSameModuleFunctionIndex,
+  callRangeKey,
   disambiguateRustCandidates,
+  findEnclosingImplType,
+  followRustBarrelChain,
   inferRustModulePath,
   inferRustReceiverTypes,
   isExternalCrateCall,
@@ -1135,4 +1566,157 @@ export {
   normalizeRustTypeName,
   parseOwnerTypeFromNodeId,
   resolveRustPass2CallTarget,
+  resolveTraitDefaultMethod,
 };
+export type { TraitDefaultMap };
+
+/**
+ * Phase 2 Task 2.4.2 — grouped / aliased `use` parser.
+ *
+ * Parses a Rust source file's `use` declarations from the raw text and
+ * returns a list of per-name import bindings. Each binding records the
+ * specifier the binding was declared under (e.g. `crate::utils`), the
+ * name the caller uses locally (`localName`), and the name actually
+ * exported by the target file (`sourceName`). For unaliased bindings
+ * these are equal; for `bar as renamed` they differ.
+ *
+ * This is a text-based parser rather than an AST walk so it can be
+ * unit tested without instantiating tree-sitter. It tolerates multiline
+ * `use` declarations and nested group lists, which is enough for the
+ * Task 2.4.2 acceptance fixtures; deeply nested groups and
+ * conditional-compilation items are intentionally out of scope.
+ */
+export interface RustUseBinding {
+  specifier: string;
+  localName: string;
+  sourceName: string;
+  isReExport: boolean;
+  isWildcard: boolean;
+}
+
+export function parseRustUseDeclarations(source: string): RustUseBinding[] {
+  const bindings: RustUseBinding[] = [];
+  // Strip line comments so comment text does not interfere with matching.
+  const cleaned = source.replace(/\/\/[^\n]*/g, "");
+  const useRegex = /\b(pub\s+)?use\s+([^;]+);/g;
+  let match: RegExpExecArray | null;
+  while ((match = useRegex.exec(cleaned)) !== null) {
+    const isReExport = Boolean(match[1]);
+    const rawBody = match[2].replace(/\s+/g, " ").trim();
+    parseRustUseBody(rawBody, isReExport, bindings);
+  }
+  return bindings;
+}
+
+function parseRustUseBody(
+  body: string,
+  isReExport: boolean,
+  out: RustUseBinding[],
+): void {
+  const braceIdx = body.indexOf("{");
+  if (braceIdx === -1) {
+    parseRustUseLeaf(body, isReExport, out);
+    return;
+  }
+  const prefix = body.slice(0, braceIdx).replace(/::\s*$/, "").trim();
+  const closeIdx = body.lastIndexOf("}");
+  if (closeIdx === -1 || closeIdx <= braceIdx) {
+    return;
+  }
+  const inner = body.slice(braceIdx + 1, closeIdx).trim();
+  const parts = splitTopLevelGroupList(inner);
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    if (trimmed.includes("{")) {
+      // Nested group list — recurse with the combined prefix.
+      const joined = prefix ? `${prefix}::${trimmed}` : trimmed;
+      parseRustUseBody(joined, isReExport, out);
+      continue;
+    }
+    const leaf = prefix ? `${prefix}::${trimmed}` : trimmed;
+    parseRustUseLeaf(leaf, isReExport, out);
+  }
+}
+
+function parseRustUseLeaf(
+  leaf: string,
+  isReExport: boolean,
+  out: RustUseBinding[],
+): void {
+  const trimmed = leaf.trim();
+  if (!trimmed) return;
+  // Detect `as` alias clause (whitespace-delimited).
+  const asMatch = trimmed.match(/^(.+?)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)\s*$/);
+  let pathText: string;
+  let aliasName: string | null = null;
+  if (asMatch) {
+    pathText = asMatch[1].trim();
+    aliasName = asMatch[2];
+  } else {
+    pathText = trimmed;
+  }
+  const isWildcard = pathText.endsWith("*");
+  if (isWildcard) {
+    const specifier = pathText.replace(/::\s*\*$/, "").trim();
+    out.push({
+      specifier,
+      localName: "*",
+      sourceName: "*",
+      isReExport,
+      isWildcard: true,
+    });
+    return;
+  }
+  const segments = pathText
+    .split("::")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (segments.length === 0) return;
+  const sourceName = segments[segments.length - 1];
+  if (sourceName === "self") {
+    // `use foo::self` re-imports the module itself; bind the parent segment.
+    if (segments.length >= 2) {
+      const specifier = segments.slice(0, -2).join("::");
+      const moduleName = segments[segments.length - 2];
+      out.push({
+        specifier,
+        localName: aliasName ?? moduleName,
+        sourceName: moduleName,
+        isReExport,
+        isWildcard: false,
+      });
+    }
+    return;
+  }
+  const specifier = segments.slice(0, -1).join("::");
+  out.push({
+    specifier,
+    localName: aliasName ?? sourceName,
+    sourceName,
+    isReExport,
+    isWildcard: false,
+  });
+}
+
+function splitTopLevelGroupList(inner: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let buf = "";
+  for (const ch of inner) {
+    if (ch === "{") {
+      depth++;
+      buf += ch;
+    } else if (ch === "}") {
+      depth--;
+      buf += ch;
+    } else if (ch === "," && depth === 0) {
+      parts.push(buf);
+      buf = "";
+    } else {
+      buf += ch;
+    }
+  }
+  if (buf.trim()) parts.push(buf);
+  return parts;
+}

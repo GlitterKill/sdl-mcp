@@ -20,6 +20,8 @@ import type {
   Pass2ResolverResult,
   Pass2Target,
 } from "../types.js";
+import { confidenceFor } from "../confidence.js";
+import { collectCommandEvalCallSites } from "./shell-pass2-helpers.js";
 
 type ExtractedSymbol = {
   nodeId: string;
@@ -68,6 +70,13 @@ type ShellRepoIndex = {
 };
 
 const SHELL_PASS2_EXTENSIONS = new Set([".sh", ".bash"]);
+
+/**
+ * Extra confidence for a same-file call whose tree-sitter node id matches an
+ * existing symbol exactly. Slightly above the generic `same-file-lexical`
+ * legacy tier because the nodeId match is effectively unambiguous.
+ */
+const SHELL_SAME_FILE_EXACT_CONFIDENCE = 0.93;
 
 function toFullKey(
   kind: SymbolKind,
@@ -409,7 +418,7 @@ function resolveShellPass2CallTarget(params: {
     return {
       symbolId: nodeIdToSymbolId.get(call.calleeSymbolId) ?? null,
       isResolved: true,
-      confidence: 0.93,
+      confidence: SHELL_SAME_FILE_EXACT_CONFIDENCE,
       resolution: "same-file",
     };
   }
@@ -424,7 +433,7 @@ function resolveShellPass2CallTarget(params: {
     return {
       symbolId: sourceCandidates[0],
       isResolved: true,
-      confidence: 0.9,
+      confidence: confidenceFor("import-direct"),
       resolution: "source-matched",
     };
   }
@@ -434,7 +443,7 @@ function resolveShellPass2CallTarget(params: {
     return {
       symbolId: sameDirectoryCandidates[0],
       isResolved: true,
-      confidence: 0.78,
+      confidence: confidenceFor("cross-file-name-unique"),
       resolution: "same-directory",
     };
   }
@@ -444,7 +453,7 @@ function resolveShellPass2CallTarget(params: {
     return {
       symbolId: globalCandidates[0],
       isResolved: true,
-      confidence: 0.45,
+      confidence: confidenceFor("cross-file-name-ambiguous"),
       resolution: "global-fallback",
     };
   }
@@ -452,7 +461,7 @@ function resolveShellPass2CallTarget(params: {
   return {
     symbolId: null,
     isResolved: false,
-    confidence: 0.35,
+    confidence: confidenceFor("heuristic-only"),
     resolution: "unresolved",
     targetName: identifier,
     candidateCount:
@@ -528,6 +537,12 @@ async function resolveShellCallEdgesPass2(params: {
       extractedSymbols as never,
     ) as ExtractedCall[];
     imports = adapter.extractImports(tree, content, filePath);
+    // Phase 2 Task 2.10.1 -- recognize `command foo` and `eval "foo"` as
+    // indirect call sites that the default extractor treats as external.
+    const indirectCalls = collectCommandEvalCallSites(tree.rootNode);
+    if (indirectCalls.length > 0) {
+      calls = calls.concat(indirectCalls);
+    }
   } finally {
     (tree as unknown as { delete?: () => void }).delete?.();
   }

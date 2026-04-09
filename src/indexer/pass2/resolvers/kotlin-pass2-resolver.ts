@@ -18,6 +18,29 @@ import type {
   Pass2ResolverResult,
   Pass2Target,
 } from "../types.js";
+import { confidenceFor } from "../confidence.js";
+
+/**
+ * Kotlin receiver-imported-instance literal (0.84). Off-rubric, preserved byte-for-byte.
+ */
+const KOTLIN_RECEIVER_IMPORTED_INSTANCE_CONFIDENCE = 0.84;
+
+/**
+ * Kotlin same-package literal (0.92). Off-rubric value preserved byte-for-byte.
+ */
+const KOTLIN_SAME_PACKAGE_CONFIDENCE = 0.92;
+
+/**
+ * Kotlin companion-object literal (0.88). Off-rubric, preserved byte-for-byte.
+ */
+const KOTLIN_COMPANION_OBJECT_CONFIDENCE = 0.88;
+
+/**
+ * Kotlin receiver-this literal (0.85). Differs from rubric receiver-this (0.92);
+ * preserved byte-for-byte.
+ */
+const KOTLIN_RECEIVER_THIS_CONFIDENCE = 0.85;
+
 
 type ExtractedSymbol = {
   nodeId: string;
@@ -629,7 +652,7 @@ function matchKotlinImportedInstanceMethodCall(params: {
     return {
       symbolId: methodCandidates[0],
       isResolved: true,
-      confidence: 0.84,
+      confidence: KOTLIN_RECEIVER_IMPORTED_INSTANCE_CONFIDENCE,
       resolution: "receiver-imported-instance",
     };
   }
@@ -667,7 +690,7 @@ function resolveKotlinPass2CallTarget(params: {
     return {
       symbolId: nodeIdToSymbolId.get(call.calleeSymbolId) ?? null,
       isResolved: true,
-      confidence: 0.93,
+      confidence: confidenceFor("package-qualified"),
       resolution: "same-file",
     };
   }
@@ -682,7 +705,7 @@ function resolveKotlinPass2CallTarget(params: {
     return {
       symbolId: importedCandidates[0],
       isResolved: true,
-      confidence: 0.9,
+      confidence: confidenceFor("import-direct"),
       resolution: "import-matched",
     };
   }
@@ -692,7 +715,7 @@ function resolveKotlinPass2CallTarget(params: {
     return {
       symbolId: samePackageCandidates[0],
       isResolved: true,
-      confidence: 0.92,
+      confidence: KOTLIN_SAME_PACKAGE_CONFIDENCE,
       resolution: "same-package",
     };
   }
@@ -709,7 +732,7 @@ function resolveKotlinPass2CallTarget(params: {
       return {
         symbolId: classQualifiedCandidates[0],
         isResolved: true,
-        confidence: 0.88,
+        confidence: KOTLIN_COMPANION_OBJECT_CONFIDENCE,
         resolution: "companion-object",
       };
     }
@@ -720,7 +743,7 @@ function resolveKotlinPass2CallTarget(params: {
         return {
           symbolId: companionCandidates[0],
           isResolved: true,
-          confidence: 0.88,
+          confidence: KOTLIN_COMPANION_OBJECT_CONFIDENCE,
           resolution: "companion-object",
         };
       }
@@ -732,7 +755,7 @@ function resolveKotlinPass2CallTarget(params: {
         return {
           symbolId: localClassCandidates[0],
           isResolved: true,
-          confidence: 0.85,
+          confidence: KOTLIN_RECEIVER_THIS_CONFIDENCE,
           resolution: "receiver-this",
         };
       }
@@ -756,7 +779,7 @@ function resolveKotlinPass2CallTarget(params: {
     return {
       symbolId: globalCandidates[0],
       isResolved: true,
-      confidence: 0.45,
+      confidence: confidenceFor("cross-file-name-ambiguous"),
       resolution: "global-fallback",
     };
   }
@@ -764,7 +787,7 @@ function resolveKotlinPass2CallTarget(params: {
   return {
     symbolId: null,
     isResolved: false,
-    confidence: 0.35,
+    confidence: confidenceFor("heuristic-only"),
     resolution: "unresolved",
     targetName: identifier,
     candidateCount:

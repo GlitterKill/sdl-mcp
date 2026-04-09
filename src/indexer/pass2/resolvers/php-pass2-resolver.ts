@@ -20,6 +20,29 @@ import type {
   Pass2ResolverResult,
   Pass2Target,
 } from "../types.js";
+import { confidenceFor } from "../confidence.js";
+
+/**
+ * PHP receiver-imported-instance literal (0.84). Off-rubric value preserved byte-for-byte.
+ */
+const PHP_RECEIVER_IMPORTED_INSTANCE_CONFIDENCE = 0.84;
+
+/**
+ * PHP static-call literal (0.85). Same as rubric receiver-type but kept named for clarity.
+ */
+const PHP_STATIC_CALL_CONFIDENCE = 0.85;
+
+/**
+ * PHP receiver-this literal (0.85). Differs from rubric receiver-this (0.92);
+ * preserved byte-for-byte.
+ */
+const PHP_RECEIVER_THIS_CONFIDENCE = 0.85;
+
+/**
+ * PHP same-namespace literal (0.82). Off-rubric value preserved byte-for-byte.
+ */
+const PHP_SAME_NAMESPACE_CONFIDENCE = 0.82;
+
 
 type ExtractedSymbol = {
   nodeId: string;
@@ -695,7 +718,7 @@ function matchPhpImportedInstanceMethodCall(params: {
   return {
     symbolId: importedMethodSymbol,
     isResolved: true,
-    confidence: 0.84,
+    confidence: PHP_RECEIVER_IMPORTED_INSTANCE_CONFIDENCE,
     resolution: "receiver-imported-instance",
   };
 }
@@ -857,7 +880,7 @@ async function resolvePhpPass2CallTarget(params: {
     return {
       symbolId: nodeIdToSymbolId.get(call.calleeSymbolId) ?? null,
       isResolved: true,
-      confidence: 0.93,
+      confidence: confidenceFor("package-qualified"),
       resolution: "same-file",
     };
   }
@@ -885,7 +908,7 @@ async function resolvePhpPass2CallTarget(params: {
           return {
             symbolId: importedMethodSymbol,
             isResolved: true,
-            confidence: 0.9,
+            confidence: confidenceFor("import-direct"),
             resolution: "use-import",
           };
         }
@@ -896,7 +919,7 @@ async function resolvePhpPass2CallTarget(params: {
         return {
           symbolId: namespaceImport.get(methodName) ?? null,
           isResolved: true,
-          confidence: 0.9,
+          confidence: confidenceFor("import-direct"),
           resolution: "use-import",
         };
       }
@@ -916,7 +939,7 @@ async function resolvePhpPass2CallTarget(params: {
         return {
           symbolId: psr4MethodSymbol,
           isResolved: true,
-          confidence: 0.88,
+          confidence: confidenceFor("psr4-autoload"),
           resolution: "psr4-autoload",
         };
       }
@@ -938,7 +961,7 @@ async function resolvePhpPass2CallTarget(params: {
             return {
               symbolId: localStaticMethod,
               isResolved: true,
-              confidence: 0.85,
+              confidence: PHP_STATIC_CALL_CONFIDENCE,
               resolution: "static-call",
             };
           }
@@ -956,7 +979,7 @@ async function resolvePhpPass2CallTarget(params: {
         return {
           symbolId: directStaticMethod,
           isResolved: true,
-          confidence: 0.85,
+          confidence: PHP_STATIC_CALL_CONFIDENCE,
           resolution: "static-call",
         };
       }
@@ -974,7 +997,7 @@ async function resolvePhpPass2CallTarget(params: {
           return {
             symbolId: shortStaticMethod,
             isResolved: true,
-            confidence: 0.85,
+            confidence: PHP_STATIC_CALL_CONFIDENCE,
             resolution: "static-call",
           };
         }
@@ -1000,7 +1023,7 @@ async function resolvePhpPass2CallTarget(params: {
           return {
             symbolId: localMethod,
             isResolved: true,
-            confidence: 0.85,
+            confidence: PHP_RECEIVER_THIS_CONFIDENCE,
             resolution: "receiver-this",
           };
         }
@@ -1023,7 +1046,7 @@ async function resolvePhpPass2CallTarget(params: {
       return {
         symbolId: namespaceImport.get(member) ?? null,
         isResolved: true,
-        confidence: 0.9,
+        confidence: confidenceFor("import-direct"),
         resolution: "use-import",
       };
     }
@@ -1034,7 +1057,7 @@ async function resolvePhpPass2CallTarget(params: {
     return {
       symbolId: importedCandidates[0],
       isResolved: true,
-      confidence: 0.9,
+      confidence: confidenceFor("import-direct"),
       resolution: "use-import",
     };
   }
@@ -1044,7 +1067,7 @@ async function resolvePhpPass2CallTarget(params: {
     return {
       symbolId: localCandidates[0],
       isResolved: true,
-      confidence: 0.93,
+      confidence: confidenceFor("package-qualified"),
       resolution: "same-file",
     };
   }
@@ -1054,7 +1077,7 @@ async function resolvePhpPass2CallTarget(params: {
     return {
       symbolId: sameNamespaceCandidates[0],
       isResolved: true,
-      confidence: 0.82,
+      confidence: PHP_SAME_NAMESPACE_CONFIDENCE,
       resolution: "same-namespace",
     };
   }
@@ -1064,7 +1087,7 @@ async function resolvePhpPass2CallTarget(params: {
     return {
       symbolId: globalCandidates[0],
       isResolved: true,
-      confidence: 0.45,
+      confidence: confidenceFor("cross-file-name-ambiguous"),
       resolution: "global-fallback",
     };
   }
@@ -1072,7 +1095,7 @@ async function resolvePhpPass2CallTarget(params: {
   return {
     symbolId: null,
     isResolved: false,
-    confidence: 0.35,
+    confidence: confidenceFor("heuristic-only"),
     resolution: "unresolved",
     targetName: identifier,
     candidateCount:

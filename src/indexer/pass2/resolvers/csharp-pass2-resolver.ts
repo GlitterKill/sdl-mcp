@@ -23,6 +23,30 @@ import type {
   Pass2ResolverResult,
   Pass2Target,
 } from "../types.js";
+import { confidenceFor } from "../confidence.js";
+
+/**
+ * C# using-import literal (0.9). Differs from rubric import-direct value
+ * (0.9 matches but kept as named const for clarity).
+ */
+const CSHARP_USING_IMPORT_CONFIDENCE = 0.9;
+
+/**
+ * C# same-namespace literal (0.92). Off-rubric value preserved byte-for-byte.
+ */
+const CSHARP_SAME_NAMESPACE_CONFIDENCE = 0.92;
+
+/**
+ * C# receiver-this literal (0.85). Differs from rubric receiver-this (0.92);
+ * preserved byte-for-byte.
+ */
+const CSHARP_RECEIVER_THIS_CONFIDENCE = 0.85;
+
+/**
+ * C# static-using literal (0.8). Same as rubric global-fallback but kept named.
+ */
+const CSHARP_STATIC_USING_CONFIDENCE = 0.8;
+
 
 type ExtractedSymbol = {
   nodeId: string;
@@ -777,7 +801,7 @@ function resolveCSharpPass2CallTarget(params: {
     return {
       symbolId: nodeIdToSymbolId.get(call.calleeSymbolId) ?? null,
       isResolved: true,
-      confidence: 0.93,
+      confidence: confidenceFor("package-qualified"),
       resolution: "same-file",
     };
   }
@@ -792,7 +816,7 @@ function resolveCSharpPass2CallTarget(params: {
     return {
       symbolId: usingCandidates[0],
       isResolved: true,
-      confidence: 0.9,
+      confidence: CSHARP_USING_IMPORT_CONFIDENCE,
       resolution: "using-import",
     };
   }
@@ -807,7 +831,7 @@ function resolveCSharpPass2CallTarget(params: {
       return {
         symbolId: namespace.get(member) ?? null,
         isResolved: true,
-        confidence: 0.9,
+        confidence: CSHARP_USING_IMPORT_CONFIDENCE,
         resolution: "using-import",
       };
     }
@@ -822,7 +846,7 @@ function resolveCSharpPass2CallTarget(params: {
       return {
         symbolId: sameNamespaceMethodCandidates[0],
         isResolved: true,
-        confidence: 0.92,
+        confidence: CSHARP_SAME_NAMESPACE_CONFIDENCE,
         resolution: "same-namespace",
       };
     }
@@ -842,7 +866,7 @@ function resolveCSharpPass2CallTarget(params: {
             return {
               symbolId: candidates[0],
               isResolved: true,
-              confidence: 0.85,
+              confidence: CSHARP_RECEIVER_THIS_CONFIDENCE,
               resolution: "receiver-this",
             };
           }
@@ -857,7 +881,7 @@ function resolveCSharpPass2CallTarget(params: {
     return {
       symbolId: sameNamespaceCandidates[0],
       isResolved: true,
-      confidence: 0.92,
+      confidence: CSHARP_SAME_NAMESPACE_CONFIDENCE,
       resolution: "same-namespace",
     };
   }
@@ -867,7 +891,7 @@ function resolveCSharpPass2CallTarget(params: {
     return {
       symbolId: staticUsingCandidates[0],
       isResolved: true,
-      confidence: 0.8,
+      confidence: CSHARP_STATIC_USING_CONFIDENCE,
       resolution: "static-using",
     };
   }
@@ -877,7 +901,7 @@ function resolveCSharpPass2CallTarget(params: {
     return {
       symbolId: globalCandidates[0],
       isResolved: true,
-      confidence: 0.45,
+      confidence: confidenceFor("cross-file-name-ambiguous"),
       resolution: "global-fallback",
     };
   }
@@ -885,7 +909,7 @@ function resolveCSharpPass2CallTarget(params: {
   return {
     symbolId: null,
     isResolved: false,
-    confidence: 0.35,
+    confidence: confidenceFor("heuristic-only"),
     resolution: "unresolved",
     targetName: identifier,
     candidateCount:

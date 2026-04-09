@@ -19,6 +19,24 @@ import type {
   Pass2ResolverResult,
   Pass2Target,
 } from "../types.js";
+import { confidenceFor } from "../confidence.js";
+
+/**
+ * Go receiver-type literal (0.85). Differs from rubric receiver-type (also 0.85)
+ * but kept as a named const for explicitness.
+ */
+const GO_RECEIVER_TYPE_CONFIDENCE = 0.85;
+
+/**
+ * Go import-alias literal (0.82). Off-rubric value preserved byte-for-byte.
+ */
+const GO_IMPORT_ALIAS_CONFIDENCE = 0.82;
+
+/**
+ * Go same-package literal (0.92). Off-rubric value preserved byte-for-byte.
+ */
+const GO_SAME_PACKAGE_CONFIDENCE = 0.92;
+
 
 type ExtractedSymbol = {
   nodeId: string;
@@ -449,7 +467,7 @@ function resolveGoPass2CallTarget(params: {
     return {
       symbolId: nodeIdToSymbolId.get(call.calleeSymbolId) ?? null,
       isResolved: true,
-      confidence: 0.93,
+      confidence: confidenceFor("package-qualified"),
       resolution: "same-file",
     };
   }
@@ -468,7 +486,7 @@ function resolveGoPass2CallTarget(params: {
       return {
         symbolId: receiverNamespace.get(member) ?? null,
         isResolved: true,
-        confidence: 0.85,
+        confidence: GO_RECEIVER_TYPE_CONFIDENCE,
         resolution: "receiver-type",
       };
     }
@@ -478,7 +496,7 @@ function resolveGoPass2CallTarget(params: {
       return {
         symbolId: namespace.get(member) ?? null,
         isResolved: true,
-        confidence: 0.9,
+        confidence: confidenceFor("import-direct"),
         resolution: "module-qualified",
       };
     }
@@ -489,7 +507,7 @@ function resolveGoPass2CallTarget(params: {
     return {
       symbolId: importedCandidates[0],
       isResolved: true,
-      confidence: 0.82,
+      confidence: GO_IMPORT_ALIAS_CONFIDENCE,
       resolution: "import-alias",
     };
   }
@@ -499,7 +517,7 @@ function resolveGoPass2CallTarget(params: {
     return {
       symbolId: dotNamespace.get(identifier) ?? null,
       isResolved: true,
-      confidence: 0.82,
+      confidence: GO_IMPORT_ALIAS_CONFIDENCE,
       resolution: "import-alias",
     };
   }
@@ -509,7 +527,7 @@ function resolveGoPass2CallTarget(params: {
     return {
       symbolId: localCandidates[0],
       isResolved: true,
-      confidence: 0.9,
+      confidence: confidenceFor("import-direct"),
       resolution: "same-file",
     };
   }
@@ -519,7 +537,7 @@ function resolveGoPass2CallTarget(params: {
     return {
       symbolId: samePackageCandidates[0],
       isResolved: true,
-      confidence: 0.92,
+      confidence: GO_SAME_PACKAGE_CONFIDENCE,
       resolution: "same-package",
     };
   }
@@ -529,7 +547,7 @@ function resolveGoPass2CallTarget(params: {
     return {
       symbolId: globalCandidates[0],
       isResolved: true,
-      confidence: 0.45,
+      confidence: confidenceFor("cross-file-name-ambiguous"),
       resolution: "global-fallback",
     };
   }
@@ -537,7 +555,7 @@ function resolveGoPass2CallTarget(params: {
   return {
     symbolId: null,
     isResolved: false,
-    confidence: 0.35,
+    confidence: confidenceFor("heuristic-only"),
     resolution: "unresolved",
     targetName: identifier,
     candidateCount:

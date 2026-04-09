@@ -14,6 +14,22 @@ export type Pass2ResolverTelemetry = {
   filesProcessed: number;
   edgesCreated: number;
   elapsedMs: number;
+  /**
+   * Phase 2 Task 2.0.3 — per-resolver bucket counts. Each call edge that
+   * a resolver creates increments exactly one of these buckets so the
+   * audit-event payload can show how a resolver actually resolved its
+   * work. `unresolved` counts call sites the resolver looked at but
+   * could not bind; `brokenChain` counts edges where the import chain
+   * pointed at a file that no longer exists in the index.
+   */
+  resolvedByCompiler: number;
+  resolvedByImport: number;
+  resolvedByLexical: number;
+  resolvedByGlobal: number;
+  resolvedByHeuristic: number;
+  unresolved: number;
+  ambiguous: number;
+  brokenChain: number;
 };
 
 export type CallResolutionTelemetry = {
@@ -94,6 +110,14 @@ export function createCallResolutionTelemetry(params: {
         filesProcessed: 0,
         edgesCreated: 0,
         elapsedMs: 0,
+        resolvedByCompiler: 0,
+        resolvedByImport: 0,
+        resolvedByLexical: 0,
+        resolvedByGlobal: 0,
+        resolvedByHeuristic: 0,
+        unresolved: 0,
+        ambiguous: 0,
+        brokenChain: 0,
       } satisfies Pass2ResolverTelemetry,
     ]),
   );
@@ -151,6 +175,14 @@ function getResolverTelemetryBucket(
       filesProcessed: 0,
       edgesCreated: 0,
       elapsedMs: 0,
+      resolvedByCompiler: 0,
+      resolvedByImport: 0,
+      resolvedByLexical: 0,
+      resolvedByGlobal: 0,
+      resolvedByHeuristic: 0,
+      unresolved: 0,
+      ambiguous: 0,
+      brokenChain: 0,
     };
   }
   return telemetry.resolverBreakdown[resolverId];
@@ -169,14 +201,144 @@ export function recordPass2ResolverResult(
   params: {
     edgesCreated: number;
     elapsedMs: number;
+    resolvedByCompiler?: number;
+    resolvedByImport?: number;
+    resolvedByLexical?: number;
+    resolvedByGlobal?: number;
+    unresolved?: number;
+    ambiguous?: number;
+    brokenChain?: number;
   },
 ): void {
   const bucket = getResolverTelemetryBucket(telemetry, resolverId);
   bucket.filesProcessed++;
   bucket.edgesCreated += params.edgesCreated;
   bucket.elapsedMs += params.elapsedMs;
+  bucket.resolvedByCompiler += params.resolvedByCompiler ?? 0;
+  bucket.resolvedByImport += params.resolvedByImport ?? 0;
+  bucket.resolvedByLexical += params.resolvedByLexical ?? 0;
+  bucket.resolvedByGlobal += params.resolvedByGlobal ?? 0;
+  bucket.unresolved += params.unresolved ?? 0;
+  bucket.ambiguous += params.ambiguous ?? 0;
+  bucket.brokenChain += params.brokenChain ?? 0;
 }
 
+/**
+ * Records a single resolved call edge under the appropriate per-resolver
+ * telemetry bucket. Used by per-language resolvers that want to attribute
+ * each edge to a strategy without rolling their own counter logic.
+ */
+/**
+ * Maps a freeform `resolved.resolution` string emitted by per-language
+ * resolvers to the canonical telemetry bucket. Centralized here so the
+ * audit-event payload remains consistent across resolvers and so adding
+ * a new resolution string is a single-file change. Unknown strings fall
+ * back to `"heuristic"` which is the most pessimistic bucket and surfaces
+ * an unmapped strategy as a low-confidence telemetry signal.
+ */
+export function bucketForResolution(
+  resolution: string,
+): "compiler" | "import" | "lexical" | "global" | "ambiguous" | "heuristic" {
+  switch (resolution) {
+    // Compiler / type-checker
+    case "compiler-resolved":
+      return "compiler";
+    // Import-based bindings
+    case "import-direct":
+    case "import-aliased":
+    case "import-barrel":
+    case "import-matched":
+    case "import-static":
+    case "namespace-import":
+    case "namespace-qualified":
+    case "wildcard-import":
+    case "use-import":
+    case "use-import-aliased":
+    case "crate-path":
+    case "package-qualified":
+    case "module-qualified":
+    case "receiver-imported-instance":
+    case "header-pair":
+    case "psr4-autoload":
+      return "import";
+    // Lexical / same-file / scope-walked
+    case "same-file":
+    case "same-file-lexical":
+    case "same-module":
+    case "same-package":
+    case "receiver-this":
+    case "receiver-self":
+    case "receiver-self-scope":
+    case "receiver-type":
+    case "impl-method":
+    case "self-impl-method":
+    case "trait-default":
+    case "inheritance-method":
+    case "extension-method":
+    case "cross-file-name-unique":
+      return "lexical";
+    // Multi-candidate disambiguation
+    case "disambiguated":
+    case "cross-file-name-ambiguous":
+    case "function-pointer":
+      return "ambiguous";
+    // Global / builtin fallback
+    case "global-preferred":
+    case "global-fallback":
+    case "builtin-or-global":
+      return "global";
+    // Heuristic / decorator-chain / catch-all
+    case "decorator-chain":
+    case "heuristic-only":
+      return "heuristic";
+    default:
+      return "heuristic";
+  }
+}
+
+export function recordPass2ResolverEdge(
+  telemetry: CallResolutionTelemetry,
+  resolverId: string,
+  bucket: "compiler" | "import" | "lexical" | "global" | "ambiguous" | "heuristic",
+): void {
+  const t = getResolverTelemetryBucket(telemetry, resolverId);
+  switch (bucket) {
+    case "compiler":
+      t.resolvedByCompiler++;
+      break;
+    case "import":
+      t.resolvedByImport++;
+      break;
+    case "lexical":
+      t.resolvedByLexical++;
+      break;
+    case "heuristic":
+      t.resolvedByHeuristic++;
+      break;
+    case "global":
+      t.resolvedByGlobal++;
+      break;
+    case "ambiguous":
+      t.ambiguous++;
+      break;
+  }
+}
+
+/**
+ * Records a single unresolved call site under the appropriate per-resolver
+ * bucket. Used so unresolved telemetry rolls up by resolver, not just by
+ * the global pass2SymbolMapping counter.
+ */
+export function recordPass2ResolverUnresolved(
+  telemetry: CallResolutionTelemetry,
+  resolverId: string,
+  reason: "unresolved" | "ambiguous" | "brokenChain" = "unresolved",
+): void {
+  const t = getResolverTelemetryBucket(telemetry, resolverId);
+  if (reason === "ambiguous") t.ambiguous++;
+  else if (reason === "brokenChain") t.brokenChain++;
+  else t.unresolved++;
+}
 export function incRecord(
   record: Record<string, number>,
   key: string,
