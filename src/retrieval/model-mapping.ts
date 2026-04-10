@@ -16,8 +16,10 @@
 export interface EmbeddingModelInfo {
   /** Dimensionality of the embedding vector. */
   dimension: number;
-  /** Prefix used to derive Symbol node property names. */
+  /** Prefix used to derive Symbol node property names (legacy STRING storage). */
   propertyPrefix: string;
+  /** Property name for the numeric DOUBLE[] vector column (for Kuzu vector indexing). */
+  vecProperty: string;
   /** Deterministic vector index name for LadybugDB. */
   indexName: string;
 }
@@ -27,9 +29,9 @@ export interface EmbeddingModelInfo {
  * Add new models here; every other helper derives from this map.
  */
 export const EMBEDDING_MODELS: Readonly<Record<string, EmbeddingModelInfo>> = {
-  "all-MiniLM-L6-v2": { dimension: 384, propertyPrefix: "embeddingMiniLM", indexName: "symbol_vec_minilm_l6_v2" },
-  "nomic-embed-text-v1.5": { dimension: 768, propertyPrefix: "embeddingNomic", indexName: "symbol_vec_nomic_embed_v15" },
-  "jina-embeddings-v2-base-code": { dimension: 768, propertyPrefix: "embeddingJinaCode", indexName: "symbol_vec_jina_code_v2" },
+  "all-MiniLM-L6-v2": { dimension: 384, propertyPrefix: "embeddingMiniLM", vecProperty: "embeddingMiniLMVec", indexName: "symbol_vec_minilm_l6_v2" },
+  "nomic-embed-text-v1.5": { dimension: 768, propertyPrefix: "embeddingNomic", vecProperty: "embeddingNomicVec", indexName: "symbol_vec_nomic_embed_v15" },
+  "jina-embeddings-v2-base-code": { dimension: 768, propertyPrefix: "embeddingJinaCode", vecProperty: "embeddingJinaCodeVec", indexName: "symbol_vec_jina_code_v2" },
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -80,6 +82,11 @@ export function getUpdatedAtPropertyName(model: string): string | null {
  *
  * @example getVectorIndexName("all-MiniLM-L6-v2") // "symbol_vec_minilm_l6_v2"
  */
+export function getVecPropertyName(model: string): string | null {
+  const info = EMBEDDING_MODELS[model];
+  return info ? info.vecProperty : null;
+}
+
 export function getVectorIndexName(model: string): string | null {
   const info = EMBEDDING_MODELS[model];
   return info ? info.indexName : null;

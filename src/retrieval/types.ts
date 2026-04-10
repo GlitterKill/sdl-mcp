@@ -70,6 +70,25 @@ export interface RetrievalCapabilities {
   vectorMiniLM: boolean;
   vectorNomic: boolean;
   vectorJinaCode: boolean;
+  /** Structured reasons explaining why capabilities are unavailable. */
+  degradationReasons?: DegradationReason[];
+}
+
+export type DegradationReasonCode =
+  | "fts-extension-unavailable"
+  | "vector-extension-unavailable"
+  | "fts-index-missing"
+  | "vector-index-missing"
+  | "db-connection-failed"
+  | "db-corrupted"
+  | "health-check-error"
+  | "config-disabled";
+
+export interface DegradationReason {
+  code: DegradationReasonCode;
+  message: string;
+  /** Which capability is affected. */
+  affects: "fts" | "vector" | "all";
 }
 
 // ---------------------------------------------------------------------------

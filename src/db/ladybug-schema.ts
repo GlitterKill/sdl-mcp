@@ -79,6 +79,9 @@ const NODE_TABLES: string[] = [
     embeddingJinaCode STRING,
     embeddingJinaCodeCardHash STRING,
     embeddingJinaCodeUpdatedAt STRING,
+    embeddingMiniLMVec DOUBLE[],
+    embeddingNomicVec DOUBLE[],
+    embeddingJinaCodeVec DOUBLE[],
     external BOOL DEFAULT false,
     scipSymbol STRING,
     source STRING DEFAULT 'treesitter',
@@ -150,7 +153,9 @@ const NODE_TABLES: string[] = [
     embeddingMiniLMUpdatedAt STRING,
     embeddingNomic STRING,
     embeddingNomicCardHash STRING,
-    embeddingNomicUpdatedAt STRING
+    embeddingNomicUpdatedAt STRING,
+    embeddingMiniLMVec DOUBLE[],
+    embeddingNomicVec DOUBLE[]
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS Process (
@@ -208,7 +213,9 @@ const NODE_TABLES: string[] = [
     embeddingMiniLMUpdatedAt STRING,
     embeddingNomic STRING,
     embeddingNomicCardHash STRING,
-    embeddingNomicUpdatedAt STRING
+    embeddingNomicUpdatedAt STRING,
+    embeddingMiniLMVec DOUBLE[],
+    embeddingNomicVec DOUBLE[]
   )`,
 
   // TODO(hybrid-retrieval): Remove after Stage 1 when SymbolEmbedding migration is verified complete

@@ -26,6 +26,19 @@ import {
   isLadybugAvailable,
   getExtensionCapabilities,
 } from "../../db/ladybug.js";
+// Lazy-loaded to avoid import failures in test environments
+let _checkIndexHealth: typeof import("../../retrieval/index-lifecycle.js").checkIndexHealth | null = null;
+async function getCheckIndexHealth() {
+  if (!_checkIndexHealth) {
+    try {
+      const mod = await import("../../retrieval/index-lifecycle.js");
+      _checkIndexHealth = mod.checkIndexHealth;
+    } catch {
+      return null;
+    }
+  }
+  return _checkIndexHealth;
+}
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import {
@@ -49,6 +62,7 @@ const DOCTOR_CHECKS = [
   },
   { name: "Graph database (Ladybug)", check: checkLadybugDb },
   { name: "DB extension capabilities (fts/vector)", check: checkLadybugExtensions },
+  { name: "Retrieval indexes (FTS/vector)", check: checkRetrievalIndexes },
   { name: "Semantic embedding models", check: checkSemanticModels },
   { name: "Runtime execution", check: checkRuntimeExecution },
 ];
@@ -680,6 +694,63 @@ async function checkLadybugExtensions(
     status,
     message: `Kuzu extensions — ${parts.join("; ")}`,
   };
+}
+
+async function checkRetrievalIndexes(
+  _options: DoctorOptions,
+): Promise<Omit<DoctorResult, "name">> {
+  if (!isLadybugAvailable()) {
+    return {
+      status: "warn",
+      message: "Graph database driver not available \u2014 skipping retrieval index check",
+    };
+  }
+
+  try {
+    const conn = await getLadybugConn();
+    const checkFn = await getCheckIndexHealth();
+    if (!checkFn) {
+      return { status: "warn" as const, message: "Retrieval index health module not available" };
+    }
+    const health = await checkFn(conn);
+
+    const parts: string[] = [];
+    parts.push(`FTS: ${health.fts.exists ? "present" : "ABSENT"}`);
+
+    const vectorPresent = health.vectors.filter((v) => v.exists);
+    const vectorAbsent = health.vectors.filter((v) => !v.exists);
+    if (vectorPresent.length > 0) {
+      parts.push(`vector indexes present: ${vectorPresent.map((v) => v.model).join(", ")}`);
+    }
+    if (vectorAbsent.length > 0) {
+      parts.push(`vector indexes absent: ${vectorAbsent.map((v) => v.model).join(", ")}`);
+    }
+
+    if (!health.fts.exists && vectorAbsent.length === health.vectors.length) {
+      return {
+        status: "warn",
+        message:
+          "No retrieval indexes found. Run 'sdl-mcp index' to create them. " +
+          "If the database was recently created or recovered, a full reindex will " +
+          "rebuild both FTS and vector indexes automatically.",
+      };
+    }
+
+    const status = health.fts.exists ? "pass" : "warn";
+    return {
+      status,
+      message: `Retrieval indexes \u2014 ${parts.join("; ")}`,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isCorruption = msg.includes("WAL") || msg.includes("corrupt") || msg.includes("wal");
+    return {
+      status: isCorruption ? "fail" as const : "warn" as const,
+      message: isCorruption
+        ? `Database corruption detected: ${msg}. Delete the database file and run 'sdl-mcp index' to rebuild.`
+        : `Retrieval index check failed: ${msg}`,
+    };
+  }
 }
 
 async function checkSemanticModels(

@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 
@@ -145,3 +145,54 @@ describe("CLI doctor command - LadybugDB", () => {
     );
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Recovery guidance (Task 8)
+// ---------------------------------------------------------------------------
+describe("doctor recovery guidance", () => {
+  const doctorSrc = readFileSync(
+    join(process.cwd(), "src/cli/commands/doctor.ts"),
+    "utf8",
+  );
+  const ladybugSrc = readFileSync(
+    join(process.cwd(), "src/db/ladybug.ts"),
+    "utf8",
+  );
+
+  it("doctor distinguishes corruption from index absence", () => {
+    assert.ok(
+      doctorSrc.includes("Database corruption detected"),
+      "doctor should detect and report corruption",
+    );
+  });
+
+  it("doctor provides reindex guidance for missing indexes", () => {
+    assert.ok(
+      doctorSrc.includes("sdl-mcp index"),
+      "doctor should suggest 'sdl-mcp index' for missing indexes",
+    );
+  });
+
+  it("ladybug.ts has WAL-specific recovery guidance", () => {
+    assert.ok(
+      ladybugSrc.includes("WAL (write-ahead log) corruption"),
+      "ladybug.ts should have WAL-specific guidance",
+    );
+  });
+
+  it("ladybug.ts distinguishes lock errors from corruption", () => {
+    assert.ok(
+      ladybugSrc.includes("locked by another process"),
+      "ladybug.ts should distinguish lock errors",
+    );
+  });
+
+  it("recovery guidance mentions semantic embeddings are recomputable", () => {
+    assert.ok(
+      ladybugSrc.includes("recomputed"),
+      "should mention embeddings are recomputable artifacts",
+    );
+  });
+});
+

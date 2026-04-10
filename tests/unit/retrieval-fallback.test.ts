@@ -54,7 +54,7 @@ function shouldFallbackToLegacy(
 }
 
 function makeCaps(overrides: Partial<RetrievalCapabilities> = {}): RetrievalCapabilities {
-  return { fts: true, vectorMiniLM: true, vectorNomic: true, ...overrides };
+  return { fts: true, vectorMiniLM: true, vectorNomic: true, vectorJinaCode: true, ...overrides };
 }
 
 // ---------------------------------------------------------------------------
@@ -182,5 +182,68 @@ describe("RetrievalCapabilities", () => {
     // With no capabilities, every hybrid request should fall back.
     assert.strictEqual(shouldFallbackToLegacy(caps, { mode: "hybrid" }), true);
     assert.strictEqual(shouldFallbackToLegacy(caps, { mode: "legacy" }), true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Degradation reasons
+// ---------------------------------------------------------------------------
+describe("degradation reasons", () => {
+  it("fallback.ts exports buildDegradationReasons or includes degradation reason logic", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/retrieval/fallback.ts"),
+      "utf8",
+    );
+    assert.ok(
+      src.includes("degradationReasons"),
+      "fallback.ts should reference degradationReasons",
+    );
+  });
+
+  it("types.ts defines DegradationReason interface", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/retrieval/types.ts"),
+      "utf8",
+    );
+    assert.ok(
+      src.includes("export interface DegradationReason"),
+      "types.ts should export DegradationReason interface",
+    );
+  });
+
+  it("types.ts defines DegradationReasonCode with expected values", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/retrieval/types.ts"),
+      "utf8",
+    );
+    const codes = ["fts-extension-unavailable", "vector-extension-unavailable", "fts-index-missing", "vector-index-missing", "db-connection-failed", "health-check-error"];
+    for (const code of codes) {
+      assert.ok(
+        src.includes(code),
+        "DegradationReasonCode should include " + code,
+      );
+    }
+  });
+
+  it("RetrievalCapabilities has optional degradationReasons field", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/retrieval/types.ts"),
+      "utf8",
+    );
+    assert.ok(
+      src.includes("degradationReasons"),
+      "RetrievalCapabilities should have degradationReasons field",
+    );
+  });
+
+  it("symbol.ts propagates degradation reasons in fallback", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/mcp/tools/symbol.ts"),
+      "utf8",
+    );
+    assert.ok(
+      src.includes("degradationReasons"),
+      "symbol.ts should reference degradationReasons when building fallback reason",
+    );
   });
 });

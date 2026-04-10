@@ -11,6 +11,7 @@ import type { Connection } from "kuzu";
 import { exec, queryAll, querySingle } from "./ladybug-core.js";
 import {
   getEmbeddingPropertyName,
+  getVecPropertyName,
   getCardHashPropertyName,
   getUpdatedAtPropertyName,
 } from "../retrieval/model-mapping.js";
@@ -38,6 +39,7 @@ export interface SymbolNodeEmbeddingRow {
  */
 function resolvePropertyNames(model: string): {
   vectorProp: string;
+  vecProp: string | null;
   cardHashProp: string;
   updatedAtProp: string;
 } {
@@ -45,6 +47,7 @@ function resolvePropertyNames(model: string): {
   const cardHashProp = getCardHashPropertyName(model);
   const updatedAtProp = getUpdatedAtPropertyName(model);
 
+  const vecProp = getVecPropertyName(model);
   if (!vectorProp || !cardHashProp || !updatedAtProp) {
     throw new Error(
       `Unknown embedding model "${model}": cannot resolve Symbol node property names`,
@@ -61,7 +64,7 @@ function resolvePropertyNames(model: string): {
     }
   }
 
-  return { vectorProp, cardHashProp, updatedAtProp };
+  return { vectorProp, vecProp, cardHashProp, updatedAtProp };
 }
 
 // ---------------------------------------------------------------------------
@@ -80,7 +83,7 @@ export async function getSymbolEmbeddingFromNode(
   symbolId: string,
   model: string,
 ): Promise<SymbolNodeEmbeddingRow | null> {
-  const { vectorProp, cardHashProp, updatedAtProp } =
+  const { vectorProp, vecProp: _vecProp, cardHashProp, updatedAtProp } =
     resolvePropertyNames(model);
 
   // Property names come from the trusted EMBEDDING_MODELS registry, so
@@ -124,8 +127,9 @@ export async function setSymbolEmbeddingOnNode(
   model: string,
   vector: string,
   cardHash: string,
+  vectorArray?: number[],
 ): Promise<void> {
-  const { vectorProp, cardHashProp, updatedAtProp } =
+  const { vectorProp, vecProp, cardHashProp, updatedAtProp } =
     resolvePropertyNames(model);
 
   const updatedAt = new Date().toISOString();
@@ -138,6 +142,16 @@ export async function setSymbolEmbeddingOnNode(
          s.${updatedAtProp} = $updatedAt`,
     { symbolId, vector, cardHash, updatedAt },
   );
+
+  // Also write to the numeric DOUBLE[] column for vector indexing
+  if (vectorArray && vecProp) {
+    await exec(
+      conn,
+      `MATCH (s:Symbol {symbolId: $symbolId})
+       SET s.${vecProp} = $vectorArray`,
+      { symbolId, vectorArray },
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -161,7 +175,7 @@ export async function getSymbolEmbeddingsFromNodes(
     return result;
   }
 
-  const { vectorProp, cardHashProp, updatedAtProp } =
+  const { vectorProp, vecProp: _vecProp2, cardHashProp, updatedAtProp } =
     resolvePropertyNames(model);
 
   // Batch query: filter symbols that have a non-null vector property.

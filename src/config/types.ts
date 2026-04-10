@@ -275,6 +275,9 @@ export const SemanticRetrievalVectorIndexSchema = z.object({
 export const SemanticRetrievalVectorConfigSchema = z.object({
   enabled: z.boolean().default(true),
   topK: z.number().int().min(1).default(75),
+  /** Build-time ef_construction for HNSW index creation. */
+  efc: z.number().int().min(1).default(200),
+  /** Query-time ef_search for HNSW similarity queries. @deprecated Use efs for query-time only. */
   efs: z.number().int().min(1).default(200),
   /** Per-model HNSW index config keyed by model name. */
   indexes: z.record(z.string(), SemanticRetrievalVectorIndexSchema).default({

@@ -56,8 +56,8 @@ describe("Ladybug reindex guidance", { skip: !ladybugAvailable }, () => {
             : String(error).toLowerCase();
 
         assert.ok(
-          message.includes("database could not be opened or initialized"),
-          "error should include the database problem description",
+          message.includes("initialization failed") || message.includes("database could not be opened"),
+          "error should include initialization failure description",
         );
         assert.ok(
           containsAny(message, ["delete", "remove"]),

@@ -179,9 +179,11 @@ export async function handleSymbolSearch(
       if (!shouldFallbackToLegacy(caps, retrievalConfig)) {
         useHybrid = true;
       } else {
-        fallbackReason = !caps.fts
+        fallbackReason = caps.degradationReasons
+          ?.map((r) => r.message)
+          .join("; ") ?? (!caps.fts
           ? "FTS extension unavailable"
-          : "Retrieval health check failed";
+          : "Retrieval health check failed");
       }
     } catch (err) {
       fallbackReason = `Health check error: ${err instanceof Error ? err.message : String(err)}`;

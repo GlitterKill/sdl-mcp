@@ -4,6 +4,8 @@ import { totalmem } from "node:os";
 import { dirname } from "path";
 import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
+import { ensureIndexes, ensureEntityIndexes } from "../retrieval/index-lifecycle.js";
+import { loadConfig } from "../config/loadConfig.js";
 import { DatabaseError } from "../domain/errors.js";
 import { ConcurrencyLimiter } from "../util/concurrency.js";
 import { normalizeGraphDbPath } from "./graph-db-path.js";
@@ -78,11 +80,30 @@ const DEFAULT_CHECKPOINT_THRESHOLD_BYTES = 128 * 1024 * 1024;
 
 function formatReindexGuidanceError(dbPath: string, msg: string): string {
   logger.error("Database initialization failed", { dbPath, error: msg });
-  return (
-    `Database could not be opened or initialized. ` +
-    `If the database is corrupted, delete it and re-run indexing with: sdl-mcp index. ` +
-    `Original error: ${msg}`
-  );
+  const isWalCorruption = msg.includes("WAL") || msg.includes("wal") || msg.includes("corrupt");
+  const isLockError = msg.includes("lock") || msg.includes("EBUSY");
+
+  let guidance = `LadybugDB initialization failed at ${dbPath}: ${msg}. `;
+
+  if (isWalCorruption) {
+    guidance +=
+      "\n\nThis appears to be a WAL (write-ahead log) corruption issue. " +
+      "To recover:\n" +
+      "  1. Stop any running SDL-MCP processes\n" +
+      `  2. Delete the database file: ${dbPath}\n` +
+      "  3. Re-index all repositories: sdl-mcp index\n" +
+      "  4. Semantic embeddings will be recomputed during the next index refresh.";
+  } else if (isLockError) {
+    guidance +=
+      "\n\nThe database file appears to be locked by another process. " +
+      "Check for other SDL-MCP instances and stop them before retrying.";
+  } else {
+    guidance +=
+      "\nIf the database is corrupted, delete it and re-run indexing with: sdl-mcp index. " +
+      "Semantic embeddings are derived artifacts and will be recomputed.";
+  }
+
+  return guidance;
 }
 
 // ---------------------------------------------------------------------------
@@ -612,6 +633,32 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
       });
     }
     // else: currentVersion === LADYBUG_SCHEMA_VERSION — no-op
+
+    
+    // Step 3: Bootstrap retrieval indexes (FTS + vector) if extensions are available
+    try {
+      const sdlConfig = loadConfig();
+      const semanticConfig = sdlConfig.semantic;
+      if (semanticConfig?.enabled && semanticConfig.retrieval) {
+        const indexConn = await getLadybugConn();
+        const indexResult = await ensureIndexes(indexConn, semanticConfig.retrieval);
+        const entityResult = await ensureEntityIndexes(indexConn);
+        logger.info("Retrieval indexes bootstrapped", {
+          created: [...indexResult.created, ...entityResult.created],
+          skipped: [...indexResult.skipped, ...entityResult.skipped],
+          failed: [...indexResult.failed, ...entityResult.failed],
+        });
+      } else {
+        logger.debug("Semantic retrieval not enabled, skipping index bootstrap");
+      }
+    } catch (indexErr) {
+      // Index bootstrap failure should not block DB init
+      logger.warn(
+        `[ladybug] Retrieval index bootstrap failed (non-fatal): ${
+          indexErr instanceof Error ? indexErr.message : String(indexErr)
+        }`,
+      );
+    }
 
     // Confirm final state
     const finalConn = await getLadybugConn();

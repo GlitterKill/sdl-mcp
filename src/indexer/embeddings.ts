@@ -338,6 +338,7 @@ export async function refreshSymbolEmbeddings(params: {
         storageModel,
         toFloat16Blob(vector),
         cardHash,
+        vector,
       );
     });
     embedded += 1;

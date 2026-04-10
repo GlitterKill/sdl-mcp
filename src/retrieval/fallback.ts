@@ -10,8 +10,32 @@ import { getExtensionCapabilities, getLadybugConn } from "../db/ladybug.js";
 import { logger } from "../util/logger.js";
 import { loadConfig } from "../config/loadConfig.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
-import type { RetrievalCapabilities } from "./types.js";
+import type { RetrievalCapabilities, DegradationReason } from "./types.js";
 import { checkIndexHealth } from "./index-lifecycle.js";
+/** Build structured degradation reasons from index health data. */
+function buildDegradationReasons(
+  health: { fts: { exists: boolean }; vectors: Array<{ model: string; exists: boolean }> },
+  caps: { fts: boolean; vector: boolean },
+): DegradationReason[] {
+  const reasons: DegradationReason[] = [];
+  if (!caps.fts) {
+    reasons.push({ code: "fts-extension-unavailable", message: "FTS extension not loaded", affects: "fts" });
+  } else if (!health.fts.exists) {
+    reasons.push({ code: "fts-index-missing", message: "FTS index not found in database", affects: "fts" });
+  }
+  if (!caps.vector) {
+    reasons.push({ code: "vector-extension-unavailable", message: "Vector extension not loaded", affects: "vector" });
+  } else {
+    for (const v of health.vectors) {
+      if (!v.exists) {
+        reasons.push({ code: "vector-index-missing", message: "Vector index missing for model " + v.model, affects: "vector" });
+      }
+    }
+  }
+  return reasons;
+}
+
+
 
 // ---------------------------------------------------------------------------
 // Health / capability detection
@@ -45,6 +69,10 @@ export async function checkRetrievalHealth(
       vectorMiniLM: false,
       vectorNomic: false,
       vectorJinaCode: false,
+      degradationReasons: [
+        { code: "fts-extension-unavailable", message: "FTS extension not loaded", affects: "fts" },
+        { code: "vector-extension-unavailable", message: "Vector extension not loaded", affects: "vector" },
+      ],
     };
   }
 
@@ -73,6 +101,7 @@ export async function checkRetrievalHealth(
       vectorMiniLM,
       vectorNomic,
       vectorJinaCode,
+      degradationReasons: buildDegradationReasons(health, caps),
     };
   } catch (err) {
     // Index health check failed — fall back to extension-based proxy
@@ -88,6 +117,7 @@ export async function checkRetrievalHealth(
       vectorMiniLM: caps.vector,
       vectorNomic: caps.vector,
       vectorJinaCode: caps.vector,
+      degradationReasons: [{ code: "health-check-error", message: err instanceof Error ? err.message : String(err), affects: "all" }],
     };
   }
 }

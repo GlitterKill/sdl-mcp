@@ -123,7 +123,8 @@
       "vector": {
         "enabled": true,
         "topK": 75,
-        "efs": 200,
+        "efc": 200,
+              "efs": 200,
         "indexes": {
           "all-MiniLM-L6-v2": {
             "indexName": "symbol_vec_minilm_l6_v2"

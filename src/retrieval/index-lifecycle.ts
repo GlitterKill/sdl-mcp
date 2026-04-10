@@ -7,13 +7,14 @@
  */
 
 import type { Connection } from "kuzu";
-import { exec, queryAll } from "../db/ladybug-core.js";
+import { queryAll } from "../db/ladybug-core.js";
 import { getExtensionCapabilities } from "../db/ladybug.js";
 import { logger } from "../util/logger.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
 import {
   EMBEDDING_MODELS,
   getEmbeddingPropertyName,
+  getVecPropertyName,
   getVectorIndexName,
 } from "./model-mapping.js";
 
@@ -71,17 +72,26 @@ export interface IndexEnsureResult {
  * @param tableName - Node table name (e.g. 'Symbol', 'Memory', 'Cluster')
  * @param indexName - Name for the new index
  */
+
+/** Validate that a name is a safe Kuzu identifier (letters, digits, underscores). */
+function validateIdentifier(name: string, label: string): void {
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+    throw new Error(`Invalid ${label}: ${JSON.stringify(name)} — must be an alphanumeric identifier`);
+  }
+}
 export async function createFtsIndex(
   conn: Connection,
   tableName: string,
   indexName: string,
 ): Promise<boolean> {
   try {
-    // Kuzu FTS extension syntax: CALL CREATE_FTS_INDEX(tableName, indexName, propertyNames)
-    await exec(
+    // Kuzu FTS procedures require literal identifiers, not parameterised values.
+    // Validate names to prevent injection before string interpolation.
+    validateIdentifier(tableName, "table name");
+    validateIdentifier(indexName, "index name");
+    await queryAll(
       conn,
-      `CALL CREATE_FTS_INDEX($tableName, $indexName, ['searchText'])`,
-      { tableName, indexName },
+      `CALL CREATE_FTS_INDEX('${tableName}', '${indexName}', ['searchText'])`,
     );
     logger.info(`[index-lifecycle] FTS index '${indexName}' created on ${tableName}.searchText`);
     return true;
@@ -118,17 +128,19 @@ export async function createVectorIndex(
   propertyName: string,
   indexName: string,
   dimension: number,
-  efs: number = 200,
+  efc: number = 200,
 ): Promise<boolean> {
   try {
-    // Kuzu vector index syntax: CALL CREATE_VECTOR_INDEX(tableName, indexName, propertyName, dimension, efs)
-    await exec(
+    // Kuzu vector procedures require literal identifiers, not parameterised values.
+    validateIdentifier(tableName, "table name");
+    validateIdentifier(propertyName, "property name");
+    validateIdentifier(indexName, "index name");
+    await queryAll(
       conn,
-      `CALL CREATE_VECTOR_INDEX($tableName, $indexName, $propertyName, $dimension, $efs)`,
-      { tableName, indexName, propertyName, dimension, efs },
+      `CALL CREATE_VECTOR_INDEX('${tableName}', '${indexName}', '${propertyName}', metric := 'cosine', efc := ${Number(efc)})`,
     );
     logger.info(
-      `[index-lifecycle] Vector index '${indexName}' created on ${tableName}.${propertyName} (dim=${dimension}, efs=${efs})`,
+      `[index-lifecycle] Vector index '${indexName}' created on ${tableName}.${propertyName} (dim=${dimension}, efc=${efc})`,
     );
     return true;
   } catch (err) {
@@ -153,6 +165,8 @@ interface ShowIndexRow {
   index_type?: string;
   property?: string;
   property_name?: string;
+  property_names?: string[];
+  table_name?: string;
   [key: string]: unknown;
 }
 
@@ -163,12 +177,21 @@ interface ShowIndexRow {
  */
 export async function showIndexes(conn: Connection): Promise<IndexInfo[]> {
   try {
-    const rows = await queryAll<ShowIndexRow>(conn, "CALL SHOW_INDEXES()");
+    const rows = await queryAll<ShowIndexRow>(conn, "CALL SHOW_INDEXES() RETURN *");
     const results: IndexInfo[] = [];
     for (const row of rows) {
-      const name = String(row.name ?? row.index_name ?? "");
-      const rawType = String(row.type ?? row.index_type ?? "").toLowerCase();
-      const property = String(row.property ?? row.property_name ?? "");
+      const name = String(row.index_name ?? row.name ?? "");
+      const rawType = String(row.index_type ?? row.type ?? "").toLowerCase();
+
+      // FTS indexes report property_names (array), vector indexes use property_name (string)
+      let property = "";
+      if (Array.isArray(row.property_names) && row.property_names.length > 0) {
+        property = String(row.property_names[0]);
+      } else if (row.property_name) {
+        property = String(row.property_name);
+      } else if (row.property) {
+        property = String(row.property);
+      }
 
       const type: "fts" | "vector" =
         rawType.includes("vector") || rawType.includes("hnsw")
@@ -180,7 +203,7 @@ export async function showIndexes(conn: Connection): Promise<IndexInfo[]> {
     return results;
   } catch (err) {
     logger.debug(
-      `[index-lifecycle] SHOW_INDEXES() unavailable: ${
+      `[index-lifecycle] SHOW_INDEXES() RETURN * unavailable: ${
         err instanceof Error ? err.message : String(err)
       }`,
     );
@@ -248,7 +271,7 @@ export async function checkIndexHealth(
 
   const vectors = Object.entries(EMBEDDING_MODELS).map(([model]) => {
     const fallbackName = getVectorIndexName(model);
-    const propName = getEmbeddingPropertyName(model);
+    const propName = getVecPropertyName(model) ?? getEmbeddingPropertyName(model);
     // Check by property name match as well as the derived index name
     const byName = fallbackName !== null && indexNames.has(fallbackName);
     const byProp =
@@ -339,7 +362,7 @@ export async function ensureIndexes(
         result.skipped.push(name);
       }
     } else {
-      const efs = vectorConfig?.efs ?? 200;
+      const efc = vectorConfig?.efc ?? vectorConfig?.efs ?? 200;
 
       for (const [model, modelInfo] of Object.entries(EMBEDDING_MODELS)) {
         const propName = getEmbeddingPropertyName(model);
@@ -370,7 +393,7 @@ export async function ensureIndexes(
           propName,
           indexName,
           modelInfo.dimension,
-          efs,
+          efc,
         );
         if (ok) {
           result.created.push(indexName);

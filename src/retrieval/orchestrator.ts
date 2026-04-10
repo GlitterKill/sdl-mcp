@@ -286,6 +286,7 @@ function resolveConfig(): SemanticRetrievalConfig {
     vector: {
       enabled: true,
       topK: DEFAULT_VECTOR_TOP_K,
+      efc: 200,
       efs: 200,
       indexes: {
         "all-MiniLM-L6-v2": { indexName: "symbol_vec_minilm_l6_v2" },
@@ -350,7 +351,7 @@ export async function hybridSearch(
       results: [],
       ...(options.includeEvidence
         ? {
-            evidence: buildEvidence([], [], 0, "fallback-to-legacy"),
+            evidence: buildEvidence([], [], 0, "fallback-to-legacy: " + (caps.degradationReasons?.map((r) => r.message).join("; ") ?? "retrieval unavailable")),
           }
         : {}),
     };
@@ -415,7 +416,13 @@ export async function hybridSearch(
     const providerType = resolveEmbeddingProviderType();
     const vectorTopK = config.vector.topK ?? DEFAULT_VECTOR_TOP_K;
 
-    for (const [modelName, modelInfo] of Object.entries(EMBEDDING_MODELS)) {
+    // Prioritize Jina for Symbol retrieval, then Nomic, then MiniLM
+    const sortedModels = Object.entries(EMBEDDING_MODELS).sort(([a], [b]) => {
+      // Jina-code first for symbol search, then nomic, then miniLM
+      const priority = (m: string) => m.includes("jina") ? 0 : m.includes("nomic") ? 1 : 2;
+      return priority(a) - priority(b);
+    });
+    for (const [modelName, modelInfo] of sortedModels) {
       // Check capability for this specific model.
       const source = vectorSourceForModel(modelName);
       const capAvailable =
@@ -734,7 +741,7 @@ export async function entitySearch(
     return {
       results: [],
       ...(options.includeEvidence
-        ? { evidence: buildEntityEvidence([], [], 0, "fallback-to-legacy") }
+        ? { evidence: buildEntityEvidence([], [], 0, "fallback-to-legacy: " + (caps.degradationReasons?.map((r) => r.message).join("; ") ?? "retrieval unavailable")) }
         : {}),
     };
   }

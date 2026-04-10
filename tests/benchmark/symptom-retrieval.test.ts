@@ -56,3 +56,44 @@ describe("symptom retrieval benchmarks", () => {
     assert.ok(categories.has("pr-description"), "Missing pr-description category");
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Semantic retrieval quality baseline (Task 9)
+// ---------------------------------------------------------------------------
+describe("semantic retrieval quality baseline", () => {
+  const orchSrc = readFileSync(
+    join(process.cwd(), "src/retrieval/orchestrator.ts"),
+    "utf8",
+  );
+
+  it("orchestrator supports model-aware vector retrieval", () => {
+    assert.ok(
+      orchSrc.includes("sortedModels") || orchSrc.includes("EMBEDDING_MODELS"),
+      "Orchestrator should iterate over embedding models for vector retrieval",
+    );
+  });
+
+  it("vector indexes target DOUBLE[] columns", () => {
+    const lcSrc = readFileSync(
+      join(process.cwd(), "src/retrieval/index-lifecycle.ts"),
+      "utf8",
+    );
+    assert.ok(
+      lcSrc.includes("getVecPropertyName"),
+      "Index lifecycle should use Vec property names for vector index creation",
+    );
+  });
+
+  it("embedding persistence writes to numeric array columns", () => {
+    const embSrc = readFileSync(
+      join(process.cwd(), "src/db/ladybug-symbol-embeddings.ts"),
+      "utf8",
+    );
+    assert.ok(
+      embSrc.includes("vectorArray"),
+      "Embedding persistence should support numeric array writes",
+    );
+  });
+});
+

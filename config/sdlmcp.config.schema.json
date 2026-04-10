@@ -642,6 +642,12 @@
                   "default": 75,
                   "description": "Maximum candidates to retrieve from the vector index before fusion."
                 },
+                "efc": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 200,
+                  "description": "HNSW ef_construction parameter for index build time."
+                },
                 "efs": {
                   "type": "integer",
                   "minimum": 1,

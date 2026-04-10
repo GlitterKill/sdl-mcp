@@ -196,23 +196,23 @@ describe("shouldFallbackToLegacy (inline)", () => {
   }
 
   it("returns true when mode is legacy (regardless of caps)", () => {
-    assert.equal(shouldFallbackToLegacy({ fts: true, vectorMiniLM: true, vectorNomic: true }, { mode: "legacy" }), true);
+    assert.equal(shouldFallbackToLegacy({ fts: true, vectorMiniLM: true, vectorNomic: true, vectorJinaCode: true }, { mode: "legacy" }), true);
   });
 
   it("returns true when FTS is unavailable in hybrid mode", () => {
-    assert.equal(shouldFallbackToLegacy({ fts: false, vectorMiniLM: true, vectorNomic: true }, { mode: "hybrid" }), true);
+    assert.equal(shouldFallbackToLegacy({ fts: false, vectorMiniLM: true, vectorNomic: true, vectorJinaCode: true }, { mode: "hybrid" }), true);
   });
 
   it("returns false when FTS available in hybrid mode (vector optional)", () => {
-    assert.equal(shouldFallbackToLegacy({ fts: true, vectorMiniLM: false, vectorNomic: false }, { mode: "hybrid" }), false);
+    assert.equal(shouldFallbackToLegacy({ fts: true, vectorMiniLM: false, vectorNomic: false, vectorJinaCode: false }, { mode: "hybrid" }), false);
   });
 
   it("returns false when all capabilities available in hybrid mode", () => {
-    assert.equal(shouldFallbackToLegacy({ fts: true, vectorMiniLM: true, vectorNomic: true }, { mode: "hybrid" }), false);
+    assert.equal(shouldFallbackToLegacy({ fts: true, vectorMiniLM: true, vectorNomic: true, vectorJinaCode: true }, { mode: "hybrid" }), false);
   });
 
   it("returns true when all capabilities unavailable in hybrid mode", () => {
-    assert.equal(shouldFallbackToLegacy({ fts: false, vectorMiniLM: false, vectorNomic: false }, { mode: "hybrid" }), true);
+    assert.equal(shouldFallbackToLegacy({ fts: false, vectorMiniLM: false, vectorNomic: false, vectorJinaCode: false }, { mode: "hybrid" }), true);
   });
 });
 
@@ -263,3 +263,91 @@ describe("source-text verification", () => {
     assert.ok(src.includes("touchedFileIds"), "should filter touched files from hybrid results");
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Hybrid retrieval regression (Task 9)
+// ---------------------------------------------------------------------------
+describe("hybrid retrieval regression — non-legacy evidence", () => {
+  const repoRoot = path.resolve(import.meta.dirname, "../..");
+  const orchSrc = fs.readFileSync(
+    path.join(repoRoot, "src/retrieval/orchestrator.ts"),
+    "utf8",
+  );
+  const fallbackSrc = fs.readFileSync(
+    path.join(repoRoot, "src/retrieval/fallback.ts"),
+    "utf8",
+  );
+  const typesSrc = fs.readFileSync(
+    path.join(repoRoot, "src/retrieval/types.ts"),
+    "utf8",
+  );
+
+  it("orchestrator reports specific retrieval sources (not just legacy)", () => {
+    assert.ok(
+      orchSrc.includes("vector:jinacode"),
+      "Should report vector:jinacode source",
+    );
+    assert.ok(
+      orchSrc.includes("vector:nomic"),
+      "Should report vector:nomic source",
+    );
+    assert.ok(
+      orchSrc.includes('"fts"'),
+      "Should report fts source",
+    );
+  });
+
+  it("degradation reasons are structured and actionable", () => {
+    assert.ok(
+      typesSrc.includes("DegradationReasonCode"),
+      "Types should define DegradationReasonCode",
+    );
+    assert.ok(
+      typesSrc.includes("fts-index-missing"),
+      "Should have specific code for FTS index missing",
+    );
+    assert.ok(
+      typesSrc.includes("vector-index-missing"),
+      "Should have specific code for vector index missing",
+    );
+  });
+
+  it("fallback includes degradation reasons in return value", () => {
+    assert.ok(
+      fallbackSrc.includes("buildDegradationReasons"),
+      "Fallback should build degradation reasons",
+    );
+  });
+
+  it("showIndexes uses RETURN * syntax for index introspection", () => {
+    const lcSrc = fs.readFileSync(
+      path.join(repoRoot, "src/retrieval/index-lifecycle.ts"),
+      "utf8",
+    );
+    assert.ok(
+      lcSrc.includes("CALL SHOW_INDEXES() RETURN *"),
+      "showIndexes must use RETURN * syntax",
+    );
+    assert.ok(
+      !lcSrc.includes('queryAll<ShowIndexRow>(conn, "CALL SHOW_INDEXES()")'),
+      "Must NOT use bare SHOW_INDEXES() without RETURN *",
+    );
+  });
+
+  it("initLadybugDb bootstraps retrieval indexes at startup", () => {
+    const ladybugSrc = fs.readFileSync(
+      path.join(repoRoot, "src/db/ladybug.ts"),
+      "utf8",
+    );
+    assert.ok(
+      ladybugSrc.includes("ensureIndexes("),
+      "initLadybugDb must call ensureIndexes at startup",
+    );
+    assert.ok(
+      ladybugSrc.includes("ensureEntityIndexes("),
+      "initLadybugDb must call ensureEntityIndexes at startup",
+    );
+  });
+});
+

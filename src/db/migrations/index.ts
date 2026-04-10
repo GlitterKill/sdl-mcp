@@ -16,6 +16,7 @@ import * as m009 from "./m009-add-symbol-summary-metadata.js";
 import * as m010 from "./m010-add-jina-code-embedding.js";
 import * as m011 from "./m011-add-centrality-and-shadow-clusters.js";
 import * as m012 from "./m012-add-symbol-repo-id-for-algo-projections.js";
+import * as m013 from "./m013-semantic-vector-array-storage.js";
 
 /** Ordered list of all migrations. Must be sorted by version ascending. */
 export const migrations: Migration[] = [
@@ -27,6 +28,7 @@ export const migrations: Migration[] = [
   m010,
   m011,
   m012,
+  m013,
 ];
 
 // --- Registry validation (runs at import time) ---
