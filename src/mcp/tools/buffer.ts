@@ -28,7 +28,11 @@ export async function handleBufferPush(
   liveIndex?: LiveIndexCoordinator,
 ): Promise<BufferPushResponse> {
   try {
-    const request = BufferPushRequestSchema.parse(args);
+    // Coerce numeric timestamp (epoch ms) to ISO string before validation
+    const normalized = args != null && typeof args === "object" && "timestamp" in args && typeof (args as Record<string, unknown>).timestamp === "number"
+      ? { ...args as Record<string, unknown>, timestamp: new Date((args as Record<string, unknown>).timestamp as number).toISOString() }
+      : args;
+    const request = BufferPushRequestSchema.parse(normalized);
     return await resolveLiveIndex(liveIndex).pushBufferUpdate(request);
   } catch (error) {
     if (error instanceof ZodError) {

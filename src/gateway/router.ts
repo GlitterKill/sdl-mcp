@@ -271,6 +271,22 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
  * @param ctx - MCP tool context
  * @returns The handler result
  */
+/**
+ * Pre-normalize action args before Zod schema validation.
+ * Coerces known fields (e.g., numeric timestamps) so callers don't
+ * need to know the exact schema type expectations.
+ */
+function preNormalizeArgs(
+  action: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  // buffer.push: coerce numeric timestamp (epoch ms) to ISO string
+  if (action === "buffer.push" && typeof args.timestamp === "number") {
+    return { ...args, timestamp: new Date(args.timestamp).toISOString() };
+  }
+  return args;
+}
+
 export async function routeGatewayCall(
   rawArgs: unknown,
   actionMap: ActionMap,
@@ -293,8 +309,12 @@ export async function routeGatewayCall(
   const { action: _action, ...rest } = args;
   const merged = repoId !== undefined ? { repoId, ...rest } : rest;
 
+  // Pre-normalize known fields before schema validation.
+  // Coerce numeric timestamps to ISO strings so callers can pass epoch ms.
+  const normalized = preNormalizeArgs(action, merged as Record<string, unknown>);
+
   // Second-pass validation using the original strict Zod schema
-  const parsed = entry.schema.parse(merged);
+  const parsed = entry.schema.parse(normalized);
 
   return entry.handler(parsed, ctx);
 }

@@ -2,6 +2,7 @@ import {
   type SymbolSearchRequest,
   SymbolSearchResponse,
   type SymbolGetCardRequest,
+  SymbolGetCardRequestSchema,
   SymbolGetCardResponse,
   type SymbolGetCardsRequest,
   SymbolGetCardsResponse,
@@ -430,8 +431,13 @@ export async function handleSymbolSearch(
         ) * 100,
       ) / 100,
   }));
+  // Apply a higher relevance floor for explicit semantic search to
+  // prevent very low-scoring results from polluting the output.
+  const effectiveThreshold = semanticEnabled && semanticRequested
+    ? Math.max(MIN_RELEVANCE_THRESHOLD, 0.4)
+    : MIN_RELEVANCE_THRESHOLD;
   const relevant = scoredResults.filter(
-    (r) => r.relevance >= MIN_RELEVANCE_THRESHOLD,
+    (r) => r.relevance >= effectiveThreshold,
   );
   const hasExactMatch = relevant.some(
     (r) => r.name.toLowerCase() === request.query.toLowerCase(),
@@ -643,7 +649,7 @@ async function buildCardsForSymbolIds(
 export async function handleSymbolGetCard(
   args: unknown,
 ): Promise<SymbolGetCardResponse | NotModifiedResponse> {
-  const request = args as SymbolGetCardRequest;
+  const request = SymbolGetCardRequestSchema.parse(args);
   const conn = await getLadybugConn();
 
   const repo = await ladybugDb.getRepo(conn, request.repoId);

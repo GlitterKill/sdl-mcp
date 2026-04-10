@@ -359,6 +359,10 @@ export interface ActionDescriptor {
   fallbacks: string[];
   /** Required parameter names (always populated, excludes repoId) */
   requiredParams: string[];
+  /** Whether this action is disabled (e.g., memory tools when memory.enabled is false) */
+  disabled?: boolean;
+  /** Reason the action is disabled */
+  disabledReason?: string;
   /** Schema summary (if requested) */
   schemaSummary?: SchemaSummary;
   /** Example args (if requested) */
@@ -733,6 +737,30 @@ export function buildCatalog(opts?: {
     cachedActionMap = createActionMap(opts?.liveIndex);
     cachedCatalog = buildBaseCatalogFromMap(cachedActionMap);
     cachedMemoryVisible = memoryVisible;
+  }
+
+  // When memory is disabled, inject disabled placeholders so callers
+  // know the tools exist and how to enable them.
+  const MEMORY_ACTIONS_LIST = ["memory.store", "memory.query", "memory.remove", "memory.surface"];
+  if (!memoryVisible) {
+    const hasMemory = cachedCatalog.some((d) => MEMORY_ACTIONS_LIST.includes(d.action));
+    if (!hasMemory) {
+      for (const action of MEMORY_ACTIONS_LIST) {
+        const fn = ACTION_TO_FN[action];
+        if (!fn) continue;
+        cachedCatalog.push({
+          action,
+          fn,
+          description: ACTION_DESCRIPTIONS[action] ?? "",
+          tags: ACTION_TAGS[action] ?? [],
+          kind: "gateway",
+          requiredParams: [],
+          disabled: true,
+          disabledReason: "Enable with memory.enabled: true in sdlmcp.config.json",
+          ...getActionMetadata(action),
+        });
+      }
+    }
   }
 
   if (!includeSchemas && !includeExamples) {

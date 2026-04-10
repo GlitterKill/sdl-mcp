@@ -6,7 +6,7 @@ import {
   createOnnxSession,
   type OnnxEmbeddingSession,
 } from "./embeddings-local.js";
-import { getModelInfo, applyDocumentPrefix } from "./model-registry.js";
+import { getModelInfo, applyDocumentPrefix, isModelAvailable } from "./model-registry.js";
 import type { IndexProgress } from "./indexer.js";
 import {
   getSymbolEmbeddingFromNode,
@@ -51,6 +51,12 @@ class LocalEmbeddingProvider implements EmbeddingProvider {
 
   constructor(modelName: string) {
     this.modelName = modelName;
+    // Eagerly detect missing model files so isMockFallback() is accurate
+    // before the first embed() call.  This lets callers (e.g. the retrieval
+    // orchestrator) skip unavailable models without triggering a warn log.
+    if (!isModelAvailable(modelName)) {
+      this.fallbackToMock = true;
+    }
   }
 
   async embed(texts: string[]): Promise<number[][]> {

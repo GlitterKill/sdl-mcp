@@ -35,7 +35,7 @@ import {
 
 export const ActionSearchRequestSchema = z.object({
   query: z.string().min(1),
-  limit: z.number().int().min(1).max(50).default(10),
+  limit: z.number().int().min(1).max(50).default(20),
   offset: z.number().int().min(0).optional().describe("Skip first N results"),
   includeSchemas: z.boolean().default(false),
   includeExamples: z.boolean().default(false),

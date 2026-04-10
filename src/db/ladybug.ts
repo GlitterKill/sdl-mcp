@@ -9,7 +9,7 @@ import { loadConfig } from "../config/loadConfig.js";
 import { DatabaseError } from "../domain/errors.js";
 import { ConcurrencyLimiter } from "../util/concurrency.js";
 import { normalizeGraphDbPath } from "./graph-db-path.js";
-import { createSchema, getSchemaVersion } from "./ladybug-schema.js";
+import { createSchema, getSchemaVersion, migrateVecColumnsToFixedSize } from "./ladybug-schema.js";
 import { LADYBUG_SCHEMA_VERSION, migrations } from "./migrations/index.js";
 import { runPendingMigrations } from "./migration-runner.js";
 import {
@@ -375,7 +375,7 @@ async function loadExtensionsOnConnection(
       logger.debug(`Kuzu extension loaded`, { extension: ext });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.debug(`Kuzu extension LOAD skipped (best-effort)`, {
+      logger.warn(`Kuzu extension LOAD failed`, {
         extension: ext,
         reason: msg,
       });
@@ -430,6 +430,9 @@ export async function getLadybugReadConn(): Promise<LadybugConnection> {
         for (const c of [localWriteConn, ...localReadPool]) {
           await loadExtensionsOnConnection(c);
         }
+
+        // Log extension capabilities after INSTALL+LOAD phase
+        logger.info(`LadybugDB extension capabilities after pool init`, { ...extensionCapabilities });
 
         // Publish all refs atomically — no concurrent caller can see
         // partial state because no `await` between these assignments.
@@ -590,6 +593,8 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
     }
   }
 
+  let freshlyCreated = false;
+
   try {
     // Step 1: Open database and initialize connection pool
     await getLadybugDb(normalizedPath);
@@ -608,6 +613,7 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
     if (currentVersion === null) {
       // Fresh DB (SchemaVersion table missing) or corrupted (table exists, no row).
       // Run createSchema() to set up everything at latest version.
+      freshlyCreated = true;
       logger.info("Fresh database detected, creating schema", {
         version: LADYBUG_SCHEMA_VERSION,
       });
@@ -641,6 +647,14 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
       const semanticConfig = sdlConfig.semantic;
       if (semanticConfig?.enabled && semanticConfig.retrieval) {
         const indexConn = await getLadybugConn();
+        // Migrate DOUBLE[] → DOUBLE[N] for vector indexing (existing DBs)
+        // Only migrate vec columns on existing DBs — fresh DBs already have DOUBLE[N].
+        // ALTER TABLE DROP+ADD corrupts Kuzu's column cache for the current process.
+        if (!freshlyCreated) {
+          await migrateVecColumnsToFixedSize(indexConn);
+        }
+        // Get a fresh connection after DDL changes to avoid stale column cache
+
         const indexResult = await ensureIndexes(indexConn, semanticConfig.retrieval);
         const entityResult = await ensureEntityIndexes(indexConn);
         logger.info("Retrieval indexes bootstrapped", {

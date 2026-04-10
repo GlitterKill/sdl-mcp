@@ -19,14 +19,14 @@ import { getFilesByIds } from "../../db/ladybug-repos.js";
 import type { BlastRadiusItem } from "../types.js";
 import { IndexError } from "../errors.js";
 
-const DEFAULT_MAX_CHANGED_SYMBOLS = 30;
-const DEFAULT_MAX_BLAST_RADIUS = 20;
+const DEFAULT_MAX_CHANGED_SYMBOLS = 15;
+const DEFAULT_MAX_BLAST_RADIUS = 10;
 const MAX_FINDINGS = 10;
 const MAX_RECOMMENDED_TESTS = 10;
 const MAX_EVIDENCE_ITEMS = 5;
 const MAX_AFFECTED_SYMBOLS_PER_FINDING = 20;
 /** Hard cap on serialized response size to prevent unbounded output. */
-const MAX_RESPONSE_BYTES = 50_000;
+const MAX_RESPONSE_BYTES = 32_000;
 
 type ComputedDeltaWithTiers = Awaited<ReturnType<typeof computeDeltaWithTiers>>;
 type ChangedSymbol = ComputedDeltaWithTiers["changedSymbols"][number];

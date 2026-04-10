@@ -89,8 +89,8 @@ export async function createFtsIndex(
     // Validate names to prevent injection before string interpolation.
     validateIdentifier(tableName, "table name");
     validateIdentifier(indexName, "index name");
-    await queryAll(
-      conn,
+    // CALL stored procedures cannot be prepared; use conn.query() directly.
+    await conn.query(
       `CALL CREATE_FTS_INDEX('${tableName}', '${indexName}', ['searchText'])`,
     );
     logger.info(`[index-lifecycle] FTS index '${indexName}' created on ${tableName}.searchText`);
@@ -135,8 +135,8 @@ export async function createVectorIndex(
     validateIdentifier(tableName, "table name");
     validateIdentifier(propertyName, "property name");
     validateIdentifier(indexName, "index name");
-    await queryAll(
-      conn,
+    // CALL stored procedures cannot be prepared; use conn.query() directly.
+    await conn.query(
       `CALL CREATE_VECTOR_INDEX('${tableName}', '${indexName}', '${propertyName}', metric := 'cosine', efc := ${Number(efc)})`,
     );
     logger.info(
@@ -239,8 +239,8 @@ export const FILESUMMARY_VECTOR_INDEX_NAMES = {
 
 /** FileSummary embedding property names for vector indexing. */
 export const FILESUMMARY_EMBEDDING_PROPERTIES = {
-  miniLM: { property: "embeddingMiniLM", dimension: 384 },
-  nomic: { property: "embeddingNomic", dimension: 768 },
+  miniLM: { property: "embeddingMiniLMVec", dimension: 384 },
+  nomic: { property: "embeddingNomicVec", dimension: 768 },
 } as const;
 
 /** Vector index names for AgentFeedback embedding properties. */
@@ -251,8 +251,8 @@ export const AGENTFEEDBACK_VECTOR_INDEX_NAMES = {
 
 /** AgentFeedback embedding property names for vector indexing. */
 export const AGENTFEEDBACK_EMBEDDING_PROPERTIES = {
-  miniLM: { property: "embeddingMiniLM", dimension: 384 },
-  nomic: { property: "embeddingNomic", dimension: 768 },
+  miniLM: { property: "embeddingMiniLMVec", dimension: 384 },
+  nomic: { property: "embeddingNomicVec", dimension: 768 },
 } as const;
 
 /**
@@ -365,7 +365,7 @@ export async function ensureIndexes(
       const efc = vectorConfig?.efc ?? vectorConfig?.efs ?? 200;
 
       for (const [model, modelInfo] of Object.entries(EMBEDDING_MODELS)) {
-        const propName = getEmbeddingPropertyName(model);
+        const propName = getVecPropertyName(model) ?? getEmbeddingPropertyName(model);
         if (propName === null) {
           logger.debug(`[index-lifecycle] No property name for model '${model}', skipping`);
           continue;

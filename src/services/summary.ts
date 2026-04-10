@@ -138,10 +138,10 @@ export function buildContextSummary(input: {
 }): ContextSummary {
   // Enforce minimum budget per scope to prevent degenerate results
   const BUDGET_MINIMUMS: Record<string, number> = {
-    repo: 800,
-    task: 500,
-    file: 300,
-    symbol: 150,
+    repo: 600,
+    task: 300,
+    file: 200,
+    symbol: 100,
   };
   const scopeMin = BUDGET_MINIMUMS[input.scope] ?? 300;
   const budget = Math.max(scopeMin, input.budget ?? DEFAULT_SUMMARY_BUDGET);
@@ -188,10 +188,10 @@ export function buildContextSummary(input: {
 
   // Budget guidance: warn when budget is too small for the requested scope
   const BUDGET_THRESHOLDS: Record<ContextSummaryScope, number> = {
-    repo: 1500,
-    file: 500,
-    symbol: 200,
-    task: 800,
+    repo: 800,
+    file: 300,
+    symbol: 150,
+    task: 500,
   };
   const minBudget = BUDGET_THRESHOLDS[input.scope] ?? 500;
   const budgetWarning =

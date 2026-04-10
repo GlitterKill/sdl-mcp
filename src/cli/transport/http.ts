@@ -257,6 +257,11 @@ export async function routeLiveIndexApiRequest(
     const [, rawRepoId] = bufferMatch;
     const repoId = decodeURIComponent(rawRepoId);
     try {
+      const rawBody = request.body as Record<string, unknown> | undefined;
+      // Coerce numeric timestamp to ISO string before validation
+      if (rawBody && typeof rawBody.timestamp === "number") {
+        rawBody.timestamp = new Date(rawBody.timestamp).toISOString();
+      }
       const parsed = BufferPushRequestSchema.parse({
         ...(request.body as Record<string, unknown> | undefined),
         repoId,

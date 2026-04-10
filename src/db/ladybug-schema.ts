@@ -22,6 +22,7 @@
 
 import type { Connection } from "kuzu";
 import { exec, querySingle } from "./ladybug-core.js";
+import { logger } from "../util/logger.js";
 import { LADYBUG_SCHEMA_VERSION } from "./migrations/index.js";
 
 /**
@@ -79,9 +80,9 @@ const NODE_TABLES: string[] = [
     embeddingJinaCode STRING,
     embeddingJinaCodeCardHash STRING,
     embeddingJinaCodeUpdatedAt STRING,
-    embeddingMiniLMVec DOUBLE[],
-    embeddingNomicVec DOUBLE[],
-    embeddingJinaCodeVec DOUBLE[],
+    embeddingMiniLMVec DOUBLE[384],
+    embeddingNomicVec DOUBLE[768],
+    embeddingJinaCodeVec DOUBLE[768],
     external BOOL DEFAULT false,
     scipSymbol STRING,
     source STRING DEFAULT 'treesitter',
@@ -154,8 +155,8 @@ const NODE_TABLES: string[] = [
     embeddingNomic STRING,
     embeddingNomicCardHash STRING,
     embeddingNomicUpdatedAt STRING,
-    embeddingMiniLMVec DOUBLE[],
-    embeddingNomicVec DOUBLE[]
+    embeddingMiniLMVec DOUBLE[384],
+    embeddingNomicVec DOUBLE[768]
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS Process (
@@ -214,8 +215,8 @@ const NODE_TABLES: string[] = [
     embeddingNomic STRING,
     embeddingNomicCardHash STRING,
     embeddingNomicUpdatedAt STRING,
-    embeddingMiniLMVec DOUBLE[],
-    embeddingNomicVec DOUBLE[]
+    embeddingMiniLMVec DOUBLE[384],
+    embeddingNomicVec DOUBLE[768]
   )`,
 
   // TODO(hybrid-retrieval): Remove after Stage 1 when SymbolEmbedding migration is verified complete
@@ -492,3 +493,57 @@ export function supportsCallResolutionMetadata(
 ): boolean {
   return typeof schemaVersion === "number" && schemaVersion >= 2;
 }
+
+/**
+ * Migrate DOUBLE[] (variable-length LIST) embedding columns to DOUBLE[N]
+ * (fixed-size ARRAY) so HNSW vector indexes can be created.
+ * Idempotent: only runs if the column type is wrong.
+ */
+export async function migrateVecColumnsToFixedSize(conn: Connection): Promise<void> {
+  // Check if any HNSW indexes exist. If so, the columns were either already
+  // correct or a previous migration succeeded — skip to avoid the Kuzu crash
+  // that occurs when DROP+ADD is used on columns with existing HNSW indexes.
+  let hasHnswIndexes = false;
+  try {
+    const result = await conn.query("CALL SHOW_INDEXES() RETURN *");
+    const rows = await result.getAll();
+    result.close();
+    hasHnswIndexes = (rows as Array<Record<string, unknown>>).some(
+      (r) => r.index_type === "HNSW",
+    );
+  } catch {
+    // SHOW_INDEXES unavailable — assume no indexes, allow migration
+  }
+
+  if (hasHnswIndexes) {
+    logger.debug("[schema-migration] HNSW indexes already exist, skipping vec column migration");
+    return;
+  }
+
+  const migrations: Array<{ table: string; column: string; size: number }> = [
+    { table: "Symbol", column: "embeddingMiniLMVec", size: 384 },
+    { table: "Symbol", column: "embeddingNomicVec", size: 768 },
+    { table: "Symbol", column: "embeddingJinaCodeVec", size: 768 },
+    { table: "FileSummary", column: "embeddingMiniLMVec", size: 384 },
+    { table: "FileSummary", column: "embeddingNomicVec", size: 768 },
+    { table: "AgentFeedback", column: "embeddingMiniLMVec", size: 384 },
+    { table: "AgentFeedback", column: "embeddingNomicVec", size: 768 },
+  ];
+
+  let migrated = 0;
+  for (const { table, column, size } of migrations) {
+    try {
+      await conn.query(`ALTER TABLE ${table} DROP ${column}`);
+      await conn.query(`ALTER TABLE ${table} ADD ${column} DOUBLE[${size}]`);
+      logger.info(`[schema-migration] Migrated ${table}.${column} to DOUBLE[${size}]`);
+      migrated++;
+    } catch (err) {
+      logger.debug(`[schema-migration] ${table}.${column} migration skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  if (migrated > 0) {
+    logger.info(`[schema-migration] Vec column migration complete: ${migrated} column(s) converted to fixed-size ARRAY`);
+  }
+}
+

@@ -45,6 +45,11 @@ export function computeSavings(
   }
 
   if (rawEquivalent > 0 && sdlTokens > rawEquivalent) {
+    // Suppress overhead warning for trivially small raw outputs where
+    // SDL envelope overhead is expected and not actionable.
+    if (rawEquivalent < 50) {
+      return { sdlTokens, rawEquivalent, savingsPercent: 0, meter: renderOperationMeter(0) };
+    }
     // Negative savings: SDL response is larger than raw equivalent.
     // Report negative percentage so callers see the overhead honestly.
     const overheadPercent = Math.round(((sdlTokens / rawEquivalent) - 1) * 100);
