@@ -132,3 +132,8 @@ LEGACY-CLEANUP-PLAN.md
 scripts/apply-orchestrate-fix.mjs
 .fallow/cache.bin
 .fallowrc.json
+runner.out
+runner-tap.out
+.gitignore
+draft-parser.out
+draft-tap.out
