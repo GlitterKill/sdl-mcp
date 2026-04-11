@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "description": "Symbol Delta Ledger MCP Server - Cards-first code context for polyglot repositories",
   "type": "module",
   "main": "dist/main.js",
@@ -123,7 +123,7 @@
     "chokidar": "^5.0.0",
     "kuzu": "npm:@ladybugdb/core@0.15.2",
     "onnxruntime-node": "^1.24.3",
-    "sdl-mcp-native": "0.10.3",
+    "sdl-mcp-native": "0.10.4",
     "tokenizers": "0.13.4-rc2",
     "tokenizers-darwin-arm64": "0.13.4-rc2",
     "tokenizers-darwin-x64": "0.13.4-rc2",

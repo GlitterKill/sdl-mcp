@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.11.0] - Unreleased
 
+## [0.10.4] - 2026-04-10
+
 ### Added
 
 - **SCIP Integration**: Ingest pre-built SCIP index files for compiler-grade cross-references
@@ -39,6 +41,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     opt in.
   - All failures (binary missing, install failure, non-zero exit, timeout)
     are non-fatal and logged as warnings — indexing continues regardless.
+- **Graph analytics for ranking and blast radius**:
+  - PageRank and K-core centrality persisted in LadybugDB
+  - Louvain shadow clusters for cluster-aware ranking and exploration
+  - Blast radius path explanations for clearer impact traces
+- **Pass-2 resolver expansion and telemetry**:
+  - Deeper Java, Python, Rust, and Shell resolver coverage
+  - Shared scope/barrel walkers and centralized confidence scoring
+  - Per-resolver telemetry for pass-2 correctness and tuning
+- **Rust-native indexing parity improvements**: stronger pass-1 coverage with
+  per-file TypeScript fallback when the native path cannot fully resolve a file.
+
+### Changed
+
+- **Semantic retrieval storage and bootstrap**:
+  - Symbol embeddings now migrate toward fixed-size vector storage for indexable columns
+  - Retrieval bootstrap adds vector index lifecycle management with structured degradation when capabilities are unavailable
+- **CLI and tooling ergonomics**:
+  - Index operations emit better user feedback during long runs
+  - Tool dispatch, schema handling, and PR risk analysis received a broad hardening pass
+- Documentation expanded across architecture, configuration, semantic setup, and SCIP deep dives.
+
+### Fixed
+
+- **Graceful stdio shutdown in `serve --stdio`**: transport close now routes through the centralized shutdown manager, aligning the CLI path with the direct entrypoint and reducing the risk of dirty LadybugDB shutdowns and WAL corruption on client exit.
+- Corrected vector-column migration behavior, buffer timestamp coercion, and several tool response edge cases.
+- Addressed code review findings across SCIP ingestion, policy updates, runtime/build safety, resource handling, and info-path redaction.
+- Fixed CI and native build issues around protobuf/clang setup and lockfile drift.
 
 ## [0.10.3] - 2026-04-04
 
@@ -938,6 +967,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage ensures ETag integrity
 - Audit hashes in policy decisions for traceability
 
+[0.10.4]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.10.4
 [0.10.3]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.10.3
 [0.10.2]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.10.2
 [0.10.1]: https://github.com/GlitterKill/sdl-mcp/releases/tag/v0.10.1
