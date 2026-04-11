@@ -23,6 +23,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const CHANGELOG_PATH = join(ROOT, "CHANGELOG.md");
 const PACKAGE_PATH = join(ROOT, "package.json");
+const PACKAGE_LOCK_PATH = join(ROOT, "package-lock.json");
 const NATIVE_PACKAGE_PATH = join(ROOT, "native", "package.json");
 const NATIVE_NPM_DIR = join(ROOT, "native", "npm");
 const TARBALL_WARN_BYTES = 25 * 1024 * 1024;
@@ -67,6 +68,29 @@ export function findNativeVersionMismatches(packageJson, nativePackageJson, nati
       mismatches.push(`native/npm/${pkg.name}/package.json version`);
     }
   }
+  return mismatches;
+}
+
+export function findNativeLockfileMismatches(
+  packageJson,
+  nativePackageJson,
+  packageLockJson,
+) {
+  const mismatches = [];
+  const packages = packageLockJson?.packages ?? {};
+  const nativeEntry = packages["node_modules/sdl-mcp-native"];
+
+  if (!nativeEntry || nativeEntry.version !== packageJson.version) {
+    mismatches.push("package-lock.json node_modules/sdl-mcp-native");
+  }
+
+  for (const depName of Object.keys(nativePackageJson.optionalDependencies ?? {})) {
+    const depEntry = packages[`node_modules/${depName}`];
+    if (!depEntry || depEntry.version !== packageJson.version) {
+      mismatches.push(`package-lock.json node_modules/${depName}`);
+    }
+  }
+
   return mismatches;
 }
 
@@ -180,6 +204,7 @@ function fail(message) {
 
 async function main() {
   const pkg = readJson(PACKAGE_PATH);
+  const packageLock = readJson(PACKAGE_LOCK_PATH);
   const nativePkg = readJson(NATIVE_PACKAGE_PATH);
   const nativePlatformPackages = readNativePlatformPackages();
   const changelog = readFileSync(CHANGELOG_PATH, "utf-8");
@@ -206,6 +231,17 @@ async function main() {
   );
   if (mismatches.length > 0) {
     fail(`version mismatch detected: ${mismatches.join(", ")}`);
+  }
+
+  const nativeLockfileMismatches = findNativeLockfileMismatches(
+    pkg,
+    nativePkg,
+    packageLock,
+  );
+  if (nativeLockfileMismatches.length > 0) {
+    fail(
+      `native package-lock mismatch detected: ${nativeLockfileMismatches.join(", ")}`,
+    );
   }
 
   const selfTarballDeps = findSelfTarballDependencies(pkg);

@@ -35,6 +35,47 @@ describe("prepare-release helpers", () => {
     assert.ok(mismatchResult.length >= 2);
 
     assert.deepStrictEqual(
+      helpers.findNativeLockfileMismatches(
+        { version: "1.2.3" },
+        {
+          optionalDependencies: {
+            "sdl-mcp-native-darwin-arm64": "1.2.3",
+            "sdl-mcp-native-linux-x64-gnu": "1.2.3",
+          },
+        },
+        {
+          packages: {
+            "node_modules/sdl-mcp-native": { version: "1.2.3" },
+            "node_modules/sdl-mcp-native-darwin-arm64": { version: "1.2.3" },
+            "node_modules/sdl-mcp-native-linux-x64-gnu": { version: "1.2.3" },
+          },
+        },
+      ),
+      [],
+    );
+    assert.deepStrictEqual(
+      helpers.findNativeLockfileMismatches(
+        { version: "1.2.3" },
+        {
+          optionalDependencies: {
+            "sdl-mcp-native-darwin-arm64": "1.2.3",
+            "sdl-mcp-native-linux-x64-gnu": "1.2.3",
+          },
+        },
+        {
+          packages: {
+            "node_modules/sdl-mcp-native": { version: "1.2.2" },
+            "node_modules/sdl-mcp-native-darwin-arm64": { version: "1.2.3" },
+          },
+        },
+      ),
+      [
+        "package-lock.json node_modules/sdl-mcp-native",
+        "package-lock.json node_modules/sdl-mcp-native-linux-x64-gnu",
+      ],
+    );
+
+    assert.deepStrictEqual(
       helpers.classifyBranchStatus("main", "## main...origin/main"),
       { nonMainBranch: false, unsynced: false },
     );
