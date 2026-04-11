@@ -257,6 +257,17 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     console.error(`[sdl-mcp] File logging enabled: ${activeLogFile}`);
   }
 
+  if (stdioServer) {
+    // Mirror the direct entrypoint so stdio client disconnects flow through
+    // the centralized shutdown path before Node can exit on its own.
+    stdioServer.getServer().onclose = () => {
+      console.error(
+        "[sdl-mcp] MCP transport closed, initiating shutdown...",
+      );
+      void shutdownMgr.shutdown("transport closed");
+    };
+  }
+
   try {
     if (options.transport === "stdio") {
       console.error("Starting MCP server on stdio transport...");

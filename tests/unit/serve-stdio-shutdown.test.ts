@@ -60,4 +60,23 @@ describe("serve command stdio shutdown wiring", () => {
       "stdin monitoring must be gated on options.transport === 'stdio'",
     );
   });
+
+  it("shuts down when the stdio transport closes", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src", "cli", "commands", "serve.ts"),
+      "utf8",
+    );
+
+    assert.match(
+      source,
+      /stdioServer\.getServer\(\)\.onclose\s*=\s*\(\)\s*=>\s*\{/,
+      "serve.ts should trigger graceful shutdown when the stdio transport closes",
+    );
+
+    assert.match(
+      source,
+      /shutdownMgr\.shutdown\("transport closed"\)/,
+      'serve.ts should use ShutdownManager for stdio transport close events',
+    );
+  });
 });
