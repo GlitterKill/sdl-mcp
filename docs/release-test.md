@@ -293,7 +293,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 - [ ] Returns notModified: true
 - [ ] Minimal response (no full card)
 
-#### sdl.symbol.getCards (Batch)
+#### sdl.symbol.getCard (Batch)
 
 **Input:**
 
@@ -552,7 +552,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 
 ### 2.9 Agent Context & Code Mode Tools
 
-#### sdl.agent.context
+#### sdl.context
 
 **Input:**
 
@@ -621,7 +621,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 
 - [ ] Returns feedback entries
 
-#### sdl.context.summary
+#### 
 
 **Input:**
 

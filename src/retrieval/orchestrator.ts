@@ -116,9 +116,6 @@ async function queryFts(
  * Map a model name to the `RetrievalSource` discriminator.
  */
 function vectorSourceForModel(model: string): RetrievalSource {
-  if (model.includes("MiniLM") || model.includes("minilm")) {
-    return "vector:minilm";
-  }
   if (model.includes("jina") && model.includes("code")) {
     return "vector:jinacode";
   }
@@ -126,7 +123,7 @@ function vectorSourceForModel(model: string): RetrievalSource {
     return "vector:nomic";
   }
   // Fallback -- still a vector source, use the first token of the model name.
-  return "vector:minilm"; // Unknown model → default to minilm source label
+  return "vector:jinacode"; // Unknown model → default to jinacode source label
 }
 
 /**
@@ -289,11 +286,10 @@ function resolveConfig(): SemanticRetrievalConfig {
       efc: 200,
       efs: 200,
       indexes: {
-        "all-MiniLM-L6-v2": { indexName: "symbol_vec_minilm_l6_v2" },
-        "nomic-embed-text-v1.5": { indexName: "symbol_vec_nomic_embed_v15" },
         "jina-embeddings-v2-base-code": {
           indexName: "symbol_vec_jina_code_v2",
         },
+        "nomic-embed-text-v1.5": { indexName: "symbol_vec_nomic_embed_v15" },
       },
     },
     fusion: { strategy: "rrf", rrfK: DEFAULT_RRF_K },
@@ -416,9 +412,9 @@ export async function hybridSearch(
     const providerType = resolveEmbeddingProviderType();
     const vectorTopK = config.vector.topK ?? DEFAULT_VECTOR_TOP_K;
 
-    // Prioritize Jina for Symbol retrieval, then Nomic, then MiniLM
+    // Prioritize Jina for Symbol retrieval, then Nomic
     const sortedModels = Object.entries(EMBEDDING_MODELS).sort(([a], [b]) => {
-      // Jina-code first for symbol search, then nomic, then miniLM
+      // Jina-code first for symbol search, then nomic
       const priority = (m: string) => m.includes("jina") ? 0 : m.includes("nomic") ? 1 : 2;
       return priority(a) - priority(b);
     });
@@ -426,7 +422,6 @@ export async function hybridSearch(
       // Check capability for this specific model.
       const source = vectorSourceForModel(modelName);
       const capAvailable =
-        (source === "vector:minilm" && caps.vectorMiniLM) ||
         (source === "vector:nomic" && caps.vectorNomic) ||
         (source === "vector:jinacode" && caps.vectorJinaCode);
 
@@ -574,10 +569,6 @@ const ENTITY_VECTOR_CONFIG: Partial<
   Record<EntityType, Record<string, { indexName: string; idField: string }>>
 > = {
   symbol: {
-    "all-MiniLM-L6-v2": {
-      indexName: "symbol_vec_minilm_l6_v2",
-      idField: "symbolId",
-    },
     "nomic-embed-text-v1.5": {
       indexName: "symbol_vec_nomic_embed_v15",
       idField: "symbolId",
@@ -588,8 +579,8 @@ const ENTITY_VECTOR_CONFIG: Partial<
     },
   },
   fileSummary: {
-    "all-MiniLM-L6-v2": {
-      indexName: "filesummary_vec_minilm_l6_v2",
+    "jina-embeddings-v2-base-code": {
+      indexName: "filesummary_vec_jina_code_v2",
       idField: "fileId",
     },
     "nomic-embed-text-v1.5": {
@@ -598,8 +589,8 @@ const ENTITY_VECTOR_CONFIG: Partial<
     },
   },
   agentFeedback: {
-    "all-MiniLM-L6-v2": {
-      indexName: "agentfeedback_vec_minilm_l6_v2",
+    "jina-embeddings-v2-base-code": {
+      indexName: "agentfeedback_vec_jina_code_v2",
       idField: "feedbackId",
     },
     "nomic-embed-text-v1.5": {
@@ -835,7 +826,6 @@ export async function entitySearch(
     for (const [modelName, modelInfo] of Object.entries(EMBEDDING_MODELS)) {
       const source = vectorSourceForModel(modelName);
       const capAvailable =
-        (source === "vector:minilm" && caps.vectorMiniLM) ||
         (source === "vector:nomic" && caps.vectorNomic) ||
         (source === "vector:jinacode" && caps.vectorJinaCode);
 

@@ -46,9 +46,7 @@ export async function ensureModelAvailable(name: string): Promise<string> {
   }
 
   const sizeHint =
-    name === "all-MiniLM-L6-v2"
-      ? "22MB"
-      : name === "nomic-embed-text-v1.5"
+    name === "nomic-embed-text-v1.5"
         ? "138MB"
         : name === "jina-embeddings-v2-base-code"
           ? "110MB"

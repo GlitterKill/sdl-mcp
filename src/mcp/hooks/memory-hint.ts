@@ -77,9 +77,9 @@ function detectPatterns(
     };
   }
 
-  // Pattern: agent.context with implement task completes
+  // Pattern: sdl.context with implement task completes
   if (
-    toolName === "sdl.agent.context" &&
+    toolName === "sdl.context" &&
     !session.hintsSent.has("feature_complete")
   ) {
     const contextArgs = args as Record<string, unknown> | null;

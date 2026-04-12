@@ -23,7 +23,6 @@ import {
   BufferStatusRequestSchema,
   SymbolSearchRequestSchema,
   SymbolGetCardRequestSchema,
-  SymbolGetCardsRequestSchema,
   SliceBuildRequestSchema,
   SliceRefreshRequestSchema,
   SliceSpilloverGetRequestSchema,
@@ -34,8 +33,6 @@ import {
   PolicyGetRequestSchema,
   PolicySetRequestSchema,
   PRRiskAnalysisRequestSchema,
-  AgentContextRequestSchema,
-  ContextSummaryRequestSchema,
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
   RuntimeExecuteRequestSchema,
@@ -63,7 +60,6 @@ import {
 import {
   handleSymbolSearch,
   handleSymbolGetCard,
-  handleSymbolGetCards,
 } from "./symbol.js";
 import {
   handleSliceBuild,
@@ -78,8 +74,6 @@ import {
 } from "./code.js";
 import { handlePolicyGet, handlePolicySet } from "./policy.js";
 import { handlePRRiskAnalysis } from "./prRisk.js";
-import { handleAgentContext } from "./context.js";
-import { handleContextSummary } from "./summary.js";
 import {
   handleAgentFeedback,
   handleAgentFeedbackQuery,
@@ -200,15 +194,6 @@ export function buildFlatToolDescriptors(
       handler: handleSymbolGetCard,
     },
     {
-      name: "sdl.symbol.getCards",
-      description:
-        "Batch fetch symbol cards for multiple symbolIds in a single round trip. " +
-        "Pass knownEtags (map of symbolId \u2192 ETag) to skip unchanged cards \u2014 " +
-        "they return notModified instead of the full card payload.",
-      schema: SymbolGetCardsRequestSchema,
-      handler: handleSymbolGetCards,
-    },
-    {
       name: "sdl.slice.build",
       description:
         "Build a graph slice for a task context. Accepts taskText alone (no entrySymbols required) " +
@@ -279,20 +264,6 @@ export function buildFlatToolDescriptors(
         "Analyze PR risk by computing delta between versions, assessing blast radius, and recommending tests",
       schema: PRRiskAnalysisRequestSchema,
       handler: handlePRRiskAnalysis,
-    },
-    {
-      name: "sdl.agent.context",
-      description:
-        "Retrieve task-shaped context with automated rung path selection, adaptive symbol relevance ranking, and contextMode (precise/broad) for token-efficient context retrieval",
-      schema: AgentContextRequestSchema,
-      handler: handleAgentContext,
-    },
-    {
-      name: "sdl.context.summary",
-      description:
-        "Generate token-bounded context summary for a symbol, file, or task query",
-      schema: ContextSummaryRequestSchema,
-      handler: handleContextSummary,
     },
     {
       name: "sdl.agent.feedback",

@@ -10,7 +10,7 @@
 1. Call `sdl.repo.status` at the start of each task.
 2. If you are not sure which SDL action to use, call `sdl.action.search`.
 3. Use `sdl.manual` with `query` or `actions` to load only the relevant subset.
-4. Use `sdl.agent.context` for code context retrieval (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration).
+4. Use `sdl.context` for code context retrieval (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration).
 5. Use `sdl.workflow` for multi-step operations (runtime execution, data transforms, batch mutations) — not for context retrieval.
 6. Use `runtimeExecute` inside `sdl.workflow` for repo-local tests, builds, lint, and diagnostics.
 7. Use `symbolRef` or `symbolRefs` when you know a symbol name but not the canonical `symbolId`.
@@ -61,10 +61,10 @@ Prefer `search` or `jsonPath` over full reads. Use `offset`/`limit` when you kno
 ### Preferred SDL Patterns
 
 - Discovery: `sdl.action.search` (use `query: "*"` to list all) -> `sdl.manual(query|actions)`
-- Context retrieval: `sdl.agent.context` with `contextMode: "precise"` or `"broad"`
+- Context retrieval: `sdl.context` with `contextMode: "precise"` or `"broad"`
 - Multi-step operations: `sdl.workflow` (runtime execution, data transforms, batch mutations)
 - Repo-local execution: `sdl.workflow` + `runtimeExecute`
-- Natural identifier lookup: `sdl.symbol.getCard` / `sdl.symbol.getCards` with `symbolRef` / `symbolRefs`
+- Natural identifier lookup: `sdl.symbol.getCard` / `sdl.symbol.getCard` with `symbolRef` / `symbolRefs`
 - Direct code access: only after cards, slices, skeletons, or hot paths are insufficient
 
 ### Runtime Execution

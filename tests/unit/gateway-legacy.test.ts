@@ -37,13 +37,13 @@ describe("Gateway legacy tool registration", () => {
     return await import("../../dist/gateway/legacy.js");
   }
 
-  it("registers all 30 legacy tools", async () => {
+  it("registers all 27 legacy tools", async () => {
     const { registerLegacyTools } = await loadLegacy();
     const mock = createMockServer();
 
     registerLegacyTools(mock as any, {});
 
-    assert.strictEqual(mock.registered.length, 30);
+    assert.strictEqual(mock.registered.length, 27);
   });
 
   it("registers known tool names", async () => {
@@ -62,7 +62,6 @@ describe("Gateway legacy tool registration", () => {
       "sdl.buffer.status",
       "sdl.symbol.search",
       "sdl.symbol.getCard",
-      "sdl.symbol.getCards",
       "sdl.slice.build",
       "sdl.slice.refresh",
       "sdl.slice.spillover.get",
@@ -75,8 +74,6 @@ describe("Gateway legacy tool registration", () => {
       "sdl.repo.overview",
       "sdl.usage.stats",
       "sdl.pr.risk.analyze",
-      "sdl.agent.context",
-      "sdl.context.summary",
       "sdl.agent.feedback",
       "sdl.agent.feedback.query",
       "sdl.runtime.execute",

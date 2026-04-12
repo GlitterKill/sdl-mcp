@@ -21,8 +21,7 @@ describe("formatToolCallForUser", () => {
     const result = formatToolCallForUser("sdl.symbol.search", { query: "foo" }, {
       results: [
         { name: "fooBar", kind: "function", file: "src/util/foo.ts" },
-        { name: "fooBaz", kind: "class", file: "src/lib/baz.ts" },
-      ],
+        { name: "fooBaz", kind: "class", file: "src/lib/baz.ts" }],
     });
     assert.ok(result !== null);
     assert.ok(result.includes('symbol.search "foo"'));
@@ -89,7 +88,7 @@ describe("formatToolCallForUser", () => {
   // --- symbol.getCards ---
 
   it("formats symbol.getCards", () => {
-    const result = formatToolCallForUser("sdl.symbol.getCards", {}, {
+    const result = formatToolCallForUser("sdl.symbol.getCard", {}, {
       cards: [{}, {}, {}],
     });
     assert.ok(result !== null);
@@ -213,8 +212,7 @@ describe("formatToolCallForUser", () => {
       results: [
         { status: "ok" },
         { status: "ok" },
-        { status: "error" },
-      ],
+        { status: "error" }],
       totalTokens: 1200,
     });
     assert.ok(result !== null);

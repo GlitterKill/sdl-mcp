@@ -72,7 +72,7 @@ describe("code-mode etag cache", () => {
 
   it("symbolGetCards batch: multiple ETags extracted", () => {
     const cache = new WorkflowEtagCache();
-    cache.extractEtags("symbol.getCards", {
+    cache.extractEtags("symbol.getCard", {
       cards: [
         { card: { symbolId: "sym1" }, etag: "e1" },
         { card: { symbolId: "sym2" }, etag: "e2" },
@@ -88,7 +88,7 @@ describe("code-mode etag cache", () => {
     const args: Record<string, unknown> = {
       symbolIds: ["sym1", "sym2", "sym3"],
     };
-    cache.injectEtags("symbol.getCards", args);
+    cache.injectEtags("symbol.getCard", args);
     assert.deepStrictEqual(args.knownEtags, { sym1: "e1", sym3: "e3" });
   });
 

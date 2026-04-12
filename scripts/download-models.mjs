@@ -3,8 +3,8 @@
  * download-models.mjs — Dev script to fetch bundled ONNX model files from HuggingFace.
  *
  * Usage:
- *   node scripts/download-models.mjs                     # Download all-MiniLM-L6-v2
- *   node scripts/download-models.mjs nomic-embed-text-v1.5 # Download nomic text model
+ *   node scripts/download-models.mjs                            # Download jina-embeddings-v2-base-code
+ *   node scripts/download-models.mjs nomic-embed-text-v1.5      # Download nomic text model
  */
 import { existsSync, mkdirSync, createWriteStream } from "fs";
 import { join, dirname } from "path";
@@ -27,20 +27,20 @@ function getModelCacheDir() {
 }
 
 const MODELS = {
-  "all-MiniLM-L6-v2": {
-    dir: join(ROOT, "models", "all-MiniLM-L6-v2"),
+  "jina-embeddings-v2-base-code": {
+    dir: join(ROOT, "models", "jina-embeddings-v2-base-code"),
     files: [
       {
         name: "model_quantized.onnx",
-        url: "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_quantized.onnx",
+        url: "https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/onnx/model_quantized.onnx",
       },
       {
         name: "tokenizer.json",
-        url: "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json",
+        url: "https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/tokenizer.json",
       },
       {
         name: "config.json",
-        url: "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json",
+        url: "https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/config.json",
       },
     ],
   },
@@ -105,7 +105,7 @@ async function downloadModel(modelName) {
 }
 
 // Main
-const requestedModel = process.argv[2] ?? "all-MiniLM-L6-v2";
+const requestedModel = process.argv[2] ?? "jina-embeddings-v2-base-code";
 
 if (requestedModel === "--all") {
   for (const modelName of Object.keys(MODELS)) {

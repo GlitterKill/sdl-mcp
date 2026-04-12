@@ -129,7 +129,7 @@ export interface SemanticSearchTelemetryEvent {
   alpha: number;
   /** Retrieval mode used: "legacy" (rerank) or "hybrid" (FTS+vector+RRF) */
   retrievalMode?: "legacy" | "hybrid";
-  /** Per-source candidate counts before fusion (e.g. { fts: 50, "vector:minilm": 30 }) */
+  /** Per-source candidate counts before fusion (e.g. { fts: 50, "vector:jinacode": 30 }) */
   candidateCountPerSource?: Record<string, number>;
   /** Time spent in RRF fusion step (ms) */
   fusionLatencyMs?: number;

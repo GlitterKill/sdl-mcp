@@ -185,7 +185,6 @@ export function computePriorityBoost(
   }
   const toolNameToShort: Record<string, string> = {
     "symbol.getCard": "card",
-    "symbol.getCards": "card",
     "symbol.search": "search",
     "slice.build": "slice",
     "slice.refresh": "slice",

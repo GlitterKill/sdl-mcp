@@ -42,10 +42,10 @@ describe("IndexHealthResult structure", () => {
       },
       vectors: [
         {
-          model: "all-MiniLM-L6-v2",
+          model: "jina-embeddings-v2-base-code",
           exists: false,
           healthy: false,
-          indexName: "symbol_vec_embeddingminilm",
+          indexName: "symbol_vec_embeddingjina",
         },
         {
           model: "nomic-embed-text-v1.5",
@@ -400,8 +400,8 @@ describe("numeric array vector storage", () => {
 
   it("schema creates DOUBLE[] embedding columns for Symbol", () => {
     assert.ok(
-      schemaSrc.includes("embeddingMiniLMVec DOUBLE[]"),
-      "Schema should have embeddingMiniLMVec DOUBLE[] on Symbol",
+      schemaSrc.includes("embeddingJinaCodeVec DOUBLE[]"),
+      "Schema should have embeddingJinaCodeVec DOUBLE[] on Symbol",
     );
     assert.ok(
       schemaSrc.includes("embeddingNomicVec DOUBLE[]"),
@@ -426,8 +426,8 @@ describe("numeric array vector storage", () => {
       "model-mapping should have vecProperty field",
     );
     assert.ok(
-      mappingSrc.includes("embeddingMiniLMVec"),
-      "MiniLM should map to embeddingMiniLMVec",
+      mappingSrc.includes("embeddingJinaCodeVec"),
+      "Jina should map to embeddingJinaCodeVec",
     );
     assert.ok(
       mappingSrc.includes("embeddingNomicVec"),

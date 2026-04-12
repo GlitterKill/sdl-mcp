@@ -35,16 +35,16 @@ export interface ModelInfo {
 }
 
 const MODEL_REGISTRY: Record<string, ModelInfo> = {
-  "all-MiniLM-L6-v2": {
-    name: "all-MiniLM-L6-v2",
-    dimension: 384,
-    maxSequenceLength: 256,
+  "jina-embeddings-v2-base-code": {
+    name: "jina-embeddings-v2-base-code",
+    dimension: 768,
+    maxSequenceLength: 8192,
     bundled: true,
     modelFile: "model_quantized.onnx",
     tokenizerFile: "tokenizer.json",
     configFile: "config.json",
     description:
-      "General-purpose sentence embedding model (384-dim, ~22MB INT8 quantized)",
+      "Code-specialized embedding model for 30+ programming languages (768-dim, ~110MB quantized, bundled)",
   },
   "nomic-embed-text-v1.5": {
     name: "nomic-embed-text-v1.5",
@@ -67,26 +67,6 @@ const MODEL_REGISTRY: Record<string, ModelInfo> = {
     documentPrefix: "search_document: ",
     queryPrefix: "search_query: ",
     maxDownloadBytes: 200_000_000, // ~138MB model + tokenizer + config
-  },
-  "jina-embeddings-v2-base-code": {
-    name: "jina-embeddings-v2-base-code",
-    dimension: 768,
-    maxSequenceLength: 8192,
-    bundled: false,
-    modelFile: "model_quantized.onnx",
-    tokenizerFile: "tokenizer.json",
-    configFile: "config.json",
-    description:
-      "Code-specialized embedding model for 30+ programming languages (768-dim, ~110MB quantized)",
-    downloadUrls: {
-      model:
-        "https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/onnx/model_quantized.onnx",
-      tokenizer:
-        "https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/tokenizer.json",
-      config:
-        "https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/config.json",
-    },
-    maxDownloadBytes: 200_000_000, // ~110MB model + tokenizer + config
   },
 };
 

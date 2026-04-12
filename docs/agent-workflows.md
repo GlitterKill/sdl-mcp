@@ -48,7 +48,7 @@ SDL-MCP exposes 34 tools in flat default mode (32 flat tools plus `sdl.action.se
 |                            | `sdl.buffer.status`        | Check live buffer state (pending, dirty, queue depth)                                                                                                                |
 | **Symbols**                | `sdl.symbol.search`        | Search symbols by name or summary; supports semantic reranking via `semantic: true`                                                                                  |
 |                            | `sdl.symbol.getCard`       | Get a single symbol card by `symbolId` or `symbolRef`, with ETag caching and optional `minCallConfidence` filtering                                                  |
-|                            | `sdl.symbol.getCards`      | Batch fetch up to 100 cards by `symbolIds` or `symbolRefs`; supports `knownEtags` and partial-success metadata                                                       |
+|                            | `sdl.symbol.getCard`      | Batch fetch up to 100 cards by `symbolIds` or `symbolRefs`; supports `knownEtags` and partial-success metadata                                                       |
 | **Slices**                 | `sdl.slice.build`          | Build graph slice from entry symbols, task text, stack traces, or edited files                                                                                       |
 |                            | `sdl.slice.refresh`        | Refresh an existing slice handle; returns incremental delta only                                                                                                     |
 |                            | `sdl.slice.spillover.get`  | Paginated fetch for overflow symbols beyond budget                                                                                                                   |
@@ -59,10 +59,10 @@ SDL-MCP exposes 34 tools in flat default mode (32 flat tools plus `sdl.action.se
 | **Policy**                 | `sdl.policy.get`           | Read current policy settings                                                                                                                                         |
 |                            | `sdl.policy.set`           | Update policy (merge patch)                                                                                                                                          |
 | **Risk**                   | `sdl.pr.risk.analyze`      | Analyze PR risk, blast radius, and recommend test targets                                                                                                            |
-| **Agent**                  | `sdl.agent.context`        | Direct task-shaped context retrieval with budget-controlled rung planning                                                                                            |
+| **Agent**                  | `sdl.context`        | Direct task-shaped context retrieval with budget-controlled rung planning                                                                                            |
 |                            | `sdl.agent.feedback`       | Record which symbols were useful/missing after a task; supports `taskTags`                                                                                           |
 |                            | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics                                                                                                                     |
-| **Context**                | `sdl.context.summary`      | Generate token-bounded summary for non-MCP contexts (clipboard, markdown, JSON)                                                                                      |
+| **Context**                |       | Generate token-bounded summary for non-MCP contexts (clipboard, markdown, JSON)                                                                                      |
 | **File**                   | `sdl.file.read`            | Read non-indexed files with line range, search, or JSON path extraction                                                                                              |
 | **Runtime**                | `sdl.runtime.execute`      | Sandboxed subprocess execution with `outputMode` (`minimal`, `summary`, `intent`); 16 runtimes including `node`, `typescript`, `python`, `shell`, `go`, `rust`, etc. |
 |                            | `sdl.runtime.queryOutput`  | On-demand keyword search of stored runtime output artifacts by `artifactHandle`                                                                                      |
@@ -107,8 +107,8 @@ Use this order unless task constraints force escalation:
    - Add `semantic: true` to enable embedding-based reranking for fuzzy or conceptual queries.
 3. `sdl.symbol.getCard` for single lookups; send `ifNoneMatch` to get `notModified` responses.
    - Provide exactly one of `symbolId` or `symbolRef`. Use `symbolRef` when you know a symbol name and optional file or kind hints but do not yet have the canonical ID.
-   - Use `sdl.symbol.getCards` (batch, up to 100 IDs) when fetching multiple symbols — one round trip instead of many.
-   - `sdl.symbol.getCards` also accepts `symbolRefs`; mixed batches can return `partial`, `succeeded`, `failed`, and structured `failures[]` metadata instead of failing the whole request.
+   - Use `sdl.symbol.getCard` (batch, up to 100 IDs) when fetching multiple symbols — one round trip instead of many.
+   - `sdl.symbol.getCard` also accepts `symbolRefs`; mixed batches can return `partial`, `succeeded`, `failed`, and structured `failures[]` metadata instead of failing the whole request.
    - Pass `knownEtags` to `getCards` for delta fetching (unchanged cards return as refs, not full payloads).
    - Use `minCallConfidence` to filter low-confidence call edges from card responses.
 4. `sdl.slice.build` with explicit budget and compact output:
@@ -142,7 +142,7 @@ Use this order unless task constraints force escalation:
 - **Live editing**: `buffer.push` as files change (with cursor/selection tracking) → `buffer.checkpoint` to persist → search/card/slice now reflect draft state.
 - **Context export**: `context.summary` with `format: "clipboard"` to produce a summary for non-MCP tools.
 - **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `python`, or `shell`) to run tests and capture structured output.
-- **Context retrieval** _(recommended)_: use `sdl.agent.context` directly, or `sdl.context` inside Code Mode. `contextMode: "precise"` is best for targeted lookups; `"broad"` is best for investigation. Both use semantic-first seeding and evidence-aware ranking, making them more accurate and more token-efficient than manual workflow-based context gathering.
+- **Context retrieval** _(recommended)_: use `sdl.context` directly, or `sdl.context` inside Code Mode. `contextMode: "precise"` is best for targeted lookups; `"broad"` is best for investigation. Both use semantic-first seeding and evidence-aware ranking, making them more accurate and more token-efficient than manual workflow-based context gathering.
 - **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, and batch mutations. Do not use it for context retrieval — route explain/debug/review/implement work to context first.
 
 ### 3) Token controls by tool
@@ -154,7 +154,7 @@ Use this order unless task constraints force escalation:
 - `sdl.symbol.search`:
   - Keep `limit` low (5–20) to start. Increase only if no results match.
   - `semantic: true` adds ~50ms latency but dramatically improves relevance for conceptual queries.
-- `sdl.symbol.getCard` / `sdl.symbol.getCards`:
+- `sdl.symbol.getCard` / `sdl.symbol.getCard`:
   - Prefer `symbolRef` inputs when the agent knows a stable symbol name but has not yet resolved the canonical ID.
   - Use `minCallConfidence` to filter out low-confidence call edges, reducing card size.
   - Use `knownEtags` (batch) or `ifNoneMatch` (single) to skip unchanged cards entirely.
@@ -172,7 +172,7 @@ Use this order unless task constraints force escalation:
   - Pass `budget` for large version diffs to constrain blast-radius work.
 - `sdl.pr.risk.analyze`:
   - Raise `riskThreshold` (for example `80`) to focus on highest-risk changes.
-- `sdl.context.summary`:
+- :
   - Set `budget` to cap output tokens. Use `scope: "task"` for multi-symbol summaries, `scope: "symbol"` for single-symbol.
 - `sdl.runtime.execute`:
   - Use `outputMode: "minimal"` (default) for ~50-token responses with just status and artifact handle.
@@ -197,7 +197,7 @@ When working in an editor with live buffer support:
 
 Stale buffer pushes (version ≤ current) are rejected automatically.
 
-### 5) Task Context (`sdl.agent.context`) guidance
+### 5) Task Context (`sdl.context`) guidance
 
 - Always provide a budget (`maxTokens`, `maxActions`, optionally `maxDurationMs`).
 - Scope with `focusSymbols` and/or `focusPaths` when you have them. In broad mode, semantic seeding often finds the right entry points from task text alone, so explicit `focusPaths` are helpful but not required.
@@ -259,9 +259,9 @@ Then, if needed:
 - `persistOutput: true` (default) saves full output to an artifact handle for later retrieval via `sdl.runtime.queryOutput`.
 - Per-line truncation caps each output line at 500 characters.
 
-### 7) Context export (`sdl.context.summary`)
+### 7) Context export ()
 
-Use `sdl.context.summary` to generate token-bounded summaries for non-MCP contexts (clipboard, PR descriptions, tickets).
+Use  to generate token-bounded summaries for non-MCP contexts (clipboard, PR descriptions, tickets).
 
 - Pass `query` (required), `budget` (token cap), `format` (`"markdown"` | `"json"` | `"clipboard"`), and `scope` (`"symbol"` | `"file"` | `"task"`).
 - Use `scope: "task"` for multi-symbol summaries; `scope: "symbol"` for single-symbol.
@@ -290,7 +290,7 @@ Workflow guidance:
 - `onError`: `"continue"` (default, skip failed steps) or `"stop"` (halt on first error).
 - The workflow enforces the same context-ladder escalation rules as individual tools.
 - Cross-step ETag caching is automatic — no need to pass ETags manually between steps.
-- Use workflows for multi-step operations: runtime execution, data shaping, batch mutations, and CI pipelines. Do not use them for context retrieval (use `sdl.context` in Code Mode or `sdl.agent.context` directly). Do not use them for single actions.
+- Use workflows for multi-step operations: runtime execution, data shaping, batch mutations, and CI pipelines. Do not use them for context retrieval (use `sdl.context` in Code Mode or `sdl.context` directly). Do not use them for single actions.
 
 ### 9) Feedback loop (`sdl.agent.feedback`)
 
@@ -332,14 +332,14 @@ When memory is disabled, memory tools return a clear error and no memory surfaci
 - Do not call `sdl.code.needWindow` before trying `sdl.code.getSkeleton`/`sdl.code.getHotPath`.
 - Do not use broad `sdl.symbol.search` limits by default.
 - Do not rebuild slices repeatedly when `sdl.slice.refresh` can provide incremental deltas.
-- Do not call `sdl.symbol.getCard` N times when `sdl.symbol.getCards` can fetch all N in one call.
+- Do not call `sdl.symbol.getCard` N times when `sdl.symbol.getCard` can fetch all N in one call.
 - Do not skip `sdl.agent.feedback` after completing a task — it improves future context quality.
 - Do not call `sdl.runtime.execute` without setting `timeoutMs` — long-running processes will hang.
 - Do not use `outputMode: "summary"` when you only need pass/fail status — use `"minimal"` and query the artifact on failure.
 - Do not ignore `nextBestAction`, `fallbackTools`, or `fallbackRationale` in denied or ambiguous responses — they tell you what to try instead.
 - Do not ignore stale memories surfaced in slices — review and update or remove them.
 - Do not store trivial or ephemeral notes as memories — they add noise to future surfacing.
-- Do not use `sdl.workflow` for context retrieval — use `sdl.context` in Code Mode or `sdl.agent.context` directly with `contextMode: "precise"` or `"broad"` instead. Workflow is for multi-step operations (runtime, data transforms, mutations).
+- Do not use `sdl.workflow` for context retrieval — use `sdl.context` in Code Mode or `sdl.context` directly with `contextMode: "precise"` or `"broad"` instead. Workflow is for multi-step operations (runtime, data transforms, mutations).
 - Do not use `sdl.workflow` for a single action — it adds overhead. Use the direct tool instead.
 - Do not hardcode step indices in `$N` references without checking the actual step order in your chain.
 

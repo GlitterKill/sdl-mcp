@@ -54,7 +54,7 @@ function shouldFallbackToLegacy(
 }
 
 function makeCaps(overrides: Partial<RetrievalCapabilities> = {}): RetrievalCapabilities {
-  return { fts: true, vectorMiniLM: true, vectorNomic: true, vectorJinaCode: true, ...overrides };
+  return { fts: true, vectorJinaCode: true, vectorNomic: true, vectorJinaCode: true, ...overrides };
 }
 
 // ---------------------------------------------------------------------------
@@ -64,14 +64,14 @@ function makeCaps(overrides: Partial<RetrievalCapabilities> = {}): RetrievalCapa
 describe("shouldFallbackToLegacy — logic", () => {
   it("returns true when mode is 'legacy', regardless of capabilities", () => {
     assert.strictEqual(
-      shouldFallbackToLegacy(makeCaps({ fts: true, vectorMiniLM: true, vectorNomic: true }), { mode: "legacy" }),
+      shouldFallbackToLegacy(makeCaps({ fts: true, vectorJinaCode: true, vectorNomic: true }), { mode: "legacy" }),
       true,
     );
   });
 
   it("returns true when mode is 'legacy' and all capabilities are false", () => {
     assert.strictEqual(
-      shouldFallbackToLegacy(makeCaps({ fts: false, vectorMiniLM: false, vectorNomic: false }), { mode: "legacy" }),
+      shouldFallbackToLegacy(makeCaps({ fts: false, vectorJinaCode: false, vectorNomic: false }), { mode: "legacy" }),
       true,
     );
   });
@@ -92,14 +92,14 @@ describe("shouldFallbackToLegacy — logic", () => {
 
   it("returns false when mode is 'hybrid', fts available, vector unavailable (degraded hybrid ok)", () => {
     assert.strictEqual(
-      shouldFallbackToLegacy(makeCaps({ fts: true, vectorMiniLM: false, vectorNomic: false }), { mode: "hybrid" }),
+      shouldFallbackToLegacy(makeCaps({ fts: true, vectorJinaCode: false, vectorNomic: false }), { mode: "hybrid" }),
       false,
     );
   });
 
   it("returns false when all capabilities are available and mode is 'hybrid'", () => {
     assert.strictEqual(
-      shouldFallbackToLegacy(makeCaps({ fts: true, vectorMiniLM: true, vectorNomic: true }), { mode: "hybrid" }),
+      shouldFallbackToLegacy(makeCaps({ fts: true, vectorJinaCode: true, vectorNomic: true }), { mode: "hybrid" }),
       false,
     );
   });
@@ -150,9 +150,9 @@ describe("shouldFallbackToLegacy — source verification", () => {
     );
   });
 
-  it("checkRetrievalHealth returns fts, vectorMiniLM, vectorNomic fields", () => {
+  it("checkRetrievalHealth returns fts, vectorJinaCode, vectorNomic fields", () => {
     assert.ok(src.includes("fts:"), "result should include fts field");
-    assert.ok(src.includes("vectorMiniLM:"), "result should include vectorMiniLM field");
+    assert.ok(src.includes("vectorJinaCode:"), "result should include vectorJinaCode field");
     assert.ok(src.includes("vectorNomic:"), "result should include vectorNomic field");
   });
 });
@@ -162,21 +162,21 @@ describe("shouldFallbackToLegacy — source verification", () => {
 // ---------------------------------------------------------------------------
 
 describe("RetrievalCapabilities", () => {
-  it("has fts, vectorMiniLM, vectorNomic boolean fields", () => {
+  it("has fts, vectorJinaCode, vectorNomic boolean fields", () => {
     const caps: RetrievalCapabilities = {
       fts: true,
-      vectorMiniLM: false,
+      vectorJinaCode: false,
       vectorNomic: true,
     };
     assert.strictEqual(typeof caps.fts, "boolean");
-    assert.strictEqual(typeof caps.vectorMiniLM, "boolean");
+    assert.strictEqual(typeof caps.vectorJinaCode, "boolean");
     assert.strictEqual(typeof caps.vectorNomic, "boolean");
   });
 
   it("all-false capabilities represent a fully unavailable environment", () => {
     const caps: RetrievalCapabilities = {
       fts: false,
-      vectorMiniLM: false,
+      vectorJinaCode: false,
       vectorNomic: false,
     };
     // With no capabilities, every hybrid request should fall back.

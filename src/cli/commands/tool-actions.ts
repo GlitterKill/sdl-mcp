@@ -125,33 +125,6 @@ const symbolGetCard: ActionDefinition = {
   ],
 };
 
-const symbolGetCards: ActionDefinition = {
-  action: "symbol.getCards",
-  namespace: "query",
-  description: "Batch fetch symbol cards for multiple IDs",
-  args: [
-    { ...REPO_ID_ARG },
-    {
-      flag: "--symbol-ids",
-      field: "symbolIds",
-      type: "string[]",
-      required: true,
-      description: "Comma-separated symbol IDs",
-    },
-    { ...MIN_CALL_CONFIDENCE_ARG },
-    { ...INCLUDE_RESOLUTION_METADATA_ARG },
-    {
-      flag: "--known-etags",
-      field: "knownEtags",
-      type: "json",
-      description: 'JSON map of symbolId→ETag, e.g. \'{"sym1":"etag1"}\'',
-    },
-  ],
-  examples: [
-    'sdl-mcp tool symbol.getCards --repo-id my-repo --symbol-ids "sym1,sym2,sym3"',
-  ],
-};
-
 const sliceBuild: ActionDefinition = {
   action: "slice.build",
   namespace: "query",
@@ -333,50 +306,6 @@ const deltaGet: ActionDefinition = {
   ],
   examples: [
     "sdl-mcp tool delta.get --repo-id my-repo --from-version v1 --to-version v2",
-  ],
-};
-
-const contextSummary: ActionDefinition = {
-  action: "context.summary",
-  namespace: "query",
-  description: "Generate token-bounded context summary",
-  args: [
-    { ...REPO_ID_ARG },
-    {
-      flag: "--query",
-      field: "query",
-      type: "string",
-      required: true,
-      description: "Summary query",
-      short: "-q",
-    },
-    {
-      flag: "--budget",
-      field: "budget",
-      type: "number",
-      description: "Token budget",
-    },
-    {
-      flag: "--format",
-      field: "format",
-      type: "string",
-      description: "Output format: markdown|json|clipboard",
-    },
-    {
-      flag: "--scope",
-      field: "scope",
-      type: "string",
-      description: "Scope: symbol|file|task",
-    },
-    {
-      flag: "--if-none-match",
-      field: "ifNoneMatch",
-      type: "string",
-      description: "ETag for conditional fetch",
-    },
-  ],
-  examples: [
-    'sdl-mcp tool context.summary --repo-id my-repo --query "auth module"',
   ],
 };
 
@@ -751,52 +680,6 @@ const policySet: ActionDefinition = {
 // ---------------------------------------------------------------------------
 // Agent actions (7)
 // ---------------------------------------------------------------------------
-
-const agentContext: ActionDefinition = {
-  action: "agent.context",
-  namespace: "agent",
-  description:
-    "Retrieve multi-rung task context for explain, debug, review, or implement work",
-  args: [
-    { ...REPO_ID_ARG },
-    {
-      flag: "--task-type",
-      field: "taskType",
-      type: "string",
-      required: true,
-      description: "Task type: debug|review|implement|explain",
-    },
-    {
-      flag: "--task-text",
-      field: "taskText",
-      type: "string",
-      required: true,
-      description: "Task description",
-    },
-    {
-      flag: "--budget",
-      field: "budget",
-      type: "json",
-      description: "JSON budget, e.g. '{\"maxTokens\":5000}'",
-    },
-    {
-      flag: "--options",
-      field: "options",
-      type: "json",
-      description:
-        'JSON options, e.g. \'{"contextMode":"precise","includeTests":true}\'',
-    },
-    {
-      flag: "--if-none-match",
-      field: "ifNoneMatch",
-      type: "string",
-      description: "ETag for conditional fetch",
-    },
-  ],
-  examples: [
-    'sdl-mcp tool agent.context --repo-id my-repo --task-type debug --task-text "fix auth bug"',
-  ],
-};
 
 const agentFeedback: ActionDefinition = {
   action: "agent.feedback",
@@ -1365,12 +1248,10 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   // Query
   symbolSearch,
   symbolGetCard,
-  symbolGetCards,
   sliceBuild,
   sliceRefresh,
   sliceSpilloverGet,
   deltaGet,
-  contextSummary,
   prRiskAnalyze,
   // Code
   codeNeedWindow,
@@ -1387,7 +1268,6 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   usageStats,
   fileRead,
   // Agent
-  agentContext,
   agentFeedback,
   agentFeedbackQuery,
   bufferPush,

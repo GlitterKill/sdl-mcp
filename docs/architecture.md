@@ -32,7 +32,7 @@ SDL-MCP is a high-performance codebase indexing and context retrieval server. Th
 | Transports   | stdio (CLI agents), HTTP/SSE (network clients)                                                     |
 | AST parsing  | tree-sitter 0.26.2 (via @keqingmoe/tree-sitter) + language grammars (0.23.x–0.25.x)                |
 | Native addon | Rust via napi-rs (optional, multi-threaded pass-1)                                                 |
-| Embeddings   | ONNX Runtime (MiniLM 384-dim, nomic-embed-text-v1.5 768-dim, jina-embeddings-v2-base-code 768-dim) |
+| Embeddings   | ONNX Runtime (jina-embeddings-v2-base-code 768-dim bundled, nomic-embed-text-v1.5 768-dim optional) |
 | Validation   | Zod schemas for all tool payloads and responses                                                    |
 
 ---
@@ -197,7 +197,7 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | :---------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Repo**          | repoId, rootPath, configJson, createdAt                                                                                                                         |
 | **File**          | fileId, repoId, relPath, byteSize, contentHash                                                                                                                  |
-| **Symbol**        | symbolId, repoId, fileId, kind, name, exported, signatureJson, summary, summaryQuality, summarySource, etag, embeddingMiniLM, embeddingNomic, embeddingJinaCode |
+| **Symbol**        | symbolId, repoId, fileId, kind, name, exported, signatureJson, summary, summaryQuality, summarySource, etag, embeddingJinaCode, embeddingNomic, embeddingJinaCode |
 | **Version**       | versionId, repoId, timestamp, indexedAt                                                                                                                         |
 | **SymbolVersion** | symbolId, versionId, signatureJson, summary                                                                                                                     |
 | **Metrics**       | symbolId, repoId, fanIn, fanOut, churn, testRefs                                                                                                                |
@@ -208,7 +208,7 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | :-------------- | :-------------------------------------------------------------------------------------- |
 | **Cluster**     | clusterId, label, memberCount, searchText                                               |
 | **Process**     | processId, label, repoId, searchText                                                    |
-| **FileSummary** | fileId, repoId, summary, searchText, embeddingMiniLM, embeddingNomic, embeddingJinaCode |
+| **FileSummary** | fileId, repoId, summary, searchText, embeddingJinaCode, embeddingNomic, embeddingJinaCode |
 
 **Infrastructure nodes:**
 
@@ -217,7 +217,7 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | **SliceHandle**   | handle, createdAt, expiresAt, minVersion, maxVersion                                                   |
 | **CardHash**      | symbolId, hash                                                                                         |
 | **Audit**         | auditId, repoId, action, timestamp                                                                     |
-| **AgentFeedback** | feedbackId, repoId, taskText, taskType, searchText, embeddingMiniLM, embeddingNomic, embeddingJinaCode |
+| **AgentFeedback** | feedbackId, repoId, taskText, taskType, searchText, embeddingJinaCode, embeddingNomic, embeddingJinaCode |
 | **SchemaVersion** | version, appliedAt                                                                                     |
 
 **Semantic nodes:**
@@ -419,11 +419,11 @@ Three subsystems that enhance code intelligence beyond structural analysis:
 
 Alpha-blended lexical + embedding similarity reranking using ONNX models. Three models available:
 
-- **all-MiniLM-L6-v2** (384-dim, ~22 MB, bundled) — general-purpose baseline, zero-setup
+- **jina-embeddings-v2-base-code** (768-dim, ~110 MB, bundled) — code-optimized, zero-setup
 - **nomic-embed-text-v1.5** (768-dim, ~138 MB, downloaded) — higher-quality text embeddings, longer context (8192 tokens), uses document/query prefixes
 - **jina-embeddings-v2-base-code** (768-dim, ~110 MB, downloaded) — code-specialized for 30+ programming languages, 8192-token context
 
-MiniLM and Nomic are text models that benefit most from LLM summaries. Jina Code is trained on source code and excels at code-to-code similarity without requiring natural-language summaries.
+Nomic is a text model that benefit most from LLM summaries. Jina Code is trained on source code and excels at code-to-code similarity without requiring natural-language summaries.
 
 ### LLM Summaries
 

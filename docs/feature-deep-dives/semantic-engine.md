@@ -304,7 +304,7 @@ When `includeRetrievalEvidence: true` is passed to `symbol.search` or `slice.bui
     "vectorAvailable": true,
     "candidateCountPerSource": {
       "fts": 42,
-      "vector:all-MiniLM-L6-v2": 38,
+      "vector:jina-embeddings-v2-base-code": 38,
       "vector:nomic-embed-text-v1.5": 35
     },
     "fusionLatencyMs": 12,
@@ -321,7 +321,7 @@ SDL-MCP ships with three embedding models, each suited to different workflows:
 
 ```mermaid
 flowchart LR
-    MiniLM["all-MiniLM-L6-v2<br/>384 dims, 256 max tokens<br/>~22 MB INT8, bundled<br/>Best for quick setup"] --> Shared["Natural-language symbol text<br/>benefits from summaries"]
+    Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~110 MB, bundled<br/>Optimized for code"] --> Shared["Natural-language symbol text<br/>benefits from summaries"]
     Nomic["nomic-embed-text-v1.5<br/>768 dims, 8192 max tokens<br/>~138 MB download<br/>Best for NL queries + summaries"] --> Shared
     Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~110 MB download<br/>Best for code-to-code search"] --> Shared
 ```
@@ -330,11 +330,11 @@ flowchart LR
 
 | If you...                            | Use                                                          |
 | :----------------------------------- | :----------------------------------------------------------- |
-| Want zero setup, no downloads        | `all-MiniLM-L6-v2` (bundled in npm)                          |
+| Want zero setup, code-focused     | `jina-embeddings-v2-base-code` (bundled)                     |
 | Want better quality, longer context  | `nomic-embed-text-v1.5` (768-dim, 8192 tokens)               |
 | Work with multi-language codebases   | `jina-embeddings-v2-base-code` (trained on 30+ languages)    |
-| Have LLM summaries enabled           | MiniLM or Nomic (text models benefit most from NL summaries) |
-| Have a large codebase (>10k symbols) | `all-MiniLM-L6-v2` (smaller vectors = faster ANN)            |
+| Have LLM summaries enabled           | Nomic (text model benefits most from NL summaries)           |
+| Have a large codebase (>10k symbols) | `jina-embeddings-v2-base-code` (code-optimized)              |
 | Want the best NL query quality       | `nomic-embed-text-v1.5` + LLM summaries                      |
 | Want the best code similarity        | `jina-embeddings-v2-base-code`                               |
 
@@ -354,7 +354,7 @@ Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB. Eac
 
 ```mermaid
 flowchart TD
-    Symbol["Symbol node"] --> MiniLM["embeddingMiniLM<br/>embeddingMiniLMCardHash<br/>embeddingMiniLMUpdatedAt"]
+    Symbol["Symbol node"] --> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
     Symbol --> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
     Symbol --> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
 ```
@@ -372,7 +372,7 @@ Hybrid retrieval uses native Ladybug vector indexes for fast approximate nearest
 ```mermaid
 flowchart TD
     subgraph Indexes["Native Ladybug Vector Indexes"]
-        MiniLMIndex["symbol_embedding_minilm_v1<br/>Property: Symbol.embeddingMiniLM<br/>Dimensions: 384"]
+        JinaIndex["symbol_embedding_jina_v1<br/>Property: Symbol.embeddingJinaCode<br/>Dimensions: 768"]
         NomicIndex["symbol_embedding_nomic_v1<br/>Property: Symbol.embeddingNomic<br/>Dimensions: 768"]
     end
 
@@ -407,7 +407,7 @@ flowchart TD
 These summaries serve two purposes:
 
 1. **For agents**: instant understanding without reading code (Rung 1 of the Iris Gate Ladder)
-2. **For embeddings**: richer text input for the MiniLM model, producing better semantic search results
+2. **For embeddings**: richer text input for the Jina Code model, producing better semantic search results
 
 ### Summary Quality Scoring
 
@@ -533,7 +533,7 @@ Every generated summary records its estimated API cost:
 
 ### Summary Compatibility
 
-All three supported embedding models (`all-MiniLM-L6-v2`, `nomic-embed-text-v1.5`, and `jina-embeddings-v2-base-code`) benefit from LLM summaries. When `generateSummaries: true` is set, summaries are generated and embedded for all models, producing higher-quality semantic search results. Note that `jina-embeddings-v2-base-code` is already optimized for code semantics, so the improvement from summaries may be less dramatic than with the general-purpose models.
+Both supported embedding models (`jina-embeddings-v2-base-code` and `nomic-embed-text-v1.5`) benefit from LLM summaries. When `generateSummaries: true` is set, summaries are generated and embedded for all models, producing higher-quality semantic search results. Note that `jina-embeddings-v2-base-code` is already optimized for code semantics, so the improvement from summaries may be less dramatic than with the general-purpose models.
 
 ---
 
@@ -549,7 +549,7 @@ All three supported embedding models (`all-MiniLM-L6-v2`, `nomic-embed-text-v1.5
 
     // ── Embedding Configuration ──
     "provider": "local", // "local" (ONNX), "api", or "mock"
-    "model": "all-MiniLM-L6-v2", // or "nomic-embed-text-v1.5" or "jina-embeddings-v2-base-code"
+    "model": "jina-embeddings-v2-base-code", // or "nomic-embed-text-v1.5" or "jina-embeddings-v2-base-code"
     "modelCacheDir": null, // Custom model cache directory
     "alpha": 0.6, // Lexical/semantic blend (0=pure semantic, 1=pure lexical)
 
@@ -623,7 +623,7 @@ Downloads ~110 MB on first run. Trained on 30+ programming languages — best ch
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "all-MiniLM-L6-v2",
+    "model": "jina-embeddings-v2-base-code",
     "generateSummaries": true,
     "summaryProvider": "local",
     "summaryModel": "llama3.2",
@@ -739,8 +739,8 @@ sdl-mcp index --repo-id my-app
 # [indexing] Extracted 847 symbols from 92 files
 # [pass2] Resolved 1,204 call edges (89% exact, 8% heuristic, 3% unresolved)
 # [summaries] Generated 312 summaries, 535 cached, 0 failed ($0.62)
-# [embeddings] Computed 847 embeddings (all-MiniLM-L6-v2)
-# [ann] Built HNSW index (847 vectors, 384 dims)
+# [embeddings] Computed 847 embeddings (jina-embeddings-v2-base-code)
+# [ann] Built HNSW index (847 vectors, 768 dims)
 # [finalize] Version v47 committed
 ```
 
@@ -748,7 +748,7 @@ sdl-mcp index --repo-id my-app
 
 ```bash
 # Generate a portable context briefing
-sdl.context.summary({
+({
   repoId: "my-app",
   query: "authentication middleware",
   budget: 2000,
@@ -802,7 +802,7 @@ sdl.symbol.search({
 #     "vectorAvailable": true,
 #     "candidateCountPerSource": {
 #       "fts": 42,
-#       "vector:all-MiniLM-L6-v2": 38,
+#       "vector:jina-embeddings-v2-base-code": 38,
 #       "vector:nomic-embed-text-v1.5": 35
 #     },
 #     "fusionLatencyMs": 12,

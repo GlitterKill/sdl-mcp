@@ -303,7 +303,7 @@ Below is every option with inline commentary. JSON does not support comments, so
     "provider": "local",
 
     // Embedding model identifier. Used by "api" and "local" providers.
-    "model": "all-MiniLM-L6-v2",
+    "model": "jina-embeddings-v2-base-code",
 
     // Override directory for downloaded ONNX model files. Defaults to platform-specific cache.
     "modelCacheDir": null,
@@ -373,7 +373,7 @@ Below is every option with inline commentary. JSON does not support comments, so
         "efs": 200, // Query-time accuracy (efSearch) (8-1000)
         "indexes": {
           // Per-model index name overrides
-          "all-MiniLM-L6-v2": { "indexName": "symbol_vec_minilm_l6_v2" },
+          "jina-embeddings-v2-base-code": { "indexName": "symbol_vec_jina_code_v2" },
           "nomic-embed-text-v1.5": {
             "indexName": "symbol_vec_nomic_embed_v15",
           },
@@ -728,7 +728,7 @@ Controls semantic search reranking, embedding generation, and LLM-powered symbol
 | `enabled`               | `boolean` | `true`                        | —                                | Enable semantic reranking in symbol search                                                 |
 | `alpha`                 | `number`  | `0.6`                         | 0.0-1.0                          | **Deprecated** — use `retrieval.fusion.rrfK` instead. Legacy lexical/semantic blend weight |
 | `provider`              | `string`  | `"local"`                     | `"api"` \| `"local"` \| `"mock"` | Embedding provider                                                                         |
-| `model`                 | `string`  | `"all-MiniLM-L6-v2"`          | —                                | Embedding model identifier                                                                 |
+| `model`                 | `string`  | `"jina-embeddings-v2-base-code"`          | —                                | Embedding model identifier                                                                 |
 | `generateSummaries`     | `boolean` | `false`                       | —                                | Generate LLM summaries during indexing                                                     |
 | `summaryModel`          | `string`  | `"claude-haiku-4-5-20251001"` | —                                | LLM model for summaries                                                                    |
 | `summaryApiKey`         | `string?` | `null`                        | —                                | API key (falls back to `ANTHROPIC_API_KEY` env var)                                        |

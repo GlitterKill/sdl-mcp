@@ -14,11 +14,11 @@ import {
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import {
   SymbolGetCardRequestSchema,
-  SymbolGetCardsRequestSchema,
+  
 } from "../../dist/mcp/tools.js";
 import {
   handleSymbolGetCard,
-  handleSymbolGetCards,
+  
 } from "../../dist/mcp/tools/symbol.js";
 import { errorToMcpResponse } from "../../dist/mcp/errors.js";
 
@@ -139,7 +139,7 @@ describe("symbol natural identifiers", () => {
       true,
     );
     assert.equal(
-      SymbolGetCardsRequestSchema.safeParse({
+      SymbolGetCardRequestSchema.safeParse({
         repoId: "repo",
         symbolRefs: [{ name: "renderNode" }],
       }).success,
@@ -155,7 +155,7 @@ describe("symbol natural identifiers", () => {
       false,
     );
     assert.equal(
-      SymbolGetCardsRequestSchema.safeParse({
+      SymbolGetCardRequestSchema.safeParse({
         repoId: "repo",
         symbolIds: ["sym-tree-main"],
         symbolRefs: [{ name: "renderNode" }],
@@ -210,7 +210,7 @@ describe("symbol natural identifiers", () => {
   });
 
   it("returns partial success metadata for mixed symbolRefs batches", async () => {
-    const response = await handleSymbolGetCards({
+    const response = await handleSymbolGetCard({
       repoId: "repo",
       symbolRefs: [
         { name: "renderNode", file: "src/tree.ts" },

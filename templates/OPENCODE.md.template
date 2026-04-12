@@ -7,7 +7,7 @@ Use SDL-MCP as the primary tool surface for repository `{{REPO_ID}}`.
 1. Start with `sdl.repo.status`.
 2. Use `sdl.action.search` for discovery (use `query: "*"` to list all).
 3. Use `sdl.manual(query|actions|format)` to load only the relevant reference.
-4. Use `sdl.agent.context` for code context retrieval (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration).
+4. Use `sdl.context` for code context retrieval (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration).
 5. Use `sdl.workflow` for multi-step operations (runtime execution, data transforms, batch mutations) and `runtimeExecute` for repo-local commands — not for context retrieval.
 6. Use `symbolRef` or `symbolRefs` when you know a symbol name but not the canonical `symbolId`.
 7. Follow SDL guidance fields such as `nextBestAction`, `fallbackTools`, `fallbackRationale`, and ranked candidates instead of retrying blocked native tools.

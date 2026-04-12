@@ -47,7 +47,7 @@ describe("Gateway schemas", () => {
     it("validates symbol.getCards action", () => {
       const result = QueryGatewaySchema.safeParse({
         repoId: "test-repo",
-        action: "symbol.getCards",
+        action: "symbol.getCard",
         symbolIds: ["sym1", "sym2"],
       });
       assert.strictEqual(result.success, true);
@@ -56,7 +56,7 @@ describe("Gateway schemas", () => {
     it("validates symbol.getCards action with symbolRefs", () => {
       const result = QueryGatewaySchema.safeParse({
         repoId: "test-repo",
-        action: "symbol.getCards",
+        action: "symbol.getCard",
         symbolRefs: [{ name: "handleRequest" }],
       });
       assert.strictEqual(result.success, true);
@@ -213,7 +213,7 @@ describe("Gateway schemas", () => {
 
   describe("action constants", () => {
     it("QUERY_ACTIONS has 9 actions", () => {
-      assert.strictEqual(QUERY_ACTIONS.length, 9);
+      assert.strictEqual(QUERY_ACTIONS.length, 7);
     });
 
     it("CODE_ACTIONS has 3 actions", () => {
@@ -225,11 +225,11 @@ describe("Gateway schemas", () => {
     });
 
     it("AGENT_ACTIONS has 12 actions", () => {
-      assert.strictEqual(AGENT_ACTIONS.length, 12);
+      assert.strictEqual(AGENT_ACTIONS.length, 11);
     });
 
     it("ALL_ACTIONS has 33 total actions", () => {
-      assert.strictEqual(ALL_ACTIONS.length, 33);
+      assert.strictEqual(ALL_ACTIONS.length, 30);
     });
   });
 });

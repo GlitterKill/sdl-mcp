@@ -92,7 +92,7 @@ describe("Gateway descriptions", () => {
   });
 
   it("AGENT_DESCRIPTION mentions key agent actions", () => {
-    assert.ok(AGENT_DESCRIPTION.includes("agent.context"));
+    assert.ok(AGENT_DESCRIPTION.includes("agent.feedback"));
     assert.ok(AGENT_DESCRIPTION.includes("buffer.push"));
     assert.ok(AGENT_DESCRIPTION.includes("memory.store"));
     assert.ok(AGENT_DESCRIPTION.includes("runtime.execute"));

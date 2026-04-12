@@ -522,12 +522,8 @@
         },
         "model": {
           "type": "string",
-          "enum": [
-            "all-MiniLM-L6-v2",
-            "nomic-embed-text-v1.5",
-            "jina-embeddings-v2-base-code"
-          ],
-          "default": "all-MiniLM-L6-v2"
+          "enum": ["jina-embeddings-v2-base-code", "nomic-embed-text-v1.5"],
+          "default": "jina-embeddings-v2-base-code"
         },
         "modelCacheDir": {
           "type": "string",
@@ -668,8 +664,8 @@
                     }
                   },
                   "default": {
-                    "all-MiniLM-L6-v2": {
-                      "indexName": "symbol_vec_minilm_l6_v2"
+                    "jina-embeddings-v2-base-code": {
+                      "indexName": "symbol_vec_jina_code_v2"
                     },
                     "nomic-embed-text-v1.5": {
                       "indexName": "symbol_vec_nomic_embed_v15"
@@ -682,8 +678,8 @@
                 "topK": 75,
                 "efs": 200,
                 "indexes": {
-                  "all-MiniLM-L6-v2": {
-                    "indexName": "symbol_vec_minilm_l6_v2"
+                  "jina-embeddings-v2-base-code": {
+                    "indexName": "symbol_vec_jina_code_v2"
                   },
                   "nomic-embed-text-v1.5": {
                     "indexName": "symbol_vec_nomic_embed_v15"
@@ -734,7 +730,9 @@
               "topK": 75,
               "efs": 200,
               "indexes": {
-                "all-MiniLM-L6-v2": { "indexName": "symbol_vec_minilm_l6_v2" },
+                "jina-embeddings-v2-base-code": {
+                  "indexName": "symbol_vec_jina_code_v2"
+                },
                 "nomic-embed-text-v1.5": {
                   "indexName": "symbol_vec_nomic_embed_v15"
                 }
@@ -751,7 +749,7 @@
       "default": {
         "enabled": true,
         "provider": "local",
-        "model": "all-MiniLM-L6-v2",
+        "model": "jina-embeddings-v2-base-code",
         "generateSummaries": false,
         "summaryModel": "claude-haiku-4-5-20251001",
         "summaryMaxConcurrency": 5,

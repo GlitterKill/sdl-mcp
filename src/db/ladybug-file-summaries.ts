@@ -19,9 +19,9 @@ export interface FileSummaryRow {
   summary: string | null;
   searchText: string | null;
   updatedAt: string;
-  embeddingMiniLM: string | null;
-  embeddingMiniLMCardHash: string | null;
-  embeddingMiniLMUpdatedAt: string | null;
+  embeddingJinaCode: string | null;
+  embeddingJinaCodeCardHash: string | null;
+  embeddingJinaCodeUpdatedAt: string | null;
   embeddingNomic: string | null;
   embeddingNomicCardHash: string | null;
   embeddingNomicUpdatedAt: string | null;
@@ -80,9 +80,9 @@ export async function getFileSummary(
             fs.summary AS summary,
             fs.searchText AS searchText,
             fs.updatedAt AS updatedAt,
-            fs.embeddingMiniLM AS embeddingMiniLM,
-            fs.embeddingMiniLMCardHash AS embeddingMiniLMCardHash,
-            fs.embeddingMiniLMUpdatedAt AS embeddingMiniLMUpdatedAt,
+            fs.embeddingJinaCode AS embeddingJinaCode,
+            fs.embeddingJinaCodeCardHash AS embeddingJinaCodeCardHash,
+            fs.embeddingJinaCodeUpdatedAt AS embeddingJinaCodeUpdatedAt,
             fs.embeddingNomic AS embeddingNomic,
             fs.embeddingNomicCardHash AS embeddingNomicCardHash,
             fs.embeddingNomicUpdatedAt AS embeddingNomicUpdatedAt`,
@@ -106,9 +106,9 @@ export async function getFileSummariesForRepo(
             fs.summary AS summary,
             fs.searchText AS searchText,
             fs.updatedAt AS updatedAt,
-            fs.embeddingMiniLM AS embeddingMiniLM,
-            fs.embeddingMiniLMCardHash AS embeddingMiniLMCardHash,
-            fs.embeddingMiniLMUpdatedAt AS embeddingMiniLMUpdatedAt,
+            fs.embeddingJinaCode AS embeddingJinaCode,
+            fs.embeddingJinaCodeCardHash AS embeddingJinaCodeCardHash,
+            fs.embeddingJinaCodeUpdatedAt AS embeddingJinaCodeUpdatedAt,
             fs.embeddingNomic AS embeddingNomic,
             fs.embeddingNomicCardHash AS embeddingNomicCardHash,
             fs.embeddingNomicUpdatedAt AS embeddingNomicUpdatedAt`,
@@ -119,7 +119,7 @@ export async function getFileSummariesForRepo(
 /**
  * Update the embedding vector and card hash for a specific model on a FileSummary node.
  *
- * Uses getEmbeddingPropertyName to derive the column prefix (e.g. "embeddingMiniLM")
+ * Uses getEmbeddingPropertyName to derive the column prefix (e.g. "embeddingJinaCode")
  * and then sets <prefix>, <prefix>CardHash, and <prefix>UpdatedAt.
  *
  * Returns false if the model is not recognised (no-op), true on success.

@@ -5,13 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { handleRepoOverview } from "../../dist/mcp/tools/repo.js";
-import { handleContextSummary } from "../../dist/mcp/tools/summary.js";
 import {
   handleGetHotPath,
   handleGetSkeleton,
 } from "../../dist/mcp/tools/code.js";
-import { handleAgentContext } from "../../dist/mcp/tools/context.js";
-import { contextEngine } from "../../dist/agent/context-engine.js";
 import {
   closeLadybugDb,
   getLadybugConn,
@@ -142,26 +139,6 @@ describe("conditional cache-aware tool handlers", () => {
     });
   });
 
-  it("context.summary returns notModified when ifNoneMatch matches", async () => {
-    const first = await handleContextSummary({
-      repoId: REPO_ID,
-      query: "greet",
-      scope: "symbol",
-    });
-    assert.ok("etag" in first);
-
-    const second = await handleContextSummary({
-      repoId: REPO_ID,
-      query: "greet",
-      scope: "symbol",
-      ifNoneMatch: first.etag,
-    });
-
-    assert.deepStrictEqual(second, {
-      notModified: true,
-      etag: first.etag,
-    });
-  });
 
   it("code.getSkeleton returns notModified when ifNoneMatch matches", async () => {
     const first = await handleGetSkeleton({
@@ -203,148 +180,5 @@ describe("conditional cache-aware tool handlers", () => {
     });
   });
 
-  it("agent.context returns notModified when ifNoneMatch matches", async () => {
-    mock.method(contextEngine, "buildContext", async () => ({
-      taskId: "task-1",
-      taskType: "debug" as const,
-      actionsTaken: [
-        {
-          id: "action-1",
-          type: "getCard",
-          status: "completed",
-          input: { symbolId: "sym-1" },
-          output: { ok: true },
-          timestamp: 1,
-          durationMs: 2,
-          evidence: [],
-        },
-      ],
-      path: {
-        rungs: ["card"],
-        estimatedTokens: 50,
-        estimatedDurationMs: 10,
-        reasoning: "stable",
-      },
-      finalEvidence: [
-        {
-          type: "symbolCard",
-          reference: "symbol:sym-1",
-          summary: "stable summary",
-          timestamp: 1,
-        },
-      ],
-      summary: "stable summary",
-      success: true,
-      metrics: {
-        totalDurationMs: 25,
-        totalTokens: 10,
-        totalActions: 1,
-        successfulActions: 1,
-        failedActions: 0,
-        cacheHits: 0,
-      },
-      answer: "answer",
-      nextBestAction: "none",
-      retrievalEvidence: {
-        symptomType: "taskText",
-      },
-    }));
 
-    const first = await handleAgentContext({
-      repoId: REPO_ID,
-      taskType: "debug",
-      taskText: "inspect greet",
-    });
-    assert.ok("etag" in first);
-
-    const second = await handleAgentContext({
-      repoId: REPO_ID,
-      taskType: "debug",
-      taskText: "inspect greet",
-      ifNoneMatch: first.etag,
-    });
-
-    assert.deepStrictEqual(second, {
-      notModified: true,
-      etag: first.etag,
-    });
-  });
-
-  it("agent.context ignores nested evidence timestamps when computing etags", async () => {
-    let callCount = 0;
-    mock.method(contextEngine, "buildContext", async () => {
-      callCount += 1;
-      return {
-        taskId: `task-${callCount}`,
-        taskType: "debug" as const,
-        actionsTaken: [
-          {
-            id: `action-${callCount}`,
-            type: "getCard",
-            status: "completed",
-            input: { symbolId: "sym-1" },
-            output: { ok: true },
-            timestamp: callCount,
-            durationMs: 2,
-            evidence: [
-              {
-                type: "symbolCard",
-                reference: "symbol:sym-1",
-                summary: "stable summary",
-                timestamp: callCount,
-              },
-            ],
-          },
-        ],
-        path: {
-          rungs: ["card"],
-          estimatedTokens: 50,
-          estimatedDurationMs: 10,
-          reasoning: "stable",
-        },
-        finalEvidence: [
-          {
-            type: "symbolCard",
-            reference: "symbol:sym-1",
-            summary: "stable summary",
-            timestamp: callCount,
-          },
-        ],
-        summary: "stable summary",
-        success: true,
-        metrics: {
-          totalDurationMs: 25,
-          totalTokens: 10,
-          totalActions: 1,
-          successfulActions: 1,
-          failedActions: 0,
-          cacheHits: 0,
-        },
-        answer: "answer",
-        nextBestAction: "none",
-        retrievalEvidence: {
-          symptomType: "taskText",
-        },
-      };
-    });
-
-    const first = await handleAgentContext({
-      repoId: REPO_ID,
-      taskType: "debug",
-      taskText: "inspect greet",
-    });
-    assert.ok("etag" in first);
-
-    const second = await handleAgentContext({
-      repoId: REPO_ID,
-      taskType: "debug",
-      taskText: "inspect greet",
-      ifNoneMatch: first.etag,
-    });
-
-    assert.deepStrictEqual(second, {
-      notModified: true,
-      etag: first.etag,
-    });
-  });
 });

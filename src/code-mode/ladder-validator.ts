@@ -3,7 +3,6 @@ import type { ParsedWorkflowStep } from "./workflow-parser.js";
 const RUNG_ORDER: Record<string, number> = {
   "symbol.search": 0,
   "symbol.getCard": 1,
-  "symbol.getCards": 1,
   "slice.build": 1,
   "code.getSkeleton": 2,
   "code.getHotPath": 3,

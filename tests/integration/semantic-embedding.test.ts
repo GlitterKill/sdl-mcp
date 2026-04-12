@@ -162,7 +162,7 @@ describe("Semantic Embedding Pipeline", () => {
     const result = await refreshSymbolEmbeddings({
       repoId,
       provider: "mock",
-      model: "all-MiniLM-L6-v2",
+      model: "jina-embeddings-v2-base-code",
       symbols,
     });
 
@@ -187,7 +187,7 @@ describe("Semantic Embedding Pipeline", () => {
     const first = await refreshSymbolEmbeddings({
       repoId,
       provider: "mock",
-      model: "all-MiniLM-L6-v2",
+      model: "jina-embeddings-v2-base-code",
       symbols,
     });
     assert.strictEqual(first.embedded, 0);
@@ -197,7 +197,7 @@ describe("Semantic Embedding Pipeline", () => {
     const second = await refreshSymbolEmbeddings({
       repoId,
       provider: "mock",
-      model: "all-MiniLM-L6-v2",
+      model: "jina-embeddings-v2-base-code",
       symbols,
     });
     assert.strictEqual(second.embedded, 0);

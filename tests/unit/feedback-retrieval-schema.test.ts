@@ -53,18 +53,18 @@ describe("AgentFeedback retrieval schema", () => {
     assert.equal(rows[0].searchText, "debug auth login failure");
   });
 
-  it("AgentFeedback node has embeddingMiniLM column", async () => {
+  it("AgentFeedback node has embeddingJinaCode column", async () => {
     const conn = await getLadybugConn();
     await exec(
       conn,
       `MERGE (f:AgentFeedback {feedbackId: 'test-schema-2'})
-        SET f.embeddingMiniLMCardHash = 'abc123',
-            f.embeddingMiniLMUpdatedAt = '2026-03-24T00:00:00Z'`,
+        SET f.embeddingJinaCodeCardHash = 'abc123',
+            f.embeddingJinaCodeUpdatedAt = '2026-03-24T00:00:00Z'`,
     );
     const rows = await queryAll(
       conn,
       `MATCH (f:AgentFeedback {feedbackId: 'test-schema-2'})
-       RETURN f.embeddingMiniLMCardHash AS hash`,
+       RETURN f.embeddingJinaCodeCardHash AS hash`,
     );
     assert.equal(rows[0].hash, "abc123");
   });

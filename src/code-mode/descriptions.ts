@@ -6,7 +6,7 @@ export const MANUAL_DESCRIPTION =
 export const WORKFLOW_DESCRIPTION =
   "Execute a workflow of SDL-MCP operations in a single round-trip. Best for "
   + "multi-step operations (runtime execution, data transforms, batch mutations) "
-  + "- for code context retrieval, prefer sdl.context or sdl.agent.context. Each "
+  + "- for code context retrieval, prefer sdl.context. Each "
   + "step calls a function from the API manual or an internal transform "
   + "(dataPick, dataMap, dataFilter, dataSort, dataTemplate). Use $N references "
   + "(e.g., $0.results[0].symbolId) to pass results "
@@ -15,7 +15,7 @@ export const WORKFLOW_DESCRIPTION =
 
 export const CONTEXT_DESCRIPTION =
   "Retrieve task-shaped code context for explain, debug, review, or implement "
-  + "work. This is the Code Mode equivalent of sdl.agent.context and should be "
+  + "work. This is the recommended tool for context retrieval and should be "
   + "preferred over sdl.workflow for context retrieval.";
 
 export const ACTION_SEARCH_DESCRIPTION =

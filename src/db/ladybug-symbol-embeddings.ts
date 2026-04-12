@@ -2,7 +2,7 @@
  * ladybug-symbol-embeddings.ts - Model-aware Symbol node embedding helpers
  *
  * Reads/writes embedding data directly on the Symbol node using model-specific
- * property names (e.g., embeddingMiniLM, embeddingMiniLMCardHash, embeddingMiniLMUpdatedAt).
+ * property names (e.g., embeddingJinaCode, embeddingJinaCodeCardHash, embeddingJinaCodeUpdatedAt).
  *
  * These helpers replace the legacy SymbolEmbedding-table-based functions in
  * ladybug-embeddings.ts for the hybrid retrieval pipeline.

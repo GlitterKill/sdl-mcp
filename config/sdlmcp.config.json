@@ -42,11 +42,7 @@
         "**/*.test.ts",
         "**/*.spec.ts"
       ],
-      "languages": [
-        "ts",
-        "tsx",
-        "js"
-      ]
+      "languages": ["ts", "tsx", "js"]
     },
     {
       "repoId": "preact-oss",
@@ -61,12 +57,7 @@
         "**/*.test.tsx",
         "**/*.spec.tsx"
       ],
-      "languages": [
-        "ts",
-        "tsx",
-        "js",
-        "jsx"
-      ]
+      "languages": ["ts", "tsx", "js", "jsx"]
     },
     {
       "repoId": "flask-oss",
@@ -81,9 +72,7 @@
         "**/*.pyc",
         "**/tests/**"
       ],
-      "languages": [
-        "py"
-      ]
+      "languages": ["py"]
     },
     {
       "repoId": "ansible-lint-oss",
@@ -100,10 +89,7 @@
         "**/tests/**",
         "**/.tox/**"
       ],
-      "languages": [
-        "py",
-        "sh"
-      ]
+      "languages": ["py", "sh"]
     }
   ],
   "graphDatabase": {
@@ -145,7 +131,7 @@
     "enabled": true,
     "alpha": 0.6,
     "provider": "mock",
-    "model": "all-MiniLM-L6-v2",
+    "model": "jina-embeddings-v2-base-code",
     "generateSummaries": false
   },
   "prefetch": {

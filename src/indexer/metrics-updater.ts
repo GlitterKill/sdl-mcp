@@ -84,7 +84,7 @@ export async function finalizeIndexing({
     (changedFileIds === undefined || changedFileIds.size > 0);
 
   if (shouldRunSemanticRefresh) {
-    const model = semanticConfig.model ?? "all-MiniLM-L6-v2";
+    const model = semanticConfig.model ?? "jina-embeddings-v2-base-code";
 
     // Summaries are generated first so embeddings can incorporate them.
     if (semanticConfig.generateSummaries) {

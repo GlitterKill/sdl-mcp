@@ -53,7 +53,7 @@ describe("SemanticRetrievalConfigSchema", () => {
         topK: 30,
         efs: 100,
         indexes: {
-          "all-MiniLM-L6-v2": { indexName: "sym_vec_minilm" },
+          "jina-embeddings-v2-base-code": { indexName: "sym_vec_jina" },
           "nomic-embed-text-v1.5": { indexName: "sym_vec_nomic" },
         },
       },
@@ -88,9 +88,9 @@ describe("SemanticRetrievalConfigSchema", () => {
     assert.strictEqual(vector.topK, 75);
     assert.strictEqual(vector.efs, 200);
 
-    const miniLM = vector.indexes?.["all-MiniLM-L6-v2"];
-    assert.ok(miniLM, "all-MiniLM-L6-v2 index entry should be present");
-    assert.strictEqual(miniLM.indexName, "symbol_vec_minilm_l6_v2");
+    const jinaCode = vector.indexes?.["jina-embeddings-v2-base-code"];
+    assert.ok(jinaCode, "jina-embeddings-v2-base-code index entry should be present");
+    assert.strictEqual(jinaCode.indexName, "symbol_vec_jina_code_v2");
 
     const nomic = vector.indexes?.["nomic-embed-text-v1.5"];
     assert.ok(nomic, "nomic-embed-text-v1.5 index entry should be present");
@@ -120,7 +120,7 @@ describe("SemanticConfigSchema with retrieval field", () => {
   it("default config parses correctly — retrieval field is optional and absent by default", () => {
     const result = SemanticConfigSchema.parse({});
     assert.strictEqual(result.enabled, true);
-    assert.strictEqual(result.model, "all-MiniLM-L6-v2");
+    assert.strictEqual(result.model, "jina-embeddings-v2-base-code");
     // retrieval is optional; may be undefined when not provided
     assert.ok(
       result.retrieval === undefined || typeof result.retrieval === "object",
@@ -132,11 +132,11 @@ describe("SemanticConfigSchema with retrieval field", () => {
     const result = SemanticConfigSchema.parse({
       enabled: true,
       alpha: 0.5,
-      model: "all-MiniLM-L6-v2",
+      model: "jina-embeddings-v2-base-code",
     });
     assert.strictEqual(result.enabled, true);
     assert.strictEqual(result.alpha, 0.5);
-    assert.strictEqual(result.model, "all-MiniLM-L6-v2");
+    assert.strictEqual(result.model, "jina-embeddings-v2-base-code");
   });
 
   it("config with semantic.retrieval.mode='hybrid' parses correctly", () => {

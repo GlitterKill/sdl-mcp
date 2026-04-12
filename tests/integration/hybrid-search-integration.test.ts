@@ -87,12 +87,12 @@ describe("hybrid search config integration", async () => {
       vector: {
         topK: 50,
         indexes: {
-          "all-MiniLM-L6-v2": { indexName: "custom_minilm_idx" },
+          "jina-embeddings-v2-base-code": { indexName: "custom_jina_idx" },
         },
       },
     });
     assert.equal(result.vector.topK, 50);
-    assert.equal(result.vector.indexes["all-MiniLM-L6-v2"].indexName, "custom_minilm_idx");
+    assert.equal(result.vector.indexes["jina-embeddings-v2-base-code"].indexName, "custom_jina_idx");
   });
 
   it("SemanticRetrievalConfigSchema parses custom fusion config", () => {

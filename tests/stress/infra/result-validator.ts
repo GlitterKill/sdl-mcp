@@ -40,8 +40,7 @@ export function validateToolResult(
         check: "validator_internal",
         passed: false,
         actual: "validator threw",
-      },
-    ];
+      }];
   }
 }
 
@@ -145,8 +144,7 @@ const VALIDATORS: Record<string, ValidatorFn> = {
     const tool = "sdl.repo.status";
     const checks: ToolResultCheck[] = [
       checkExists(tool, "symbolsIndexed present", result.symbolsIndexed),
-      checkExists(tool, "filesIndexed present", result.filesIndexed),
-    ];
+      checkExists(tool, "filesIndexed present", result.filesIndexed)];
     if (typeof result.symbolsIndexed === "number") {
       checks.push(
         result.symbolsIndexed > 0
@@ -172,15 +170,13 @@ const VALIDATORS: Record<string, ValidatorFn> = {
         tool,
         "stats or directories present",
         result.stats ?? result.directories ?? result.hotspots,
-      ),
-    ];
+      )];
   },
 
   "sdl.index.refresh": (_args, result) => {
     const tool = "sdl.index.refresh";
     const checks = [
-      checkNonEmptyString(tool, "versionId returned", result.versionId),
-    ];
+      checkNonEmptyString(tool, "versionId returned", result.versionId)];
     if (_args.includeDiagnostics === true) {
       const diagnostics = result.diagnostics as
         | Record<string, unknown>
@@ -215,8 +211,7 @@ const VALIDATORS: Record<string, ValidatorFn> = {
       | Array<Record<string, unknown>>
       | undefined;
     const checks: ToolResultCheck[] = [
-      checkExists(tool, "results array present", results),
-    ];
+      checkExists(tool, "results array present", results)];
     if (Array.isArray(results)) {
       // For non-garbage queries, expect at least 1 result
       checks.push(checkArrayMinLen(tool, "results.length >= 1", results, 1));
@@ -242,8 +237,7 @@ const VALIDATORS: Record<string, ValidatorFn> = {
     if (result.notModified === true) {
       return [
         ok(tool, "notModified response", "true"),
-        checkNonEmptyString(tool, "etag present", result.etag),
-      ];
+        checkNonEmptyString(tool, "etag present", result.etag)];
     }
     const card = result.card as Record<string, unknown> | undefined;
     if (!card) return [fail(tool, "card present", "missing")];
@@ -255,16 +249,14 @@ const VALIDATORS: Record<string, ValidatorFn> = {
       checkNonEmptyString(tool, "card.file", card.file),
       checkExists(tool, "card.range present", card.range),
       checkExists(tool, "card.deps present", card.deps),
-      checkExists(tool, "card.version present", card.version),
-    ];
+      checkExists(tool, "card.version present", card.version)];
   },
 
-  "sdl.symbol.getCards": (_args, result) => {
-    const tool = "sdl.symbol.getCards";
+  "sdl.symbol.getCard": (_args, result) => {
+    const tool = "sdl.symbol.getCard";
     const cards = result.cards as unknown[] | undefined;
     const checks: ToolResultCheck[] = [
-      checkExists(tool, "cards array present", cards),
-    ];
+      checkExists(tool, "cards array present", cards)];
     if (Array.isArray(cards)) {
       checks.push(checkArrayMinLen(tool, "cards.length >= 1", cards, 1));
       // Spot-check first card
@@ -322,8 +314,7 @@ const VALIDATORS: Record<string, ValidatorFn> = {
         tool,
         "delta or notModified",
         result.delta ?? (result.notModified === true ? true : undefined),
-      ),
-    ];
+      )];
   },
 
   "sdl.slice.spillover.get": (_args, result) => {
@@ -357,8 +348,7 @@ const VALIDATORS: Record<string, ValidatorFn> = {
           tool,
           "approved with code",
           `${(result.code as string).length} chars`,
-        ),
-      ];
+        )];
     }
     if (denied) {
       const whyDenied = Array.isArray(result.whyDenied)
@@ -380,41 +370,35 @@ const VALIDATORS: Record<string, ValidatorFn> = {
       checkExists(tool, "policy object present", policy),
       ...(policy
         ? [checkExists(tool, "maxWindowLines in policy", policy.maxWindowLines)]
-        : []),
-    ];
+        : [])];
   },
 
   "sdl.policy.set": (_args, result) => {
     const tool = "sdl.policy.set";
     return [
-      checkExists(tool, "ok or policy returned", result.ok ?? result.policy),
-    ];
+      checkExists(tool, "ok or policy returned", result.ok ?? result.policy)];
   },
 
   // -------------------------------------------------------------------------
   // Context Summary
-  // -------------------------------------------------------------------------
-
-  "sdl.context.summary": (_args, result) => {
-    const tool = "sdl.context.summary";
+  // -------------------------------------------------------------------------: (_args, result) => {
+    const tool =;
     return [
       checkNonEmptyString(tool, "content string", result.content),
       checkExists(tool, "summary object present", result.summary),
-      checkNonEmptyString(tool, "format present", result.format),
-    ];
+      checkNonEmptyString(tool, "format present", result.format)];
   },
 
   // -------------------------------------------------------------------------
   // Agent
   // -------------------------------------------------------------------------
 
-  "sdl.agent.context": (_args, result) => {
-    const tool = "sdl.agent.context";
+  "sdl.context": (_args, result) => {
+    const tool = "sdl.context";
     const checks: ToolResultCheck[] = [
       checkNonEmptyString(tool, "taskId present", result.taskId),
       checkNonEmptyString(tool, "taskType present", result.taskType),
-      checkExists(tool, "finalEvidence present", result.finalEvidence),
-    ];
+      checkExists(tool, "finalEvidence present", result.finalEvidence)];
     // Broad mode: answer must be present on successful responses
     // (compact format may omit actionsTaken, path, metrics — that is expected)
     if (result.success === true && result.answer !== undefined) {
@@ -432,8 +416,7 @@ const VALIDATORS: Record<string, ValidatorFn> = {
         ? ok(tool, "ok === true", "true")
         : fail(tool, "ok === true", String(result.ok)),
       checkNonEmptyString(tool, "feedbackId present", result.feedbackId),
-      checkPositiveNumber(tool, "symbolsRecorded > 0", result.symbolsRecorded),
-    ];
+      checkPositiveNumber(tool, "symbolsRecorded > 0", result.symbolsRecorded)];
   },
 
   "sdl.agent.feedback.query": (_args, result) => {
@@ -452,8 +435,7 @@ const VALIDATORS: Record<string, ValidatorFn> = {
         tool,
         "delta or noChanges",
         result.delta ?? result.noChanges ?? result.changes,
-      ),
-    ];
+      )];
   },
 
   // -------------------------------------------------------------------------
@@ -467,8 +449,7 @@ const VALIDATORS: Record<string, ValidatorFn> = {
         tool,
         "risk data present",
         result.riskScore ?? result.risks ?? result.analysis,
-      ),
-    ];
+      )];
   },
 
   // -------------------------------------------------------------------------
@@ -483,8 +464,7 @@ const VALIDATORS: Record<string, ValidatorFn> = {
   "sdl.buffer.checkpoint": (_args, result) => {
     const tool = "sdl.buffer.checkpoint";
     return [
-      checkExists(tool, "ok or checkpointId", result.ok ?? result.checkpointId),
-    ];
+      checkExists(tool, "ok or checkpointId", result.ok ?? result.checkpointId)];
   },
 
   "sdl.buffer.status": (_args, result) => {
@@ -494,8 +474,7 @@ const VALIDATORS: Record<string, ValidatorFn> = {
         tool,
         "status data present",
         result.draftFiles ?? result.status,
-      ),
-    ];
+      )];
   },
 };
 
@@ -537,7 +516,7 @@ const SAMPLE_EXTRACTORS: Record<string, SampleExtractorFn> = {
     return vals;
   },
 
-  "sdl.symbol.getCards": (result) => {
+  "sdl.symbol.getCard": (result) => {
     const cards = result.cards as unknown[] | undefined;
     return {
       cardsReturned: String(cards?.length ?? 0),
@@ -563,15 +542,13 @@ const SAMPLE_EXTRACTORS: Record<string, SampleExtractorFn> = {
     excerptLength: String(
       typeof result.excerpt === "string" ? result.excerpt.length : 0,
     ),
-  }),
-
-  "sdl.context.summary": (result) => ({
+  }): (result) => ({
     contentLength: String(
       typeof result.content === "string" ? result.content.length : 0,
     ),
   }),
 
-  "sdl.agent.context": (result) => {
+  "sdl.context": (result) => {
     const actions = result.actionsTaken as unknown[] | undefined;
     const vals: Record<string, string> = {
       actionCount: actions ? String(actions.length) : "compact",

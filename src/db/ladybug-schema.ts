@@ -27,7 +27,7 @@ import { LADYBUG_SCHEMA_VERSION } from "./migrations/index.js";
 
 /**
  * DDL statements for all LadybugDB node tables.
- * Symbol includes inline embedding columns (embeddingMiniLM*, embeddingNomic*)
+ * Symbol includes inline embedding columns (embeddingJinaCode*, embeddingNomic*)
  * for the hybrid-retrieval feature (Stage 0+). SymbolEmbedding is kept during
  * migration until Stage 1 is verified complete.
  */
@@ -70,17 +70,12 @@ const NODE_TABLES: string[] = [
     sideEffectsJson STRING,
     roleTagsJson STRING,
     searchText STRING,
-    updatedAt STRING,
-    embeddingMiniLM STRING,
-    embeddingMiniLMCardHash STRING,
-    embeddingMiniLMUpdatedAt STRING,
-    embeddingNomic STRING,
+    updatedAt STRING,    embeddingNomic STRING,
     embeddingNomicCardHash STRING,
     embeddingNomicUpdatedAt STRING,
     embeddingJinaCode STRING,
     embeddingJinaCodeCardHash STRING,
     embeddingJinaCodeUpdatedAt STRING,
-    embeddingMiniLMVec DOUBLE[384],
     embeddingNomicVec DOUBLE[768],
     embeddingJinaCodeVec DOUBLE[768],
     external BOOL DEFAULT false,
@@ -148,14 +143,9 @@ const NODE_TABLES: string[] = [
     repoId STRING,
     summary STRING,
     searchText STRING,
-    updatedAt STRING,
-    embeddingMiniLM STRING,
-    embeddingMiniLMCardHash STRING,
-    embeddingMiniLMUpdatedAt STRING,
-    embeddingNomic STRING,
+    updatedAt STRING,    embeddingNomic STRING,
     embeddingNomicCardHash STRING,
     embeddingNomicUpdatedAt STRING,
-    embeddingMiniLMVec DOUBLE[384],
     embeddingNomicVec DOUBLE[768]
   )`,
 
@@ -208,14 +198,9 @@ const NODE_TABLES: string[] = [
     taskType STRING,
     taskText STRING,
     createdAt STRING,
-    searchText STRING,
-    embeddingMiniLM STRING,
-    embeddingMiniLMCardHash STRING,
-    embeddingMiniLMUpdatedAt STRING,
-    embeddingNomic STRING,
+    searchText STRING,    embeddingNomic STRING,
     embeddingNomicCardHash STRING,
     embeddingNomicUpdatedAt STRING,
-    embeddingMiniLMVec DOUBLE[384],
     embeddingNomicVec DOUBLE[768]
   )`,
 
@@ -521,13 +506,12 @@ export async function migrateVecColumnsToFixedSize(conn: Connection): Promise<vo
   }
 
   const migrations: Array<{ table: string; column: string; size: number }> = [
-    { table: "Symbol", column: "embeddingMiniLMVec", size: 384 },
     { table: "Symbol", column: "embeddingNomicVec", size: 768 },
     { table: "Symbol", column: "embeddingJinaCodeVec", size: 768 },
-    { table: "FileSummary", column: "embeddingMiniLMVec", size: 384 },
     { table: "FileSummary", column: "embeddingNomicVec", size: 768 },
-    { table: "AgentFeedback", column: "embeddingMiniLMVec", size: 384 },
+    { table: "FileSummary", column: "embeddingJinaCodeVec", size: 768 },
     { table: "AgentFeedback", column: "embeddingNomicVec", size: 768 },
+    { table: "AgentFeedback", column: "embeddingJinaCodeVec", size: 768 },
   ];
 
   let migrated = 0;

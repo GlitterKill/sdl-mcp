@@ -7,7 +7,7 @@ Use SDL-MCP as the default path for repository `{{REPO_ID}}`.
 1. Start with `sdl.repo.status`.
 2. Use `sdl.action.search` when the correct SDL action is unclear.
 3. Use `sdl.manual(query|actions|format)` for focused reference instead of loading the full manual.
-4. Use `sdl.agent.context` for code context retrieval (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration).
+4. Use `sdl.context` for code context retrieval (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration).
 5. Use `sdl.workflow` for multi-step operations (runtime execution, data transforms, batch mutations) — not for context retrieval.
 6. Use `symbolRef` or `symbolRefs` when you know a symbol name but not the canonical `symbolId`.
 7. Follow `nextBestAction`, `fallbackTools`, `fallbackRationale`, and ranked candidates from SDL responses instead of retrying blocked native tools.
@@ -69,5 +69,5 @@ Prefer `search` or `jsonPath` over full reads. Use `offset`/`limit` when you kno
 - Discovery: `sdl.action.search({ query: "auth tests" })` (use `query: "*"` to list all actions)
 - Focused manual: `sdl.manual({ actions: ["symbol.search", "slice.build"] })`
 - Natural lookup: `sdl.symbol.getCard({ repoId: "{{REPO_ID}}", symbolRef: { name: "handleRequest", file: "src/server.ts" } })`
-- Context retrieval: `sdl.agent.context({ taskType: "explain", taskText: "...", options: { contextMode: "precise", focusPaths: ["..."] } })`
+- Context retrieval: `sdl.context({ taskType: "explain", taskText: "...", options: { contextMode: "precise", focusPaths: ["..."] } })`
 - Multi-step operations: `sdl.workflow(... runtimeExecute ...)`

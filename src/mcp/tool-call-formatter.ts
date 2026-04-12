@@ -94,14 +94,6 @@ function fmtSymbolGetCard(
   return `symbol.getCard -> ${str(card.name)} (${str(card.kind)})\n  File: ${shortPath(str(card.file))} ${rng(safeRange(card.range))}\n  Deps: ${imports} imports, ${calls} calls`;
 }
 
-function fmtSymbolGetCards(
-  _args: Record<string, unknown>,
-  result: Record<string, unknown>,
-): string | null {
-  const cards = result.cards as Array<Record<string, unknown>> | undefined;
-  if (!cards) return null;
-  return `symbol.getCards -> ${cards.length} card${cards.length !== 1 ? "s" : ""}`;
-}
 
 function fmtCodeSkeleton(
   _args: Record<string, unknown>,
@@ -236,14 +228,14 @@ function fmtAgentContext(
   result: Record<string, unknown>,
 ): string | null {
   if (result.notModified) {
-    return "agent.context -> not modified (ETag hit)";
+    return "sdl.context -> not modified (ETag hit)";
   }
   const path = result.path as Record<string, unknown> | undefined;
   const rungs = (path?.rungs as unknown[])?.length ?? 0;
   const status = typeof result.success === "boolean"
     ? (result.success ? "success" : "error")
     : "complete";
-  return `agent.context [${status}] -> ${rungs} rungs`;
+  return `sdl.context [${status}] -> ${rungs} rungs`;
 }
 
 function fmtMemoryStore(
@@ -278,7 +270,6 @@ function fmtPrRisk(
 const formatters: Record<string, Formatter> = {
   "sdl.symbol.search": fmtSymbolSearch,
   "sdl.symbol.getCard": fmtSymbolGetCard,
-  "sdl.symbol.getCards": fmtSymbolGetCards,
   "sdl.code.getSkeleton": fmtCodeSkeleton,
   "sdl.code.getHotPath": fmtCodeHotPath,
   "sdl.code.needWindow": fmtCodeNeedWindow,
@@ -289,7 +280,6 @@ const formatters: Record<string, Formatter> = {
   "sdl.repo.overview": fmtRepoOverview,
   "sdl.index.refresh": fmtIndexRefresh,
   "sdl.workflow": fmtWorkflow,
-  "sdl.agent.context": fmtAgentContext,
   "sdl.context": fmtAgentContext,
   "sdl.memory.store": fmtMemoryStore,
   "sdl.memory.query": fmtMemoryQuery,

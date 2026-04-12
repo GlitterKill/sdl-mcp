@@ -187,7 +187,7 @@ Then run manual refreshes with `sdl-mcp index` until the underlying issue is fix
 - Resolution:
   - ensure outbound HTTPS access to Hugging Face model hub
   - configure proxy via `HTTPS_PROXY` environment variable if needed
-  - use the smaller default model (`all-MiniLM-L6-v2`) which is bundled and requires no download
+  - use the default model (`jina-embeddings-v2-base-code`) which is bundled and requires no download
   - if one downloaded model fails, try the other (`nomic-embed-text-v1.5` vs `jina-embeddings-v2-base-code`)
 
 ## Debug Commands

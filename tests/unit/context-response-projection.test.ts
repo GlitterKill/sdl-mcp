@@ -12,8 +12,7 @@ describe("context-response-projection", () => {
     actionsTaken: [{ id: "a-1", type: "getCard", status: "completed" }],
     path: { rungs: ["card"], estimatedTokens: 50 },
     finalEvidence: [
-      { type: "symbolCard", reference: "sym:1", summary: "test" },
-    ],
+      { type: "symbolCard", reference: "sym:1", summary: "test" }],
     summary: "Task completed",
     success: true,
     metrics: { totalDurationMs: 10, totalTokens: 50 },
@@ -23,9 +22,9 @@ describe("context-response-projection", () => {
   };
 
   describe("isBroadContextResult", () => {
-    it("returns true for sdl.agent.context broad result", () => {
+    it("returns true for sdl.context broad result", () => {
       assert.equal(
-        isBroadContextResult("sdl.agent.context", broadResult),
+        isBroadContextResult("sdl.context", broadResult),
         true,
       );
     });
@@ -42,21 +41,21 @@ describe("context-response-projection", () => {
     });
 
     it("returns false for null/undefined/array", () => {
-      assert.equal(isBroadContextResult("sdl.agent.context", null), false);
-      assert.equal(isBroadContextResult("sdl.agent.context", undefined), false);
-      assert.equal(isBroadContextResult("sdl.agent.context", [1, 2]), false);
+      assert.equal(isBroadContextResult("sdl.context", null), false);
+      assert.equal(isBroadContextResult("sdl.context", undefined), false);
+      assert.equal(isBroadContextResult("sdl.context", [1, 2]), false);
     });
 
     it("returns false when answer field is missing (precise mode)", () => {
       const precise = { taskId: "t-1", actionsTaken: [], success: true };
-      assert.equal(isBroadContextResult("sdl.agent.context", precise), false);
+      assert.equal(isBroadContextResult("sdl.context", precise), false);
     });
   });
 
   describe("projectBroadContextResult", () => {
     it("keeps only visible fields for broad context", () => {
       const projected = projectBroadContextResult(
-        "sdl.agent.context",
+        "sdl.context",
         broadResult,
       ) as Record<string, unknown>;
 
@@ -78,7 +77,7 @@ describe("context-response-projection", () => {
     it("preserves error field when present", () => {
       const errorResult = { ...broadResult, error: "something broke" };
       const projected = projectBroadContextResult(
-        "sdl.agent.context",
+        "sdl.context",
         errorResult,
       ) as Record<string, unknown>;
       assert.equal(projected.error, "something broke");
@@ -94,7 +93,7 @@ describe("context-response-projection", () => {
         },
       };
       const projected = projectBroadContextResult(
-        "sdl.agent.context",
+        "sdl.context",
         truncated,
       ) as Record<string, unknown>;
       assert.deepEqual(projected.truncation, truncated.truncation);
@@ -103,7 +102,7 @@ describe("context-response-projection", () => {
     it("preserves _displayFooter", () => {
       const withFooter = { ...broadResult, _displayFooter: "meter text" };
       const projected = projectBroadContextResult(
-        "sdl.agent.context",
+        "sdl.context",
         withFooter,
       ) as Record<string, unknown>;
       assert.equal(projected._displayFooter, "meter text");
@@ -120,7 +119,7 @@ describe("context-response-projection", () => {
     it("returns precise-mode results unchanged", () => {
       const precise = { taskId: "t-1", actionsTaken: [], success: true };
       assert.strictEqual(
-        projectBroadContextResult("sdl.agent.context", precise),
+        projectBroadContextResult("sdl.context", precise),
         precise,
       );
     });
@@ -135,13 +134,12 @@ describe("context-response-projection", () => {
         summary: "Task completed",
         answer: "# Results\n\nFound 1 symbol.",
         finalEvidence: [
-          { type: "symbolCard", reference: "sym:1", summary: "test" },
-        ],
+          { type: "symbolCard", reference: "sym:1", summary: "test" }],
         nextBestAction: "none",
       };
       // First projection should detect it's not a broad result (no actionsTaken)
       // and return it unchanged
-      const first = projectBroadContextResult("sdl.agent.context", compact);
+      const first = projectBroadContextResult("sdl.context", compact);
       assert.strictEqual(
         first,
         compact,
@@ -152,12 +150,12 @@ describe("context-response-projection", () => {
     it("is idempotent when re-projecting a projected result", () => {
       // Project the full broad result once
       const projected = projectBroadContextResult(
-        "sdl.agent.context",
+        "sdl.context",
         broadResult,
       ) as Record<string, unknown>;
       // Project again — should pass through since actionsTaken was stripped
       const reprojected = projectBroadContextResult(
-        "sdl.agent.context",
+        "sdl.context",
         projected,
       );
       assert.strictEqual(

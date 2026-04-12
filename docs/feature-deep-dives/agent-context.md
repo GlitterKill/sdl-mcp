@@ -6,13 +6,13 @@
 
 ## Overview
 
-`sdl.agent.context` is SDL-MCP's direct task-shaped context tool.
+`sdl.context` is SDL-MCP's direct task-shaped context tool.
 
 Instead of manually deciding whether to call `symbol.search`, `symbol.getCard`, `code.getSkeleton`, or `code.getHotPath`, you give SDL-MCP a task type, task text, and optional scope. The context engine chooses the right Iris Gate rungs, gathers evidence, and returns a response sized to the task.
 
 In Code Mode, the equivalent surface is `sdl.context`. The two tools share the same task envelope and the same retrieval model.
 
-`sdl.context.summary` is separate. It does not do task-shaped retrieval. It exports a compact summary for non-MCP destinations such as Slack, tickets, or PR descriptions.
+ is separate. It does not do task-shaped retrieval. It exports a compact summary for non-MCP destinations such as Slack, tickets, or PR descriptions.
 
 ---
 
@@ -20,9 +20,9 @@ In Code Mode, the equivalent surface is `sdl.context`. The two tools share the s
 
 | Surface               | Use when                                            | Primary job                                                     |
 | :-------------------- | :-------------------------------------------------- | :-------------------------------------------------------------- |
-| `sdl.agent.context`   | You are calling flat or gateway tools directly      | Retrieve task-shaped code context                               |
+| `sdl.context`   | You are calling flat or gateway tools directly      | Retrieve task-shaped code context                               |
 | `sdl.context`         | You are already operating through Code Mode         | Retrieve the same task-shaped context without leaving Code Mode |
-| `sdl.context.summary` | You need a portable write-up for a non-MCP consumer | Export a bounded summary, not a retrieval workflow              |
+|  | You need a portable write-up for a non-MCP consumer | Export a bounded summary, not a retrieval workflow              |
 
 ---
 
@@ -156,7 +156,7 @@ That feedback is not just bookkeeping. The seeding pipeline uses feedback priors
 
 ## Portable Summaries Stay Separate
 
-Use `sdl.context.summary` when you need to publish what you found.
+Use  when you need to publish what you found.
 
 Examples:
 
@@ -164,7 +164,7 @@ Examples:
 - hand off a summary to a non-MCP teammate
 - generate a bounded project brief for another tool
 
-Do not treat `sdl.context.summary` as a replacement for `sdl.agent.context` or `sdl.context`. Summary is export. Context is retrieval.
+Do not treat  as a replacement for `sdl.context` or `sdl.context`. Summary is export. Context is retrieval.
 
 ---
 
@@ -178,7 +178,7 @@ Do not treat `sdl.context.summary` as a replacement for `sdl.agent.context` or `
 | `src/agent/planner.ts`         | Rung selection, confidence-aware budget trimming            |
 | `src/agent/executor.ts`        | Rung execution and evidence generation                      |
 | `src/agent/evidence.ts`        | Evidence capture and deduplication                          |
-| `src/mcp/tools/context.ts`     | MCP handler for `sdl.agent.context`                         |
+| `src/mcp/tools/context.ts`     | MCP handler for `sdl.context`                         |
 
 ---
 
@@ -187,7 +187,7 @@ Do not treat `sdl.context.summary` as a replacement for `sdl.agent.context` or `
 - [Context Modes](./context-modes.md)
 - [Code Mode](./code-mode.md)
 - [Iris Gate Ladder](./iris-gate-ladder.md)
-- [`sdl.context.summary`](../mcp-tools-detailed.md#sdlcontextsummary)
+- [](../mcp-tools-detailed.md#sdlcontextsummary)
 - [`sdl.agent.feedback`](../mcp-tools-detailed.md#sdlagentfeedback)
 
 [Back to README](../../README.md)

@@ -56,7 +56,7 @@ Supported filters:
 
 Use this for task-shaped context retrieval inside Code Mode.
 
-It mirrors `sdl.agent.context`, but it sits next to `sdl.manual` and `sdl.workflow` so an agent can stay on the Code Mode surface after discovery. Start here for:
+It mirrors `sdl.context`, but it sits next to `sdl.manual` and `sdl.workflow` so an agent can stay on the Code Mode surface after discovery. Start here for:
 
 - `explain`
 - `debug`

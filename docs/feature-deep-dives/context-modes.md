@@ -10,7 +10,7 @@ Agents need different amounts of code context for different jobs.
 
 A targeted question such as "check NaN handling in `normalizeEdgeConfidence`" should not return the same envelope as "understand the auth pipeline." Manual `sdl.workflow` assembly can get either answer, but it forces the model to spend tokens on planning, step wiring, and repeated envelopes.
 
-`sdl.agent.context` and `sdl.context` solve that by exposing two retrieval modes:
+`sdl.context` and `sdl.context` solve that by exposing two retrieval modes:
 
 - `contextMode: "precise"` for minimal, targeted evidence
 - `contextMode: "broad"` for richer surrounding context

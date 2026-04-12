@@ -217,7 +217,7 @@ export function getEmbeddingProvider(
 ): EmbeddingProvider {
   switch (provider) {
     case "local":
-      return new LocalEmbeddingProvider(model ?? "all-MiniLM-L6-v2");
+      return new LocalEmbeddingProvider(model ?? "jina-embeddings-v2-base-code");
     case "api":
       return new ApiEmbeddingProvider();
     case "mock":
@@ -227,8 +227,8 @@ export function getEmbeddingProvider(
 }
 
 /**
- * For MiniLM (general text model): name + kind + signature + summary.
- * Formats as natural language because MiniLM is a text model.
+ * For Jina (code-specialized model): name + kind + signature + summary.
+ * Optimized for code understanding.
  */
 export function buildRawEmbeddingText(symbol: ladybugDb.SymbolRow): string {
   const parts = [`${symbol.name} (${symbol.kind})`];
@@ -247,7 +247,7 @@ export async function refreshSymbolEmbeddings(params: {
   symbols?: ladybugDb.SymbolRow[];
   onProgress?: (progress: IndexProgress) => void;
 }): Promise<{ embedded: number; skipped: number }> {
-  const modelName = params.model ?? "all-MiniLM-L6-v2";
+  const modelName = params.model ?? "jina-embeddings-v2-base-code";
   const provider = getEmbeddingProvider(params.provider, modelName);
   const conn = await getLadybugConn();
   const symbols =

@@ -5,13 +5,13 @@ import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
-import { handleSymbolGetCards } from "../../dist/mcp/tools/symbol.js";
-import { SymbolGetCardsRequestSchema } from "../../dist/mcp/tools.js";
+import { handleSymbolGetCard } from "../../dist/mcp/tools/symbol.js";
+import { SymbolGetCardRequestSchema } from "../../dist/mcp/tools.js";
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 
 /**
- * Tests for handleSymbolGetCards — the batch symbol card API.
+ * Tests for handleSymbolGetCard — the batch symbol card API.
  *
  * These tests verify:
  * - Schema validation (max 100 symbolIds, min 1)
@@ -27,7 +27,7 @@ const FOREIGN_REPO_ID = "test-get-cards-foreign-repo";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-describe("handleSymbolGetCards", () => {
+describe("handleSymbolGetCard", () => {
   const graphDbPath = join(tmpdir(), ".lbug-get-cards-test-db");
 
   let symbolIdA: string;
@@ -174,7 +174,7 @@ describe("handleSymbolGetCards", () => {
   });
 
   it("returns one result per symbolId in the input array", async () => {
-    const result = await handleSymbolGetCards({
+    const result = await handleSymbolGetCard({
       repoId: REPO_ID,
       symbolIds: [symbolIdA, symbolIdB],
     });
@@ -183,7 +183,7 @@ describe("handleSymbolGetCards", () => {
   });
 
   it("preserves input order in output cards array", async () => {
-    const result = await handleSymbolGetCards({
+    const result = await handleSymbolGetCard({
       repoId: REPO_ID,
       symbolIds: [symbolIdB, symbolIdA],
     });
@@ -205,7 +205,7 @@ describe("handleSymbolGetCards", () => {
   });
 
   it("returns full card for symbolIds with no matching knownEtag", async () => {
-    const result = await handleSymbolGetCards({
+    const result = await handleSymbolGetCard({
       repoId: REPO_ID,
       symbolIds: [symbolIdA],
     });
@@ -219,7 +219,7 @@ describe("handleSymbolGetCards", () => {
   });
 
   it("returns notModified for symbolIds whose etag matches knownEtags", async () => {
-    const firstResult = await handleSymbolGetCards({
+    const firstResult = await handleSymbolGetCard({
       repoId: REPO_ID,
       symbolIds: [symbolIdA],
     });
@@ -228,7 +228,7 @@ describe("handleSymbolGetCards", () => {
     assert.ok("etag" in firstCard, "Expected first fetch to return full card with etag");
     const etag = (firstCard as { etag: string }).etag;
 
-    const secondResult = await handleSymbolGetCards({
+    const secondResult = await handleSymbolGetCard({
       repoId: REPO_ID,
       symbolIds: [symbolIdA],
       knownEtags: { [symbolIdA]: etag },
@@ -243,7 +243,7 @@ describe("handleSymbolGetCards", () => {
   });
 
   it("handles mixed batch with some hits and some misses", async () => {
-    const firstResult = await handleSymbolGetCards({
+    const firstResult = await handleSymbolGetCard({
       repoId: REPO_ID,
       symbolIds: [symbolIdA],
     });
@@ -251,7 +251,7 @@ describe("handleSymbolGetCards", () => {
     assert.ok("etag" in firstCard);
     const etag = (firstCard as { etag: string }).etag;
 
-    const batchResult = await handleSymbolGetCards({
+    const batchResult = await handleSymbolGetCard({
       repoId: REPO_ID,
       symbolIds: [symbolIdA, symbolIdB],
       knownEtags: { [symbolIdA]: etag },
@@ -274,7 +274,7 @@ describe("handleSymbolGetCards", () => {
   it("rejects symbolIds that belong to a different repo", async () => {
     await assert.rejects(
       () =>
-        handleSymbolGetCards({
+        handleSymbolGetCard({
           repoId: REPO_ID,
           symbolIds: [symbolIdA, foreignSymbolId],
         }),
@@ -287,7 +287,7 @@ describe("handleSymbolGetCards", () => {
 
     assert.throws(
       () =>
-        SymbolGetCardsRequestSchema.parse({
+        SymbolGetCardRequestSchema.parse({
           repoId: REPO_ID,
           symbolIds: tooMany,
         }),
@@ -298,7 +298,7 @@ describe("handleSymbolGetCards", () => {
   it("schema rejects requests with zero symbolIds", () => {
     assert.throws(
       () =>
-        SymbolGetCardsRequestSchema.parse({
+        SymbolGetCardRequestSchema.parse({
           repoId: REPO_ID,
           symbolIds: [],
         }),
@@ -309,7 +309,7 @@ describe("handleSymbolGetCards", () => {
   it("schema accepts requests with exactly 100 symbolIds", () => {
     const exactly100 = Array.from({ length: 100 }, (_, i) => `sym-${i}`);
 
-    const parsed = SymbolGetCardsRequestSchema.parse({
+    const parsed = SymbolGetCardRequestSchema.parse({
       repoId: REPO_ID,
       symbolIds: exactly100,
     });

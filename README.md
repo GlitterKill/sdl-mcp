@@ -281,11 +281,11 @@ The sandboxed runtime execution tool (`sdl.runtime.execute`) has its own governa
 
 ### Agent Context — Task-Shaped Retrieval
 
-`sdl.agent.context` is SDL-MCP's task-shaped context engine. Give it a task type (`debug`, `review`, `implement`, `explain`), a description, and a budget — it selects the right Iris Gate rungs, collects evidence, and returns context tuned to the job. In Code Mode, `sdl.context` provides the same retrieval surface without dropping into `sdl.workflow`.
+`sdl.context` is SDL-MCP's task-shaped context engine. Give it a task type (`debug`, `review`, `implement`, `explain`), a description, and a budget — it selects the right Iris Gate rungs, collects evidence, and returns context tuned to the job. In Code Mode, `sdl.context` provides the same retrieval surface without dropping into `sdl.workflow`.
 
 The feedback loop (`sdl.agent.feedback`) records which symbols were useful and which were missing, improving future slice quality.
 
-`sdl.context.summary` generates portable, token-bounded context briefings in markdown, JSON, or clipboard format for use outside MCP environments.
+ generates portable, token-bounded context briefings in markdown, JSON, or clipboard format for use outside MCP environments.
 
 **Why it matters:**
 
@@ -440,7 +440,7 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 <tr><td rowspan="3"><strong>Symbols</strong></td>
     <td><code>sdl.symbol.search</code></td><td>Search symbols by name (with optional semantic reranking)</td></tr>
 <tr><td><code>sdl.symbol.getCard</code></td><td>Get a symbol card with ETag-based conditional support</td></tr>
-<tr><td><code>sdl.symbol.getCards</code></td><td>Batch-fetch up to 100 cards in one round trip</td></tr>
+<tr><td><code>sdl.symbol.getCard</code></td><td>Batch-fetch up to 100 cards in one round trip</td></tr>
 
 <tr><td rowspan="3"><strong>Slices</strong></td>
     <td><code>sdl.slice.build</code></td><td>Build a task-scoped dependency subgraph</td></tr>
@@ -463,10 +463,10 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
     <td><code>sdl.pr.risk.analyze</code></td><td>Scored PR risk with findings and test recommendations</td></tr>
 
 <tr><td><strong>Context</strong></td>
-    <td><code>sdl.context.summary</code></td><td>Token-bounded portable briefing (markdown/JSON/clipboard) with conditional ETag fetch support</td></tr>
+    <td><code></code></td><td>Token-bounded portable briefing (markdown/JSON/clipboard) with conditional ETag fetch support</td></tr>
 
 <tr><td rowspan="3"><strong>Agent</strong></td>
-    <td><code>sdl.agent.context</code></td><td>Task-shaped context retrieval with budget-controlled rung planning and conditional ETag fetch support</td></tr>
+    <td><code>sdl.context</code></td><td>Task-shaped context retrieval with budget-controlled rung planning and conditional ETag fetch support</td></tr>
 <tr><td><code>sdl.agent.feedback</code></td><td>Record which symbols were useful or missing</td></tr>
 <tr><td><code>sdl.agent.feedback.query</code></td><td>Query aggregated feedback statistics</td></tr>
 

@@ -15,7 +15,7 @@ export class WorkflowEtagCache {
       ) {
         args.ifNoneMatch = this.cache.get(symbolId);
       }
-    } else if (action === "symbol.getCards") {
+    } else if (action === "symbol.getCard") {
       const symbolIds = args.symbolIds;
       if (Array.isArray(symbolIds) && !args.knownEtags) {
         const knownEtags: Record<string, string> = {};
@@ -53,7 +53,7 @@ export class WorkflowEtagCache {
           this.evictIfNeeded();
         }
       }
-    } else if (action === "symbol.getCards") {
+    } else if (action === "symbol.getCard") {
       const cards = record.cards;
       if (Array.isArray(cards)) {
         for (const entry of cards) {

@@ -77,7 +77,7 @@ describe("metrics-updater semantic config branching", () => {
       semantic: {
         enabled: true,
         generateSummaries: false,
-        model: "all-MiniLM-L6-v2",
+        model: "jina-embeddings-v2-base-code",
       },
     };
     assert.strictEqual(config.semantic.generateSummaries, false);

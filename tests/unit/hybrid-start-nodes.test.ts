@@ -80,13 +80,13 @@ function isHybridRetrievalAvailableLogic(opts: {
   }
 
   // Legacy mode (default) -- auto-promote when infrastructure is healthy.
-  return opts.health.fts && (opts.health.vectorMiniLM || opts.health.vectorNomic);
+  return opts.health.fts && (opts.health.vectorJinaCode || opts.health.vectorNomic);
 }
 
 function makeCaps(
   overrides: Partial<RetrievalCapabilities> = {},
 ): RetrievalCapabilities {
-  return { fts: true, vectorMiniLM: true, vectorNomic: true, ...overrides };
+  return { fts: true, vectorJinaCode: true, vectorNomic: true, ...overrides };
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +99,7 @@ describe("isHybridRetrievalAvailable — logic", () => {
       semanticEnabled: true,
       retrievalMode: "legacy",
       extensionCaps: { fts: true, vector: true },
-      health: { fts: true, vectorMiniLM: true, vectorNomic: false },
+      health: { fts: true, vectorJinaCode: true, vectorNomic: false },
     });
     assert.strictEqual(result, true);
   });
@@ -109,7 +109,7 @@ describe("isHybridRetrievalAvailable — logic", () => {
       semanticEnabled: false,
       retrievalMode: "legacy",
       extensionCaps: { fts: true, vector: true },
-      health: { fts: true, vectorMiniLM: true, vectorNomic: false },
+      health: { fts: true, vectorJinaCode: true, vectorNomic: false },
     });
     assert.strictEqual(result, false);
   });
@@ -119,7 +119,7 @@ describe("isHybridRetrievalAvailable — logic", () => {
       semanticEnabled: true,
       retrievalMode: "legacy",
       extensionCaps: { fts: true, vector: false },
-      health: { fts: true, vectorMiniLM: false, vectorNomic: false },
+      health: { fts: true, vectorJinaCode: false, vectorNomic: false },
     });
     assert.strictEqual(result, false);
   });
@@ -129,7 +129,7 @@ describe("isHybridRetrievalAvailable — logic", () => {
       semanticEnabled: true,
       retrievalMode: "hybrid",
       extensionCaps: { fts: true, vector: true },
-      health: { fts: false, vectorMiniLM: false, vectorNomic: false },
+      health: { fts: false, vectorJinaCode: false, vectorNomic: false },
     });
     assert.strictEqual(result, true);
   });
@@ -139,7 +139,7 @@ describe("isHybridRetrievalAvailable — logic", () => {
       semanticEnabled: true,
       retrievalMode: "hybrid",
       extensionCaps: { fts: false, vector: true },
-      health: { fts: true, vectorMiniLM: true, vectorNomic: true },
+      health: { fts: true, vectorJinaCode: true, vectorNomic: true },
     });
     assert.strictEqual(result, false);
   });
@@ -149,7 +149,7 @@ describe("isHybridRetrievalAvailable — logic", () => {
       semanticEnabled: true,
       retrievalMode: "legacy",
       extensionCaps: { fts: true, vector: true },
-      health: { fts: true, vectorMiniLM: false, vectorNomic: true },
+      health: { fts: true, vectorJinaCode: false, vectorNomic: true },
     });
     assert.strictEqual(result, true);
   });
@@ -159,7 +159,7 @@ describe("isHybridRetrievalAvailable — logic", () => {
       semanticEnabled: true,
       retrievalMode: "legacy",
       extensionCaps: { fts: true, vector: true },
-      health: { fts: true, vectorMiniLM: false, vectorNomic: false },
+      health: { fts: true, vectorJinaCode: false, vectorNomic: false },
     });
     assert.strictEqual(result, false);
   });
@@ -171,13 +171,13 @@ describe("isHybridRetrievalAvailable — logic", () => {
 
 describe("shouldFallbackToLegacy — no auto-flip (Stage 2)", () => {
   it("returns true when mode is legacy (no auto-flip in shouldFallbackToLegacy)", () => {
-    const caps = makeCaps({ fts: true, vectorMiniLM: true });
+    const caps = makeCaps({ fts: true, vectorJinaCode: true });
     const config: MinimalRetrievalConfig = { mode: "legacy" };
     assert.strictEqual(shouldFallbackToLegacy(caps, config), true);
   });
 
   it("returns true when mode is legacy, regardless of full capabilities", () => {
-    const caps = makeCaps({ fts: true, vectorMiniLM: true, vectorNomic: true });
+    const caps = makeCaps({ fts: true, vectorJinaCode: true, vectorNomic: true });
     const config: MinimalRetrievalConfig = { mode: "legacy" };
     assert.strictEqual(shouldFallbackToLegacy(caps, config), true);
   });
@@ -254,7 +254,7 @@ describe("shouldFallbackToLegacy — source verification (Stage 2)", () => {
 
   it("isHybridRetrievalAvailable auto-promotes from legacy when healthy", () => {
     assert.ok(
-      src.includes("health.fts && (health.vectorMiniLM || health.vectorNomic || health.vectorJinaCode)"),
+      src.includes("health.fts && (health.vectorJinaCode || health.vectorNomic || health.vectorJinaCode)"),
       "should auto-promote from legacy when FTS + vector healthy",
     );
   });

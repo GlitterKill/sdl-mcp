@@ -66,29 +66,6 @@ const SymbolGetCardAction = z
     }
   });
 
-const SymbolGetCardsAction = z
-  .object({
-    action: z.literal("symbol.getCards"),
-    symbolIds: z.array(z.string()).min(1).max(100).optional(),
-    symbolRefs: z.array(SymbolRefFields).min(1).max(100).optional(),
-    minCallConfidence: z.number().min(0).max(1).optional(),
-    includeResolutionMetadata: z.boolean().optional(),
-    knownEtags: z.record(z.string(), z.string())
-      .refine(obj => Object.keys(obj).length <= 1000, { message: "knownEtags exceeds maximum of 1000 entries" })
-      .optional(),
-  })
-  .superRefine((value, ctx) => {
-    const provided =
-      Number(value.symbolIds !== undefined) + Number(value.symbolRefs !== undefined);
-    if (provided !== 1) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Provide exactly one of symbolIds or symbolRefs.",
-        path: ["symbolIds"],
-      });
-    }
-  });
-
 const SliceBuildAction = z.object({
   action: z.literal("slice.build"),
   taskText: z.string().min(1).optional(),
@@ -133,15 +110,6 @@ const DeltaGetAction = z.object({
   budget: SliceBudgetFields.optional(),
 });
 
-const ContextSummaryAction = z.object({
-  action: z.literal("context.summary"),
-  query: z.string().min(1),
-  budget: z.number().int().min(1).optional(),
-  format: z.enum(["markdown", "json", "clipboard"]).optional(),
-  scope: z.enum(["symbol", "file", "task", "repo"]).optional(),
-  ifNoneMatch: z.string().optional(),
-});
-
 const PRRiskAnalyzeAction = z.object({
   action: z.literal("pr.risk.analyze"),
   fromVersion: z.string(),
@@ -157,12 +125,10 @@ export const QueryGatewaySchema = z
     z.union([
       SymbolSearchAction,
       SymbolGetCardAction,
-      SymbolGetCardsAction,
       SliceBuildAction,
       SliceRefreshAction,
       SliceSpilloverGetAction,
       DeltaGetAction,
-      ContextSummaryAction,
       PRRiskAnalyzeAction,
     ]),
   );
@@ -355,29 +321,6 @@ export const RepoGatewaySchema = z
 // sdl.agent — Agentic + live-edit operations
 // ============================================================================
 
-const AgentContextAction = z.object({
-  action: z.literal("agent.context"),
-  taskType: z.enum(["debug", "review", "implement", "explain"]),
-  taskText: z.string(),
-  budget: z
-    .object({
-      maxTokens: z.number().optional(),
-      maxActions: z.number().optional(),
-      maxDurationMs: z.number().optional(),
-    })
-    .optional(),
-  options: z
-    .object({
-      focusSymbols: z.array(z.string()).optional(),
-      focusPaths: z.array(z.string()).optional(),
-      includeTests: z.boolean().optional(),
-      requireDiagnostics: z.boolean().optional(),
-    contextMode: z.enum(["precise", "broad"]).optional(),
-    })
-    .optional(),
-  ifNoneMatch: z.string().optional(),
-});
-
 const AgentFeedbackAction = z.object({
   action: z.literal("agent.feedback"),
   versionId: z.string().min(1),
@@ -519,7 +462,6 @@ export const AgentGatewaySchema = z
   })
   .and(
     z.discriminatedUnion("action", [
-      AgentContextAction,
       AgentFeedbackAction,
       AgentFeedbackQueryAction,
       BufferPushAction,
@@ -541,12 +483,10 @@ export const AgentGatewaySchema = z
 export const QUERY_ACTIONS = [
   "symbol.search",
   "symbol.getCard",
-  "symbol.getCards",
   "slice.build",
   "slice.refresh",
   "slice.spillover.get",
   "delta.get",
-  "context.summary",
   "pr.risk.analyze",
 ] as const;
 
@@ -569,7 +509,6 @@ export const REPO_ACTIONS = [
 ] as const;
 
 export const AGENT_ACTIONS = [
-  "agent.context",
   "agent.feedback",
   "agent.feedback.query",
   "buffer.push",

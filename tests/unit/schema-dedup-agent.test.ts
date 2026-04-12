@@ -2,57 +2,57 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 
 /**
- * Validates that the AgentContextRequestSchema is defined only in
+ * Validates that the SymbolGetCardRequestSchema is defined only in
  * src/mcp/tools.ts (canonical) and not duplicated in src/mcp/tools/context.ts.
  *
  * Regression test for: duplicate schema definitions causing silent validation
  * drift between server registration (uses canonical) and handler parsing
  * (previously used local copy with weaker constraints).
  */
-describe("AgentContextRequestSchema deduplication", () => {
-  it("should export AgentContextRequestSchema from tools.ts", async () => {
+describe("SymbolGetCardRequestSchema deduplication", () => {
+  it("should export SymbolGetCardRequestSchema from tools.ts", async () => {
     const tools = await import("../../dist/mcp/tools.js");
     assert.ok(
-      tools.AgentContextRequestSchema,
-      "tools.ts should export AgentContextRequestSchema",
+      tools.SymbolGetCardRequestSchema,
+      "tools.ts should export SymbolGetCardRequestSchema",
     );
     assert.strictEqual(
-      typeof tools.AgentContextRequestSchema.parse,
+      typeof tools.SymbolGetCardRequestSchema.parse,
       "function",
       "Schema should have a parse method",
     );
   });
 
-  it("should NOT export AgentContextRequestSchema from context.ts", async () => {
+  it("should NOT export SymbolGetCardRequestSchema from context.ts", async () => {
     const agent = await import("../../dist/mcp/tools/context.js");
     assert.strictEqual(
-      agent.AgentContextRequestSchema,
+      agent.SymbolGetCardRequestSchema,
       undefined,
-      "context.ts should NOT export its own AgentContextRequestSchema",
+      "context.ts should NOT export its own SymbolGetCardRequestSchema",
     );
   });
 
-  it("should export handleAgentContext from context.ts", async () => {
+  it("should export handleSymbolGetCard from context.ts", async () => {
     const agent = await import("../../dist/mcp/tools/context.js");
     assert.ok(
-      agent.handleAgentContext,
-      "context.ts should still export handleAgentContext",
+      agent.handleSymbolGetCard,
+      "context.ts should still export handleSymbolGetCard",
     );
     assert.strictEqual(
-      typeof agent.handleAgentContext,
+      typeof agent.handleSymbolGetCard,
       "function",
-      "handleAgentContext should be a function",
+      "handleSymbolGetCard should be a function",
     );
   });
 
   it("canonical schema should have max constraints", async () => {
-    const { AgentContextRequestSchema } = await import(
+    const { SymbolGetCardRequestSchema } = await import(
       "../../dist/mcp/tools.js"
     );
 
     // The canonical schema should reject overly long repoId
     const longRepoId = "x".repeat(200);
-    const result = AgentContextRequestSchema.safeParse({
+    const result = SymbolGetCardRequestSchema.safeParse({
       repoId: longRepoId,
       taskType: "debug",
       taskText: "test",

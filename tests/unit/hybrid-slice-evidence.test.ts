@@ -45,8 +45,8 @@ describe("mapRetrievalSource — logic", () => {
     assert.strictEqual(mapRetrievalSource("fts"), "fts");
   });
 
-  it('maps "vector:minilm" to "vector"', () => {
-    assert.strictEqual(mapRetrievalSource("vector:minilm"), "vector");
+  it('maps "vector:jinacode" to "vector"', () => {
+    assert.strictEqual(mapRetrievalSource("vector:jinacode"), "vector");
   });
 
   it('maps "vector:nomic" to "vector"', () => {
@@ -65,7 +65,7 @@ describe("mapRetrievalSource — logic", () => {
     const validValues = new Set(["fts", "vector", "hybrid", "legacy"]);
     const allSources: RetrievalSource[] = [
       "fts",
-      "vector:minilm",
+      "vector:jinacode",
       "vector:nomic",
   "vector:jinacode",
   "legacyFallback",

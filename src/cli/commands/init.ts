@@ -495,7 +495,7 @@ ext=".\${ext##*.}"
 
 for blocked_ext in ${blocked}; do
   if [ "$ext" = "$blocked_ext" ]; then
-    python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Use SDL-MCP tools for indexed source code. Do not use native Read, shell commands, or sdl.workflow/runtimeExecute to print or read indexed source files directly.\\n\\nFor indexed source:\\n1. Start with sdl.repo.status.\\n2. Use sdl.context (or sdl.agent.context outside Code Mode) for explain/debug/review/implement work.\\n3. If more detail is needed, follow the SDL ladder: symbol.search/getCard -> slice.build -> code.getSkeleton -> code.getHotPath -> code.needWindow.\\n4. Use symbolRef when the symbol name is known but the ID is not.\\n5. Follow nextBestAction, fallbackTools, and fallbackRationale from SDL responses.\\n\\nOnly use file.read for non-indexed files such as docs, config, JSON, YAML, TOML, SQL, lockfiles, and templates.\\nDo not use runtimeExecute as a workaround to read indexed source.'}}))"
+    python -c "import json; print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', 'permissionDecisionReason': 'Use SDL-MCP tools for indexed source code. Do not use native Read, shell commands, or sdl.workflow/runtimeExecute to print or read indexed source files directly.\\n\\nFor indexed source:\\n1. Start with sdl.repo.status.\\n2. Use sdl.context  for explain/debug/review/implement work.\\n3. If more detail is needed, follow the SDL ladder: symbol.search/getCard -> slice.build -> code.getSkeleton -> code.getHotPath -> code.needWindow.\\n4. Use symbolRef when the symbol name is known but the ID is not.\\n5. Follow nextBestAction, fallbackTools, and fallbackRationale from SDL responses.\\n\\nOnly use file.read for non-indexed files such as docs, config, JSON, YAML, TOML, SQL, lockfiles, and templates.\\nDo not use runtimeExecute as a workaround to read indexed source.'}}))"
     exit 0
   fi
 done
@@ -637,7 +637,7 @@ You are a codebase exploration agent. Your job is to answer questions about the 
 
 4. **Use \`sdl.manual\`** with \`query\` or \`actions\` to load a focused reference for specific tools.
 
-5. **Use \`sdl.context\`** for Code Mode context retrieval, or \`sdl.agent.context\` on the agent surface:
+5. **Use \`sdl.context\`** for context retrieval:
    - \`contextMode: "precise"\` — targeted symbol/file lookups.
    - \`contextMode: "broad"\` — exploratory codebase understanding.
    - Provide \`focusSymbols\` and/or \`focusPaths\` to scope the retrieval.
@@ -649,7 +649,7 @@ You are a codebase exploration agent. Your job is to answer questions about the 
 
 8. **Follow the Context Ladder** — escalate only when needed:
    - \`sdl.symbol.search\` — Find symbols by name/pattern. Add \`semantic: true\` for conceptual queries.
-   - \`sdl.symbol.getCard\` / \`sdl.symbol.getCards\` — Get symbol metadata, signature, dependencies.
+   - \`sdl.symbol.getCard\` — Get symbol metadata, signature, dependencies.
    - \`sdl.slice.build\` — Get related symbols for a task. Use \`taskText\` for auto-discovery.
    - \`sdl.code.getSkeleton\` — See control flow structure (signatures + elided bodies).
    - \`sdl.code.getHotPath\` — Find specific identifiers in code.
@@ -675,9 +675,9 @@ You are a codebase exploration agent. Your job is to answer questions about the 
 2. Use \`Glob\` to find relevant files by pattern
 3. Use \`Grep\` to search for keywords across the codebase
 4. Use \`sdl.action.search\` if you're unsure which SDL tool fits
-5. Use \`sdl.context\` or \`sdl.agent.context\` with appropriate \`contextMode\` for code understanding tasks
+5. Use \`sdl.context\` with appropriate \`contextMode\` for code understanding tasks
 6. Use \`sdl.symbol.search\` to find specific symbols
-7. Use \`sdl.symbol.getCard\` / \`sdl.symbol.getCards\` to understand what symbols do
+7. Use \`sdl.symbol.getCard\` to understand what symbols do
 8. Use \`sdl.slice.build\` to map relationships between symbols
 9. Use \`sdl.code.getSkeleton\` / \`sdl.code.getHotPath\` only when deeper understanding is needed
 10. Use \`sdl.code.needWindow\` only as a last resort with clear justification
@@ -693,7 +693,7 @@ function buildClaudePrompt(repoId: string): string {
 1. Start with sdl.repo.status.
 2. Use sdl.action.search when the correct SDL action is unclear.
 3. Use sdl.manual(query|actions|format) for focused reference instead of loading the full manual.
-4. Use sdl.context for Code Mode context retrieval, or sdl.agent.context on the agent action surface (contextMode: "precise" for targeted lookups, "broad" for exploration).
+4. Use sdl.context for context retrieval (contextMode: "precise" for targeted lookups, "broad" for exploration).
 5. Use sdl.workflow for multi-step operations (runtime execution, data transforms, batch mutations) - not for context retrieval.
 6. Use symbolRef / symbolRefs when you know a symbol name but not the canonical symbolId.
 7. Follow nextBestAction, fallbackTools, fallbackRationale, and candidate guidance from SDL responses instead of retrying blocked native tools.
@@ -712,7 +712,7 @@ All SDL-MCP enforcement is conditional on the server being active (PID file exis
 
 ## Context Retrieval
 
-Use sdl.context - not sdl.workflow - for Code Mode understanding tasks. On the agent action surface, use sdl.agent.context:
+Use sdl.context - not sdl.workflow - for understanding tasks:
 - contextMode: "precise" — targeted symbol/file lookups
 - contextMode: "broad" — exploratory codebase understanding
 Provide focusSymbols and/or focusPaths to scope the retrieval. Always set a budget (maxTokens, maxActions).
@@ -775,7 +775,7 @@ export const EnforceSDL: Plugin = async () => {
         const loweredPath = rawPath.toLowerCase();
         if (BLOCKED_EXTENSIONS.some((ext) => loweredPath.endsWith(ext))) {
           throw new Error(
-            "Use SDL-MCP tools for indexed source code. Start with sdl.repo.status, then use sdl.context or sdl.agent.context for context retrieval, or sdl.action.search to find the right tool. Use symbolRef when the symbol name is known but the ID is not."
+            "Use SDL-MCP tools for indexed source code. Start with sdl.repo.status, then use sdl.context for context retrieval, or sdl.action.search to find the right tool. Use symbolRef when the symbol name is known but the ID is not."
           );
         }
       }

@@ -20,7 +20,7 @@ export const BROAD_VISIBLE_FIELDS = new Set([
 ]);
 
 /** Tool names eligible for broad compaction. */
-const CONTEXT_TOOLS = new Set(["sdl.agent.context", "sdl.context"]);
+const CONTEXT_TOOLS = new Set(["sdl.context"]);
 
 /**
  * Returns true when the result looks like a broad context response that

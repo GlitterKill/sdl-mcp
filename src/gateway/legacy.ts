@@ -14,7 +14,6 @@ import {
   BufferStatusRequestSchema,
   SymbolSearchRequestSchema,
   SymbolGetCardRequestSchema,
-  SymbolGetCardsRequestSchema,
   SliceBuildRequestSchema,
   SliceRefreshRequestSchema,
   SliceSpilloverGetRequestSchema,
@@ -26,8 +25,6 @@ import {
   PolicySetRequestSchema,
   UsageStatsRequestSchema,
   PRRiskAnalysisRequestSchema,
-  AgentContextRequestSchema,
-  ContextSummaryRequestSchema,
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
   RuntimeExecuteRequestSchema,
@@ -50,7 +47,6 @@ import {
 import {
   handleSymbolSearch,
   handleSymbolGetCard,
-  handleSymbolGetCards,
 } from "../mcp/tools/symbol.js";
 import {
   handleSliceBuild,
@@ -66,8 +62,6 @@ import {
 import { handlePolicyGet, handlePolicySet } from "../mcp/tools/policy.js";
 import { handleUsageStats } from "../mcp/tools/usage.js";
 import { handlePRRiskAnalysis } from "../mcp/tools/prRisk.js";
-import { handleAgentContext } from "../mcp/tools/context.js";
-import { handleContextSummary } from "../mcp/tools/summary.js";
 import {
   handleAgentFeedback,
   handleAgentFeedbackQuery,
@@ -145,12 +139,6 @@ export function registerLegacyTools(
     handleSymbolGetCard,
   );
   server.registerTool(
-    "sdl.symbol.getCards",
-    dep("sdl.query", "Batch fetch symbol cards for multiple symbolIds"),
-    SymbolGetCardsRequestSchema,
-    handleSymbolGetCards,
-  );
-  server.registerTool(
     "sdl.slice.build",
     dep("sdl.query", "Build a graph slice for a task context"),
     SliceBuildRequestSchema,
@@ -221,18 +209,6 @@ export function registerLegacyTools(
     dep("sdl.query", "Analyze PR risk"),
     PRRiskAnalysisRequestSchema,
     handlePRRiskAnalysis,
-  );
-  server.registerTool(
-    "sdl.agent.context",
-    dep("sdl.agent", "Retrieve task-shaped agent context"),
-    AgentContextRequestSchema,
-    handleAgentContext,
-  );
-  server.registerTool(
-    "sdl.context.summary",
-    dep("sdl.query", "Generate token-bounded context summary"),
-    ContextSummaryRequestSchema,
-    handleContextSummary,
   );
   server.registerTool(
     "sdl.agent.feedback",

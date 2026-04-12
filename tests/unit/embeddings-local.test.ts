@@ -94,12 +94,12 @@ test("different texts produce different embeddings", async () => {
 });
 
 test("getEmbeddingProvider local provider returns correct model dimension", () => {
-  const provider = getEmbeddingProvider("local", "all-MiniLM-L6-v2");
-  // getDimension should return model dimension from registry (384) or fallback mock (64)
+  const provider = getEmbeddingProvider("local", "jina-embeddings-v2-base-code");
+  // getDimension should return model dimension from registry (768) or fallback mock (64)
   const dim = provider.getDimension();
   assert.ok(
-    dim === 384 || dim === 64,
-    `Expected 384 or 64 (fallback), got ${dim}`,
+    dim === 768 || dim === 64,
+    `Expected 768 or 64 (fallback), got ${dim}`,
   );
 });
 
@@ -112,7 +112,7 @@ test("getEmbeddingProvider api provider works", async () => {
 });
 
 test("local provider embeds or falls back gracefully", async () => {
-  const provider = getEmbeddingProvider("local", "all-MiniLM-L6-v2");
+  const provider = getEmbeddingProvider("local", "jina-embeddings-v2-base-code");
   // If ONNX runtime is available, returns 384-dim vectors
   // If not, falls back to 64-dim mock vectors — either way, should not throw
   const result = await provider.embed(["test embedding"]);

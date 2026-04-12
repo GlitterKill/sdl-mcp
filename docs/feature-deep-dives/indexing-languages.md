@@ -234,7 +234,7 @@ The summary system interacts with the embedding pipeline to create four distinct
 
 | Tier           | Embedding Model                                   | Summary Source                               | Cost                                      |
 | :------------- | :------------------------------------------------ | :------------------------------------------- | :---------------------------------------- |
-| Low            | `all-MiniLM-L6-v2` (384-dim, ~22 MB)              | Heuristic summaries                          | Free, bundled                             |
+| Default   | `jina-embeddings-v2-base-code` (768-dim, ~110 MB) | Heuristic summaries | Free, bundled  |
 | Medium         | `nomic-embed-text-v1.5` (768-dim, ~138 MB)        | Heuristic summaries                          | Free, downloaded model                    |
 | Medium+        | `jina-embeddings-v2-base-code` (768-dim, ~110 MB) | Heuristic summaries                          | Free, downloaded model (code-specialized) |
 | Enhanced (1.5) | Either model with `semantic: true`                | Enhanced heuristics plus NN summary transfer | Free, requires embeddings                 |

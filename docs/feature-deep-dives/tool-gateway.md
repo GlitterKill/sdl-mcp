@@ -377,6 +377,6 @@ Estimated savings: ~3525 tokens per tools/list call
 
 ## What's Next: Code Mode
 
-Gateway mode optimizes **tool registration** overhead. For context retrieval, `sdl.agent.context` provides the most token-efficient path with automatic rung selection and adaptive symbol ranking (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration). In Code Mode, `sdl.context` provides the same retrieval surface, while `sdl.workflow` is reserved for multi-step operations such as runtime execution, data transforms, and batch mutations.
+Gateway mode optimizes **tool registration** overhead. For context retrieval, `sdl.context` provides the most token-efficient path with automatic rung selection and adaptive symbol ranking (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration). In Code Mode, `sdl.context` provides the same retrieval surface, while `sdl.workflow` is reserved for multi-step operations such as runtime execution, data transforms, and batch mutations.
 
 [Code Mode Deep Dive →](./code-mode.md)

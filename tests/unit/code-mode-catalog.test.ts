@@ -134,8 +134,8 @@ describe("code-mode action catalog", () => {
       assert.ok(ranked.length > 0, "should have results");
       const topActions = ranked.slice(0, 3).map((d) => d.action);
       assert.ok(
-        topActions.includes("symbol.getCard") || topActions.includes("symbol.getCards"),
-        `Expected symbol.getCard or symbol.getCards in top 3, got: ${topActions.join(", ")}`,
+        topActions.includes("symbol.getCard") || topActions.includes(),
+        `Expected symbol.getCard in top 3, got: ${topActions.join(", ")}`,
       );
     });
 

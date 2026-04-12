@@ -102,7 +102,7 @@
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "all-MiniLM-L6-v2",
+    "model": "jina-embeddings-v2-base-code",
     "modelCacheDir": null,
     "generateSummaries": false,
     "summaryProvider": null,
@@ -124,10 +124,10 @@
         "enabled": true,
         "topK": 75,
         "efc": 200,
-              "efs": 200,
+        "efs": 200,
         "indexes": {
-          "all-MiniLM-L6-v2": {
-            "indexName": "symbol_vec_minilm_l6_v2"
+          "jina-embeddings-v2-base-code": {
+            "indexName": "symbol_vec_jina_code_v2"
           },
           "nomic-embed-text-v1.5": {
             "indexName": "symbol_vec_nomic_embed_v15"

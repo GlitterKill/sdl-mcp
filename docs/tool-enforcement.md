@@ -39,7 +39,7 @@ SDL-MCP's token savings depend on the model actually using SDL tools:
 1. `sdl.repo.status`
 2. `sdl.action.search`
 3. focused `sdl.manual`
-4. `sdl.agent.context` for direct code context retrieval (`contextMode: "precise"` or `"broad"`)
+4. `sdl.context` for direct code context retrieval (`contextMode: "precise"` or `"broad"`)
 5. `sdl.context` first for Code Mode explain/debug/review/implement requests
 6. `sdl.workflow` for multi-step operations (runtime execution, data transforms, batch mutations)
 7. `runtimeExecute` inside `sdl.workflow` for repo-local commands
@@ -106,7 +106,7 @@ After generating the enforcement setup:
 
 1. connect the client to SDL-MCP
 2. start the session with `sdl.repo.status`
-3. confirm the agent uses `sdl.agent.context` or `sdl.context` for code context retrieval
+3. confirm the agent uses `sdl.context` or `sdl.context` for code context retrieval
 4. confirm explain/debug/review requests route to context first
 5. confirm `sdl.workflow` is used for runtime execution and multi-step operations, not context retrieval
 5. confirm symbol lookups can use `symbolRef` / `symbolRefs` when IDs are not yet known

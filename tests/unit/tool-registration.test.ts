@@ -85,14 +85,6 @@ describe("MCP tool registration", () => {
       "expected sdl.slice.refresh to be registered",
     );
     assert.ok(
-      names.includes("sdl.context.summary"),
-      "expected sdl.context.summary to be registered",
-    );
-    assert.ok(
-      names.includes("sdl.symbol.getCards"),
-      "expected sdl.symbol.getCards to be registered",
-    );
-    assert.ok(
       names.includes("sdl.buffer.push"),
       "expected sdl.buffer.push to be registered",
     );

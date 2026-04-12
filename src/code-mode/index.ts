@@ -3,9 +3,7 @@ import type { CodeModeConfig } from "../config/types.js";
 import { ValidationError } from "../domain/errors.js";
 import type { ToolServices } from "../gateway/index.js";
 import { createActionMap, type ActionMap } from "../gateway/router.js";
-import {
-  AgentContextRequestSchema,
-} from "../mcp/tools.js";
+import { AgentContextRequestSchema } from "../mcp/tools.js";
 import { handleAgentContext } from "../mcp/tools/context.js";
 import type { MCPServer, ToolContext } from "../server.js";
 import { estimateTokens } from "../util/tokenize.js";

@@ -32,7 +32,7 @@ describe("request normalization", () => {
         }),
         handler: async (args: unknown) => args,
       },
-      "symbol.getCards": {
+      "symbol.getCard": {
         schema: z.object({
           repoId: z.string(),
           symbolIds: z.array(z.string()).min(1),
@@ -56,7 +56,7 @@ describe("request normalization", () => {
 
     const symbolResult = await routeGatewayCall(
       {
-        action: "symbol.getCards",
+        action: "symbol.getCard",
         repo_id: "repo-1",
         symbol_ids: ["sym-1"],
       },

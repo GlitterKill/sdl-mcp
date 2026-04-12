@@ -253,7 +253,7 @@ export const AnnConfigSchema = z.object({
 export type AnnConfig = z.infer<typeof AnnConfigSchema>;
 
 export const SUPPORTED_EMBEDDING_MODELS = [
-  "all-MiniLM-L6-v2",
+  "jina-embeddings-v2-base-code",
   "nomic-embed-text-v1.5",
 ] as const;
 
@@ -281,9 +281,8 @@ export const SemanticRetrievalVectorConfigSchema = z.object({
   efs: z.number().int().min(1).default(200),
   /** Per-model HNSW index config keyed by model name. */
   indexes: z.record(z.string(), SemanticRetrievalVectorIndexSchema).default({
-    "all-MiniLM-L6-v2": { indexName: "symbol_vec_minilm_l6_v2" },
-    "nomic-embed-text-v1.5": { indexName: "symbol_vec_nomic_embed_v15" },
     "jina-embeddings-v2-base-code": { indexName: "symbol_vec_jina_code_v2" },
+    "nomic-embed-text-v1.5": { indexName: "symbol_vec_nomic_embed_v15" },
   }),
 });
 
@@ -332,7 +331,7 @@ export const SemanticConfigSchema = z.object({
    */
   alpha: z.number().min(0).max(1).default(0.6),
   provider: z.enum(["api", "local", "mock"]).default("local"),
-  model: z.string().default("all-MiniLM-L6-v2"),
+  model: z.string().default("jina-embeddings-v2-base-code"),
   modelCacheDir: z.string().nullish(),
   generateSummaries: z.boolean().default(false),
   /** Summary LLM backend — independent from embedding provider.

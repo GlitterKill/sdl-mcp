@@ -390,7 +390,7 @@ If a natural reference is ambiguous or not found, the error response includes st
 
 ---
 
-### `sdl.symbol.getCards`
+### `sdl.symbol.getCard`
 
 Batch fetch up to 100 symbol cards in a single round trip. Prefer this over multiple sequential `sdl.symbol.getCard` calls when you already have a list of symbol IDs or natural symbol references.
 
@@ -438,7 +438,7 @@ When you use `symbolRefs`, the batch resolves each reference independently. Mixe
 
 ---
 
-### `sdl.context.summary`
+### 
 
 Generate a token-bounded context summary for a symbol, file, or task query. Useful for getting a quick overview of relevant symbols, dependencies, and risk areas without building a full slice.
 
@@ -815,7 +815,7 @@ Update policy configuration for a repository. Accepts a partial patch — only s
 
 ## Agent Context and Feedback (3 tools)
 
-### `sdl.agent.context`
+### `sdl.context`
 
 Retrieve task-shaped code context with rung path selection and evidence capture. The engine uses semantic-first candidate seeding (with lexical and feedback fallbacks), evidence-aware ranking, and confidence-driven rung planning to select an optimal path through the context ladder (card -> skeleton -> hotPath -> raw).
 
@@ -1233,7 +1233,7 @@ Get cumulative token usage statistics and savings metrics for the current sessio
 
 ### `sdl.context`
 
-Retrieve task-shaped context inside Code Mode. Parameters and response shape mirror `sdl.agent.context`.
+Retrieve task-shaped context inside Code Mode. Parameters and response shape mirror `sdl.context`.
 
 Use `sdl.context` first for `debug`, `review`, `implement`, and `explain` requests when you are already operating through the Code Mode surfaces.
 
@@ -1241,7 +1241,7 @@ Use `sdl.context` first for `debug`, `review`, `implement`, and `explain` reques
 
 Execute a multi-step workflow of SDL-MCP actions and internal transforms in one round trip.
 
-Use this for runtime execution, data shaping, batch mutations, and reusable multi-step pipelines. Do not use it for context retrieval; route that work to `sdl.context` or `sdl.agent.context`.
+Use this for runtime execution, data shaping, batch mutations, and reusable multi-step pipelines. Do not use it for context retrieval; route that work to `sdl.context` or `sdl.context`.
 
 ### `sdl.manual`
 
@@ -1258,8 +1258,8 @@ Use tools in this order for most tasks:
 1. `sdl.repo.status` — check repo state and version
 2. `sdl.repo.overview` — understand codebase structure (start with `level: "stats"`)
 3. `sdl.symbol.search` — find relevant symbols (start with tight limits)
-4. `sdl.agent.context` / `sdl.context` — get task-shaped context first for explain/debug/review/implement work
-5. `sdl.symbol.getCard` / `sdl.symbol.getCards` — understand what symbols do
+4. `sdl.context` / `sdl.context` — get task-shaped context first for explain/debug/review/implement work
+5. `sdl.symbol.getCard` / `sdl.symbol.getCard` — understand what symbols do
 6. `sdl.slice.build` — get related symbols for a task (auto-surfaces relevant memories when memory is enabled)
 7. `sdl.code.getSkeleton` — see code structure without full bodies
 8. `sdl.code.getHotPath` — find specific identifiers in code
@@ -1271,7 +1271,7 @@ Use tools in this order for most tasks:
 
 | Task                         | Workflow                                                                                      |
 | ---------------------------- | --------------------------------------------------------------------------------------------- |
-| **Explain / Debug / Review** | `sdl.agent.context` or `sdl.context` first -> direct ladder follow-up only if still ambiguous |
+| **Explain / Debug / Review** | `sdl.context` or `sdl.context` first -> direct ladder follow-up only if still ambiguous |
 | **Debug (manual)**           | search -> card -> slice.build -> hotPath -> needWindow (if still ambiguous)                   |
 | **Debug (auto)**             | slice.build with `taskText` + `stackTrace` -> hotPath -> needWindow with `sliceContext`       |
 | **Feature**                  | repo.overview -> search -> card -> slice.build (use `editedFiles` for impact)                 |

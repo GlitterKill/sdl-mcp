@@ -57,7 +57,7 @@ describe("RRF fusion", () => {
     const result = rrfFuse(
       [
         { source: "fts", items: [{ symbolId: "sym1" }, { symbolId: "sym2" }] },
-        { source: "vector:minilm", items: [{ symbolId: "sym2" }, { symbolId: "sym3" }] },
+        { source: "vector:jinacode", items: [{ symbolId: "sym2" }, { symbolId: "sym3" }] },
       ],
       k,
       10,
@@ -89,12 +89,12 @@ describe("RRF fusion", () => {
     const result = rrfFuse(
       [
         { source: "fts", items: [{ symbolId: "x" }] },            // rank 1 → 1/61
-        { source: "vector:minilm", items: [{ symbolId: "x" }] },  // rank 1 → 1/61 (tie)
+        { source: "vector:jinacode", items: [{ symbolId: "x" }] },  // rank 1 → 1/61 (tie)
       ],
       60,
       10,
     );
-    // On tie, the last source to set wins (vector:minilm)
+    // On tie, the last source to set wins (vector:jinacode)
     assert.equal(result[0].symbolId, "x");
     // Score should be 1/61 + 1/61
     const expected = 2 / 61;
@@ -138,11 +138,11 @@ describe("model mapping", async () => {
     modelMapping = await import("../../dist/retrieval/model-mapping.js");
   });
 
-  it("returns correct property names for MiniLM", () => {
-    assert.equal(modelMapping.getEmbeddingPropertyName("all-MiniLM-L6-v2"), "embeddingMiniLM");
-    assert.equal(modelMapping.getCardHashPropertyName("all-MiniLM-L6-v2"), "embeddingMiniLMCardHash");
-    assert.equal(modelMapping.getUpdatedAtPropertyName("all-MiniLM-L6-v2"), "embeddingMiniLMUpdatedAt");
-    assert.equal(modelMapping.getVectorIndexName("all-MiniLM-L6-v2"), "symbol_vec_minilm_l6_v2");
+  it("returns correct property names for Jina", () => {
+    assert.equal(modelMapping.getEmbeddingPropertyName("jina-embeddings-v2-base-code"), "embeddingJinaCode");
+    assert.equal(modelMapping.getCardHashPropertyName("jina-embeddings-v2-base-code"), "embeddingJinaCodeCardHash");
+    assert.equal(modelMapping.getUpdatedAtPropertyName("jina-embeddings-v2-base-code"), "embeddingJinaCodeUpdatedAt");
+    assert.equal(modelMapping.getVectorIndexName("jina-embeddings-v2-base-code"), "symbol_vec_jina_code_v2");
   });
 
   it("returns correct property names for Nomic", () => {
@@ -159,13 +159,13 @@ describe("model mapping", async () => {
   it("EMBEDDING_MODELS has exactly 3 real model entries", () => {
     const keys = Object.keys(modelMapping.EMBEDDING_MODELS);
     assert.equal(keys.length, 3);
-    assert.ok(keys.includes("all-MiniLM-L6-v2"));
+    assert.ok(keys.includes("jina-embeddings-v2-base-code"));
     assert.ok(keys.includes("nomic-embed-text-v1.5"));
     assert.ok(keys.includes("jina-embeddings-v2-base-code"));
   });
 
   it("dimensions match expected values", () => {
-    assert.equal(modelMapping.EMBEDDING_MODELS["all-MiniLM-L6-v2"].dimension, 384);
+    assert.equal(modelMapping.EMBEDDING_MODELS["jina-embeddings-v2-base-code"].dimension, 768);
     assert.equal(modelMapping.EMBEDDING_MODELS["nomic-embed-text-v1.5"].dimension, 768);
   });
 });
@@ -177,7 +177,7 @@ describe("model mapping", async () => {
 describe("shouldFallbackToLegacy (inline)", () => {
   interface RetrievalCapabilities {
     fts: boolean;
-    vectorMiniLM: boolean;
+    vectorJinaCode: boolean;
     vectorNomic: boolean;
   }
   interface SemanticRetrievalConfig {
@@ -196,23 +196,23 @@ describe("shouldFallbackToLegacy (inline)", () => {
   }
 
   it("returns true when mode is legacy (regardless of caps)", () => {
-    assert.equal(shouldFallbackToLegacy({ fts: true, vectorMiniLM: true, vectorNomic: true, vectorJinaCode: true }, { mode: "legacy" }), true);
+    assert.equal(shouldFallbackToLegacy({ fts: true, vectorJinaCode: true, vectorNomic: true, vectorJinaCode: true }, { mode: "legacy" }), true);
   });
 
   it("returns true when FTS is unavailable in hybrid mode", () => {
-    assert.equal(shouldFallbackToLegacy({ fts: false, vectorMiniLM: true, vectorNomic: true, vectorJinaCode: true }, { mode: "hybrid" }), true);
+    assert.equal(shouldFallbackToLegacy({ fts: false, vectorJinaCode: true, vectorNomic: true, vectorJinaCode: true }, { mode: "hybrid" }), true);
   });
 
   it("returns false when FTS available in hybrid mode (vector optional)", () => {
-    assert.equal(shouldFallbackToLegacy({ fts: true, vectorMiniLM: false, vectorNomic: false, vectorJinaCode: false }, { mode: "hybrid" }), false);
+    assert.equal(shouldFallbackToLegacy({ fts: true, vectorJinaCode: false, vectorNomic: false, vectorJinaCode: false }, { mode: "hybrid" }), false);
   });
 
   it("returns false when all capabilities available in hybrid mode", () => {
-    assert.equal(shouldFallbackToLegacy({ fts: true, vectorMiniLM: true, vectorNomic: true, vectorJinaCode: true }, { mode: "hybrid" }), false);
+    assert.equal(shouldFallbackToLegacy({ fts: true, vectorJinaCode: true, vectorNomic: true, vectorJinaCode: true }, { mode: "hybrid" }), false);
   });
 
   it("returns true when all capabilities unavailable in hybrid mode", () => {
-    assert.equal(shouldFallbackToLegacy({ fts: false, vectorMiniLM: false, vectorNomic: false, vectorJinaCode: false }, { mode: "hybrid" }), true);
+    assert.equal(shouldFallbackToLegacy({ fts: false, vectorJinaCode: false, vectorNomic: false, vectorJinaCode: false }, { mode: "hybrid" }), true);
   });
 });
 

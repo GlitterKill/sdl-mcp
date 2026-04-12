@@ -88,7 +88,7 @@ async function createV8DatabaseWithoutSummaryMetadata(
   const ddl = [
     `CREATE NODE TABLE IF NOT EXISTS Repo (repoId STRING PRIMARY KEY, rootPath STRING, configJson STRING, createdAt STRING)`,
     `CREATE NODE TABLE IF NOT EXISTS File (fileId STRING PRIMARY KEY, relPath STRING, contentHash STRING, language STRING, byteSize INT64, lastIndexedAt STRING, directory STRING)`,
-    `CREATE NODE TABLE IF NOT EXISTS Symbol (symbolId STRING PRIMARY KEY, kind STRING, name STRING, exported BOOLEAN, visibility STRING, language STRING, rangeStartLine INT64, rangeStartCol INT64, rangeEndLine INT64, rangeEndCol INT64, astFingerprint STRING, signatureJson STRING, summary STRING, invariantsJson STRING, sideEffectsJson STRING, roleTagsJson STRING, searchText STRING, updatedAt STRING, embeddingMiniLM STRING, embeddingMiniLMCardHash STRING, embeddingMiniLMUpdatedAt STRING, embeddingNomic STRING, embeddingNomicCardHash STRING, embeddingNomicUpdatedAt STRING)`,
+    `CREATE NODE TABLE IF NOT EXISTS Symbol (symbolId STRING PRIMARY KEY, kind STRING, name STRING, exported BOOLEAN, visibility STRING, language STRING, rangeStartLine INT64, rangeStartCol INT64, rangeEndLine INT64, rangeEndCol INT64, astFingerprint STRING, signatureJson STRING, summary STRING, invariantsJson STRING, sideEffectsJson STRING, roleTagsJson STRING, searchText STRING, updatedAt STRING, embeddingJinaCode STRING, embeddingJinaCodeCardHash STRING, embeddingJinaCodeUpdatedAt STRING, embeddingNomic STRING, embeddingNomicCardHash STRING, embeddingNomicUpdatedAt STRING)`,
     `CREATE NODE TABLE IF NOT EXISTS Cluster (clusterId STRING PRIMARY KEY, repoId STRING, label STRING, symbolCount INT32 DEFAULT 0, cohesionScore DOUBLE DEFAULT 0.0, versionId STRING, createdAt STRING, searchText STRING)`,
     `CREATE NODE TABLE IF NOT EXISTS Process (processId STRING PRIMARY KEY, repoId STRING, entrySymbolId STRING, label STRING, depth INT32 DEFAULT 0, versionId STRING, createdAt STRING, searchText STRING)`,
     `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (id STRING PRIMARY KEY, schemaVersion INT64, createdAt STRING, updatedAt STRING)`,
@@ -116,7 +116,7 @@ async function createV8DatabaseWithoutSummaryMetadata(
   );
   closeResult(
     await conn.query(
-      `CREATE (s:Symbol {symbolId: 'sym-1', kind: 'function', name: 'exampleFn', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 3, rangeEndCol: 1, astFingerprint: 'fp-1', signatureJson: '{}', summary: 'Example summary', invariantsJson: null, sideEffectsJson: null, roleTagsJson: '[]', searchText: 'exampleFn Example summary', updatedAt: '${now}', embeddingMiniLM: null, embeddingMiniLMCardHash: null, embeddingMiniLMUpdatedAt: null, embeddingNomic: null, embeddingNomicCardHash: null, embeddingNomicUpdatedAt: null})`,
+      `CREATE (s:Symbol {symbolId: 'sym-1', kind: 'function', name: 'exampleFn', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 3, rangeEndCol: 1, astFingerprint: 'fp-1', signatureJson: '{}', summary: 'Example summary', invariantsJson: null, sideEffectsJson: null, roleTagsJson: '[]', searchText: 'exampleFn Example summary', updatedAt: '${now}', embeddingJinaCode: null, embeddingJinaCodeCardHash: null, embeddingJinaCodeUpdatedAt: null, embeddingNomic: null, embeddingNomicCardHash: null, embeddingNomicUpdatedAt: null})`,
     ),
   );
   closeResult(

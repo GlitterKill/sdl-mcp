@@ -4,8 +4,6 @@ import {
   type SymbolGetCardRequest,
   SymbolGetCardRequestSchema,
   SymbolGetCardResponse,
-  type SymbolGetCardsRequest,
-  SymbolGetCardsResponse,
   type SymbolRef,
 } from "../tools.js";
 import { SYMBOL_SEARCH_DEFAULT_LIMIT } from "../../config/constants.js";
@@ -646,10 +644,22 @@ async function buildCardsForSymbolIds(
   return { cards, symbolMap };
 }
 
+/**
+ * Unified handler for symbol card retrieval - supports both single and batch.
+ * Dispatches based on whether symbolIds/symbolRefs (batch) or symbolId/symbolRef (single) is provided.
+ */
 export async function handleSymbolGetCard(
   args: unknown,
 ): Promise<SymbolGetCardResponse | NotModifiedResponse> {
   const request = SymbolGetCardRequestSchema.parse(args);
+  
+  // Dispatch to batch handler if symbolIds or symbolRefs is provided
+  const isBatch = request.symbolIds !== undefined || request.symbolRefs !== undefined;
+  if (isBatch) {
+    return handleBatchCards(request);
+  }
+  
+  // Single symbol lookup
   const conn = await getLadybugConn();
 
   const repo = await ladybugDb.getRepo(conn, request.repoId);
@@ -694,9 +704,12 @@ export async function handleSymbolGetCard(
     : response;
 }
 
-export async function handleSymbolGetCards(
-  args: unknown,
-): Promise<SymbolGetCardsResponse> {
+/**
+ * Internal batch card handler - called by handleSymbolGetCard when symbolIds/symbolRefs provided.
+ */
+async function handleBatchCards(
+  request: SymbolGetCardRequest,
+): Promise<SymbolGetCardResponse> {
   const {
     repoId,
     symbolIds,
@@ -704,7 +717,7 @@ export async function handleSymbolGetCards(
     knownEtags,
     minCallConfidence,
     includeResolutionMetadata,
-  } = args as SymbolGetCardsRequest;
+  } = request;
   const conn = await getLadybugConn();
 
   const repo = await ladybugDb.getRepo(conn, repoId);
@@ -760,7 +773,7 @@ export async function handleSymbolGetCards(
     ];
   }
 
-  const response: SymbolGetCardsResponse = { cards };
+  const response: SymbolGetCardResponse = { cards };
   if (failures.length > 0) {
     response.partial = resolvedSymbolIds.length > 0;
     response.succeeded = resolvedSymbolIds;

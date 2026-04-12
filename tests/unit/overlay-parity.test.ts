@@ -145,7 +145,7 @@ describe("OverlayEmbeddingCache", () => {
   });
 
   it("should return null for a symbol that was never cached", () => {
-    const result = cache.get("nonexistent-sym", "all-MiniLM-L6-v2");
+    const result = cache.get("nonexistent-sym", "jina-embeddings-v2-base-code");
     assert.equal(result, null, "uncached symbol should return null");
   });
 
@@ -166,14 +166,14 @@ describe("OverlayEmbeddingCache", () => {
 
   it("should invalidate a single symbol without error", () => {
     cache.invalidate("sym-1");
-    assert.equal(cache.get("sym-1", "all-MiniLM-L6-v2"), null);
+    assert.equal(cache.get("sym-1", "jina-embeddings-v2-base-code"), null);
   });
 
   it("should invalidate multiple symbols at once", () => {
     cache.invalidateMany(["sym-1", "sym-2", "sym-3"]);
-    assert.equal(cache.get("sym-1", "all-MiniLM-L6-v2"), null);
+    assert.equal(cache.get("sym-1", "jina-embeddings-v2-base-code"), null);
     assert.equal(cache.get("sym-2", "nomic-embed-text-v1.5"), null);
-    assert.equal(cache.get("sym-3", "all-MiniLM-L6-v2"), null);
+    assert.equal(cache.get("sym-3", "jina-embeddings-v2-base-code"), null);
   });
 
   it("should invalidateMany with an empty array without error", () => {

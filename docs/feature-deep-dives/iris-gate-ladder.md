@@ -111,6 +111,6 @@ flowchart TD
 
 - [`sdl.symbol.search`](../mcp-tools-detailed.md#sdlsymbolsearch) - Find symbols to get cards for
 - [`sdl.slice.build`](../mcp-tools-detailed.md#sdlslicebuild) - Get cards for an entire task context at once
-- [`sdl.context.summary`](../mcp-tools-detailed.md#sdlcontextsummary) - Generate a portable context briefing
+- [](../mcp-tools-detailed.md#sdlcontextsummary) - Generate a portable context briefing
 
 [Back to README](../../README.md)

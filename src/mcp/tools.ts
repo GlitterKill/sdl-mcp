@@ -899,10 +899,24 @@ export const SymbolRefSchema = z.object({
   exportedOnly: z.boolean().optional(),
 });
 
+/**
+ * Unified symbol card request schema - supports both single and batch retrieval.
+ * Provide exactly one of: symbolId, symbolIds, symbolRef, or symbolRefs.
+ */
 export const SymbolGetCardRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  // Single symbol lookup
   symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH).optional(),
   symbolRef: SymbolRefSchema.optional(),
+  // Batch symbol lookup
+  symbolIds: z
+    .array(z.string().max(MAX_SYMBOL_ID_LENGTH))
+    .min(1)
+    .max(100)
+    .describe("Array of symbol IDs to fetch (max 100)")
+    .optional(),
+  symbolRefs: z.array(SymbolRefSchema).min(1).max(100).optional(),
+  // Shared options
   ifNoneMatch: z.string().optional(),
   minCallConfidence: z.number().min(0).max(1).optional(),
   includeResolutionMetadata: z.boolean().optional(),
@@ -912,48 +926,23 @@ export const SymbolGetCardRequestSchema = z.object({
    * decision-relevant.
    */
   includeProcesses: z.boolean().optional(),
-}).superRefine((value, ctx) => {
-  const provided = Number(value.symbolId !== undefined) + Number(value.symbolRef !== undefined);
-  if (provided !== 1) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Provide exactly one of symbolId or symbolRef.",
-      path: ["symbolId"],
-    });
-  }
-});
-
-export const SymbolGetCardsRequestSchema = z.object({
-  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH).describe("Repository ID"),
-  symbolIds: z
-    .array(z.string())
-    .min(1)
-    .max(100)
-    .describe("Array of symbol IDs to fetch (max 100)")
-    .optional(),
-  symbolRefs: z.array(SymbolRefSchema).min(1).max(100).optional(),
-  minCallConfidence: z.number().min(0).max(1).optional(),
-  includeResolutionMetadata: z.boolean().optional(),
   /**
-   * When true, include the per-card `processes` array on each returned
-   * card. Default false — see SymbolGetCardRequestSchema for rationale.
+   * Map of symbolId → known ETag for batch requests.
+   * Matching symbols return notModified instead of full card.
    */
-  includeProcesses: z.boolean().optional(),
   knownEtags: z
     .record(z.string(), z.string())
     .refine(obj => Object.keys(obj).length <= 1000, { message: "knownEtags exceeds maximum of 1000 entries" })
-    .optional()
-    .describe(
-      "Map of symbolId → known ETag. Matching symbols return notModified instead of full card.",
-    ),
+    .optional(),
 }).superRefine((value, ctx) => {
-  const provided =
-    Number(value.symbolIds !== undefined) + Number(value.symbolRefs !== undefined);
-  if (provided !== 1) {
+  const singleProvided = Number(value.symbolId !== undefined) + Number(value.symbolRef !== undefined);
+  const batchProvided = Number(value.symbolIds !== undefined) + Number(value.symbolRefs !== undefined);
+  const totalProvided = singleProvided + batchProvided;
+  if (totalProvided !== 1) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "Provide exactly one of symbolIds or symbolRefs.",
-      path: ["symbolIds"],
+      message: "Provide exactly one of: symbolId, symbolIds, symbolRef, or symbolRefs.",
+      path: ["symbolId"],
     });
   }
 });
@@ -962,22 +951,49 @@ const CardWithETagSchema = SymbolCardSchema.extend({
   etag: z.string(),
 });
 
+// Batch card response (when symbolIds/symbolRefs used)
+const BatchCardResponseSchema = z.object({
+  cards: z.array(z.union([CardWithETagSchema, NotModifiedResponseSchema])),
+  partial: z.boolean().optional(),
+  succeeded: z.array(z.string()).optional(),
+  failed: z.array(z.string()).optional(),
+  failures: z.array(z.object({
+    input: z.string(),
+    message: z.string(),
+    code: z.string().optional(),
+    classification: z.string().optional(),
+    retryable: z.boolean().optional(),
+    fallbackTools: z.array(z.string()).optional(),
+    fallbackRationale: z.string().optional(),
+    candidates: z.array(z.record(z.string(), z.unknown())).optional(),
+  })).optional(),
+});
+
+// Single card response (when symbolId/symbolRef used)
+const SingleCardResponseSchema = z.object({
+  card: CardWithETagSchema,
+  truncation: z
+    .object({
+      truncated: z.boolean(),
+      droppedCount: z.number().int().min(0),
+      howToResume: z
+        .object({
+          type: z.enum(["cursor", "token"]),
+          value: z.union([z.string(), z.number()]),
+        })
+        .nullable(),
+    })
+    .optional(),
+});
+
+/**
+ * Unified response schema - supports both single and batch responses.
+ * Single: { card: CardWithETag, truncation?: {...} }
+ * Batch: { cards: [...], partial?: boolean, succeeded?: [...], failed?: [...], failures?: [...] }
+ */
 export const SymbolGetCardResponseSchema = z.union([
-  z.object({
-    card: CardWithETagSchema,
-    truncation: z
-      .object({
-        truncated: z.boolean(),
-        droppedCount: z.number().int().min(0),
-        howToResume: z
-          .object({
-            type: z.enum(["cursor", "token"]),
-            value: z.union([z.string(), z.number()]),
-          })
-          .nullable(),
-      })
-      .optional(),
-  }),
+  SingleCardResponseSchema,
+  BatchCardResponseSchema,
   NotModifiedResponseSchema,
 ]);
 
@@ -1545,102 +1561,6 @@ export const RepoOverviewResponseSchema = z.union([
 // Context Summary Schemas
 // ============================================================================
 
-const ContextSummaryScopeSchema = z.enum(["symbol", "file", "task", "repo"]);
-const ContextSummaryFormatSchema = z.enum(["markdown", "json", "clipboard"]);
-
-const ContextSummarySymbolSchema = z.object({
-  symbolId: z.string(),
-  name: z.string(),
-  kind: z.enum([
-    "function",
-    "class",
-    "interface",
-    "type",
-    "module",
-    "method",
-    "constructor",
-    "variable",
-  ]),
-  signature: z.string().optional(),
-  summary: z.string(),
-  cluster: z
-    .object({
-      clusterId: z.string(),
-      label: z.string(),
-      memberCount: z.number().int().min(0),
-    })
-    .optional(),
-  processes: z
-    .array(
-      z.object({
-        processId: z.string(),
-        label: z.string(),
-        role: z.enum(["entry", "intermediate", "exit"]),
-        depth: z.number().int().min(0),
-      }),
-    )
-    .optional(),
-});
-
-const ContextSummaryDependencySchema = z.object({
-  fromSymbolId: z.string(),
-  toSymbolIds: z.array(z.string()),
-});
-
-const ContextSummaryRiskAreaSchema = z.object({
-  symbolId: z.string(),
-  name: z.string(),
-  reasons: z.array(z.string()),
-});
-
-const ContextSummaryFileTouchSchema = z.object({
-  file: z.string(),
-  symbolCount: z.number().int().min(0),
-});
-
-const ContextSummaryMetadataSchema = z.object({
-  query: z.string(),
-  summaryTokens: z.number().int().min(0),
-  budget: z.number().int().min(1),
-  truncated: z.boolean(),
-  indexVersion: z.string(),
-  budgetWarning: z.string().optional(),
-});
-
-const ContextSummarySchema = z.object({
-  repoId: z.string().min(1),
-  query: z.string(),
-  scope: ContextSummaryScopeSchema,
-  keySymbols: z.array(ContextSummarySymbolSchema),
-  dependencyGraph: z.array(ContextSummaryDependencySchema),
-  riskAreas: z.array(ContextSummaryRiskAreaSchema),
-  filesTouched: z.array(ContextSummaryFileTouchSchema),
-  metadata: ContextSummaryMetadataSchema,
-});
-
-export const ContextSummaryRequestSchema = z.object({
-  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  query: z.string().min(1).max(1000),
-  budget: z.number().int().min(1).optional(),
-  format: ContextSummaryFormatSchema.optional(),
-  scope: ContextSummaryScopeSchema.optional(),
-  ifNoneMatch: z.string().optional(),
-});
-
-const ContextSummaryPayloadSchema = z.object({
-  repoId: z.string().min(1),
-  format: ContextSummaryFormatSchema,
-  summary: ContextSummarySchema,
-  content: z.string(),
-});
-
-export const ContextSummaryResponseSchema = z.union([
-  ContextSummaryPayloadSchema.extend({
-    etag: z.string(),
-  }),
-  ConditionalNotModifiedResponseSchema,
-]);
-
 export type RepoRegisterRequest = z.infer<typeof RepoRegisterRequestSchema>;
 export type RepoRegisterResponse = z.infer<typeof RepoRegisterResponseSchema>;
 export type RepoStatusRequest = z.infer<typeof RepoStatusRequestSchema>;
@@ -1662,24 +1582,6 @@ export type SymbolSearchResponse = z.infer<typeof SymbolSearchResponseSchema>;
 export type SymbolRef = z.infer<typeof SymbolRefSchema>;
 export type SymbolGetCardRequest = z.infer<typeof SymbolGetCardRequestSchema>;
 export type SymbolGetCardResponse = z.infer<typeof SymbolGetCardResponseSchema>;
-export type SymbolGetCardsRequest = z.infer<typeof SymbolGetCardsRequestSchema>;
-export const SymbolGetCardsResponseSchema = z.object({
-  cards: z.array(z.union([CardWithETagSchema, NotModifiedResponseSchema])),
-  partial: z.boolean().optional(),
-  succeeded: z.array(z.string()).optional(),
-  failed: z.array(z.string()).optional(),
-  failures: z.array(z.object({
-    input: z.string(),
-    message: z.string(),
-    code: z.string().optional(),
-    classification: z.string().optional(),
-    retryable: z.boolean().optional(),
-    fallbackTools: z.array(z.string()).optional(),
-    fallbackRationale: z.string().optional(),
-    candidates: z.array(z.record(z.string(), z.unknown())).optional(),
-  })).optional(),
-});
-export type SymbolGetCardsResponse = z.infer<typeof SymbolGetCardsResponseSchema>;
 export type SliceBuildRequest = z.infer<typeof SliceBuildRequestSchema>;
 export type SliceBuildResponse = z.infer<typeof SliceBuildResponseSchema>;
 export type SliceBuildWireFormat = z.infer<typeof SliceBuildWireFormatSchema>;
@@ -1718,10 +1620,6 @@ export type GetHotPathRequest = z.infer<typeof GetHotPathRequestSchema>;
 export type GetHotPathResponse = z.infer<typeof GetHotPathResponseSchema>;
 export type RepoOverviewRequest = z.infer<typeof RepoOverviewRequestSchema>;
 export type RepoOverviewResponse = z.infer<typeof RepoOverviewResponseSchema>;
-export type ContextSummaryRequest = z.infer<typeof ContextSummaryRequestSchema>;
-export type ContextSummaryResponse = z.infer<
-  typeof ContextSummaryResponseSchema
->;
 
 const FindingSchema = z.object({
   type: z.string(),
@@ -1838,6 +1736,11 @@ export type PRRiskAnalysisResponse = z.infer<
   typeof PRRiskAnalysisResponseSchema
 >;
 
+
+// ============================================================================
+// Agent Context Schemas
+// ============================================================================
+
 export const AgentContextRequestSchema = z.object({
   repoId: z
     .string()
@@ -1951,7 +1854,6 @@ const AgentContextPayloadSchema = z.object({
     .describe(
       "Suggested next action based on execution results and policy decisions",
     ),
-  /** Retrieval evidence with symptom classification. */
   retrievalEvidence: z.object({
     symptomType: z.enum(["stackTrace", "failingTest", "taskText", "editedFiles"]).optional(),
     sources: z.array(z.string()).optional(),

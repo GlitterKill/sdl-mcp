@@ -20,12 +20,10 @@ const MEMORY_ACTIONS = new Set([
 export const FN_NAME_MAP: Record<string, string> = {
   symbolSearch: "symbol.search",
   symbolGetCard: "symbol.getCard",
-  symbolGetCards: "symbol.getCards",
   sliceBuild: "slice.build",
   sliceRefresh: "slice.refresh",
   sliceSpilloverGet: "slice.spillover.get",
   deltaGet: "delta.get",
-  contextSummary: "context.summary",
   prRiskAnalyze: "pr.risk.analyze",
   codeNeedWindow: "code.needWindow",
   codeSkeleton: "code.getSkeleton",
@@ -36,7 +34,6 @@ export const FN_NAME_MAP: Record<string, string> = {
   indexRefresh: "index.refresh",
   policyGet: "policy.get",
   policySet: "policy.set",
-  agentContext: "agent.context",
   agentFeedback: "agent.feedback",
   agentFeedbackQuery: "agent.feedback.query",
   bufferPush: "buffer.push",
@@ -90,8 +87,6 @@ const MANUAL_TEMPLATE = `// SDL-MCP API - use sdl.context for context retrieval,
 function symbolSearch(p: { query: string; kinds?: string[]; limit?: number; semantic?: boolean }): { results: { symbolId: string; name: string; kind: string; file: string; relevance?: number }[] }
 /** Get symbol card (metadata, deps, metrics) */
 function symbolGetCard(p: { symbolId: string; ifNoneMatch?: string }): { card: { symbolId: string; name: string; kind: string; signature: string; summary: string; deps: object }; etag: string } | { notModified: true }
-/** Batch-fetch symbol cards */
-function symbolGetCards(p: { symbolIds: string[]; knownEtags?: Record<string,string> }): { cards: object[]; notModified: string[] }
 /** Build dependency graph slice */
 function sliceBuild(p: { taskText?: string; entrySymbols?: string[]; budget?: { maxCards?: number; maxEstimatedTokens?: number } }): { handle: string; cards: object[]; spilloverCount: number }
 /** Refresh existing slice (delta only) */
@@ -100,8 +95,6 @@ function sliceRefresh(p: { sliceHandle: string; knownVersion?: string }): { adde
 function sliceSpilloverGet(p: { spilloverHandle: string; page?: number; pageSize?: number }): { cards: object[]; hasMore: boolean }
 /** Get delta between versions */
 function deltaGet(p: { fromVersion?: string; toVersion?: string; includeBlastRadius?: boolean }): { changed: object[]; blastRadius?: object[] }
-/** Generate context summary */
-function contextSummary(p: { symbolId?: string; file?: string; query?: string; budget?: number; format?: "markdown"|"json"|"clipboard"; scope?: "symbol"|"file"|"task"|"repo"; ifNoneMatch?: string }): { summary: string; tokens: number } | { notModified: true; etag: string }
 /** Analyze PR risk */
 function prRiskAnalyze(p: { fromVersion: string; toVersion: string; riskThreshold?: number }): { riskItems: object[]; summary: string }
 
@@ -141,8 +134,6 @@ function memoryRemove(p: { memoryId: string }): { removed: boolean }
 function memorySurface(p: { symbolIds?: string[]; fileIds?: string[]; taskText?: string; limit?: number }): { memories: object[] }
 
 // === Context / Agent ===
-/** Retrieve multi-rung task context */
-function agentContext(p: { taskType: "debug" | "review" | "implement" | "explain"; taskText: string; budget?: { maxTokens?: number; maxActions?: number; maxDurationMs?: number }; options?: { focusSymbols?: string[]; focusPaths?: string[]; includeTests?: boolean; requireDiagnostics?: boolean; contextMode?: "precise"|"broad" }; ifNoneMatch?: string }): { evidence: object[]; etag: string } | { notModified: true; etag: string }
 /** Record agent feedback */
 function agentFeedback(p: { versionId: string; sliceHandle: string; usefulSymbols: string[]; missingSymbols?: string[]; rating?: string; comment?: string }): { recorded: boolean }
 /** Query feedback records */

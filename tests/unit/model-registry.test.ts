@@ -10,10 +10,10 @@ import {
   isModelAvailable,
 } from "../../dist/indexer/model-registry.js";
 
-test("getModelInfo returns MiniLM metadata", () => {
-  const info = getModelInfo("all-MiniLM-L6-v2");
-  assert.strictEqual(info.name, "all-MiniLM-L6-v2");
-  assert.strictEqual(info.dimension, 384);
+test("getModelInfo returns Jina metadata", () => {
+  const info = getModelInfo("jina-embeddings-v2-base-code");
+  assert.strictEqual(info.name, "jina-embeddings-v2-base-code");
+  assert.strictEqual(info.dimension, 768);
   assert.strictEqual(info.maxSequenceLength, 256);
   assert.strictEqual(info.bundled, true);
   assert.strictEqual(info.modelFile, "model_quantized.onnx");
@@ -46,14 +46,14 @@ test("getModelInfo throws for unknown model", () => {
 
 test("listModels returns all registered models", () => {
   const models = listModels();
-  assert.ok(models.includes("all-MiniLM-L6-v2"));
+  assert.ok(models.includes("jina-embeddings-v2-base-code"));
   assert.ok(models.includes("nomic-embed-text-v1.5"));
   assert.ok(models.includes("jina-embeddings-v2-base-code"));
   assert.strictEqual(models.length, 3);
 });
 
 test("isKnownModel returns true for registered models", () => {
-  assert.strictEqual(isKnownModel("all-MiniLM-L6-v2"), true);
+  assert.strictEqual(isKnownModel("jina-embeddings-v2-base-code"), true);
   assert.strictEqual(isKnownModel("nomic-embed-text-v1.5"), true);
 });
 
@@ -63,34 +63,34 @@ test("isKnownModel returns false for unknown models", () => {
 });
 
 test("resolveModelPath returns path ending with model file", () => {
-  const path = resolveModelPath("all-MiniLM-L6-v2");
+  const path = resolveModelPath("jina-embeddings-v2-base-code");
   assert.ok(
     path.endsWith("model_quantized.onnx"),
     `Path should end with ONNX file: ${path}`,
   );
   assert.ok(
-    path.includes("all-MiniLM-L6-v2"),
+    path.includes("jina-embeddings-v2-base-code"),
     `Path should contain model name: ${path}`,
   );
 });
 
 test("resolveTokenizerPath returns path ending with tokenizer file", () => {
-  const path = resolveTokenizerPath("all-MiniLM-L6-v2");
+  const path = resolveTokenizerPath("jina-embeddings-v2-base-code");
   assert.ok(
     path.endsWith("tokenizer.json"),
     `Path should end with tokenizer.json: ${path}`,
   );
   assert.ok(
-    path.includes("all-MiniLM-L6-v2"),
+    path.includes("jina-embeddings-v2-base-code"),
     `Path should contain model name: ${path}`,
   );
 });
 
 test("resolveModelDir for bundled model points to models/ directory", () => {
-  const dir = resolveModelDir("all-MiniLM-L6-v2");
+  const dir = resolveModelDir("jina-embeddings-v2-base-code");
   assert.ok(dir.includes("models"), `Dir should contain 'models': ${dir}`);
   assert.ok(
-    dir.endsWith("all-MiniLM-L6-v2"),
+    dir.endsWith("jina-embeddings-v2-base-code"),
     `Dir should end with model name: ${dir}`,
   );
 });
@@ -112,7 +112,7 @@ test("resolveModelDir for non-bundled model uses cache directory", () => {
 test("isModelAvailable returns boolean without throwing", () => {
   // This test verifies the function runs without error regardless of whether
   // model files are actually present (CI may not have them downloaded)
-  const result = isModelAvailable("all-MiniLM-L6-v2");
+  const result = isModelAvailable("jina-embeddings-v2-base-code");
   assert.strictEqual(typeof result, "boolean");
 });
 
@@ -121,10 +121,10 @@ test("isModelAvailable returns boolean for nomic model", () => {
   assert.strictEqual(typeof result, "boolean");
 });
 
-test("MiniLM and nomic have different dimensions", () => {
-  const miniLM = getModelInfo("all-MiniLM-L6-v2");
+test("Jina and nomic have different dimensions", () => {
+  const jina = getModelInfo("jina-embeddings-v2-base-code");
   const nomic = getModelInfo("nomic-embed-text-v1.5");
-  assert.notStrictEqual(miniLM.dimension, nomic.dimension);
-  assert.strictEqual(miniLM.dimension, 384);
+  assert.notStrictEqual(jina.dimension, nomic.dimension);
+  assert.strictEqual(jina.dimension, 768);
   assert.strictEqual(nomic.dimension, 768);
 });

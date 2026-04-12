@@ -8,10 +8,9 @@ import { anyRepoHasMemoryTools } from "../config/memory-config.js";
 
 export const QUERY_DESCRIPTION =
   `sdl.query - Read-only SDL intelligence. Pass { repoId, action, ...params }.` +
-  `\nActions: symbol.search(query,limit?,semantic?) | symbol.getCard(symbolId,ifNoneMatch?,minCallConfidence?) | ` +
-  `symbol.getCards(symbolIds[],knownEtags?) | slice.build(taskText?,entrySymbols?,editedFiles?,budget?,wireFormat?) | ` +
+  `\nActions: symbol.search(query,limit?,semantic?) | symbol.getCard(symbolId|symbolIds[],ifNoneMatch?,knownEtags?) | slice.build(taskText?,entrySymbols?,editedFiles?,budget?,wireFormat?) | ` +
   `slice.refresh(sliceHandle,knownVersion) | slice.spillover.get(spilloverHandle,cursor?,pageSize?) | ` +
-  `delta.get(fromVersion,toVersion,budget?) | context.summary(query,scope?,budget?,format?) | ` +
+  `delta.get(fromVersion,toVersion,budget?) | ` +
   `pr.risk.analyze(fromVersion,toVersion,riskThreshold?)` +
   `\nPrefer: repo.status -> symbol.search -> symbol.getCard -> slice.build.`;
 
@@ -31,8 +30,7 @@ export const REPO_DESCRIPTION =
 
 const AGENT_DESCRIPTION_BASE =
   `sdl.agent - Agentic + live-edit operations. Pass { repoId, action, ...params }.` +
-  `\nActions: agent.context(taskType,taskText,budget?,options?{contextMode?,focusPaths?,...}) | ` +
-  `agent.feedback(versionId,sliceHandle,usefulSymbols[],missingSymbols?,taskType?,taskText?) | ` +
+  `\nActions: agent.feedback(versionId,sliceHandle,usefulSymbols[],missingSymbols?,taskType?,taskText?) | ` +
   `agent.feedback.query(versionId?,limit?,since?) | ` +
   `buffer.push(eventType,filePath,content,version,dirty,timestamp,cursor?,selections?) | ` +
   `buffer.checkpoint(reason?) | buffer.status() | ` +

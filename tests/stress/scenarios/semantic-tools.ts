@@ -3,9 +3,8 @@
  *
  * Tests semantic-layer MCP tools under concurrent load:
  *   - sdl.symbol.search with `semantic: true` (embedding rerank / graceful fallback)
- *   - sdl.symbol.getCards (batch card fetch)
- *   - sdl.context.summary (token-bounded summaries)
- *   - sdl.agent.context (autopilot with tight budget)
+ *   - sdl.symbol.getCard (single/batch card fetch)
+ *    *   - sdl.context (context retrieval with tight budget)
  *   - sdl.agent.feedback + feedback.query (feedback loop)
  *
  * Escalates from 3→N concurrent clients, each running the full semantic workflow.
@@ -35,8 +34,7 @@ const SEMANTIC_QUERIES = [
   "Middleware",
   "DataProcessor",
   "UserController",
-  "Repository",
-];
+  "Repository"];
 
 const SUMMARY_QUERIES = [
   "How does the user repository work?",
@@ -44,8 +42,7 @@ const SUMMARY_QUERIES = [
   "How is the API service structured?",
   "What validation patterns are used?",
   "How does the middleware layer work?",
-  "What are the core utility functions?",
-];
+  "What are the core utility functions?"];
 
 const ITERATIONS_PER_CLIENT = 2;
 
@@ -83,7 +80,7 @@ async function runSemanticWorkflow(
 
     // 2. Batch getCards for top results
     const topSymbolIds = results.slice(0, 5).map((r) => r.symbolId);
-    const cardsResult = await client.callToolParsed("sdl.symbol.getCards", {
+    const cardsResult = await client.callToolParsed("sdl.symbol.getCard", {
       repoId: "stress-fixtures",
       symbolIds: topSymbolIds,
     });
@@ -93,7 +90,7 @@ async function runSemanticWorkflow(
     }>;
 
     // 3. Context summary
-    await client.callToolParsed("sdl.context.summary", {
+    await client.callToolParsed( {
       repoId: "stress-fixtures",
       query: summaryQuery,
       budget: 2000,
@@ -102,7 +99,7 @@ async function runSemanticWorkflow(
 
     // 4. Agent context with tight budget
     const contextResult = await client.callToolParsed(
-      "sdl.agent.context",
+      "sdl.context",
       {
         repoId: "stress-fixtures",
         taskType: "explain",
@@ -154,7 +151,7 @@ async function runSemanticWorkflow(
         }
       }
       if (Object.keys(knownEtags).length > 0) {
-        await client.callToolParsed("sdl.symbol.getCards", {
+        await client.callToolParsed("sdl.symbol.getCard", {
           repoId: "stress-fixtures",
           symbolIds: topSymbolIds,
           knownEtags,

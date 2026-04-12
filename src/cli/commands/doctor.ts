@@ -784,13 +784,13 @@ async function checkSemanticModels(
   const { getModelInfo, isModelAvailable } =
     await import("../../indexer/model-registry.js");
 
-  let activeModel = "all-MiniLM-L6-v2";
+  let activeModel = "jina-embeddings-v2-base-code";
   let annEnabled = true;
   if (existsSync(configPath)) {
     try {
       const { loadConfig } = await import("../../config/loadConfig.js");
       const config = loadConfig(configPath);
-      activeModel = config.semantic?.model ?? "all-MiniLM-L6-v2";
+      activeModel = config.semantic?.model ?? "jina-embeddings-v2-base-code";
       annEnabled = config.semantic?.ann?.enabled ?? true;
     } catch {
       // Use defaults

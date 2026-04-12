@@ -126,7 +126,7 @@ describe("EntitySearchResultItem – type surface", () => {
   it("should accept all valid RetrievalSource values", () => {
     const sources: RetrievalSource[] = [
       "fts",
-      "vector:minilm",
+      "vector:jinacode",
       "vector:nomic",
       "legacyFallback",
       "overlay",
@@ -147,7 +147,7 @@ describe("EntitySearchResultItem – type surface", () => {
       entityType: "cluster",
       entityId: "cluster-xyz",
       score: 0.75,
-      source: "vector:minilm",
+      source: "vector:jinacode",
     };
     assert.equal(item.entityType, "cluster");
   });

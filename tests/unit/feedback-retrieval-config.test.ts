@@ -53,8 +53,8 @@ describe("ENTITY_FTS_CONFIG includes agentFeedback", () => {
 describe("ENTITY_VECTOR_CONFIG includes agentFeedback", () => {
   it("orchestrator.ts source contains agentFeedback vector config entry", () => {
     assert.ok(
-      orchestratorSrc.includes("agentfeedback_vec_minilm_l6_v2"),
-      "ENTITY_VECTOR_CONFIG should have a miniLM index for agentFeedback",
+      orchestratorSrc.includes("agentfeedback_vec_jina_code_v2"),
+      "ENTITY_VECTOR_CONFIG should have a jinaCode index for agentFeedback",
     );
     assert.ok(
       orchestratorSrc.includes("agentfeedback_vec_nomic_embed_v15"),

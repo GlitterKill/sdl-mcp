@@ -23,12 +23,10 @@ export type ActionTag =
 const ACTION_TAGS: Record<string, ActionTag[]> = {
   "symbol.search": ["query"],
   "symbol.getCard": ["query"],
-  "symbol.getCards": ["query"],
   "slice.build": ["query"],
   "slice.refresh": ["query"],
   "slice.spillover.get": ["query"],
   "delta.get": ["query"],
-  "context.summary": ["query"],
   "pr.risk.analyze": ["query"],
   "code.needWindow": ["code"],
   "code.getSkeleton": ["code"],
@@ -39,7 +37,6 @@ const ACTION_TAGS: Record<string, ActionTag[]> = {
   "index.refresh": ["repo"],
   "policy.get": ["policy"],
   "policy.set": ["policy"],
-  "agent.context": ["agent"],
   "agent.feedback": ["agent"],
   "agent.feedback.query": ["agent"],
   "buffer.push": ["buffer"],
@@ -262,7 +259,6 @@ function resolveTypeName(schema: z.ZodType): string {
 const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "symbol.search": { query: "handleError", kinds: ["function"], limit: 10 },
   "symbol.getCard": { symbolId: "<symbolId>" },
-  "symbol.getCards": { symbolIds: ["<id1>", "<id2>"] },
   "slice.build": {
     taskText: "debug authentication flow",
     entrySymbols: ["<symbolId>"],
@@ -271,7 +267,6 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "slice.refresh": { sliceHandle: "<handle>" },
   "slice.spillover.get": { spilloverHandle: "<handle>", pageSize: 20 },
   "delta.get": {},
-  "context.summary": { query: "error handling patterns" },
   "pr.risk.analyze": { riskThreshold: 80 },
   "code.getSkeleton": { symbolId: "<symbolId>" },
   "code.getHotPath": {
@@ -290,15 +285,6 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "index.refresh": { mode: "incremental" },
   "policy.get": {},
   "policy.set": { policyPatch: { maxWindowLines: 200 } },
-  "agent.context": {
-    taskType: "explain",
-    taskText: "understand the auth flow",
-    budget: { maxTokens: 5000 },
-    options: {
-      contextMode: "precise",
-      focusSymbols: ["<symbolId>"],
-    },
-  },
   "agent.feedback": {
     versionId: "<versionId>",
     sliceHandle: "<sliceHandle>",
@@ -380,13 +366,11 @@ export interface ActionMetadata {
 const ACTION_DESCRIPTIONS: Record<string, string> = {
   "symbol.search": "Search symbols by name/pattern",
   "symbol.getCard": "Get symbol card (metadata, deps, metrics)",
-  "symbol.getCards": "Batch-fetch symbol cards",
   "slice.build": "Build dependency graph slice",
   "slice.refresh": "Refresh existing slice (delta only)",
   "slice.spillover.get":
     "Fetch spillover page (requires spilloverHandle from slice.build spillover response)",
   "delta.get": "Get delta between versions",
-  "context.summary": "Generate context summary",
   "pr.risk.analyze": "Analyze PR risk",
   "code.needWindow": "Request raw code window (requires justification)",
   "code.getSkeleton": "Get skeleton IR (signatures + control flow)",
@@ -398,8 +382,6 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "policy.get": "Get policy config",
   "policy.set":
     "Set policy config (policyPatch wrapper: maxWindowLines, maxWindowTokens, requireIdentifiers, allowBreakGlass, defaultMinCallConfidence, defaultDenyRaw, budgetCaps)",
-  "agent.context":
-    "Retrieve multi-rung task context for explain, debug, review, implement, understand, or investigate tasks",
   "agent.feedback": "Record agent feedback",
   "agent.feedback.query": "Query feedback records",
   "buffer.push": "Push buffer update",
@@ -474,8 +456,7 @@ const META_TOOL_EXAMPLES: Record<string, Record<string, unknown>> = {
     repoId: "<repoId>",
     steps: [
       { fn: "repoStatus" },
-      { fn: "runtimeExecute", args: { runtime: "node", args: ["--version"] } },
-    ],
+      { fn: "runtimeExecute", args: { runtime: "node", args: ["--version"] } }],
   },
 };
 
@@ -486,8 +467,7 @@ const CONTEXT_DISCOVERY_TERMS = new Set([
   "explain",
   "understand",
   "investigate",
-  "implement",
-]);
+  "implement"]);
 
 const WORKFLOW_DISCOVERY_TERMS = new Set([
   "workflow",
@@ -495,8 +475,7 @@ const WORKFLOW_DISCOVERY_TERMS = new Set([
   "runtime",
   "transform",
   "batch",
-  "pipeline",
-]);
+  "pipeline"]);
 
 const EMPTY_METADATA: ActionMetadata = {
   prerequisites: [],
@@ -515,15 +494,10 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     recommendedNextActions: ["slice.build", "code.getSkeleton"],
     fallbacks: ["symbol.search"],
   },
-  "symbol.getCards": {
-    prerequisites: ["symbol.search"],
-    recommendedNextActions: ["slice.build"],
-    fallbacks: ["symbol.getCard"],
-  },
   "slice.build": {
     prerequisites: ["symbol.getCard", "repo.overview"],
     recommendedNextActions: ["slice.refresh", "code.getSkeleton"],
-    fallbacks: ["context.summary"],
+    fallbacks: ["repo.overview"],
   },
   "slice.refresh": {
     prerequisites: ["slice.build"],
@@ -537,18 +511,13 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
   },
   "delta.get": {
     prerequisites: ["repo.status"],
-    recommendedNextActions: ["pr.risk.analyze", "context.summary"],
-    fallbacks: ["repo.overview"],
-  },
-  "context.summary": {
-    prerequisites: ["symbol.getCard", "slice.build"],
-    recommendedNextActions: [],
+    recommendedNextActions: ["pr.risk.analyze"],
     fallbacks: ["repo.overview"],
   },
   "pr.risk.analyze": {
     prerequisites: ["delta.get"],
     recommendedNextActions: ["symbol.getCard", "code.getHotPath"],
-    fallbacks: ["context.summary"],
+    fallbacks: ["repo.overview"],
   },
   "code.needWindow": {
     prerequisites: ["code.getSkeleton", "code.getHotPath"],
@@ -558,7 +527,7 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
   "code.getSkeleton": {
     prerequisites: ["symbol.getCard", "slice.build"],
     recommendedNextActions: ["code.getHotPath", "code.needWindow"],
-    fallbacks: ["context.summary"],
+    fallbacks: ["repo.overview"],
   },
   "code.getHotPath": {
     prerequisites: ["code.getSkeleton", "symbol.getCard"],
@@ -578,7 +547,7 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
   "repo.overview": {
     prerequisites: ["repo.status"],
     recommendedNextActions: ["symbol.search", "slice.build"],
-    fallbacks: ["context.summary"],
+    fallbacks: ["repo.overview"],
   },
   "index.refresh": {
     prerequisites: ["repo.status"],
@@ -595,13 +564,8 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     recommendedNextActions: ["code.needWindow"],
     fallbacks: ["policy.get"],
   },
-  "agent.context": {
-    prerequisites: ["repo.status", "repo.overview"],
-    recommendedNextActions: ["agent.feedback"],
-    fallbacks: ["slice.build", "context.summary"],
-  },
   "agent.feedback": {
-    prerequisites: ["slice.build", "agent.context"],
+    prerequisites: ["slice.build"],
     recommendedNextActions: ["agent.feedback.query"],
     fallbacks: [],
   },
@@ -627,12 +591,12 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
   },
   "runtime.execute": {
     prerequisites: ["repo.status", "policy.get"],
-    recommendedNextActions: ["runtime.queryOutput", "context.summary"],
+    recommendedNextActions: ["runtime.queryOutput"],
     fallbacks: ["code.getSkeleton"],
   },
   "runtime.queryOutput": {
     prerequisites: ["runtime.execute"],
-    recommendedNextActions: ["context.summary"],
+    recommendedNextActions: ["repo.overview"],
     fallbacks: ["runtime.execute"],
   },
   "memory.store": {
@@ -662,13 +626,13 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
   },
   "file.read": {
     prerequisites: ["repo.status"],
-    recommendedNextActions: ["context.summary"],
+    recommendedNextActions: ["repo.overview"],
     fallbacks: ["runtime.execute"],
   },
   context: {
     prerequisites: ["action.search"],
-    recommendedNextActions: ["agent.feedback", "context.summary"],
-    fallbacks: ["agent.context", "slice.build"],
+    recommendedNextActions: ["agent.feedback"],
+    fallbacks: ["slice.build"],
   },
   workflow: {
     prerequisites: ["action.search", "manual"],
@@ -910,8 +874,7 @@ export function rankCatalog(
     const metadataStr = [
       ...desc.prerequisites,
       ...desc.recommendedNextActions,
-      ...desc.fallbacks,
-    ]
+      ...desc.fallbacks]
       .join(" ")
       .toLowerCase();
 

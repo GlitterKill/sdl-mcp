@@ -15,7 +15,7 @@ flowchart TD
     Text["Symbol Text Construction"] --> Tokenizer["Tokenizer<br/>(tokenizers)"] --> Onnx["ONNX Model<br/>(onnxruntime)"] --> Vector["Embedding Vector"]
 
     subgraph Models["Embedding Models"]
-        MiniLM["all-MiniLM-L6-v2<br/>384-dim, ~22 MB, bundled"]
+        Jina["jina-embeddings-v2-base-code<br/>768-dim, ~110 MB, bundled"]
         Nomic["nomic-embed-text-v1.5<br/>768-dim, ~138 MB, downloaded"]
         Jina["jina-embeddings-v2-base-code<br/>768-dim, ~110 MB, downloaded<br/>code-specialized"]
         Mock["Mock fallback<br/>64-dim, deterministic"]
@@ -51,7 +51,7 @@ flowchart TD
 | :-------------------- | :----------------- | :-------- | :-------- | :----------------------------------- |
 | ONNX Runtime          | `onnxruntime-node` | `^1.24.3` | Optional  | Run embedding model inference (CPU)  |
 | HuggingFace Tokenizer | `tokenizers`       | `^0.13.3` | Optional  | Tokenize text for ONNX models        |
-| MiniLM Model          | bundled            | —         | Included  | 384-dim general-purpose embeddings   |
+| Jina Code Model       | bundled            | —         | Included  | 768-dim code-optimized embeddings    |
 | Nomic Model           | downloaded         | —         | Optional  | 768-dim high-quality text embeddings |
 | Jina Code Model       | downloaded         | —         | Optional  | 768-dim code-specialized embeddings  |
 | Anthropic API Key     | —                  | —         | Optional  | LLM summary generation (High tier)   |
@@ -65,7 +65,7 @@ flowchart TD
 
 ### Tier 1: Low (Free, Bundled — Default)
 
-The default configuration. Uses the bundled MiniLM model with symbol text enriched by enhanced per-kind heuristic summaries. No LLM summaries.
+The default configuration. Uses the bundled Jina Code model with symbol text enriched by enhanced per-kind heuristic summaries. No LLM summaries.
 
 Enhanced heuristics are always active, generating pattern-matched summaries for all symbol kinds (class, interface, type, enum, variable, constructor) in addition to the existing typed function/method summaries. When `semantic.enabled: true`, NN summary transfer also runs automatically, propagating documentation from well-documented neighbors to undocumented symbols via embedding similarity.
 
@@ -88,7 +88,7 @@ Look for:
 Semantic embedding models .................. PASS
   onnxruntime-node: 1.24.x
   tokenizers: available
-  model: all-MiniLM-L6-v2 (384d, files present)
+  model: jina-embeddings-v2-base-code (768d, files present)
 ```
 
 **Step 3 — Config (optional — this is the default):**
@@ -99,7 +99,7 @@ Semantic embedding models .................. PASS
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "all-MiniLM-L6-v2",
+    "model": "jina-embeddings-v2-base-code",
   },
 }
 ```
@@ -112,7 +112,7 @@ npx sdl-mcp index --repo my-repo
 
 Embeddings are generated during the finalization step of indexing. Subsequent searches with `semantic: true` will use them.
 
-**How text is constructed for MiniLM:**
+**How text is constructed for Jina Code:**
 
 ```
 validateToken (function)
@@ -126,7 +126,7 @@ Natural language format — name, kind, signature, and summary (if available) jo
 
 ### Tier 2: Medium (Free, Downloaded)
 
-Uses the higher-quality Nomic text embedding model. Better semantic matching thanks to 768 dimensions and an 8,192-token context window (vs MiniLM's 384-dim / 256-token limit). Still fully offline — no LLM API calls needed.
+Uses the higher-quality Nomic text embedding model. Better semantic matching thanks to 768 dimensions and an 8,192-token context window (both have 768-dim but Nomic has different training focus). Still fully offline — no LLM API calls needed.
 
 **Step 1 — Install ONNX dependencies (if not already):**
 
@@ -206,7 +206,7 @@ validateToken (function)
 Validates JWT signature and checks expiration claim
 ```
 
-Same natural-language format as MiniLM — both are text models. The Nomic model's 8,192-token window means longer signatures and summaries are captured without truncation.
+Similar format to Jina Code but optimized for natural-language text. The Nomic model's 8,192-token window means longer signatures and summaries are captured without truncation.
 
 ---
 
@@ -302,7 +302,7 @@ Semantic embedding models .................. PASS
 
 ### Tier 3: High (API Tokens Required)
 
-Adds LLM-generated natural-language summaries (quality 0.8) to any embedding model. MiniLM, Nomic, and Jina Code all benefit from richer symbol text. For maximum quality with natural-language queries, pair summaries with `nomic-embed-text-v1.5`. For code-centric queries, pair with `jina-embeddings-v2-base-code`. Produces the highest quality semantic search results because the LLM distills code meaning into plain English that embedding models handle well.
+Adds LLM-generated natural-language summaries (quality 0.8) to any embedding model. Jina Code and Nomic both benefit from richer symbol text. For maximum quality with natural-language queries, pair summaries with `nomic-embed-text-v1.5`. For code-centric queries, pair with `jina-embeddings-v2-base-code`. Produces the highest quality semantic search results because the LLM distills code meaning into plain English that embedding models handle well.
 
 The LLM stage is quality-gated: symbols that already have `summaryQuality >= 0.8` (e.g., from JSDoc extraction) are automatically skipped, avoiding redundant API calls. In practice, this means well-documented codebases spend less on LLM summaries while undocumented symbols get the most attention.
 
@@ -350,7 +350,7 @@ Option B — Config file:
 }
 ```
 
-> **Tip:** For maximum quality, pair summaries with `nomic-embed-text-v1.5`. For smaller disk footprint, `all-MiniLM-L6-v2` + summaries is also very effective.
+> **Tip:** For maximum quality with natural-language queries, pair summaries with `nomic-embed-text-v1.5`. For code-centric queries, the default `jina-embeddings-v2-base-code` is very effective.
 
 **Step 4 — Index (summaries generated during finalization):**
 
@@ -401,7 +401,7 @@ Ollama runs an OpenAI-compatible API at `http://localhost:11434/v1` by default.
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "all-MiniLM-L6-v2",
+    "model": "jina-embeddings-v2-base-code",
     "generateSummaries": true,
     "summaryProvider": "local",
     "summaryModel": "llama3.2:3b",
@@ -444,11 +444,11 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 
 ## Model Comparison
 
-| Property              | `all-MiniLM-L6-v2`           | `nomic-embed-text-v1.5`                | `jina-embeddings-v2-base-code` |
+| Property              | `jina-embeddings-v2-base-code` (default) | `nomic-embed-text-v1.5` (optional) |
 | :-------------------- | :--------------------------- | :------------------------------------- | :----------------------------- |
 | Dimensions            | 384                          | 768                                    | 768                            |
 | Max input tokens      | 256                          | 8,192                                  | 8,192                          |
-| ONNX file size        | ~22 MB (INT8)                | ~138 MB (INT8)                         | ~110 MB (INT8)                 |
+| ONNX file size        | ~110 MB (INT8)                | ~138 MB (INT8)                         | ~110 MB (INT8)                 |
 | Bundled with npm      | Yes                          | No, downloaded on demand               | No, downloaded on demand       |
 | Training data         | English sentence embeddings  | Diverse text embeddings                | Source code (30+ languages)    |
 | Input format          | Natural-language symbol text | Natural-language symbol text           | Natural-language symbol text   |
@@ -459,7 +459,7 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 
 **Choosing a model:**
 
-- **MiniLM** — Zero setup, bundled, good baseline. Benefits most from concise summaries since its 256-token window truncates quickly.
+- **Jina Code** — Zero setup, bundled, optimized for code. Has 8192-token context so handles long functions well.
 - **Nomic** — Best for natural-language queries ("find the auth handler") and when using LLM summaries. Its 8,192-token window captures longer signatures and documentation.
 - **Jina Code** — Best for code-to-code similarity and multi-language codebases. Trained directly on source code from 30+ languages, so it understands code structure natively without needing natural-language summaries.
 
@@ -548,7 +548,7 @@ Hybrid retrieval replaces the legacy alpha-blending search with native Ladybug F
 
 ### How It Works
 
-1. **FTS and vector indexes are created automatically** on DB init when `semantic.enabled: true`. The FTS extension indexes `Symbol.searchText`; vector indexes cover `Symbol.embeddingMiniLM`, `Symbol.embeddingNomic`, and `Symbol.embeddingJinaCode`.
+1. **FTS and vector indexes are created automatically** on DB init when `semantic.enabled: true`. The FTS extension indexes `Symbol.searchText`; vector indexes cover `Symbol.embeddingJinaCode`, `Symbol.embeddingNomic`, and `Symbol.embeddingJinaCode`.
 2. **At query time**, FTS and vector searches run in parallel. Each source produces a ranked candidate list.
 3. **RRF fuses** the rank lists: `score(d) = Σ 1/(k + rank_i(d))` — symbols ranked highly by multiple sources rise to the top.
 4. **If extensions are unavailable** (e.g., `fts` or `vector` not loaded), the system automatically falls back to the legacy alpha-blending path and records the fallback reason in telemetry.
@@ -562,14 +562,14 @@ Retrieval extensions ...................... PASS
   fts: loaded
   vector: loaded
   FTS index: symbol_search_text_v1 (healthy)
-  Vector index: symbol_embedding_minilm_v1 (healthy)
+  Vector index: symbol_embedding_jina_v1 (healthy)
   Vector index: symbol_embedding_nomic_v1 (healthy)
   Vector index: symbol_embedding_jina_code_v1 (healthy)
 ```
 
 ### Migration from SymbolEmbedding
 
-Prior to hybrid retrieval, embeddings were stored in a separate `SymbolEmbedding` node table. Migration m007 automatically copies embeddings to inline Symbol properties (`embeddingMiniLM`, `embeddingNomic`) on DB init. Mock-fallback rows are skipped. The old `SymbolEmbedding` table is deprecated but retained for backward compatibility.
+Prior to hybrid retrieval, embeddings were stored in a separate `SymbolEmbedding` node table. Migration m007 automatically copies embeddings to inline Symbol properties (`embeddingJinaCode`, `embeddingNomic`) on DB init. Mock-fallback rows are skipped. The old `SymbolEmbedding` table is deprecated but retained for backward compatibility.
 
 > **Removed in v0.10.1**: `semantic.alpha` is deprecated in favor of `semantic.retrieval.fusion`. `semantic.ann` has been removed — any existing config is silently ignored. Use `semantic.retrieval.vector` instead.
 
@@ -587,7 +587,7 @@ Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB:
 
 ```mermaid
 flowchart TD
-    Symbol["Symbol node"] --> MiniLM["embeddingMiniLM<br/>embeddingMiniLMCardHash<br/>embeddingMiniLMUpdatedAt"]
+    Symbol["Symbol node"] --> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
     Symbol --> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
     Symbol --> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
 ```
@@ -595,9 +595,9 @@ flowchart TD
 Vectors are compressed using Float16 quantization:
 
 ```text
-Original:  [0.0234, -0.1567, 0.8901, ...]   (float64, 3072 bytes for 384-dim)
+Original:  [0.0234, -0.1567, 0.8901, ...]   (float64, 3072 bytes for 768-dim)
 Quantized: [234, -1567, 8901, ...]          (int16 x 10000 scale)
-Stored:    Base64(Int16Array)               (768 bytes for 384-dim)
+Stored:    Base64(Int16Array)               (768 bytes for 768-dim)
 ```
 
 This reduces storage by about 75% with negligible quality loss. Vectors are L2-normalized after decompression.
@@ -641,12 +641,12 @@ Then run `npx sdl-mcp doctor` to verify.
 
 ### "Bundled model files not found"
 
-**Cause:** The `models/all-MiniLM-L6-v2/` directory is missing from the package.
+**Cause:** The `models/jina-embeddings-v2-base-code/` directory is missing from the package.
 
 **Fix:**
 
 ```bash
-node scripts/download-models.mjs all-MiniLM-L6-v2
+node scripts/download-models.mjs jina-embeddings-v2-base-code
 ```
 
 ### "Failed to download model_quantized.onnx for model nomic-embed-text-v1.5"
@@ -726,7 +726,7 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
     // ── Embedding Model ─────────────────────────────────────────
     "enabled": true, // Enable semantic search
     "provider": "local", // "local" | "api" | "mock"
-    "model": "all-MiniLM-L6-v2", // or "nomic-embed-text-v1.5"
+    "model": "jina-embeddings-v2-base-code", // or "nomic-embed-text-v1.5"
     "modelCacheDir": null, // Override model storage path
     "alpha": 0.6, // Lexical/semantic blend (0-1)
 
@@ -756,7 +756,7 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
 {
   "semantic": {
     "enabled": true,
-    "model": "all-MiniLM-L6-v2",
+    "model": "jina-embeddings-v2-base-code",
   },
 }
 ```

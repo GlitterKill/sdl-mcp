@@ -29,9 +29,18 @@ export interface EmbeddingModelInfo {
  * Add new models here; every other helper derives from this map.
  */
 export const EMBEDDING_MODELS: Readonly<Record<string, EmbeddingModelInfo>> = {
-  "all-MiniLM-L6-v2": { dimension: 384, propertyPrefix: "embeddingMiniLM", vecProperty: "embeddingMiniLMVec", indexName: "symbol_vec_minilm_l6_v2" },
-  "nomic-embed-text-v1.5": { dimension: 768, propertyPrefix: "embeddingNomic", vecProperty: "embeddingNomicVec", indexName: "symbol_vec_nomic_embed_v15" },
-  "jina-embeddings-v2-base-code": { dimension: 768, propertyPrefix: "embeddingJinaCode", vecProperty: "embeddingJinaCodeVec", indexName: "symbol_vec_jina_code_v2" },
+  "jina-embeddings-v2-base-code": {
+    dimension: 768,
+    propertyPrefix: "embeddingJinaCode",
+    vecProperty: "embeddingJinaCodeVec",
+    indexName: "symbol_vec_jina_code_v2",
+  },
+  "nomic-embed-text-v1.5": {
+    dimension: 768,
+    propertyPrefix: "embeddingNomic",
+    vecProperty: "embeddingNomicVec",
+    indexName: "symbol_vec_nomic_embed_v15",
+  },
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -42,7 +51,7 @@ export const EMBEDDING_MODELS: Readonly<Record<string, EmbeddingModelInfo>> = {
  * Return the Symbol node property name that stores the embedding vector for
  * the given model, or `null` if the model is not recognised.
  *
- * @example getEmbeddingPropertyName("all-MiniLM-L6-v2") // "embeddingMiniLM"
+ * @example getEmbeddingPropertyName("jina-embeddings-v2-base-code") // "embeddingJinaCode"
  */
 export function getEmbeddingPropertyName(model: string): string | null {
   const info = EMBEDDING_MODELS[model];
@@ -53,7 +62,7 @@ export function getEmbeddingPropertyName(model: string): string | null {
  * Return the Symbol node property name that stores the card-content hash
  * used to detect stale embeddings, or `null` for unknown models.
  *
- * @example getCardHashPropertyName("all-MiniLM-L6-v2") // "embeddingMiniLMCardHash"
+ * @example getCardHashPropertyName("jina-embeddings-v2-base-code") // "embeddingJinaCodeCardHash"
  */
 export function getCardHashPropertyName(model: string): string | null {
   const info = EMBEDDING_MODELS[model];
@@ -64,7 +73,7 @@ export function getCardHashPropertyName(model: string): string | null {
  * Return the Symbol node property name that stores the timestamp of the
  * last embedding update, or `null` for unknown models.
  *
- * @example getUpdatedAtPropertyName("all-MiniLM-L6-v2") // "embeddingMiniLMUpdatedAt"
+ * @example getUpdatedAtPropertyName("jina-embeddings-v2-base-code") // "embeddingJinaCodeUpdatedAt"
  */
 export function getUpdatedAtPropertyName(model: string): string | null {
   const info = EMBEDDING_MODELS[model];
@@ -80,7 +89,7 @@ export function getUpdatedAtPropertyName(model: string): string | null {
  * for unknown models.  Index names are lowercase with underscores to stay
  * compatible with LadybugDB naming rules.
  *
- * @example getVectorIndexName("all-MiniLM-L6-v2") // "symbol_vec_minilm_l6_v2"
+ * @example getVectorIndexName("jina-embeddings-v2-base-code") // "symbol_vec_jina_code_v2"
  */
 export function getVecPropertyName(model: string): string | null {
   const info = EMBEDDING_MODELS[model];

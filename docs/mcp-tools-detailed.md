@@ -22,7 +22,7 @@ Flat mode, gateway mode, and the CLI `tool` command share the same normalization
 3. [Symbol Search & Retrieval](#3-symbol-search--retrieval)
    - [sdl.symbol.search](#sdlsymbolsearch)
    - [sdl.symbol.getCard](#sdlsymbolgetcard)
-   - [sdl.symbol.getCards](#sdlsymbolgetcards)
+   - [sdl.symbol.getCard](#sdlsymbolgetcards)
 4. [Graph Slices](#4-graph-slices)
    - [sdl.slice.build](#sdlslicebuild)
    - [sdl.slice.refresh](#sdlslicerefresh)
@@ -41,9 +41,9 @@ Flat mode, gateway mode, and the CLI `tool` command share the same normalization
 9. [PR & Risk Analysis](#9-pr--risk-analysis)
    - [sdl.pr.risk.analyze](#sdlprriskanalyze)
 10. [Context Summary](#10-context-summary)
-    - [sdl.context.summary](#sdlcontextsummary)
+    - [](#sdlcontextsummary)
 11. [Agent Context & Feedback](#11-agent-context--feedback)
-    - [sdl.agent.context](#sdlagentcontext)
+    - [sdl.context](#sdlagentcontext)
     - [sdl.agent.feedback](#sdlagentfeedback)
     - [sdl.agent.feedback.query](#sdlagentfeedbackquery)
 12. [Runtime Execution](#12-runtime-execution)
@@ -424,7 +424,7 @@ Provide exactly one of `symbolId` or `symbolRef`.
 
 ---
 
-### sdl.symbol.getCards
+### sdl.symbol.getCard
 
 Batch-fetches multiple symbol cards in a single round trip.
 
@@ -869,7 +869,7 @@ Analyzes the risk of a code change between two versions, computing a risk score,
 
 ## 10. Context Summary
 
-### sdl.context.summary
+### 
 
 Generates a structured, token-bounded context briefing for any query against the codebase.
 
@@ -924,7 +924,7 @@ Results are cached by `repoId + indexVersion + query` to avoid redundant graph q
 
 ## 11. Agent Context & Feedback
 
-### sdl.agent.context
+### sdl.context
 
 Task-shaped context engine that selects the optimal Iris Gate Ladder path and collects evidence.
 
@@ -1276,11 +1276,11 @@ Returns cumulative token usage statistics and savings metrics.
 
 Retrieves task-shaped code context inside Code Mode.
 
-**What it does:** Mirrors `sdl.agent.context` but lives alongside `sdl.manual` and `sdl.workflow`. Use it first for `explain`, `debug`, `review`, and most `implement` requests when you are already operating through the Code Mode surfaces.
+**What it does:** Mirrors `sdl.context` but lives alongside `sdl.manual` and `sdl.workflow`. Use it first for `explain`, `debug`, `review`, and most `implement` requests when you are already operating through the Code Mode surfaces.
 
-**Parameters:** Same as `sdl.agent.context`.
+**Parameters:** Same as `sdl.context`.
 
-**Response:** Same as `sdl.agent.context`.
+**Response:** Same as `sdl.context`.
 
 ---
 
@@ -1335,7 +1335,7 @@ Use `offset` with `limit` to page through large result sets such as `query: "*"`
 
 ### sdl.manual
 
-Returns the SDL-MCP API manual — a compact reference listing all available functions, their parameters, and return types. Use for focused API reference before calling `sdl.agent.context` / `sdl.context` (context retrieval) or `sdl.workflow` (multi-step operations).
+Returns the SDL-MCP API manual — a compact reference listing all available functions, their parameters, and return types. Use for focused API reference before calling `sdl.context` / `sdl.context` (context retrieval) or `sdl.workflow` (multi-step operations).
 
 **Parameters:**
 

@@ -1,7 +1,7 @@
 /**
  * embeddings-local.ts — ONNX inference engine for local embedding generation.
  *
- * Creates ONNX sessions backed by real sentence-transformer models (all-MiniLM-L6-v2 or
+ * Creates ONNX sessions backed by real sentence-transformer models (jina-embeddings-v2-base-code or
  * nomic-embed-text-v1.5). Handles tokenization, batched inference, mean pooling, and
  * L2-normalization.
  *
@@ -274,7 +274,7 @@ async function runBatchInference(
     attention_mask: new ort.Tensor("int64", attentionMask, dims),
   };
 
-  // Some models (MiniLM) expect token_type_ids; nomic may not
+  // Some models (Jina) expect token_type_ids; nomic may not
   if (session.inputNames.includes("token_type_ids")) {
     feeds.token_type_ids = new ort.Tensor("int64", tokenTypeIds, dims);
   }

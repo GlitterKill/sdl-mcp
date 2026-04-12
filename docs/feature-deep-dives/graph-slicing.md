@@ -120,7 +120,7 @@ When `includeRetrievalEvidence: true` is set, the slice response includes eviden
     "symptomType": "taskText",
     "candidateCountPerSource": {
       "fts": 28,
-      "vector:all-MiniLM-L6-v2": 24
+      "vector:jina-embeddings-v2-base-code": 24
     },
     "fusionLatencyMs": 8,
     "fallbackReason": null
@@ -149,7 +149,7 @@ Combined with ETag-based conditional cards (`knownCardEtags`), a slice refresh c
 ## Related Tools
 
 - [`sdl.symbol.search`](../mcp-tools-detailed.md#sdlsymbolsearch) - Find entry symbols
-- [`sdl.context.summary`](../mcp-tools-detailed.md#sdlcontextsummary) - Portable summary from slice data
+- [](../mcp-tools-detailed.md#sdlcontextsummary) - Portable summary from slice data
 - [`sdl.delta.get`](../mcp-tools-detailed.md#sdldeltaget) - Change tracking between versions
 
 [Back to README](../../README.md)

@@ -1,7 +1,7 @@
 {
   "name": "agent-review-budget-constraints",
   "description": "Review task with strict budget constraints",
-  "tool": "sdl.agent.context",
+  "tool": "sdl.context",
   "request": {
     "repoId": "test-repo",
     "taskType": "review",

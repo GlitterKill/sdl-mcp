@@ -28,14 +28,14 @@ describe("agentFeedback index lifecycle constants", () => {
     );
   });
 
-  it("AGENTFEEDBACK_VECTOR_INDEX_NAMES has miniLM and nomic entries", () => {
+  it("AGENTFEEDBACK_VECTOR_INDEX_NAMES has jinaCode and nomic entries", () => {
     assert.ok(
       lifecycleSrc.includes("AGENTFEEDBACK_VECTOR_INDEX_NAMES"),
       "Source should export AGENTFEEDBACK_VECTOR_INDEX_NAMES",
     );
     assert.ok(
-      lifecycleSrc.includes('"agentfeedback_vec_minilm_l6_v2"'),
-      "AGENTFEEDBACK_VECTOR_INDEX_NAMES should have miniLM index name",
+      lifecycleSrc.includes('"agentfeedback_vec_jina_code_v2"'),
+      "AGENTFEEDBACK_VECTOR_INDEX_NAMES should have jinaCode index name",
     );
     assert.ok(
       lifecycleSrc.includes('"agentfeedback_vec_nomic_embed_v15"'),
@@ -48,21 +48,21 @@ describe("agentFeedback index lifecycle constants", () => {
       lifecycleSrc.includes("AGENTFEEDBACK_EMBEDDING_PROPERTIES"),
       "Source should export AGENTFEEDBACK_EMBEDDING_PROPERTIES",
     );
-    // Verify miniLM dimension (384) and nomic dimension (768) are present
+    // Verify jinaCode dimension (768) and nomic dimension (768) are present
     // in the AGENTFEEDBACK_EMBEDDING_PROPERTIES block
     const propsIdx = lifecycleSrc.indexOf("AGENTFEEDBACK_EMBEDDING_PROPERTIES");
     const propsBlock = lifecycleSrc.substring(propsIdx, lifecycleSrc.indexOf("} as const;", propsIdx) + 12);
     assert.ok(
-      propsBlock.includes("dimension: 384"),
-      "miniLM dimension should be 384",
+      propsBlock.includes("dimension: 768"),
+      "jinaCode dimension should be 768",
     );
     assert.ok(
       propsBlock.includes("dimension: 768"),
       "nomic dimension should be 768",
     );
     assert.ok(
-      propsBlock.includes('property: "embeddingMiniLM"'),
-      "miniLM property should be embeddingMiniLM",
+      propsBlock.includes('property: "embeddingJinaCode"'),
+      "jinaCode property should be embeddingJinaCode",
     );
     assert.ok(
       propsBlock.includes('property: "embeddingNomic"'),

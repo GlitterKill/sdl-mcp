@@ -17,7 +17,7 @@ import {
 } from "../../dist/retrieval/model-mapping.js";
 
 // Known model constants used throughout the tests.
-const MINILM = "all-MiniLM-L6-v2";
+const JINA = "jina-embeddings-v2-base-code";
 const NOMIC = "nomic-embed-text-v1.5";
 const UNKNOWN = "unknown-model-xyz";
 
@@ -26,10 +26,10 @@ const UNKNOWN = "unknown-model-xyz";
 // ---------------------------------------------------------------------------
 
 describe("EMBEDDING_MODELS", () => {
-  it("has an entry for all-MiniLM-L6-v2 with dimension 384", () => {
-    const info = EMBEDDING_MODELS[MINILM];
-    assert.ok(info, "all-MiniLM-L6-v2 should be in EMBEDDING_MODELS");
-    assert.strictEqual(info.dimension, 384);
+  it("has an entry for jina-embeddings-v2-base-code with dimension 384", () => {
+    const info = EMBEDDING_MODELS[JINA];
+    assert.ok(info, "jina-embeddings-v2-base-code should be in EMBEDDING_MODELS");
+    assert.strictEqual(info.dimension, 768);
   });
 
   it("has an entry for nomic-embed-text-v1.5 with dimension 768", () => {
@@ -38,8 +38,8 @@ describe("EMBEDDING_MODELS", () => {
     assert.strictEqual(info.dimension, 768);
   });
 
-  it("all-MiniLM-L6-v2 propertyPrefix is 'embeddingMiniLM'", () => {
-    assert.strictEqual(EMBEDDING_MODELS[MINILM]!.propertyPrefix, "embeddingMiniLM");
+  it("jina-embeddings-v2-base-code propertyPrefix is 'embeddingJinaCode'", () => {
+    assert.strictEqual(EMBEDDING_MODELS[JINA]!.propertyPrefix, "embeddingJinaCode");
   });
 
   it("nomic-embed-text-v1.5 propertyPrefix is 'embeddingNomic'", () => {
@@ -56,8 +56,8 @@ describe("EMBEDDING_MODELS", () => {
 // ---------------------------------------------------------------------------
 
 describe("getEmbeddingPropertyName", () => {
-  it("returns 'embeddingMiniLM' for all-MiniLM-L6-v2", () => {
-    assert.strictEqual(getEmbeddingPropertyName(MINILM), "embeddingMiniLM");
+  it("returns 'embeddingJinaCode' for jina-embeddings-v2-base-code", () => {
+    assert.strictEqual(getEmbeddingPropertyName(JINA), "embeddingJinaCode");
   });
 
   it("returns 'embeddingNomic' for nomic-embed-text-v1.5", () => {
@@ -78,8 +78,8 @@ describe("getEmbeddingPropertyName", () => {
 // ---------------------------------------------------------------------------
 
 describe("getCardHashPropertyName", () => {
-  it("returns 'embeddingMiniLMCardHash' for all-MiniLM-L6-v2", () => {
-    assert.strictEqual(getCardHashPropertyName(MINILM), "embeddingMiniLMCardHash");
+  it("returns 'embeddingJinaCodeCardHash' for jina-embeddings-v2-base-code", () => {
+    assert.strictEqual(getCardHashPropertyName(JINA), "embeddingJinaCodeCardHash");
   });
 
   it("returns 'embeddingNomicCardHash' for nomic-embed-text-v1.5", () => {
@@ -96,8 +96,8 @@ describe("getCardHashPropertyName", () => {
 // ---------------------------------------------------------------------------
 
 describe("getUpdatedAtPropertyName", () => {
-  it("returns 'embeddingMiniLMUpdatedAt' for all-MiniLM-L6-v2", () => {
-    assert.strictEqual(getUpdatedAtPropertyName(MINILM), "embeddingMiniLMUpdatedAt");
+  it("returns 'embeddingJinaCodeUpdatedAt' for jina-embeddings-v2-base-code", () => {
+    assert.strictEqual(getUpdatedAtPropertyName(JINA), "embeddingJinaCodeUpdatedAt");
   });
 
   it("returns 'embeddingNomicUpdatedAt' for nomic-embed-text-v1.5", () => {
@@ -114,8 +114,8 @@ describe("getUpdatedAtPropertyName", () => {
 // ---------------------------------------------------------------------------
 
 describe("getVectorIndexName", () => {
-  it("returns 'symbol_vec_embeddingminilm' for all-MiniLM-L6-v2", () => {
-    assert.strictEqual(getVectorIndexName(MINILM), "symbol_vec_minilm_l6_v2");
+  it("returns 'symbol_vec_jina_code_v2' for jina-embeddings-v2-base-code", () => {
+    assert.strictEqual(getVectorIndexName(JINA), "symbol_vec_jina_code_v2");
   });
 
   it("returns 'symbol_vec_embeddingnomic' for nomic-embed-text-v1.5", () => {

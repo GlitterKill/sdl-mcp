@@ -379,7 +379,8 @@ export async function routeSymbolCardApiRequest(
     };
   }
 
-  if (!response.card) {
+  // Type narrowing for single card response (not batch)
+  if (!("card" in response) || !response.card) {
     return {
       status: 404,
       payload: { error: `Symbol not found: ${symbolId}` },

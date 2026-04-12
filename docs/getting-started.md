@@ -300,7 +300,6 @@ The summary system has **three quality tiers**. Each tier builds on the previous
 ```
 Tier     Embedding Model                    Summaries    Search Quality   Cost
 ─────    ────────────────────────────────  ───────────  ───────────────  ────────
-Low      all-MiniLM-L6-v2 (384d)          None         Baseline         Free
 Medium   nomic-embed-text-v1.5 (768d)     None         Better           Free
 Medium+  jina-embeddings-v2-base-code(768d) None       Best for code    Free
 High     any model above                  LLM-gen'd    Best             API cost
@@ -518,7 +517,7 @@ The card's `summary` field should contain a natural-language description instead
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "all-MiniLM-L6-v2",
+    "model": "jina-embeddings-v2-base-code",
     "generateSummaries": true,
     "summaryProvider": "api",
     "summaryModel": "claude-haiku-4-5-20251001"
@@ -535,7 +534,7 @@ Requires: `ANTHROPIC_API_KEY` environment variable.
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "all-MiniLM-L6-v2",
+    "model": "jina-embeddings-v2-base-code",
     "generateSummaries": true,
     "summaryProvider": "local",
     "summaryModel": "qwen2.5-coder"

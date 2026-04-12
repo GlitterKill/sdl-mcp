@@ -233,25 +233,25 @@ export const ENTITY_FTS_INDEX_NAMES = {
 
 /** Vector index names for FileSummary embedding properties. */
 export const FILESUMMARY_VECTOR_INDEX_NAMES = {
-  miniLM: "filesummary_vec_minilm_l6_v2",
+  jinaCode: "filesummary_vec_jina_code_v2",
   nomic: "filesummary_vec_nomic_embed_v15",
 } as const;
 
 /** FileSummary embedding property names for vector indexing. */
 export const FILESUMMARY_EMBEDDING_PROPERTIES = {
-  miniLM: { property: "embeddingMiniLMVec", dimension: 384 },
+  jinaCode: { property: "embeddingJinaCodeVec", dimension: 768 },
   nomic: { property: "embeddingNomicVec", dimension: 768 },
 } as const;
 
 /** Vector index names for AgentFeedback embedding properties. */
 export const AGENTFEEDBACK_VECTOR_INDEX_NAMES = {
-  miniLM: "agentfeedback_vec_minilm_l6_v2",
+  jinaCode: "agentfeedback_vec_jina_code_v2",
   nomic: "agentfeedback_vec_nomic_embed_v15",
 } as const;
 
 /** AgentFeedback embedding property names for vector indexing. */
 export const AGENTFEEDBACK_EMBEDDING_PROPERTIES = {
-  miniLM: { property: "embeddingMiniLMVec", dimension: 384 },
+  jinaCode: { property: "embeddingJinaCodeVec", dimension: 768 },
   nomic: { property: "embeddingNomicVec", dimension: 768 },
 } as const;
 

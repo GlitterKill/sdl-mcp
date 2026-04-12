@@ -17,8 +17,7 @@ describe("Code-mode descriptions", () => {
     { name: "MANUAL_DESCRIPTION", value: MANUAL_DESCRIPTION },
     { name: "WORKFLOW_DESCRIPTION", value: WORKFLOW_DESCRIPTION },
     { name: "CONTEXT_DESCRIPTION", value: CONTEXT_DESCRIPTION },
-    { name: "ACTION_SEARCH_DESCRIPTION", value: ACTION_SEARCH_DESCRIPTION },
-  ];
+    { name: "ACTION_SEARCH_DESCRIPTION", value: ACTION_SEARCH_DESCRIPTION }];
 
   for (const { name, value } of descriptions) {
     it(`${name} is a non-empty string`, () => {
@@ -68,8 +67,8 @@ describe("Code-mode descriptions", () => {
     assert.ok(WORKFLOW_DESCRIPTION.includes("dataTemplate"));
   });
 
-  it("CONTEXT_DESCRIPTION mentions sdl.agent.context and context retrieval", () => {
-    assert.ok(CONTEXT_DESCRIPTION.includes("sdl.agent.context"));
+  it("CONTEXT_DESCRIPTION mentions context retrieval", () => {
+    assert.ok(CONTEXT_DESCRIPTION.includes("sdl.context"));
     assert.ok(CONTEXT_DESCRIPTION.includes("context"));
   });
 

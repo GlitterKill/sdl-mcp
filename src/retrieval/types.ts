@@ -13,7 +13,6 @@
 /** Identifies which retrieval backend produced a result. */
 export type RetrievalSource =
   | "fts"
-  | "vector:minilm"
   | "vector:nomic"
   | "vector:jinacode"
   | "legacyFallback"
@@ -67,7 +66,6 @@ export interface RetrievalEvidence {
 /** Snapshot of which retrieval backends are available at runtime. */
 export interface RetrievalCapabilities {
   fts: boolean;
-  vectorMiniLM: boolean;
   vectorNomic: boolean;
   vectorJinaCode: boolean;
   /** Structured reasons explaining why capabilities are unavailable. */

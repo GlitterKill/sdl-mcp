@@ -25,7 +25,7 @@ Shared outside Code Mode exclusive. `sdl.action.search` is still available in ex
 
 Registered in flat mode (default) via `tool-descriptors.ts`.
 
-- `sdl.agent.context`
+- `sdl.context`
 - `sdl.agent.feedback`
 - `sdl.agent.feedback.query`
 - `sdl.buffer.checkpoint`
@@ -34,7 +34,7 @@ Registered in flat mode (default) via `tool-descriptors.ts`.
 - `sdl.code.getHotPath`
 - `sdl.code.getSkeleton`
 - `sdl.code.needWindow`
-- `sdl.context.summary`
+- 
 - `sdl.delta.get`
 - `sdl.file.read`
 - `sdl.index.refresh`
@@ -54,7 +54,7 @@ Registered in flat mode (default) via `tool-descriptors.ts`.
 - `sdl.slice.refresh`
 - `sdl.slice.spillover.get`
 - `sdl.symbol.getCard`
-- `sdl.symbol.getCards`
+- `sdl.symbol.getCard`
 - `sdl.symbol.search`
 - `sdl.usage.stats`
 

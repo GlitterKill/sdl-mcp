@@ -36,7 +36,6 @@ function buildDegradationReasons(
 }
 
 
-
 // ---------------------------------------------------------------------------
 // Health / capability detection
 // ---------------------------------------------------------------------------
@@ -66,7 +65,6 @@ export async function checkRetrievalHealth(
   if (!caps.fts && !caps.vector) {
     return {
       fts: false,
-      vectorMiniLM: false,
       vectorNomic: false,
       vectorJinaCode: false,
       degradationReasons: [
@@ -82,14 +80,11 @@ export async function checkRetrievalHealth(
     const health = await checkIndexHealth(conn);
 
     // Derive per-model vector availability from the health result.
-    let vectorMiniLM = false;
     let vectorNomic = false;
     let vectorJinaCode = false;
 
     for (const v of health.vectors) {
-      if (v.model === "all-MiniLM-L6-v2") {
-        vectorMiniLM = v.exists;
-      } else if (v.model === "nomic-embed-text-v1.5") {
+      if (v.model === "nomic-embed-text-v1.5") {
         vectorNomic = v.exists;
       } else if (v.model === "jina-embeddings-v2-base-code") {
         vectorJinaCode = v.exists;
@@ -98,7 +93,6 @@ export async function checkRetrievalHealth(
 
     return {
       fts: health.fts.exists,
-      vectorMiniLM,
       vectorNomic,
       vectorJinaCode,
       degradationReasons: buildDegradationReasons(health, caps),
@@ -114,7 +108,6 @@ export async function checkRetrievalHealth(
 
     return {
       fts: caps.fts,
-      vectorMiniLM: caps.vector,
       vectorNomic: caps.vector,
       vectorJinaCode: caps.vector,
       degradationReasons: [{ code: "health-check-error", message: err instanceof Error ? err.message : String(err), affects: "all" }],
@@ -190,8 +183,8 @@ export async function isHybridRetrievalAvailable(): Promise<boolean> {
 
     // Legacy mode — auto-promote when infrastructure is healthy.
     const health = await checkRetrievalHealth();
-    return health.fts && (health.vectorMiniLM || health.vectorNomic || health.vectorJinaCode);
+    return health.fts && (health.vectorNomic || health.vectorJinaCode);
   } catch {
     return false;
   }
-}
+}

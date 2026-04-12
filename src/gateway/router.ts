@@ -12,12 +12,10 @@ import type { LiveIndexCoordinator } from "../live-index/types.js";
 import {
   SymbolSearchRequestSchema,
   SymbolGetCardRequestSchema,
-  SymbolGetCardsRequestSchema,
   SliceBuildRequestSchema,
   SliceRefreshRequestSchema,
   SliceSpilloverGetRequestSchema,
   DeltaGetRequestSchema,
-  ContextSummaryRequestSchema,
   PRRiskAnalysisRequestSchema,
   CodeNeedWindowRequestSchema,
   GetSkeletonRequestSchema,
@@ -31,7 +29,6 @@ import {
   BufferPushRequestSchema,
   BufferCheckpointRequestSchema,
   BufferStatusRequestSchema,
-  AgentContextRequestSchema,
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
   RuntimeExecuteRequestSchema,
@@ -47,7 +44,6 @@ import {
 import {
   handleSymbolSearch,
   handleSymbolGetCard,
-  handleSymbolGetCards,
 } from "../mcp/tools/symbol.js";
 import {
   handleSliceBuild,
@@ -55,7 +51,6 @@ import {
   handleSliceSpilloverGet,
 } from "../mcp/tools/slice.js";
 import { handleDeltaGet } from "../mcp/tools/delta.js";
-import { handleContextSummary } from "../mcp/tools/summary.js";
 import { handlePRRiskAnalysis } from "../mcp/tools/prRisk.js";
 import {
   handleCodeNeedWindow,
@@ -74,7 +69,6 @@ import {
   handleBufferCheckpoint,
   handleBufferStatus,
 } from "../mcp/tools/buffer.js";
-import { handleAgentContext } from "../mcp/tools/context.js";
 import {
   handleAgentFeedback,
   handleAgentFeedbackQuery,
@@ -122,10 +116,6 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
       schema: SymbolGetCardRequestSchema,
       handler: handleSymbolGetCard,
     },
-    "symbol.getCards": {
-      schema: SymbolGetCardsRequestSchema,
-      handler: handleSymbolGetCards,
-    },
     "slice.build": {
       schema: SliceBuildRequestSchema,
       handler: handleSliceBuild,
@@ -141,10 +131,6 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
     "delta.get": {
       schema: DeltaGetRequestSchema,
       handler: handleDeltaGet,
-    },
-    "context.summary": {
-      schema: ContextSummaryRequestSchema,
-      handler: handleContextSummary,
     },
     "pr.risk.analyze": {
       schema: PRRiskAnalysisRequestSchema,
@@ -204,10 +190,6 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
     },
 
     // === Agent actions ===
-    "agent.context": {
-      schema: AgentContextRequestSchema,
-      handler: handleAgentContext,
-    },
     "agent.feedback": {
       schema: AgentFeedbackRequestSchema,
       handler: handleAgentFeedback,
