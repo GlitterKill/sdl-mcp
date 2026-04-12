@@ -9,6 +9,12 @@ dist/
 build/
 *.tsbuildinfo
 
+# Scripts build output (TypeScript compiled)
+scripts/**/*.js
+scripts/**/*.d.ts
+scripts/**/*.d.mts
+scripts/**/*.map
+
 # Rust / napi-rs native build
 native/target/
 native/*.node
@@ -55,6 +61,7 @@ test_results.txt
 tests/results/
 tests/stress/results/
 tests/**/.lbug-*-db/
+tests/**/.tmp-*/
 tests/integration/test-*/
 coverage/
 .nyc_output/
