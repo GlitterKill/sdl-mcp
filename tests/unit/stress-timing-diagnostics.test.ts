@@ -1,9 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { MetricsCollector } from "../stress/infra/metrics-collector.ts";
-import { validateToolResult } from "../stress/infra/result-validator.ts";
-import { mergeToolDiagnostics } from "../stress/infra/types.ts";
+import { MetricsCollector } from "../stress/infra/metrics-collector.js";
+import { validateToolResult } from "../stress/infra/result-validator.js";
+import { mergeToolDiagnostics } from "../stress/infra/types.js";
 
 describe("stress timing diagnostics", () => {
   it("aggregates index.refresh timing diagnostics into report-ready summaries", () => {

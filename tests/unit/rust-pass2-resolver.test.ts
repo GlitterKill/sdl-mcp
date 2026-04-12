@@ -57,23 +57,18 @@ describe("RustPass2Resolver", () => {
   });
 });
 
-
 // ============================================================================
 // Phase 2 Task 2.4.x — extended unit tests for the Rust Pass-2 resolver.
-// The imports below point at the .ts source so the tests run under
-// `node --experimental-strip-types` without rebuilding `dist/`.
 // ============================================================================
 
 import {
-  parseRustUseDeclarations,
-  type RustUseBinding,
-} from "../../src/indexer/import-resolution/rust-adapter.ts";
-import {
   buildRustUseAliasMap,
+  parseRustUseDeclarations,
   resolveTraitDefaultMethod,
   resolveRustPass2CallTarget,
+  type RustUseBinding,
   type TraitDefaultMap,
-} from "../../src/indexer/pass2/resolvers/rust-pass2-resolver.ts";
+} from "../../dist/indexer/pass2/resolvers/rust-pass2-resolver.js";
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

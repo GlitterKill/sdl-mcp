@@ -83,6 +83,11 @@ function fmtSymbolGetCard(
   _args: Record<string, unknown>,
   result: Record<string, unknown>,
 ): string | null {
+  // Handle batch mode (symbolIds/symbolRefs returns cards array)
+  const cards = result.cards as unknown[] | undefined;
+  if (Array.isArray(cards)) {
+    return `symbol.getCard -> ${cards.length} card${cards.length === 1 ? "" : "s"} returned`;
+  }
   const card = result.card as Record<string, unknown> | undefined;
   if (result.notModified) {
     return "symbol.getCard -> not modified (ETag hit)";

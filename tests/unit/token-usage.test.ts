@@ -91,7 +91,8 @@ describe("token-usage", () => {
     it("reports negative savings when sdlTokens exceed rawEquivalent", async () => {
       const result = {
         data: "a".repeat(1000),
-        _rawContext: { rawTokens: 1 },
+        // Note: rawTokens >= 50 to avoid small-value guard in computeSavings
+        _rawContext: { rawTokens: 50 },
       };
       const usage = await computeTokenUsage(result as Record<string, unknown>);
       assert.ok(usage.savingsPercent < 0, "savingsPercent should be negative");

@@ -137,11 +137,12 @@ export function buildContextSummary(input: {
   filesTouched: ContextSummaryFileTouch[];
 }): ContextSummary {
   // Enforce minimum budget per scope to prevent degenerate results
+  // These values match BUDGET_THRESHOLDS below (recommended minimums)
   const BUDGET_MINIMUMS: Record<string, number> = {
-    repo: 600,
-    task: 300,
-    file: 200,
-    symbol: 100,
+    repo: 800,
+    task: 500,
+    file: 300,
+    symbol: 150,
   };
   const scopeMin = BUDGET_MINIMUMS[input.scope] ?? 300;
   const budget = Math.max(scopeMin, input.budget ?? DEFAULT_SUMMARY_BUDGET);

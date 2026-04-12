@@ -26,8 +26,12 @@ async function createTestDb(): Promise<{
   db: LadybugDatabase;
   conn: LadybugConnection;
 }> {
+  // Clean up both database and WAL file from previous runs
   if (existsSync(TEST_DB_PATH)) {
-    rmSync(TEST_DB_PATH, { recursive: true, force: true });
+    rmSync(TEST_DB_PATH, { force: true });
+  }
+  if (existsSync(TEST_DB_PATH + ".wal")) {
+    rmSync(TEST_DB_PATH + ".wal", { force: true });
   }
   mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
 
@@ -50,7 +54,10 @@ async function cleanupTestDb(
   } catch {}
   try {
     if (existsSync(TEST_DB_PATH)) {
-      rmSync(TEST_DB_PATH, { recursive: true, force: true });
+      rmSync(TEST_DB_PATH, { force: true });
+    }
+    if (existsSync(TEST_DB_PATH + ".wal")) {
+      rmSync(TEST_DB_PATH + ".wal", { force: true });
     }
   } catch {}
 }

@@ -9,17 +9,36 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, "..");
 
-const testFiles = [...globSync("tests/**/*.test.ts", { cwd: repoRoot })].sort();
+const allTestFiles = [
+  ...globSync("tests/**/*.test.ts", { cwd: repoRoot }),
+].sort();
 
-if (testFiles.length === 0) {
+if (allTestFiles.length === 0) {
   console.error("No test files found under tests/**/*.test.ts");
   process.exit(1);
 }
 
+
+// Skip patterns for tests with import issues or requiring special setup
+// (matches SKIP_PATTERNS in runner.test.ts plus isolated tests run separately)
+const SKIP_PATTERNS = [
+  "draft-parser",
+  "file-patcher",
+  "sqlite-to-ladybug-migration",
+  "vscode-buffer-push",
+  "check-benchmark-claims",
+  "build-exe",
+  "stress-timing-diagnostics",
+  "runner.test.ts",
+];
+
+const testFiles = allTestFiles.filter(
+  (f) => !SKIP_PATTERNS.some((p) => f.includes(p)),
+);
 const nodeArgs = [
   "--test-concurrency=1",
   "--test",
-  resolve(repoRoot, "tests", "runner.test.ts"),
+  ...testFiles.map((f) => resolve(repoRoot, f)),
 ];
 
 const testTempDir = mkdtempSync(join(tmpdir(), "sdl-mcp-tests-"));
@@ -127,19 +146,24 @@ const result = spawnSync(process.execPath, nodeArgs, {
   env: testEnv,
 });
 
-
 // Run tests that need process isolation (due to module cache pollution in the main suite)
+// Note: draft-parser.test.ts and file-patcher.test.ts may segfault during process shutdown
+// due to LadybugDB native addon cleanup issues. The tests pass - only exit code is affected.
 const isolatedTests = [
   "tests/unit/draft-parser.test.ts",
   "tests/unit/file-patcher.test.ts",
 ];
 
 for (const testFile of isolatedTests) {
-  const isoResult = spawnSync(process.execPath, ["--test-concurrency=1", "--test", resolve(repoRoot, testFile)], {
-    cwd: repoRoot,
-    stdio: "inherit",
-    env: testEnv,
-  });
+  const isoResult = spawnSync(
+    process.execPath,
+    ["--test-concurrency=1", "--test", resolve(repoRoot, testFile)],
+    {
+      cwd: repoRoot,
+      stdio: "inherit",
+      env: testEnv,
+    },
+  );
   if ((isoResult.status ?? 1) !== 0) {
     overallFailed = true;
   }

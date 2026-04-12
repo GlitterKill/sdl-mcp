@@ -252,8 +252,8 @@ const VALIDATORS: Record<string, ValidatorFn> = {
       checkExists(tool, "card.version present", card.version)];
   },
 
-  "sdl.symbol.getCard": (_args, result) => {
-    const tool = "sdl.symbol.getCard";
+  "sdl.symbol.getCard:batch": (_args, result) => {
+    const tool = "sdl.symbol.getCard:batch";
     const cards = result.cards as unknown[] | undefined;
     const checks: ToolResultCheck[] = [
       checkExists(tool, "cards array present", cards)];
@@ -381,8 +381,10 @@ const VALIDATORS: Record<string, ValidatorFn> = {
 
   // -------------------------------------------------------------------------
   // Context Summary
-  // -------------------------------------------------------------------------: (_args, result) => {
-    const tool =;
+  // -------------------------------------------------------------------------
+
+  "sdl.context.summary": (_args, result) => {
+    const tool = "sdl.context.summary";
     return [
       checkNonEmptyString(tool, "content string", result.content),
       checkExists(tool, "summary object present", result.summary),
@@ -516,7 +518,7 @@ const SAMPLE_EXTRACTORS: Record<string, SampleExtractorFn> = {
     return vals;
   },
 
-  "sdl.symbol.getCard": (result) => {
+  "sdl.symbol.getCard:batch": (result) => {
     const cards = result.cards as unknown[] | undefined;
     return {
       cardsReturned: String(cards?.length ?? 0),
@@ -542,7 +544,9 @@ const SAMPLE_EXTRACTORS: Record<string, SampleExtractorFn> = {
     excerptLength: String(
       typeof result.excerpt === "string" ? result.excerpt.length : 0,
     ),
-  }): (result) => ({
+  }),
+
+  "sdl.context.summary": (result) => ({
     contentLength: String(
       typeof result.content === "string" ? result.content.length : 0,
     ),

@@ -15,16 +15,29 @@ describe("parseDraftFile", () => {
 
   before(async () => {
     process.env.SDL_GRAPH_DB_PATH = testDbPath;
-    try { await closeLadybugDb(); } catch { /* may already be closed */ }
+    try {
+      await closeLadybugDb();
+    } catch {
+      /* may already be closed */
+    }
     await initLadybugDb(testDbPath);
     loadBuiltInAdapters();
   });
 
   after(async () => {
-    try { await closeLadybugDb(); } catch { /* ignore */ }
-    if (prevGraphDbPath) process.env.SDL_GRAPH_DB_PATH = prevGraphDbPath;
-    else delete process.env.SDL_GRAPH_DB_PATH;
-    try { await initLadybugDb(prevGraphDbPath!); } catch { /* restore previous DB */ }
+    try {
+      await closeLadybugDb();
+    } catch {
+      /* ignore */
+    }
+    // Restore env var but don't re-init DB - let the next process handle it.
+    // Re-initializing here leaves a connection open that causes segfault on exit.
+    if (prevGraphDbPath) {
+      process.env.SDL_GRAPH_DB_PATH = prevGraphDbPath;
+    } else {
+      delete process.env.SDL_GRAPH_DB_PATH;
+    }
+    // Clean up test DB and WAL file
     rmSync(testDbDir, { recursive: true, force: true });
   });
 

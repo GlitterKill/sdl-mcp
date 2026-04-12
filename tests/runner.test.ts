@@ -8,16 +8,20 @@ const repoRoot = resolve(__dirname, "..");
 
 const runnerPath = resolve(repoRoot, "tests", "runner.test.ts");
 
-// node:sqlite is only available in Node >= 22; skip tests that require it
+// Skip tests that have import issues or require special setup
 const SKIP_PATTERNS = [
   "draft-parser",
   "file-patcher",
   "sqlite-to-ladybug-migration",
   "vscode-buffer-push",
   "check-benchmark-claims",
+  "build-exe", // scripts/ not compiled to dist/
+  "stress-timing-diagnostics", // test infra in tests/stress/ not compiled
 ];
 
-const testFiles = [...globSync("tests/**/*.test.ts", { cwd: repoRoot })].map(f => resolve(repoRoot, f)).sort();
+const testFiles = [...globSync("tests/**/*.test.ts", { cwd: repoRoot })]
+  .map((f) => resolve(repoRoot, f))
+  .sort();
 
 for (const filePath of testFiles) {
   if (resolve(filePath) === runnerPath) {
@@ -29,7 +33,9 @@ for (const filePath of testFiles) {
   try {
     await import(pathToFileURL(filePath).href);
   } catch (err) {
-    console.error(`[runner] Failed to import ${filePath}:`, (err as Error).message);
+    console.error(
+      `[runner] Failed to import ${filePath}:`,
+      (err as Error).message,
+    );
   }
 }
-

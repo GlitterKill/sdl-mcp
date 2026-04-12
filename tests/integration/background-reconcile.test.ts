@@ -32,7 +32,9 @@ describe("background reconcile worker", () => {
   const prevConfigPath = process.env.SDL_CONFIG_PATH;
 
   before(async () => {
-    if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
+    // Clean up both database and WAL file from previous runs
+    if (existsSync(dbPath)) rmSync(dbPath, { force: true });
+    if (existsSync(dbPath + ".wal")) rmSync(dbPath + ".wal", { force: true });
     repoDir = mkdtempSync(join(tmpdir(), "sdl-background-reconcile-repo-"));
     mkdirSync(join(repoDir, "src"), { recursive: true });
     writeFileSync(
@@ -87,7 +89,8 @@ describe("background reconcile worker", () => {
   after(async () => {
     try {
       await closeLadybugDb();
-      if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
+      if (existsSync(dbPath)) rmSync(dbPath, { force: true });
+      if (existsSync(dbPath + ".wal")) rmSync(dbPath + ".wal", { force: true });
       if (existsSync(configPath)) rmSync(configPath, { force: true });
       if (repoDir && existsSync(repoDir))
         rmSync(repoDir, { recursive: true, force: true });
