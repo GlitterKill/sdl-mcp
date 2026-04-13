@@ -46,10 +46,7 @@ describe("code-mode regressions", () => {
     invalidateManualCache();
     const manual = generateManual();
 
-    assert.match(
-      manual,
-      /function contextSummary\(p: \{ symbolId\?: string; file\?: string; query\?: string; budget\?: number; format\?: "markdown"\|"json"\|"clipboard"; scope\?: "symbol"\|"file"\|"task"\|"repo"; ifNoneMatch\?: string \}\): \{ summary: string; tokens: number \} \| \{ notModified: true; etag: string \}/,
-    );
+    // contextSummary was removed from the API
     assert.match(
       manual,
       /function codeHotPath\(p: \{ symbolId: string; identifiersToFind: string\[]; contextLines\?: number; ifNoneMatch\?: string \}\): \{ excerpt: string; foundIdentifiers: string\[]; etag: string \} \| \{ notModified: true; etag: string \}/,
@@ -58,10 +55,7 @@ describe("code-mode regressions", () => {
       manual,
       /function repoOverview\(p: \{ level\?: "stats" \| "directories" \| "full"; ifNoneMatch\?: string \}\): \{ overview: object; etag: string \} \| \{ notModified: true; etag: string \}/,
     );
-    assert.match(
-      manual,
-      /function agentContext\(p: \{ taskType: "debug" \| "review" \| "implement" \| "explain"; taskText: string; budget\?: \{ maxTokens\?: number; maxActions\?: number; maxDurationMs\?: number \}; options\?: \{ focusSymbols\?: string\[]; focusPaths\?: string\[]; includeTests\?: boolean; requireDiagnostics\?: boolean; contextMode\?: "precise"\|"broad" \}; ifNoneMatch\?: string \}\): \{ evidence: object\[]; etag: string \} \| \{ notModified: true; etag: string \}/,
-      );
+    // agentContext was removed from the API
     assert.match(
       manual,
       /function prRiskAnalyze\(p: \{ fromVersion: string; toVersion: string; riskThreshold\?: number \}\)/,

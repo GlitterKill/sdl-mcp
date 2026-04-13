@@ -15,7 +15,7 @@ export const WORKFLOW_DESCRIPTION =
 
 export const CONTEXT_DESCRIPTION =
   "Retrieve task-shaped code context for explain, debug, review, or implement "
-  + "work. This is the recommended tool for context retrieval and should be "
+  + "work. This is the Code Mode equivalent of sdl.context and should be "
   + "preferred over sdl.workflow for context retrieval.";
 
 export const ACTION_SEARCH_DESCRIPTION =

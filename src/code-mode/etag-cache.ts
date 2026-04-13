@@ -7,15 +7,7 @@ export class WorkflowEtagCache {
   /** Inject ifNoneMatch into card request args if we have a cached ETag. */
   injectEtags(action: string, args: Record<string, unknown>): void {
     if (action === "symbol.getCard") {
-      const symbolId = args.symbolId;
-      if (
-        typeof symbolId === "string"
-        && this.cache.has(symbolId)
-        && !args.ifNoneMatch
-      ) {
-        args.ifNoneMatch = this.cache.get(symbolId);
-      }
-    } else if (action === "symbol.getCard") {
+      // Handle batch format (symbolIds array) first
       const symbolIds = args.symbolIds;
       if (Array.isArray(symbolIds) && !args.knownEtags) {
         const knownEtags: Record<string, string> = {};
@@ -28,6 +20,16 @@ export class WorkflowEtagCache {
         }
         if (found) {
           args.knownEtags = knownEtags;
+        }
+      } else {
+        // Handle single symbolId format
+        const symbolId = args.symbolId;
+        if (
+          typeof symbolId === "string"
+          && this.cache.has(symbolId)
+          && !args.ifNoneMatch
+        ) {
+          args.ifNoneMatch = this.cache.get(symbolId);
         }
       }
     } else if (action === "slice.build" && !args.knownCardEtags) {
@@ -44,16 +46,7 @@ export class WorkflowEtagCache {
     const record = result as Record<string, unknown>;
 
     if (action === "symbol.getCard") {
-      const etag = record.etag;
-      const card = record.card;
-      if (typeof etag === "string" && card && typeof card === "object") {
-        const symbolId = (card as Record<string, unknown>).symbolId;
-        if (typeof symbolId === "string") {
-          this.cache.set(symbolId, etag);
-          this.evictIfNeeded();
-        }
-      }
-    } else if (action === "symbol.getCard") {
+      // Handle batch format (cards array) first
       const cards = record.cards;
       if (Array.isArray(cards)) {
         for (const entry of cards) {
@@ -68,6 +61,17 @@ export class WorkflowEtagCache {
                 this.evictIfNeeded();
               }
             }
+          }
+        }
+      } else {
+        // Handle single card format
+        const etag = record.etag;
+        const card = record.card;
+        if (typeof etag === "string" && card && typeof card === "object") {
+          const symbolId = (card as Record<string, unknown>).symbolId;
+          if (typeof symbolId === "string") {
+            this.cache.set(symbolId, etag);
+            this.evictIfNeeded();
           }
         }
       }

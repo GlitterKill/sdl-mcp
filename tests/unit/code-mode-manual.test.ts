@@ -91,7 +91,7 @@ describe("code-mode manual generator", () => {
     );
   });
 
-  it("FN_NAME_MAP covers all 33 actions", () => {
-    assert.strictEqual(Object.keys(FN_NAME_MAP).length, 33);
+  it("FN_NAME_MAP covers all 30 actions", () => {
+    assert.strictEqual(Object.keys(FN_NAME_MAP).length, 30);
   });
 });
