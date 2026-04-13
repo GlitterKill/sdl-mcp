@@ -5,6 +5,29 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { globSync } from "node:fs";
 
+// Exit codes that indicate Windows native addon segfaults.
+// 0xC0000005 = ACCESS_VIOLATION, returned as signed int32 = -1073741819
+const WINDOWS_SEGFAULT_EXIT_CODES = new Set([-1073741819, 3221225477]);
+
+// Tests known to trigger native addon segfaults on Windows process exit.
+// These are run isolated with TAP output parsing to determine pass/fail,
+// ignoring the process exit code when it matches a known segfault value.
+const SEGFAULT_BYPASS_TESTS = new Set([
+  "tests/unit/draft-parser.test.ts",
+  "tests/unit/file-patcher.test.ts",
+]);
+
+/**
+ * Parse TAP output to determine if tests passed.
+ * Handles both Node 24+ (ℹ prefix) and pre-24 (# prefix) formats.
+ * Returns false if output is missing/truncated (fail-safe).
+ */
+function parseTapResult(output) {
+  const hasFailures = /^not ok /m.test(output);
+  const hasSummaryPass = /^[#ℹ] fail 0$/m.test(output);
+  return { passed: !hasFailures && hasSummaryPass };
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, "..");
@@ -149,6 +172,8 @@ const result = spawnSync(process.execPath, nodeArgs, {
 // Run tests that need process isolation (due to module cache pollution in the main suite)
 // Note: draft-parser.test.ts and file-patcher.test.ts may segfault during process shutdown
 // due to LadybugDB native addon cleanup issues. The tests pass - only exit code is affected.
+// Tests that need process isolation. Tests with LadybugDB segfaults on exit
+// must also be listed in SEGFAULT_BYPASS_TESTS to enable TAP-based pass/fail.
 const isolatedTests = [
   "tests/unit/draft-parser.test.ts",
   "tests/unit/file-patcher.test.ts",
@@ -157,15 +182,48 @@ const isolatedTests = [
 for (const testFile of isolatedTests) {
   const isoResult = spawnSync(
     process.execPath,
-    ["--test-concurrency=1", "--test", resolve(repoRoot, testFile)],
+    ["--test-concurrency=1", "--test-reporter=tap", "--test", resolve(repoRoot, testFile)],
     {
       cwd: repoRoot,
-      stdio: "inherit",
+      stdio: "pipe",
       env: testEnv,
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024, // 10 MB - prevent truncation of large test output
     },
   );
-  if ((isoResult.status ?? 1) !== 0) {
+
+  // Check for spawnSync errors (e.g., buffer overflow)
+  if (isoResult.error) {
+    console.error(`[run-tests] ${testFile}: spawnSync error: ${isoResult.error.message}`);
     overallFailed = true;
+    continue;
+  }
+
+  // Always print output so it appears in CI logs
+  if (isoResult.stdout) process.stdout.write(isoResult.stdout);
+  if (isoResult.stderr) process.stderr.write(isoResult.stderr);
+
+  const exitCode = isoResult.status ?? 1;
+  const isKnownSegfault = WINDOWS_SEGFAULT_EXIT_CODES.has(exitCode);
+  const isSegfaultBypassTest = SEGFAULT_BYPASS_TESTS.has(testFile);
+
+  if (exitCode !== 0) {
+    if (isKnownSegfault && isSegfaultBypassTest) {
+      // Segfault on exit expected - use TAP output to determine pass/fail
+      const { passed } = parseTapResult(isoResult.stdout ?? "");
+      if (!passed) {
+        console.error(`[run-tests] ${testFile}: tests FAILED (TAP parse)`);
+        overallFailed = true;
+      } else {
+        console.warn(
+          `[run-tests] ${testFile}: tests passed, process exited with ` +
+            `known segfault code ${exitCode} (LadybugDB native addon cleanup issue)`,
+        );
+      }
+    } else {
+      // Non-segfault exit: treat as real failure
+      overallFailed = true;
+    }
   }
 }
 

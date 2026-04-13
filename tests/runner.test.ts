@@ -8,7 +8,9 @@ const repoRoot = resolve(__dirname, "..");
 
 const runnerPath = resolve(repoRoot, "tests", "runner.test.ts");
 
-// Skip tests that have import issues or require special setup
+// Skip patterns for tests with import issues or that are run isolated.
+// draft-parser, file-patcher: isolated in run-tests.mjs due to LadybugDB
+// native addon segfaults on Windows process exit (tests pass, exit fails).
 const SKIP_PATTERNS = [
   "draft-parser",
   "file-patcher",
