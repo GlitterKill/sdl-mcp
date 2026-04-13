@@ -24,7 +24,7 @@ describe("SymbolGetCardRequestSchema deduplication", () => {
   });
 
   it("should NOT export SymbolGetCardRequestSchema from context.ts", async () => {
-    const agent = await import("../../dist/mcp/tools/context.js");
+    const agent = await import("../../dist/mcp/tools/symbol.js");
     assert.strictEqual(
       agent.SymbolGetCardRequestSchema,
       undefined,
@@ -33,10 +33,10 @@ describe("SymbolGetCardRequestSchema deduplication", () => {
   });
 
   it("should export handleSymbolGetCard from context.ts", async () => {
-    const agent = await import("../../dist/mcp/tools/context.js");
+    const agent = await import("../../dist/mcp/tools/symbol.js");
     assert.ok(
       agent.handleSymbolGetCard,
-      "context.ts should still export handleSymbolGetCard",
+      "symbol.ts should export handleSymbolGetCard",
     );
     assert.strictEqual(
       typeof agent.handleSymbolGetCard,

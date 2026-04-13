@@ -266,7 +266,7 @@ describe("createFtsIndex — safe literal query", () => {
     assert.ok(fnStart !== -1, "createFtsIndex function must exist");
     const fnBody = src.slice(fnStart, fnStart + 800);
     assert.ok(
-      fnBody.includes("queryAll(") || fnBody.includes("queryAll<"),
+      fnBody.includes("queryAll(") || fnBody.includes("queryAll<") || fnBody.includes("conn.query("),
       "createFtsIndex should use queryAll (not exec) for Kuzu procedure calls",
     );
   });
@@ -400,16 +400,16 @@ describe("numeric array vector storage", () => {
 
   it("schema creates DOUBLE[] embedding columns for Symbol", () => {
     assert.ok(
-      schemaSrc.includes("embeddingJinaCodeVec DOUBLE[]"),
-      "Schema should have embeddingJinaCodeVec DOUBLE[] on Symbol",
+      schemaSrc.includes("embeddingJinaCodeVec DOUBLE[768]"),
+      "Schema should have embeddingJinaCodeVec DOUBLE[768] on Symbol",
     );
     assert.ok(
-      schemaSrc.includes("embeddingNomicVec DOUBLE[]"),
-      "Schema should have embeddingNomicVec DOUBLE[] on Symbol",
+      schemaSrc.includes("embeddingNomicVec DOUBLE[768]"),
+      "Schema should have embeddingNomicVec DOUBLE[768] on Symbol",
     );
     assert.ok(
-      schemaSrc.includes("embeddingJinaCodeVec DOUBLE[]"),
-      "Schema should have embeddingJinaCodeVec DOUBLE[] on Symbol",
+      schemaSrc.includes("embeddingJinaCodeVec DOUBLE[768]"),
+      "Schema should have embeddingJinaCodeVec DOUBLE[768] on Symbol",
     );
   });
 

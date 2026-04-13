@@ -146,7 +146,11 @@ const NODE_TABLES: string[] = [
     updatedAt STRING,    embeddingNomic STRING,
     embeddingNomicCardHash STRING,
     embeddingNomicUpdatedAt STRING,
-    embeddingNomicVec DOUBLE[768]
+    embeddingNomicVec DOUBLE[768],
+    embeddingJinaCode STRING,
+    embeddingJinaCodeCardHash STRING,
+    embeddingJinaCodeUpdatedAt STRING,
+    embeddingJinaCodeVec DOUBLE[768]
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS Process (

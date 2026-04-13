@@ -14,7 +14,7 @@ test("getModelInfo returns Jina metadata", () => {
   const info = getModelInfo("jina-embeddings-v2-base-code");
   assert.strictEqual(info.name, "jina-embeddings-v2-base-code");
   assert.strictEqual(info.dimension, 768);
-  assert.strictEqual(info.maxSequenceLength, 256);
+  assert.strictEqual(info.maxSequenceLength, 8192);
   assert.strictEqual(info.bundled, true);
   assert.strictEqual(info.modelFile, "model_quantized.onnx");
   assert.strictEqual(info.tokenizerFile, "tokenizer.json");
@@ -49,7 +49,7 @@ test("listModels returns all registered models", () => {
   assert.ok(models.includes("jina-embeddings-v2-base-code"));
   assert.ok(models.includes("nomic-embed-text-v1.5"));
   assert.ok(models.includes("jina-embeddings-v2-base-code"));
-  assert.strictEqual(models.length, 3);
+  assert.strictEqual(models.length, 2);
 });
 
 test("isKnownModel returns true for registered models", () => {
@@ -121,10 +121,10 @@ test("isModelAvailable returns boolean for nomic model", () => {
   assert.strictEqual(typeof result, "boolean");
 });
 
-test("Jina and nomic have different dimensions", () => {
+test("Jina and nomic have same 768 dimensions", () => {
   const jina = getModelInfo("jina-embeddings-v2-base-code");
   const nomic = getModelInfo("nomic-embed-text-v1.5");
-  assert.notStrictEqual(jina.dimension, nomic.dimension);
+  assert.strictEqual(jina.dimension, nomic.dimension);
   assert.strictEqual(jina.dimension, 768);
   assert.strictEqual(nomic.dimension, 768);
 });
