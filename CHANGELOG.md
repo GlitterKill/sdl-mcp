@@ -17,6 +17,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Batch: `{ symbolIds: ["...", "..."] }` (was separate tool)
     - Response shape unchanged for each mode
 
+## [0.10.5] - 2026-04-14
+
+### Breaking Changes
+
+- **Default Embedding Model Changed**: Replaced all-MiniLM-L6-v2 (384-dim, 256-token) with
+  jina-embeddings-v2-base-code (768-dim, 8192-token) as the default bundled embedding model.
+  - **Migration Required**: Existing users must update their config and re-index to regenerate embeddings
+  - Database schema updated: removed `embeddingMiniLM` columns, added `embeddingJinaCode` columns
+  - Config field `embedding.model` default changed from `"all-MiniLM-L6-v2"` to `"jina-embeddings-v2-base-code"`
+  - nomic-embed-text-v1.5 remains available as an optional addon
+
+### Added
+
+- **`sdl.file.write` Tool**: Write non-indexed files (configs, docs, templates) with multiple modes:
+  - Full content replacement
+  - Line-range replacement
+  - Pattern-based replacement
+  - JSON path updates
+  - Insert at line / append modes
+- **Workflow Dry-Run Mode**: Validate workflow steps and `$N` references without execution
+  via `dryRun: true` parameter
+- **Action Search Enhancements**:
+  - `summaryOnly` mode for compact stats without full details
+  - Synonym expansion (e.g., "test coverage" finds metrics/symbol/card tools)
+- **Symbol Search Improvements**:
+  - `shortId` field (first 16 chars) in results for easier reference
+  - `pattern` alias for `query` parameter
+- **Context Response Enhancements**:
+  - `contextModeHint` explains precise vs broad mode behavior
+  - `schemaHint` tip when `includeSchemas` is false
+- **Truncation Recovery**: `cursor` field in `suggestedNextCall.args` for easy continuation
+  after truncated code windows
+- **CLI Improvements**:
+  - Banner display for index/serve commands (HTTP transport)
+  - Progress display shows current file below progress bar
+
+### Changed
+
+- **Test Infrastructure Overhaul**:
+  - All tests run isolated for LadybugDB safety
+  - Improved TAP parsing distinguishes real failures from process exit segfaults
+  - Test summary with pass/fail counts and segfault tracking
+- Token savings meter now always appended as content block for MCP client visibility
+- `file.read` uses sliced range for raw token baseline (not full file)
+
+### Fixed
+
+- **Windows CI**: Allow 8.3 short paths (e.g., `RUNNER~1`) in `--repo-path` validation.
+  Changed from `includes("~")` to `startsWith("~")` to only block Unix home directory
+  expansion while permitting Windows short filename formats.
+- Windows LadybugDB native addon cleanup crash handling in tests
+- Embedding column name consistency in schema and tests
+- Tool count expectations in gateway tests
 ## [0.10.4] - 2026-04-10
 
 ### Added
