@@ -21,13 +21,15 @@ export interface ParsedWorkflowRequest {
   onError: "continue" | "stop";
   defaultMaxResponseTokens?: number;
   onlyFinalResult?: boolean;
+  /** When true, validate steps and references without executing */
+  dryRun?: boolean;
 }
 
 /**
  * Recursively walks an args object and extracts all $N step reference indices.
  * Returns a deduplicated, sorted array of referenced step indices.
  */
-function findRefsInArgs(args: Record<string, unknown>): number[] {
+export function findRefsInArgs(args: Record<string, unknown>): number[] {
   const refs = new Set<number>();
   const refPattern = /\$(\d+)/g;
 
@@ -74,7 +76,7 @@ export function parseWorkflowRequest(
     return { ok: false, errors };
   }
 
-  const { repoId, steps, budget, onError, defaultMaxResponseTokens, onlyFinalResult } = parsed.data;
+  const { repoId, steps, budget, onError, defaultMaxResponseTokens, onlyFinalResult, dryRun } = parsed.data;
   const errors: string[] = [];
   const parsedSteps: ParsedWorkflowStep[] = [];
   const fnNameMap = getActiveFnNameMap();
@@ -129,6 +131,7 @@ export function parseWorkflowRequest(
       onError,
       defaultMaxResponseTokens,
       onlyFinalResult,
+      dryRun,
     },
   };
 }

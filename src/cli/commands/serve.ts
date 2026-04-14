@@ -9,6 +9,7 @@ import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
 import { closeLadybugDb, configurePool } from "../../db/ladybug.js";
 import { persistUsageSnapshot } from "../../db/ladybug-usage.js";
+import { printBanner } from "../../util/banner.js";
 import {
   configurePrefetch,
   warmPrefetchOnServeStart,
@@ -41,6 +42,11 @@ import { tokenAccumulator } from "../../mcp/token-accumulator.js";
 import { ensureConfiguredReposRegistered } from "../../startup/bootstrap.js";
 
 export async function serveCommand(options: ServeOptions): Promise<void> {
+  // Show banner for HTTP transport only (stdio needs clean output for MCP protocol)
+  if (options.transport !== "stdio") {
+    printBanner();
+  }
+
   // Enable file logging by default so crash evidence is always persisted.
   // Placed inside the function body so these side effects only fire when
   // the serve command is actually invoked, not on module import.
@@ -50,15 +56,23 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
 
   // Catch uncaught errors — sanitize stderr output, log full details to file, then exit.
   process.on("uncaughtException", (error) => {
-    process.stderr.write(`[sdl-mcp] Fatal uncaught exception: ${error instanceof Error ? error.message : String(error)}\n`);
-    logger.error("Uncaught exception", { error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
+    process.stderr.write(
+      `[sdl-mcp] Fatal uncaught exception: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    logger.error("Uncaught exception", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     process.exit(1);
   });
 
   process.on("unhandledRejection", (reason) => {
     const message = reason instanceof Error ? reason.message : String(reason);
     process.stderr.write(`[sdl-mcp] Unhandled rejection: ${message}\n`);
-    logger.error("Unhandled rejection", { error: message, stack: reason instanceof Error ? reason.stack : undefined });
+    logger.error("Unhandled rejection", {
+      error: message,
+      stack: reason instanceof Error ? reason.stack : undefined,
+    });
   });
 
   const configPath = activateCliConfigPath(options.config);
@@ -261,9 +275,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     // Mirror the direct entrypoint so stdio client disconnects flow through
     // the centralized shutdown path before Node can exit on its own.
     stdioServer.getServer().onclose = () => {
-      console.error(
-        "[sdl-mcp] MCP transport closed, initiating shutdown...",
-      );
+      console.error("[sdl-mcp] MCP transport closed, initiating shutdown...");
       void shutdownMgr.shutdown("transport closed");
     };
   }
@@ -277,15 +289,26 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     } else {
       const host = options.host ?? "localhost";
       console.error(`Starting MCP server on http://${host}:${httpPort}...`);
-      const httpHandle = await setupHttpTransport(host, httpPort, graphDbPath, {
-        liveIndex,
-        sessionManager,
-        gatewayConfig: config.gateway,
-        codeModeConfig: config.codeMode,
-      }, config.httpAuth);
+      const httpHandle = await setupHttpTransport(
+        host,
+        httpPort,
+        graphDbPath,
+        {
+          liveIndex,
+          sessionManager,
+          gatewayConfig: config.gateway,
+          codeModeConfig: config.codeMode,
+        },
+        config.httpAuth,
+      );
 
       // Now that we know the actual bound port, write the pidfile.
-      pidfilePath = writePidfile(graphDbPath, transport, httpHandle.port, httpHandle.authToken ?? undefined);
+      pidfilePath = writePidfile(
+        graphDbPath,
+        transport,
+        httpHandle.port,
+        httpHandle.authToken ?? undefined,
+      );
       console.error(`PID file written: ${pidfilePath}`);
       shutdownMgr.setPidfilePath(pidfilePath);
 

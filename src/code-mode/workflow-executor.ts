@@ -26,6 +26,8 @@ import { tokenAccumulator } from "../mcp/token-accumulator.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { z } from "zod";
+import { getActiveFnNameMap, getActiveActionToFn } from "./manual-generator.js";
+import { findRefsInArgs } from "./workflow-parser.js";
 
 /**
  * Apply per-step token truncation if configured.
@@ -86,6 +88,54 @@ export async function executeWorkflow(
       includeExamples: traceOpts.includeExamples,
     })
     : null;
+
+  // Handle dryRun mode - validate steps and references without executing
+  if (request.dryRun) {
+    const validation: { stepIndex: number; fn: string; action: string; valid: boolean; issues: string[] }[] = [];
+    const fnNameMap = getActiveFnNameMap();
+    const actionToFn = getActiveActionToFn();
+    
+    for (let i = 0; i < request.steps.length; i++) {
+      const step = request.steps[i];
+      const issues: string[] = [];
+      
+      // Check if function exists
+      const fnExists = step.fn in fnNameMap || step.fn in actionToFn || step.internal;
+      if (!fnExists) {
+        issues.push(`Unknown function: ${step.fn}`);
+      }
+      
+      // Validate references point to valid steps
+      const refs = findRefsInArgs(step.args);
+      for (const ref of refs) {
+        if (ref >= i) {
+          issues.push(`Reference ${"$"}${ref} points to step that hasn't executed yet`);
+        }
+      }
+      
+      validation.push({
+        stepIndex: i,
+        fn: step.fn,
+        action: step.action,
+        valid: issues.length === 0,
+        issues,
+      });
+    }
+    
+    const allValid = validation.every(v => v.valid);
+    return {
+      results: [],
+      totalTokens: 0,
+      durationMs: Date.now() - startTime,
+      truncated: false,
+      dryRun: {
+        valid: allValid,
+        validation,
+        stepCount: request.steps.length,
+        budgetLimits: request.budget ?? {},
+      },
+    } as WorkflowResponse;
+  }
 
   for (let i = 0; i < request.steps.length; i++) {
     const step = request.steps[i];

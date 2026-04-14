@@ -48,7 +48,7 @@ describe("Gateway tool registration", () => {
     );
   });
 
-  it("registers 36 tools when gateway enabled with legacy", () => {
+  it("registers 33 tools when gateway enabled with legacy", () => {
     const names: string[] = [];
     const fakeServer = makeFakeGatewayServer(names);
 
@@ -74,12 +74,12 @@ describe("Gateway tool registration", () => {
     assert.ok(names.includes("sdl.info"), "expected sdl.info universal tool");
     assert.strictEqual(
       names.length,
-      36,
-      "expected 36 tools (2 universal + 4 gateway + 30 legacy)",
+      33,
+      "expected 33 tools (2 universal + 4 gateway + 27 legacy)",
     );
   });
 
-  it("registers 31 tools when gateway disabled (29 flat + 2 universal)", () => {
+  it("registers 28 tools when gateway disabled (26 flat + 2 universal)", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -111,12 +111,12 @@ describe("Gateway tool registration", () => {
     assert.ok(names.includes("sdl.info"), "expected sdl.info");
     assert.strictEqual(
       names.length,
-      31,
-      "expected 31 tools (29 flat + 2 universal)",
+      28,
+      "expected 28 tools (26 flat + 2 universal)",
     );
   });
 
-  it("registers 31 tools when no gateway config (29 flat + 2 universal)", () => {
+  it("registers 28 tools when no gateway config (26 flat + 2 universal)", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -138,8 +138,8 @@ describe("Gateway tool registration", () => {
     assert.ok(names.includes("sdl.info"), "expected sdl.info");
     assert.strictEqual(
       names.length,
-      31,
-      "expected 31 tools (29 flat + 2 universal)",
+      28,
+      "expected 28 tools (26 flat + 2 universal)",
     );
   });
 

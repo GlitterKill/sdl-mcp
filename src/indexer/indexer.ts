@@ -615,6 +615,15 @@ async function indexRepoImpl(
       }),
     );
 
+    // Emit finalizing immediately after Pass 2 so the user sees feedback
+    // before the silent internal phases (import re-resolution, edge
+    // finalization, metrics, clusters, processes) begin.
+    onProgress?.({
+      stage: "finalizing",
+      current: 0,
+      total: files.length,
+    });
+
     // --- Phase: re-resolve unresolved import edges ---
 
     const importReResolution = await measurePhase(
@@ -647,11 +656,6 @@ async function indexRepoImpl(
       totalEdgesCreated += importReResolution.resolved;
     }
 
-    onProgress?.({
-      stage: "finalizing",
-      current: files.length,
-      total: files.length,
-    });
     const changedFiles = changedFilesFromPass1 + removedFiles;
 
     // --- Phase: release pass2 memory before edge finalization ---

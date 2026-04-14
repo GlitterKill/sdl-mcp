@@ -44,22 +44,22 @@ describe("Gateway schemas", () => {
       assert.strictEqual(result.success, true);
     });
 
-    it("validates symbol.getCards action", () => {
+    it("rejects symbol.getCard action with batch symbolIds (not supported)", () => {
       const result = QueryGatewaySchema.safeParse({
         repoId: "test-repo",
         action: "symbol.getCard",
         symbolIds: ["sym1", "sym2"],
       });
-      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.success, false);
     });
 
-    it("validates symbol.getCards action with symbolRefs", () => {
+    it("rejects symbol.getCard action with batch symbolRefs (not supported)", () => {
       const result = QueryGatewaySchema.safeParse({
         repoId: "test-repo",
         action: "symbol.getCard",
         symbolRefs: [{ name: "handleRequest" }],
       });
-      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.success, false);
     });
 
     it("validates slice.build action", () => {
@@ -175,14 +175,14 @@ describe("Gateway schemas", () => {
   });
 
   describe("AgentGatewaySchema", () => {
-    it("validates agent.context action", () => {
+    it("rejects non-existent agent.context action", () => {
       const result = AgentGatewaySchema.safeParse({
         repoId: "test-repo",
         action: "agent.context",
         taskType: "debug",
         taskText: "Fix login bug",
       });
-      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.success, false);
     });
 
     it("validates buffer.push action", () => {
@@ -212,7 +212,7 @@ describe("Gateway schemas", () => {
   });
 
   describe("action constants", () => {
-    it("QUERY_ACTIONS has 9 actions", () => {
+    it("QUERY_ACTIONS has 7 actions", () => {
       assert.strictEqual(QUERY_ACTIONS.length, 7);
     });
 
@@ -224,11 +224,11 @@ describe("Gateway schemas", () => {
       assert.strictEqual(REPO_ACTIONS.length, 9);
     });
 
-    it("AGENT_ACTIONS has 12 actions", () => {
+    it("AGENT_ACTIONS has 11 actions", () => {
       assert.strictEqual(AGENT_ACTIONS.length, 11);
     });
 
-    it("ALL_ACTIONS has 33 total actions", () => {
+    it("ALL_ACTIONS has 30 total actions", () => {
       assert.strictEqual(ALL_ACTIONS.length, 30);
     });
   });

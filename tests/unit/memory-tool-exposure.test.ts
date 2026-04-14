@@ -491,8 +491,8 @@ describe("memory tool exposure gating", () => {
       );
       // Non-memory actions should remain
       assert.ok(
-        desc.includes("sdl.context"),
-        "sdl.context should be in description",
+        desc.includes("agent.feedback"),
+        "agent.feedback should be in description",
       );
       assert.ok(
         desc.includes("runtime.execute"),

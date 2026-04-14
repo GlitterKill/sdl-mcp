@@ -39,6 +39,7 @@ import {
   MemorySurfaceRequestSchema,
   UsageStatsRequestSchema,
   FileReadRequestSchema,
+  FileWriteRequestSchema,
   ScipIngestRequestSchema,
 } from "../mcp/tools.js";
 import {
@@ -83,6 +84,7 @@ import {
 } from "../mcp/tools/memory.js";
 import { handleUsageStats } from "../mcp/tools/usage.js";
 import { handleFileRead } from "../mcp/tools/file-read.js";
+import { handleFileWrite } from "../mcp/tools/file-write.js";
 import { handleScipIngest } from "../mcp/tools/scip.js";
 import type { z } from "zod";
 import { normalizeToolArguments } from "../mcp/request-normalization.js";
@@ -183,6 +185,10 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
     "file.read": {
       schema: FileReadRequestSchema,
       handler: handleFileRead,
+    },
+    "file.write": {
+      schema: FileWriteRequestSchema,
+      handler: handleFileWrite,
     },
     "scip.ingest": {
       schema: ScipIngestRequestSchema,

@@ -202,10 +202,15 @@ const NODE_TABLES: string[] = [
     taskType STRING,
     taskText STRING,
     createdAt STRING,
-    searchText STRING,    embeddingNomic STRING,
+    searchText STRING,
+    embeddingNomic STRING,
     embeddingNomicCardHash STRING,
     embeddingNomicUpdatedAt STRING,
-    embeddingNomicVec DOUBLE[768]
+    embeddingNomicVec DOUBLE[768],
+    embeddingJinaCode STRING,
+    embeddingJinaCodeCardHash STRING,
+    embeddingJinaCodeUpdatedAt STRING,
+    embeddingJinaCodeVec DOUBLE[768]
   )`,
 
   // TODO(hybrid-retrieval): Remove after Stage 1 when SymbolEmbedding migration is verified complete

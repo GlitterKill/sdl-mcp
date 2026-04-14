@@ -43,6 +43,7 @@ import {
   MemorySurfaceRequestSchema,
   UsageStatsRequestSchema,
   FileReadRequestSchema,
+  FileWriteRequestSchema,
   ScipIngestRequestSchema,
 } from "../tools.js";
 
@@ -88,6 +89,7 @@ import {
 } from "./memory.js";
 import { handleUsageStats } from "./usage.js";
 import { handleFileRead } from "./file-read.js";
+import { handleFileWrite } from "./file-write.js";
 import { handleScipIngest } from "./scip.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { anyRepoHasMemoryTools } from "../../config/memory-config.js";
@@ -335,6 +337,13 @@ export function buildFlatToolDescriptors(
         "Read non-indexed files (templates, configs, docs) with optional line range, search, or JSON path extraction",
       schema: FileReadRequestSchema,
       handler: handleFileRead,
+    },
+    {
+      name: "sdl.file.write",
+      description:
+        "Write to non-indexed files with targeted modes: full content, line replacement, pattern replacement, JSON path update, insert, or append",
+      schema: FileWriteRequestSchema,
+      handler: handleFileWrite,
     },
     {
       name: "sdl.scip.ingest",

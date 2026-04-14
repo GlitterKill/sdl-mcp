@@ -3,8 +3,8 @@
  *
  * Tests semantic-layer MCP tools under concurrent load:
  *   - sdl.symbol.search with `semantic: true` (embedding rerank / graceful fallback)
- *   - sdl.symbol.getCard (single/batch card fetch)
- *    *   - sdl.context (context retrieval with tight budget)
+ *   - sdl.symbol.getCard / sdl.symbol.getCards (single/batch card fetch)
+ *   - sdl.context (context retrieval with tight budget)
  *   - sdl.agent.feedback + feedback.query (feedback loop)
  *
  * Escalates from 3→N concurrent clients, each running the full semantic workflow.
@@ -36,13 +36,6 @@ const SEMANTIC_QUERIES = [
   "UserController",
   "Repository"];
 
-const SUMMARY_QUERIES = [
-  "How does the user repository work?",
-  "What are the main data models?",
-  "How is the API service structured?",
-  "What validation patterns are used?",
-  "How does the middleware layer work?",
-  "What are the core utility functions?"];
 
 const ITERATIONS_PER_CLIENT = 2;
 
@@ -50,10 +43,11 @@ const ITERATIONS_PER_CLIENT = 2;
  * Each client runs a full semantic workflow per iteration:
  *   1. Semantic search (semantic: true)
  *   2. Batch getCards for top results
- *   3. Context summary
- *   4. Agent context (explain, tight budget)
- *   5. Agent feedback (record useful symbols)
- *   6. Agent feedback query
+ *   3. Agent context (explain, tight budget)
+ *   4. Agent feedback (record useful symbols)
+ *   5. Agent feedback query
+ *   6. Lexical search comparison
+ *   7. Second batch getCards with ETag support
  */
 async function runSemanticWorkflow(
   client: import("../infra/client-factory.js").StressClient,
@@ -61,8 +55,6 @@ async function runSemanticWorkflow(
 ): Promise<void> {
   for (let i = 0; i < ITERATIONS_PER_CLIENT; i++) {
     const query = SEMANTIC_QUERIES[(queryIndex + i) % SEMANTIC_QUERIES.length];
-    const summaryQuery =
-      SUMMARY_QUERIES[(queryIndex + i) % SUMMARY_QUERIES.length];
 
     // 1. Semantic search
     const searchResult = await client.callToolParsed("sdl.symbol.search", {
@@ -80,7 +72,7 @@ async function runSemanticWorkflow(
 
     // 2. Batch getCards for top results
     const topSymbolIds = results.slice(0, 5).map((r) => r.symbolId);
-    const cardsResult = await client.callToolParsed("sdl.symbol.getCard", {
+    const cardsResult = await client.callToolParsed("sdl.symbol.getCards", {
       repoId: "stress-fixtures",
       symbolIds: topSymbolIds,
     });
@@ -89,15 +81,8 @@ async function runSemanticWorkflow(
       etag?: string;
     }>;
 
-    // 3. Context summary
-    await client.callToolParsed( {
-      repoId: "stress-fixtures",
-      query: summaryQuery,
-      budget: 2000,
-      scope: "task",
-    });
 
-    // 4. Agent context with tight budget
+    // 3. Agent context with tight budget
     const contextResult = await client.callToolParsed(
       "sdl.context",
       {
@@ -115,7 +100,7 @@ async function runSemanticWorkflow(
       },
     );
 
-    // 5. Agent feedback — record useful symbols from the workflow
+    // 4. Agent feedback — record useful symbols from the workflow
     const sliceHandle = contextResult?.sliceHandle as string | undefined;
     const versionId = contextResult?.versionId as string | undefined;
     if (sliceHandle && versionId && topSymbolIds.length > 0) {
@@ -129,20 +114,20 @@ async function runSemanticWorkflow(
       });
     }
 
-    // 6. Agent feedback query — verify feedback round-trip
+    // 5. Agent feedback query — verify feedback round-trip
     await client.callToolParsed("sdl.agent.feedback.query", {
       repoId: "stress-fixtures",
       limit: 5,
     });
 
-    // 7. Also run a lexical search for comparison (same query, no semantic flag)
+    // 6. Also run a lexical search for comparison (same query, no semantic flag)
     await client.callToolParsed("sdl.symbol.search", {
       repoId: "stress-fixtures",
       query,
       limit: 15,
     });
 
-    // 8. Second batch getCards with ETag support (simulating cache hit path)
+    // 7. Second batch getCards with ETag support (simulating cache hit path)
     if (cards.length > 0) {
       const knownEtags: Record<string, string> = {};
       for (const card of cards) {
@@ -151,7 +136,7 @@ async function runSemanticWorkflow(
         }
       }
       if (Object.keys(knownEtags).length > 0) {
-        await client.callToolParsed("sdl.symbol.getCard", {
+        await client.callToolParsed("sdl.symbol.getCards", {
           repoId: "stress-fixtures",
           symbolIds: topSymbolIds,
           knownEtags,

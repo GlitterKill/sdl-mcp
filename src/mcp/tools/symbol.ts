@@ -138,6 +138,8 @@ export async function handleSymbolSearch(
 ): Promise<SymbolSearchResponse> {
   const startedAt = Date.now();
   const request = args as SymbolSearchRequest;
+  // Normalize: fold 'pattern' alias into 'query' if query was not provided
+  const query = request.query ?? request.pattern ?? "";
   const requestedLimit = request.limit ?? SYMBOL_SEARCH_DEFAULT_LIMIT;
   const limit =
     request.kinds && request.kinds.length > 0
@@ -202,7 +204,7 @@ export async function handleSymbolSearch(
         await searchSymbolsHybridWithOverlay(
           conn,
           request.repoId,
-          request.query,
+          query,
           limit,
           {
             ftsTopK: retrievalConfig?.fts?.topK,
@@ -224,7 +226,7 @@ export async function handleSymbolSearch(
       rows = await searchSymbolsWithOverlay(
         conn,
         request.repoId,
-        request.query,
+        query,
         limit,
         request.kinds,
         request.excludeExternal,
@@ -235,7 +237,7 @@ export async function handleSymbolSearch(
     rows = await searchSymbolsWithOverlay(
       conn,
       request.repoId,
-      request.query,
+      query,
       limit,
       request.kinds,
       request.excludeExternal,
@@ -256,10 +258,10 @@ export async function handleSymbolSearch(
   let camelFallbackTerms: string[] = [];
   if (
     results.length === 0 &&
-    !request.query.includes("*") &&
-    !request.query.includes("?")
+    !query.includes("*") &&
+    !query.includes("?")
   ) {
-    const subwords = splitCamelSubwords(request.query);
+    const subwords = splitCamelSubwords(query);
     if (subwords.length >= 2) {
       camelFallbackTerms = subwords;
       const joinedQuery = subwords.join(" ");
@@ -324,14 +326,14 @@ export async function handleSymbolSearch(
     }
   }
 
-  results = sortByExactMatch(results, request.query);
+  results = sortByExactMatch(results, query);
 
   // FP-5: For wildcard queries or when no exact match, sort by importance metrics
   // This ensures "*" queries return the most important symbols rather than arbitrary order
   const isWildcard =
-    request.query === "*" ||
-    request.query.includes("*") ||
-    request.query.includes("?");
+    query === "*" ||
+    query.includes("*") ||
+    query.includes("?");
   if (isWildcard && results.length > 1) {
     // Fetch metrics for top results to sort by importance
     const topIds = results
@@ -420,7 +422,7 @@ export async function handleSymbolSearch(
       Math.round(
         Math.min(
           1,
-          computeRelevance(r.name, request.query) +
+          computeRelevance(r.name, query) +
             // Boost semantic results: top-ranked results from semantic search
             // are likely relevant even if the name doesn't match the query text
             (request.semantic && semanticEnabled
@@ -438,7 +440,7 @@ export async function handleSymbolSearch(
     (r) => r.relevance >= effectiveThreshold,
   );
   const hasExactMatch = relevant.some(
-    (r) => r.name.toLowerCase() === request.query.toLowerCase(),
+    (r) => r.name.toLowerCase() === query.toLowerCase(),
   );
   // symbols alias removed — use results (symbols was an exact duplicate wasting tokens)
   // Add suggestion when no relevant results or all results are weak
@@ -449,7 +451,7 @@ export async function handleSymbolSearch(
       ? semanticRequested && !semanticEnabled
         ? `Semantic search unavailable (${fallbackReason || "embedding model not loaded"}). Lexical search returned no matches. Try exact symbol names or broader terms.`
         : (() => {
-            const tokens = splitCamelSubwords(request.query).filter(
+            const tokens = splitCamelSubwords(query).filter(
               (t) => t.length >= 3 && !SUGGESTION_STOP_WORDS.has(t),
             );
             return tokens.length >= 2
@@ -459,7 +461,7 @@ export async function handleSymbolSearch(
                 : "No close matches found. Try broader terms or use kinds filter.";
           })()
       : camelFallbackUsed
-        ? `No exact match for '${request.query}'. Showing results for decomposed terms: ${camelFallbackTerms.join(", ")}`
+        ? `No exact match for '${query}'. Showing results for decomposed terms: ${camelFallbackTerms.join(", ")}`
         : bestRelevance < 0.5
           ? "Results may not be relevant. Try more specific terms, use kinds filter, or try sdl.symbol.search with a wildcard pattern."
           : undefined;

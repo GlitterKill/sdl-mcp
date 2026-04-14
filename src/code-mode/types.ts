@@ -48,7 +48,9 @@ export const WorkflowRequestSchema = z.object({
   onlyFinalResult: z.boolean().optional(),
   /** Opt-in execution trace for debugging */
   trace: WorkflowTraceOptionsSchema.optional(),
-});
+  /** When true, validate steps and $N references without executing. Returns validation result only. */
+  dryRun: z.boolean().optional(),
+})
 
 // --- TypeScript Types ---
 
@@ -124,6 +126,13 @@ export interface WorkflowResponse {
   truncated: boolean;
   /** Context ladder warnings (e.g., "Step 3 skips skeleton rung for symbol X") */
   ladderWarnings?: string[];
+  /** Present when dryRun was requested - validation results without execution */
+  dryRun?: {
+    valid: boolean;
+    validation: { stepIndex: number; fn: string; action: string; valid: boolean; issues: string[] }[];
+    stepCount: number;
+    budgetLimits: object;
+  };
   /** ETag cache state at end of workflow - pass back in next workflow for savings */
   etagCache?: Record<string, string>;
   /** Execution trace (only present when trace options are provided) */

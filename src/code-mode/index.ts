@@ -37,7 +37,9 @@ export const ActionSearchRequestSchema = z.object({
   offset: z.number().int().min(0).optional().describe("Skip first N results"),
   includeSchemas: z.boolean().default(false),
   includeExamples: z.boolean().default(false),
-});
+  /** When true, return only counts and categories instead of full action details */
+  summaryOnly: z.boolean().default(false),
+})
 
 export function registerActionSearchTool(
   server: MCPServer,
@@ -77,6 +79,26 @@ export function registerActionSearchTool(
               reason: args.limit === 1 ? 'limit=1' : 'exact-name-query',
             }
           : undefined;
+      // Handle summaryOnly mode - return counts/categories instead of full details
+      if (args.summaryOnly) {
+        const byKind: Record<string, number> = {};
+        const byNamespace: Record<string, number> = {};
+        for (const action of allRanked) {
+          byKind[action.kind] = (byKind[action.kind] ?? 0) + 1;
+          const ns = action.action.split('.')[0];
+          byNamespace[ns] = (byNamespace[ns] ?? 0) + 1;
+        }
+        return {
+          summary: {
+            total: allRanked.length,
+            byKind,
+            byNamespace,
+            matchedActions: ranked.map(a => a.action),
+          },
+          tokenEstimate: estimateTokens(JSON.stringify({ total: allRanked.length, byKind, byNamespace })),
+        };
+      }
+
       return {
         actions: ranked,
         total: allRanked.length,
@@ -93,6 +115,7 @@ export function registerActionSearchTool(
         offset: { type: "integer", minimum: 0 },
         includeSchemas: { type: "boolean" },
         includeExamples: { type: "boolean" },
+        summaryOnly: { type: "boolean", description: "Return only counts and categories" },
       },
       required: ["query"],
       additionalProperties: false,

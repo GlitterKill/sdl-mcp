@@ -47,6 +47,7 @@ export const FN_NAME_MAP: Record<string, string> = {
   memorySurface: "memory.surface",
   usageStats: "usage.stats",
   fileRead: "file.read",
+  fileWrite: "file.write",
   scipIngest: "scip.ingest",
 };
 
@@ -80,7 +81,16 @@ export function getActiveActionToFn(): Record<string, string> {
 
 const MANUAL_TEMPLATE = `// SDL-MCP API - use sdl.context for context retrieval, sdl.workflow for multi-step operations
 // repoId is set in the workflow envelope, not per-step.
-// Reference prior step results with $N (e.g., $0.results[0].symbolId).
+// Reference prior step results with ${"$"}N (e.g., ${"$"}0.results[0].symbolId).
+//
+// === ${"$"}N Reference Patterns ===
+// Common patterns for referencing prior step results:
+//   ${"$"}0.results[0].symbolId    - First symbol from search results
+//   ${"$"}0.card.symbolId          - Symbol ID from getCard response  
+//   ${"$"}0.slice.si[0]            - First symbol in slice (compact format)
+//   ${"$"}0.skeleton               - Skeleton IR string
+//   ${"$"}N.result.fieldName       - Any field from step N's result
+// References can be nested in JSONPath-like expressions.
 
 // === Query ===
 /** Search symbols by name/pattern */
@@ -157,6 +167,7 @@ function usageStats(p: { scope?: "session" | "history" | "both"; since?: string;
 // === File ===
 /** Read non-indexed file content (templates, configs, docs) */
 function fileRead(p: { filePath: string; maxBytes?: number; offset?: number; limit?: number; search?: string; searchContext?: number; jsonPath?: string }): { content: string; bytes: number; totalLines: number; returnedLines: number; truncated: boolean; matchCount?: number; extractedPath?: string }
+function fileWrite(p: { filePath: string; content?: string; replaceLines?: { start: number; end: number; content: string }; replacePattern?: { pattern: string; replacement: string; global?: boolean }; jsonPath?: string; jsonValue?: unknown; insertAt?: { line: number; content: string }; append?: string; createBackup?: boolean; createIfMissing?: boolean }): { filePath: string; bytesWritten: number; linesWritten: number; mode: string; backupPath?: string; replacementCount?: number }
 
 // === Data Transforms (use inside sdl.workflow steps) ===
 // These are internal transforms, NOT gateway actions. Use as workflow step fn names.

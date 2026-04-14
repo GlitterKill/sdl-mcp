@@ -834,17 +834,24 @@ const SymbolSearchResultSchema = z.object({
   relevance: z.number().min(0).max(1).optional(),
 });
 
-export const SymbolSearchRequestSchema = z.object({
-  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  query: z.string().min(1).max(1000),
-  kinds: z.array(SymbolKindEnumSchema).optional(),
-  limit: z.number().int().min(1).max(SYMBOL_SEARCH_MAX_RESULTS).optional(),
-  semantic: z.boolean().optional(),
-  /** When true, include per-result retrieval evidence (FTS score, vector score, fusion rank). */
-  includeRetrievalEvidence: z.boolean().optional(),
-  /** When true, exclude external symbols (from SCIP) from search results. */
-  excludeExternal: z.boolean().optional(),
-});
+export const SymbolSearchRequestSchema = z
+  .object({
+    repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+    /** Search query string. Use `pattern` as an alias for this field. */
+    query: z.string().min(1).max(1000).optional(),
+    /** Alias for `query` - accepts the same search pattern. */
+    pattern: z.string().min(1).max(1000).optional(),
+    kinds: z.array(SymbolKindEnumSchema).optional(),
+    limit: z.number().int().min(1).max(SYMBOL_SEARCH_MAX_RESULTS).optional(),
+    semantic: z.boolean().optional(),
+    /** When true, include per-result retrieval evidence (FTS score, vector score, fusion rank). */
+    includeRetrievalEvidence: z.boolean().optional(),
+    /** When true, exclude external symbols (from SCIP) from search results. */
+    excludeExternal: z.boolean().optional(),
+  })
+  .refine((data) => data.query || data.pattern, {
+    message: "Either 'query' or 'pattern' must be provided",
+  })
 
 export const RetrievalEvidenceItemSchema = z.object({
   symbolId: z.string(),
@@ -2350,3 +2357,53 @@ export const ScipIngestRequestSchema = z.object({
 });
 
 export type ScipIngestRequest = z.infer<typeof ScipIngestRequestSchema>;
+
+// ============================================================================
+// File Write Schemas
+// ============================================================================
+
+export const FileWriteReplaceLinesSchema = z.object({
+  start: z.number().int().min(0).describe("Start line number (0-based, inclusive)"),
+  end: z.number().int().min(0).describe("End line number (0-based, exclusive)"),
+  content: z.string().max(512 * 1024).describe("New content to replace the line range (max 512KB)"),
+});
+
+export const FileWriteReplacePatternSchema = z.object({
+  pattern: z.string().min(1).max(500).describe("Regex pattern to find"),
+  replacement: z.string().describe("Replacement string (supports capture groups)"),
+  global: z.boolean().optional().default(false).describe("Replace all occurrences (default: first only)"),
+});
+
+export const FileWriteInsertAtSchema = z.object({
+  line: z.number().int().min(0).describe("Line number to insert at (0-based)"),
+  content: z.string().max(512 * 1024).describe("Content to insert (max 512KB)"),
+});
+
+export const FileWriteRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  filePath: z.string().min(1).describe("File path relative to repo root"),
+  
+  // Write modes (mutually exclusive - use exactly one)
+  content: z.string().max(512 * 1024).optional().describe("Full file content for create/overwrite mode (max 512KB)"),
+  replaceLines: FileWriteReplaceLinesSchema.optional().describe("Replace a line range with new content"),
+  replacePattern: FileWriteReplacePatternSchema.optional().describe("Regex find/replace"),
+  jsonPath: z.string().max(200).optional().describe("Dot-separated path to update in JSON/YAML"),
+  jsonValue: z.unknown().optional().describe("New value for jsonPath (required if jsonPath is set)"),
+  insertAt: FileWriteInsertAtSchema.optional().describe("Insert content at a specific line"),
+  append: z.string().max(512 * 1024).optional().describe("Content to append to end of file (max 512KB)"),
+  
+  // Options
+  createBackup: z.boolean().optional().default(true).describe("Create .bak backup before modifying (default: true)"),
+  createIfMissing: z.boolean().optional().default(false).describe("Create file if it doesn't exist"),
+});
+
+export type FileWriteRequest = z.infer<typeof FileWriteRequestSchema>;
+
+export interface FileWriteResponse {
+  filePath: string;
+  bytesWritten: number;
+  linesWritten: number;
+  mode: "create" | "overwrite" | "replaceLines" | "replacePattern" | "jsonPath" | "insertAt" | "append";
+  backupPath?: string;
+  replacementCount?: number;
+}

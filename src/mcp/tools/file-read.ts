@@ -308,7 +308,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
         returnedLines: sliced.length,
         truncated: true,
         truncatedAt: maxBytes,
-      }, totalBytes);
+      }, slicedBytes); // Compare against sliced range, not full file
     }
 
     return withRawTokenBaseline({
@@ -318,7 +318,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
       totalLines,
       returnedLines: sliced.length,
       truncated: false,
-    }, totalBytes);
+    }, slicedBytes); // Compare against sliced range, not full file
   }
 
   // === Default: full file read with maxBytes truncation ===

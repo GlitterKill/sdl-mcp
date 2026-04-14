@@ -61,12 +61,12 @@ describe("agentFeedback index lifecycle constants", () => {
       "nomic dimension should be 768",
     );
     assert.ok(
-      propsBlock.includes('property: "embeddingJinaCode"'),
-      "jinaCode property should be embeddingJinaCode",
+      propsBlock.includes('property: "embeddingJinaCodeVec"'),
+      "jinaCode property should be embeddingJinaCodeVec",
     );
     assert.ok(
-      propsBlock.includes('property: "embeddingNomic"'),
-      "nomic property should be embeddingNomic",
+      propsBlock.includes('property: "embeddingNomicVec"'),
+      "nomic property should be embeddingNomicVec",
     );
   });
 });

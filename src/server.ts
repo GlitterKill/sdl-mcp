@@ -35,10 +35,7 @@ import {
   type ToolPresentation,
 } from "./mcp/tool-presentation.js";
 import { getPackageVersion } from "./util/package-info.js";
-import {
-  projectBroadContextResult,
-  isBroadContextResult,
-} from "./mcp/context-response-projection.js";
+import { projectBroadContextResult } from "./mcp/context-response-projection.js";
 
 export interface ToolContext {
   progressToken?: string | number;
@@ -390,10 +387,9 @@ export class MCPServer {
               symbolId,
             });
             const footerLines: string[] = [];
-            if (capturedUsage && capturedUsage.rawEquivalent > 0) {
-              footerLines.push(
-                `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens (SDL/raw-equiv) ${capturedUsage.meter}`,
-              );
+            if (capturedUsage && capturedUsage.sdlTokens < capturedUsage.rawEquivalent) {
+              const meterLine = `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens (SDL/raw-equiv) ${capturedUsage.meter}`;
+              footerLines.push(meterLine);
             }
             if (capturedSummary) {
               footerLines.push(capturedSummary);
@@ -412,16 +408,9 @@ export class MCPServer {
             ];
 
             // Append per-call token savings meter (visible in tool response)
-            // Skip for compacted broad context — meter is already in _displayFooter
-            const wasCompacted = isBroadContextResult(
-              request.params.name,
-              result,
-            );
-            if (
-              capturedUsage &&
-              capturedUsage.rawEquivalent > 0 &&
-              !wasCompacted
-            ) {
+            // Always append as content block - not all MCP clients (e.g. Claude Code CLI)
+            // render the _displayFooter property, so this ensures visibility everywhere.
+            if (capturedUsage && capturedUsage.sdlTokens < capturedUsage.rawEquivalent) {
               contentBlocks.push({
                 type: "text",
                 text: `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens (SDL/raw-equiv) ${capturedUsage.meter}`,
@@ -436,7 +425,11 @@ export class MCPServer {
               });
             }
 
-            return { content: contentBlocks };
+            // Add _displayFooter at response level for Claude Code CLI visibility
+            const responseLevelDisplayFooter = footerLines.length > 0 ? footerLines.join('\n\n') : undefined;
+            return responseLevelDisplayFooter 
+              ? { content: contentBlocks, _displayFooter: responseLevelDisplayFooter }
+              : { content: contentBlocks };
           } catch (error) {
             process.stderr.write(
               `[sdl-mcp] Tool ${request.params.name} error: ${error}\n`,

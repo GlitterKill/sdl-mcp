@@ -50,6 +50,7 @@ const ACTION_TAGS: Record<string, ActionTag[]> = {
   "memory.surface": ["memory"],
   "usage.stats": ["query"],
   "file.read": ["repo"],
+  "file.write": ["repo"],
   "scip.ingest": ["repo"],
 };
 
@@ -322,6 +323,7 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "memory.surface": { taskText: "fix auth bug", limit: 5 },
   "usage.stats": { scope: "both", since: "2026-03-01T00:00:00Z" },
   "file.read": { filePath: "config/sdlmcp.config.example.json" },
+  "file.write": { filePath: "config/app.yaml", jsonPath: "server.port", jsonValue: 8080 },
 };
 
 // --- ActionDescriptor ---
@@ -395,6 +397,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "memory.surface": "Auto-surface relevant memories",
   "usage.stats": "Get cumulative token savings statistics",
   "file.read": "Read non-indexed file content (templates, configs, docs)",
+  "file.write": "Write to non-indexed files with targeted modes (line replace, pattern replace, JSON path, insert, append)",
   "scip.ingest": "Ingest a pre-built SCIP index to overlay compiler-grade cross-references onto the symbol graph",
 };
 
@@ -627,6 +630,11 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
   "file.read": {
     prerequisites: ["repo.status"],
     recommendedNextActions: ["repo.overview"],
+    fallbacks: ["runtime.execute"],
+  },
+  "file.write": {
+    prerequisites: ["repo.status", "file.read"],
+    recommendedNextActions: [],
     fallbacks: ["runtime.execute"],
   },
   context: {

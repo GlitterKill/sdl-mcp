@@ -15,6 +15,7 @@ import { activateCliConfigPath } from "../../config/configPath.js";
 import { findExistingProcess, type PidfileData } from "../../util/pidfile.js";
 import { connectSSE, type SSEEvent } from "../../util/sse-client.js";
 import type { AutoIngestProgressEvent } from "../../scip/ingestion.js";
+import { printBanner } from "../../util/banner.js";
 
 // ---------------------------------------------------------------------------
 // Progress renderer
@@ -31,12 +32,19 @@ interface ProgressState {
   currentStage: string | null;
   /** Last line written, used to dedupe identical updates from high-frequency callbacks. */
   lastLine: string;
+  /** Last file line written (shown below the progress bar). */
+  lastFileLine: string;
   /** Last percentage printed in non-TTY mode (throttles to ~10% increments). */
   lastPrintedPct: number;
 }
 
 function createProgressState(): ProgressState {
-  return { currentStage: null, lastLine: "", lastPrintedPct: -1 };
+  return {
+    currentStage: null,
+    lastLine: "",
+    lastFileLine: "",
+    lastPrintedPct: -1,
+  };
 }
 
 function isTty(): boolean {
@@ -84,30 +92,55 @@ function writeProgressLine(
   stageKey: string,
   line: string,
   pct: number | null,
+  fileLine?: string,
 ): void {
   // Stage transition — finalize the previous line so the new stage starts
   // on a fresh line and scrollback shows all stages.
   if (state.currentStage !== null && state.currentStage !== stageKey) {
     if (isTty()) {
+      // Clear file line if present, then move to new line
+      if (state.lastFileLine) {
+        process.stdout.write("\n"); // Move past file line
+      }
       process.stdout.write("\n");
     }
     state.lastLine = "";
+    state.lastFileLine = "";
     state.lastPrintedPct = -1;
   }
   state.currentStage = stageKey;
 
-  if (line === state.lastLine) return;
+  const sameContent =
+    line === state.lastLine && (fileLine ?? "") === state.lastFileLine;
+  if (sameContent) return;
 
   if (isTty()) {
+    // If we previously had a file line, move up one line first
+    if (state.lastFileLine) {
+      process.stdout.write("\x1b[1A"); // Move cursor up one line
+    }
     // \r returns to line start; \x1b[K clears from cursor to end of line.
     process.stdout.write(`\r${line}\x1b[K`);
     state.lastLine = line;
+    // Write file line below if provided
+    if (fileLine) {
+      process.stdout.write(`\n    ${fileLine}\x1b[K`);
+      state.lastFileLine = fileLine;
+    } else if (state.lastFileLine) {
+      // Clear old file line if we no longer have one
+      process.stdout.write("\n\x1b[K\x1b[1A");
+      state.lastFileLine = "";
+    }
   } else {
     // Non-TTY: throttle to ~10% boundaries so CI logs don't drown in ticks.
     // Pass pct=null for "always print" lines (stage headers, spinners).
     if (pct === null || pct === 100 || pct - state.lastPrintedPct >= 10) {
       console.log(line);
+      if (fileLine) {
+        console.log(`    ${fileLine}`);
+      }
       state.lastLine = line;
+      state.lastFileLine = fileLine ?? "";
       state.lastPrintedPct = pct ?? -1;
     }
   }
@@ -116,10 +149,17 @@ function writeProgressLine(
 /** Finalize any in-flight progress line with a newline so output that follows starts cleanly. */
 function finishProgress(state: ProgressState): void {
   if (state.currentStage !== null && isTty()) {
-    process.stdout.write("\n");
+    // If we have a file line displayed, we're already on that line, so one \n is enough
+    // Otherwise we need to move past the progress line
+    if (state.lastFileLine) {
+      process.stdout.write("\n");
+    } else {
+      process.stdout.write("\n");
+    }
   }
   state.currentStage = null;
   state.lastLine = "";
+  state.lastFileLine = "";
   state.lastPrintedPct = -1;
 }
 
@@ -135,6 +175,10 @@ function renderIndexProgress(state: ProgressState, p: IndexProgress): void {
 
   if (p.stage === "scanning") {
     line = `  ${label}...`;
+  } else if (p.stage === "parsing") {
+    // parsing fires only once with current=0 before pass1 begins; show file
+    // count without a progress bar to avoid the misleading 0% that never updates.
+    line = `  Parsing ${p.total} files:`;
   } else if (p.stage === "finalizing") {
     // finalizing fires only once; show it as a static indicator while the
     // silent internal phases (finalizeEdges, metrics, fileSummaries) run.
@@ -142,13 +186,12 @@ function renderIndexProgress(state: ProgressState, p: IndexProgress): void {
   } else if (p.total > 0) {
     pct = Math.min(100, Math.floor((p.current / p.total) * 100));
     const bar = buildBar(pct);
-    const file = p.currentFile ? ` ${p.currentFile}` : "";
-    line = `  ${label}: ${bar} ${String(pct).padStart(3)}% (${p.current}/${p.total})${file}`;
+    line = `  ${label}: ${bar} ${String(pct).padStart(3)}% (${p.current}/${p.total})`;
   } else {
     line = `  ${label}...`;
   }
 
-  writeProgressLine(state, p.stage, line, pct);
+  writeProgressLine(state, p.stage, line, pct, p.currentFile);
 }
 
 /**
@@ -292,6 +335,8 @@ async function delegateIndexToServer(
 }
 
 export async function indexCommand(options: IndexOptions): Promise<void> {
+  printBanner();
+
   const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
 

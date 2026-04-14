@@ -66,7 +66,7 @@ describe("sdl.file.read token usage metadata", () => {
     }
   });
 
-  it("attaches full-file raw token baseline for targeted reads", async () => {
+  it("attaches sliced-range raw token baseline for targeted reads", async () => {
     const response = await handleFileRead({
       repoId,
       filePath: "docs/guide.md",
@@ -77,8 +77,9 @@ describe("sdl.file.read token usage metadata", () => {
     assert.equal(response.content, "3: alpha line");
     assert.equal(response.returnedLines, 1);
     assert.equal(response.truncated, false);
+    // Raw tokens now based on sliced content, not full file
     assert.deepEqual(response._rawContext, {
-      rawTokens: Math.ceil(Buffer.byteLength(fileContent, "utf-8") / 4),
+      rawTokens: Math.ceil(Buffer.byteLength("3: alpha line", "utf-8") / 4),
     });
   });
 });
