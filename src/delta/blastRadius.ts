@@ -26,6 +26,46 @@ import {
   FAN_IN_AMPLIFIER_THRESHOLD,
 } from "../config/constants.js";
 
+// --- Blast Radius Cache ---
+// Cache blast radius results for repeated queries (e.g., during PR review iterations)
+interface BlastRadiusCacheEntry {
+  result: BlastRadiusItem[];
+  timestamp: number;
+}
+
+const blastRadiusCache = new Map<string, BlastRadiusCacheEntry>();
+const BLAST_RADIUS_CACHE_TTL_MS = 60_000; // 1 minute TTL
+const BLAST_RADIUS_CACHE_MAX_ENTRIES = 50;
+
+function computeBlastRadiusCacheKey(
+  repoId: RepoId,
+  changedSymbols: SymbolId[],
+  options: BlastRadiusOptions,
+): string {
+  const sortedSymbols = [...changedSymbols].sort().join(",");
+  const optionsKey = `${options.maxHops ?? 3}-${options.maxResults ?? 20}-${options.fromVersionId ?? ""}-${options.toVersionId ?? ""}`;
+  return crypto.createHash("sha256").update(`${repoId}:${sortedSymbols}:${optionsKey}`).digest("hex").slice(0, 16);
+}
+
+function getCachedBlastRadius(key: string): BlastRadiusItem[] | null {
+  const entry = blastRadiusCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > BLAST_RADIUS_CACHE_TTL_MS) {
+    blastRadiusCache.delete(key);
+    return null;
+  }
+  return entry.result;
+}
+
+function setCachedBlastRadius(key: string, result: BlastRadiusItem[]): void {
+  // Evict oldest entries if cache is full
+  if (blastRadiusCache.size >= BLAST_RADIUS_CACHE_MAX_ENTRIES) {
+    const oldestKey = blastRadiusCache.keys().next().value;
+    if (oldestKey) blastRadiusCache.delete(oldestKey);
+  }
+  blastRadiusCache.set(key, { result, timestamp: Date.now() });
+}
+
 export interface BlastRadiusOptions {
   maxHops?: number;
   maxResults?: number;
@@ -168,6 +208,7 @@ export async function computeBlastRadius(
   changedSymbols: SymbolId[],
   options?: BlastRadiusOptions,
 ): Promise<BlastRadiusItem[]> {
+  const startTime = Date.now();
   let maxHops = options?.maxHops ?? 3;
   const maxResults = options?.maxResults ?? 20;
   const repoId = options?.repoId;
@@ -184,6 +225,26 @@ export async function computeBlastRadius(
   if (changedSymbols.length === 0) {
     return [];
   }
+
+  // Check cache first
+  const cacheKey = computeBlastRadiusCacheKey(repoId, changedSymbols, options ?? {});
+  const cached = getCachedBlastRadius(cacheKey);
+  if (cached) {
+    logger.debug("Blast radius cache hit", {
+      repoId,
+      changedSymbols: changedSymbols.length,
+      resultCount: cached.length,
+      durationMs: Date.now() - startTime,
+    });
+    return cached;
+  }
+
+  logger.debug("Computing blast radius", {
+    repoId,
+    changedSymbols: changedSymbols.length,
+    maxHops,
+    maxResults,
+  });
 
   assertSafeInt(maxHops, "maxHops");
   assertSafeInt(maxResults, "maxResults");
@@ -391,6 +452,26 @@ export async function computeBlastRadius(
       ranked,
       Math.max(2, Math.min(maxHops, 6)),
     );
+  }
+
+  // Cache and log timing before returning
+  setCachedBlastRadius(cacheKey, ranked);
+  const durationMs = Date.now() - startTime;
+  if (durationMs > 5000) {
+    logger.warn("Slow blast radius computation", {
+      repoId,
+      changedSymbols: changedSymbols.length,
+      resultCount: ranked.length,
+      durationMs,
+      hint: "Consider using preview mode or skipBlastRadius for large deltas",
+    });
+  } else {
+    logger.debug("Blast radius computed", {
+      repoId,
+      changedSymbols: changedSymbols.length,
+      resultCount: ranked.length,
+      durationMs,
+    });
   }
 
   return ranked;

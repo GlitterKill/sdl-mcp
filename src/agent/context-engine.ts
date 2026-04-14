@@ -156,6 +156,7 @@ export class ContextEngine {
           taskType: task.taskType,
           actionsTaken: actions,
           path,
+          contextModeHint: "precise: Returns focused evidence with minimal metadata. Use for targeted lookups when you know what you're looking for.",
           finalEvidence: evidence,
           summary: this.generateSummary(task, actions, evidence, success, {
             clusterExpandedCount,
@@ -170,6 +171,7 @@ export class ContextEngine {
         taskType: task.taskType,
         actionsTaken: actions,
         path,
+        contextModeHint: "broad: Expands context via cluster relationships and graph edges. Returns answer, nextBestAction, and retrievalEvidence. Use for exploratory tasks.",
         finalEvidence: evidence,
         summary: this.generateSummary(task, actions, evidence, success, {
           clusterExpandedCount,

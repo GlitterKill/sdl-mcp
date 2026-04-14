@@ -271,6 +271,17 @@ export interface SliceTruncation {
   truncated: boolean;
   droppedCards: number;
   droppedEdges: number;
+  /** Human-readable explanation of why truncation occurred */
+  reason?: string;
+  /** Budget consumption details */
+  budgetUsed?: {
+    cards: number;
+    maxCards: number;
+    estimatedTokens: number;
+    maxTokens: number;
+  };
+  /** Actionable suggestion for retrieving more context */
+  suggestion?: string;
   howToResume: {
     type: "cursor" | "token";
     value: string | number;

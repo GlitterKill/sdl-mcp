@@ -99,9 +99,25 @@ export function registerActionSearchTool(
         };
       }
 
+      // Compute disabled action hints
+      const disabledActions = ranked.filter(a => a.disabled);
+      const disabledHint = disabledActions.length > 0
+        ? {
+            count: disabledActions.length,
+            message: `${disabledActions.length} action(s) are disabled. Enable them by updating your sdlmcp.config.json.`,
+            actions: disabledActions.map(a => ({
+              action: a.action,
+              reason: a.disabledReason ?? "Unknown",
+            })),
+          }
+        : undefined;
+
       return {
         actions: ranked,
         total: allRanked.length,
+        disabledHint,
+        // Hint when schemas not included
+        ...(!effectiveIncludeSchemas ? { schemaHint: "Tip: Add includeSchemas: true to see parameter types and enum values." } : {}),
         hasMore: allRanked.length > offset + args.limit,
         tokenEstimate: estimateTokens(JSON.stringify(ranked)),
         ...(autoEnabled ? { autoEnabled } : {}),

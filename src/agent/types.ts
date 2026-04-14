@@ -81,6 +81,8 @@ export interface ContextResult {
   taskType: TaskType;
   actionsTaken: Action[];
   path: RungPath;
+  /** Explains how contextMode (precise/broad) affected the results. */
+  contextModeHint?: string;
   finalEvidence: Evidence[];
   summary: string;
   success: boolean;

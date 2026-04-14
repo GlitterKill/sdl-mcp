@@ -418,6 +418,7 @@ export async function handleSymbolSearch(
   // FP2: Add relevance scoring and filter out spurious matches
   const scoredResults = results.map((r, idx) => ({
     ...r,
+    shortId: r.symbolId.slice(0, 16),
     relevance:
       Math.round(
         Math.min(

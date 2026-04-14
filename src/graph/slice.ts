@@ -404,10 +404,28 @@ export async function buildSlice(
       score: item.score,
       why: item.why,
     }));
+    // Determine the reason for truncation
+    const hitCardLimit = cards.length >= budget.maxCards;
+    const hitTokenLimit = estimatedTokens >= budget.maxEstimatedTokens;
+    const reasons: string[] = [];
+    if (hitCardLimit) reasons.push(`card limit (${budget.maxCards})`);
+    if (hitTokenLimit) reasons.push(`token limit (~${budget.maxEstimatedTokens})`);
+    if (reasons.length === 0) reasons.push("score threshold");
+
     slice.truncation = {
       truncated: true,
       droppedCards: droppedCandidates,
       droppedEdges: Math.max(0, droppedCandidates),
+      reason: `Slice truncated due to ${reasons.join(" and ")}.`,
+      budgetUsed: {
+        cards: cards.length,
+        maxCards: budget.maxCards,
+        estimatedTokens,
+        maxTokens: budget.maxEstimatedTokens,
+      },
+      suggestion: droppedCandidates > 0
+        ? `Use slice.spillover.get with the spilloverHandle to retrieve ${Math.min(droppedCandidates, 20)} more symbols, or increase budget.maxCards/budget.maxEstimatedTokens.`
+        : "Use slice.refresh to get incremental updates.",
       howToResume: {
         type: "token",
         value: estimatedTokens,

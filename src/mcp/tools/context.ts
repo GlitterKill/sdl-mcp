@@ -76,6 +76,7 @@ function buildStableAgentContextValue(
     taskType: response.taskType,
     actionsTaken,
     path: response.path,
+    contextModeHint: response.contextModeHint,
     finalEvidence,
     summary: response.summary,
     success: response.success,

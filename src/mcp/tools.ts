@@ -819,6 +819,8 @@ export const BufferStatusResponseSchema = z.object({
 
 const SymbolSearchResultSchema = z.object({
   symbolId: z.string(),
+  /** First 16 chars of symbolId for easier reference in workflows */
+  shortId: z.string().length(16).optional(),
   name: z.string(),
   file: z.string(),
   kind: z.enum([
@@ -1260,6 +1262,7 @@ export const CodeNeedWindowRequestSchema = z.object({
       budget: SliceBudgetSchema.optional(),
     })
     .optional(),
+  cursor: z.number().int().min(0).optional().describe("Resume from this line number (for continuation after truncation)"),
 });
 
 const CodeWindowResponseApprovedSchema = z.object({
@@ -1284,6 +1287,14 @@ const CodeWindowResponseApprovedSchema = z.object({
           parameter: z.string().optional(),
         })
         .nullable(),
+      suggestedNextCall: z
+        .object({
+          tool: z.string(),
+          description: z.string(),
+          args: z.record(z.string(), z.unknown()),
+        })
+        .optional()
+        .describe("Copy these args to continue reading"),
     })
     .optional(),
   matchedIdentifiers: z.array(z.string()).optional(),
@@ -1828,6 +1839,12 @@ const AgentContextPayloadSchema = z.object({
       reasoning: z.string(),
     })
     .describe("Rung path selected for execution"),
+  contextModeHint: z
+    .string()
+    .optional()
+    .describe(
+      "Explanation of how contextMode (precise/broad) affected the results",
+    ),
   finalEvidence: z
     .array(
       z.object({

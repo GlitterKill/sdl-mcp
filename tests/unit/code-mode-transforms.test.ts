@@ -38,12 +38,17 @@ describe("code-mode transforms", () => {
       assert.deepStrictEqual(result, { value: 42 });
     });
 
-    it("returns undefined for missing paths", () => {
+    it("returns undefined for missing paths and includes warning metadata", () => {
       const result = executeTransform("dataPick", {
         input: { a: 1 },
         fields: { missing: "b.c" },
       });
-      assert.deepStrictEqual(result, { missing: undefined });
+      assert.deepStrictEqual(result, {
+        missing: undefined,
+        _warning:
+          'Some fields could not be resolved: missing (from "b.c"). Check that source field names match the actual data structure.',
+        _unmappedFields: ['missing (from "b.c")'],
+      });
     });
 
     it("wraps scalar input under 'value' key", () => {

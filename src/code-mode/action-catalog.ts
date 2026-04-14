@@ -852,12 +852,63 @@ export function invalidateCatalog(): void {
  * Ranks catalog entries against a query string using deterministic lexical matching.
  * Scores based on: exact name match > prefix match > substring in name > substring in description > tag match.
  */
+
+/** Synonym expansion for action search - maps user terms to SDL action-related terms */
+const ACTION_SEARCH_SYNONYMS: Record<string, string[]> = {
+  // Test-related - match terms in catalog descriptions like "metadata, deps, metrics"
+  test: ["metrics", "symbol", "canonical"],
+  tests: ["metrics", "symbol"],
+  testing: ["metrics", "symbol"],
+  coverage: ["metrics", "symbol", "card"],
+  
+  // Code quality
+  quality: ["metrics", "churn", "fanin", "fanout"],
+  complexity: ["metrics", "fanin", "fanout"],
+  
+  // Navigation
+  find: ["search", "symbol"],
+  lookup: ["search", "getcard", "symbol"],
+  locate: ["search", "symbol"],
+  
+  // Dependencies - match catalog terms like "dependency graph slice"
+  deps: ["slice", "dependency", "graph"],
+  dependencies: ["slice", "dependency", "graph"],
+  imports: ["slice", "dependency"],
+  callers: ["fanin", "slice"],
+  callees: ["fanout", "slice", "calls"],
+  
+  // Changes
+  changes: ["delta", "churn", "pr"],
+  diff: ["delta", "pr"],
+  history: ["delta", "churn"],
+  
+  // Risk
+  risk: ["pr", "blast", "delta"],
+  impact: ["blast", "pr", "fanin"],
+  
+  // Reading code
+  read: ["skeleton", "hotpath", "window", "code"],
+  view: ["skeleton", "hotpath", "window", "code"],
+  show: ["skeleton", "hotpath", "window", "code"],
+  
+  // Running
+  run: ["runtime", "execute"],
+  exec: ["runtime", "execute"],
+  execute: ["runtime"],
+};
+
 export function rankCatalog(
   catalog: ActionDescriptor[],
   query: string,
 ): ActionDescriptor[] {
   const q = query.toLowerCase();
-  const terms = q.split(/\s+/).filter(Boolean);
+  const rawTerms = q.split(/\s+/).filter(Boolean);
+  
+  // Expand synonyms: add related terms for better matching
+  const terms = rawTerms.flatMap((term) => {
+    const synonyms = ACTION_SEARCH_SYNONYMS[term];
+    return synonyms ? [term, ...synonyms] : [term];
+  });
 
   // Wildcard or empty query returns all actions sorted alphabetically
   if (terms.length === 0 || (terms.length === 1 && terms[0] === "*")) {

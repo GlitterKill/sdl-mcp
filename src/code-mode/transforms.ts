@@ -204,9 +204,22 @@ function execDataPick(args: unknown): unknown {
   }
 
   const result: Record<string, unknown> = {};
+  const unmappedFields: string[] = [];
+
   for (const [outputKey, sourcePath] of Object.entries(fields)) {
-    result[outputKey] = navigatePath(input, sourcePath);
+    const value = navigatePath(input, sourcePath);
+    result[outputKey] = value;
+    if (value === undefined) {
+      unmappedFields.push(`${outputKey} (from "${sourcePath}")`);
+    }
   }
+
+  // Include warning if some fields couldn't be resolved
+  if (unmappedFields.length > 0) {
+    result._warning = `Some fields could not be resolved: ${unmappedFields.join(", ")}. Check that source field names match the actual data structure.`;
+    result._unmappedFields = unmappedFields;
+  }
+
   return result;
 }
 
@@ -214,13 +227,32 @@ function execDataMap(args: unknown): unknown {
   const parsed = DataMapSchema.parse(args);
   const { input, fields } = parsed;
 
-  return input.map((item) => {
+  // Track fields that couldn't be resolved (returned undefined)
+  const unmappedFields = new Set<string>();
+
+  const mapped = input.map((item, index) => {
     const result: Record<string, unknown> = {};
     for (const [outputKey, sourcePath] of Object.entries(fields)) {
-      result[outputKey] = navigatePath(item, sourcePath);
+      const value = navigatePath(item, sourcePath);
+      result[outputKey] = value;
+      // Track if field was not found (undefined) on first item only to avoid noise
+      if (index === 0 && value === undefined) {
+        unmappedFields.add(`${outputKey} (from "${sourcePath}")`);
+      }
     }
     return result;
   });
+
+  // Return with warning metadata if some fields couldn't be resolved
+  if (unmappedFields.size > 0) {
+    return {
+      _warning: `Some fields could not be resolved: ${Array.from(unmappedFields).join(", ")}. Check that source field names match the actual data structure.`,
+      _unmappedFields: Array.from(unmappedFields),
+      items: mapped,
+    };
+  }
+
+  return mapped;
 }
 
 function matchesClause(

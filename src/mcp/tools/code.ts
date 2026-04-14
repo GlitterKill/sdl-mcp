@@ -530,6 +530,15 @@ export async function handleCodeNeedWindow(
     // maxLines of symbol), shift the range to center on identifier locations.
     let effectiveRange = symbolRange;
     let effectiveGranularity = granularity;
+
+    // Handle cursor-based continuation (from truncation recovery)
+    if (request.cursor !== undefined && request.cursor > symbolRange.startLine) {
+      effectiveRange = {
+        ...symbolRange,
+        startLine: request.cursor,
+      };
+      effectiveGranularity = "fileWindow";
+    }
     if (
       request.identifiersToFind.length > 0 &&
       granularity === "symbol" &&
@@ -671,13 +680,14 @@ export async function handleCodeNeedWindow(
           },
           suggestedNextCall: {
             tool: "sdl.code.needWindow",
-            description: "Re-request this symbol with adjusted identifiers. See howToResume.value for the continuation start line.",
+            description: "Continue reading from the truncation point. All original params preserved; just copy this args block.",
             args: {
               repoId: request.repoId,
               symbolId: request.symbolId,
               reason: request.reason,
               expectedLines: request.expectedLines,
               identifiersToFind: request.identifiersToFind,
+              cursor: windowResult.actualRange.endLine,
             },
           },
         }
