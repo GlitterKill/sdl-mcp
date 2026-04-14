@@ -8,56 +8,73 @@ function readSource(path: string): string {
 }
 
 describe("semantic pipeline regressions", () => {
-  it("checks embedding cache before invoking provider embed", () => {
+  it("checks embedding cache before invoking provider embed (batched)", () => {
     const source = readSource("src/indexer/embeddings.ts");
     const fnStart = source.indexOf("export async function refreshSymbolEmbeddings(");
-    // refreshSymbolEmbeddings is now the last exported function;
-    // use EOF as the end boundary
-    const fnEnd = source.length;
+    const nextFnStart = source.indexOf("\nexport ", fnStart + 1);
+    const fnEnd = nextFnStart !== -1 ? nextFnStart : source.length;
     assert.ok(fnStart !== -1);
 
     const fnBody = source.slice(fnStart, fnEnd);
-    const cardHashIdx = fnBody.indexOf(
-      "const cardHash = buildCardHash(symbol, prefixedText);",
-    );
-    const storageModelIdx = fnBody.indexOf("let storageModel =");
-    const existingIdx = fnBody.indexOf(
-      "const existing = await getSymbolEmbeddingFromNode(conn, symbol.symbolId, storageModel);",
-    );
-    const embedIdx = fnBody.indexOf("const [vector] = await provider.embed([prefixedText]);");
-    const existingAfterEmbedIdx = fnBody.indexOf(
-      "const existingAfterEmbed = await getSymbolEmbeddingFromNode(conn, symbol.symbolId, storageModel);",
+
+    // Phase 4: Batched refresh patterns
+    // 1. storageModel pinned once at start (const, not let)
+    const storageModelIdx = fnBody.indexOf("const storageModel = provider.isMockFallback");
+    assert.ok(
+      storageModelIdx !== -1,
+      "refreshSymbolEmbeddings should pin storageModel once at start",
     );
 
+    // 2. Pre-pass batch load of existing embeddings
+    const prePassIdx = fnBody.indexOf("getSymbolEmbeddingsFromNodes");
     assert.ok(
-      cardHashIdx !== -1 &&
-        existingIdx !== -1 &&
-        storageModelIdx !== -1 &&
-        embedIdx !== -1 &&
-        existingAfterEmbedIdx !== -1,
-      "refreshSymbolEmbeddings should compute cardHash, derive storageModel, read cache, and re-check after embedding",
-    );
-    assert.ok(
-      storageModelIdx > cardHashIdx,
-      "refreshSymbolEmbeddings should derive storageModel after cardHash is computed",
-    );
-    assert.ok(
-      existingIdx > storageModelIdx && existingIdx < embedIdx,
-      "refreshSymbolEmbeddings should read cached embedding after deriving storageModel and before embedding",
-    );
-    assert.ok(
-      existingAfterEmbedIdx > embedIdx,
-      "refreshSymbolEmbeddings should re-check storage after embedding in case the provider changed fallback status",
-    );
-    assert.ok(
-      embedIdx > existingIdx,
-      "refreshSymbolEmbeddings should only embed after cache comparison",
+      prePassIdx !== -1,
+      "refreshSymbolEmbeddings should use batch getSymbolEmbeddingsFromNodes",
     );
 
+    // 3. cardHash computed per symbol in uncached filter loop
+    const cardHashIdx = fnBody.indexOf("const cardHash = buildCardHash(symbol, prefixedText)");
+    assert.ok(
+      cardHashIdx !== -1,
+      "refreshSymbolEmbeddings should compute cardHash for each symbol",
+    );
+
+    // 4. Batch embed call
+    const batchEmbedIdx = fnBody.indexOf("await provider.embed(batchTexts)");
+    assert.ok(
+      batchEmbedIdx !== -1,
+      "refreshSymbolEmbeddings should batch embed calls",
+    );
+
+    // 5. Post-embed recheck for race avoidance
+    const postEmbedIdx = fnBody.indexOf("postEmbedExisting");
+    assert.ok(
+      postEmbedIdx !== -1,
+      "refreshSymbolEmbeddings should recheck cache after embed for race avoidance",
+    );
+
+    // Order checks: pre-pass before batch embed, batch embed before post-check
+    assert.ok(
+      prePassIdx < batchEmbedIdx,
+      "pre-pass cache load should occur before batch embed",
+    );
+    assert.ok(
+      batchEmbedIdx < postEmbedIdx,
+      "batch embed should occur before post-embed recheck",
+    );
+
+    // Cache hit skip pattern in uncached filter loop
     assert.match(
       fnBody,
-      /if\s*\(\s*existing\s*&&\s*existing\.cardHash === cardHash\s*\)\s*\{\s*skipped \+= 1;\s*continue;\s*\}/s,
-      "refreshSymbolEmbeddings should skip unchanged symbols before embedding work",
+      /if\s*\(\s*existing\s*&&\s*existing\.cardHash === cardHash\s*\)/s,
+      "refreshSymbolEmbeddings should skip cached symbols before batching",
+    );
+
+    // Batch size constant usage
+    assert.match(
+      fnBody,
+      /REFRESH_BATCH_SIZE/,
+      "refreshSymbolEmbeddings should use REFRESH_BATCH_SIZE constant",
     );
   });
 

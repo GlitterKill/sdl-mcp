@@ -1,10 +1,15 @@
 /**
  * Tests for symbol-embedding-text.ts - model-aware payload builders.
  * Phase 2: Jina structured payload with graph context.
+ * Phase 3: Broader model-aware payload split (Nomic builder + dispatcher).
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildJinaSymbolEmbeddingText } from "../../dist/indexer/symbol-embedding-text.js";
+import {
+  buildJinaSymbolEmbeddingText,
+  buildNomicSymbolEmbeddingText,
+  buildSymbolEmbeddingText,
+} from "../../dist/indexer/symbol-embedding-text.js";
 import type {
   PreparedSymbolEmbeddingInput,
   GraphLabel,
@@ -16,16 +21,16 @@ function makeInput(
 ): PreparedSymbolEmbeddingInput {
   return {
     symbol: {
-      id: "sym-test-001",
+      symbolId: "sym-test-001",
       repoId: "test-repo",
       fileId: "file-001",
       name: "testFunction",
       kind: "function",
       signatureJson: '{"text":"function testFunction(a: string): void"}',
-      startLine: 10,
-      endLine: 20,
-      startCol: 0,
-      endCol: 1,
+      rangeStartLine: 10,
+      rangeEndLine: 20,
+      rangeStartCol: 0,
+      rangeEndCol: 1,
       astFingerprint: "fp-abc123",
       exported: true,
       roleTagsJson: null,
@@ -476,6 +481,314 @@ describe("buildJinaSymbolEmbeddingText", () => {
       assert.ok(text.includes("Imports:"));
       assert.ok(text.includes("Calls:"));
       assert.ok(text.includes("Terms:"));
+    });
+  });
+});
+
+// Phase 3: Nomic builder tests
+describe("buildNomicSymbolEmbeddingText", () => {
+  describe("natural language format", () => {
+    it("produces prose-oriented output, not labeled sections", () => {
+      const input = makeInput({
+        signatureText: "function processData(input: string): Result",
+        relPath: "src/utils/processor.ts",
+        summaryFreshness: "fresh",
+        summaryText: "Processes input data and returns a result object.",
+      });
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      // Should use natural language phrasing, not "Label: value" format
+      assert.ok(!text.includes("Name:"), "should not use labeled Name format");
+      assert.ok(!text.includes("Kind:"), "should not use labeled Kind format");
+      // Should include the symbol identity in prose form
+      assert.ok(text.includes("testFunction"), "should include symbol name");
+      assert.ok(text.includes("function"), "should include symbol kind");
+    });
+
+    it("includes summary as natural prose", () => {
+      const input = makeInput({
+        summaryFreshness: "fresh",
+        summaryText: "Validates user input and returns parsed result.",
+      });
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      assert.ok(
+        text.includes("Validates user input and returns parsed result"),
+        "should include summary text",
+      );
+    });
+
+    it("phrases imports/calls as related code context", () => {
+      const input = makeInput({
+        imports: [
+          { label: "readFile", confidence: 1, resolved: true },
+          { label: "parseJSON", confidence: 1, resolved: true },
+        ],
+        calls: [
+          { label: "validate", confidence: 0.9, resolved: true },
+          { label: "transform", confidence: 0.85, resolved: true },
+        ],
+      });
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      // Should phrase as context, not raw list dump
+      assert.ok(
+        text.toLowerCase().includes("uses") ||
+          text.toLowerCase().includes("calls") ||
+          text.toLowerCase().includes("imports") ||
+          text.toLowerCase().includes("relies on") ||
+          text.toLowerCase().includes("related"),
+        "should phrase dependencies as context",
+      );
+    });
+  });
+
+  describe("content coverage", () => {
+    it("includes name and kind", () => {
+      const input = makeInput();
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      assert.ok(text.includes("testFunction"), "should include name");
+      assert.ok(text.includes("function"), "should include kind");
+    });
+
+    it("includes path context", () => {
+      const input = makeInput({ relPath: "src/core/engine.ts" });
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      assert.ok(
+        text.includes("src/core/engine.ts") ||
+          text.includes("core") ||
+          text.includes("engine"),
+        "should include path or domain context",
+      );
+    });
+
+    it("includes signature", () => {
+      const input = makeInput({
+        signatureText: "function compute(x: number): number",
+      });
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      assert.ok(
+        text.includes("compute") || text.includes("number"),
+        "should include signature elements",
+      );
+    });
+
+    it("includes role tags", () => {
+      const input = makeInput({
+        roleTags: ["controller", "api-handler"],
+      });
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      assert.ok(
+        text.includes("controller") || text.includes("api-handler"),
+        "should include role tags",
+      );
+    });
+
+    it("includes search terms", () => {
+      const input = makeInput({
+        searchTerms: ["parse", "json", "decode"],
+      });
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      assert.ok(
+        text.includes("parse") ||
+          text.includes("json") ||
+          text.includes("decode"),
+        "should include search terms",
+      );
+    });
+  });
+
+  describe("summary freshness handling", () => {
+    it("includes summary when fresh", () => {
+      const input = makeInput({
+        summaryFreshness: "fresh",
+        summaryText: "A fresh summary for this symbol.",
+      });
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      assert.ok(
+        text.includes("A fresh summary for this symbol"),
+        "should include fresh summary",
+      );
+    });
+
+    it("omits summary when stale", () => {
+      const input = makeInput({
+        summaryFreshness: "stale",
+        summaryText: null,
+      });
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      // Should still produce valid output without summary
+      assert.ok(text.includes("testFunction"), "should still include name");
+    });
+
+    it("omits summary when absent", () => {
+      const input = makeInput({
+        summaryFreshness: "absent",
+        summaryText: null,
+      });
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      assert.ok(text.includes("testFunction"), "should still include name");
+    });
+  });
+
+  describe("edge cases", () => {
+    it("handles minimal input", () => {
+      const input = makeInput({
+        signatureText: null,
+        relPath: null,
+        language: null,
+        roleTags: [],
+        searchTerms: [],
+        invariants: [],
+        sideEffects: [],
+        imports: [],
+        calls: [],
+        summaryFreshness: "absent",
+        summaryText: null,
+      });
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      assert.ok(text.includes("testFunction"), "should include name");
+      assert.ok(text.length > 0, "should produce non-empty output");
+    });
+
+    it("handles fully populated input", () => {
+      const input = makeInput({
+        signatureText: "async function process(data: Data): Promise<Result>",
+        relPath: "src/processors/main.ts",
+        language: "typescript",
+        roleTags: ["processor", "async"],
+        searchTerms: ["process", "transform"],
+        invariants: ["data must be valid"],
+        sideEffects: ["logs to console"],
+        imports: [{ label: "Logger", confidence: 1, resolved: true }],
+        calls: [{ label: "validate", confidence: 0.95, resolved: true }],
+        summaryFreshness: "fresh",
+        summaryText: "Main data processor.",
+      });
+      const text = buildNomicSymbolEmbeddingText(input);
+
+      assert.ok(text.length > 50, "should produce substantial output");
+    });
+  });
+});
+
+// Phase 3: Model-aware dispatcher tests
+describe("buildSymbolEmbeddingText", () => {
+  describe("model dispatch", () => {
+    it("uses Jina builder for jina-embeddings-v2-base-code", () => {
+      const input = makeInput({
+        signatureText: "function test(): void",
+        relPath: "src/test.ts",
+      });
+      const text = buildSymbolEmbeddingText(
+        "jina-embeddings-v2-base-code",
+        input,
+      );
+
+      // Jina format uses "Label: value" style
+      assert.ok(text.includes("Name:"), "should use Jina labeled format");
+      assert.ok(text.includes("Kind:"), "should use Jina labeled format");
+    });
+
+    it("uses Nomic builder for nomic-embed-text-v1.5", () => {
+      const input = makeInput({
+        signatureText: "function test(): void",
+        relPath: "src/test.ts",
+      });
+      const text = buildSymbolEmbeddingText("nomic-embed-text-v1.5", input);
+
+      // Nomic format does not use "Label:" style
+      assert.ok(!text.includes("Name:"), "should not use Jina labeled format");
+      assert.ok(!text.includes("Kind:"), "should not use Jina labeled format");
+      // But should still contain the symbol info
+      assert.ok(text.includes("testFunction"), "should include symbol name");
+    });
+
+    it("falls back to minimal for unknown models", () => {
+      const input = makeInput();
+      const text = buildSymbolEmbeddingText("unknown-model-xyz", input);
+
+      // Fallback should produce something with name and kind
+      assert.ok(text.includes("testFunction"), "fallback should include name");
+      assert.ok(text.includes("function"), "fallback should include kind");
+    });
+  });
+
+  describe("payload differences", () => {
+    it("produces different payloads for Jina vs Nomic with same input", () => {
+      const input = makeInput({
+        signatureText: "function process(x: number): string",
+        relPath: "src/processor.ts",
+        language: "typescript",
+        roleTags: ["utility"],
+        imports: [{ label: "helper", confidence: 1, resolved: true }],
+        calls: [{ label: "compute", confidence: 0.9, resolved: true }],
+        summaryFreshness: "fresh",
+        summaryText: "Processes numeric input.",
+      });
+
+      const jinaText = buildSymbolEmbeddingText(
+        "jina-embeddings-v2-base-code",
+        input,
+      );
+      const nomicText = buildSymbolEmbeddingText(
+        "nomic-embed-text-v1.5",
+        input,
+      );
+
+      // They should be different
+      assert.notEqual(jinaText, nomicText, "payloads should differ by model");
+
+      // Both should contain the essential info
+      assert.ok(jinaText.includes("testFunction"), "Jina should include name");
+      assert.ok(
+        nomicText.includes("testFunction"),
+        "Nomic should include name",
+      );
+
+      // Jina should be more structured
+      assert.ok(jinaText.includes("Name:"), "Jina should use labeled sections");
+      assert.ok(
+        !nomicText.includes("Name:"),
+        "Nomic should not use labeled sections",
+      );
+    });
+
+    it("preserves content semantics across models", () => {
+      const input = makeInput({
+        signatureText: "function validate(data: Input): boolean",
+        roleTags: ["validator"],
+        summaryFreshness: "fresh",
+        summaryText: "Validates input data structure.",
+      });
+
+      const jinaText = buildSymbolEmbeddingText(
+        "jina-embeddings-v2-base-code",
+        input,
+      );
+      const nomicText = buildSymbolEmbeddingText(
+        "nomic-embed-text-v1.5",
+        input,
+      );
+
+      // Both should contain the key semantic content
+      assert.ok(
+        jinaText.includes("validate") || jinaText.includes("Validates"),
+      );
+      assert.ok(
+        nomicText.includes("validate") || nomicText.includes("Validates"),
+      );
+      assert.ok(jinaText.includes("validator"));
+      assert.ok(nomicText.includes("validator"));
     });
   });
 });
