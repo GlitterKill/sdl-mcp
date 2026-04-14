@@ -69,7 +69,7 @@ export function parseInitOptions(
         throw new Error("--repo-path requires a value");
       }
       const repoPath = args[++i];
-      if (repoPath.includes("..") || repoPath.includes("~")) {
+      if (repoPath.includes("..") || repoPath.startsWith("~")) {
         throw new Error("--repo-path cannot contain path traversal sequences");
       }
       options.repoPath = repoPath;
@@ -102,7 +102,7 @@ export function parseInitOptions(
         ? values.repoPath
         : undefined;
   if (repoPathValue) {
-    if (repoPathValue.includes("..") || repoPathValue.includes("~")) {
+    if (repoPathValue.includes("..") || repoPathValue.startsWith("~")) {
       throw new Error("--repo-path cannot contain path traversal sequences");
     }
     options.repoPath = repoPathValue;
