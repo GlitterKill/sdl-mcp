@@ -9,6 +9,8 @@ import { normalizePath, validatePathWithinRoot } from "../../util/paths.js";
 import { logger } from "../../util/logger.js";
 import { NotFoundError, ValidationError } from "../../domain/errors.js";
 import { attachRawContext } from "../token-usage.js";
+import { SDL_SOURCE_EXTENSIONS } from "./file-read.js";
+import { patchSavedFile } from "../../live-index/file-patcher.js";
 
 const MAX_FILE_SIZE_BYTES = 512 * 1024;
 const REPLACE_TIME_BUDGET_MS = 500; // 512KB
@@ -300,6 +302,40 @@ export async function handleFileWrite(
     `file.write completed: ${filePath} (${mode}, ${bytesWritten} bytes)`,
   );
 
+  // Live-index sync: if the file is indexed source, push the new content
+  // through patchSavedFile so the symbol graph reflects the write before we
+  // return. Failures are logged but do not fail the write (file is already on
+  // disk and chokidar/index.refresh can still reconcile later).
+  let indexUpdate: FileWriteResponse["indexUpdate"] | undefined;
+  const dotIdx = filePath.lastIndexOf(".");
+  const fileExt = dotIdx >= 0 ? filePath.slice(dotIdx).toLowerCase() : "";
+  if (SDL_SOURCE_EXTENSIONS.has(fileExt)) {
+    try {
+      const patchResult = await patchSavedFile({
+        repoId: request.repoId,
+        filePath,
+        content: newContent,
+      });
+      const symbolsMatched = patchResult.symbolsUpserted - patchResult.symbolsAdded;
+      indexUpdate = {
+        applied: true,
+        symbolsMatched,
+        symbolsAdded: patchResult.symbolsAdded,
+        symbolsRemoved: patchResult.symbolsRemoved,
+        edgesUpserted: patchResult.edgesUpserted,
+      };
+      logger.debug(
+        `file.write indexed ${filePath}: +${patchResult.symbolsAdded} -${patchResult.symbolsRemoved} ~${symbolsMatched} symbols`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        `file.write live-index sync failed for ${filePath}: ${message}`,
+      );
+      indexUpdate = { applied: false, error: message };
+    }
+  }
+
   // For targeted writes, raw equivalent is the full file content that would need to be sent
   // For full writes, raw equivalent is the same as what we wrote
   const rawBytes =
@@ -316,6 +352,7 @@ export async function handleFileWrite(
       backupPath: normalizePath(relative(rootPath, backupPath)),
     }),
     ...(replacementCount !== undefined && { replacementCount }),
+    ...(indexUpdate !== undefined && { indexUpdate }),
   };
 
   return withRawTokenBaseline(response, rawBytes);

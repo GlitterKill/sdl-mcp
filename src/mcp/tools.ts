@@ -2423,4 +2423,14 @@ export interface FileWriteResponse {
   mode: "create" | "overwrite" | "replaceLines" | "replacePattern" | "jsonPath" | "insertAt" | "append";
   backupPath?: string;
   replacementCount?: number;
+  /** Live-index sync result when writing an indexed source file. */
+  indexUpdate?: {
+    applied: boolean;
+    /** Symbols that existed before and were updated in place. */
+    symbolsMatched?: number;
+    symbolsAdded?: number;
+    symbolsRemoved?: number;
+    edgesUpserted?: number;
+    error?: string;
+  };
 }

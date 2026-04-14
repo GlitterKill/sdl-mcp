@@ -9,7 +9,7 @@ import { logger } from "../../util/logger.js";
 import { NotFoundError, ValidationError } from "../../domain/errors.js";
 import { attachRawContext } from "../token-usage.js";
 
-const SDL_SOURCE_EXTENSIONS = new Set([
+export const SDL_SOURCE_EXTENSIONS = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
   ".py", ".pyw", ".go", ".java", ".cs",
   ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx",
