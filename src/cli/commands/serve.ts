@@ -40,6 +40,8 @@ import { configureToolDispatchLimiter } from "../../mcp/dispatch-limiter.js";
 import { SessionManager } from "../../mcp/session-manager.js";
 import { tokenAccumulator } from "../../mcp/token-accumulator.js";
 import { ensureConfiguredReposRegistered } from "../../startup/bootstrap.js";
+import { detectCpuProfile } from "../../util/cpu-detect.js";
+import { getTierPresets } from "../../util/cpu-presets.js";
 
 export async function serveCommand(options: ServeOptions): Promise<void> {
   // Show banner for HTTP transport only (stdio needs clean output for MCP protocol)
@@ -87,6 +89,19 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   const config = loadConfig(configPath);
 
   configureLogger(options.logLevel ?? "info", options.logFormat ?? "pretty");
+
+  // Log detected CPU tier for observability.
+  const cpuProfile = detectCpuProfile();
+  const effectiveTier =
+    config.performanceTier === "auto"
+      ? cpuProfile.detectedTier
+      : config.performanceTier;
+  const tierPresets = getTierPresets(effectiveTier);
+  console.error(
+    `[sdl-mcp] CPU tier: ${effectiveTier} (${cpuProfile.logicalCores} logical cores` +
+      (cpuProfile.physicalCores ? `, ~${cpuProfile.physicalCores} physical` : "") +
+      `) — indexing.concurrency=${tierPresets.indexingConcurrency}, maxToolConcurrency=${tierPresets.maxToolConcurrency}`,
+  );
 
   // Wire concurrency configuration from config file
   const concurrency = config.concurrency;

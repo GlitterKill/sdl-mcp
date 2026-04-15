@@ -1,6 +1,8 @@
 import { access, constants, existsSync } from "fs";
 import { DoctorOptions } from "../types.js";
 import { NODE_MIN_MAJOR_VERSION } from "../../config/constants.js";
+import { detectCpuProfile } from "../../util/cpu-detect.js";
+import { getTierPresets } from "../../util/cpu-presets.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import {
   defaultGraphDbPath,
@@ -49,6 +51,7 @@ import {
 
 const DOCTOR_CHECKS = [
   { name: "Node.js version", check: checkNodeVersion },
+  { name: "CPU profile and performance tier", check: checkCpuProfile },
   { name: "Config file exists", check: checkConfigExists },
   { name: "Config file readable", check: checkConfigReadable },
   { name: "Tree-sitter grammars available", check: checkTreeSitterGrammar },
@@ -131,6 +134,53 @@ async function checkNodeVersion(
     status: "fail",
     message: `Node.js ${version} (requires >= ${NODE_MIN_MAJOR_VERSION}.0.0)`,
   };
+}
+
+async function checkCpuProfile(
+  options: DoctorOptions,
+): Promise<Omit<DoctorResult, "name">> {
+  const profile = detectCpuProfile();
+  const presets = getTierPresets(profile.detectedTier);
+
+  // Try to read configured tier from config if available
+  let configuredTier: string = "auto";
+  let effectiveTier = profile.detectedTier;
+  const configPath = options.config ?? activateCliConfigPath();
+  if (existsSync(configPath)) {
+    try {
+      const { loadConfig } = await import("../../config/loadConfig.js");
+      const config = loadConfig(configPath);
+      configuredTier = config.performanceTier ?? "auto";
+      if (configuredTier !== "auto") {
+        effectiveTier = config.performanceTier as typeof profile.detectedTier;
+      }
+    } catch {
+      // Config unreadable; use detected tier
+    }
+  }
+
+  const effectivePresets =
+    configuredTier === "auto" ? presets : getTierPresets(effectiveTier);
+
+  const physicalPart = profile.physicalCores
+    ? `, ~${profile.physicalCores} physical`
+    : "";
+  const cachePart = profile.cacheSize
+    ? `, cache ${Math.round(profile.cacheSize / 1024)}KB`
+    : "";
+
+  const message =
+    `tier=${profile.detectedTier} (${profile.logicalCores} logical${physicalPart}${cachePart}); ` +
+    `configured=${configuredTier}; ` +
+    `effective presets: indexing.concurrency=${effectivePresets.indexingConcurrency}, ` +
+    `maxToolConcurrency=${effectivePresets.maxToolConcurrency}, ` +
+    `readPoolSize=${effectivePresets.readPoolSize}, ` +
+    `maxSessions=${effectivePresets.maxSessions}, ` +
+    `runtime.maxConcurrentJobs=${effectivePresets.runtimeMaxConcurrentJobs}, ` +
+    `liveIndex.reconcileConcurrency=${effectivePresets.reconcileConcurrency}, ` +
+    `parallelScorer.enabled=${effectivePresets.parallelScorerEnabled}`;
+
+  return { status: "pass", message };
 }
 
 async function checkConfigExists(
