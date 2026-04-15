@@ -1,9 +1,11 @@
-import { glob } from "node:fs/promises";
 import { resolve } from "path";
+
 import { RepoConfig } from "../config/types.js";
 import { normalizePath } from "../util/paths.js";
 import { readFileAsync, statAsync } from "../util/asyncFs.js";
 import { logger } from "../util/logger.js";
+
+import { walkRepositoryFiles } from "./fileWalker.js";
 
 export interface FileMetadata {
   path: string;
@@ -65,11 +67,7 @@ async function discoverFiles(
   config: RepoConfig,
 ): Promise<string[]> {
   const extensions = getLanguageExtensions(config.languages);
-  const patterns: string[] = [];
-
-  for (const ext of extensions) {
-    patterns.push(`**/*${ext}`);
-  }
+  const patterns = extensions.map((ext) => `**/*${ext}`);
 
   const workspaces = await resolveWorkspaces(repoPath, config);
   const ignorePatterns = [...config.ignore];
@@ -79,18 +77,18 @@ async function discoverFiles(
     const workspaceDist = `${workspace}/**/dist/**`;
     const workspaceBuild = `${workspace}/**/build/**`;
     const workspaceTarget = `${workspace}/**/target/**`;
-    ignorePatterns.push(workspaceNodeModules, workspaceDist, workspaceBuild, workspaceTarget);
+    ignorePatterns.push(
+      workspaceNodeModules,
+      workspaceDist,
+      workspaceBuild,
+      workspaceTarget,
+    );
   }
 
-  // Convert array of patterns to single brace pattern for node:fs glob
-  const bracePattern = patterns.length === 1 ? patterns[0] : `{${patterns.join(",")}}`;
-
-  const files: string[] = [];
-  for await (const file of glob(bracePattern, { cwd: repoPath, exclude: ignorePatterns })) {
-    files.push(normalizePath(file));
-  }
-
-  return files;
+  return walkRepositoryFiles(repoPath, {
+    patterns,
+    ignorePatterns,
+  });
 }
 
 async function filterFilesBySize(
@@ -160,3 +158,5 @@ export async function scanRepository(
 
   return deduplicated.sort((a, b) => a.path.localeCompare(b.path));
 }
+
+export { walkRepositoryFiles } from "./fileWalker.js";

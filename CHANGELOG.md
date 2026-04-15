@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Batch: `{ symbolIds: ["...", "..."] }` (was separate tool)
     - Response shape unchanged for each mode
 
+### Fixed
+
+- **Repository scanning descriptor cleanup**: Replaced async `node:fs/promises.glob()`
+  traversal in the indexer with an explicit directory walker that closes every
+  opened directory handle deterministically. The same walker now backs Go,
+  Java/Kotlin, and C# import-resolution fallback scans to avoid leaving identical
+  traversal leak candidates in place.
+
 ## [0.10.5] - 2026-04-14
 
 ### Breaking Changes

@@ -1,6 +1,6 @@
-import { glob } from "node:fs/promises";
 import { dirname, join, resolve } from "path";
 
+import { walkRepositoryFiles } from "../fileWalker.js";
 import { existsAsync, readFileAsync } from "../../util/asyncFs.js";
 import { logger } from "../../util/logger.js";
 import { normalizePath } from "../../util/paths.js";
@@ -86,11 +86,7 @@ export class GoImportResolutionAdapter implements ImportResolutionAdapter {
       (extension) => `${packageDir}/**/*${extension}`,
     );
 
-    const matches: string[] = [];
-    for await (const f of glob(patterns.length === 1 ? patterns[0] : `{${patterns.join(",")}}`, { cwd: params.repoRoot })) {
-      matches.push(f);
-    }
-
+    const matches = await walkRepositoryFiles(params.repoRoot, { patterns });
     return matches.map((path) => normalizePath(path)).sort();
   }
 }

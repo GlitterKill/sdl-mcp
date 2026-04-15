@@ -1,6 +1,6 @@
-import { glob } from "node:fs/promises";
 import { join } from "path";
 
+import { walkRepositoryFiles } from "../fileWalker.js";
 import { existsAsync } from "../../util/asyncFs.js";
 import { normalizePath } from "../../util/paths.js";
 
@@ -60,10 +60,9 @@ export class CSharpImportResolutionAdapter implements ImportResolutionAdapter {
     const fallbackPatterns = params.extensions.map(
       (extension) => `**/${typeName}${extension}`,
     );
-    const fallbackMatches: string[] = [];
-    for await (const f of glob(fallbackPatterns.length === 1 ? fallbackPatterns[0] : `{${fallbackPatterns.join(",")}}`, { cwd: params.repoRoot })) {
-      fallbackMatches.push(f);
-    }
+    const fallbackMatches = await walkRepositoryFiles(params.repoRoot, {
+      patterns: fallbackPatterns,
+    });
 
     return fallbackMatches.map((path) => normalizePath(path)).sort();
   }
