@@ -298,7 +298,7 @@ export async function handleMemoryQuery(
       tags,
       symbolIds,
       staleOnly,
-      limit,
+      limit: limit + 1,  // Fetch one extra to detect hasMore
       offset,
       sortBy,
     });
@@ -308,7 +308,10 @@ export async function handleMemoryQuery(
     );
   }
 
-  const memories: SurfacedMemory[] = rows.map((row) => ({
+  const hasMore = rows.length > limit;
+  const memoryRows = hasMore ? rows.slice(0, limit) : rows;
+
+  const memories: SurfacedMemory[] = memoryRows.map((row) => ({
     memoryId: row.memoryId,
     type: row.type as SurfacedMemory["type"],
     title: row.title,
@@ -319,7 +322,7 @@ export async function handleMemoryQuery(
     tags: safeJsonParse(row.tagsJson, StringArraySchema, []),
   }));
 
-  const hasMore = memories.length === limit;
+  // hasMore already computed above
   return {
     repoId,
     memories,

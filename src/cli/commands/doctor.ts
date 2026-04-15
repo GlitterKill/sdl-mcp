@@ -104,6 +104,7 @@ export async function doctorCommand(options: DoctorOptions): Promise<void> {
   const failed = results.filter((r) => r.status === "fail").length;
   if (failed > 0) {
     console.log(`\n✗ ${failed} check(s) failed. Please fix the issues above.`);
+    await closeLadybugDb();
     process.exit(1);
   }
 
@@ -115,6 +116,7 @@ export async function doctorCommand(options: DoctorOptions): Promise<void> {
   } else {
     console.log("\n✓ All checks passed!");
   }
+  await closeLadybugDb();
 }
 
 async function checkNodeVersion(
@@ -372,10 +374,7 @@ async function checkStaleIndex(
     return {
       status: "warn",
       message: `Cannot check index staleness: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  } finally {
-    await closeLadybugDb();
-  }
+    };}
 }
 
 async function checkRepoPaths(
@@ -698,10 +697,7 @@ async function checkLadybugDb(
     return {
       status: "warn",
       message: `Cannot verify graph database: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  } finally {
-    await closeLadybugDb();
-  }
+    };}
 }
 async function checkLadybugExtensions(
   _options: DoctorOptions,

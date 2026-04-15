@@ -76,6 +76,9 @@ export async function executeWorkflow(
   });
 
   const etagCache = config.etagCaching ? new WorkflowEtagCache() : null;
+  if (etagCache && request.etagCache) {
+    etagCache.seed(request.etagCache);
+  }
   const priorResults: unknown[] = [];
   const stepResults: WorkflowStepResult[] = [];
   const traceSteps: WorkflowTraceStep[] = [];
@@ -533,16 +536,14 @@ export async function executeWorkflow(
   // Strip intermediate step results if onlyFinalResult is requested
   if (request.onlyFinalResult && response.results.length > 1) {
     const lastIdx = response.results.length - 1;
-    let strippedTokens = 0;
     response.results = response.results.map((r, i) => {
       if (i < lastIdx) {
-        strippedTokens += r.tokens;
         return { stepIndex: r.stepIndex, fn: r.fn, status: r.status, tokens: 0, durationMs: r.durationMs, result: null };
       }
       return r;
     });
-    // Adjust totalTokens to reflect what's actually in the response
-    response.totalTokens = response.totalTokens - strippedTokens;
+    // Recalculate totalTokens as sum of kept tokens (avoids mixing pre/post truncation values)
+    response.totalTokens = response.results.reduce((sum, r) => sum + r.tokens, 0);
   }
 
 return response;

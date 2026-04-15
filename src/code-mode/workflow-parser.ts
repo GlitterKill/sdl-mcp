@@ -22,6 +22,8 @@ export interface ParsedWorkflowRequest {
   defaultMaxResponseTokens?: number;
   onlyFinalResult?: boolean;
   /** When true, validate steps and references without executing */
+  /** Prior workflow etagCache to seed */
+  etagCache?: Record<string, string>;
   dryRun?: boolean;
 }
 
@@ -76,7 +78,7 @@ export function parseWorkflowRequest(
     return { ok: false, errors };
   }
 
-  const { repoId, steps, budget, onError, defaultMaxResponseTokens, onlyFinalResult, dryRun } = parsed.data;
+  const { repoId, steps, budget, onError, defaultMaxResponseTokens, onlyFinalResult, dryRun, etagCache } = parsed.data;
   const errors: string[] = [];
   const parsedSteps: ParsedWorkflowStep[] = [];
   const fnNameMap = getActiveFnNameMap();
@@ -132,6 +134,7 @@ export function parseWorkflowRequest(
       defaultMaxResponseTokens,
       onlyFinalResult,
       dryRun,
+      etagCache,
     },
   };
 }

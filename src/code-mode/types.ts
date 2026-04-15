@@ -50,6 +50,9 @@ export const WorkflowRequestSchema = z.object({
   trace: WorkflowTraceOptionsSchema.optional(),
   /** When true, validate steps and $N references without executing. Returns validation result only. */
   dryRun: z.boolean().optional(),
+
+  /** Prior workflow etagCache to seed - enables cross-workflow cache hits */
+  etagCache: z.record(z.string(), z.string()).optional(),
 })
 
 // --- TypeScript Types ---

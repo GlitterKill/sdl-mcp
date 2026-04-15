@@ -7,8 +7,8 @@ import {
   IndexResult,
 } from "../../indexer/indexer.js";
 import type { IndexProgress } from "../../indexer/indexer.js";
-import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
-import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
+import {initGraphDb, resolveGraphDbPath} from "../../db/initGraphDb.js";
+import { getLadybugConn, withWriteConn, closeLadybugDb } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getCurrentTimestamp } from "../../util/time.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
@@ -374,6 +374,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
         ? `Repository not found: ${options.repoId}`
         : "No repositories configured",
     );
+    await closeLadybugDb();
     process.exit(1);
   }
 
@@ -527,6 +528,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     for (const e of errors) {
       console.error(`  - ${e.repoId}: ${e.error}`);
     }
+    await closeLadybugDb();
     process.exit(1);
   }
 
@@ -568,6 +570,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       for (const watcher of watchers) {
         await watcher.close();
       }
+      await closeLadybugDb();
       process.exit(0);
     };
 

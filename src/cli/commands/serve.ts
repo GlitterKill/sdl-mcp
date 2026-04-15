@@ -74,6 +74,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       error: message,
       stack: reason instanceof Error ? reason.stack : undefined,
     });
+    process.exit(1);
   });
 
   const configPath = activateCliConfigPath(options.config);

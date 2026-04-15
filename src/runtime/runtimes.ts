@@ -10,7 +10,10 @@ function cmdEscape(arg: string): string {
   // Include / and : as safe chars (path separators, drive letters) — not cmd.exe metacharacters
   if (/^[a-zA-Z0-9._/:-]+$/.test(arg)) return arg;
   // Double-quote the argument; escape chars that cmd.exe interprets
-  const escaped = arg.replace(/[()%!^"<>&|]/g, (ch) => "^" + ch);
+  // Note: % must use %% inside double quotes (^% doesn't suppress expansion inside quotes)
+  const escaped = arg
+    .replace(/[()!^"<>&|]/g, (ch) => "^" + ch)
+    .replace(/%/g, "%%");
   return '"' + escaped + '"';
 }
 

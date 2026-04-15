@@ -327,10 +327,9 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     });
 
     // Apply MAX_BLAST_RADIUS_ITEMS hard cap
-    let blastRadiusTruncatedFlag = false;
+    // Defensive hard cap (first truncation via truncateArray should already enforce this)
     if (delta.blastRadius.length > MAX_BLAST_RADIUS_ITEMS) {
       delta.blastRadius = delta.blastRadius.slice(0, MAX_BLAST_RADIUS_ITEMS);
-      blastRadiusTruncatedFlag = true;
     }
 
     const amplifiers = delta.blastRadius
@@ -345,9 +344,6 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
     const fileIds = allFileIds;
 
     const response: Record<string, unknown> = { delta, ...(singleVersionHint ? { hint: singleVersionHint } : {}), amplifiers };
-    if (blastRadiusTruncatedFlag) {
-      response.blastRadiusTruncated = true;
-    }
     return attachRawContext(response, { fileIds }) as DeltaGetResponse;
   };
 

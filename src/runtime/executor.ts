@@ -24,6 +24,7 @@ export function killProcessTree(pid: number): void {
       execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
         windowsHide: true,
         stdio: "ignore",
+        timeout: 10_000, // 10s cap to prevent event loop freeze
       });
     } catch {
       // Best-effort process cleanup.

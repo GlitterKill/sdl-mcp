@@ -725,6 +725,7 @@ export async function entitySearch(
     "cluster",
     "process",
     "fileSummary",
+    "agentFeedback",
   ];
   const entityTypes = options.entityTypes ?? ALL_ENTITY_TYPES;
 

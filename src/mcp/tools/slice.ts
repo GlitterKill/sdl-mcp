@@ -230,8 +230,9 @@ export async function handleSliceBuild(
     // AbortError from context cancellation or timeout
     if (error instanceof Error && error.name === "AbortError") {
       return sliceErrorToResponse({
-        type: "no_version",
-        repoId: parsed?.repoId ?? "unknown",
+        type: "internal",
+        message: "Request timed out or was cancelled",
+        cause: error.message,
       });
     }
 
