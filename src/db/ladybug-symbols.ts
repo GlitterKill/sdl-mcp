@@ -113,6 +113,90 @@ export async function upsertSymbol(
   );
 }
 
+/**
+ * Upsert all symbols for a single file in one transaction-scoped loop.
+ *
+ * All symbols in a file share the same `repoId` and `fileId`, so the Repo
+ * and File nodes are matched once (implicitly, via per-symbol MATCH). The
+ * prepared statement is cached by `ladybug-core` after the first call so
+ * subsequent iterations reuse it without re-parsing. When called from inside
+ * an already-open transaction the inner `withTransaction` call is a no-op
+ * (depth > 0 nesting is transparent), so the outer transaction is preserved.
+ *
+ * @param conn  Write connection (or txConn from an outer transaction).
+ * @param symbols  All symbols to upsert. May be empty (no-op).
+ */
+export async function upsertSymbolBatch(
+  conn: Connection,
+  symbols: SymbolRow[],
+): Promise<void> {
+  if (symbols.length === 0) return;
+
+  if (symbols.length > MAX_BATCH_WARNING_THRESHOLD) {
+    logger.warn("upsertSymbolBatch: unusually large file-scoped batch", {
+      count: symbols.length,
+      threshold: MAX_BATCH_WARNING_THRESHOLD,
+    });
+  }
+
+  await withTransaction(conn, async (txConn) => {
+    for (const symbol of symbols) {
+      await exec(
+        txConn,
+        `MATCH (r:Repo {repoId: $repoId})
+         MATCH (f:File {fileId: $fileId})
+         MERGE (s:Symbol {symbolId: $symbolId})
+         SET s.repoId = $repoId,
+             s.kind = $kind,
+             s.name = $name,
+             s.exported = $exported,
+             s.visibility = $visibility,
+             s.language = $language,
+             s.rangeStartLine = $rangeStartLine,
+             s.rangeStartCol = $rangeStartCol,
+             s.rangeEndLine = $rangeEndLine,
+             s.rangeEndCol = $rangeEndCol,
+             s.astFingerprint = $astFingerprint,
+             s.signatureJson = $signatureJson,
+             s.summary = $summary,
+             s.invariantsJson = $invariantsJson,
+             s.sideEffectsJson = $sideEffectsJson,
+             s.roleTagsJson = $roleTagsJson,
+             s.searchText = $searchText,
+             s.summaryQuality = $summaryQuality,
+             s.summarySource = $summarySource,
+             s.updatedAt = $updatedAt
+         MERGE (s)-[:SYMBOL_IN_FILE]->(f)
+         MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
+        {
+          symbolId: symbol.symbolId,
+          repoId: symbol.repoId,
+          fileId: symbol.fileId,
+          kind: symbol.kind,
+          name: symbol.name,
+          exported: symbol.exported,
+          visibility: symbol.visibility,
+          language: symbol.language,
+          rangeStartLine: symbol.rangeStartLine,
+          rangeStartCol: symbol.rangeStartCol,
+          rangeEndLine: symbol.rangeEndLine,
+          rangeEndCol: symbol.rangeEndCol,
+          astFingerprint: symbol.astFingerprint,
+          signatureJson: symbol.signatureJson,
+          summary: symbol.summary,
+          invariantsJson: symbol.invariantsJson,
+          sideEffectsJson: symbol.sideEffectsJson,
+          roleTagsJson: symbol.roleTagsJson ?? null,
+          searchText: symbol.searchText ?? null,
+          summaryQuality: symbol.summaryQuality ?? 0.0,
+          summarySource: symbol.summarySource ?? "unknown",
+          updatedAt: symbol.updatedAt,
+        },
+      );
+    }
+  });
+}
+
 export async function getSymbol(
   conn: Connection,
   symbolId: string,

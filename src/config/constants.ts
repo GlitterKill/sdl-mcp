@@ -480,7 +480,7 @@ export const DEFAULT_INDEXING_CONCURRENCY = 8;
 /**
  * Maximum concurrency level for indexing operations.
  */
-export const MAX_INDEXING_CONCURRENCY = 10;
+export const MAX_INDEXING_CONCURRENCY = 32;
 
 /**
  * Default timeout for operations in milliseconds.
@@ -660,7 +660,7 @@ export const RUNTIME_DEFAULT_MAX_CONCURRENT_JOBS = 2;
 /**
  * Maximum allowed concurrent runtime jobs.
  */
-export const RUNTIME_MAX_CONCURRENT_JOBS = 8;
+export const RUNTIME_MAX_CONCURRENT_JOBS = 12;
 
 /**
  * Maximum number of arguments allowed per execution.

@@ -20,15 +20,15 @@ describe("SessionManager", () => {
   it("validates maxSessions range in constructor", () => {
     assert.throws(
       () => new SessionManager(0),
-      /maxSessions must be between 1 and 16, got 0/,
+      /maxSessions must be between 1 and 32, got 0/,
     );
     assert.throws(
-      () => new SessionManager(17),
-      /maxSessions must be between 1 and 16, got 17/,
+      () => new SessionManager(33),
+      /maxSessions must be between 1 and 32, got 33/,
     );
 
     assert.doesNotThrow(() => new SessionManager(1));
-    assert.doesNotThrow(() => new SessionManager(16));
+    assert.doesNotThrow(() => new SessionManager(32));
   });
 
   it("canAcceptSession returns true when under limit", () => {

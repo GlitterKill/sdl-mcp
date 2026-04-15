@@ -163,9 +163,9 @@ export function configurePool(opts: {
     );
   }
   if (opts.readPoolSize !== undefined) {
-    if (opts.readPoolSize < 1 || opts.readPoolSize > 8) {
+    if (opts.readPoolSize < 1 || opts.readPoolSize > 16) {
       throw new DatabaseError(
-        `readPoolSize must be between 1 and 8, got ${opts.readPoolSize}`,
+        `readPoolSize must be between 1 and 16, got ${opts.readPoolSize}`,
       );
     }
     readPoolSize = opts.readPoolSize;

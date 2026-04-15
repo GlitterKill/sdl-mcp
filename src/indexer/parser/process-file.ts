@@ -189,11 +189,7 @@ export async function processFile(
         }
 
         await ladybugDb.insertSymbolReferences(txConn, symbolReferences);
-
-        for (const symbol of symbolsToUpsert) {
-          await ladybugDb.upsertSymbol(txConn, symbol);
-        }
-
+        await ladybugDb.upsertSymbolBatch(txConn, symbolsToUpsert);
         await ladybugDb.insertEdges(txConn, edgesToInsert);
       });
     });

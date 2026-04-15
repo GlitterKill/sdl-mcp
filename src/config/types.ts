@@ -161,7 +161,7 @@ export const IndexingConfigSchema = z.object({
     .int()
     .min(1)
     .default(WATCHER_DEFAULT_MAX_WATCHED_FILES),
-  workerPoolSize: z.number().int().min(1).max(16).nullish(),
+  workerPoolSize: z.number().int().min(1).max(32).nullish(),
   engine: z.enum(["typescript", "rust"]).default("rust"),
   watchDebounceMs: z.number().int().min(50).max(5000).default(300),
 });
@@ -173,7 +173,7 @@ export const LiveIndexConfigSchema = z.object({
   debounceMs: z.number().int().min(25).max(5000).default(75),
   idleCheckpointMs: z.number().int().min(1000).max(300000).default(15_000),
   maxDraftFiles: z.number().int().min(1).max(10_000).default(200),
-  reconcileConcurrency: z.number().int().min(1).max(8).default(1),
+  reconcileConcurrency: z.number().int().min(1).max(16).default(1),
   clusterRefreshThreshold: z.number().int().min(1).max(1000).default(25),
 });
 
@@ -343,7 +343,7 @@ export const SemanticConfigSchema = z.object({
   summaryModel: z.string().nullish(),
   summaryApiKey: z.string().nullish(),
   summaryApiBaseUrl: z.string().nullish(),
-  summaryMaxConcurrency: z.number().int().min(1).max(20).default(5),
+  summaryMaxConcurrency: z.number().int().min(1).max(32).default(5),
   summaryBatchSize: z.number().int().min(1).max(50).default(20),
   /**
    * @deprecated Use `retrieval.vector` for HNSW index configuration instead.
@@ -377,7 +377,7 @@ export type TracingConfig = z.infer<typeof TracingConfigSchema>;
 
 export const ParallelScorerConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  poolSize: z.number().int().min(1).max(8).nullish(),
+  poolSize: z.number().int().min(1).max(16).nullish(),
   minBatchSize: z.number().int().min(1).max(100).nullish(),
 });
 
@@ -390,9 +390,9 @@ export const GraphDatabaseConfigSchema = z.object({
 export type GraphDatabaseConfig = z.infer<typeof GraphDatabaseConfigSchema>;
 
 export const ConcurrencyConfigSchema = z.object({
-  maxSessions: z.number().int().min(1).max(16).default(8),
-  maxToolConcurrency: z.number().int().min(1).max(32).default(8),
-  readPoolSize: z.number().int().min(1).max(8).default(4),
+  maxSessions: z.number().int().min(1).max(32).default(8),
+  maxToolConcurrency: z.number().int().min(1).max(64).default(8),
+  readPoolSize: z.number().int().min(1).max(16).default(4),
   writeQueueTimeoutMs: z.number().int().min(1000).max(120000).default(30000),
   toolQueueTimeoutMs: z.number().int().min(5000).max(120000).default(30000),
 });

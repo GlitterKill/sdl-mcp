@@ -241,7 +241,7 @@
           "type": "integer",
           "description": "Number of concurrent indexing workers",
           "minimum": 1,
-          "maximum": 10,
+          "maximum": 32,
           "default": 8
         },
         "enableFileWatching": {
@@ -259,7 +259,7 @@
           "type": "integer",
           "description": "Optional cap for the indexing worker pool size",
           "minimum": 1,
-          "maximum": 16
+          "maximum": 32
         },
         "engine": {
           "type": "string",
@@ -317,7 +317,7 @@
           "type": "integer",
           "description": "Reserved concurrency cap for background reconciliation work",
           "minimum": 1,
-          "maximum": 8,
+          "maximum": 16,
           "default": 1
         },
         "clusterRefreshThreshold": {
@@ -554,7 +554,7 @@
           "type": "integer",
           "description": "Maximum concurrent LLM requests for summary generation",
           "minimum": 1,
-          "maximum": 20,
+          "maximum": 32,
           "default": 5
         },
         "summaryBatchSize": {
@@ -834,7 +834,7 @@
           "type": "integer",
           "description": "Number of worker threads in the scorer pool",
           "minimum": 1,
-          "maximum": 8
+          "maximum": 16
         },
         "minBatchSize": {
           "type": "integer",
@@ -866,21 +866,21 @@
           "type": "integer",
           "description": "Maximum number of concurrent MCP sessions",
           "minimum": 1,
-          "maximum": 16,
+          "maximum": 32,
           "default": 8
         },
         "maxToolConcurrency": {
           "type": "integer",
           "description": "Maximum concurrent tool handler executions across all sessions",
           "minimum": 1,
-          "maximum": 32,
+          "maximum": 64,
           "default": 8
         },
         "readPoolSize": {
           "type": "integer",
           "description": "Number of read-only database connections in the pool",
           "minimum": 1,
-          "maximum": 8,
+          "maximum": 16,
           "default": 4
         },
         "writeQueueTimeoutMs": {
@@ -962,7 +962,7 @@
           "type": "integer",
           "description": "Maximum concurrent runtime executions",
           "minimum": 1,
-          "maximum": 8,
+          "maximum": 12,
           "default": 2
         },
         "envAllowlist": {

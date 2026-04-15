@@ -4,8 +4,8 @@ import { describe, it } from "node:test";
 import { configurePool, getPoolStats } from "../../dist/db/ladybug.js";
 
 describe("ladybug connection pool configuration", () => {
-  it("configurePool accepts readPoolSize values within 1-8", () => {
-    for (const size of [1, 4, 8]) {
+  it("configurePool accepts readPoolSize values within 1-16", () => {
+    for (const size of [1, 4, 8, 16]) {
       assert.doesNotThrow(() => {
         configurePool({ readPoolSize: size });
       });
@@ -18,15 +18,15 @@ describe("ladybug connection pool configuration", () => {
   it("configurePool rejects invalid readPoolSize values", () => {
     assert.throws(
       () => configurePool({ readPoolSize: 0 }),
-      /readPoolSize must be between 1 and 8, got 0/,
+      /readPoolSize must be between 1 and 16, got 0/,
     );
     assert.throws(
-      () => configurePool({ readPoolSize: 9 }),
-      /readPoolSize must be between 1 and 8, got 9/,
+      () => configurePool({ readPoolSize: 17 }),
+      /readPoolSize must be between 1 and 16, got 17/,
     );
     assert.throws(
       () => configurePool({ readPoolSize: -1 }),
-      /readPoolSize must be between 1 and 8, got -1/,
+      /readPoolSize must be between 1 and 16, got -1/,
     );
   });
 

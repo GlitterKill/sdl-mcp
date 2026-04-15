@@ -24,9 +24,9 @@ export class SessionManager {
   private idleReaperHandle: ReturnType<typeof setInterval> | undefined;
 
   constructor(maxSessions = 8) {
-    if (maxSessions < 1 || maxSessions > 16) {
+    if (maxSessions < 1 || maxSessions > 32) {
       throw new ValidationError(
-        `maxSessions must be between 1 and 16, got ${maxSessions}`,
+        `maxSessions must be between 1 and 32, got ${maxSessions}`,
       );
     }
     this.maxSessions = maxSessions;
