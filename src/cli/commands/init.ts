@@ -1082,6 +1082,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
         workspaceGlobs: null,
       },
     ],
+    performanceTier: "auto" as const,
     dbPath,
     graphDatabase: {
       path: ladybugDbPath,

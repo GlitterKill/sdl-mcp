@@ -578,8 +578,23 @@ export const ScipConfigSchema = z.object({
 
 export type ScipConfig = z.infer<typeof ScipConfigSchema>;
 
+export const PerformanceTierSchema = z.enum(["mid", "high", "extreme", "auto"]);
+export type PerformanceTier = z.infer<typeof PerformanceTierSchema>;
+
 export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
+  /**
+   * CPU performance tier for auto-tuning concurrency defaults.
+   *
+   * - "auto" (default): detect hardware at startup and select a tier.
+   * - "mid":    conservative defaults (1–8 logical cores).
+   * - "high":   moderate scaling (9–20 logical cores).
+   * - "extreme": aggressive scaling (21+ logical cores).
+   *
+   * Presets only affect fields that are NOT explicitly set by the user.
+   * Set this to "mid" to opt out of auto-scaling on large machines.
+   */
+  performanceTier: PerformanceTierSchema.default("auto"),
   /**
    * Deprecated legacy SQLite path (v0.7.x). Only used by the one-time
    * SQLite→Ladybug migration script in v0.8.

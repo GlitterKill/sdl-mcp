@@ -142,6 +142,12 @@
         }
       }
     },
+    "performanceTier": {
+      "type": "string",
+      "description": "CPU performance tier for auto-tuning concurrency defaults. 'auto' (default) detects hardware at startup. 'mid' = 1-8 cores (conservative), 'high' = 9-20 cores (moderate), 'extreme' = 21+ cores (aggressive). Presets only affect fields not explicitly set by the user.",
+      "enum": ["mid", "high", "extreme", "auto"],
+      "default": "auto"
+    },
     "policy": {
       "type": "object",
       "description": "Code access policy settings",

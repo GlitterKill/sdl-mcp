@@ -1,8 +1,17 @@
 import { readFileSync, statSync } from "fs";
-import { AppConfig, AppConfigSchema } from "./types.js";
+import {
+  AppConfig,
+  AppConfigSchema,
+  IndexingConfigSchema,
+  LiveIndexConfigSchema,
+  ConcurrencyConfigSchema,
+  ParallelScorerConfigSchema,
+} from "./types.js";
 import { ConfigError } from "../domain/errors.js";
 import { resolveCliConfigPath } from "./configPath.js";
 import { normalizePath } from "../util/paths.js";
+import { detectCpuProfile } from "../util/cpu-detect.js";
+import { resolvePerformancePresets } from "../util/cpu-presets.js";
 
 function expandEnvVars(obj: unknown, configPath: string): unknown {
   if (typeof obj === "string") {
@@ -102,11 +111,70 @@ export function loadConfig(configPath?: string): AppConfig {
 
     const config = result.data;
 
+    // -------------------------------------------------------------------------
+    // CPU tier preset resolution
+    // -------------------------------------------------------------------------
+    // Pass the raw (pre-Zod) config object so that resolvePerformancePresets
+    // can distinguish user-explicit values from Zod-filled defaults.
+    // Only apply when performanceTier is "auto" (the default).
+    const rawConfig = expandedConfig as Record<string, unknown>;
+    let tierAdjustedConfig = config;
+    if (config.performanceTier === "auto") {
+      const cpuProfile = detectCpuProfile();
+      const tier = cpuProfile.detectedTier;
+      const presets = resolvePerformancePresets(
+        tier,
+        rawConfig as Parameters<typeof resolvePerformancePresets>[1],
+      );
+      // Re-parse each sub-section through its schema so that Zod fills in any
+      // missing required fields before we overlay the preset values.
+      const baseIndexing = IndexingConfigSchema.parse(config.indexing ?? {});
+      const baseConcurrency = ConcurrencyConfigSchema.parse(
+        config.concurrency ?? {},
+      );
+      const baseLiveIndex = LiveIndexConfigSchema.parse(config.liveIndex ?? {});
+      const baseParallelScorer = ParallelScorerConfigSchema.parse(
+        config.parallelScorer ?? {},
+      );
+
+      tierAdjustedConfig = {
+        ...config,
+        indexing: { ...baseIndexing, concurrency: presets.indexingConcurrency },
+        concurrency: {
+          ...baseConcurrency,
+          maxToolConcurrency: presets.maxToolConcurrency,
+          readPoolSize: presets.readPoolSize,
+          maxSessions: presets.maxSessions,
+        },
+        runtime: config.runtime
+          ? {
+              ...config.runtime,
+              maxConcurrentJobs: presets.runtimeMaxConcurrentJobs,
+            }
+          : config.runtime,
+        liveIndex: {
+          ...baseLiveIndex,
+          reconcileConcurrency: presets.reconcileConcurrency,
+        },
+        semantic: config.semantic
+          ? {
+              ...config.semantic,
+              summaryMaxConcurrency: presets.summaryMaxConcurrency,
+            }
+          : config.semantic,
+        parallelScorer: {
+          ...baseParallelScorer,
+          enabled: presets.parallelScorerEnabled,
+          poolSize: presets.parallelScorerPoolSize,
+        },
+      };
+    }
+
     // Merge SDL_ALLOWED_REPO_ROOTS env var (comma-separated absolute paths)
     // into config.security.allowedRepoRoots at load time.
     // Build a new object instead of mutating the Zod-parsed result.
     const envAllowedRootsRaw = process.env.SDL_ALLOWED_REPO_ROOTS;
-    let finalConfig = config;
+    let finalConfig = tierAdjustedConfig;
     if (envAllowedRootsRaw && envAllowedRootsRaw.trim().length > 0) {
       const envRoots = envAllowedRootsRaw
         .split(",")
@@ -114,13 +182,13 @@ export function loadConfig(configPath?: string): AppConfig {
         .filter((s) => s.length > 0);
       if (envRoots.length > 0) {
         const mergedSecurity = {
-          ...(config.security ?? { allowedRepoRoots: [] }),
+          ...(finalConfig.security ?? { allowedRepoRoots: [] }),
           allowedRepoRoots: [
-            ...(config.security?.allowedRepoRoots ?? []),
+            ...(finalConfig.security?.allowedRepoRoots ?? []),
             ...envRoots,
           ],
         };
-        finalConfig = { ...config, security: mergedSecurity };
+        finalConfig = { ...finalConfig, security: mergedSecurity };
       }
     }
 
