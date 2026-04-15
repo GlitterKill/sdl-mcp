@@ -483,6 +483,20 @@ export const DEFAULT_INDEXING_CONCURRENCY = 8;
 export const MAX_INDEXING_CONCURRENCY = 10;
 
 /**
+ * Default number of concurrent embedding batches during symbol embedding refresh.
+ * Conservative default of 1 (sequential) to avoid overloading the ONNX thread pool.
+ * Increase with caution: ONNX Runtime has an internal thread pool and multiple
+ * concurrent embed() calls compete for those threads.
+ */
+export const DEFAULT_EMBEDDING_CONCURRENCY = 1;
+
+/**
+ * Maximum number of concurrent embedding batches during symbol embedding refresh.
+ * Capped at 4; profiling suggests diminishing returns beyond 2 for local ONNX models.
+ */
+export const MAX_EMBEDDING_CONCURRENCY = 4;
+
+/**
  * Default timeout for operations in milliseconds.
  */
 export const DEFAULT_OPERATION_TIMEOUT_MS = 2000;

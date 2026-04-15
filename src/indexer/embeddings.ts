@@ -255,6 +255,8 @@ export async function refreshSymbolEmbeddings(params: {
   model?: string;
   symbols?: ladybugDb.SymbolRow[];
   onProgress?: (progress: IndexProgress) => void;
+  /** Number of batches to process concurrently. Defaults to 1 (sequential). */
+  concurrency?: number;
 }): Promise<{ embedded: number; skipped: number }> {
   const modelName = params.model ?? "jina-embeddings-v2-base-code";
   const provider = getEmbeddingProvider(params.provider, modelName);
@@ -318,32 +320,45 @@ export async function refreshSymbolEmbeddings(params: {
     uncachedItems.push({ symbol, prefixedText, cardHash });
   }
 
+  // Resolve concurrency: clamp to [1, MAX_EMBEDDING_CONCURRENCY].
+  const maxConcurrency = Math.max(
+    1,
+    Math.min(params.concurrency ?? 1, 4),
+  );
+
   // Progress: fire at start
   params.onProgress?.({ stage: "embeddings", current: 0, total: symbols.length });
 
-  // Phase 4: Process in batches of REFRESH_BATCH_SIZE
-  for (let batchStart = 0; batchStart < uncachedItems.length; batchStart += REFRESH_BATCH_SIZE) {
-    const batchEnd = Math.min(batchStart + REFRESH_BATCH_SIZE, uncachedItems.length);
-    const batch = uncachedItems.slice(batchStart, batchEnd);
-    const batchTexts = batch.map((item) => item.prefixedText);
+  // Split uncached items into batches of REFRESH_BATCH_SIZE.
+  type UncachedBatch = Array<{ symbol: ladybugDb.SymbolRow; prefixedText: string; cardHash: string }>;
+  const batches: UncachedBatch[] = [];
+  for (let i = 0; i < uncachedItems.length; i += REFRESH_BATCH_SIZE) {
+    batches.push(uncachedItems.slice(i, i + REFRESH_BATCH_SIZE));
+  }
 
+  // Shared mutable counters — updated inside processBatch results (not inside
+  // concurrent closures directly) so there are no data races.
+  type BatchResult = { embedded: number; skipped: number; terminal: boolean };
+
+  const processBatch = async (
+    batch: UncachedBatch,
+  ): Promise<BatchResult> => {
+    const batchTexts = batch.map((item) => item.prefixedText);
     let batchVectors: number[][];
     try {
       batchVectors = await provider.embed(batchTexts);
     } catch (error) {
-      // Log error and continue to next batch. No per-symbol retry.
       logger.warn("Batch embedding failed, continuing to next batch", {
         batchSize: batch.length,
         firstSymbolId: batch[0]?.symbol.symbolId,
         error: error instanceof Error ? error.message : String(error),
       });
-      // Check for terminal errors that should abort refresh
       const errorMsg = error instanceof Error ? error.message : String(error);
       if (errorMsg.includes("SessionClosed") || errorMsg.includes("ECONNRESET")) {
         logger.error("Terminal provider error, aborting refresh", { error: errorMsg });
-        break;
+        return { embedded: 0, skipped: 0, terminal: true };
       }
-      continue;
+      return { embedded: 0, skipped: 0, terminal: false };
     }
 
     // Guard: validate provider returned correct vector count
@@ -353,17 +368,15 @@ export async function refreshSymbolEmbeddings(params: {
         received: batchVectors.length,
         firstSymbolId: batch[0]?.symbol.symbolId,
       });
-      continue;
+      return { embedded: 0, skipped: 0, terminal: false };
     }
 
     // Check if provider degraded to mock mid-refresh
     if (provider.isMockFallback?.()) {
-      // Skip entire batch, mark as skipped
-      skipped += batch.length;
       logger.debug("Provider degraded to mock, skipping batch persistence", {
         batchSize: batch.length,
       });
-      continue;
+      return { embedded: 0, skipped: batch.length, terminal: false };
     }
 
     // Post-embed cache recheck for race avoidance
@@ -374,19 +387,19 @@ export async function refreshSymbolEmbeddings(params: {
       storageModel,
     );
 
-    // Write vectors for genuinely stale items
+    let batchEmbedded = 0;
+    let batchSkipped = 0;
+
     for (let i = 0; i < batch.length; i++) {
       const item = batch[i];
       const vector = batchVectors[i];
       const postExisting = postEmbedExisting.get(item.symbol.symbolId);
 
       if (postExisting && postExisting.cardHash === item.cardHash) {
-        // Another process wrote the same embedding while we were working
-        skipped += 1;
+        batchSkipped += 1;
         continue;
       }
 
-      // Write embedding (per-symbol, short write scope)
       await withWriteConn(async (wConn) => {
         await setSymbolEmbeddingOnNode(
           wConn,
@@ -397,14 +410,37 @@ export async function refreshSymbolEmbeddings(params: {
           vector,
         );
       });
-      embedded += 1;
+      batchEmbedded += 1;
     }
 
-    // Progress: fire after each batch
-    const progressCurrent = Math.min(
-      skipped + embedded,
-      symbols.length,
-    );
+    return { embedded: batchEmbedded, skipped: batchSkipped, terminal: false };
+  };
+
+  // Process batches with bounded concurrency using a sliding window.
+  // Each "chunk" is at most maxConcurrency batches run in parallel.
+  let aborted = false;
+  for (let chunkStart = 0; chunkStart < batches.length && !aborted; chunkStart += maxConcurrency) {
+    const chunk = batches.slice(chunkStart, chunkStart + maxConcurrency);
+    const results = await Promise.allSettled(chunk.map((b) => processBatch(b)));
+
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        embedded += result.value.embedded;
+        skipped += result.value.skipped;
+        if (result.value.terminal) {
+          aborted = true;
+        }
+      } else {
+        // processBatch should not throw (all errors handled internally),
+        // but guard defensively.
+        logger.warn("Unexpected processBatch rejection", {
+          reason: String(result.reason),
+        });
+      }
+    }
+
+    // Progress: fire after each chunk
+    const progressCurrent = Math.min(skipped + embedded, symbols.length);
     params.onProgress?.({ stage: "embeddings", current: progressCurrent, total: symbols.length });
   }
 

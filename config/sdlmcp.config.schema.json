@@ -564,6 +564,13 @@
           "maximum": 50,
           "default": 20
         },
+        "embeddingConcurrency": {
+          "type": "integer",
+          "description": "Number of embedding batches to process concurrently during refreshSymbolEmbeddings(). Defaults to 1 (sequential). Increasing this can improve throughput on multi-core machines but ONNX Runtime's internal thread pool is shared across concurrent calls; consider reducing intraOpNumThreads proportionally when raising above 1. Maximum 4.",
+          "minimum": 1,
+          "maximum": 4,
+          "default": 1
+        },
         "ann": {
           "type": "object",
           "description": "Deprecated — removed in v0.10.1. Silently ignored. Use retrieval.vector instead.",
@@ -753,7 +760,8 @@
         "generateSummaries": false,
         "summaryModel": "claude-haiku-4-5-20251001",
         "summaryMaxConcurrency": 5,
-        "summaryBatchSize": 20
+        "summaryBatchSize": 20,
+        "embeddingConcurrency": 1
       }
     },
     "prefetch": {
