@@ -74,7 +74,9 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       error: message,
       stack: reason instanceof Error ? reason.stack : undefined,
     });
-    process.exit(1);
+    // Do NOT process.exit here — a stray unhandled rejection (e.g. from a
+    // fire-and-forget notification or audit write) should not kill the server.
+    // This matches main.ts behavior.
   });
 
   const configPath = activateCliConfigPath(options.config);
@@ -270,7 +272,14 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   shutdownMgr.addCleanup("logger", () => shutdownLogger());
   shutdownMgr.addCleanup("watchers", async () => {
     for (const watcher of watchers) {
-      await watcher.close();
+      try {
+        await watcher.close();
+      } catch (error) {
+        // Don't let a single watcher failure abort cleanup of others
+        console.error(
+          `[sdl-mcp] Watcher close error during shutdown: ${error}`,
+        );
+      }
     }
   });
 

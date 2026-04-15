@@ -85,8 +85,6 @@ type HttpTransportServices = {
   symbolGetCard?: typeof handleSymbolGetCard;
 };
 
-const MAX_SESSIONS = 16;
-
 const LOCALHOST_ORIGIN_RE =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
@@ -1107,11 +1105,6 @@ async function handleMcpStreamableRequest(
                 `[sdl-mcp] StreamableHTTP session initialized: ${newSessionId}`,
               );
               registeredSessionId = newSessionId;
-              if (ctx.transports.size >= MAX_SESSIONS) {
-                logger.warn("Transport map at capacity, rejecting new session", { sessionId: newSessionId });
-                void mcpServer.stop(); // H2: prevent MCPServer leak
-                return;
-              }
               ctx.transports.set(newSessionId, transport!);
               // Track MCPServer immediately so onclose/reaper can find it
               ctx.mcpServers.set(newSessionId, mcpServer);
@@ -1244,13 +1237,19 @@ async function handleSseConnection(
 
   let sseReservationHeld = true;
   try {
+    // Create MCPServer BEFORE transport setup to avoid async gap where
+    // onclose could fire before mcpServers.set() completes (leak prevention).
+    const mcpServer = await createMCPServer({
+      liveIndex: ctx.effectiveServices.liveIndex,
+      gatewayConfig: ctx.effectiveServices.gatewayConfig,
+      codeModeConfig: ctx.effectiveServices.codeModeConfig,
+    });
+
     const sseTransport = new SSEServerTransport("/message", res);
     const sseSessionId = sseTransport.sessionId;
-    if (ctx.transports.size >= MAX_SESSIONS) {
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message: "Too many active sessions" } }));
-      return;
-    }
+
+    // Register MCPServer immediately so onclose/reaper can find it
+    ctx.mcpServers.set(sseSessionId, mcpServer);
     ctx.transports.set(sseSessionId, sseTransport);
     // registerSession internally releases the reservation
     ctx.sessionManager.registerSession(sseSessionId, "sse");
@@ -1259,14 +1258,6 @@ async function handleSseConnection(
     sseTransport.onclose = () => {
       ctx.cleanupSession(sseSessionId);
     };
-
-    // Create per-session MCP server via factory
-    const mcpServer = await createMCPServer({
-      liveIndex: ctx.effectiveServices.liveIndex,
-      gatewayConfig: ctx.effectiveServices.gatewayConfig,
-      codeModeConfig: ctx.effectiveServices.codeModeConfig,
-    });
-    ctx.mcpServers.set(sseSessionId, mcpServer);
 
     await mcpServer
       .getServer()
@@ -1562,8 +1553,11 @@ export async function setupHttpTransport(
         console.error(`[sdl-mcp] HTTP transport error: ${String(error)}`);
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Internal server error" }));
+        } else if (!res.writableEnded) {
+          // Headers already sent (e.g., SSE stream) - destroy to avoid corruption
+          res.destroy();
         }
-        res.end(JSON.stringify({ error: "Internal server error" }));
       });
     },
   );

@@ -42,6 +42,7 @@ export function connectSSE(options: SSEClientOptions): Promise<void> {
         if (res.statusCode !== 200) {
           const chunks: Buffer[] = [];
           res.on("data", (c: Buffer) => chunks.push(c));
+          res.on("error", (err) => reject(err));
           res.on("end", () => {
             const body = Buffer.concat(chunks).toString("utf8");
             reject(

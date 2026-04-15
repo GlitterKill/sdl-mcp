@@ -15,7 +15,7 @@ import { PRRiskAnalysisRequestSchema } from "../tools.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import { getSymbolsByIds } from "../../db/ladybug-symbols.js";
-import { getFilesByIds } from "../../db/ladybug-repos.js";
+import { getFilesByIds, getRepo } from "../../db/ladybug-repos.js";
 import type { BlastRadiusItem } from "../types.js";
 import { IndexError } from "../errors.js";
 
@@ -78,6 +78,13 @@ export async function handlePRRiskAnalysis(args: unknown) {
   );
 
   const conn = await getLadybugConn();
+
+  // Validate repository exists
+  const repo = await getRepo(conn, validated.repoId);
+  if (!repo) {
+    throw new IndexError(`Repository ${validated.repoId} not found`);
+  }
+
   const blastRadiusItems = await computeBlastRadius(conn, changedSymbolIds, {
     maxHops: 3,
     maxResults: 50,

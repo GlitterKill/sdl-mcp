@@ -93,8 +93,15 @@ export async function handleMemoryStore(
     const searchText = title + " " + content;
 
     await withWriteConn(async (wConn) => {
+      // Re-read inside transaction to avoid TOCTOU race with stale `existing`
+      const freshExisting = await ladybugDb.getMemory(wConn, providedMemoryId);
+      if (!freshExisting) {
+        throw new ValidationError(
+          `Memory ${providedMemoryId} was deleted concurrently`,
+        );
+      }
       await ladybugDb.upsertMemory(wConn, {
-        ...existing,
+        ...freshExisting,
         type,
         title,
         content,

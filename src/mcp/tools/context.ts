@@ -107,15 +107,10 @@ export async function handleAgentContext(
       { notModified: true }
     >;
 
-    const focusPaths = request.options?.focusPaths;
-    const fileIds = focusPaths?.length
-      ? focusPaths.map((path) => `${request.repoId}:${path}`)
-      : undefined;
+    // Always use rawTokens for usage tracking - synthetic fileIds don't exist in DB
+    // and would cause the savings meter to always show 0%.
     const rawTokens = (response.metrics?.totalTokens ?? 0) * 3;
-    const enrichedResponse = attachRawContext(
-      response,
-      fileIds ? { fileIds } : { rawTokens },
-    );
+    const enrichedResponse = attachRawContext(response, { rawTokens });
     return buildConditionalResponse(enrichedResponse, {
       ifNoneMatch: request.ifNoneMatch,
       // Strip request-unique IDs and timing data from the ETag source.

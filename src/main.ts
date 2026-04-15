@@ -4,6 +4,8 @@ import { loadConfig } from "./config/loadConfig.js";
 import { activateCliConfigPath } from "./config/configPath.js";
 import { initGraphDb } from "./db/initGraphDb.js";
 import { closeLadybugDb } from "./db/ladybug.js";
+import { persistUsageSnapshot } from "./db/ladybug-usage.js";
+import { tokenAccumulator } from "./mcp/token-accumulator.js";
 import { CLEANUP_INTERVAL_MS } from "./config/constants.js";
 import {
   configureDefaultLiveIndexCoordinator,
@@ -158,6 +160,16 @@ async function main(): Promise<void> {
       idleMonitor.stop();
     });
     shutdownMgr.addCleanup("server", () => server.stop());
+    shutdownMgr.addCleanup("persistUsage", async () => {
+      // Match serve.ts behavior - flush token accumulator before DB closes
+      try {
+        if (tokenAccumulator.hasUsage) {
+          await persistUsageSnapshot(tokenAccumulator.getSnapshot());
+        }
+      } catch {
+        // Non-critical — don't block shutdown
+      }
+    });
     shutdownMgr.addCleanup("scorerPool", () => resetScorerPool());
     shutdownMgr.addCleanup("db", () => closeLadybugDb());
     shutdownMgr.addCleanup("logger", () => shutdownLogger());

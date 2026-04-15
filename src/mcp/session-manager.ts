@@ -70,7 +70,9 @@ export class SessionManager {
       return;
     }
 
-    if (!this.canAcceptSession() && this.pendingReservations === 0) {
+    // Reject if at capacity. The pendingReservations check was removed because
+    // it could allow overflow when another caller has a pending reservation.
+    if (!this.canAcceptSession()) {
       throw new ValidationError(
         `Maximum session limit (${this.maxSessions}) reached. Cannot accept new session.`,
       );
@@ -141,14 +143,16 @@ export class SessionManager {
       for (const sessionId of expiredSessionIds) {
         try {
           onExpired(sessionId);
+          // Note: onExpired (cleanupSession) calls unregisterSession internally,
+          // so we don't call it again here to avoid double-unregister.
         } catch (error) {
           logger.error("Idle reaper callback failed", {
             sessionId,
             error: error instanceof Error ? error.message : String(error),
           });
+          // If onExpired failed, we still need to unregister the session
+          this.unregisterSession(sessionId);
         }
-
-        this.unregisterSession(sessionId);
       }
     }, intervalMs);
     // Don't let the reaper interval prevent clean process exit (M7)

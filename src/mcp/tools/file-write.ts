@@ -230,12 +230,18 @@ export async function handleFileWrite(
       // For global replace, do it in chunks with deadline checks
       let result = existingContent;
       let match;
+      let searchStart = 0;
       const singleRegex = new RegExp(pattern);
-      while ((match = singleRegex.exec(result)) !== null) {
+      while ((match = singleRegex.exec(result.slice(searchStart))) !== null) {
         if (Date.now() > deadline) {
           throw new ValidationError(`Pattern replacement exceeded ${REPLACE_TIME_BUDGET_MS}ms time budget`);
         }
-        result = result.slice(0, match.index) + replacement + result.slice(match.index + match[0].length);
+        const absoluteIndex = searchStart + match.index;
+        const matchLen = match[0].length;
+        result = result.slice(0, absoluteIndex) + replacement + result.slice(absoluteIndex + matchLen);
+        // Advance past this match to prevent infinite loop on zero-length matches
+        searchStart = absoluteIndex + replacement.length + (matchLen === 0 ? 1 : 0);
+        if (searchStart >= result.length) break;
       }
       newContent = result;
     } else {
