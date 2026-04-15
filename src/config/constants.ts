@@ -483,6 +483,17 @@ export const DEFAULT_INDEXING_CONCURRENCY = 8;
 export const MAX_INDEXING_CONCURRENCY = 10;
 
 /**
+ * Default concurrency for Pass 2 cross-file call resolution.
+ * Conservative default (1 = sequential) until tier presets exist.
+ */
+export const DEFAULT_PASS2_CONCURRENCY = 1;
+
+/**
+ * Maximum concurrency for Pass 2 resolvers.
+ */
+export const MAX_PASS2_CONCURRENCY = 16;
+
+/**
  * Default timeout for operations in milliseconds.
  */
 export const DEFAULT_OPERATION_TIMEOUT_MS = 2000;

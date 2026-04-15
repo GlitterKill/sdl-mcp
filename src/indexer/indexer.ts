@@ -606,6 +606,7 @@ async function indexRepoImpl(
         symbolIndex,
         tsResolver,
         config,
+        pass2Concurrency: appConfig.indexing?.pass2Concurrency ?? 1,
         createdCallEdges,
         globalNameToSymbolIds,
         globalPreferredSymbolId,
