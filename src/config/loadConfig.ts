@@ -6,6 +6,8 @@ import {
   LiveIndexConfigSchema,
   ConcurrencyConfigSchema,
   ParallelScorerConfigSchema,
+  RuntimeConfigSchema,
+  SemanticConfigSchema,
 } from "./types.js";
 import { ConfigError } from "../domain/errors.js";
 import { resolveCliConfigPath } from "./configPath.js";
@@ -146,22 +148,18 @@ export function loadConfig(configPath?: string): AppConfig {
           readPoolSize: presets.readPoolSize,
           maxSessions: presets.maxSessions,
         },
-        runtime: config.runtime
-          ? {
-              ...config.runtime,
-              maxConcurrentJobs: presets.runtimeMaxConcurrentJobs,
-            }
-          : config.runtime,
+        runtime: (() => {
+          const baseRuntime = RuntimeConfigSchema.parse(config.runtime ?? {});
+          return { ...baseRuntime, maxConcurrentJobs: presets.runtimeMaxConcurrentJobs };
+        })(),
         liveIndex: {
           ...baseLiveIndex,
           reconcileConcurrency: presets.reconcileConcurrency,
         },
-        semantic: config.semantic
-          ? {
-              ...config.semantic,
-              summaryMaxConcurrency: presets.summaryMaxConcurrency,
-            }
-          : config.semantic,
+        semantic: (() => {
+          const baseSemantic = SemanticConfigSchema.parse(config.semantic ?? {});
+          return { ...baseSemantic, summaryMaxConcurrency: presets.summaryMaxConcurrency };
+        })(),
         parallelScorer: {
           ...baseParallelScorer,
           enabled: presets.parallelScorerEnabled,

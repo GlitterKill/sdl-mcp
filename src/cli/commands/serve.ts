@@ -41,7 +41,6 @@ import { SessionManager } from "../../mcp/session-manager.js";
 import { tokenAccumulator } from "../../mcp/token-accumulator.js";
 import { ensureConfiguredReposRegistered } from "../../startup/bootstrap.js";
 import { detectCpuProfile } from "../../util/cpu-detect.js";
-import { getTierPresets } from "../../util/cpu-presets.js";
 
 export async function serveCommand(options: ServeOptions): Promise<void> {
   // Show banner for HTTP transport only (stdio needs clean output for MCP protocol)
@@ -96,11 +95,10 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     config.performanceTier === "auto"
       ? cpuProfile.detectedTier
       : config.performanceTier;
-  const tierPresets = getTierPresets(effectiveTier);
   console.error(
     `[sdl-mcp] CPU tier: ${effectiveTier} (${cpuProfile.logicalCores} logical cores` +
       (cpuProfile.physicalCores ? `, ~${cpuProfile.physicalCores} physical` : "") +
-      `) — indexing.concurrency=${tierPresets.indexingConcurrency}, maxToolConcurrency=${tierPresets.maxToolConcurrency}`,
+      `) — indexing.concurrency=${config.indexing?.concurrency ?? "default"}, maxToolConcurrency=${config.concurrency?.maxToolConcurrency ?? "default"}`,
   );
 
   // Wire concurrency configuration from config file

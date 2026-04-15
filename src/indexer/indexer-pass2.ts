@@ -192,7 +192,7 @@ export async function runPass2Resolvers(params: {
   });
   callResolutionTelemetry.pass2Targets = pass2Targets.length;
 
-  // Shared resolver cache is read-only after construction; safe to share across concurrent calls.
+  // Resolver cache - shared in sequential mode, per-batch in parallel mode to avoid compute-once races.
   const pass2ResolverCache = new Map<string, unknown>();
 
   const concurrency = Math.max(1, params.pass2Concurrency ?? 1);
@@ -243,6 +243,12 @@ export async function runPass2Resolvers(params: {
   } else {
     // --- Parallel path: bounded concurrency with per-file isolated dedup sets ---
     //
+    // TELEMETRY NOTE: Counters in callResolutionTelemetry may be slightly
+    // inaccurate under concurrency due to interleaved increments. This is
+    // acceptable because telemetry is diagnostic only and does not affect
+    // indexing correctness. The alternative (cloning telemetry per resolver
+    // and merging) would add significant complexity for marginal benefit.
+    //
     // Each file in a batch receives a *snapshot* of createdCallEdges taken
     // at batch-start so resolvers do not race on the shared set.  After the
     // batch finishes we union all new keys back into the canonical set.
@@ -257,6 +263,8 @@ export async function runPass2Resolvers(params: {
 
       // Snapshot the canonical dedup set for this batch.
       const batchSnapshot = new Set(createdCallEdges);
+      // Per-batch cache avoids compute-once races on package index builds.
+      const batchCache = new Map<string, unknown>();
 
       // Emit progress for the first file in this batch.
       if (batch[0]) {
@@ -293,7 +301,7 @@ export async function runPass2Resolvers(params: {
           globalNameToSymbolIds,
           globalPreferredSymbolId,
           callResolutionTelemetry,
-          pass2ResolverCache,
+          pass2ResolverCache: batchCache,
         });
       });
 
