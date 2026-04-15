@@ -29,7 +29,9 @@ import {
   getExtensionCapabilities,
 } from "../../db/ladybug.js";
 // Lazy-loaded to avoid import failures in test environments
-let _checkIndexHealth: typeof import("../../retrieval/index-lifecycle.js").checkIndexHealth | null = null;
+let _checkIndexHealth:
+  | typeof import("../../retrieval/index-lifecycle.js").checkIndexHealth
+  | null = null;
 async function getCheckIndexHealth() {
   if (!_checkIndexHealth) {
     try {
@@ -64,7 +66,10 @@ const DOCTOR_CHECKS = [
     check: checkCallResolutionCapabilities,
   },
   { name: "Graph database (Ladybug)", check: checkLadybugDb },
-  { name: "DB extension capabilities (fts/vector)", check: checkLadybugExtensions },
+  {
+    name: "DB extension capabilities (fts/vector)",
+    check: checkLadybugExtensions,
+  },
   { name: "Retrieval indexes (FTS/vector)", check: checkRetrievalIndexes },
   { name: "Semantic embedding models", check: checkSemanticModels },
   { name: "Runtime execution", check: checkRuntimeExecution },
@@ -374,7 +379,8 @@ async function checkStaleIndex(
     return {
       status: "warn",
       message: `Cannot check index staleness: ${error instanceof Error ? error.message : String(error)}`,
-    };}
+    };
+  }
 }
 
 async function checkRepoPaths(
@@ -697,7 +703,8 @@ async function checkLadybugDb(
     return {
       status: "warn",
       message: `Cannot verify graph database: ${error instanceof Error ? error.message : String(error)}`,
-    };}
+    };
+  }
 }
 async function checkLadybugExtensions(
   _options: DoctorOptions,
@@ -748,15 +755,28 @@ async function checkRetrievalIndexes(
   if (!isLadybugAvailable()) {
     return {
       status: "warn",
-      message: "Graph database driver not available \u2014 skipping retrieval index check",
+      message:
+        "Graph database driver not available \u2014 skipping retrieval index check",
     };
   }
 
   try {
-    const conn = await getLadybugConn();
+    // getLadybugConn throws if DB not initialized; guard against that
+    let conn;
+    try {
+      conn = await getLadybugConn();
+    } catch {
+      return {
+        status: "warn" as const,
+        message: "Graph database not initialized — run 'sdl-mcp init' first",
+      };
+    }
     const checkFn = await getCheckIndexHealth();
     if (!checkFn) {
-      return { status: "warn" as const, message: "Retrieval index health module not available" };
+      return {
+        status: "warn" as const,
+        message: "Retrieval index health module not available",
+      };
     }
     const health = await checkFn(conn);
 
@@ -766,10 +786,14 @@ async function checkRetrievalIndexes(
     const vectorPresent = health.vectors.filter((v) => v.exists);
     const vectorAbsent = health.vectors.filter((v) => !v.exists);
     if (vectorPresent.length > 0) {
-      parts.push(`vector indexes present: ${vectorPresent.map((v) => v.model).join(", ")}`);
+      parts.push(
+        `vector indexes present: ${vectorPresent.map((v) => v.model).join(", ")}`,
+      );
     }
     if (vectorAbsent.length > 0) {
-      parts.push(`vector indexes absent: ${vectorAbsent.map((v) => v.model).join(", ")}`);
+      parts.push(
+        `vector indexes absent: ${vectorAbsent.map((v) => v.model).join(", ")}`,
+      );
     }
 
     if (!health.fts.exists && vectorAbsent.length === health.vectors.length) {
@@ -789,9 +813,10 @@ async function checkRetrievalIndexes(
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const isCorruption = msg.includes("WAL") || msg.includes("corrupt") || msg.includes("wal");
+    const isCorruption =
+      msg.includes("WAL") || msg.includes("corrupt") || msg.includes("wal");
     return {
-      status: isCorruption ? "fail" as const : "warn" as const,
+      status: isCorruption ? ("fail" as const) : ("warn" as const),
       message: isCorruption
         ? `Database corruption detected: ${msg}. Delete the database file and run 'sdl-mcp index' to rebuild.`
         : `Retrieval index check failed: ${msg}`,
@@ -904,15 +929,21 @@ async function checkRuntimeExecution(
     if (!runtimeConfig || !runtimeConfig.enabled) {
       return {
         status: "warn",
-        message:
-          "Runtime execution disabled (runtime.enabled = false)",
+        message: "Runtime execution disabled (runtime.enabled = false)",
       };
     }
 
     const { detectAllRuntimes } = await import("../../runtime/runtimes.js");
     const detections = await detectAllRuntimes();
 
-    const allowed = new Set(runtimeConfig.allowedRuntimes ?? ["node", "typescript", "python", "shell"]);
+    const allowed = new Set(
+      runtimeConfig.allowedRuntimes ?? [
+        "node",
+        "typescript",
+        "python",
+        "shell",
+      ],
+    );
     const available: string[] = [];
     const unavailable: string[] = [];
     const details: string[] = [];
@@ -921,7 +952,9 @@ async function checkRuntimeExecution(
       if (result.available) {
         const allowedTag = allowed.has(name) ? "" : " (not in allowedRuntimes)";
         available.push(name);
-        details.push(`${name}: ${result.version ?? "unknown version"}${allowedTag}`);
+        details.push(
+          `${name}: ${result.version ?? "unknown version"}${allowedTag}`,
+        );
       } else if (allowed.has(name)) {
         unavailable.push(name);
         details.push(`${name}: NOT FOUND (allowed but missing)`);

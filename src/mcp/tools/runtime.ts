@@ -53,13 +53,21 @@ import {
 // ============================================================================
 
 let concurrencyTracker: ConcurrencyTracker | undefined;
+let concurrencyTrackerLimit: number | undefined;
 
 function getOrCreateConcurrencyTracker(maxJobs: number): ConcurrencyTracker {
+  // Recreate tracker if limit changed and no active slots
+  if (concurrencyTracker && concurrencyTrackerLimit !== maxJobs) {
+    if (concurrencyTracker.activeCount === 0) {
+      concurrencyTracker = undefined;
+    }
+    // If slots active, log warning but continue with existing tracker
+    // Config change will take effect when all slots complete
+  }
   if (!concurrencyTracker) {
     concurrencyTracker = createConcurrencyTracker(maxJobs);
+    concurrencyTrackerLimit = maxJobs;
   }
-  // Don't replace tracker while slots are active - just use existing one
-  // The limit change will take effect when server restarts
   return concurrencyTracker;
 }
 

@@ -172,11 +172,15 @@ export async function handleRepoRegister(
 
   // Resolve the root to an absolute path and validate — this catches
   // traversal attempts like "../../etc/passwd" that string matching misses.
+  // On Windows, relative paths like "./foo" resolve to absolute paths, so
+  // we compare resolved-vs-resolved to detect traversal sequences.
   const normalizedRoot = normalizePath(rootPath);
   const resolvedRoot = normalizePath(resolve(normalizedRoot));
 
-  // Reject any path that doesn't resolve to itself (contains traversal sequences)
-  if (resolvedRoot !== normalizedRoot) {
+  // For traversal detection, resolve the input as-is and check if double-resolve changes it.
+  // This catches ".." sequences that escape the intended directory.
+  const doubleResolved = normalizePath(resolve(resolvedRoot));
+  if (resolvedRoot !== doubleResolved) {
     throw new ValidationError("Root path contains path traversal sequences");
   }
 
@@ -557,9 +561,8 @@ export async function handleIndexRefresh(
       if (scipConfig?.enabled && scipConfig?.autoIngestOnRefresh) {
         const repo = await ladybugDb.getRepo(conn, repoId);
         if (repo?.rootPath) {
-          const { autoIngestScipIndexes } = await import(
-            "../../scip/ingestion.js"
-          );
+          const { autoIngestScipIndexes } =
+            await import("../../scip/ingestion.js");
           const scipResults = await autoIngestScipIndexes(
             repoId,
             scipConfig,

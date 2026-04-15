@@ -1,5 +1,5 @@
 import { resolve } from "path";
-import { readFile, stat } from "fs/promises";
+import { open, readFile, stat } from "fs/promises";
 import { existsSync, realpathSync } from "fs";
 import { FileReadRequestSchema, type FileReadResponse } from "../tools.js";
 import { getLadybugConn } from "../../db/ladybug.js";
@@ -10,11 +10,32 @@ import { NotFoundError, ValidationError } from "../../domain/errors.js";
 import { attachRawContext } from "../token-usage.js";
 
 export const SDL_SOURCE_EXTENSIONS = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-  ".py", ".pyw", ".go", ".java", ".cs",
-  ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx",
-  ".php", ".phtml", ".rs", ".kt", ".kts",
-  ".sh", ".bash", ".zsh",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".py",
+  ".pyw",
+  ".go",
+  ".java",
+  ".cs",
+  ".c",
+  ".h",
+  ".cpp",
+  ".hpp",
+  ".cc",
+  ".cxx",
+  ".hxx",
+  ".php",
+  ".phtml",
+  ".rs",
+  ".kt",
+  ".kts",
+  ".sh",
+  ".bash",
+  ".zsh",
 ]);
 
 const MAX_FILE_SIZE_BYTES = 512 * 1024; // 512KB
@@ -24,7 +45,11 @@ const BYTES_PER_TOKEN = 4;
  * Extract a value from a parsed object using a dot-separated key path.
  * Supports array indexing via numeric segments (e.g. "items.0.name").
  */
-const BLOCKED_PATH_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+const BLOCKED_PATH_SEGMENTS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
 
 function extractByPath(obj: unknown, keyPath: string): unknown {
   const segments = keyPath.split(".");
@@ -58,7 +83,12 @@ function searchLines(
   lines: string[],
   pattern: string,
   contextLines: number,
-): { content: string; matchCount: number; returnedLines: number; matchesTruncated: boolean } {
+): {
+  content: string;
+  matchCount: number;
+  returnedLines: number;
+  matchesTruncated: boolean;
+} {
   if (pattern.length > 500) {
     throw new ValidationError("Search pattern too long (max 500 characters)");
   }
@@ -104,7 +134,12 @@ function searchLines(
   }
 
   if (matchIndices.length === 0) {
-    return { content: "", matchCount: 0, returnedLines: 0, matchesTruncated: false };
+    return {
+      content: "",
+      matchCount: 0,
+      returnedLines: 0,
+      matchesTruncated: false,
+    };
   }
 
   // Build ranges with context, merge overlaps
@@ -187,21 +222,37 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
   }
 
   const maxBytes = request.maxBytes ?? MAX_FILE_SIZE_BYTES;
-
-  // Check file size before reading to prevent excessive memory allocation.
-  // Allow a small headroom over maxBytes so near-boundary reads are not
-  // rejected outright, but do not allow a 4x overread into memory the way
-  // the previous "maxBytes * 4" gate did.
   const fileStat = await stat(absPath);
-  const sizeCap = maxBytes + 64 * 1024;
-  if (fileStat.size > sizeCap) {
+
+  // Read only what we need: cap at maxBytes to prevent memory exhaustion.
+  // For files larger than maxBytes, read exactly maxBytes and truncate.
+  // This avoids the previous 64KB headroom that could overread into memory.
+  const needsFullFile = request.jsonPath !== undefined; // JSON/YAML parsing needs full content
+  const readLimit = needsFullFile
+    ? fileStat.size
+    : Math.min(fileStat.size, maxBytes);
+
+  if (needsFullFile && fileStat.size > maxBytes) {
     throw new ValidationError(
-      `File size ${fileStat.size} bytes exceeds read cap of ${sizeCap} bytes. Use offset/limit parameters to read a portion.`,
+      `File size ${fileStat.size} bytes exceeds maxBytes ${maxBytes} for JSON/YAML extraction. Use a smaller file or increase maxBytes.`,
     );
   }
 
-  const rawContent = await readFile(absPath, "utf-8");
-  const totalBytes = Buffer.byteLength(rawContent, "utf-8");
+  let rawContent: string;
+  if (readLimit < fileStat.size) {
+    // Read limited bytes to avoid full allocation
+    const fh = await open(absPath, "r");
+    try {
+      const buf = Buffer.alloc(readLimit);
+      await fh.read(buf, 0, readLimit, 0);
+      rawContent = buf.toString("utf-8");
+    } finally {
+      await fh.close();
+    }
+  } else {
+    rawContent = await readFile(absPath, "utf-8");
+  }
+  const totalBytes = fileStat.size;
   const lines = rawContent.split(/\r?\n/);
   const totalLines = lines.length;
 
@@ -222,7 +273,9 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
       try {
         parsed = JSON.parse(rawContent);
       } catch (err) {
-        throw new ValidationError(`Failed to parse JSON: ${err instanceof Error ? err.message : String(err)}`);
+        throw new ValidationError(
+          `Failed to parse JSON: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     } else {
       // Simple YAML: parse as JSON if it looks like JSON, otherwise return raw with guidance
@@ -238,31 +291,38 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
 
     const extracted = extractByPath(parsed, request.jsonPath);
     if (extracted === undefined) {
-      return withRawTokenBaseline({
-        filePath,
-        content: "",
-        bytes: 0,
-        totalLines,
-        returnedLines: 0,
-        truncated: false,
-        extractedPath: request.jsonPath,
-      }, totalBytes);
+      return withRawTokenBaseline(
+        {
+          filePath,
+          content: "",
+          bytes: 0,
+          totalLines,
+          returnedLines: 0,
+          truncated: false,
+          extractedPath: request.jsonPath,
+        },
+        totalBytes,
+      );
     }
 
-    const serialized = typeof extracted === "string"
-      ? extracted
-      : JSON.stringify(extracted, null, 2);
+    const serialized =
+      typeof extracted === "string"
+        ? extracted
+        : JSON.stringify(extracted, null, 2);
     const extractedBytes = Buffer.byteLength(serialized, "utf-8");
 
-    return withRawTokenBaseline({
-      filePath,
-      content: serialized,
-      bytes: extractedBytes,
-      totalLines,
-      returnedLines: serialized.split("\n").length,
-      truncated: false,
-      extractedPath: request.jsonPath,
-    }, totalBytes);
+    return withRawTokenBaseline(
+      {
+        filePath,
+        content: serialized,
+        bytes: extractedBytes,
+        totalLines,
+        returnedLines: serialized.split("\n").length,
+        truncated: false,
+        extractedPath: request.jsonPath,
+      },
+      totalBytes,
+    );
   }
 
   // === Feature 2: Search with context ===
@@ -272,19 +332,26 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
     const searchLimit = request.limit ?? lines.length;
     const rangedLines = lines.slice(searchOffset, searchOffset + searchLimit);
 
-    const result = searchLines(rangedLines, request.search, Math.min(request.searchContext ?? 2, 50));
+    const result = searchLines(
+      rangedLines,
+      request.search,
+      Math.min(request.searchContext ?? 2, 50),
+    );
     const finalContent = result.matchesTruncated
       ? `// WARNING: ${result.matchCount} total matches, showing first ${MAX_SEARCH_MATCHES}. Narrow the pattern.\n${result.content}`
       : result.content;
-    return withRawTokenBaseline({
-      filePath,
-      content: finalContent,
-      bytes: Buffer.byteLength(finalContent, "utf-8"),
-      totalLines,
-      returnedLines: result.returnedLines,
-      truncated: result.matchesTruncated,
-      matchCount: result.matchCount,
-    }, totalBytes);
+    return withRawTokenBaseline(
+      {
+        filePath,
+        content: finalContent,
+        bytes: Buffer.byteLength(finalContent, "utf-8"),
+        totalLines,
+        returnedLines: result.returnedLines,
+        truncated: result.matchesTruncated,
+        matchCount: result.matchCount,
+      },
+      totalBytes,
+    );
   }
 
   // === Feature 1: Line range ===
@@ -294,54 +361,70 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
   if (offset > 0 || limit !== undefined) {
     const endIdx = limit !== undefined ? offset + limit : lines.length;
     const sliced = lines.slice(offset, endIdx);
-    const numberedContent = sliced.map((l, i) => `${offset + i + 1}: ${l}`).join("\n");
+    const numberedContent = sliced
+      .map((l, i) => `${offset + i + 1}: ${l}`)
+      .join("\n");
     const slicedBytes = Buffer.byteLength(numberedContent, "utf-8");
 
     // Apply maxBytes truncation
     if (slicedBytes > maxBytes) {
       const truncated = numberedContent.slice(0, maxBytes);
-      return withRawTokenBaseline({
+      return withRawTokenBaseline(
+        {
+          filePath,
+          content: truncated,
+          bytes: slicedBytes,
+          totalLines,
+          returnedLines: sliced.length,
+          truncated: true,
+          truncatedAt: maxBytes,
+        },
+        slicedBytes,
+      ); // Compare against sliced range, not full file
+    }
+
+    return withRawTokenBaseline(
+      {
         filePath,
-        content: truncated,
+        content: numberedContent,
         bytes: slicedBytes,
         totalLines,
         returnedLines: sliced.length,
-        truncated: true,
-        truncatedAt: maxBytes,
-      }, slicedBytes); // Compare against sliced range, not full file
-    }
-
-    return withRawTokenBaseline({
-      filePath,
-      content: numberedContent,
-      bytes: slicedBytes,
-      totalLines,
-      returnedLines: sliced.length,
-      truncated: false,
-    }, slicedBytes); // Compare against sliced range, not full file
+        truncated: false,
+      },
+      slicedBytes,
+    ); // Compare against sliced range, not full file
   }
 
   // === Default: full file read with maxBytes truncation ===
   if (totalBytes > maxBytes) {
     const truncated = rawContent.slice(0, maxBytes);
-    logger.debug(`file.read truncated ${filePath}: ${totalBytes} -> ${maxBytes} bytes`);
-    return withRawTokenBaseline({
-      filePath,
-      content: truncated,
-      bytes: totalBytes,
-      totalLines,
-      returnedLines: truncated.split("\n").length,
-      truncated: true,
-      truncatedAt: maxBytes,
-    }, totalBytes);
+    logger.debug(
+      `file.read truncated ${filePath}: ${totalBytes} -> ${maxBytes} bytes`,
+    );
+    return withRawTokenBaseline(
+      {
+        filePath,
+        content: truncated,
+        bytes: totalBytes,
+        totalLines,
+        returnedLines: truncated.split("\n").length,
+        truncated: true,
+        truncatedAt: maxBytes,
+      },
+      totalBytes,
+    );
   }
 
-  return withRawTokenBaseline({
-    filePath,
-    content: rawContent,
-    bytes: totalBytes,
-    totalLines,
-    returnedLines: totalLines,
-    truncated: false,
-  }, totalBytes);
+  return withRawTokenBaseline(
+    {
+      filePath,
+      content: rawContent,
+      bytes: totalBytes,
+      totalLines,
+      returnedLines: totalLines,
+      truncated: false,
+    },
+    totalBytes,
+  );
 }

@@ -41,6 +41,9 @@ export class ShutdownManager {
   private pidfilePath: string | null = null;
   private forceTimeoutMs: number;
   private log: (msg: string) => void;
+  private shutdownResolve: (() => void) | null = null;
+  /** Promise that resolves when shutdown is initiated (before cleanup runs) */
+  readonly shutdownInitiated: Promise<void>;
 
   constructor(options: ShutdownManagerOptions = {}) {
     this.forceTimeoutMs =
@@ -48,6 +51,9 @@ export class ShutdownManager {
     this.log =
       options.log ??
       ((msg: string) => process.stderr.write(`[sdl-mcp] ${msg}\n`));
+    this.shutdownInitiated = new Promise((resolve) => {
+      this.shutdownResolve = resolve;
+    });
   }
 
   /**
@@ -112,6 +118,12 @@ export class ShutdownManager {
       return;
     }
     this.shutdownCalled = true;
+
+    // Signal shutdown initiated so waiters can unblock
+    if (this.shutdownResolve) {
+      this.shutdownResolve();
+      this.shutdownResolve = null;
+    }
 
     this.log(`Received ${reason}, shutting down gracefully...`);
 

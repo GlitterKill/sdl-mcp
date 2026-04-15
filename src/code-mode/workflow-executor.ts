@@ -5,14 +5,8 @@ import { estimateTokens } from "../util/tokenize.js";
 import { buildCatalog, type ActionDescriptor } from "./action-catalog.js";
 import { WorkflowEtagCache } from "./etag-cache.js";
 import { validateLadder } from "./ladder-validator.js";
-import {
-  resolveRefs,
-  RefResolutionError,
-} from "./ref-resolver.js";
-import {
-  executeTransform,
-  TransformError,
-} from "./transforms.js";
+import { resolveRefs, RefResolutionError } from "./ref-resolver.js";
+import { executeTransform, TransformError } from "./transforms.js";
 import { truncateStepResult } from "./workflow-truncation.js";
 import {
   type WorkflowResponse,
@@ -40,9 +34,9 @@ function applyStepTruncation(
 ): void {
   const maxResponseTokens = step.maxResponseTokens ?? defaultMaxResponseTokens;
   if (
-    maxResponseTokens != null
-    && stepResult.status === "ok"
-    && stepResult.result != null
+    maxResponseTokens != null &&
+    stepResult.status === "ok" &&
+    stepResult.result != null
   ) {
     const truncation = truncateStepResult(stepResult.result, maxResponseTokens);
     if (truncation.handle) {
@@ -84,38 +78,47 @@ export async function executeWorkflow(
   const traceSteps: WorkflowTraceStep[] = [];
   const startTime = Date.now();
 
-  const traceCatalog = traceOpts
-    && (traceOpts.includeSchemas || traceOpts.includeExamples)
-    ? buildCatalog({
-      includeSchemas: traceOpts.includeSchemas,
-      includeExamples: traceOpts.includeExamples,
-    })
-    : null;
+  const traceCatalog =
+    traceOpts && (traceOpts.includeSchemas || traceOpts.includeExamples)
+      ? buildCatalog({
+          includeSchemas: traceOpts.includeSchemas,
+          includeExamples: traceOpts.includeExamples,
+        })
+      : null;
 
   // Handle dryRun mode - validate steps and references without executing
   if (request.dryRun) {
-    const validation: { stepIndex: number; fn: string; action: string; valid: boolean; issues: string[] }[] = [];
+    const validation: {
+      stepIndex: number;
+      fn: string;
+      action: string;
+      valid: boolean;
+      issues: string[];
+    }[] = [];
     const fnNameMap = getActiveFnNameMap();
     const actionToFn = getActiveActionToFn();
-    
+
     for (let i = 0; i < request.steps.length; i++) {
       const step = request.steps[i];
       const issues: string[] = [];
-      
+
       // Check if function exists
-      const fnExists = step.fn in fnNameMap || step.fn in actionToFn || step.internal;
+      const fnExists =
+        step.fn in fnNameMap || step.fn in actionToFn || step.internal;
       if (!fnExists) {
         issues.push(`Unknown function: ${step.fn}`);
       }
-      
+
       // Validate references point to valid steps
       const refs = findRefsInArgs(step.args);
       for (const ref of refs) {
         if (ref >= i) {
-          issues.push(`Reference ${"$"}${ref} points to step that hasn't executed yet`);
+          issues.push(
+            `Reference ${"$"}${ref} points to step that hasn't executed yet`,
+          );
         }
       }
-      
+
       validation.push({
         stepIndex: i,
         fn: step.fn,
@@ -124,8 +127,8 @@ export async function executeWorkflow(
         issues,
       });
     }
-    
-    const allValid = validation.every(v => v.valid);
+
+    const allValid = validation.every((v) => v.valid);
     return {
       results: [],
       totalTokens: 0,
@@ -164,8 +167,7 @@ export async function executeWorkflow(
       // step, so callers can act on the feedback instead of seeing an
       // opaque budget_exceeded status for every remaining step.
       const explanation =
-        budget.exceededExplanation() ??
-        "Workflow budget exhausted.";
+        budget.exceededExplanation() ?? "Workflow budget exhausted.";
       for (let j = i; j < request.steps.length; j++) {
         stepResults.push({
           stepIndex: j,
@@ -188,9 +190,10 @@ export async function executeWorkflow(
     try {
       resolvedArgs = resolveRefs(step.args, priorResults);
     } catch (error) {
-      const errorMessage = error instanceof RefResolutionError
-        ? error.message
-        : `Ref resolution failed: ${String(error)}`;
+      const errorMessage =
+        error instanceof RefResolutionError
+          ? error.message
+          : `Ref resolution failed: ${String(error)}`;
       stepResults.push({
         stepIndex: i,
         fn: step.fn,
@@ -238,11 +241,7 @@ export async function executeWorkflow(
           durationMs: stepDuration,
           status: "ok",
         };
-        applyStepTruncation(
-          stepResult,
-          step,
-          request.defaultMaxResponseTokens,
-        );
+        applyStepTruncation(stepResult, step, request.defaultMaxResponseTokens);
         stepResults.push(stepResult);
 
         if (traceOpts) {
@@ -265,9 +264,10 @@ export async function executeWorkflow(
       } catch (error) {
         const stepDuration = Date.now() - stepStart;
         budget.record(0, stepDuration);
-        const errorMessage = error instanceof TransformError
-          ? error.message
-          : `Transform failed: ${String(error)}`;
+        const errorMessage =
+          error instanceof TransformError
+            ? error.message
+            : `Transform failed: ${String(error)}`;
 
         stepResults.push({
           stepIndex: i,
@@ -332,17 +332,27 @@ export async function executeWorkflow(
 
         budget.record(tokens, stepDuration);
         // Record usage for session-level token tracking (per-step attribution)
-        const rawCtx = (result && typeof result === "object")
-          ? (result as Record<string, unknown>)._rawContext as { fileIds?: string[]; rawTokens?: number } | undefined
-          : undefined;
+        const rawCtx =
+          result && typeof result === "object"
+            ? ((result as Record<string, unknown>)._rawContext as
+                | { fileIds?: string[]; rawTokens?: number }
+                | undefined)
+            : undefined;
         let rawEquivalent = rawCtx?.rawTokens ?? tokens;
         // When rawTokens is not explicitly set but fileIds are available,
         // estimate raw equivalent from file byte sizes so per-step
         // savings are correctly attributed (not just to the workflow envelope).
-        if (!rawCtx?.rawTokens && rawCtx?.fileIds && rawCtx.fileIds.length > 0) {
+        if (
+          !rawCtx?.rawTokens &&
+          rawCtx?.fileIds &&
+          rawCtx.fileIds.length > 0
+        ) {
           try {
             const usageConn = await getLadybugConn();
-            const files = await ladybugDb.getFilesByIds(usageConn, rawCtx.fileIds);
+            const files = await ladybugDb.getFilesByIds(
+              usageConn,
+              rawCtx.fileIds,
+            );
             let estimatedRaw = 0;
             for (const file of files.values()) {
               estimatedRaw += Math.ceil(file.byteSize / 4); // ~4 bytes per token
@@ -350,7 +360,9 @@ export async function executeWorkflow(
             if (estimatedRaw > tokens) {
               rawEquivalent = estimatedRaw;
             }
-          } catch { /* graceful degradation: keep rawEquivalent = tokens */ }
+          } catch {
+            /* graceful degradation: keep rawEquivalent = tokens */
+          }
         }
         tokenAccumulator.recordUsage(step.fn, tokens, rawEquivalent);
 
@@ -367,11 +379,7 @@ export async function executeWorkflow(
           durationMs: stepDuration,
           status: "ok",
         };
-        applyStepTruncation(
-          stepResult,
-          step,
-          request.defaultMaxResponseTokens,
-        );
+        applyStepTruncation(stepResult, step, request.defaultMaxResponseTokens);
         stepResults.push(stepResult);
 
         if (traceOpts) {
@@ -397,7 +405,8 @@ export async function executeWorkflow(
         let errorMessage: string;
         if (error instanceof z.ZodError) {
           const lines = error.issues.map((issue) => {
-            const path = issue.path.length > 0 ? issue.path.join(".") + ": " : "";
+            const path =
+              issue.path.length > 0 ? issue.path.join(".") + ": " : "";
             return path + issue.message;
           });
           errorMessage = `Invalid arguments: ${lines.join("; ")}`;
@@ -415,10 +424,12 @@ export async function executeWorkflow(
           durationMs: stepDuration,
           status: "error",
           error: errorMessage,
-          ...((() => {
-            const meta = actionCatalog.find(a => a.action === step.action);
-            return meta?.fallbacks?.length ? { fallbackTools: meta.fallbacks } : {};
-          })()),
+          ...(() => {
+            const meta = actionCatalog.find((a) => a.action === step.action);
+            return meta?.fallbacks?.length
+              ? { fallbackTools: meta.fallbacks }
+              : {};
+          })(),
         });
         priorResults.push(null);
 
@@ -467,17 +478,16 @@ export async function executeWorkflow(
 
   const budgetState = budget.state();
   const etagCacheState = etagCache?.getCache();
-  const hasEtags = etagCacheState !== undefined
-    && Object.keys(etagCacheState).length > 0;
+  const hasEtags =
+    etagCacheState !== undefined && Object.keys(etagCacheState).length > 0;
   const totalDurationMs = Date.now() - startTime;
 
   const aggregatedFileIds = new Set<string>();
   let aggregatedRawTokens = 0;
   for (const priorResult of priorResults) {
     if (priorResult && typeof priorResult === "object") {
-      const rawContext = (priorResult as Record<string, unknown>)._rawContext as
-        | { fileIds?: string[]; rawTokens?: number }
-        | undefined;
+      const rawContext = (priorResult as Record<string, unknown>)
+        ._rawContext as { fileIds?: string[]; rawTokens?: number } | undefined;
       if (rawContext) {
         if (rawContext.fileIds) {
           for (const fileId of rawContext.fileIds) {
@@ -498,7 +508,7 @@ export async function executeWorkflow(
     truncated: budgetState.truncated,
     // Filter out ladder warnings for steps that failed (e.g., "symbol not found")
     ladderWarnings: (() => {
-      const filtered = ladderWarnings.filter(w => {
+      const filtered = ladderWarnings.filter((w) => {
         const match = w.match(/^Step (\d+)/);
         if (!match) return true;
         const stepIdx = parseInt(match[1], 10);
@@ -519,34 +529,48 @@ export async function executeWorkflow(
   }
 
   if (traceOpts && traceSteps.length > 0) {
+    const successCount = stepResults.filter((r) => r.status === "ok").length;
+    const attemptCount = stepResults.filter(
+      (r) => r.status === "ok" || r.status === "error",
+    ).length;
     response.trace = {
       steps: traceSteps,
       totals: {
         durationMs: totalDurationMs,
         tokens: budgetState.tokensUsed,
-        stepsExecuted: stepResults.filter(
-          (stepResult) =>
-            stepResult.status === "ok" || stepResult.status === "error",
-        ).length,
+        stepsExecuted: successCount,
+        stepsAttempted: attemptCount,
       },
     };
   }
 
-  
   // Strip intermediate step results if onlyFinalResult is requested
   if (request.onlyFinalResult && response.results.length > 1) {
     const lastIdx = response.results.length - 1;
+    const suppressedCount = lastIdx; // All steps except the last
     response.results = response.results.map((r, i) => {
       if (i < lastIdx) {
-        return { stepIndex: r.stepIndex, fn: r.fn, status: r.status, tokens: 0, durationMs: r.durationMs, result: null };
+        return {
+          stepIndex: r.stepIndex,
+          fn: r.fn,
+          status: r.status,
+          tokens: 0,
+          durationMs: r.durationMs,
+          result: null,
+        };
       }
       return r;
     });
     // Recalculate totalTokens as sum of kept tokens (avoids mixing pre/post truncation values)
-    response.totalTokens = response.results.reduce((sum, r) => sum + r.tokens, 0);
+    response.totalTokens = response.results.reduce(
+      (sum, r) => sum + r.tokens,
+      0,
+    );
+    // Signal that intermediate results were suppressed
+    response.intermediateResultsSuppressed = suppressedCount;
   }
 
-return response;
+  return response;
 }
 
 // --- Trace Helpers ---

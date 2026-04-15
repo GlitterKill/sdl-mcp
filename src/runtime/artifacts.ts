@@ -15,6 +15,20 @@ import { isReDoSRisk } from "../util/safeRegex.js";
 const gzipAsync = promisify(gzip);
 const ARTIFACT_DIR_PREFIX = "sdl-runtime";
 
+// Lazy sweep: rate-limit cleanup to once per 5 minutes
+let lastSweepMs = 0;
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+
+async function maybeSweepExpired(baseDir?: string | null): Promise<void> {
+  const now = Date.now();
+  if (now - lastSweepMs < SWEEP_INTERVAL_MS) return;
+  lastSweepMs = now;
+  // Fire-and-forget; don't block artifact writes on cleanup
+  sweepExpiredArtifacts(baseDir).catch((err) => {
+    logger.warn("Background artifact sweep failed", { error: err });
+  });
+}
+
 interface WriteArtifactOptions {
   repoId: string;
   runtime: string;
@@ -81,14 +95,18 @@ export function applyRedaction(
 
   for (const customPattern of redactionConfig.patterns) {
     if (isReDoSRisk(customPattern.pattern)) {
-      logger.warn("Skipping redaction pattern with ReDoS risk", { pattern: customPattern.pattern });
+      logger.warn("Skipping redaction pattern with ReDoS risk", {
+        pattern: customPattern.pattern,
+      });
       continue;
     }
     try {
       const VALID_FLAGS = /^[gimsuvdy]*$/;
       const flags = customPattern.flags ?? "g";
       if (!VALID_FLAGS.test(flags)) {
-        logger.warn("Invalid regex flags in redaction pattern; skipping", { flags });
+        logger.warn("Invalid regex flags in redaction pattern; skipping", {
+          flags,
+        });
         continue;
       }
       const regex = new RegExp(customPattern.pattern, flags);
@@ -109,6 +127,9 @@ export function applyRedaction(
 export async function writeArtifact(
   opts: WriteArtifactOptions,
 ): Promise<ArtifactWriteResult> {
+  // Trigger lazy cleanup of expired artifacts (rate-limited, non-blocking)
+  void maybeSweepExpired(opts.artifactBaseDir);
+
   const artifactId = generateArtifactId(opts.repoId);
   const artifactDir = join(
     getArtifactBaseDir(opts.artifactBaseDir),
@@ -324,7 +345,6 @@ export async function readArtifactManifest(
 
 import { gunzip } from "zlib";
 
-
 const MAX_ARTIFACT_DECOMPRESS_SIZE = 50 * 1024 * 1024; // 50 MB
 const gunzipAsync = promisify(gunzip);
 
@@ -335,7 +355,11 @@ export async function readArtifactContent(
   artifactHandle: string,
   baseDir?: string | null,
   stream: "stdout" | "stderr" | "both" = "both",
-): Promise<{ stdout: string | null; stderr: string | null; totalBytes: number }> {
+): Promise<{
+  stdout: string | null;
+  stderr: string | null;
+  totalBytes: number;
+}> {
   if (
     !artifactHandle ||
     artifactHandle.includes("..") ||
@@ -358,7 +382,9 @@ export async function readArtifactContent(
       const compressed = await readFile(join(artifactDir, "stdout.gz"));
       const decompressed = await gunzipAsync(compressed);
       if (decompressed.length > MAX_ARTIFACT_DECOMPRESS_SIZE) {
-        throw new Error(`Decompressed artifact exceeds size limit (${decompressed.length} bytes)`);
+        throw new Error(
+          `Decompressed artifact exceeds size limit (${decompressed.length} bytes)`,
+        );
       }
       stdout = decompressed.toString("utf-8");
       totalBytes += decompressed.length;
@@ -372,7 +398,9 @@ export async function readArtifactContent(
       const compressed = await readFile(join(artifactDir, "stderr.gz"));
       const decompressed = await gunzipAsync(compressed);
       if (decompressed.length > MAX_ARTIFACT_DECOMPRESS_SIZE) {
-        throw new Error(`Decompressed artifact exceeds size limit (${decompressed.length} bytes)`);
+        throw new Error(
+          `Decompressed artifact exceeds size limit (${decompressed.length} bytes)`,
+        );
       }
       stderr = decompressed.toString("utf-8");
       totalBytes += decompressed.length;
@@ -433,7 +461,9 @@ export async function queryArtifactContent(
     if (line.length <= maxLineLength) return line;
     return (
       line.slice(0, maxLineLength) +
-      "\u2026 (+" + (line.length - maxLineLength) + ")"
+      "\u2026 (+" +
+      (line.length - maxLineLength) +
+      ")"
     );
   };
 
@@ -446,11 +476,7 @@ export async function queryArtifactContent(
     const lines = content.split("\n");
     totalLines += lines.length;
 
-    for (
-      let i = 0;
-      i < lines.length && excerpts.length < maxExcerpts;
-      i++
-    ) {
+    for (let i = 0; i < lines.length && excerpts.length < maxExcerpts; i++) {
       const lower = lines[i].toLowerCase();
       if (lowerTerms.some((t) => lower.includes(t))) {
         const start = Math.max(0, i - contextLines);
@@ -474,7 +500,10 @@ export async function queryArtifactContent(
 
   // Fallback: if no keyword matches found, return first lines of output
   if (excerpts.length === 0) {
-    const fallbackStream = (streamContent: string | null, source: "stdout" | "stderr"): void => {
+    const fallbackStream = (
+      streamContent: string | null,
+      source: "stdout" | "stderr",
+    ): void => {
       if (!streamContent) return;
       const lines = streamContent.split("\n");
       if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) return;
@@ -482,7 +511,10 @@ export async function queryArtifactContent(
       excerpts.push({
         lineStart: 1,
         lineEnd: end + 1,
-        content: lines.slice(0, end + 1).map(truncLine).join("\n"),
+        content: lines
+          .slice(0, end + 1)
+          .map(truncLine)
+          .join("\n"),
         source,
       });
     };

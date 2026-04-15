@@ -1,21 +1,9 @@
 import { execFileSync } from "child_process";
 import { basename } from "path";
 import type { RuntimeDescriptor, RuntimeDetectionResult } from "./types.js";
+import { ValidationError } from "../domain/errors.js";
 
 // ── Table types ──────────────────────────────────────────────
-
-/** Escape a single argument for cmd.exe /c to prevent metacharacter injection */
-function cmdEscape(arg: string): string {
-  // Don't quote simple tokens (shell builtins like echo, dir, set must be unquoted)
-  // Include / and : as safe chars (path separators, drive letters) — not cmd.exe metacharacters
-  if (/^[a-zA-Z0-9._/:-]+$/.test(arg)) return arg;
-  // Double-quote the argument; escape chars that cmd.exe interprets
-  // Note: % must use %% inside double quotes (^% doesn't suppress expansion inside quotes)
-  const escaped = arg
-    .replace(/[()!^"<>&|]/g, (ch) => "^" + ch)
-    .replace(/%/g, "%%");
-  return '"' + escaped + '"';
-}
 
 interface PlatformCandidates {
   win32: string[];
@@ -246,10 +234,6 @@ function buildAliasMap(): Map<string, Set<string>> {
 
 const RUNTIME_EXECUTABLE_ALIASES = buildAliasMap();
 
-function shellEscape(arg: string): string {
-  return "'" + arg.replace(/'/g, "'\\''") + "'";
-}
-
 export function normalizeExecutableName(executable: string): string {
   const trimmed = executable.replace(/^["']|["']$/g, "");
   const normalized = trimmed.replace(/\\/g, "/");
@@ -363,16 +347,19 @@ function createDescriptor(entry: RuntimeTableEntry): RuntimeDescriptor {
       const exe = opts.executable ?? candidates[0];
 
       if (entry.commandBuilder === "shell") {
+        // Shell runtime requires codePath for security — arbitrary command execution
+        // via args alone is too risky. Use the `code` parameter to write a script file.
+        if (!opts.codePath) {
+          throw new ValidationError(
+            "Shell runtime requires code parameter. Direct command execution via args is not supported for security reasons.",
+          );
+        }
         if (IS_WINDOWS) {
           const cmd = opts.executable ?? "cmd.exe";
-          return opts.codePath
-            ? { executable: cmd, args: ["/c", opts.codePath, ...args] }
-            : { executable: cmd, args: ["/c", args.map(cmdEscape).join(" ")] };
+          return { executable: cmd, args: ["/c", opts.codePath, ...args] };
         }
         const sh = opts.executable ?? "bash";
-        return opts.codePath
-          ? { executable: sh, args: [opts.codePath, ...args] }
-          : { executable: sh, args: ["-c", args.map(shellEscape).join(" ")] };
+        return { executable: sh, args: [opts.codePath, ...args] };
       }
 
       if (

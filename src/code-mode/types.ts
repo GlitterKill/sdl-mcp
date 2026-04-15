@@ -53,7 +53,7 @@ export const WorkflowRequestSchema = z.object({
 
   /** Prior workflow etagCache to seed - enables cross-workflow cache hits */
   etagCache: z.record(z.string(), z.string()).optional(),
-})
+});
 
 // --- TypeScript Types ---
 
@@ -61,11 +61,7 @@ export type WorkflowStep = z.infer<typeof WorkflowStepSchema>;
 export type WorkflowBudget = z.infer<typeof WorkflowBudgetSchema>;
 export type WorkflowRequest = z.infer<typeof WorkflowRequestSchema>;
 
-export type WorkflowStepStatus =
-  | "ok"
-  | "error"
-  | "skipped"
-  | "budget_exceeded";
+export type WorkflowStepStatus = "ok" | "error" | "skipped" | "budget_exceeded";
 
 export interface WorkflowStepResult {
   /** Zero-based step index */
@@ -114,7 +110,10 @@ export interface WorkflowTrace {
   totals: {
     durationMs: number;
     tokens: number;
+    /** Count of successfully executed steps */
     stepsExecuted: number;
+    /** Count of attempted steps (includes failed) */
+    stepsAttempted?: number;
   };
 }
 
@@ -132,7 +131,13 @@ export interface WorkflowResponse {
   /** Present when dryRun was requested - validation results without execution */
   dryRun?: {
     valid: boolean;
-    validation: { stepIndex: number; fn: string; action: string; valid: boolean; issues: string[] }[];
+    validation: {
+      stepIndex: number;
+      fn: string;
+      action: string;
+      valid: boolean;
+      issues: string[];
+    }[];
     stepCount: number;
     budgetLimits: object;
   };
@@ -140,4 +145,6 @@ export interface WorkflowResponse {
   etagCache?: Record<string, string>;
   /** Execution trace (only present when trace options are provided) */
   trace?: WorkflowTrace;
+  /** Count of intermediate step results suppressed due to onlyFinalResult */
+  intermediateResultsSuppressed?: number;
 }

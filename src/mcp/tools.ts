@@ -200,7 +200,16 @@ const SliceTruncationSchema = z.object({
     .nullable(),
 });
 
-const MemoryTypeSchema = z.enum(["decision", "bugfix", "task_context", "pattern", "convention", "architecture", "performance", "security"]);
+const MemoryTypeSchema = z.enum([
+  "decision",
+  "bugfix",
+  "task_context",
+  "pattern",
+  "convention",
+  "architecture",
+  "performance",
+  "security",
+]);
 
 const SurfacedMemorySchema = z.object({
   memoryId: z.string(),
@@ -213,7 +222,12 @@ const SurfacedMemorySchema = z.object({
   tags: z.array(z.string()),
 });
 
-const SliceBuildWireFormatSchema = z.enum(["standard", "readable", "compact", "agent"]);
+const SliceBuildWireFormatSchema = z.enum([
+  "standard",
+  "readable",
+  "compact",
+  "agent",
+]);
 const SliceBuildWireFormatVersionSchema = z.union([
   z.literal(1),
   z.literal(2),
@@ -609,7 +623,10 @@ export const RepoStatusRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   surfaceMemories: z.boolean().optional().default(false),
   /** "minimal" returns only core counts (fastest). "standard" includes health/watcher/prefetch. "full" adds live-index. */
-  detail: z.enum(["minimal", "standard", "full"]).optional().default("standard"),
+  detail: z
+    .enum(["minimal", "standard", "full"])
+    .optional()
+    .default("standard"),
 });
 
 export const RepoStatusResponseSchema = z.object({
@@ -653,33 +670,34 @@ export const RepoStatusResponseSchema = z.object({
   watcherNote: z.string().optional(),
   prefetchStats: z
     .object({
-    enabled: z.boolean(),
-    queueDepth: z.number().int().min(0),
-    running: z.boolean(),
-    completed: z.number().int().min(0),
-    cancelled: z.number().int().min(0),
-    cacheHits: z.number().int().min(0),
-    cacheMisses: z.number().int().min(0),
-    wastedPrefetch: z.number().int().min(0),
-    hitRate: z.number().min(0).max(1),
-    wasteRate: z.number().min(0),
-    avgLatencyReductionMs: z.number().min(0),
-    lastRunAt: z.string().nullable(),
-    modelEnabled: z.boolean(),
-    strategyMetrics: z.array(
-      z.object({
-        strategy: z.string(),
-        hitRate: z.number().min(0),
-        wasteRate: z.number().min(0),
-        avgLatencyReductionMs: z.number().min(0),
-        samples: z.number().int().min(0),
-        cacheHits: z.number().int().min(0),
-        cacheMisses: z.number().int().min(0),
-        wastedPrefetch: z.number().int().min(0),
-      }),
-    ),
-    deterministicFallback: z.boolean(),
-  }).optional(),
+      enabled: z.boolean(),
+      queueDepth: z.number().int().min(0),
+      running: z.boolean(),
+      completed: z.number().int().min(0),
+      cancelled: z.number().int().min(0),
+      cacheHits: z.number().int().min(0),
+      cacheMisses: z.number().int().min(0),
+      wastedPrefetch: z.number().int().min(0),
+      hitRate: z.number().min(0).max(1),
+      wasteRate: z.number().min(0),
+      avgLatencyReductionMs: z.number().min(0),
+      lastRunAt: z.string().nullable(),
+      modelEnabled: z.boolean(),
+      strategyMetrics: z.array(
+        z.object({
+          strategy: z.string(),
+          hitRate: z.number().min(0),
+          wasteRate: z.number().min(0),
+          avgLatencyReductionMs: z.number().min(0),
+          samples: z.number().int().min(0),
+          cacheHits: z.number().int().min(0),
+          cacheMisses: z.number().int().min(0),
+          wastedPrefetch: z.number().int().min(0),
+        }),
+      ),
+      deterministicFallback: z.boolean(),
+    })
+    .optional(),
   liveIndexStatus: z
     .object({
       enabled: z.boolean(),
@@ -711,7 +729,12 @@ export const IndexRefreshRequestSchema = z.object({
   mode: z.enum(["full", "incremental"]),
   reason: z.string().optional(),
   includeDiagnostics: z.boolean().optional(),
-  async: z.boolean().optional().describe("If true, return immediately with operationId and run indexing in background"),
+  async: z
+    .boolean()
+    .optional()
+    .describe(
+      "If true, return immediately with operationId and run indexing in background",
+    ),
 });
 
 export const IndexRefreshResponseSchema = z.object({
@@ -722,12 +745,14 @@ export const IndexRefreshResponseSchema = z.object({
   async: z.boolean().optional(),
   operationId: z.string().optional(),
   message: z.string().optional(),
-  diagnostics: z.object({
-    timings: z.object({
-      totalMs: z.number(),
-      phases: z.record(z.string(), z.number()),
-    }),
-  }).optional(),
+  diagnostics: z
+    .object({
+      timings: z.object({
+        totalMs: z.number(),
+        phases: z.record(z.string(), z.number()),
+      }),
+    })
+    .optional(),
 });
 
 const BufferSelectionSchema = z.object({
@@ -853,7 +878,7 @@ export const SymbolSearchRequestSchema = z
   })
   .refine((data) => data.query || data.pattern, {
     message: "Either 'query' or 'pattern' must be provided",
-  })
+  });
 
 export const RetrievalEvidenceItemSchema = z.object({
   symbolId: z.string(),
@@ -912,49 +937,58 @@ export const SymbolRefSchema = z.object({
  * Unified symbol card request schema - supports both single and batch retrieval.
  * Provide exactly one of: symbolId, symbolIds, symbolRef, or symbolRefs.
  */
-export const SymbolGetCardRequestSchema = z.object({
-  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  // Single symbol lookup
-  symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH).optional(),
-  symbolRef: SymbolRefSchema.optional(),
-  // Batch symbol lookup
-  symbolIds: z
-    .array(z.string().max(MAX_SYMBOL_ID_LENGTH))
-    .min(1)
-    .max(100)
-    .describe("Array of symbol IDs to fetch (max 100)")
-    .optional(),
-  symbolRefs: z.array(SymbolRefSchema).min(1).max(100).optional(),
-  // Shared options
-  ifNoneMatch: z.string().optional(),
-  minCallConfidence: z.number().min(0).max(1).optional(),
-  includeResolutionMetadata: z.boolean().optional(),
-  /**
-   * When true, include the per-card `processes` array. Default false —
-   * processes add ~100 tokens per high-fan-in helper and are rarely
-   * decision-relevant.
-   */
-  includeProcesses: z.boolean().optional(),
-  /**
-   * Map of symbolId → known ETag for batch requests.
-   * Matching symbols return notModified instead of full card.
-   */
-  knownEtags: z
-    .record(z.string(), z.string())
-    .refine(obj => Object.keys(obj).length <= 1000, { message: "knownEtags exceeds maximum of 1000 entries" })
-    .optional(),
-}).superRefine((value, ctx) => {
-  const singleProvided = Number(value.symbolId !== undefined) + Number(value.symbolRef !== undefined);
-  const batchProvided = Number(value.symbolIds !== undefined) + Number(value.symbolRefs !== undefined);
-  const totalProvided = singleProvided + batchProvided;
-  if (totalProvided !== 1) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Provide exactly one of: symbolId, symbolIds, symbolRef, or symbolRefs.",
-      path: ["symbolId"],
-    });
-  }
-});
+export const SymbolGetCardRequestSchema = z
+  .object({
+    repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+    // Single symbol lookup
+    symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH).optional(),
+    symbolRef: SymbolRefSchema.optional(),
+    // Batch symbol lookup
+    symbolIds: z
+      .array(z.string().max(MAX_SYMBOL_ID_LENGTH))
+      .min(1)
+      .max(100)
+      .describe("Array of symbol IDs to fetch (max 100)")
+      .optional(),
+    symbolRefs: z.array(SymbolRefSchema).min(1).max(100).optional(),
+    // Shared options
+    ifNoneMatch: z.string().optional(),
+    minCallConfidence: z.number().min(0).max(1).optional(),
+    includeResolutionMetadata: z.boolean().optional(),
+    /**
+     * When true, include the per-card `processes` array. Default false —
+     * processes add ~100 tokens per high-fan-in helper and are rarely
+     * decision-relevant.
+     */
+    includeProcesses: z.boolean().optional(),
+    /**
+     * Map of symbolId → known ETag for batch requests.
+     * Matching symbols return notModified instead of full card.
+     */
+    knownEtags: z
+      .record(z.string(), z.string())
+      .refine((obj) => Object.keys(obj).length <= 1000, {
+        message: "knownEtags exceeds maximum of 1000 entries",
+      })
+      .optional(),
+  })
+  .superRefine((value, ctx) => {
+    const singleProvided =
+      Number(value.symbolId !== undefined) +
+      Number(value.symbolRef !== undefined);
+    const batchProvided =
+      Number(value.symbolIds !== undefined) +
+      Number(value.symbolRefs !== undefined);
+    const totalProvided = singleProvided + batchProvided;
+    if (totalProvided !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Provide exactly one of: symbolId, symbolIds, symbolRef, or symbolRefs.",
+        path: ["symbolId"],
+      });
+    }
+  });
 
 const CardWithETagSchema = SymbolCardSchema.extend({
   etag: z.string(),
@@ -966,16 +1000,20 @@ const BatchCardResponseSchema = z.object({
   partial: z.boolean().optional(),
   succeeded: z.array(z.string()).optional(),
   failed: z.array(z.string()).optional(),
-  failures: z.array(z.object({
-    input: z.string(),
-    message: z.string(),
-    code: z.string().optional(),
-    classification: z.string().optional(),
-    retryable: z.boolean().optional(),
-    fallbackTools: z.array(z.string()).optional(),
-    fallbackRationale: z.string().optional(),
-    candidates: z.array(z.record(z.string(), z.unknown())).optional(),
-  })).optional(),
+  failures: z
+    .array(
+      z.object({
+        input: z.string(),
+        message: z.string(),
+        code: z.string().optional(),
+        classification: z.string().optional(),
+        retryable: z.boolean().optional(),
+        fallbackTools: z.array(z.string()).optional(),
+        fallbackRationale: z.string().optional(),
+        candidates: z.array(z.record(z.string(), z.unknown())).optional(),
+      }),
+    )
+    .optional(),
 });
 
 // Single card response (when symbolId/symbolRef used)
@@ -1022,8 +1060,11 @@ export const SliceBuildRequestSchema = z.object({
   failingTestPath: z.string().max(500).optional(),
   editedFiles: z.array(z.string()).max(100).optional(),
   entrySymbols: z.array(z.string()).max(100).optional(),
-  knownCardEtags: z.record(z.string(), z.string())
-    .refine(obj => Object.keys(obj).length <= 1000, { message: "knownCardEtags exceeds maximum of 1000 entries" })
+  knownCardEtags: z
+    .record(z.string(), z.string())
+    .refine((obj) => Object.keys(obj).length <= 1000, {
+      message: "knownCardEtags exceeds maximum of 1000 entries",
+    })
     .optional(),
   cardDetail: CardDetailLevelSchema.optional(),
   adaptiveDetail: z.boolean().optional(),
@@ -1066,7 +1107,10 @@ const SliceEtagSchema = z.object({
 
 export const SliceRefreshRequestSchema = z.object({
   sliceHandle: z.string().min(1).max(256),
-  knownVersion: z.string().optional().describe("Known version. Defaults to the slice handle's maxVersion."),
+  knownVersion: z
+    .string()
+    .optional()
+    .describe("Known version. Defaults to the slice handle's maxVersion."),
 });
 
 const DeltaPackWithGovernanceSchema = DeltaPackSchema.extend({
@@ -1186,7 +1230,9 @@ export const SliceBuildResponseSchema = z.union([
     /** Per-symbol retrieval evidence. Only populated when includeRetrievalEvidence is true. */
     retrievalEvidence: z.array(RetrievalEvidenceItemSchema).optional(),
     /** Symptom type classification. Only populated when includeRetrievalEvidence is true. */
-    symptomType: z.enum(["stackTrace", "failingTest", "taskText", "editedFiles"]).optional(),
+    symptomType: z
+      .enum(["stackTrace", "failingTest", "taskText", "editedFiles"])
+      .optional(),
   }),
   NotModifiedResponseSchema,
   SliceErrorResponseSchema,
@@ -1194,8 +1240,14 @@ export const SliceBuildResponseSchema = z.union([
 
 export const DeltaGetRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  fromVersion: z.string().optional().describe("Start version. Defaults to previous version."),
-  toVersion: z.string().optional().describe("End version. Defaults to latest version."),
+  fromVersion: z
+    .string()
+    .optional()
+    .describe("Start version. Defaults to previous version."),
+  toVersion: z
+    .string()
+    .optional()
+    .describe("End version. Defaults to latest version."),
   budget: SliceBudgetSchema.optional(),
   /**
    * Fix #1 — fast count-only preview mode. Returns just the changed-symbol
@@ -1203,13 +1255,22 @@ export const DeltaGetRequestSchema = z.object({
    * blast-radius governor loop entirely. Use this to probe the size of a
    * delta before committing to a full computation.
    */
-  preview: z.boolean().optional().describe(
-    "If true, skip blast-radius computation and return only changed-symbol " +
-    "counts plus a small sample (previewSampleSize). Much faster for large deltas.",
-  ),
-  previewSampleSize: z.number().int().min(0).max(200).optional().describe(
-    "Number of enriched changes to return when preview=true. Default 20.",
-  ),
+  preview: z
+    .boolean()
+    .optional()
+    .describe(
+      "If true, skip blast-radius computation and return only changed-symbol " +
+        "counts plus a small sample (previewSampleSize). Much faster for large deltas.",
+    ),
+  previewSampleSize: z
+    .number()
+    .int()
+    .min(0)
+    .max(200)
+    .optional()
+    .describe(
+      "Number of enriched changes to return when preview=true. Default 20.",
+    ),
   /**
    * Skip the blast-radius computation even when not in preview mode. Useful
    * when the caller only needs changed-symbol details and wants to avoid
@@ -1262,7 +1323,14 @@ export const CodeNeedWindowRequestSchema = z.object({
       budget: SliceBudgetSchema.optional(),
     })
     .optional(),
-  cursor: z.number().int().min(0).optional().describe("Resume from this line number (for continuation after truncation)"),
+  cursor: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "Resume from this line number (for continuation after truncation)",
+    ),
 });
 
 const CodeWindowResponseApprovedSchema = z.object({
@@ -1411,10 +1479,16 @@ const PolicyConfigSchema = z.object({
   allowBreakGlass: z.boolean().default(false),
   defaultMinCallConfidence: z.number().min(0).max(1).optional(),
   defaultDenyRaw: z.boolean().default(true),
-  budgetCaps: z.object({
-    maxCards: z.number().int().min(1).default(DEFAULT_MAX_CARDS),
-    maxEstimatedTokens: z.number().int().min(100).default(DEFAULT_MAX_TOKENS_SLICE),
-  }).optional(),
+  budgetCaps: z
+    .object({
+      maxCards: z.number().int().min(1).default(DEFAULT_MAX_CARDS),
+      maxEstimatedTokens: z
+        .number()
+        .int()
+        .min(100)
+        .default(DEFAULT_MAX_TOKENS_SLICE),
+    })
+    .optional(),
 });
 
 export const PolicyGetRequestSchema = z.object({
@@ -1735,10 +1809,12 @@ export const PRRiskAnalysisRequestSchema = z.object({
   fromVersion: z.string(),
   toVersion: z.string(),
   riskThreshold: z.number().int().min(0).max(100).optional(),
-  budget: z.object({
-    maxChangedSymbols: z.number().int().min(1).max(200).optional(),
-    maxBlastRadius: z.number().int().min(1).max(200).optional(),
-  }).optional(),
+  budget: z
+    .object({
+      maxChangedSymbols: z.number().int().min(1).max(200).optional(),
+      maxBlastRadius: z.number().int().min(1).max(200).optional(),
+    })
+    .optional(),
 });
 
 export const PRRiskAnalysisResponseSchema = z.object({
@@ -1753,7 +1829,6 @@ export type PRRiskAnalysisRequest = z.infer<typeof PRRiskAnalysisRequestSchema>;
 export type PRRiskAnalysisResponse = z.infer<
   typeof PRRiskAnalysisResponseSchema
 >;
-
 
 // ============================================================================
 // Agent Context Schemas
@@ -1804,7 +1879,9 @@ export const AgentContextRequestSchema = z.object({
       contextMode: z
         .enum(["precise", "broad"])
         .optional()
-        .describe("Context breadth: precise returns minimal workflow-efficient context, broad returns richer surrounding context. Default: broad"),
+        .describe(
+          "Context breadth: precise returns minimal workflow-efficient context, broad returns richer surrounding context. Default: broad",
+        ),
     })
     .optional()
     .describe("Task-specific options"),
@@ -1878,15 +1955,21 @@ const AgentContextPayloadSchema = z.object({
     .describe(
       "Suggested next action based on execution results and policy decisions",
     ),
-  retrievalEvidence: z.object({
-    symptomType: z.enum(["stackTrace", "failingTest", "taskText", "editedFiles"]).optional(),
-    sources: z.array(z.string()).optional(),
-    feedbackBoosts: z.object({
-      feedbackMatchCount: z.number(),
-      symbolsBoosted: z.number(),
-      feedbackIds: z.array(z.string()),
-    }).optional(),
-  }).optional(),
+  retrievalEvidence: z
+    .object({
+      symptomType: z
+        .enum(["stackTrace", "failingTest", "taskText", "editedFiles"])
+        .optional(),
+      sources: z.array(z.string()).optional(),
+      feedbackBoosts: z
+        .object({
+          feedbackMatchCount: z.number(),
+          symbolsBoosted: z.number(),
+          feedbackIds: z.array(z.string()),
+        })
+        .optional(),
+    })
+    .optional(),
 });
 
 export const AgentContextResponseSchema = z.union([
@@ -1896,12 +1979,8 @@ export const AgentContextResponseSchema = z.union([
   ConditionalNotModifiedResponseSchema,
 ]);
 
-export type AgentContextRequest = z.infer<
-  typeof AgentContextRequestSchema
->;
-export type AgentContextResponse = z.infer<
-  typeof AgentContextResponseSchema
->;
+export type AgentContextRequest = z.infer<typeof AgentContextRequestSchema>;
+export type AgentContextResponse = z.infer<typeof AgentContextResponseSchema>;
 
 // ============================================================================
 // Agent Feedback Schemas
@@ -2029,66 +2108,89 @@ export type AgentFeedbackQueryResponse = z.infer<
 // Runtime Execution Schemas
 // ============================================================================
 
-export const RuntimeExecuteRequestSchema = z.object({
-  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  runtime: z.enum(RUNTIME_NAMES),
-  executable: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      "Override executable; defaults to runtime's default (node, python3, bash/cmd)",
-    ),
-  args: z
-    .array(z.string())
-    .max(RUNTIME_MAX_ARG_COUNT)
-    .default([])
-    .describe("Arguments to pass to the executable"),
-  code: z
-    .string()
-    .max(RUNTIME_MAX_CODE_LENGTH)
-    .optional()
-    .describe(
-      "Code mode: write to temp file and execute. Mutually exclusive with args-only mode.",
-    ),
-  relativeCwd: z
-    .string()
-    .default(".")
-    .describe("Working directory relative to repo root. Must not escape repo."),
-  timeoutMs: z
-    .number()
-    .int()
-    .min(RUNTIME_MIN_TIMEOUT_MS)
-    .max(RUNTIME_MAX_TIMEOUT_MS)
-    .optional()
-    .describe("Execution timeout in ms. Defaults to config maxDurationMs."),
-  queryTerms: z
-    .array(z.string())
-    .max(RUNTIME_MAX_QUERY_TERMS)
-    .optional()
-    .describe(
-      "Keywords for excerpt matching — up to 10 terms scanned against output",
-    ),
-  maxResponseLines: z
-    .number()
-    .int()
-    .min(10)
-    .max(1000)
-    .default(RUNTIME_DEFAULT_MAX_RESPONSE_LINES)
-    .describe("Max lines in stdout/stderr summaries"),
-  persistOutput: z
-    .boolean()
-    .default(true)
-    .describe("Whether to persist full output as a gzip artifact"),
-  outputMode: z
-    .enum(["minimal", "summary", "intent"])
-    .default("minimal")
-    .describe(
-      "Response verbosity: 'minimal' returns only status/exitCode/duration/artifactHandle (~50 tokens); " +
-        "'summary' returns head+tail output excerpts (legacy behavior); " +
-        "'intent' returns only queryTerms-matched excerpts, no head/tail summary",
-    ),
-}).strict();
+export const RuntimeExecuteRequestSchema = z
+  .object({
+    repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+    runtime: z.enum(RUNTIME_NAMES),
+    executable: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Override executable; defaults to runtime's default (node, python3, bash/cmd)",
+      ),
+    args: z
+      .array(z.string())
+      .max(RUNTIME_MAX_ARG_COUNT)
+      .default([])
+      .describe("Arguments to pass to the executable"),
+    code: z
+      .string()
+      .max(RUNTIME_MAX_CODE_LENGTH)
+      .optional()
+      .describe(
+        "Code mode: write to temp file and execute. Mutually exclusive with args-only mode.",
+      ),
+    relativeCwd: z
+      .string()
+      .default(".")
+      .refine((s) => !s.includes("\0"), "Path must not contain null bytes")
+      .refine(
+        (s) => !(/^[A-Za-z]:/.test(s) || s.startsWith("/")),
+        "Path must be relative, not absolute",
+      )
+      .refine(
+        (s) => !s.split(/[/\\]/).some((seg) => seg === ".."),
+        "Path must not contain traversal sequences (..)",
+      )
+      .describe(
+        "Working directory relative to repo root. Must not escape repo.",
+      ),
+    timeoutMs: z
+      .number()
+      .int()
+      .min(RUNTIME_MIN_TIMEOUT_MS)
+      .max(RUNTIME_MAX_TIMEOUT_MS)
+      .optional()
+      .describe("Execution timeout in ms. Defaults to config maxDurationMs."),
+    queryTerms: z
+      .array(z.string())
+      .max(RUNTIME_MAX_QUERY_TERMS)
+      .optional()
+      .describe(
+        "Keywords for excerpt matching — up to 10 terms scanned against output",
+      ),
+    maxResponseLines: z
+      .number()
+      .int()
+      .min(10)
+      .max(1000)
+      .default(RUNTIME_DEFAULT_MAX_RESPONSE_LINES)
+      .describe("Max lines in stdout/stderr summaries"),
+    persistOutput: z
+      .boolean()
+      .default(true)
+      .describe("Whether to persist full output as a gzip artifact"),
+    outputMode: z
+      .enum(["minimal", "summary", "intent"])
+      .default("minimal")
+      .describe(
+        "Response verbosity: 'minimal' returns only status/exitCode/duration/artifactHandle (~50 tokens); " +
+          "'summary' returns head+tail output excerpts (legacy behavior); " +
+          "'intent' returns only queryTerms-matched excerpts, no head/tail summary",
+      ),
+  })
+  .strict()
+  .superRefine((val, ctx) => {
+    if (val.runtime === "shell" && !val.code) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["code"],
+        message:
+          "Shell runtime requires the code parameter. Direct args execution is not supported for security reasons.",
+      });
+    }
+  });
 
 export const RuntimeExecuteExcerptSchema = z.object({
   lineStart: z.number().int(),
@@ -2136,7 +2238,10 @@ export type RuntimeExecuteResponse = z.infer<
 // ============================================================================
 
 export const RuntimeQueryOutputRequestSchema = z.object({
-  artifactHandle: z.string().min(1).describe("Artifact handle from a previous runtime.execute call"),
+  artifactHandle: z
+    .string()
+    .min(1)
+    .describe("Artifact handle from a previous runtime.execute call"),
   queryTerms: z
     .array(z.string())
     .min(1)
@@ -2170,8 +2275,12 @@ export const RuntimeQueryOutputResponseSchema = z.object({
   searchedStreams: z.array(z.enum(["stdout", "stderr"])),
 });
 
-export type RuntimeQueryOutputRequest = z.infer<typeof RuntimeQueryOutputRequestSchema>;
-export type RuntimeQueryOutputResponse = z.infer<typeof RuntimeQueryOutputResponseSchema>;
+export type RuntimeQueryOutputRequest = z.infer<
+  typeof RuntimeQueryOutputRequestSchema
+>;
+export type RuntimeQueryOutputResponse = z.infer<
+  typeof RuntimeQueryOutputResponseSchema
+>;
 
 // ============================================================================
 // Memory Schemas
@@ -2327,13 +2436,57 @@ export type UsageStatsResponse = z.infer<typeof UsageStatsResponseSchema>;
 
 export const FileReadRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  filePath: z.string().min(1).describe("File path relative to repo root. Only non-indexed file types allowed."),
-  maxBytes: z.number().int().min(1).max(512 * 1024).optional().describe("Max bytes to read. Default 512KB."),
-  offset: z.number().int().min(0).optional().describe("Start reading from this line number (0-based). Omit for beginning of file."),
-  limit: z.number().int().min(1).max(5000).optional().describe("Max lines to return. Omit for no line limit (maxBytes still applies)."),
-  search: z.string().max(500).optional().describe("Return only lines matching this regex pattern (case-insensitive). Includes context lines."),
-  searchContext: z.number().int().min(0).max(20).default(2).describe("Lines of context around each search match. Default 2."),
-  jsonPath: z.string().max(200).optional().describe("For JSON/YAML files: dot-separated key path to extract (e.g. 'server.port' or 'dependencies')."),
+  filePath: z
+    .string()
+    .min(1)
+    .describe(
+      "File path relative to repo root. Only non-indexed file types allowed.",
+    ),
+  maxBytes: z
+    .number()
+    .int()
+    .min(1)
+    .max(512 * 1024)
+    .optional()
+    .describe("Max bytes to read. Default 512KB."),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "Start reading from this line number (0-based). Omit for beginning of file.",
+    ),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(5000)
+    .optional()
+    .describe(
+      "Max lines to return. Omit for no line limit (maxBytes still applies).",
+    ),
+  search: z
+    .string()
+    .max(500)
+    .optional()
+    .describe(
+      "Return only lines matching this regex pattern (case-insensitive). Includes context lines.",
+    ),
+  searchContext: z
+    .number()
+    .int()
+    .min(0)
+    .max(20)
+    .default(2)
+    .describe("Lines of context around each search match. Default 2."),
+  jsonPath: z
+    .string()
+    .max(200)
+    .optional()
+    .describe(
+      "For JSON/YAML files: dot-separated key path to extract (e.g. 'server.port' or 'dependencies').",
+    ),
 });
 
 export type FileReadRequest = z.infer<typeof FileReadRequestSchema>;
@@ -2349,7 +2502,6 @@ export interface FileReadResponse {
   matchCount?: number;
   extractedPath?: string;
 }
-
 
 // ============================================================================
 // SCIP Ingest Schemas
@@ -2380,38 +2532,82 @@ export type ScipIngestRequest = z.infer<typeof ScipIngestRequestSchema>;
 // ============================================================================
 
 export const FileWriteReplaceLinesSchema = z.object({
-  start: z.number().int().min(0).describe("Start line number (0-based, inclusive)"),
+  start: z
+    .number()
+    .int()
+    .min(0)
+    .describe("Start line number (0-based, inclusive)"),
   end: z.number().int().min(0).describe("End line number (0-based, exclusive)"),
-  content: z.string().max(512 * 1024).describe("New content to replace the line range (max 512KB)"),
+  content: z
+    .string()
+    .max(512 * 1024)
+    .describe("New content to replace the line range (max 512KB)"),
 });
 
 export const FileWriteReplacePatternSchema = z.object({
   pattern: z.string().min(1).max(500).describe("Regex pattern to find"),
-  replacement: z.string().describe("Replacement string (supports capture groups)"),
-  global: z.boolean().optional().default(false).describe("Replace all occurrences (default: first only)"),
+  replacement: z
+    .string()
+    .describe("Replacement string (supports capture groups)"),
+  global: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Replace all occurrences (default: first only)"),
 });
 
 export const FileWriteInsertAtSchema = z.object({
   line: z.number().int().min(0).describe("Line number to insert at (0-based)"),
-  content: z.string().max(512 * 1024).describe("Content to insert (max 512KB)"),
+  content: z
+    .string()
+    .max(512 * 1024)
+    .describe("Content to insert (max 512KB)"),
 });
 
 export const FileWriteRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   filePath: z.string().min(1).describe("File path relative to repo root"),
-  
+
   // Write modes (mutually exclusive - use exactly one)
-  content: z.string().max(512 * 1024).optional().describe("Full file content for create/overwrite mode (max 512KB)"),
-  replaceLines: FileWriteReplaceLinesSchema.optional().describe("Replace a line range with new content"),
-  replacePattern: FileWriteReplacePatternSchema.optional().describe("Regex find/replace"),
-  jsonPath: z.string().max(200).optional().describe("Dot-separated path to update in JSON/YAML"),
-  jsonValue: z.unknown().optional().describe("New value for jsonPath (required if jsonPath is set)"),
-  insertAt: FileWriteInsertAtSchema.optional().describe("Insert content at a specific line"),
-  append: z.string().max(512 * 1024).optional().describe("Content to append to end of file (max 512KB)"),
-  
+  content: z
+    .string()
+    .max(512 * 1024)
+    .optional()
+    .describe("Full file content for create/overwrite mode (max 512KB)"),
+  replaceLines: FileWriteReplaceLinesSchema.optional().describe(
+    "Replace a line range with new content",
+  ),
+  replacePattern:
+    FileWriteReplacePatternSchema.optional().describe("Regex find/replace"),
+  jsonPath: z
+    .string()
+    .max(200)
+    .optional()
+    .describe("Dot-separated path to update in JSON/YAML"),
+  jsonValue: z
+    .unknown()
+    .optional()
+    .describe("New value for jsonPath (required if jsonPath is set)"),
+  insertAt: FileWriteInsertAtSchema.optional().describe(
+    "Insert content at a specific line",
+  ),
+  append: z
+    .string()
+    .max(512 * 1024)
+    .optional()
+    .describe("Content to append to end of file (max 512KB)"),
+
   // Options
-  createBackup: z.boolean().optional().default(true).describe("Create .bak backup before modifying (default: true)"),
-  createIfMissing: z.boolean().optional().default(false).describe("Create file if it doesn't exist"),
+  createBackup: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe("Create .bak backup before modifying (default: true)"),
+  createIfMissing: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Create file if it doesn't exist"),
 });
 
 export type FileWriteRequest = z.infer<typeof FileWriteRequestSchema>;
@@ -2420,7 +2616,14 @@ export interface FileWriteResponse {
   filePath: string;
   bytesWritten: number;
   linesWritten: number;
-  mode: "create" | "overwrite" | "replaceLines" | "replacePattern" | "jsonPath" | "insertAt" | "append";
+  mode:
+    | "create"
+    | "overwrite"
+    | "replaceLines"
+    | "replacePattern"
+    | "jsonPath"
+    | "insertAt"
+    | "append";
   backupPath?: string;
   replacementCount?: number;
   /** Live-index sync result when writing an indexed source file. */

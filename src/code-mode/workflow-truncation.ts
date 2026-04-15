@@ -75,7 +75,10 @@ function smartTruncate(result: unknown, maxTokens: number): unknown {
       if (chars + entrySize > maxChars) {
         // Try to include with truncated value
         if (Array.isArray(value) && value.length > 0) {
-          const remainingBudget = Math.max(50, Math.floor((maxChars - chars) / 4));
+          const remainingBudget = Math.max(
+            50,
+            Math.floor((maxChars - chars) / 4),
+          );
           truncatedObj[key] = smartTruncate(value, remainingBudget);
           break;
         }
@@ -114,7 +117,12 @@ export function truncateStepResult(
   const originalTokens = estimateJsonTokens(json);
 
   if (originalTokens <= maxTokens) {
-    return { truncated: result, handle: "", originalTokens, keptTokens: originalTokens };
+    return {
+      truncated: result,
+      handle: "",
+      originalTokens,
+      keptTokens: originalTokens,
+    };
   }
 
   const handle = `cont-${Date.now()}-${randomBytes(4).toString("hex")}`;
@@ -122,9 +130,12 @@ export function truncateStepResult(
   // Store full result for continuation
   evictExpired();
   if (CONTINUATION_STORE.size >= MAX_CONTINUATIONS) {
-    // Evict oldest entry
-    const oldest = CONTINUATION_STORE.keys().next().value;
-    if (oldest) CONTINUATION_STORE.delete(oldest);
+    // Evict 10% of entries (batch eviction prevents rapid churn from bursts)
+    const evictCount = Math.max(1, Math.floor(MAX_CONTINUATIONS * 0.1));
+    const keys = Array.from(CONTINUATION_STORE.keys()).slice(0, evictCount);
+    for (const key of keys) {
+      CONTINUATION_STORE.delete(key);
+    }
   }
   CONTINUATION_STORE.set(handle, {
     data: json,

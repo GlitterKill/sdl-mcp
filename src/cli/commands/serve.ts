@@ -98,7 +98,9 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       : config.performanceTier;
   console.error(
     `[sdl-mcp] CPU tier: ${effectiveTier} (${cpuProfile.logicalCores} logical cores` +
-      (cpuProfile.physicalCores ? `, ~${cpuProfile.physicalCores} physical` : "") +
+      (cpuProfile.physicalCores
+        ? `, ~${cpuProfile.physicalCores} physical`
+        : "") +
       `) — indexing.concurrency=${config.indexing?.concurrency ?? "default"}, maxToolConcurrency=${config.concurrency?.maxToolConcurrency ?? "default"}`,
   );
 
@@ -298,8 +300,8 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     if (options.transport === "stdio") {
       console.error("Starting MCP server on stdio transport...");
       await setupStdioTransport(stdioServer!);
-      // Stdio transport blocks until the client disconnects
-      await new Promise(() => {});
+      // Wait for shutdown signal (triggered by transport close or signal handlers)
+      await shutdownMgr.shutdownInitiated;
     } else {
       const host = options.host ?? "localhost";
       console.error(`Starting MCP server on http://${host}:${httpPort}...`);

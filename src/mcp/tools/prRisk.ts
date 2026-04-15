@@ -3,7 +3,7 @@ import type { Connection } from "kuzu";
 import { computeBlastRadius } from "../../delta/blastRadius.js";
 import {
   computeCentralityStats,
-  computeCentralitySignal,
+  computeCentralitySignal,
   compareScoresWithCentrality,
   type CentralityStats,
 } from "../../graph/score.js";
@@ -126,10 +126,13 @@ export async function handlePRRiskAnalysis(args: unknown) {
     riskScore >= (validated.riskThreshold ?? 70) &&
     findings.some((f) => f.severity === "high");
 
-  let policyDecision: { decision: string; deniedReasons: string[]; auditHash?: string } | undefined;
+  let policyDecision:
+    | { decision: string; deniedReasons: string[]; auditHash?: string }
+    | undefined;
   if (escalationRequired) {
+    // Use delta requestType since this is PR/diff analysis, not code window access
     const rawDecision = policyEngine.evaluate({
-      requestType: "codeWindow",
+      requestType: "delta",
       repoId: validated.repoId,
       identifiersToFind: ["pr-risk-escalation"],
       reason: `PR risk score ${riskScore} exceeds threshold`,
@@ -154,9 +157,10 @@ export async function handlePRRiskAnalysis(args: unknown) {
   for (const row of symbolMap.values()) {
     if (row.fileId) fileIdSet.add(row.fileId);
   }
-  const fileMap = fileIdSet.size > 0
-    ? await getFilesByIds(conn, [...fileIdSet])
-    : new Map<string, { relPath: string }>();
+  const fileMap =
+    fileIdSet.size > 0
+      ? await getFilesByIds(conn, [...fileIdSet])
+      : new Map<string, { relPath: string }>();
 
   // Helper to enrich a symbolId with name, kind, file
   const enrichSymbol = (symbolId: string) => {
@@ -173,11 +177,12 @@ export async function handlePRRiskAnalysis(args: unknown) {
 
   // --- Filter by riskThreshold when set ---
   const riskThreshold = validated.riskThreshold;
-  const filteredChangedSymbols = riskThreshold !== undefined
-    ? delta.changedSymbols.filter(
-        (c: ChangedSymbol) => (c.tiers?.riskScore ?? 0) >= riskThreshold,
-      )
-    : delta.changedSymbols;
+  const filteredChangedSymbols =
+    riskThreshold !== undefined
+      ? delta.changedSymbols.filter(
+          (c: ChangedSymbol) => (c.tiers?.riskScore ?? 0) >= riskThreshold,
+        )
+      : delta.changedSymbols;
 
   // --- Enrich and truncate changedSymbols ---
   const totalChangedSymbols = filteredChangedSymbols.length;
@@ -209,14 +214,20 @@ export async function handlePRRiskAnalysis(args: unknown) {
 
   // --- Truncate recommendedTests ---
   const totalRecommendedTests = recommendedTests.length;
-  const truncatedRecommendedTests = recommendedTests.slice(0, MAX_RECOMMENDED_TESTS);
+  const truncatedRecommendedTests = recommendedTests.slice(
+    0,
+    MAX_RECOMMENDED_TESTS,
+  );
 
   // --- Truncate evidence ---
   const totalEvidence = evidence.length;
   const truncatedEvidence = evidence.slice(0, MAX_EVIDENCE_ITEMS);
 
   // --- Top-level summary for quick triage ---
-  const topRiskItemName = truncatedChangedSymbols.length > 0 ? truncatedChangedSymbols[0].name ?? truncatedChangedSymbols[0].symbolId : undefined;
+  const topRiskItemName =
+    truncatedChangedSymbols.length > 0
+      ? (truncatedChangedSymbols[0].name ?? truncatedChangedSymbols[0].symbolId)
+      : undefined;
 
   const response = {
     summary: {
@@ -276,31 +287,43 @@ export async function handlePRRiskAnalysis(args: unknown) {
   if (serialized.length > MAX_RESPONSE_BYTES) {
     const originalBytes = serialized.length;
     (response as Record<string, unknown>).truncationWarning =
-      "Response truncated: " + originalBytes + " bytes exceeds " + MAX_RESPONSE_BYTES + " byte cap. Use budget.maxChangedSymbols to narrow scope.";
+      "Response truncated: " +
+      originalBytes +
+      " bytes exceeds " +
+      MAX_RESPONSE_BYTES +
+      " byte cap. Use budget.maxChangedSymbols to narrow scope.";
 
     const trimSteps: Array<() => void> = [
       // Pass 1: initial aggressive trim.
       () => {
         if (response.analysis.changedSymbols.items.length > 10) {
-          response.analysis.changedSymbols.items = response.analysis.changedSymbols.items.slice(0, 10);
+          response.analysis.changedSymbols.items =
+            response.analysis.changedSymbols.items.slice(0, 10);
           response.analysis.changedSymbols.truncated = true;
         }
         if (response.analysis.blastRadius.items.length > 10) {
-          response.analysis.blastRadius.items = response.analysis.blastRadius.items.slice(0, 10);
+          response.analysis.blastRadius.items =
+            response.analysis.blastRadius.items.slice(0, 10);
           response.analysis.blastRadius.truncated = true;
         }
         if (response.analysis.findings.items.length > 5) {
-          response.analysis.findings.items = response.analysis.findings.items.slice(0, 5);
+          response.analysis.findings.items =
+            response.analysis.findings.items.slice(0, 5);
           response.analysis.findings.truncated = true;
         }
       },
       // Pass 2: halve what we kept.
       () => {
-        response.analysis.changedSymbols.items = response.analysis.changedSymbols.items.slice(0, 5);
-        response.analysis.blastRadius.items = response.analysis.blastRadius.items.slice(0, 5);
-        response.analysis.findings.items = response.analysis.findings.items.slice(0, 3);
-        response.analysis.evidence.items = response.analysis.evidence.items.slice(0, 3);
-        response.analysis.recommendedTests.items = response.analysis.recommendedTests.items.slice(0, 3);
+        response.analysis.changedSymbols.items =
+          response.analysis.changedSymbols.items.slice(0, 5);
+        response.analysis.blastRadius.items =
+          response.analysis.blastRadius.items.slice(0, 5);
+        response.analysis.findings.items =
+          response.analysis.findings.items.slice(0, 3);
+        response.analysis.evidence.items =
+          response.analysis.evidence.items.slice(0, 3);
+        response.analysis.recommendedTests.items =
+          response.analysis.recommendedTests.items.slice(0, 3);
         response.analysis.changedSymbols.truncated = true;
         response.analysis.blastRadius.truncated = true;
         response.analysis.findings.truncated = true;
@@ -359,7 +382,9 @@ function generateFindings(
       type: "high-risk-changes",
       severity: "high" as const,
       message: `${highRiskChanges.length} changed symbol(s) with high risk score (≥70)`,
-      affectedSymbols: highRiskChanges.slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING).map((c: ChangedSymbol) => c.symbolId),
+      affectedSymbols: highRiskChanges
+        .slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING)
+        .map((c: ChangedSymbol) => c.symbolId),
       metadata: {
         highRiskCount: highRiskChanges.length,
       },
@@ -375,9 +400,9 @@ function generateFindings(
       type: "interface-breaking-changes",
       severity: "high" as const,
       message: `${interfaceBreakingChanges.length} symbol(s) with interface-breaking changes`,
-      affectedSymbols: interfaceBreakingChanges.slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING).map(
-        (c: ChangedSymbol) => c.symbolId,
-      ),
+      affectedSymbols: interfaceBreakingChanges
+        .slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING)
+        .map((c: ChangedSymbol) => c.symbolId),
       metadata: {
         breakingChangeCount: interfaceBreakingChanges.length,
       },
@@ -393,7 +418,9 @@ function generateFindings(
       type: "side-effect-changes",
       severity: "medium" as const,
       message: `${sideEffectChanges.length} symbol(s) with side effect changes`,
-      affectedSymbols: sideEffectChanges.slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING).map((c: ChangedSymbol) => c.symbolId),
+      affectedSymbols: sideEffectChanges
+        .slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING)
+        .map((c: ChangedSymbol) => c.symbolId),
     });
   }
 
@@ -405,7 +432,9 @@ function generateFindings(
       type: "removed-symbols",
       severity: "medium" as const,
       message: `${removedSymbols.length} symbol(s) removed`,
-      affectedSymbols: removedSymbols.slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING).map((c: ChangedSymbol) => c.symbolId),
+      affectedSymbols: removedSymbols
+        .slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING)
+        .map((c: ChangedSymbol) => c.symbolId),
     });
   }
 
@@ -417,7 +446,8 @@ function generateFindings(
       type: "large-impact-radius",
       severity: "medium" as const,
       message: `${largeBlastRadius.length} direct dependents may be affected`,
-      affectedSymbols: largeBlastRadius.slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING)
+      affectedSymbols: largeBlastRadius
+        .slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING)
         .map((item: BlastRadiusItem) => item.symbolId),
       metadata: {
         directDependentCount: largeBlastRadius.length,
@@ -433,7 +463,9 @@ function generateFindings(
       type: "new-symbols",
       severity: "low" as const,
       message: `${addedSymbols.length} new symbol(s) added`,
-      affectedSymbols: addedSymbols.slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING).map((c: ChangedSymbol) => c.symbolId),
+      affectedSymbols: addedSymbols
+        .slice(0, MAX_AFFECTED_SYMBOLS_PER_FINDING)
+        .map((c: ChangedSymbol) => c.symbolId),
     });
   }
 
@@ -740,9 +772,9 @@ function generateRecommendedTests(
     tests.push({
       type: "integration-tests",
       description: "Run integration tests for symbols with interface changes",
-      targetSymbols: interfaceBreakingSymbols.slice(0, 20).map(
-        (c: ChangedSymbol) => c.symbolId,
-      ),
+      targetSymbols: interfaceBreakingSymbols
+        .slice(0, 20)
+        .map((c: ChangedSymbol) => c.symbolId),
       priority: "high" as const,
     });
   }
@@ -755,7 +787,8 @@ function generateRecommendedTests(
       .slice()
       .sort(compareItemsByExplanationPath);
     const exemplarChain = formatDependencyChain(
-      prioritizedDirectDependents.find((item) => item.explanationPath)?.explanationPath,
+      prioritizedDirectDependents.find((item) => item.explanationPath)
+        ?.explanationPath,
     );
     tests.push({
       type: "regression-tests",

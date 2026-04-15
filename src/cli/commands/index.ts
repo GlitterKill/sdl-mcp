@@ -7,8 +7,12 @@ import {
   IndexResult,
 } from "../../indexer/indexer.js";
 import type { IndexProgress } from "../../indexer/indexer.js";
-import {initGraphDb, resolveGraphDbPath} from "../../db/initGraphDb.js";
-import { getLadybugConn, withWriteConn, closeLadybugDb } from "../../db/ladybug.js";
+import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
+import {
+  getLadybugConn,
+  withWriteConn,
+  closeLadybugDb,
+} from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getCurrentTimestamp } from "../../util/time.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
@@ -517,9 +521,12 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       console.error(`  Error indexing: ${msg}`);
       errors.push({ repoId: repo.repoId, error: msg });
     }
+  }
 
-    if (options.watch) {
-      console.log(`  Starting file watcher for ${repo.repoId}...`);
+  // Announce watch mode intention only if all repos indexed successfully
+  if (options.watch && errors.length === 0) {
+    for (const repo of reposToIndex) {
+      console.log(`  File watcher will start for ${repo.repoId}`);
     }
   }
 

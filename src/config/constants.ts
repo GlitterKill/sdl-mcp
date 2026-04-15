@@ -653,7 +653,7 @@ export const RUNTIME_DEFAULT_TIMEOUT_MS = 30_000;
 export const RUNTIME_MIN_TIMEOUT_MS = 100;
 
 /**
- * Maximum allowed execution timeout in milliseconds (5 minutes).
+ * Maximum allowed execution timeout in milliseconds (10 minutes).
  */
 export const RUNTIME_MAX_TIMEOUT_MS = 600_000;
 

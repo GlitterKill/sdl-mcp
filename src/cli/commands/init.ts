@@ -12,7 +12,10 @@ import {
 import { basename, dirname, join, resolve } from "path";
 import { createInterface } from "readline";
 import { fileURLToPath } from "url";
-import { WATCHER_DEFAULT_MAX_WATCHED_FILES, DEFAULT_PASS2_CONCURRENCY } from "../../config/constants.js";
+import {
+  WATCHER_DEFAULT_MAX_WATCHED_FILES,
+  DEFAULT_PASS2_CONCURRENCY,
+} from "../../config/constants.js";
 import {
   DEFAULT_INDEXING_CONCURRENCY,
   DEFAULT_MAX_CARDS,
@@ -148,7 +151,10 @@ const SDL_SOURCE_EXTENSIONS_BY_LANGUAGE: Array<{
   { language: "Go", extensions: [".go"] },
   { language: "Java", extensions: [".java"] },
   { language: "C#", extensions: [".cs"] },
-  { language: "C/C++", extensions: [".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx"] },
+  {
+    language: "C/C++",
+    extensions: [".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx"],
+  },
   { language: "PHP", extensions: [".php", ".phtml"] },
   { language: "Rust", extensions: [".rs"] },
   { language: "Kotlin", extensions: [".kt", ".kts"] },
@@ -398,7 +404,7 @@ async function loadClientTemplate(client: ClientType): Promise<unknown> {
     return JSON.parse(content);
   } catch (error) {
     throw new Error(
-      `Failed to load client template '${client}' from ${templatePath}: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to load client template '${client}' from ${templatePath}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
@@ -412,7 +418,10 @@ function loadTextTemplate(templateName: string): string {
   return readFileSync(templatePath, "utf-8");
 }
 
-function renderTextTemplate(templateName: string, values: Record<string, string>): string {
+function renderTextTemplate(
+  templateName: string,
+  values: Record<string, string>,
+): string {
   let rendered = loadTextTemplate(templateName);
   for (const [key, value] of Object.entries(values)) {
     rendered = rendered.replaceAll(`{{${key}}}`, value);
@@ -504,7 +513,9 @@ done
 
 function buildClaudeRuntimeHook(pidfilePath: string): string {
   const safePath = shellEscape(pidfilePath);
-  const prefixes = SDL_RUNTIME_REDIRECT_PREFIXES.map((prefix) => `'${prefix}'`).join(" ");
+  const prefixes = SDL_RUNTIME_REDIRECT_PREFIXES.map(
+    (prefix) => `'${prefix}'`,
+  ).join(" ");
   return `#!/bin/sh
 set -eu
 
@@ -567,11 +578,7 @@ function buildClaudeSettings(): string {
   // When SDL-MCP is not running (no PID file), all native tools work normally.
   const settings = {
     permissions: {
-      allow: [
-        "Read",
-        "Bash",
-        "mcp__sdl-mcp__*",
-      ],
+      allow: ["Read", "Bash", "mcp__sdl-mcp__*"],
     },
     hooks: {
       PreToolUse: [
@@ -751,7 +758,10 @@ function buildOpenCodeProjectConfig(configPath: string): string {
       ]),
       bash: Object.fromEntries([
         ["*", "ask"],
-        ...SDL_RUNTIME_REDIRECT_PREFIXES.map((prefix) => [`${prefix}*`, "deny"]),
+        ...SDL_RUNTIME_REDIRECT_PREFIXES.map((prefix) => [
+          `${prefix}*`,
+          "deny",
+        ]),
       ]),
     },
   };
@@ -834,7 +844,9 @@ function buildEnforcementAssets(
 
   if (client === "claude-code") {
     const graphDbPath = defaultGraphDbPath(configPath);
-    const pidfilePath = resolvePidfilePath(graphDbPath).replace(/\\/g, "/").replace(/'/g, "'\\''");
+    const pidfilePath = resolvePidfilePath(graphDbPath)
+      .replace(/\\/g, "/")
+      .replace(/'/g, "'\\''");
     assets.push(
       {
         path: join(repoRoot, ".claude", "settings.json"),
@@ -885,7 +897,10 @@ function buildEnforcementAssets(
 function generateClientConfig(template: unknown, configPath: string): string {
   // Template is JSON-parsed client config with mcpServers shape
   const tpl = template as {
-    mcpServers: Record<string, { env?: Record<string, string>; [k: string]: unknown }>;
+    mcpServers: Record<
+      string,
+      { env?: Record<string, string>; [k: string]: unknown }
+    >;
   };
   const mcpServers = tpl.mcpServers;
   const config = {
@@ -1225,13 +1240,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
     console.log(`Languages: ${languages.join(", ")}`);
 
     if (options.client) {
-      if (!VALID_CLIENTS.includes(options.client as ClientType)) {
-        console.error(`Invalid client: ${options.client}`);
-        console.error(`Valid options: ${VALID_CLIENTS.join(", ")}`);
-        rollback();
-        process.exit(1);
-      }
-
+      // Client validation already done at line ~1052; this is post-success client config generation
       const template = await loadClientTemplate(options.client as ClientType);
       const clientConfig = generateClientConfig(template, configPath);
       const clientConfigPath = resolve(`${options.client}-mcp-config.json`);

@@ -1,7 +1,4 @@
-import {
-  WorkflowRequestSchema,
-  type WorkflowBudget,
-} from "./types.js";
+import { WorkflowRequestSchema, type WorkflowBudget } from "./types.js";
 import { getActiveFnNameMap, getActiveActionToFn } from "./manual-generator.js";
 import { isInternalTransform } from "./transforms.js";
 
@@ -47,7 +44,9 @@ export function findRefsInArgs(args: Record<string, unknown>): number[] {
         walkValue(item);
       }
     } else if (value !== null && typeof value === "object") {
-      for (const nestedValue of Object.values(value as Record<string, unknown>)) {
+      for (const nestedValue of Object.values(
+        value as Record<string, unknown>,
+      )) {
         walkValue(nestedValue);
       }
     }
@@ -78,7 +77,16 @@ export function parseWorkflowRequest(
     return { ok: false, errors };
   }
 
-  const { repoId, steps, budget, onError, defaultMaxResponseTokens, onlyFinalResult, dryRun, etagCache } = parsed.data;
+  const {
+    repoId,
+    steps,
+    budget,
+    onError,
+    defaultMaxResponseTokens,
+    onlyFinalResult,
+    dryRun,
+    etagCache,
+  } = parsed.data;
   const errors: string[] = [];
   const parsedSteps: ParsedWorkflowStep[] = [];
   const fnNameMap = getActiveFnNameMap();
@@ -99,7 +107,7 @@ export function parseWorkflowRequest(
 
     if (!isTransform && !(resolvedFn in fnNameMap)) {
       errors.push(
-        `Unknown function '${step.fn}' in step ${i}. Available: ${Object.keys(fnNameMap).join(", ")}, dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet`,
+        `Step ${i}: unknown function '${step.fn}'. Available: ${Object.keys(fnNameMap).join(", ")}, dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet`,
       );
       continue;
     }

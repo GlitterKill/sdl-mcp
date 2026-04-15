@@ -3,6 +3,7 @@ import type { SyncExportOptions } from "../../sync/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
+import { closeLadybugDb } from "../../db/ladybug.js";
 
 interface ExportCommandOptions {
   config?: string;
@@ -19,11 +20,19 @@ export async function exportCommand(
 ): Promise<void> {
   const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
+
+  // Validate repoId before initializing DB to avoid resource leak on early exit
+  const repoId = options.repoId ?? config.repos[0]?.repoId;
+  if (!repoId && !options.list) {
+    console.error("No repository specified or configured");
+    process.exit(1);
+  }
+
   await initGraphDb(config, configPath);
 
   if (options.list) {
-    const repoId = options.repoId ?? config.repos[0]?.repoId;
     if (!repoId) {
+      await closeLadybugDb();
       console.error("No repository specified or configured");
       process.exit(1);
     }
@@ -50,14 +59,9 @@ export async function exportCommand(
     return;
   }
 
-  const repoId = options.repoId ?? config.repos[0]?.repoId;
-  if (!repoId) {
-    console.error("No repository specified or configured");
-    process.exit(1);
-  }
-
+  // repoId already validated before DB init (non-list path)
   const exportOptions: SyncExportOptions = {
-    repoId,
+    repoId: repoId!,
     versionId: options.versionId,
     commitSha: options.commitSha,
     branch: options.branch,
