@@ -12,7 +12,7 @@ import {
 import { basename, dirname, join, resolve } from "path";
 import { createInterface } from "readline";
 import { fileURLToPath } from "url";
-import { WATCHER_DEFAULT_MAX_WATCHED_FILES } from "../../config/constants.js";
+import { WATCHER_DEFAULT_MAX_WATCHED_FILES, DEFAULT_PASS2_CONCURRENCY } from "../../config/constants.js";
 import {
   DEFAULT_INDEXING_CONCURRENCY,
   DEFAULT_MAX_CARDS,
@@ -1104,6 +1104,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
       maxWatchedFiles: WATCHER_DEFAULT_MAX_WATCHED_FILES,
       engine: "rust" as const,
       watchDebounceMs: 300,
+      pass2Concurrency: DEFAULT_PASS2_CONCURRENCY,
     },
     liveIndex: {
       enabled: true,

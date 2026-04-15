@@ -6,6 +6,8 @@ import {
   DEFAULT_MAX_WINDOW_TOKENS,
   DEFAULT_INDEXING_CONCURRENCY,
   MAX_INDEXING_CONCURRENCY,
+  DEFAULT_PASS2_CONCURRENCY,
+  MAX_PASS2_CONCURRENCY,
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
   TS_DIAGNOSTICS_MAX_ERRORS,
@@ -164,6 +166,13 @@ export const IndexingConfigSchema = z.object({
   workerPoolSize: z.number().int().min(1).max(32).nullish(),
   engine: z.enum(["typescript", "rust"]).default("rust"),
   watchDebounceMs: z.number().int().min(50).max(5000).default(300),
+  /** Number of files to resolve concurrently in Pass 2. Default 1 (sequential). */
+  pass2Concurrency: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_PASS2_CONCURRENCY)
+    .default(DEFAULT_PASS2_CONCURRENCY),
 });
 
 export type IndexingConfig = z.infer<typeof IndexingConfigSchema>;

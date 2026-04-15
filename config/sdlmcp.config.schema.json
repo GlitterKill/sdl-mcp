@@ -273,6 +273,13 @@
           "minimum": 50,
           "maximum": 5000,
           "default": 300
+        },
+        "pass2Concurrency": {
+          "type": "integer",
+          "description": "Number of files to resolve concurrently in Pass 2 cross-file call resolution. Default 1 (sequential). Increase on multi-core systems to overlap CPU parse work with read I/O.",
+          "minimum": 1,
+          "maximum": 16,
+          "default": 1
         }
       },
       "default": {
@@ -280,7 +287,8 @@
         "enableFileWatching": true,
         "maxWatchedFiles": 25000,
         "engine": "rust",
-        "watchDebounceMs": 300
+        "watchDebounceMs": 300,
+        "pass2Concurrency": 1
       }
     },
     "liveIndex": {

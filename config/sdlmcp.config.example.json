@@ -61,7 +61,8 @@
     "maxWatchedFiles": 25000,
     "workerPoolSize": null,
     "engine": "rust",
-    "watchDebounceMs": 300
+    "watchDebounceMs": 300,
+    "pass2Concurrency": 1
   },
   "liveIndex": {
     "enabled": true,

@@ -91,6 +91,70 @@ export async function refreshSymbolIndexFromDb(
   }
 }
 
+/**
+ * Runs a single Pass 2 resolver for `fileMeta` and returns the count of edges
+ * created.  Each invocation receives its own snapshot of `createdCallEdges` so
+ * that concurrent calls within a batch do not corrupt each other's dedup
+ * checks.  New edge-keys are returned so the caller can merge them back into
+ * the canonical set after the batch completes.
+ *
+ * DB writes inside the resolver are already serialised through `withWriteConn`
+ * and are idempotent (MERGE semantics), so racing writes are safe.
+ */
+async function runOnePass2Resolver(params: {
+  repoId: string;
+  repoRoot: string;
+  fileMeta: FileMetadata;
+  pass2ResolverRegistry: Pass2ResolverRegistry;
+  symbolIndex: SymbolIndex;
+  tsResolver: TsCallResolver | null;
+  config: RepoConfig;
+  /**
+   * Private copy of the canonical dedup set taken at batch-start.  The
+   * resolver mutates this in-place; after resolution the caller merges all
+   * keys (including pre-existing ones from the snapshot) back into the
+   * canonical set.  Re-adding pre-existing keys is a Set no-op.
+   */
+  localCreatedCallEdges: Set<string>;
+  globalNameToSymbolIds: Map<string, string[]>;
+  globalPreferredSymbolId: Map<string, string>;
+  callResolutionTelemetry: CallResolutionTelemetry;
+  pass2ResolverCache: Map<string, unknown>;
+}): Promise<{ edgesCreated: number; localEdgeKeys: Set<string>; resolverId: string | null; elapsedMs: number }> {
+  const {
+    repoId, repoRoot, fileMeta, pass2ResolverRegistry, symbolIndex, tsResolver,
+    config, localCreatedCallEdges, globalNameToSymbolIds, globalPreferredSymbolId,
+    callResolutionTelemetry, pass2ResolverCache,
+  } = params;
+
+  const target = toPass2Target({ ...fileMeta, repoId });
+  const resolver = pass2ResolverRegistry.getResolver(target);
+  if (!resolver) {
+    return { edgesCreated: 0, localEdgeKeys: localCreatedCallEdges, resolverId: null, elapsedMs: 0 };
+  }
+
+  const resolverStartedAt = Date.now();
+  const pass2Result = await resolver.resolve(target, {
+    repoRoot,
+    symbolIndex,
+    tsResolver,
+    languages: config.languages,
+    createdCallEdges: localCreatedCallEdges,
+    globalNameToSymbolIds,
+    globalPreferredSymbolId,
+    telemetry: callResolutionTelemetry,
+    cache: pass2ResolverCache,
+  });
+
+  return {
+    edgesCreated: pass2Result.edgesCreated,
+    // Return the mutated local set; caller does a union merge into canonical.
+    localEdgeKeys: localCreatedCallEdges,
+    resolverId: resolver.id,
+    elapsedMs: Date.now() - resolverStartedAt,
+  };
+}
+
 /** Pass 2 — cross-file call resolution. Returns total new edges created. */
 export async function runPass2Resolvers(params: {
   repoId: string;
@@ -103,6 +167,8 @@ export async function runPass2Resolvers(params: {
   symbolIndex: SymbolIndex;
   tsResolver: TsCallResolver | null;
   config: RepoConfig;
+  /** Number of files to resolve in parallel. Sourced from appConfig.indexing.pass2Concurrency. */
+  pass2Concurrency?: number;
   createdCallEdges: Set<string>;
   globalNameToSymbolIds: Map<string, string[]>;
   globalPreferredSymbolId: Map<string, string>;
@@ -126,48 +192,131 @@ export async function runPass2Resolvers(params: {
   });
   callResolutionTelemetry.pass2Targets = pass2Targets.length;
 
-  let totalEdgesCreated = 0;
+  // Shared resolver cache is read-only after construction; safe to share across concurrent calls.
   const pass2ResolverCache = new Map<string, unknown>();
+
+  const concurrency = Math.max(1, params.pass2Concurrency ?? 1);
+  let totalEdgesCreated = 0;
   let pass2Processed = 0;
 
-  for (const fileMeta of pass2Targets) {
-    if (signal?.aborted) break;
-    callResolutionTelemetry.pass2FilesProcessed++;
-    onProgress?.({
-      stage: "pass2",
-      current: pass2Processed,
-      total: pass2Targets.length,
-      currentFile: fileMeta.path,
-    });
-    const resolver = pass2ResolverRegistry.getResolver(
-      toPass2Target({ ...fileMeta, repoId }),
-    );
-    if (!resolver) {
+  if (concurrency <= 1) {
+    // --- Sequential path (default, identical to original behaviour) ---
+    for (const fileMeta of pass2Targets) {
+      if (signal?.aborted) break;
+      callResolutionTelemetry.pass2FilesProcessed++;
+      onProgress?.({
+        stage: "pass2",
+        current: pass2Processed,
+        total: pass2Targets.length,
+        currentFile: fileMeta.path,
+      });
+      const resolver = pass2ResolverRegistry.getResolver(
+        toPass2Target({ ...fileMeta, repoId }),
+      );
+      if (!resolver) {
+        pass2Processed++;
+        continue;
+      }
+      recordPass2ResolverTarget(callResolutionTelemetry, resolver.id);
+      const resolverStartedAt = Date.now();
+      const pass2Result = await resolver.resolve(
+        toPass2Target({ ...fileMeta, repoId }),
+        {
+          repoRoot,
+          symbolIndex,
+          tsResolver,
+          languages: config.languages,
+          createdCallEdges,
+          globalNameToSymbolIds,
+          globalPreferredSymbolId,
+          telemetry: callResolutionTelemetry,
+          cache: pass2ResolverCache,
+        },
+      );
+      recordPass2ResolverResult(callResolutionTelemetry, resolver.id, {
+        edgesCreated: pass2Result.edgesCreated,
+        elapsedMs: Date.now() - resolverStartedAt,
+      });
+      totalEdgesCreated += pass2Result.edgesCreated;
       pass2Processed++;
-      continue;
     }
-    recordPass2ResolverTarget(callResolutionTelemetry, resolver.id);
-    const resolverStartedAt = Date.now();
-    const pass2Result = await resolver.resolve(
-      toPass2Target({ ...fileMeta, repoId }),
-      {
-        repoRoot,
-        symbolIndex,
-        tsResolver,
-        languages: config.languages,
-        createdCallEdges,
-        globalNameToSymbolIds,
-        globalPreferredSymbolId,
-        telemetry: callResolutionTelemetry,
-        cache: pass2ResolverCache,
-      },
-    );
-    recordPass2ResolverResult(callResolutionTelemetry, resolver.id, {
-      edgesCreated: pass2Result.edgesCreated,
-      elapsedMs: Date.now() - resolverStartedAt,
-    });
-    totalEdgesCreated += pass2Result.edgesCreated;
-    pass2Processed++;
+  } else {
+    // --- Parallel path: bounded concurrency with per-file isolated dedup sets ---
+    //
+    // Each file in a batch receives a *snapshot* of createdCallEdges taken
+    // at batch-start so resolvers do not race on the shared set.  After the
+    // batch finishes we union all new keys back into the canonical set.
+    //
+    // DB writes inside resolvers are already serialised by withWriteConn and
+    // use MERGE semantics, so concurrent writes of the same edge are idempotent.
+    for (let batchStart = 0; batchStart < pass2Targets.length; batchStart += concurrency) {
+      if (signal?.aborted) break;
+
+      const batchEnd = Math.min(batchStart + concurrency, pass2Targets.length);
+      const batch = pass2Targets.slice(batchStart, batchEnd);
+
+      // Snapshot the canonical dedup set for this batch.
+      const batchSnapshot = new Set(createdCallEdges);
+
+      // Emit progress for the first file in this batch.
+      if (batch[0]) {
+        onProgress?.({
+          stage: "pass2",
+          current: pass2Processed,
+          total: pass2Targets.length,
+          currentFile: batch[0].path,
+        });
+      }
+
+      // Record targets before launching — recordPass2ResolverTarget is synchronous and cheap.
+      for (const fileMeta of batch) {
+        const resolver = pass2ResolverRegistry.getResolver(toPass2Target({ ...fileMeta, repoId }));
+        if (resolver) recordPass2ResolverTarget(callResolutionTelemetry, resolver.id);
+      }
+
+      callResolutionTelemetry.pass2FilesProcessed += batch.length;
+
+      // Launch all files in this batch concurrently, each with its own
+      // local copy of the dedup set.
+      const batchPromises = batch.map((fileMeta) => {
+        // Each resolver gets an independent copy so mutations don't race.
+        const localCreatedCallEdges = new Set(batchSnapshot);
+        return runOnePass2Resolver({
+          repoId,
+          repoRoot,
+          fileMeta,
+          pass2ResolverRegistry,
+          symbolIndex,
+          tsResolver,
+          config,
+          localCreatedCallEdges,
+          globalNameToSymbolIds,
+          globalPreferredSymbolId,
+          callResolutionTelemetry,
+          pass2ResolverCache,
+        });
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+
+      // Sequentially merge results back into the canonical state.
+      for (const result of batchResults) {
+        totalEdgesCreated += result.edgesCreated;
+        // Union the resolver's local set (snapshot + new keys) back into canonical.
+        // Re-adding keys already in canonical is a Set no-op.
+        for (const key of result.localEdgeKeys) {
+          createdCallEdges.add(key);
+        }
+        if (result.resolverId !== null) {
+          recordPass2ResolverResult(callResolutionTelemetry, result.resolverId, {
+            edgesCreated: result.edgesCreated,
+            elapsedMs: result.elapsedMs,
+          });
+        }
+      }
+
+      pass2Processed += batch.length;
+    }
   }
 
   if (pass2Targets.length > 0) {
