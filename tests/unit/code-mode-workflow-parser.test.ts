@@ -36,7 +36,7 @@ describe("code-mode workflow parser", () => {
     });
     assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      assert.ok(result.errors[0].includes("Unknown function 'unknownFn'"));
+      assert.ok(result.errors[0].includes("unknown function 'unknownFn'"));
       assert.ok(result.errors[0].includes("Available:"));
     }
   });

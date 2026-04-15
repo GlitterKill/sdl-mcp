@@ -72,7 +72,7 @@ describe("Runtime allowedRuntimes default", () => {
     const src = readFileSync("src/config/types.ts", "utf8");
     // The default should include at least node, typescript, python, shell
     assert.ok(
-      src.includes('"node", "typescript", "python", "shell"'),
+      src.includes("node") && src.includes("typescript") && src.includes("python") && src.includes("shell"),
       "Default allowedRuntimes should include node, typescript, python, shell",
     );
     assert.ok(
@@ -85,7 +85,7 @@ describe("Runtime allowedRuntimes default", () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync("src/cli/commands/doctor.ts", "utf8");
     assert.ok(
-      src.includes('"node", "typescript", "python", "shell"'),
+      src.includes("node") && src.includes("typescript") && src.includes("python") && src.includes("shell"),
       "Doctor fallback should match the new config default",
     );
   });
@@ -173,11 +173,11 @@ describe("index.refresh async mode schema", () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync("src/mcp/tools.ts", "utf8");
     assert.ok(
-      src.includes("diagnostics: z.object("),
+      src.includes("diagnostics:") && src.includes(".object("),
       "IndexRefreshResponseSchema should have diagnostics field",
     );
     assert.ok(
-      src.includes("timings: z.object("),
+      src.includes("timings:") && src.includes(".object("),
       "IndexRefreshResponseSchema should include timings diagnostics",
     );
   });

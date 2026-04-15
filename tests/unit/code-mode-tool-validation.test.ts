@@ -52,7 +52,7 @@ describe("code-mode tool validation", () => {
         );
         assert.ok(
           validationError.details?.some((detail) =>
-            detail.includes("Unknown function 'notARealFunction'"),
+            detail.includes("unknown function 'notARealFunction'"),
           ),
         );
         return true;
