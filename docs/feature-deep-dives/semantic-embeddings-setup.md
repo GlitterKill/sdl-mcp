@@ -114,13 +114,20 @@ Embeddings are generated during the finalization step of indexing. Subsequent se
 
 **How text is constructed for Jina Code:**
 
+Jina payloads use a structured, labeled-section format optimized for code models:
+
 ```
-validateToken (function)
-(token: string, opts?: ValidateOpts): Promise<DecodedToken>
-Validates JWT signature and checks expiration claim
+function validateToken (TypeScript)
+File: src/auth/jwt.ts
+Exported: true
+Signature: (token: string, opts?: ValidateOpts) => Promise<DecodedToken>
+Summary: Validates JWT signature and checks expiration claim
+Imports: jsonwebtoken, JwtOptions
+Calls: verify (function), isExpired (function)
+Terms: validate, token, jwt, auth
 ```
 
-Natural language format — name, kind, signature, and summary (if available) joined with newlines.
+Includes graph context (imports/calls made by the symbol) and search terms. See [Model-Aware Embedding Payloads](./semantic-engine.md#model-aware-embedding-payloads) for details.
 
 ---
 
@@ -200,13 +207,16 @@ Semantic embedding models .................. PASS
 
 **How text is constructed for Nomic:**
 
+Nomic payloads use flowing prose optimized for natural-language models:
+
 ```
-validateToken (function)
-(token: string, opts?: ValidateOpts): Promise<DecodedToken>
-Validates JWT signature and checks expiration claim
+validateToken is a function in src/auth/jwt.ts that validates JWT signature
+and checks expiration claim. It takes (token: string, opts?: ValidateOpts)
+=> Promise<DecodedToken>. It imports jsonwebtoken, JwtOptions and calls
+verify, isExpired. Related terms: validate, token, jwt, auth.
 ```
 
-Similar format to Jina Code but optimized for natural-language text. The Nomic model's 8,192-token window means longer signatures and summaries are captured without truncation.
+Includes the same graph context as Jina but formatted as English sentences. The Nomic model's 8,192-token window captures longer summaries without truncation. See [Model-Aware Embedding Payloads](./semantic-engine.md#model-aware-embedding-payloads) for details.
 
 ---
 
@@ -444,18 +454,18 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 
 ## Model Comparison
 
-| Property              | `jina-embeddings-v2-base-code` (default) | `nomic-embed-text-v1.5` (optional) |
-| :-------------------- | :--------------------------- | :------------------------------------- | :----------------------------- |
-| Dimensions            | 384                          | 768                                    | 768                            |
-| Max input tokens      | 256                          | 8,192                                  | 8,192                          |
-| ONNX file size        | ~110 MB (INT8)                | ~138 MB (INT8)                         | ~110 MB (INT8)                 |
-| Bundled with npm      | Yes                          | No, downloaded on demand               | No, downloaded on demand       |
-| Training data         | English sentence embeddings  | Diverse text embeddings                | Source code (30+ languages)    |
-| Input format          | Natural-language symbol text | Natural-language symbol text           | Natural-language symbol text   |
-| Document/query prefix | None                         | `search_document: ` / `search_query: ` | None                           |
-| Best paired with      | LLM summaries                | LLM summaries (NL queries)             | Code-centric queries           |
-| Disk location         | `<pkg>/models/`              | `<cache>/models/`                      | `<cache>/models/`              |
-| Upstream source       | `sentence-transformers`      | `nomic-ai`                             | `jinaai`                       |
+| Property              | `jina-embeddings-v2-base-code` (default) | `nomic-embed-text-v1.5` (optional)     |
+| :-------------------- | :--------------------------------------- | :------------------------------------- | :--------------------------- |
+| Dimensions            | 384                                      | 768                                    | 768                          |
+| Max input tokens      | 256                                      | 8,192                                  | 8,192                        |
+| ONNX file size        | ~110 MB (INT8)                           | ~138 MB (INT8)                         | ~110 MB (INT8)               |
+| Bundled with npm      | Yes                                      | No, downloaded on demand               | No, downloaded on demand     |
+| Training data         | English sentence embeddings              | Diverse text embeddings                | Source code (30+ languages)  |
+| Input format          | Natural-language symbol text             | Natural-language symbol text           | Natural-language symbol text |
+| Document/query prefix | None                                     | `search_document: ` / `search_query: ` | None                         |
+| Best paired with      | LLM summaries                            | LLM summaries (NL queries)             | Code-centric queries         |
+| Disk location         | `<pkg>/models/`                          | `<cache>/models/`                      | `<cache>/models/`            |
+| Upstream source       | `sentence-transformers`                  | `nomic-ai`                             | `jinaai`                     |
 
 **Choosing a model:**
 

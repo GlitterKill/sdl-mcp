@@ -328,15 +328,15 @@ flowchart LR
 
 **Which should you choose?**
 
-| If you...                            | Use                                                          |
-| :----------------------------------- | :----------------------------------------------------------- |
-| Want zero setup, code-focused     | `jina-embeddings-v2-base-code` (bundled)                     |
-| Want better quality, longer context  | `nomic-embed-text-v1.5` (768-dim, 8192 tokens)               |
-| Work with multi-language codebases   | `jina-embeddings-v2-base-code` (trained on 30+ languages)    |
-| Have LLM summaries enabled           | Nomic (text model benefits most from NL summaries)           |
-| Have a large codebase (>10k symbols) | `jina-embeddings-v2-base-code` (code-optimized)              |
-| Want the best NL query quality       | `nomic-embed-text-v1.5` + LLM summaries                      |
-| Want the best code similarity        | `jina-embeddings-v2-base-code`                               |
+| If you...                            | Use                                                       |
+| :----------------------------------- | :-------------------------------------------------------- |
+| Want zero setup, code-focused        | `jina-embeddings-v2-base-code` (bundled)                  |
+| Want better quality, longer context  | `nomic-embed-text-v1.5` (768-dim, 8192 tokens)            |
+| Work with multi-language codebases   | `jina-embeddings-v2-base-code` (trained on 30+ languages) |
+| Have LLM summaries enabled           | Nomic (text model benefits most from NL summaries)        |
+| Have a large codebase (>10k symbols) | `jina-embeddings-v2-base-code` (code-optimized)           |
+| Want the best NL query quality       | `nomic-embed-text-v1.5` + LLM summaries                   |
+| Want the best code similarity        | `jina-embeddings-v2-base-code`                            |
 
 ### Three Embedding Providers
 
@@ -347,6 +347,101 @@ flowchart LR
 | **`mock`**            | Deterministic hash-based vectors (64-dim)   | Testing, CI, when ONNX is unavailable |
 
 The local provider uses `onnxruntime-node` and `tokenizers` (optional dependencies). If they're not installed, it gracefully falls back to mock embeddings.
+
+### Model-Aware Embedding Payloads
+
+Different embedding models understand text differently. SDL-MCP constructs **model-specific payloads** that optimize embedding quality for each model's training data.
+
+#### Jina Code Payload (Structured)
+
+The `jina-embeddings-v2-base-code` model was trained on source code. Its payload uses a labeled-section format that mirrors code structure:
+
+```
+function parseConfig (TypeScript)
+File: src/config/parser.ts
+Exported: true
+Signature: (input: string, options?: ParseOptions) => Config
+Summary: Parses configuration from YAML or JSON string with schema validation
+Roles: parser, validator
+Invariants: input must be valid UTF-8, returns frozen Config object
+Side effects: none
+Imports: yaml, zod, ConfigSchema
+Calls: validateSchema (function), parseYaml (function), Object.freeze
+Terms: config, parse, yaml, json, validation
+```
+
+**Section order (fixed):** symbol header → file path → signature → summary → roles → invariants → side effects → imports → calls → search terms.
+
+#### Nomic Payload (Prose)
+
+The `nomic-embed-text-v1.5` model was trained on natural language. Its payload uses flowing prose:
+
+```
+parseConfig is a function in src/config/parser.ts that parses configuration
+from YAML or JSON string with schema validation. It takes (input: string,
+options?: ParseOptions) => Config. This code acts as a parser and validator.
+It imports yaml, zod, ConfigSchema and calls validateSchema, parseYaml,
+Object.freeze. Related terms: config, parse, yaml, json, validation.
+```
+
+This format works better with models trained on English text rather than code.
+
+#### Graph Context in Payloads
+
+Embedding payloads now include **outgoing dependency edges** — the imports and calls a symbol makes:
+
+| Edge Type | Max Included | Sort Order                               |
+| :-------- | :----------- | :--------------------------------------- |
+| Imports   | 8            | Alphabetical                             |
+| Calls     | 12           | Confidence descending, then alphabetical |
+
+**Why outgoing only?** Incoming callers are excluded because:
+
+- High-fan-in utilities (like `logger.info`) would dominate embedding space
+- Outgoing edges are intrinsic to the symbol; incoming edges change with callers
+- A function's meaning is better captured by what it _uses_ than what _uses it_
+
+```mermaid
+flowchart LR
+    subgraph "Included (Outgoing)"
+        A[parseConfig] --> B[yaml.parse]
+        A --> C[zod.validate]
+        A --> D[ConfigSchema]
+    end
+
+    subgraph "Excluded (Incoming)"
+        E[loadSettings] -.-> A
+        F[initApp] -.-> A
+        G[testHelper] -.-> A
+    end
+
+    style E stroke-dasharray: 5 5
+    style F stroke-dasharray: 5 5
+    style G stroke-dasharray: 5 5
+```
+
+#### Summary Freshness
+
+LLM-generated summaries are only included in payloads when they're **fresh** — when the cached summary matches the current symbol state:
+
+| Freshness  | Condition                               | Action                                      |
+| :--------- | :-------------------------------------- | :------------------------------------------ |
+| **fresh**  | `cardHash` matches current symbol state | Include summary in payload                  |
+| **stale**  | Summary exists but symbol changed       | Omit summary (avoids misleading embeddings) |
+| **absent** | No cached summary or mock provider      | Field left null                             |
+
+The `cardHash` is computed from: `name | kind | signature | astFingerprint | provider | model`. Any change invalidates the cached summary.
+
+#### Embedding Refresh Batching
+
+Embeddings are refreshed in batches of 32 symbols per inference call:
+
+1. **Pre-filter**: Skip symbols with valid cached embeddings (matching `cardHash`)
+2. **Batch embed**: Single `provider.embed()` call per batch
+3. **Post-recheck**: Avoid redundant writes from concurrent indexing
+4. **Skip on degradation**: If provider falls back to mock mid-refresh, skip the batch
+
+This batching reduces ONNX inference overhead and speeds up re-indexing of large repositories.
 
 ### Embedding Storage
 
