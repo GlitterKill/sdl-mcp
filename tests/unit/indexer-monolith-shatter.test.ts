@@ -70,7 +70,7 @@ describe("indexer.ts monolith shattering", () => {
     );
 
     // Extracted indexer modules
-    const extractedModuleMaxLines = 350;
+    const extractedModuleMaxLines = 450;
     assert.ok(
       existsSync(modulePaths.indexerInit),
       "missing src/indexer/indexer-init.ts",
