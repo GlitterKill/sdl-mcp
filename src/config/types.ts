@@ -8,6 +8,8 @@ import {
   MAX_INDEXING_CONCURRENCY,
   DEFAULT_PASS2_CONCURRENCY,
   MAX_PASS2_CONCURRENCY,
+  DEFAULT_EMBEDDING_CONCURRENCY,
+  MAX_EMBEDDING_CONCURRENCY,
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
   TS_DIAGNOSTICS_MAX_ERRORS,
@@ -354,6 +356,20 @@ export const SemanticConfigSchema = z.object({
   summaryApiBaseUrl: z.string().nullish(),
   summaryMaxConcurrency: z.number().int().min(1).max(32).default(5),
   summaryBatchSize: z.number().int().min(1).max(50).default(20),
+  /**
+   * Number of embedding batches to process concurrently during
+   * `refreshSymbolEmbeddings()`. Defaults to 1 (sequential). Increasing
+   * this can improve throughput on multi-core machines but ONNX Runtime's
+   * internal thread pool is shared across all concurrent calls; consider
+   * reducing `intraOpNumThreads` proportionally when raising above 1.
+   * Capped at MAX_EMBEDDING_CONCURRENCY (4).
+   */
+  embeddingConcurrency: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_EMBEDDING_CONCURRENCY)
+    .default(DEFAULT_EMBEDDING_CONCURRENCY),
   /**
    * @deprecated Use `retrieval.vector` for HNSW index configuration instead.
    * Legacy HNSW ANN index settings. Still honoured when `retrieval.mode` is

@@ -112,6 +112,7 @@
     "summaryApiBaseUrl": null,
     "summaryMaxConcurrency": 5,
     "summaryBatchSize": 20,
+    "embeddingConcurrency": 1,
     "retrieval": {
       "mode": "hybrid",
       "extensionsOptional": true,

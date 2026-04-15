@@ -107,6 +107,7 @@ export async function finalizeIndexing({
           provider: semanticConfig.provider ?? "local",
           model,
           onProgress,
+          concurrency: semanticConfig.embeddingConcurrency ?? 1,
         }),
       );
       logger.info(
