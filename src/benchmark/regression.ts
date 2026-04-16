@@ -241,7 +241,7 @@ export class RegressionReportGenerator {
     lines.push(`Generated: ${new Date().toISOString()}`);
     lines.push("");
 
-    const statusEmoji = report.summary.passed ? "✅" : "❌";
+    const statusEmoji = report.summary.passed ? "\u2705" : "\u274C";
     lines.push(`## Summary ${statusEmoji}`);
     lines.push("");
     lines.push(`- **Status**: ${report.summary.passed ? "PASSED" : "FAILED"}`);
@@ -256,7 +256,7 @@ export class RegressionReportGenerator {
       lines.push("## Failed Thresholds");
       lines.push("");
       for (const threshold of report.failingThresholds) {
-        lines.push(`- ❌ \`${threshold}\``);
+        lines.push(`- \u274C \`${threshold}\``);
       }
       lines.push("");
     }
@@ -278,16 +278,16 @@ export class RegressionReportGenerator {
 
       for (const delta of deltas) {
         const impactEmoji = {
-          high: "🔴",
-          medium: "🟡",
-          low: "🟢",
-          none: "⚪",
+          high: "\uD83D\uDD34",
+          medium: "\uD83D\uDFE1",
+          low: "\uD83D\uDFE2",
+          none: "\u26AA",
         }[delta.impact];
 
         const trendEmoji = {
-          improved: "✓",
-          degraded: "✗",
-          neutral: "−",
+          improved: "\u2713",
+          degraded: "\u2717",
+          neutral: "\u2212",
           unknown: "?",
         }[delta.trend];
 

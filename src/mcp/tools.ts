@@ -1685,9 +1685,7 @@ export type CompactGraphSlice = z.infer<typeof CompactGraphSliceSchema>;
 export type CompactGraphSliceV2 = z.infer<typeof CompactGraphSliceV2Schema>;
 export type CompactGroupedEdgeV3 = z.infer<typeof CompactGroupedEdgeV3Schema>;
 export type CompactGraphSliceV3 = z.infer<typeof CompactGraphSliceV3Schema>;
-export type SliceLease = z.infer<typeof SliceLeaseSchema>;
-export type SliceEtag = z.infer<typeof SliceEtagSchema>;
-export type NotModifiedResponse = z.infer<typeof NotModifiedResponseSchema>;
+// SliceLease, SliceEtag, NotModifiedResponse — canonical types in domain/types.ts
 export type SliceRefreshRequest = z.infer<typeof SliceRefreshRequestSchema>;
 export type SliceRefreshResponse = z.infer<typeof SliceRefreshResponseSchema>;
 export type DeltaGetRequest = z.infer<typeof DeltaGetRequestSchema>;

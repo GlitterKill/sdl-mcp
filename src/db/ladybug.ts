@@ -4,12 +4,20 @@ import { totalmem } from "node:os";
 import { dirname } from "path";
 import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
-import { ensureIndexes, ensureEntityIndexes } from "../retrieval/index-lifecycle.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { DatabaseError } from "../domain/errors.js";
 import { ConcurrencyLimiter } from "../util/concurrency.js";
+import {
+  markExtensionLoaded,
+  getExtensionCapabilities as getExtCaps,
+  resetExtensionCapabilities,
+} from "./extension-caps.js";
 import { normalizeGraphDbPath } from "./graph-db-path.js";
-import { createSchema, getSchemaVersion, migrateVecColumnsToFixedSize } from "./ladybug-schema.js";
+import {
+  createSchema,
+  getSchemaVersion,
+  migrateVecColumnsToFixedSize,
+} from "./ladybug-schema.js";
 import { LADYBUG_SCHEMA_VERSION, migrations } from "./migrations/index.js";
 import { runPendingMigrations } from "./migration-runner.js";
 import {
@@ -40,20 +48,11 @@ export function registerDbCloseHook(fn: () => void): void {
 // Track which Kuzu extensions (fts, vector) loaded successfully.
 // INSTALL is attempted once per pool initialization; LOAD is attempted per
 // connection. Failures are best-effort — they never block DB initialization.
+// State lives in extension-caps.ts to break circular imports.
 // ---------------------------------------------------------------------------
 
 /** Names of Kuzu extensions managed by this module. */
 const MANAGED_EXTENSIONS = ["fts", "vector"] as const;
-
-interface ExtensionCapabilities {
-  fts: boolean;
-  vector: boolean;
-}
-
-const extensionCapabilities: ExtensionCapabilities = {
-  fts: false,
-  vector: false,
-};
 
 // Set to true once INSTALL has been attempted for the pool lifetime.
 let extensionsInstallAttempted = false;
@@ -80,7 +79,8 @@ const DEFAULT_CHECKPOINT_THRESHOLD_BYTES = 128 * 1024 * 1024;
 
 function formatReindexGuidanceError(dbPath: string, msg: string): string {
   logger.error("Database initialization failed", { dbPath, error: msg });
-  const isWalCorruption = msg.includes("WAL") || msg.includes("wal") || msg.includes("corrupt");
+  const isWalCorruption =
+    msg.includes("WAL") || msg.includes("wal") || msg.includes("corrupt");
   const isLockError = msg.includes("lock") || msg.includes("EBUSY");
 
   let guidance = `LadybugDB initialization failed at ${dbPath}: ${msg}. `;
@@ -363,7 +363,7 @@ async function installExtensionsOnce(conn: LadybugConnection): Promise<void> {
 
 /**
  * Attempt to LOAD extensions on a connection (best-effort, per-session).
- * Updates extensionCapabilities for each extension that loads successfully.
+ * Marks each successfully loaded extension via markExtensionLoaded().
  */
 async function loadExtensionsOnConnection(
   conn: LadybugConnection,
@@ -371,7 +371,7 @@ async function loadExtensionsOnConnection(
   for (const ext of MANAGED_EXTENSIONS) {
     try {
       await conn.query(`LOAD EXTENSION ${ext}`);
-      extensionCapabilities[ext] = true;
+      markExtensionLoaded(ext);
       logger.debug(`Kuzu extension loaded`, { extension: ext });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -432,7 +432,9 @@ export async function getLadybugReadConn(): Promise<LadybugConnection> {
         }
 
         // Log extension capabilities after INSTALL+LOAD phase
-        logger.info(`LadybugDB extension capabilities after pool init`, { ...extensionCapabilities });
+        logger.info(`LadybugDB extension capabilities after pool init`, {
+          ...getExtCaps(),
+        });
 
         // Publish all refs atomically — no concurrent caller can see
         // partial state because no `await` between these assignments.
@@ -640,7 +642,6 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
     }
     // else: currentVersion === LADYBUG_SCHEMA_VERSION — no-op
 
-    
     // Step 3: Bootstrap retrieval indexes (FTS + vector) if extensions are available
     try {
       const sdlConfig = loadConfig();
@@ -655,7 +656,13 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
         }
         // Get a fresh connection after DDL changes to avoid stale column cache
 
-        const indexResult = await ensureIndexes(indexConn, semanticConfig.retrieval);
+        // Dynamic import to break circular dependency (ladybug ↔ index-lifecycle).
+        const { ensureIndexes, ensureEntityIndexes } =
+          await import("../retrieval/index-lifecycle.js");
+        const indexResult = await ensureIndexes(
+          indexConn,
+          semanticConfig.retrieval,
+        );
         const entityResult = await ensureEntityIndexes(indexConn);
         logger.info("Retrieval indexes bootstrapped", {
           created: [...indexResult.created, ...entityResult.created],
@@ -663,7 +670,9 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
           failed: [...indexResult.failed, ...entityResult.failed],
         });
       } else {
-        logger.debug("Semantic retrieval not enabled, skipping index bootstrap");
+        logger.debug(
+          "Semantic retrieval not enabled, skipping index bootstrap",
+        );
       }
     } catch (indexErr) {
       // Index bootstrap failure should not block DB init
@@ -759,6 +768,8 @@ export async function closeLadybugDb(): Promise<void> {
   }
 
   currentDbPath = null;
+  extensionsInstallAttempted = false;
+  resetExtensionCapabilities();
   resetJoinHintCache();
   for (const hook of closeHooks) {
     try {
@@ -814,11 +825,5 @@ export function getLadybugDbPath(): string | null {
   return currentDbPath;
 }
 
-/**
- * Return which Kuzu extensions loaded successfully on the current connection pool.
- * Returns { fts: false, vector: false } if the pool has not been initialized
- * or if extensions are unavailable on this platform.
- */
-export function getExtensionCapabilities(): ExtensionCapabilities {
-  return { ...extensionCapabilities };
-}
+// Re-export for backward compatibility — canonical home is extension-caps.ts.
+export { getExtensionCapabilities } from "./extension-caps.js";

@@ -13,7 +13,7 @@ export interface RedactionPatternInput {
   flags?: string;
 }
 
-export interface RedactionConfig {
+interface RedactionConfig {
   enabled?: boolean;
   includeDefaults?: boolean;
   patterns?: RedactionPatternInput[];

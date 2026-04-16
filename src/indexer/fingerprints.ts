@@ -1,11 +1,11 @@
 import Parser from "tree-sitter";
-import {
-  hashContent,
-  generateSymbolId as hashSymbolId,
-} from "../util/hashing.js";
+import { hashContent } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
 
-const fingerprintCollisionLog = new Map<string, { type: string; name: string; row: number; col: number }>();
+const fingerprintCollisionLog = new Map<
+  string,
+  { type: string; name: string; row: number; col: number }
+>();
 
 /**
  * Generates a stable AST fingerprint for a function/class node.
@@ -70,10 +70,22 @@ export function generateAstFingerprint(node: Parser.SyntaxNode): string {
   const fingerprint = hashContent(parts.join("|"));
 
   const newName = nameNode?.text || "<unknown>";
-  const newMeta = { type: node.type, name: newName, row: node.startPosition.row, col: node.startPosition.column };
+  const newMeta = {
+    type: node.type,
+    name: newName,
+    row: node.startPosition.row,
+    col: node.startPosition.column,
+  };
   const existingMeta = fingerprintCollisionLog.get(fingerprint);
-  if (existingMeta && (existingMeta.row !== newMeta.row || existingMeta.col !== newMeta.col)) {
-    logger.debug("Fingerprint collision detected", { fingerprint, existing: `${existingMeta.type}:${existingMeta.name}@${existingMeta.row}:${existingMeta.col}`, new_entry: `${newMeta.type}:${newMeta.name}@${newMeta.row}:${newMeta.col}` });
+  if (
+    existingMeta &&
+    (existingMeta.row !== newMeta.row || existingMeta.col !== newMeta.col)
+  ) {
+    logger.debug("Fingerprint collision detected", {
+      fingerprint,
+      existing: `${existingMeta.type}:${existingMeta.name}@${existingMeta.row}:${existingMeta.col}`,
+      new_entry: `${newMeta.type}:${newMeta.name}@${newMeta.row}:${newMeta.col}`,
+    });
   } else {
     if (fingerprintCollisionLog.size >= 10000) {
       fingerprintCollisionLog.clear();
@@ -126,8 +138,17 @@ export function clearFingerprintCollisionLog(): void {
 export function generateMetadataFingerprint(meta: {
   kind: string;
   name: string;
-  range: { startLine: number; startCol: number; endLine: number; endCol: number };
-  signature?: { params?: Array<{ name: string; type?: string }>; returns?: string; generics?: string[] };
+  range: {
+    startLine: number;
+    startCol: number;
+    endLine: number;
+    endCol: number;
+  };
+  signature?: {
+    params?: Array<{ name: string; type?: string }>;
+    returns?: string;
+    generics?: string[];
+  };
 }): string {
   const parts = [
     `kind:${meta.kind}`,
@@ -135,15 +156,15 @@ export function generateMetadataFingerprint(meta: {
     `range:${meta.range.startLine}:${meta.range.startCol}:${meta.range.endLine}:${meta.range.endCol}`,
   ];
   if (meta.signature?.params) {
-    parts.push(`params:${meta.signature.params.map((p) => `${p.name}:${p.type ?? ""}`).join(",")}`);
+    parts.push(
+      `params:${meta.signature.params.map((p) => `${p.name}:${p.type ?? ""}`).join(",")}`,
+    );
   }
   if (meta.signature?.returns) {
     parts.push(`returns:${meta.signature.returns}`);
   }
   return hashContent(parts.join("|"));
 }
-
-export { generateSymbolId as hashSymbolId };
 
 /**
  * Generates a stable unique identifier for a symbol.
@@ -156,12 +177,5 @@ export { generateSymbolId as hashSymbolId };
  * @param astFingerprint - AST fingerprint hash
  * @returns Hex string symbol identifier
  */
-export function generateSymbolId(
-  repoId: string,
-  relPath: string,
-  kind: string,
-  name: string,
-  astFingerprint: string,
-): string {
-  return hashSymbolId(repoId, relPath, kind, name, astFingerprint);
-}
+// Re-export from canonical source for backward compatibility.
+export { generateSymbolId } from "../util/hashing.js";

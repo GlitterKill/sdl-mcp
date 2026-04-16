@@ -890,7 +890,7 @@ export async function updateMetricsForRepo(
   return { timings };
 }
 
-export interface Graph {
+interface Graph {
   repoId: string;
   symbols: Map<string, Pick<SymbolLiteRow, "symbolId" | "fileId">>;
   edges: EdgeLite[];

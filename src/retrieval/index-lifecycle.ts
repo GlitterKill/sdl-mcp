@@ -8,7 +8,7 @@
 
 import type { Connection } from "kuzu";
 import { queryAll } from "../db/ladybug-core.js";
-import { getExtensionCapabilities } from "../db/ladybug.js";
+import { getExtensionCapabilities } from "../db/extension-caps.js";
 import { logger } from "../util/logger.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
 import {
@@ -76,7 +76,9 @@ export interface IndexEnsureResult {
 /** Validate that a name is a safe Kuzu identifier (letters, digits, underscores). */
 function validateIdentifier(name: string, label: string): void {
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
-    throw new Error(`Invalid ${label}: ${JSON.stringify(name)} — must be an alphanumeric identifier`);
+    throw new Error(
+      `Invalid ${label}: ${JSON.stringify(name)} — must be an alphanumeric identifier`,
+    );
   }
 }
 export async function createFtsIndex(
@@ -93,7 +95,9 @@ export async function createFtsIndex(
     await conn.query(
       `CALL CREATE_FTS_INDEX('${tableName}', '${indexName}', ['searchText'])`,
     );
-    logger.info(`[index-lifecycle] FTS index '${indexName}' created on ${tableName}.searchText`);
+    logger.info(
+      `[index-lifecycle] FTS index '${indexName}' created on ${tableName}.searchText`,
+    );
     return true;
   } catch (err) {
     logger.warn(
@@ -177,7 +181,10 @@ interface ShowIndexRow {
  */
 export async function showIndexes(conn: Connection): Promise<IndexInfo[]> {
   try {
-    const rows = await queryAll<ShowIndexRow>(conn, "CALL SHOW_INDEXES() RETURN *");
+    const rows = await queryAll<ShowIndexRow>(
+      conn,
+      "CALL SHOW_INDEXES() RETURN *",
+    );
     const results: IndexInfo[] = [];
     for (const row of rows) {
       const name = String(row.index_name ?? row.name ?? "");
@@ -271,7 +278,8 @@ export async function checkIndexHealth(
 
   const vectors = Object.entries(EMBEDDING_MODELS).map(([model]) => {
     const fallbackName = getVectorIndexName(model);
-    const propName = getVecPropertyName(model) ?? getEmbeddingPropertyName(model);
+    const propName =
+      getVecPropertyName(model) ?? getEmbeddingPropertyName(model);
     // Check by property name match as well as the derived index name
     const byName = fallbackName !== null && indexNames.has(fallbackName);
     const byProp =
@@ -326,15 +334,19 @@ export async function ensureIndexes(
   const ftsConfig = config.fts;
   if (ftsConfig?.enabled !== false) {
     if (!caps.fts) {
-      logger.debug("[index-lifecycle] Skipping FTS index — extension unavailable");
+      logger.debug(
+        "[index-lifecycle] Skipping FTS index — extension unavailable",
+      );
       result.skipped.push(ftsConfig?.indexName ?? DEFAULT_FTS_INDEX_NAME);
     } else {
       const ftsIndexName = ftsConfig?.indexName ?? DEFAULT_FTS_INDEX_NAME;
       if (existingNames.has(ftsIndexName)) {
-        logger.debug(`[index-lifecycle] FTS index '${ftsIndexName}' already exists, skipping`);
+        logger.debug(
+          `[index-lifecycle] FTS index '${ftsIndexName}' already exists, skipping`,
+        );
         result.skipped.push(ftsIndexName);
       } else {
-        const ok = await createFtsIndex(conn, 'Symbol', ftsIndexName);
+        const ok = await createFtsIndex(conn, "Symbol", ftsIndexName);
         if (ok) {
           result.created.push(ftsIndexName);
         } else {
@@ -343,7 +355,9 @@ export async function ensureIndexes(
       }
     }
   } else {
-    logger.debug("[index-lifecycle] FTS index creation skipped (disabled in config)");
+    logger.debug(
+      "[index-lifecycle] FTS index creation skipped (disabled in config)",
+    );
   }
 
   // ------------------------------------------------------------------
@@ -352,7 +366,9 @@ export async function ensureIndexes(
   const vectorConfig = config.vector;
   if (vectorConfig?.enabled !== false) {
     if (!caps.vector) {
-      logger.debug("[index-lifecycle] Skipping vector indexes — extension unavailable");
+      logger.debug(
+        "[index-lifecycle] Skipping vector indexes — extension unavailable",
+      );
       // Record all expected vector index names as skipped
       for (const model of Object.keys(EMBEDDING_MODELS)) {
         const name =
@@ -365,9 +381,12 @@ export async function ensureIndexes(
       const efc = vectorConfig?.efc ?? vectorConfig?.efs ?? 200;
 
       for (const [model, modelInfo] of Object.entries(EMBEDDING_MODELS)) {
-        const propName = getVecPropertyName(model) ?? getEmbeddingPropertyName(model);
+        const propName =
+          getVecPropertyName(model) ?? getEmbeddingPropertyName(model);
         if (propName === null) {
-          logger.debug(`[index-lifecycle] No property name for model '${model}', skipping`);
+          logger.debug(
+            `[index-lifecycle] No property name for model '${model}', skipping`,
+          );
           continue;
         }
 
@@ -389,7 +408,7 @@ export async function ensureIndexes(
 
         const ok = await createVectorIndex(
           conn,
-          'Symbol',
+          "Symbol",
           propName,
           indexName,
           modelInfo.dimension,
@@ -403,7 +422,9 @@ export async function ensureIndexes(
       }
     }
   } else {
-    logger.debug("[index-lifecycle] Vector index creation skipped (disabled in config)");
+    logger.debug(
+      "[index-lifecycle] Vector index creation skipped (disabled in config)",
+    );
   }
 
   logger.info(
@@ -440,9 +461,9 @@ export async function ensureEntityIndexes(
   // FTS indexes for entity tables
   // ------------------------------------------------------------------
   const ftsTables: Array<{ table: string; indexName: string }> = [
-    { table: "Memory",      indexName: ENTITY_FTS_INDEX_NAMES.memory },
-    { table: "Cluster",     indexName: ENTITY_FTS_INDEX_NAMES.cluster },
-    { table: "Process",     indexName: ENTITY_FTS_INDEX_NAMES.process },
+    { table: "Memory", indexName: ENTITY_FTS_INDEX_NAMES.memory },
+    { table: "Cluster", indexName: ENTITY_FTS_INDEX_NAMES.cluster },
+    { table: "Process", indexName: ENTITY_FTS_INDEX_NAMES.process },
     { table: "FileSummary", indexName: ENTITY_FTS_INDEX_NAMES.fileSummary },
     { table: "AgentFeedback", indexName: ENTITY_FTS_INDEX_NAMES.agentFeedback },
   ];
@@ -450,7 +471,9 @@ export async function ensureEntityIndexes(
   if (caps.fts) {
     for (const { table, indexName } of ftsTables) {
       if (existingNames.has(indexName)) {
-        logger.debug(`[index-lifecycle] Entity FTS index '${indexName}' already exists, skipping`);
+        logger.debug(
+          `[index-lifecycle] Entity FTS index '${indexName}' already exists, skipping`,
+        );
         result.skipped.push(indexName);
       } else {
         const ok = await createFtsIndex(conn, table, indexName);
@@ -462,7 +485,9 @@ export async function ensureEntityIndexes(
       }
     }
   } else {
-    logger.debug("[index-lifecycle] Skipping entity FTS indexes — extension unavailable");
+    logger.debug(
+      "[index-lifecycle] Skipping entity FTS indexes — extension unavailable",
+    );
     for (const { indexName } of ftsTables) {
       result.skipped.push(indexName);
     }
@@ -471,18 +496,31 @@ export async function ensureEntityIndexes(
   // ------------------------------------------------------------------
   // Vector indexes for FileSummary
   // ------------------------------------------------------------------
-  const vectorEntries = Object.entries(FILESUMMARY_EMBEDDING_PROPERTIES) as Array<
-    [keyof typeof FILESUMMARY_EMBEDDING_PROPERTIES, { property: string; dimension: number }]
+  const vectorEntries = Object.entries(
+    FILESUMMARY_EMBEDDING_PROPERTIES,
+  ) as Array<
+    [
+      keyof typeof FILESUMMARY_EMBEDDING_PROPERTIES,
+      { property: string; dimension: number },
+    ]
   >;
 
   if (caps.vector) {
     for (const [key, { property, dimension }] of vectorEntries) {
       const indexName = FILESUMMARY_VECTOR_INDEX_NAMES[key];
       if (existingNames.has(indexName)) {
-        logger.debug(`[index-lifecycle] FileSummary vector index '${indexName}' already exists, skipping`);
+        logger.debug(
+          `[index-lifecycle] FileSummary vector index '${indexName}' already exists, skipping`,
+        );
         result.skipped.push(indexName);
       } else {
-        const ok = await createVectorIndex(conn, "FileSummary", property, indexName, dimension);
+        const ok = await createVectorIndex(
+          conn,
+          "FileSummary",
+          property,
+          indexName,
+          dimension,
+        );
         if (ok) {
           result.created.push(indexName);
         } else {
@@ -491,7 +529,9 @@ export async function ensureEntityIndexes(
       }
     }
   } else {
-    logger.debug("[index-lifecycle] Skipping FileSummary vector indexes — extension unavailable");
+    logger.debug(
+      "[index-lifecycle] Skipping FileSummary vector indexes — extension unavailable",
+    );
     for (const [key] of vectorEntries) {
       result.skipped.push(FILESUMMARY_VECTOR_INDEX_NAMES[key]);
     }
@@ -500,18 +540,31 @@ export async function ensureEntityIndexes(
   // ------------------------------------------------------------------
   // Vector indexes for AgentFeedback
   // ------------------------------------------------------------------
-  const afVectorEntries = Object.entries(AGENTFEEDBACK_EMBEDDING_PROPERTIES) as Array<
-    [keyof typeof AGENTFEEDBACK_EMBEDDING_PROPERTIES, { property: string; dimension: number }]
+  const afVectorEntries = Object.entries(
+    AGENTFEEDBACK_EMBEDDING_PROPERTIES,
+  ) as Array<
+    [
+      keyof typeof AGENTFEEDBACK_EMBEDDING_PROPERTIES,
+      { property: string; dimension: number },
+    ]
   >;
 
   if (caps.vector) {
     for (const [key, { property, dimension }] of afVectorEntries) {
       const indexName = AGENTFEEDBACK_VECTOR_INDEX_NAMES[key];
       if (existingNames.has(indexName)) {
-        logger.debug(`[index-lifecycle] AgentFeedback vector index '${indexName}' already exists, skipping`);
+        logger.debug(
+          `[index-lifecycle] AgentFeedback vector index '${indexName}' already exists, skipping`,
+        );
         result.skipped.push(indexName);
       } else {
-        const ok = await createVectorIndex(conn, "AgentFeedback", property, indexName, dimension);
+        const ok = await createVectorIndex(
+          conn,
+          "AgentFeedback",
+          property,
+          indexName,
+          dimension,
+        );
         if (ok) {
           result.created.push(indexName);
         } else {
@@ -520,7 +573,9 @@ export async function ensureEntityIndexes(
       }
     }
   } else {
-    logger.debug("[index-lifecycle] Skipping AgentFeedback vector indexes — extension unavailable");
+    logger.debug(
+      "[index-lifecycle] Skipping AgentFeedback vector indexes — extension unavailable",
+    );
     for (const [key] of afVectorEntries) {
       result.skipped.push(AGENTFEEDBACK_VECTOR_INDEX_NAMES[key]);
     }
