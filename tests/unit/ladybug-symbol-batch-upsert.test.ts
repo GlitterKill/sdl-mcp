@@ -334,8 +334,8 @@ describe("upsertSymbolBatch — integration", () => {
       }));
       await queries.upsertSymbolBatch(conn_, batch);
 
-      const serialResults = await queries.getSymbolsByFile(conn_, fileId);
-      const batchResults = await queries.getSymbolsByFile(conn_, fileId2);
+      const serialResults = (await queries.getSymbolsByFile(conn_, fileId)).sort((a, b) => a.name.localeCompare(b.name));
+      const batchResults = (await queries.getSymbolsByFile(conn_, fileId2)).sort((a, b) => a.name.localeCompare(b.name));
 
       assert.strictEqual(
         serialResults.length,
