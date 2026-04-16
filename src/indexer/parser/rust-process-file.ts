@@ -26,6 +26,7 @@ import {
   loadExistingSymbols,
 } from "./symbol-mapping.js";
 import type { ProcessFileResult, SymbolDetail } from "./types.js";
+import type { BatchPersistAccumulator } from "./batch-persist.js";
 
 /**
  * Process a file using pre-parsed results from the Rust native engine.
@@ -56,6 +57,7 @@ export async function processFileFromRustResult(params: {
   globalNameToSymbolIds?: Map<string, string[]>;
   globalPreferredSymbolId?: Map<string, string>;
   supportsPass2FilePath?: (relPath: string) => boolean;
+  batchAccumulator?: BatchPersistAccumulator;
 }): Promise<ProcessFileResult> {
   const {
     repoId,
@@ -309,10 +311,10 @@ export async function processFileFromRustResult(params: {
       adapter,
     });
 
-    // ── Persist ──────────────────────────────────────────────────
-    await withWriteConn(async (wConn) => {
-      await ladybugDb.withTransaction(wConn, async (txConn) => {
-        await ladybugDb.upsertFile(txConn, {
+    // ── Persist ──────────────────────────────────────────────────────────
+    if (params.batchAccumulator) {
+      params.batchAccumulator.addFile(
+        {
           fileId,
           repoId,
           relPath,
@@ -320,21 +322,39 @@ export async function processFileFromRustResult(params: {
           language: ext,
           byteSize: fileMeta.size,
           lastIndexedAt: new Date().toISOString(),
+        },
+        existingFile?.fileId ?? null,
+      );
+      params.batchAccumulator.addSymbolReferences(symbolReferences);
+      params.batchAccumulator.addSymbols(symbolsToUpsert);
+      params.batchAccumulator.addEdges(edgesToInsert);
+    } else {
+      await withWriteConn(async (wConn) => {
+        await ladybugDb.withTransaction(wConn, async (txConn) => {
+          await ladybugDb.upsertFile(txConn, {
+            fileId,
+            repoId,
+            relPath,
+            contentHash,
+            language: ext,
+            byteSize: fileMeta.size,
+            lastIndexedAt: new Date().toISOString(),
+          });
+
+          if (existingFile) {
+            await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+            await ladybugDb.deleteSymbolReferencesByFileId(
+              txConn,
+              existingFile.fileId,
+            );
+          }
+
+          await ladybugDb.insertSymbolReferences(txConn, symbolReferences);
+          await ladybugDb.upsertSymbolBatch(txConn, symbolsToUpsert);
+          await ladybugDb.insertEdges(txConn, edgesToInsert);
         });
-
-        if (existingFile) {
-          await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
-          await ladybugDb.deleteSymbolReferencesByFileId(
-            txConn,
-            existingFile.fileId,
-          );
-        }
-
-        await ladybugDb.insertSymbolReferences(txConn, symbolReferences);
-        await ladybugDb.upsertSymbolBatch(txConn, symbolsToUpsert);
-        await ladybugDb.insertEdges(txConn, edgesToInsert);
       });
-    });
+    }
 
     prefetchFileExports(repoId, fileMeta.path);
 

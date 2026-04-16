@@ -136,6 +136,7 @@ interface NativeProcess {
 
 interface NativeAddon {
   parseFiles(files: NativeFileInput[], threadCount: number): NativeParsedFile[];
+  parseFilesAsync?(files: NativeFileInput[], threadCount: number): Promise<NativeParsedFile[]>;
   hashContentNative(content: string): string;
   generateSymbolIdNative(
     repoId: string,
@@ -488,6 +489,96 @@ export function parseFilesRust(
       nativeDisabledForSession = true;
       return null;
     }
+  }
+
+  return results.filter((result): result is RustParseResult => result !== null);
+}
+
+/**
+ * Async variant of parseFilesRust. Runs Rust parsing on a libuv thread,
+ * freeing the Node.js event loop to process DB writes concurrently.
+ */
+export async function parseFilesRustAsync(
+  repoId: string,
+  repoRoot: string,
+  files: FileMetadata[],
+  threadCount: number = 0,
+): Promise<RustParseResult[] | null> {
+  const addon = loadNativeAddon();
+  if (!addon) return null;
+
+  // Fall back to sync if addon lacks async support (older binary)
+  if (typeof addon.parseFilesAsync !== "function") {
+    return parseFilesRust(repoId, repoRoot, files, threadCount);
+  }
+
+  const results = new Array<RustParseResult | null>(files.length).fill(null);
+  const nativeEntries: Array<{ index: number; input: NativeFileInput }> = [];
+
+  files.forEach((file, index) => {
+    const ext = file.path.split(".").pop()?.toLowerCase() ?? "";
+    const language = extensionToLanguage(ext);
+
+    if (!supportsNativeExtractionLanguage(language)) {
+      results[index] = buildUnsupportedLanguageResult(
+        file.path,
+        language || ext,
+      );
+      return;
+    }
+
+    nativeEntries.push({
+      index,
+      input: {
+        relPath: file.path,
+        absolutePath: join(repoRoot, file.path).replace(/\\/g, "/"),
+        repoId,
+        language,
+      },
+    });
+  });
+
+  if (nativeEntries.length === 0) {
+    return results.filter(
+      (result): result is RustParseResult => result !== null,
+    );
+  }
+
+  const batch = nativeEntries.map((entry) => entry.input);
+
+  let nativeResults: NativeParsedFile[];
+  try {
+    nativeResults = await addon.parseFilesAsync(batch, threadCount);
+  } catch (error) {
+    logger.error(
+      "Native Rust indexer parseFilesAsync failed; disabling native addon",
+      { error, batchSize: batch.length },
+    );
+    nativeDisabledForSession = true;
+    return null;
+  }
+
+  if (nativeResults.length !== batch.length) {
+    logger.error("Native Rust indexer async returned unexpected result count", {
+      expected: batch.length,
+      actual: nativeResults.length,
+    });
+    nativeDisabledForSession = true;
+    return null;
+  }
+
+  try {
+    const mapped = nativeResults.map(mapNativeResult);
+    mapped.forEach((result, batchIndex) => {
+      results[nativeEntries[batchIndex].index] = result;
+    });
+  } catch (error) {
+    logger.error(
+      "Failed to map native async results; disabling native addon",
+      { error },
+    );
+    nativeDisabledForSession = true;
+    return null;
   }
 
   return results.filter((result): result is RustParseResult => result !== null);

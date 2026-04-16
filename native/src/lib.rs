@@ -35,6 +35,42 @@ pub fn parse_files(
     parse::parse_files_parallel(&files, count)
 }
 
+pub struct ParseFilesTask {
+    files: Vec<NativeFileInput>,
+    thread_count: usize,
+}
+
+impl napi::Task for ParseFilesTask {
+    type Output = Vec<NativeParsedFile>;
+    type JsValue = Vec<NativeParsedFile>;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        Ok(parse::parse_files_parallel(&self.files, self.thread_count))
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+#[napi]
+pub fn parse_files_async(
+    files: Vec<NativeFileInput>,
+    thread_count: u32,
+) -> napi::bindgen_prelude::AsyncTask<ParseFilesTask> {
+    let count = if thread_count == 0 {
+        num_cpus()
+    } else {
+        thread_count as usize
+    };
+
+    napi::bindgen_prelude::AsyncTask::new(ParseFilesTask {
+        files,
+        thread_count: count,
+    })
+}
+
+
 #[napi]
 pub fn hash_content_native(content: String) -> String {
     parse::content_hash::hash_content(&content)
