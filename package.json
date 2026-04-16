@@ -115,7 +115,7 @@
   "overrides": {
     "@hono/node-server": "1.19.13",
     "flatted": "3.4.2",
-    "hono": "4.12.12",
+    "hono": "4.12.14",
     "tar": "7.5.12",
     "tree-sitter": "$tree-sitter"
   },
