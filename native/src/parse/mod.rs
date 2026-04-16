@@ -83,6 +83,7 @@ fn parse_single_file_safe(input: &NativeFileInput) -> NativeParsedFile {
             NativeParsedFile {
                 rel_path,
                 content_hash: String::new(),
+                content: None,
                 symbols: vec![],
                 imports: vec![],
                 calls: vec![],
@@ -100,6 +101,7 @@ fn parse_single_file(input: &NativeFileInput) -> NativeParsedFile {
             return NativeParsedFile {
                 rel_path: input.rel_path.clone(),
                 content_hash: String::new(),
+                content: None,
                 symbols: vec![],
                 imports: vec![],
                 calls: vec![],
@@ -114,6 +116,7 @@ fn parse_single_file(input: &NativeFileInput) -> NativeParsedFile {
         return NativeParsedFile {
             rel_path: input.rel_path.clone(),
             content_hash,
+            content: None,
             symbols: vec![],
             imports: vec![],
             calls: vec![],
@@ -127,6 +130,7 @@ fn parse_single_file(input: &NativeFileInput) -> NativeParsedFile {
         return NativeParsedFile {
             rel_path: input.rel_path.clone(),
             content_hash,
+            content: None,
             symbols: vec![],
             imports: vec![],
             calls: vec![],
@@ -145,6 +149,7 @@ fn parse_single_file(input: &NativeFileInput) -> NativeParsedFile {
             return NativeParsedFile {
                 rel_path: input.rel_path.clone(),
                 content_hash,
+                content: None,
                 symbols: vec![],
                 imports: vec![],
                 calls: vec![],
@@ -204,6 +209,7 @@ fn parse_single_file(input: &NativeFileInput) -> NativeParsedFile {
     NativeParsedFile {
         rel_path: input.rel_path.clone(),
         content_hash,
+        content: Some(content),
         symbols,
         imports,
         calls,

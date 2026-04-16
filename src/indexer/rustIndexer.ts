@@ -90,6 +90,7 @@ interface NativeParsedCall {
 interface NativeParsedFile {
   relPath: string;
   contentHash: string;
+  content?: string;
   symbols: NativeParsedSymbol[];
   imports: NativeParsedImport[];
   calls: NativeParsedCall[];
@@ -284,6 +285,7 @@ export interface RustExtractedSymbol extends CallExtractedSymbol {
 export interface RustParseResult {
   relPath: string;
   contentHash: string;
+  content?: string;
   symbols: RustExtractedSymbol[];
   imports: ExtractedImport[];
   calls: ExtractedCall[];
@@ -365,7 +367,7 @@ function buildUnsupportedLanguageResult(
  * held in memory simultaneously per batch). Smaller batches also reduce the
  * probability of hitting a pathological file that crashes the native addon.
  */
-const NATIVE_BATCH_SIZE = 1000;
+const NATIVE_BATCH_SIZE = 200;
 
 /**
  * Parse a batch of files using the native Rust engine.
@@ -564,6 +566,7 @@ function mapNativeResult(native: NativeParsedFile): RustParseResult {
   return {
     relPath: native.relPath,
     contentHash: native.contentHash,
+    content: native.content,
     symbols: native.symbols.map(mapNativeSymbol),
     imports: native.imports.map(mapNativeImport),
     calls: native.calls.map(mapNativeCall),

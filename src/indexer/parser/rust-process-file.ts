@@ -160,25 +160,31 @@ export async function processFileFromRustResult(params: {
     const extWithDot = `.${ext}`;
     const adapter = getAdapterForExtension(extWithDot);
     const filePath = join(repoRoot, fileMeta.path);
+    // Fix 1: Use content from Rust result to avoid double file read.
+    // Falls back to async read for older addon versions without content.
     let content: string;
-    try {
-      content = await readFileAsync(filePath, "utf-8");
-    } catch (readError: unknown) {
-      const code = (readError as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "EPERM") {
-        logger.warn(
-          `File disappeared before Rust post-processing: ${fileMeta.path}`,
-          { code },
-        );
-        return {
-          symbolsIndexed: 0,
-          edgesCreated: 0,
-          changed: false,
-          configEdges: [],
-          pass2HintPaths: [],
-        };
+    if (rustResult.content != null) {
+      content = rustResult.content;
+    } else {
+      try {
+        content = await readFileAsync(filePath, "utf-8");
+      } catch (readError: unknown) {
+        const code = (readError as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "EPERM") {
+          logger.warn(
+            `File disappeared before Rust post-processing: ${fileMeta.path}`,
+            { code },
+          );
+          return {
+            symbolsIndexed: 0,
+            edgesCreated: 0,
+            changed: false,
+            configEdges: [],
+            pass2HintPaths: [],
+          };
+        }
+        throw readError;
       }
-      throw readError;
     }
 
     // ── Phase 4: Load existing symbols ───────────────────────────

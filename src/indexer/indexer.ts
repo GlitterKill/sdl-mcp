@@ -469,14 +469,18 @@ async function indexRepoImpl(
       const tsResolver = await measureNestedPhase(
         "initSharedState",
         "tsResolver",
-        () =>
-          useRustEngine
-            ? null
-            : createTsCallResolver(repoRow.rootPath, files, {
-                includeNodeModulesTypes: config.includeNodeModulesTypes ?? true,
-                dirtyRelPaths: dirtyTsResolverPaths,
-                timingsOut: phaseTimings ? tsResolverTimings : undefined,
-              }),
+        // Fix 4: Create TS resolver eagerly when repo has TS/JS files,
+        // so it is warm for Pass 1 call resolution and avoids cold-start
+        // penalty before Pass 2. Skip for pure non-TS repos.
+        () => {
+          const hasTsFiles = files.some((f) => /.[cm]?[jt]sx?$/.test(f.path));
+          if (!hasTsFiles) return null;
+          return createTsCallResolver(repoRow.rootPath, files, {
+            includeNodeModulesTypes: config.includeNodeModulesTypes ?? true,
+            dirtyRelPaths: dirtyTsResolverPaths,
+            timingsOut: phaseTimings ? tsResolverTimings : undefined,
+          });
+        },
       );
       if (phaseTimings) {
         for (const [phaseName, durationMs] of Object.entries(
@@ -582,17 +586,7 @@ async function indexRepoImpl(
 
     // --- Phase: Pass 2 — cross-file call resolution ---
 
-    // Lazily create TS compiler resolver for Pass 2 when Rust engine was used
-    // for Pass 1.  The TS compiler provides type-aware call resolution that
-    // complements the import-based resolver.
-    if (!tsResolver && useRustEngine && pass2EligibleFiles.length > 0) {
-      logger.debug("Creating deferred TS call resolver for Pass 2");
-      tsResolver = createTsCallResolver(repoRow.rootPath, files, {
-        includeNodeModulesTypes: config.includeNodeModulesTypes ?? true,
-        dirtyRelPaths: dirtyTsResolverPaths,
-      });
-      logger.debug("Deferred TS call resolver ready");
-    }
+    // Fix 4: TS resolver created eagerly in initSharedState — no deferred creation needed.
 
     totalEdgesCreated += await measurePhase("pass2", async () =>
       runPass2Resolvers({

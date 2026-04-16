@@ -234,6 +234,11 @@ export interface NativeParsedFile {
   relPath: string
   /** SHA-256 hex digest of file content. */
   contentHash: string
+  /**
+   * Raw file content (passed through to avoid double-read on JS side).
+   * `None` for error paths where content was unavailable or irrelevant.
+   */
+  content?: string
   /** Extracted symbols. */
   symbols: Array<NativeParsedSymbol>
   /** Extracted imports. */

@@ -149,6 +149,9 @@ pub struct NativeParsedFile {
     pub rel_path: String,
     /// SHA-256 hex digest of file content.
     pub content_hash: String,
+    /// Raw file content (passed through to avoid double-read on JS side).
+    /// `None` for error paths where content was unavailable or irrelevant.
+    pub content: Option<String>,
     /// Extracted symbols.
     pub symbols: Vec<NativeParsedSymbol>,
     /// Extracted imports.
