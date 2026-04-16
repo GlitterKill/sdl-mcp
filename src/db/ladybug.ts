@@ -699,6 +699,15 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
   }
 }
 
+/**
+ * Close all LadybugDB connections and the database instance.
+ *
+ * **Important (Windows / kuzu 0.15.2):** After this function returns, the
+ * process MUST call `process.exit()` before the event loop drains naturally.
+ * kuzu's N-API destructor on closed Connection/Database objects segfaults
+ * during V8's at-exit GC sweep. All known callers (ShutdownManager, CLI
+ * commands, stress-test harness) already call `process.exit()` after cleanup.
+ */
 export async function closeLadybugDb(): Promise<void> {
   // Drain in-flight writes before closing connections. Timeout after 5s
   // to avoid hanging indefinitely if a write is stuck.

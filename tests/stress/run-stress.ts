@@ -407,12 +407,11 @@ async function main(): Promise<void> {
   const jsonPath = writeJsonReport(report, resultsDir);
   stressLog("info", `JSON report saved to: ${jsonPath}`);
 
-  // Set exit code and allow stderr to flush before force-exiting.
-  // process.exit() alone truncates buffered console.error output on Windows.
-  // The unref'd timer lets the process exit naturally if no dangling handles
-  // remain, but forces exit after 500ms if handles keep the loop alive.
-  process.exitCode = report.overallPassed ? 0 : 1;
-  setTimeout(() => process.exit(), 500).unref();
+  // Force-exit immediately after flushing output. kuzu 0.15.2's N-API
+  // destructor segfaults during V8's at-exit GC sweep on Windows when
+  // Connection/Database objects are finalized after close().
+  const code = report.overallPassed ? 0 : 1;
+  setImmediate(() => process.exit(code));
 }
 
 // ---------------------------------------------------------------------------
