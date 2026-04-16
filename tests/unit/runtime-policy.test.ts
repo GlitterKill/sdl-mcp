@@ -117,7 +117,7 @@ describe("PolicyEngine - Runtime Execution Policy", () => {
 
   it("should allow the resolved default executable when it is explicitly allowlisted", () => {
     const defaultShellExecutable =
-      getRuntime("shell")?.buildCommand([], {}).executable;
+      getRuntime("shell")?.buildCommand([], { codePath: "/tmp/dummy.sh" }).executable;
     assert.ok(defaultShellExecutable, "Expected shell runtime default");
 
     const config = makeRuntimeConfig({
