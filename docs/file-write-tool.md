@@ -22,6 +22,7 @@ The `file.write` tool provides token-efficient file writing with six targeted wr
 ## Overview
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     A[file.write request] --> B{Write mode?}
 
@@ -123,6 +124,7 @@ flowchart TD
 Create a new file or overwrite existing content entirely.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     subgraph Input
         A["content: 'new file content'"]
@@ -158,6 +160,7 @@ flowchart LR
 Replace a specific line range with new content. Ideal for updating sections of config files.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     subgraph Input
         A["replaceLines:\n  start: 5\n  end: 8\n  content: 'new lines'"]
@@ -207,6 +210,7 @@ flowchart LR
 Find and replace text using regex patterns. Supports capture groups.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     subgraph Input
         A["replacePattern:\n  pattern: 'v(\\d+)'\n  replacement: 'v$1.1'\n  global: true"]
@@ -253,6 +257,7 @@ flowchart TD
 Update a specific key in a JSON file without touching other content.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     subgraph Input
         A["jsonPath: 'server.port'\njsonValue: 9000"]
@@ -303,6 +308,7 @@ flowchart LR
 Insert new content at a specific line without replacing existing content.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     subgraph Input
         A["insertAt:\n  line: 5\n  content: '# New Section'"]
@@ -347,6 +353,7 @@ flowchart LR
 Add content to the end of a file.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     subgraph Input
         A["append: 'new entry'"]
@@ -385,6 +392,7 @@ flowchart LR
 By default, `file.write` creates a backup before modifying any existing file:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     A[Write request] --> B{File exists?}
     B -->|No| C[Create new file]

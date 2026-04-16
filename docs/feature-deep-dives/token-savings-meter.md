@@ -19,6 +19,7 @@ SDL-MCP's core value proposition is token efficiency — agents get the code int
 ## Architecture
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Handler["Tool handler"]
     Raw["attachRawContext<br/>fileIds or rawTokens<br/>raw-read cost estimate"]
@@ -214,6 +215,7 @@ These summaries are non-critical — formatting failures are silently caught and
 The server declares `logging: {}` in its MCP capabilities, enabling the `notifications/message` method. Up to three notifications are sent per tool call:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     N1["Notification 1<br/>savings meter"]
     N2["Notification 2<br/>tool summary"]
@@ -239,6 +241,7 @@ All notifications use:
 ## Data Flow Diagram
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     H["Tool Handler"] -->|"attachRawContext<br/>(fileIds or rawTokens)"| R["Result with _rawContext"]
 

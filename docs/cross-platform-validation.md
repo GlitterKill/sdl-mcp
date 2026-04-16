@@ -29,6 +29,7 @@ The CI workflow validates cross-platform behavior through three mechanisms:
 3. **Performance Validation**: Validate performance budgets on both platforms
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 graph TB
     A[Push to main] --> B[CI Job - Linux]
     A --> C[CI Job - Windows]

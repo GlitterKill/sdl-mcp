@@ -21,6 +21,7 @@ This page defines practical workflows for coding agents using SDL-MCP.
 ## Workflow Overview
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     Task["Agent task"]
     State["1. Establish state<br/>repo.status<br/>index.refresh<br/>policy.get"]
@@ -30,12 +31,20 @@ flowchart LR
     Execute["5. Execute and verify<br/>runtime.execute<br/>runtime.queryOutput"]
     Record["6. Record feedback<br/>agent.feedback<br/>memory.store<br/>usage.stats"]
 
-    Task --> State --> Discover --> Understand --> Read --> Execute --> Record
+    Task e1@--> State
+    State e2@--> Discover
+    Discover e3@--> Understand
+    Understand e4@--> Read
+    Read e5@--> Execute
+    Execute e6@--> Record
+
+    classDef animate stroke-dasharray: 9\,5,stroke-dashoffset: 900,animation: dash 25s linear infinite;
+    class e1,e2,e3,e4,e5,e6 animate
 ```
 
 ## Complete Tool Reference
 
-SDL-MCP exposes 34 tools in flat default mode (32 flat tools plus `sdl.action.search` and `sdl.info`). Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, while gateway mode replaces the 32 flat tools with 4 namespace surfaces.
+SDL-MCP exposes 33 tools in flat default mode (31 flat tools plus `sdl.action.search` and `sdl.info`). Gateway mode replaces 30 of those flat tools with 4 namespace surfaces, while `sdl.file.write` remains flat-only. Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, and can also run in exclusive mode with only those 4 tools.
 
 | Category                   | Tool                       | Purpose                                                                                                                                                              |
 | :------------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -59,11 +68,10 @@ SDL-MCP exposes 34 tools in flat default mode (32 flat tools plus `sdl.action.se
 | **Policy**                 | `sdl.policy.get`           | Read current policy settings                                                                                                                                         |
 |                            | `sdl.policy.set`           | Update policy (merge patch)                                                                                                                                          |
 | **Risk**                   | `sdl.pr.risk.analyze`      | Analyze PR risk, blast radius, and recommend test targets                                                                                                            |
-| **Agent**                  | `sdl.context`        | Direct task-shaped context retrieval with budget-controlled rung planning                                                                                            |
-|                            | `sdl.agent.feedback`       | Record which symbols were useful/missing after a task; supports `taskTags`                                                                                           |
+| **Agent**                  | `sdl.agent.feedback`       | Record which symbols were useful/missing after a task; supports `taskTags`                                                                                           |
 |                            | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics                                                                                                                     |
-| **Context**                |       | Generate token-bounded summary for non-MCP contexts (clipboard, markdown, JSON)                                                                                      |
 | **File**                   | `sdl.file.read`            | Read non-indexed files with line range, search, or JSON path extraction                                                                                              |
+|                            | `sdl.file.write`           | Write non-indexed files with targeted update modes                                                                                                                   |
 | **Runtime**                | `sdl.runtime.execute`      | Sandboxed subprocess execution with `outputMode` (`minimal`, `summary`, `intent`); 16 runtimes including `node`, `typescript`, `python`, `shell`, `go`, `rust`, etc. |
 |                            | `sdl.runtime.queryOutput`  | On-demand keyword search of stored runtime output artifacts by `artifactHandle`                                                                                      |
 | **Memory**                 | `sdl.memory.store`         | Store or update a development memory with symbol/file links                                                                                                          |
@@ -140,9 +148,8 @@ Use this order unless task constraints force escalation:
 - **Feature implementation**: `repo.overview -> search -> card -> slice.build`. Use `editedFiles` in `slice.build` to include symbols from files you're actively modifying.
 - **PR review**: `delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols`.
 - **Live editing**: `buffer.push` as files change (with cursor/selection tracking) → `buffer.checkpoint` to persist → search/card/slice now reflect draft state.
-- **Context export**: `context.summary` with `format: "clipboard"` to produce a summary for non-MCP tools.
 - **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `python`, or `shell`) to run tests and capture structured output.
-- **Context retrieval** _(recommended)_: use `sdl.context` directly, or `sdl.context` inside Code Mode. `contextMode: "precise"` is best for targeted lookups; `"broad"` is best for investigation. Both use semantic-first seeding and evidence-aware ranking, making them more accurate and more token-efficient than manual workflow-based context gathering.
+- **Context retrieval** _(Code Mode)_: use `sdl.context` when Code Mode is enabled. If Code Mode is disabled, follow the manual ladder (`repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> code tools).
 - **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, and batch mutations. Do not use it for context retrieval — route explain/debug/review/implement work to context first.
 
 ### 3) Token controls by tool
@@ -172,8 +179,6 @@ Use this order unless task constraints force escalation:
   - Pass `budget` for large version diffs to constrain blast-radius work.
 - `sdl.pr.risk.analyze`:
   - Raise `riskThreshold` (for example `80`) to focus on highest-risk changes.
-- :
-  - Set `budget` to cap output tokens. Use `scope: "task"` for multi-symbol summaries, `scope: "symbol"` for single-symbol.
 - `sdl.runtime.execute`:
   - Use `outputMode: "minimal"` (default) for ~50-token responses with just status and artifact handle.
   - Use `outputMode: "summary"` for head+tail output excerpts (legacy behavior).
@@ -259,15 +264,7 @@ Then, if needed:
 - `persistOutput: true` (default) saves full output to an artifact handle for later retrieval via `sdl.runtime.queryOutput`.
 - Per-line truncation caps each output line at 500 characters.
 
-### 7) Context export ()
-
-Use  to generate token-bounded summaries for non-MCP contexts (clipboard, PR descriptions, tickets).
-
-- Pass `query` (required), `budget` (token cap), `format` (`"markdown"` | `"json"` | `"clipboard"`), and `scope` (`"symbol"` | `"file"` | `"task"`).
-- Use `scope: "task"` for multi-symbol summaries; `scope: "symbol"` for single-symbol.
-- Use `format: "clipboard"` for paste-ready output.
-
-### 8) Code Mode (`sdl.context` + `sdl.workflow`)
+### 7) Code Mode (`sdl.context` + `sdl.workflow`)
 
 When `codeMode.enabled: true` is set in config, three Code Mode tools sit alongside the universal `sdl.action.search` surface:
 
@@ -292,7 +289,7 @@ Workflow guidance:
 - Cross-step ETag caching is automatic — no need to pass ETags manually between steps.
 - Use workflows for multi-step operations: runtime execution, data shaping, batch mutations, and CI pipelines. Do not use them for context retrieval (use `sdl.context` in Code Mode or `sdl.context` directly). Do not use them for single actions.
 
-### 9) Feedback loop (`sdl.agent.feedback`)
+### 8) Feedback loop (`sdl.agent.feedback`)
 
 After completing a task, call `sdl.agent.feedback` with:
 
@@ -304,7 +301,7 @@ This trains the slice ranker and improves future context quality.
 
 Use `sdl.agent.feedback.query` with `limit` and `since` (ISO timestamp) to review aggregated stats on which symbols are most frequently useful/missing.
 
-### 10) Policy management (`sdl.policy.get` / `sdl.policy.set`)
+### 9) Policy management (`sdl.policy.get` / `sdl.policy.set`)
 
 1. Call `sdl.policy.get` to read current gating thresholds.
 2. Call `sdl.policy.set` with `policyPatch` (merge patch — only supplied fields change):
@@ -312,7 +309,7 @@ Use `sdl.agent.feedback.query` with `limit` and `since` (ISO timestamp) to revie
    - `allowBreakGlass: false` — enforce strict proof-of-need gating.
    - `requireIdentifiers: false` — allow unscoped code window requests (not recommended).
 
-### 11) Development memories (opt-in, disabled by default)
+### 10) Development memories (opt-in, disabled by default)
 
 Memory is **opt-in and disabled by default**. Enable it via `"memory": { "enabled": true }` in config (global or per-repo). When enabled:
 
@@ -326,7 +323,7 @@ Memory is **opt-in and disabled by default**. Enable it via `"memory": { "enable
 
 When memory is disabled, memory tools return a clear error and no memory surfacing occurs.
 
-### 12) Do not
+### 11) Do not
 
 - Do not jump directly to raw file reads if SDL tools can answer the question.
 - Do not call `sdl.code.needWindow` before trying `sdl.code.getSkeleton`/`sdl.code.getHotPath`.
@@ -339,7 +336,7 @@ When memory is disabled, memory tools return a clear error and no memory surfaci
 - Do not ignore `nextBestAction`, `fallbackTools`, or `fallbackRationale` in denied or ambiguous responses — they tell you what to try instead.
 - Do not ignore stale memories surfaced in slices — review and update or remove them.
 - Do not store trivial or ephemeral notes as memories — they add noise to future surfacing.
-- Do not use `sdl.workflow` for context retrieval — use `sdl.context` in Code Mode or `sdl.context` directly with `contextMode: "precise"` or `"broad"` instead. Workflow is for multi-step operations (runtime, data transforms, mutations).
+- Do not use `sdl.workflow` for context retrieval. Use `sdl.context` in Code Mode, or use the manual ladder when Code Mode is disabled. Workflow is for multi-step operations (runtime, data transforms, mutations).
 - Do not use `sdl.workflow` for a single action — it adds overhead. Use the direct tool instead.
 - Do not hardcode step indices in `$N` references without checking the actual step order in your chain.
 

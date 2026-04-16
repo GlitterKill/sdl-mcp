@@ -23,6 +23,7 @@ AI coding agents are stateless. Every session starts from scratch — the agent 
 ## Architecture Overview
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     Store["memory.store"]
     Query["memory.query"]
@@ -44,6 +45,7 @@ flowchart LR
 ### Dual Storage and Auto-Surfacing Flow
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     subgraph "Write Path"
         Store["sdl.memory.store"]
@@ -257,6 +259,7 @@ introduced in v0.7.
 ### Directory Structure
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Root["<repo-root>/.sdl-memory"]
     Decisions["decisions/a1b2c3d4e5f6g7h8.md"]

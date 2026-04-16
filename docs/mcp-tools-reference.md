@@ -18,11 +18,11 @@
 
 Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
 
-- `32` flat SDL action tools (`31` gateway-routable + `1` flat-only)
+- `31` flat SDL action tools (`30` gateway-routable + `1` flat-only)
 - `2` universal tools: `sdl.action.search` and `sdl.info`
 - optional Code Mode-only tools: `sdl.manual`, `sdl.context`, and `sdl.workflow`
 
-Flat mode, gateway mode, and the CLI `tool` command all route into the same handler layer.
+Flat mode and gateway mode share the same handler layer. The CLI `tool` command exposes a narrower direct-action subset rather than the full MCP surface.
 
 Parameter normalization is shared across flat and gateway calls. SDL-MCP accepts canonical camelCase fields plus common public aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, `spillover_handle`, `if_none_match`, `known_etags`, `known_card_etags`, `edited_files`, `entry_symbols`, and `relative_cwd`.
 
@@ -433,39 +433,6 @@ When you use `symbolRefs`, the batch resolves each reference independently. Mixe
     { "name": "handleRequest", "file": "src/server.ts" },
     { "name": "parseConfig", "kind": "function" }
   ]
-}
-```
-
----
-
-### 
-
-Generate a token-bounded context summary for a symbol, file, or task query. Useful for getting a quick overview of relevant symbols, dependencies, and risk areas without building a full slice.
-
-**Parameters:**
-
-| Parameter | Type                                  | Required | Description                         |
-| --------- | ------------------------------------- | -------- | ----------------------------------- |
-| `repoId`  | `string`                              | Yes      | Repository identifier               |
-| `query`   | `string`                              | Yes      | Search query (min length: 1)        |
-| `budget`  | `integer`                             | No       | Max tokens for the summary (min: 1) |
-| `format`  | `"markdown" \| "json" \| "clipboard"` | No       | Output format                       |
-| `scope`   | `"symbol" \| "file" \| "task"`        | No       | Query scope                         |
-
-**Response includes:**
-
-- `summary` — keySymbols, dependencyGraph, riskAreas, filesTouched, metadata (query, summaryTokens, budget, truncated, indexVersion)
-- `content` — formatted summary string in the requested format
-
-**Example:**
-
-```json
-{
-  "repoId": "my-repo",
-  "query": "auth middleware",
-  "budget": 2000,
-  "format": "markdown",
-  "scope": "task"
 }
 ```
 
@@ -964,7 +931,7 @@ Query stored feedback records and aggregated statistics. Useful for offline tuni
 
 ---
 
-## File Access (1 tool)
+## File Access (2 tools)
 
 ### `sdl.file.read`
 
@@ -989,6 +956,35 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 - **Search**: `search` — returns matching lines with context, matches prefixed with `>`
 - **JSON path**: `jsonPath` — parses JSON and returns extracted subtree
 - **Full read**: no params — returns entire file (subject to `maxBytes`)
+
+### `sdl.file.write`
+
+Write non-indexed files using targeted update modes. This tool is MCP-only today; `sdl-mcp tool` does not expose it directly.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `repoId` | `string` | Yes | Repository identifier |
+| `filePath` | `string` | Yes | Path relative to repo root |
+| `content` | `string` | No | Full create or overwrite content |
+| `replaceLines` | `{ start, end, content }` | No | Replace a line range |
+| `replacePattern` | `{ pattern, replacement, global? }` | No | Regex-based replacement |
+| `jsonPath` | `string` | No | Dot-separated JSON key path |
+| `jsonValue` | `unknown` | No | New value for `jsonPath` |
+| `insertAt` | `{ line, content }` | No | Insert content at a specific line |
+| `append` | `string` | No | Append content to the end of the file |
+| `createBackup` | `boolean` | No | Create a `.bak` file before modifying an existing file (default: `true`) |
+| `createIfMissing` | `boolean` | No | Create the file when it does not exist |
+
+Provide exactly one write mode: `content`, `replaceLines`, `replacePattern`, `jsonPath`, `insertAt`, or `append`.
+
+**Response includes:**
+
+- `filePath`, `bytesWritten`, `linesWritten`, `mode`
+- `backupPath` when backup creation is enabled
+- `replacementCount` for pattern-replace operations
+- `indexUpdate` when SDL-MCP can live-sync an indexed source file after the write
+
+See [file.write Tool Reference](./file-write-tool.md) for the mode-by-mode guide.
 
 ---
 
@@ -1233,7 +1229,7 @@ Get cumulative token usage statistics and savings metrics for the current sessio
 
 ### `sdl.context`
 
-Retrieve task-shaped context inside Code Mode. Parameters and response shape mirror `sdl.context`.
+Retrieve task-shaped context inside Code Mode.
 
 Use `sdl.context` first for `debug`, `review`, `implement`, and `explain` requests when you are already operating through the Code Mode surfaces.
 
@@ -1241,7 +1237,7 @@ Use `sdl.context` first for `debug`, `review`, `implement`, and `explain` reques
 
 Execute a multi-step workflow of SDL-MCP actions and internal transforms in one round trip.
 
-Use this for runtime execution, data shaping, batch mutations, and reusable multi-step pipelines. Do not use it for context retrieval; route that work to `sdl.context` or `sdl.context`.
+Use this for runtime execution, data shaping, batch mutations, and reusable multi-step pipelines. Do not use it for context retrieval; route that work to `sdl.context`.
 
 ### `sdl.manual`
 
@@ -1258,8 +1254,8 @@ Use tools in this order for most tasks:
 1. `sdl.repo.status` — check repo state and version
 2. `sdl.repo.overview` — understand codebase structure (start with `level: "stats"`)
 3. `sdl.symbol.search` — find relevant symbols (start with tight limits)
-4. `sdl.context` / `sdl.context` — get task-shaped context first for explain/debug/review/implement work
-5. `sdl.symbol.getCard` / `sdl.symbol.getCard` — understand what symbols do
+4. `sdl.context` — get task-shaped context first when Code Mode is available
+5. `sdl.symbol.getCard` — understand what symbols do; batch through the same tool when you already have many IDs or refs
 6. `sdl.slice.build` — get related symbols for a task (auto-surfaces relevant memories when memory is enabled)
 7. `sdl.code.getSkeleton` — see code structure without full bodies
 8. `sdl.code.getHotPath` — find specific identifiers in code
@@ -1271,7 +1267,7 @@ Use tools in this order for most tasks:
 
 | Task                         | Workflow                                                                                      |
 | ---------------------------- | --------------------------------------------------------------------------------------------- |
-| **Explain / Debug / Review** | `sdl.context` or `sdl.context` first -> direct ladder follow-up only if still ambiguous |
+| **Explain / Debug / Review** | `sdl.context` first in Code Mode -> direct ladder follow-up only if still ambiguous |
 | **Debug (manual)**           | search -> card -> slice.build -> hotPath -> needWindow (if still ambiguous)                   |
 | **Debug (auto)**             | slice.build with `taskText` + `stackTrace` -> hotPath -> needWindow with `sliceContext`       |
 | **Feature**                  | repo.overview -> search -> card -> slice.build (use `editedFiles` for impact)                 |

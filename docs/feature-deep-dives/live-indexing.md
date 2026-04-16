@@ -15,6 +15,7 @@ SDL-MCP's live indexing system eliminates this gap. As you type in your editor, 
 ## Architecture
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Editor["Editor (VSCode, etc.)"] -->|"open / change / save / close"| Push["sdl.buffer.push<br/>full buffer content + metadata"]
     Push --> Overlay["Overlay Store<br/>dirty buffers, parse queue, symbol cache"]
@@ -29,6 +30,7 @@ flowchart TD
 ### Overlay Merge and Checkpoint Flow
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Editor["Editor (VSCode, etc.)"]
     Push["sdl.buffer.push<br/>(full buffer content)"]

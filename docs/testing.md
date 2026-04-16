@@ -45,6 +45,7 @@ SDL-MCP uses a **dist-first** testing strategy to ensure tests validate the ship
 ### Test Layers
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Stress["Stress Tests<br/>Concurrent clients, session limits, large repos"] --> Integration["Integration Tests<br/>Adapter harness, MCP server E2E, CLI dispatch"]
     Integration --> Golden["Golden File Tests<br/>Fixture validation and deterministic snapshots"]

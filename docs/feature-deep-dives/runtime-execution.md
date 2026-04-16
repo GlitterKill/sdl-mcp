@@ -49,6 +49,7 @@ Compiled runtimes use a compile-then-execute workflow: SDL-MCP compiles the sour
 ## Sandboxed Execution Flow
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Req["sdl.runtime.execute request"]
     G1{"runtime.enabled?"}
@@ -135,6 +136,7 @@ The recommended workflow for most runtime tasks is a two-phase approach:
 This pattern minimizes tokens in the common case (command succeeded, move on) while still providing full output access when needed.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 sequenceDiagram
     participant Agent
     participant SDL as sdl.runtime.execute

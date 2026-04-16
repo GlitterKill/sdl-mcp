@@ -33,6 +33,7 @@ Flat mode, gateway mode, and the CLI `tool` command share the same normalization
    - [sdl.code.needWindow](#sdlcodeneedwindow)
 6. [File Access](#6-file-access)
    - [sdl.file.read](#sdlfileread)
+   - [sdl.file.write](#sdlfilewrite)
 7. [Delta & Change Tracking](#7-delta--change-tracking)
    - [sdl.delta.get](#sdldeltaget)
 8. [Policy Management](#8-policy-management)
@@ -40,10 +41,9 @@ Flat mode, gateway mode, and the CLI `tool` command share the same normalization
    - [sdl.policy.set](#sdlpolicyset)
 9. [PR & Risk Analysis](#9-pr--risk-analysis)
    - [sdl.pr.risk.analyze](#sdlprriskanalyze)
-10. [Context Summary](#10-context-summary)
-    - [](#sdlcontextsummary)
-11. [Agent Context & Feedback](#11-agent-context--feedback)
-    - [sdl.context](#sdlagentcontext)
+10. [File Writes](#10-file-writes)
+    - [sdl.file.write](#sdlfilewrite-1)
+11. [Agent Feedback](#11-agent-feedback)
     - [sdl.agent.feedback](#sdlagentfeedback)
     - [sdl.agent.feedback.query](#sdlagentfeedbackquery)
 12. [Runtime Execution](#12-runtime-execution)
@@ -748,6 +748,51 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 
 **Token cost:** Variable, depends on file size and mode. JSON path extraction is typically cheapest.
 
+### sdl.file.write
+
+Write non-indexed files with targeted update modes instead of rewriting entire files.
+
+**What it does:** Applies one of six mutually exclusive write modes against a repo-relative path: full content create or overwrite, line-range replacement, regex replacement, JSON path update, line insertion, or append. Existing files can be backed up automatically. When the target is an indexed source file, SDL-MCP attempts a live-index patch so symbol and slice reads can reflect the change immediately.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+| :-------- | :--- | :------- | :------ | :---------- |
+| `repoId` | string | Yes | — | Repository identifier |
+| `filePath` | string | Yes | — | Path relative to repo root |
+| `content` | string | No | — | Full content for create or overwrite mode |
+| `replaceLines` | object | No | — | `{start, end, content}` line-range replacement |
+| `replacePattern` | object | No | — | `{pattern, replacement, global?}` regex replacement |
+| `jsonPath` | string | No | — | Dot-separated JSON key path |
+| `jsonValue` | unknown | No | — | New value for `jsonPath`; required when `jsonPath` is set |
+| `insertAt` | object | No | — | `{line, content}` insertion mode |
+| `append` | string | No | — | Content appended to the end of the file |
+| `createBackup` | boolean | No | `true` | Create a `.bak` file before modifying an existing file |
+| `createIfMissing` | boolean | No | `false` | Create the file if it does not already exist |
+
+Provide exactly one of `content`, `replaceLines`, `replacePattern`, `jsonPath`, `insertAt`, or `append`.
+
+**Response:**
+
+| Field | Type | Description |
+| :---- | :--- | :---------- |
+| `filePath` | string | Normalized relative path |
+| `bytesWritten` | number | Total bytes written |
+| `linesWritten` | number | Line count written |
+| `mode` | string | One of `create`, `overwrite`, `replaceLines`, `replacePattern`, `jsonPath`, `insertAt`, or `append` |
+| `backupPath` | string | Backup path when backup creation is enabled |
+| `replacementCount` | number | Number of replacements in regex mode |
+| `indexUpdate` | object | Live-index patch result for indexed source files |
+
+**Security and limits:**
+
+- Path traversal is blocked through repo-root validation and symlink re-validation.
+- Modification modes read at most 512KB before applying edits.
+- Regex replacement rejects known catastrophic-backtracking patterns.
+- JSON-path mode is limited to `.json` files and blocks dangerous path segments such as `__proto__`.
+
+See [file.write Tool Reference](./file-write-tool.md) for the full mode guide.
+
 ---
 
 ## 7. Delta & Change Tracking
@@ -867,122 +912,19 @@ Analyzes the risk of a code change between two versions, computing a risk score,
 
 ---
 
-## 10. Context Summary
+## 10. File Writes
 
-### 
+### sdl.file.write
 
-Generates a structured, token-bounded context briefing for any query against the codebase.
-
-**What it does:** Takes a natural-language query (e.g., `"debug the auth middleware"`, `"src/db/queries.ts"`, or `"handleRepoStatus"`), searches the symbol graph for matching symbols, then assembles a budget-constrained context package. The query scope is auto-detected (symbol, file, or task) based on the query content, or can be specified explicitly.
-
-The summary is assembled from four sections, each progressively trimmed if the token budget is exceeded (dependency graph is trimmed first, then risk areas, then files touched, then key symbols):
-
-1. **Key Symbols** — the most relevant symbols with signatures, summaries, cluster membership, and process (call-chain) participation
-2. **Dependency Graph** — how those symbols connect to each other via call/import edges
-3. **Risk Areas** — symbols flagged for high fan-in (>= 15) or recent churn (30-day modifications)
-4. **Files Touched** — which files contain the matched symbols, ranked by density
-
-Results are cached by `repoId + indexVersion + query` to avoid redundant graph queries.
-
-**Parameters:**
-
-| Parameter | Type                                      | Required | Description                                       |
-| :-------- | :---------------------------------------- | :------- | :------------------------------------------------ |
-| `repoId`  | string                                    | Yes      | Repository identifier                             |
-| `query`   | string                                    | Yes      | Natural-language query, file path, or symbol name |
-| `budget`  | number                                    | No       | Token budget for the summary (default: 2000)      |
-| `format`  | `"markdown"` \| `"json"` \| `"clipboard"` | No       | Output format (default: `"markdown"`)             |
-| `scope`   | `"symbol"` \| `"file"` \| `"task"`        | No       | Query scope (auto-detected if omitted)            |
-
-**Response:**
-
-| Field                     | Type   | Description                                                                                                                                |
-| :------------------------ | :----- | :----------------------------------------------------------------------------------------------------------------------------------------- |
-| `repoId`                  | string | Repository identifier                                                                                                                      |
-| `format`                  | string | Output format used                                                                                                                         |
-| `summary`                 | object | Structured summary: `{repoId, query, scope, keySymbols, dependencyGraph, riskAreas, filesTouched, metadata}`                               |
-| `summary.keySymbols`      | array  | Each: `{symbolId, name, kind, signature, summary, cluster: {clusterId, label, memberCount}, processes: [{processId, label, role, depth}]}` |
-| `summary.dependencyGraph` | array  | Each: `{fromSymbolId, toSymbolIds: string[]}`                                                                                              |
-| `summary.riskAreas`       | array  | Each: `{symbolId, name, reasons: string[]}`                                                                                                |
-| `summary.filesTouched`    | array  | Each: `{file, symbolCount}`                                                                                                                |
-| `summary.metadata`        | object | `{query, summaryTokens, budget, truncated, indexVersion}`                                                                                  |
-| `content`                 | string | The rendered summary (markdown or JSON string)                                                                                             |
-
-**Scope auto-detection:**
-
-- Contains `/` or `\` or a file extension → `"file"`
-- Contains 3+ words or task-related words (fix, debug, analyze, refactor, etc.) → `"task"`
-- Otherwise → `"symbol"`
-
-**Use cases:**
-
-- Copy/paste context into non-MCP environments (Slack, Jira, PRs)
-- Quick task briefing before diving into a codebase area
-- The CLI `sdl-mcp summary` command wraps this tool
+See the full write-tool section above under [File Access](#6-file-access). `sdl.file.write` remains part of the flat MCP surface and is documented in detail in [file.write Tool Reference](./file-write-tool.md).
 
 ---
 
-## 11. Agent Context & Feedback
+## 11. Agent Feedback
 
-### sdl.context
-
-Task-shaped context engine that selects the optimal Iris Gate Ladder path and collects evidence.
-
-**What it does:** Given a task type (`debug`, `review`, `implement`, `explain`) and a text description, the context engine:
-
-1. Seeds candidates using a three-stage pipeline: semantic embedding match first, lexical fallback when embeddings are unavailable, then feedback priors from previous tasks.
-2. Ranks candidates with an evidence-aware multi-factor scorer that combines retrieval confidence, graph proximity, lexical overlap, summary support, feedback history, and structural signals.
-3. Plans a **rung path** (e.g., `card → skeleton → hotPath`) based on the task type, budget constraints, and retrieval confidence tier.
-4. Executes each rung in sequence, collecting evidence at each step.
-5. Returns evidence, a synthesized answer (broad mode), and optionally the execution path (precise mode).
-
-The planner estimates token costs per rung (`card: ~50`, `skeleton: ~200`, `hotPath: ~500`, `raw: ~2000`) and trims rungs based on both budget and confidence: high-confidence retrievals trim aggressively; low-confidence retrievals preserve diagnostic rungs.
-
-When Code Mode is enabled, `sdl.context` accepts the same task envelope and should be preferred over `sdl.workflow` for retrieval.
-
-**Parameters:**
-
-| Parameter  | Type                                                    | Required | Description                                                                      |
-| :--------- | :------------------------------------------------------ | :------- | :------------------------------------------------------------------------------- |
-| `repoId`   | string                                                  | Yes      | Repository identifier                                                            |
-| `taskType` | `"debug"` \| `"review"` \| `"implement"` \| `"explain"` | Yes      | Type of task                                                                     |
-| `taskText` | string                                                  | Yes      | Task description or prompt                                                       |
-| `budget`   | object                                                  | No       | `{maxTokens, maxActions, maxDurationMs}`                                         |
-| `options`  | object                                                  | No       | `{contextMode?, focusSymbols?, focusPaths?, includeTests?, requireDiagnostics?}` |
-
-`options.contextMode`: `"precise"` returns minimal, chain-efficient context (1 symbol per rung, stripped envelope). `"broad"` (default) returns richer surrounding context with full diagnostics.
-
-**Response (broad mode — compact by default):**
-
-Broad responses are compacted at the MCP serialization layer. The model-visible payload contains only:
-
-| Field            | Type    | Description                                                              |
-| :--------------- | :------ | :----------------------------------------------------------------------- |
-| `taskId`         | string  | Unique task identifier                                                   |
-| `taskType`       | string  | Task type executed                                                       |
-| `success`        | boolean | Whether the task completed successfully                                  |
-| `summary`        | string  | Human-readable execution summary                                         |
-| `answer`         | string  | Synthesized answer based on evidence                                     |
-| `finalEvidence`  | array   | Each: `{type, reference, summary, timestamp}` — primary evidence surface |
-| `nextBestAction` | string  | Suggested follow-up action (when relevant)                               |
-| `error`          | string  | Error message (when failed)                                              |
-
-The fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are still computed internally by the ContextEngine but are not included in the model-visible broad response. `finalEvidence` is the primary evidence surface for broad mode. The `answer` field is always preserved on successful broad responses -- budget trimming may shorten it but never removes it entirely.
-
-**Response (precise mode):** Only `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics`. Envelope fields stripped for token efficiency.
-
-**Notes:**
-
-- Use `contextMode: "precise"` for targeted lookups — more token-efficient than manual `sdl.workflow`.
-- Use `contextMode: "broad"` (default) for investigation and exploration.
-- Semantic seeding means explicit `focusPaths` are less critical in broad mode — the engine often finds the right entry points from task text alone. Still provide `focusSymbols`/`focusPaths` when you have them, as they sharpen retrieval.
-- Always provide `budget`.
-- Avoid `requireDiagnostics` unless needed — it can force a raw code rung.
-
----
+There is no separate flat `sdl.context` tool in the regular MCP surface. Task-shaped context retrieval lives in Code Mode and is documented in [15. Code Mode Tools](#15-code-mode-tools). Outside Code Mode, use the manual ladder: `repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> `code.getSkeleton` -> `code.getHotPath` -> `code.needWindow`.
 
 ### sdl.agent.feedback
-
 Records which symbols were useful or missing during a task, enabling offline tuning of slice relevance.
 
 **What it does:** After completing a task with a slice, the agent reports which symbols in the slice were actually useful and which expected symbols were missing. This feedback is stored in the graph database and used to improve future slice quality through reinforcement-style tuning.
@@ -1335,7 +1277,7 @@ Use `offset` with `limit` to page through large result sets such as `query: "*"`
 
 ### sdl.manual
 
-Returns the SDL-MCP API manual — a compact reference listing all available functions, their parameters, and return types. Use for focused API reference before calling `sdl.context` / `sdl.context` (context retrieval) or `sdl.workflow` (multi-step operations).
+Returns the SDL-MCP API manual — a compact reference listing all available functions, their parameters, and return types. Use for focused API reference before calling `sdl.context` (context retrieval) or `sdl.workflow` (multi-step operations).
 
 **Parameters:**
 

@@ -15,15 +15,19 @@ Without governance, AI agents default to reading entire files. This wastes token
 Every request to `sdl.code.needWindow` (raw code, Rung 4) passes through the policy engine before code is returned:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Req["Agent request<br/>I need to read validateToken()"]
     Policy["Policy engine<br/>identifiers required<br/>line and token caps<br/>identifier match check<br/>slice / frontier boost<br/>utility scoring"]
     Approve["APPROVE<br/>Return code + audit log"]
     Deny["DENY<br/>Return guidance + nextBestAction"]
 
-    Req --> Policy
-    Policy --> Approve
-    Policy --> Deny
+    Req e1@--> Policy
+    Policy e2@--> Approve
+    Policy e3@--> Deny
+
+    classDef animate stroke-dasharray: 9\,5,stroke-dashoffset: 900,animation: dash 25s linear infinite;
+    class e1,e2,e3 animate
 ```
 
 ### Configurable Policy Settings
@@ -82,6 +86,7 @@ When a request is denied, the response doesn't just say "no." It provides:
 ## Policy Decision Tree
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Req["sdl.code.needWindow request"]
     C1{"Identifiers<br/>provided?"}

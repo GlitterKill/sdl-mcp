@@ -42,6 +42,7 @@ SDL-MCP is a high-performance codebase indexing and context retrieval server. Th
 SDL-MCP follows a **hexagonal / ports-and-adapters** design. Each module has a clear role and no cross-layer mutations:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Tools["MCP tool layer<br/>tools.ts, server.ts, coord.ts"]
     Indexer["Indexer<br/>write path<br/>pass-1 + pass-2<br/>clusters, processes, summaries"]
@@ -89,14 +90,15 @@ Startup is sequenced (not parallel) — the DB must be ready before tools regist
 
 All MCP tools flow through a single dispatch path in `src/server.ts`. The exact surface is configuration-dependent:
 
-- Flat mode: 34 tools (`32` flat tools + `sdl.action.search` + `sdl.info`)
+- Flat mode: 33 tools (`31` flat tools + `sdl.action.search` + `sdl.info`)
 - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
-- Gateway + legacy mode: 38 tools (`4` gateway tools + `32` legacy flat tools + `sdl.action.search` + `sdl.info`)
+- Gateway + legacy mode: 37 tools (`4` gateway tools + `31` legacy flat tools + `sdl.action.search` + `sdl.info`)
 - Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, or can run in exclusive mode with just `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow`
 
 Before strict Zod validation, requests also pass through a shared normalization layer. Flat and gateway calls therefore accept the same canonical camelCase fields plus common aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, and `spillover_handle`.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Request["Client request"]
     Validate["Zod schema validation"]
@@ -126,6 +128,7 @@ Indexing happens in two passes plus a finalization stage. Triggered by `sdl-mcp 
 Per-file, parallelizable. Each file produces:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Source["Source file<br/>.ts, .py, .go, ..."] --> Engine["Indexer engine<br/>Rust native or Tree-sitter fallback"]
     Engine --> Symbols["Symbols<br/>name, kind, range, signature"]
@@ -145,6 +148,7 @@ flowchart TD
 Sequential, cross-file. Resolves raw call identifiers to specific symbol IDs using the pass-2 resolver registry (`src/indexer/pass2/registry.ts`):
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Raw["Raw call edge<br/>getUserById"] --> Registry["Resolver registry<br/>11 language-specific resolvers<br/>selected by file extension"] --> Resolver["Language resolver<br/>import maps, alias chains, barrel re-exports,<br/>package resolution, inheritance"] --> Resolved["Resolved edge<br/>targetSymbolId: abc123<br/>confidence: 0.92<br/>strategy: import-alias"]
 ```
@@ -180,6 +184,7 @@ SDL-MCP uses LadybugDB (Kuzu engine, npm alias `kuzu`) as the sole persistence l
 **Connection pool:**
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Reads["Read pool<br/>round-robin connections<br/>default 4, configurable 1-8"]
     Limit["ConcurrencyLimiter(1)"] --> Write["Serialized write connection<br/>withWriteConn(async fn)"]
@@ -285,6 +290,7 @@ Each module owns a specific domain of queries:
 The slice builder (`src/graph/slice.ts`) constructs task-scoped context subgraphs bounded by a token budget.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Entry["Entry symbols<br/>explicit IDs or auto-discovered from taskText"] --> Start["Start-node resolver<br/>explicit IDs, hybrid retrieval, stack traces,<br/>edited files, legacy search"]
     Start --> Beam["Beam-search engine<br/>weighted BFS<br/>call 1.0, config 0.8, import 0.6<br/>adaptive minConfidence + budget tracking"]
@@ -309,6 +315,7 @@ flowchart TD
 The four-rung escalation ladder controls how much raw code an agent receives:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     R1["Rung 1: Symbol cards<br/>~50-135 tokens per symbol<br/>always available"]
     R2["Rung 2: Skeleton IR<br/>~200 tokens per function<br/>signatures + control flow"]
@@ -329,6 +336,7 @@ Finds lines matching requested identifiers with configurable context lines befor
 ### Proof-of-Need Gating (`src/code/gate.ts`)
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Req["needWindow request<br/>symbolId + reason + expectedLines + identifiersToFind"]
     Engine["Policy engine<br/>priority 100 hard caps<br/>priority 90 identifiers required<br/>priority 80 budget enforcement<br/>priority 10 break-glass override"]
@@ -351,6 +359,7 @@ flowchart TD
 **Blast radius** (`blastRadius.ts`) ? BFS traversal of reverse dependency edges from changed symbols:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Changed["Changed symbols"] --> Reverse["Reverse-edge BFS<br/>imports + calls + config"] --> Score["Scoring and ranking<br/>0.6 distance + 0.3 fanIn + 0.1 test proximity<br/>fan-in amplifiers flagged across versions"]
 ```
@@ -364,6 +373,7 @@ flowchart TD
 The live index system (`src/live-index/`) provides draft-aware code intelligence for unsaved editor buffers.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Editor["Editor<br/>VSCode, etc."] --> Push["buffer.push<br/>on each keystroke or save"] --> Overlay["Overlay store<br/>content, version, parseResult, dirty flag"] --> Coordinator["Live index coordinator<br/>parse queue, reconcile queue,<br/>checkpoint service, idle monitor"] --> Reads["Merged into reads<br/>search, getCard, slice.build, getSkeleton"]
 ```
@@ -383,6 +393,7 @@ Single-session, used by CLI agents (Claude Code, etc.). One MCPServer instance h
 Multi-session, per-session server isolation:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Http["HTTP server<br/>POST /mcp"] --> Sessions["SessionManager<br/>max 8 sessions<br/>reserve, register, idle reaper"] --> Resources["Per-session resources<br/>transport map + MCPServer map"]
     Http --> Rest["REST endpoints<br/>health, buffer, graph, symbol, UI"]
@@ -451,6 +462,7 @@ See [Development Memories deep dive](./feature-deep-dives/development-memories.m
 `sdl.runtime.execute` runs repo-scoped commands under SDL-MCP governance instead of uncontrolled shell access. 16 runtimes are supported (Node, Python, Go, Java, Rust, C, C++, C#, Kotlin, PHP, Ruby, Perl, R, Elixir, Shell, TypeScript).
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Request["runtime.execute request"]
     Validate["runtime enabled?<br/>allowed runtime?<br/>valid executable?"]
@@ -518,6 +530,7 @@ Current command/tool registration notes:
 - Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow`
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Src["src/"] --> Entry["main.ts, server.ts"]
     Src --> CLI["cli/<br/>commands, transport"]
@@ -546,6 +559,7 @@ flowchart TD
 ## Component Diagram
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 graph TD
     A[Repository Files] --> B[Indexer Engine]
     B --> |Pass-1: Symbols, Imports, Calls| C[LadybugDB Graph]
@@ -565,7 +579,7 @@ graph TD
     C --> J[MCP Tool Layer]
 
     subgraph Tool Registration Modes
-        J1[Flat Mode: 34 tools]
+        J1[Flat Mode: 33 tools]
         J2[Gateway Mode: 6 tools]
         J3[Code Mode adds manual, context, and workflow]
     end
@@ -605,9 +619,9 @@ graph TD
 
 Registration-mode counts in the current implementation:
 
-- Flat mode: 34 tools
+- Flat mode: 33 tools
 - Gateway-only mode: 6 tools
-- Gateway + legacy mode: 38 tools
+- Gateway + legacy mode: 37 tools
 - Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`
 
 [Back to README](../README.md)

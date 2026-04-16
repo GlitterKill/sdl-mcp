@@ -37,6 +37,7 @@ Select explicitly via config:
 Indexing happens in two passes:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     subgraph Pass1["Pass 1: Local Extraction"]
         Parse["Parse AST"] --> Symbols["Extract symbols"]
@@ -58,6 +59,7 @@ flowchart LR
 ### Two-Pass Pipeline Diagram
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     subgraph "Pass 1: Local Extraction (per-file, parallel)"
         F1["Source File"] --> Parse["Parse AST<br/>(tree-sitter)"]

@@ -445,6 +445,7 @@ if (
 ## Decision Tree: Pass or Fail?
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Failed["CI failed"] --> OneCategory{"All failures in one category?"}
     OneCategory -->|Yes| SmallKnown{"Small (<5%) and understood?"}

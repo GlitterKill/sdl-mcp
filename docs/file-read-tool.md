@@ -21,6 +21,7 @@ The `file.read` tool provides token-efficient file reading for non-indexed files
 ## Overview
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     A[file.read request] --> B{File type?}
     B -->|Indexed source| C[Error: Use SDL code tools]
@@ -82,6 +83,7 @@ flowchart TD
 Read specific lines using `offset` and `limit`. Ideal when you know which part of a file you need.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     subgraph Input
         A[offset: 10<br>limit: 20]
@@ -125,6 +127,7 @@ flowchart LR
 Search for patterns and return matching lines with surrounding context. Automatically merges overlapping context windows.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     subgraph Input
         A["search: 'database'<br>searchContext: 2"]
@@ -181,6 +184,7 @@ flowchart TD
 Extract specific values from JSON or YAML files using dot-notation paths. Supports array indexing.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     subgraph Input
         A["jsonPath: 'dependencies'"]
@@ -228,6 +232,7 @@ flowchart LR
 The `file.read` tool reports token savings when SDL returns fewer tokens than Claude Code's native Read would for an equivalent operation.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     subgraph "Token Calculation"
         A[SDL Response Tokens]

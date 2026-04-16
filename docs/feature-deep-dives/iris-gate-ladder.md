@@ -15,6 +15,7 @@ The Iris Gate Ladder eliminates this waste. Named after the adjustable aperture 
 ## The Four Rungs
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     R1["Rung 1: Symbol cards<br/>~100 tokens<br/>name, signature, summary, deps, metrics"]
     R2["Rung 2: Skeleton IR<br/>~300 tokens<br/>signatures + control flow, bodies elided"]
@@ -82,6 +83,7 @@ The last resort. Full source code access, but with guardrails:
 ## Escalation Flow
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Q["Agent Question"]
     R1["Rung 1: Symbol Card<br/>~100 tokens"]

@@ -24,6 +24,7 @@ This document covers all three in depth, with architecture diagrams, configurati
 ## Overview: The Three Pillars
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     subgraph P1["Pillar 1: Pass-2 Call Resolution"]
         Call["Who calls whom, and how sure are we?"]
@@ -74,6 +75,7 @@ Pass-2 answers this question by tracing import chains, analyzing scope, and reso
 ### Two-Pass Architecture
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     subgraph Pass1["Pass 1 (per-file, parallelizable)"]
         Parse["Parse AST"] --> Extract["Extract symbols, imports, raw calls, and types"]
@@ -259,6 +261,7 @@ When `semantic.retrieval.mode` is `"hybrid"` and the required database extension
 #### Hybrid Retrieval Pipeline
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Query["User Query: check auth credentials"] --> FTS["1. Full-Text Search
 Ladybug FTS on Symbol.searchText"]
@@ -278,6 +281,7 @@ RRF is more robust than alpha-blending because it fuses _rank positions_ rather 
 The legacy path is retained as a fallback and can be explicitly selected via `semantic.retrieval.mode: "legacy"`:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Query["User Query: check auth credentials"] --> Lexical["1. Lexical Search<br/>always runs first"]
     Lexical --> Embed["2. Embed Query + Cosine Similarity<br/>sim(authenticate)=0.87<br/>sim(validateToken)=0.91"]
@@ -286,7 +290,7 @@ flowchart TD
     style Blend fill:#fff3cd,stroke:#d39e00
 ```
 
-> **Deprecation notice**: `semantic.alpha` is deprecated in favor of `semantic.retrieval.fusion`. The legacy alpha-blending path remains functional but is no longer the recommended default.
+> **Legacy mode note**: `semantic.retrieval.mode: "legacy"` still preserves the compatibility rerank path, but current tuning guidance belongs under `semantic.retrieval.*` rather than deprecated alpha controls.
 
 #### Automatic Fallback
 
@@ -315,15 +319,16 @@ When `includeRetrievalEvidence: true` is passed to `symbol.search` or `slice.bui
 
 If a fallback occurred, `mode` is `"legacy"` and `fallbackReason` explains why (e.g., `"fts extension not loaded"`, `"vector index unhealthy"`).
 
-### Three Embedding Models
+### Two Supported Embedding Models
 
-SDL-MCP ships with three embedding models, each suited to different workflows:
+SDL-MCP currently ships with two supported embedding models, each suited to different workflows:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~110 MB, bundled<br/>Optimized for code"] --> Shared["Natural-language symbol text<br/>benefits from summaries"]
     Nomic["nomic-embed-text-v1.5<br/>768 dims, 8192 max tokens<br/>~138 MB download<br/>Best for NL queries + summaries"] --> Shared
-    Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~110 MB download<br/>Best for code-to-code search"] --> Shared
+
 ```
 
 **Which should you choose?**
@@ -402,6 +407,7 @@ Embedding payloads now include **outgoing dependency edges** — the imports and
 - A function's meaning is better captured by what it _uses_ than what _uses it_
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     subgraph "Included (Outgoing)"
         A[parseConfig] --> B[yaml.parse]
@@ -448,6 +454,7 @@ This batching reduces ONNX inference overhead and speeds up re-indexing of large
 Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB. Each model gets its own set of properties:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Symbol["Symbol node"] --> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
     Symbol --> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
@@ -465,16 +472,17 @@ Each embedding is tagged with a `cardHash` (SHA-256 of the symbol data + text fo
 Hybrid retrieval uses native Ladybug vector indexes for fast approximate nearest-neighbor search at query time:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     subgraph Indexes["Native Ladybug Vector Indexes"]
-        JinaIndex["symbol_embedding_jina_v1<br/>Property: Symbol.embeddingJinaCode<br/>Dimensions: 768"]
-        NomicIndex["symbol_embedding_nomic_v1<br/>Property: Symbol.embeddingNomic<br/>Dimensions: 768"]
+        JinaIndex["symbol_vec_jina_code_v2<br/>Property: Symbol.embeddingJinaCode<br/>Dimensions: 768"]
+        NomicIndex["symbol_vec_nomic_embed_v15<br/>Property: Symbol.embeddingNomic<br/>Dimensions: 768"]
     end
 
     Config["semantic.retrieval.vector<br/>vector.enabled = true<br/>vector.topK = 75<br/>vector.efs = 200"] --> Indexes
 ```
 
-> **Removed in v0.10.1**: The previous `semantic.ann` config (HNSW sidecar indexes via `ann-index.ts`) has been removed. Use `semantic.retrieval.vector` for native Ladybug vector indexes instead. Legacy `semantic.ann` config keys are silently ignored for backward compatibility.
+The current recommended configuration surface is `semantic.retrieval.vector`. Retired sidecar ANN configuration is intentionally omitted from current examples.
 
 ### Live Overlay Handling
 
@@ -495,6 +503,7 @@ This ensures unsaved code always appears in results, just without hybrid retriev
 A symbol summary is a 1-3 sentence plain-English description of what a symbol does:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Symbol["buildGraphSlice<br/>function"] --> Summary["Performs a BFS traversal from entry symbols across the dependency graph, scores nodes by relevance, and returns the top cards within a token budget."]
 ```
@@ -544,6 +553,7 @@ Both the TypeScript and Rust indexing engines implement these generators with id
 When `semantic.enabled: true`, the NN (nearest-neighbor) summary transfer module runs after metrics computation and before LLM generation. It uses the existing ONNX embedding model and vector similarity search to propagate documentation from well-documented symbols to undocumented neighbors.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Candidates["1. Gather candidates<br/>summary missing or quality < 0.5"] --> Embed["2a. Embed symbol text"]
     Embed --> Search["2b. Search vector index<br/>max 5 neighbors"]
@@ -572,6 +582,7 @@ A well-documented function `validateToken` with summary "Validates JWT signature
 ### LLM Generation Pipeline
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Indexing["Indexing completes<br/>(pass 1 + pass 2)"] --> Gate["Quality gate<br/>skip symbols with summaryQuality >= 0.8"]
     Gate --> Prompt["Build LLM prompt<br/>system instruction + kind + name + signature + heuristic hint"]
@@ -592,6 +603,7 @@ flowchart TD
 Summaries are generated in configurable batches with concurrency control:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Total["500 symbols needing summaries<br/>batchSize = 20<br/>25 total batches"] --> Wave1["Wave 1<br/>B1-B5 in parallel"]
     Wave1 --> Wave2["Wave 2<br/>B6-B10 after first completions"]
@@ -646,7 +658,7 @@ Both supported embedding models (`jina-embeddings-v2-base-code` and `nomic-embed
     "provider": "local", // "local" (ONNX), "api", or "mock"
     "model": "jina-embeddings-v2-base-code", // or "nomic-embed-text-v1.5" or "jina-embeddings-v2-base-code"
     "modelCacheDir": null, // Custom model cache directory
-    "alpha": 0.6, // Lexical/semantic blend (0=pure semantic, 1=pure lexical)
+    "retrieval": { "mode": "hybrid" }, // Current search tuning entry point
 
     // ── Summary Configuration ──
     "generateSummaries": false, // Enable LLM summary generation
@@ -657,9 +669,9 @@ Both supported embedding models (`jina-embeddings-v2-base-code` and `nomic-embed
     "summaryMaxConcurrency": 5, // 1-20, parallel batch workers
     "summaryBatchSize": 20, // 1-50, symbols per batch
 
-    // ── ANN Index (Removed in v0.10.1 — silently ignored) ──
-    // "ann": { "enabled": true, "m": 16, ... }
-    // Use retrieval.vector instead for HNSW index configuration.
+    // ── Retrieval Configuration ──
+    // Add `fts`, `vector`, and `fusion` blocks under `semantic.retrieval` as needed.
+
   },
 }
 ```
@@ -835,28 +847,28 @@ sdl-mcp index --repo-id my-app
 # [pass2] Resolved 1,204 call edges (89% exact, 8% heuristic, 3% unresolved)
 # [summaries] Generated 312 summaries, 535 cached, 0 failed ($0.62)
 # [embeddings] Computed 847 embeddings (jina-embeddings-v2-base-code)
-# [ann] Built HNSW index (847 vectors, 768 dims)
+# [vector] Refreshed native vector indexes (847 vectors, 768 dims)
 # [finalize] Version v47 committed
 ```
 
-### Example 5: Context Summary Using Semantic Data
+### Example 5: Task-Shaped Context Using Semantic Retrieval
 
-```bash
-# Generate a portable context briefing
-({
-  repoId: "my-app",
-  query: "authentication middleware",
-  budget: 2000,
-  format: "markdown"
-})
-
-# Returns a structured briefing with:
-# - Key symbols (with LLM summaries!)
-# - Dependency graph
-# - Risk areas (high fan-in, recent churn)
-# - Files touched
-# All within the 2,000 token budget
+```json
+{
+  "repoId": "my-app",
+  "taskType": "explain",
+  "taskText": "trace the authentication middleware",
+  "budget": { "maxTokens": 2000, "maxActions": 3 },
+  "options": { "contextMode": "precise" }
+}
 ```
+
+This request lets `sdl.context` use semantic retrieval to seed the most relevant symbols before it chooses the cheapest useful rung path.
+
+Expected result:
+
+- Relevant auth symbols seeded from task text and summaries
+- Minimal evidence package for a 2,000-token budget
 
 ### Example 6: Checking Semantic Health
 
@@ -947,6 +959,7 @@ sdl.symbol.search({
 The real power emerges when all three pillars reinforce each other:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Pass2["1. Pass-2 resolves
 authenticate() -> validateToken()"] --> Summary["2. LLM summary

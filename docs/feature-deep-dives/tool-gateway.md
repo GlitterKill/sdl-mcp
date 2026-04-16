@@ -1,382 +1,107 @@
 # Tool Gateway
 
-**Reduce MCP tool registration overhead by collapsing 31 of the 32 action tools into 4 namespace-scoped gateway tools, while keeping `sdl.action.search` and `sdl.info` available as universal discovery and diagnostics surfaces.**
+[Back to README](../../README.md) | [Documentation Hub](../README.md) | [Generated Tool Inventory](../generated/tool-inventory.md)
 
-The tool gateway consolidates 31 of the 32 action tools into 4 typed proxy tools (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`). `sdl.file.read` is flat-only and not gateway-routed. Each gateway tool accepts an `action` field that routes the call to the appropriate handler and then applies the original per-tool validation. `sdl.action.search` and `sdl.info` stay registered outside the gateway so discovery and environment diagnostics remain available in every mode.
-
----
-
-## The Problem
-
-When an MCP client connects, it calls `tools/list` to discover available tools. The response includes tool names, descriptions, and JSON schemas. Registering 32 action tools separately is expensive, especially once titles, richer descriptions, and action-specific schema metadata are included.
+The gateway compresses most of the flat SDL-MCP surface into four namespace tools: `sdl.query`, `sdl.code`, `sdl.repo`, and `sdl.agent`. It exists to reduce `tools/list` overhead without changing the underlying handler behavior.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#dff6e8","primaryBorderColor":"#12715b","primaryTextColor":"#0f172a","secondaryColor":"#e0f2fe","secondaryBorderColor":"#1d4ed8","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#0f766e","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
-    Flat["Flat mode<br/>34 tools<br/>32 action tools + sdl.action.search + sdl.info"]
-    Compare["Measurement scope<br/>31 gateway-routable flat tools vs 4 gateway tools<br/>sdl.file.read stays flat-only"]
-    Gateway["Gateway mode<br/>6 tools<br/>4 gateway tools + sdl.action.search + sdl.info"]
+    Flat["Flat mode<br/>33 tools<br/>2 universal + 31 flat"]
+    Shrink["Gateway projection<br/>30 gateway-routable actions"]
+    Gateway["Gateway mode<br/>6 tools<br/>2 universal + 4 gateway"]
 
-    Flat --> Compare --> Gateway
+    Flat e1@--> Shrink
+    Shrink --> Gateway
+
+    classDef animate stroke-dasharray: 8\,4,stroke-dashoffset: 240,animation: dash 18s linear infinite;
+    class e1 animate;
 ```
 
-This matters because:
-- Agents process `tools/list` at the **start of every conversation**
-- Tokens spent on tool schemas are tokens **not available** for code context
-- Large tool registrations cause some MCP clients to **truncate or error**
-- Fewer tools means fewer **selection decisions** for the agent (faster + more accurate)
+## Current Surface Matrix
 
----
+| Mode | Tool count | Composition |
+| --- | --- | --- |
+| Flat | `33` | `2` universal + `31` flat tools |
+| Gateway | `6` | `2` universal + `4` gateway tools |
+| Gateway + legacy | `37` | `2` universal + `4` gateway + `31` flat tools |
+| Code Mode exclusive | `4` | `sdl.action.search`, `sdl.context`, `sdl.manual`, `sdl.workflow` |
 
-## Architecture
+The generated source of truth is [tool-inventory.md](../generated/tool-inventory.md).
 
-### Before (Flat Mode)
+## What the Gateway Actually Covers
 
-```mermaid
-flowchart TD
-    Flat["MCP server<br/>31 gateway-routable flat tools<br/>full per-tool schemas<br/>~4,000+ tokens"]
-```
+The gateway currently exposes `30` of the `31` flat actions. The missing flat action is `sdl.file.write`, which remains flat-only today.
 
-### After (Gateway Mode)
+| Gateway tool | Actions | Current action set |
+| --- | --- | --- |
+| `sdl.query` | `7` | `symbol.search`, `symbol.getCard`, `slice.build`, `slice.refresh`, `slice.spillover.get`, `delta.get`, `pr.risk.analyze` |
+| `sdl.code` | `3` | `code.needWindow`, `code.getSkeleton`, `code.getHotPath` |
+| `sdl.repo` | `9` | `repo.register`, `repo.status`, `repo.overview`, `index.refresh`, `policy.get`, `policy.set`, `usage.stats`, `file.read`, `scip.ingest` |
+| `sdl.agent` | `11` | `agent.feedback`, `agent.feedback.query`, `buffer.push`, `buffer.checkpoint`, `buffer.status`, `runtime.execute`, `runtime.queryOutput`, `memory.store`, `memory.query`, `memory.remove`, `memory.surface` |
 
-```mermaid
-flowchart TD
-    Gateway["MCP server<br/>4 gateway tools<br/>compact action-aware schemas<br/>~713 tokens"]
-    Query["sdl.query<br/>9 actions"]
-    Code["sdl.code<br/>3 actions"]
-    Repo["sdl.repo<br/>7 actions"]
-    Agent["sdl.agent<br/>12 actions"]
-
-    Gateway --> Query
-    Gateway --> Code
-    Gateway --> Repo
-    Gateway --> Agent
-```
-
-## How It Works
-
-### Gateway Routing Diagram
+## Routing Path
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#eef6ff","primaryBorderColor":"#2563eb","primaryTextColor":"#0f172a","secondaryColor":"#e9fff4","secondaryBorderColor":"#12715b","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#2563eb","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
-    Agent["Agent Call"]
+    Agent["Agent call"] --> Gateway{"Namespace tool"}
+    Gateway --> Q["sdl.query"]
+    Gateway --> C["sdl.code"]
+    Gateway --> R["sdl.repo"]
+    Gateway --> A["sdl.agent"]
 
-    subgraph "Gateway Layer"
-        GW{"Which gateway<br/>tool?"}
-        Q["sdl.query<br/>(9 actions)"]
-        C["sdl.code<br/>(3 actions)"]
-        R["sdl.repo<br/>(7 actions)"]
-        A["sdl.agent<br/>(12 actions)"]
-    end
+    Q e1@--> Normalize["Normalize aliases<br/>camelCase + snake_case"]
+    C --> Normalize
+    R --> Normalize
+    A --> Normalize
+    Normalize --> Strict["Strict per-action schema"]
+    Strict --> Handler["Same handler layer<br/>used by flat tools"]
 
-    subgraph "Validation"
-        Thin["Thin Schema<br/>(first pass)"]
-        Router["Router: extract action<br/>+ merge repoId"]
-        Strict["Original Zod Schema<br/>(strict second pass)"]
-    end
-
-    Handler["Same Handler<br/>as Flat Mode"]
-
-    Agent --> GW
-    GW --> Q & C & R & A
-    Q & C & R & A --> Thin
-    Thin --> Router
-    Router --> Strict
-    Strict --> Handler
-
-    style Agent fill:#cce5ff,stroke:#004085
-    style Handler fill:#d4edda,stroke:#28a745
+    classDef animate stroke-dasharray: 8\,4,stroke-dashoffset: 240,animation: dash 18s linear infinite;
+    class e1 animate;
 ```
 
-### 1. Namespace-Scoped Tools
+The important implementation detail is not the namespace wrapper. It is the preservation of the original validation and handler path after routing. Gateway mode is a registration optimization, not a separate execution engine.
 
-The 31 action tools are organized into 4 namespaces:
+## Why It Exists
 
-| Gateway Tool | Actions | Domain |
-|:-------------|:--------|:-------|
-| `sdl.query` | 9 | Read-only intelligence: symbol search/cards, slices, deltas, summaries, PR risk |
-| `sdl.code` | 3 | Gated code access: needWindow, skeleton, hotPath |
-| `sdl.repo` | 7 | Repository lifecycle: register, status, overview, index, policy, usage stats |
-| `sdl.agent` | 12 | Agentic ops: context, feedback, buffers, runtime, runtime.queryOutput, memory |
+- Fewer tool descriptors reduce startup token cost in MCP clients.
+- Namespace routing keeps tool choice simpler for agents that do not need every flat tool listed separately.
+- The underlying handlers stay shared, so behavior drift between flat and gateway mode stays low.
 
-Outside the gateway, SDL-MCP always keeps:
+## Limits and Gotchas
 
-- `sdl.action.search` for action discovery
-- `sdl.info` for runtime and environment diagnostics
-
-### 2. Action-Based Union Schema
-
-Each gateway tool uses an action-based union schema on the `action` field. Some actions add a second validation layer for mutually exclusive inputs such as `symbolId` versus `symbolRef`. The calling pattern is:
-
-```json
-// Instead of:
-{ "tool": "sdl.symbol.search", "args": { "repoId": "x", "query": "auth" } }
-
-// Gateway mode:
-{ "tool": "sdl.query", "args": { "repoId": "x", "action": "symbol.search", "query": "auth" } }
-```
-
-The `repoId` field is hoisted to the envelope level (shared across all actions in a namespace), and the `action` field selects which handler processes the call.
-
-For symbol-card actions, gateway mode now accepts the same natural-identifier shape as flat mode:
-
-```json
-{
-  "tool": "sdl.query",
-  "args": {
-    "repoId": "x",
-    "action": "symbol.getCard",
-    "symbolRef": { "name": "handleRequest", "file": "src/server.ts" }
-  }
-}
-```
-
-`symbol.getCards` follows the same pattern with `symbolRefs`. Mixed natural-reference batches can return partial-success metadata instead of failing the whole request.
-
-Gateway requests also go through the shared normalization layer before validation, so common aliases and snake_case forms work the same way they do in flat mode:
-
-```json
-{
-  "tool": "sdl.query",
-  "args": {
-    "repo_id": "x",
-    "action": "slice.build",
-    "task_text": "trace auth flow",
-    "edited_files": ["src/auth/token.ts"]
-  }
-}
-```
-
-Aliases such as `repo`, `repo_id`, `root_path`, `project_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, `spillover_handle`, `if_none_match`, `known_etags`, `known_card_etags`, `failing_test_path`, `edited_files`, `entry_symbols`, `relative_cwd`, and `identifiers` normalize to the canonical field names before strict validation.
-
-### 3. Double Validation
-
-Validation happens in two passes for safety:
-
-```mermaid
-flowchart TD
-    Call["Agent Call"] --> Gateway["Gateway Schema<br/>(cheap first pass)<br/>Discriminated union on action"]
-    Gateway --> Router["Router<br/>Extracts action, merges repoId, looks up handler"]
-    Router --> Zod["Original Zod Schema<br/>(strict second pass)<br/>Matches flat-mode validation"]
-    Zod --> Handler["Handler Function<br/>Same behavior as flat mode"]
-
-    style Gateway fill:#fff3cd,stroke:#d39e00
-    style Zod fill:#d4edda,stroke:#2b8a3e
-```
-
-### 4. Compact Action-Aware Schemas
-
-The key to token savings is the **compact schema** emitted in `tools/list` responses. SDL-MCP no longer publishes a description-free envelope with only `repoId` and `action`. Instead, each gateway tool exposes a compact `oneOf` schema with action-specific fields, while still preserving user-facing descriptions, required-vs-optional visibility, and default semantics where they help the agent construct valid calls.
-
-That means gateway mode keeps most of the usability benefits of flat mode while still compressing the registration surface down to 4 namespace tools.
-
----
-
-## Token Savings Breakdown
-
-Measured with the included token measurement script (`scripts/measure-gateway-schema-tokens.ts`):
-
-| Mode | Tools | Characters | Est. Tokens |
-|:-----|:-----:|:----------:|:-----------:|
-| **Flat core action tools** | 31 | ~17,000 | ~4,250 |
-| **Gateway core namespace tools** | 4 | ~2,900 | ~725 |
-| **Gateway-only runtime surface** | 6 | includes universal tools | varies slightly |
-| **Hybrid runtime surface** | 38 | includes universal tools | varies slightly |
-
-| Metric | Value |
-|:-------|:------|
-| **Token reduction** | **~83%** (4,250 → 725) |
-| **Tokens saved per conversation** | **~3,525** |
-| **Character reduction** | ~17,000 → ~2,900 |
-| **Tool count reduction** | 31 → 4 |
-
-The savings come from three techniques:
-1. **Fewer tools** — 4 vs 31 registration entries
-2. **Compact action-aware schemas** — gateway `oneOf` variants preserve useful field metadata without publishing every full flat schema separately
-3. **$defs deduplication** — repeated sub-schemas are hoisted to `$defs` with `$ref` pointers (via `compact-schema.ts`)
-
----
+- `sdl.file.write` is still flat-only.
+- `sdl.info` is universal outside Code Mode exclusive. It is not part of the four gateway tools.
+- Code Mode exclusive bypasses the regular gateway and flat surfaces entirely.
+- The CLI `sdl-mcp tool` command is related but not identical. It exposes a narrower direct-action subset. See [CLI Tool Access](./cli-tool-access.md).
 
 ## Configuration
 
-Gateway mode is controlled in your SDL-MCP config file:
-
-```jsonc
-{
-  "gateway": {
-    // Enable gateway mode (default: true)
-    "enabled": true,
-    // Also emit the 32 flat tool names for backward compat (default: false, deprecated)
-    "emitLegacyTools": false
-  }
-}
-```
-
-### Modes
-
-| `enabled` | `emitLegacyTools` | Tools Registered | Use Case |
-|:---------:|:-----------------:|:----------------:|:---------|
-| `true` | `true` | 38 (4 gateway + 32 action + 2 universal) | Migration period — agents can use either style |
-| `true` | `false` | 6 (4 gateway + 2 universal) | Maximum registration savings |
-| `false` | — | 34 (32 flat + 2 universal) | Backward compatibility, legacy agents |
-
-Legacy tools include a deprecation notice in their description:
-```
-[Legacy — prefer sdl.query] Search for symbols by name or summary
-```
-
----
-
-## Implementation Details
-
-### Module Structure
-
-```
-src/gateway/
-  index.ts            # Registration orchestrator — registers 4 gateway + optional legacy
-  router.ts           # Action routing — maps action names to { schema, handler } pairs
-  schemas.ts          # Full Zod schemas — action-based unions per namespace
-  thin-schemas.ts     # Compact action-aware schemas for tools/list
-  descriptions.ts     # Compact tool descriptions — action reference cards
-  compact-schema.ts   # $defs/$ref deduplicator for schema optimization
-  legacy.ts           # Legacy tool aliases with deprecation notices
-```
-
-### Gateway Registration Flow
-
-```typescript
-// src/gateway/index.ts
-export function registerGatewayTools(server, services, config) {
-  const actionMap = createActionMap(services.liveIndex);
-
-  // Register 4 gateway tools with compact action-aware schemas
-  server.registerTool("sdl.query", QUERY_DESCRIPTION, QueryGatewaySchema,
-    handler, QUERY_THIN_SCHEMA);
-  server.registerTool("sdl.code", CODE_DESCRIPTION, CodeGatewaySchema,
-    handler, CODE_THIN_SCHEMA);
-  server.registerTool("sdl.repo", REPO_DESCRIPTION, RepoGatewaySchema,
-    handler, REPO_THIN_SCHEMA);
-  server.registerTool("sdl.agent", AGENT_DESCRIPTION, AgentGatewaySchema,
-    handler, AGENT_THIN_SCHEMA);
-
-  // Optional: also register 32 flat tool names
-  if (config.emitLegacyTools) {
-    registerLegacyTools(server, services);
-  }
-}
-```
-
-### Router Logic
-
-The gateway router (`src/gateway/router.ts`) performs the core dispatch:
-
-```typescript
-export async function routeGatewayCall(rawArgs, actionMap, ctx) {
-  const normalized = normalizeToolArgs(rawArgs);
-  const { action, repoId, ...rest } = normalized;
-
-  // Look up handler by action name
-  const entry = actionMap[action];
-  if (!entry) throw new Error(`Unknown gateway action: ${action}`);
-
-  // Merge repoId back into params for handler compatibility
-  const merged = repoId !== undefined ? { repoId, ...rest } : rest;
-
-  // Second-pass validation using the original strict Zod schema
-  const parsed = entry.schema.parse(merged);
-
-  return entry.handler(parsed, ctx);
-}
-```
-
-### Compact Schema Emitter
-
-The `compact-schema.ts` module optimizes JSON Schemas for token efficiency:
-
-1. **Fingerprint sub-schemas** — canonicalize and hash every object node
-2. **Deduplicate** — sub-schemas appearing 2+ times with size >40 chars are hoisted to `$defs` and replaced with `$ref` pointers
-3. **Preserve useful metadata** — keep action-specific descriptions and defaults that help agents call the gateway correctly
-
-Example deduplication:
-```json
-// Before: repeated { "type": "number", "minimum": 0, "maximum": 1 } appears 4 times
-// After: hoisted to $defs/d0, referenced as { "$ref": "#/$defs/d0" }
-```
-
----
-
-## CLI Integration
-
-The gateway router is also used by the `sdl-mcp tool` command for direct CLI access. The CLI dispatcher calls `createActionMap()` directly, bypassing the MCP server entirely while sharing the same handler map.
-
-See [CLI Tool Access](./cli-tool-access.md) for full CLI documentation.
-
----
-
-## Migration Guide
-
-### For MCP Client Users
-
-If your agent configuration currently uses the flat tool names (e.g., `sdl.symbol.search`), you have two options:
-
-1. **Keep legacy tools** — Set `emitLegacyTools: true` in your config and both flat and gateway tools are available (note: legacy tools are deprecated)
-2. **Switch to gateway** — Update your agent instructions to use `sdl.query` with `action: "symbol.search"` instead of `sdl.symbol.search`
-
-### For Agent Instruction Authors
-
-Update your CLAUDE.md / AGENTS.md to use gateway-style calls:
-
-```markdown
-# Before (flat tools)
-Use `sdl.symbol.search` to find symbols.
-Use `sdl.code.getSkeleton` to see code structure.
-
-# After (gateway tools)
-Use `sdl.query` with `action: "symbol.search"` to find symbols.
-Use `sdl.code` with `action: "code.getSkeleton"` to see code structure.
-```
-
-### Disabling Gateway Mode
-
-If you need backward compatibility with older MCP clients:
+The current non-deprecated gateway setting is:
 
 ```json
 {
   "gateway": {
-    "enabled": false
+    "enabled": true
   }
 }
 ```
 
-This registers the 32 flat tools plus the universal `sdl.action.search` and `sdl.info` surfaces.
+That setting only matters when Code Mode is not exclusive. With the default `codeMode.exclusive: true`, the server exposes the Code Mode-only surface instead.
 
----
+If you are migrating older agent instructions that still depend on flat tool names, there is still a compatibility path in source for emitting legacy flat aliases alongside gateway tools. It is intentionally omitted from the main configuration reference because it is deprecated and should not be the recommended steady-state setup.
 
-## Measuring Token Savings
+## When To Use Which Surface
 
-Run the included measurement script to verify savings for your configuration:
+| Situation | Recommended surface |
+| --- | --- |
+| Smallest registration footprint | Gateway mode |
+| Task-shaped retrieval first | Code Mode |
+| Need `file.write` | Flat mode or flat + Code Mode |
+| Existing legacy instructions still call flat tools | Flat mode, or a temporary migration setup |
 
-```bash
-node --experimental-strip-types scripts/measure-gateway-schema-tokens.ts
-```
+## Practical Recommendation
 
-Output:
-```
-=== SDL-MCP Gateway Schema Token Measurement ===
-
-Flat mode:    32 tools, ~4550 tokens (~18200 chars)
-Gateway mode: 4 tools, ~725 tokens (~2900 chars)
-Hybrid mode:  34 tools
-
-Gateway is ~17% of flat mode
-Estimated savings: ~3525 tokens per tools/list call
-
-✅ Gateway schema is within target (≤40% of flat)
-```
-
----
-
-## What's Next: Code Mode
-
-Gateway mode optimizes **tool registration** overhead. For context retrieval, `sdl.context` provides the most token-efficient path with automatic rung selection and adaptive symbol ranking (`contextMode: "precise"` for targeted lookups, `"broad"` for exploration). In Code Mode, `sdl.context` provides the same retrieval surface, while `sdl.workflow` is reserved for multi-step operations such as runtime execution, data transforms, and batch mutations.
-
-[Code Mode Deep Dive →](./code-mode.md)
+If you want the current best default for agent work, use Code Mode for discovery and retrieval, then disable exclusivity only when you also need the regular gateway or flat tools in the same session.

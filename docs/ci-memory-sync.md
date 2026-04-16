@@ -39,6 +39,7 @@ The CI workflow consists of three main jobs:
 3. **Sync Validation Job** (`sync-validation`): Cross-platform artifact comparison
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 graph LR
     A[Push to main] --> B[CI Job]
     B --> C[Sync Memory Job]

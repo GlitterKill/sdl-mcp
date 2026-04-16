@@ -10,7 +10,7 @@ Agents need different amounts of code context for different jobs.
 
 A targeted question such as "check NaN handling in `normalizeEdgeConfidence`" should not return the same envelope as "understand the auth pipeline." Manual `sdl.workflow` assembly can get either answer, but it forces the model to spend tokens on planning, step wiring, and repeated envelopes.
 
-`sdl.context` and `sdl.context` solve that by exposing two retrieval modes:
+`sdl.context` solves that by exposing two retrieval modes inside Code Mode:
 
 - `contextMode: "precise"` for minimal, targeted evidence
 - `contextMode: "broad"` for richer surrounding context
@@ -181,6 +181,7 @@ The consistent pattern is:
 ## Decision Guide
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Q["Does the task name a specific symbol or narrow check?"]
     P["Use contextMode: precise"]
@@ -188,12 +189,15 @@ flowchart TD
     W["Need a procedural pipeline instead of retrieval?"]
     WF["Use sdl.workflow"]
 
-    Q -->|Yes| P
-    Q -->|No| B
-    P --> W
-    B --> W
-    W -->|No| P
-    W -->|Yes| WF
+    Q e1@-->|Yes| P
+    Q e2@-->|No| B
+    P e3@--> W
+    B e4@--> W
+    W e5@-->|No| P
+    W e6@-->|Yes| WF
+
+    classDef animate stroke-dasharray: 9\,5,stroke-dashoffset: 900,animation: dash 25s linear infinite;
+    class e1,e2,e3,e4,e5,e6 animate
 ```
 
 In plain terms:
@@ -211,7 +215,7 @@ Inside Code Mode:
 - `sdl.context` is the first stop for explain/debug/review/implement retrieval
 - `sdl.workflow` stays reserved for runtime execution, transforms, and batch operations
 
-That separation is intentional. If an agent starts using workflows for retrieval by default, it is reintroducing the planning overhead that context mode exists to remove.
+When Code Mode is disabled, fall back to the manual ladder (`symbol.search` -> `symbol.getCard` -> `slice.build` -> code tools). That separation is intentional. If an agent starts using workflows for retrieval by default, it is reintroducing the planning overhead that context mode exists to remove.
 
 ---
 

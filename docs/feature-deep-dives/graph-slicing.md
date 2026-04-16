@@ -15,6 +15,7 @@ SDL-MCP's graph slicing follows the *dependency graph* instead. Starting from th
 ## How Slicing Works
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Task["Task: Fix the auth middleware"]
     Seeds["Entry symbols<br/>authenticate<br/>validateToken"]
@@ -56,6 +57,7 @@ Each symbol in the BFS frontier is scored by weighted factors:
 Slices aren't one-shot. They have a full lifecycle:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     Build["slice.build"] --> Handle["handle"] --> Refresh["slice.refresh"] --> Delta["delta"] --> Spillover["slice.spillover.get"] --> Overflow["overflow pages"]
     Handle --> Rebuild["lease expires -> rebuild"]
@@ -69,6 +71,7 @@ flowchart LR
 ### Lifecycle Diagram
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 stateDiagram-v2
     [*] --> Build: sdl.slice.build
     Build --> Handle: returns handle + lease

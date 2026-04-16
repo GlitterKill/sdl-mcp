@@ -19,15 +19,21 @@
 ## Architecture
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     CLI["Command line"]
-    Parser["CLI parser<br/>(Commander.js)<br/>Global options: --config, --log-level, --help"]
+    Parser["CLI parser<br/>(Node parseArgs)<br/>Global options: --config, --log-level, --help"]
     Router["Command router<br/>init, doctor, info, version,<br/>health, summary, index, serve,<br/>tool, export, import, pull, benchmark:ci"]
     Tool["Tool dispatch<br/>same handler layer as the MCP server"]
     Format["Validation and output<br/>Zod -> handler -> json | json-compact | pretty | table"]
 
-    CLI --> Parser --> Router
-    Router -->|"tool"| Tool --> Format
+    CLI e1@--> Parser
+    Parser e2@--> Router
+    Router e3@-->|tool| Tool
+    Tool e4@--> Format
+
+    classDef animate stroke-dasharray: 9\,5,stroke-dashoffset: 900,animation: dash 25s linear infinite;
+    class e1,e2,e3,e4 animate
 ```
 
 ## Run Without Installing (npx)
@@ -249,7 +255,7 @@ Key options:
 
 ### `sdl-mcp tool <action> [args]`
 
-Direct MCP tool invocation from the CLI. Supports all 32 SDL action tools and reuses the same validation and normalization path as the MCP server.
+Direct MCP tool invocation from the CLI. The command currently exposes 30 action definitions from [`src/cli/commands/tool-actions.ts`](../src/cli/commands/tool-actions.ts), reuses the gateway action map for execution, and shares the same normalization and Zod validation path as the MCP server.
 
 ```bash
 sdl-mcp tool repo.status --repo-id my-repo
@@ -265,7 +271,7 @@ Key options:
 
 The CLI parser accepts the canonical action fields plus the same common aliases accepted by MCP requests, such as `--repo-id`, `--symbol-id`, `--symbol-ids`, `--from-version`, `--to-version`, and `--slice-handle`.
 
-Any action listed in `sdl.manual` can be invoked this way. The output format can be switched for scripting (`json`) or human reading (`pretty`, `compact`).
+Not every MCP surface is available through `sdl-mcp tool`. Code Mode-only tools (`sdl.manual`, `sdl.context`, `sdl.workflow`) are separate, and `sdl.file.write` is currently MCP-only. Use [`CLI Tool Access`](./feature-deep-dives/cli-tool-access.md) for the current direct-action matrix.
 
 ### `sdl-mcp version`
 

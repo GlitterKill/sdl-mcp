@@ -182,6 +182,7 @@ See [plugin-sdk-security.md](./plugin-sdk-security.md) for complete security gui
 ## File Structure
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Root["my-plugin/"] --> Package["package.json<br/>NPM metadata"]
     Root --> TSConfig["tsconfig.json<br/>TypeScript config"]

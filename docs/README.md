@@ -84,22 +84,25 @@ Use this page as the entry point for SDL-MCP documentation.
 - **Version**: 0.10.5
 - **Supported languages**: TS, JS, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, Shell (11 adapters, 12 languages)
 - **CLI commands** (13): init, doctor, info, index, serve, export, import, pull, benchmark, summary, health, version, tool
+- **Generated tool inventory**: [docs/generated/tool-inventory.md](./generated/tool-inventory.md)
 - **MCP surfaces**:
-  - Core: repo register/status/overview, index refresh, symbol search/getCard/getCards, slice build/refresh/spillover, delta get, PR risk analyze
+  - Core: repo register/status/overview, index refresh, symbol search/getCard, slice build/refresh/spillover, delta get, PR risk analyze
   - Code access: getSkeleton, getHotPath, needWindow (Iris Gate Ladder)
   - Policy: get/set
-  - Agent: context, feedback, feedback.query
-  - Context export: context summary
-  - Memory: store, query, remove, surface
+  - Feedback: agent.feedback, agent.feedback.query
   - Buffer: push, checkpoint, status
   - Runtime: execute, queryOutput
-  - File: read (non-indexed files)
+  - File: read and write for non-indexed files
+  - Memory: store, query, remove, surface
+  - SCIP: ingest
   - Usage: stats
   - Universal: `sdl.action.search` and `sdl.info`
-  - Default flat mode: 34 tools (`32` flat tools + `sdl.action.search` + `sdl.info`)
+  - Default flat mode: 33 tools (`31` flat tools + `sdl.action.search` + `sdl.info`)
   - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
-  - Gateway + legacy mode: 38 tools (`4` gateway + `32` legacy flat + `sdl.action.search` + `sdl.info`)
-  - Code Mode (optional): adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow`
+  - Gateway + legacy mode: 37 tools (`4` gateway + `31` legacy flat + `sdl.action.search` + `sdl.info`)
+  - Code Mode exclusive: 4 tools (`sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`)
+  - Gateway routing covers 30 of the 31 flat tools; `sdl.file.write` remains flat-only
+  - `sdl-mcp tool` exposes 30 direct CLI action aliases, not the full flat surface
 - **Semantic features**: optional semantic reranking with 2 embedding models (Jina Code bundled, Nomic optional), LLM-generated symbol summaries (Anthropic/Ollama/mock)
 - **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
 - **Native addon**: Rust via napi-rs for multi-threaded indexing (default engine, TS fallback)

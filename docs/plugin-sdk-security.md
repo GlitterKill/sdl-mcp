@@ -46,6 +46,7 @@ SDL-MCP's plugin system allows external code to run within the indexer process. 
 ### Trust Boundaries
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     User["User / System<br/>configures which plugins to load"] -->|"trusted plugin path"| Host["SDL-MCP Host<br/>validates manifests, checks API versions, loads modules"]
     Host -->|"plugin execution"| Plugin["Plugin Code<br/>runs with host permissions, file/network/process access"]
@@ -73,6 +74,7 @@ Plugins execute with the same permissions as the SDL-MCP process:
 Use a dedicated, protected directory for trusted plugins:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart LR
     Unix["/usr/local/lib/sdl-mcp/plugins/"] --> UnixA["my-lang-plugin/dist/index.js"]
     Unix --> UnixB["another-plugin/dist/index.js"]

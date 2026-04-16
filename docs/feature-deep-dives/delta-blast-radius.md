@@ -20,6 +20,7 @@ A delta pack contains:
 ## Anatomy of a Delta Pack
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Change["Code change<br/>modified validateToken() signature"]
     Sig["signatureDiff<br/>token -> token, options?"]
@@ -78,6 +79,7 @@ SDL-MCP tracks how a symbol's fan-in changes across versions. A symbol whose fan
 ## Delta Computation Flow
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
 flowchart TD
     Change["Code Change Detected"]
     Diff["Compute Symbol Diffs"]
