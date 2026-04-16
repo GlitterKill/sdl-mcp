@@ -66,16 +66,55 @@ const VALID_LANGUAGES = [
 type LanguageType = (typeof VALID_LANGUAGES)[number];
 
 const DEFAULT_IGNORE_PATTERNS = [
-  "**/node_modules/**",
-  "**/dist/**",
-  "**/.next/**",
-  "**/build/**",
+  // Version control
   "**/.git/**",
-  "**/coverage/**",
+
+  // Build output (universal)
+  "**/dist/**",
+  "**/dist-*/**",
+  "**/build/**",
+  "**/out/**",
   "**/target/**",
-  "**/vendor/**",
+  "**/coverage/**",
   "**/*.min.js",
   "**/*.min.css",
+
+  // Package managers / dependencies
+  "**/node_modules/**",
+  "**/vendor/**",
+  "**/.pnp.*",
+  "**/.yarn/**",
+
+  // Framework-specific output
+  "**/.next/**",
+  "**/.nuxt/**",
+  "**/.svelte-kit/**",
+  "**/.output/**",
+
+  // Language-specific intermediates
+  "**/__pycache__/**",
+  "**/.pytest_cache/**",
+  "**/*.pyc",
+  "**/.venv/**",
+  "**/venv/**",
+  "**/.tox/**",
+  "**/.mypy_cache/**",
+
+  // Temp / scratch
+  "**/.tmp/**",
+  "**/tmp/**",
+
+  // AI agent folders
+  "**/.claude/**",
+  "**/.codex/**",
+  "**/.cursor/**",
+  "**/.aider*/**",
+  "**/.windsurf/**",
+  "**/.continue/**",
+
+  // SDL-MCP internal
+  "**/.sdl-memory/**",
+  "**/.sisyphus/**",
 ];
 
 const LANGUAGE_BY_EXTENSION: Record<string, LanguageType> = {

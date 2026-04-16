@@ -29,10 +29,21 @@
               "type": "string"
             },
             "default": [
-              "**/node_modules/**",
+              "**/.git/**",
               "**/dist/**",
+              "**/dist-*/**",
+              "**/build/**",
+              "**/out/**",
+              "**/target/**",
+              "**/coverage/**",
+              "**/node_modules/**",
+              "**/vendor/**",
               "**/.next/**",
-              "**/build/**"
+              "**/__pycache__/**",
+              "**/.venv/**",
+              "**/.tmp/**",
+              "**/.claude/**",
+              "**/.sdl-memory/**"
             ]
           },
           "languages": {

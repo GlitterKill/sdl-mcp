@@ -84,10 +84,30 @@ export const RepoConfigSchema = z.object({
   ignore: z
     .array(z.string())
     .default([
-      "**/node_modules/**",
+      "**/.git/**",
       "**/dist/**",
-      "**/.next/**",
+      "**/dist-*/**",
       "**/build/**",
+      "**/out/**",
+      "**/target/**",
+      "**/coverage/**",
+      "**/node_modules/**",
+      "**/vendor/**",
+      "**/.next/**",
+      "**/.nuxt/**",
+      "**/__pycache__/**",
+      "**/.pytest_cache/**",
+      "**/*.pyc",
+      "**/.venv/**",
+      "**/venv/**",
+      "**/.tmp/**",
+      "**/.claude/**",
+      "**/.codex/**",
+      "**/.cursor/**",
+      "**/.aider*/**",
+      "**/.windsurf/**",
+      "**/.continue/**",
+      "**/.sdl-memory/**",
     ]),
   languages: z
     .array(LanguageSchema)
