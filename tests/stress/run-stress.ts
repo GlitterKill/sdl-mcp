@@ -334,17 +334,17 @@ async function main(): Promise<void> {
   }
 
   // -----------------------------------------------------------------------
-  // Scenario 8: Limit Stress (maxSessions: 8, 1 writer + 7 readers)
+  // Scenario 8: Limit Stress (maxSessions: 9, 1 setup + 1 writer + 7 readers)
   // -----------------------------------------------------------------------
   if (shouldRun("limit-stress")) {
     stressLog(
       "info",
-      "=== Scenario 8: Limit Stress (1 writer + 7 readers, max sessions) ===",
+      "=== Scenario 8: Limit Stress (1 setup + 1 writer + 7 readers, max sessions) ===",
     );
     const harness = new ServerHarness(config);
     try {
       const port = await harness.start({
-        maxSessions: 8,
+        maxSessions: 9,
         maxToolConcurrency: 8,
       });
       const result = await withTimeout(

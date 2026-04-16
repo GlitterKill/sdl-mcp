@@ -81,3 +81,21 @@ test("globToSafeRegex anchors pattern with ^ and $", () => {
   assert.strictEqual(regex.test("dir/foo.ts"), false);
   assert.strictEqual(regex.test("foo.ts.bak"), false);
 });
+
+test("globToSafeRegex trailing /** matches directory itself", () => {
+  const regex = globToSafeRegex("**/node_modules/**");
+  // Must match directory name without trailing content
+  assert.strictEqual(regex.test("node_modules"), true);
+  // Must match files inside directory
+  assert.strictEqual(regex.test("node_modules/foo"), true);
+  // Must match nested directories
+  assert.strictEqual(regex.test("src/node_modules"), true);
+  assert.strictEqual(regex.test("src/node_modules/bar"), true);
+});
+
+test("globToSafeRegex trailing /** with dist pattern", () => {
+  const regex = globToSafeRegex("**/dist/**");
+  assert.strictEqual(regex.test("dist"), true);
+  assert.strictEqual(regex.test("dist/index.js"), true);
+  assert.strictEqual(regex.test("packages/dist/foo.js"), true);
+});

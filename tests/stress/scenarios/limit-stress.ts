@@ -204,6 +204,10 @@ export async function runLimitStress(
     });
   } finally {
     await disconnectAll([setupClient]);
+    // Allow server to process session termination before creating new sessions.
+    // The DELETE /mcp request is fire-and-forget from the client's perspective,
+    // so we need a brief delay to avoid race with the 8-session limit.
+    await new Promise((r) => setTimeout(r, 500));
   }
 
   // Create 8 clients: 1 writer + 7 readers (fills maxSessions)

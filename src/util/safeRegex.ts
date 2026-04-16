@@ -146,10 +146,20 @@ export function globToSafeRegex(glob: string): RegExp {
   // Replace placeholders with regex equivalents
   // **/ matches zero or more path segments (including the trailing /)
   pattern = pattern.replace(/GLOB_DOUBLESTAR_SLASH/g, "(?:.*/)?");
-  // ** matches anything including /
-  pattern = pattern.replace(/GLOB_DOUBLESTAR/g, ".*");
   // * matches anything except /
   pattern = pattern.replace(/GLOB_SINGLESTAR/g, "[^/]*");
+
+  // Trailing /** should match: nothing, /, or /anything
+  // This ensures **/node_modules/** matches "node_modules" directory itself
+  // Handle /GLOB_DOUBLESTAR at end (the / was already escaped to /)
+  if (pattern.endsWith("/GLOB_DOUBLESTAR")) {
+    pattern = pattern.slice(0, -"/GLOB_DOUBLESTAR".length) + "(?:/.*)?";
+  } else if (pattern.endsWith("GLOB_DOUBLESTAR")) {
+    // Bare trailing ** (no preceding /)
+    pattern = pattern.slice(0, -"GLOB_DOUBLESTAR".length) + ".*";
+  }
+  // Non-trailing ** matches anything including /
+  pattern = pattern.replace(/GLOB_DOUBLESTAR/g, ".*");
 
   // Anchor the pattern
   return new RegExp(`^${pattern}$`);
