@@ -249,6 +249,7 @@ export interface NativeParsedFile {
   parseError?: string
 }
 export declare function parseFiles(files: Array<NativeFileInput>, threadCount: number): Array<NativeParsedFile>
+export declare function parseFilesAsync(files: Array<NativeFileInput>, threadCount: number): Promise<unknown>
 export declare function hashContentNative(content: string): string
 export declare function generateSymbolIdNative(repoId: string, relPath: string, kind: string, name: string, fingerprint: string): string
 export declare function computeClusters(symbols: Array<NativeClusterSymbol>, edges: Array<NativeClusterEdge>, minClusterSize: number): Array<NativeClusterAssignment>
