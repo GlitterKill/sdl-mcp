@@ -55,6 +55,11 @@ export async function runSessionSaturation(
     await disconnectAll([setupClient]);
   }
 
+  // Allow server to process session termination before creating new sessions.
+  // The DELETE /mcp request is fire-and-forget from the client's perspective,
+  // so we need a brief delay to avoid racing the session limit.
+  await new Promise((r) => setTimeout(r, 500));
+
   const connectedClients: import("../infra/client-factory.js").StressClient[] =
     [];
 

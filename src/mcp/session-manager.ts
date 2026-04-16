@@ -66,13 +66,17 @@ export class SessionManager {
   ): void {
     if (this.sessions.has(sessionId)) {
       logger.warn("Session already registered", { sessionId });
-      this.releaseReservation();
       return;
     }
 
-    // Reject if at capacity. The pendingReservations check was removed because
-    // it could allow overflow when another caller has a pending reservation.
-    if (!this.canAcceptSession()) {
+    // Consume the pending reservation: decrement first so the capacity check
+    // below doesn't double-count (sessions.size already reflects real sessions,
+    // pendingReservations should no longer include this one).
+    this.releaseReservation();
+
+    // Guard against overflow: if sessions map is already at capacity (e.g. no
+    // reservation was held, or a race allowed a second register), reject.
+    if (this.sessions.size >= this.maxSessions) {
       throw new ValidationError(
         `Maximum session limit (${this.maxSessions}) reached. Cannot accept new session.`,
       );
@@ -87,9 +91,6 @@ export class SessionManager {
       totalRequests: 0,
       lastActivityAt: now,
     });
-
-    // Transition one slot from reserved -> registered.
-    this.releaseReservation();
 
     logger.info("Session registered", {
       sessionId,
