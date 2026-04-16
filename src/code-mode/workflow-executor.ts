@@ -227,16 +227,25 @@ export async function executeWorkflow(
     if (step.internal) {
       try {
         const result = executeTransform(step.fn, resolvedArgs);
-        const stepDuration = Date.now() - stepStart;
-        const tokens = WorkflowBudgetTracker.estimateResultTokens(result);
 
-        budget.record(tokens, stepDuration);
+        const stepDuration = Date.now() - stepStart;
         priorResults.push(result);
+        let resultForResponse: unknown = result;
+        if (Array.isArray(result) && result.length > 3) {
+          resultForResponse = {
+            _type: "array",
+            length: result.length,
+            sample: result.slice(0, 3),
+            hint: "Full data available via $" + i + " reference in subsequent steps",
+          };
+        }
+        const tokens = WorkflowBudgetTracker.estimateResultTokens(resultForResponse);
+        budget.record(tokens, stepDuration);
 
         const stepResult: WorkflowStepResult = {
           stepIndex: i,
           fn: step.fn,
-          result,
+          result: resultForResponse,
           tokens,
           durationMs: stepDuration,
           status: "ok",
@@ -409,7 +418,7 @@ export async function executeWorkflow(
               issue.path.length > 0 ? issue.path.join(".") + ": " : "";
             return path + issue.message;
           });
-          errorMessage = `Invalid arguments: ${lines.join("; ")}`;
+          errorMessage = `Invalid arguments: ${lines.join("; ")}. Use sdl.manual({ actions: ["${step.action}"] }) to see expected params.`;
         } else if (error instanceof Error) {
           errorMessage = error.message;
         } else {

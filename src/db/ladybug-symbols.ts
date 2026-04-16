@@ -1527,3 +1527,33 @@ export async function resolveSymbolByShorthand(
 
   return rows[0].symbolId;
 }
+
+/**
+ * Direct exact-name lookup — guarantees exact matches are never missed
+ * due to CONTAINS/LIKE limit truncation in searchSymbolsLite.
+ */
+export async function findSymbolByExactName(
+  conn: Connection,
+  repoId: string,
+  name: string,
+  kinds?: string[],
+): Promise<SearchSymbolLiteRow | null> {
+  const params: Record<string, unknown> = {
+    repoId,
+    name: name.toLowerCase(),
+    kinds: kinds && kinds.length > 0 ? kinds : null,
+  };
+  const rows = await queryAll<SearchSymbolLiteRow>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(r:Repo {repoId: $repoId})
+     MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
+     WHERE lower(s.name) = $name AND ($kinds IS NULL OR s.kind IN $kinds)
+     RETURN s.symbolId AS symbolId, s.name AS name, f.fileId AS fileId,
+            f.relPath AS file, s.kind AS kind, s.exported AS exported,
+            f.relPath AS filePath, s.summary AS summary,
+            '' AS searchText
+     LIMIT 1`,
+    params,
+  );
+  return rows[0] ?? null;
+}

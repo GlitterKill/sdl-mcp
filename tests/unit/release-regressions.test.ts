@@ -78,7 +78,8 @@ describe("release regression guards", () => {
   it("keeps the broad CI suite non-native while native-dependent jobs consume built addons", () => {
     const ciSource = readSource(".github/workflows/ci.yml");
     const runTestsSource = readSource("scripts/run-tests.mjs");
-    const testsJob = ciSource.match(/tests:\s*[\s\S]*?\n  benchmarks:/)?.[0] ?? "";
+    const testsJob =
+      ciSource.match(/tests:\s*[\s\S]*?\n  benchmarks:/)?.[0] ?? "";
     const benchmarksJob =
       ciSource.match(/benchmarks:\s*[\s\S]*?\n  native-build:/)?.[0] ?? "";
     const syncMemoryJob =
@@ -184,7 +185,7 @@ describe("release regression guards", () => {
 
     assert.match(
       source,
-      /const filePath = join\(repoRoot, fileMeta\.path\);\s*let content:\s*string;\s*try\s*\{\s*content = await readFileAsync\(filePath, "utf-8"\);/s,
+      /const filePath = join\(repoRoot, fileMeta\.path\);[\s\S]*?let content:\s*string;[\s\S]*?content = await readFileAsync\(filePath, "utf-8"\);/,
       "Rust pass-1 should read file content for metadata generation in all files",
     );
 

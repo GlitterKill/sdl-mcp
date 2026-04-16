@@ -252,6 +252,33 @@ export async function handleSymbolSearch(
   }));
 
   // Prioritize exact name matches over fuzzy/partial matches
+
+  // FP-7: Guarantee exact name matches are never missed due to DB limit truncation.
+  // When the initial search returns results but none match the query exactly,
+  // do a supplementary exact-name lookup to ensure deterministic behavior.
+  const queryLowerExact = query.toLowerCase();
+  if (
+    !query.includes("*") &&
+    !query.includes("?") &&
+    query.length >= 2 &&
+    !results.some((r) => r.name.toLowerCase() === queryLowerExact)
+  ) {
+    const exactMatch = await ladybugDb.findSymbolByExactName(
+      conn,
+      request.repoId,
+      query,
+      request.kinds,
+    );
+    if (exactMatch && !results.some((r) => r.symbolId === exactMatch.symbolId)) {
+      results.unshift({
+        symbolId: exactMatch.symbolId,
+        name: exactMatch.name,
+        file: exactMatch.file,
+        kind: exactMatch.kind as SymbolKind,
+      });
+    }
+  }
+
   // CamelCase fallback: when no results and query is a camelCase compound,
   // decompose into subwords and re-search with joined terms (multi-term query)
   let camelFallbackUsed = false;

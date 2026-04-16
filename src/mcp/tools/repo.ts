@@ -379,6 +379,7 @@ export async function handleRepoStatus(
       symbolsIndexed,
       lastIndexedAt,
       healthResult,
+      recentVersions,
     ] = await Promise.all([
       ladybugDb.getLatestVersion(conn, repoId),
       ladybugDb.getFileCount(conn, repoId),
@@ -397,6 +398,9 @@ export async function handleRepoStatus(
             ),
           ])
         : Promise.resolve(unavailableHealth),
+      includeLiveIndex
+        ? ladybugDb.getVersionsByRepo(conn, repoId, 10)
+        : Promise.resolve([] as Awaited<ReturnType<typeof ladybugDb.getVersionsByRepo>>),
     ]);
     const health = healthResult.snapshot;
     const healthIsStale = healthResult.isStale;
@@ -459,6 +463,13 @@ export async function handleRepoStatus(
       repoId,
       rootPath: repo.rootPath,
       latestVersionId: latestVersion?.versionId ?? null,
+      recentVersions: detail === "full"
+        ? recentVersions.map((v) => ({
+            versionId: v.versionId,
+            createdAt: v.createdAt,
+            reason: v.reason,
+          }))
+        : undefined,
       filesIndexed,
       symbolsIndexed,
       lastIndexedAt,

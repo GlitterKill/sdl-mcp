@@ -60,7 +60,10 @@ export interface Action {
   timestamp: number;
   durationMs: number;
   evidence: Evidence[];
+
+  evidenceCount?: number;
 }
+
 
 export interface Evidence {
   type:

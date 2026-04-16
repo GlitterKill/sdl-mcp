@@ -154,7 +154,7 @@ export class ContextEngine {
         return {
           taskId,
           taskType: task.taskType,
-          actionsTaken: actions,
+          actionsTaken: actions.map((a) => ({ ...a, evidence: [], evidenceCount: a.evidence?.length ?? 0 })),
           path,
           contextModeHint: "precise: Returns focused evidence with minimal metadata. Use for targeted lookups when you know what you're looking for.",
           finalEvidence: evidence,
@@ -169,7 +169,7 @@ export class ContextEngine {
       const result: ContextResult = {
         taskId,
         taskType: task.taskType,
-        actionsTaken: actions,
+        actionsTaken: actions.map((a) => ({ ...a, evidence: [], evidenceCount: a.evidence?.length ?? 0 })),
         path,
         contextModeHint: "broad: Expands context via cluster relationships and graph edges. Returns answer, nextBestAction, and retrievalEvidence. Use for exploratory tasks.",
         finalEvidence: evidence,

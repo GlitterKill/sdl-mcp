@@ -51,7 +51,10 @@ describe("agentFeedback index lifecycle constants", () => {
     // Verify jinaCode dimension (768) and nomic dimension (768) are present
     // in the AGENTFEEDBACK_EMBEDDING_PROPERTIES block
     const propsIdx = lifecycleSrc.indexOf("AGENTFEEDBACK_EMBEDDING_PROPERTIES");
-    const propsBlock = lifecycleSrc.substring(propsIdx, lifecycleSrc.indexOf("} as const;", propsIdx) + 12);
+    const propsBlock = lifecycleSrc.substring(
+      propsIdx,
+      lifecycleSrc.indexOf("} as const;", propsIdx) + 12,
+    );
     assert.ok(
       propsBlock.includes("dimension: 768"),
       "jinaCode dimension should be 768",
@@ -74,7 +77,9 @@ describe("agentFeedback index lifecycle constants", () => {
 describe("ensureEntityIndexes includes AgentFeedback", () => {
   it("ftsTables array includes AgentFeedback entry", () => {
     assert.ok(
-      lifecycleSrc.includes('{ table: "AgentFeedback", indexName: ENTITY_FTS_INDEX_NAMES.agentFeedback }'),
+      lifecycleSrc.includes(
+        '{ table: "AgentFeedback", indexName: ENTITY_FTS_INDEX_NAMES.agentFeedback }',
+      ),
       "ftsTables should include AgentFeedback entry",
     );
   });
@@ -93,7 +98,7 @@ describe("ensureEntityIndexes includes AgentFeedback", () => {
       "ensureEntityIndexes should reference AGENTFEEDBACK_EMBEDDING_PROPERTIES",
     );
     assert.ok(
-      fnBody.includes('createVectorIndex(conn, "AgentFeedback"'),
+      /createVectorIndex\(\s*conn,\s*"AgentFeedback"/.test(fnBody),
       "ensureEntityIndexes should call createVectorIndex for AgentFeedback",
     );
   });
