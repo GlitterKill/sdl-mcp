@@ -37,6 +37,10 @@ describe("ladybug connection pool configuration", () => {
       "readPoolInitialized",
       "readPoolSize",
       "writeActive",
+      "writeExecActive",
+      "writeExecQueued",
+      "writePoolInitialized",
+      "writePoolSize",
       "writeQueued",
     ]);
 
@@ -44,6 +48,10 @@ describe("ladybug connection pool configuration", () => {
     assert.strictEqual(typeof stats.readPoolSize, "number");
     assert.strictEqual(typeof stats.writeQueued, "number");
     assert.strictEqual(typeof stats.writeActive, "number");
+    assert.strictEqual(typeof stats.writeExecQueued, "number");
+    assert.strictEqual(typeof stats.writeExecActive, "number");
+    assert.strictEqual(typeof stats.writePoolSize, "number");
+    assert.strictEqual(typeof stats.writePoolInitialized, "number");
 
     assert.strictEqual(stats.readPoolInitialized, 0);
     assert.strictEqual(stats.writeQueued, 0);
