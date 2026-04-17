@@ -315,12 +315,14 @@ export async function runPass1WithTsEngine(
   // SAFETY: nextIndex++ must remain synchronous — no `await` between reading
   // and incrementing. JavaScript's single-threaded event loop guarantees
   // atomicity only when there is no yield point between the read and write.
+  const batchAccumulator = new BatchPersistAccumulator();
   let nextIndex = 0;
 
   const runWorker = async (): Promise<void> => {
      
     while (true) {
       if (params.signal?.aborted) return;
+      if (batchAccumulator.error) return;
       const index = nextIndex++;
       if (index >= files.length) return;
       const file = files[index];
@@ -353,6 +355,7 @@ export async function runPass1WithTsEngine(
           globalNameToSymbolIds,
           globalPreferredSymbolId,
           supportsPass2FilePath,
+          batchAccumulator,
         });
         acc.filesProcessed++;
         acc.tsFilesProcessed++;
@@ -388,5 +391,6 @@ export async function runPass1WithTsEngine(
     () => runWorker(),
   );
   await Promise.all(workers);
+  await batchAccumulator.drain();
   return acc;
 }

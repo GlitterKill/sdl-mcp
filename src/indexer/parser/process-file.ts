@@ -168,31 +168,54 @@ export async function processFile(
     }
 
     // ── Phase 8: Persist ─────────────────────────────────────────
-    await withWriteConn(async (wConn) => {
-      await ladybugDb.withTransaction(wConn, async (txConn) => {
-        await ladybugDb.upsertFile(txConn, {
-          fileId: fileData.fileId,
-          repoId,
-          relPath: fileData.relPath,
-          contentHash: fileData.contentHash,
-          language: adapter?.languageId ?? fileData.ext,
-          byteSize: fileMeta.size,
-          lastIndexedAt: new Date().toISOString(),
+    const { batchAccumulator } = params;
+
+    if (batchAccumulator) {
+      batchAccumulator.addFile({
+        fileId: fileData.fileId,
+        repoId,
+        relPath: fileData.relPath,
+        contentHash: fileData.contentHash,
+        language: adapter?.languageId ?? fileData.ext,
+        byteSize: fileMeta.size,
+        lastIndexedAt: new Date().toISOString(),
+      }, existingFile?.fileId ?? null);
+      if (symbolReferences.length > 0) {
+        batchAccumulator.addSymbolReferences(symbolReferences);
+      }
+      if (symbolsToUpsert.length > 0) {
+        batchAccumulator.addSymbols(symbolsToUpsert);
+      }
+      if (edgesToInsert.length > 0) {
+        batchAccumulator.addEdges(edgesToInsert);
+      }
+    } else {
+      await withWriteConn(async (wConn) => {
+        await ladybugDb.withTransaction(wConn, async (txConn) => {
+          await ladybugDb.upsertFile(txConn, {
+            fileId: fileData.fileId,
+            repoId,
+            relPath: fileData.relPath,
+            contentHash: fileData.contentHash,
+            language: adapter?.languageId ?? fileData.ext,
+            byteSize: fileMeta.size,
+            lastIndexedAt: new Date().toISOString(),
+          });
+
+          if (existingFile) {
+            await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
+            await ladybugDb.deleteSymbolReferencesByFileId(
+              txConn,
+              existingFile.fileId,
+            );
+          }
+
+          await ladybugDb.insertSymbolReferences(txConn, symbolReferences);
+          await ladybugDb.upsertSymbolBatch(txConn, symbolsToUpsert);
+          await ladybugDb.insertEdges(txConn, edgesToInsert);
         });
-
-        if (existingFile) {
-          await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
-          await ladybugDb.deleteSymbolReferencesByFileId(
-            txConn,
-            existingFile.fileId,
-          );
-        }
-
-        await ladybugDb.insertSymbolReferences(txConn, symbolReferences);
-        await ladybugDb.upsertSymbolBatch(txConn, symbolsToUpsert);
-        await ladybugDb.insertEdges(txConn, edgesToInsert);
       });
-    });
+    }
 
     prefetchFileExports(repoId, fileMeta.path);
 

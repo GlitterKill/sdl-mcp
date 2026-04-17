@@ -14,6 +14,7 @@ import type { ExtractedCall } from "../treesitter/extractCalls.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
 import type * as ladybugDb from "../../db/ladybug-queries.js";
 import type { SymbolMapFileUpdate } from "../symbol-map-cache.js";
+import type { BatchPersistAccumulator } from "./batch-persist.js";
 
 // ── ProcessFile params & result ─────────────────────────────────────
 
@@ -40,6 +41,7 @@ export interface ProcessFileParams {
   globalNameToSymbolIds?: Map<string, string[]>;
   globalPreferredSymbolId?: Map<string, string>;
   supportsPass2FilePath?: (relPath: string) => boolean;
+  batchAccumulator?: BatchPersistAccumulator;
 }
 
 export interface ProcessFileResult {
