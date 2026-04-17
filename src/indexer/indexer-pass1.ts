@@ -73,7 +73,7 @@ export async function runPass1WithRustEngine(
   acc.filesProcessed += skippedRustFiles;
   const tsFallbackFiles: FileMetadata[] = [];
 
-  const batchAccumulator = new BatchPersistAccumulator(50);
+  const batchAccumulator = new BatchPersistAccumulator();
 
   // --- Pipelined chunk processing ---
   // Parse chunk N+1 (async, on libuv thread) while processing chunk N's
@@ -94,6 +94,7 @@ export async function runPass1WithRustEngine(
 
   for (let ci = 0; ci < chunks.length; ci++) {
     if (params.signal?.aborted) break;
+    if (batchAccumulator.error) break;
 
     // Await the parse that was kicked off previously
     let chunkResults: RustParseResult[] | null;
@@ -216,18 +217,16 @@ export async function runPass1WithRustEngine(
 
     for (let i = 0; i < processable.length; i += CONCURRENCY_LIMIT) {
       if (params.signal?.aborted) break;
+      if (batchAccumulator.error) break;
       const batch = processable.slice(i, i + CONCURRENCY_LIMIT);
       await Promise.all(
         batch.map(({ file, rustResult }) => processOne(file, rustResult)),
       );
-      if (batchAccumulator.shouldFlush()) {
-        await batchAccumulator.flush();
-      }
     }
   }
 
-  // Flush any remaining batched writes
-  await batchAccumulator.flush();
+  // Wait for background write queue to finish
+  await batchAccumulator.drain();
 
   // Process files that the Rust engine couldn't handle via the TS engine
   for (const file of tsFallbackFiles) {
