@@ -220,11 +220,9 @@ export async function runPass1WithRustEngine(
       await Promise.all(
         batch.map(({ file, rustResult }) => processOne(file, rustResult)),
       );
-    }
-
-    // Flush accumulated DB writes for this chunk
-    if (batchAccumulator.shouldFlush()) {
-      await batchAccumulator.flush();
+      if (batchAccumulator.shouldFlush()) {
+        await batchAccumulator.flush();
+      }
     }
   }
 

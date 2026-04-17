@@ -57,12 +57,11 @@ export class BatchPersistAccumulator {
   async flush(): Promise<void> {
     if (this.pendingCount === 0) return;
 
-    const filesToWrite = this.files.splice(0);
-    const symbolsToWrite = this.symbols.splice(0);
-    const edgesToWrite = this.edges.splice(0);
-    const refsToWrite = this.symbolReferences.splice(0);
+    const filesToWrite = [...this.files];
+    const symbolsToWrite = [...this.symbols];
+    const edgesToWrite = [...this.edges];
+    const refsToWrite = [...this.symbolReferences];
     const count = this.pendingCount;
-    this.pendingCount = 0;
 
     logger.debug("BatchPersistAccumulator flushing", {
       files: filesToWrite.length,
@@ -73,16 +72,16 @@ export class BatchPersistAccumulator {
 
     await withWriteConn(async (wConn) => {
       await ladybugDb.withTransaction(wConn, async (txConn) => {
+        const existingFileIds = filesToWrite
+          .map((e) => e.existingFileId)
+          .filter((id): id is string => id !== null);
+
+        if (existingFileIds.length > 0) {
+          await ladybugDb.deleteSymbolsByFileIds(txConn, existingFileIds);
+        }
+
         for (const entry of filesToWrite) {
           await ladybugDb.upsertFile(txConn, entry.file);
-
-          if (entry.existingFileId) {
-            await ladybugDb.deleteSymbolsByFileId(txConn, entry.existingFileId);
-            await ladybugDb.deleteSymbolReferencesByFileId(
-              txConn,
-              entry.existingFileId,
-            );
-          }
         }
 
         if (refsToWrite.length > 0) {
@@ -98,6 +97,12 @@ export class BatchPersistAccumulator {
         }
       });
     });
+
+    this.files.splice(0, filesToWrite.length);
+    this.symbols.splice(0, symbolsToWrite.length);
+    this.edges.splice(0, edgesToWrite.length);
+    this.symbolReferences.splice(0, refsToWrite.length);
+    this.pendingCount -= count;
 
     logger.debug("BatchPersistAccumulator flush complete", {
       filesWritten: count,

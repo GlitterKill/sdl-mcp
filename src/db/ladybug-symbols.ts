@@ -821,6 +821,124 @@ export async function findSymbolsInRange(
   }));
 }
 
+export async function deleteSymbolsByFileIds(
+  conn: Connection,
+  fileIds: string[],
+): Promise<void> {
+  if (fileIds.length === 0) return;
+
+  const symbolRows = await queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
+     WHERE f.fileId IN $fileIds
+     RETURN s.symbolId AS symbolId`,
+    { fileIds },
+  );
+
+  if (symbolRows.length === 0) return;
+
+  const symbolIds = symbolRows.map((r) => r.symbolId);
+
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
+     WHERE s.symbolId IN $symbolIds
+     DELETE d`,
+    { symbolIds },
+  );
+  await exec(
+    conn,
+    `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
+     WHERE s.symbolId IN $symbolIds
+     DELETE d`,
+    { symbolIds },
+  );
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo)
+     WHERE s.symbolId IN $symbolIds
+     DELETE r`,
+    { symbolIds },
+  );
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[r:SYMBOL_IN_FILE]->(:File)
+     WHERE s.symbolId IN $symbolIds
+     DELETE r`,
+    { symbolIds },
+  );
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
+     WHERE s.symbolId IN $symbolIds
+     DELETE r`,
+    { symbolIds },
+  );
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[r:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
+     WHERE s.symbolId IN $symbolIds
+     DELETE r`,
+    { symbolIds },
+  );
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[r:PARTICIPATES_IN]->(:Process)
+     WHERE s.symbolId IN $symbolIds
+     DELETE r`,
+    { symbolIds },
+  );
+  await exec(
+    conn,
+    `MATCH (m:Metrics)
+     WHERE m.symbolId IN $symbolIds
+     DELETE m`,
+    { symbolIds },
+  );
+  await exec(
+    conn,
+    `MATCH (e:SymbolEmbedding)
+     WHERE e.symbolId IN $symbolIds
+     DELETE e`,
+    { symbolIds },
+  );
+  await exec(
+    conn,
+    `MATCH (sc:SummaryCache)
+     WHERE sc.symbolId IN $symbolIds
+     DELETE sc`,
+    { symbolIds },
+  );
+  await exec(
+    conn,
+    `MATCH (sr:SymbolReference)
+     WHERE sr.fileId IN $fileIds
+     DELETE sr`,
+    { fileIds },
+  );
+  await exec(
+    conn,
+    `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
+     WHERE s.symbolId IN $symbolIds
+     DELETE r`,
+    { symbolIds },
+  );
+  await exec(
+    conn,
+    `MATCH (mem:Memory)-[r:MEMORY_OF_FILE]->(f:File)
+     WHERE f.fileId IN $fileIds
+     DELETE r`,
+    { fileIds },
+  );
+  await exec(
+    conn,
+    `MATCH (s:Symbol)
+     WHERE s.symbolId IN $symbolIds
+     DELETE s`,
+    { symbolIds },
+  );
+}
+
 export async function deleteSymbolsByFileId(
   conn: Connection,
   fileId: string,
