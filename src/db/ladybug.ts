@@ -384,6 +384,38 @@ async function loadExtensionsOnConnection(
 }
 
 /**
+ * Force a WAL checkpoint on the given write connection (best-effort).
+ *
+ * Workaround for Kuzu 0.15.2 native crash: `LOAD EXTENSION fts` can hit
+ * `UNREACHABLE_CODE` in `wal_record.cpp:76` when the WAL has uncheckpointed
+ * records. Forcing CHECKPOINT before LOAD (and on graceful shutdown) keeps
+ * the WAL empty so the extension's replay path never runs.
+ *
+ * Failures are logged and swallowed — CHECKPOINT must never block DB init
+ * or shutdown.
+ */
+async function checkpointWal(
+  conn: LadybugConnection,
+  phase: string,
+): Promise<void> {
+  try {
+    const result = await conn.query("CHECKPOINT");
+    if (Array.isArray(result)) {
+      for (const r of result) r.close();
+    } else {
+      result.close();
+    }
+    logger.debug(`LadybugDB CHECKPOINT completed`, { phase });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`LadybugDB CHECKPOINT failed (best-effort)`, {
+      phase,
+      reason: msg,
+    });
+  }
+}
+
+/**
  * Get a read connection from the pool (round-robin).
  * This is the primary function for read-only queries.
  * Backward-compatible: this is what getLadybugConn() returns.
@@ -427,6 +459,11 @@ export async function getLadybugReadConn(): Promise<LadybugConnection> {
         // Step: attempt INSTALL once, then LOAD on write + all read conns.
         // Best-effort — failures must not prevent pool initialization.
         await installExtensionsOnce(localWriteConn);
+        // Force a CHECKPOINT before LOAD EXTENSION to drain any uncheckpointed
+        // WAL records. Kuzu 0.15.2 `fts` extension hits UNREACHABLE_CODE in
+        // wal_record.cpp:76 when parsing a dirty WAL on LOAD — aborting the
+        // process mid-session. Ensuring an empty WAL sidesteps that path.
+        await checkpointWal(localWriteConn, "pre-extension-load");
         for (const c of [localWriteConn, ...localReadPool]) {
           await loadExtensionsOnConnection(c);
         }
@@ -755,6 +792,10 @@ export async function closeLadybugDb(): Promise<void> {
 
   // Close write connection
   if (writeConn) {
+    // Force CHECKPOINT on the way out so the next startup opens a clean WAL.
+    // Prevents the Kuzu 0.15.2 UNREACHABLE_CODE crash in wal_record.cpp:76
+    // when `LOAD EXTENSION fts` replays an uncheckpointed WAL.
+    await checkpointWal(writeConn, "pre-close");
     try {
       await writeConn.close();
     } catch (err) {

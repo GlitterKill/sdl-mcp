@@ -25,8 +25,13 @@ async function resetDb(): Promise<void> {
   clearAllCaches();
   clearSnapshotCache();
   await closeLadybugDb();
-  if (existsSync(TEST_DB_PATH)) {
-    rmSync(TEST_DB_PATH, { recursive: true, force: true });
+  for (const p of [
+    TEST_DB_PATH,
+    `${TEST_DB_PATH}.wal`,
+    `${TEST_DB_PATH}.shadow`,
+    `${TEST_DB_PATH}.lock`,
+  ]) {
+    if (existsSync(p)) rmSync(p, { recursive: true, force: true });
   }
   mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
   await initLadybugDb(TEST_DB_PATH);

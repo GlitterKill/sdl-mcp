@@ -24,8 +24,13 @@ const TEST_DB_PATH = join(tmpdir(), ".lbug-algorithms-test-db.lbug");
 
 async function resetDb(): Promise<void> {
   await closeLadybugDb();
-  if (existsSync(TEST_DB_PATH)) {
-    rmSync(TEST_DB_PATH, { recursive: true, force: true });
+  for (const p of [
+    TEST_DB_PATH,
+    `${TEST_DB_PATH}.wal`,
+    `${TEST_DB_PATH}.shadow`,
+    `${TEST_DB_PATH}.lock`,
+  ]) {
+    if (existsSync(p)) rmSync(p, { recursive: true, force: true });
   }
   mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
   await initLadybugDb(TEST_DB_PATH);
@@ -217,16 +222,15 @@ describe("LadybugDB Algorithm Adapter", () => {
     }
 
     function createFakeAlgoConn() {
-      const calls: Array<{ statement: string; params: Record<string, unknown> }> =
-        [];
+      const calls: Array<{
+        statement: string;
+        params: Record<string, unknown>;
+      }> = [];
       const conn = {
         async prepare(statement: string) {
           return statement;
         },
-        async execute(
-          prepared: string,
-          params: Record<string, unknown>,
-        ) {
+        async execute(prepared: string, params: Record<string, unknown>) {
           calls.push({ statement: prepared, params });
 
           if (prepared === "INSTALL algo" || prepared === "LOAD algo") {
@@ -272,9 +276,7 @@ describe("LadybugDB Algorithm Adapter", () => {
 
       assert.deepStrictEqual(pageRank, [{ symbolId: "sym-a", score: 0.5 }]);
       assert.deepStrictEqual(kCore, [{ symbolId: "sym-a", coreness: 3 }]);
-      assert.deepStrictEqual(louvain, [
-        { symbolId: "sym-a", communityId: 7 },
-      ]);
+      assert.deepStrictEqual(louvain, [{ symbolId: "sym-a", communityId: 7 }]);
 
       const projectionCalls = calls.filter((call) =>
         call.statement.includes("CALL PROJECT_GRAPH"),
@@ -286,22 +288,26 @@ describe("LadybugDB Algorithm Adapter", () => {
       assert.ok(
         projectionCalls[0]?.statement.includes(`n.repoId = "${repoId}"`),
       );
-      assert.ok(
-        projectionCalls[0]?.statement.includes(`r.edgeType = "call"`),
-      );
+      assert.ok(projectionCalls[0]?.statement.includes(`r.edgeType = "call"`));
 
       const algoStatements = calls
         .map((call) => call.statement)
         .filter((statement) => statement.includes("CALL "));
-      assert.ok(algoStatements.some((statement) => statement.includes("page_rank")));
+      assert.ok(
+        algoStatements.some((statement) => statement.includes("page_rank")),
+      );
       assert.ok(
         algoStatements.some((statement) =>
           statement.includes("k_core_decomposition"),
         ),
       );
-      assert.ok(algoStatements.some((statement) => statement.includes("louvain")));
       assert.ok(
-        algoStatements.every((statement) => !statement.includes("MATCH (s:Symbol")),
+        algoStatements.some((statement) => statement.includes("louvain")),
+      );
+      assert.ok(
+        algoStatements.every(
+          (statement) => !statement.includes("MATCH (s:Symbol"),
+        ),
       );
     });
   });

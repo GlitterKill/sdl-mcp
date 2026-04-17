@@ -15,12 +15,20 @@ import { computeAndStoreClustersAndProcesses } from "../../dist/indexer/cluster-
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(tmpdir(), ".lbug-cluster-orchestrator-unit-test-db.lbug");
+const TEST_DB_PATH = join(
+  tmpdir(),
+  ".lbug-cluster-orchestrator-unit-test-db.lbug",
+);
 
 async function resetDb(): Promise<void> {
   await closeLadybugDb();
-  if (existsSync(TEST_DB_PATH)) {
-    rmSync(TEST_DB_PATH, { recursive: true, force: true });
+  for (const p of [
+    TEST_DB_PATH,
+    `${TEST_DB_PATH}.wal`,
+    `${TEST_DB_PATH}.shadow`,
+    `${TEST_DB_PATH}.lock`,
+  ]) {
+    if (existsSync(p)) rmSync(p, { recursive: true, force: true });
   }
   mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
   await initLadybugDb(TEST_DB_PATH);
@@ -110,7 +118,12 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
       versionId: "v1",
     });
 
-    assert.deepStrictEqual(result, { clustersComputed: 0, processesTraced: 0, centralityComputed: 0, shadowClustersComputed: 0 });
+    assert.deepStrictEqual(result, {
+      clustersComputed: 0,
+      processesTraced: 0,
+      centralityComputed: 0,
+      shadowClustersComputed: 0,
+    });
   });
 
   it("returns zero cluster/process counts for a symbol graph with no call edges", async () => {

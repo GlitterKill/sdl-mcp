@@ -101,7 +101,7 @@ describe("Fix 2+3: Chunked concurrent processing", () => {
       "Should define CONCURRENCY_LIMIT for concurrent post-processing",
     );
     assert.ok(
-      content.includes("chunkStart + CHUNK_SIZE"),
+      content.includes("i + CHUNK_SIZE"),
       "Should iterate in chunk-sized steps",
     );
     assert.ok(
@@ -280,7 +280,7 @@ describe("Review fix: mid-run fallback to TS", () => {
 
     // After a chunk fails, remaining files should go to tsFallbackFiles, not return
     assert.ok(
-      content.includes("tsFallbackFiles.push(rustFiles[j])"),
+      content.includes("for (const f of chunks[j]) tsFallbackFiles.push(f)"),
       "Should push remaining files to TS fallback on mid-run failure",
     );
     assert.ok(
@@ -339,4 +339,3 @@ describe("Review fix: eager resolver guards non-TS repos", () => {
     );
   });
 });
-
