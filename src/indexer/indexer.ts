@@ -764,6 +764,13 @@ async function indexRepoImpl(
       }
     }
 
+    // --- Phase: build deferred indexes (fresh DB only) ---
+
+    await measurePhase("buildDeferredIndexes", async () => {
+      const { buildDeferredIndexes } = await import("../db/ladybug.js");
+      await buildDeferredIndexes();
+    });
+
     // --- Phase: memory management (staleness flagging + file import) ---
 
     await measurePhase("memorySync", async () => {

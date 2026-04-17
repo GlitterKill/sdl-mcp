@@ -14,7 +14,8 @@ import {
 } from "./extension-caps.js";
 import { normalizeGraphDbPath } from "./graph-db-path.js";
 import {
-  createSchema,
+  createBaseSchema,
+  createSecondaryIndexes,
   getSchemaVersion,
   migrateVecColumnsToFixedSize,
 } from "./ladybug-schema.js";
@@ -131,6 +132,8 @@ let writePoolSize = 4;
 let writeLimiter: ConcurrencyLimiter | null = null;
 let writeExecMutex: ConcurrencyLimiter | null = null;
 let writeQueueTimeoutMs = 30_000;
+
+let deferredIndexesPending = false;
 
 // Per-slot recycling guard: prevents concurrent recycling of the same pool slot (TOCTOU).
 const recyclingSlots = new Set<number>();
@@ -696,11 +699,12 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
       // Fresh DB (SchemaVersion table missing) or corrupted (table exists, no row).
       // Run createSchema() to set up everything at latest version.
       freshlyCreated = true;
-      logger.info("Fresh database detected, creating schema", {
+      deferredIndexesPending = true;
+      logger.info("Fresh database detected, creating base schema (indexes deferred)", {
         version: LADYBUG_SCHEMA_VERSION,
       });
       await withWriteConn(async (wConn) => {
-        await createSchema(wConn);
+        await createBaseSchema(wConn);
       });
     } else if (currentVersion < LADYBUG_SCHEMA_VERSION) {
       // Existing DB needs migration — capture version in const for TS narrowing
@@ -723,7 +727,9 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
     // else: currentVersion === LADYBUG_SCHEMA_VERSION — no-op
 
     // Step 3: Bootstrap retrieval indexes (FTS + vector) if extensions are available
-    try {
+    if (freshlyCreated) {
+      logger.info("Deferring retrieval index bootstrap until after first full index");
+    } else try {
       const sdlConfig = loadConfig();
       const semanticConfig = sdlConfig.semantic;
       if (semanticConfig?.enabled && semanticConfig.retrieval) {
@@ -788,6 +794,42 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
  * during V8's at-exit GC sweep. All known callers (ShutdownManager, CLI
  * commands, stress-test harness) already call `process.exit()` after cleanup.
  */
+export function hasDeferredIndexes(): boolean {
+  return deferredIndexesPending;
+}
+
+export async function buildDeferredIndexes(): Promise<void> {
+  if (!deferredIndexesPending) return;
+
+  const startMs = Date.now();
+  logger.info("Building deferred secondary indexes after fresh load");
+
+  await withWriteConn(async (wConn) => {
+    await createSecondaryIndexes(wConn);
+  });
+
+  try {
+    const sdlConfig = loadConfig();
+    const semanticConfig = sdlConfig.semantic;
+    if (semanticConfig?.enabled && semanticConfig.retrieval) {
+      const indexConn = await getLadybugConn();
+      const { ensureIndexes, ensureEntityIndexes } =
+        await import("../retrieval/index-lifecycle.js");
+      await ensureIndexes(indexConn, semanticConfig.retrieval);
+      await ensureEntityIndexes(indexConn);
+    }
+  } catch (err) {
+    logger.warn(
+      `Deferred retrieval index build failed (non-fatal): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  deferredIndexesPending = false;
+  logger.info("Deferred indexes built", { durationMs: Date.now() - startMs });
+}
+
 export async function closeLadybugDb(): Promise<void> {
   // Drain in-flight writes before closing connections. Timeout after 5s
   // to avoid hanging indefinitely if a write is stuck.
@@ -872,6 +914,7 @@ export async function closeLadybugDb(): Promise<void> {
   }
 
   currentDbPath = null;
+  deferredIndexesPending = false;
   extensionsInstallAttempted = false;
   resetExtensionCapabilities();
   resetJoinHintCache();

@@ -434,7 +434,7 @@ const INDEXES: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_filesummary_repoId ON FileSummary(repoId)`,
 ];
 
-export async function createSchema(conn: Connection): Promise<void> {
+export async function createBaseSchema(conn: Connection): Promise<void> {
   for (const ddl of NODE_TABLES) {
     await execDdl(conn, ddl);
   }
@@ -443,16 +443,6 @@ export async function createSchema(conn: Connection): Promise<void> {
     await execDdl(conn, ddl);
   }
 
-  for (const ddl of INDEXES) {
-    try {
-      await execDdl(conn, ddl);
-    } catch {
-      // Kùzu versions before 0.4 do not support CREATE INDEX. Since indexes
-      // are performance-only (not correctness), silently skipping is safe.
-    }
-  }
-
-  // Insert or verify schema version
   const now = new Date().toISOString();
   await exec(
     conn,
@@ -461,6 +451,22 @@ export async function createSchema(conn: Connection): Promise<void> {
      ON MATCH SET sv.schemaVersion = $schemaVersion, sv.updatedAt = $updatedAt`,
     { schemaVersion: LADYBUG_SCHEMA_VERSION, createdAt: now, updatedAt: now },
   );
+}
+
+export async function createSecondaryIndexes(conn: Connection): Promise<void> {
+  for (const ddl of INDEXES) {
+    try {
+      await execDdl(conn, ddl);
+    } catch {
+      // LadybugDB versions before 0.4 do not support CREATE INDEX. Since indexes
+      // are performance-only (not correctness), silently skipping is safe.
+    }
+  }
+}
+
+export async function createSchema(conn: Connection): Promise<void> {
+  await createBaseSchema(conn);
+  await createSecondaryIndexes(conn);
 }
 
 export async function getSchemaVersion(
