@@ -30,7 +30,28 @@ describe("ladybug connection pool configuration", () => {
     );
   });
 
-  it("getPoolStats returns expected shape before initialization", () => {
+  it("configurePool accepts writePoolSize values within 1-8", () => {
+    assert.doesNotThrow(() => configurePool({ writePoolSize: 1 }));
+    assert.doesNotThrow(() => configurePool({ writePoolSize: 4 }));
+    assert.doesNotThrow(() => configurePool({ writePoolSize: 8 }));
+  });
+
+  it("configurePool rejects invalid writePoolSize values", () => {
+    assert.throws(
+      () => configurePool({ writePoolSize: 0 }),
+      /writePoolSize must be between 1 and 8, got 0/,
+    );
+    assert.throws(
+      () => configurePool({ writePoolSize: 9 }),
+      /writePoolSize must be between 1 and 8, got 9/,
+    );
+    assert.throws(
+      () => configurePool({ writePoolSize: -1 }),
+      /writePoolSize must be between 1 and 8, got -1/,
+    );
+  });
+
+    it("getPoolStats returns expected shape before initialization", () => {
     const stats = getPoolStats();
 
     assert.deepStrictEqual(Object.keys(stats).sort(), [

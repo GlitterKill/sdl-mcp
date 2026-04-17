@@ -194,7 +194,7 @@ export class BatchPersistAccumulator {
       await this.drainPromise;
     }
 
-    if (this.writeQueue.length > 0) {
+    if (this.writeQueue.length > 0 && !this._error) {
       this.ensureDraining();
       if (this.drainPromise) await this.drainPromise;
     }

@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Batch: `{ symbolIds: ["...", "..."] }` (was separate tool)
     - Response shape unchanged for each mode
 
+### Performance
+
+- **Deferred fresh-DB index bootstrap**: Fresh databases now create only base schema (node/edge tables)
+  during initialization, deferring 19 secondary indexes and retrieval indexes until after the first
+  successful full index completes. This removes index maintenance overhead from the ingestion-critical
+  path. Existing DB initialization is unchanged.
+- **Write connection pool**: Replaced single write connection with a pool of 4 warm connections using
+  two-layer concurrency control (connection acquisition + serialized execution). Enables instant
+  failover and hides connection acquisition latency from the batch drain loop.
+- **Background batch drain**: Batch persistence accumulator now uses an async background writer with
+  auto-enqueue at threshold (200 rows). Parsing threads are never blocked by DB writes.
+- **TS engine batch persistence**: TypeScript pass1 indexing now uses the same `BatchPersistAccumulator`
+  as the Rust engine, eliminating per-file transaction overhead and enabling write pipelining.
+
 ### Fixed
 
 - **Repository scanning descriptor cleanup**: Replaced async `node:fs/promises.glob()`
@@ -78,6 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows LadybugDB native addon cleanup crash handling in tests
 - Embedding column name consistency in schema and tests
 - Tool count expectations in gateway tests
+
 ## [0.10.4] - 2026-04-10
 
 ### Added
