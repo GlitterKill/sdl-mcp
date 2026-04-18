@@ -40,6 +40,21 @@ const transactionContext = new AsyncLocalStorage<Map<Connection, symbol>>();
 // delegates to queryAll without adding another wrap.
 const connExecMutex = new WeakMap<Connection, ConcurrencyLimiter>();
 
+// Parallel iterable registry of per-conn mutexes. WeakMap is not iterable, so
+// shutdown cannot walk it to drain in-flight query pipelines. This Set holds
+// strong refs to every live mutex so closeLadybugDb() can await them before
+// tearing down the connection pools. Pool size is small (read + write
+// connections, fixed at init), so the set stays bounded.
+const activeConnMutexes = new Set<ConcurrencyLimiter>();
+
+// Hard fence for shutdown. When set, no new runExclusive() call may start —
+// late arrivals that cross an `await` after drain returned would otherwise
+// schedule against a conn we are about to close (LadybugDB 0.15.2 UAF). The
+// flag is raised before drainConnectionMutexes() runs and lowered by
+// resetConnectionGate() on re-init.
+let connectionGateClosed = false;
+let connectionGateError: Error = new DatabaseError("LadybugDB is closing");
+
 function getConnExecMutex(conn: Connection): ConcurrencyLimiter {
   let mutex = connExecMutex.get(conn);
   if (!mutex) {
@@ -49,7 +64,69 @@ function getConnExecMutex(conn: Connection): ConcurrencyLimiter {
     });
     connExecMutex.set(conn, mutex);
   }
+  // Re-add on every access (Set.add is idempotent). If a previous
+  // drainConnectionMutexes() cleared the Set but the WeakMap still hands back
+  // this cached mutex, we must re-register so a subsequent close can drain it.
+  activeConnMutexes.add(mutex);
   return mutex;
+}
+
+/**
+ * Close the connection gate. All future runExclusive() calls will reject with
+ * the configured error until resetConnectionGate() is called. Idempotent.
+ */
+export function closeConnectionGate(error: Error): void {
+  connectionGateError = error;
+  connectionGateClosed = true;
+}
+
+/**
+ * Reopen the connection gate. Called on DB (re-)initialization so the next
+ * session can accept queries.
+ */
+export function resetConnectionGate(): void {
+  connectionGateClosed = false;
+}
+
+/**
+ * Drain all per-connection execution mutexes. Used on shutdown to ensure no
+ * prepare/execute/getAll pipeline is mid-flight when the DB closes — a race
+ * that has triggered native use-after-free crashes in LadybugDB 0.15.2.
+ *
+ * Waits up to `timeoutMs` for active work to finish, then rejects any still-
+ * queued tasks with `onTimeoutError` so callers receive a clean DatabaseError
+ * rather than a silent hang.
+ *
+ * CALLER CONTRACT: closeConnectionGate() must be raised before calling this
+ * so new runExclusive() invocations cannot repopulate activeConnMutexes while
+ * the drain is in flight.
+ */
+export async function drainConnectionMutexes(
+  timeoutMs: number,
+  onTimeoutError: Error,
+): Promise<void> {
+  const mutexes = [...activeConnMutexes];
+  if (mutexes.length === 0) return;
+
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      Promise.all(mutexes.map((m) => m.drain())),
+      new Promise<void>((resolve) => {
+        timeoutHandle = setTimeout(resolve, timeoutMs);
+        timeoutHandle.unref();
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+
+  // Clear queued tasks on every mutex so nothing schedules against a conn we
+  // are about to close. Safe to call even after drain completed.
+  for (const m of mutexes) {
+    m.clearQueue(onTimeoutError);
+  }
+  activeConnMutexes.clear();
 }
 
 /**
@@ -61,11 +138,14 @@ function getConnExecMutex(conn: Connection): ConcurrencyLimiter {
  * can participate in the same lock regime.
  *
  * WARNING: non-reentrant. Nested calls on the same connection deadlock.
+ *
+ * Rejects immediately if the connection gate is closed (shutdown in progress).
  */
 export function runExclusive<T>(
   conn: Connection,
   fn: () => Promise<T>,
 ): Promise<T> {
+  if (connectionGateClosed) return Promise.reject(connectionGateError);
   return getConnExecMutex(conn).run(fn);
 }
 

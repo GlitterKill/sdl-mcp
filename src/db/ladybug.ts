@@ -24,7 +24,10 @@ import { runPendingMigrations } from "./migration-runner.js";
 import {
   clearConnectionPoisoned,
   clearPreparedStatementCache,
+  closeConnectionGate,
+  drainConnectionMutexes,
   isConnectionPoisoned,
+  resetConnectionGate,
 } from "./ladybug-core.js";
 import { resetJoinHintCache } from "./ladybug-edges.js";
 
@@ -714,6 +717,10 @@ export async function withWriteConn<T>(
 export async function initLadybugDb(dbPath: string): Promise<void> {
   const normalizedPath = normalizePath(normalizeGraphDbPath(dbPath));
 
+  // Reopen the connection gate in case a prior close() raised it — otherwise
+  // every query on the new DB would reject with "LadybugDB is closing".
+  resetConnectionGate();
+
   logger.info("Initializing LadybugDB", { path: normalizedPath });
 
   const parentDir = dirname(normalizedPath);
@@ -888,6 +895,13 @@ export async function buildDeferredIndexes(): Promise<void> {
 }
 
 export async function closeLadybugDb(): Promise<void> {
+  // Raise the shutdown fence BEFORE any drain so a caller that crosses an
+  // await during the drain cannot acquire a new per-conn mutex and race the
+  // pool teardown.
+  closeConnectionGate(
+    new DatabaseError("LadybugDB is closing, connection gate closed"),
+  );
+
   // Drain in-flight writes before closing connections. Timeout after 5s
   // to avoid hanging indefinitely if a write is stuck.
   if (writeLimiter) {
@@ -920,6 +934,19 @@ export async function closeLadybugDb(): Promise<void> {
       );
       writeExecMutex = null;
     }
+  }
+
+  // Drain per-connection execution mutexes before tearing down the pools.
+  // LadybugDB 0.15.2 segfaults if a native prepare/execute/getAll pipeline is
+  // still running on a conn when Database closes; this drains the one-at-a-
+  // time per-conn serializer so no query is mid-flight at teardown.
+  try {
+    await drainConnectionMutexes(
+      5_000,
+      new DatabaseError("LadybugDB is closing, per-conn queue cleared"),
+    );
+  } catch {
+    // Best-effort drain — proceed with teardown regardless
   }
 
   // Synchronously capture and clear the read pool so concurrent readers
