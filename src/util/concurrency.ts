@@ -177,6 +177,33 @@ export class ConcurrencyLimiter {
   }
 
   /**
+   * Get the currently configured maximum concurrency.
+   */
+  getMaxConcurrency(): number {
+    return this.maxConcurrency;
+  }
+
+  /**
+   * Update the maximum concurrency without clearing the queue.
+   *
+   * Narrowing (new < active): in-flight tasks are allowed to finish; no new
+   * queue items dequeue until activeCount falls below the new cap.
+   * Widening (new > current): immediately drains queued tasks up to the new
+   * cap.
+   *
+   * @param newMax - New max concurrency (must be >= 1)
+   */
+  setMaxConcurrency(newMax: number): void {
+    if (newMax < 1) {
+      throw new Error("maxConcurrency must be at least 1");
+    }
+    if (newMax === this.maxConcurrency) return;
+    this.maxConcurrency = newMax;
+    // If widened, drain queue up to the new ceiling.
+    this.processQueue();
+  }
+
+  /**
    * Clears all pending tasks from the queue.
    *
    * @param error - Optional error to reject all queued tasks with

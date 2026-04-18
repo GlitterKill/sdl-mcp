@@ -48,6 +48,8 @@ import {
   flagStaleMemoriesForChangedFiles,
   importMemoryFilesFromDisk,
 } from "./indexer-memory.js";
+import { withIndexingGate } from "../mcp/indexing-gate.js";
+import { preIndexCheckpoint } from "../db/ladybug.js";
 
 export type { IndexProgress } from "./indexer-init.js";
 
@@ -214,13 +216,13 @@ export async function indexRepo(
     }
   }
 
-  const resultPromise = indexRepoImpl(
-    repoId,
-    mode,
-    onProgress,
-    signal,
-    options,
-  );
+  const resultPromise = withIndexingGate(async () => {
+    // Flush WAL before the indexer opens its own transactions. Prevents
+    // LadybugDB 0.15.2 `wal_record.cpp:76` UNREACHABLE_CODE crashes when a
+    // large WAL backlog collides with heavy concurrent writes.
+    await preIndexCheckpoint();
+    return indexRepoImpl(repoId, mode, onProgress, signal, options);
+  });
   indexLocks.set(repoId, resultPromise);
   try {
     return await resultPromise;

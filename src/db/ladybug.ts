@@ -405,7 +405,7 @@ async function loadExtensionsOnConnection(
 /**
  * Force a WAL checkpoint on the given write connection (best-effort).
  *
- * Workaround for Kuzu 0.15.2 native crash: `LOAD EXTENSION fts` can hit
+ * Workaround for LadybugDB 0.15.2 native crash: `LOAD EXTENSION fts` can hit
  * `UNREACHABLE_CODE` in `wal_record.cpp:76` when the WAL has uncheckpointed
  * records. Forcing CHECKPOINT before LOAD (and on graceful shutdown) keeps
  * the WAL empty so the extension's replay path never runs.
@@ -430,6 +430,33 @@ async function checkpointWal(
     logger.warn(`LadybugDB CHECKPOINT failed (best-effort)`, {
       phase,
       reason: msg,
+    });
+  }
+}
+
+/**
+ * Force a WAL checkpoint before starting a large indexing run.
+ *
+ * Runs through `withWriteConn` so the checkpoint is serialized against any
+ * other in-flight writes by the global write-exec mutex. Read-pool callers
+ * use separate connections and cannot interleave. All failures are swallowed
+ * — the checkpoint is a best-effort safety measure; indexing will proceed
+ * even if the WAL flush fails.
+ *
+ * This is the public entry point the indexer uses; `checkpointWal` remains
+ * private and is used only during pool init and shutdown.
+ */
+export async function preIndexCheckpoint(): Promise<void> {
+  // Skip if the pool isn't ready — indexer may be driving an init path.
+  if (writePool.length === 0) return;
+  try {
+    await withWriteConn(async (conn) => {
+      await checkpointWal(conn, "pre-index");
+    });
+  } catch (err) {
+    // withWriteConn can throw on poisoned pool — non-fatal for indexing.
+    logger.debug("preIndexCheckpoint skipped", {
+      error: err instanceof Error ? err.message : String(err),
     });
   }
 }
@@ -700,9 +727,12 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
       // Run createSchema() to set up everything at latest version.
       freshlyCreated = true;
       deferredIndexesPending = true;
-      logger.info("Fresh database detected, creating base schema (indexes deferred)", {
-        version: LADYBUG_SCHEMA_VERSION,
-      });
+      logger.info(
+        "Fresh database detected, creating base schema (indexes deferred)",
+        {
+          version: LADYBUG_SCHEMA_VERSION,
+        },
+      );
       await withWriteConn(async (wConn) => {
         await createBaseSchema(wConn);
       });
@@ -728,46 +758,49 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
 
     // Step 3: Bootstrap retrieval indexes (FTS + vector) if extensions are available
     if (freshlyCreated) {
-      logger.info("Deferring retrieval index bootstrap until after first full index");
-    } else try {
-      const sdlConfig = loadConfig();
-      const semanticConfig = sdlConfig.semantic;
-      if (semanticConfig?.enabled && semanticConfig.retrieval) {
-        const indexConn = await getLadybugConn();
-        // Migrate DOUBLE[] → DOUBLE[N] for vector indexing (existing DBs)
-        // Only migrate vec columns on existing DBs — fresh DBs already have DOUBLE[N].
-        // ALTER TABLE DROP+ADD corrupts Kuzu's column cache for the current process.
-        if (!freshlyCreated) {
-          await migrateVecColumnsToFixedSize(indexConn);
-        }
-        // Get a fresh connection after DDL changes to avoid stale column cache
+      logger.info(
+        "Deferring retrieval index bootstrap until after first full index",
+      );
+    } else
+      try {
+        const sdlConfig = loadConfig();
+        const semanticConfig = sdlConfig.semantic;
+        if (semanticConfig?.enabled && semanticConfig.retrieval) {
+          const indexConn = await getLadybugConn();
+          // Migrate DOUBLE[] → DOUBLE[N] for vector indexing (existing DBs)
+          // Only migrate vec columns on existing DBs — fresh DBs already have DOUBLE[N].
+          // ALTER TABLE DROP+ADD corrupts Kuzu's column cache for the current process.
+          if (!freshlyCreated) {
+            await migrateVecColumnsToFixedSize(indexConn);
+          }
+          // Get a fresh connection after DDL changes to avoid stale column cache
 
-        // Dynamic import to break circular dependency (ladybug ↔ index-lifecycle).
-        const { ensureIndexes, ensureEntityIndexes } =
-          await import("../retrieval/index-lifecycle.js");
-        const indexResult = await ensureIndexes(
-          indexConn,
-          semanticConfig.retrieval,
-        );
-        const entityResult = await ensureEntityIndexes(indexConn);
-        logger.info("Retrieval indexes bootstrapped", {
-          created: [...indexResult.created, ...entityResult.created],
-          skipped: [...indexResult.skipped, ...entityResult.skipped],
-          failed: [...indexResult.failed, ...entityResult.failed],
-        });
-      } else {
-        logger.debug(
-          "Semantic retrieval not enabled, skipping index bootstrap",
+          // Dynamic import to break circular dependency (ladybug ↔ index-lifecycle).
+          const { ensureIndexes, ensureEntityIndexes } =
+            await import("../retrieval/index-lifecycle.js");
+          const indexResult = await ensureIndexes(
+            indexConn,
+            semanticConfig.retrieval,
+          );
+          const entityResult = await ensureEntityIndexes(indexConn);
+          logger.info("Retrieval indexes bootstrapped", {
+            created: [...indexResult.created, ...entityResult.created],
+            skipped: [...indexResult.skipped, ...entityResult.skipped],
+            failed: [...indexResult.failed, ...entityResult.failed],
+          });
+        } else {
+          logger.debug(
+            "Semantic retrieval not enabled, skipping index bootstrap",
+          );
+        }
+      } catch (indexErr) {
+        // Index bootstrap failure should not block DB init
+        logger.warn(
+          `[ladybug] Retrieval index bootstrap failed (non-fatal): ${
+            indexErr instanceof Error ? indexErr.message : String(indexErr)
+          }`,
         );
       }
-    } catch (indexErr) {
-      // Index bootstrap failure should not block DB init
-      logger.warn(
-        `[ladybug] Retrieval index bootstrap failed (non-fatal): ${
-          indexErr instanceof Error ? indexErr.message : String(indexErr)
-        }`,
-      );
-    }
 
     // Confirm final state
     const finalConn = await getLadybugConn();

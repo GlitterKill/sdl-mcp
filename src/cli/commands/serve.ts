@@ -118,6 +118,20 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       `) — indexing.concurrency=${config.indexing?.concurrency ?? "default"}, maxToolConcurrency=${config.concurrency?.maxToolConcurrency ?? "default"}`,
   );
 
+  // Surface diagnostic modes so operators know what a "silent crash"
+  // repro environment looks like. These envs are the standard isolation
+  // levers when investigating native-layer aborts.
+  if (process.env.SDL_MCP_DISABLE_NATIVE_ADDON) {
+    console.error(
+      "[sdl-mcp] SDL_MCP_DISABLE_NATIVE_ADDON is set — Rust indexer & SCIP native decoder disabled (TS fallback active). Use this to isolate native-addon crashes.",
+    );
+  }
+  if (process.execArgv.some((a) => a.includes("abort-on-uncaught-exception"))) {
+    console.error(
+      "[sdl-mcp] Node started with --abort-on-uncaught-exception — uncaught errors will produce a core dump (set NODE_OPTIONS=--abort-on-uncaught-exception or pass the flag on the shebang line to enable).",
+    );
+  }
+
   // Wire concurrency configuration from config file
   const concurrency = config.concurrency;
   if (concurrency) {

@@ -27,7 +27,13 @@ describe("tool dispatch limiter", () => {
     assert.strictEqual(first, second);
   });
 
-  it("configureToolDispatchLimiter replaces the limiter instance", () => {
+  it("configureToolDispatchLimiter reshapes the limiter in place", () => {
+    // Reshape-in-place preserves the singleton reference so in-flight tool
+    // calls don't need to be replayed through a brand-new limiter. The
+    // indexing-gate listener is attached to the singleton, so replacing it
+    // would silently break the gate. Narrowing/widening is applied via
+    // setMaxConcurrency; only the queueTimeoutMs for *future* enqueues is
+    // observable, and the public API exposes max through getStats/max only.
     const original = getToolDispatchLimiter();
 
     configureToolDispatchLimiter({
@@ -35,10 +41,11 @@ describe("tool dispatch limiter", () => {
       queueTimeoutMs: 1_000,
     });
 
-    const replaced = getToolDispatchLimiter();
-    assert.notStrictEqual(replaced, original);
-    assert.strictEqual(replaced.getStats().active, 0);
-    assert.strictEqual(replaced.getStats().queued, 0);
+    const reshaped = getToolDispatchLimiter();
+    assert.strictEqual(reshaped, original);
+    assert.strictEqual(reshaped.getMaxConcurrency(), 2);
+    assert.strictEqual(reshaped.getStats().active, 0);
+    assert.strictEqual(reshaped.getStats().queued, 0);
   });
 
   it("resetToolDispatchLimiter clears the singleton instance", () => {

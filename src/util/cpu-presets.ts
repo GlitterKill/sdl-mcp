@@ -12,8 +12,8 @@ import { type AppConfig } from "../config/types.js";
  *
  * | Setting                          | mid (1-8) | high (9-20) | extreme (21+) |
  * |----------------------------------|-----------|-------------|---------------|
- * | indexing.concurrency             | 4         | 12          | 20            |
- * | concurrency.maxToolConcurrency   | 8         | 16          | 24            |
+ * | indexing.concurrency             | 4         | 12          | 16            |
+ * | concurrency.maxToolConcurrency   | 8         | 12          | 16            |
  * | concurrency.readPoolSize         | 4         | 8           | 8             |
  * | concurrency.maxSessions          | 4         | 8           | 16            |
  * | runtime.maxConcurrentJobs        | 2         | 4           | 8             |
@@ -21,6 +21,17 @@ import { type AppConfig } from "../config/types.js";
  * | semantic.summaryMaxConcurrency   | 3         | 8           | 16            |
  * | parallelScorer.enabled           | false     | true        | true          |
  * | parallelScorer.poolSize          | null      | 4           | 8             |
+ *
+ * Tuning notes:
+ *   - dispatch:readPool ratio kept at 2:1 — per-connection mutex serializes
+ *     native DB execution, so ratios above 2:1 queue callers without added
+ *     throughput and increase LadybugDB 0.15.2 WAL pressure.
+ *   - indexingConcurrency capped at 16 (extreme) / 12 (high): empirically
+ *     saturates the Rust parse stage; higher values yielded <5% gain while
+ *     doubling DB contention windows.
+ *   - During an active `indexRepo`, the dispatch limiter throttles to
+ *     INDEXING_DISPATCH_CAP (see src/mcp/indexing-gate.ts) so tool callers
+ *     don't compete with the indexer for the same connections.
  */
 export interface PerformancePresets {
   indexingConcurrency: number;
@@ -42,8 +53,8 @@ export function getTierPresets(tier: CpuTier): PerformancePresets {
   switch (tier) {
     case "extreme":
       return {
-        indexingConcurrency: 20,
-        maxToolConcurrency: 24,
+        indexingConcurrency: 16,
+        maxToolConcurrency: 16,
         readPoolSize: 8,
         maxSessions: 16,
         runtimeMaxConcurrentJobs: 8,
@@ -55,7 +66,7 @@ export function getTierPresets(tier: CpuTier): PerformancePresets {
     case "high":
       return {
         indexingConcurrency: 12,
-        maxToolConcurrency: 16,
+        maxToolConcurrency: 12,
         readPoolSize: 8,
         maxSessions: 8,
         runtimeMaxConcurrentJobs: 4,
@@ -114,18 +125,14 @@ export function resolvePerformancePresets(
       userConfig.indexing?.concurrency ?? presets.indexingConcurrency,
 
     maxToolConcurrency:
-      userConfig.concurrency?.maxToolConcurrency ??
-      presets.maxToolConcurrency,
+      userConfig.concurrency?.maxToolConcurrency ?? presets.maxToolConcurrency,
 
-    readPoolSize:
-      userConfig.concurrency?.readPoolSize ?? presets.readPoolSize,
+    readPoolSize: userConfig.concurrency?.readPoolSize ?? presets.readPoolSize,
 
-    maxSessions:
-      userConfig.concurrency?.maxSessions ?? presets.maxSessions,
+    maxSessions: userConfig.concurrency?.maxSessions ?? presets.maxSessions,
 
     runtimeMaxConcurrentJobs:
-      userConfig.runtime?.maxConcurrentJobs ??
-      presets.runtimeMaxConcurrentJobs,
+      userConfig.runtime?.maxConcurrentJobs ?? presets.runtimeMaxConcurrentJobs,
 
     reconcileConcurrency:
       userConfig.liveIndex?.reconcileConcurrency ??
