@@ -338,8 +338,8 @@ function getHeaderValue(
   }
 
   const targetName = name.toLowerCase();
-  const headerEntry = Object.entries(headers).find(([key]) =>
-    key.toLowerCase() === targetName
+  const headerEntry = Object.entries(headers).find(
+    ([key]) => key.toLowerCase() === targetName,
   );
   const value = headerEntry?.[1];
   return Array.isArray(value) ? value[0] : value;
@@ -956,12 +956,15 @@ async function handleRestRequest(
       });
 
       const sendEvent = (event: string, data: unknown): void => {
-        if (!res.destroyed && !clientDisconnected) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        if (!res.destroyed && !clientDisconnected)
+          res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       };
 
       // H4: Detect client disconnect to avoid writing to closed stream.
       let clientDisconnected = false;
-      req.on("close", () => { clientDisconnected = true; });
+      req.on("close", () => {
+        clientDisconnected = true;
+      });
 
       try {
         const result = await indexRepo(
@@ -1431,12 +1434,9 @@ export async function setupHttpTransport(
   const checkHealth = async (): Promise<boolean> => {
     try {
       const conn = await getLadybugConn();
-      const result = await conn.query("RETURN 1 AS ok");
-      if (Array.isArray(result)) {
-        for (const r of result) r.close();
-      } else {
-        result.close();
-      }
+      // Go through queryAll so the per-connection mutex serializes this probe
+      // against concurrent tool handlers sharing the same round-robin conn.
+      await ladybugDb.queryAll(conn, "RETURN 1 AS ok");
       return true;
     } catch {
       return false;
@@ -1462,7 +1462,8 @@ export async function setupHttpTransport(
             pathname === "/.well-known/oauth-protected-resource")
         ) {
           json(res, 404, {
-            error: "OAuth discovery not supported — this server does not require authentication",
+            error:
+              "OAuth discovery not supported — this server does not require authentication",
           });
           return;
         }

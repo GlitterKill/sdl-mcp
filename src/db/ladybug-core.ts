@@ -9,6 +9,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Connection, PreparedStatement, QueryResult } from "kuzu";
 import { logger } from "../util/logger.js";
 import { DatabaseError } from "../domain/errors.js";
+import { ConcurrencyLimiter } from "../util/concurrency.js";
 
 const MAX_PREPARED_STATEMENT_CACHE_SIZE = 200;
 
@@ -21,6 +22,53 @@ const poisonedConnections = new WeakMap<Connection, true>();
 const transactionOwnerByConn = new WeakMap<Connection, symbol>();
 const transactionContext = new AsyncLocalStorage<Map<Connection, symbol>>();
 
+// Per-connection execution mutex.
+//
+// LadybugDB's native connection state is NOT safe for concurrent execute() or
+// query() calls. The read pool round-robins connections, but with more
+// concurrent tool handlers than pool slots (dispatch limit 8 vs. read pool 4),
+// two callers can land on the same conn and issue simultaneous queries — the
+// native layer then aborts the process (no JS exception, just silent exit).
+//
+// This mutex serializes prepare → execute → getAll → close on a per-conn basis
+// so that CPU-bound parallelism is preserved at the tool-dispatch level while
+// native DB execution is always one-at-a-time per connection.
+//
+// Reentrancy: do NOT call runExclusive from inside another runExclusive on the
+// same conn — maxConcurrency is 1, so nested acquire deadlocks. The public
+// helpers (queryAll / exec) wrap once at the outermost layer; querySingle
+// delegates to queryAll without adding another wrap.
+const connExecMutex = new WeakMap<Connection, ConcurrencyLimiter>();
+
+function getConnExecMutex(conn: Connection): ConcurrencyLimiter {
+  let mutex = connExecMutex.get(conn);
+  if (!mutex) {
+    mutex = new ConcurrencyLimiter({
+      maxConcurrency: 1,
+      queueTimeoutMs: 120_000,
+    });
+    connExecMutex.set(conn, mutex);
+  }
+  return mutex;
+}
+
+/**
+ * Run a function with exclusive access to a LadybugDB connection.
+ *
+ * Serializes concurrent callers on the same connection so native prepare /
+ * execute / query calls are never interleaved. Exported so low-level callers
+ * that use `conn.query()` directly (schema init, extension load, migrations)
+ * can participate in the same lock regime.
+ *
+ * WARNING: non-reentrant. Nested calls on the same connection deadlock.
+ */
+export function runExclusive<T>(
+  conn: Connection,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return getConnExecMutex(conn).run(fn);
+}
+
 /**
  * Clear the prepared statement cache for a specific connection.
  * Must be called after DDL schema changes (migrations) so that
@@ -29,7 +77,6 @@ const transactionContext = new AsyncLocalStorage<Map<Connection, symbol>>();
 export function clearPreparedStatementCache(conn: Connection): void {
   preparedStatementCacheByConn.delete(conn);
 }
-
 
 export function assertSafeInt(value: number, name: string): void {
   if (!Number.isSafeInteger(value)) {
@@ -116,7 +163,9 @@ export async function getPreparedStatement(
   return prepared;
 }
 
-async function execute(
+// Inner execute: caller must hold the per-conn mutex. Used by queryAll/exec
+// to do the prepare → native execute without re-acquiring the lock.
+async function executeLocked(
   conn: Connection,
   statement: string,
   params: Record<string, unknown> = {},
@@ -142,12 +191,14 @@ export async function queryAll<T>(
   statement: string,
   params: Record<string, unknown> = {},
 ): Promise<T[]> {
-  const result = await execute(conn, statement, params);
-  try {
-    return (await result.getAll()) as T[];
-  } finally {
-    result.close();
-  }
+  return runExclusive(conn, async () => {
+    const result = await executeLocked(conn, statement, params);
+    try {
+      return (await result.getAll()) as T[];
+    } finally {
+      result.close();
+    }
+  });
 }
 
 export async function querySingle<T>(
@@ -164,8 +215,10 @@ export async function exec(
   statement: string,
   params: Record<string, unknown> = {},
 ): Promise<void> {
-  const result = await execute(conn, statement, params);
-  result.close();
+  return runExclusive(conn, async () => {
+    const result = await executeLocked(conn, statement, params);
+    result.close();
+  });
 }
 
 export function isConnectionPoisoned(conn: Connection): boolean {
@@ -249,9 +302,12 @@ export async function withTransaction<T>(
           await exec(conn, "ROLLBACK");
         } catch (rollbackErr) {
           poisonedConnections.set(conn, true);
-          const originalMessage = err instanceof Error ? err.message : String(err);
+          const originalMessage =
+            err instanceof Error ? err.message : String(err);
           const rollbackMessage =
-            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+            rollbackErr instanceof Error
+              ? rollbackErr.message
+              : String(rollbackErr);
           throw new DatabaseError(
             `Transaction rollback failed after ${originalMessage}: ${rollbackMessage}`,
           );

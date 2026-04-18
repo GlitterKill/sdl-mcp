@@ -7,7 +7,7 @@
  */
 
 import type { Connection } from "kuzu";
-import { queryAll } from "../db/ladybug-core.js";
+import { queryAll, runExclusive } from "../db/ladybug-core.js";
 import { getExtensionCapabilities } from "../db/extension-caps.js";
 import { logger } from "../util/logger.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
@@ -92,8 +92,12 @@ export async function createFtsIndex(
     validateIdentifier(tableName, "table name");
     validateIdentifier(indexName, "index name");
     // CALL stored procedures cannot be prepared; use conn.query() directly.
-    await conn.query(
-      `CALL CREATE_FTS_INDEX('${tableName}', '${indexName}', ['searchText'])`,
+    // Wrap in runExclusive so deferred-index builds don't race concurrent
+    // tool handlers sharing the same read-pool connection.
+    await runExclusive(conn, () =>
+      conn.query(
+        `CALL CREATE_FTS_INDEX('${tableName}', '${indexName}', ['searchText'])`,
+      ),
     );
     logger.info(
       `[index-lifecycle] FTS index '${indexName}' created on ${tableName}.searchText`,
@@ -140,8 +144,10 @@ export async function createVectorIndex(
     validateIdentifier(propertyName, "property name");
     validateIdentifier(indexName, "index name");
     // CALL stored procedures cannot be prepared; use conn.query() directly.
-    await conn.query(
-      `CALL CREATE_VECTOR_INDEX('${tableName}', '${indexName}', '${propertyName}', metric := 'cosine', efc := ${Number(efc)})`,
+    await runExclusive(conn, () =>
+      conn.query(
+        `CALL CREATE_VECTOR_INDEX('${tableName}', '${indexName}', '${propertyName}', metric := 'cosine', efc := ${Number(efc)})`,
+      ),
     );
     logger.info(
       `[index-lifecycle] Vector index '${indexName}' created on ${tableName}.${propertyName} (dim=${dimension}, efc=${efc})`,
