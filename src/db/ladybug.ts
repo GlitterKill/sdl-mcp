@@ -449,10 +449,34 @@ async function checkpointWal(
 export async function preIndexCheckpoint(): Promise<void> {
   // Skip if the pool isn't ready — indexer may be driving an init path.
   if (writePool.length === 0) return;
+
+  // Race with a short timeout. If another writer holds the mutex (e.g. a
+  // deferred derived-refresh still in flight), we do NOT want to block
+  // indexing for ~minutes waiting for CHECKPOINT. Checkpoint is purely a
+  // best-effort WAL flush; skipping it is always safe.
+  const PRE_INDEX_CHECKPOINT_TIMEOUT_MS = 2_000;
   try {
-    await withWriteConn(async (conn) => {
+    const work = withWriteConn(async (conn) => {
       await checkpointWal(conn, "pre-index");
     });
+    const timeout = new Promise<"timeout">((resolve) => {
+      const t = setTimeout(
+        () => resolve("timeout"),
+        PRE_INDEX_CHECKPOINT_TIMEOUT_MS,
+      );
+      t.unref?.();
+    });
+    const winner = await Promise.race([
+      work.then(() => "ok" as const),
+      timeout,
+    ]);
+    if (winner === "timeout") {
+      logger.debug("preIndexCheckpoint skipped (write mutex busy)", {
+        timeoutMs: PRE_INDEX_CHECKPOINT_TIMEOUT_MS,
+      });
+      // Let the checkpoint finish in the background; swallow any error.
+      work.catch(() => {});
+    }
   } catch (err) {
     // withWriteConn can throw on poisoned pool — non-fatal for indexing.
     logger.debug("preIndexCheckpoint skipped", {
